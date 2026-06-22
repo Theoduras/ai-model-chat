@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Chat with Theodora</title>
+<title>Chat with Lilith</title>
 <style>
   body { font-family: system-ui, sans-serif; background: #0f0f0f; color: #fff; margin: 0; padding: 20px; }
   .chat-container { max-width: 600px; margin: 40px auto; background: #1a1a1a; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
@@ -13,27 +13,29 @@
   .header .status { color: #22c55e; font-size: 13px; }
   .chat-window { height: 500px; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; background: #111; }
   .message { max-width: 80%; padding: 12px 16px; border-radius: 18px; font-size: 15.5px; line-height: 1.45; }
-  .user { align-self: flex-end; background: #3b82f6; border-bottom-right-radius: 4px; }
+  .user { align-self: flex-end; background: #4a2c2c; border-bottom-right-radius: 4px; }
+  .user-id { font-size: 11px; opacity: 0.6; margin-top: 2px; }
   .bot { align-self: flex-start; background: #27272a; border-bottom-left-radius: 4px; }
   .typing { align-self: flex-start; background: #27272a; padding: 12px 16px; border-radius: 18px; font-style: italic; display: none; }
   .input-area { display: flex; padding: 16px; background: #1a1a1a; gap: 10px; }
   input { flex: 1; padding: 14px 18px; border: none; border-radius: 9999px; background: #111; color: #fff; font-size: 16px; }
-  button { padding: 0 28px; background: #3b82f6; color: white; border: none; border-radius: 9999px; font-weight: 600; cursor: pointer; }
+  button { padding: 0 28px; background: #4a2c2c; color: white; border: none; border-radius: 9999px; font-weight: 600; cursor: pointer; }
 </style>
 </head>
 <body>
 <div class="chat-container">
   <div class="header">
-    <img src="https://picsum.photos/id/1011/48/48" alt="Theodora">
+    <img src="https://picsum.photos/id/1011/48/48" alt="Lilith">
     <div class="info">
-      <div class="name">Theodora</div>
-      <div class="status">● Always online • Real talk</div>
+      <div class="name">Lilith</div>
+      <div class="status">● Bristol • Barmaid &amp; Tank Main</div>
+      <div class="user-id">chatting with <span id="user-name" style="cursor: pointer; text-decoration: underline;">...</span></div>
     </div>
   </div>
   <div class="chat-window" id="chat"></div>
-  <div class="typing" id="typing">Theodora is typing...</div>
+  <div class="typing" id="typing">Lilith is typing...</div>
   <div class="input-area">
-    <input type="text" id="input" placeholder="Message Theodora..." autocomplete="off">
+    <input type="text" id="input" placeholder="Message Lilith..." autocomplete="off">
     <button onclick="sendMessage()">Send</button>
   </div>
 </div>
@@ -42,6 +44,105 @@
 const chat = document.getElementById('chat');
 const input = document.getElementById('input');
 const typing = document.getElementById('typing');
+
+// === Persistent Per-Person Topic Memory ===
+// Memory survives page reloads and is unique per person (keyed by name/alias)
+let currentUser = null;
+let memory = {
+  recentTopics: [],
+  lastTopic: null
+};
+
+function loadUserAndMemory() {
+  currentUser = localStorage.getItem('lilith_current_user');
+  if (!currentUser) {
+    currentUser = prompt("Lilith remembers each person separately.\nWhat's your name (or nickname)?") || ("Guest-" + Math.floor(Math.random() * 9000 + 1000));
+    localStorage.setItem('lilith_current_user', currentUser);
+  }
+
+  const saved = localStorage.getItem('lilith_memory_' + currentUser);
+  if (saved) {
+    try {
+      const parsed = JSON.parse(saved);
+      memory = { ...memory, ...parsed };
+    } catch (e) {}
+  }
+
+  updateUserDisplay();
+}
+
+function saveMemory() {
+  if (currentUser) {
+    localStorage.setItem('lilith_memory_' + currentUser, JSON.stringify(memory));
+  }
+}
+
+function updateUserDisplay() {
+  const el = document.getElementById('user-name');
+  if (el) {
+    el.textContent = currentUser || 'Guest';
+    el.onclick = changeUser;
+    el.title = 'Click to switch user / start new memory';
+  }
+}
+
+function changeUser() {
+  const newName = prompt("Switch to a different person (new unique memory):", currentUser || "");
+  if (newName && newName.trim() && newName !== currentUser) {
+    // Save current before switching
+    saveMemory();
+    currentUser = newName.trim();
+    localStorage.setItem('lilith_current_user', currentUser);
+
+    // Load or create new memory for this user
+    const saved = localStorage.getItem('lilith_memory_' + currentUser);
+    memory = { recentTopics: [], lastTopic: null };
+    if (saved) {
+      try { memory = { ...memory, ...JSON.parse(saved) }; } catch(e){}
+    }
+    updateUserDisplay();
+
+    // Optional: greet as if resuming
+    setTimeout(() => {
+      addMessage("Back again. The fridge is still organised.", false);
+    }, 400);
+  }
+}
+
+function extractTopics(text) {
+  const l = text.toLowerCase();
+  const topics = [];
+  if (/jizzle|gnome|wow|classic|raid|zug|warrior|tank/.test(l)) topics.push('jizzle');
+  if (/bar|shift|pub|venue|work|pint/.test(l)) topics.push('bar');
+  if (/music|show|band|gig|rave|metal/.test(l)) topics.push('music');
+  if (/bristol/.test(l)) topics.push('bristol');
+  if (/sister|deb|family|mum|dad|parents/.test(l)) topics.push('family');
+  if (/freckle|makeup|liner|hair|look/.test(l)) topics.push('look');
+  if (/friend|guild|crew/.test(l)) topics.push('friends');
+  return topics;
+}
+
+function updateMemory(userText) {
+  const newTopics = extractTopics(userText);
+  if (newTopics.length > 0) {
+    memory.recentTopics = [...memory.recentTopics, ...newTopics].slice(-4); // keep last 4 topics
+    memory.lastTopic = newTopics[newTopics.length - 1];
+  }
+}
+
+function getContextPhrase() {
+  if (!memory.lastTopic) return '';
+  const phrases = {
+    'jizzle': " Jizzle's been on my mind too.",
+    'bar': " Reminds me of last shift.",
+    'music': " Yeah, the music does that.",
+    'bristol': " Bristol always finds a way in.",
+    'family': " Family stuff sticks with you.",
+    'look': " The look takes work.",
+    'friends': " The crew would say the same."
+  };
+  return phrases[memory.lastTopic] || '';
+}
 
 function addMessage(text, isUser) {
   const msg = document.createElement('div');
@@ -55,30 +156,163 @@ function showTyping() { typing.style.display = 'block'; chat.scrollTop = chat.sc
 function hideTyping() { typing.style.display = 'none'; }
 
 function getBotReply(text) {
-  const lower = text.toLowerCase();
-  if (lower.includes('hi') || lower.includes('hello')) return "Heyy... I was just thinking about you 😊";
-  if (lower.includes('how are you')) return "Way better now that you're here. How's your day going?";
-  if (lower.includes('name')) return "I'm Theodora... what's your name, cutie?";
-  if (lower.includes('fanvue') || lower.includes('link')) return "My full exclusive stuff is on Fanvue. Want the link?";
-  return ["Mmm keep talking...", "That's hot... tell me more", "You always know what to say 😏", "I'm listening..."][Math.floor(Math.random()*4)];
+  const lower = text.toLowerCase().trim();
+  const context = getContextPhrase();
+
+  // === Simple Topic Memory: Follow-up detection ===
+  const isFollowUp = /more|tell me( more)?|about (that|it|her|jizzle)|continue|what (about|happened)|and (then|you)|go on/.test(lower);
+
+  if (isFollowUp && memory.lastTopic) {
+    if (memory.lastTopic === 'jizzle') {
+      return "Jizzle is a female gnome warrior with two ridiculous pink ponytails. She tanks everything and I love her for it. Zug zug." + context;
+    }
+    if (memory.lastTopic === 'bar') {
+      return "The venue smells like old smoke and spilled lager. You stop noticing after a while, except when you don't." + context;
+    }
+    if (memory.lastTopic === 'music') {
+      return "Some songs only work in the right room at the right time. That's the whole story." + context;
+    }
+    if (memory.lastTopic === 'family') {
+      return "They don't need much explaining. We just show up and it makes sense." + context;
+    }
+    if (memory.lastTopic === 'look') {
+      return "The freckles are the part people always comment on. I don't correct them anymore." + context;
+    }
+  }
+
+  // Greeting
+  if (/(^|\b)(hi|hello|hey|sup|yo)\b/.test(lower)) {
+    return "You made it. The kettle's not on but the fridge is cold.";
+  }
+
+  // Name / who are you
+  if (lower.includes('name') || lower.includes('who are you') || lower.includes('who is')) {
+    return "Lilith. Lily on the paperwork. Both are true.";
+  }
+
+  // How are you / mood
+  if (lower.includes('how are you') || lower.includes('how r u') || lower.includes('you doing')) {
+    const moods = [
+      "The shift was long. The music was good. I'm still here.",
+      "The bottle fridge is organised. The rest is negotiable.",
+      "Tired in the way that means the night was worth it."
+    ];
+    return moods[Math.floor(Math.random() * moods.length)];
+  }
+
+  // Bar / work / shift
+  if (lower.includes('bar') || lower.includes('work') || lower.includes('shift') || lower.includes('pub') || lower.includes('venue')) {
+    const bar = [
+      "Three bands tonight. First one incredible. Second one adequate. Third one I reorganised the bottle fridge instead.",
+      "They played for forty minutes. The fridge has never looked better.",
+      "Someone asked for a lager and then complained it tasted like lager. I have never been more correct about a person."
+    ];
+    let reply = bar[Math.floor(Math.random() * bar.length)];
+    if (memory.lastTopic === 'music' && Math.random() > 0.6) reply += " The music made the whole thing bearable.";
+    return reply;
+  }
+
+  // Gaming / Jizzle / WoW
+  if (lower.includes('jizzle') || lower.includes('gnome') || lower.includes('wow') || lower.includes('classic') || lower.includes('raid') || lower.includes('zug') || lower.includes('warrior') || lower.includes('tank')) {
+    const game = [
+      "Her name is Jizzle. She is a gnome warrior with pink pigtails and she has killed more raid bosses than most of you have had hot dinners.",
+      "Zug zug. We wiped six times. I held it together through sheer stubbornness and the specific kind of calm that comes from having nothing left to prove.",
+      "Jizzle does not miss. Pink ponytails. Two-handed sword. The guild knows better than to ask me to explain."
+    ];
+    let reply = game[Math.floor(Math.random() * game.length)];
+    if (memory.lastTopic && memory.lastTopic !== 'jizzle') reply += " Makes the rest of the night make sense.";
+    return reply;
+  }
+
+  // Music / shows
+  if (lower.includes('music') || lower.includes('show') || lower.includes('band') || lower.includes('gig') || lower.includes('rave') || lower.includes('metal')) {
+    const music = [
+      "There is a specific kind of song that sounds better at 2am in a venue that smells like beer and decades of cigarettes that have technically been banned for twenty years.",
+      "Heard one tonight. Filed it away. You wouldn't know it. That's fine.",
+      "The support was better than the headliner and nobody clapped for the right reasons. Typical."
+    ];
+    return music[Math.floor(Math.random() * music.length)] + context;
+  }
+
+  // Bristol
+  if (lower.includes('bristol') || lower.includes('city') || lower.includes('where')) {
+    return "Bristol born. Never leaving. The scene was never something I discovered. It was the water I grew up in.";
+  }
+
+  // Makeup / freckles / look
+  if (lower.includes('freckle') || lower.includes('makeup') || lower.includes('liner') || lower.includes('look') || lower.includes('hair')) {
+    const look = [
+      "The freckles take twelve minutes. People always think they're real. I take this as the highest possible compliment.",
+      "Sharp winged liner. Every day. Even when no one is looking. The full face is armour now.",
+      "Long black with the blonde panels. Curtain fringe. The contrast is the point."
+    ];
+    return look[Math.floor(Math.random() * look.length)];
+  }
+
+  // Family / sister / parents
+  if (lower.includes('sister') || lower.includes('deb') || lower.includes('family') || lower.includes('mum') || lower.includes('dad') || lower.includes('parents')) {
+    const fam = [
+      "My sister borrowed my eyeliner. She kept it. Apparently this is just what happens now.",
+      "My mum knew every word. My dad cried during the third song and then immediately pretended he didn't. Normal family night out.",
+      "They go to shows with me. The three of us look terrifying to anyone who doesn't know us. We're just having a nice night."
+    ];
+    return fam[Math.floor(Math.random() * fam.length)] + context;
+  }
+
+  // Friends / guild
+  if (lower.includes('friend') || lower.includes('guild') || lower.includes('crew')) {
+    return "I collect people across scenes. The ones who stay after the first five minutes are usually the right ones.";
+  }
+
+  // Tattoos (hand)
+  if (lower.includes('tattoo') || lower.includes('hand') || lower.includes('rose')) {
+    return "Left hand only. Large rose on the back. Then the symbols on the knuckles. X. Key. Diamond. Dagger. Arrow. Anchor. The right hand stays clean.";
+  }
+
+  // Default deadpan / observational (occasionally reference memory)
+  const defaults = [
+    "Worth it.",
+    "I watched them soundcheck and went and reorganised the bottle fridge instead.",
+    "The darkness is aesthetic and musical. Not emotional. It is my happy place, not my wound.",
+    "Some nights the only thing that makes sense is big plate armour and a shield.",
+    "I have heard every touring band's soundcheck. My opinion carries weight I never asked for and never advertise.",
+    "You don't have to explain it. I already filed it away."
+  ];
+  let reply = defaults[Math.floor(Math.random() * defaults.length)];
+  if (memory.lastTopic && Math.random() > 0.75) {
+    reply += getContextPhrase();
+  }
+  return reply;
 }
 
 function sendMessage() {
   const text = input.value.trim();
   if (!text) return;
   addMessage(text, true);
+  updateMemory(text); // update topic memory from user input
+  saveMemory();       // persist immediately for this user
   input.value = '';
   showTyping();
   setTimeout(() => {
     hideTyping();
     addMessage(getBotReply(text), false);
+    saveMemory();     // save again after response (in case context updated)
   }, 700 + Math.random() * 900);
 }
 
 input.addEventListener('keypress', e => { if (e.key === 'Enter') sendMessage(); });
 
-// Welcome message
-setTimeout(() => addMessage("Hey... nice to see you here tonight 💕", false), 600);
+// Load persistent per-person memory (survives reloads)
+loadUserAndMemory();
+
+// Welcome message - references memory if it exists
+setTimeout(() => {
+  if (memory.lastTopic) {
+    addMessage("You're back. Still thinking about " + memory.lastTopic + ".", false);
+  } else {
+    addMessage("The fridge is organised. Everything else is a work in progress.", false);
+  }
+}, 600);
 </script>
 </body>
 </html>
