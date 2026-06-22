@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Chat with Theodora</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #0f0f0f; color: #fff; margin: 0; padding: 20px; }
+  .chat-container { max-width: 600px; margin: 40px auto; background: #1a1a1a; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+  .header { background: #111; padding: 16px 20px; display: flex; align-items: center; gap: 12px; }
+  .header img { width: 48px; height: 48px; border-radius: 50%; }
+  .header .info { flex: 1; }
+  .header .name { font-weight: 600; font-size: 18px; }
+  .header .status { color: #22c55e; font-size: 13px; }
+  .chat-window { height: 500px; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; background: #111; }
+  .message { max-width: 80%; padding: 12px 16px; border-radius: 18px; font-size: 15.5px; line-height: 1.45; }
+  .user { align-self: flex-end; background: #3b82f6; border-bottom-right-radius: 4px; }
+  .bot { align-self: flex-start; background: #27272a; border-bottom-left-radius: 4px; }
+  .typing { align-self: flex-start; background: #27272a; padding: 12px 16px; border-radius: 18px; font-style: italic; display: none; }
+  .input-area { display: flex; padding: 16px; background: #1a1a1a; gap: 10px; }
+  input { flex: 1; padding: 14px 18px; border: none; border-radius: 9999px; background: #111; color: #fff; font-size: 16px; }
+  button { padding: 0 28px; background: #3b82f6; color: white; border: none; border-radius: 9999px; font-weight: 600; cursor: pointer; }
+</style>
+</head>
+<body>
+<div class="chat-container">
+  <div class="header">
+    <img src="https://picsum.photos/id/1011/48/48" alt="Theodora">
+    <div class="info">
+      <div class="name">Theodora</div>
+      <div class="status">● Always online • Real talk</div>
+    </div>
+  </div>
+  <div class="chat-window" id="chat"></div>
+  <div class="typing" id="typing">Theodora is typing...</div>
+  <div class="input-area">
+    <input type="text" id="input" placeholder="Message Theodora..." autocomplete="off">
+    <button onclick="sendMessage()">Send</button>
+  </div>
+</div>
+
+<script>
+const chat = document.getElementById('chat');
+const input = document.getElementById('input');
+const typing = document.getElementById('typing');
+
+function addMessage(text, isUser) {
+  const msg = document.createElement('div');
+  msg.className = `message ${isUser ? 'user' : 'bot'}`;
+  msg.innerHTML = text + `<div style="font-size:11px;opacity:0.5;margin-top:4px;">${new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</div>`;
+  chat.appendChild(msg);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function showTyping() { typing.style.display = 'block'; chat.scrollTop = chat.scrollHeight; }
+function hideTyping() { typing.style.display = 'none'; }
+
+function getBotReply(text) {
+  const lower = text.toLowerCase();
+  if (lower.includes('hi') || lower.includes('hello')) return "Heyy... I was just thinking about you 😊";
+  if (lower.includes('how are you')) return "Way better now that you're here. How's your day going?";
+  if (lower.includes('name')) return "I'm Theodora... what's your name, cutie?";
+  if (lower.includes('fanvue') || lower.includes('link')) return "My full exclusive stuff is on Fanvue. Want the link?";
+  return ["Mmm keep talking...", "That's hot... tell me more", "You always know what to say 😏", "I'm listening..."][Math.floor(Math.random()*4)];
+}
+
+function sendMessage() {
+  const text = input.value.trim();
+  if (!text) return;
+  addMessage(text, true);
+  input.value = '';
+  showTyping();
+  setTimeout(() => {
+    hideTyping();
+    addMessage(getBotReply(text), false);
+  }, 700 + Math.random() * 900);
+}
+
+input.addEventListener('keypress', e => { if (e.key === 'Enter') sendMessage(); });
+
+// Welcome message
+setTimeout(() => addMessage("Hey... nice to see you here tonight 💕", false), 600);
+</script>
+</body>
+</html>
