@@ -119,20 +119,17 @@
             line-height: 1.05;
             font-weight: 700;
             letter-spacing: -2.5px;
+            width: 100%;
         }
 
         .headline-media {
             display: flex;
+            flex-direction: row;
             gap: 1.5rem;
             align-items: stretch;
             min-height: 280px;
         }
-        .headline-side {
-            flex: 0 0 35%;
-            min-width: 0;
-            display: flex;
-            flex-direction: column;
-        }
+
         .headline-text {
             flex: none;
             width: 100%;
@@ -172,6 +169,7 @@
         }
 
         .cta-button {
+            width: 163px;
             margin-top: 2rem;
             background: #0ea5e9;
             color: white;
@@ -203,18 +201,18 @@
 
         .stats {
             display: flex;
-            gap: 0.5rem;
-            margin-top: 1rem;
-            flex-wrap: nowrap;
+            gap: 0.3rem;
+            margin-top: 0.5rem;
+            flex-wrap: wrap;
         }
 
         .stat-card {
             background: white;
             color: #18181b;
-            padding: 0.5rem 0.4rem;
-            border-radius: 12px;
+            padding: 0.3rem 0.2rem;
+            border-radius: 10px;
             text-align: center;
-            flex: 1;
+            flex: 1 1 30%;
             min-width: 0;
             box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
             transition: transform 0.2s;
@@ -222,6 +220,7 @@
             flex-direction: column;
             justify-content: center;
             align-items: center;
+            min-height: 84px;
         }
 
         .stat-card:hover {
@@ -231,14 +230,14 @@
         .stat-number {
             font-size: 1.1rem;
             font-weight: 700;
-            line-height: 1.1;
+            line-height: 1;
         }
 
         .stat-label {
             color: #52525b;
-            font-size: 0.6rem;
+            font-size: 0.7rem;
             font-weight: 500;
-            margin-top: 2px;
+            margin-top: 1px;
             line-height: 1;
         }
 
@@ -403,24 +402,24 @@
 
     <div class="main-container">
         <div class="content-wrapper">
-            <!-- Left: Headline (35%) beside cover video, stats below, gallery full width under stats -->
+            <!-- Left: Headline (one sentence, full width of its flex item) next to video, stats + gallery under -->
             <div class="left-section">
                 <div class="headline-media">
-                    <!-- Left side: headline + secret + about (35%), next to tall video -->
-                    <div class="headline-side">
-                        <div class="headline-text">
+                    <!-- Headline inside flex row next to video, one sentence full width of its left container -->
+                    <div style="flex: 0 0 55%; min-width: 0; display: flex; flex-direction: column; justify-content: space-evenly;">
+                        <div class="headline-text" style="width: 100%;">
                             <h1 class="headline" id="headline">
                                 You only see <span class="highlight">10%</span> of me.
                             </h1>
-
-                            <p style="margin-top:0.6rem; font-size:1.15rem; color:#a1a1aa;" id="subtext">
-                                The rest stays private.
-                            </p>
-
-                            <button class="cta-button" id="cta-button" style="margin-top:1rem; padding:0.7rem 1.8rem; font-size:1rem;" onclick="alert('Redirecting to full profile...')">
-                                SEE MORE →
-                            </button>
                         </div>
+
+                        <p style="margin-top:0.6rem; font-size:1.15rem; color:#a1a1aa;" id="subtext">
+                            The rest stays private.
+                        </p>
+
+                        <button class="cta-button" id="cta-button" style="width:163px; margin-top:1rem; padding:0.7rem 1.8rem; font-size:1rem;" onclick="alert('Redirecting to full profile...')">
+                            SEE MORE →
+                        </button>
 
                         <div class="secret-note" id="secret-note" style="margin-top:0.8rem;">
                             <span style="font-size:1.6rem;"></span>
@@ -428,31 +427,40 @@
                         </div>
 
                         <div id="about" style="margin-top:0.3rem; font-size:0.82rem; color:#a1a1aa; line-height:1.25;"></div>
+
+                        <!-- Stats under bio -->
+                        <div class="stats" id="stats" style="margin-top:0.6rem;">
+                            <div class="stat-card">
+                                <div class="stat-number">46+</div>
+                                <div class="stat-label">Photos</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-number">7+</div>
+                                <div class="stat-label">Videos</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-number">Updates every other day</div>
+                                <div class="stat-label">Updates</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-number" style="font-size:1.1rem;">Custom Content</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-number" style="font-size:1.1rem;">ASMR/JOI</div>
+                            </div>
+                            <div class="stat-card">
+                                <div class="stat-number" style="font-size:1.1rem;">Personal Messaging</div>
+                            </div>
+                        </div>
                     </div>
 
-                    <!-- Cover video - full height next to left content -->
-                    <div class="cover-photo" id="cover-photo">
+                    <!-- Cover video next to headline -->
+                    <div class="cover-photo" id="cover-photo" style="flex: 1; height: 100%;">
                         <div class="silhouette">
                             <div class="silhouette-head"></div>
                             <div class="silhouette-body"></div>
                         </div>
                         <div class="cover-label" id="cover-label">COVER PHOTO</div>
-                    </div>
-                </div>
-
-                <!-- Stats below the headline+video row -->
-                <div class="stats" id="stats" style="margin-top:0.8rem;">
-                    <div class="stat-card">
-                        <div class="stat-number">46+</div>
-                        <div class="stat-label">Photos</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-number">7+</div>
-                        <div class="stat-label">Videos</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-number">Updates every other day</div>
-                        <div class="stat-label">Updates</div>
                     </div>
                 </div>
 
@@ -510,8 +518,8 @@
                         const card = document.createElement('div');
                         card.className = 'stat-card';
                         card.innerHTML = `
-                            <div class="stat-number">${stat.number}</div>
-                            <div class="stat-label">${stat.label}</div>
+                            ${stat.number ? `<div class="stat-number">${stat.number}</div>` : ''}
+                            ${stat.label ? `<div class="stat-label">${stat.label}</div>` : ''}
                         `;
                         statsContainer.appendChild(card);
                     });

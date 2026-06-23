@@ -1,5 +1,5 @@
 {
-  "headline": "You only<br>see <span class=\"highlight\">10%</span><br>of me.",
+  "headline": "You only see <span class=\"highlight\">10%</span> of me.",
   "subtext": "The rest stays private.",
   "cta_text": "SEE MORE \u2192",
   "secret_note": "I look unapproachable. I am actually the funniest person you will meet. These two things are not mutually exclusive.",
@@ -15,6 +15,18 @@
     {
       "number": "Updates every other day",
       "label": "Updates"
+    },
+    {
+      "number": "Custom Content",
+      "label": ""
+    },
+    {
+      "number": "ASMR/JOI",
+      "label": ""
+    },
+    {
+      "number": "Personal Messaging",
+      "label": ""
     }
   ],
   "cover_label": "Lillyforfun_",
