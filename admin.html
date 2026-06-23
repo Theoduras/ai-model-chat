@@ -499,20 +499,24 @@
 
 <!-- Backstory AI Interview Modal -->
 <div class="modal-overlay" id="backstory-modal" onclick="if(event.target===this)closeBackstoryAI()">
-  <div class="modal" style="max-width:560px; display:flex; flex-direction:column; max-height:86vh;">
+  <div class="modal" style="max-width:580px; display:flex; flex-direction:column; max-height:90vh;">
     <div class="modal-header">
       <h2>✨ Build Backstory with AI</h2>
       <button class="modal-close" onclick="closeBackstoryAI()">×</button>
     </div>
     <div class="modal-body" style="display:flex; flex-direction:column; min-height:0; overflow:hidden;">
-      <p class="hint" style="margin-bottom:12px;">Answer each question. Once there's enough, you can keep adding depth or finalize anytime.</p>
-      <div id="bs-transcript" class="chat-preview" style="flex:1; overflow-y:auto; min-height:180px; max-height:46vh; padding:4px;"></div>
-      <div style="display:flex; gap:8px; margin-top:14px;">
-        <input type="text" id="bs-answer" placeholder="Type your answer…" autocomplete="off"
-               onkeypress="if(event.key==='Enter')bsSendAnswer()" style="flex:1;">
-        <button class="btn btn-secondary" id="bs-send-btn" onclick="bsSendAnswer()">Send</button>
+      <p class="hint" style="margin-bottom:12px;">Pick an answer for each question — or skip. Finalize when ready.</p>
+      <div id="bs-transcript" class="chat-preview" style="flex:1; overflow-y:auto; min-height:120px; max-height:36vh; padding:4px; margin-bottom:12px;"></div>
+      <!-- Current question + option buttons -->
+      <div id="bs-question-area" style="display:none;">
+        <div id="bs-question-text" style="font-weight:600; margin-bottom:10px; line-height:1.4;"></div>
+        <div id="bs-options" style="display:flex; flex-direction:column; gap:7px;"></div>
+        <div style="display:flex; gap:8px; margin-top:10px;">
+          <button class="btn btn-ghost" id="bs-regen-btn" onclick="bsRegenerate()" style="font-size:13px;">↻ New options</button>
+          <button class="btn btn-ghost" id="bs-skip-btn" onclick="bsSkip()" style="font-size:13px;">Skip →</button>
+        </div>
       </div>
-      <div class="modal-footer" style="margin-top:16px;">
+      <div class="modal-footer" style="margin-top:14px;">
         <span class="save-status" id="bs-status"></span>
         <button class="btn btn-ghost" onclick="closeBackstoryAI()">Cancel</button>
         <button class="btn btn-primary" id="bs-finalize-btn" onclick="bsFinalize()">Generate backstory ✓</button>
@@ -680,6 +684,7 @@ async function saveGeminiKey() {
 
 // ── Backstory AI interview ────────────────────────────────────────────────────
 let bsMessages = [];
+let bsCurrentQuestion = '';
 
 function bsBasics() {
   return { name: v('f-name'), age: v('f-age'), archetype: v('f-archetype'), location: v('f-location') };
@@ -694,10 +699,35 @@ function bsRender() {
 }
 
 function bsSetBusy(busy, msg) {
-  document.getElementById('bs-send-btn').disabled = busy;
-  document.getElementById('bs-finalize-btn').disabled = busy;
+  ['bs-regen-btn','bs-skip-btn','bs-finalize-btn'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = busy;
+  });
+  document.querySelectorAll('#bs-options button').forEach(b => b.disabled = busy);
   document.getElementById('bs-status').textContent = msg || '';
   document.getElementById('bs-status').className = 'save-status';
+}
+
+function bsShowQuestion(question, options) {
+  bsCurrentQuestion = question;
+  document.getElementById('bs-question-text').textContent = question;
+  const optEl = document.getElementById('bs-options');
+  optEl.innerHTML = options.map((opt, i) =>
+    `<button class="btn btn-secondary" style="text-align:left; white-space:normal; line-height:1.35;"
+       onclick="bsPickOption(${i})">${esc(opt)}</button>`
+  ).join('');
+  document.getElementById('bs-question-area').style.display = 'block';
+}
+
+async function bsPickOption(idx) {
+  const btn = document.querySelectorAll('#bs-options button')[idx];
+  const answer = btn ? btn.textContent.trim() : '';
+  if (!answer) return;
+  bsMessages.push({ role: 'assistant', content: bsCurrentQuestion });
+  bsMessages.push({ role: 'user', content: answer });
+  document.getElementById('bs-question-area').style.display = 'none';
+  bsRender();
+  await bsAsk();
 }
 
 async function bsCall(action) {
@@ -709,48 +739,54 @@ async function bsCall(action) {
   return res.json();
 }
 
-async function openBackstoryAI() {
-  bsMessages = [];
-  bsRender();
-  document.getElementById('bs-answer').value = '';
-  document.getElementById('backstory-modal').classList.add('open');
+async function bsAsk() {
   bsSetBusy(true, 'Thinking…');
   try {
     const data = await bsCall('ask');
-    if (!data.ok) { bsSetBusy(false); document.getElementById('bs-status').textContent = '✗ ' + (data.error || 'error'); document.getElementById('bs-status').className = 'save-status err'; return; }
-    bsMessages.push({ role: 'assistant', content: data.text });
-    bsRender();
+    if (!data.ok) throw new Error(data.error || 'error');
+    bsShowQuestion(data.question, data.options || []);
+    document.getElementById('bs-status').textContent = '';
   } catch(e) {
     document.getElementById('bs-status').textContent = '✗ ' + e.message;
     document.getElementById('bs-status').className = 'save-status err';
   }
   bsSetBusy(false);
-  document.getElementById('bs-answer').focus();
+}
+
+async function openBackstoryAI() {
+  bsMessages = [];
+  bsCurrentQuestion = '';
+  bsRender();
+  document.getElementById('bs-question-area').style.display = 'none';
+  document.getElementById('backstory-modal').classList.add('open');
+  await bsAsk();
 }
 
 function closeBackstoryAI() {
   document.getElementById('backstory-modal').classList.remove('open');
 }
 
-async function bsSendAnswer() {
-  const input = document.getElementById('bs-answer');
-  const answer = input.value.trim();
-  if (!answer) return;
-  bsMessages.push({ role: 'user', content: answer });
-  input.value = '';
-  bsRender();
-  bsSetBusy(true, 'Thinking…');
+async function bsRegenerate() {
+  // Re-ask the same question with a hint to give different options
+  bsSetBusy(true, 'Generating new options…');
   try {
     const data = await bsCall('ask');
     if (!data.ok) throw new Error(data.error || 'error');
-    bsMessages.push({ role: 'assistant', content: data.text });
-    bsRender();
+    bsShowQuestion(data.question, data.options || []);
+    document.getElementById('bs-status').textContent = '';
   } catch(e) {
     document.getElementById('bs-status').textContent = '✗ ' + e.message;
     document.getElementById('bs-status').className = 'save-status err';
   }
   bsSetBusy(false);
-  input.focus();
+}
+
+async function bsSkip() {
+  bsMessages.push({ role: 'assistant', content: bsCurrentQuestion });
+  bsMessages.push({ role: 'user', content: '(skipped)' });
+  document.getElementById('bs-question-area').style.display = 'none';
+  bsRender();
+  await bsAsk();
 }
 
 async function bsFinalize() {

@@ -475,6 +475,8 @@ def api_backstory_interview():
     archetype = basics.get('archetype', '')
     location = basics.get('location', '')
 
+    location_hint = f" The persona is based in {location}." if location else ""
+
     system = (
         f"You are interviewing a content creator to build a rich, believable backstory for their "
         f"AI chatbot persona named {name}"
@@ -482,15 +484,20 @@ def api_backstory_interview():
         + (f", from {location}" if location else "")
         + (f", personality archetype: {archetype}" if archetype else "")
         + ".\n\n"
-        "Goal: gather the details needed for an engaging backstory — origin/where they're from, "
-        "job and daily life, family, hobbies and interests, personality quirks, formative experiences, and overall vibe.\n\n"
+        "Goal: gather the details needed for an engaging backstory — job and daily life, "
+        "family background, hobbies and interests, personality quirks, and formative experiences.\n\n"
+        f"Location is already known: {location or 'not specified'}.{location_hint} Do NOT ask about location.\n\n"
         "Rules:\n"
-        "- Ask only ONE short, conversational question per turn.\n"
+        "- Each turn: output ONLY a valid JSON object, nothing else.\n"
+        '- For a question turn: {"question": "...", "options": ["option A", "option B", "option C"]}\n'
+        "  - The question must be short and conversational.\n"
+        "  - The 3 options must be distinct, plausible, specific answers (not vague). "
+        "Tailor them to the persona's archetype and what's already been answered.\n"
         "- Build on previous answers; never repeat something already covered.\n"
-        "- Once you have the bare necessities (origin, job/daily life, and a couple of personality details), "
-        "tell the creator you have enough for a solid backstory and ask whether they want to add more depth or finalize now.\n"
-        "- If they want more depth, keep asking richer follow-up questions.\n"
-        "- Never write the final backstory yourself unless explicitly instructed to finalize."
+        "- Once you have the bare necessities (job/daily life and a couple of personality details), "
+        'output: {"question": "That\'s enough for a solid backstory! Want to add more depth or shall we generate it now?", '
+        '"options": ["Generate the backstory now", "Add more depth", "Add one more detail"]}\n'
+        "- Never write the final backstory yourself unless explicitly told to finalize."
     )
 
     contents = []
@@ -501,11 +508,11 @@ def api_backstory_interview():
     if action == 'finalize':
         contents.append({'role': 'user', 'parts': [{'text': (
             "Write the final backstory now using everything gathered. Output ONLY the backstory itself — "
-            "2-4 sentences (longer only if rich detail warrants it), third person, vivid and specific. "
-            "No preamble, no questions, no quotation marks."
+            "2-4 sentences (longer only if rich detail warrants it), written as if describing the persona, vivid and specific. "
+            "No preamble, no questions, no quotation marks, no JSON."
         )}]})
     elif not contents:
-        contents.append({'role': 'user', 'parts': [{'text': 'Start the interview. Ask your first question.'}]})
+        contents.append({'role': 'user', 'parts': [{'text': 'Start the interview. Output your first question as JSON.'}]})
 
     try:
         resp = client.models.generate_content(
@@ -513,15 +520,31 @@ def api_backstory_interview():
             contents=contents,
             config=types.GenerateContentConfig(
                 system_instruction=system,
-                temperature=0.8,
-                max_output_tokens=400,
+                temperature=0.85,
+                max_output_tokens=500,
             ),
         )
         text = (resp.text or '').strip()
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)[:200]}), 200
 
-    return jsonify({'ok': True, 'action': action, 'text': text})
+    if action == 'finalize':
+        return jsonify({'ok': True, 'action': 'finalize', 'text': text})
+
+    # Parse JSON question+options from Gemini
+    try:
+        # Strip markdown code fences if present
+        clean = re.sub(r'^```(?:json)?\s*|\s*```$', '', text, flags=re.MULTILINE).strip()
+        parsed = json.loads(clean)
+        question = parsed.get('question', '')
+        options = parsed.get('options', [])
+        if not isinstance(options, list):
+            options = []
+        options = [str(o) for o in options[:3]]
+        return jsonify({'ok': True, 'action': 'ask', 'question': question, 'options': options})
+    except Exception:
+        # Fallback: treat whole text as the question with no options
+        return jsonify({'ok': True, 'action': 'ask', 'question': text, 'options': []})
 
 
 # ── Config API (Gemini API key) ───────────────────────────────────────────────
