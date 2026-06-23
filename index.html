@@ -537,11 +537,13 @@ function showTyping(on){
 function um(x){const r=x.toLowerCase();const t=[];if(/jizzle|gnome|wow|classic|raid|zug|warrior|tank/.test(r))t.push('gaming');if(/bar|shift|pub|venue|work|pint/.test(r))t.push('work');if(/music|show|band|gig|rave|metal/.test(r))t.push('music');if(t.length){m.recentTopics=[...m.recentTopics,...t].slice(-4);m.lastTopic=t[t.length-1];}}
 
 function splitChunks(text){
+  if(text.length<120)return[text];
   const parts=text.match(/[^.!?…]*[.!?…]+(?=\s|$)|[^.!?…]+$/g)||[text];
   const clean=parts.map(s=>s.trim()).filter(Boolean);
-  const chunks=[];
-  for(let i=0;i<clean.length;i+=2)chunks.push(clean.slice(i,i+2).join(' '));
-  return chunks.length?chunks:[text];
+  if(clean.length<=2)return[text];
+  // max 2 chunks: first half and second half of sentences
+  const mid=Math.ceil(clean.length/2);
+  return[clean.slice(0,mid).join(' '),clean.slice(mid).join(' ')].filter(Boolean);
 }
 
 function deliverChunks(chunks,idx,onDone){
