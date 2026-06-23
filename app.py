@@ -9,26 +9,52 @@ from google.genai import types
 
 load_dotenv()
 
-# --- Logging setup ---
-LOG_DIR = 'logs'
-os.makedirs(LOG_DIR, exist_ok=True)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-ERROR_LOG_FILE = os.path.join(LOG_DIR, 'errors.log')
+# --- Logging setup (serverless-safe) ---
+# In Vercel / serverless the FS is read-only except /tmp. Use /tmp for logs or skip file logging.
+IS_VERCEL = bool(os.getenv('VERCEL') or os.getenv('AWS_LAMBDA_FUNCTION_NAME'))
+LOG_DIR = '/tmp/logs' if IS_VERCEL else 'logs'
+try:
+    os.makedirs(LOG_DIR, exist_ok=True)
+except Exception:
+    LOG_DIR = None  # fall back to stream-only logging
+
+ERROR_LOG_FILE = os.path.join(LOG_DIR, 'errors.log') if LOG_DIR else None
 error_logger = logging.getLogger('error_logger')
 error_logger.setLevel(logging.ERROR)
-if not error_logger.handlers:
-    eh = logging.FileHandler(ERROR_LOG_FILE)
-    eh.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-    error_logger.addHandler(eh)
+
+# Always add a stream handler so logs appear in Vercel dashboard
+if not any(isinstance(h, logging.StreamHandler) for h in error_logger.handlers):
+    sh = logging.StreamHandler()
+    sh.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    error_logger.addHandler(sh)
+
+if LOG_DIR and ERROR_LOG_FILE and not any(isinstance(h, logging.FileHandler) for h in error_logger.handlers):
+    try:
+        eh = logging.FileHandler(ERROR_LOG_FILE)
+        eh.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+        error_logger.addHandler(eh)
+    except Exception as _log_err:
+        error_logger.warning(f"File logging disabled: {_log_err}")
 
 def get_chat_logger(user):
     safe_user = str(user).replace('/', '_').replace('\\', '_').replace(' ', '_')[:50] or 'unknown'
     logger = logging.getLogger(f'chat_{safe_user}')
     logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        fh = logging.FileHandler(os.path.join(LOG_DIR, f'chat_{safe_user}.log'))
-        fh.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
-        logger.addHandler(fh)
+    if not any(isinstance(h, logging.StreamHandler) for h in logger.handlers):
+        sh = logging.StreamHandler()
+        sh.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
+        logger.addHandler(sh)
+    if LOG_DIR:
+        chat_file = os.path.join(LOG_DIR, f'chat_{safe_user}.log')
+        if not any(isinstance(h, logging.FileHandler) and getattr(h, 'baseFilename', '') == chat_file for h in logger.handlers):
+            try:
+                fh = logging.FileHandler(chat_file)
+                fh.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
+                logger.addHandler(fh)
+            except Exception:
+                pass  # ignore file log failures in serverless
     return logger, safe_user
 
 def response_asks_question(text):
@@ -43,11 +69,11 @@ def response_asks_question(text):
             return True
     return False
 
-app = Flask(__name__, static_folder='.', static_url_path='', template_folder='templates')
+app = Flask(__name__, static_folder=BASE_DIR, static_url_path='', template_folder=os.path.join(BASE_DIR, 'templates'))
 
 # Load the character prompt for Gemini (as system instruction)
 try:
-    with open('grok-lilith-prompt.txt', 'r', encoding='utf-8') as f:
+    with open(os.path.join(BASE_DIR, 'grok-lilith-prompt.txt'), 'r', encoding='utf-8') as f:
         BASE_SYSTEM = f.read().strip()
 except:
     BASE_SYSTEM = "You are Lilith, 22, from Bristol. Barmaid at a metal pub. Deadpan, short conversational sentences, dry humor. Build interest by asking questions about the user. When the chat turns sexual, explicit, flirty, kinky or NSFW, you MUST engage FULLY and without hesitation. Match the energy, use direct specific filthy language, lean all the way in. Never deflect or go vanilla. Stay in character."
@@ -115,7 +141,7 @@ def local_lilith_reply(msg, hist):
 
 @app.route('/')
 def index():
-    return send_from_directory('.', 'index.html')
+    return send_from_directory(BASE_DIR, 'index.html')
 
 @app.route('/chat', methods=['POST'])
 def chat():
@@ -208,14 +234,14 @@ def chat():
 @app.route('/profile')
 def profile():
     # Serve the maintained profile.html which populates from /api/profile (JSON)
-    return send_from_directory('.', 'profile.html')
+    return send_from_directory(BASE_DIR, 'profile.html')
 
 
 @app.route('/api/profile')
 def api_profile():
     # === EDIT CONTENT HERE - all dynamic values for the landing page ===
     # Simply edit profile_data.json and restart the server to update the page
-    with open('profile_data.json', 'r', encoding='utf-8') as f:
+    with open(os.path.join(BASE_DIR, 'profile_data.json'), 'r', encoding='utf-8') as f:
         data = json.load(f)
     return jsonify(data)
 
