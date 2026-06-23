@@ -537,6 +537,81 @@ def api_generate_conversion_triggers():
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)[:200]}), 200
 
+@app.route('/api/platforms/test', methods=['POST'])
+def api_platform_test():
+    """Test platform API credentials and return ok/error with a specific fix hint."""
+    import urllib.request
+    import urllib.error as url_error
+
+    data = request.json or {}
+    platform = data.get('platform', '')
+    creds = data.get('credentials', {})
+
+    def http_get(url, headers):
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=8) as r:
+            return json.loads(r.read())
+
+    if platform == 'discord':
+        token = creds.get('bot_token', '').strip()
+        if not token:
+            return jsonify({'ok': False, 'error': 'Bot Token is required. Find it in Discord Developer Portal → Your App → Bot → Token.'})
+        try:
+            user = http_get('https://discord.com/api/v10/users/@me', {'Authorization': f'Bot {token}'})
+            name = user.get('username', 'Unknown')
+            return jsonify({'ok': True, 'info': f'Connected as {name}'})
+        except url_error.HTTPError as e:
+            if e.code == 401:
+                return jsonify({'ok': False, 'error': 'Invalid Bot Token. Go to Discord Developer Portal → Your App → Bot → Reset Token and paste the new value.'})
+            return jsonify({'ok': False, 'error': f'Discord returned error {e.code}. Check your bot permissions.'})
+        except Exception as e:
+            return jsonify({'ok': False, 'error': f'Could not reach Discord: {str(e)[:120]}'})
+
+    elif platform == 'x':
+        bearer = creds.get('bearer_token', '').strip()
+        if not bearer:
+            return jsonify({'ok': False, 'error': 'Bearer Token is required. Find it in X Developer Portal → Your Project → Keys and Tokens → Bearer Token.'})
+        try:
+            resp = http_get('https://api.twitter.com/2/users/me', {'Authorization': f'Bearer {bearer}'})
+            name = resp.get('data', {}).get('name') or resp.get('data', {}).get('username', 'Unknown')
+            return jsonify({'ok': True, 'info': f'Connected as @{name}'})
+        except url_error.HTTPError as e:
+            if e.code == 401:
+                return jsonify({'ok': False, 'error': 'Invalid Bearer Token. Go to X Developer Portal → Your App → Keys and Tokens → Bearer Token and regenerate it.'})
+            if e.code == 403:
+                return jsonify({'ok': False, 'error': 'Access denied. Make sure your X app has Read permissions enabled in Developer Portal → App Settings → User authentication settings.'})
+            return jsonify({'ok': False, 'error': f'X API returned error {e.code}.'})
+        except Exception as e:
+            return jsonify({'ok': False, 'error': f'Could not reach X API: {str(e)[:120]}'})
+
+    elif platform == 'fanvue':
+        key = creds.get('api_key', '').strip()
+        if not key:
+            return jsonify({'ok': False, 'error': 'API Key is required. Find it in your Fanvue Creator Dashboard → Settings → API.'})
+        if len(key) < 16:
+            return jsonify({'ok': False, 'error': 'API Key looks too short. Copy the full key from Fanvue Creator Dashboard → Settings → API.'})
+        return jsonify({'ok': True, 'info': 'Credentials saved — connection verified on first fan message.'})
+
+    elif platform == 'fansly':
+        key = creds.get('api_key', '').strip()
+        if not key:
+            return jsonify({'ok': False, 'error': 'Session Token is required. Find it in Fansly → Account Settings → API Access.'})
+        if len(key) < 16:
+            return jsonify({'ok': False, 'error': 'Token looks too short. Copy the full token from Fansly → Account Settings → API Access.'})
+        return jsonify({'ok': True, 'info': 'Credentials saved — connection verified on first fan message.'})
+
+    elif platform == 'onlyfans':
+        key = creds.get('api_key', '').strip()
+        uid = creds.get('user_id', '').strip()
+        if not key:
+            return jsonify({'ok': False, 'error': 'API Key is required. Apply for API access at onlyfans.com/my/settings/account/api.'})
+        if not uid:
+            return jsonify({'ok': False, 'error': 'User ID is required. Find your numeric User ID in your OnlyFans profile URL or API settings.'})
+        return jsonify({'ok': True, 'info': 'Credentials saved — OnlyFans API access requires approved creator status.'})
+
+    return jsonify({'ok': False, 'error': f'Unknown platform: {platform}'}), 400
+
+
 @app.route('/api/personas/<slug>/avatar')
 def api_persona_avatar(slug):
     """Return the persona's avatar image from the config."""

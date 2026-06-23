@@ -1039,6 +1039,13 @@ function renderForm(slug, cfg) {
         <span class="hint" style="margin-top:2px;">When and how to introduce PPV offers. Editable — tweak to match your style.</span>
       </div>
     </div>
+
+    <!-- Platforms -->
+    <div class="form-section">
+      <div class="section-title">Chat Platforms</div>
+      <p class="hint" style="margin-bottom:14px;">Enable the platforms where this persona will chat with fans. Add credentials and test the connection before deploying.</p>
+      ${renderPlatformsSection(cfg.platforms || {})}
+    </div>
   `;
 }
 
@@ -1054,6 +1061,124 @@ function toggleMirrorLocation(on) {
     input.style.opacity = on ? '0.45' : '1';
   }
   if (hint) hint.style.display = on ? 'block' : 'none';
+}
+
+// ── Platform connections ──────────────────────────────────────────────────────
+const PLATFORMS = [
+  { id: 'onlyfans', label: 'OnlyFans', color: '#00aff0',
+    fields: [{id:'api_key',label:'API Key',type:'password'},{id:'user_id',label:'User ID',type:'text'}] },
+  { id: 'fanvue',   label: 'Fanvue',   color: '#ff4d6d',
+    fields: [{id:'api_key',label:'API Key',type:'password'}] },
+  { id: 'fansly',   label: 'Fansly',   color: '#9b59b6',
+    fields: [{id:'api_key',label:'API Key / Session Token',type:'password'}] },
+  { id: 'x',        label: 'X.com',    color: '#fff',
+    fields: [{id:'bearer_token',label:'Bearer Token',type:'password'}] },
+  { id: 'discord',  label: 'Discord',  color: '#5865f2',
+    fields: [{id:'bot_token',label:'Bot Token',type:'password'},{id:'channel_id',label:'Channel ID (optional)',type:'text'}] },
+];
+
+function renderPlatformsSection(platforms) {
+  return PLATFORMS.map(p => {
+    const cfg = platforms[p.id] || {};
+    const enabled = cfg.enabled || false;
+    const fieldsHtml = p.fields.map(f =>
+      `<div class="field" style="margin-top:8px;">
+        <label style="font-size:12px;">${esc(f.label)}</label>
+        <input type="${f.type}" id="plat-${p.id}-${f.id}" value="${esc(cfg[f.id] || '')}"
+               placeholder="${f.type === 'password' ? '••••••••••••••••' : f.label}"
+               style="font-size:13px;">
+      </div>`
+    ).join('');
+    return `
+      <div class="platform-card" id="platcard-${p.id}" style="border:1px solid #3f3f46; border-radius:10px; padding:14px; margin-bottom:10px; ${enabled ? 'border-color:'+p.color+';' : ''}">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div class="toggle"><label class="toggle">
+            <input type="checkbox" id="plat-${p.id}-enabled" ${enabled ? 'checked' : ''}
+                   onchange="togglePlatform('${p.id}', this.checked)">
+            <span class="toggle-track"></span>
+          </label></div>
+          <span style="font-weight:600; color:${p.color}; font-size:14px;">${p.label}</span>
+          <span id="plat-${p.id}-badge" style="margin-left:auto; font-size:12px; color:#71717a;"></span>
+          <button type="button" class="btn btn-ghost" id="plat-${p.id}-testbtn"
+                  onclick="testPlatformBtn('${p.id}')"
+                  style="font-size:12px; padding:3px 10px; display:${enabled ? 'inline-flex' : 'none'};">Test</button>
+        </div>
+        <div id="plat-${p.id}-fields" style="display:${enabled ? 'block' : 'none'}; padding-top:4px;">
+          ${fieldsHtml}
+          <div id="plat-${p.id}-error" style="font-size:12px; color:#ef4444; margin-top:6px; display:none;"></div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function togglePlatform(id, on) {
+  document.getElementById(`plat-${id}-fields`).style.display = on ? 'block' : 'none';
+  document.getElementById(`plat-${id}-testbtn`).style.display = on ? 'inline-flex' : 'none';
+  const card = document.getElementById(`platcard-${id}`);
+  const p = PLATFORMS.find(x => x.id === id);
+  card.style.borderColor = on ? p.color : '#3f3f46';
+  if (!on) setPlatformStatus(id, null, '');
+}
+
+function collectPlatforms() {
+  const result = {};
+  for (const p of PLATFORMS) {
+    const enabled = document.getElementById(`plat-${p.id}-enabled`)?.checked || false;
+    const creds = { enabled };
+    for (const f of p.fields) {
+      const el = document.getElementById(`plat-${p.id}-${f.id}`);
+      if (el) creds[f.id] = el.value.trim();
+    }
+    result[p.id] = creds;
+  }
+  return result;
+}
+
+function setPlatformStatus(id, ok, msg) {
+  const badge = document.getElementById(`plat-${id}-badge`);
+  const errEl = document.getElementById(`plat-${id}-error`);
+  if (ok === true) {
+    badge.textContent = '✓ ' + (msg || 'Connected');
+    badge.style.color = '#22c55e';
+    errEl.style.display = 'none';
+  } else if (ok === false) {
+    badge.textContent = '✗ Failed';
+    badge.style.color = '#ef4444';
+    errEl.textContent = msg || 'Connection failed.';
+    errEl.style.display = 'block';
+  } else {
+    badge.textContent = '';
+    errEl.style.display = 'none';
+  }
+}
+
+async function testPlatformAPI(id, creds) {
+  try {
+    const res = await fetch('/api/platforms/test', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ platform: id, credentials: creds })
+    });
+    return res.json();
+  } catch(e) {
+    return { ok: false, error: 'Network error: ' + e.message };
+  }
+}
+
+async function testPlatformBtn(id) {
+  const btn = document.getElementById(`plat-${id}-testbtn`);
+  btn.disabled = true;
+  btn.textContent = 'Testing…';
+  setPlatformStatus(id, null, '');
+  const p = PLATFORMS.find(x => x.id === id);
+  const creds = { enabled: true };
+  for (const f of p.fields) {
+    const el = document.getElementById(`plat-${id}-${f.id}`);
+    if (el) creds[f.id] = el.value.trim();
+  }
+  const result = await testPlatformAPI(id, creds);
+  setPlatformStatus(id, result.ok, result.ok ? result.info : result.error);
+  btn.disabled = false;
+  btn.textContent = 'Test';
 }
 
 // ── Speech style generation ───────────────────────────────────────────────────
@@ -1137,6 +1262,7 @@ function collectConfig() {
     nsfw_level: v('f-nsfw-level'),
     conversion_triggers: v('f-triggers'),
     avatar: v('f-avatar'),
+    platforms: collectPlatforms(),
   };
 }
 
@@ -1145,6 +1271,31 @@ async function savePersona() {
   if (!currentSlug) return;
   const config = collectConfig();
   const status = document.getElementById('save-status');
+
+  // Test all enabled platform connections before saving
+  const enabledPlatforms = Object.entries(config.platforms || {})
+    .filter(([, p]) => p.enabled);
+  if (enabledPlatforms.length) {
+    status.textContent = 'Testing platform connections…';
+    status.className = 'save-status';
+    const failures = [];
+    for (const [id, creds] of enabledPlatforms) {
+      const result = await testPlatformAPI(id, creds);
+      if (!result.ok) {
+        const label = PLATFORMS.find(p => p.id === id)?.label || id;
+        failures.push(`${label}: ${result.error}`);
+        setPlatformStatus(id, false, result.error);
+      } else {
+        setPlatformStatus(id, true, result.info);
+      }
+    }
+    if (failures.length) {
+      status.textContent = '✗ Fix platform errors before saving';
+      status.className = 'save-status err';
+      return;
+    }
+  }
+
   status.textContent = 'Saving…';
   status.className = 'save-status';
   try {
@@ -1157,10 +1308,8 @@ async function savePersona() {
     if (data.ok) {
       status.textContent = '✓ Saved & deployed';
       status.className = 'save-status ok';
-      // Update sidebar name
       const item = document.getElementById(`item-${currentSlug}`);
       if (item) item.querySelector('.persona-name').textContent = config.name || currentSlug;
-      // Show prompt in preview
       showPromptPreview(data.prompt);
     } else {
       throw new Error(data.error || 'Unknown error');
