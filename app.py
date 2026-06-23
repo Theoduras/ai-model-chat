@@ -15,6 +15,7 @@ os.makedirs(PERSONAS_DIR, exist_ok=True)
 
 # --- Logging setup (serverless-safe) ---
 IS_VERCEL = bool(os.getenv('VERCEL') or os.getenv('AWS_LAMBDA_FUNCTION_NAME'))
+TMP_PERSONAS_DIR = '/tmp/personas'
 LOG_DIR = '/tmp/logs' if IS_VERCEL else os.path.join(BASE_DIR, 'logs')
 try:
     os.makedirs(LOG_DIR, exist_ok=True)
@@ -69,21 +70,32 @@ def response_asks_question(text):
     return False
 
 
+def _read_file(path):
+    with open(path, 'r', encoding='utf-8') as f:
+        return f.read().strip()
+
+
+def _persona_path(slug, ext):
+    """Return path to persona file, preferring /tmp/personas on Vercel."""
+    tmp = os.path.join(TMP_PERSONAS_DIR, f'{slug}{ext}')
+    if os.path.exists(tmp):
+        return tmp
+    return os.path.join(PERSONAS_DIR, f'{slug}{ext}')
+
+
 def load_persona_prompt(slug):
-    path = os.path.join(PERSONAS_DIR, f'{slug}.txt')
+    path = _persona_path(slug, '.txt')
     if os.path.exists(path):
-        with open(path, 'r', encoding='utf-8') as f:
-            return f.read().strip()
+        return _read_file(path)
     # fallback to legacy location
     legacy = os.path.join(BASE_DIR, f'grok-{slug}-prompt.txt')
     if os.path.exists(legacy):
-        with open(legacy, 'r', encoding='utf-8') as f:
-            return f.read().strip()
+        return _read_file(legacy)
     return None
 
 
 def load_persona_profile(slug):
-    path = os.path.join(PERSONAS_DIR, f'{slug}.json')
+    path = _persona_path(slug, '.json')
     if os.path.exists(path):
         with open(path, 'r', encoding='utf-8') as f:
             return json.load(f)
@@ -401,26 +413,34 @@ def api_profile_save():
 @app.route('/api/personas')
 def api_personas():
     """List all available personas."""
-    personas = []
+    # Collect slugs from both static personas dir and /tmp (Vercel writes)
+    slugs = set()
     for fname in os.listdir(PERSONAS_DIR):
         if fname.endswith('.txt'):
-            slug = fname[:-4]
-            meta_path = os.path.join(PERSONAS_DIR, f'{slug}.json')
-            meta = {}
-            if os.path.exists(meta_path):
-                with open(meta_path, 'r', encoding='utf-8') as f:
-                    meta = json.load(f)
-            config_path = os.path.join(PERSONAS_DIR, f'{slug}.config.json')
-            config = {}
-            if os.path.exists(config_path):
-                with open(config_path, 'r', encoding='utf-8') as f:
-                    config = json.load(f)
-            personas.append({
-                'slug': slug,
-                'name': config.get('name') or meta.get('cover_label') or slug.capitalize(),
-                'avatar': f'/api/personas/{slug}/avatar' if config.get('avatar') else None,
-                'config': config
-            })
+            slugs.add(fname[:-4])
+    if os.path.isdir(TMP_PERSONAS_DIR):
+        for fname in os.listdir(TMP_PERSONAS_DIR):
+            if fname.endswith('.txt'):
+                slugs.add(fname[:-4])
+
+    personas = []
+    for slug in sorted(slugs):
+        config_path = _persona_path(slug, '.config.json')
+        config = {}
+        if os.path.exists(config_path):
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+        meta_path = _persona_path(slug, '.json')
+        meta = {}
+        if os.path.exists(meta_path):
+            with open(meta_path, 'r', encoding='utf-8') as f:
+                meta = json.load(f)
+        personas.append({
+            'slug': slug,
+            'name': config.get('name') or meta.get('cover_label') or slug.capitalize(),
+            'avatar': f'/api/personas/{slug}/avatar' if config.get('avatar') else None,
+            'config': config
+        })
     return jsonify(personas)
 
 
@@ -428,7 +448,7 @@ def api_personas():
 def api_persona_get(slug):
     if not re.match(r'^[a-z0-9_-]+$', slug):
         return jsonify({'error': 'Invalid slug'}), 400
-    config_path = os.path.join(PERSONAS_DIR, f'{slug}.config.json')
+    config_path = _persona_path(slug, '.config.json')
     config = {}
     if os.path.exists(config_path):
         with open(config_path, 'r', encoding='utf-8') as f:
@@ -617,7 +637,11 @@ def api_persona_avatar(slug):
     """Return the persona's avatar image from the config."""
     import base64
     from flask import Response
-    cfg = _load_config(slug)
+    config_path = _persona_path(slug, '.config.json')
+    cfg = {}
+    if os.path.exists(config_path):
+        with open(config_path, 'r', encoding='utf-8') as f:
+            cfg = json.load(f)
     avatar = cfg.get('avatar', '')
     if not avatar or not avatar.startswith('data:'):
         return ('', 404)
