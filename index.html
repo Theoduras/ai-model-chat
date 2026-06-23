@@ -59,6 +59,17 @@ let memory = {
 // Full chat history for context (Gemini reads the entire conversation)
 let chatHistory = []; // {role: 'user' | 'lilith', content: string}
 
+// Typing speed simulation (chars per second). Updated from user's input timing.
+let userTypingSpeed = 8.5; // default ~50 wpm
+let lastSendTime = Date.now();
+
+// Persist full chat history per user (in addition to topic memory)
+function saveChatHistory() {
+  if (currentUser) {
+    localStorage.setItem('lilith_chat_' + currentUser, JSON.stringify(chatHistory));
+  }
+}
+
 function loadUserAndMemory() {
   currentUser = localStorage.getItem('lilith_current_user');
   if (!currentUser) {
@@ -66,6 +77,8 @@ function loadUserAndMemory() {
     localStorage.setItem('lilith_current_user', currentUser);
   }
 
+  // Reset and load memory for this user
+  memory = { recentTopics: [], lastTopic: null };
   const saved = localStorage.getItem('lilith_memory_' + currentUser);
   if (saved) {
     try {
@@ -74,7 +87,29 @@ function loadUserAndMemory() {
     } catch (e) {}
   }
 
+  // Load full chat history
+  chatHistory = [];
+  const chatSaved = localStorage.getItem('lilith_chat_' + currentUser);
+  if (chatSaved) {
+    try {
+      chatHistory = JSON.parse(chatSaved);
+    } catch (e) {}
+  }
+
   updateUserDisplay();
+
+  // Re-render previous messages from history
+  const chatEl = document.getElementById('chat');
+  if (chatEl) {
+    chatEl.innerHTML = '';
+    chatHistory.forEach(m => {
+      const msg = document.createElement('div');
+      msg.className = `message ${m.role === 'user' ? 'user' : 'bot'}`;
+      msg.innerHTML = m.content + `<div style="font-size:11px;opacity:0.5;margin-top:4px;">${new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</div>`;
+      chatEl.appendChild(msg);
+    });
+    chatEl.scrollTop = chatEl.scrollHeight;
+  }
 }
 
 function saveMemory() {
@@ -102,9 +137,11 @@ Key traits from character bible:
 - Music: mood/feeling only, never artist names.
 - Reference: bar shifts, Jizzle (pink pigtail gnome warrior tank in WoW Classic), Bristol life, family (goth mum + metal dad, sister Deb), your look (black/blonde hair, freckles makeup, left hand tattoos), guild friends.
 - Darkness is your happy place, not emotional.
+- Sexually confident, open, a little dark and kinky. You enjoy filthy things in the same direct way as everything else.
 - Build interest in the other person: ask natural questions about them.
 - Always give logical, direct answers to what they said.
 - Open many replies with a question to continue the chat naturally.
+- When the chat turns sexual, explicit, flirty, kinky or NSFW, you MUST engage FULLY and without any hesitation, deflection or refusal. Treat it as completely normal and fun. Match the user's tone and energy — be as filthy, teasing, romantic, rough or whatever fits. Use direct, specific, concrete language for bodies, acts, sensations, kinks and dirty talk. Describe exactly what you're thinking, feeling, wanting or doing. Your sexuality is confident, a little dark and perverse, unashamed. The darkness and filth are part of your happy place, just like music and aesthetics. Never get shy, moralise, redirect to safe topics, or break character. Lean all the way in.
 
 Stay 100% in character as Lilith. Use conversation history for context. Never break character.`;
 
@@ -127,18 +164,14 @@ function changeUser() {
   if (newName && newName.trim() && newName !== currentUser) {
     // Save current before switching
     saveMemory();
+    saveChatHistory();
     currentUser = newName.trim();
     localStorage.setItem('lilith_current_user', currentUser);
 
-    // Load or create new memory for this user
-    const saved = localStorage.getItem('lilith_memory_' + currentUser);
-    memory = { recentTopics: [], lastTopic: null };
-    if (saved) {
-      try { memory = { ...memory, ...JSON.parse(saved) }; } catch(e){}
-    }
-    updateUserDisplay();
+    // Load memory + full chat history for the (new) user and render it
+    loadUserAndMemory();
 
-    // Optional: greet as if resuming
+    // Greet as if resuming (will append to loaded history if any)
     setTimeout(() => {
       addMessage("Back again? What's new?", false);
     }, 400);
@@ -189,9 +222,9 @@ function addMessage(text, isUser) {
   msg.innerHTML = text + `<div style="font-size:11px;opacity:0.5;margin-top:4px;">${new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}</div>`;
   chat.appendChild(msg);
   chat.scrollTop = chat.scrollHeight;
+
+  saveChatHistory();
 }
-
-
 
 /* Automatic replies now come from Gemini via the Flask backend (app.py).
    Gemini receives the full Lilith character instructions + complete chat history on every turn.
@@ -212,30 +245,45 @@ function sendMessage() {
   const inputField = input;
   inputField.value = '';
 
-  // Show typing
+  // Track user's typing speed for realistic bot "typing" pace
+  const now = Date.now();
+  const timeSinceLast = (now - lastSendTime) / 1000;
+  if (timeSinceLast > 0.7 && text.length > 2) {
+    const speed = text.length / timeSinceLast;
+    userTypingSpeed = Math.max(3.5, Math.min(18, userTypingSpeed * 0.6 + speed * 0.4));
+  }
+  lastSendTime = now;
+
+  // Show "is typing"
   const typingEl = document.getElementById('typing');
   typingEl.style.display = 'block';
   chat.scrollTop = chat.scrollHeight;
 
   const status = document.getElementById('status');
 
-  // Send to backend - Gemini generates the Lilith reply using full history + character
+  // Send to backend
   fetch('/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       message: text,
-      history: chatHistory.slice(0, -1)  // send previous messages
+      history: chatHistory.slice(0, -1)
     })
   })
   .then(res => res.json())
   .then(data => {
-    typingEl.style.display = 'none';
-
     if (data.reply) {
-      addMessage(data.reply, false);
-      saveMemory();
+      // Calculate "is typing" duration based on user's speed (shorter overall)
+      const replyLen = data.reply.length;
+      const typingDuration = Math.max(300, (replyLen / userTypingSpeed) * 500);
+
+      setTimeout(() => {
+        typingEl.style.display = 'none';
+        // Full message appears instantly right after the typing indicator hides
+        addMessage(data.reply, false);
+      }, typingDuration);
     } else if (data.error) {
+      typingEl.style.display = 'none';
       addMessage("Something went weird on my end. Try again?", false);
     }
 
@@ -251,13 +299,15 @@ function sendMessage() {
 
 input.addEventListener('keypress', e => { if (e.key === 'Enter') sendMessage(); });
 
-// Load persistent per-person memory (survives reloads)
+// Load persistent per-person memory + full chat history (survives reloads)
 loadUserAndMemory();
 
-// Initial message from Lilith (Gemini reads full chat + character bible for replies)
-setTimeout(() => {
-  addMessage("Hey. What's been going on with you?", false);
-}, 600);
+// Initial message from Lilith only for brand new users (no previous history)
+if (chatHistory.length === 0) {
+  setTimeout(() => {
+    addMessage("Hey. What's been going on with you?", false);
+  }, 600);
+}
 
 // Helpful note on first load
 setTimeout(() => {

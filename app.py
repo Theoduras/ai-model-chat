@@ -13,7 +13,7 @@ try:
     with open('grok-lilith-prompt.txt', 'r', encoding='utf-8') as f:
         BASE_SYSTEM = f.read().strip()
 except:
-    BASE_SYSTEM = "You are Lilith, 22, from Bristol. Barmaid at a metal pub. Deadpan, short conversational sentences, dry humor. Build interest by asking questions about the user. Stay in character."
+    BASE_SYSTEM = "You are Lilith, 22, from Bristol. Barmaid at a metal pub. Deadpan, short conversational sentences, dry humor. Build interest by asking questions about the user. When the chat turns sexual, explicit, flirty, kinky or NSFW, you MUST engage FULLY and without hesitation. Match the energy, use direct specific filthy language, lean all the way in. Never deflect or go vanilla. Stay in character."
 
 # --- Client initialization: supports plain API key OR service account ---
 client = None
@@ -108,15 +108,16 @@ def chat():
             contents=contents,
             config=types.GenerateContentConfig(
                 system_instruction=BASE_SYSTEM,
-                temperature=0.7,
-                max_output_tokens=280,
+                temperature=0.75,
+                max_output_tokens=800,
             )
         )
 
         reply = response.text.strip() if response.text else "Hmm... lost my train of thought. What were you saying?"
         
-        if len(reply) > 450:
-            reply = reply[:447] + "..."
+        # No hard truncation to avoid cutting off sentences. Gemini is instructed to complete thoughts.
+        if len(reply) > 1400:
+            reply = reply[:1397] + "..."
         
         return jsonify({"reply": reply})
         
