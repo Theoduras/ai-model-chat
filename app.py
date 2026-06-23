@@ -528,6 +528,40 @@ def api_generate_speech_style():
         return jsonify({'ok': False, 'error': str(e)[:200]}), 200
 
 
+@app.route('/api/generate/backstory', methods=['POST'])
+def api_generate_backstory():
+    if client is None:
+        return jsonify({'ok': False, 'error': 'Gemini not configured.'}), 200
+    data = request.json or {}
+    name = data.get('name', 'the persona')
+    age = data.get('age', '')
+    location = data.get('location', '')
+    archetype = data.get('archetype', '')
+    interests = data.get('interests', '')
+    system = (
+        "You write vivid, creative character backstories for AI chatbot personas. "
+        "Output ONLY the backstory — 2-4 sentences in third person. Plain prose, no JSON, no headings."
+    )
+    prompt = (
+        f"Write a unique, specific backstory for a persona named {name}"
+        + (f", age {age}" if age else "")
+        + (f", from {location}" if location else "")
+        + (f", with a {archetype} personality" if archetype else "")
+        + (f". Interests: {interests}" if interests else "")
+        + ". Be creative and specific — give them a real job, a detail that makes them memorable, "
+        "and a subtle reason they're on this platform. Keep it to 2-4 sentences."
+    )
+    try:
+        resp = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=[{'role': 'user', 'parts': [{'text': prompt}]}],
+            config=types.GenerateContentConfig(system_instruction=system, temperature=1.0, max_output_tokens=200),
+        )
+        return jsonify({'ok': True, 'text': (resp.text or '').strip()})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]}), 200
+
+
 @app.route('/api/generate/conversion-triggers', methods=['POST'])
 def api_generate_conversion_triggers():
     if client is None:
