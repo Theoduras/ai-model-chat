@@ -85,8 +85,9 @@ def chat():
     data = request.json
     user_message = data.get('message', '').strip()
     chat_history = data.get('history', [])  # list of {role: 'user'/'lilith', content: str}
+    is_continue = data.get('continue', False)
     
-    if not user_message:
+    if not is_continue and not user_message:
         return jsonify({"error": "No message"}), 400
     
     if client is None:
@@ -100,8 +101,12 @@ def chat():
             role = "user" if msg.get("role") == "user" else "model"
             contents.append({"role": role, "parts": [{"text": msg.get("content", "")}]})
 
-        # Add current user message
-        contents.append({"role": "user", "parts": [{"text": user_message}]})
+        if not is_continue:
+            # Add current user message
+            contents.append({"role": "user", "parts": [{"text": user_message}]})
+        else:
+            # For idle continuation: append dummy user to trigger next bot response without polluting client history
+            contents.append({"role": "user", "parts": [{"text": "(continuing the conversation naturally as Lilith)"}]})
 
         response = client.models.generate_content(
             model=MODEL_NAME,
@@ -109,7 +114,7 @@ def chat():
             config=types.GenerateContentConfig(
                 system_instruction=BASE_SYSTEM,
                 temperature=0.75,
-                max_output_tokens=800,
+                max_output_tokens=1024,
             )
         )
 
