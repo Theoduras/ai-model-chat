@@ -521,7 +521,7 @@ def api_generate_speech_style():
         resp = client.models.generate_content(
             model=MODEL_NAME,
             contents=[{'role': 'user', 'parts': [{'text': prompt}]}],
-            config=types.GenerateContentConfig(system_instruction=system, temperature=0.9 if randomize else 0.7, max_output_tokens=200),
+            config=types.GenerateContentConfig(system_instruction=system, temperature=0.9 if randomize else 0.7),
         )
         return jsonify({'ok': True, 'text': (resp.text or '').strip()})
     except Exception as e:
@@ -555,7 +555,7 @@ def api_generate_backstory():
         resp = client.models.generate_content(
             model=MODEL_NAME,
             contents=[{'role': 'user', 'parts': [{'text': prompt}]}],
-            config=types.GenerateContentConfig(system_instruction=system, temperature=1.0, max_output_tokens=200),
+            config=types.GenerateContentConfig(system_instruction=system, temperature=1.0),
         )
         return jsonify({'ok': True, 'text': (resp.text or '').strip()})
     except Exception as e:
@@ -789,7 +789,6 @@ def api_backstory_interview():
             config=types.GenerateContentConfig(
                 system_instruction=system,
                 temperature=0.85,
-                max_output_tokens=500,
             ),
         )
         text = (resp.text or '').strip()
