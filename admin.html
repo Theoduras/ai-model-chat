@@ -585,19 +585,54 @@ let currentTab = 'prompt';
 const personas = {};
 
 // ── Init ─────────────────────────────────────────────────────────────────────
+function lsPersonaKey(slug) { return 'admin_persona_cfg_' + slug; }
+function lsSlugsKey() { return 'admin_persona_slugs'; }
+
+function lsSavePersona(slug, config) {
+  try {
+    localStorage.setItem(lsPersonaKey(slug), JSON.stringify(config));
+    const slugs = JSON.parse(localStorage.getItem(lsSlugsKey()) || '[]');
+    if (!slugs.includes(slug)) slugs.push(slug);
+    localStorage.setItem(lsSlugsKey(), JSON.stringify(slugs));
+  } catch(e) {}
+}
+
+function lsLoadPersona(slug) {
+  try {
+    const raw = localStorage.getItem(lsPersonaKey(slug));
+    return raw ? JSON.parse(raw) : null;
+  } catch(e) { return null; }
+}
+
+function lsLoadSlugs() {
+  try { return JSON.parse(localStorage.getItem(lsSlugsKey()) || '[]'); } catch(e) { return []; }
+}
+
 async function init() {
   loadConfig();
+  const seen = new Set();
   try {
     const res = await fetch('/api/personas');
     const list = await res.json();
-    document.getElementById('persona-count').textContent = list.length;
     list.forEach(p => {
       personas[p.slug] = p;
       renderSidebarItem(p);
+      seen.add(p.slug);
     });
   } catch(e) {
     console.error('Could not load personas', e);
   }
+  // Merge in any locally-saved personas the server doesn't know about
+  lsLoadSlugs().forEach(slug => {
+    if (seen.has(slug)) return;
+    const cfg = lsLoadPersona(slug);
+    if (!cfg) return;
+    const p = { slug, name: cfg.name || slug, config: cfg };
+    personas[slug] = p;
+    renderSidebarItem(p);
+    seen.add(slug);
+  });
+  document.getElementById('persona-count').textContent = seen.size;
 }
 
 // ── Settings / Gemini API key ─────────────────────────────────────────────────
@@ -868,6 +903,11 @@ async function loadPersona(slug) {
     const data = await res.json();
     config = data.config || {};
   } catch(e) {}
+  // Fall back to localStorage if server has no config (cross-instance Vercel)
+  if (!config.name) {
+    const cached = lsLoadPersona(slug);
+    if (cached) config = cached;
+  }
 
   renderForm(slug, config);
   document.getElementById('action-bar').style.display = 'flex';
@@ -1336,6 +1376,8 @@ async function savePersona() {
     });
     const data = await res.json();
     if (data.ok) {
+      lsSavePersona(currentSlug, config);
+      if (data.prompt) localStorage.setItem('persona_prompt_' + currentSlug, data.prompt);
       status.textContent = '✓ Saved & deployed';
       status.className = 'save-status ok';
       const item = document.getElementById(`item-${currentSlug}`);

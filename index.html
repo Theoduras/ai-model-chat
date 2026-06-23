@@ -536,68 +536,66 @@ function showTyping(on){
 
 function um(x){const r=x.toLowerCase();const t=[];if(/jizzle|gnome|wow|classic|raid|zug|warrior|tank/.test(r))t.push('gaming');if(/bar|shift|pub|venue|work|pint/.test(r))t.push('work');if(/music|show|band|gig|rave|metal/.test(r))t.push('music');if(t.length){m.recentTopics=[...m.recentTopics,...t].slice(-4);m.lastTopic=t[t.length-1];}}
 
-function cs(text,cb){
-  showTyping(false);
-  addMsg(text,false);
-  ss(true);
-  if(cb)cb();
+function splitChunks(text){
+  const parts=text.match(/[^.!?…]*[.!?…]+(?=\s|$)|[^.!?…]+$/g)||[text];
+  const clean=parts.map(s=>s.trim()).filter(Boolean);
+  const chunks=[];
+  for(let i=0;i<clean.length;i+=2)chunks.push(clean.slice(i,i+2).join(' '));
+  return chunks.length?chunks:[text];
 }
 
-let it=null,st=null,ot=null;
-function ri(){clearTimeout(it);clearTimeout(st);clearTimeout(ot);ss(true);}
+function deliverChunks(chunks,idx,onDone){
+  if(idx>=chunks.length){if(onDone)onDone();return;}
+  showTyping(false);
+  addMsg(chunks[idx],false);
+  if(idx+1<chunks.length){
+    const next=chunks[idx+1];
+    const delay=2500+next.length*20+Math.random()*3000;
+    setTimeout(()=>{showTyping(true);setTimeout(()=>deliverChunks(chunks,idx+1,onDone),delay);},200);
+  } else {
+    if(onDone)onDone();
+  }
+}
+
+function cs(text,cb){
+  ss(true);
+  const chunks=splitChunks(text);
+  deliverChunks(chunks,0,cb);
+}
+
+let st=null,ot=null;
+function ri(){clearTimeout(st);clearTimeout(ot);}
 
 function si(){
-  ri();autoCount=0;
-  it=setTimeout(()=>{
-    showTyping(true);
-    fetch('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:chatBody({message:'',history:h.slice(0),continue:true})})
-    .then(r=>r.json()).then(d=>{
-      if(d.reply){
-        const last=h[h.length-1];
-        if(last&&last.role==='bot'&&last.content.trim()===d.reply.trim()){showTyping(false);ss(true);return;}
-        const delay=5000+Math.random()*10000;
-        setTimeout(()=>cs(d.reply,null),delay);
-        autoCount++;
-        if(autoCount<1){
-          it=setTimeout(()=>{
-            showTyping(true);
-            fetch('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:chatBody({message:'',history:h.slice(0),continue:true})})
-            .then(r=>r.json()).then(d=>{
-              if(d.reply){
-                const last=h[h.length-1];
-                if(last&&last.role==='bot'&&last.content.trim()===d.reply.trim()){showTyping(false);ss(true);return;}
-                setTimeout(()=>cs(d.reply,null),5000+Math.random()*10000);
-              }
-            }).catch(e=>{showTyping(false);addMsg("something went wrong. please try again.",false);ss(false);});
-          },8000);
-        }
-      } else if(d.error){showTyping(false);addMsg("something went weird on my end. try again?",false);ss(false);}
-    }).catch(e=>{showTyping(false);addMsg("something went wrong. please try again.",false);ss(false);});
-  },8000);
+  ri();
   st=setTimeout(()=>{
+    const delay=2000+Math.random()*2000;
     showTyping(true);
-    setTimeout(()=>{showTyping(false);addMsg("heeyyy u still there? 👀",false);ss(true);},800);
-  },180000);
-  ot=setTimeout(()=>{addMsg("i'll be here when you're back 💜",false);ss(false);},60000);
+    setTimeout(()=>{showTyping(false);addMsg("still there?",false);ss(true);},delay);
+  },300000);
+  ot=setTimeout(()=>{addMsg("i'll catch you later 💜",false);ss(false);},480000);
 }
 
 function se(){
   const x=inp.value.trim();if(!x)return;
-  ri();autoCount=0;
+  ri();
   addMsg(x,true);um(x);sm();
   inp.value='';
   const n=Date.now(),d=(n-l)/1000;
   if(d>.7&&x.length>2){const v=x.length/d;s=Math.max(3.5,Math.min(18,s*.6+v*.4));}
   l=n;
+  const initialDelay=15000+Math.random()*75000;
   showTyping(true);
-  fetch('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:chatBody({message:x,history:h.slice(0,-1)})})
-  .then(r=>r.json()).then(d=>{
-    if(d.reply){
-      const last=h[h.length-1];
-      if(last&&last.role==='bot'&&last.content.trim()===d.reply.trim()){showTyping(false);ss(true);return;}
-      setTimeout(()=>cs(d.reply,si),5000+Math.random()*10000);
-    } else if(d.error){showTyping(false);addMsg("something went weird on my end. try again?",false);ss(false);}
-  }).catch(e=>{showTyping(false);addMsg("something went wrong. please try again.",false);ss(false);});
+  setTimeout(()=>{
+    fetch('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:chatBody({message:x,history:h.slice(0,-1)})})
+    .then(r=>r.json()).then(d=>{
+      if(d.reply){
+        const last=h[h.length-1];
+        if(last&&last.role==='bot'&&last.content.trim()===d.reply.trim()){showTyping(false);ss(true);si();return;}
+        cs(d.reply,si);
+      } else if(d.error){showTyping(false);addMsg("something went weird on my end. try again?",false);ss(false);}
+    }).catch(e=>{showTyping(false);addMsg("something went wrong. please try again.",false);ss(false);});
+  },initialDelay);
 }
 
 function ss(ok){
@@ -611,7 +609,10 @@ function ck(){fetch('/').then(()=>ss(true)).catch(()=>ss(false));}
 
 inp.addEventListener('keypress',e=>{if(e.key==='Enter')se();});
 ld();
-if(h.length===0)setTimeout(()=>{addMsg("heeyyy stranger 👋",false);si();},800);
+if(h.length===0){
+  const greetDelay=3000+Math.random()*5000;
+  setTimeout(()=>{addMsg("heyy 👋",false);si();},greetDelay);
+}
 ss(false);ck();setInterval(ck,10000);
 </script>
 </body>
