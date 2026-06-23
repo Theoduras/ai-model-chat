@@ -1,12 +1,13 @@
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, render_template
 import os
+import json
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
 load_dotenv()
 
-app = Flask(__name__, static_folder='.', static_url_path='')
+app = Flask(__name__, static_folder='.', static_url_path='', template_folder='templates')
 
 # Load the character prompt for Gemini (as system instruction)
 try:
@@ -134,9 +135,27 @@ def chat():
             "reply": reply + f" (Gemini error: {err_msg}). Check credentials / API enabled / project permissions."
         })
 
+
+# --- Dynamic Creator Profile (Landing Page) ---
+@app.route('/profile')
+def profile():
+    # Serve the maintained profile.html which populates from /api/profile (JSON)
+    return send_from_directory('.', 'profile.html')
+
+
+@app.route('/api/profile')
+def api_profile():
+    # === EDIT CONTENT HERE - all dynamic values for the landing page ===
+    # Simply edit profile_data.json and restart the server to update the page
+    with open('profile_data.json', 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    return jsonify(data)
+
+
 if __name__ == '__main__':
     print("Starting Lilith + Gemini server...")
-    print("Open http://localhost:5000 in your browser")
+    print("Open http://localhost:5000/profile for the landing page")
+    print("Open http://localhost:5000 for chat")
     print("Configure .env with either GEMINI_API_KEY or GOOGLE_APPLICATION_CREDENTIALS (service account JSON)")
     print("Note: Using google-genai (new SDK)")
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
