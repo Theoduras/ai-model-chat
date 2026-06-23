@@ -20,6 +20,27 @@
   .input-area { display: flex; padding: 16px; background: #1a1a1a; gap: 10px; }
   input { flex: 1; padding: 14px 18px; border: none; border-radius: 9999px; background: #111; color: #fff; font-size: 16px; }
   button { padding: 0 28px; background: #4a2c2c; color: white; border: none; border-radius: 9999px; font-weight: 600; cursor: pointer; }
+
+  @media (max-width: 768px) {
+    body { padding: 0; }
+    .chat-container {
+      max-width: 100%;
+      margin: 0;
+      height: 100vh;
+      border-radius: 0;
+      box-shadow: none;
+      display: flex;
+      flex-direction: column;
+    }
+    .chat-window {
+      flex: 1;
+      height: auto;
+      min-height: 0;
+      overflow-y: auto;
+    }
+    .input-area { flex-shrink: 0; }
+    .header { padding: 12px 16px; }
+  }
 </style>
 </head>
 <body>
