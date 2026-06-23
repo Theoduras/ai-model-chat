@@ -494,29 +494,27 @@ def api_backstory_interview():
     archetype = basics.get('archetype', '')
     location = basics.get('location', '')
 
-    location_hint = f" The persona is based in {location}." if location else ""
-
     system = (
-        f"You are interviewing a content creator to build a rich, believable backstory for their "
-        f"AI chatbot persona named {name}"
-        + (f", age {age}" if age else "")
-        + (f", from {location}" if location else "")
-        + (f", personality archetype: {archetype}" if archetype else "")
-        + ".\n\n"
-        "Goal: gather the details needed for an engaging backstory — job and daily life, "
-        "family background, hobbies and interests, personality quirks, and formative experiences.\n\n"
-        f"Location is already known: {location or 'not specified'}.{location_hint} Do NOT ask about location.\n\n"
+        f"You are building a backstory for an AI chatbot persona named {name}, "
+        + (f"age {age}, " if age else "")
+        + (f"from {location}, " if location else "")
+        + (f"personality archetype: {archetype}." if archetype else ".")
+        + "\n\n"
+        "Ask questions across exactly these 5 topics in order: work/job, hobbies, free time, "
+        "study/education background, personality quirks. One question per topic, then offer to finalize.\n\n"
+        "Name, age, and location are already known — do NOT ask about them.\n\n"
         "Rules:\n"
-        "- Each turn: output ONLY a valid JSON object, nothing else.\n"
-        '- For a question turn: {"question": "...", "options": ["option A", "option B", "option C"]}\n'
-        "  - The question must be short and conversational.\n"
-        "  - The 3 options must be distinct, plausible, specific answers (not vague). "
-        "Tailor them to the persona's archetype and what's already been answered.\n"
-        "- Build on previous answers; never repeat something already covered.\n"
-        "- Once you have the bare necessities (job/daily life and a couple of personality details), "
-        'output: {"question": "That\'s enough for a solid backstory! Want to add more depth or shall we generate it now?", '
-        '"options": ["Generate the backstory now", "Add more depth", "Add one more detail"]}\n'
-        "- Never write the final backstory yourself unless explicitly told to finalize."
+        "- Output ONLY a valid JSON object each turn, nothing else.\n"
+        f'- Question format: {{"question": "short conversational question", "options": ["A", "B", "C"]}}\n'
+        "- Questions: simple, direct, mid-length. Not too basic (not 'what do you do?'), "
+        "not too complex. One sentence.\n"
+        "- Options: 3 distinct, specific, realistic answers. "
+        f"Tailor them to {archetype} archetype, age {age}, location {location}. "
+        "Each option is 4-10 words. No vague options like 'something creative'.\n"
+        "- After all 5 topics are covered output: "
+        '{"question": "Got everything I need for a solid backstory. Generate it now or add more?", '
+        '"options": ["Generate now", "Add one more thing", "Keep going"]}\n'
+        "- Never write the backstory itself unless told to finalize."
     )
 
     contents = []
@@ -526,12 +524,12 @@ def api_backstory_interview():
 
     if action == 'finalize':
         contents.append({'role': 'user', 'parts': [{'text': (
-            "Write the final backstory now using everything gathered. Output ONLY the backstory itself — "
-            "2-4 sentences (longer only if rich detail warrants it), written as if describing the persona, vivid and specific. "
+            f"Write the final backstory for {name} using everything gathered. "
+            "Output ONLY the backstory — 2-4 sentences, written in third person as a vivid character description. "
             "No preamble, no questions, no quotation marks, no JSON."
         )}]})
     elif not contents:
-        contents.append({'role': 'user', 'parts': [{'text': 'Start the interview. Output your first question as JSON.'}]})
+        contents.append({'role': 'user', 'parts': [{'text': 'Start with the first question (work/job). Output JSON only.'}]})
 
     try:
         resp = client.models.generate_content(

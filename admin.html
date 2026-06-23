@@ -511,7 +511,12 @@
       <div id="bs-question-area" style="display:none;">
         <div id="bs-question-text" style="font-weight:600; margin-bottom:10px; line-height:1.4;"></div>
         <div id="bs-options" style="display:flex; flex-direction:column; gap:7px;"></div>
-        <div style="display:flex; gap:8px; margin-top:10px;">
+        <div style="display:flex; gap:6px; margin-top:10px; align-items:center;">
+          <input type="text" id="bs-custom" placeholder="Or write your own answer…" autocomplete="off"
+                 onkeypress="if(event.key==='Enter')bsSubmitCustom()" style="flex:1; font-size:13px;">
+          <button class="btn btn-secondary" id="bs-custom-btn" onclick="bsSubmitCustom()" style="flex-shrink:0;">→</button>
+        </div>
+        <div style="display:flex; gap:8px; margin-top:8px;">
           <button class="btn btn-ghost" id="bs-regen-btn" onclick="bsRegenerate()" style="font-size:13px;">↻ New options</button>
           <button class="btn btn-ghost" id="bs-skip-btn" onclick="bsSkip()" style="font-size:13px;">Skip →</button>
         </div>
@@ -699,10 +704,12 @@ function bsRender() {
 }
 
 function bsSetBusy(busy, msg) {
-  ['bs-regen-btn','bs-skip-btn','bs-finalize-btn'].forEach(id => {
+  ['bs-regen-btn','bs-skip-btn','bs-finalize-btn','bs-custom-btn'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.disabled = busy;
   });
+  const custom = document.getElementById('bs-custom');
+  if (custom) custom.disabled = busy;
   document.querySelectorAll('#bs-options button').forEach(b => b.disabled = busy);
   document.getElementById('bs-status').textContent = msg || '';
   document.getElementById('bs-status').className = 'save-status';
@@ -716,13 +723,27 @@ function bsShowQuestion(question, options) {
     `<button class="btn btn-secondary" style="text-align:left; white-space:normal; line-height:1.35;"
        onclick="bsPickOption(${i})">${esc(opt)}</button>`
   ).join('');
+  document.getElementById('bs-custom').value = '';
   document.getElementById('bs-question-area').style.display = 'block';
+  document.getElementById('bs-custom').focus();
 }
 
 async function bsPickOption(idx) {
   const btn = document.querySelectorAll('#bs-options button')[idx];
   const answer = btn ? btn.textContent.trim() : '';
   if (!answer) return;
+  await bsSubmitAnswer(answer);
+}
+
+async function bsSubmitCustom() {
+  const input = document.getElementById('bs-custom');
+  const answer = input.value.trim();
+  if (!answer) return;
+  input.value = '';
+  await bsSubmitAnswer(answer);
+}
+
+async function bsSubmitAnswer(answer) {
   bsMessages.push({ role: 'assistant', content: bsCurrentQuestion });
   bsMessages.push({ role: 'user', content: answer });
   document.getElementById('bs-question-area').style.display = 'none';
@@ -754,10 +775,20 @@ async function bsAsk() {
 }
 
 async function openBackstoryAI() {
+  const missing = [];
+  if (!v('f-name').trim()) missing.push('Name');
+  if (!v('f-age').trim()) missing.push('Age');
+  if (!v('f-location').trim() && !document.getElementById('f-mirror-location')?.checked) missing.push('Location');
+  if (!v('f-archetype').trim()) missing.push('Archetype');
+  if (missing.length) {
+    alert(`Please fill in the following fields first: ${missing.join(', ')}`);
+    return;
+  }
   bsMessages = [];
   bsCurrentQuestion = '';
   bsRender();
   document.getElementById('bs-question-area').style.display = 'none';
+  document.getElementById('bs-custom').value = '';
   document.getElementById('backstory-modal').classList.add('open');
   await bsAsk();
 }
