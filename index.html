@@ -81,7 +81,7 @@ fetch('/api/personas/'+persona).then(r=>r.ok?r.json():null).then(d=>{
   if(cfg.avatar){avatarUrl='/api/personas/'+persona+'/avatar';document.getElementById('header-avatar').src=avatarUrl;}
   const parts=[];
   if(cfg.location&&!cfg.mirror_location)parts.push(cfg.location);
-  if(cfg.archetype)parts.push(cfg.archetype);
+  if(cfg.age)parts.push(cfg.age);
   document.getElementById('header-status').textContent=parts.length?'● '+parts.join(' • '):'';
   document.getElementById('typing').textContent=n+' is typing...';
   document.getElementById('input').placeholder='Message '+n+'...';
