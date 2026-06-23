@@ -585,7 +585,7 @@ def api_generate_conversion_triggers():
         resp = client.models.generate_content(
             model=MODEL_NAME,
             contents=[{'role': 'user', 'parts': [{'text': prompt}]}],
-            config=types.GenerateContentConfig(system_instruction=system, temperature=0.7, max_output_tokens=150),
+            config=types.GenerateContentConfig(system_instruction=system, temperature=0.7),
         )
         return jsonify({'ok': True, 'text': (resp.text or '').strip()})
     except Exception as e:
