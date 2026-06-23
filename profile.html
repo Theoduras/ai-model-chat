@@ -43,6 +43,7 @@
             font-size: 1.8rem;
             color: #18181b;
             cursor: pointer;
+            display: none; /* shown only in mobile via media query */
         }
 
         .verified {
@@ -367,24 +368,68 @@
         }
 
         @media (max-width: 1024px) {
+            html, body {
+                overflow: auto;
+                height: auto;
+            }
+
             .content-wrapper {
                 display: block;
                 overflow: auto;
             }
 
             .left-section {
-                padding: 1.1rem 1.5rem;
-                width:100vw;
-                max-width: 100vw;
+                padding: 1rem;
+                width: 100%;
+                max-width: 100%;
                 flex-direction: column;
             }
+
             .headline {
-                font-size: 3.2rem;
-            }
-            .headline-media .cover-photo {
-                height: 100%;
+                font-size: 2.5rem;
             }
 
+            .headline-media {
+                flex-direction: column !important;
+                min-height: auto !important;
+                gap: 0.75rem;
+            }
+
+            .headline-media > div:first-child {
+                width: 100% !important;
+                flex: none !important;
+            }
+
+            .headline-media .cover-photo {
+                width: 100% !important;
+                height: 220px !important;
+                flex: none !important;
+                border-radius: 20px;
+            }
+
+            /* Right section becomes full-screen overlay popup on mobile */
+            .right-section {
+                position: fixed !important;
+                top: 56px; /* below the sticky nav */
+                left: 0;
+                width: 100vw;
+                height: calc(100vh - 56px);
+                z-index: 1000;
+                background: #18181b;
+                padding: 0.5rem;
+                display: none;
+                flex-direction: column;
+                overflow: hidden;
+            }
+
+            .right-section.open {
+                display: flex;
+            }
+
+            .hamburger {
+                display: block;
+                z-index: 1001;
+            }
         }
     </style>
 </head>
@@ -410,7 +455,7 @@
             <!-- Left: Headline (one sentence, full width of its flex item) next to video, stats + gallery under -->
             <div class="left-section">
                 <div class="headline-media">
-                    <!-- Headline inside flex row next to video, one sentence full width of its left container -->
+                    <!-- On mobile: Headline on top, then cover image underneath, then rest below -->
                     <div style="flex: 0 0 55%; min-width: 0; display: flex; flex-direction: column; justify-content: space-evenly;">
                         <div class="headline-text" style="width: 100%;">
                             <h1 class="headline" id="headline">
@@ -430,36 +475,9 @@
                             <span style="font-size:1.6rem;"></span>
                             <span>I left something for you inside.</span>
                         </div>
-
-                        <div id="about" style="margin-top:0.3rem; font-size:0.82rem; color:#a1a1aa; line-height:1.25;"></div>
-
-                        <!-- Stats under bio -->
-                        <div class="stats" id="stats" style="margin-top:0.6rem;">
-                            <div class="stat-card">
-                                <div class="stat-number">46+</div>
-                                <div class="stat-label">Photos</div>
-                            </div>
-                            <div class="stat-card">
-                                <div class="stat-number">7+</div>
-                                <div class="stat-label">Videos</div>
-                            </div>
-                            <div class="stat-card">
-                                <div class="stat-number">Updates every other day</div>
-                                <div class="stat-label">Updates</div>
-                            </div>
-                            <div class="stat-card">
-                                <div class="stat-number" style="font-size:1.1rem;">Custom Content</div>
-                            </div>
-                            <div class="stat-card">
-                                <div class="stat-number" style="font-size:1.1rem;">ASMR/JOI</div>
-                            </div>
-                            <div class="stat-card">
-                                <div class="stat-number" style="font-size:1.1rem;">Personal Messaging</div>
-                            </div>
-                        </div>
                     </div>
 
-                    <!-- Cover video next to headline -->
+                    <!-- Cover video (will stack under headline on mobile) -->
                     <div class="cover-photo" id="cover-photo" style="flex: 1; height: 100%;">
                         <div class="silhouette">
                             <div class="silhouette-head"></div>
@@ -469,7 +487,35 @@
                     </div>
                 </div>
 
-                <!-- Gallery: full width underneath stat cards, taller images -->
+                <!-- About / bio (rest under cover on mobile) -->
+                <div id="about" style="margin-top:0.6rem; font-size:0.82rem; color:#a1a1aa; line-height:1.25;"></div>
+
+                <!-- Stats under cover image on mobile -->
+                <div class="stats" id="stats" style="margin-top:0.6rem;">
+                    <div class="stat-card">
+                        <div class="stat-number">46+</div>
+                        <div class="stat-label">Photos</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number">7+</div>
+                        <div class="stat-label">Videos</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number">Updates every other day</div>
+                        <div class="stat-label">Updates</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" style="font-size:1.1rem;">Custom Content</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" style="font-size:1.1rem;">ASMR/JOI</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-number" style="font-size:1.1rem;">Personal Messaging</div>
+                    </div>
+                </div>
+
+                <!-- Gallery: full width underneath -->
                 <div class="gallery-area">
                     <h2 class="gallery-header" id="gallery-header" style="font-size:0.72rem; margin:0 0 2px 0; font-weight:600;">A glimpse of what you're missing</h2>
                     <div class="gallery-grid" id="gallery-grid"></div>
@@ -477,7 +523,7 @@
             </div>
 
             <!-- Right Section: Chat full height -->
-            <div class="right-section" style="display:flex; flex-direction:column; align-items:stretch; padding:0.35rem; min-height:0; background:#18181b;">
+            <div class="right-section" style="flex-direction:column; align-items:stretch; padding:0.35rem; min-height:0; background:#18181b;">
                 <div style="flex:1; min-height:0; display:flex;">
                     <iframe src="index.html" title="Chat with Lilith" style="width:100%; height:100%; border:none; border-radius:8px; box-shadow:0 4px 6px rgba(0,0,0,0.1); flex:1;"></iframe>
                 </div>
@@ -586,6 +632,74 @@
 
             })
             .catch(err => console.log('Using static content (API not available yet)', err));
+
+        // Mobile: Right section as full-screen popup overlay (chat)
+        // Automatically open on mobile. Hamburger toggles it.
+        (function setupMobileChatOverlay() {
+            const hamburger = document.querySelector('.hamburger');
+            const rightSection = document.querySelector('.right-section');
+            if (!hamburger || !rightSection) return;
+
+            const icon = hamburger.querySelector('i');
+
+            function isMobile() {
+                return window.innerWidth <= 1024;
+            }
+
+            function updateIcon(isOpen) {
+                if (!icon) return;
+                if (isOpen) {
+                    icon.classList.remove('fa-bars');
+                    icon.classList.add('fa-times');
+                } else {
+                    icon.classList.remove('fa-times');
+                    icon.classList.add('fa-bars');
+                }
+            }
+
+            function toggleOverlay() {
+                if (!isMobile()) return; // only on mobile
+                const isOpen = rightSection.classList.toggle('open');
+                updateIcon(isOpen);
+            }
+
+            // Attach click
+            hamburger.addEventListener('click', function(e) {
+                e.stopPropagation();
+                toggleOverlay();
+            });
+
+            // Auto open the overlay on mobile by default
+            function initMobileOverlay() {
+                if (isMobile()) {
+                    rightSection.classList.add('open');
+                    updateIcon(true);
+                } else {
+                    rightSection.classList.remove('open');
+                    updateIcon(false);
+                }
+            }
+
+            // Init
+            initMobileOverlay();
+
+            // Handle resize (switching between mobile/desktop)
+            window.addEventListener('resize', function() {
+                if (isMobile()) {
+                    // keep open if it was, or ensure default open
+                    if (!rightSection.classList.contains('open')) {
+                        rightSection.classList.add('open');
+                        updateIcon(true);
+                    }
+                } else {
+                    rightSection.classList.remove('open');
+                    updateIcon(false);
+                }
+            });
+
+            // Optional: close overlay if clicking outside on mobile (but iframe may capture)
+            // For simplicity we rely on hamburger to toggle
+        })();
     </script>
 </body>
 </html>
