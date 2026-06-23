@@ -46,6 +46,10 @@
             display: none; /* shown only in mobile via media query */
         }
 
+        .hamburger:hover {
+            opacity: 0.8;
+        }
+
         .verified {
             display: flex;
             align-items: center;
@@ -411,23 +415,9 @@
                 border-radius: 20px;
             }
 
-            /* Right section becomes full-screen overlay popup on mobile */
+            /* On mobile, hide the side chat panel (use hamburger to open chat.html in new tab) */
             .right-section {
-                position: fixed !important;
-                top: 56px; /* below the sticky nav */
-                left: 0;
-                width: 100vw;
-                height: calc(100vh - 56px);
-                z-index: 1000;
-                background: #18181b;
-                padding: 0.5rem;
-                display: none;
-                flex-direction: column;
-                overflow: hidden;
-            }
-
-            .right-section.open {
-                display: flex;
+                display: none !important;
             }
 
             .hamburger {
@@ -435,8 +425,8 @@
                 z-index: 1001;
             }
 
-            .fa-solid.fa-message{
-                color:rgb(73, 242, 100);
+            .fa-solid.fa-message {
+                color: rgb(73, 242, 100);
             }
         }
     </style>
@@ -445,7 +435,7 @@
     <!-- Navigation -->
     <nav>
         <div class="nav-left">
-            <div class="hamburger"><i class="fa-solid fa-message"></i></div>
+            <a class="hamburger" href="chat.html" target="_blank" style="color: inherit; text-decoration: none; display: flex; align-items: center;"><i class="fa-solid fa-message"></i></a>
             <div class="verified">
                 <div class="verified-dot">
                     <i class="fa-solid fa-check text-white text-xs"></i>
@@ -475,7 +465,7 @@
                             The rest stays private.
                         </p>
 
-                        <button class="cta-button" id="cta-button" style="width:163px; margin-top:1rem; padding:0.7rem 1.8rem; font-size:1rem;" onclick="alert('Redirecting to full profile...')">
+                        <button class="cta-button" id="cta-button" style="width:163px; margin-top:1rem; padding:0.7rem 1.8rem; font-size:1rem;">
                             SEE MORE →
                         </button>
 
@@ -641,73 +631,6 @@
             })
             .catch(err => console.log('Using static content (API not available yet)', err));
 
-        // Mobile: Right section as full-screen popup overlay (chat)
-        // Automatically open on mobile. Hamburger toggles it.
-        (function setupMobileChatOverlay() {
-            const hamburger = document.querySelector('.hamburger');
-            const rightSection = document.querySelector('.right-section');
-            if (!hamburger || !rightSection) return;
-
-            const icon = hamburger.querySelector('i');
-
-            function isMobile() {
-                return window.innerWidth <= 1024;
-            }
-
-            function updateIcon(isOpen) {
-                if (!icon) return;
-                if (isOpen) {
-                    icon.classList.remove('fa-bars');
-                    icon.classList.add('fa-times');
-                } else {
-                    icon.classList.remove('fa-times');
-                    icon.classList.add('fa-bars');
-                }
-            }
-
-            function toggleOverlay() {
-                if (!isMobile()) return; // only on mobile
-                const isOpen = rightSection.classList.toggle('open');
-                updateIcon(isOpen);
-            }
-
-            // Attach click
-            hamburger.addEventListener('click', function(e) {
-                e.stopPropagation();
-                toggleOverlay();
-            });
-
-            // Auto open the overlay on mobile by default
-            function initMobileOverlay() {
-                if (isMobile()) {
-                    rightSection.classList.add('open');
-                    updateIcon(true);
-                } else {
-                    rightSection.classList.remove('open');
-                    updateIcon(false);
-                }
-            }
-
-            // Init
-            initMobileOverlay();
-
-            // Handle resize (switching between mobile/desktop)
-            window.addEventListener('resize', function() {
-                if (isMobile()) {
-                    // keep open if it was, or ensure default open
-                    if (!rightSection.classList.contains('open')) {
-                        rightSection.classList.add('open');
-                        updateIcon(true);
-                    }
-                } else {
-                    rightSection.classList.remove('open');
-                    updateIcon(false);
-                }
-            });
-
-            // Optional: close overlay if clicking outside on mobile (but iframe may capture)
-            // For simplicity we rely on hamburger to toggle
-        })();
     </script>
 </body>
 </html>
