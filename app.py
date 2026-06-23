@@ -469,6 +469,74 @@ def api_persona_preview(slug):
     return jsonify({'prompt': prompt})
 
 
+@app.route('/api/generate/speech-style', methods=['POST'])
+def api_generate_speech_style():
+    if client is None:
+        return jsonify({'ok': False, 'error': 'Gemini not configured.'}), 200
+    data = request.json or {}
+    name = data.get('name', 'the persona')
+    age = data.get('age', '')
+    archetype = data.get('archetype', '')
+    backstory = data.get('backstory', '')
+    interests = data.get('interests', '')
+    randomize = data.get('randomize', False)
+
+    rand_note = ' Be creative and unexpected — avoid clichés.' if randomize else ''
+    system = (
+        "You write concise speech-style rules for an AI chatbot persona. "
+        "Output ONLY the rules — 2-4 short bullet points or one tight paragraph. "
+        "No preamble, no headers, no quotation marks."
+    )
+    prompt = (
+        f"Write speech style rules for a persona named {name}"
+        + (f", age {age}" if age else "")
+        + (f", archetype: {archetype}" if archetype else "")
+        + (f". Backstory: {backstory}" if backstory else "")
+        + (f". Interests: {interests}" if interests else "")
+        + ".\n\nRules should cover: sentence length, punctuation style, use of slang or emoji, "
+        "how they express warmth or attitude, and one distinctive quirk of how they text."
+        + rand_note
+    )
+    try:
+        resp = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=[{'role': 'user', 'parts': [{'text': prompt}]}],
+            config=types.GenerateContentConfig(system_instruction=system, temperature=0.9 if randomize else 0.7, max_output_tokens=200),
+        )
+        return jsonify({'ok': True, 'text': (resp.text or '').strip()})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]}), 200
+
+
+@app.route('/api/generate/conversion-triggers', methods=['POST'])
+def api_generate_conversion_triggers():
+    if client is None:
+        return jsonify({'ok': False, 'error': 'Gemini not configured.'}), 200
+    data = request.json or {}
+    name = data.get('name', 'the persona')
+    archetype = data.get('archetype', '')
+    flirt_pace = data.get('flirt_pace', 'moderate')
+    nsfw_level = data.get('nsfw_level', 'suggestive')
+    system = (
+        "You write short, practical conversion trigger instructions for an AI chatbot persona on a fan platform. "
+        "Output ONLY the instructions — 2-3 sentences. No preamble, no headers."
+    )
+    prompt = (
+        f"Write conversion trigger instructions for {name} ({archetype} archetype, "
+        f"flirt pace: {flirt_pace}, content level: {nsfw_level}). "
+        "Instructions should tell the AI when and how to naturally introduce PPV offers — "
+        "tied to emotional moments in the conversation, never pushy, always in-character."
+    )
+    try:
+        resp = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=[{'role': 'user', 'parts': [{'text': prompt}]}],
+            config=types.GenerateContentConfig(system_instruction=system, temperature=0.7, max_output_tokens=150),
+        )
+        return jsonify({'ok': True, 'text': (resp.text or '').strip()})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]}), 200
+
 @app.route('/api/personas/<slug>/avatar')
 def api_persona_avatar(slug):
     """Return the persona's avatar image from the config."""
