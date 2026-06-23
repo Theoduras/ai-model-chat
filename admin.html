@@ -692,7 +692,9 @@ let bsMessages = [];
 let bsCurrentQuestion = '';
 
 function bsBasics() {
-  return { name: v('f-name'), age: v('f-age'), archetype: v('f-archetype'), location: v('f-location') };
+  const mirrorChecked = document.getElementById('f-mirror-location')?.checked;
+  const location = mirrorChecked ? 'the fan\'s city (mirrors fan location)' : v('f-location');
+  return { name: v('f-name'), age: v('f-age'), archetype: v('f-archetype'), location };
 }
 
 function bsRender() {
@@ -798,10 +800,9 @@ function closeBackstoryAI() {
 }
 
 async function bsRegenerate() {
-  // Re-ask the same question with a hint to give different options
   bsSetBusy(true, 'Generating new options…');
   try {
-    const data = await bsCall('ask');
+    const data = await bsCall('randomize');
     if (!data.ok) throw new Error(data.error || 'error');
     bsShowQuestion(data.question, data.options || []);
     document.getElementById('bs-status').textContent = '';

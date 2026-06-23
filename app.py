@@ -689,6 +689,11 @@ def api_backstory_interview():
             "Output ONLY the backstory — 2-4 sentences, written in third person as a vivid character description. "
             "No preamble, no questions, no quotation marks, no JSON."
         )}]})
+    elif action == 'randomize':
+        contents.append({'role': 'user', 'parts': [{'text': (
+            'Repeat the same question topic but generate 3 completely different, fresh answer options. '
+            'Do not reuse any of the previous options. Output JSON only.'
+        )}]})
     elif not contents:
         contents.append({'role': 'user', 'parts': [{'text': 'Start with the first question (work/job). Output JSON only.'}]})
 
