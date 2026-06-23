@@ -1,41 +1,80 @@
 from flask import Flask, request, jsonify, send_from_directory
 import os
-import requests
-import json
 from dotenv import load_dotenv
+from google import genai
+from google.genai import types
 
 load_dotenv()
 
 app = Flask(__name__, static_folder='.', static_url_path='')
 
-# Load the character prompt
+# Load the character prompt for Gemini (as system instruction)
 try:
     with open('grok-lilith-prompt.txt', 'r', encoding='utf-8') as f:
         BASE_SYSTEM = f.read().strip()
 except:
     BASE_SYSTEM = "You are Lilith, 22, from Bristol. Barmaid at a metal pub. Deadpan, short conversational sentences, dry humor. Build interest by asking questions about the user. Stay in character."
 
-XAI_API_KEY = os.getenv("XAI_API_KEY")
-if not XAI_API_KEY:
-    print("WARNING: XAI_API_KEY not set. Set it in .env or environment variable.")
+# --- Client initialization: supports plain API key OR service account ---
+client = None
+auth_mode = None
 
-MODEL = "grok-beta"  # Change to "grok-2-latest" or whatever is current if needed
+GOOGLE_CREDENTIALS = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+PROJECT_ID = os.getenv("GOOGLE_CLOUD_PROJECT", "793708886252")
+LOCATION = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
 
-def build_messages(user_message, chat_history):
-    """Build messages list for Grok API: system + history + new user msg"""
-    messages = [
-        {"role": "system", "content": BASE_SYSTEM}
-    ]
-    
-    # Add conversation history
-    for msg in chat_history:
-        role = "user" if msg["role"] == "user" else "assistant"
-        messages.append({"role": role, "content": msg["content"]})
-    
-    # Add current message
-    messages.append({"role": "user", "content": user_message})
-    
-    return messages
+try:
+    if GOOGLE_CREDENTIALS and os.path.exists(GOOGLE_CREDENTIALS):
+        from google.oauth2 import service_account
+        credentials = service_account.Credentials.from_service_account_file(
+            GOOGLE_CREDENTIALS,
+            scopes=["https://www.googleapis.com/auth/cloud-platform"]
+        )
+        client = genai.Client(
+            vertexai=True,
+            project=PROJECT_ID,
+            location=LOCATION,
+            credentials=credentials
+        )
+        auth_mode = "service-account"
+        print(f"Gemini configured with service account (project={PROJECT_ID}, location={LOCATION}).")
+    elif GEMINI_API_KEY:
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        auth_mode = "api-key"
+        print("Gemini API configured (API key).")
+    else:
+        print("WARNING: No GEMINI_API_KEY and no GOOGLE_APPLICATION_CREDENTIALS. Using local fallback.")
+except Exception as init_err:
+    print(f"WARNING: Failed to initialize Gemini client: {init_err}")
+    client = None
+
+MODEL_NAME = "gemini-2.5-flash"  # Current supported model from the key's list_models
+
+# Fallback local reply (used if no API key or API fails)
+def local_lilith_reply(msg, hist):
+    lower = msg.lower().strip()
+    if any(x in lower for x in ['hi', 'hello', 'hey']):
+        return "Hey. What's your story?"
+    if 'how are you' in lower or 'you doing' in lower:
+        return "Long shift. You?"
+    if 'name' in lower or 'who are you' in lower:
+        return "Lilith. You?"
+    if any(x in lower for x in ['bar', 'work', 'shift', 'pub', 'venue']) and not any(x in lower for x in ['my ', 'i ']):
+        return "Just pulled another shift. Chaos as usual. What do you do?"
+    if any(x in lower for x in ['jizzle', 'gnome', 'wow', 'raid', 'zug']):
+        return "Jizzle's my pink gnome tank. She's ridiculous but I love her. You play?"
+    if any(x in lower for x in ['music', 'show', 'band', 'gig', 'rave', 'metal']):
+        return "Some nights the music just hits right. What have you been listening to?"
+    if 'bristol' in lower or 'where' in lower:
+        return "Bristol born. Never leaving. You from around here?"
+    if any(x in lower for x in ['freckle', 'makeup', 'liner', 'look', 'hair', 'tattoo']):
+        return "The freckles take forever but I can't go without them now. What's your thing with getting ready?"
+    if any(x in lower for x in ['sister', 'deb', 'family', 'mum', 'dad', 'parents']):
+        return "Family's a bit mad but they're mine. You close with yours?"
+    if any(x in lower for x in ['friend', 'guild', 'crew']):
+        return "Got a solid crew. Hard to find good ones. You?"
+    return "Yeah I hear that. What's your take on it?"
 
 @app.route('/')
 def index():
@@ -50,59 +89,48 @@ def chat():
     if not user_message:
         return jsonify({"error": "No message"}), 400
     
-    if not XAI_API_KEY:
-        return jsonify({
-            "reply": "Hey... I need an XAI_API_KEY to talk properly right now. Set it up and try again?",
-            "error": "no_key"
-        }), 200  # Still return something
-    
+    if client is None:
+        reply = local_lilith_reply(user_message, chat_history)
+        return jsonify({"reply": reply + " (Local mode - configure Gemini API key or service account)"})
+
     try:
-        messages = build_messages(user_message, chat_history)
-        
-        payload = {
-            "model": MODEL,
-            "messages": messages,
-            "temperature": 0.75,
-            "max_tokens": 280,  # Keep replies relatively short and conversational
-            "stream": False
-        }
-        
-        headers = {
-            "Authorization": f"Bearer {XAI_API_KEY}",
-            "Content-Type": "application/json"
-        }
-        
-        resp = requests.post(
-            "https://api.x.ai/v1/chat/completions",
-            headers=headers,
-            json=payload,
-            timeout=30
+        # Convert chat history for Gemini
+        contents = []
+        for msg in chat_history:
+            role = "user" if msg.get("role") == "user" else "model"
+            contents.append({"role": role, "parts": [{"text": msg.get("content", "")}]})
+
+        # Add current user message
+        contents.append({"role": "user", "parts": [{"text": user_message}]})
+
+        response = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=contents,
+            config=types.GenerateContentConfig(
+                system_instruction=BASE_SYSTEM,
+                temperature=0.7,
+                max_output_tokens=280,
+            )
         )
+
+        reply = response.text.strip() if response.text else "Hmm... lost my train of thought. What were you saying?"
         
-        if resp.status_code != 200:
-            print("API error:", resp.text)
-            return jsonify({
-                "reply": "Something's off with the connection to Grok right now. Try again in a sec?",
-                "error": "api_error"
-            }), 200
-        
-        result = resp.json()
-        reply = result["choices"][0]["message"]["content"].strip()
-        
-        # Basic cleanup to keep it short and Lilith-like
-        if len(reply) > 500:
-            reply = reply[:497] + "..."
+        if len(reply) > 450:
+            reply = reply[:447] + "..."
         
         return jsonify({"reply": reply})
         
     except Exception as e:
-        print("Error calling Grok API:", str(e))
+        # Capture error safely (some Windows consoles have issues with certain prints)
+        err_msg = str(e)[:300]
+        reply = local_lilith_reply(user_message, chat_history)
         return jsonify({
-            "reply": "The connection to Grok glitched. Mind repeating that?",
-            "error": str(e)
-        }), 200
+            "reply": reply + f" (Gemini error: {err_msg}). Check credentials / API enabled / project permissions."
+        })
 
 if __name__ == '__main__':
-    print("Starting Lilith + Grok server...")
+    print("Starting Lilith + Gemini server...")
     print("Open http://localhost:5000 in your browser")
+    print("Configure .env with either GEMINI_API_KEY or GOOGLE_APPLICATION_CREDENTIALS (service account JSON)")
+    print("Note: Using google-genai (new SDK)")
     app.run(host='0.0.0.0', port=5000, debug=True)
