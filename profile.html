@@ -445,7 +445,7 @@
     <!-- Navigation -->
     <nav>
         <div class="nav-left">
-            <div class="hamburger"><i class="fa-solid fa-message"></i></div>
+            <div class="hamburger"><a href="index.html"></a><i class="fa-solid fa-message"></i></a></div>
             <div class="verified">
                 <div class="verified-dot">
                     <i class="fa-solid fa-check text-white text-xs"></i>
@@ -641,69 +641,69 @@
             })
             .catch(err => console.log('Using static content (API not available yet)', err));
 
-        // Mobile: Right section as full-screen popup overlay (chat)
-        // Automatically open on mobile. Hamburger toggles it.
-        (function setupMobileChatOverlay() {
-            const hamburger = document.querySelector('.hamburger');
-            const rightSection = document.querySelector('.right-section');
-            if (!hamburger || !rightSection) return;
+        // // Mobile: Right section as full-screen popup overlay (chat)
+        // // Automatically open on mobile. Hamburger toggles it.
+        // (function setupMobileChatOverlay() {
+        //     const hamburger = document.querySelector('.hamburger');
+        //     const rightSection = document.querySelector('.right-section');
+        //     if (!hamburger || !rightSection) return;
 
-            const icon = hamburger.querySelector('i');
+        //     const icon = hamburger.querySelector('i');
 
-            function isMobile() {
-                return window.innerWidth <= 1024;
-            }
+        //     function isMobile() {
+        //         return window.innerWidth <= 1024;
+        //     }
 
-            function updateIcon(isOpen) {
-                if (!icon) return;
-                if (isOpen) {
-                    icon.classList.remove('fa-message');
-                    icon.classList.add('fa-message');
-                } else {
-                    icon.classList.remove('fa-message');
-                    icon.classList.add('fa-message');
-                }
-            }
+        //     function updateIcon(isOpen) {
+        //         if (!icon) return;
+        //         if (isOpen) {
+        //             icon.classList.remove('fa-message');
+        //             icon.classList.add('fa-message');
+        //         } else {
+        //             icon.classList.remove('fa-message');
+        //             icon.classList.add('fa-message');
+        //         }
+        //     }
 
-            function toggleOverlay() {
-                if (!isMobile()) return; // only on mobile
-                const isOpen = rightSection.classList.toggle('open');
-                updateIcon(isOpen);
-            }
+        //     function toggleOverlay() {
+        //         if (!isMobile()) return; // only on mobile
+        //         const isOpen = rightSection.classList.toggle('open');
+        //         updateIcon(isOpen);
+        //     }
 
-            // Attach click
-            hamburger.addEventListener('click', function(e) {
-                e.stopPropagation();
-                toggleOverlay();
-            });
+        //     // Attach click
+        //     hamburger.addEventListener('click', function(e) {
+        //         e.stopPropagation();
+        //         toggleOverlay();
+        //     });
 
-            // Auto open the overlay on mobile by default
-            function initMobileOverlay() {
-                if (isMobile()) {
-                    rightSection.classList.add('open');
-                    updateIcon(true);
-                } else {
-                    rightSection.classList.remove('open');
-                    updateIcon(false);
-                }
-            }
+        //     // Auto open the overlay on mobile by default
+        //     function initMobileOverlay() {
+        //         if (isMobile()) {
+        //             rightSection.classList.add('open');
+        //             updateIcon(true);
+        //         } else {
+        //             rightSection.classList.remove('open');
+        //             updateIcon(false);
+        //         }
+        //     }
 
-            // Init
-            initMobileOverlay();
+        //     // Init
+        //     initMobileOverlay();
 
-            // Handle resize (switching between mobile/desktop)
-            window.addEventListener('resize', function() {
-                if (isMobile()) {
-                    // keep open if it was, or ensure default open
-                    if (!rightSection.classList.contains('open')) {
-                        rightSection.classList.add('open');
-                        updateIcon(true);
-                    }
-                } else {
-                    rightSection.classList.remove('open');
-                    updateIcon(false);
-                }
-            });
+        //     // Handle resize (switching between mobile/desktop)
+        //     window.addEventListener('resize', function() {
+        //         if (isMobile()) {
+        //             // keep open if it was, or ensure default open
+        //             if (!rightSection.classList.contains('open')) {
+        //                 rightSection.classList.add('open');
+        //                 updateIcon(true);
+        //             }
+        //         } else {
+        //             rightSection.classList.remove('open');
+        //             updateIcon(false);
+        //         }
+        //     });
 
             // Optional: close overlay if clicking outside on mobile (but iframe may capture)
             // For simplicity we rely on hamburger to toggle
