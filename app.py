@@ -400,6 +400,7 @@ def api_personas():
             personas.append({
                 'slug': slug,
                 'name': config.get('name') or meta.get('cover_label') or slug.capitalize(),
+                'avatar': f'/api/personas/{slug}/avatar' if config.get('avatar') else None,
                 'config': config
             })
     return jsonify(personas)
@@ -448,6 +449,24 @@ def api_persona_preview(slug):
     config = request.json
     prompt = build_system_prompt(config)
     return jsonify({'prompt': prompt})
+
+
+@app.route('/api/personas/<slug>/avatar')
+def api_persona_avatar(slug):
+    """Return the persona's avatar image from the config."""
+    import base64
+    from flask import Response
+    cfg = _load_config(slug)
+    avatar = cfg.get('avatar', '')
+    if not avatar or not avatar.startswith('data:'):
+        return ('', 404)
+    try:
+        header, b64 = avatar.split(',', 1)
+        mime = header.split(';')[0].replace('data:', '') or 'image/jpeg'
+        data = base64.b64decode(b64)
+        return Response(data, mimetype=mime)
+    except Exception:
+        return ('', 400)
 
 
 # ── Backstory AI interview ────────────────────────────────────────────────────
