@@ -719,7 +719,15 @@ function renderForm(slug, cfg) {
       <div class="field-row">
         <div class="field">
           <label>Location</label>
-          <input type="text" id="f-location" value="${esc(cfg.location || '')}" placeholder="e.g. London">
+          <input type="text" id="f-location" value="${esc(cfg.location || '')}" placeholder="e.g. London" ${cfg.mirror_location ? 'disabled' : ''} style="${cfg.mirror_location ? 'opacity:0.45;' : ''}">
+          <div class="toggle-row" style="margin-top:8px;">
+            <label class="toggle">
+              <input type="checkbox" id="f-mirror-location" ${cfg.mirror_location ? 'checked' : ''} onchange="toggleMirrorLocation(this.checked)">
+              <span class="toggle-track"></span>
+            </label>
+            <span class="toggle-label" style="font-size:0.8rem;">Always match the fan's location</span>
+          </div>
+          <span class="hint" id="mirror-hint" style="display:${cfg.mirror_location ? 'block' : 'none'}">Persona claims to be from wherever the fan is — asks naturally if unknown, then mirrors it to build rapport.</span>
         </div>
         <div class="field">
           <label>Personality Archetype</label>
@@ -811,12 +819,23 @@ function toggleNsfw(on) {
   document.getElementById('nsfw-level-field').style.display = on ? 'flex' : 'none';
 }
 
+function toggleMirrorLocation(on) {
+  const input = document.getElementById('f-location');
+  const hint = document.getElementById('mirror-hint');
+  if (input) {
+    input.disabled = on;
+    input.style.opacity = on ? '0.45' : '1';
+  }
+  if (hint) hint.style.display = on ? 'block' : 'none';
+}
+
 // ── Collect form values ───────────────────────────────────────────────────────
 function collectConfig() {
   return {
     name: v('f-name'),
     age: v('f-age'),
     location: v('f-location'),
+    mirror_location: document.getElementById('f-mirror-location')?.checked || false,
     archetype: v('f-archetype'),
     backstory: v('f-backstory'),
     speech_style: v('f-speech'),

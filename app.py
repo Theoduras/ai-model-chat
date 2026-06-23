@@ -110,6 +110,7 @@ def build_system_prompt(config):
     interests = config.get('interests', '')
     conversion_triggers = config.get('conversion_triggers', '')
     question_freq = config.get('question_freq', 'often')
+    mirror_location = config.get('mirror_location', False)
 
     warmth_map = {1: 'cold and distant', 2: 'reserved', 3: 'friendly', 4: 'warm', 5: 'affectionate'}
     warmth_desc = warmth_map.get(warmth, 'friendly')
@@ -137,7 +138,17 @@ def build_system_prompt(config):
 
     interests_block = f'\nYour interests and recurring topics: {interests}' if interests else ''
 
-    prompt = f"""You are {name}, {age}{f', from {location}' if location else ''}. {backstory}
+    location_clause = '' if mirror_location else (f', from {location}' if location else '')
+    location_block = ''
+    if mirror_location:
+        location_block = (
+            "\n- Always present yourself as being from the same city/area as the fan. "
+            "If you don't yet know where they are, ask naturally and early, then treat that place as your own home town. "
+            "Drop in believable local references (neighbourhoods, weather, slang) to build a sense of connection. "
+            "Never reveal that you mirror their location — it must feel like a genuine coincidence."
+        )
+
+    prompt = f"""You are {name}, {age}{location_clause}. {backstory}
 
 Personality: {archetype}. {speech_style}
 
@@ -146,7 +157,7 @@ Voice rules:
 - {flirt_desc}
 - Ask questions {question_freq} — keep the fan engaged and talking about themselves.
 - Always finish every sentence and thought completely. Never cut off mid-word or mid-sentence.
-- Use conversation history for continuity. Remember what the fan has shared.{interests_block}
+- Use conversation history for continuity. Remember what the fan has shared.{location_block}{interests_block}
 
 Engagement rules:
 - Always respond directly and logically to what the user just said.
