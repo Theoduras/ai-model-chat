@@ -49,17 +49,17 @@
 <body>
 <div class="chat-container">
   <div class="header">
-    <img id="header-avatar" src="https://picsum.photos/id/1011/48/48" alt="Lilith">
+    <img id="header-avatar" src="https://picsum.photos/id/1011/48/48" alt="">
     <div class="info">
-      <div class="name">Lilith</div>
-      <div class="status">● Bristol • Barmaid &amp; Tank Main</div>
+      <div class="name" id="header-name">...</div>
+      <div class="status" id="header-status"></div>
       <div class="user-id">chatting with <span id="user-name" style="cursor: pointer; text-decoration: underline;">...</span></div>
     </div>
   </div>
   <div class="chat-window" id="chat"></div>
-  <div class="typing" id="typing">Lilith is typing...</div>
+  <div class="typing" id="typing">typing...</div>
   <div class="input-area">
-    <input type="text" id="input" placeholder="Message Lilith..." autocomplete="off">
+    <input type="text" id="input" placeholder="Send a message…" autocomplete="off">
     <button onclick="sendMessage()">Send</button>
   </div>
 
@@ -71,7 +71,21 @@ const c=document.getElementById('chat'),i=document.getElementById('input'),t=doc
 let u=null,m={recentTopics:[],lastTopic:null},h=[],s=3.5,l=Date.now(),autoCount=0,avatarUrl=null;
 const persona=new URLSearchParams(location.search).get('persona')||'lilith';
 const PFX='persona_'+persona+'_';
-fetch('/api/personas/'+persona).then(r=>r.ok?r.json():null).then(d=>{if(!d)return;const cfg=d.config||{};if(cfg.avatar){avatarUrl='/api/personas/'+persona+'/avatar';document.getElementById('header-avatar').src=avatarUrl;}const n=cfg.name||persona;document.title='Chat with '+n;document.querySelector('.header .name').textContent=n;}).catch(()=>{});
+fetch('/api/personas/'+persona).then(r=>r.ok?r.json():null).then(d=>{
+  if(!d)return;
+  const cfg=d.config||{};
+  const n=cfg.name||persona;
+  document.title='Chat with '+n;
+  document.getElementById('header-name').textContent=n;
+  document.getElementById('header-avatar').alt=n;
+  if(cfg.avatar){avatarUrl='/api/personas/'+persona+'/avatar';document.getElementById('header-avatar').src=avatarUrl;}
+  const parts=[];
+  if(cfg.location&&!cfg.mirror_location)parts.push(cfg.location);
+  if(cfg.archetype)parts.push(cfg.archetype);
+  document.getElementById('header-status').textContent=parts.length?'● '+parts.join(' • '):'';
+  document.getElementById('typing').textContent=n+' is typing...';
+  document.getElementById('input').placeholder='Message '+n+'...';
+}).catch(()=>{});
 if (window.self !== window.top) { u = 'EmbedUser'; localStorage.setItem(PFX+'user', u); document.body.style.padding='0'; var cont=document.querySelector('.chat-container'); if(cont){cont.style.maxWidth='100%';cont.style.margin='0';cont.style.height='100%';cont.style.borderRadius='0';cont.style.boxShadow='none';cont.style.display='flex';cont.style.flexDirection='column';} var win=document.getElementById('chat'); if(win){win.style.flex='1';win.style.height='auto';win.style.minHeight='0';} var inp=document.querySelector('.input-area'); if(inp){inp.style.flexShrink='0';} }
 function chatBody(extra){const sp=localStorage.getItem('persona_prompt_'+persona);return JSON.stringify({...extra,user:u,persona,...(sp?{system_prompt:sp}:{})})}
 function sc(){if(u)localStorage.setItem(PFX+'chat_'+u,JSON.stringify(h))}
