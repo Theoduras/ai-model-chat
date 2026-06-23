@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Persona Builder — Admin</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: system-ui, -apple-system, sans-serif;
+    background: #09090b;
+    color: #e4e4e7;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  header {
+    background: #111113;
+    border-bottom: 1px solid #27272a;
+    padding: 14px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  header h1 { font-size: 1rem; font-weight: 600; color: #fff; letter-spacing: -0.3px; }
+  header .badge { font-size: 0.7rem; background: #3f3f46; padding: 2px 8px; border-radius: 9999px; color: #a1a1aa; }
+
+  .layout {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 280px 1fr 340px;
+    min-height: 0;
+  }
+
+  /* ── Sidebar: persona list ── */
+  .sidebar {
+    border-right: 1px solid #27272a;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .sidebar-header {
+    padding: 14px 16px 10px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: #71717a;
+    border-bottom: 1px solid #27272a;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .persona-list { flex: 1; overflow-y: auto; padding: 8px; }
+
+  .persona-item {
+    padding: 10px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transition: background 0.15s;
+    margin-bottom: 2px;
+  }
+
+  .persona-item:hover { background: #18181b; }
+  .persona-item.active { background: #1c1c21; border: 1px solid #3f3f46; }
+
+  .persona-avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #6366f1, #ec4899);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 0.85rem;
+    flex-shrink: 0;
+  }
+
+  .persona-name { font-size: 0.875rem; font-weight: 500; }
+  .persona-slug { font-size: 0.7rem; color: #71717a; }
+
+  .btn-new {
+    margin: 12px;
+    padding: 9px;
+    background: #27272a;
+    border: 1px dashed #3f3f46;
+    border-radius: 8px;
+    color: #a1a1aa;
+    font-size: 0.8rem;
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.15s;
+  }
+  .btn-new:hover { background: #3f3f46; color: #fff; }
+
+  /* ── Main form ── */
+  .form-area {
+    overflow-y: auto;
+    padding: 28px 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+  }
+
+  .form-section { display: flex; flex-direction: column; gap: 16px; }
+
+  .section-title {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: #71717a;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #27272a;
+  }
+
+  .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field.full { grid-column: 1 / -1; }
+
+  label { font-size: 0.8rem; font-weight: 500; color: #a1a1aa; }
+
+  input[type="text"],
+  input[type="number"],
+  textarea,
+  select {
+    background: #18181b;
+    border: 1px solid #27272a;
+    border-radius: 8px;
+    color: #e4e4e7;
+    padding: 9px 12px;
+    font-size: 0.875rem;
+    font-family: inherit;
+    transition: border-color 0.15s;
+    width: 100%;
+  }
+
+  input:focus, textarea:focus, select:focus {
+    outline: none;
+    border-color: #6366f1;
+  }
+
+  textarea { min-height: 80px; resize: vertical; line-height: 1.5; }
+
+  .hint { font-size: 0.7rem; color: #52525b; }
+
+  /* Slider */
+  .slider-row { display: flex; align-items: center; gap: 12px; }
+  .slider-row input[type="range"] {
+    flex: 1;
+    accent-color: #6366f1;
+    height: 4px;
+    border: none;
+    background: transparent;
+    padding: 0;
+  }
+  .slider-labels { display: flex; justify-content: space-between; font-size: 0.65rem; color: #52525b; margin-top: 2px; }
+  .slider-val { font-size: 0.8rem; font-weight: 600; color: #a1a1aa; min-width: 24px; text-align: right; }
+
+  /* Toggle */
+  .toggle-row { display: flex; align-items: center; gap: 10px; }
+  .toggle { position: relative; width: 40px; height: 22px; flex-shrink: 0; }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .toggle-track {
+    position: absolute; inset: 0;
+    background: #27272a;
+    border-radius: 9999px;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .toggle input:checked + .toggle-track { background: #6366f1; }
+  .toggle-track::after {
+    content: '';
+    position: absolute;
+    top: 3px; left: 3px;
+    width: 16px; height: 16px;
+    background: white;
+    border-radius: 50%;
+    transition: transform 0.2s;
+  }
+  .toggle input:checked + .toggle-track::after { transform: translateX(18px); }
+  .toggle-label { font-size: 0.875rem; }
+
+  /* Action bar */
+  .action-bar {
+    display: flex;
+    gap: 10px;
+    padding: 16px 32px;
+    border-top: 1px solid #27272a;
+    background: #09090b;
+    position: sticky;
+    bottom: 0;
+  }
+
+  .btn {
+    padding: 9px 20px;
+    border-radius: 8px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    border: none;
+    transition: all 0.15s;
+  }
+  .btn-primary { background: #6366f1; color: white; }
+  .btn-primary:hover { background: #4f46e5; }
+  .btn-secondary { background: #27272a; color: #e4e4e7; }
+  .btn-secondary:hover { background: #3f3f46; }
+  .btn-ghost { background: transparent; color: #71717a; border: 1px solid #27272a; }
+  .btn-ghost:hover { color: #e4e4e7; border-color: #52525b; }
+
+  .save-status { font-size: 0.8rem; color: #71717a; align-self: center; margin-left: auto; }
+  .save-status.ok { color: #22c55e; }
+  .save-status.err { color: #ef4444; }
+
+  /* ── Preview panel ── */
+  .preview-panel {
+    border-left: 1px solid #27272a;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .preview-header {
+    padding: 14px 16px 10px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: #71717a;
+    border-bottom: 1px solid #27272a;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .preview-tabs { display: flex; border-bottom: 1px solid #27272a; }
+  .preview-tab {
+    padding: 10px 16px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    color: #71717a;
+    border-bottom: 2px solid transparent;
+    transition: all 0.15s;
+  }
+  .preview-tab.active { color: #e4e4e7; border-color: #6366f1; }
+
+  .preview-content { flex: 1; overflow-y: auto; padding: 16px; }
+
+  .prompt-box {
+    background: #111113;
+    border: 1px solid #27272a;
+    border-radius: 8px;
+    padding: 14px;
+    font-size: 0.78rem;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    color: #a1a1aa;
+    font-family: 'Menlo', 'Monaco', monospace;
+    min-height: 200px;
+  }
+
+  /* Chat preview */
+  .chat-preview {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .chat-bubble {
+    max-width: 85%;
+    padding: 10px 14px;
+    border-radius: 16px;
+    font-size: 0.85rem;
+    line-height: 1.45;
+  }
+  .chat-bubble.bot { align-self: flex-start; background: #27272a; border-bottom-left-radius: 4px; }
+  .chat-bubble.user { align-self: flex-end; background: #4f46e5; border-bottom-right-radius: 4px; color: white; }
+
+  .funnel-stage {
+    padding: 10px 14px;
+    background: #18181b;
+    border: 1px solid #27272a;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 6px;
+  }
+  .funnel-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .funnel-stage-name { font-size: 0.8rem; font-weight: 600; }
+  .funnel-stage-desc { font-size: 0.72rem; color: #71717a; }
+
+  .empty-state {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    color: #52525b;
+    text-align: center;
+    padding: 40px;
+  }
+  .empty-state svg { width: 48px; height: 48px; opacity: 0.4; }
+  .empty-state p { font-size: 0.875rem; }
+
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; }
+    .sidebar, .preview-panel { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div style="display:flex; align-items:center; gap:10px;">
+    <h1>Persona Builder</h1>
+    <span class="badge">Admin</span>
+  </div>
+  <a href="/profile" style="color:#71717a; font-size:0.8rem; text-decoration:none;">← Back to site</a>
+</header>
+
+<div class="layout">
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <span>Personas</span>
+      <span id="persona-count" style="font-size:0.7rem; color:#52525b;"></span>
+    </div>
+    <div class="persona-list" id="persona-list"></div>
+    <button class="btn-new" onclick="newPersona()">+ New Persona</button>
+  </div>
+
+  <!-- Main form -->
+  <div style="display:flex; flex-direction:column; overflow:hidden;">
+    <div class="form-area" id="form-area">
+      <div class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <p>Select a persona from the sidebar<br>or create a new one.</p>
+      </div>
+    </div>
+    <div class="action-bar" id="action-bar" style="display:none;">
+      <button class="btn btn-secondary" onclick="previewPrompt()">Preview Prompt</button>
+      <button class="btn btn-ghost" onclick="testChat()">Test Chat</button>
+      <button class="btn btn-primary" onclick="savePersona()">Save & Deploy</button>
+      <span class="save-status" id="save-status"></span>
+    </div>
+  </div>
+
+  <!-- Preview panel -->
+  <div class="preview-panel">
+    <div class="preview-header">
+      <span>Preview</span>
+    </div>
+    <div class="preview-tabs">
+      <div class="preview-tab active" onclick="switchTab('prompt', this)">System Prompt</div>
+      <div class="preview-tab" onclick="switchTab('funnel', this)">Funnel</div>
+    </div>
+    <div class="preview-content" id="preview-content">
+      <div class="empty-state" style="padding:20px; min-height:auto;">
+        <p style="font-size:0.75rem;">Configure a persona and click Preview Prompt.</p>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── State ────────────────────────────────────────────────────────────────────
+let currentSlug = null;
+let currentTab = 'prompt';
+const personas = {};
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+async function init() {
+  try {
+    const res = await fetch('/api/personas');
+    const list = await res.json();
+    document.getElementById('persona-count').textContent = list.length;
+    list.forEach(p => {
+      personas[p.slug] = p;
+      renderSidebarItem(p);
+    });
+  } catch(e) {
+    console.error('Could not load personas', e);
+  }
+}
+
+function renderSidebarItem(p) {
+  const el = document.createElement('div');
+  el.className = 'persona-item';
+  el.id = `item-${p.slug}`;
+  el.onclick = () => loadPersona(p.slug);
+  const initials = (p.name || p.slug).slice(0,2).toUpperCase();
+  el.innerHTML = `
+    <div class="persona-avatar">${initials}</div>
+    <div>
+      <div class="persona-name">${p.name || p.slug}</div>
+      <div class="persona-slug">${p.slug}</div>
+    </div>`;
+  document.getElementById('persona-list').appendChild(el);
+}
+
+// ── Load persona into form ────────────────────────────────────────────────────
+async function loadPersona(slug) {
+  document.querySelectorAll('.persona-item').forEach(el => el.classList.remove('active'));
+  const item = document.getElementById(`item-${slug}`);
+  if (item) item.classList.add('active');
+  currentSlug = slug;
+
+  let config = {};
+  try {
+    const res = await fetch(`/api/personas/${slug}`);
+    const data = await res.json();
+    config = data.config || {};
+  } catch(e) {}
+
+  renderForm(slug, config);
+  document.getElementById('action-bar').style.display = 'flex';
+}
+
+// ── New persona ───────────────────────────────────────────────────────────────
+function newPersona() {
+  const name = prompt('Persona display name:');
+  if (!name) return;
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  if (!slug) return;
+  currentSlug = slug;
+  if (!document.getElementById(`item-${slug}`)) {
+    const p = { slug, name, config: {} };
+    personas[slug] = p;
+    renderSidebarItem(p);
+    document.getElementById('persona-count').textContent = Object.keys(personas).length;
+  }
+  document.querySelectorAll('.persona-item').forEach(el => el.classList.remove('active'));
+  const item = document.getElementById(`item-${slug}`);
+  if (item) item.classList.add('active');
+  renderForm(slug, { name });
+  document.getElementById('action-bar').style.display = 'flex';
+}
+
+// ── Render form ───────────────────────────────────────────────────────────────
+function renderForm(slug, cfg) {
+  const fa = document.getElementById('form-area');
+  fa.innerHTML = `
+    <div style="display:flex; align-items:baseline; gap:10px;">
+      <h2 style="font-size:1.1rem; font-weight:600;">${cfg.name || slug}</h2>
+      <span style="font-size:0.75rem; color:#52525b;">/${slug}</span>
+    </div>
+
+    <!-- Identity -->
+    <div class="form-section">
+      <div class="section-title">Identity</div>
+      <div class="field-row">
+        <div class="field">
+          <label>Display Name</label>
+          <input type="text" id="f-name" value="${esc(cfg.name || '')}" placeholder="e.g. Aria">
+        </div>
+        <div class="field">
+          <label>Age</label>
+          <input type="text" id="f-age" value="${esc(cfg.age || '')}" placeholder="e.g. 23">
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label>Location</label>
+          <input type="text" id="f-location" value="${esc(cfg.location || '')}" placeholder="e.g. London">
+        </div>
+        <div class="field">
+          <label>Personality Archetype</label>
+          <select id="f-archetype">
+            ${opt(['Deadpan / Dry', 'Bubbly / Sweet', 'Dominant / Edgy', 'Girl-Next-Door', 'Mysterious / Dark', 'Playful / Teasing', 'Intellectual / Witty'], cfg.archetype)}
+          </select>
+        </div>
+      </div>
+      <div class="field full">
+        <label>Backstory (2-3 sentences)</label>
+        <textarea id="f-backstory" placeholder="She works as a barmaid at a metal pub in Bristol. She chose the name Lilith...">${esc(cfg.backstory || '')}</textarea>
+      </div>
+    </div>
+
+    <!-- Voice -->
+    <div class="form-section">
+      <div class="section-title">Voice & Speech Style</div>
+      <div class="field full">
+        <label>Speech Style Rules</label>
+        <textarea id="f-speech" placeholder="Short, deadpan sentences. Full punctuation. Never explains the joke.">${esc(cfg.speech_style || '')}</textarea>
+        <span class="hint">These are added verbatim to the system prompt voice rules section.</span>
+      </div>
+      <div class="field">
+        <label>Warmth Level</label>
+        <div class="slider-row">
+          <input type="range" id="f-warmth" min="1" max="5" value="${cfg.warmth || 3}" oninput="document.getElementById('warmth-val').textContent=this.value">
+          <span class="slider-val" id="warmth-val">${cfg.warmth || 3}</span>
+        </div>
+        <div class="slider-labels"><span>Cold</span><span>Distant</span><span>Friendly</span><span>Warm</span><span>Affectionate</span></div>
+      </div>
+      <div class="field">
+        <label>Question Frequency</label>
+        <select id="f-qfreq">
+          ${opt(['rarely', 'sometimes', 'often', 'very often'], cfg.question_freq)}
+        </select>
+        <span class="hint">How often the persona asks the fan a question to keep them engaged.</span>
+      </div>
+    </div>
+
+    <!-- Interests -->
+    <div class="form-section">
+      <div class="section-title">Interests & Hooks</div>
+      <div class="field full">
+        <label>Topics the persona naturally returns to</label>
+        <input type="text" id="f-interests" value="${esc(cfg.interests || '')}" placeholder="gaming, fitness, tattoos, music, cooking…">
+        <span class="hint">Comma-separated. These appear in conversation naturally.</span>
+      </div>
+    </div>
+
+    <!-- Flirt & NSFW -->
+    <div class="form-section">
+      <div class="section-title">Flirt & Content Rules</div>
+      <div class="field">
+        <label>Flirt Escalation Pace</label>
+        <select id="f-flirt">
+          ${opt(['slow', 'moderate', 'fast', 'instant'], cfg.flirt_pace)}
+        </select>
+      </div>
+      <div class="field">
+        <div class="toggle-row">
+          <label class="toggle">
+            <input type="checkbox" id="f-nsfw" ${cfg.nsfw_enabled ? 'checked' : ''} onchange="toggleNsfw(this.checked)">
+            <span class="toggle-track"></span>
+          </label>
+          <span class="toggle-label">Enable NSFW / Adult Content</span>
+        </div>
+      </div>
+      <div class="field" id="nsfw-level-field" style="display:${cfg.nsfw_enabled ? 'flex' : 'none'}">
+        <label>NSFW Level</label>
+        <select id="f-nsfw-level">
+          ${opt(['suggestive', 'moderate', 'explicit'], cfg.nsfw_level)}
+        </select>
+      </div>
+    </div>
+
+    <!-- Conversion -->
+    <div class="form-section">
+      <div class="section-title">Conversion Funnel</div>
+      <div class="field full">
+        <label>Conversion Triggers</label>
+        <textarea id="f-triggers" placeholder="When the fan mentions buying, ask about PPV. After 10 messages, mention exclusive content lightly.">${esc(cfg.conversion_triggers || '')}</textarea>
+        <span class="hint">Instructions for when and how to introduce paid content offers. Keep natural — no hard sells.</span>
+      </div>
+    </div>
+  `;
+}
+
+function toggleNsfw(on) {
+  document.getElementById('nsfw-level-field').style.display = on ? 'flex' : 'none';
+}
+
+// ── Collect form values ───────────────────────────────────────────────────────
+function collectConfig() {
+  return {
+    name: v('f-name'),
+    age: v('f-age'),
+    location: v('f-location'),
+    archetype: v('f-archetype'),
+    backstory: v('f-backstory'),
+    speech_style: v('f-speech'),
+    warmth: parseInt(v('f-warmth')) || 3,
+    question_freq: v('f-qfreq'),
+    interests: v('f-interests'),
+    flirt_pace: v('f-flirt'),
+    nsfw_enabled: document.getElementById('f-nsfw')?.checked || false,
+    nsfw_level: v('f-nsfw-level'),
+    conversion_triggers: v('f-triggers'),
+  };
+}
+
+// ── Save ──────────────────────────────────────────────────────────────────────
+async function savePersona() {
+  if (!currentSlug) return;
+  const config = collectConfig();
+  const status = document.getElementById('save-status');
+  status.textContent = 'Saving…';
+  status.className = 'save-status';
+  try {
+    const res = await fetch(`/api/personas/${currentSlug}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config)
+    });
+    const data = await res.json();
+    if (data.ok) {
+      status.textContent = '✓ Saved & deployed';
+      status.className = 'save-status ok';
+      // Update sidebar name
+      const item = document.getElementById(`item-${currentSlug}`);
+      if (item) item.querySelector('.persona-name').textContent = config.name || currentSlug;
+      // Show prompt in preview
+      showPromptPreview(data.prompt);
+    } else {
+      throw new Error(data.error || 'Unknown error');
+    }
+  } catch(e) {
+    status.textContent = '✗ ' + e.message;
+    status.className = 'save-status err';
+  }
+}
+
+// ── Preview ───────────────────────────────────────────────────────────────────
+async function previewPrompt() {
+  if (!currentSlug) return;
+  const config = collectConfig();
+  try {
+    const res = await fetch(`/api/personas/${currentSlug}/preview`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config)
+    });
+    const data = await res.json();
+    showPromptPreview(data.prompt);
+    switchTabByName('prompt');
+  } catch(e) {
+    console.error(e);
+  }
+}
+
+function showPromptPreview(prompt) {
+  if (currentTab === 'prompt') {
+    document.getElementById('preview-content').innerHTML =
+      `<div class="prompt-box">${esc(prompt)}</div>`;
+  }
+}
+
+function testChat() {
+  if (!currentSlug) return;
+  window.open(`/?persona=${currentSlug}`, '_blank');
+}
+
+// ── Tabs ──────────────────────────────────────────────────────────────────────
+function switchTab(name, el) {
+  currentTab = name;
+  document.querySelectorAll('.preview-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  if (name === 'funnel') {
+    renderFunnelPreview();
+  }
+}
+
+function switchTabByName(name) {
+  const tabs = document.querySelectorAll('.preview-tab');
+  tabs.forEach((t, i) => {
+    if ((i === 0 && name === 'prompt') || (i === 1 && name === 'funnel')) {
+      t.classList.add('active');
+      currentTab = name;
+    } else {
+      t.classList.remove('active');
+    }
+  });
+}
+
+function renderFunnelPreview() {
+  const stages = [
+    { name: 'Warm', desc: 'Friendly opener, build rapport, ask about the fan.', color: '#22c55e' },
+    { name: 'Engage', desc: 'Reference what the fan shared. Create a sense of being known.', color: '#84cc16' },
+    { name: 'Intrigue', desc: 'Drop hints about exclusive content without hard-selling.', color: '#eab308' },
+    { name: 'Tease', desc: 'Light flirt or behind-the-scenes reference implying more exists.', color: '#f97316' },
+    { name: 'Offer', desc: 'Natural, in-character mention of paid post / PPV / subscription perk.', color: '#ef4444' },
+    { name: 'Close', desc: 'Reinforce value. Make the fan feel special for buying.', color: '#a855f7' },
+  ];
+  const config = collectConfig();
+  const paceNote = {
+    slow: 'Slow burn — funnel progresses over many sessions.',
+    moderate: 'Moderate — funnel completes over a few conversations.',
+    fast: 'Fast — funnel progresses within a single conversation.',
+    instant: 'Instant — moves to tease/offer very quickly.',
+  }[config.flirt_pace] || '';
+
+  document.getElementById('preview-content').innerHTML = `
+    <div style="margin-bottom:12px; font-size:0.78rem; color:#71717a;">${paceNote}</div>
+    ${stages.map(s => `
+      <div class="funnel-stage">
+        <div class="funnel-dot" style="background:${s.color};"></div>
+        <div>
+          <div class="funnel-stage-name">${s.name}</div>
+          <div class="funnel-stage-desc">${s.desc}</div>
+        </div>
+      </div>`).join('')}
+    ${config.conversion_triggers ? `<div style="margin-top:14px; font-size:0.75rem; color:#52525b;"><strong style="color:#a1a1aa;">Custom triggers:</strong><br>${esc(config.conversion_triggers)}</div>` : ''}
+  `;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function v(id) { const el = document.getElementById(id); return el ? el.value.trim() : ''; }
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function opt(options, selected) {
+  return options.map(o => `<option value="${esc(o)}" ${o === selected ? 'selected' : ''}>${o}</option>`).join('');
+}
+
+init();
+</script>
+</body>
+</html>

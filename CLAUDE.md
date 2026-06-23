@@ -23,16 +23,38 @@ The backend is Python/Flask + Google Gemini. The frontend is plain HTML/JS. Host
 ## Architecture
 
 ```
-app.py                  — Flask server, Gemini API calls, chat history, logging
-index.html              — Main chat UI (fan-facing)
-profile.html            — Profile/persona display page
-templates/profile.html  — Jinja2 template variant
-grok-lilith-prompt.txt  — System prompt for the "Lilith" persona (loaded at runtime)
-profile_data.json       — Persona metadata (name, bio, stats, photos)
-.env                    — API keys (never commit)
-vercel.json             — Vercel deployment config
-requirements.txt        — Python deps
+app.py                          — Flask server, Gemini API, multi-persona, builder API
+admin.html                      — Visual persona builder UI (creator-facing)
+index.html                      — Fan chat UI (embeds as iframe in profile.html)
+chat.html                       — Standalone fan chat (mobile hamburger link)
+profile.html                    — Creator landing page with embedded chat
+profile_data.json               — Legacy Lilith profile data (fallback)
+personas/
+  lilith.txt                    — Lilith system prompt (auto-generated or hand-edited)
+  lilith.config.json            — Lilith builder config (source of truth for the form)
+  lilith.json                   — Lilith profile/landing page data
+  {slug}.txt                    — Any other persona's system prompt
+  {slug}.config.json            — Any other persona's builder config
+grok-lilith-prompt.txt          — Legacy location (still loaded as fallback)
+templates/profile.html          — Jinja2 template variant (unused currently)
+.env                            — API keys (never commit)
+vercel.json                     — Vercel routing config
+requirements.txt                — Python deps: flask, google-genai, python-dotenv, google-auth
 ```
+
+### Key API Routes
+
+| Route | Method | Purpose |
+|---|---|---|
+| `GET /` | — | Fan chat UI |
+| `GET /profile` | — | Creator landing page |
+| `GET /admin` | — | Persona builder UI |
+| `POST /chat` | JSON | Send message, get AI reply. Accepts `persona` slug param. |
+| `GET /api/profile?persona=slug` | — | Profile data JSON for landing page |
+| `GET /api/personas` | — | List all personas |
+| `GET /api/personas/{slug}` | — | Get persona config + prompt |
+| `POST /api/personas/{slug}` | JSON | Save config and regenerate system prompt |
+| `POST /api/personas/{slug}/preview` | JSON | Preview generated prompt without saving |
 
 ---
 
@@ -115,8 +137,8 @@ Stay completely in character. Never mention being an AI.
 - **API calls**: Always use `try/except` around Gemini calls with meaningful fallback messages.
 - **Secrets**: `.env` only. Never hardcode keys. `.env` is in `.gitignore`.
 - **Logging**: Use the existing `get_chat_logger` pattern. Log every message sent/received with timestamp.
-- **Persona files**: Named `grok-{slug}-prompt.txt`. Never overwrite without confirmation.
-- **JSON data**: `profile_data.json` is the source of truth for persona metadata.
+- **Persona files**: Stored in `personas/{slug}.txt` (prompt) and `personas/{slug}.config.json` (builder config). `grok-{slug}-prompt.txt` in root is legacy fallback only.
+- **JSON data**: `personas/{slug}.json` is the source of truth per persona. `profile_data.json` is the legacy fallback for Lilith only.
 
 ---
 
