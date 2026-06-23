@@ -162,29 +162,69 @@ The user is chatting with you as {name} in a casual text conversation. Respond o
 client = None
 auth_mode = None
 
-GOOGLE_CREDENTIALS = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 PROJECT_ID = os.getenv('GOOGLE_CLOUD_PROJECT', '793708886252')
 LOCATION = os.getenv('GOOGLE_CLOUD_LOCATION', 'us-central1')
 
-try:
-    if GOOGLE_CREDENTIALS and os.path.exists(GOOGLE_CREDENTIALS):
-        from google.oauth2 import service_account
-        credentials = service_account.Credentials.from_service_account_file(
-            GOOGLE_CREDENTIALS,
-            scopes=['https://www.googleapis.com/auth/cloud-platform']
-        )
-        client = genai.Client(vertexai=True, project=PROJECT_ID, location=LOCATION, credentials=credentials)
-        auth_mode = 'service-account'
-        print(f'Gemini: service account (project={PROJECT_ID})')
-    elif GEMINI_API_KEY:
-        client = genai.Client(api_key=GEMINI_API_KEY)
-        auth_mode = 'api-key'
-        print('Gemini: API key')
-    else:
-        print('WARNING: No Gemini credentials. Using local fallback.')
-except Exception as e:
-    print(f'WARNING: Gemini init failed: {e}')
+ENV_PATH = os.path.join(BASE_DIR, '.env')
+
+
+def update_env_var(key, value):
+    """Insert or replace KEY=value in the project .env, preserving other lines."""
+    lines = []
+    if os.path.exists(ENV_PATH):
+        with open(ENV_PATH, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+    out = []
+    found = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not stripped.startswith('#') and '=' in stripped:
+            if stripped.split('=', 1)[0].strip() == key:
+                out.append(f'{key}={value}\n')
+                found = True
+                continue
+        out.append(line)
+    if not found:
+        if out and not out[-1].endswith('\n'):
+            out[-1] += '\n'
+        out.append(f'{key}={value}\n')
+    with open(ENV_PATH, 'w', encoding='utf-8') as f:
+        f.writelines(out)
+
+
+def init_gemini_client():
+    """(Re)initialize the global Gemini client from current environment.
+    Returns an error string on failure, or None on success."""
+    global client, auth_mode
+    google_creds = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
+    api_key = os.getenv('GEMINI_API_KEY')
+    try:
+        if google_creds and os.path.exists(google_creds):
+            from google.oauth2 import service_account
+            credentials = service_account.Credentials.from_service_account_file(
+                google_creds,
+                scopes=['https://www.googleapis.com/auth/cloud-platform']
+            )
+            client = genai.Client(vertexai=True, project=PROJECT_ID, location=LOCATION, credentials=credentials)
+            auth_mode = 'service-account'
+            print(f'Gemini: service account (project={PROJECT_ID})')
+        elif api_key:
+            client = genai.Client(api_key=api_key)
+            auth_mode = 'api-key'
+            print('Gemini: API key')
+        else:
+            client = None
+            auth_mode = None
+            print('WARNING: No Gemini credentials. Using local fallback.')
+        return None
+    except Exception as e:
+        client = None
+        auth_mode = None
+        print(f'WARNING: Gemini init failed: {e}')
+        return str(e)
+
+
+init_gemini_client()
 
 MODEL_NAME = 'gemini-2.5-flash'
 
@@ -397,6 +437,76 @@ def api_persona_preview(slug):
     config = request.json
     prompt = build_system_prompt(config)
     return jsonify({'prompt': prompt})
+
+
+# ── Config API (Gemini API key) ───────────────────────────────────────────────
+
+def _mask_key(key):
+    if not key:
+        return None
+    return (key[:5] + '…' + key[-4:]) if len(key) > 12 else '••••'
+
+
+@app.route('/api/config')
+def api_config_get():
+    """Report current Gemini connection status (key never returned in full)."""
+    key = os.getenv('GEMINI_API_KEY', '')
+    return jsonify({
+        'gemini_configured': client is not None,
+        'auth_mode': auth_mode,
+        'key_masked': _mask_key(key),
+        'is_vercel': IS_VERCEL,
+    })
+
+
+@app.route('/api/config/gemini-key', methods=['POST'])
+def api_config_set_key():
+    """Save a Gemini API key to .env, reload the client, and verify it works."""
+    data = request.json or {}
+    api_key = (data.get('api_key') or '').strip()
+
+    if not api_key:
+        return jsonify({'ok': False, 'error': 'API key is required'}), 400
+    if any(c.isspace() for c in api_key):
+        return jsonify({'ok': False, 'error': 'API key must not contain spaces or line breaks'}), 400
+
+    if IS_VERCEL:
+        return jsonify({
+            'ok': False,
+            'error': 'On Vercel the filesystem is read-only. Set GEMINI_API_KEY in Project Settings → Environment Variables instead.'
+        }), 400
+
+    try:
+        update_env_var('GEMINI_API_KEY', api_key)
+    except Exception as e:
+        return jsonify({'ok': False, 'error': f'Could not write .env: {e}'}), 500
+
+    # Apply live without a server restart
+    os.environ['GEMINI_API_KEY'] = api_key
+    err = init_gemini_client()
+    if err or client is None:
+        return jsonify({'ok': False, 'error': err or 'Client failed to initialize'}), 200
+
+    # Best-effort live verification with a tiny call
+    verified, verify_error = None, None
+    try:
+        r = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=[{'role': 'user', 'parts': [{'text': 'Reply with: ok'}]}],
+            config=types.GenerateContentConfig(max_output_tokens=5),
+        )
+        verified = bool(r.text)
+    except Exception as e:
+        verified = False
+        verify_error = str(e)[:200]
+
+    return jsonify({
+        'ok': True,
+        'auth_mode': auth_mode,
+        'key_masked': _mask_key(api_key),
+        'verified': verified,
+        'verify_error': verify_error,
+    })
 
 
 # ── Error handler ─────────────────────────────────────────────────────────────
