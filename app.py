@@ -1,12 +1,49 @@
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, render_template
 import os
+import json
+import logging
+from datetime import datetime
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
 load_dotenv()
 
-app = Flask(__name__, static_folder='.', static_url_path='')
+# --- Logging setup ---
+LOG_DIR = 'logs'
+os.makedirs(LOG_DIR, exist_ok=True)
+
+ERROR_LOG_FILE = os.path.join(LOG_DIR, 'errors.log')
+error_logger = logging.getLogger('error_logger')
+error_logger.setLevel(logging.ERROR)
+if not error_logger.handlers:
+    eh = logging.FileHandler(ERROR_LOG_FILE)
+    eh.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    error_logger.addHandler(eh)
+
+def get_chat_logger(user):
+    safe_user = str(user).replace('/', '_').replace('\\', '_').replace(' ', '_')[:50] or 'unknown'
+    logger = logging.getLogger(f'chat_{safe_user}')
+    logger.setLevel(logging.INFO)
+    if not logger.handlers:
+        fh = logging.FileHandler(os.path.join(LOG_DIR, f'chat_{safe_user}.log'))
+        fh.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
+        logger.addHandler(fh)
+    return logger, safe_user
+
+def response_asks_question(text):
+    if not text:
+        return False
+    text = text.strip().lower()
+    if text.endswith('?'):
+        return True
+    question_starters = ['what', 'why', 'how', 'when', 'where', 'who', 'which', 'do you', 'are you', 'can you', 'would you', 'could you', 'have you', 'did you']
+    for starter in question_starters:
+        if starter in text:
+            return True
+    return False
+
+app = Flask(__name__, static_folder='.', static_url_path='', template_folder='templates')
 
 # Load the character prompt for Gemini (as system instruction)
 try:
@@ -86,12 +123,20 @@ def chat():
     user_message = data.get('message', '').strip()
     chat_history = data.get('history', [])  # list of {role: 'user'/'lilith', content: str}
     is_continue = data.get('continue', False)
+    user = data.get('user', 'unknown')
+    
+    chat_logger, safe_user = get_chat_logger(user)
     
     if not is_continue and not user_message:
+        error_logger.error(f"No message from user {safe_user}")
         return jsonify({"error": "No message"}), 400
     
     if client is None:
         reply = local_lilith_reply(user_message, chat_history)
+        prefix = "LOCAL_REPLY (ASKS QUESTION, no Gemini)" if response_asks_question(reply) else "LOCAL_REPLY (no Gemini)"
+        chat_logger.info(f"{prefix}: {reply}")
+        if response_asks_question(reply):
+            print(f"[CHAT {safe_user}] Local fallback asked a question: {reply[:100]}...")
         return jsonify({"reply": reply + " (Local mode - configure Gemini API key or service account)"})
 
     try:
@@ -107,6 +152,9 @@ def chat():
         else:
             # For idle continuation: append dummy user to trigger next bot response without polluting client history
             contents.append({"role": "user", "parts": [{"text": "(continuing the conversation naturally as Lilith)"}]})
+
+        chat_logger.info(f"USER_INPUT: {user_message if not is_continue else '[continue]'}")
+        chat_logger.info(f"CONTENTS_SENT_TO_GEMINI: {contents}")
 
         response = client.models.generate_content(
             model=MODEL_NAME,
@@ -124,19 +172,64 @@ def chat():
         if len(reply) > 1400:
             reply = reply[:1397] + "..."
         
+        # Avoid sending the exact same message twice
+        last_bot = None
+        for i in range(len(chat_history)-1, -1, -1):
+            if chat_history[i].get('role') in ('lilith', 'bot'):
+                last_bot = chat_history[i].get('content')
+                break
+        if last_bot and reply.strip().lower() == last_bot.strip().lower():
+            reply = local_lilith_reply(user_message, chat_history)
+            chat_logger.info("AVOIDED DUPLICATE: used local reply instead")
+        
+        if response_asks_question(reply):
+            chat_logger.info(f"GEMINI_RESPONSE (ASKS QUESTION): {reply}")
+            print(f"[CHAT {safe_user}] Gemini asked a question: {reply[:100]}...")
+        else:
+            chat_logger.info(f"GEMINI_RESPONSE: {reply}")
+        
         return jsonify({"reply": reply})
         
     except Exception as e:
         # Capture error safely (some Windows consoles have issues with certain prints)
         err_msg = str(e)[:300]
+        error_logger.error(f"Gemini error for user {safe_user}: {err_msg}", exc_info=True)
         reply = local_lilith_reply(user_message, chat_history)
+        prefix = "FALLBACK_LOCAL (ASKS QUESTION)" if response_asks_question(reply) else "FALLBACK_LOCAL"
+        chat_logger.info(f"{prefix}: {reply}")
+        if response_asks_question(reply):
+            print(f"[CHAT {safe_user}] Fallback after error asked a question: {reply[:100]}...")
         return jsonify({
             "reply": reply + f" (Gemini error: {err_msg}). Check credentials / API enabled / project permissions."
         })
 
+
+# --- Dynamic Creator Profile (Landing Page) ---
+@app.route('/profile')
+def profile():
+    # Serve the maintained profile.html which populates from /api/profile (JSON)
+    return send_from_directory('.', 'profile.html')
+
+
+@app.route('/api/profile')
+def api_profile():
+    # === EDIT CONTENT HERE - all dynamic values for the landing page ===
+    # Simply edit profile_data.json and restart the server to update the page
+    with open('profile_data.json', 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    return jsonify(data)
+
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    error_logger.error(f"Unhandled error: {str(e)}", exc_info=True)
+    return jsonify({"error": "Internal server error"}), 500
+
+
 if __name__ == '__main__':
     print("Starting Lilith + Gemini server...")
-    print("Open http://localhost:5000 in your browser")
+    print("Open http://localhost:5000/profile for the landing page")
+    print("Open http://localhost:5000 for chat")
     print("Configure .env with either GEMINI_API_KEY or GOOGLE_APPLICATION_CREDENTIALS (service account JSON)")
     print("Note: Using google-genai (new SDK)")
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
