@@ -50,9 +50,11 @@ function Update-Memory {
     }
 }
 
-# Optional opening line if memory exists for this person
+# Opening message - always starts with a question to open conversation
 if ($memory.LastTopic) {
-    Write-Host "Lilith: You're back. Still thinking about $($memory.LastTopic)." -ForegroundColor Green
+    Write-Host "Lilith: Back again? What have you been up to since last time?" -ForegroundColor Green
+} else {
+    Write-Host "Lilith: Hey. What's been going on with you?" -ForegroundColor Green
 }
 
 while ($true) {
@@ -69,66 +71,85 @@ while ($true) {
     $lower = $userInput.ToLower()
     $response = $null
 
-    # === Follow-up using topic memory ===
-    $isFollowUp = $lower -match 'more|tell me|about that|continue|what about'
-    if ($isFollowUp -and $memory.LastTopic) {
+    # Detect follow-up intent for memory
+    $isFollowUp = $lower -match 'more|tell me|about that|continue|what about|and you'
+
+    # Short conversational. Give a logical reply to what they actually said.
+
+    # Greeting
+    if ($lower -match '^(hi|hello|hey|sup|yo)$') { 
+        $response = "Hey. What's been going on with you?" 
+    }
+
+    # Asking about her
+    elseif ($lower -match 'name|who are you|who is this') { 
+        $response = "Lilith. You?" 
+    }
+
+    # How are you
+    elseif ($lower -match 'how are you|how r u|you doing') { 
+        $response = @("Long shift. You?", "Surviving. How about you?") | Get-Random 
+    }
+
+    # User talking about their own work/shift/job
+    elseif (($lower -match 'my |i ') -and ($lower -match 'work|shift|job')) {
+        $response = @("Sounds rough. What do you do?", "Yeah that can suck. What happened?", "Tough one? Tell me about it.") | Get-Random
+    }
+
+    # User asking about HER bar/work (your/the bar etc)
+    elseif (($lower -match 'your |the ') -and ($lower -match 'bar|pub|venue|shift|work')) {
+        $response = @("Just got off. Place was mental. You been anywhere busy?", "Same chaos behind the bar. You ever do service work?", "Pints and people watching. What's your night usually like?") | Get-Random
+    }
+
+    # Gaming / Jizzle
+    elseif ($lower -match 'jizzle|gnome|wow|classic|raid|zug|warrior|tank|game|play') {
+        $response = @("Jizzle's my pink gnome tank. Chaos but I love her. You into games?", "Raid nights save me. You play anything?", "Don't ask about the ponytails. What do you do for fun?") | Get-Random
+    }
+
+    # Music / shows
+    elseif ($lower -match 'music|show|band|gig|rave|metal|concert') {
+        $response = @("Some nights it just hits right. What have you been listening to?", "Live stuff is the best. You go out much?", "Yeah I know that feeling. Got anything stuck in your head?") | Get-Random
+    }
+
+    # Bristol / location
+    elseif ($lower -match 'bristol|city|where are you|from') {
+        $response = "Bristol born and staying. You local or just visiting?"
+    }
+
+    # Look / makeup / appearance
+    elseif ($lower -match 'freckle|makeup|liner|look|hair|tattoo') {
+        $response = @("Freckles are fake but no one believes it. What's your daily thing?", "Takes ages but I feel off without it. You got any rituals?", "Left hand only for the tattoos. You got any?") | Get-Random
+    }
+
+    # Family
+    elseif ($lower -match 'sister|deb|family|mum|dad|parents|mom') {
+        $response = @("My family's mental but they're mine. How's yours?", "We go to shows together, it's weird but good. You close with family?", "Sister's a pain in the best way. You got siblings?") | Get-Random
+    }
+
+    # Friends
+    elseif ($lower -match 'friend|guild|crew|mate') {
+        $response = "My lot are all over the place but solid. You got good people around you?"
+    }
+
+    # Follow-up on memory – now more logical continuations
+    elseif ($isFollowUp -and $memory.LastTopic) {
         switch ($memory.LastTopic) {
-            'jizzle' { $response = "Jizzle is a female gnome warrior with two ridiculous pink ponytails. She tanks everything. Zug zug." }
-            'bar'    { $response = "The venue smells like old smoke and spilled lager. You stop noticing after a while." }
-            'music'  { $response = "Some songs only work in the right room at the right time. That's the whole story." }
-            'family' { $response = "They don't need much explaining. We just show up." }
-            'look'   { $response = "The freckles are the part people always comment on. I don't correct them anymore." }
+            'jizzle' { $response = "She's a nightmare but perfect. You got any games you're obsessed with?" }
+            'bar'    { $response = "The people make it worth it some nights. What's the strangest thing that's happened to you at work?" }
+            'music'  { $response = "It stays with you for days. What song's been stuck for you lately?" }
+            'family' { $response = "They're why I never leave Bristol. What about your family?" }
+            'look'   { $response = "It's the little things that make it feel right. What's something you always do for yourself?" }
         }
     }
 
-    if (-not $response) {
-        $response = switch -Regex ($lower) {
-            "hi|hello|hey|sup|yo" { 
-                "You made it. The kettle's not on but the fridge is cold." 
-            }
-            "how are you|how r u|you doing" { 
-                @("The shift was long. The music was good. I'm still here.",
-                  "The bottle fridge is organised. The rest is negotiable.",
-                  "Tired in the way that means the night was worth it.") | Get-Random
-            }
-            "name|who are you|who is" { 
-                "Lilith. Lily on the paperwork. Both are true." 
-            }
-            "bar|work|shift|pub|venue" { 
-                @("Three bands tonight. First one incredible. Second one adequate. Third one I reorganised the bottle fridge instead.",
-                  "They played for forty minutes. The fridge has never looked better.",
-                  "Someone asked for a lager and then complained it tasted like lager. I have never been more correct about a person.") | Get-Random
-            }
-            "jizzle|gnome|wow|classic|raid|zug|warrior|tank" { 
-                @("Her name is Jizzle. She is a gnome warrior with pink pigtails and she has killed more raid bosses than most of you have had hot dinners.",
-                  "Zug zug. We wiped six times. I held it together through sheer stubbornness.",
-                  "Jizzle does not miss. Pink ponytails. Two-handed sword.") | Get-Random
-            }
-            "music|show|band|gig|rave|metal" { 
-                @("There is a specific kind of song that sounds better at 2am in a venue that smells like beer and decades of cigarettes.",
-                  "Heard one tonight. Filed it away. You wouldn't know it. That's fine.",
-                  "The support was better than the headliner and nobody clapped for the right reasons.") | Get-Random
-            }
-            "bristol|city" { 
-                "Bristol born. Never leaving. The scene was never something I discovered. It was the water I grew up in." 
-            }
-            "freckle|makeup|liner|look|hair" { 
-                @("The freckles take twelve minutes. People always think they're real. Highest possible compliment.",
-                  "Sharp winged liner. Every day. Even when no one is looking. The full face is armour now.") | Get-Random
-            }
-            "sister|deb|family|mum|dad|parents" { 
-                @("My sister borrowed my eyeliner. She kept it. Apparently this is just what happens now.",
-                  "My mum knew every word. My dad cried during the third song and then immediately pretended he didn't.",
-                  "They go to shows with me. We look terrifying to anyone who doesn't know us.") | Get-Random
-            }
-            default { 
-                @("Worth it.",
-                  "I watched them soundcheck and went and reorganised the bottle fridge instead.",
-                  "The darkness is aesthetic and musical. Not emotional. It is my happy place.",
-                  "Some nights the only thing that makes sense is big plate armour and a shield.",
-                  "You don't have to explain it. I already filed it away.") | Get-Random
-            }
-        }
+    # User sharing something about themselves (I / my)
+    elseif ($lower -match 'i |my |i''m ') {
+        $response = @("Yeah? What's that like for you?", "No shit. How'd that happen?", "Sounds like a lot. Tell me more about it.", "Huh. What's it been like?") | Get-Random
+    }
+
+    # Default – logical reaction + question
+    else {
+        $response = @("Yeah I hear that. What's your take?", "Fair enough. How'd you end up there?", "No way. What happened after that?", "I get it. What's it like on your end?", "Interesting. You always seen it that way?") | Get-Random
     }
     
     Write-Host "Lilith: $response" -ForegroundColor Green
