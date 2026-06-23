@@ -779,7 +779,8 @@ async function bsAsk() {
 async function openBackstoryAI() {
   const missing = [];
   if (!v('f-name').trim()) missing.push('Name');
-  if (!v('f-age').trim()) missing.push('Age');
+  const ageVal = parseInt(v('f-age'));
+  if (!v('f-age').trim() || isNaN(ageVal) || ageVal < 18) missing.push('Age (must be 18+)');
   if (!v('f-location').trim() && !document.getElementById('f-mirror-location')?.checked) missing.push('Location');
   if (!v('f-archetype').trim()) missing.push('Archetype');
   if (missing.length) {
@@ -925,7 +926,13 @@ function renderForm(slug, cfg) {
         </div>
         <div class="field">
           <label>Age</label>
-          <input type="text" id="f-age" value="${esc(cfg.age || '')}" placeholder="e.g. 23">
+          <input type="number" id="f-age" value="${esc(cfg.age || '')}" placeholder="e.g. 23" min="18" step="1">
+        </div>
+        <div class="field">
+          <label>Gender</label>
+          <select id="f-gender">
+            ${opt(['Female', 'Male', 'Trans Female to Male', 'Trans Male to Female'], cfg.gender || 'Female')}
+          </select>
         </div>
       </div>
       <div class="field-row">
@@ -1277,6 +1284,7 @@ function collectConfig() {
   return {
     name: v('f-name'),
     age: v('f-age'),
+    gender: v('f-gender'),
     location: v('f-location'),
     mirror_location: document.getElementById('f-mirror-location')?.checked || false,
     archetype: v('f-archetype'),
@@ -1298,6 +1306,12 @@ function collectConfig() {
 async function savePersona() {
   if (!currentSlug) return;
   const config = collectConfig();
+  const ageNum = parseInt(config.age);
+  if (!config.age || isNaN(ageNum) || ageNum < 18) {
+    alert('Age must be 18 or older.');
+    document.getElementById('f-age').focus();
+    return;
+  }
   const status = document.getElementById('save-status');
 
   // Test enabled platform connections (warnings only — doesn't block save)

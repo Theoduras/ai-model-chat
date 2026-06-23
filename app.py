@@ -111,6 +111,7 @@ def build_system_prompt(config):
     """Generate a system prompt from persona builder config dict."""
     name = config.get('name', 'Aria')
     age = config.get('age', '22')
+    gender = config.get('gender', 'Female')
     location = config.get('location', '')
     backstory = config.get('backstory', '')
     archetype = config.get('archetype', 'Friendly')
@@ -178,7 +179,7 @@ PPV sales funnel (follow this arc across the conversation):
 - STEP 11 — LADDER UP: Repeat — sext 2-3 messages, drop another PPV that escalates again. Each one teases the next tier. Keep returning to conversation between drops so it never feels like a hard sell.
 - After the final PPV, bring the conversation back down. Be warm, funny, ask about them again. The goal is they come back tomorrow.{nsfw_desc and chr(10) + '- Content level: ' + nsfw_desc}"""
 
-    prompt = f"""You are {name}, {age}{location_clause}. {backstory}
+    prompt = f"""You are {name}, {age}, {gender}{location_clause}. {backstory}
 
 Personality: {archetype}. {speech_style}
 
@@ -464,6 +465,11 @@ def api_persona_save(slug):
         return jsonify({'error': 'Invalid slug'}), 400
 
     config = request.json
+    try:
+        if int(config.get('age', 0)) < 18:
+            return jsonify({'error': 'Age must be 18 or older'}), 400
+    except (ValueError, TypeError):
+        return jsonify({'error': 'Age must be 18 or older'}), 400
     prompt = build_system_prompt(config)
 
     write_dir = '/tmp/personas' if IS_VERCEL else PERSONAS_DIR
