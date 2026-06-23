@@ -39,18 +39,7 @@
     <button onclick="sendMessage()">Send</button>
   </div>
 
-  <!-- Grok-powered reply area (no simple script) -->
-  <div id="grok-area" style="margin-top: 8px; padding: 8px; background: #222; border-radius: 8px;">
-    <div style="font-size: 12px; color: #aaa; margin-bottom: 4px;">
-      Grok (free) generates Lilith replies by reading the full chat history + character bible. 
-      <button onclick="copyGrokPrompt()" style="font-size:11px; padding: 2px 6px;">Copy prompt</button>
-    </div>
-    <div style="display: flex; gap: 6px;">
-      <input type="text" id="grok-reply-input" placeholder="Paste Grok's reply here..." style="flex:1; padding: 8px; border-radius: 9999px; background:#111; color:#fff; border:1px solid #444;">
-      <button onclick="sendGrokReply()" style="padding: 0 16px; background:#4a2c2c; color:white; border:none; border-radius:9999px;">Send as Lilith</button>
-    </div>
-    <div style="font-size:10px; color:#666; margin-top:4px;">Tip: Paste the copied prompt into grok.x.ai (include the bible file for perfect results).</div>
-  </div>
+  <div id="status" style="font-size: 11px; color: #666; text-align: center; margin-top: 6px; min-height: 14px;"></div>
 </div>
 
 <script>
@@ -254,28 +243,49 @@ function sendGrokReply() {
 function sendMessage() {
   const text = input.value.trim();
   if (!text) return;
+
   addMessage(text, true);
   updateMemory(text);
   saveMemory();
-  input.value = '';
 
-  // Grok-powered only: no simple script used
-  const grokArea = document.getElementById('grok-area');
-  if (grokArea) grokArea.style.display = 'block';
+  const inputField = input;
+  inputField.value = '';
 
-  // Automatically build and copy the full prompt for Grok free version.
-  // The prompt includes the full Lilith character (from bible) + the entire chat history so Grok reads the conversation context.
-  try {
-    const promptForGrok = buildGrokPrompt(text);
-    navigator.clipboard.writeText(promptForGrok);
-  } catch(e) {}
-
-  // Show instruction in chat
-  const note = document.createElement('div');
-  note.style.cssText = 'font-size: 11px; color: #666; margin: 6px 0; padding: 4px; background: #1a1a1a; border-radius: 4px;';
-  note.innerHTML = '✅ Prompt for Grok copied! Open free Grok (grok.x.ai), paste it (add the character bible for best results), copy the reply as Lilith, then paste below and click "Send as Lilith".';
-  chat.appendChild(note);
+  // Show typing
+  const typingEl = document.getElementById('typing');
+  typingEl.style.display = 'block';
   chat.scrollTop = chat.scrollHeight;
+
+  const status = document.getElementById('status');
+
+  // Send to backend which calls Grok automatically with full context
+  fetch('/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      message: text,
+      history: chatHistory.slice(0, -1)  // send previous messages (current one already added)
+    })
+  })
+  .then(res => res.json())
+  .then(data => {
+    typingEl.style.display = 'none';
+
+    if (data.reply) {
+      addMessage(data.reply, false);
+      saveMemory();
+    } else if (data.error) {
+      addMessage("Something went weird on my end. Try again?", false);
+    }
+
+    if (status) status.textContent = '';
+  })
+  .catch(err => {
+    typingEl.style.display = 'none';
+    addMessage("The connection to Grok dropped. Mind saying that again?", false);
+    console.error(err);
+    if (status) status.textContent = '';
+  });
 }
 
 input.addEventListener('keypress', e => { if (e.key === 'Enter') sendMessage(); });
@@ -283,12 +293,9 @@ input.addEventListener('keypress', e => { if (e.key === 'Enter') sendMessage(); 
 // Load persistent per-person memory (survives reloads)
 loadUserAndMemory();
 
-// Initial message from Lilith (Grok-powered flow)
+// Initial message from Lilith (powered by Grok reading the full chat + character bible)
 setTimeout(() => {
   addMessage("Hey. What's been going on with you?", false);
-  // Show the Grok area immediately with instructions
-  const grokArea = document.getElementById('grok-area');
-  if (grokArea) grokArea.style.display = 'block';
 }, 600);
 </script>
 </body>

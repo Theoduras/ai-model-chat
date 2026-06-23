@@ -29,13 +29,27 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
 
 Type `exit` (or `quit` / `bye`) to leave.
 
-## Web version (recommended)
+## Web version (recommended - now automatic with Grok)
 
-Currently served on localhost. If the server is running:
+This now uses the real Grok (via xAI API) to generate replies as Lilith. The backend sends the full chat history + character instructions on every message.
 
-http://localhost:8000
+### Setup
 
-Just open `index.html` in a browser if you prefer static.
+1. `pip install -r requirements.txt`
+2. Create `.env` with your xAI API key:
+   ```
+   XAI_API_KEY=sk-...
+   ```
+   (Get one at https://console.x.ai/)
+3. Run:
+   ```
+   python app.py
+   ```
+4. Open http://localhost:5000
+
+Replies are now fully automatic — Grok reads the entire conversation and the Lilith character bible to respond naturally in character.
+
+No more manual copy-paste.
 
 ## Using real Grok (free version) as Lilith
 
