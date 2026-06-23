@@ -354,6 +354,19 @@
   }
   .icon-btn:hover { color: #fff; background: #27272a; }
 
+  .btn-ai {
+    background: linear-gradient(135deg, #6366f1, #ec4899);
+    color: #fff;
+    border: none;
+    border-radius: 9999px;
+    padding: 4px 12px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  .btn-ai:hover { opacity: 0.88; }
+
   /* Modal */
   .modal-overlay {
     position: fixed;
@@ -479,6 +492,30 @@
         <span class="save-status" id="key-save-status"></span>
         <button class="btn btn-ghost" onclick="closeSettings()">Cancel</button>
         <button class="btn btn-primary" id="key-save-btn" onclick="saveGeminiKey()">Save & Verify</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Backstory AI Interview Modal -->
+<div class="modal-overlay" id="backstory-modal" onclick="if(event.target===this)closeBackstoryAI()">
+  <div class="modal" style="max-width:560px; display:flex; flex-direction:column; max-height:86vh;">
+    <div class="modal-header">
+      <h2>✨ Build Backstory with AI</h2>
+      <button class="modal-close" onclick="closeBackstoryAI()">×</button>
+    </div>
+    <div class="modal-body" style="display:flex; flex-direction:column; min-height:0; overflow:hidden;">
+      <p class="hint" style="margin-bottom:12px;">Answer each question. Once there's enough, you can keep adding depth or finalize anytime.</p>
+      <div id="bs-transcript" class="chat-preview" style="flex:1; overflow-y:auto; min-height:180px; max-height:46vh; padding:4px;"></div>
+      <div style="display:flex; gap:8px; margin-top:14px;">
+        <input type="text" id="bs-answer" placeholder="Type your answer…" autocomplete="off"
+               onkeypress="if(event.key==='Enter')bsSendAnswer()" style="flex:1;">
+        <button class="btn btn-secondary" id="bs-send-btn" onclick="bsSendAnswer()">Send</button>
+      </div>
+      <div class="modal-footer" style="margin-top:16px;">
+        <span class="save-status" id="bs-status"></span>
+        <button class="btn btn-ghost" onclick="closeBackstoryAI()">Cancel</button>
+        <button class="btn btn-primary" id="bs-finalize-btn" onclick="bsFinalize()">Generate backstory ✓</button>
       </div>
     </div>
   </div>
@@ -641,6 +678,96 @@ async function saveGeminiKey() {
   }
 }
 
+// ── Backstory AI interview ────────────────────────────────────────────────────
+let bsMessages = [];
+
+function bsBasics() {
+  return { name: v('f-name'), age: v('f-age'), archetype: v('f-archetype'), location: v('f-location') };
+}
+
+function bsRender() {
+  const t = document.getElementById('bs-transcript');
+  t.innerHTML = bsMessages.map(m =>
+    `<div class="chat-bubble ${m.role === 'user' ? 'user' : 'bot'}">${esc(m.content)}</div>`
+  ).join('');
+  t.scrollTop = t.scrollHeight;
+}
+
+function bsSetBusy(busy, msg) {
+  document.getElementById('bs-send-btn').disabled = busy;
+  document.getElementById('bs-finalize-btn').disabled = busy;
+  document.getElementById('bs-status').textContent = msg || '';
+  document.getElementById('bs-status').className = 'save-status';
+}
+
+async function bsCall(action) {
+  const res = await fetch('/api/backstory/interview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ basics: bsBasics(), messages: bsMessages, action })
+  });
+  return res.json();
+}
+
+async function openBackstoryAI() {
+  bsMessages = [];
+  bsRender();
+  document.getElementById('bs-answer').value = '';
+  document.getElementById('backstory-modal').classList.add('open');
+  bsSetBusy(true, 'Thinking…');
+  try {
+    const data = await bsCall('ask');
+    if (!data.ok) { bsSetBusy(false); document.getElementById('bs-status').textContent = '✗ ' + (data.error || 'error'); document.getElementById('bs-status').className = 'save-status err'; return; }
+    bsMessages.push({ role: 'assistant', content: data.text });
+    bsRender();
+  } catch(e) {
+    document.getElementById('bs-status').textContent = '✗ ' + e.message;
+    document.getElementById('bs-status').className = 'save-status err';
+  }
+  bsSetBusy(false);
+  document.getElementById('bs-answer').focus();
+}
+
+function closeBackstoryAI() {
+  document.getElementById('backstory-modal').classList.remove('open');
+}
+
+async function bsSendAnswer() {
+  const input = document.getElementById('bs-answer');
+  const answer = input.value.trim();
+  if (!answer) return;
+  bsMessages.push({ role: 'user', content: answer });
+  input.value = '';
+  bsRender();
+  bsSetBusy(true, 'Thinking…');
+  try {
+    const data = await bsCall('ask');
+    if (!data.ok) throw new Error(data.error || 'error');
+    bsMessages.push({ role: 'assistant', content: data.text });
+    bsRender();
+  } catch(e) {
+    document.getElementById('bs-status').textContent = '✗ ' + e.message;
+    document.getElementById('bs-status').className = 'save-status err';
+  }
+  bsSetBusy(false);
+  input.focus();
+}
+
+async function bsFinalize() {
+  bsSetBusy(true, 'Writing backstory…');
+  try {
+    const data = await bsCall('finalize');
+    if (!data.ok) throw new Error(data.error || 'error');
+    const ta = document.getElementById('f-backstory');
+    if (ta) ta.value = data.text;
+    closeBackstoryAI();
+  } catch(e) {
+    document.getElementById('bs-status').textContent = '✗ ' + e.message;
+    document.getElementById('bs-status').className = 'save-status err';
+    bsSetBusy(false);
+  }
+}
+
 function renderSidebarItem(p) {
   const el = document.createElement('div');
   el.className = 'persona-item';
@@ -737,8 +864,12 @@ function renderForm(slug, cfg) {
         </div>
       </div>
       <div class="field full">
-        <label>Backstory (2-3 sentences)</label>
-        <textarea id="f-backstory" placeholder="She works as a barmaid at a metal pub in Bristol. She chose the name Lilith...">${esc(cfg.backstory || '')}</textarea>
+        <label style="display:flex; align-items:center; justify-content:space-between;">
+          <span>Backstory</span>
+          <button type="button" class="btn-ai" onclick="openBackstoryAI()">✨ Build with AI</button>
+        </label>
+        <textarea id="f-backstory" placeholder="Write 2-3 sentences yourself, or click ‘Build with AI’ to be interviewed and have one generated.">${esc(cfg.backstory || '')}</textarea>
+        <span class="hint">Either type a short origin story, or let Gemini interview you and write it.</span>
       </div>
     </div>
 

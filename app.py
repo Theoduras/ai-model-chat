@@ -450,6 +450,80 @@ def api_persona_preview(slug):
     return jsonify({'prompt': prompt})
 
 
+# ── Backstory AI interview ────────────────────────────────────────────────────
+
+@app.route('/api/backstory/interview', methods=['POST'])
+def api_backstory_interview():
+    """Drive an interactive backstory interview via Gemini.
+
+    Body: { basics: {name, age, archetype, location}, messages: [{role, content}],
+            action: 'ask' | 'finalize' }
+    - action 'ask': returns the next single question (or a check-in offering to
+      finalize or go deeper once the basics are covered).
+    - action 'finalize': writes the final backstory from everything gathered.
+    """
+    if client is None:
+        return jsonify({'ok': False, 'error': 'Gemini is not configured. Add an API key in Settings first.'}), 200
+
+    data = request.json or {}
+    basics = data.get('basics', {})
+    messages = data.get('messages', [])
+    action = data.get('action', 'ask')
+
+    name = basics.get('name') or 'the persona'
+    age = basics.get('age', '')
+    archetype = basics.get('archetype', '')
+    location = basics.get('location', '')
+
+    system = (
+        f"You are interviewing a content creator to build a rich, believable backstory for their "
+        f"AI chatbot persona named {name}"
+        + (f", age {age}" if age else "")
+        + (f", from {location}" if location else "")
+        + (f", personality archetype: {archetype}" if archetype else "")
+        + ".\n\n"
+        "Goal: gather the details needed for an engaging backstory — origin/where they're from, "
+        "job and daily life, family, hobbies and interests, personality quirks, formative experiences, and overall vibe.\n\n"
+        "Rules:\n"
+        "- Ask only ONE short, conversational question per turn.\n"
+        "- Build on previous answers; never repeat something already covered.\n"
+        "- Once you have the bare necessities (origin, job/daily life, and a couple of personality details), "
+        "tell the creator you have enough for a solid backstory and ask whether they want to add more depth or finalize now.\n"
+        "- If they want more depth, keep asking richer follow-up questions.\n"
+        "- Never write the final backstory yourself unless explicitly instructed to finalize."
+    )
+
+    contents = []
+    for m in messages:
+        role = 'user' if m.get('role') == 'user' else 'model'
+        contents.append({'role': role, 'parts': [{'text': m.get('content', '')}]})
+
+    if action == 'finalize':
+        contents.append({'role': 'user', 'parts': [{'text': (
+            "Write the final backstory now using everything gathered. Output ONLY the backstory itself — "
+            "2-4 sentences (longer only if rich detail warrants it), third person, vivid and specific. "
+            "No preamble, no questions, no quotation marks."
+        )}]})
+    elif not contents:
+        contents.append({'role': 'user', 'parts': [{'text': 'Start the interview. Ask your first question.'}]})
+
+    try:
+        resp = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=contents,
+            config=types.GenerateContentConfig(
+                system_instruction=system,
+                temperature=0.8,
+                max_output_tokens=400,
+            ),
+        )
+        text = (resp.text or '').strip()
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]}), 200
+
+    return jsonify({'ok': True, 'action': action, 'text': text})
+
+
 # ── Config API (Gemini API key) ───────────────────────────────────────────────
 
 def _mask_key(key):
