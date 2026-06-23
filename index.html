@@ -45,6 +45,7 @@
 <script>
 const c=document.getElementById('chat'),i=document.getElementById('input'),t=document.getElementById('typing');
 let u=null,m={recentTopics:[],lastTopic:null},h=[],s=8.5,l=Date.now();
+if (window.self !== window.top) { u = 'EmbedUser'; localStorage.setItem('lilith_current_user', u); document.body.style.padding='0'; var cont=document.querySelector('.chat-container'); if(cont){cont.style.maxWidth='100%';cont.style.margin='0';cont.style.height='100%';cont.style.borderRadius='0';cont.style.boxShadow='none';cont.style.display='flex';cont.style.flexDirection='column';} var win=document.getElementById('chat'); if(win){win.style.flex='1';win.style.height='auto';win.style.minHeight='0';} var inp=document.querySelector('.input-area'); if(inp){inp.style.flexShrink='0';} }
 function sc(){if(u)localStorage.setItem('lilith_chat_'+u,JSON.stringify(h))}
 function ld(){
   u=localStorage.getItem('lilith_current_user');
