@@ -552,7 +552,7 @@ function deliverChunks(chunks,idx,onDone){
   addMsg(chunks[idx],false);
   if(idx+1<chunks.length){
     const next=chunks[idx+1];
-    const delay=2500+next.length*20+Math.random()*3000;
+    const delay=800+next.length*10+Math.random()*700;
     setTimeout(()=>{showTyping(true);setTimeout(()=>deliverChunks(chunks,idx+1,onDone),delay);},200);
   } else {
     if(onDone)onDone();
@@ -586,14 +586,14 @@ function se(){
   const n=Date.now(),d=(n-l)/1000;
   if(d>.7&&x.length>2){const v=x.length/d;s=Math.max(3.5,Math.min(18,s*.6+v*.4));}
   l=n;
-  const initialDelay=15000+Math.random()*75000;
+  const initialDelay=3000+Math.random()*9000;
   showTyping(true);
   setTimeout(()=>{
     fetch('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:chatBody({message:x,history:h.slice(0,-1)})})
     .then(r=>r.json()).then(d=>{
       if(d.reply){
-        const last=h[h.length-1];
-        if(last&&last.role==='bot'&&last.content.trim()===d.reply.trim()){showTyping(false);ss(true);si();return;}
+        const recentBot=h.slice(-6).filter(x=>x.role==='bot').map(x=>x.content.trim().toLowerCase());
+        if(recentBot.includes(d.reply.trim().toLowerCase())){showTyping(false);ss(true);si();return;}
         cs(d.reply,si);
       } else if(d.error){showTyping(false);addMsg("something went weird on my end. try again?",false);ss(false);}
     }).catch(e=>{showTyping(false);addMsg("something went wrong. please try again.",false);ss(false);});
@@ -612,8 +612,13 @@ function ck(){fetch('/').then(()=>ss(true)).catch(()=>ss(false));}
 inp.addEventListener('keypress',e=>{if(e.key==='Enter')se();});
 ld();
 if(h.length===0){
-  const greetDelay=3000+Math.random()*5000;
-  setTimeout(()=>{addMsg("heyy 👋",false);si();},greetDelay);
+  const greetDelay=1500+Math.random()*2000;
+  showTyping(true);
+  setTimeout(()=>{
+    fetch('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:chatBody({message:'__greeting__',history:[]})})
+    .then(r=>r.json()).then(d=>{if(d.reply){cs(d.reply,si);}else{showTyping(false);addMsg("hey 👋",false);si();}})
+    .catch(()=>{showTyping(false);addMsg("hey 👋",false);si();});
+  },greetDelay);
 }
 ss(false);ck();setInterval(ck,10000);
 </script>

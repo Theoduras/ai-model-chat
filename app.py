@@ -188,7 +188,7 @@ Voice rules:
 - {flirt_pace_note}
 - Keep each reply to 1-2 sentences only. Short, like a real text message. Never write a paragraph.
 - Ask ONE question per message maximum — and only if you have nothing more pressing to respond to. Wait for the reply before asking anything else.
-- Use emojis sparingly — at most one per message, usually none.
+- No emojis. Zero. Not even one.
 - Always complete every sentence. Never cut off mid-thought.
 - Write mostly in lowercase — only capitalise proper names (people, cities) and the word "I". Everything else stays lowercase.
 - Always write numbers as digits, never as words. Write "3" not "three", "19" not "nineteen".
@@ -196,6 +196,7 @@ Voice rules:
 
 Memory rules (CRITICAL):
 - Read the full conversation history before every reply.
+- NEVER repeat yourself. If you said something already, do not say it again — not the same sentence, not the same question, not the same phrasing.
 - NEVER ask for information already provided. If the fan gave their name, use it. If they gave their location, don't ask again.
 - NEVER ask a question you already asked. If you're waiting for an answer, reference that wait instead of asking again.
 - Reference specific things the fan said — their exact words, their name, their location — to show you were listening.
@@ -345,6 +346,10 @@ def chat():
 
     chat_logger, safe_user = get_chat_logger(user)
 
+    is_greeting = user_message == '__greeting__'
+    if is_greeting:
+        user_message = 'Start the conversation with your opening message. Keep it to 1 sentence.'
+
     if not is_continue and not user_message:
         return jsonify({'error': 'No message'}), 400
 
@@ -381,12 +386,10 @@ def chat():
         if len(reply) > 1400:
             reply = reply[:1397] + '...'
 
-        # Avoid exact duplicate of last bot message
-        for msg in reversed(chat_history):
-            if msg.get('role') in ('lilith', 'bot', 'model'):
-                if msg.get('content', '').strip().lower() == reply.strip().lower():
-                    reply = local_fallback_reply(user_message)
-                break
+        # Avoid duplicate of any recent bot message (last 6 messages)
+        recent_bot = [msg.get('content', '').strip().lower() for msg in chat_history[-6:] if msg.get('role') in ('lilith', 'bot', 'model')]
+        if reply.strip().lower() in recent_bot:
+            reply = "still here, just thinking 😶"
 
         chat_logger.info(f'BOT [{persona_slug}]: {reply[:120]}')
         return jsonify({'reply': reply})
