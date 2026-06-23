@@ -679,7 +679,7 @@ def api_backstory_interview():
     archetype = basics.get('archetype', '')
     location = basics.get('location', '')
 
-    system = (
+    interview_system = (
         f"You are building a backstory for an AI chatbot persona named {name}, "
         + (f"age {age}, " if age else "")
         + (f"from {location}, " if location else "")
@@ -702,24 +702,35 @@ def api_backstory_interview():
         "- Never write the backstory itself unless told to finalize."
     )
 
+    finalize_system = (
+        f"You are a creative writer. Write a vivid character backstory for {name}"
+        + (f", age {age}" if age else "")
+        + (f", from {location}" if location else "")
+        + (f", with a {archetype} personality" if archetype else "")
+        + ". Use only the information provided in the conversation. "
+        "Write 2-4 sentences in third person. Plain prose only — no JSON, no bullet points, no headings."
+    )
+
     contents = []
     for m in messages:
         role = 'user' if m.get('role') == 'user' else 'model'
         contents.append({'role': role, 'parts': [{'text': m.get('content', '')}]})
 
     if action == 'finalize':
+        system = finalize_system
         contents.append({'role': 'user', 'parts': [{'text': (
-            f"Write the final backstory for {name} using everything gathered. "
-            "Output ONLY the backstory — 2-4 sentences, written in third person as a vivid character description. "
-            "No preamble, no questions, no quotation marks, no JSON."
+            f"Write the final backstory for {name} using everything gathered in this conversation. "
+            "Plain prose, 2-4 sentences, third person. No JSON, no questions, no preamble."
         )}]})
-    elif action == 'randomize':
-        contents.append({'role': 'user', 'parts': [{'text': (
-            'Repeat the same question topic but generate 3 completely different, fresh answer options. '
-            'Do not reuse any of the previous options. Output JSON only.'
-        )}]})
-    elif not contents:
-        contents.append({'role': 'user', 'parts': [{'text': 'Start with the first question (work/job). Output JSON only.'}]})
+    else:
+        system = interview_system
+        if action == 'randomize':
+            contents.append({'role': 'user', 'parts': [{'text': (
+                'Repeat the same question topic but generate 3 completely different, fresh answer options. '
+                'Do not reuse any of the previous options. Output JSON only.'
+            )}]})
+        elif not contents:
+            contents.append({'role': 'user', 'parts': [{'text': 'Start with the first question (work/job). Output JSON only.'}]})
 
     try:
         resp = client.models.generate_content(

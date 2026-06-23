@@ -504,7 +504,7 @@
       <h2>✨ Build Backstory with AI</h2>
       <button class="modal-close" onclick="closeBackstoryAI()">×</button>
     </div>
-    <div class="modal-body" style="display:flex; flex-direction:column; min-height:0; overflow:hidden;">
+    <div class="modal-body" style="display:flex; flex-direction:column; min-height:0; overflow-y:auto;">
       <p class="hint" style="margin-bottom:12px;">Pick an answer for each question — or skip. Finalize when ready.</p>
       <div id="bs-transcript" class="chat-preview" style="flex:1; overflow-y:auto; min-height:120px; max-height:36vh; padding:4px; margin-bottom:12px;"></div>
       <!-- Current question + option buttons -->
@@ -1273,27 +1273,15 @@ async function savePersona() {
   const config = collectConfig();
   const status = document.getElementById('save-status');
 
-  // Test all enabled platform connections before saving
+  // Test enabled platform connections (warnings only — doesn't block save)
   const enabledPlatforms = Object.entries(config.platforms || {})
     .filter(([, p]) => p.enabled);
   if (enabledPlatforms.length) {
     status.textContent = 'Testing platform connections…';
     status.className = 'save-status';
-    const failures = [];
     for (const [id, creds] of enabledPlatforms) {
       const result = await testPlatformAPI(id, creds);
-      if (!result.ok) {
-        const label = PLATFORMS.find(p => p.id === id)?.label || id;
-        failures.push(`${label}: ${result.error}`);
-        setPlatformStatus(id, false, result.error);
-      } else {
-        setPlatformStatus(id, true, result.info);
-      }
-    }
-    if (failures.length) {
-      status.textContent = '✗ Fix platform errors before saving';
-      status.className = 'save-status err';
-      return;
+      setPlatformStatus(id, result.ok, result.ok ? result.info : result.error);
     }
   }
 
@@ -1346,8 +1334,14 @@ function showPromptPreview(prompt) {
   }
 }
 
-function testChat() {
+async function testChat() {
   if (!currentSlug) return;
+  const config = collectConfig();
+  await fetch(`/api/personas/${currentSlug}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config)
+  });
   window.open(`/?persona=${currentSlug}`, '_blank');
 }
 
