@@ -1337,11 +1337,15 @@ function showPromptPreview(prompt) {
 async function testChat() {
   if (!currentSlug) return;
   const config = collectConfig();
-  await fetch(`/api/personas/${currentSlug}`, {
+  const res = await fetch(`/api/personas/${currentSlug}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(config)
   });
+  const data = await res.json().catch(() => ({}));
+  if (data.prompt) {
+    localStorage.setItem(`persona_prompt_${currentSlug}`, data.prompt);
+  }
   window.open(`/?persona=${currentSlug}`, '_blank');
 }
 

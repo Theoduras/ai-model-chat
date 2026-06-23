@@ -335,7 +335,7 @@ def chat():
     if not is_continue and not user_message:
         return jsonify({'error': 'No message'}), 400
 
-    system_prompt = get_system_prompt(persona_slug)
+    system_prompt = data.get('system_prompt') or get_system_prompt(persona_slug)
 
     if client is None:
         reply = local_fallback_reply(user_message)
@@ -718,10 +718,26 @@ def api_backstory_interview():
 
     if action == 'finalize':
         system = finalize_system
-        contents.append({'role': 'user', 'parts': [{'text': (
-            f"Write the final backstory for {name} using everything gathered in this conversation. "
-            "Plain prose, 2-4 sentences, third person. No JSON, no questions, no preamble."
-        )}]})
+        # Build a clean Q&A summary to avoid JSON bleed-through from interview history
+        qa_lines = []
+        pending_q = None
+        for msg in messages:
+            if msg.get('role') == 'assistant':
+                try:
+                    parsed = json.loads(msg.get('content', ''))
+                    pending_q = parsed.get('question', msg.get('content', ''))
+                except Exception:
+                    pending_q = msg.get('content', '')
+            elif msg.get('role') == 'user' and pending_q:
+                answer = msg.get('content', '')
+                if answer and answer != '(skipped)':
+                    qa_lines.append(f"Q: {pending_q}\nA: {answer}")
+                pending_q = None
+        summary = '\n\n'.join(qa_lines) if qa_lines else 'No specific details provided.'
+        contents = [{'role': 'user', 'parts': [{'text': (
+            f"Write a backstory for {name} based on these interview answers:\n\n{summary}\n\n"
+            "Plain prose, 2-4 sentences, third person. No JSON, no questions, no headings."
+        )}]}]
     else:
         system = interview_system
         if action == 'randomize':
