@@ -460,6 +460,7 @@
       </svg>
     </button>
     <a href="/profile" style="color:#71717a; font-size:0.8rem; text-decoration:none;">← Back to site</a>
+    <a href="/admin/logout" style="color:#71717a; font-size:0.8rem; text-decoration:none;" title="Log out">Log out</a>
   </div>
 </header>
 
@@ -914,6 +915,7 @@ async function loadPersona(slug) {
   // Auto-fill generated fields if empty
   if (!config.speech_style) generateSpeechStyle(false);
   if (!config.conversion_triggers) generateTriggers();
+  loadXStatus();
 }
 
 // ── New persona ───────────────────────────────────────────────────────────────
@@ -1098,6 +1100,26 @@ function renderForm(slug, cfg) {
       <p class="hint" style="margin-bottom:14px;">Enable the platforms where this persona will chat with fans. Add credentials and test the connection before deploying.</p>
       ${renderPlatformsSection(cfg.platforms || {})}
     </div>
+
+    <!-- X.com DM Bot -->
+    <div class="form-section" id="x-oauth-section">
+      <div class="section-title">X.com DM Bot</div>
+      <p class="hint" style="margin-bottom:14px;">Connect this persona's X account via OAuth so it can auto-reply to DMs. Requires an X Developer App with OAuth 2.0 PKCE and dm.read + dm.write scopes.</p>
+      <div id="x-connect-status" style="margin-bottom:12px;"></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button type="button" class="btn btn-ghost" onclick="xOAuthConnect()" id="x-connect-btn">Connect X Account</button>
+        <button type="button" class="btn btn-ghost" onclick="xPollDMs()" id="x-poll-btn" style="display:none;">Poll DMs Now</button>
+        <button type="button" class="btn btn-ghost" onclick="xDisconnect()" id="x-disconnect-btn" style="display:none;color:#ef4444;border-color:#ef4444;">Disconnect</button>
+      </div>
+      <div id="x-poll-status" style="font-size:13px;color:#71717a;margin-top:10px;"></div>
+      <div style="margin-top:14px;">
+        <label class="field-label" style="font-size:12px;">OAuth Client ID</label>
+        <input type="text" id="x-client-id" placeholder="your-app-client-id" style="font-size:13px;margin-top:4px;">
+        <label class="field-label" style="font-size:12px;margin-top:8px;display:block;">Redirect URI (must match your X app settings)</label>
+        <input type="text" id="x-redirect-uri" placeholder="https://your-domain.vercel.app/api/x/oauth-redirect" style="font-size:13px;margin-top:4px;">
+        <p class="hint" style="margin-top:6px;">Set Redirect URI in X Developer Portal → Your App → User authentication settings → Callback URI/Redirect URL.</p>
+      </div>
+    </div>
   `;
 }
 
@@ -1123,8 +1145,8 @@ const PLATFORMS = [
     fields: [{id:'api_key',label:'API Key',type:'password'}] },
   { id: 'fansly',   label: 'Fansly',   color: '#9b59b6',
     fields: [{id:'api_key',label:'API Key / Session Token',type:'password'}] },
-  { id: 'x',        label: 'X.com',    color: '#fff',
-    fields: [{id:'bearer_token',label:'Bearer Token',type:'password'}] },
+  { id: 'x', label: 'X.com', color: '#fff',
+    fields: [{id:'client_id',label:'OAuth 2.0 Client ID',type:'text'},{id:'redirect_uri',label:'Redirect URI',type:'text'}] },
   { id: 'discord',  label: 'Discord',  color: '#5865f2',
     fields: [{id:'bot_token',label:'Bot Token',type:'password'},{id:'channel_id',label:'Channel ID (optional)',type:'text'}] },
 ];
@@ -1231,6 +1253,111 @@ async function testPlatformBtn(id) {
   setPlatformStatus(id, result.ok, result.ok ? result.info : result.error);
   btn.disabled = false;
   btn.textContent = 'Test';
+}
+
+// ── X.com OAuth connect ───────────────────────────────────────────────────────
+async function loadXStatus() {
+  try {
+    const res = await fetch('/api/x/status');
+    const data = await res.json();
+    const slug = currentSlug;
+    const info = data[slug];
+    const statusEl = document.getElementById('x-connect-status');
+    const pollBtn = document.getElementById('x-poll-btn');
+    const disconnectBtn = document.getElementById('x-disconnect-btn');
+    const connectBtn = document.getElementById('x-connect-btn');
+    if (!statusEl) return;
+    if (info && info.connected) {
+      statusEl.innerHTML = `<span style="color:#22c55e;font-size:13px;">✓ Connected as @${info.username}</span>`;
+      pollBtn.style.display = 'inline-flex';
+      disconnectBtn.style.display = 'inline-flex';
+      connectBtn.textContent = 'Reconnect';
+    } else {
+      statusEl.innerHTML = '<span style="color:#71717a;font-size:13px;">Not connected</span>';
+      pollBtn.style.display = 'none';
+      disconnectBtn.style.display = 'none';
+      connectBtn.textContent = 'Connect X Account';
+    }
+  } catch(e) {}
+}
+
+async function xOAuthConnect() {
+  const clientId = document.getElementById('x-client-id')?.value.trim();
+  const redirectUri = document.getElementById('x-redirect-uri')?.value.trim();
+  if (!clientId) { alert('Enter your X OAuth Client ID first.'); return; }
+  if (!redirectUri) { alert('Enter the Redirect URI that matches your X app settings.'); return; }
+  try {
+    const res = await fetch('/api/x/auth-url', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ client_id: clientId, redirect_uri: redirectUri, persona: currentSlug })
+    });
+    const data = await res.json();
+    if (!data.ok) { alert('Error: ' + data.error); return; }
+    const popup = window.open(data.url, 'x-oauth', 'width=600,height=700');
+    const statusEl = document.getElementById('x-connect-status');
+    if (statusEl) statusEl.innerHTML = '<span style="color:#f59e0b;font-size:13px;">Waiting for authorization… complete it in the popup, then paste the callback URL below.</span>';
+    document.getElementById('x-poll-status').innerHTML = `
+      <div style="margin-top:8px;">
+        <label style="font-size:12px;color:#a1a1aa;">After authorizing, copy the full callback URL from your browser and paste it here:</label>
+        <input type="text" id="x-callback-url" placeholder="https://your-domain.vercel.app/api/x/oauth-redirect?code=...&state=..." style="font-size:13px;margin-top:4px;">
+        <button type="button" class="btn btn-ghost" onclick="xCompleteAuth()" style="margin-top:6px;font-size:13px;">Complete Connection</button>
+      </div>`;
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function xCompleteAuth() {
+  const callbackUrl = document.getElementById('x-callback-url')?.value.trim();
+  if (!callbackUrl) { alert('Paste the callback URL first.'); return; }
+  try {
+    const url = new URL(callbackUrl);
+    const code = url.searchParams.get('code');
+    const state = url.searchParams.get('state');
+    if (!code || !state) { alert('Could not find code/state in that URL. Make sure you copied the full callback URL.'); return; }
+    const res = await fetch('/api/x/callback', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ code, state })
+    });
+    const data = await res.json();
+    if (!data.ok) { alert('Error: ' + data.error); return; }
+    document.getElementById('x-poll-status').textContent = '';
+    await loadXStatus();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function xPollDMs() {
+  const btn = document.getElementById('x-poll-btn');
+  const statusEl = document.getElementById('x-poll-status');
+  btn.disabled = true;
+  btn.textContent = 'Polling…';
+  statusEl.textContent = '';
+  try {
+    const res = await fetch('/api/x/poll', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ persona: currentSlug })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      statusEl.style.color = '#22c55e';
+      statusEl.textContent = `Replied to ${data.replied} new DM(s).` + (data.errors.length ? ` Errors: ${data.errors.join('; ')}` : '');
+    } else {
+      statusEl.style.color = '#ef4444';
+      statusEl.textContent = data.error;
+    }
+  } catch(e) {
+    statusEl.style.color = '#ef4444';
+    statusEl.textContent = 'Network error: ' + e.message;
+  }
+  btn.disabled = false;
+  btn.textContent = 'Poll DMs Now';
+}
+
+async function xDisconnect() {
+  if (!confirm('Disconnect this X account?')) return;
+  await fetch('/api/x/disconnect', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ persona: currentSlug })
+  });
+  await loadXStatus();
 }
 
 // ── Speech style generation ───────────────────────────────────────────────────

@@ -1,8 +1,13 @@
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, session, redirect, url_for, render_template_string
 import os
 import json
 import re
 import logging
+import hashlib
+import secrets
+import urllib.request
+import urllib.parse
+import urllib.error as url_error
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
@@ -312,6 +317,68 @@ def local_fallback_reply(msg):
 
 app = Flask(__name__, static_folder=BASE_DIR, static_url_path='',
             template_folder=os.path.join(BASE_DIR, 'templates'))
+app.secret_key = os.getenv('SECRET_KEY') or secrets.token_hex(32)
+
+X_TOKENS_FILE = '/tmp/x_tokens.json' if IS_VERCEL else os.path.join(BASE_DIR, 'x_tokens.json')
+X_OAUTH_STATE_FILE = '/tmp/x_oauth_state.json' if IS_VERCEL else os.path.join(BASE_DIR, '.x_oauth_state.json')
+
+
+def _load_x_tokens():
+    if os.path.exists(X_TOKENS_FILE):
+        with open(X_TOKENS_FILE, 'r') as f:
+            return json.load(f)
+    return {}
+
+
+def _save_x_tokens(data):
+    with open(X_TOKENS_FILE, 'w') as f:
+        json.dump(data, f)
+
+
+def _admin_password():
+    return os.getenv('ADMIN_PASSWORD', '')
+
+
+def _check_admin():
+    """Return True if the request has a valid admin session."""
+    if not _admin_password():
+        return True  # no password set → open access
+    return session.get('admin_authed') is True
+
+
+LOGIN_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Admin Login</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d0d0f;color:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh}
+.card{background:#18181b;border:1px solid #2a2a2d;border-radius:16px;padding:40px 36px;width:100%;max-width:380px}
+h1{font-size:1.3rem;font-weight:700;margin-bottom:8px}
+p{color:#71717a;font-size:.9rem;margin-bottom:28px}
+label{display:block;font-size:.8rem;color:#a1a1aa;margin-bottom:6px}
+input{width:100%;background:#27272a;border:1px solid #3f3f46;border-radius:10px;padding:11px 14px;color:#f4f4f5;font-size:.95rem;outline:none;margin-bottom:20px}
+input:focus{border-color:#7c3aed}
+button{width:100%;background:#7c3aed;color:#fff;border:none;border-radius:10px;padding:13px;font-size:.95rem;font-weight:600;cursor:pointer}
+button:hover{background:#6d28d9}
+.err{background:#3f1515;border:1px solid #7f1d1d;border-radius:8px;padding:10px 14px;font-size:.85rem;color:#fca5a5;margin-bottom:16px}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Admin Login</h1>
+  <p>Enter your admin password to continue.</p>
+  {% if error %}<div class="err">{{ error }}</div>{% endif %}
+  <form method="post">
+    <label>Password</label>
+    <input type="password" name="password" autofocus placeholder="••••••••">
+    <button type="submit">Sign in</button>
+  </form>
+</div>
+</body>
+</html>"""
 
 
 # ── Static pages ─────────────────────────────────────────────────────────────
@@ -328,9 +395,22 @@ def profile():
 def chat_page():
     return send_from_directory(BASE_DIR, 'chat.html')
 
-@app.route('/admin')
+@app.route('/admin', methods=['GET', 'POST'])
 def admin():
+    if not _check_admin():
+        if request.method == 'POST':
+            pw = request.form.get('password', '')
+            if pw == _admin_password():
+                session['admin_authed'] = True
+                return redirect('/admin')
+            return render_template_string(LOGIN_HTML, error='Incorrect password.')
+        return render_template_string(LOGIN_HTML, error=None)
     return send_from_directory(BASE_DIR, 'admin.html')
+
+@app.route('/admin/logout')
+def admin_logout():
+    session.pop('admin_authed', None)
+    return redirect('/admin')
 
 
 # ── Chat endpoint ─────────────────────────────────────────────────────────────
@@ -903,6 +983,242 @@ def api_config_set_key():
         'verified': verified,
         'verify_error': verify_error,
     })
+
+
+# ── X.com OAuth 2.0 PKCE + DM bot ───────────────────────────────────────────
+
+def _x_api(method, path, access_token=None, bearer=None, body=None):
+    """Simple X API v2 helper. Returns parsed JSON dict."""
+    url = f'https://api.twitter.com/2{path}'
+    headers = {'Content-Type': 'application/json'}
+    if access_token:
+        headers['Authorization'] = f'Bearer {access_token}'
+    elif bearer:
+        headers['Authorization'] = f'Bearer {bearer}'
+    data = json.dumps(body).encode() if body else None
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return json.loads(r.read())
+
+
+@app.route('/api/x/auth-url', methods=['POST'])
+def api_x_auth_url():
+    """Generate X OAuth 2.0 PKCE authorization URL."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    data = request.json or {}
+    client_id = data.get('client_id', '').strip()
+    redirect_uri = data.get('redirect_uri', '').strip()
+    persona = data.get('persona', 'lilith')
+    if not client_id or not redirect_uri:
+        return jsonify({'ok': False, 'error': 'client_id and redirect_uri are required'}), 400
+
+    code_verifier = secrets.token_urlsafe(64)
+    code_challenge = urllib.parse.quote(
+        __import__('base64').urlsafe_b64encode(
+            hashlib.sha256(code_verifier.encode()).digest()
+        ).rstrip(b'=').decode()
+    )
+    state = secrets.token_urlsafe(16)
+
+    oauth_state = {'code_verifier': code_verifier, 'state': state, 'client_id': client_id,
+                   'redirect_uri': redirect_uri, 'persona': persona}
+    with open(X_OAUTH_STATE_FILE, 'w') as f:
+        json.dump(oauth_state, f)
+
+    params = urllib.parse.urlencode({
+        'response_type': 'code',
+        'client_id': client_id,
+        'redirect_uri': redirect_uri,
+        'scope': 'dm.read dm.write tweet.read users.read offline.access',
+        'state': state,
+        'code_challenge': code_challenge,
+        'code_challenge_method': 'S256',
+    })
+    return jsonify({'ok': True, 'url': f'https://twitter.com/i/oauth2/authorize?{params}'})
+
+
+@app.route('/api/x/callback', methods=['POST'])
+def api_x_callback():
+    """Exchange authorization code for access token."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    data = request.json or {}
+    code = data.get('code', '').strip()
+    state = data.get('state', '').strip()
+
+    if not os.path.exists(X_OAUTH_STATE_FILE):
+        return jsonify({'ok': False, 'error': 'OAuth session expired. Start the flow again.'}), 400
+    with open(X_OAUTH_STATE_FILE, 'r') as f:
+        saved = json.load(f)
+
+    if state != saved.get('state'):
+        return jsonify({'ok': False, 'error': 'State mismatch. Possible CSRF. Start again.'}), 400
+
+    client_id = saved['client_id']
+    redirect_uri = saved['redirect_uri']
+    code_verifier = saved['code_verifier']
+    persona = saved.get('persona', 'lilith')
+
+    body = urllib.parse.urlencode({
+        'grant_type': 'authorization_code',
+        'code': code,
+        'redirect_uri': redirect_uri,
+        'code_verifier': code_verifier,
+        'client_id': client_id,
+    }).encode()
+    req = urllib.request.Request(
+        'https://api.twitter.com/2/oauth2/token',
+        data=body,
+        headers={'Content-Type': 'application/x-www-form-urlencoded'},
+        method='POST'
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            token_data = json.loads(r.read())
+    except url_error.HTTPError as e:
+        err = json.loads(e.read()).get('error_description', str(e))
+        return jsonify({'ok': False, 'error': f'X token exchange failed: {err}'}), 400
+
+    # Get user info
+    try:
+        me = _x_api('GET', '/users/me?user.fields=name,username', access_token=token_data['access_token'])
+        username = me.get('data', {}).get('username', 'unknown')
+        user_id = me.get('data', {}).get('id', '')
+    except Exception:
+        username, user_id = 'unknown', ''
+
+    tokens = _load_x_tokens()
+    tokens[persona] = {
+        'access_token': token_data['access_token'],
+        'refresh_token': token_data.get('refresh_token', ''),
+        'client_id': client_id,
+        'username': username,
+        'user_id': user_id,
+    }
+    _save_x_tokens(tokens)
+    os.remove(X_OAUTH_STATE_FILE)
+
+    return jsonify({'ok': True, 'username': username, 'persona': persona})
+
+
+@app.route('/api/x/status', methods=['GET'])
+def api_x_status():
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    tokens = _load_x_tokens()
+    result = {}
+    for persona, t in tokens.items():
+        result[persona] = {'username': t.get('username', ''), 'connected': bool(t.get('access_token'))}
+    return jsonify(result)
+
+
+@app.route('/api/x/disconnect', methods=['POST'])
+def api_x_disconnect():
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    persona = (request.json or {}).get('persona', '')
+    tokens = _load_x_tokens()
+    tokens.pop(persona, None)
+    _save_x_tokens(tokens)
+    return jsonify({'ok': True})
+
+
+@app.route('/api/x/poll', methods=['POST'])
+def api_x_poll():
+    """Read new DMs for a persona's connected X account and reply via Gemini."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    data = request.json or {}
+    persona = data.get('persona', 'lilith')
+
+    tokens = _load_x_tokens()
+    t = tokens.get(persona)
+    if not t or not t.get('access_token'):
+        return jsonify({'ok': False, 'error': f'No X account connected for persona "{persona}". Connect one in the X tab first.'}), 400
+
+    access_token = t['access_token']
+    user_id = t.get('user_id', '')
+    if not user_id:
+        return jsonify({'ok': False, 'error': 'User ID missing. Reconnect the X account.'}), 400
+
+    system_prompt = get_system_prompt(persona)
+
+    dm_state_file = f'/tmp/x_dm_cursor_{persona}.json' if IS_VERCEL else os.path.join(BASE_DIR, f'.x_dm_cursor_{persona}.json')
+    cursor_data = {}
+    if os.path.exists(dm_state_file):
+        with open(dm_state_file, 'r') as f:
+            cursor_data = json.load(f)
+
+    replied = 0
+    errors = []
+
+    try:
+        path = f'/dm_conversations?dm_event.fields=id,text,sender_id,created_at&event_types=MessageCreate&max_results=10'
+        convs = _x_api('GET', path, access_token=access_token)
+        events = convs.get('data', [])
+        last_seen = cursor_data.get('last_event_id', '')
+
+        new_last = last_seen
+        for event in events:
+            eid = event.get('id', '')
+            sender = event.get('sender_id', '')
+            text = event.get('text', '').strip()
+
+            if sender == user_id:
+                continue
+            if eid == last_seen:
+                break
+            if not new_last:
+                new_last = eid
+
+            conv_id = event.get('conversation_id', f'dm_{sender}')
+            history_key = f'x_hist_{persona}_{sender}'
+            hist_file = f'/tmp/{history_key}.json' if IS_VERCEL else os.path.join(BASE_DIR, f'.{history_key}.json')
+            history = []
+            if os.path.exists(hist_file):
+                with open(hist_file, 'r') as f:
+                    history = json.load(f)
+
+            contents = [{'role': 'model' if m['role'] == 'bot' else 'user', 'parts': [{'text': m['content']}]} for m in history[-20:]]
+            contents.append({'role': 'user', 'parts': [{'text': text}]})
+
+            try:
+                response = client.models.generate_content(
+                    model=MODEL_NAME,
+                    contents=contents,
+                    config=types.GenerateContentConfig(system_instruction=system_prompt, temperature=0.85, max_output_tokens=200),
+                )
+                reply_text = (response.text or '').strip()
+                if not reply_text:
+                    continue
+
+                # Send DM reply
+                _x_api('POST', f'/dm_conversations/{conv_id}/messages',
+                       access_token=access_token,
+                       body={'text': reply_text})
+
+                history.append({'role': 'user', 'content': text})
+                history.append({'role': 'bot', 'content': reply_text})
+                with open(hist_file, 'w') as f:
+                    json.dump(history[-40:], f)
+                replied += 1
+            except Exception as e:
+                errors.append(str(e)[:120])
+
+        cursor_data['last_event_id'] = new_last or last_seen
+        with open(dm_state_file, 'w') as f:
+            json.dump(cursor_data, f)
+
+    except url_error.HTTPError as e:
+        code = e.code
+        if code == 401:
+            return jsonify({'ok': False, 'error': 'X access token expired. Reconnect the account.'}), 400
+        return jsonify({'ok': False, 'error': f'X API error {code}'}), 400
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]}), 400
+
+    return jsonify({'ok': True, 'replied': replied, 'errors': errors})
 
 
 # ── Error handler ─────────────────────────────────────────────────────────────
