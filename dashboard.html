@@ -601,13 +601,13 @@ function renderForm(slug, cfg) {
       </div>
     </div>
 
-    <div class="form-section">
+    <div class="form-section" style="display:none;">
       <div class="section-title">Chat Platforms</div>
       <p class="hint" style="margin-bottom:14px;">Enable the platforms where this persona will chat with fans. Add credentials and test the connection before deploying.</p>
       ${renderPlatformsSection(cfg.platforms || {})}
     </div>
 
-    <div class="form-section" id="x-oauth-section">
+    <div class="form-section" id="x-oauth-section" style="display:none;">
       <div class="section-title">X.com DM Bot</div>
       <p class="hint" style="margin-bottom:14px;">Connect this persona's X account via OAuth so it can auto-reply to DMs. Requires an X Developer App with OAuth 2.0 PKCE and dm.read + dm.write scopes.</p>
       <div id="x-connect-status" style="margin-bottom:12px;"></div>
