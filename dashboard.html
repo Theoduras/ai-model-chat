@@ -1,466 +1,30 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Persona Builder — Admin</title>
-<style>
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-  body {
-    font-family: system-ui, -apple-system, sans-serif;
-    background: #09090b;
-    color: #e4e4e7;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-  }
-
-  header {
-    background: #111113;
-    border-bottom: 1px solid #27272a;
-    padding: 14px 24px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    position: sticky;
-    top: 0;
-    z-index: 100;
-  }
-
-  header h1 { font-size: 1rem; font-weight: 600; color: #fff; letter-spacing: -0.3px; }
-  header .badge { font-size: 0.7rem; background: #3f3f46; padding: 2px 8px; border-radius: 9999px; color: #a1a1aa; }
-
-  .layout {
-    flex: 1;
-    display: grid;
-    grid-template-columns: 280px 1fr 340px;
-    min-height: 0;
-  }
-
-  /* ── Sidebar: persona list ── */
-  .sidebar {
-    border-right: 1px solid #27272a;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-
-  .sidebar-header {
-    padding: 14px 16px 10px;
-    font-size: 0.7rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.8px;
-    color: #71717a;
-    border-bottom: 1px solid #27272a;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-
-  .persona-list { flex: 1; overflow-y: auto; padding: 8px; }
-
-  .persona-item {
-    padding: 10px 12px;
-    border-radius: 8px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    transition: background 0.15s;
-    margin-bottom: 2px;
-  }
-
-  .persona-item:hover { background: #18181b; }
-  .persona-item.active { background: #1c1c21; border: 1px solid #3f3f46; }
-
-  .persona-avatar {
-    width: 36px;
-    height: 36px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #6366f1, #ec4899);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: 700;
-    font-size: 0.85rem;
-    flex-shrink: 0;
-  }
-
-  .persona-name { font-size: 0.875rem; font-weight: 500; }
-  .persona-slug { font-size: 0.7rem; color: #71717a; }
-
-  .btn-new {
-    margin: 12px;
-    padding: 9px;
-    background: #27272a;
-    border: 1px dashed #3f3f46;
-    border-radius: 8px;
-    color: #a1a1aa;
-    font-size: 0.8rem;
-    cursor: pointer;
-    text-align: center;
-    transition: all 0.15s;
-  }
-  .btn-new:hover { background: #3f3f46; color: #fff; }
-
-  /* ── Main form ── */
-  .form-area {
-    overflow-y: auto;
-    padding: 28px 32px;
-    display: flex;
-    flex-direction: column;
-    gap: 28px;
-  }
-
-  .form-section { display: flex; flex-direction: column; gap: 16px; }
-
-  .section-title {
-    font-size: 0.7rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.8px;
-    color: #71717a;
-    padding-bottom: 8px;
-    border-bottom: 1px solid #27272a;
-  }
-
-  .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-  .field { display: flex; flex-direction: column; gap: 6px; }
-  .field.full { grid-column: 1 / -1; }
-
-  label { font-size: 0.8rem; font-weight: 500; color: #a1a1aa; }
-
-  input[type="text"],
-  input[type="number"],
-  textarea,
-  select {
-    background: #18181b;
-    border: 1px solid #27272a;
-    border-radius: 8px;
-    color: #e4e4e7;
-    padding: 9px 12px;
-    font-size: 0.875rem;
-    font-family: inherit;
-    transition: border-color 0.15s;
-    width: 100%;
-  }
-
-  input:focus, textarea:focus, select:focus {
-    outline: none;
-    border-color: #6366f1;
-  }
-
-  textarea { min-height: 80px; resize: vertical; line-height: 1.5; }
-
-  .hint { font-size: 0.7rem; color: #52525b; }
-
-  /* Slider */
-  .slider-row { display: flex; align-items: center; gap: 12px; }
-  .slider-row input[type="range"] {
-    flex: 1;
-    accent-color: #6366f1;
-    height: 4px;
-    border: none;
-    background: transparent;
-    padding: 0;
-  }
-  .slider-labels { display: flex; justify-content: space-between; font-size: 0.65rem; color: #52525b; margin-top: 2px; }
-  .slider-val { font-size: 0.8rem; font-weight: 600; color: #a1a1aa; min-width: 24px; text-align: right; }
-
-  /* Toggle */
-  .toggle-row { display: flex; align-items: center; gap: 10px; }
-  .toggle { position: relative; width: 40px; height: 22px; flex-shrink: 0; }
-  .toggle input { opacity: 0; width: 0; height: 0; }
-  .toggle-track {
-    position: absolute; inset: 0;
-    background: #27272a;
-    border-radius: 9999px;
-    cursor: pointer;
-    transition: background 0.2s;
-  }
-  .toggle input:checked + .toggle-track { background: #6366f1; }
-  .toggle-track::after {
-    content: '';
-    position: absolute;
-    top: 3px; left: 3px;
-    width: 16px; height: 16px;
-    background: white;
-    border-radius: 50%;
-    transition: transform 0.2s;
-  }
-  .toggle input:checked + .toggle-track::after { transform: translateX(18px); }
-  .toggle-label { font-size: 0.875rem; }
-
-  /* Action bar */
-  .action-bar {
-    display: flex;
-    gap: 10px;
-    padding: 16px 32px;
-    border-top: 1px solid #27272a;
-    background: #09090b;
-    position: sticky;
-    bottom: 0;
-  }
-
-  .btn {
-    padding: 9px 20px;
-    border-radius: 8px;
-    font-size: 0.875rem;
-    font-weight: 500;
-    cursor: pointer;
-    border: none;
-    transition: all 0.15s;
-  }
-  .btn-primary { background: #6366f1; color: white; }
-  .btn-primary:hover { background: #4f46e5; }
-  .btn-secondary { background: #27272a; color: #e4e4e7; }
-  .btn-secondary:hover { background: #3f3f46; }
-  .btn-ghost { background: transparent; color: #71717a; border: 1px solid #27272a; }
-  .btn-ghost:hover { color: #e4e4e7; border-color: #52525b; }
-
-  .save-status { font-size: 0.8rem; color: #71717a; align-self: center; margin-left: auto; }
-  .save-status.ok { color: #22c55e; }
-  .save-status.err { color: #ef4444; }
-
-  /* ── Preview panel ── */
-  .preview-panel {
-    border-left: 1px solid #27272a;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-
-  .preview-header {
-    padding: 14px 16px 10px;
-    font-size: 0.7rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.8px;
-    color: #71717a;
-    border-bottom: 1px solid #27272a;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-
-  .preview-tabs { display: flex; border-bottom: 1px solid #27272a; }
-  .preview-tab {
-    padding: 10px 16px;
-    font-size: 0.8rem;
-    cursor: pointer;
-    color: #71717a;
-    border-bottom: 2px solid transparent;
-    transition: all 0.15s;
-  }
-  .preview-tab.active { color: #e4e4e7; border-color: #6366f1; }
-
-  .preview-content { flex: 1; overflow-y: auto; padding: 16px; }
-
-  .prompt-box {
-    background: #111113;
-    border: 1px solid #27272a;
-    border-radius: 8px;
-    padding: 14px;
-    font-size: 0.78rem;
-    line-height: 1.6;
-    white-space: pre-wrap;
-    color: #a1a1aa;
-    font-family: 'Menlo', 'Monaco', monospace;
-    min-height: 200px;
-  }
-
-  /* Chat preview */
-  .chat-preview {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-
-  .chat-bubble {
-    max-width: 85%;
-    padding: 10px 14px;
-    border-radius: 16px;
-    font-size: 0.85rem;
-    line-height: 1.45;
-  }
-  .chat-bubble.bot { align-self: flex-start; background: #27272a; border-bottom-left-radius: 4px; }
-  .chat-bubble.user { align-self: flex-end; background: #4f46e5; border-bottom-right-radius: 4px; color: white; }
-
-  .funnel-stage {
-    padding: 10px 14px;
-    background: #18181b;
-    border: 1px solid #27272a;
-    border-radius: 8px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 6px;
-  }
-  .funnel-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-  .funnel-stage-name { font-size: 0.8rem; font-weight: 600; }
-  .funnel-stage-desc { font-size: 0.72rem; color: #71717a; }
-
-  .empty-state {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    color: #52525b;
-    text-align: center;
-    padding: 40px;
-  }
-  .empty-state svg { width: 48px; height: 48px; opacity: 0.4; }
-  .empty-state p { font-size: 0.875rem; }
-
-  /* Connection badge + icon button */
-  .conn-badge {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    font-size: 0.78rem;
-    color: #a1a1aa;
-    cursor: pointer;
-    padding: 4px 10px;
-    border-radius: 9999px;
-    background: #18181b;
-    border: 1px solid #27272a;
-    transition: border-color 0.15s;
-  }
-  .conn-badge:hover { border-color: #3f3f46; }
-  .conn-dot {
-    width: 8px; height: 8px;
-    border-radius: 50%;
-    background: #71717a;
-    flex-shrink: 0;
-  }
-  .conn-dot.ok { background: #22c55e; box-shadow: 0 0 6px #22c55e88; }
-  .conn-dot.err { background: #ef4444; }
-
-  .icon-btn {
-    background: transparent;
-    border: none;
-    color: #a1a1aa;
-    cursor: pointer;
-    padding: 4px;
-    display: flex;
-    align-items: center;
-    border-radius: 6px;
-    transition: color 0.15s, background 0.15s;
-  }
-  .icon-btn:hover { color: #fff; background: #27272a; }
-
-  .btn-ai {
-    background: linear-gradient(135deg, #6366f1, #ec4899);
-    color: #fff;
-    border: none;
-    border-radius: 9999px;
-    padding: 4px 12px;
-    font-size: 0.72rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: opacity 0.15s;
-  }
-  .btn-ai:hover { opacity: 0.88; }
-
-  /* Modal */
-  .modal-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.65);
-    backdrop-filter: blur(2px);
-    display: none;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-    padding: 20px;
-  }
-  .modal-overlay.open { display: flex; }
-  .modal {
-    background: #111113;
-    border: 1px solid #27272a;
-    border-radius: 14px;
-    width: 100%;
-    max-width: 480px;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.6);
-    animation: modalIn 0.15s ease-out;
-  }
-  @keyframes modalIn { from { transform: translateY(8px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-  .modal-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 18px 22px;
-    border-bottom: 1px solid #27272a;
-  }
-  .modal-header h2 { font-size: 1.05rem; font-weight: 600; color: #fff; }
-  .modal-close {
-    background: transparent;
-    border: none;
-    color: #71717a;
-    font-size: 1.5rem;
-    cursor: pointer;
-    line-height: 1;
-    padding: 0 4px;
-  }
-  .modal-close:hover { color: #fff; }
-  .modal-body { padding: 22px; }
-  .modal-footer {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-top: 24px;
-    justify-content: flex-end;
-  }
-  .modal-footer .save-status { margin-right: auto; margin-left: 0; }
-  .conn-row {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    padding: 11px 14px;
-    background: #18181b;
-    border: 1px solid #27272a;
-    border-radius: 8px;
-    font-size: 0.82rem;
-    color: #a1a1aa;
-  }
-  code {
-    background: #27272a;
-    padding: 1px 5px;
-    border-radius: 4px;
-    font-size: 0.78em;
-    color: #d4d4d8;
-  }
-
-  @media (max-width: 900px) {
-    .layout { grid-template-columns: 1fr; }
-    .sidebar, .preview-panel { display: none; }
-  }
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Persona Builder — Dashboard</title>
+  <link rel="stylesheet" href="/css/style.css">
 </head>
-<body>
+<body class="page-dashboard">
 
 <header>
   <div style="display:flex; align-items:center; gap:10px;">
     <h1>Persona Builder</h1>
-    <span class="badge">Admin</span>
+    <span class="badge">Dashboard</span>
   </div>
   <div style="display:flex; align-items:center; gap:16px;">
     <div id="gemini-status" class="conn-badge" onclick="openSettings()" title="Gemini connection — click to configure">
       <span class="conn-dot"></span><span id="conn-text">Checking…</span>
     </div>
     <button class="icon-btn" onclick="openSettings()" title="Settings">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" width="18" height="18">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" width="18" height="18" aria-hidden="true">
         <path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z" stroke-linecap="round" stroke-linejoin="round"/>
         <path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" stroke-linecap="round" stroke-linejoin="round"/>
       </svg>
     </button>
-    <a href="/profile" style="color:#71717a; font-size:0.8rem; text-decoration:none;">← Back to site</a>
-    <a href="/admin/logout" style="color:#71717a; font-size:0.8rem; text-decoration:none;" title="Log out">Log out</a>
+    <a href="/landing" style="color:#71717a; font-size:0.8rem; text-decoration:none;">← Back to site</a>
+    <a href="/dashboard/logout" style="color:#71717a; font-size:0.8rem; text-decoration:none;" title="Log out">Log out</a>
   </div>
 </header>
 
@@ -469,16 +33,14 @@
   <div class="modal">
     <div class="modal-header">
       <h2>Settings</h2>
-      <button class="modal-close" onclick="closeSettings()">×</button>
+      <button class="modal-close" onclick="closeSettings()" aria-label="Close">×</button>
     </div>
     <div class="modal-body">
       <div class="section-title" style="margin-bottom:14px;">Gemini API</div>
-
       <div class="conn-row" id="modal-conn-row">
         <span class="conn-dot"></span>
         <span id="modal-conn-text">Checking connection…</span>
       </div>
-
       <div class="field full" style="margin-top:18px;">
         <label>Gemini API Key</label>
         <div style="display:flex; gap:8px;">
@@ -488,11 +50,10 @@
         <span class="hint">Saved to the <code>.env</code> file as <code>GEMINI_API_KEY</code> and applied immediately — no restart needed.</span>
         <span class="hint">Get a free key at <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:#818cf8;">aistudio.google.com/app/apikey</a></span>
       </div>
-
       <div class="modal-footer">
         <span class="save-status" id="key-save-status"></span>
         <button class="btn btn-ghost" onclick="closeSettings()">Cancel</button>
-        <button class="btn btn-primary" id="key-save-btn" onclick="saveGeminiKey()">Save & Verify</button>
+        <button class="btn btn-primary" id="key-save-btn" onclick="saveGeminiKey()">Save &amp; Verify</button>
       </div>
     </div>
   </div>
@@ -502,13 +63,12 @@
 <div class="modal-overlay" id="backstory-modal" onclick="if(event.target===this)closeBackstoryAI()">
   <div class="modal" style="max-width:580px; display:flex; flex-direction:column; max-height:90vh;">
     <div class="modal-header">
-      <h2>✨ Build Backstory with AI</h2>
-      <button class="modal-close" onclick="closeBackstoryAI()">×</button>
+      <h2>Build Backstory with AI</h2>
+      <button class="modal-close" onclick="closeBackstoryAI()" aria-label="Close">×</button>
     </div>
     <div class="modal-body" style="display:flex; flex-direction:column; min-height:0; overflow-y:auto;">
       <p class="hint" style="margin-bottom:12px;">Pick an answer for each question — or skip. Finalize when ready.</p>
       <div id="bs-transcript" class="chat-preview" style="flex:1; overflow-y:auto; min-height:120px; max-height:36vh; padding:4px; margin-bottom:12px;"></div>
-      <!-- Current question + option buttons -->
       <div id="bs-question-area" style="display:none;">
         <div id="bs-question-text" style="font-weight:600; margin-bottom:10px; line-height:1.4;"></div>
         <div id="bs-options" style="display:flex; flex-direction:column; gap:7px;"></div>
@@ -533,21 +93,19 @@
 
 <div class="layout">
 
-  <!-- Sidebar -->
-  <div class="sidebar">
+  <aside class="sidebar" aria-label="Personas">
     <div class="sidebar-header">
       <span>Personas</span>
       <span id="persona-count" style="font-size:0.7rem; color:#52525b;"></span>
     </div>
     <div class="persona-list" id="persona-list"></div>
     <button class="btn-new" onclick="newPersona()">+ New Persona</button>
-  </div>
+  </aside>
 
-  <!-- Main form -->
   <div style="display:flex; flex-direction:column; overflow:hidden;">
     <div class="form-area" id="form-area">
       <div class="empty-state">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
           <path d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
         <p>Select a persona from the sidebar<br>or create a new one.</p>
@@ -556,16 +114,13 @@
     <div class="action-bar" id="action-bar" style="display:none;">
       <button class="btn btn-secondary" onclick="previewPrompt()">Preview Prompt</button>
       <button class="btn btn-ghost" onclick="testChat()">Test Chat</button>
-      <button class="btn btn-primary" onclick="savePersona()">Save & Deploy</button>
+      <button class="btn btn-primary" onclick="savePersona()">Save &amp; Deploy</button>
       <span class="save-status" id="save-status"></span>
     </div>
   </div>
 
-  <!-- Preview panel -->
-  <div class="preview-panel">
-    <div class="preview-header">
-      <span>Preview</span>
-    </div>
+  <aside class="preview-panel" aria-label="Preview">
+    <div class="preview-header"><span>Preview</span></div>
     <div class="preview-tabs">
       <div class="preview-tab active" onclick="switchTab('prompt', this)">System Prompt</div>
       <div class="preview-tab" onclick="switchTab('funnel', this)">Funnel</div>
@@ -575,17 +130,15 @@
         <p style="font-size:0.75rem;">Configure a persona and click Preview Prompt.</p>
       </div>
     </div>
-  </div>
+  </aside>
 
 </div>
 
 <script>
-// ── State ────────────────────────────────────────────────────────────────────
 let currentSlug = null;
 let currentTab = 'prompt';
 const personas = {};
 
-// ── Init ─────────────────────────────────────────────────────────────────────
 function lsPersonaKey(slug) { return 'admin_persona_cfg_' + slug; }
 function lsSlugsKey() { return 'admin_persona_slugs'; }
 
@@ -623,7 +176,6 @@ async function init() {
   } catch(e) {
     console.error('Could not load personas', e);
   }
-  // Merge in any locally-saved personas the server doesn't know about
   lsLoadSlugs().forEach(slug => {
     if (seen.has(slug)) return;
     const cfg = lsLoadPersona(slug);
@@ -636,17 +188,16 @@ async function init() {
   document.getElementById('persona-count').textContent = seen.size;
 }
 
-// ── Settings / Gemini API key ─────────────────────────────────────────────────
 function applyConnState(configured, authMode, masked) {
-  const headDot = document.querySelector('#gemini-status .conn-dot');
+  const headDot  = document.querySelector('#gemini-status .conn-dot');
   const headText = document.getElementById('conn-text');
-  const modalDot = document.querySelector('#modal-conn-row .conn-dot');
+  const modalDot  = document.querySelector('#modal-conn-row .conn-dot');
   const modalText = document.getElementById('modal-conn-text');
   if (configured) {
     headDot.className = 'conn-dot ok';
     headText.textContent = 'Gemini connected';
     modalDot.className = 'conn-dot ok';
-    modalText.textContent = `Connected via ${authMode || 'api-key'}${masked ? ' · ' + masked : ''}`;
+    modalText.textContent = 'Connected via ' + (authMode || 'api-key') + (masked ? ' · ' + masked : '');
     const input = document.getElementById('gemini-key-input');
     if (input && masked) input.placeholder = masked + '  (saved — paste a new key to replace)';
   } else {
@@ -667,10 +218,7 @@ async function loadConfig() {
   }
 }
 
-function openSettings() {
-  document.getElementById('settings-modal').classList.add('open');
-  loadConfig();
-}
+function openSettings()  { document.getElementById('settings-modal').classList.add('open'); loadConfig(); }
 function closeSettings() {
   document.getElementById('settings-modal').classList.remove('open');
   document.getElementById('key-save-status').textContent = '';
@@ -685,25 +233,22 @@ function toggleKeyVisibility() {
 }
 
 async function saveGeminiKey() {
-  const input = document.getElementById('gemini-key-input');
+  const input  = document.getElementById('gemini-key-input');
   const status = document.getElementById('key-save-status');
-  const btn = document.getElementById('key-save-btn');
-  const key = input.value.trim();
+  const btn    = document.getElementById('key-save-btn');
+  const key    = input.value.trim();
   if (!key) { status.textContent = 'Enter a key first'; status.className = 'save-status err'; return; }
-
   btn.disabled = true;
   status.textContent = 'Saving & verifying…';
   status.className = 'save-status';
   try {
     const res = await fetch('/api/config/gemini-key', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ api_key: key })
     });
     const data = await res.json();
     if (data.ok && data.verified) {
-      status.textContent = '✓ Saved & verified';
-      status.className = 'save-status ok';
+      status.textContent = '✓ Saved & verified'; status.className = 'save-status ok';
       applyConnState(true, data.auth_mode, data.key_masked);
       input.value = '';
       setTimeout(closeSettings, 1100);
@@ -716,27 +261,23 @@ async function saveGeminiKey() {
       status.className = 'save-status err';
     }
   } catch(e) {
-    status.textContent = '✗ ' + e.message;
-    status.className = 'save-status err';
-  } finally {
-    btn.disabled = false;
-  }
+    status.textContent = '✗ ' + e.message; status.className = 'save-status err';
+  } finally { btn.disabled = false; }
 }
 
-// ── Backstory AI interview ────────────────────────────────────────────────────
 let bsMessages = [];
 let bsCurrentQuestion = '';
 
 function bsBasics() {
   const mirrorChecked = document.getElementById('f-mirror-location')?.checked;
-  const location = mirrorChecked ? 'the fan\'s city (mirrors fan location)' : v('f-location');
+  const location = mirrorChecked ? "the fan's city (mirrors fan location)" : v('f-location');
   return { name: v('f-name'), age: v('f-age'), archetype: v('f-archetype'), location };
 }
 
 function bsRender() {
   const t = document.getElementById('bs-transcript');
   t.innerHTML = bsMessages.map(m =>
-    `<div class="chat-bubble ${m.role === 'user' ? 'user' : 'bot'}">${esc(m.content)}</div>`
+    '<div class="chat-bubble ' + (m.role === 'user' ? 'user' : 'bot') + '">' + esc(m.content) + '</div>'
   ).join('');
   t.scrollTop = t.scrollHeight;
 }
@@ -758,8 +299,7 @@ function bsShowQuestion(question, options) {
   document.getElementById('bs-question-text').textContent = question;
   const optEl = document.getElementById('bs-options');
   optEl.innerHTML = options.map((opt, i) =>
-    `<button class="btn btn-secondary" style="text-align:left; white-space:normal; line-height:1.35;"
-       onclick="bsPickOption(${i})">${esc(opt)}</button>`
+    '<button class="btn btn-secondary" style="text-align:left; white-space:normal; line-height:1.35;" onclick="bsPickOption(' + i + ')">' + esc(opt) + '</button>'
   ).join('');
   document.getElementById('bs-custom').value = '';
   document.getElementById('bs-question-area').style.display = 'block';
@@ -791,8 +331,7 @@ async function bsSubmitAnswer(answer) {
 
 async function bsCall(action) {
   const res = await fetch('/api/backstory/interview', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ basics: bsBasics(), messages: bsMessages, action })
   });
   return res.json();
@@ -819,10 +358,7 @@ async function openBackstoryAI() {
   if (!v('f-age').trim() || isNaN(ageVal) || ageVal < 18) missing.push('Age (must be 18+)');
   if (!v('f-location').trim() && !document.getElementById('f-mirror-location')?.checked) missing.push('Location');
   if (!v('f-archetype').trim()) missing.push('Archetype');
-  if (missing.length) {
-    alert(`Please fill in the following fields first: ${missing.join(', ')}`);
-    return;
-  }
+  if (missing.length) { alert('Please fill in the following fields first: ' + missing.join(', ')); return; }
   bsMessages = [];
   bsCurrentQuestion = '';
   bsRender();
@@ -832,9 +368,7 @@ async function openBackstoryAI() {
   await bsAsk();
 }
 
-function closeBackstoryAI() {
-  document.getElementById('backstory-modal').classList.remove('open');
-}
+function closeBackstoryAI() { document.getElementById('backstory-modal').classList.remove('open'); }
 
 async function bsRegenerate() {
   bsSetBusy(true, 'Generating new options…');
@@ -876,69 +410,57 @@ async function bsFinalize() {
 function renderSidebarItem(p) {
   const el = document.createElement('div');
   el.className = 'persona-item';
-  el.id = `item-${p.slug}`;
+  el.id = 'item-' + p.slug;
   el.onclick = () => loadPersona(p.slug);
   const initials = (p.name || p.slug).slice(0,2).toUpperCase();
   const avatarHtml = p.avatar
-    ? `<img src="${p.avatar}?t=${Date.now()}" style="width:36px;height:36px;border-radius:50%;object-fit:cover;">`
-    : `<div class="persona-avatar">${initials}</div>`;
-  el.innerHTML = `
-    ${avatarHtml}
-    <div>
-      <div class="persona-name">${p.name || p.slug}</div>
-      <div class="persona-slug">${p.slug}</div>
-    </div>`;
+    ? '<img src="' + p.avatar + '?t=' + Date.now() + '" style="width:36px;height:36px;border-radius:50%;object-fit:cover;">'
+    : '<div class="persona-avatar">' + initials + '</div>';
+  el.innerHTML = avatarHtml + '<div><div class="persona-name">' + (p.name || p.slug) + '</div><div class="persona-slug">' + p.slug + '</div></div>';
   document.getElementById('persona-list').appendChild(el);
 }
 
-// ── Load persona into form ────────────────────────────────────────────────────
 async function loadPersona(slug) {
   document.querySelectorAll('.persona-item').forEach(el => el.classList.remove('active'));
-  const item = document.getElementById(`item-${slug}`);
+  const item = document.getElementById('item-' + slug);
   if (item) item.classList.add('active');
   currentSlug = slug;
-
   let config = {};
   try {
-    const res = await fetch(`/api/personas/${slug}`);
+    const res = await fetch('/api/personas/' + slug);
     const data = await res.json();
     config = data.config || {};
   } catch(e) {}
-  // Fall back to localStorage if server has no config (cross-instance Vercel)
   if (!config.name) {
     const cached = lsLoadPersona(slug);
     if (cached) config = cached;
   }
-
   renderForm(slug, config);
   document.getElementById('action-bar').style.display = 'flex';
-  // Auto-fill generated fields if empty
   if (!config.speech_style) generateSpeechStyle(false);
   if (!config.conversion_triggers) generateTriggers();
   loadXStatus();
 }
 
-// ── New persona ───────────────────────────────────────────────────────────────
 function newPersona() {
   const name = prompt('Persona display name:');
   if (!name) return;
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   if (!slug) return;
   currentSlug = slug;
-  if (!document.getElementById(`item-${slug}`)) {
+  if (!document.getElementById('item-' + slug)) {
     const p = { slug, name, config: {} };
     personas[slug] = p;
     renderSidebarItem(p);
     document.getElementById('persona-count').textContent = Object.keys(personas).length;
   }
   document.querySelectorAll('.persona-item').forEach(el => el.classList.remove('active'));
-  const item = document.getElementById(`item-${slug}`);
+  const item = document.getElementById('item-' + slug);
   if (item) item.classList.add('active');
   renderForm(slug, { name });
   document.getElementById('action-bar').style.display = 'flex';
 }
 
-// ── Render form ───────────────────────────────────────────────────────────────
 function renderForm(slug, cfg) {
   const fa = document.getElementById('form-area');
   fa.innerHTML = `
@@ -947,34 +469,32 @@ function renderForm(slug, cfg) {
       <span style="font-size:0.75rem; color:#52525b;">/${slug}</span>
     </div>
 
-    <!-- Identity -->
     <div class="form-section">
       <div class="section-title">Identity</div>
       <div class="field-row" style="align-items:flex-start;">
         <div class="field" style="flex:0 0 auto; text-align:center;">
           <label>Profile Picture</label>
           <div id="avatar-preview" style="width:88px;height:88px;border-radius:50%;background:#27272a;border:2px dashed #52525b;display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;margin:0 auto 6px;" onclick="document.getElementById('f-avatar-input').click()">
-            ${cfg.avatar ? `<img src="${esc(cfg.avatar)}" style="width:100%;height:100%;object-fit:cover;">` : `<span style="font-size:28px;color:#71717a;">+</span>`}
+            ${cfg.avatar ? '<img src="' + esc(cfg.avatar) + '" style="width:100%;height:100%;object-fit:cover;">' : '<span style="font-size:28px;color:#71717a;">+</span>'}
           </div>
           <input type="file" id="f-avatar-input" accept="image/*" style="display:none;" onchange="handleAvatarUpload(this)">
           <button type="button" class="btn btn-ghost" style="font-size:11px;padding:2px 8px;" onclick="document.getElementById('f-avatar-input').click()">Upload</button>
-          ${cfg.avatar ? `<button type="button" class="btn btn-ghost" style="font-size:11px;padding:2px 8px;margin-left:4px;" onclick="clearAvatar()">Remove</button>` : ''}
+          ${cfg.avatar ? '<button type="button" class="btn btn-ghost" style="font-size:11px;padding:2px 8px;margin-left:4px;" onclick="clearAvatar()">Remove</button>' : ''}
           <input type="hidden" id="f-avatar" value="${esc(cfg.avatar || '')}">
         </div>
         <div style="flex:1; display:flex; flex-direction:column; gap:12px;">
-        <div class="field">
-          <label>Display Name</label>
-          <input type="text" id="f-name" value="${esc(cfg.name || '')}" placeholder="e.g. Aria">
-        </div>
-        <div class="field">
-          <label>Age</label>
-          <input type="number" id="f-age" value="${esc(cfg.age || '')}" placeholder="e.g. 23" min="18" step="1">
-        </div>
-        <div class="field">
-          <label>Gender</label>
-          <select id="f-gender">
-            ${opt(['Female', 'Male', 'Trans Female to Male', 'Trans Male to Female'], cfg.gender || 'Female')}
-          </select>
+          <div class="field">
+            <label>Display Name</label>
+            <input type="text" id="f-name" value="${esc(cfg.name || '')}" placeholder="e.g. Aria">
+          </div>
+          <div class="field">
+            <label>Age</label>
+            <input type="number" id="f-age" value="${esc(cfg.age || '')}" placeholder="e.g. 23" min="18" step="1">
+          </div>
+          <div class="field">
+            <label>Gender</label>
+            <select id="f-gender">${opt(['Female', 'Male', 'Trans Female to Male', 'Trans Male to Female'], cfg.gender || 'Female')}</select>
+          </div>
         </div>
       </div>
       <div class="field-row">
@@ -988,15 +508,12 @@ function renderForm(slug, cfg) {
             </label>
             <span class="toggle-label" style="font-size:0.8rem;">Always match the fan's location</span>
           </div>
-          <span class="hint" id="mirror-hint" style="display:${cfg.mirror_location ? 'block' : 'none'}">Persona claims to be from wherever the fan is — asks naturally if unknown, then mirrors it to build rapport.</span>
+          <span class="hint" id="mirror-hint" style="display:${cfg.mirror_location ? 'block' : 'none'}">Persona claims to be from wherever the fan is — asks naturally if unknown, then mirrors it.</span>
         </div>
         <div class="field">
           <label>Personality Archetype</label>
-          <select id="f-archetype">
-            ${opt(['Deadpan / Dry', 'Bubbly / Sweet', 'Dominant / Edgy', 'Girl-Next-Door', 'Mysterious / Dark', 'Playful / Teasing', 'Intellectual / Witty'], cfg.archetype)}
-          </select>
+          <select id="f-archetype">${opt(['Deadpan / Dry', 'Bubbly / Sweet', 'Dominant / Edgy', 'Girl-Next-Door', 'Mysterious / Dark', 'Playful / Teasing', 'Intellectual / Witty'], cfg.archetype)}</select>
         </div>
-        </div><!-- /right column -->
       </div>
       <div class="field full">
         <label style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px;">
@@ -1006,15 +523,14 @@ function renderForm(slug, cfg) {
             <button type="button" class="btn-ai" onclick="openBackstoryAI()">✨ Build with AI</button>
           </span>
         </label>
-        <textarea id="f-backstory" placeholder="Write 2-3 sentences yourself, or click ‘Build with AI’ to be interviewed and have one generated.">${esc(cfg.backstory || '')}</textarea>
+        <textarea id="f-backstory" placeholder="Write 2-3 sentences yourself, or click 'Build with AI' to be interviewed and have one generated.">${esc(cfg.backstory || '')}</textarea>
         <span class="hint" id="backstory-rand-status"></span>
         <span class="hint">Either type a short origin story, or let Gemini interview you and write it.</span>
       </div>
     </div>
 
-    <!-- Voice -->
     <div class="form-section">
-      <div class="section-title">Voice & Speech Style</div>
+      <div class="section-title">Voice &amp; Speech Style</div>
       <div class="field full">
         <label style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px;">
           <span>Speech Style Rules</span>
@@ -1037,16 +553,13 @@ function renderForm(slug, cfg) {
       </div>
       <div class="field">
         <label>Question Frequency</label>
-        <select id="f-qfreq">
-          ${opt(['rarely', 'sometimes', 'often', 'very often'], cfg.question_freq)}
-        </select>
+        <select id="f-qfreq">${opt(['rarely', 'sometimes', 'often', 'very often'], cfg.question_freq)}</select>
         <span class="hint">How often the persona asks the fan a question to keep them engaged.</span>
       </div>
     </div>
 
-    <!-- Interests -->
     <div class="form-section">
-      <div class="section-title">Interests & Hooks</div>
+      <div class="section-title">Interests &amp; Hooks</div>
       <div class="field full">
         <label>Topics the persona naturally returns to</label>
         <input type="text" id="f-interests" value="${esc(cfg.interests || '')}" placeholder="gaming, fitness, tattoos, music, cooking…">
@@ -1054,14 +567,11 @@ function renderForm(slug, cfg) {
       </div>
     </div>
 
-    <!-- Flirt & NSFW -->
     <div class="form-section">
-      <div class="section-title">Flirt & Content Rules</div>
+      <div class="section-title">Flirt &amp; Content Rules</div>
       <div class="field">
         <label>Flirt Escalation Pace</label>
-        <select id="f-flirt">
-          ${opt(['slow', 'moderate', 'fast', 'instant'], cfg.flirt_pace)}
-        </select>
+        <select id="f-flirt">${opt(['slow', 'moderate', 'fast', 'instant'], cfg.flirt_pace)}</select>
       </div>
       <div class="field">
         <div class="toggle-row">
@@ -1074,13 +584,10 @@ function renderForm(slug, cfg) {
       </div>
       <div class="field" id="nsfw-level-field" style="display:${cfg.nsfw_enabled ? 'flex' : 'none'}">
         <label>NSFW Level</label>
-        <select id="f-nsfw-level">
-          ${opt(['suggestive', 'moderate', 'explicit'], cfg.nsfw_level)}
-        </select>
+        <select id="f-nsfw-level">${opt(['suggestive', 'moderate', 'explicit'], cfg.nsfw_level)}</select>
       </div>
     </div>
 
-    <!-- Conversion -->
     <div class="form-section">
       <div class="section-title">Conversion Funnel</div>
       <div class="field full">
@@ -1094,14 +601,12 @@ function renderForm(slug, cfg) {
       </div>
     </div>
 
-    <!-- Platforms -->
     <div class="form-section">
       <div class="section-title">Chat Platforms</div>
       <p class="hint" style="margin-bottom:14px;">Enable the platforms where this persona will chat with fans. Add credentials and test the connection before deploying.</p>
       ${renderPlatformsSection(cfg.platforms || {})}
     </div>
 
-    <!-- X.com DM Bot -->
     <div class="form-section" id="x-oauth-section">
       <div class="section-title">X.com DM Bot</div>
       <p class="hint" style="margin-bottom:14px;">Connect this persona's X account via OAuth so it can auto-reply to DMs. Requires an X Developer App with OAuth 2.0 PKCE and dm.read + dm.write scopes.</p>
@@ -1113,9 +618,9 @@ function renderForm(slug, cfg) {
       </div>
       <div id="x-poll-status" style="font-size:13px;color:#71717a;margin-top:10px;"></div>
       <div style="margin-top:14px;">
-        <label class="field-label" style="font-size:12px;">OAuth Client ID</label>
+        <label style="font-size:12px;">OAuth Client ID</label>
         <input type="text" id="x-client-id" placeholder="your-app-client-id" style="font-size:13px;margin-top:4px;">
-        <label class="field-label" style="font-size:12px;margin-top:8px;display:block;">Redirect URI (must match your X app settings)</label>
+        <label style="font-size:12px;margin-top:8px;display:block;">Redirect URI (must match your X app settings)</label>
         <input type="text" id="x-redirect-uri" placeholder="https://your-domain.vercel.app/api/x/oauth-redirect" style="font-size:13px;margin-top:4px;">
         <p class="hint" style="margin-top:6px;">Set Redirect URI in X Developer Portal → Your App → User authentication settings → Callback URI/Redirect URL.</p>
       </div>
@@ -1123,21 +628,15 @@ function renderForm(slug, cfg) {
   `;
 }
 
-function toggleNsfw(on) {
-  document.getElementById('nsfw-level-field').style.display = on ? 'flex' : 'none';
-}
+function toggleNsfw(on) { document.getElementById('nsfw-level-field').style.display = on ? 'flex' : 'none'; }
 
 function toggleMirrorLocation(on) {
   const input = document.getElementById('f-location');
-  const hint = document.getElementById('mirror-hint');
-  if (input) {
-    input.disabled = on;
-    input.style.opacity = on ? '0.45' : '1';
-  }
-  if (hint) hint.style.display = on ? 'block' : 'none';
+  const hint  = document.getElementById('mirror-hint');
+  if (input) { input.disabled = on; input.style.opacity = on ? '0.45' : '1'; }
+  if (hint)  hint.style.display = on ? 'block' : 'none';
 }
 
-// ── Platform connections ──────────────────────────────────────────────────────
 const PLATFORMS = [
   { id: 'onlyfans', label: 'OnlyFans', color: '#00aff0',
     fields: [{id:'api_key',label:'API Key',type:'password'},{id:'user_id',label:'User ID',type:'text'}] },
@@ -1156,39 +655,24 @@ function renderPlatformsSection(platforms) {
     const cfg = platforms[p.id] || {};
     const enabled = cfg.enabled || false;
     const fieldsHtml = p.fields.map(f =>
-      `<div class="field" style="margin-top:8px;">
-        <label style="font-size:12px;">${esc(f.label)}</label>
-        <input type="${f.type}" id="plat-${p.id}-${f.id}" value="${esc(cfg[f.id] || '')}"
-               placeholder="${f.type === 'password' ? '••••••••••••••••' : f.label}"
-               style="font-size:13px;">
-      </div>`
+      '<div class="field" style="margin-top:8px;"><label style="font-size:12px;">' + esc(f.label) + '</label>' +
+      '<input type="' + f.type + '" id="plat-' + p.id + '-' + f.id + '" value="' + esc(cfg[f.id] || '') + '" placeholder="' + (f.type === 'password' ? '••••••••••••••••' : f.label) + '" style="font-size:13px;"></div>'
     ).join('');
-    return `
-      <div class="platform-card" id="platcard-${p.id}" style="border:1px solid #3f3f46; border-radius:10px; padding:14px; margin-bottom:10px; ${enabled ? 'border-color:'+p.color+';' : ''}">
-        <div style="display:flex; align-items:center; gap:10px;">
-          <div class="toggle"><label class="toggle">
-            <input type="checkbox" id="plat-${p.id}-enabled" ${enabled ? 'checked' : ''}
-                   onchange="togglePlatform('${p.id}', this.checked)">
-            <span class="toggle-track"></span>
-          </label></div>
-          <span style="font-weight:600; color:${p.color}; font-size:14px;">${p.label}</span>
-          <span id="plat-${p.id}-badge" style="margin-left:auto; font-size:12px; color:#71717a;"></span>
-          <button type="button" class="btn btn-ghost" id="plat-${p.id}-testbtn"
-                  onclick="testPlatformBtn('${p.id}')"
-                  style="font-size:12px; padding:3px 10px; display:${enabled ? 'inline-flex' : 'none'};">Test</button>
-        </div>
-        <div id="plat-${p.id}-fields" style="display:${enabled ? 'block' : 'none'}; padding-top:4px;">
-          ${fieldsHtml}
-          <div id="plat-${p.id}-error" style="font-size:12px; color:#ef4444; margin-top:6px; display:none;"></div>
-        </div>
-      </div>`;
+    return '<div class="platform-card" id="platcard-' + p.id + '" style="border:1px solid #3f3f46; border-radius:10px; padding:14px; margin-bottom:10px; ' + (enabled ? 'border-color:' + p.color + ';' : '') + '">' +
+      '<div style="display:flex; align-items:center; gap:10px;">' +
+      '<div class="toggle"><label class="toggle"><input type="checkbox" id="plat-' + p.id + '-enabled" ' + (enabled ? 'checked' : '') + ' onchange="togglePlatform(\'' + p.id + '\', this.checked)"><span class="toggle-track"></span></label></div>' +
+      '<span style="font-weight:600; color:' + p.color + '; font-size:14px;">' + p.label + '</span>' +
+      '<span id="plat-' + p.id + '-badge" style="margin-left:auto; font-size:12px; color:#71717a;"></span>' +
+      '<button type="button" class="btn btn-ghost" id="plat-' + p.id + '-testbtn" onclick="testPlatformBtn(\'' + p.id + '\')" style="font-size:12px; padding:3px 10px; display:' + (enabled ? 'inline-flex' : 'none') + ';">Test</button>' +
+      '</div><div id="plat-' + p.id + '-fields" style="display:' + (enabled ? 'block' : 'none') + '; padding-top:4px;">' +
+      fieldsHtml + '<div id="plat-' + p.id + '-error" style="font-size:12px; color:#ef4444; margin-top:6px; display:none;"></div></div></div>';
   }).join('');
 }
 
 function togglePlatform(id, on) {
-  document.getElementById(`plat-${id}-fields`).style.display = on ? 'block' : 'none';
-  document.getElementById(`plat-${id}-testbtn`).style.display = on ? 'inline-flex' : 'none';
-  const card = document.getElementById(`platcard-${id}`);
+  document.getElementById('plat-' + id + '-fields').style.display = on ? 'block' : 'none';
+  document.getElementById('plat-' + id + '-testbtn').style.display = on ? 'inline-flex' : 'none';
+  const card = document.getElementById('platcard-' + id);
   const p = PLATFORMS.find(x => x.id === id);
   card.style.borderColor = on ? p.color : '#3f3f46';
   if (!on) setPlatformStatus(id, null, '');
@@ -1197,10 +681,10 @@ function togglePlatform(id, on) {
 function collectPlatforms() {
   const result = {};
   for (const p of PLATFORMS) {
-    const enabled = document.getElementById(`plat-${p.id}-enabled`)?.checked || false;
+    const enabled = document.getElementById('plat-' + p.id + '-enabled')?.checked || false;
     const creds = { enabled };
     for (const f of p.fields) {
-      const el = document.getElementById(`plat-${p.id}-${f.id}`);
+      const el = document.getElementById('plat-' + p.id + '-' + f.id);
       if (el) creds[f.id] = el.value.trim();
     }
     result[p.id] = creds;
@@ -1209,20 +693,15 @@ function collectPlatforms() {
 }
 
 function setPlatformStatus(id, ok, msg) {
-  const badge = document.getElementById(`plat-${id}-badge`);
-  const errEl = document.getElementById(`plat-${id}-error`);
+  const badge = document.getElementById('plat-' + id + '-badge');
+  const errEl = document.getElementById('plat-' + id + '-error');
   if (ok === true) {
-    badge.textContent = '✓ ' + (msg || 'Connected');
-    badge.style.color = '#22c55e';
-    errEl.style.display = 'none';
+    badge.textContent = '✓ ' + (msg || 'Connected'); badge.style.color = '#22c55e'; errEl.style.display = 'none';
   } else if (ok === false) {
-    badge.textContent = '✗ Failed';
-    badge.style.color = '#ef4444';
-    errEl.textContent = msg || 'Connection failed.';
-    errEl.style.display = 'block';
+    badge.textContent = '✗ Failed'; badge.style.color = '#ef4444';
+    errEl.textContent = msg || 'Connection failed.'; errEl.style.display = 'block';
   } else {
-    badge.textContent = '';
-    errEl.style.display = 'none';
+    badge.textContent = ''; errEl.style.display = 'none';
   }
 }
 
@@ -1233,42 +712,37 @@ async function testPlatformAPI(id, creds) {
       body: JSON.stringify({ platform: id, credentials: creds })
     });
     return res.json();
-  } catch(e) {
-    return { ok: false, error: 'Network error: ' + e.message };
-  }
+  } catch(e) { return { ok: false, error: 'Network error: ' + e.message }; }
 }
 
 async function testPlatformBtn(id) {
-  const btn = document.getElementById(`plat-${id}-testbtn`);
-  btn.disabled = true;
-  btn.textContent = 'Testing…';
+  const btn = document.getElementById('plat-' + id + '-testbtn');
+  btn.disabled = true; btn.textContent = 'Testing…';
   setPlatformStatus(id, null, '');
   const p = PLATFORMS.find(x => x.id === id);
   const creds = { enabled: true };
   for (const f of p.fields) {
-    const el = document.getElementById(`plat-${id}-${f.id}`);
+    const el = document.getElementById('plat-' + id + '-' + f.id);
     if (el) creds[f.id] = el.value.trim();
   }
   const result = await testPlatformAPI(id, creds);
   setPlatformStatus(id, result.ok, result.ok ? result.info : result.error);
-  btn.disabled = false;
-  btn.textContent = 'Test';
+  btn.disabled = false; btn.textContent = 'Test';
 }
 
-// ── X.com OAuth connect ───────────────────────────────────────────────────────
 async function loadXStatus() {
   try {
     const res = await fetch('/api/x/status');
     const data = await res.json();
     const slug = currentSlug;
     const info = data[slug];
-    const statusEl = document.getElementById('x-connect-status');
-    const pollBtn = document.getElementById('x-poll-btn');
+    const statusEl     = document.getElementById('x-connect-status');
+    const pollBtn      = document.getElementById('x-poll-btn');
     const disconnectBtn = document.getElementById('x-disconnect-btn');
-    const connectBtn = document.getElementById('x-connect-btn');
+    const connectBtn   = document.getElementById('x-connect-btn');
     if (!statusEl) return;
     if (info && info.connected) {
-      statusEl.innerHTML = `<span style="color:#22c55e;font-size:13px;">✓ Connected as @${info.username}</span>`;
+      statusEl.innerHTML = '<span style="color:#22c55e;font-size:13px;">✓ Connected as @' + info.username + '</span>';
       pollBtn.style.display = 'inline-flex';
       disconnectBtn.style.display = 'inline-flex';
       connectBtn.textContent = 'Reconnect';
@@ -1282,9 +756,9 @@ async function loadXStatus() {
 }
 
 async function xOAuthConnect() {
-  const clientId = document.getElementById('x-client-id')?.value.trim();
+  const clientId    = document.getElementById('x-client-id')?.value.trim();
   const redirectUri = document.getElementById('x-redirect-uri')?.value.trim();
-  if (!clientId) { alert('Enter your X OAuth Client ID first.'); return; }
+  if (!clientId)    { alert('Enter your X OAuth Client ID first.'); return; }
   if (!redirectUri) { alert('Enter the Redirect URI that matches your X app settings.'); return; }
   try {
     const res = await fetch('/api/x/auth-url', {
@@ -1293,15 +767,14 @@ async function xOAuthConnect() {
     });
     const data = await res.json();
     if (!data.ok) { alert('Error: ' + data.error); return; }
-    const popup = window.open(data.url, 'x-oauth', 'width=600,height=700');
+    window.open(data.url, 'x-oauth', 'width=600,height=700');
     const statusEl = document.getElementById('x-connect-status');
     if (statusEl) statusEl.innerHTML = '<span style="color:#f59e0b;font-size:13px;">Waiting for authorization… complete it in the popup, then paste the callback URL below.</span>';
-    document.getElementById('x-poll-status').innerHTML = `
-      <div style="margin-top:8px;">
-        <label style="font-size:12px;color:#a1a1aa;">After authorizing, copy the full callback URL from your browser and paste it here:</label>
-        <input type="text" id="x-callback-url" placeholder="https://your-domain.vercel.app/api/x/oauth-redirect?code=...&state=..." style="font-size:13px;margin-top:4px;">
-        <button type="button" class="btn btn-ghost" onclick="xCompleteAuth()" style="margin-top:6px;font-size:13px;">Complete Connection</button>
-      </div>`;
+    document.getElementById('x-poll-status').innerHTML =
+      '<div style="margin-top:8px;">' +
+      '<label style="font-size:12px;color:#a1a1aa;">After authorizing, copy the full callback URL from your browser and paste it here:</label>' +
+      '<input type="text" id="x-callback-url" placeholder="https://your-domain.vercel.app/api/x/oauth-redirect?code=...&state=..." style="font-size:13px;margin-top:4px;">' +
+      '<button type="button" class="btn btn-ghost" onclick="xCompleteAuth()" style="margin-top:6px;font-size:13px;">Complete Connection</button></div>';
   } catch(e) { alert('Error: ' + e.message); }
 }
 
@@ -1309,11 +782,11 @@ async function xCompleteAuth() {
   const callbackUrl = document.getElementById('x-callback-url')?.value.trim();
   if (!callbackUrl) { alert('Paste the callback URL first.'); return; }
   try {
-    const url = new URL(callbackUrl);
-    const code = url.searchParams.get('code');
+    const url   = new URL(callbackUrl);
+    const code  = url.searchParams.get('code');
     const state = url.searchParams.get('state');
     if (!code || !state) { alert('Could not find code/state in that URL. Make sure you copied the full callback URL.'); return; }
-    const res = await fetch('/api/x/callback', {
+    const res  = await fetch('/api/x/callback', {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ code, state })
     });
@@ -1325,30 +798,23 @@ async function xCompleteAuth() {
 }
 
 async function xPollDMs() {
-  const btn = document.getElementById('x-poll-btn');
+  const btn      = document.getElementById('x-poll-btn');
   const statusEl = document.getElementById('x-poll-status');
-  btn.disabled = true;
-  btn.textContent = 'Polling…';
-  statusEl.textContent = '';
+  btn.disabled = true; btn.textContent = 'Polling…'; statusEl.textContent = '';
   try {
-    const res = await fetch('/api/x/poll', {
+    const res  = await fetch('/api/x/poll', {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ persona: currentSlug })
     });
     const data = await res.json();
     if (data.ok) {
       statusEl.style.color = '#22c55e';
-      statusEl.textContent = `Replied to ${data.replied} new DM(s).` + (data.errors.length ? ` Errors: ${data.errors.join('; ')}` : '');
+      statusEl.textContent = 'Replied to ' + data.replied + ' new DM(s).' + (data.errors.length ? ' Errors: ' + data.errors.join('; ') : '');
     } else {
-      statusEl.style.color = '#ef4444';
-      statusEl.textContent = data.error;
+      statusEl.style.color = '#ef4444'; statusEl.textContent = data.error;
     }
-  } catch(e) {
-    statusEl.style.color = '#ef4444';
-    statusEl.textContent = 'Network error: ' + e.message;
-  }
-  btn.disabled = false;
-  btn.textContent = 'Poll DMs Now';
+  } catch(e) { statusEl.style.color = '#ef4444'; statusEl.textContent = 'Network error: ' + e.message; }
+  btn.disabled = false; btn.textContent = 'Poll DMs Now';
 }
 
 async function xDisconnect() {
@@ -1360,15 +826,13 @@ async function xDisconnect() {
   await loadXStatus();
 }
 
-// ── Speech style generation ───────────────────────────────────────────────────
 async function randomizeBackstory() {
-  const btn = document.getElementById('backstory-rand-btn');
+  const btn    = document.getElementById('backstory-rand-btn');
   const status = document.getElementById('backstory-rand-status');
   if (!btn || !status) return;
-  btn.disabled = true;
-  status.textContent = 'Generating…';
+  btn.disabled = true; status.textContent = 'Generating…';
   try {
-    const res = await fetch('/api/generate/backstory', {
+    const res  = await fetch('/api/generate/backstory', {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ name: v('f-name'), age: v('f-age'), location: v('f-location'),
         archetype: v('f-archetype'), interests: v('f-interests') })
@@ -1378,19 +842,16 @@ async function randomizeBackstory() {
     document.getElementById('f-backstory').value = data.text;
     status.textContent = '✓ Done';
     setTimeout(() => { status.textContent = ''; }, 2000);
-  } catch(e) {
-    status.textContent = '✗ ' + e.message;
-  }
+  } catch(e) { status.textContent = '✗ ' + e.message; }
   btn.disabled = false;
 }
 
 async function generateSpeechStyle(randomize) {
-  const btn = document.getElementById(randomize ? 'speech-rand-btn' : 'speech-gen-btn');
+  const btn    = document.getElementById(randomize ? 'speech-rand-btn' : 'speech-gen-btn');
   const status = document.getElementById('speech-gen-status');
-  btn.disabled = true;
-  status.textContent = randomize ? 'Randomizing…' : 'Generating…';
+  btn.disabled = true; status.textContent = randomize ? 'Randomizing…' : 'Generating…';
   try {
-    const res = await fetch('/api/generate/speech-style', {
+    const res  = await fetch('/api/generate/speech-style', {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ name: v('f-name'), age: v('f-age'), archetype: v('f-archetype'),
         backstory: v('f-backstory'), interests: v('f-interests'), randomize })
@@ -1400,19 +861,16 @@ async function generateSpeechStyle(randomize) {
     document.getElementById('f-speech').value = data.text;
     status.textContent = '✓ Done';
     setTimeout(() => { status.textContent = ''; }, 2000);
-  } catch(e) {
-    status.textContent = '✗ ' + e.message;
-  }
+  } catch(e) { status.textContent = '✗ ' + e.message; }
   btn.disabled = false;
 }
 
 async function generateTriggers() {
-  const btn = document.getElementById('triggers-gen-btn');
+  const btn    = document.getElementById('triggers-gen-btn');
   const status = document.getElementById('triggers-gen-status');
-  btn.disabled = true;
-  status.textContent = 'Generating…';
+  btn.disabled = true; status.textContent = 'Generating…';
   try {
-    const res = await fetch('/api/generate/conversion-triggers', {
+    const res  = await fetch('/api/generate/conversion-triggers', {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ name: v('f-name'), archetype: v('f-archetype'),
         flirt_pace: v('f-flirt'), nsfw_level: v('f-nsfw-level') })
@@ -1422,9 +880,7 @@ async function generateTriggers() {
     document.getElementById('f-triggers').value = data.text;
     status.textContent = '✓ Done';
     setTimeout(() => { status.textContent = ''; }, 2000);
-  } catch(e) {
-    status.textContent = '✗ ' + e.message;
-  }
+  } catch(e) { status.textContent = '✗ ' + e.message; }
   btn.disabled = false;
 }
 
@@ -1435,191 +891,135 @@ function handleAvatarUpload(input) {
   reader.onload = e => {
     const dataUrl = e.target.result;
     document.getElementById('f-avatar').value = dataUrl;
-    const preview = document.getElementById('avatar-preview');
-    preview.innerHTML = `<img src="${dataUrl}" style="width:100%;height:100%;object-fit:cover;">`;
+    document.getElementById('avatar-preview').innerHTML = '<img src="' + dataUrl + '" style="width:100%;height:100%;object-fit:cover;">';
   };
   reader.readAsDataURL(file);
 }
 
 function clearAvatar() {
   document.getElementById('f-avatar').value = '';
-  document.getElementById('avatar-preview').innerHTML = `<span style="font-size:28px;color:#71717a;">+</span>`;
+  document.getElementById('avatar-preview').innerHTML = '<span style="font-size:28px;color:#71717a;">+</span>';
 }
 
-// ── Collect form values ───────────────────────────────────────────────────────
 function collectConfig() {
   return {
-    name: v('f-name'),
-    age: v('f-age'),
-    gender: v('f-gender'),
-    location: v('f-location'),
-    mirror_location: document.getElementById('f-mirror-location')?.checked || false,
-    archetype: v('f-archetype'),
-    backstory: v('f-backstory'),
-    speech_style: v('f-speech'),
-    warmth: parseInt(v('f-warmth')) || 3,
-    question_freq: v('f-qfreq'),
-    interests: v('f-interests'),
-    flirt_pace: v('f-flirt'),
+    name: v('f-name'), age: v('f-age'), gender: v('f-gender'),
+    location: v('f-location'), mirror_location: document.getElementById('f-mirror-location')?.checked || false,
+    archetype: v('f-archetype'), backstory: v('f-backstory'), speech_style: v('f-speech'),
+    warmth: parseInt(v('f-warmth')) || 3, question_freq: v('f-qfreq'),
+    interests: v('f-interests'), flirt_pace: v('f-flirt'),
     nsfw_enabled: document.getElementById('f-nsfw')?.checked || false,
-    nsfw_level: v('f-nsfw-level'),
-    conversion_triggers: v('f-triggers'),
-    avatar: v('f-avatar'),
-    platforms: collectPlatforms(),
+    nsfw_level: v('f-nsfw-level'), conversion_triggers: v('f-triggers'),
+    avatar: v('f-avatar'), platforms: collectPlatforms(),
   };
 }
 
-// ── Save ──────────────────────────────────────────────────────────────────────
 async function savePersona() {
   if (!currentSlug) return;
   const config = collectConfig();
   const ageNum = parseInt(config.age);
-  if (!config.age || isNaN(ageNum) || ageNum < 18) {
-    alert('Age must be 18 or older.');
-    document.getElementById('f-age').focus();
-    return;
-  }
+  if (!config.age || isNaN(ageNum) || ageNum < 18) { alert('Age must be 18 or older.'); document.getElementById('f-age').focus(); return; }
   const status = document.getElementById('save-status');
-
-  // Test enabled platform connections (warnings only — doesn't block save)
-  const enabledPlatforms = Object.entries(config.platforms || {})
-    .filter(([, p]) => p.enabled);
+  const enabledPlatforms = Object.entries(config.platforms || {}).filter(([, p]) => p.enabled);
   if (enabledPlatforms.length) {
-    status.textContent = 'Testing platform connections…';
-    status.className = 'save-status';
+    status.textContent = 'Testing platform connections…'; status.className = 'save-status';
     for (const [id, creds] of enabledPlatforms) {
       const result = await testPlatformAPI(id, creds);
       setPlatformStatus(id, result.ok, result.ok ? result.info : result.error);
     }
   }
-
-  status.textContent = 'Saving…';
-  status.className = 'save-status';
+  status.textContent = 'Saving…'; status.className = 'save-status';
   try {
-    const res = await fetch(`/api/personas/${currentSlug}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+    const res = await fetch('/api/personas/' + currentSlug, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(config)
     });
     const data = await res.json();
     if (data.ok) {
       lsSavePersona(currentSlug, config);
       if (data.prompt) localStorage.setItem('persona_prompt_' + currentSlug, data.prompt);
-      status.textContent = '✓ Saved & deployed';
-      status.className = 'save-status ok';
-      const item = document.getElementById(`item-${currentSlug}`);
+      status.textContent = '✓ Saved & deployed'; status.className = 'save-status ok';
+      const item = document.getElementById('item-' + currentSlug);
       if (item) item.querySelector('.persona-name').textContent = config.name || currentSlug;
       showPromptPreview(data.prompt);
-    } else {
-      throw new Error(data.error || 'Unknown error');
-    }
-  } catch(e) {
-    status.textContent = '✗ ' + e.message;
-    status.className = 'save-status err';
-  }
+    } else { throw new Error(data.error || 'Unknown error'); }
+  } catch(e) { status.textContent = '✗ ' + e.message; status.className = 'save-status err'; }
 }
 
-// ── Preview ───────────────────────────────────────────────────────────────────
 async function previewPrompt() {
   if (!currentSlug) return;
   const config = collectConfig();
   try {
-    const res = await fetch(`/api/personas/${currentSlug}/preview`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+    const res = await fetch('/api/personas/' + currentSlug + '/preview', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(config)
     });
     const data = await res.json();
     showPromptPreview(data.prompt);
     switchTabByName('prompt');
-  } catch(e) {
-    console.error(e);
-  }
+  } catch(e) { console.error(e); }
 }
 
 function showPromptPreview(prompt) {
   if (currentTab === 'prompt') {
-    document.getElementById('preview-content').innerHTML =
-      `<div class="prompt-box">${esc(prompt)}</div>`;
+    document.getElementById('preview-content').innerHTML = '<div class="prompt-box">' + esc(prompt) + '</div>';
   }
 }
 
 async function testChat() {
   if (!currentSlug) return;
   const config = collectConfig();
-  const res = await fetch(`/api/personas/${currentSlug}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+  const res = await fetch('/api/personas/' + currentSlug, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(config)
   });
   const data = await res.json().catch(() => ({}));
-  if (data.prompt) {
-    localStorage.setItem(`persona_prompt_${currentSlug}`, data.prompt);
-  }
-  window.open(`/?persona=${currentSlug}`, '_blank');
+  if (data.prompt) localStorage.setItem('persona_prompt_' + currentSlug, data.prompt);
+  window.open('/chat?persona=' + currentSlug, '_blank');
 }
 
-// ── Tabs ──────────────────────────────────────────────────────────────────────
 function switchTab(name, el) {
   currentTab = name;
   document.querySelectorAll('.preview-tab').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
-  if (name === 'funnel') {
-    renderFunnelPreview();
-  }
+  if (name === 'funnel') renderFunnelPreview();
 }
 
 function switchTabByName(name) {
-  const tabs = document.querySelectorAll('.preview-tab');
-  tabs.forEach((t, i) => {
+  document.querySelectorAll('.preview-tab').forEach((t, i) => {
     if ((i === 0 && name === 'prompt') || (i === 1 && name === 'funnel')) {
-      t.classList.add('active');
-      currentTab = name;
-    } else {
-      t.classList.remove('active');
-    }
+      t.classList.add('active'); currentTab = name;
+    } else { t.classList.remove('active'); }
   });
 }
 
 function renderFunnelPreview() {
   const stages = [
-    { name: 'Warm', desc: 'Friendly opener, build rapport, ask about the fan.', color: '#22c55e' },
-    { name: 'Engage', desc: 'Reference what the fan shared. Create a sense of being known.', color: '#84cc16' },
-    { name: 'Intrigue', desc: 'Drop hints about exclusive content without hard-selling.', color: '#eab308' },
-    { name: 'Tease', desc: 'Light flirt or behind-the-scenes reference implying more exists.', color: '#f97316' },
-    { name: 'Offer', desc: 'Natural, in-character mention of paid post / PPV / subscription perk.', color: '#ef4444' },
-    { name: 'Close', desc: 'Reinforce value. Make the fan feel special for buying.', color: '#a855f7' },
+    { name: 'Warm',    desc: 'Friendly opener, build rapport, ask about the fan.',              color: '#22c55e' },
+    { name: 'Engage',  desc: 'Reference what the fan shared. Create a sense of being known.',   color: '#84cc16' },
+    { name: 'Intrigue',desc: 'Drop hints about exclusive content without hard-selling.',         color: '#eab308' },
+    { name: 'Tease',   desc: 'Light flirt or behind-the-scenes reference implying more exists.',color: '#f97316' },
+    { name: 'Offer',   desc: 'Natural, in-character mention of paid post / PPV / subscription perk.', color: '#ef4444' },
+    { name: 'Close',   desc: 'Reinforce value. Make the fan feel special for buying.',           color: '#a855f7' },
   ];
   const config = collectConfig();
-  const paceNote = {
-    slow: 'Slow burn — funnel progresses over many sessions.',
-    moderate: 'Moderate — funnel completes over a few conversations.',
-    fast: 'Fast — funnel progresses within a single conversation.',
-    instant: 'Instant — moves to tease/offer very quickly.',
-  }[config.flirt_pace] || '';
-
-  document.getElementById('preview-content').innerHTML = `
-    <div style="margin-bottom:12px; font-size:0.78rem; color:#71717a;">${paceNote}</div>
-    ${stages.map(s => `
-      <div class="funnel-stage">
-        <div class="funnel-dot" style="background:${s.color};"></div>
-        <div>
-          <div class="funnel-stage-name">${s.name}</div>
-          <div class="funnel-stage-desc">${s.desc}</div>
-        </div>
-      </div>`).join('')}
-    ${config.conversion_triggers ? `<div style="margin-top:14px; font-size:0.75rem; color:#52525b;"><strong style="color:#a1a1aa;">Custom triggers:</strong><br>${esc(config.conversion_triggers)}</div>` : ''}
-  `;
+  const paceNote = { slow: 'Slow burn — funnel progresses over many sessions.', moderate: 'Moderate — funnel completes over a few conversations.', fast: 'Fast — funnel progresses within a single conversation.', instant: 'Instant — moves to tease/offer very quickly.' }[config.flirt_pace] || '';
+  document.getElementById('preview-content').innerHTML =
+    '<div style="margin-bottom:12px; font-size:0.78rem; color:#71717a;">' + paceNote + '</div>' +
+    stages.map(s =>
+      '<div class="funnel-stage"><div class="funnel-dot" style="background:' + s.color + ';"></div><div><div class="funnel-stage-name">' + s.name + '</div><div class="funnel-stage-desc">' + s.desc + '</div></div></div>'
+    ).join('') +
+    (config.conversion_triggers ? '<div style="margin-top:14px; font-size:0.75rem; color:#52525b;"><strong style="color:#a1a1aa;">Custom triggers:</strong><br>' + esc(config.conversion_triggers) + '</div>' : '');
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
 function v(id) { const el = document.getElementById(id); return el ? el.value.trim() : ''; }
 function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function opt(options, selected) {
-  return options.map(o => `<option value="${esc(o)}" ${o === selected ? 'selected' : ''}>${o}</option>`).join('');
+  return options.map(o => '<option value="' + esc(o) + '" ' + (o === selected ? 'selected' : '') + '>' + o + '</option>').join('');
 }
 
 init();
 </script>
+
 </body>
 </html>

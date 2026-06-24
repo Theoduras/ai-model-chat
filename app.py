@@ -383,34 +383,44 @@ button:hover{background:#6d28d9}
 
 # ── Static pages ─────────────────────────────────────────────────────────────
 
-@app.route('/')
-def index():
-    return send_from_directory(BASE_DIR, 'index.html')
-
-@app.route('/profile')
-def profile():
-    return send_from_directory(BASE_DIR, 'profile.html')
-
-@app.route('/chat.html')
-def chat_page():
-    return send_from_directory(BASE_DIR, 'chat.html')
-
-@app.route('/admin', methods=['GET', 'POST'])
-def admin():
+@app.route('/', methods=['GET', 'POST'])
+@app.route('/dashboard', methods=['GET', 'POST'])
+def dashboard():
     if not _check_admin():
         if request.method == 'POST':
             pw = request.form.get('password', '')
             if pw == _admin_password():
                 session['admin_authed'] = True
-                return redirect('/admin')
+                return redirect('/dashboard')
             return render_template_string(LOGIN_HTML, error='Incorrect password.')
         return render_template_string(LOGIN_HTML, error=None)
-    return send_from_directory(BASE_DIR, 'admin.html')
+    return send_from_directory(BASE_DIR, 'dashboard.html')
+
+@app.route('/chat', methods=['GET'])
+def chat_page():
+    return send_from_directory(BASE_DIR, 'chat.html')
+
+@app.route('/landing')
+def landing():
+    return send_from_directory(BASE_DIR, 'landingpage.html')
+
+@app.route('/profile')
+def profile():
+    return redirect('/landing')
+
+@app.route('/admin', methods=['GET', 'POST'])
+def admin():
+    return redirect('/dashboard')
 
 @app.route('/admin/logout')
 def admin_logout():
     session.pop('admin_authed', None)
-    return redirect('/admin')
+    return redirect('/dashboard')
+
+@app.route('/dashboard/logout')
+def dashboard_logout():
+    session.pop('admin_authed', None)
+    return redirect('/dashboard')
 
 
 # ── Chat endpoint ─────────────────────────────────────────────────────────────
