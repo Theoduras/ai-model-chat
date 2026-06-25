@@ -8,6 +8,13 @@
 </head>
 <body class="page-chat">
 
+<div class="chat-shell">
+
+<aside class="persona-rail" id="persona-rail" aria-label="Choose a model">
+  <div class="persona-rail-header">Models</div>
+  <div class="persona-rail-list" id="rail-list"></div>
+</aside>
+
 <div class="chat-container">
 
   <header class="header">
@@ -53,19 +60,20 @@
 
 </div>
 
+</div>
+
 <script>
 const chatEl = document.getElementById('chat');
 const inp = document.getElementById('input');
 const typingRow = document.getElementById('typing-row');
 let u = null, m = { recentTopics: [], lastTopic: null }, h = [], s = 3.5, l = Date.now(), avatarUrl = null, personaName = '…';
-const persona = new URLSearchParams(location.search).get('persona') || 'lilith';
-const PFX = 'persona_' + persona + '_';
+let persona = new URLSearchParams(location.search).get('persona') || 'lilith';
+let PFX = 'persona_' + persona + '_';
 
 if (window.self !== window.top) { document.body.classList.add('embed'); u = 'EmbedUser'; localStorage.setItem(PFX + 'user', u); }
 
-fetch('/api/personas/' + persona).then(r => r.ok ? r.json() : null).then(d => {
-  if (!d) return;
-  const cfg = d.config || {};
+function applyPersonaConfig(cfg) {
+  avatarUrl = null;
   personaName = cfg.name || persona;
   document.title = 'Chat with ' + personaName;
   document.getElementById('header-name').textContent = personaName;
@@ -74,13 +82,74 @@ fetch('/api/personas/' + persona).then(r => r.ok ? r.json() : null).then(d => {
     avatarUrl = '/api/personas/' + persona + '/avatar';
     document.getElementById('header-avatar').src = avatarUrl;
     document.getElementById('typing-av').src = avatarUrl;
+  } else {
+    document.getElementById('header-avatar').src = 'https://picsum.photos/id/1011/48/48';
+    document.getElementById('typing-av').src = 'https://picsum.photos/id/1011/48/48';
   }
   const parts = [];
   if (cfg.location && !cfg.mirror_location) parts.push(cfg.location);
   if (cfg.age) parts.push(cfg.age);
   document.getElementById('header-status').textContent = parts.join(' · ');
   inp.placeholder = 'Message ' + personaName + '…';
-}).catch(() => {});
+}
+
+function loadPersonaConfig() {
+  return fetch('/api/personas/' + persona).then(r => r.ok ? r.json() : null).then(d => {
+    if (d) applyPersonaConfig(d.config || {});
+  }).catch(() => {});
+}
+
+function renderRail(list) {
+  const railList = document.getElementById('rail-list');
+  railList.innerHTML = '';
+  list.forEach(p => {
+    const cfg = p.config || {};
+    const item = document.createElement('div');
+    item.className = 'rail-item' + (p.slug === persona ? ' active' : '');
+    item.id = 'rail-' + p.slug;
+    item.onclick = () => switchPersona(p.slug);
+    const name = cfg.name || p.name || p.slug;
+    const av = p.avatar
+      ? '<img class="rail-avatar" src="/api/personas/' + p.slug + '/avatar" alt="">'
+      : '<div class="rail-avatar">' + name.slice(0,2).toUpperCase() + '</div>';
+    const meta = [cfg.location, cfg.age].filter(Boolean).join(' · ');
+    item.innerHTML = av +
+      '<div class="rail-info"><div class="rail-name">' + name + '</div>' +
+      (meta ? '<div class="rail-meta">' + meta + '</div>' : '') + '</div>';
+    railList.appendChild(item);
+  });
+}
+
+function loadPersonaList() {
+  return fetch('/api/personas').then(r => r.ok ? r.json() : []).then(list => {
+    renderRail(Array.isArray(list) ? list : []);
+  }).catch(() => {});
+}
+
+async function switchPersona(slug) {
+  if (slug === persona) return;
+  ri();
+  sm(); sc();
+  persona = slug;
+  PFX = 'persona_' + persona + '_';
+  document.querySelectorAll('.rail-item').forEach(el => el.classList.remove('active'));
+  const active = document.getElementById('rail-' + slug);
+  if (active) active.classList.add('active');
+  await loadPersonaConfig();
+  ld();
+  if (h.length === 0) {
+    const greetDelay = 800 + Math.random() * 1200;
+    showTyping(true);
+    setTimeout(() => {
+      fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: chatBody({ message: '__greeting__', history: [] }) })
+        .then(r => r.json()).then(d => { if (d.reply) { cs(d.reply, si); } else { showTyping(false); addMsg('hey', false); si(); } })
+        .catch(() => { showTyping(false); addMsg('hey', false); si(); });
+    }, greetDelay);
+  }
+}
+
+loadPersonaConfig();
+loadPersonaList();
 
 function chatBody(extra) {
   const sp = localStorage.getItem('persona_prompt_' + persona);
