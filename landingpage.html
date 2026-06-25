@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Creator Profile</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <link rel="stylesheet" href="/css/style.css">
@@ -11,7 +11,6 @@
 
   <nav>
     <div class="nav-left">
-      <a class="hamburger" href="/chat" target="_blank" style="color: inherit; text-decoration: none; display: flex; align-items: center;"><i class="fa-solid fa-message"></i></a>
       <div class="verified">
         <div class="verified-dot">
           <i class="fa-solid fa-check text-white text-xs"></i>
@@ -22,103 +21,147 @@
   </nav>
 
   <div class="main-container">
-    <div class="content-wrapper">
-      <div class="left-section">
-        <div class="headline-media">
-          <div style="flex: 0 0 55%; min-width: 0; display: flex; flex-direction: column; justify-content: space-evenly;">
-            <div class="headline-text" style="width: 100%;">
-              <h1 class="headline" id="headline">
-                You only see <span class="highlight">10%</span> of me.
-              </h1>
-            </div>
+    <div class="lp-content">
 
-            <p style="margin-top:0.6rem; font-size:1.15rem; color:#a1a1aa;" id="subtext">
-              The rest stays private.
-            </p>
-
-            <button class="cta-button" id="cta-button" style="width:163px; margin-top:1rem; padding:0.7rem 1.8rem; font-size:1rem;">
-              SEE MORE &rarr;
-            </button>
-
-            <div class="secret-note" id="secret-note" style="margin-top:0.8rem;">
-              <span style="font-size:1.6rem;"></span>
-              <span>I left something for you inside.</span>
-            </div>
-          </div>
-
-          <div class="cover-photo" id="cover-photo" style="flex: 1; height: 100%;">
-            <div class="silhouette">
-              <div class="silhouette-head"></div>
-              <div class="silhouette-body"></div>
-            </div>
-            <div class="cover-label" id="cover-label">COVER PHOTO</div>
+      <div class="headline-media">
+        <div class="headline-copy">
+          <h1 class="headline" id="headline">
+            You only see <span class="highlight">10%</span> of me.
+          </h1>
+          <p class="subtext" id="subtext">The rest stays private.</p>
+          <button class="cta-button" id="cta-button">SEE MORE &rarr;</button>
+          <div class="secret-note" id="secret-note">
+            <span>I left something for you inside.</span>
           </div>
         </div>
 
-        <div id="about" style="margin-top:0.6rem; font-size:0.82rem; color:#a1a1aa; line-height:1.25;"></div>
-
-        <div class="stats" id="stats" style="margin-top:0.6rem;">
-          <div class="stat-card">
-            <div class="stat-number">46+</div>
-            <div class="stat-label">Photos</div>
+        <div class="cover-photo" id="cover-photo">
+          <div class="silhouette">
+            <div class="silhouette-head"></div>
+            <div class="silhouette-body"></div>
           </div>
-          <div class="stat-card">
-            <div class="stat-number">7+</div>
-            <div class="stat-label">Videos</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-number">Updates every other day</div>
-            <div class="stat-label">Updates</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-number" style="font-size:1.1rem;">Custom Content</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-number" style="font-size:1.1rem;">ASMR/JOI</div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-number" style="font-size:1.1rem;">Personal Messaging</div>
-          </div>
-        </div>
-
-        <div class="gallery-area">
-          <h2 class="gallery-header" id="gallery-header" style="font-size:0.72rem; margin:0 0 2px 0; font-weight:600;">A glimpse of what you're missing</h2>
-          <div class="gallery-grid" id="gallery-grid"></div>
+          <div class="cover-label" id="cover-label">COVER PHOTO</div>
         </div>
       </div>
 
-      <div class="right-section" style="flex-direction:column; align-items:stretch; padding:0.35rem; min-height:0; background:#18181b;">
-        <div style="flex:1; min-height:0; display:flex;">
-          <iframe src="/chat" title="Chat with Lilith" style="width:100%; height:100%; border:none; border-radius:8px; box-shadow:0 4px 6px rgba(0,0,0,0.1); flex:1;"></iframe>
+      <div id="about" class="lp-about"></div>
+
+      <div class="stats" id="stats">
+        <div class="stat-card">
+          <div class="stat-number">46+</div>
+          <div class="stat-label">Photos</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-number">7+</div>
+          <div class="stat-label">Videos</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-number">Daily</div>
+          <div class="stat-label">Updates</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-number" style="font-size:1rem;">Custom Content</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-number" style="font-size:1rem;">ASMR/JOI</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-number" style="font-size:1rem;">Personal Messaging</div>
         </div>
       </div>
+
+      <div class="gallery-area">
+        <h2 class="gallery-header" id="gallery-header">A glimpse of what you're missing</h2>
+        <div class="gallery-grid" id="gallery-grid"></div>
+      </div>
+
     </div>
   </div>
 
+  <!-- Chat drawer overlay -->
+  <div class="chat-overlay" id="chat-overlay" onclick="closeChat()"></div>
+
+  <!-- Slide-in chat drawer -->
+  <div class="chat-drawer" id="chat-drawer" aria-label="Chat panel">
+    <button class="drawer-close" onclick="closeChat()" aria-label="Close chat">
+      <i class="fa-solid fa-xmark"></i>
+    </button>
+    <iframe id="chat-iframe" src="/chat?embed=1" title="Chat" allow="autoplay"></iframe>
+  </div>
+
+  <!-- Floating chat button -->
+  <button class="chat-fab" id="chat-fab" onclick="openChat()" aria-label="Open chat">
+    <i class="fa-solid fa-comment"></i>
+    <span class="fab-badge" id="fab-badge" aria-hidden="true"></span>
+  </button>
+
   <script>
+    let chatOpen = false;
+    let unread = 0;
+
+    function openChat() {
+      chatOpen = true;
+      document.getElementById('chat-drawer').classList.add('open');
+      document.getElementById('chat-overlay').classList.add('open');
+      document.body.classList.add('chat-is-open');
+      clearBadge();
+    }
+
+    function closeChat() {
+      chatOpen = false;
+      document.getElementById('chat-drawer').classList.remove('open');
+      document.getElementById('chat-overlay').classList.remove('open');
+      document.body.classList.remove('chat-is-open');
+    }
+
+    function clearBadge() {
+      unread = 0;
+      const badge = document.getElementById('fab-badge');
+      badge.textContent = '';
+      badge.classList.remove('visible');
+    }
+
+    function showBadge() {
+      if (chatOpen) return;
+      unread++;
+      const badge = document.getElementById('fab-badge');
+      badge.textContent = unread > 9 ? '9+' : unread;
+      badge.classList.add('visible');
+    }
+
+    window.addEventListener('message', function(e) {
+      if (e.data && e.data.type === 'new_message') showBadge();
+    });
+
+    // Show badge after initial greeting delay
+    setTimeout(() => { if (!chatOpen) showBadge(); }, 4000);
+
+    // Profile data
     fetch('/api/profile')
-      .then(res => res.json())
+      .then(r => r.json())
       .then(data => {
         const headlineEl = document.getElementById('headline');
-        if (headlineEl) headlineEl.innerHTML = data.headline || headlineEl.innerHTML;
+        if (headlineEl && data.headline) headlineEl.innerHTML = data.headline;
 
         const subtextEl = document.getElementById('subtext');
-        if (subtextEl) subtextEl.textContent = data.subtext || subtextEl.textContent;
+        if (subtextEl && data.subtext) subtextEl.textContent = data.subtext;
 
         const cta = document.getElementById('cta-button');
         if (cta) {
-          cta.textContent = data.cta_text || cta.textContent;
-          cta.onclick = () => { window.location.href = '/chat'; };
+          if (data.cta_text) cta.textContent = data.cta_text;
+          cta.onclick = () => openChat();
+        } else {
+          document.getElementById('cta-button').onclick = () => openChat();
         }
 
         const noteEl = document.getElementById('secret-note');
-        if (noteEl) {
-          const spans = noteEl.querySelectorAll('span');
-          if (spans.length > 1) spans[1].textContent = data.secret_note || spans[1].textContent;
+        if (noteEl && data.secret_note) {
+          const span = noteEl.querySelector('span');
+          if (span) span.textContent = data.secret_note;
         }
 
         const aboutEl = document.getElementById('about');
-        if (aboutEl) aboutEl.textContent = data.about || aboutEl.textContent;
+        if (aboutEl && data.about) aboutEl.textContent = data.about;
 
         const statsContainer = document.getElementById('stats');
         if (statsContainer && data.stats) {
@@ -126,10 +169,9 @@
           data.stats.forEach(stat => {
             const card = document.createElement('div');
             card.className = 'stat-card';
-            card.innerHTML = `
-              ${stat.number ? `<div class="stat-number">${stat.number}</div>` : ''}
-              ${stat.label ? `<div class="stat-label">${stat.label}</div>` : ''}
-            `;
+            card.innerHTML =
+              (stat.number ? `<div class="stat-number">${stat.number}</div>` : '') +
+              (stat.label  ? `<div class="stat-label">${stat.label}</div>`   : '');
             statsContainer.appendChild(card);
           });
         }
@@ -139,47 +181,43 @@
           coverPhoto.style.background = 'none';
           if (data.cover_video) {
             coverPhoto.innerHTML = `
-              <video autoplay muted loop playsinline style="width:100%; height:100%; object-fit:contain; border-radius:28px; display:block;">
+              <video autoplay muted loop playsinline style="width:100%;height:100%;object-fit:contain;border-radius:28px;display:block;">
                 <source src="${data.cover_video}" type="video/mp4">
-                Your browser does not support the video tag.
               </video>
-              <div class="cover-label" id="cover-label">${data.cover_label || 'COVER PHOTO'}</div>
-            `;
-          } else if (data.cover_image) {
+              <div class="cover-label">${data.cover_label || 'COVER PHOTO'}</div>`;
+          } else {
             coverPhoto.innerHTML = `
-              <img src="${data.cover_image}" alt="Profile cover" style="width:100%; height:100%; object-fit:contain; border-radius:28px; display:block;">
-              <div class="cover-label" id="cover-label">${data.cover_label || 'COVER PHOTO'}</div>
-            `;
+              <img src="${data.cover_image}" alt="Profile cover" style="width:100%;height:100%;object-fit:contain;border-radius:28px;display:block;">
+              <div class="cover-label">${data.cover_label || 'COVER PHOTO'}</div>`;
           }
         } else {
-          const coverLabel = document.getElementById('cover-label');
-          if (coverLabel) coverLabel.textContent = data.cover_label || coverLabel.textContent;
+          const cl = document.getElementById('cover-label');
+          if (cl && data.cover_label) cl.textContent = data.cover_label;
         }
 
         const galleryHeader = document.getElementById('gallery-header');
-        if (galleryHeader) galleryHeader.textContent = data.gallery_header || galleryHeader.textContent;
+        if (galleryHeader && data.gallery_header) galleryHeader.textContent = data.gallery_header;
 
         const galleryGrid = document.getElementById('gallery-grid');
         if (galleryGrid && data.gallery) {
           galleryGrid.innerHTML = '';
           data.gallery.forEach(item => {
-            const photoDiv = document.createElement('div');
-            photoDiv.className = 'photo' + (item.locked ? ' locked' : '');
+            const div = document.createElement('div');
+            div.className = 'photo' + (item.locked ? ' locked' : '');
             if (item.private) {
-              photoDiv.className += ' plus-private';
-              photoDiv.innerHTML = `
-                <div style="font-size:1.1rem; margin-bottom:2px; line-height:1;">${item.label}</div>
-                <div style="color:#bae6fd; font-size:0.65rem;">Private</div>
-              `;
+              div.className += ' plus-private';
+              div.innerHTML = `<div style="font-size:1.1rem;margin-bottom:2px;line-height:1;">${item.label}</div><div style="color:#bae6fd;font-size:0.65rem;">Private</div>`;
             } else {
-              photoDiv.innerHTML = `<div class="photo-label">${item.label}</div>`;
+              div.innerHTML = `<div class="photo-label">${item.label}</div>`;
             }
-            if (item.url) photoDiv.style.backgroundImage = `url(${item.url})`;
-            galleryGrid.appendChild(photoDiv);
+            if (item.url) div.style.backgroundImage = `url(${item.url})`;
+            galleryGrid.appendChild(div);
           });
         }
       })
-      .catch(err => console.log('Using static content (API not available yet)', err));
+      .catch(() => {
+        document.getElementById('cta-button').onclick = () => openChat();
+      });
   </script>
 
 </body>

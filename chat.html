@@ -219,6 +219,9 @@ function addMsg(text, isUser) {
   h.push({ role: r, content: text });
   insertMsg(text, isUser);
   sc();
+  if (!isUser && window.parent !== window) {
+    try { window.parent.postMessage({ type: 'new_message' }, '*'); } catch(e) {}
+  }
 }
 
 function showTyping(on) {
