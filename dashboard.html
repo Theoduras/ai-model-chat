@@ -96,13 +96,7 @@
   <aside class="sidebar" aria-label="Personas">
     <div class="sidebar-header">
       <span>Personas</span>
-      <div style="display:flex; align-items:center; gap:8px;">
-        <span id="persona-count" style="font-size:0.7rem; color:#52525b;"></span>
-        <button class="btn-new-folder" onclick="newFolder()" title="New folder">
-          <svg viewBox="0 0 20 20" fill="currentColor" width="13" height="13"><path d="M2 4.75A2.75 2.75 0 014.75 2h3.5c.698 0 1.33.26 1.81.688L11.19 4h4.06A2.75 2.75 0 0118 6.75v8.5A2.75 2.75 0 0115.25 18H4.75A2.75 2.75 0 012 15.25V4.75z"/></svg>
-          New Folder
-        </button>
-      </div>
+      <span id="persona-count" style="font-size:0.7rem; color:#52525b;"></span>
     </div>
     <div class="persona-list" id="persona-list"></div>
     <button class="btn-new" onclick="newPersona()">+ New Persona</button>
@@ -130,19 +124,10 @@
     <div class="preview-tabs">
       <div class="preview-tab active" onclick="switchTab('prompt', this)">System Prompt</div>
       <div class="preview-tab" onclick="switchTab('funnel', this)">Funnel</div>
-      <div class="preview-tab" onclick="switchTab('ai', this)">✨ AI Builder</div>
     </div>
     <div class="preview-content" id="preview-content">
       <div class="empty-state" style="padding:20px; min-height:auto;">
         <p style="font-size:0.75rem;">Configure a persona and click Preview Prompt.</p>
-      </div>
-    </div>
-    <!-- AI Builder panel -->
-    <div id="ai-builder-panel" style="display:none; flex-direction:column; flex:1; min-height:0; overflow:hidden;">
-      <div id="ai-chat-log" class="ai-chat-log"></div>
-      <div class="ai-input-row">
-        <input type="text" id="ai-builder-input" placeholder="Describe your persona… e.g. 'make her 21, bubbly, works at a coffee shop in Amsterdam'" autocomplete="off" onkeypress="if(event.key==='Enter')aiSend()">
-        <button class="btn btn-primary" style="padding:8px 14px; font-size:0.8rem; flex-shrink:0;" onclick="aiSend()">Send</button>
       </div>
     </div>
   </aside>
@@ -183,7 +168,11 @@ async function init() {
   try {
     const res = await fetch('/api/personas');
     const list = await res.json();
-    list.forEach(p => { personas[p.slug] = p; seen.add(p.slug); });
+    list.forEach(p => {
+      personas[p.slug] = p;
+      renderSidebarItem(p);
+      seen.add(p.slug);
+    });
   } catch(e) {
     console.error('Could not load personas', e);
   }
@@ -191,10 +180,12 @@ async function init() {
     if (seen.has(slug)) return;
     const cfg = lsLoadPersona(slug);
     if (!cfg) return;
-    personas[slug] = { slug, name: cfg.name || slug, config: cfg };
+    const p = { slug, name: cfg.name || slug, config: cfg };
+    personas[slug] = p;
+    renderSidebarItem(p);
     seen.add(slug);
   });
-  renderSidebar();
+  document.getElementById('persona-count').textContent = seen.size;
 }
 
 function applyConnState(configured, authMode, masked) {
@@ -417,15 +408,23 @@ async function bsFinalize() {
 }
 
 function renderSidebarItem(p) {
-  personas[p.slug] = p;
-  renderSidebar();
+  const el = document.createElement('div');
+  el.className = 'persona-item';
+  el.id = 'item-' + p.slug;
+  el.onclick = () => loadPersona(p.slug);
+  const initials = (p.name || p.slug).slice(0,2).toUpperCase();
+  const avatarHtml = p.avatar
+    ? '<img src="' + p.avatar + '?t=' + Date.now() + '" style="width:36px;height:36px;border-radius:50%;object-fit:cover;">'
+    : '<div class="persona-avatar">' + initials + '</div>';
+  el.innerHTML = avatarHtml + '<div><div class="persona-name">' + (p.name || p.slug) + '</div><div class="persona-slug">' + p.slug + '</div></div>';
+  document.getElementById('persona-list').appendChild(el);
 }
 
 async function loadPersona(slug) {
-  currentSlug = slug;
-  renderSidebar();
+  document.querySelectorAll('.persona-item').forEach(el => el.classList.remove('active'));
   const item = document.getElementById('item-' + slug);
   if (item) item.classList.add('active');
+  currentSlug = slug;
   let config = {};
   try {
     const res = await fetch('/api/personas/' + slug);
@@ -449,8 +448,13 @@ function newPersona() {
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   if (!slug) return;
   currentSlug = slug;
-  if (!personas[slug]) personas[slug] = { slug, name, config: {} };
-  renderSidebar();
+  if (!document.getElementById('item-' + slug)) {
+    const p = { slug, name, config: {} };
+    personas[slug] = p;
+    renderSidebarItem(p);
+    document.getElementById('persona-count').textContent = Object.keys(personas).length;
+  }
+  document.querySelectorAll('.persona-item').forEach(el => el.classList.remove('active'));
   const item = document.getElementById('item-' + slug);
   if (item) item.classList.add('active');
   renderForm(slug, { name });
@@ -460,18 +464,9 @@ function newPersona() {
 function renderForm(slug, cfg) {
   const fa = document.getElementById('form-area');
   fa.innerHTML = `
-    <div style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;">
-      <div style="display:flex; align-items:baseline; gap:10px;">
-        <h2 style="font-size:1.1rem; font-weight:600;">${cfg.name || slug}</h2>
-        <span style="font-size:0.75rem; color:#52525b;">/${slug}</span>
-      </div>
-      <div style="display:flex; align-items:center; gap:6px;">
-        <span style="font-size:0.7rem; color:#52525b;">Folder:</span>
-        <select id="f-folder" onchange="assignFolder(this.value)" style="font-size:0.75rem; padding:3px 8px; background:#18181b; border:1px solid #27272a; border-radius:6px; color:#a1a1aa;">
-          <option value="">— None —</option>
-          ${lsFolders().map(f => '<option value="' + esc(f.id) + '" ' + (lsPersonaFolder(slug) === f.id ? 'selected' : '') + '>' + esc(f.name) + '</option>').join('')}
-        </select>
-      </div>
+    <div style="display:flex; align-items:baseline; gap:10px;">
+      <h2 style="font-size:1.1rem; font-weight:600;">${cfg.name || slug}</h2>
+      <span style="font-size:0.75rem; color:#52525b;">/${slug}</span>
     </div>
 
     <div class="form-section">
@@ -951,10 +946,8 @@ async function savePersona() {
       lsSavePersona(currentSlug, config);
       if (data.prompt) localStorage.setItem('persona_prompt_' + currentSlug, data.prompt);
       status.textContent = '✓ Saved & deployed'; status.className = 'save-status ok';
-      if (personas[currentSlug]) personas[currentSlug].name = config.name || currentSlug;
-      renderSidebar();
       const item = document.getElementById('item-' + currentSlug);
-      if (item) item.classList.add('active');
+      if (item) item.querySelector('.persona-name').textContent = config.name || currentSlug;
       showPromptPreview(data.prompt);
     } else { throw new Error(data.error || 'Unknown error'); }
   } catch(e) { status.textContent = '✗ ' + e.message; status.className = 'save-status err'; }
@@ -996,229 +989,15 @@ function switchTab(name, el) {
   currentTab = name;
   document.querySelectorAll('.preview-tab').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
-  const content = document.getElementById('preview-content');
-  const aiPanel = document.getElementById('ai-builder-panel');
-  if (name === 'ai') {
-    content.style.display = 'none';
-    aiPanel.style.display = 'flex';
-    document.getElementById('ai-builder-input').focus();
-  } else {
-    content.style.display = '';
-    aiPanel.style.display = 'none';
-    if (name === 'funnel') renderFunnelPreview();
-  }
+  if (name === 'funnel') renderFunnelPreview();
 }
 
 function switchTabByName(name) {
   document.querySelectorAll('.preview-tab').forEach((t, i) => {
-    const names = ['prompt', 'funnel', 'ai'];
-    if (names[i] === name) { t.classList.add('active'); currentTab = name; }
-    else t.classList.remove('active');
+    if ((i === 0 && name === 'prompt') || (i === 1 && name === 'funnel')) {
+      t.classList.add('active'); currentTab = name;
+    } else { t.classList.remove('active'); }
   });
-  const content = document.getElementById('preview-content');
-  const aiPanel = document.getElementById('ai-builder-panel');
-  if (name === 'ai') { content.style.display = 'none'; aiPanel.style.display = 'flex'; }
-  else { content.style.display = ''; aiPanel.style.display = 'none'; }
-}
-
-/* ── Folder helpers ── */
-function lsFoldersKey() { return 'admin_folders'; }
-function lsFolderAssignKey() { return 'admin_folder_assign'; }
-function lsFolders() { try { return JSON.parse(localStorage.getItem(lsFoldersKey()) || '[]'); } catch(e) { return []; } }
-function lsSaveFolders(folders) { localStorage.setItem(lsFoldersKey(), JSON.stringify(folders)); }
-function lsPersonaFolder(slug) { try { return JSON.parse(localStorage.getItem(lsFolderAssignKey()) || '{}')[slug] || ''; } catch(e) { return ''; } }
-function lsSetPersonaFolder(slug, folderId) {
-  try {
-    const m = JSON.parse(localStorage.getItem(lsFolderAssignKey()) || '{}');
-    if (folderId) m[slug] = folderId; else delete m[slug];
-    localStorage.setItem(lsFolderAssignKey(), JSON.stringify(m));
-  } catch(e) {}
-}
-
-function newFolder() {
-  const name = prompt('Folder name:');
-  if (!name || !name.trim()) return;
-  const folders = lsFolders();
-  const id = 'f' + Date.now();
-  folders.push({ id, name: name.trim() });
-  lsSaveFolders(folders);
-  renderSidebar();
-}
-
-function renameFolder(id) {
-  const folders = lsFolders();
-  const f = folders.find(x => x.id === id);
-  if (!f) return;
-  const name = prompt('Rename folder:', f.name);
-  if (!name || !name.trim()) return;
-  f.name = name.trim();
-  lsSaveFolders(folders);
-  renderSidebar();
-}
-
-function deleteFolder(id) {
-  if (!confirm('Delete this folder? Personas inside will become uncategorised.')) return;
-  let folders = lsFolders();
-  folders = folders.filter(f => f.id !== id);
-  lsSaveFolders(folders);
-  const m = JSON.parse(localStorage.getItem(lsFolderAssignKey()) || '{}');
-  Object.keys(m).forEach(slug => { if (m[slug] === id) delete m[slug]; });
-  localStorage.setItem(lsFolderAssignKey(), JSON.stringify(m));
-  renderSidebar();
-}
-
-function assignFolder(folderId) {
-  if (!currentSlug) return;
-  lsSetPersonaFolder(currentSlug, folderId);
-  renderSidebar();
-  const item = document.getElementById('item-' + currentSlug);
-  if (item) item.classList.add('active');
-}
-
-function renderSidebar() {
-  const list = document.getElementById('persona-list');
-  list.innerHTML = '';
-  const folders = lsFolders();
-  const assign = JSON.parse(localStorage.getItem(lsFolderAssignKey()) || '{}');
-  const collapsedKey = 'admin_folders_collapsed';
-  const collapsed = JSON.parse(localStorage.getItem(collapsedKey) || '{}');
-
-  folders.forEach(folder => {
-    const isCollapsed = collapsed[folder.id];
-    const section = document.createElement('div');
-    section.className = 'folder-section';
-    section.innerHTML =
-      '<div class="folder-header" onclick="toggleFolder(\'' + folder.id + '\')">' +
-        '<span class="folder-arrow">' + (isCollapsed ? '▶' : '▼') + '</span>' +
-        '<span class="folder-name">' + esc(folder.name) + '</span>' +
-        '<span class="folder-actions">' +
-          '<span onclick="event.stopPropagation();renameFolder(\'' + folder.id + '\')" title="Rename">✎</span>' +
-          '<span onclick="event.stopPropagation();deleteFolder(\'' + folder.id + '\')" title="Delete" style="color:#ef4444;">✕</span>' +
-        '</span>' +
-      '</div>' +
-      '<div class="folder-items" id="fi-' + folder.id + '" style="display:' + (isCollapsed ? 'none' : 'block') + ';"></div>';
-    list.appendChild(section);
-    const itemsEl = section.querySelector('.folder-items');
-    Object.entries(personas).forEach(([slug, p]) => {
-      if (assign[slug] === folder.id) itemsEl.appendChild(buildPersonaItem(p));
-    });
-  });
-
-  const ungrouped = document.createElement('div');
-  ungrouped.className = 'folder-section';
-  const hasUngrouped = Object.values(personas).some(p => !assign[p.slug]);
-  if (folders.length > 0 && hasUngrouped) {
-    ungrouped.innerHTML = '<div class="folder-header" onclick="toggleFolder(\'__none__\')">' +
-      '<span class="folder-arrow">' + (collapsed['__none__'] ? '▶' : '▼') + '</span>' +
-      '<span class="folder-name" style="color:#52525b;">Uncategorised</span></div>' +
-      '<div class="folder-items" id="fi-__none__" style="display:' + (collapsed['__none__'] ? 'none' : 'block') + ';"></div>';
-    list.appendChild(ungrouped);
-  }
-  const ungroupedItems = document.getElementById('fi-__none__') || ungrouped.querySelector('.folder-items');
-  Object.values(personas).forEach(p => {
-    if (!assign[p.slug]) {
-      const el = ungroupedItems || list;
-      el.appendChild(buildPersonaItem(p));
-    }
-  });
-  document.getElementById('persona-count').textContent = Object.keys(personas).length;
-}
-
-function buildPersonaItem(p) {
-  const el = document.createElement('div');
-  el.className = 'persona-item' + (p.slug === currentSlug ? ' active' : '');
-  el.id = 'item-' + p.slug;
-  el.onclick = () => loadPersona(p.slug);
-  const initials = (p.name || p.slug).slice(0,2).toUpperCase();
-  const avatarHtml = p.avatar
-    ? '<img src="' + p.avatar + '?t=' + Date.now() + '" style="width:36px;height:36px;border-radius:50%;object-fit:cover;">'
-    : '<div class="persona-avatar">' + initials + '</div>';
-  el.innerHTML = avatarHtml + '<div><div class="persona-name">' + (p.name || p.slug) + '</div><div class="persona-slug">' + p.slug + '</div></div>';
-  return el;
-}
-
-function toggleFolder(id) {
-  const collapsedKey = 'admin_folders_collapsed';
-  const collapsed = JSON.parse(localStorage.getItem(collapsedKey) || '{}');
-  collapsed[id] = !collapsed[id];
-  localStorage.setItem(collapsedKey, JSON.stringify(collapsed));
-  renderSidebar();
-  const item = document.getElementById('item-' + currentSlug);
-  if (item) item.classList.add('active');
-}
-
-/* ── AI Builder ── */
-let aiHistory = [];
-
-function aiAddMessage(role, text) {
-  const log = document.getElementById('ai-chat-log');
-  const div = document.createElement('div');
-  div.className = 'ai-bubble ' + role;
-  div.textContent = text;
-  log.appendChild(div);
-  log.scrollTop = log.scrollHeight;
-}
-
-async function aiSend() {
-  if (!currentSlug) { alert('Select or create a persona first.'); return; }
-  const input = document.getElementById('ai-builder-input');
-  const msg = input.value.trim();
-  if (!msg) return;
-  input.value = '';
-  aiAddMessage('user', msg);
-  aiHistory.push({ role: 'user', content: msg });
-  const typingDiv = document.createElement('div');
-  typingDiv.className = 'ai-bubble bot ai-typing';
-  typingDiv.textContent = '…';
-  document.getElementById('ai-chat-log').appendChild(typingDiv);
-  try {
-    const res = await fetch('/api/builder/chat', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: msg, history: aiHistory.slice(-10), current_config: collectConfig() })
-    });
-    const data = await res.json();
-    typingDiv.remove();
-    if (!data.ok) { aiAddMessage('bot', '✗ ' + (data.error || 'Something went wrong.')); return; }
-    aiHistory.push({ role: 'assistant', content: data.reply });
-    aiAddMessage('bot', data.reply);
-    if (data.updates && Object.keys(data.updates).length) applyAIUpdates(data.updates);
-  } catch(e) {
-    typingDiv.remove();
-    aiAddMessage('bot', '✗ Network error: ' + e.message);
-  }
-}
-
-function applyAIUpdates(updates) {
-  const fieldMap = {
-    name: 'f-name', age: 'f-age', gender: 'f-gender', location: 'f-location',
-    archetype: 'f-archetype', backstory: 'f-backstory', speech_style: 'f-speech',
-    interests: 'f-interests', flirt_pace: 'f-flirt', nsfw_level: 'f-nsfw-level',
-    conversion_triggers: 'f-triggers', warmth: 'f-warmth', question_freq: 'f-qfreq',
-  };
-  let applied = 0;
-  Object.entries(updates).forEach(([key, val]) => {
-    const id = fieldMap[key];
-    if (!id) return;
-    const el = document.getElementById(id);
-    if (!el) return;
-    if (el.tagName === 'INPUT' && el.type === 'checkbox') { el.checked = !!val; el.dispatchEvent(new Event('change')); }
-    else el.value = val;
-    el.classList.add('ai-updated');
-    setTimeout(() => el.classList.remove('ai-updated'), 1800);
-    applied++;
-  });
-  if (updates.nsfw_enabled !== undefined) {
-    const cb = document.getElementById('f-nsfw');
-    if (cb) { cb.checked = !!updates.nsfw_enabled; toggleNsfw(cb.checked); }
-  }
-  if (applied) {
-    const note = document.createElement('div');
-    note.className = 'ai-bubble bot';
-    note.style.cssText = 'font-size:0.7rem; color:#52525b; margin-top:2px;';
-    note.textContent = '↑ ' + applied + ' field' + (applied > 1 ? 's' : '') + ' updated in the form';
-    document.getElementById('ai-chat-log').appendChild(note);
-    document.getElementById('ai-chat-log').scrollTop = 9999;
-  }
 }
 
 function renderFunnelPreview() {
