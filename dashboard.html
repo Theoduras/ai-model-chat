@@ -96,7 +96,10 @@
   <aside class="sidebar" aria-label="Personas">
     <div class="sidebar-header">
       <span>Personas</span>
-      <span id="persona-count" style="font-size:0.7rem; color:#52525b;"></span>
+      <div style="display:flex; align-items:center; gap:4px;">
+        <span id="persona-count" style="font-size:0.7rem; color:#52525b;"></span>
+        <button class="btn-new-folder" onclick="newFolder()" title="New folder">📁</button>
+      </div>
     </div>
     <div class="persona-list" id="persona-list"></div>
     <button class="btn-new" onclick="newPersona()">+ New Persona</button>
@@ -141,6 +144,8 @@ const personas = {};
 
 function lsPersonaKey(slug) { return 'admin_persona_cfg_' + slug; }
 function lsSlugsKey() { return 'admin_persona_slugs'; }
+function lsFoldersKey() { return 'admin_folders'; }
+function lsFolderAssignKey(slug) { return 'admin_folder_assign_' + slug; }
 
 function lsSavePersona(slug, config) {
   try {
@@ -162,6 +167,30 @@ function lsLoadSlugs() {
   try { return JSON.parse(localStorage.getItem(lsSlugsKey()) || '[]'); } catch(e) { return []; }
 }
 
+function lsFolders() {
+  try { return JSON.parse(localStorage.getItem(lsFoldersKey()) || '[]'); } catch(e) { return []; }
+}
+
+function lsSaveFolders(folders) {
+  try { localStorage.setItem(lsFoldersKey(), JSON.stringify(folders)); } catch(e) {}
+}
+
+function lsPersonaFolder(slug) {
+  try { return localStorage.getItem(lsFolderAssignKey(slug)) || null; } catch(e) { return null; }
+}
+
+function lsSetPersonaFolder(slug, folderId) {
+  try { localStorage.setItem(lsFolderAssignKey(slug), folderId); } catch(e) {}
+}
+
+function lsFolderOpen(id) {
+  try { return localStorage.getItem('admin_folder_open_' + id) !== 'false'; } catch(e) { return true; }
+}
+
+function lsSetFolderOpen(id, open) {
+  try { localStorage.setItem('admin_folder_open_' + id, open ? 'true' : 'false'); } catch(e) {}
+}
+
 async function init() {
   loadConfig();
   const seen = new Set();
@@ -170,7 +199,6 @@ async function init() {
     const list = await res.json();
     list.forEach(p => {
       personas[p.slug] = p;
-      renderSidebarItem(p);
       seen.add(p.slug);
     });
   } catch(e) {
@@ -180,11 +208,21 @@ async function init() {
     if (seen.has(slug)) return;
     const cfg = lsLoadPersona(slug);
     if (!cfg) return;
-    const p = { slug, name: cfg.name || slug, config: cfg };
-    personas[slug] = p;
-    renderSidebarItem(p);
+    personas[slug] = { slug, name: cfg.name || slug, config: cfg };
     seen.add(slug);
   });
+
+  let folders = lsFolders();
+  if (folders.length === 0) {
+    folders = [{ id: 'main', name: 'Main' }];
+    lsSaveFolders(folders);
+  }
+
+  seen.forEach(slug => {
+    if (!lsPersonaFolder(slug)) lsSetPersonaFolder(slug, folders[0].id);
+  });
+
+  renderSidebar();
   document.getElementById('persona-count').textContent = seen.size;
 }
 
@@ -407,7 +445,7 @@ async function bsFinalize() {
   }
 }
 
-function renderSidebarItem(p) {
+function buildPersonaItem(p) {
   const el = document.createElement('div');
   el.className = 'persona-item';
   el.id = 'item-' + p.slug;
@@ -417,14 +455,63 @@ function renderSidebarItem(p) {
     ? '<img src="' + p.avatar + '?t=' + Date.now() + '" style="width:36px;height:36px;border-radius:50%;object-fit:cover;">'
     : '<div class="persona-avatar">' + initials + '</div>';
   el.innerHTML = avatarHtml + '<div><div class="persona-name">' + (p.name || p.slug) + '</div><div class="persona-slug">' + p.slug + '</div></div>';
-  document.getElementById('persona-list').appendChild(el);
+  return el;
+}
+
+function renderSidebar() {
+  const list = document.getElementById('persona-list');
+  list.innerHTML = '';
+  const folders = lsFolders();
+  const slugs = Object.keys(personas);
+
+  const assigned = new Set();
+  folders.forEach(folder => {
+    const section = document.createElement('div');
+    section.className = 'folder-section';
+    section.id = 'folder-section-' + folder.id;
+
+    const isOpen = lsFolderOpen(folder.id);
+    const header = document.createElement('div');
+    header.className = 'folder-header';
+    header.innerHTML =
+      '<span class="folder-arrow ' + (isOpen ? 'open' : '') + '">▶</span>' +
+      '<span class="folder-name">' + esc(folder.name) + '</span>' +
+      '<span class="folder-actions">' +
+        '<button class="folder-action-btn" onclick="event.stopPropagation();renameFolder(\'' + folder.id + '\')" title="Rename">✏</button>' +
+        '<button class="folder-action-btn" onclick="event.stopPropagation();deleteFolder(\'' + folder.id + '\')" title="Delete" style="color:#ef4444;">✕</button>' +
+      '</span>';
+    header.onclick = () => toggleFolder(folder.id);
+    section.appendChild(header);
+
+    const items = document.createElement('div');
+    items.className = 'folder-items' + (isOpen ? '' : ' collapsed');
+    items.id = 'folder-items-' + folder.id;
+
+    slugs.forEach(slug => {
+      if (lsPersonaFolder(slug) === folder.id) {
+        items.appendChild(buildPersonaItem(personas[slug]));
+        assigned.add(slug);
+      }
+    });
+    section.appendChild(items);
+    list.appendChild(section);
+  });
+
+  slugs.forEach(slug => {
+    if (!assigned.has(slug)) list.appendChild(buildPersonaItem(personas[slug]));
+  });
+
+  if (currentSlug) {
+    const active = document.getElementById('item-' + currentSlug);
+    if (active) active.classList.add('active');
+  }
 }
 
 async function loadPersona(slug) {
+  currentSlug = slug;
   document.querySelectorAll('.persona-item').forEach(el => el.classList.remove('active'));
   const item = document.getElementById('item-' + slug);
   if (item) item.classList.add('active');
-  currentSlug = slug;
   let config = {};
   try {
     const res = await fetch('/api/personas/' + slug);
@@ -448,17 +535,62 @@ function newPersona() {
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   if (!slug) return;
   currentSlug = slug;
-  if (!document.getElementById('item-' + slug)) {
-    const p = { slug, name, config: {} };
-    personas[slug] = p;
-    renderSidebarItem(p);
+  if (!personas[slug]) {
+    personas[slug] = { slug, name, config: {} };
+    const folders = lsFolders();
+    if (folders.length > 0) lsSetPersonaFolder(slug, folders[0].id);
     document.getElementById('persona-count').textContent = Object.keys(personas).length;
   }
-  document.querySelectorAll('.persona-item').forEach(el => el.classList.remove('active'));
-  const item = document.getElementById('item-' + slug);
-  if (item) item.classList.add('active');
+  renderSidebar();
   renderForm(slug, { name });
   document.getElementById('action-bar').style.display = 'flex';
+}
+
+function toggleFolder(id) {
+  const items = document.getElementById('folder-items-' + id);
+  const arrow = document.querySelector('#folder-section-' + id + ' .folder-arrow');
+  if (!items) return;
+  const open = items.classList.toggle('collapsed');
+  if (arrow) arrow.classList.toggle('open', !open);
+  lsSetFolderOpen(id, !open);
+}
+
+function newFolder() {
+  const name = prompt('Folder name:');
+  if (!name || !name.trim()) return;
+  const id = 'f_' + Date.now();
+  const folders = lsFolders();
+  folders.push({ id, name: name.trim() });
+  lsSaveFolders(folders);
+  renderSidebar();
+}
+
+function renameFolder(id) {
+  const folders = lsFolders();
+  const folder = folders.find(f => f.id === id);
+  if (!folder) return;
+  const name = prompt('Rename folder:', folder.name);
+  if (!name || !name.trim()) return;
+  folder.name = name.trim();
+  lsSaveFolders(folders);
+  renderSidebar();
+}
+
+function deleteFolder(id) {
+  const folders = lsFolders();
+  const folder = folders.find(f => f.id === id);
+  if (!folder) return;
+  if (!confirm('Delete folder "' + folder.name + '"? Personas in it will be unfoldered.')) return;
+  lsSaveFolders(folders.filter(f => f.id !== id));
+  Object.keys(personas).forEach(slug => {
+    if (lsPersonaFolder(slug) === id) lsSetPersonaFolder(slug, folders[0]?.id || '');
+  });
+  renderSidebar();
+}
+
+function assignFolder(slug, folderId) {
+  lsSetPersonaFolder(slug, folderId);
+  renderSidebar();
 }
 
 function renderForm(slug, cfg) {
@@ -946,8 +1078,8 @@ async function savePersona() {
       lsSavePersona(currentSlug, config);
       if (data.prompt) localStorage.setItem('persona_prompt_' + currentSlug, data.prompt);
       status.textContent = '✓ Saved & deployed'; status.className = 'save-status ok';
-      const item = document.getElementById('item-' + currentSlug);
-      if (item) item.querySelector('.persona-name').textContent = config.name || currentSlug;
+      if (personas[currentSlug]) personas[currentSlug].name = config.name || currentSlug;
+      renderSidebar();
       showPromptPreview(data.prompt);
     } else { throw new Error(data.error || 'Unknown error'); }
   } catch(e) { status.textContent = '✗ ' + e.message; status.className = 'save-status err'; }
