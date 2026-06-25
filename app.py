@@ -736,6 +736,74 @@ def api_generate_conversion_triggers():
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)[:200]}), 200
 
+@app.route('/api/builder/chat', methods=['POST'])
+def api_builder_chat():
+    """Conversational AI persona builder — interprets natural language and returns form field updates."""
+    if client is None:
+        return jsonify({'ok': False, 'error': 'Gemini not configured. Add an API key in Settings first.'}), 200
+    data = request.json or {}
+    message = data.get('message', '')
+    history = data.get('history', [])
+    current = data.get('current_config', {})
+
+    system = (
+        "You are a persona consultant helping a creator set up an AI chatbot persona for a fan subscription platform (like OnlyFans). "
+        "The creator talks to you in plain language and you extract details and update the persona form fields.\n\n"
+        "ALWAYS respond with valid JSON in this exact format:\n"
+        '{"reply": "conversational reply to the creator", "updates": {"field": "value", ...}}\n\n'
+        "Available fields and their valid values:\n"
+        "- name: string\n"
+        "- age: number string (must be 18+)\n"
+        "- gender: 'Female' | 'Male' | 'Trans Female to Male' | 'Trans Male to Female'\n"
+        "- location: city/country string\n"
+        "- archetype: 'Deadpan / Dry' | 'Bubbly / Sweet' | 'Dominant / Edgy' | 'Girl-Next-Door' | 'Mysterious / Dark' | 'Playful / Teasing' | 'Intellectual / Witty'\n"
+        "- backstory: 2-4 sentence string (age-realistic: 18-24 = student + side job; 22-28 = junior role / freelance)\n"
+        "- speech_style: string with bullet point rules\n"
+        "- warmth: '1'-'5'\n"
+        "- question_freq: 'rarely' | 'sometimes' | 'often' | 'very often'\n"
+        "- interests: comma-separated string\n"
+        "- flirt_pace: 'slow' | 'moderate' | 'fast' | 'instant'\n"
+        "- nsfw_enabled: true | false\n"
+        "- nsfw_level: 'suggestive' | 'moderate' | 'explicit'\n"
+        "- conversion_triggers: string\n\n"
+        "Rules:\n"
+        "- Only include fields in 'updates' when you have clear info to set them — don't guess randomly.\n"
+        "- If the creator says something ambiguous, ask for clarification in your reply.\n"
+        "- Keep replies short, friendly, and practical — you're a helpful assistant, not a chatbot.\n"
+        "- Output ONLY valid JSON — no markdown, no code blocks, no preamble."
+    )
+
+    contents = []
+    for m in history[:-1]:
+        role = 'user' if m.get('role') == 'user' else 'model'
+        contents.append({'role': role, 'parts': [{'text': m.get('content', '')}]})
+
+    current_summary = ', '.join(f"{k}: {v}" for k, v in current.items()
+                                if v and k not in ('avatar', 'platforms', 'conversion_triggers', 'speech_style'))
+    user_text = (
+        (f"[Current form state: {current_summary}]\n\n" if current_summary else "")
+        + message
+    )
+    contents.append({'role': 'user', 'parts': [{'text': user_text}]})
+
+    try:
+        resp = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=contents,
+            config=types.GenerateContentConfig(system_instruction=system, temperature=0.7),
+        )
+        raw = (resp.text or '').strip()
+        if raw.startswith('```'):
+            raw = raw.split('```')[1]
+            if raw.startswith('json'): raw = raw[4:]
+        parsed = json.loads(raw)
+        return jsonify({'ok': True, 'reply': parsed.get('reply', ''), 'updates': parsed.get('updates', {})})
+    except json.JSONDecodeError:
+        return jsonify({'ok': True, 'reply': raw, 'updates': {}})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]}), 200
+
+
 @app.route('/api/generate/interests', methods=['POST'])
 def api_generate_interests():
     if client is None:
