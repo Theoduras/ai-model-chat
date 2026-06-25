@@ -613,19 +613,32 @@ def api_generate_speech_style():
     randomize = data.get('randomize', False)
 
     rand_note = ' Be creative and unexpected — avoid clichés.' if randomize else ''
+
+    baseline_rules = (
+        "- Replies are short to medium length — 1 to 3 sentences max per message, never walls of text.\n"
+        "- Sends messages in quick natural bursts, not one long block.\n"
+        "- Lowercase by default; uses proper caps only for emphasis or names.\n"
+        "- Minimal punctuation — no full stops at end of casual lines, occasional ellipsis for trailing off.\n"
+        "- Response timing feels natural: short replies come fast, longer ones have a brief pause."
+    )
+
     system = (
-        "You write concise speech-style rules for an AI chatbot persona. "
-        "Output ONLY the rules — 2-4 short bullet points or one tight paragraph. "
-        "No preamble, no headers, no quotation marks."
+        "You write persona-specific speech style rules for an AI chatbot. "
+        "The following baseline chat rules are already applied to every persona — do NOT repeat them:\n"
+        + baseline_rules
+        + "\n\nOutput ONLY the additional rules that are missing from the baseline above, "
+        "tailored to this specific persona's personality and backstory. "
+        "2-4 bullet points. No preamble, no headers, no quotation marks."
     )
     prompt = (
-        f"Write speech style rules for a persona named {name}"
+        f"Write the persona-specific speech style additions for {name}"
         + (f", age {age}" if age else "")
         + (f", archetype: {archetype}" if archetype else "")
         + (f". Backstory: {backstory}" if backstory else "")
         + (f". Interests: {interests}" if interests else "")
-        + ".\n\nRules should cover: sentence length, punctuation style, use of slang or emoji, "
-        "how they express warmth or attitude, and one distinctive quirk of how they text."
+        + ".\n\nFocus on what makes THIS persona's texting voice distinct: "
+        "their slang, emoji use (or absence), warmth level in word choice, "
+        "how they flirt or tease through language, and one distinctive quirk."
         + rand_note
     )
     try:
@@ -634,7 +647,9 @@ def api_generate_speech_style():
             contents=[{'role': 'user', 'parts': [{'text': prompt}]}],
             config=types.GenerateContentConfig(system_instruction=system, temperature=0.9 if randomize else 0.7),
         )
-        return jsonify({'ok': True, 'text': (resp.text or '').strip()})
+        persona_rules = (resp.text or '').strip()
+        full_text = "— Baseline rules (always active) —\n" + baseline_rules + "\n\n— Persona-specific —\n" + persona_rules
+        return jsonify({'ok': True, 'text': full_text})
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)[:200]}), 200
 
@@ -649,18 +664,37 @@ def api_generate_backstory():
     location = data.get('location', '')
     archetype = data.get('archetype', '')
     interests = data.get('interests', '')
+
+    age_int = int(age) if str(age).isdigit() else 0
+    if age_int and age_int <= 24:
+        age_job_rule = (
+            f"IMPORTANT: {name} is {age} years old. At this age, people are typically students or recent school leavers. "
+            "Give them a realistic student side-job: waiter, barista, supermarket cashier, dishwasher, retail assistant, delivery driver, babysitter, or similar. "
+            "They do NOT have a career, a full-time office job, or a management role. They might be studying something specific at uni or college."
+        )
+    elif age_int and age_int <= 28:
+        age_job_rule = (
+            f"IMPORTANT: {name} is {age} years old. At this age, people are typically finishing a degree, doing a postgrad, "
+            "starting a junior/entry-level role in their field, freelancing on the side, or running a very small venture like an Etsy shop or local service. "
+            "They are NOT senior, not managing teams, not running established businesses."
+        )
+    else:
+        age_job_rule = ""
+
     system = (
-        "You write vivid, creative character backstories for AI chatbot personas. "
-        "Output ONLY the backstory — 2-4 sentences in third person. Plain prose, no JSON, no headings."
+        "You write vivid, realistic character backstories for AI chatbot personas. "
+        "Output ONLY the backstory — 2-4 sentences in third person. Plain prose, no JSON, no headings. "
+        "Make the life situation feel genuinely believable for the person's age."
     )
     prompt = (
-        f"Write a unique, specific backstory for a persona named {name}"
+        (age_job_rule + "\n\n" if age_job_rule else "")
+        + f"Write a unique, specific backstory for a persona named {name}"
         + (f", age {age}" if age else "")
         + (f", from {location}" if location else "")
         + (f", with a {archetype} personality" if archetype else "")
         + (f". Interests: {interests}" if interests else "")
-        + ". Be creative and specific — give them a real job, a detail that makes them memorable, "
-        "and a subtle reason they're on this platform. Keep it to 2-4 sentences."
+        + ". Give them a memorable real-life detail and a subtle reason they're on this platform. "
+        "If any details are missing, invent plausible ones that fit the age. Keep it to 2-4 sentences."
     )
     try:
         resp = client.models.generate_content(
@@ -854,11 +888,29 @@ def api_backstory_interview():
     archetype = basics.get('archetype', '')
     location = basics.get('location', '')
 
+    age_int = int(age) if str(age).isdigit() else 0
+    if age_int and age_int <= 24:
+        age_job_context = (
+            f"AGE RULE: {name} is {age}. Options for work/study must reflect this. "
+            "Realistic choices: student with a side-job (waiter, barista, supermarket cashier, dishwasher, retail worker, delivery driver, babysitter). "
+            "Do NOT suggest full-time careers, office jobs, or management roles."
+        )
+    elif age_int and age_int <= 28:
+        age_job_context = (
+            f"AGE RULE: {name} is {age}. Options for work/study must reflect this. "
+            "Realistic choices: finishing a degree or postgrad, first junior/entry-level job in their field, "
+            "freelancing on the side, running a tiny venture (Etsy shop, local gigs). "
+            "Do NOT suggest senior roles or established businesses."
+        )
+    else:
+        age_job_context = ""
+
     interview_system = (
         f"You are building a backstory for an AI chatbot persona named {name}, "
         + (f"age {age}, " if age else "")
         + (f"from {location}, " if location else "")
         + (f"personality archetype: {archetype}." if archetype else ".")
+        + ("\n\n" + age_job_context if age_job_context else "")
         + "\n\n"
         "Ask questions across exactly these 5 topics in order: work/job, hobbies, free time, "
         "study/education background, personality quirks. One question per topic, then offer to finalize.\n\n"
@@ -877,13 +929,28 @@ def api_backstory_interview():
         "- Never write the backstory itself unless told to finalize."
     )
 
+    if age_int and age_int <= 24:
+        age_finalize_rule = (
+            f"IMPORTANT: {name} is {age}. Their job/life situation must be age-realistic: "
+            "student with a side-job like waiter, cashier, barista, etc. — NOT a full-time career. "
+            "Invent missing details that fit this age bracket."
+        )
+    elif age_int and age_int <= 28:
+        age_finalize_rule = (
+            f"IMPORTANT: {name} is {age}. Invent missing details that fit this age: "
+            "finishing studies, starting out in a junior role, freelancing, or a small side project."
+        )
+    else:
+        age_finalize_rule = "Invent any missing details that feel realistic and believable."
+
     finalize_system = (
         f"You are a creative writer. Write a vivid character backstory for {name}"
         + (f", age {age}" if age else "")
         + (f", from {location}" if location else "")
         + (f", with a {archetype} personality" if archetype else "")
-        + ". Use only the information provided in the conversation. "
-        "Write 2-4 sentences in third person. Plain prose only — no JSON, no bullet points, no headings."
+        + f". {age_finalize_rule} "
+        "Even if only a few answers were given or most were skipped, produce a full, coherent 2-4 sentence backstory in third person. "
+        "Fill gaps with realistic invented details. Plain prose only — no JSON, no bullet points, no headings."
     )
 
     contents = []
