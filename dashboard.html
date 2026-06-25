@@ -561,9 +561,16 @@ function renderForm(slug, cfg) {
     <div class="form-section">
       <div class="section-title">Interests &amp; Hooks</div>
       <div class="field full">
-        <label>Topics the persona naturally returns to</label>
+        <label style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px;">
+          <span>Topics the persona naturally returns to</span>
+          <span style="display:flex; gap:6px;">
+            <button type="button" class="btn-ai" id="interests-gen-btn" onclick="generateInterests(false)">✨ Generate</button>
+            <button type="button" class="btn-ai" style="background:#3f3f46;" id="interests-rand-btn" onclick="generateInterests(true)">🎲 Randomize</button>
+          </span>
+        </label>
         <input type="text" id="f-interests" value="${esc(cfg.interests || '')}" placeholder="gaming, fitness, tattoos, music, cooking…">
-        <span class="hint">Comma-separated. These appear in conversation naturally.</span>
+        <span class="hint" id="interests-gen-status"></span>
+        <span class="hint" style="margin-top:2px;">Comma-separated. These appear in conversation naturally.</span>
       </div>
     </div>
 
@@ -1010,6 +1017,25 @@ function renderFunnelPreview() {
       '<div class="funnel-stage"><div class="funnel-dot" style="background:' + s.color + ';"></div><div><div class="funnel-stage-name">' + s.name + '</div><div class="funnel-stage-desc">' + s.desc + '</div></div></div>'
     ).join('') +
     (config.conversion_triggers ? '<div style="margin-top:14px; font-size:0.75rem; color:#52525b;"><strong style="color:#a1a1aa;">Custom triggers:</strong><br>' + esc(config.conversion_triggers) + '</div>' : '');
+}
+
+async function generateInterests(randomize) {
+  const btn    = document.getElementById(randomize ? 'interests-rand-btn' : 'interests-gen-btn');
+  const status = document.getElementById('interests-gen-status');
+  btn.disabled = true; status.textContent = randomize ? 'Randomizing…' : 'Generating…';
+  try {
+    const res  = await fetch('/api/generate/interests', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ name: v('f-name'), age: v('f-age'), archetype: v('f-archetype'),
+        backstory: v('f-backstory'), randomize })
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'error');
+    document.getElementById('f-interests').value = data.text;
+    status.textContent = '✓ Done';
+    setTimeout(() => { status.textContent = ''; }, 2000);
+  } catch(e) { status.textContent = '✗ ' + e.message; }
+  btn.disabled = false;
 }
 
 function v(id) { const el = document.getElementById(id); return el ? el.value.trim() : ''; }

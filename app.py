@@ -702,6 +702,36 @@ def api_generate_conversion_triggers():
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)[:200]}), 200
 
+@app.route('/api/generate/interests', methods=['POST'])
+def api_generate_interests():
+    if client is None:
+        return jsonify({'ok': False, 'error': 'Gemini not configured.'}), 200
+    data = request.json or {}
+    name = data.get('name', 'the persona')
+    age = data.get('age', '')
+    archetype = data.get('archetype', '')
+    backstory = data.get('backstory', '')
+    randomize = data.get('randomize', False)
+    system = (
+        "You generate comma-separated interest topics for an AI chatbot persona on a fan platform. "
+        "Output ONLY a comma-separated list of 6-10 topics. No preamble, no explanation."
+    )
+    prompt = (
+        f"{'Randomly generate' if randomize else 'Generate'} a comma-separated list of interests for "
+        f"{name}, {age}, archetype: {archetype}. Backstory: {backstory}. "
+        "Topics should feel authentic to the persona and spark natural conversation. "
+        "Examples of format: gaming, fitness, tattoos, astrology, cooking, true crime, fashion"
+    )
+    try:
+        resp = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=[{'role': 'user', 'parts': [{'text': prompt}]}],
+            config=types.GenerateContentConfig(system_instruction=system, temperature=0.9 if randomize else 0.7),
+        )
+        return jsonify({'ok': True, 'text': (resp.text or '').strip()})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]}), 200
+
 @app.route('/api/platforms/test', methods=['POST'])
 def api_platform_test():
     """Test platform API credentials and return ok/error with a specific fix hint."""
