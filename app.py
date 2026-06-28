@@ -1098,6 +1098,106 @@ def api_generate_persona():
         return jsonify({'ok': False, 'error': str(e)[:200]}), 200
 
 
+def _appearance_from_config(cfg):
+    """Build a fixed physical-appearance description so multiple photos of a
+    persona depict the same fictional person."""
+    if cfg.get('appearance'):
+        return cfg['appearance']
+    name = cfg.get('name', '')
+    age = cfg.get('age', '24')
+    archetype = cfg.get('archetype', '')
+    location = cfg.get('location', '')
+    bits = [f"a {age}-year-old woman"]
+    if location:
+        bits.append(f"from {location}")
+    if archetype:
+        bits.append(f"with a {archetype.lower().split('/')[0].strip()} look")
+    return ', '.join(bits)
+
+
+_SHOT_FRAMING = {
+    'portrait': 'a head-and-shoulders portrait selfie, looking at the camera',
+    'half': 'a waist-up casual photo',
+    'full': 'a full-body photo in a casual outfit',
+    'candid': 'a candid lifestyle photo doing an everyday activity',
+    'mirror': 'a mirror selfie holding a phone',
+}
+
+
+@app.route('/api/generate/image', methods=['POST'])
+def api_generate_image():
+    """Generate a photorealistic image of a fictional person via Google Imagen.
+    Reuse the same `appearance` text across shots to keep the same person."""
+    if client is None:
+        return jsonify({'ok': False, 'error': 'Gemini not configured.'}), 200
+    data = request.json or {}
+    cfg = data.get('config') or {}
+    appearance = (data.get('appearance') or _appearance_from_config(cfg)).strip()
+    shot = (data.get('shot') or 'portrait').strip().lower()
+    framing = _SHOT_FRAMING.get(shot, _SHOT_FRAMING['portrait'])
+
+    import base64
+    reference = data.get('reference')  # optional data URL of an existing photo
+
+    try:
+        # With a reference photo, use the Gemini image model to keep the SAME
+        # person across shots. Without one, generate a fresh face via Imagen.
+        if reference and isinstance(reference, str) and reference.startswith('data:'):
+            head, b64 = reference.split(',', 1)
+            ref_mime = head.split(';')[0].replace('data:', '') or 'image/png'
+            edit_prompt = (
+                f"Generate a new photorealistic photo of the exact same woman shown in the reference image — "
+                f"identical face, hair and features — now as {framing}. "
+                "Keep her identity perfectly consistent. Realistic, natural lighting, Instagram aesthetic. "
+                "Fictional AI-generated person."
+            )
+            resp = client.models.generate_content(
+                model=os.getenv('GEMINI_IMAGE_MODEL', 'gemini-2.5-flash-image'),
+                contents=[{'role': 'user', 'parts': [
+                    {'text': edit_prompt},
+                    {'inline_data': {'mime_type': ref_mime, 'data': b64}},
+                ]}],
+            )
+            for part in (resp.candidates[0].content.parts if resp.candidates else []):
+                inline = getattr(part, 'inline_data', None)
+                if inline and getattr(inline, 'data', None):
+                    raw = inline.data
+                    mime = getattr(inline, 'mime_type', None) or 'image/png'
+                    b = raw if isinstance(raw, (bytes, bytearray)) else base64.b64decode(raw)
+                    durl = f"data:{mime};base64," + base64.b64encode(b).decode()
+                    return jsonify({'ok': True, 'image': durl, 'appearance': appearance})
+            return jsonify({'ok': False, 'error': 'No image returned from reference (it may have been filtered).'}), 200
+
+        prompt = (
+            f"Photorealistic {framing} of {appearance}. "
+            "Natural lighting, realistic skin texture and detail, modern Instagram aesthetic, "
+            "attractive, friendly expression. "
+            "This is a fictional, AI-generated person who does not exist in real life."
+        )
+        resp = client.models.generate_images(
+            model=os.getenv('IMAGEN_MODEL', 'imagen-4.0-fast-generate-001'),
+            prompt=prompt,
+            config=types.GenerateImagesConfig(
+                number_of_images=1,
+                aspect_ratio='3:4',
+                person_generation='ALLOW_ADULT',
+                safety_filter_level='BLOCK_LOW_AND_ABOVE',
+            ),
+        )
+        gen = (resp.generated_images or [None])[0]
+        if not gen or not getattr(gen, 'image', None):
+            return jsonify({'ok': False, 'error': 'No image returned (it may have been filtered).'}), 200
+        img = gen.image
+        raw = getattr(img, 'image_bytes', None)
+        mime = getattr(img, 'mime_type', None) or 'image/png'
+        if not raw:
+            return jsonify({'ok': False, 'error': 'Empty image data.'}), 200
+        durl = f"data:{mime};base64," + base64.b64encode(raw).decode()
+        return jsonify({'ok': True, 'image': durl, 'appearance': appearance})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:300]}), 200
+
+
 @app.route('/api/generate/backstory', methods=['POST'])
 def api_generate_backstory():
     if client is None:
