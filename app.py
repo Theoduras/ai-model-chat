@@ -266,6 +266,11 @@ def build_system_prompt(config):
     question_freq = config.get('question_freq', 'often')
     mirror_location = config.get('mirror_location', False)
 
+    # No location set → automatically match the fan's location.
+    if not (location or '').strip():
+        mirror_location = True
+        location = ''
+
     warmth_map = {1: 'cold and distant', 2: 'reserved', 3: 'friendly', 4: 'warm', 5: 'affectionate'}
     warmth_desc = warmth_map.get(warmth, 'friendly')
 
