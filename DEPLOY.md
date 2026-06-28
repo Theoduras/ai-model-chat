@@ -49,6 +49,35 @@ That URL works immediately — no domain required.
 
 ---
 
+## Auto-deploy on push (recommended)
+
+`cloudbuild.yaml` builds and deploys automatically whenever you push, so you
+never run a deploy command by hand. One-time setup:
+
+1. Enable the APIs and create an image repository:
+   ```bash
+   gcloud services enable cloudbuild.googleapis.com run.googleapis.com artifactregistry.googleapis.com
+   gcloud artifacts repositories create ai-model-chat \
+     --repository-format=docker --location=us-central1
+   ```
+2. Connect the GitHub repo and create the trigger (Console is easiest):
+   **Cloud Build → Triggers → Create trigger** → connect `Theoduras/ai-model-chat`,
+   pick the branch, and select **cloudbuild.yaml** as the config.
+   Or via CLI:
+   ```bash
+   gcloud builds triggers create github \
+     --repo-name=ai-model-chat --repo-owner=Theoduras \
+     --branch-pattern="^deploy/cloud-run-online$" \
+     --build-config=cloudbuild.yaml
+   ```
+3. Set secrets once on the Cloud Run service (they persist across deploys):
+   ```bash
+   gcloud run services update ai-model-chat --region us-central1 \
+     --set-env-vars "GEMINI_API_KEY=...,API_KEYS=...,ADMIN_PASSWORD=..."
+   ```
+
+After that, every push builds a new image and rolls it out automatically.
+
 ## Run locally (same container as production)
 
 ```bash

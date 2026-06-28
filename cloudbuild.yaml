@@ -1,0 +1,49 @@
+# Auto-deploy to Cloud Run on every push (via a Cloud Build trigger).
+# Setup (one-time) is documented in DEPLOY.md under "Auto-deploy".
+#
+# Substitutions let you override region/service without editing this file:
+#   _REGION   (default: us-central1)
+#   _SERVICE  (default: ai-model-chat)
+
+substitutions:
+  _REGION: us-central1
+  _SERVICE: ai-model-chat
+
+steps:
+  # Build the container image, tagged with the commit SHA.
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_SERVICE}/app:$SHORT_SHA
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_SERVICE}/app:latest
+      - .
+
+  # Push both tags to Artifact Registry.
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - --all-tags
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_SERVICE}/app
+
+  # Deploy the freshly built image to Cloud Run.
+  # Secrets (GEMINI_API_KEY, API_KEYS, DATABASE_URL, etc.) are configured on the
+  # Cloud Run service itself, so they are NOT listed here.
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE}
+      - --image=${_REGION}-docker.pkg.dev/$PROJECT_ID/${_SERVICE}/app:$SHORT_SHA
+      - --region=${_REGION}
+      - --platform=managed
+      - --allow-unauthenticated
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_SERVICE}/app:$SHORT_SHA
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_SERVICE}/app:latest
+
+options:
+  logging: CLOUD_LOGGING_ONLY
