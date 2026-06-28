@@ -167,6 +167,7 @@ function sm() { if (u) localStorage.setItem(PFX + 'mem_' + u, JSON.stringify(m))
 
 function ld() {
   u = localStorage.getItem(PFX + 'user');
+  if (u === 'EmbedUser') u = null;   // ignore legacy auto-set placeholder
   m = { recentTopics: [], lastTopic: null };
   const sv = localStorage.getItem(PFX + 'mem_' + u);
   if (sv) try { m = { ...m, ...JSON.parse(sv) }; } catch (e) {}
@@ -371,7 +372,12 @@ function greet() {
 inp.addEventListener('keypress', e => { if (e.key === 'Enter') se(); });
 document.getElementById('name-input').addEventListener('keypress', e => { if (e.key === 'Enter') submitName(); });
 
-if (localStorage.getItem(PFX + 'user')) {
+function hasName() {
+  const n = localStorage.getItem(PFX + 'user');
+  return !!(n && n.trim() && n !== 'EmbedUser');  // ignore legacy auto-set placeholder
+}
+
+if (hasName()) {
   ld();
   greet();
 } else {
