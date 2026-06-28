@@ -167,7 +167,7 @@ function sm() { if (u) localStorage.setItem(PFX + 'mem_' + u, JSON.stringify(m))
 
 function ld() {
   u = localStorage.getItem(PFX + 'user');
-  if (u === 'EmbedUser') u = null;   // ignore legacy auto-set placeholder
+  if (!isRealName(u)) u = null;   // ignore legacy / auto-generated placeholders
   m = { recentTopics: [], lastTopic: null };
   const sv = localStorage.getItem(PFX + 'mem_' + u);
   if (sv) try { m = { ...m, ...JSON.parse(sv) }; } catch (e) {}
@@ -372,9 +372,13 @@ function greet() {
 inp.addEventListener('keypress', e => { if (e.key === 'Enter') se(); });
 document.getElementById('name-input').addEventListener('keypress', e => { if (e.key === 'Enter') submitName(); });
 
+function isRealName(n) {
+  // Ignore legacy auto-set placeholders so the name screen still appears.
+  return !!(n && n.trim() && n !== 'EmbedUser' && !/^Guest-\d+$/i.test(n.trim()));
+}
+
 function hasName() {
-  const n = localStorage.getItem(PFX + 'user');
-  return !!(n && n.trim() && n !== 'EmbedUser');  // ignore legacy auto-set placeholder
+  return isRealName(localStorage.getItem(PFX + 'user'));
 }
 
 if (hasName()) {
