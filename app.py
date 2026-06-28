@@ -320,6 +320,13 @@ app = Flask(__name__, static_folder=BASE_DIR, static_url_path='',
 app.secret_key = os.getenv('SECRET_KEY') or secrets.token_hex(32)
 
 
+try:
+    from db import init_db
+    init_db()
+except Exception as _db_err:
+    print(f'DB init skipped: {_db_err}')
+
+
 @app.route('/healthz')
 def healthz():
     return jsonify({'status': 'ok'}), 200
@@ -431,6 +438,43 @@ def dashboard_logout():
 
 # ── Chat endpoint ─────────────────────────────────────────────────────────────
 
+def generate_reply(system_prompt, chat_history, user_message, is_continue=False):
+    """Call Gemini with the given history and return the reply text.
+
+    Shared by the browser /chat route and the /api/v1/chat programmatic API.
+    Raises on API errors so callers decide how to handle failure.
+    """
+    contents = []
+    for msg in chat_history:
+        role = 'user' if msg.get('role') == 'user' else 'model'
+        contents.append({'role': role, 'parts': [{'text': msg.get('content', '')}]})
+
+    if is_continue:
+        contents.append({'role': 'user', 'parts': [{'text': '(continuing the conversation naturally)'}]})
+    else:
+        contents.append({'role': 'user', 'parts': [{'text': user_message}]})
+
+    response = client.models.generate_content(
+        model=MODEL_NAME,
+        contents=contents,
+        config=types.GenerateContentConfig(
+            system_instruction=system_prompt,
+            temperature=0.75,
+            max_output_tokens=1024,
+        )
+    )
+
+    reply = response.text.strip() if response.text else "Hmm. What were you saying?"
+    if len(reply) > 1400:
+        reply = reply[:1397] + '...'
+
+    recent_bot = [msg.get('content', '').strip().lower()
+                  for msg in chat_history[-6:] if msg.get('role') in ('lilith', 'bot', 'model')]
+    if reply.strip().lower() in recent_bot:
+        reply = "still here, just thinking 😶"
+    return reply
+
+
 @app.route('/chat', methods=['POST'])
 def chat():
     data = request.json
@@ -456,37 +500,8 @@ def chat():
         return jsonify({'reply': reply + ' (Local mode — add GEMINI_API_KEY to .env)'})
 
     try:
-        contents = []
-        for msg in chat_history:
-            role = 'user' if msg.get('role') == 'user' else 'model'
-            contents.append({'role': role, 'parts': [{'text': msg.get('content', '')}]})
-
-        if is_continue:
-            contents.append({'role': 'user', 'parts': [{'text': '(continuing the conversation naturally)'}]})
-        else:
-            contents.append({'role': 'user', 'parts': [{'text': user_message}]})
-
         chat_logger.info(f'USER [{persona_slug}]: {user_message if not is_continue else "[continue]"}')
-
-        response = client.models.generate_content(
-            model=MODEL_NAME,
-            contents=contents,
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                temperature=0.75,
-                max_output_tokens=1024,
-            )
-        )
-
-        reply = response.text.strip() if response.text else "Hmm. What were you saying?"
-        if len(reply) > 1400:
-            reply = reply[:1397] + '...'
-
-        # Avoid duplicate of any recent bot message (last 6 messages)
-        recent_bot = [msg.get('content', '').strip().lower() for msg in chat_history[-6:] if msg.get('role') in ('lilith', 'bot', 'model')]
-        if reply.strip().lower() in recent_bot:
-            reply = "still here, just thinking 😶"
-
+        reply = generate_reply(system_prompt, chat_history, user_message, is_continue)
         chat_logger.info(f'BOT [{persona_slug}]: {reply[:120]}')
         return jsonify({'reply': reply})
 
@@ -495,6 +510,65 @@ def chat():
         error_logger.error(f'Gemini error [{persona_slug}] user={safe_user}: {err_msg}', exc_info=True)
         reply = local_fallback_reply(user_message)
         return jsonify({'reply': reply + f' (Gemini error: {err_msg})'})
+
+
+# ── Programmatic API (v1) ─────────────────────────────────────────────────────
+# Server-side conversation memory keyed by conversation_id, so an external app
+# can drive a client's chat without holding the history itself.
+
+def _valid_api_key():
+    """True if request carries a valid key, or no keys are configured (open)."""
+    configured = [k.strip() for k in os.getenv('API_KEYS', '').split(',') if k.strip()]
+    if not configured:
+        return True
+    provided = request.headers.get('Authorization', '')
+    if provided.startswith('Bearer '):
+        provided = provided[7:]
+    provided = provided or request.headers.get('X-API-Key', '')
+    return provided in configured
+
+
+@app.route('/api/v1/chat', methods=['POST'])
+def api_v1_chat():
+    if not _valid_api_key():
+        return jsonify({'error': 'Invalid or missing API key'}), 401
+
+    data = request.json or {}
+    user_message = (data.get('message') or '').strip()
+    persona_slug = data.get('persona', DEFAULT_PERSONA)
+    conversation_id = data.get('conversation_id')
+    client_id = data.get('client_id')
+
+    if not user_message:
+        return jsonify({'error': 'message is required'}), 400
+
+    system_prompt = get_system_prompt(persona_slug)
+
+    from db import SessionLocal, get_or_create_conversation, add_message, history_as_dicts
+    session_db = SessionLocal()
+    try:
+        conv = get_or_create_conversation(session_db, conversation_id, persona_slug, client_id)
+        history = history_as_dicts(conv)
+        add_message(session_db, conv.id, 'user', user_message)
+
+        if client is None:
+            reply = local_fallback_reply(user_message)
+        else:
+            reply = generate_reply(system_prompt, history, user_message)
+
+        add_message(session_db, conv.id, 'model', reply)
+        session_db.commit()
+        return jsonify({
+            'reply': reply,
+            'conversation_id': conv.id,
+            'persona': persona_slug,
+        })
+    except Exception as e:
+        session_db.rollback()
+        error_logger.error(f'API v1 chat error [{persona_slug}]: {str(e)[:300]}', exc_info=True)
+        return jsonify({'error': 'Internal error generating reply'}), 500
+    finally:
+        session_db.close()
 
 
 # ── Profile API ───────────────────────────────────────────────────────────────

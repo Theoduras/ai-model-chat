@@ -8,6 +8,7 @@ logs/
 .vercel
 node_modules/
 .DS_Store
+*.db
 README.md
 grok.ps1
 chat_cli.py

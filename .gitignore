@@ -9,6 +9,10 @@ __pycache__/
 .env*
 
 
+# Local SQLite database
+data.db
+*.db
+
 # X.com OAuth + DM bot runtime state (local only)
 x_tokens.json
 .x_oauth_state.json

@@ -76,6 +76,54 @@ own (e.g. `chat.yourbrand.com`):
 
 ---
 
+## Database (conversation memory)
+
+Conversations are stored in a database so an external app can drive a client's
+chat without holding the history itself.
+
+- **Local dev:** defaults to a SQLite file (`data.db`) — zero setup.
+- **Production:** set `DATABASE_URL` to a Postgres connection string (e.g. Cloud
+  SQL). Same code, no changes.
+
+```bash
+# Create a Cloud SQL Postgres instance, then deploy with:
+gcloud run deploy ai-model-chat --source . --region us-central1 \
+  --add-cloudsql-instances YOUR_PROJECT:us-central1:YOUR_INSTANCE \
+  --set-env-vars "DATABASE_URL=postgresql+psycopg2://USER:PASS@/DBNAME?host=/cloudsql/YOUR_PROJECT:us-central1:YOUR_INSTANCE"
+```
+
+Tables are created automatically on startup.
+
+## Programmatic API (for your app → client chats)
+
+`POST /api/v1/chat` — drives a conversation with server-side memory.
+
+**Auth:** set `API_KEYS` (comma-separated) as an env var. Callers pass it as
+`Authorization: Bearer <key>` or `X-API-Key: <key>`. If unset, the endpoint is
+open (dev only — always set keys in production).
+
+Request:
+```json
+{
+  "message": "hey, what's new?",
+  "persona": "lilith",
+  "conversation_id": "optional — omit to start a new one",
+  "client_id": "optional — your end-user's id"
+}
+```
+
+Response:
+```json
+{
+  "reply": "...",
+  "conversation_id": "abc123",
+  "persona": "lilith"
+}
+```
+
+Store the returned `conversation_id` and send it back on the next call to
+continue the same conversation.
+
 ## Health check
 
 Cloud Run pings `GET /healthz`, which returns `{"status":"ok"}`.
