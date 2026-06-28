@@ -319,6 +319,12 @@ app = Flask(__name__, static_folder=BASE_DIR, static_url_path='',
             template_folder=os.path.join(BASE_DIR, 'templates'))
 app.secret_key = os.getenv('SECRET_KEY') or secrets.token_hex(32)
 
+
+@app.route('/healthz')
+def healthz():
+    return jsonify({'status': 'ok'}), 200
+
+
 X_TOKENS_FILE = '/tmp/x_tokens.json' if IS_VERCEL else os.path.join(BASE_DIR, 'x_tokens.json')
 X_OAUTH_STATE_FILE = '/tmp/x_oauth_state.json' if IS_VERCEL else os.path.join(BASE_DIR, '.x_oauth_state.json')
 

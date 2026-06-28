@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.env
+.git
+.gitignore
+logs/
+*.log
+.vercel
+node_modules/
+.DS_Store
+README.md
+grok.ps1
+chat_cli.py
