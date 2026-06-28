@@ -305,26 +305,46 @@ function si() {
   ot = setTimeout(() => { addMsg("i'll catch you later", false); ss(false); }, 480000);
 }
 
+// Queue of user messages awaiting a reply. Multiple quick messages are
+// answered one at a time, in order — as if she reads and replies to the
+// first before noticing the next.
+let msgQueue = [], processing = false;
+
 function se() {
   const x = inp.value.trim();
   if (!x) return;
-  ri();
-  addMsg(x, true); um(x); sm();
+  insertMsg(x, true);   // show immediately; committed to history when processed
   inp.value = '';
   const n = Date.now(), d = (n - l) / 1000;
   if (d > 0.7 && x.length > 2) { const v = x.length / d; s = Math.max(3.5, Math.min(18, s * 0.6 + v * 0.4)); }
   l = n;
-  const initialDelay = 3000 + Math.random() * 9000;
+  msgQueue.push(x);
+  if (!processing) processQueue();
+}
+
+function processQueue() {
+  if (!msgQueue.length) { processing = false; si(); return; }
+  processing = true;
+  ri();
+  const x = msgQueue.shift();
+  um(x);
+  const histSnapshot = h.slice();   // only turns answered so far — not later queued messages
+  const initialDelay = 1800 + Math.random() * 3500 + Math.min(x.length * 35, 3500);
   showTyping(true);
   setTimeout(() => {
-    fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: chatBody({ message: x, history: h.slice(0, -1) }) })
+    fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: chatBody({ message: x, history: histSnapshot }) })
       .then(r => r.json()).then(d => {
+        h.push({ role: 'user', content: x }); sm();
         if (d.reply) {
-          const recentBot = h.slice(-6).filter(x => x.role === 'bot').map(x => x.content.trim().toLowerCase());
-          if (recentBot.includes(d.reply.trim().toLowerCase())) { showTyping(false); ss(true); si(); return; }
-          cs(d.reply, si);
-        } else if (d.error) { showTyping(false); addMsg('something went weird on my end. try again?', false); ss(false); }
-      }).catch(() => { showTyping(false); addMsg('something went wrong. please try again.', false); ss(false); });
+          const recentBot = h.slice(-6).filter(m => m.role === 'bot').map(m => m.content.trim().toLowerCase());
+          if (recentBot.includes(d.reply.trim().toLowerCase())) { showTyping(false); sc(); ss(true); processQueue(); return; }
+          cs(d.reply, () => { sc(); processQueue(); });
+        } else {
+          showTyping(false); addMsg('something went weird on my end. try again?', false); sc(); ss(false); processQueue();
+        }
+      }).catch(() => {
+        showTyping(false); h.push({ role: 'user', content: x }); addMsg('something went wrong. please try again.', false); sc(); ss(false); processQueue();
+      });
   }, initialDelay);
 }
 

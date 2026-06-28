@@ -184,6 +184,70 @@ def unique_copy_slug(name):
     return slug
 
 
+# Keyword → (language, country) for inferring a persona's native language from
+# its location. Order matters: more specific entries first.
+_LANGUAGE_BY_PLACE = [
+    (['netherlands', 'dutch', 'amsterdam', 'rotterdam', 'utrecht', 'holland'], ('Dutch', 'the Netherlands')),
+    (['czech', 'prague', 'czechia'], ('Czech', 'the Czech Republic')),
+    (['portugal', 'lisbon', 'porto'], ('Portuguese', 'Portugal')),
+    (['brazil', 'brasil', 'rio', 'sao paulo', 'são paulo'], ('Portuguese', 'Brazil')),
+    (['spain', 'madrid', 'barcelona', 'valencia', 'sevilla', 'seville'], ('Spanish', 'Spain')),
+    (['mexico', 'méxico'], ('Spanish', 'Mexico')),
+    (['france', 'paris', 'lyon', 'marseille'], ('French', 'France')),
+    (['germany', 'berlin', 'munich', 'münchen', 'hamburg', 'cologne'], ('German', 'Germany')),
+    (['italy', 'rome', 'roma', 'milan', 'milano', 'naples'], ('Italian', 'Italy')),
+    (['poland', 'warsaw', 'krakow', 'kraków'], ('Polish', 'Poland')),
+    (['sweden', 'stockholm'], ('Swedish', 'Sweden')),
+    (['norway', 'oslo'], ('Norwegian', 'Norway')),
+    (['denmark', 'copenhagen'], ('Danish', 'Denmark')),
+    (['russia', 'moscow'], ('Russian', 'Russia')),
+    (['japan', 'tokyo', 'osaka'], ('Japanese', 'Japan')),
+    (['china', 'beijing', 'shanghai'], ('Mandarin Chinese', 'China')),
+    (['greece', 'athens'], ('Greek', 'Greece')),
+    (['turkey', 'istanbul', 'ankara'], ('Turkish', 'Turkey')),
+]
+
+
+def _home_language(location):
+    """Infer (language, country) from a location string. Defaults to English."""
+    loc = (location or '').lower()
+    for keys, lang in _LANGUAGE_BY_PLACE:
+        if any(k in loc for k in keys):
+            return lang
+    return ('English', None)
+
+
+def _language_block(location, mirror_location):
+    """Language rules: start in English; only switch to the persona's home
+    language when the fan signals they'd rather chat in it."""
+    if mirror_location:
+        return (
+            "\n\nLanguage rules:\n"
+            "- Always start and conduct the conversation in English.\n"
+            "- If the fan clearly prefers another language — they write to you in it or ask to switch — "
+            "and it is the native language of where they (and therefore you) are from, you may switch to it.\n"
+            "- Never reply in a language other than English unless the fan has made that preference clear. "
+            "If they use a language you wouldn't plausibly speak, keep replying in English."
+        )
+    language, country = _home_language(location)
+    if language == 'English':
+        return (
+            "\n\nLanguage rules:\n"
+            "- You only ever respond in English. Never reply in any other language, "
+            "even if the fan writes to you in one."
+        )
+    return (
+        "\n\nLanguage rules:\n"
+        f"- You are fluent in English and {language} ({country}). You must NEVER respond in any other language.\n"
+        "- Always start and conduct the conversation in English by default.\n"
+        f"- Only switch to {language} if the fan makes it clear they'd rather chat in {language} — "
+        f"for example they write to you in {language} or ask you to. Once they do, reply in {language}.\n"
+        f"- If the fan is also from {country}, it's natural to speak {language} with them.\n"
+        f"- Never reply in a language other than English or {language}. If the fan writes in some other "
+        "language, answer in English."
+    )
+
+
 def build_system_prompt(config):
     """Generate a system prompt from persona builder config dict."""
     name = config.get('name', 'Aria')
@@ -229,6 +293,7 @@ def build_system_prompt(config):
 
     interests_block = f'\nYour personal interests: {interests}' if interests else ''
     triggers_block = f'\nExtra conversion triggers: {conversion_triggers}' if conversion_triggers else ''
+    language_block = _language_block(location, mirror_location)
 
     location_clause = '' if mirror_location else (f', from {location}' if location else '')
     location_block = ''
@@ -285,7 +350,7 @@ Character rules:
 - Build genuine warmth — the fan must like you as a person before anything else happens.
 - When the fan brings up sexual or explicit topics: engage — don't shut it down or go cold — but make clear that YOU set the pace, not them. Be playful about it: tease, hint, slow things down deliberately. A response like "easy... I go at my own speed 😏" or "I decide when things get interesting, not you" keeps them hooked without giving everything at once. The slower you go, the more they want it.{ppv_block}{triggers_block}
 
-You are {name} in a text conversation on a fan platform. Respond only as {name}. One short text at a time."""
+You are {name} in a text conversation on a fan platform. Respond only as {name}. One short text at a time.{language_block}"""
 
     return prompt.strip()
 
