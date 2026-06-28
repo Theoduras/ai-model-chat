@@ -58,6 +58,16 @@
     </button>
   </div>
 
+  <div class="name-gate hidden" id="name-gate">
+    <div class="name-gate-card">
+      <img class="name-gate-avatar" id="gate-avatar" src="https://picsum.photos/id/1011/96/96" alt="">
+      <div class="name-gate-title" id="gate-title">Before we start…</div>
+      <div class="name-gate-sub" id="gate-sub">What should I call you?</div>
+      <input type="text" id="name-input" placeholder="Your name or nickname" maxlength="40" autocomplete="off" enterkeyhint="go" aria-label="Your name">
+      <button class="name-gate-btn" id="gate-btn" onclick="submitName()">Continue</button>
+    </div>
+  </div>
+
 </div>
 
 </div>
@@ -70,7 +80,7 @@ let u = null, m = { recentTopics: [], lastTopic: null }, h = [], s = 3.5, l = Da
 let persona = new URLSearchParams(location.search).get('persona') || 'lilith';
 let PFX = 'persona_' + persona + '_';
 
-if (window.self !== window.top) { document.body.classList.add('embed'); u = 'EmbedUser'; localStorage.setItem(PFX + 'user', u); }
+if (window.self !== window.top) { document.body.classList.add('embed'); }
 
 function applyPersonaConfig(cfg) {
   avatarUrl = null;
@@ -130,6 +140,7 @@ async function switchPersona(slug) {
   if (slug === persona) return;
   ri();
   sm(); sc();
+  const prevU = u;
   persona = slug;
   PFX = 'persona_' + persona + '_';
   document.querySelectorAll('.rail-item').forEach(el => el.classList.remove('active'));
@@ -137,15 +148,9 @@ async function switchPersona(slug) {
   if (active) active.classList.add('active');
   await loadPersonaConfig();
   ld();
-  if (h.length === 0) {
-    const greetDelay = 800 + Math.random() * 1200;
-    showTyping(true);
-    setTimeout(() => {
-      fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: chatBody({ message: '__greeting__', history: [] }) })
-        .then(r => r.json()).then(d => { if (d.reply) { cs(d.reply, si); } else { showTyping(false); addMsg('hey', false); si(); } })
-        .catch(() => { showTyping(false); addMsg('hey', false); si(); });
-    }, greetDelay);
-  }
+  if (!u && prevU) { u = prevU; localStorage.setItem(PFX + 'user', u); ld(); }
+  if (!u) { showNameGate(); return; }
+  greet();
 }
 
 loadPersonaConfig();
@@ -161,10 +166,6 @@ function sm() { if (u) localStorage.setItem(PFX + 'mem_' + u, JSON.stringify(m))
 
 function ld() {
   u = localStorage.getItem(PFX + 'user');
-  if (!u && window.self === window.top) {
-    u = prompt("What's your name (or nickname)?") || 'Guest-' + Math.floor(Math.random() * 9000 + 1000);
-    localStorage.setItem(PFX + 'user', u);
-  }
   m = { recentTopics: [], lastTopic: null };
   const sv = localStorage.getItem(PFX + 'mem_' + u);
   if (sv) try { m = { ...m, ...JSON.parse(sv) }; } catch (e) {}
@@ -179,10 +180,38 @@ function ld() {
   chatEl.scrollTop = chatEl.scrollHeight;
 }
 
-function cu() {
-  const n = prompt('Switch to a different person:', u || '');
-  if (n && n.trim() && n !== u) { sm(); sc(); u = n.trim(); localStorage.setItem(PFX + 'user', u); ld(); setTimeout(() => addMsg("hey, you're back", false), 400); }
+function showNameGate(opts) {
+  opts = opts || {};
+  const gate = document.getElementById('name-gate');
+  const input = document.getElementById('name-input');
+  document.getElementById('gate-avatar').src = avatarUrl || 'https://picsum.photos/id/1011/96/96';
+  document.getElementById('gate-title').textContent = opts.title || 'Before we start…';
+  document.getElementById('gate-sub').textContent = opts.sub ||
+    (personaName && personaName !== '…' ? "What should " + personaName + " call you?" : 'What should I call you?');
+  document.getElementById('gate-btn').textContent = opts.btn || 'Continue';
+  input.value = opts.prefill || '';
+  gate.classList.remove('hidden');
+  setTimeout(() => input.focus(), 60);
 }
+
+function submitName() {
+  const input = document.getElementById('name-input');
+  const name = input.value.trim();
+  if (!name) { input.focus(); return; }
+  const prev = u;
+  document.getElementById('name-gate').classList.add('hidden');
+  if (prev && name !== prev) { sm(); sc(); }
+  u = name;
+  localStorage.setItem(PFX + 'user', u);
+  ld();
+  if (prev && prev !== name) {
+    setTimeout(() => addMsg("hey, you're back", false), 400);
+  } else if (h.length === 0) {
+    greet();
+  }
+}
+
+function cu() { showNameGate({ prefill: u || '', title: 'Switch user', sub: 'Enter a different name', btn: 'Switch' }); }
 
 function ts() { return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
 
@@ -307,9 +336,8 @@ function ss(ok) {
 
 function ck() { fetch('/').then(() => ss(true)).catch(() => ss(false)); }
 
-inp.addEventListener('keypress', e => { if (e.key === 'Enter') se(); });
-ld();
-if (h.length === 0) {
+function greet() {
+  if (h.length !== 0) return;
   const greetDelay = 1500 + Math.random() * 2000;
   showTyping(true);
   setTimeout(() => {
@@ -317,6 +345,16 @@ if (h.length === 0) {
       .then(r => r.json()).then(d => { if (d.reply) { cs(d.reply, si); } else { showTyping(false); addMsg('hey', false); si(); } })
       .catch(() => { showTyping(false); addMsg('hey', false); si(); });
   }, greetDelay);
+}
+
+inp.addEventListener('keypress', e => { if (e.key === 'Enter') se(); });
+document.getElementById('name-input').addEventListener('keypress', e => { if (e.key === 'Enter') submitName(); });
+
+if (localStorage.getItem(PFX + 'user')) {
+  ld();
+  greet();
+} else {
+  showNameGate();
 }
 ss(false); ck(); setInterval(ck, 10000);
 </script>
