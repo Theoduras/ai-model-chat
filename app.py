@@ -796,10 +796,11 @@ def api_personas():
         if os.path.exists(meta_path):
             with open(meta_path, 'r', encoding='utf-8') as f:
                 meta = json.load(f)
+        has_img = bool(config.get('avatar')) or len(db_get_images(slug)) > 0
         personas.append({
             'slug': slug,
             'name': config.get('name') or meta.get('cover_label') or slug.capitalize(),
-            'avatar': f'/api/personas/{slug}/avatar' if config.get('avatar') else None,
+            'avatar': f'/api/personas/{slug}/avatar' if has_img else None,
             'config': config,
             'premade': True
         })
@@ -807,10 +808,11 @@ def api_personas():
     # Saved copies live in the DB (durable across redeploys)
     for sp in db_list_personas():
         config = sp.get('config', {})
+        has_img = bool(config.get('avatar')) or len(db_get_images(sp['slug'])) > 0
         personas.append({
             'slug': sp['slug'],
             'name': sp.get('name') or config.get('name') or sp['slug'].capitalize(),
-            'avatar': f"/api/personas/{sp['slug']}/avatar" if config.get('avatar') else None,
+            'avatar': f"/api/personas/{sp['slug']}/avatar" if has_img else None,
             'config': config,
             'premade': False
         })
@@ -1432,11 +1434,14 @@ def _serve_data_url(data_url):
 
 @app.route('/api/personas/<slug>/images', methods=['GET'])
 def api_persona_images(slug):
-    """List a persona's gallery image URLs (served individually from the DB)."""
+    """List a persona's gallery images. ?full=1 returns the raw data URLs
+    (for the dashboard editor); otherwise per-image endpoint URLs."""
     if not re.match(r'^[a-z0-9_-]+$', slug):
         return jsonify({'error': 'Invalid slug'}), 400
-    n = len(db_get_images(slug))
-    return jsonify({'count': n, 'images': [f'/api/personas/{slug}/image/{i}' for i in range(n)]})
+    imgs = db_get_images(slug)
+    if request.args.get('full') == '1':
+        return jsonify({'count': len(imgs), 'images': imgs})
+    return jsonify({'count': len(imgs), 'images': [f'/api/personas/{slug}/image/{i}' for i in range(len(imgs))]})
 
 
 @app.route('/api/personas/<slug>/image/<int:idx>')

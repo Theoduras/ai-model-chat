@@ -560,6 +560,7 @@ async function loadPersona(slug) {
   }
   renderForm(slug, config);
   document.getElementById('action-bar').style.display = 'flex';
+  loadGallery(slug);
   if (!config.speech_style) generateSpeechStyle(false);
   if (!config.conversion_triggers) generateTriggers();
   loadXStatus();
@@ -579,6 +580,8 @@ function newPersona() {
   }
   renderSidebar();
   renderForm(slug, { name });
+  galleryImages = [];
+  renderGallery();
   document.getElementById('action-bar').style.display = 'flex';
 }
 
@@ -695,6 +698,20 @@ function renderForm(slug, cfg) {
         <span class="hint" id="backstory-rand-status"></span>
         <span class="hint">Either type a short origin story, or let Gemini interview you and write it.</span>
       </div>
+    </div>
+
+    <div class="form-section">
+      <div class="section-title" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px;">
+        <span>Photos <span style="font-weight:400; color:#52525b; font-size:0.8rem;">(up to 5 — same person)</span></span>
+        <span style="display:flex; gap:6px;">
+          <button type="button" class="btn-ai" id="gen-face-btn" onclick="generateFirstPhoto()" title="Generate a new fictional face">✨ New face</button>
+          <button type="button" class="btn-ai" style="background:#3f3f46;" id="gen-more-btn" onclick="generateMorePhotos()" title="Add more shots of the same person">＋ More of her</button>
+        </span>
+      </div>
+      <div class="photo-grid" id="photo-grid"></div>
+      <input type="file" id="photo-file-input" accept="image/*" multiple style="display:none;" onchange="onPhotoFiles(event)">
+      <span class="hint" id="photo-status"></span>
+      <span class="hint" style="margin-top:2px;">First photo creates a fictional face; "More of her" keeps the same person in new shots. Photos save to the database on Save.</span>
     </div>
 
     <div class="form-section">
@@ -1114,7 +1131,19 @@ async function savePersona() {
     }
   }
   status.textContent = 'Saving…'; status.className = 'save-status';
+  const isPremade = personas[currentSlug] && personas[currentSlug].premade;
   try {
+    // Photos always save to the current persona (originals included).
+    await saveGallery(currentSlug);
+
+    if (isPremade) {
+      // Originals are read-only for text — only the photos are saved.
+      status.textContent = '✓ Photos saved (original text unchanged — use Copy to edit)';
+      status.className = 'save-status ok';
+      renderSidebar();
+      return;
+    }
+
     const res = await fetch('/api/personas/' + currentSlug, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(config)
@@ -1135,6 +1164,114 @@ async function savePersona() {
       showPromptPreview(data.prompt);
     } else { throw new Error(data.error || 'Unknown error'); }
   } catch(e) { status.textContent = '✗ ' + e.message; status.className = 'save-status err'; }
+}
+
+// ── Persona photo gallery (max 5, same person) ──
+let galleryImages = [];   // array of data URLs
+const MAX_PHOTOS = 5;
+
+function renderGallery() {
+  const grid = document.getElementById('photo-grid');
+  if (!grid) return;
+  grid.innerHTML = '';
+  galleryImages.forEach((src, i) => {
+    const cell = document.createElement('div');
+    cell.className = 'photo-cell';
+    cell.innerHTML = '<img src="' + src + '" alt="photo ' + (i+1) + '">' +
+      '<button type="button" class="photo-del" title="Remove" onclick="removePhoto(' + i + ')">✕</button>' +
+      (i === 0 ? '<span class="photo-badge">profile</span>' : '');
+    grid.appendChild(cell);
+  });
+  if (galleryImages.length < MAX_PHOTOS) {
+    const add = document.createElement('div');
+    add.className = 'photo-cell photo-add';
+    add.title = 'Upload a photo';
+    add.innerHTML = '<span>＋</span>';
+    add.onclick = () => document.getElementById('photo-file-input').click();
+    grid.appendChild(add);
+  }
+}
+
+async function loadGallery(slug) {
+  galleryImages = [];
+  renderGallery();
+  try {
+    const res = await fetch('/api/personas/' + slug + '/images?full=1');
+    const data = await res.json();
+    if (Array.isArray(data.images)) galleryImages = data.images.slice(0, MAX_PHOTOS);
+  } catch(e) {}
+  renderGallery();
+}
+
+function removePhoto(i) { galleryImages.splice(i, 1); renderGallery(); }
+
+function onPhotoFiles(ev) {
+  const files = Array.from(ev.target.files || []);
+  let remaining = MAX_PHOTOS - galleryImages.length;
+  files.slice(0, remaining).forEach(file => {
+    const reader = new FileReader();
+    reader.onload = e => { if (galleryImages.length < MAX_PHOTOS) { galleryImages.push(e.target.result); renderGallery(); } };
+    reader.readAsDataURL(file);
+  });
+  ev.target.value = '';
+}
+
+async function generateFirstPhoto() {
+  if (galleryImages.length >= MAX_PHOTOS) { setPhotoStatus('Max 5 photos.', false); return; }
+  const btn = document.getElementById('gen-face-btn');
+  if (btn) btn.disabled = true;
+  setPhotoStatus('✨ Generating a new face…', null);
+  try {
+    const res = await fetch('/api/generate/image', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config: collectConfig(), shot: 'portrait' })
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Generation failed');
+    galleryImages.push(data.image); renderGallery();
+    setPhotoStatus('✓ Face added — use "More of her" for matching shots', true);
+  } catch(e) { setPhotoStatus('✗ ' + e.message, false); }
+  finally { if (btn) btn.disabled = false; }
+}
+
+async function generateMorePhotos() {
+  if (!galleryImages.length) { setPhotoStatus('Make a face first with "New face".', false); return; }
+  if (galleryImages.length >= MAX_PHOTOS) { setPhotoStatus('Max 5 photos.', false); return; }
+  const btn = document.getElementById('gen-more-btn');
+  if (btn) btn.disabled = true;
+  const shots = ['half', 'full', 'candid', 'mirror'];
+  const reference = galleryImages[0];
+  try {
+    while (galleryImages.length < MAX_PHOTOS) {
+      const shot = shots[(galleryImages.length - 1) % shots.length];
+      setPhotoStatus('✨ Generating photo ' + (galleryImages.length + 1) + ' of the same person…', null);
+      const res = await fetch('/api/generate/image', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reference, shot, config: collectConfig() })
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Generation failed');
+      galleryImages.push(data.image); renderGallery();
+    }
+    setPhotoStatus('✓ Photo set complete', true);
+  } catch(e) { setPhotoStatus('✗ ' + e.message, false); }
+  finally { if (btn) btn.disabled = false; }
+}
+
+function setPhotoStatus(msg, ok) {
+  const el = document.getElementById('photo-status');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = ok === true ? '#22c55e' : ok === false ? '#ef4444' : '#a1a1aa';
+}
+
+async function saveGallery(slug) {
+  try {
+    await fetch('/api/personas/' + slug + '/images', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ images: galleryImages })
+    });
+  } catch(e) {}
 }
 
 async function fillAllInfo() {
@@ -1180,6 +1317,7 @@ async function copyPersona(presetConfig) {
     });
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || 'Could not copy');
+    await saveGallery(data.slug);   // carry the current photos onto the copy
     personas[data.slug] = { slug: data.slug, name: data.name, config: { ...config, name: data.name }, premade: false };
     const folders = lsFolders();
     if (folders.length > 0) lsSetPersonaFolder(data.slug, folders[0].id);
