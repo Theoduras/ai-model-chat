@@ -116,6 +116,7 @@
       </div>
     </div>
     <div class="action-bar" id="action-bar" style="display:none;">
+      <button class="btn btn-secondary" id="fillall-btn" onclick="fillAllInfo()" title="Auto-generate a complete, coherent persona">✨ Fill all information</button>
       <button class="btn btn-secondary" onclick="previewPrompt()">Preview Prompt</button>
       <button class="btn btn-ghost" onclick="testChat()">Test Chat</button>
       <button class="btn btn-ghost" onclick="copyPersona()" title="Save a renamed copy with all settings">⧉ Copy</button>
@@ -1134,6 +1135,33 @@ async function savePersona() {
       showPromptPreview(data.prompt);
     } else { throw new Error(data.error || 'Unknown error'); }
   } catch(e) { status.textContent = '✗ ' + e.message; status.className = 'save-status err'; }
+}
+
+async function fillAllInfo() {
+  if (!currentSlug) return;
+  const btn = document.getElementById('fillall-btn');
+  const status = document.getElementById('save-status');
+  status.textContent = '✨ Generating a complete persona…'; status.className = 'save-status';
+  if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; }
+  try {
+    const res = await fetch('/api/generate/persona', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hint: v('f-name') || '' })
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Generation failed');
+    const cfg = data.config;
+    cfg.avatar = v('f-avatar') || cfg.avatar || '';   // keep any uploaded avatar
+    renderForm(currentSlug, cfg);                       // repopulate every field at once
+    if (personas[currentSlug]) personas[currentSlug].name = cfg.name || currentSlug;
+    renderSidebar();
+    status.textContent = '✓ Filled — review, then Save & Deploy'; status.className = 'save-status ok';
+  } catch(e) {
+    status.textContent = '✗ ' + e.message; status.className = 'save-status err';
+  } finally {
+    const b = document.getElementById('fillall-btn');
+    if (b) { b.disabled = false; b.style.opacity = '1'; }
+  }
 }
 
 async function copyPersona(presetConfig) {

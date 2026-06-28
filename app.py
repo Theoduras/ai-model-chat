@@ -950,6 +950,121 @@ def api_generate_speech_style():
         return jsonify({'ok': False, 'error': str(e)[:200]}), 200
 
 
+_ARCHETYPES = ['Deadpan / Dry', 'Bubbly / Sweet', 'Dominant / Edgy', 'Girl-Next-Door',
+               'Mysterious / Dark', 'Playful / Teasing', 'Intellectual / Witty']
+
+
+def _parse_persona_json(raw):
+    """Parse a JSON persona from model output, tolerating code fences."""
+    if not raw:
+        return None
+    txt = raw.strip()
+    if txt.startswith('```'):
+        txt = re.sub(r'^```[a-zA-Z]*\n?', '', txt)
+        txt = re.sub(r'\n?```$', '', txt).strip()
+    try:
+        return json.loads(txt)
+    except Exception:
+        m = re.search(r'\{.*\}', txt, re.DOTALL)
+        if m:
+            try:
+                return json.loads(m.group(0))
+            except Exception:
+                return None
+    return None
+
+
+def _pick(value, allowed, default):
+    if isinstance(value, str):
+        for a in allowed:
+            if value.strip().lower() == a.lower():
+                return a
+    return default
+
+
+def _normalize_persona(cfg):
+    """Coerce a generated persona into valid, in-range field values."""
+    out = {}
+    out['name'] = str(cfg.get('name') or 'Aria').strip()[:40]
+    try:
+        age = int(cfg.get('age', 22))
+    except (ValueError, TypeError):
+        age = 22
+    out['age'] = str(max(18, min(60, age)))
+    out['gender'] = _pick(cfg.get('gender'), ['Female', 'Male', 'Trans Female to Male', 'Trans Male to Female'], 'Female')
+    out['location'] = str(cfg.get('location') or '').strip()[:80]
+    out['archetype'] = _pick(cfg.get('archetype'), _ARCHETYPES, 'Girl-Next-Door')
+    out['backstory'] = str(cfg.get('backstory') or '').strip()
+    out['speech_style'] = str(cfg.get('speech_style') or '').strip()
+    try:
+        warmth = int(cfg.get('warmth', 3))
+    except (ValueError, TypeError):
+        warmth = 3
+    out['warmth'] = max(1, min(5, warmth))
+    out['question_freq'] = _pick(cfg.get('question_freq'), ['rarely', 'sometimes', 'often', 'very often'], 'often')
+    interests = cfg.get('interests')
+    if isinstance(interests, list):
+        interests = ', '.join(str(i) for i in interests)
+    out['interests'] = str(interests or '').strip()
+    out['flirt_pace'] = _pick(cfg.get('flirt_pace'), ['slow', 'moderate', 'fast', 'instant'], 'moderate')
+    out['nsfw_enabled'] = bool(cfg.get('nsfw_enabled', True))
+    out['nsfw_level'] = _pick(cfg.get('nsfw_level'), ['suggestive', 'moderate', 'explicit'], 'moderate')
+    out['conversion_triggers'] = str(cfg.get('conversion_triggers') or '').strip()
+    return out
+
+
+@app.route('/api/generate/persona', methods=['POST'])
+def api_generate_persona():
+    """Generate a complete, internally-consistent persona config in one shot."""
+    if client is None:
+        return jsonify({'ok': False, 'error': 'Gemini not configured.'}), 200
+    data = request.json or {}
+    hint = (data.get('hint') or '').strip()
+
+    system = (
+        "You design coherent, believable AI companion personas for an adult creator platform. "
+        "Invent ONE person whose every trait fits together and is realistic: age, where they're from, "
+        "backstory, personality archetype, the way they text, warmth, interests, and flirt style must ALL be "
+        "mutually consistent. A shy bookish 19-year-old student must not text like a brash 28-year-old dominatrix. "
+        "Backstory must be age-appropriate: 18-24 = student or recent school-leaver with a realistic side job "
+        "(barista, waiter, retail, dishwasher, delivery); 25-30 = early career, junior role, freelancing, or a small venture. "
+        "No fictional careers for young ages.\n\n"
+        "Return ONLY a JSON object (no markdown, no prose) with EXACTLY these keys: "
+        "name (first name), age (integer 18-32), gender (one of "
+        '["Female","Male","Trans Female to Male","Trans Male to Female"]), '
+        'location ("City, Country"), archetype (one of ' + json.dumps(_ARCHETYPES) + "), "
+        "backstory (2-3 specific sentences), speech_style (2-4 sentences on how they text — sentence length, "
+        "capitalisation, emoji use, slang, quirks — matching the archetype and backstory), "
+        "warmth (integer 1-5, consistent with the archetype), "
+        'question_freq (one of ["rarely","sometimes","often","very often"]), '
+        "interests (comma-separated string of 5-8 topics that fit the backstory), "
+        'flirt_pace (one of ["slow","moderate","fast","instant"], consistent with the archetype), '
+        "nsfw_enabled (boolean), nsfw_level (one of [\"suggestive\",\"moderate\",\"explicit\"]), "
+        "conversion_triggers (1-2 sentences, in their own voice, on how they naturally introduce paid content). "
+        "Ensure deep internal consistency across every field."
+    )
+    user = "Create a fresh, original, distinctive persona."
+    if hint:
+        user += f" Use this theme or starting idea: {hint}."
+    else:
+        user += " Make it unexpected — avoid clichés."
+
+    try:
+        resp = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=[{'role': 'user', 'parts': [{'text': user}]}],
+            config=types.GenerateContentConfig(
+                system_instruction=system, temperature=1.0,
+                response_mime_type='application/json'),
+        )
+        cfg = _parse_persona_json(resp.text or '')
+        if not cfg:
+            return jsonify({'ok': False, 'error': 'Could not parse the generated persona.'}), 200
+        return jsonify({'ok': True, 'config': _normalize_persona(cfg)})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]}), 200
+
+
 @app.route('/api/generate/backstory', methods=['POST'])
 def api_generate_backstory():
     if client is None:
