@@ -396,7 +396,6 @@ button:hover{background:#6d28d9}
 
 # ── Static pages ─────────────────────────────────────────────────────────────
 
-@app.route('/', methods=['GET', 'POST'])
 @app.route('/dashboard', methods=['GET', 'POST'])
 def dashboard():
     if not _check_admin():
@@ -409,6 +408,7 @@ def dashboard():
         return render_template_string(LOGIN_HTML, error=None)
     return send_from_directory(BASE_DIR, 'dashboard.html')
 
+@app.route('/', methods=['GET'])
 @app.route('/chat', methods=['GET'])
 def chat_page():
     return send_from_directory(BASE_DIR, 'chat.html')
