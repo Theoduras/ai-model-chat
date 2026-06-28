@@ -89,6 +89,9 @@ def _persona_path(slug, ext):
 
 
 def load_persona_prompt(slug):
+    saved = db_get_persona(slug)
+    if saved and saved.get('prompt'):
+        return saved['prompt']
     path = _persona_path(slug, '.txt')
     if os.path.exists(path):
         return _read_file(path)
@@ -110,6 +113,75 @@ def load_persona_profile(slug):
         with open(legacy, 'r', encoding='utf-8') as f:
             return json.load(f)
     return {}
+
+
+def _is_premade(slug):
+    """A premade (original) persona ships as a repo file and must stay unedited."""
+    return os.path.exists(os.path.join(PERSONAS_DIR, f'{slug}.config.json')) \
+        or os.path.exists(os.path.join(PERSONAS_DIR, f'{slug}.txt'))
+
+
+def db_get_persona(slug):
+    """Return a saved (copied) persona from the DB as a dict, or None."""
+    try:
+        from db import SessionLocal, get_saved_persona
+    except Exception:
+        return None
+    s = SessionLocal()
+    try:
+        sp = get_saved_persona(s, slug)
+        if not sp:
+            return None
+        try:
+            config = json.loads(sp.config_json)
+        except Exception:
+            config = {}
+        return {'slug': sp.slug, 'name': sp.name, 'config': config, 'prompt': sp.prompt}
+    finally:
+        s.close()
+
+
+def db_list_personas():
+    """Return all saved (copied) personas as a list of dicts."""
+    try:
+        from db import SessionLocal, list_saved_personas
+    except Exception:
+        return []
+    s = SessionLocal()
+    try:
+        out = []
+        for sp in list_saved_personas(s):
+            try:
+                config = json.loads(sp.config_json)
+            except Exception:
+                config = {}
+            out.append({'slug': sp.slug, 'name': sp.name, 'config': config})
+        return out
+    finally:
+        s.close()
+
+
+def db_save_persona(slug, name, config, prompt):
+    from db import SessionLocal, upsert_saved_persona
+    s = SessionLocal()
+    try:
+        upsert_saved_persona(s, slug, name, json.dumps(config, ensure_ascii=False), prompt)
+        s.commit()
+    finally:
+        s.close()
+    _prompt_cache.pop(slug, None)
+
+
+def unique_copy_slug(name):
+    """Make a URL-safe slug from a name, unique across premade + saved personas."""
+    base = re.sub(r'[^a-z0-9]+', '-', (name or 'persona').lower()).strip('-') or 'persona'
+    slug = base
+    i = 2
+    existing_saved = {p['slug'] for p in db_list_personas()}
+    while _is_premade(slug) or slug in existing_saved:
+        slug = f'{base}-{i}'
+        i += 1
+    return slug
 
 
 def build_system_prompt(config):
@@ -625,7 +697,19 @@ def api_personas():
             'slug': slug,
             'name': config.get('name') or meta.get('cover_label') or slug.capitalize(),
             'avatar': f'/api/personas/{slug}/avatar' if config.get('avatar') else None,
-            'config': config
+            'config': config,
+            'premade': True
+        })
+
+    # Saved copies live in the DB (durable across redeploys)
+    for sp in db_list_personas():
+        config = sp.get('config', {})
+        personas.append({
+            'slug': sp['slug'],
+            'name': sp.get('name') or config.get('name') or sp['slug'].capitalize(),
+            'avatar': f"/api/personas/{sp['slug']}/avatar" if config.get('avatar') else None,
+            'config': config,
+            'premade': False
         })
     return jsonify(personas)
 
@@ -634,42 +718,104 @@ def api_personas():
 def api_persona_get(slug):
     if not re.match(r'^[a-z0-9_-]+$', slug):
         return jsonify({'error': 'Invalid slug'}), 400
+    saved = db_get_persona(slug)
+    if saved:
+        return jsonify({'slug': slug, 'config': saved['config'],
+                        'prompt': saved.get('prompt') or '', 'premade': False})
     config_path = _persona_path(slug, '.config.json')
     config = {}
     if os.path.exists(config_path):
         with open(config_path, 'r', encoding='utf-8') as f:
             config = json.load(f)
     prompt = load_persona_prompt(slug) or ''
-    return jsonify({'slug': slug, 'config': config, 'prompt': prompt})
+    return jsonify({'slug': slug, 'config': config, 'prompt': prompt,
+                    'premade': _is_premade(slug)})
+
+
+def _validate_age(config):
+    try:
+        return int(config.get('age', 0)) >= 18
+    except (ValueError, TypeError):
+        return False
 
 
 @app.route('/api/personas/<slug>', methods=['POST'])
 def api_persona_save(slug):
-    """Save a persona config and regenerate its system prompt."""
+    """Save edits to a saved (copied) persona. Premade originals are read-only —
+    editing one must go through the copy endpoint instead."""
     if not re.match(r'^[a-z0-9_-]+$', slug):
         return jsonify({'error': 'Invalid slug'}), 400
 
     config = request.json
-    try:
-        if int(config.get('age', 0)) < 18:
-            return jsonify({'error': 'Age must be 18 or older'}), 400
-    except (ValueError, TypeError):
+    if not _validate_age(config):
         return jsonify({'error': 'Age must be 18 or older'}), 400
+
+    # Protect premade originals: never overwrite them.
+    if _is_premade(slug) and not db_get_persona(slug):
+        return jsonify({
+            'error': 'premade_readonly',
+            'message': 'This is a premade model. Save it as a copy to make changes.'
+        }), 409
+
     prompt = build_system_prompt(config)
-
-    write_dir = '/tmp/personas' if IS_VERCEL else PERSONAS_DIR
-    os.makedirs(write_dir, exist_ok=True)
-
-    with open(os.path.join(write_dir, f'{slug}.config.json'), 'w', encoding='utf-8') as f:
-        json.dump(config, f, indent=2, ensure_ascii=False)
-
-    with open(os.path.join(write_dir, f'{slug}.txt'), 'w', encoding='utf-8') as f:
-        f.write(prompt)
-
-    # Invalidate cache so next chat picks up new prompt
-    _prompt_cache.pop(slug, None)
-
+    name = config.get('name') or slug.capitalize()
+    db_save_persona(slug, name, config, prompt)
     return jsonify({'ok': True, 'slug': slug, 'prompt': prompt})
+
+
+@app.route('/api/personas/copy', methods=['POST'])
+def api_persona_copy():
+    """Copy any persona (premade or saved) into a new, renamed saved persona."""
+    data = request.json or {}
+    source = data.get('source', '')
+    new_name = (data.get('name') or '').strip()
+    if not re.match(r'^[a-z0-9_-]+$', source):
+        return jsonify({'error': 'Invalid source slug'}), 400
+    if not new_name:
+        return jsonify({'error': 'A name is required for the copy'}), 400
+
+    # Prefer a live config sent from the editor (carries unsaved edits); else
+    # pull the source config from the DB or repo files.
+    config = data.get('config')
+    if not isinstance(config, dict):
+        src = db_get_persona(source)
+        if src:
+            config = dict(src['config'])
+        else:
+            cfg_path = _persona_path(source, '.config.json')
+            if not os.path.exists(cfg_path):
+                return jsonify({'error': 'Source persona not found'}), 404
+            with open(cfg_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+    else:
+        config = dict(config)
+
+    config['name'] = new_name
+    if not _validate_age(config):
+        return jsonify({'error': 'Age must be 18 or older'}), 400
+
+    slug = unique_copy_slug(new_name)
+    prompt = build_system_prompt(config)
+    db_save_persona(slug, new_name, config, prompt)
+    return jsonify({'ok': True, 'slug': slug, 'name': new_name})
+
+
+@app.route('/api/personas/<slug>', methods=['DELETE'])
+def api_persona_delete(slug):
+    """Delete a saved copy. Premade originals cannot be deleted."""
+    if not re.match(r'^[a-z0-9_-]+$', slug):
+        return jsonify({'error': 'Invalid slug'}), 400
+    if _is_premade(slug) and not db_get_persona(slug):
+        return jsonify({'error': 'Premade models cannot be deleted'}), 403
+    from db import SessionLocal, delete_saved_persona
+    s = SessionLocal()
+    try:
+        ok = delete_saved_persona(s, slug)
+        s.commit()
+    finally:
+        s.close()
+    _prompt_cache.pop(slug, None)
+    return jsonify({'ok': ok})
 
 
 @app.route('/api/personas/<slug>/preview', methods=['POST'])
@@ -926,11 +1072,15 @@ def api_persona_avatar(slug):
     """Return the persona's avatar image from the config."""
     import base64
     from flask import Response
-    config_path = _persona_path(slug, '.config.json')
-    cfg = {}
-    if os.path.exists(config_path):
-        with open(config_path, 'r', encoding='utf-8') as f:
-            cfg = json.load(f)
+    saved = db_get_persona(slug)
+    if saved:
+        cfg = saved['config']
+    else:
+        config_path = _persona_path(slug, '.config.json')
+        cfg = {}
+        if os.path.exists(config_path):
+            with open(config_path, 'r', encoding='utf-8') as f:
+                cfg = json.load(f)
     avatar = cfg.get('avatar', '')
     if not avatar or not avatar.startswith('data:'):
         return ('', 404)

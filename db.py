@@ -60,8 +60,47 @@ class Message(Base):
 Index('ix_messages_conv_created', Message.conversation_id, Message.created_at)
 
 
+class SavedPersona(Base):
+    """Creator-made persona copies. Premade personas stay as repo files;
+    these live in the DB so they survive refreshes and redeploys."""
+    __tablename__ = 'saved_personas'
+
+    slug = Column(String(64), primary_key=True)
+    name = Column(String(120))
+    config_json = Column(Text, nullable=False)   # JSON-encoded builder config
+    prompt = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=_now)
+    updated_at = Column(DateTime, default=_now, onupdate=_now)
+
+
 def init_db():
     Base.metadata.create_all(engine)
+
+
+def list_saved_personas(session):
+    return session.query(SavedPersona).order_by(SavedPersona.name).all()
+
+
+def get_saved_persona(session, slug):
+    return session.get(SavedPersona, slug)
+
+
+def upsert_saved_persona(session, slug, name, config_json, prompt):
+    sp = session.get(SavedPersona, slug)
+    if sp is None:
+        sp = SavedPersona(slug=slug)
+        session.add(sp)
+    sp.name = name
+    sp.config_json = config_json
+    sp.prompt = prompt
+    return sp
+
+
+def delete_saved_persona(session, slug):
+    sp = session.get(SavedPersona, slug)
+    if sp:
+        session.delete(sp)
+    return bool(sp)
 
 
 def get_or_create_conversation(session, conversation_id, persona, client_id=None):

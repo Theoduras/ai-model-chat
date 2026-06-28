@@ -607,8 +607,34 @@ body.page-dashboard .badge { font-size: 0.7rem; background: #3f3f46; padding: 2p
   font-size: 0.85rem;
   flex-shrink: 0;
 }
-.persona-name { font-size: 0.875rem; font-weight: 500; }
+.persona-name { font-size: 0.875rem; font-weight: 500; display: flex; align-items: center; gap: 6px; }
 .persona-slug { font-size: 0.7rem; color: #71717a; }
+.persona-tag {
+  font-size: 0.58rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: #a1a1aa;
+  background: #27272a;
+  padding: 1px 6px;
+  border-radius: 9999px;
+  flex-shrink: 0;
+}
+.persona-del {
+  margin-left: auto;
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: #52525b;
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 4px 6px;
+  border-radius: 6px;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
+}
+.persona-item:hover .persona-del { opacity: 1; }
+.persona-del:hover { color: #ef4444; background: #2a2a2d; }
 .btn-new {
   margin: 12px;
   padding: 10px;

@@ -117,6 +117,7 @@
     <div class="action-bar" id="action-bar" style="display:none;">
       <button class="btn btn-secondary" onclick="previewPrompt()">Preview Prompt</button>
       <button class="btn btn-ghost" onclick="testChat()">Test Chat</button>
+      <button class="btn btn-ghost" onclick="copyPersona()" title="Save a renamed copy with all settings">⧉ Copy</button>
       <button class="btn btn-primary" onclick="savePersona()">Save &amp; Deploy</button>
       <span class="save-status" id="save-status"></span>
     </div>
@@ -454,8 +455,32 @@ function buildPersonaItem(p) {
   const avatarHtml = p.avatar
     ? '<img src="' + p.avatar + '?t=' + Date.now() + '" style="width:36px;height:36px;border-radius:50%;object-fit:cover;">'
     : '<div class="persona-avatar">' + initials + '</div>';
-  el.innerHTML = avatarHtml + '<div><div class="persona-name">' + (p.name || p.slug) + '</div><div class="persona-slug">' + p.slug + '</div></div>';
+  const tag = p.premade ? '<span class="persona-tag">original</span>' : '';
+  const delBtn = p.premade ? ''
+    : '<button class="persona-del" title="Delete copy" onclick="event.stopPropagation();deletePersona(\'' + p.slug + '\')">✕</button>';
+  el.innerHTML = avatarHtml +
+    '<div style="flex:1;min-width:0;"><div class="persona-name">' + esc(p.name || p.slug) + tag + '</div>' +
+    '<div class="persona-slug">' + p.slug + '</div></div>' + delBtn;
   return el;
+}
+
+async function deletePersona(slug) {
+  if (!confirm('Delete this copy? This cannot be undone.')) return;
+  try {
+    const res = await fetch('/api/personas/' + slug, { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok || data.error) { alert(data.error || 'Could not delete'); return; }
+    delete personas[slug];
+    lsDeletePersona && lsDeletePersona(slug);
+    if (currentSlug === slug) {
+      currentSlug = null;
+      document.getElementById('form-area').innerHTML =
+        '<div class="empty-state"><p>Select a persona from the sidebar<br>or create a new one.</p></div>';
+      document.getElementById('action-bar').style.display = 'none';
+    }
+    document.getElementById('persona-count').textContent = Object.keys(personas).length;
+    renderSidebar();
+  } catch(e) { alert('Could not delete: ' + e.message); }
 }
 
 function renderSidebar() {
@@ -536,7 +561,7 @@ function newPersona() {
   if (!slug) return;
   currentSlug = slug;
   if (!personas[slug]) {
-    personas[slug] = { slug, name, config: {} };
+    personas[slug] = { slug, name, config: {}, premade: false };
     const folders = lsFolders();
     if (folders.length > 0) lsSetPersonaFolder(slug, folders[0].id);
     document.getElementById('persona-count').textContent = Object.keys(personas).length;
@@ -1074,6 +1099,12 @@ async function savePersona() {
       body: JSON.stringify(config)
     });
     const data = await res.json();
+    if (res.status === 409 && data.error === 'premade_readonly') {
+      status.textContent = 'Original models are read-only — saving as a copy…';
+      status.className = 'save-status';
+      await copyPersona(config);
+      return;
+    }
     if (data.ok) {
       lsSavePersona(currentSlug, config);
       if (data.prompt) localStorage.setItem('persona_prompt_' + currentSlug, data.prompt);
@@ -1082,6 +1113,32 @@ async function savePersona() {
       renderSidebar();
       showPromptPreview(data.prompt);
     } else { throw new Error(data.error || 'Unknown error'); }
+  } catch(e) { status.textContent = '✗ ' + e.message; status.className = 'save-status err'; }
+}
+
+async function copyPersona(presetConfig) {
+  if (!currentSlug) return;
+  const config = presetConfig || collectConfig();
+  const suggested = (config.name || personas[currentSlug]?.name || '') + ' copy';
+  const newName = prompt('Name this copy (it saves as a new model, leaving the original unchanged):', suggested.trim());
+  if (!newName || !newName.trim()) return;
+  const status = document.getElementById('save-status');
+  status.textContent = 'Creating copy…'; status.className = 'save-status';
+  try {
+    // Persist the current edits onto the copy by sending the live config as the source.
+    const res = await fetch('/api/personas/copy', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: currentSlug, name: newName.trim(), config })
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Could not copy');
+    personas[data.slug] = { slug: data.slug, name: data.name, config: { ...config, name: data.name }, premade: false };
+    const folders = lsFolders();
+    if (folders.length > 0) lsSetPersonaFolder(data.slug, folders[0].id);
+    document.getElementById('persona-count').textContent = Object.keys(personas).length;
+    status.textContent = '✓ Copied as "' + data.name + '"'; status.className = 'save-status ok';
+    renderSidebar();
+    loadPersona(data.slug);
   } catch(e) { status.textContent = '✗ ' + e.message; status.className = 'save-status err'; }
 }
 
