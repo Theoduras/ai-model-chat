@@ -169,6 +169,16 @@ function lsLoadSlugs() {
   try { return JSON.parse(localStorage.getItem(lsSlugsKey()) || '[]'); } catch(e) { return []; }
 }
 
+function lsDeletePersona(slug) {
+  try {
+    localStorage.removeItem(lsPersonaKey(slug));
+    localStorage.removeItem(lsFolderAssignKey(slug));
+    localStorage.removeItem('persona_prompt_' + slug);
+    const slugs = JSON.parse(localStorage.getItem(lsSlugsKey()) || '[]').filter(s => s !== slug);
+    localStorage.setItem(lsSlugsKey(), JSON.stringify(slugs));
+  } catch(e) {}
+}
+
 function lsFolders() {
   try { return JSON.parse(localStorage.getItem(lsFoldersKey()) || '[]'); } catch(e) { return []; }
 }
@@ -472,7 +482,7 @@ async function deletePersona(slug) {
     const data = await res.json();
     if (!res.ok || data.error) { alert(data.error || 'Could not delete'); return; }
     delete personas[slug];
-    lsDeletePersona && lsDeletePersona(slug);
+    lsDeletePersona(slug);
     if (currentSlug === slug) {
       currentSlug = null;
       document.getElementById('form-area').innerHTML =
