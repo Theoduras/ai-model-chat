@@ -3,6 +3,42 @@
 /* ── Universal Reset ── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* ── Dev-only navigation bar (devnav.js) ── */
+.devnav {
+  position: fixed;
+  bottom: 16px;
+  left: 16px;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(20,20,23,0.92);
+  border: 1px solid #2a2a2d;
+  padding: 6px;
+  border-radius: 12px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.45);
+  backdrop-filter: blur(8px);
+  font-family: system-ui, -apple-system, sans-serif;
+}
+.devnav-tag {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.6px;
+  color: #fbbf24;
+  padding: 0 8px 0 4px;
+}
+.devnav-btn {
+  font-size: 12px;
+  font-weight: 600;
+  color: #d4d4d8;
+  text-decoration: none;
+  padding: 6px 12px;
+  border-radius: 8px;
+  transition: background 0.15s, color 0.15s;
+}
+.devnav-btn:hover { background: #27272a; color: #fff; }
+.devnav-btn.active { background: #7c3aed; color: #fff; }
+
 /* ── CSS Custom Properties (chat palette) ── */
 :root {
   --bg: #0d0d0f;
