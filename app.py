@@ -172,6 +172,39 @@ def db_save_persona(slug, name, config, prompt):
     _prompt_cache.pop(slug, None)
 
 
+def db_get_images(slug):
+    """Return the list of image data URLs stored for a persona (max 5)."""
+    try:
+        from db import SessionLocal, get_persona_images_row
+    except Exception:
+        return []
+    s = SessionLocal()
+    try:
+        row = get_persona_images_row(s, slug)
+        if not row:
+            return []
+        try:
+            imgs = json.loads(row.images_json)
+            return imgs if isinstance(imgs, list) else []
+        except Exception:
+            return []
+    finally:
+        s.close()
+
+
+def db_set_images(slug, images):
+    """Persist a persona's images (list of data URLs, capped at 5) to the DB."""
+    from db import SessionLocal, set_persona_images_row
+    clean = [i for i in (images or []) if isinstance(i, str) and i.startswith('data:')][:5]
+    s = SessionLocal()
+    try:
+        set_persona_images_row(s, slug, json.dumps(clean))
+        s.commit()
+    finally:
+        s.close()
+    return clean
+
+
 def unique_copy_slug(name):
     """Make a URL-safe slug from a name, unique across premade + saved personas."""
     base = re.sub(r'[^a-z0-9]+', '-', (name or 'persona').lower()).strip('-') or 'persona'
@@ -431,7 +464,7 @@ init_gemini_client()
 MODEL_NAME = 'gemini-2.5-flash'
 
 # Default persona slug (used when no persona param given)
-DEFAULT_PERSONA = 'lilith'
+DEFAULT_PERSONA = 'lillith'
 
 # Cache of loaded system prompts {slug: str}
 _prompt_cache = {}
@@ -1267,6 +1300,11 @@ def api_persona_avatar(slug):
             with open(config_path, 'r', encoding='utf-8') as f:
                 cfg = json.load(f)
     avatar = cfg.get('avatar', '')
+    # Fall back to the first gallery image so personas with photos get a profile pic.
+    if not avatar or not avatar.startswith('data:'):
+        imgs = db_get_images(slug)
+        if imgs:
+            avatar = imgs[0]
     if not avatar or not avatar.startswith('data:'):
         return ('', 404)
     try:
@@ -1276,6 +1314,53 @@ def api_persona_avatar(slug):
         return Response(data, mimetype=mime)
     except Exception:
         return ('', 400)
+
+
+def _serve_data_url(data_url):
+    """Serve a data: URL as an image Response, or 404/400."""
+    import base64
+    from flask import Response
+    if not data_url or not data_url.startswith('data:'):
+        return ('', 404)
+    try:
+        header, b64 = data_url.split(',', 1)
+        mime = header.split(';')[0].replace('data:', '') or 'image/jpeg'
+        return Response(base64.b64decode(b64), mimetype=mime)
+    except Exception:
+        return ('', 400)
+
+
+@app.route('/api/personas/<slug>/images', methods=['GET'])
+def api_persona_images(slug):
+    """List a persona's gallery image URLs (served individually from the DB)."""
+    if not re.match(r'^[a-z0-9_-]+$', slug):
+        return jsonify({'error': 'Invalid slug'}), 400
+    n = len(db_get_images(slug))
+    return jsonify({'count': n, 'images': [f'/api/personas/{slug}/image/{i}' for i in range(n)]})
+
+
+@app.route('/api/personas/<slug>/image/<int:idx>')
+def api_persona_image(slug, idx):
+    if not re.match(r'^[a-z0-9_-]+$', slug):
+        return ('', 400)
+    imgs = db_get_images(slug)
+    if idx < 0 or idx >= len(imgs):
+        return ('', 404)
+    return _serve_data_url(imgs[idx])
+
+
+@app.route('/api/personas/<slug>/images', methods=['POST'])
+def api_persona_images_save(slug):
+    """Save a persona's images to the DB (max 5). Allowed for originals too —
+    photos are an overlay and don't touch the read-only original config."""
+    if not re.match(r'^[a-z0-9_-]+$', slug):
+        return jsonify({'error': 'Invalid slug'}), 400
+    data = request.json or {}
+    images = data.get('images', [])
+    if not isinstance(images, list):
+        return jsonify({'error': 'images must be a list'}), 400
+    saved = db_set_images(slug, images)
+    return jsonify({'ok': True, 'count': len(saved)})
 
 
 # ── Backstory AI interview ────────────────────────────────────────────────────
@@ -1531,7 +1616,7 @@ def api_x_auth_url():
     data = request.json or {}
     client_id = data.get('client_id', '').strip()
     redirect_uri = data.get('redirect_uri', '').strip()
-    persona = data.get('persona', 'lilith')
+    persona = data.get('persona', 'lillith')
     if not client_id or not redirect_uri:
         return jsonify({'ok': False, 'error': 'client_id and redirect_uri are required'}), 400
 
@@ -1580,7 +1665,7 @@ def api_x_callback():
     client_id = saved['client_id']
     redirect_uri = saved['redirect_uri']
     code_verifier = saved['code_verifier']
-    persona = saved.get('persona', 'lilith')
+    persona = saved.get('persona', 'lillith')
 
     body = urllib.parse.urlencode({
         'grant_type': 'authorization_code',
@@ -1652,7 +1737,7 @@ def api_x_poll():
     if not _check_admin():
         return jsonify({'error': 'Unauthorized'}), 401
     data = request.json or {}
-    persona = data.get('persona', 'lilith')
+    persona = data.get('persona', 'lillith')
 
     tokens = _load_x_tokens()
     t = tokens.get(persona)

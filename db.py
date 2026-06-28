@@ -73,8 +73,32 @@ class SavedPersona(Base):
     updated_at = Column(DateTime, default=_now, onupdate=_now)
 
 
+class PersonaImages(Base):
+    """Up to 5 images per persona, stored as a JSON list of data URLs. Works as
+    an overlay for any persona (premade originals included) so photos persist in
+    the DB without editing the read-only original config files."""
+    __tablename__ = 'persona_images'
+
+    slug = Column(String(64), primary_key=True)
+    images_json = Column(Text, nullable=False, default='[]')
+    updated_at = Column(DateTime, default=_now, onupdate=_now)
+
+
 def init_db():
     Base.metadata.create_all(engine)
+
+
+def get_persona_images_row(session, slug):
+    return session.get(PersonaImages, slug)
+
+
+def set_persona_images_row(session, slug, images_json):
+    row = session.get(PersonaImages, slug)
+    if row is None:
+        row = PersonaImages(slug=slug)
+        session.add(row)
+    row.images_json = images_json
+    return row
 
 
 def list_saved_personas(session):
