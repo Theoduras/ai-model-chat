@@ -1048,6 +1048,39 @@ def _normalize_persona(cfg):
     return out
 
 
+@app.route('/api/geo/suggest')
+def api_geo_suggest():
+    """City/country autocomplete via OpenStreetMap Nominatim (country mandatory)."""
+    q = (request.args.get('q') or '').strip()
+    if len(q) < 2:
+        return jsonify({'suggestions': []})
+    try:
+        # Photon (Komoot) supports prefix/typeahead matching, e.g. "heerl" → Heerlen.
+        url = 'https://photon.komoot.io/api/?' + urllib.parse.urlencode({'q': q, 'limit': 10, 'lang': 'en'})
+        req = urllib.request.Request(url, headers={'User-Agent': 'ai-model-chat/1.0'})
+        with urllib.request.urlopen(req, timeout=6) as r:
+            data = json.loads(r.read().decode())
+        seen, out = set(), []
+        for feat in data.get('features', []):
+            p = feat.get('properties', {})
+            country = p.get('country')
+            if not country:
+                continue
+            # Only place-like results (cities, towns, countries, states).
+            if p.get('osm_key') not in (None, 'place', 'boundary'):
+                continue
+            city = p.get('city') or (p.get('name') if p.get('osm_value') in ('city', 'town', 'village', 'municipality') else '')
+            label = f'{city}, {country}' if city else country
+            if label not in seen:
+                seen.add(label)
+                out.append({'label': label, 'city': city or '', 'country': country})
+            if len(out) >= 8:
+                break
+        return jsonify({'suggestions': out})
+    except Exception as e:
+        return jsonify({'suggestions': [], 'error': str(e)[:120]})
+
+
 @app.route('/api/generate/persona', methods=['POST'])
 def api_generate_persona():
     """Generate a complete, internally-consistent persona config in one shot."""

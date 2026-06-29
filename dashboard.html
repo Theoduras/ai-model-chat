@@ -671,7 +671,10 @@ function renderForm(slug, cfg) {
       <div class="field-row">
         <div class="field">
           <label>Location</label>
-          <input type="text" id="f-location" value="${esc(cfg.location || '')}" placeholder="e.g. London — leave blank to match the fan" onblur="autoMirrorIfBlank()" ${cfg.mirror_location ? 'disabled' : ''} style="${cfg.mirror_location ? 'opacity:0.45;' : ''}">
+          <div style="position:relative;">
+            <input type="text" id="f-location" value="${esc(cfg.location || '')}" placeholder="Start typing a city or country…" autocomplete="off" oninput="onLocationInput()" onblur="autoMirrorIfBlank()" ${cfg.mirror_location ? 'disabled' : ''} style="${cfg.mirror_location ? 'opacity:0.45;' : ''}">
+            <div class="geo-suggest" id="geo-suggest" style="display:none;"></div>
+          </div>
           <div class="toggle-row" style="margin-top:8px;">
             <label class="toggle">
               <input type="checkbox" id="f-mirror-location" ${cfg.mirror_location ? 'checked' : ''} onchange="toggleMirrorLocation(this.checked)">
@@ -828,6 +831,38 @@ function toggleMirrorLocation(on) {
   if (input) { input.disabled = on; input.style.opacity = on ? '0.45' : '1'; }
   if (hint)  hint.style.display = on ? 'block' : 'none';
 }
+
+// ── Location autocomplete (city, country — country mandatory) ──
+let geoTimer = null;
+function onLocationInput() {
+  const input = document.getElementById('f-location');
+  const box = document.getElementById('geo-suggest');
+  if (!input || !box) return;
+  const q = input.value.trim();
+  clearTimeout(geoTimer);
+  if (q.length < 2) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  geoTimer = setTimeout(async () => {
+    try {
+      const res = await fetch('/api/geo/suggest?q=' + encodeURIComponent(q));
+      const data = await res.json();
+      const items = data.suggestions || [];
+      if (!items.length) { box.style.display = 'none'; return; }
+      box.innerHTML = items.map(s => '<div class="geo-item" onclick="pickLocation(\'' +
+        s.label.replace(/'/g, "\\'") + '\')">' + esc(s.label) + '</div>').join('');
+      box.style.display = 'block';
+    } catch(e) { box.style.display = 'none'; }
+  }, 250);
+}
+function pickLocation(label) {
+  const input = document.getElementById('f-location');
+  if (input) input.value = label;
+  const box = document.getElementById('geo-suggest');
+  if (box) { box.style.display = 'none'; box.innerHTML = ''; }
+}
+document.addEventListener('click', e => {
+  const box = document.getElementById('geo-suggest');
+  if (box && !e.target.closest('#f-location') && !e.target.closest('#geo-suggest')) box.style.display = 'none';
+});
 
 // Leaving location blank automatically means "match the fan's location".
 function autoMirrorIfBlank() {
