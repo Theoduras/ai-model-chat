@@ -50,8 +50,33 @@
           <select id="persona" onchange="updateConn()"></select>
         </div>
         <span class="conn-pill" id="conn-pill">—</span>
+        <button class="btn-ai" id="connect-btn" onclick="toggleConnect()">Connect X</button>
+        <button class="btn-ai" id="disconnect-btn" style="background:#3f3f46; display:none;" onclick="disconnectX()">Disconnect</button>
       </div>
-      <span class="hint">Only personas with a connected X account can act. Connect an account in the Dashboard → persona → X.com section.</span>
+      <span class="hint">Only personas with a connected X account can act on X.</span>
+    </div>
+
+    <div id="connect-panel" style="display:none; margin-top:4px; border-top:1px solid #232327; padding-top:16px;">
+      <div class="field full">
+        <label>X app OAuth 2.0 Client ID</label>
+        <input type="text" id="x-client-id" placeholder="your-app-client-id" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="field full" style="margin-top:12px;">
+        <label>Redirect URI <span style="font-weight:400;color:#52525b;">(must match your X app's callback URL exactly)</span></label>
+        <input type="text" id="x-redirect-uri" placeholder="https://your-domain/api/x/oauth-redirect" autocomplete="off" spellcheck="false">
+      </div>
+      <div style="display:flex; gap:8px; margin-top:14px;">
+        <button class="btn-ai" onclick="startConnect()">Authorize on X →</button>
+      </div>
+      <div id="connect-step2" style="display:none; margin-top:14px;">
+        <div class="field full">
+          <label>Paste the full callback URL after authorizing</label>
+          <input type="text" id="x-callback-url" placeholder="https://…/api/x/oauth-redirect?code=…&state=…" autocomplete="off" spellcheck="false">
+        </div>
+        <button class="btn-ai" style="margin-top:12px;" onclick="completeConnect()">Finish connection ✓</button>
+      </div>
+      <div class="result-box" id="connect-status"></div>
+      <span class="hint" style="margin-top:8px;">Need an X app? Create one at <a href="https://developer.x.com" target="_blank" style="color:#818cf8;">developer.x.com</a> with OAuth 2.0 enabled and scopes for tweet, follows, dm, and users. Set the Redirect URI above as a Callback URL in the app's user-authentication settings.</span>
     </div>
   </div>
 
@@ -129,13 +154,82 @@ async function init() {
 function updateConn() {
   const pill = document.getElementById('conn-pill');
   const info = connStatus[persona()];
-  if (info && info.connected) {
+  const connected = !!(info && info.connected);
+  if (connected) {
     pill.className = 'conn-pill ok';
     pill.textContent = '✓ @' + info.username;
   } else {
     pill.className = 'conn-pill err';
     pill.textContent = 'Not connected';
   }
+  document.getElementById('connect-btn').textContent = connected ? 'Reconnect' : 'Connect X';
+  document.getElementById('disconnect-btn').style.display = connected ? 'inline-flex' : 'none';
+  // collapse the connect panel when switching persona
+  document.getElementById('connect-panel').style.display = 'none';
+  document.getElementById('connect-step2').style.display = 'none';
+  document.getElementById('connect-status').innerHTML = '';
+}
+
+function toggleConnect() {
+  const panel = document.getElementById('connect-panel');
+  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+  if (panel.style.display === 'block' && !document.getElementById('x-redirect-uri').value) {
+    document.getElementById('x-redirect-uri').value = location.origin + '/api/x/oauth-redirect';
+  }
+}
+
+async function startConnect() {
+  const box = document.getElementById('connect-status');
+  const clientId = document.getElementById('x-client-id').value.trim();
+  const redirectUri = document.getElementById('x-redirect-uri').value.trim();
+  if (!clientId) { err(box, 'Enter your X app Client ID.'); return; }
+  if (!redirectUri) { err(box, 'Enter the Redirect URI.'); return; }
+  busy(box, 'Opening X authorization…');
+  const data = await post('/api/x/auth-url', { client_id: clientId, redirect_uri: redirectUri, persona: persona() });
+  if (!data.ok) { err(box, data.error); return; }
+  window.open(data.url, 'x-oauth', 'width=600,height=720');
+  document.getElementById('connect-step2').style.display = 'block';
+  box.innerHTML = '<span class="hint" style="color:#fbbf24;">Authorize in the popup, then paste the URL it lands on below.</span>';
+}
+
+async function finishWith(code, state) {
+  const box = document.getElementById('connect-status');
+  if (!code || !state) { err(box, 'Could not find code/state in that URL.'); return; }
+  busy(box, 'Finishing connection…');
+  const data = await post('/api/x/callback', { code, state });
+  if (!data.ok) { err(box, data.error); return; }
+  box.innerHTML = '<span class="hint" style="color:#4ade80;">✓ Connected as @' + esc(data.username) + '</span>';
+  const sRes = await fetch('/api/x/status');
+  connStatus = await sRes.json();
+  setTimeout(updateConn, 1100);
+}
+
+// Auto-complete when the OAuth popup hands back code/state.
+window.addEventListener('message', (e) => {
+  const d = e.data || {};
+  if (d.type !== 'x_oauth') return;
+  if (d.error) { err(document.getElementById('connect-status'), 'X returned: ' + d.error); return; }
+  finishWith(d.code, d.state);
+});
+
+async function completeConnect() {
+  const box = document.getElementById('connect-status');
+  const cb = document.getElementById('x-callback-url').value.trim();
+  if (!cb) { err(box, 'Paste the callback URL first.'); return; }
+  let code, state;
+  try {
+    const u = new URL(cb);
+    code = u.searchParams.get('code');
+    state = u.searchParams.get('state');
+  } catch(e) { err(box, 'That is not a valid URL.'); return; }
+  await finishWith(code, state);
+}
+
+async function disconnectX() {
+  if (!confirm('Disconnect this persona’s X account?')) return;
+  await post('/api/x/disconnect', { persona: persona() });
+  delete connStatus[persona()];
+  updateConn();
 }
 
 function busy(box, msg) { box.innerHTML = '<span class="hint">' + esc(msg) + '</span>'; }

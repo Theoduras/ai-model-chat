@@ -1961,6 +1961,30 @@ def api_x_callback():
     return jsonify({'ok': True, 'username': username, 'persona': persona})
 
 
+@app.route('/api/x/oauth-redirect', methods=['GET'])
+def api_x_oauth_redirect():
+    """Landing page X redirects to after authorization. Hands the code/state
+    back to the opener window so the connect flow can finish automatically."""
+    code = request.args.get('code', '')
+    state = request.args.get('state', '')
+    error = request.args.get('error', '')
+    payload = json.dumps({'type': 'x_oauth', 'code': code, 'state': state, 'error': error})
+    html = """<!DOCTYPE html><html><head><meta charset="utf-8"><title>X Authorization</title>
+<style>body{background:#0d0d0f;color:#f4f4f5;font-family:system-ui,sans-serif;display:flex;
+align-items:center;justify-content:center;min-height:100vh;text-align:center;padding:24px}
+.card{max-width:420px}a{color:#818cf8}</style></head><body><div class="card">
+<h2>%s</h2><p id="msg">Returning you to the bot…</p>
+<p style="font-size:13px;color:#71717a">If this window doesn't close, copy this page's URL and
+paste it back into the bot.</p></div>
+<script>
+var data = %s;
+try { if (window.opener) { window.opener.postMessage(data, '*'); document.getElementById('msg').textContent='Connected — you can close this window.'; setTimeout(function(){window.close();}, 1200); } }
+catch(e){}
+</script></body></html>""" % (
+        'Authorization failed' if error else 'Authorized ✓', payload)
+    return html, (400 if error else 200), {'Content-Type': 'text/html; charset=utf-8'}
+
+
 @app.route('/api/x/status', methods=['GET'])
 def api_x_status():
     if not _check_admin():
