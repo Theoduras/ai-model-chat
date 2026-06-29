@@ -24,6 +24,12 @@
     .conn-pill.err { background: #4c0519; color: #fb7185; }
     .row-inline { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
     .row-inline .field { flex: 1; min-width: 160px; }
+    @media (max-width: 640px) {
+      .xbot-wrap { padding: 18px 14px 70px; gap: 16px; }
+      .row-inline { gap: 8px; }
+      .row-inline .field { min-width: 130px; }
+      .reply-card .tag { float: none; display: inline-block; margin-bottom: 6px; }
+    }
   </style>
 </head>
 <body class="page-dashboard">
