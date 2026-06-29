@@ -19,7 +19,7 @@
 <div class="chat-container">
 
   <header class="header">
-    <div class="header-avatar-wrap">
+    <div class="header-avatar-wrap" onclick="openProfile()" style="cursor:pointer;" title="View profile">
       <img id="header-avatar" src="https://picsum.photos/id/1011/48/48" alt="">
       <div class="online-dot"></div>
     </div>
@@ -73,6 +73,28 @@
 
 </div>
 
+<div class="profile-modal" id="profile-modal" onclick="if(event.target===this)closeProfile()">
+  <div class="profile-card">
+    <button class="profile-close" onclick="closeProfile()" aria-label="Close">✕</button>
+    <div class="profile-gallery" id="profile-gallery">
+      <img id="profile-photo" src="" alt="" onclick="toggleProfileFullscreen()">
+      <button class="pg-nav prev" id="pg-prev" onclick="profileStep(-1)" aria-label="Previous">‹</button>
+      <button class="pg-nav next" id="pg-next" onclick="profileStep(1)" aria-label="Next">›</button>
+      <div class="pg-dots" id="pg-dots"></div>
+    </div>
+    <div class="profile-info">
+      <div class="profile-name-row">
+        <span class="profile-name" id="profile-name"></span>
+        <span class="profile-age" id="profile-age"></span>
+        <span class="profile-verified" title="Verified">✓</span>
+      </div>
+      <div class="profile-loc" id="profile-loc"></div>
+      <div class="profile-bio" id="profile-bio"></div>
+      <div class="profile-interests" id="profile-interests"></div>
+    </div>
+  </div>
+</div>
+
 <script>
 const chatEl = document.getElementById('chat');
 const inp = document.getElementById('input');
@@ -104,11 +126,60 @@ function applyPersonaConfig(cfg) {
   inp.placeholder = 'Message ' + personaName + '…';
 }
 
+let personaCfg = {}, profileImages = [], profileIdx = 0;
+
 function loadPersonaConfig() {
   return fetch('/api/personas/' + persona).then(r => r.ok ? r.json() : null).then(d => {
-    if (d) applyPersonaConfig(d.config || {});
+    personaCfg = (d && d.config) || {};
+    applyPersonaConfig(personaCfg);
+    return fetch('/api/personas/' + persona + '/images').then(r => r.ok ? r.json() : { images: [] }).then(g => {
+      profileImages = Array.isArray(g.images) ? g.images : [];
+      if (profileImages.length) {
+        avatarUrl = profileImages[0];
+        document.getElementById('header-avatar').src = avatarUrl;
+        document.getElementById('typing-av').src = avatarUrl;
+      }
+    }).catch(() => {});
   }).catch(() => {});
 }
+
+function openProfile() {
+  document.getElementById('profile-name').textContent = personaName || personaCfg.name || '';
+  document.getElementById('profile-age').textContent = personaCfg.age ? ', ' + personaCfg.age : '';
+  document.getElementById('profile-loc').textContent =
+    (personaCfg.location && !personaCfg.mirror_location) ? '📍 ' + personaCfg.location : '';
+  document.getElementById('profile-bio').textContent = personaCfg.backstory || '';
+  const interests = (personaCfg.interests || '').split(',').map(s => s.trim()).filter(Boolean);
+  document.getElementById('profile-interests').innerHTML =
+    interests.map(t => '<span class="interest-chip">' + t.replace(/</g, '&lt;') + '</span>').join('');
+  profileIdx = 0;
+  renderProfileGallery();
+  document.getElementById('profile-modal').classList.add('open');
+}
+
+function profileGalleryImgs() {
+  return profileImages.length ? profileImages : [avatarUrl || 'https://picsum.photos/id/1011/600/800'];
+}
+
+function renderProfileGallery() {
+  const imgs = profileGalleryImgs();
+  if (profileIdx >= imgs.length) profileIdx = 0;
+  if (profileIdx < 0) profileIdx = imgs.length - 1;
+  document.getElementById('profile-photo').src = imgs[profileIdx];
+  const multi = imgs.length > 1;
+  document.getElementById('pg-prev').style.display = multi ? 'flex' : 'none';
+  document.getElementById('pg-next').style.display = multi ? 'flex' : 'none';
+  document.getElementById('pg-dots').innerHTML = multi
+    ? imgs.map((_, i) => '<span class="pg-dot' + (i === profileIdx ? ' active' : '') + '"></span>').join('')
+    : '';
+}
+
+function profileStep(dir) { profileIdx += dir; renderProfileGallery(); }
+function closeProfile() {
+  document.getElementById('profile-modal').classList.remove('open');
+  document.querySelector('.profile-card').classList.remove('fs');
+}
+function toggleProfileFullscreen() { document.querySelector('.profile-card').classList.toggle('fs'); }
 
 function renderRail(list) {
   const railList = document.getElementById('rail-list');
@@ -388,6 +459,7 @@ if (hasName()) {
   showNameGate();
 }
 ss(false); ck(); setInterval(ck, 10000);
+if (location.hash === '#profile') setTimeout(openProfile, 1200);
 </script>
 
 </body>
