@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>X Engagement Bot</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <script src="/js/devnav.js" defer></script>
+  <style>
+    .xbot-wrap { max-width: 760px; margin: 0 auto; padding: 28px 24px 60px; display: flex; flex-direction: column; gap: 20px; }
+    .xbot-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    @media (max-width: 640px) { .xbot-grid { grid-template-columns: 1fr; } }
+    .result-box { margin-top: 12px; font-size: 0.82rem; display: flex; flex-direction: column; gap: 8px; }
+    .reply-card { background: #0d0d0f; border: 1px solid #2a2a30; border-radius: 10px; padding: 12px 14px; }
+    .reply-card .from { color: #818cf8; font-weight: 600; font-size: 0.78rem; }
+    .reply-card .cmt { color: #a1a1aa; margin: 4px 0 8px; font-style: italic; }
+    .reply-card .rep { color: #f4f4f5; }
+    .reply-card .tag { float: right; font-size: 0.7rem; padding: 1px 8px; border-radius: 9999px; }
+    .tag.ok { background: #14532d; color: #4ade80; }
+    .tag.no { background: #4c0519; color: #fb7185; }
+    .conn-pill { font-size: 0.75rem; padding: 3px 10px; border-radius: 9999px; background: #27272a; color: #a1a1aa; }
+    .conn-pill.ok { background: #14532d; color: #4ade80; }
+    .conn-pill.err { background: #4c0519; color: #fb7185; }
+    .row-inline { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+    .row-inline .field { flex: 1; min-width: 160px; }
+  </style>
+</head>
+<body class="page-dashboard">
+
+<header>
+  <div style="display:flex; align-items:center; gap:10px;">
+    <h1>X Engagement Bot</h1>
+    <span class="badge">𝕏</span>
+  </div>
+  <div style="display:flex; align-items:center; gap:16px;">
+    <a href="/dashboard" style="color:#71717a; font-size:0.8rem; text-decoration:none;">← Dashboard</a>
+  </div>
+</header>
+
+<div class="xbot-wrap">
+
+  <div class="form-section">
+    <div class="section-title">Persona &amp; Account</div>
+    <div class="field full">
+      <label>Choose a model (persona)</label>
+      <div class="row-inline">
+        <div class="field" style="margin:0;">
+          <select id="persona" onchange="updateConn()"></select>
+        </div>
+        <span class="conn-pill" id="conn-pill">—</span>
+      </div>
+      <span class="hint">Only personas with a connected X account can act. Connect an account in the Dashboard → persona → X.com section.</span>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">💬 Reply to comments on a post</div>
+    <div class="field full">
+      <label>Post URL or tweet ID</label>
+      <input type="text" id="post" placeholder="https://x.com/yourhandle/status/1234567890…">
+    </div>
+    <div class="row-inline">
+      <div class="field" style="flex:0 0 120px;">
+        <label>How many</label>
+        <select id="comment-limit">
+          <option>3</option><option>5</option><option>8</option><option>10</option>
+        </select>
+      </div>
+      <div style="display:flex; gap:8px; padding-bottom:1px;">
+        <button class="btn-ai" style="background:#3f3f46;" onclick="runComment(true)">Preview drafts</button>
+        <button class="btn-ai" onclick="runComment(false)">Reply for real</button>
+      </div>
+    </div>
+    <div class="result-box" id="comment-result"></div>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">👋 Start a chat (DM)</div>
+    <div class="field full">
+      <label>Target @handle or profile URL</label>
+      <input type="text" id="dm-target" placeholder="@username">
+    </div>
+    <div class="field full">
+      <label>Context / note <span style="font-weight:400;color:#52525b;">(optional — helps tailor the opener)</span></label>
+      <input type="text" id="dm-note" placeholder="e.g. liked 3 of my posts, into gaming…">
+    </div>
+    <div style="display:flex; gap:8px;">
+      <button class="btn-ai" style="background:#3f3f46;" onclick="runChatUp(true)">Preview opener</button>
+      <button class="btn-ai" onclick="runChatUp(false)">Send DM</button>
+    </div>
+    <div class="result-box" id="dm-result"></div>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">➕ Follow / Unfollow</div>
+    <div class="field full">
+      <label>Target @handle or profile URL</label>
+      <input type="text" id="follow-target" placeholder="@username">
+    </div>
+    <div style="display:flex; gap:8px;">
+      <button class="btn-ai" onclick="runFollow('follow')">Follow</button>
+      <button class="btn-ai" style="background:#3f3f46;" onclick="runFollow('unfollow')">Unfollow</button>
+    </div>
+    <div class="result-box" id="follow-result"></div>
+  </div>
+
+</div>
+
+<script>
+let connStatus = {};
+
+function esc(s) { return (s || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function persona() { return document.getElementById('persona').value; }
+
+async function init() {
+  try {
+    const [pRes, sRes] = await Promise.all([fetch('/api/personas'), fetch('/api/x/status')]);
+    const list = await pRes.json();
+    connStatus = await sRes.json();
+    const sel = document.getElementById('persona');
+    sel.innerHTML = list.map(p => '<option value="' + p.slug + '">' + esc(p.name || p.slug) + '</option>').join('');
+    updateConn();
+  } catch(e) {}
+}
+
+function updateConn() {
+  const pill = document.getElementById('conn-pill');
+  const info = connStatus[persona()];
+  if (info && info.connected) {
+    pill.className = 'conn-pill ok';
+    pill.textContent = '✓ @' + info.username;
+  } else {
+    pill.className = 'conn-pill err';
+    pill.textContent = 'Not connected';
+  }
+}
+
+function busy(box, msg) { box.innerHTML = '<span class="hint">' + esc(msg) + '</span>'; }
+function err(box, msg) { box.innerHTML = '<span class="hint" style="color:#fb7185;">✗ ' + esc(msg) + '</span>'; }
+
+async function post(url, body) {
+  const res = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  return res.json();
+}
+
+async function runComment(preview) {
+  const box = document.getElementById('comment-result');
+  const postUrl = document.getElementById('post').value.trim();
+  if (!postUrl) { err(box, 'Enter a post URL or tweet ID.'); return; }
+  busy(box, preview ? 'Drafting replies…' : 'Posting replies…');
+  const data = await post('/api/x/comment', {
+    persona: persona(), post: postUrl,
+    limit: parseInt(document.getElementById('comment-limit').value), preview });
+  if (!data.ok) { err(box, data.error); return; }
+  if (!data.replies.length) { box.innerHTML = '<span class="hint">No comments found to reply to.</span>'; return; }
+  box.innerHTML = data.replies.map(r => {
+    let tag = '';
+    if (!preview) tag = r.posted ? '<span class="tag ok">posted</span>' : '<span class="tag no">failed</span>';
+    return '<div class="reply-card">' + tag +
+      '<div class="from">↪ ' + esc(r.to) + '</div>' +
+      '<div class="cmt">“' + esc(r.comment) + '”</div>' +
+      '<div class="rep">' + esc(r.reply) + '</div></div>';
+  }).join('');
+}
+
+async function runChatUp(preview) {
+  const box = document.getElementById('dm-result');
+  const target = document.getElementById('dm-target').value.trim();
+  if (!target) { err(box, 'Enter a target @handle.'); return; }
+  busy(box, preview ? 'Writing opener…' : 'Sending DM…');
+  const data = await post('/api/x/chat-up', {
+    persona: persona(), target,
+    note: document.getElementById('dm-note').value.trim(), preview });
+  if (!data.ok) { err(box, data.error); return; }
+  const tag = data.sent ? '<span class="tag ok">sent</span>' : '<span class="tag" style="background:#3f3f46;color:#a1a1aa;">draft</span>';
+  box.innerHTML = '<div class="reply-card">' + tag +
+    '<div class="from">→ @' + esc(data.username) + '</div>' +
+    '<div class="rep">' + esc(data.opener) + '</div></div>';
+}
+
+async function runFollow(action) {
+  const box = document.getElementById('follow-result');
+  const target = document.getElementById('follow-target').value.trim();
+  if (!target) { err(box, 'Enter a target @handle.'); return; }
+  busy(box, action === 'follow' ? 'Following…' : 'Unfollowing…');
+  const data = await post('/api/x/' + action, { persona: persona(), target });
+  if (!data.ok) { err(box, data.error); return; }
+  box.innerHTML = '<span class="hint" style="color:#4ade80;">✓ ' +
+    (action === 'follow' ? 'Now following @' : 'Unfollowed @') + esc(data.username) + '</span>';
+}
+
+init();
+</script>
+</body>
+</html>

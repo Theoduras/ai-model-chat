@@ -34,6 +34,7 @@
     bar.appendChild(btn('/dashboard', 'Dashboard'));
     bar.appendChild(btn('/chat', 'Chat'));
     bar.appendChild(btn('/landing', 'Landing'));
+    bar.appendChild(btn('/xbot', '𝕏 Bot'));
     document.body.appendChild(bar);
   }
 

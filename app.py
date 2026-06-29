@@ -612,6 +612,12 @@ def chat_page():
 def landing():
     return send_from_directory(BASE_DIR, 'landingpage.html')
 
+@app.route('/xbot')
+def xbot_page():
+    if not _check_admin():
+        return redirect('/dashboard')
+    return send_from_directory(BASE_DIR, 'xbot.html')
+
 @app.route('/profile')
 def profile():
     return redirect('/landing')
@@ -1763,7 +1769,95 @@ def _x_api(method, path, access_token=None, bearer=None, body=None):
     data = json.dumps(body).encode() if body else None
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     with urllib.request.urlopen(req, timeout=10) as r:
-        return json.loads(r.read())
+        raw = r.read()
+        return json.loads(raw) if raw else {}
+
+
+def _x_refresh(persona):
+    """Refresh a persona's access token using its stored refresh_token.
+    Returns the new access token, or None if refresh isn't possible."""
+    tokens = _load_x_tokens()
+    t = tokens.get(persona) or {}
+    refresh_token = t.get('refresh_token')
+    client_id = t.get('client_id')
+    if not refresh_token or not client_id:
+        return None
+    body = urllib.parse.urlencode({
+        'grant_type': 'refresh_token',
+        'refresh_token': refresh_token,
+        'client_id': client_id,
+    }).encode()
+    req = urllib.request.Request(
+        'https://api.twitter.com/2/oauth2/token', data=body,
+        headers={'Content-Type': 'application/x-www-form-urlencoded'}, method='POST')
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            td = json.loads(r.read())
+    except Exception:
+        return None
+    t['access_token'] = td.get('access_token', t.get('access_token'))
+    if td.get('refresh_token'):
+        t['refresh_token'] = td['refresh_token']
+    tokens[persona] = t
+    _save_x_tokens(tokens)
+    return t['access_token']
+
+
+def _x_call(persona, method, path, body=None):
+    """Call the X API as a persona, transparently refreshing the token once on 401."""
+    tokens = _load_x_tokens()
+    t = tokens.get(persona) or {}
+    access_token = t.get('access_token')
+    if not access_token:
+        raise RuntimeError(f'No X account connected for persona "{persona}".')
+    try:
+        return _x_api(method, path, access_token=access_token, body=body)
+    except url_error.HTTPError as e:
+        if e.code == 401:
+            new_token = _x_refresh(persona)
+            if new_token:
+                return _x_api(method, path, access_token=new_token, body=body)
+        raise
+
+
+def _persona_text(persona, instruction, history=None, max_tokens=200, temperature=0.9):
+    """Generate an in-character message for a persona via Gemini."""
+    system_prompt = get_system_prompt(persona)
+    contents = []
+    for m in (history or [])[-20:]:
+        contents.append({'role': 'model' if m['role'] in ('bot', 'model') else 'user',
+                         'parts': [{'text': m['content']}]})
+    contents.append({'role': 'user', 'parts': [{'text': instruction}]})
+    response = client.models.generate_content(
+        model=MODEL_NAME, contents=contents,
+        config=types.GenerateContentConfig(
+            system_instruction=system_prompt, temperature=temperature,
+            max_output_tokens=max_tokens),
+    )
+    return (response.text or '').strip()
+
+
+def _x_resolve_user(persona, handle):
+    """Resolve an @handle (or id) to {id, username}. Accepts URLs too."""
+    handle = handle.strip().lstrip('@')
+    if 'x.com/' in handle or 'twitter.com/' in handle:
+        handle = handle.rstrip('/').split('/')[-1].split('?')[0]
+    if handle.isdigit():
+        data = _x_call(persona, 'GET', f'/users/{handle}?user.fields=username,name')
+    else:
+        data = _x_call(persona, 'GET', f'/users/by/username/{handle}?user.fields=username,name')
+    u = data.get('data') or {}
+    if not u.get('id'):
+        raise RuntimeError(f'Could not find X user "{handle}".')
+    return {'id': u['id'], 'username': u.get('username', handle), 'name': u.get('name', '')}
+
+
+def _x_extract_tweet_id(ref):
+    """Pull a tweet id out of a URL or return the id as-is."""
+    ref = ref.strip()
+    if '/status/' in ref:
+        ref = ref.split('/status/')[1]
+    return ref.split('?')[0].split('/')[0]
 
 
 @app.route('/api/x/auth-url', methods=['POST'])
@@ -1795,7 +1889,7 @@ def api_x_auth_url():
         'response_type': 'code',
         'client_id': client_id,
         'redirect_uri': redirect_uri,
-        'scope': 'dm.read dm.write tweet.read users.read offline.access',
+        'scope': 'dm.read dm.write tweet.read tweet.write users.read follows.read follows.write like.write offline.access',
         'state': state,
         'code_challenge': code_challenge,
         'code_challenge_method': 'S256',
@@ -1984,6 +2078,173 @@ def api_x_poll():
         return jsonify({'ok': False, 'error': str(e)[:200]}), 400
 
     return jsonify({'ok': True, 'replied': replied, 'errors': errors})
+
+
+# ── X.com engagement bot (comment / follow / unfollow / chat-up) ───────────────
+
+def _x_me_id(persona):
+    tokens = _load_x_tokens()
+    t = tokens.get(persona) or {}
+    uid = t.get('user_id')
+    if uid:
+        return uid
+    me = _x_call(persona, 'GET', '/users/me')
+    uid = (me.get('data') or {}).get('id', '')
+    if uid:
+        t['user_id'] = uid
+        tokens[persona] = t
+        _save_x_tokens(tokens)
+    return uid
+
+
+@app.route('/api/x/follow', methods=['POST'])
+def api_x_follow():
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    data = request.json or {}
+    persona = data.get('persona', '')
+    target = (data.get('target') or '').strip()
+    if not persona or not target:
+        return jsonify({'ok': False, 'error': 'persona and target are required'}), 400
+    try:
+        me_id = _x_me_id(persona)
+        user = _x_resolve_user(persona, target)
+        _x_call(persona, 'POST', f'/users/{me_id}/following', body={'target_user_id': user['id']})
+        return jsonify({'ok': True, 'username': user['username']})
+    except url_error.HTTPError as e:
+        return jsonify({'ok': False, 'error': f'X API error {e.code}: {e.read()[:200].decode(errors="ignore")}'}), 400
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]}), 400
+
+
+@app.route('/api/x/unfollow', methods=['POST'])
+def api_x_unfollow():
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    data = request.json or {}
+    persona = data.get('persona', '')
+    target = (data.get('target') or '').strip()
+    if not persona or not target:
+        return jsonify({'ok': False, 'error': 'persona and target are required'}), 400
+    try:
+        me_id = _x_me_id(persona)
+        user = _x_resolve_user(persona, target)
+        _x_call(persona, 'DELETE', f'/users/{me_id}/following/{user["id"]}')
+        return jsonify({'ok': True, 'username': user['username']})
+    except url_error.HTTPError as e:
+        return jsonify({'ok': False, 'error': f'X API error {e.code}: {e.read()[:200].decode(errors="ignore")}'}), 400
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]}), 400
+
+
+@app.route('/api/x/comment', methods=['POST'])
+def api_x_comment():
+    """Reply in-character to the comments (replies) under a given post.
+    Body: {persona, post (url or id), limit, preview}. If preview is true,
+    drafts replies without posting them."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    data = request.json or {}
+    persona = data.get('persona', '')
+    post = (data.get('post') or '').strip()
+    limit = max(1, min(int(data.get('limit', 3)), 10))
+    preview = bool(data.get('preview', False))
+    if not persona or not post:
+        return jsonify({'ok': False, 'error': 'persona and post are required'}), 400
+
+    try:
+        tweet_id = _x_extract_tweet_id(post)
+        me_id = _x_me_id(persona)
+        q = urllib.parse.quote(f'conversation_id:{tweet_id}')
+        path = (f'/tweets/search/recent?query={q}'
+                f'&max_results={max(10, limit)}'
+                f'&tweet.fields=author_id,text,conversation_id&expansions=author_id'
+                f'&user.fields=username')
+        res = _x_call(persona, 'GET', path)
+        tweets = res.get('data', []) or []
+        users = {u['id']: u for u in (res.get('includes', {}).get('users', []) or [])}
+
+        results = []
+        for tw in tweets:
+            if len(results) >= limit:
+                break
+            if tw.get('id') == tweet_id or tw.get('author_id') == me_id:
+                continue
+            comment_text = tw.get('text', '').strip()
+            if not comment_text:
+                continue
+            author = users.get(tw.get('author_id'), {})
+            instruction = (
+                "You are replying to a comment someone left on your X post. "
+                "Write ONE short, in-character reply (max 200 chars, no hashtags, "
+                "sound human and flirty-but-natural). Their comment: \"" + comment_text + "\"")
+            reply = _persona_text(persona, instruction, max_tokens=120, temperature=0.95)
+            if not reply:
+                continue
+            item = {'to': '@' + author.get('username', '?'), 'comment': comment_text, 'reply': reply}
+            if not preview:
+                try:
+                    _x_call(persona, 'POST', '/tweets',
+                            body={'text': reply, 'reply': {'in_reply_to_tweet_id': tw['id']}})
+                    item['posted'] = True
+                except Exception as e:
+                    item['posted'] = False
+                    item['error'] = str(e)[:120]
+            results.append(item)
+
+        return jsonify({'ok': True, 'count': len(results), 'replies': results, 'preview': preview})
+    except url_error.HTTPError as e:
+        return jsonify({'ok': False, 'error': f'X API error {e.code}: {e.read()[:200].decode(errors="ignore")}'}), 400
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]}), 400
+
+
+@app.route('/api/x/chat-up', methods=['POST'])
+def api_x_chat_up():
+    """Open a DM with a target user using an in-character opener.
+    Body: {persona, target, note (optional context), opener (optional override),
+    preview}. Returns the opener; sends it unless preview is true."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    data = request.json or {}
+    persona = data.get('persona', '')
+    target = (data.get('target') or '').strip()
+    note = (data.get('note') or '').strip()
+    opener = (data.get('opener') or '').strip()
+    preview = bool(data.get('preview', False))
+    if not persona or not target:
+        return jsonify({'ok': False, 'error': 'persona and target are required'}), 400
+
+    try:
+        user = _x_resolve_user(persona, target)
+        if not opener:
+            ctx = f' Here is some context about them: {note}.' if note else ''
+            instruction = (
+                "Write a warm, natural opening DM to start a conversation with a fan "
+                "named @" + user['username'] + " on X." + ctx +
+                " Keep it short (max 200 chars), in-character, curious about them, "
+                "no hard selling, no hashtags. Make them want to reply.")
+            opener = _persona_text(persona, instruction, max_tokens=120, temperature=0.95)
+        if not opener:
+            return jsonify({'ok': False, 'error': 'Could not generate an opener.'}), 400
+
+        sent = False
+        if not preview:
+            _x_call(persona, 'POST', f'/dm_conversations/with/{user["id"]}/messages',
+                    body={'text': opener})
+            sent = True
+            history_key = f'x_hist_{persona}_{user["id"]}'
+            hist_file = f'/tmp/{history_key}.json' if IS_VERCEL else os.path.join(BASE_DIR, f'.{history_key}.json')
+            try:
+                with open(hist_file, 'w') as f:
+                    json.dump([{'role': 'bot', 'content': opener}], f)
+            except Exception:
+                pass
+        return jsonify({'ok': True, 'username': user['username'], 'opener': opener, 'sent': sent})
+    except url_error.HTTPError as e:
+        return jsonify({'ok': False, 'error': f'X API error {e.code}: {e.read()[:200].decode(errors="ignore")}'}), 400
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]}), 400
 
 
 # ── Error handler ─────────────────────────────────────────────────────────────
