@@ -704,8 +704,8 @@ function renderForm(slug, cfg) {
     </div>
 
     <div class="form-section">
-      <div class="section-title" style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px;">
-        <span>Photos <span style="font-weight:400; color:#52525b; font-size:0.8rem;">(up to 5 — same person)</span></span>
+      <div class="section-title" style="flex-wrap:wrap;">
+        <span style="margin-right:auto;">Photos <span style="font-weight:400; color:#52525b; font-size:0.8rem;">(up to 5 — same person)</span></span>
         <span style="display:flex; gap:6px;">
           <button type="button" class="btn-ai" id="gen-face-btn" onclick="generateFirstPhoto()" title="Generate a new fictional face">✨ New face</button>
           <button type="button" class="btn-ai" style="background:#3f3f46;" id="gen-more-btn" onclick="generateMorePhotos()" title="Add more shots of the same person">＋ More of her</button>
