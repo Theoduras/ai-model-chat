@@ -40,6 +40,20 @@
 .devnav-btn:hover { background: #27272a; color: #fff; }
 .devnav-btn.active { background: #7c3aed; color: #fff; }
 
+/* On phones the top-center bar collides with page headers — dock it to the
+   bottom and shrink it so it stays out of the way. */
+@media (max-width: 900px) {
+  .devnav {
+    top: auto;
+    bottom: 12px;
+    gap: 2px;
+    padding: 5px;
+    opacity: 0.92;
+  }
+  .devnav-tag { font-size: 0.6rem; padding: 2px 5px; }
+  .devnav-btn { padding: 5px 9px; font-size: 0.72rem; }
+}
+
 /* ── CSS Custom Properties (chat palette) ── */
 :root {
   --bg: #0d0d0f;
