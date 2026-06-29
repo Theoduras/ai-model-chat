@@ -11,10 +11,16 @@
 
 <header>
   <div style="display:flex; align-items:center; gap:10px;">
+    <button class="icon-btn mobile-only" onclick="openSidebar()" title="Personas" aria-label="Open personas">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="20" height="20"><path d="M4 6h16M4 12h16M4 18h16" stroke-linecap="round"/></svg>
+    </button>
     <h1>Persona Builder</h1>
     <span class="badge">Dashboard</span>
   </div>
   <div style="display:flex; align-items:center; gap:16px;">
+    <button class="icon-btn mobile-only" onclick="openPreview()" title="Preview" aria-label="Open preview">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="20" height="20"><path d="M2.5 12s3.5-7 9.5-7 9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7Z" stroke-linejoin="round"/><circle cx="12" cy="12" r="2.5"/></svg>
+    </button>
     <div id="gemini-status" class="conn-badge" onclick="openSettings()" title="Gemini connection — click to configure">
       <span class="conn-dot"></span><span id="conn-text">Checking…</span>
     </div>
@@ -29,6 +35,8 @@
     <a href="/dashboard/logout" style="color:#71717a; font-size:0.8rem; text-decoration:none;" title="Log out">Log out</a>
   </div>
 </header>
+
+<div class="mobile-overlay" id="mobile-overlay" onclick="closeMobilePanels()"></div>
 
 <!-- Settings Modal -->
 <div class="modal-overlay" id="settings-modal" onclick="if(event.target===this)closeSettings()">
@@ -145,6 +153,21 @@
 let currentSlug = null;
 let currentTab = 'prompt';
 const personas = {};
+
+function _overlay() { return document.getElementById('mobile-overlay'); }
+function openSidebar() {
+  document.querySelector('.sidebar').classList.add('open');
+  _overlay().classList.add('open');
+}
+function openPreview() {
+  document.querySelector('.preview-panel').classList.add('open');
+  _overlay().classList.add('open');
+}
+function closeMobilePanels() {
+  document.querySelector('.sidebar').classList.remove('open');
+  document.querySelector('.preview-panel').classList.remove('open');
+  _overlay().classList.remove('open');
+}
 
 function lsPersonaKey(slug) { return 'admin_persona_cfg_' + slug; }
 function lsSlugsKey() { return 'admin_persona_slugs'; }
@@ -546,6 +569,7 @@ function renderSidebar() {
 
 async function loadPersona(slug) {
   currentSlug = slug;
+  if (window.innerWidth <= 900) closeMobilePanels();
   document.querySelectorAll('.persona-item').forEach(el => el.classList.remove('active'));
   const item = document.getElementById('item-' + slug);
   if (item) item.classList.add('active');
