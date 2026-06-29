@@ -172,24 +172,44 @@ def db_save_persona(slug, name, config, prompt):
     _prompt_cache.pop(slug, None)
 
 
+PERSONA_PHOTOS_DIR = os.path.join(PERSONAS_DIR, 'photos')
+
+
+def _photo_files(slug):
+    d = os.path.join(PERSONA_PHOTOS_DIR, slug)
+    if not os.path.isdir(d):
+        return []
+    return [os.path.join(d, f) for f in sorted(os.listdir(d))
+            if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+
+
+def _file_to_data_url(path):
+    import base64
+    mime = 'image/png' if path.lower().endswith('.png') else 'image/jpeg'
+    with open(path, 'rb') as f:
+        return f'data:{mime};base64,' + base64.b64encode(f.read()).decode()
+
+
 def db_get_images(slug):
-    """Return the list of image data URLs stored for a persona (max 5)."""
+    """Image data URLs for a persona: DB first (editable, durable with Postgres),
+    falling back to baked-in repo files in personas/photos/<slug>/."""
+    imgs = []
     try:
         from db import SessionLocal, get_persona_images_row
-    except Exception:
-        return []
-    s = SessionLocal()
-    try:
-        row = get_persona_images_row(s, slug)
-        if not row:
-            return []
+        s = SessionLocal()
         try:
-            imgs = json.loads(row.images_json)
-            return imgs if isinstance(imgs, list) else []
-        except Exception:
-            return []
-    finally:
-        s.close()
+            row = get_persona_images_row(s, slug)
+            if row:
+                parsed = json.loads(row.images_json)
+                if isinstance(parsed, list):
+                    imgs = parsed
+        finally:
+            s.close()
+    except Exception:
+        imgs = []
+    if imgs:
+        return imgs
+    return [_file_to_data_url(p) for p in _photo_files(slug)][:5]
 
 
 def db_set_images(slug, images):
