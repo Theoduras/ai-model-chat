@@ -1366,7 +1366,35 @@ body.page-dashboard code {
   body.page-dashboard header { padding: 11px 14px; }
   body.page-dashboard header h1 { font-size: 0.92rem; }
   .form-area { padding: 18px 16px 80px; }
-  .action-bar { padding: 12px 16px; }
+
+  /* Stack two-column rows */
+  .field-row { grid-template-columns: 1fr; gap: 14px; }
+  .form-section { padding: 16px 16px; }
+
+  /* Action bar: scroll horizontally instead of overflowing the viewport */
+  .action-bar {
+    padding: 12px 16px;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .action-bar::-webkit-scrollbar { display: none; }
+  .action-bar .btn { flex-shrink: 0; white-space: nowrap; }
+  .action-bar .save-status { flex-shrink: 0; }
+
+  /* Modals fill the small screen comfortably */
+  .modal-overlay { padding: 12px; align-items: flex-start; }
+  .modal { max-width: 100%; max-height: 92vh; overflow-y: auto; margin-top: 12px; }
+}
+
+@media (max-width: 640px) {
+  /* Hide non-essential header links on very narrow screens */
+  body.page-dashboard header h1 + .badge { display: none; }
+  .dash-link-secondary { display: none; }
+  body.page-dashboard #gemini-status { display: none; }
+  .xbot-label { display: none; }
+  .form-area > div:first-child h2 { font-size: 1rem; }
 }
 
 /* ══════════════════════════════════════
