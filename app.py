@@ -945,6 +945,7 @@ tr:hover td{background:#16161a}
 <p class="sub">Every X connect/action taken through this site — IP + location of whoever did it. Newest first, UTC. Auto-refresh 30s.</p>
 <div class="bar">
   <a class="btn" href="/admin/xlog">↻ Refresh</a>
+  <a class="btn ghost" href="/admin/xchats">Chat messages →</a>
   <a class="btn ghost" href="/api/xlog">JSON</a>
   <a class="btn ghost" href="/admin/visitors">Visitor log →</a>
 </div>
@@ -992,6 +993,67 @@ def admin_xlog():
             return render_template_string(LOGIN_HTML, error='Incorrect password.')
         return render_template_string(LOGIN_HTML, error=None)
     return render_template_string(XLOG_HTML, rows=_xevents_rows(limit=1000))
+
+
+XCHATS_HTML = """<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="30">
+<title>X chat messages</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d0d0f;color:#e7e9ee;font-family:-apple-system,Segoe UI,system-ui,sans-serif;padding:24px}
+h1{font-size:1.25rem;margin-bottom:4px}
+.sub{color:#8b8f9a;font-size:.85rem;margin-bottom:18px}
+.bar{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap}
+a.btn{background:#1d9bf0;color:#fff;text-decoration:none;padding:8px 14px;border-radius:9px;font-size:.85rem;font-weight:600}
+a.btn.ghost{background:#26262b}
+table{width:100%;border-collapse:collapse;font-size:.85rem}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid #232327;vertical-align:top}
+th{color:#a1a1aa;font-weight:600;position:sticky;top:0;background:#0d0d0f;white-space:nowrap}
+td.t{white-space:nowrap;color:#8b8f9a;font-size:.78rem}
+td.who{white-space:nowrap;color:#7cc7ff;font-weight:600}
+td.msg{color:#e7e9ee}
+tr:hover td{background:#16161a}
+.empty{color:#71717a;padding:30px 0}
+</style></head><body>
+<h1>X chat messages <span style="color:#8b8f9a;font-weight:400">({{ rows|length }})</span></h1>
+<p class="sub">Incoming DMs sent to your connected X personas — who messaged, what they said. Newest first, UTC. Auto-refresh 30s.</p>
+<div class="bar">
+  <a class="btn" href="/admin/xchats">↻ Refresh</a>
+  <a class="btn ghost" href="/admin/xlog">Action log →</a>
+  <a class="btn ghost" href="/xbot">X bot →</a>
+</div>
+{% if rows %}
+<table>
+<tr><th>Time (UTC)</th><th>Persona</th><th>From</th><th>Message</th><th>Country</th></tr>
+{% for r in rows %}
+<tr>
+  <td class="t">{{ r.time }}</td>
+  <td>{{ r.persona }}</td>
+  <td class="who">{% if r.x_username %}@{{ r.x_username }}{% else %}(unknown){% endif %}</td>
+  <td class="msg">{{ r.detail }}</td>
+  <td>{{ r.flag }} {{ r.country }}</td>
+</tr>
+{% endfor %}
+</table>
+{% else %}
+<p class="empty">No incoming chat messages logged yet. They appear once a connected persona polls or runs auto mode and someone has DMed it.</p>
+{% endif %}
+</body></html>"""
+
+
+@app.route('/admin/xchats', methods=['GET', 'POST'])
+def admin_xchats():
+    if not _check_admin():
+        if request.method == 'POST':
+            if request.form.get('password', '') == _admin_password():
+                session['admin_authed'] = True
+                return redirect('/admin/xchats')
+            return render_template_string(LOGIN_HTML, error='Incorrect password.')
+        return render_template_string(LOGIN_HTML, error=None)
+    rows = [r for r in _xevents_rows(limit=2000) if r['action'] == 'dm_in']
+    return render_template_string(XCHATS_HTML, rows=rows)
 
 
 # ── Chat endpoint ─────────────────────────────────────────────────────────────
@@ -2244,6 +2306,26 @@ def _x_save_history(persona, other_id, entries):
     _x_save_json(path, entries[-40:])
 
 
+def _x_username_for(persona, uid):
+    """Resolve a sender's @username from their numeric id, cached per persona."""
+    if not uid:
+        return ''
+    cache_path = _x_state_path(persona, 'usercache')
+    cache = _x_load_json(cache_path, {})
+    if uid in cache:
+        return cache[uid]
+    name = ''
+    try:
+        d = _x_call(persona, 'GET', f'/users/{uid}?user.fields=username')
+        name = (d.get('data') or {}).get('username', '')
+    except Exception:
+        pass
+    if name:
+        cache[uid] = name
+        _x_save_json(cache_path, cache)
+    return name
+
+
 def _x_dm_reply_round(persona, max_results=20):
     """Reply in-character to new incoming DMs. Returns (replied_count, log_lines)."""
     tokens = _load_x_tokens()
@@ -2276,6 +2358,8 @@ def _x_dm_reply_round(persona, max_results=20):
             new_last = eid
         if not text:
             continue
+        sender_name = _x_username_for(persona, sender)
+        _log_x_event('dm_in', persona=persona, x_username=sender_name, detail=text[:160])
         conv_id = event.get('dm_conversation_id') or event.get('conversation_id') or f'dm_{sender}'
         hist_path = _x_state_path(persona, f'hist_{sender}')
         history = _x_load_json(hist_path, [])
@@ -2601,6 +2685,9 @@ def api_x_poll():
             if not new_last:
                 new_last = eid
 
+            if text:
+                _log_x_event('dm_in', persona=persona,
+                             x_username=_x_username_for(persona, sender), detail=text[:160])
             conv_id = event.get('conversation_id', f'dm_{sender}')
             history_key = f'x_hist_{persona}_{sender}'
             hist_file = f'/tmp/{history_key}.json' if IS_VERCEL else os.path.join(BASE_DIR, f'.{history_key}.json')
