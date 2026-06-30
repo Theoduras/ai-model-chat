@@ -124,7 +124,12 @@ def _is_premade(slug):
 
 
 def db_get_persona(slug):
-    """Return a saved (copied) persona from the DB as a dict, or None."""
+    """Return a saved (copied) persona from the DB as a dict, or None.
+    A premade (repo-file) persona always wins, so any stale DB copy that shadows
+    a premade slug is ignored — this is how a saved persona gets 'promoted' to an
+    original by committing its files."""
+    if _is_premade(slug):
+        return None
     try:
         from db import SessionLocal, get_saved_persona
     except Exception:
@@ -1438,6 +1443,8 @@ def api_personas():
 
     # Saved copies live in the DB (durable across redeploys)
     for sp in db_list_personas():
+        if _is_premade(sp['slug']):
+            continue  # a committed original shadows any stale DB copy of the same slug
         config = sp.get('config', {})
         has_img = bool(config.get('avatar')) or len(db_get_images(sp['slug'])) > 0
         personas.append({
