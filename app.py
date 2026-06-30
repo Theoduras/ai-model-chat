@@ -2457,7 +2457,7 @@ def _x_dm_reply_round(persona, max_results=20):
     cursor_path = _x_state_path(persona, 'dm_cursor')
     cursor = _x_load_json(cursor_path, {})
     last_seen = cursor.get('last_event_id', '')
-    path = ('/dm_conversations?dm_event.fields=id,text,sender_id,created_at'
+    path = ('/dm_events?dm_event.fields=id,text,sender_id,created_at,dm_conversation_id'
             f'&event_types=MessageCreate&max_results={max_results}')
     try:
         convs = _x_call(persona, 'GET', path)
@@ -2791,7 +2791,7 @@ def api_x_poll():
     errors = []
 
     try:
-        path = f'/dm_conversations?dm_event.fields=id,text,sender_id,created_at&event_types=MessageCreate&max_results=10'
+        path = f'/dm_events?dm_event.fields=id,text,sender_id,created_at,dm_conversation_id&event_types=MessageCreate&max_results=10'
         convs = _x_api('GET', path, access_token=access_token)
         events = convs.get('data', [])
         last_seen = cursor_data.get('last_event_id', '')
@@ -2813,7 +2813,7 @@ def api_x_poll():
             if text:
                 _log_x_event('dm_in', persona=persona, x_username=sender_name, detail=text[:160])
                 _log_x_message(persona, sender, sender_name, 'in', text)
-            conv_id = event.get('conversation_id', f'dm_{sender}')
+            conv_id = event.get('dm_conversation_id') or event.get('conversation_id') or f'dm_{sender}'
             history_key = f'x_hist_{persona}_{sender}'
             hist_file = f'/tmp/{history_key}.json' if IS_VERCEL else os.path.join(BASE_DIR, f'.{history_key}.json')
             history = []
