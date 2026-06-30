@@ -30,6 +30,29 @@ git merge develop
 git push            # triggers the live deploy
 ```
 
+## Password-protecting an environment
+
+The dashboard, `/admin/*`, `/xbot`, the chat/conversation logs, and the X API
+endpoints are gated whenever the service has an `ADMIN_PASSWORD` env var. **No
+password set → open access**, so set it on *every* environment you want locked
+(dev is easy to forget):
+
+```bash
+gcloud run services update ai-model-chat-dev \
+  --region=europe-west4 \
+  --update-env-vars ADMIN_PASSWORD='your-password'
+```
+
+Or in the Console: Cloud Run → service → **Edit & deploy new revision** →
+**Variables & Secrets** → add `ADMIN_PASSWORD`. Updating the var creates a new
+revision on its own — no code redeploy needed.
+
+The login form ships a fixed `admin` username + a `current-password` field, so
+your browser's password manager will offer to **save and autofill** it (per
+browser, i.e. only on your own PC). Prefer not to keep the value in plaintext
+env? Store it in Secret Manager and use
+`--update-secrets ADMIN_PASSWORD=admin-password:latest` instead.
+
 ## Tips
 
 - Give the dev service a **separate** `ADMIN_PASSWORD` if you want, so dev and

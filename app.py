@@ -581,9 +581,11 @@ button:hover{background:#6d28d9}
   <h1>Admin Login</h1>
   <p>Enter your admin password to continue.</p>
   {% if error %}<div class="err">{{ error }}</div>{% endif %}
-  <form method="post">
+  <form method="post" autocomplete="on">
+    <label>Username</label>
+    <input type="text" name="username" value="admin" autocomplete="username" readonly>
     <label>Password</label>
-    <input type="password" name="password" autofocus placeholder="••••••••">
+    <input type="password" name="password" autofocus autocomplete="current-password" placeholder="••••••••">
     <button type="submit">Sign in</button>
   </form>
 </div>
