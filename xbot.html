@@ -22,6 +22,15 @@
     .conn-pill { font-size: 0.75rem; padding: 3px 10px; border-radius: 9999px; background: #27272a; color: #a1a1aa; }
     .conn-pill.ok { background: #14532d; color: #4ade80; }
     .conn-pill.err { background: #4c0519; color: #fb7185; }
+    .auto-toggles { display: flex; flex-wrap: wrap; gap: 10px 20px; margin-top: 14px; }
+    .auto-chk { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: #d4d4d8; cursor: pointer; }
+    .auto-chk input { width: auto; }
+    .auto-log { margin-top: 14px; max-height: 240px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; font-size: 0.78rem; font-family: ui-monospace, monospace; }
+    .auto-log .ln { color: #a1a1aa; border-left: 2px solid #27272a; padding: 2px 0 2px 10px; }
+    .auto-log .ln.act { color: #4ade80; border-left-color: #14532d; }
+    .auto-log .ln.hd { color: #818cf8; border-left-color: #312e81; }
+    .auto-log .ln.er { color: #fb7185; border-left-color: #4c0519; }
+    .conn-pill.run { background: #312e81; color: #c7d2fe; }
     .row-inline { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
     .row-inline .field { flex: 1; min-width: 160px; }
     @media (max-width: 640px) {
@@ -84,6 +93,41 @@
       <div class="result-box" id="connect-status"></div>
       <span class="hint" style="margin-top:8px;">Need an X app? Create one at <a href="https://developer.x.com" target="_blank" style="color:#818cf8;">developer.x.com</a> with OAuth 2.0 enabled and scopes for tweet, follows, dm, and users. Set the Redirect URI above as a Callback URL in the app's user-authentication settings.</span>
     </div>
+  </div>
+
+  <div class="form-section" id="auto-section">
+    <div class="section-title">🤖 Auto mode — keep chatting &amp; finding new chats</div>
+    <span class="hint" style="display:block; margin-bottom:14px;">Runs the whole flow on a loop: replies to your incoming DMs, replies to comments on the post below, then searches X for new people and opens fresh chats with them — round after round, until you stop.</span>
+    <div class="field full">
+      <label>Find new people matching <span style="font-weight:400;color:#52525b;">(keywords / hashtag the bot searches to find fresh fans)</span></label>
+      <input type="text" id="auto-query" placeholder="e.g. lonely tonight, gym girl, gamer guy, #single">
+    </div>
+    <div class="xbot-grid">
+      <div class="field">
+        <label>New chats per round</label>
+        <select id="auto-new-limit">
+          <option>1</option><option selected>2</option><option>3</option><option>5</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Seconds between rounds</label>
+        <select id="auto-interval">
+          <option value="45">45s</option><option value="90" selected>90s</option><option value="180">3 min</option><option value="300">5 min</option>
+        </select>
+      </div>
+    </div>
+    <div class="auto-toggles">
+      <label class="auto-chk"><input type="checkbox" id="auto-dm" checked> Reply to incoming DMs</label>
+      <label class="auto-chk"><input type="checkbox" id="auto-new" checked> Start new chats</label>
+      <label class="auto-chk"><input type="checkbox" id="auto-comments"> Reply to comments on the post below</label>
+      <label class="auto-chk"><input type="checkbox" id="auto-follow"> Follow new people first</label>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center; margin-top:14px;">
+      <button class="btn-ai" id="auto-start" onclick="startAuto()">▶ Start auto mode</button>
+      <button class="btn-ai" id="auto-stop" style="background:#4c0519; display:none;" onclick="stopAuto()">■ Stop</button>
+      <span class="conn-pill" id="auto-state">idle</span>
+    </div>
+    <div class="auto-log" id="auto-log"></div>
   </div>
 
   <div class="form-section">
@@ -291,6 +335,93 @@ async function runFollow(action) {
   box.innerHTML = '<span class="hint" style="color:#4ade80;">✓ ' +
     (action === 'follow' ? 'Now following @' : 'Unfollowed @') + esc(data.username) + '</span>';
 }
+
+// ── Auto mode ────────────────────────────────────────────────────────────────
+let autoTimer = null, autoRunning = false, autoBusy = false, autoRounds = 0;
+
+function logLine(text, cls) {
+  const box = document.getElementById('auto-log');
+  const div = document.createElement('div');
+  div.className = 'ln' + (cls ? ' ' + cls : '');
+  const t = new Date().toLocaleTimeString();
+  div.textContent = '[' + t + '] ' + text;
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+  while (box.children.length > 200) box.removeChild(box.firstChild);
+}
+
+function autoSetState(txt, cls) {
+  const p = document.getElementById('auto-state');
+  p.textContent = txt;
+  p.className = 'conn-pill' + (cls ? ' ' + cls : '');
+}
+
+function startAuto() {
+  const info = connStatus[persona()];
+  if (!(info && info.connected)) { logLine('Connect an X account for this persona first.', 'er'); return; }
+  const wantNew = document.getElementById('auto-new').checked;
+  if (wantNew && !document.getElementById('auto-query').value.trim()) {
+    logLine('Enter keywords to find new people, or uncheck "Start new chats".', 'er'); return;
+  }
+  autoRunning = true;
+  autoRounds = 0;
+  document.getElementById('auto-start').style.display = 'none';
+  document.getElementById('auto-stop').style.display = 'inline-flex';
+  logLine('Auto mode started as ' + persona() + '.', 'hd');
+  runAutoRound();
+  const interval = parseInt(document.getElementById('auto-interval').value) * 1000;
+  autoTimer = setInterval(runAutoRound, interval);
+}
+
+function stopAuto() {
+  autoRunning = false;
+  if (autoTimer) clearInterval(autoTimer);
+  autoTimer = null;
+  document.getElementById('auto-start').style.display = 'inline-flex';
+  document.getElementById('auto-stop').style.display = 'none';
+  autoSetState('idle');
+  logLine('Auto mode stopped after ' + autoRounds + ' round(s).', 'hd');
+}
+
+async function runAutoRound() {
+  if (!autoRunning || autoBusy) return;
+  autoBusy = true;
+  autoRounds++;
+  autoSetState('running · round ' + autoRounds, 'run');
+  try {
+    const data = await post('/api/x/auto-run', {
+      persona: persona(),
+      query: document.getElementById('auto-query').value.trim(),
+      post: document.getElementById('post').value.trim(),
+      new_chat_limit: parseInt(document.getElementById('auto-new-limit').value),
+      comment_limit: parseInt(document.getElementById('comment-limit').value),
+      dm_replies: document.getElementById('auto-dm').checked,
+      new_chats: document.getElementById('auto-new').checked,
+      comments: document.getElementById('auto-comments').checked,
+      follow: document.getElementById('auto-follow').checked,
+    });
+    if (!data.ok) {
+      logLine('Round ' + autoRounds + ' error: ' + data.error, 'er');
+      if (/token expired|No X account/i.test(data.error || '')) stopAuto();
+    } else {
+      const a = data.actions || {};
+      logLine('Round ' + autoRounds + ' · ' + (a.new_chats || 0) + ' new chats, ' +
+        (a.dm_replies || 0) + ' DM replies, ' + (a.comments || 0) + ' comment replies, ' +
+        (a.follows || 0) + ' follows', 'hd');
+      (data.log || []).forEach(l => logLine(l, 'act'));
+      if (!(data.log || []).length && !Object.values(a).some(Boolean)) {
+        logLine('Nothing new this round — will retry.', null);
+      }
+    }
+  } catch (e) {
+    logLine('Round ' + autoRounds + ' failed: ' + e, 'er');
+  } finally {
+    autoBusy = false;
+    if (autoRunning) autoSetState('waiting for next round', 'run');
+  }
+}
+
+window.addEventListener('beforeunload', () => { if (autoRunning) stopAuto(); });
 
 init();
 </script>

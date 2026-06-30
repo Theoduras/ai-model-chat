@@ -2217,6 +2217,171 @@ def _x_extract_tweet_id(ref):
     return ref.split('?')[0].split('/')[0]
 
 
+def _x_state_path(persona, name):
+    """Per-persona state file path (auto-run cursors, contacted/seen sets)."""
+    fn = f'x_{name}_{persona}.json'
+    return f'/tmp/{fn}' if IS_VERCEL else os.path.join(BASE_DIR, f'.{fn}')
+
+
+def _x_load_json(path, default):
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+
+def _x_save_json(path, data):
+    try:
+        with open(path, 'w') as f:
+            json.dump(data, f)
+    except Exception:
+        pass
+
+
+def _x_save_history(persona, other_id, entries):
+    path = _x_state_path(persona, f'hist_{other_id}')
+    _x_save_json(path, entries[-40:])
+
+
+def _x_dm_reply_round(persona, max_results=20):
+    """Reply in-character to new incoming DMs. Returns (replied_count, log_lines)."""
+    tokens = _load_x_tokens()
+    t = tokens.get(persona) or {}
+    user_id = t.get('user_id', '')
+    if not t.get('access_token') or not user_id:
+        return 0, []
+    cursor_path = _x_state_path(persona, 'dm_cursor')
+    cursor = _x_load_json(cursor_path, {})
+    last_seen = cursor.get('last_event_id', '')
+    path = ('/dm_conversations?dm_event.fields=id,text,sender_id,created_at'
+            f'&event_types=MessageCreate&max_results={max_results}')
+    try:
+        convs = _x_call(persona, 'GET', path)
+    except Exception as e:
+        return 0, [f'DM read failed: {str(e)[:80]}']
+    events = convs.get('data', []) or []
+    replied = 0
+    log = []
+    new_last = last_seen
+    for event in events:
+        eid = event.get('id', '')
+        sender = event.get('sender_id', '')
+        text = event.get('text', '').strip()
+        if sender == user_id:
+            continue
+        if eid == last_seen:
+            break
+        if not new_last:
+            new_last = eid
+        if not text:
+            continue
+        conv_id = event.get('dm_conversation_id') or event.get('conversation_id') or f'dm_{sender}'
+        hist_path = _x_state_path(persona, f'hist_{sender}')
+        history = _x_load_json(hist_path, [])
+        try:
+            instruction = ("Reply to this DM from a fan, in-character, short "
+                           f"(max 200 chars), warm and engaging, end with a question "
+                           f"to keep them talking. Their message: \"{text}\"")
+            reply = _persona_text(persona, instruction, history=history,
+                                  max_tokens=120, temperature=0.9)
+            if not reply:
+                continue
+            _x_call(persona, 'POST', f'/dm_conversations/{conv_id}/messages',
+                    body={'text': reply})
+            history.append({'role': 'user', 'content': text})
+            history.append({'role': 'bot', 'content': reply})
+            _x_save_history(persona, sender, history)
+            replied += 1
+            log.append(f'DM reply → fan: {reply[:60]}')
+        except Exception as e:
+            log.append(f'DM reply failed: {str(e)[:60]}')
+    cursor['last_event_id'] = new_last or last_seen
+    _x_save_json(cursor_path, cursor)
+    return replied, log
+
+
+def _x_comment_round(persona, post, limit, preview=False, skip_seen=False):
+    """Reply in-character to comments under a post. Returns list of result dicts.
+    With skip_seen, comment ids already replied to (per persona) are skipped and
+    new ones recorded — used by the autonomous loop to avoid double replies."""
+    tweet_id = _x_extract_tweet_id(post)
+    me_id = _x_me_id(persona)
+    q = urllib.parse.quote(f'conversation_id:{tweet_id}')
+    path = (f'/tweets/search/recent?query={q}'
+            f'&max_results={max(10, limit)}'
+            f'&tweet.fields=author_id,text,conversation_id&expansions=author_id'
+            f'&user.fields=username')
+    res = _x_call(persona, 'GET', path)
+    tweets = res.get('data', []) or []
+    users = {u['id']: u for u in (res.get('includes', {}).get('users', []) or [])}
+
+    seen_path = _x_state_path(persona, 'comments_seen')
+    seen = set(_x_load_json(seen_path, [])) if skip_seen else set()
+
+    results = []
+    for tw in tweets:
+        if len(results) >= limit:
+            break
+        tid = tw.get('id')
+        if tid == tweet_id or tw.get('author_id') == me_id:
+            continue
+        if skip_seen and tid in seen:
+            continue
+        comment_text = tw.get('text', '').strip()
+        if not comment_text:
+            continue
+        author = users.get(tw.get('author_id'), {})
+        instruction = (
+            "You are replying to a comment someone left on your X post. "
+            "Write ONE short, in-character reply (max 200 chars, no hashtags, "
+            "sound human and flirty-but-natural). Their comment: \"" + comment_text + "\"")
+        reply = _persona_text(persona, instruction, max_tokens=120, temperature=0.95)
+        if not reply:
+            continue
+        item = {'to': '@' + author.get('username', '?'), 'comment': comment_text, 'reply': reply}
+        if not preview:
+            try:
+                _x_call(persona, 'POST', '/tweets',
+                        body={'text': reply, 'reply': {'in_reply_to_tweet_id': tid}})
+                item['posted'] = True
+                if skip_seen:
+                    seen.add(tid)
+            except Exception as e:
+                item['posted'] = False
+                item['error'] = str(e)[:120]
+        results.append(item)
+
+    if skip_seen and not preview:
+        _x_save_json(seen_path, list(seen)[-1000:])
+    return results
+
+
+def _x_find_new_users(persona, query, limit, contacted):
+    """Search recent tweets matching query and return fresh candidate users
+    (not me, not already contacted)."""
+    me_id = _x_me_id(persona)
+    q = urllib.parse.quote(f'{query} -is:retweet -is:reply')
+    path = (f'/tweets/search/recent?query={q}&max_results=30'
+            f'&tweet.fields=author_id,text&expansions=author_id'
+            f'&user.fields=username,name')
+    res = _x_call(persona, 'GET', path)
+    users = {u['id']: u for u in (res.get('includes', {}).get('users', []) or [])}
+    out = []
+    seen = set()
+    for tw in res.get('data', []) or []:
+        aid = tw.get('author_id')
+        if not aid or aid == me_id or aid in contacted or aid in seen:
+            continue
+        seen.add(aid)
+        u = users.get(aid, {})
+        out.append({'id': aid, 'username': u.get('username', '?'),
+                    'name': u.get('name', ''), 'tweet': tw.get('text', '')})
+        if len(out) >= limit:
+            break
+    return out
+
+
 @app.route('/api/x/auth-url', methods=['POST'])
 def api_x_auth_url():
     """Generate X OAuth 2.0 PKCE authorization URL."""
@@ -2540,46 +2705,8 @@ def api_x_comment():
         return jsonify({'ok': False, 'error': 'persona and post are required'}), 400
 
     try:
-        tweet_id = _x_extract_tweet_id(post)
         _log_x_event('comment', persona=persona, detail=post)
-        me_id = _x_me_id(persona)
-        q = urllib.parse.quote(f'conversation_id:{tweet_id}')
-        path = (f'/tweets/search/recent?query={q}'
-                f'&max_results={max(10, limit)}'
-                f'&tweet.fields=author_id,text,conversation_id&expansions=author_id'
-                f'&user.fields=username')
-        res = _x_call(persona, 'GET', path)
-        tweets = res.get('data', []) or []
-        users = {u['id']: u for u in (res.get('includes', {}).get('users', []) or [])}
-
-        results = []
-        for tw in tweets:
-            if len(results) >= limit:
-                break
-            if tw.get('id') == tweet_id or tw.get('author_id') == me_id:
-                continue
-            comment_text = tw.get('text', '').strip()
-            if not comment_text:
-                continue
-            author = users.get(tw.get('author_id'), {})
-            instruction = (
-                "You are replying to a comment someone left on your X post. "
-                "Write ONE short, in-character reply (max 200 chars, no hashtags, "
-                "sound human and flirty-but-natural). Their comment: \"" + comment_text + "\"")
-            reply = _persona_text(persona, instruction, max_tokens=120, temperature=0.95)
-            if not reply:
-                continue
-            item = {'to': '@' + author.get('username', '?'), 'comment': comment_text, 'reply': reply}
-            if not preview:
-                try:
-                    _x_call(persona, 'POST', '/tweets',
-                            body={'text': reply, 'reply': {'in_reply_to_tweet_id': tw['id']}})
-                    item['posted'] = True
-                except Exception as e:
-                    item['posted'] = False
-                    item['error'] = str(e)[:120]
-            results.append(item)
-
+        results = _x_comment_round(persona, post, limit, preview=preview)
         return jsonify({'ok': True, 'count': len(results), 'replies': results, 'preview': preview})
     except url_error.HTTPError as e:
         return jsonify({'ok': False, 'error': f'X API error {e.code}: {e.read()[:200].decode(errors="ignore")}'}), 400
@@ -2632,6 +2759,100 @@ def api_x_chat_up():
         return jsonify({'ok': True, 'username': user['username'], 'opener': opener, 'sent': sent})
     except url_error.HTTPError as e:
         return jsonify({'ok': False, 'error': f'X API error {e.code}: {e.read()[:200].decode(errors="ignore")}'}), 400
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]}), 400
+
+
+@app.route('/api/x/auto-run', methods=['POST'])
+def api_x_auto_run():
+    """Run one autonomous engagement round as a persona, mirroring the manual
+    flow: keep existing DMs going, reply to a post's comments, then find new
+    people and chat them up (optionally following them first). The frontend
+    calls this on a loop so the bot keeps finding new chats.
+    Body: {persona, query, post, new_chat_limit, comment_limit,
+           follow, dm_replies, new_chats, comments}."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    data = request.json or {}
+    persona = data.get('persona', '')
+    query = (data.get('query') or '').strip()
+    post = (data.get('post') or '').strip()
+    new_chat_limit = max(0, min(int(data.get('new_chat_limit', 2)), 5))
+    comment_limit = max(0, min(int(data.get('comment_limit', 0)), 5))
+    do_follow = bool(data.get('follow', False))
+    do_dm = bool(data.get('dm_replies', True))
+    do_new = bool(data.get('new_chats', True))
+    do_comments = bool(data.get('comments', True))
+    if not persona:
+        return jsonify({'ok': False, 'error': 'persona is required'}), 400
+
+    tokens = _load_x_tokens()
+    if not (tokens.get(persona) or {}).get('access_token'):
+        return jsonify({'ok': False, 'error': f'No X account connected for persona "{persona}".'}), 400
+
+    _log_x_event('auto-run', persona=persona, detail=query or post)
+    actions = {'dm_replies': 0, 'new_chats': 0, 'follows': 0, 'comments': 0}
+    log = []
+    try:
+        if do_dm:
+            replied, dlog = _x_dm_reply_round(persona)
+            actions['dm_replies'] = replied
+            log += dlog
+
+        if do_comments and post and comment_limit:
+            try:
+                res = _x_comment_round(persona, post, comment_limit, skip_seen=True)
+                posted = [r for r in res if r.get('posted')]
+                actions['comments'] = len(posted)
+                for r in posted:
+                    log.append(f"Comment reply → {r['to']}: {r['reply'][:50]}")
+            except Exception as e:
+                log.append(f'Comment round failed: {str(e)[:80]}')
+
+        if do_new and query and new_chat_limit:
+            contacted = set(_x_load_json(_x_state_path(persona, 'contacted'), []))
+            try:
+                candidates = _x_find_new_users(persona, query, new_chat_limit, contacted)
+            except Exception as e:
+                candidates = []
+                log.append(f'Search failed: {str(e)[:80]}')
+            me_id = _x_me_id(persona) if (candidates and do_follow) else None
+            for u in candidates:
+                try:
+                    if do_follow and me_id:
+                        try:
+                            _x_call(persona, 'POST', f'/users/{me_id}/following',
+                                    body={'target_user_id': u['id']})
+                            actions['follows'] += 1
+                            log.append(f"Followed @{u['username']}")
+                        except Exception:
+                            pass
+                    snippet = (u.get('tweet') or '')[:160]
+                    instruction = (
+                        f"Start a DM with @{u['username']} on X. They recently posted: "
+                        f"\"{snippet}\". Write a warm, natural, in-character opener (max "
+                        "200 chars) that reacts to their post and asks something to get "
+                        "them talking. No hashtags, no hard sell.")
+                    opener = _persona_text(persona, instruction, max_tokens=120, temperature=0.95)
+                    if opener:
+                        _x_call(persona, 'POST',
+                                f'/dm_conversations/with/{u["id"]}/messages',
+                                body={'text': opener})
+                        actions['new_chats'] += 1
+                        _x_save_history(persona, u['id'], [{'role': 'bot', 'content': opener}])
+                        log.append(f"New chat → @{u['username']}: {opener[:50]}")
+                except Exception as e:
+                    log.append(f"@{u['username']} failed: {str(e)[:60]}")
+                finally:
+                    contacted.add(u['id'])
+            _x_save_json(_x_state_path(persona, 'contacted'), list(contacted)[-1000:])
+
+        return jsonify({'ok': True, 'actions': actions, 'log': log})
+    except url_error.HTTPError as e:
+        body = e.read()[:200].decode(errors='ignore')
+        if e.code == 401:
+            return jsonify({'ok': False, 'error': 'X token expired. Reconnect the account.'}), 400
+        return jsonify({'ok': False, 'error': f'X API error {e.code}: {body}'}), 400
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)[:200]}), 400
 
