@@ -2360,7 +2360,7 @@ def _x_call(persona, method, path, body=None):
         raise
 
 
-def _persona_text(persona, instruction, history=None, max_tokens=200, temperature=0.9):
+def _persona_text(persona, instruction, history=None, max_tokens=1024, temperature=0.9):
     """Generate an in-character message for a persona via Gemini."""
     system_prompt = get_system_prompt(persona)
     contents = []
@@ -2486,11 +2486,11 @@ def _x_dm_reply_round(persona, max_results=20):
         hist_path = _x_state_path(persona, f'hist_{sender}')
         history = _x_load_json(hist_path, [])
         try:
-            instruction = ("Reply to this DM from a fan, in-character, short "
-                           f"(max 200 chars), warm and engaging, end with a question "
-                           f"to keep them talking. Their message: \"{text}\"")
+            instruction = ("Reply to this DM from a fan, in-character, warm and "
+                           "engaging, end with a question to keep them talking. "
+                           f"Their message: \"{text}\"")
             reply = _persona_text(persona, instruction, history=history,
-                                  max_tokens=120, temperature=0.9)
+                                  max_tokens=1024, temperature=0.9)
             if not reply:
                 continue
             _x_call(persona, 'POST', f'/dm_conversations/{conv_id}/messages',
@@ -2541,16 +2541,17 @@ def _x_comment_round(persona, post, limit, preview=False, skip_seen=False):
         author = users.get(tw.get('author_id'), {})
         instruction = (
             "You are replying to a comment someone left on your X post. "
-            "Write ONE short, in-character reply (max 200 chars, no hashtags, "
-            "sound human and flirty-but-natural). Their comment: \"" + comment_text + "\"")
-        reply = _persona_text(persona, instruction, max_tokens=120, temperature=0.95)
+            "Write ONE in-character reply (no hashtags, sound human and "
+            "flirty-but-natural). It must fit in a single tweet (280 characters). "
+            "Their comment: \"" + comment_text + "\"")
+        reply = _persona_text(persona, instruction, max_tokens=400, temperature=0.95)
         if not reply:
             continue
         item = {'to': '@' + author.get('username', '?'), 'comment': comment_text, 'reply': reply}
         if not preview:
             try:
                 _x_call(persona, 'POST', '/tweets',
-                        body={'text': reply, 'reply': {'in_reply_to_tweet_id': tid}})
+                        body={'text': reply[:280], 'reply': {'in_reply_to_tweet_id': tid}})
                 item['posted'] = True
                 if skip_seen:
                     seen.add(tid)
@@ -2569,9 +2570,9 @@ def _x_generate_post(persona, topic=''):
     ctx = f' about: {topic}.' if topic else '.'
     instruction = (
         "Write ONE original X post (tweet) as yourself, in-character" + ctx +
-        " Max 270 characters, engaging and human, invite replies, at most one "
-        "hashtag, no @mentions. Return only the tweet text.")
-    text = _persona_text(persona, instruction, max_tokens=120, temperature=1.0)
+        " Engaging and human, invite replies, at most one hashtag, no @mentions. "
+        "It must fit in a single tweet (280 characters). Return only the tweet text.")
+    text = _persona_text(persona, instruction, max_tokens=400, temperature=1.0)
     return text.strip().strip('"')[:280]
 
 
@@ -2827,7 +2828,7 @@ def api_x_poll():
                 response = client.models.generate_content(
                     model=MODEL_NAME,
                     contents=contents,
-                    config=types.GenerateContentConfig(system_instruction=system_prompt, temperature=0.85, max_output_tokens=200),
+                    config=types.GenerateContentConfig(system_instruction=system_prompt, temperature=0.85, max_output_tokens=1024),
                 )
                 reply_text = (response.text or '').strip()
                 if not reply_text:
@@ -3030,9 +3031,9 @@ def api_x_chat_up():
             instruction = (
                 "Write a warm, natural opening DM to start a conversation with a fan "
                 "named @" + user['username'] + " on X." + ctx +
-                " Keep it short (max 200 chars), in-character, curious about them, "
-                "no hard selling, no hashtags. Make them want to reply.")
-            opener = _persona_text(persona, instruction, max_tokens=120, temperature=0.95)
+                " In-character, curious about them, no hard selling, no hashtags. "
+                "Make them want to reply.")
+            opener = _persona_text(persona, instruction, max_tokens=1024, temperature=0.95)
         if not opener:
             return jsonify({'ok': False, 'error': 'Could not generate an opener.'}), 400
 
@@ -3150,10 +3151,10 @@ def api_x_auto_run():
                     snippet = (u.get('tweet') or '')[:160]
                     instruction = (
                         f"Start a DM with @{u['username']} on X. They recently posted: "
-                        f"\"{snippet}\". Write a warm, natural, in-character opener (max "
-                        "200 chars) that reacts to their post and asks something to get "
-                        "them talking. No hashtags, no hard sell.")
-                    opener = _persona_text(persona, instruction, max_tokens=120, temperature=0.95)
+                        f"\"{snippet}\". Write a warm, natural, in-character opener that "
+                        "reacts to their post and asks something to get them talking. "
+                        "No hashtags, no hard sell.")
+                    opener = _persona_text(persona, instruction, max_tokens=1024, temperature=0.95)
                     if opener:
                         _x_call(persona, 'POST',
                                 f'/dm_conversations/with/{u["id"]}/messages',
