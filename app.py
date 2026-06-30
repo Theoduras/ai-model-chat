@@ -861,6 +861,139 @@ def admin_visitors():
     return render_template_string(VISITORS_HTML, rows=_visitors_rows(limit=1000))
 
 
+# ── X-account access log (who connects/operates X, from which IP) ─────────────
+
+def _finalize_x_event(eid, ip):
+    geo = _geo_lookup(ip)
+    try:
+        from db import SessionLocal, set_x_event_geo
+        s = SessionLocal()
+        try:
+            set_x_event_geo(s, eid, geo['country'], geo['country_code'], geo['region'], geo['city'])
+            s.commit()
+        finally:
+            s.close()
+    except Exception:
+        pass
+
+
+def _log_x_event(action, persona='', detail='', x_username=''):
+    """Record an X action with the caller's IP + geo. Best-effort, never raises."""
+    try:
+        ip = _client_ip()
+        ua = request.headers.get('User-Agent', '')
+        from db import SessionLocal, add_x_event
+        s = SessionLocal()
+        try:
+            e = add_x_event(s, action=action, ip=ip, persona=persona,
+                            detail=detail, x_username=x_username, user_agent=ua)
+            s.commit()
+            eid = e.id
+        finally:
+            s.close()
+        threading.Thread(target=_finalize_x_event, args=(eid, ip), daemon=True).start()
+    except Exception:
+        pass
+
+
+def _xevents_rows(limit=1000):
+    from db import SessionLocal, list_x_events
+    s = SessionLocal()
+    try:
+        rows = []
+        for e in list_x_events(s, limit=limit):
+            rows.append({
+                'time': e.created_at.strftime('%Y-%m-%d %H:%M:%S UTC') if e.created_at else '',
+                'action': e.action or '',
+                'persona': e.persona or '',
+                'x_username': e.x_username or '',
+                'detail': e.detail or '',
+                'ip': e.ip or '',
+                'flag': _flag(e.country_code),
+                'country': e.country or '',
+                'region': e.region or '',
+                'city': e.city or '',
+                'user_agent': e.user_agent or '',
+            })
+        return rows
+    finally:
+        s.close()
+
+
+XLOG_HTML = """<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="30">
+<title>X access log</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d0d0f;color:#e7e9ee;font-family:-apple-system,Segoe UI,system-ui,sans-serif;padding:24px}
+h1{font-size:1.25rem;margin-bottom:4px}
+.sub{color:#8b8f9a;font-size:.85rem;margin-bottom:18px}
+.bar{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap}
+a.btn{background:#1d9bf0;color:#fff;text-decoration:none;padding:8px 14px;border-radius:9px;font-size:.85rem;font-weight:600}
+a.btn.ghost{background:#26262b}
+table{width:100%;border-collapse:collapse;font-size:.82rem}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #232327;white-space:nowrap}
+th{color:#a1a1aa;font-weight:600;position:sticky;top:0;background:#0d0d0f}
+td.ua{white-space:normal;color:#8b8f9a;max-width:280px;font-size:.72rem}
+tr:hover td{background:#16161a}
+.act{font-weight:600;color:#7cc7ff}
+.empty{color:#71717a;padding:30px 0}
+</style></head><body>
+<h1>X-account access log <span style="color:#8b8f9a;font-weight:400">({{ rows|length }})</span></h1>
+<p class="sub">Every X connect/action taken through this site — IP + location of whoever did it. Newest first, UTC. Auto-refresh 30s.</p>
+<div class="bar">
+  <a class="btn" href="/admin/xlog">↻ Refresh</a>
+  <a class="btn ghost" href="/api/xlog">JSON</a>
+  <a class="btn ghost" href="/admin/visitors">Visitor log →</a>
+</div>
+{% if rows %}
+<table>
+<tr><th>Time (UTC)</th><th>Action</th><th>Persona</th><th>X account</th><th>Target/detail</th><th>Country</th><th>City</th><th>IP</th><th>Device</th></tr>
+{% for r in rows %}
+<tr>
+  <td>{{ r.time }}</td>
+  <td class="act">{{ r.action }}</td>
+  <td>{{ r.persona }}</td>
+  <td>{% if r.x_username %}@{{ r.x_username }}{% endif %}</td>
+  <td>{{ r.detail }}</td>
+  <td>{{ r.flag }} {{ r.country }}</td>
+  <td>{{ r.city }}{% if r.city and r.region %}, {% endif %}{{ r.region }}</td>
+  <td>{{ r.ip }}</td>
+  <td class="ua">{{ r.user_agent }}</td>
+</tr>
+{% endfor %}
+</table>
+{% else %}
+<p class="empty">No X actions logged yet. Connect or operate an X account from /xbot and refresh.</p>
+{% endif %}
+</body></html>"""
+
+
+@app.route('/api/xlog')
+def api_xlog():
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        limit = min(int(request.args.get('limit', 1000)), 5000)
+    except (ValueError, TypeError):
+        limit = 1000
+    return jsonify(_xevents_rows(limit=limit))
+
+
+@app.route('/admin/xlog', methods=['GET', 'POST'])
+def admin_xlog():
+    if not _check_admin():
+        if request.method == 'POST':
+            if request.form.get('password', '') == _admin_password():
+                session['admin_authed'] = True
+                return redirect('/admin/xlog')
+            return render_template_string(LOGIN_HTML, error='Incorrect password.')
+        return render_template_string(LOGIN_HTML, error=None)
+    return render_template_string(XLOG_HTML, rows=_xevents_rows(limit=1000))
+
+
 # ── Chat endpoint ─────────────────────────────────────────────────────────────
 
 def generate_reply(system_prompt, chat_history, user_message, is_continue=False):
@@ -2096,6 +2229,7 @@ def api_x_auth_url():
     if not client_id or not redirect_uri:
         return jsonify({'ok': False, 'error': 'client_id and redirect_uri are required'}), 400
 
+    _log_x_event('connect_start', persona=persona)
     code_verifier = secrets.token_urlsafe(64)
     code_challenge = urllib.parse.quote(
         __import__('base64').urlsafe_b64encode(
@@ -2182,6 +2316,7 @@ def api_x_callback():
     _save_x_tokens(tokens)
     os.remove(X_OAUTH_STATE_FILE)
 
+    _log_x_event('connect_complete', persona=persona, x_username=username)
     return jsonify({'ok': True, 'username': username, 'persona': persona})
 
 
@@ -2225,6 +2360,7 @@ def api_x_disconnect():
     if not _check_admin():
         return jsonify({'error': 'Unauthorized'}), 401
     persona = (request.json or {}).get('persona', '')
+    _log_x_event('disconnect', persona=persona)
     tokens = _load_x_tokens()
     tokens.pop(persona, None)
     _save_x_tokens(tokens)
@@ -2238,6 +2374,7 @@ def api_x_poll():
         return jsonify({'error': 'Unauthorized'}), 401
     data = request.json or {}
     persona = data.get('persona', 'lillith')
+    _log_x_event('poll_dm', persona=persona)
 
     tokens = _load_x_tokens()
     t = tokens.get(persona)
@@ -2357,6 +2494,7 @@ def api_x_follow():
     try:
         me_id = _x_me_id(persona)
         user = _x_resolve_user(persona, target)
+        _log_x_event('follow', persona=persona, detail=target)
         _x_call(persona, 'POST', f'/users/{me_id}/following', body={'target_user_id': user['id']})
         return jsonify({'ok': True, 'username': user['username']})
     except url_error.HTTPError as e:
@@ -2377,6 +2515,7 @@ def api_x_unfollow():
     try:
         me_id = _x_me_id(persona)
         user = _x_resolve_user(persona, target)
+        _log_x_event('unfollow', persona=persona, detail=target)
         _x_call(persona, 'DELETE', f'/users/{me_id}/following/{user["id"]}')
         return jsonify({'ok': True, 'username': user['username']})
     except url_error.HTTPError as e:
@@ -2402,6 +2541,7 @@ def api_x_comment():
 
     try:
         tweet_id = _x_extract_tweet_id(post)
+        _log_x_event('comment', persona=persona, detail=post)
         me_id = _x_me_id(persona)
         q = urllib.parse.quote(f'conversation_id:{tweet_id}')
         path = (f'/tweets/search/recent?query={q}'
@@ -2465,6 +2605,7 @@ def api_x_chat_up():
 
     try:
         user = _x_resolve_user(persona, target)
+        _log_x_event('chat_up', persona=persona, detail=target)
         if not opener:
             ctx = f' Here is some context about them: {note}.' if note else ''
             instruction = (

@@ -104,6 +104,28 @@ class Visit(Base):
 Index('ix_visits_created', Visit.created_at)
 
 
+class XEvent(Base):
+    """One row per X (Twitter) action taken through the site — who connected or
+    operated which persona's X account, from which IP/geo, and when."""
+    __tablename__ = 'x_events'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    created_at = Column(DateTime, default=_now, index=True)
+    action = Column(String(40))       # connect_start, connect_complete, follow, comment, ...
+    persona = Column(String(64))
+    detail = Column(String(300))      # target handle / post / hint
+    x_username = Column(String(120))  # the connected X account, when known
+    ip = Column(String(64), index=True)
+    user_agent = Column(String(400))
+    country = Column(String(80))
+    country_code = Column(String(8))
+    region = Column(String(120))
+    city = Column(String(120))
+
+
+Index('ix_xevents_created', XEvent.created_at)
+
+
 def init_db():
     Base.metadata.create_all(engine)
 
@@ -161,6 +183,27 @@ def set_visit_geo(session, visit_id, country, country_code, region, city):
         v.region = region
         v.city = city
     return v
+
+
+def add_x_event(session, action, ip, persona='', detail='', x_username='', user_agent=''):
+    e = XEvent(action=action, ip=ip, persona=persona, detail=(detail or '')[:300],
+               x_username=x_username, user_agent=(user_agent or '')[:400])
+    session.add(e)
+    return e
+
+
+def list_x_events(session, limit=500):
+    return session.query(XEvent).order_by(XEvent.created_at.desc()).limit(limit).all()
+
+
+def set_x_event_geo(session, event_id, country, country_code, region, city):
+    e = session.get(XEvent, event_id)
+    if e:
+        e.country = country
+        e.country_code = country_code
+        e.region = region
+        e.city = city
+    return e
 
 
 def delete_saved_persona(session, slug):
