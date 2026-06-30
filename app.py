@@ -919,22 +919,52 @@ def _x_maybe_prune():
         pass
 
 
+_last_x_log_error = [None]
+
+
+def _ensure_x_tables():
+    """Create the x_messages table if it's missing (self-heal when the model was
+    added after the DB was first initialized)."""
+    try:
+        from db import XMessage, engine
+        XMessage.__table__.create(bind=engine, checkfirst=True)
+        return True
+    except Exception as e:
+        _last_x_log_error[0] = f'ensure tables: {str(e)[:140]}'
+        return False
+
+
+def _write_x_message(persona, x_user_id, x_username, direction, text):
+    from db import SessionLocal, add_x_message
+    s = SessionLocal()
+    try:
+        add_x_message(s, persona=persona, x_user_id=x_user_id,
+                      x_username=x_username, direction=direction, text=text)
+        s.commit()
+    finally:
+        s.close()
+
+
 def _log_x_message(persona, x_user_id, x_username, direction, text):
-    """Persist one side of a DM conversation. Best-effort, never raises."""
+    """Persist one side of a DM conversation. Best-effort, never raises, but
+    records the last failure in _last_x_log_error and self-heals a missing table."""
     if not text:
         return
     try:
-        from db import SessionLocal, add_x_message
-        s = SessionLocal()
-        try:
-            add_x_message(s, persona=persona, x_user_id=x_user_id,
-                          x_username=x_username, direction=direction, text=text)
-            s.commit()
-        finally:
-            s.close()
+        _write_x_message(persona, x_user_id, x_username, direction, text)
+        _last_x_log_error[0] = None
         _x_maybe_prune()
-    except Exception:
-        pass
+    except Exception as e:
+        # Most likely the table doesn't exist yet — create it and retry once.
+        if _ensure_x_tables():
+            try:
+                _write_x_message(persona, x_user_id, x_username, direction, text)
+                _last_x_log_error[0] = None
+                return
+            except Exception as e2:
+                _last_x_log_error[0] = f'write: {str(e2)[:140]}'
+        else:
+            _last_x_log_error[0] = f'write: {str(e)[:140]}'
 
 
 def _xevents_rows(limit=1000):
@@ -3209,7 +3239,10 @@ def api_x_auto_run():
                     contacted.add(u['id'])
             _x_save_json(_x_state_path(persona, 'contacted'), list(contacted)[-1000:])
 
-        return jsonify({'ok': True, 'actions': actions, 'log': log})
+        if _last_x_log_error[0]:
+            log.append(f'⚠ conversation logging failed: {_last_x_log_error[0]}')
+        return jsonify({'ok': True, 'actions': actions, 'log': log,
+                        'log_error': _last_x_log_error[0]})
     except url_error.HTTPError as e:
         body = e.read()[:200].decode(errors='ignore')
         if e.code == 401:
