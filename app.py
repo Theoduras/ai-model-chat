@@ -2585,6 +2585,19 @@ def _x_my_recent_tweet_ids(persona, n=5):
     return [t['id'] for t in (res.get('data', []) or [])][:n]
 
 
+def _x_known_user_ids(persona):
+    """Fan ids the persona already has a logged DM conversation with."""
+    try:
+        from db import SessionLocal, list_x_known_user_ids
+        s = SessionLocal()
+        try:
+            return list_x_known_user_ids(s, persona)
+        finally:
+            s.close()
+    except Exception:
+        return set()
+
+
 def _x_audience_candidates(persona, limit, contacted):
     """Find fresh people to DM from the persona's own audience — no keyword
     search. Sources: recent followers, then people who replied to the persona's
@@ -3151,6 +3164,7 @@ def api_x_auto_run():
 
         if do_new and new_chat_limit:
             contacted = set(_x_load_json(_x_state_path(persona, 'contacted'), []))
+            contacted |= _x_known_user_ids(persona)
             try:
                 candidates = _x_audience_candidates(persona, new_chat_limit, contacted)
             except Exception as e:

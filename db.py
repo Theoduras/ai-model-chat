@@ -257,6 +257,14 @@ def list_x_conversations(session, limit=200):
     return out
 
 
+def list_x_known_user_ids(session, persona):
+    """Distinct fan ids the persona already has any DM with — used to avoid
+    opening a fresh chat with someone there's already a conversation with."""
+    rows = session.query(XMessage.x_user_id).filter(
+        XMessage.persona == persona).distinct().all()
+    return {r[0] for r in rows if r[0]}
+
+
 def prune_x_data(session, days=14):
     """Delete X messages, X events, and visits older than the retention window."""
     cutoff = _now() - datetime.timedelta(days=days)
