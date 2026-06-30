@@ -84,6 +84,26 @@ class PersonaImages(Base):
     updated_at = Column(DateTime, default=_now, onupdate=_now)
 
 
+class Visit(Base):
+    """One row per page view on the site — used for the visitor log
+    (who's on the dev page: IP, geolocation, time, path)."""
+    __tablename__ = 'visits'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    created_at = Column(DateTime, default=_now, index=True)
+    ip = Column(String(64), index=True)
+    path = Column(String(255))
+    user_agent = Column(String(400))
+    referrer = Column(String(400))
+    country = Column(String(80))
+    country_code = Column(String(8))
+    region = Column(String(120))
+    city = Column(String(120))
+
+
+Index('ix_visits_created', Visit.created_at)
+
+
 def init_db():
     Base.metadata.create_all(engine)
 
@@ -118,6 +138,29 @@ def upsert_saved_persona(session, slug, name, config_json, prompt):
     sp.config_json = config_json
     sp.prompt = prompt
     return sp
+
+
+def add_visit(session, ip, path, user_agent='', referrer='',
+              country=None, country_code=None, region=None, city=None):
+    v = Visit(ip=ip, path=path, user_agent=(user_agent or '')[:400],
+              referrer=(referrer or '')[:400], country=country,
+              country_code=country_code, region=region, city=city)
+    session.add(v)
+    return v
+
+
+def list_visits(session, limit=500):
+    return session.query(Visit).order_by(Visit.created_at.desc()).limit(limit).all()
+
+
+def set_visit_geo(session, visit_id, country, country_code, region, city):
+    v = session.get(Visit, visit_id)
+    if v:
+        v.country = country
+        v.country_code = country_code
+        v.region = region
+        v.city = city
+    return v
 
 
 def delete_saved_persona(session, slug):

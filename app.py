@@ -5,9 +5,11 @@ import re
 import logging
 import hashlib
 import secrets
+import threading
 import urllib.request
 import urllib.parse
 import urllib.error as url_error
+from datetime import datetime, timezone
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
@@ -635,6 +637,228 @@ def admin_logout():
 def dashboard_logout():
     session.pop('admin_authed', None)
     return redirect('/dashboard')
+
+
+# ── Visitor log (who's on the site: IP, geo-location, time) ───────────────────
+# Records one row per page view (IP + country/city via geo lookup + timestamp).
+# View it at /admin/visitors ; download the raw log at /admin/visitors.log .
+
+_GEO_CACHE = {}
+_VISIT_LOG_FILE = os.path.join(LOG_DIR, 'visitors.log') if LOG_DIR else None
+_VISIT_SKIP_PREFIXES = ('/api/', '/static/', '/css/', '/js/', '/assets/')
+_VISIT_SKIP_EXACT = {'/healthz', '/favicon.ico', '/admin/visitors', '/admin/visitors.log'}
+
+
+def _now_str():
+    return datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+
+
+def _client_ip():
+    """Real client IP behind Cloud Run / proxies (first hop of X-Forwarded-For)."""
+    xff = request.headers.get('X-Forwarded-For', '')
+    if xff:
+        return xff.split(',')[0].strip()
+    return request.headers.get('X-Real-IP') or request.remote_addr or ''
+
+
+def _is_private_ip(ip):
+    if not ip:
+        return True
+    privates = ('10.', '127.', '192.168.', '169.254.',
+                '172.16.', '172.17.', '172.18.', '172.19.', '172.20.', '172.21.',
+                '172.22.', '172.23.', '172.24.', '172.25.', '172.26.', '172.27.',
+                '172.28.', '172.29.', '172.30.', '172.31.', '::1', 'fc', 'fd')
+    return ip.startswith(privates) or ip in ('localhost', '0.0.0.0')
+
+
+def _flag(cc):
+    if not cc or len(cc) != 2:
+        return ''
+    cc = cc.upper()
+    try:
+        return chr(0x1F1E6 + ord(cc[0]) - 65) + chr(0x1F1E6 + ord(cc[1]) - 65)
+    except Exception:
+        return ''
+
+
+def _geo_lookup(ip):
+    """Resolve an IP to {country, country_code, region, city}. Cached, best-effort."""
+    if ip in _GEO_CACHE:
+        return _GEO_CACHE[ip]
+    geo = {'country': None, 'country_code': None, 'region': None, 'city': None}
+    if _is_private_ip(ip):
+        geo = {'country': 'Local/Private', 'country_code': '', 'region': '', 'city': ''}
+    else:
+        try:
+            url = ('http://ip-api.com/json/' + urllib.parse.quote(ip) +
+                   '?fields=status,country,countryCode,regionName,city')
+            with urllib.request.urlopen(url, timeout=4) as r:
+                d = json.loads(r.read())
+            if d.get('status') == 'success':
+                geo = {'country': d.get('country'), 'country_code': d.get('countryCode'),
+                       'region': d.get('regionName'), 'city': d.get('city')}
+        except Exception:
+            pass
+    _GEO_CACHE[ip] = geo
+    return geo
+
+
+def _append_visit_logfile(ts, ip, geo, path, ua):
+    if not _VISIT_LOG_FILE:
+        return
+    try:
+        os.makedirs(os.path.dirname(_VISIT_LOG_FILE), exist_ok=True)
+        loc = ' / '.join(p for p in (geo.get('city'), geo.get('region'), geo.get('country')) if p) or '?'
+        with open(_VISIT_LOG_FILE, 'a', encoding='utf-8') as f:
+            f.write(f"{ts}\t{ip}\t{loc}\t{path}\t{(ua or '')[:160]}\n")
+    except Exception:
+        pass
+
+
+def _finalize_visit(vid, ip, path, ua):
+    """Background: geo-locate the IP, persist it to the row, append to the log file."""
+    geo = _geo_lookup(ip)
+    try:
+        from db import SessionLocal, set_visit_geo
+        s = SessionLocal()
+        try:
+            set_visit_geo(s, vid, geo['country'], geo['country_code'], geo['region'], geo['city'])
+            s.commit()
+        finally:
+            s.close()
+    except Exception:
+        pass
+    _append_visit_logfile(_now_str(), ip, geo, path, ua)
+
+
+@app.after_request
+def _log_visit(response):
+    try:
+        path = request.path or '/'
+        if (request.method == 'GET'
+                and response.status_code == 200
+                and (response.mimetype or '').startswith('text/html')
+                and path not in _VISIT_SKIP_EXACT
+                and not path.startswith(_VISIT_SKIP_PREFIXES)):
+            ip = _client_ip()
+            ua = request.headers.get('User-Agent', '')
+            ref = request.headers.get('Referer', '')
+            from db import SessionLocal, add_visit
+            s = SessionLocal()
+            try:
+                v = add_visit(s, ip=ip, path=path, user_agent=ua, referrer=ref)
+                s.commit()
+                vid = v.id
+            finally:
+                s.close()
+            threading.Thread(target=_finalize_visit, args=(vid, ip, path, ua), daemon=True).start()
+    except Exception:
+        pass
+    return response
+
+
+def _visitors_rows(limit=1000):
+    from db import SessionLocal, list_visits
+    s = SessionLocal()
+    try:
+        rows = []
+        for v in list_visits(s, limit=limit):
+            rows.append({
+                'time': v.created_at.strftime('%Y-%m-%d %H:%M:%S UTC') if v.created_at else '',
+                'ip': v.ip or '',
+                'flag': _flag(v.country_code),
+                'country': v.country or '',
+                'region': v.region or '',
+                'city': v.city or '',
+                'path': v.path or '',
+                'user_agent': v.user_agent or '',
+            })
+        return rows
+    finally:
+        s.close()
+
+
+VISITORS_HTML = """<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="30">
+<title>Visitor log</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d0d0f;color:#e7e9ee;font-family:-apple-system,Segoe UI,system-ui,sans-serif;padding:24px}
+h1{font-size:1.25rem;margin-bottom:4px}
+.sub{color:#8b8f9a;font-size:.85rem;margin-bottom:18px}
+.bar{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap}
+a.btn{background:#7c3aed;color:#fff;text-decoration:none;padding:8px 14px;border-radius:9px;font-size:.85rem;font-weight:600}
+a.btn.ghost{background:#26262b}
+table{width:100%;border-collapse:collapse;font-size:.82rem}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #232327;white-space:nowrap}
+th{color:#a1a1aa;font-weight:600;position:sticky;top:0;background:#0d0d0f}
+td.ua{white-space:normal;color:#8b8f9a;max-width:340px;font-size:.74rem}
+tr:hover td{background:#16161a}
+.empty{color:#71717a;padding:30px 0}
+</style></head><body>
+<h1>Visitor log <span style="color:#8b8f9a;font-weight:400">({{ rows|length }})</span></h1>
+<p class="sub">Page views on this service — newest first. Auto-refreshes every 30s. Times are UTC.</p>
+<div class="bar">
+  <a class="btn" href="/admin/visitors">↻ Refresh now</a>
+  <a class="btn ghost" href="/admin/visitors.log">⬇ Download visitors.log</a>
+  <a class="btn ghost" href="/api/visitors">JSON</a>
+</div>
+{% if rows %}
+<table>
+<tr><th>Time (UTC)</th><th>Country</th><th>City / Region</th><th>IP</th><th>Page</th><th>Device / browser</th></tr>
+{% for r in rows %}
+<tr>
+  <td>{{ r.time }}</td>
+  <td>{{ r.flag }} {{ r.country }}</td>
+  <td>{{ r.city }}{% if r.city and r.region %}, {% endif %}{{ r.region }}</td>
+  <td>{{ r.ip }}</td>
+  <td>{{ r.path }}</td>
+  <td class="ua">{{ r.user_agent }}</td>
+</tr>
+{% endfor %}
+</table>
+{% else %}
+<p class="empty">No visits recorded yet. Open a page (e.g. /chat) and refresh.</p>
+{% endif %}
+</body></html>"""
+
+
+@app.route('/api/visitors')
+def api_visitors():
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        limit = min(int(request.args.get('limit', 1000)), 5000)
+    except (ValueError, TypeError):
+        limit = 1000
+    return jsonify(_visitors_rows(limit=limit))
+
+
+@app.route('/admin/visitors.log')
+def admin_visitors_logfile():
+    if not _check_admin():
+        return redirect('/dashboard')
+    lines = ['time\tip\tlocation\tpath\tuser_agent']
+    for r in _visitors_rows(limit=5000):
+        loc = ' / '.join(p for p in (r['city'], r['region'], r['country']) if p) or '?'
+        lines.append(f"{r['time']}\t{r['ip']}\t{loc}\t{r['path']}\t{r['user_agent'][:160]}")
+    return ('\n'.join(lines), 200,
+            {'Content-Type': 'text/plain; charset=utf-8',
+             'Content-Disposition': 'attachment; filename=visitors.log'})
+
+
+@app.route('/admin/visitors', methods=['GET', 'POST'])
+def admin_visitors():
+    if not _check_admin():
+        if request.method == 'POST':
+            if request.form.get('password', '') == _admin_password():
+                session['admin_authed'] = True
+                return redirect('/admin/visitors')
+            return render_template_string(LOGIN_HTML, error='Incorrect password.')
+        return render_template_string(LOGIN_HTML, error=None)
+    return render_template_string(VISITORS_HTML, rows=_visitors_rows(limit=1000))
 
 
 # ── Chat endpoint ─────────────────────────────────────────────────────────────
