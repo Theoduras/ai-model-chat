@@ -234,15 +234,27 @@ let connStatus = {};
 function esc(s) { return (s || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function persona() { return document.getElementById('persona').value; }
 
+let appConfig = {};
+
 async function init() {
   try {
-    const [pRes, sRes] = await Promise.all([fetch('/api/personas'), fetch('/api/x/status')]);
+    const [pRes, sRes, cRes] = await Promise.all([
+      fetch('/api/personas'), fetch('/api/x/status'), fetch('/api/x/app-config')]);
     const list = await pRes.json();
     connStatus = await sRes.json();
+    appConfig = await cRes.json().catch(() => ({}));
     const sel = document.getElementById('persona');
     sel.innerHTML = list.map(p => '<option value="' + p.slug + '">' + esc(p.name || p.slug) + '</option>').join('');
+    prefillConnect();
     updateConn();
   } catch(e) {}
+}
+
+function prefillConnect() {
+  const idEl = document.getElementById('x-client-id');
+  const uriEl = document.getElementById('x-redirect-uri');
+  if (!idEl.value && appConfig.client_id) idEl.value = appConfig.client_id;
+  if (!uriEl.value) uriEl.value = appConfig.redirect_uri || (location.origin + '/api/x/oauth-redirect');
 }
 
 function updateConn() {
@@ -267,9 +279,7 @@ function updateConn() {
 function toggleConnect() {
   const panel = document.getElementById('connect-panel');
   panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
-  if (panel.style.display === 'block' && !document.getElementById('x-redirect-uri').value) {
-    document.getElementById('x-redirect-uri').value = location.origin + '/api/x/oauth-redirect';
-  }
+  if (panel.style.display === 'block') prefillConnect();
 }
 
 async function startConnect() {

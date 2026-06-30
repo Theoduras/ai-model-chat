@@ -144,6 +144,30 @@ class XMessage(Base):
 Index('ix_xmsg_thread', XMessage.persona, XMessage.x_user_id, XMessage.created_at)
 
 
+class AppSetting(Base):
+    """Small persistent key/value store (e.g. the X app Client ID + redirect URI
+    so connecting/refreshing doesn't need them re-entered each time)."""
+    __tablename__ = 'app_settings'
+
+    key = Column(String(64), primary_key=True)
+    value = Column(Text)
+    updated_at = Column(DateTime, default=_now, onupdate=_now)
+
+
+def get_app_setting(session, key, default=None):
+    row = session.get(AppSetting, key)
+    return row.value if row else default
+
+
+def set_app_setting(session, key, value):
+    row = session.get(AppSetting, key)
+    if row is None:
+        row = AppSetting(key=key)
+        session.add(row)
+    row.value = value
+    return row
+
+
 class XOpener(Base):
     """Permanent record of every fan a persona has sent an opening DM to. Never
     pruned, so an opener is never sent to the same person twice — even after the

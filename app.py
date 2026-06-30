@@ -925,16 +925,48 @@ _last_x_log_error = [None]
 
 
 def _ensure_x_tables():
-    """Create the x_messages / x_openers tables if missing (self-heal when a
-    model was added after the DB was first initialized)."""
+    """Create the x_messages / x_openers / app_settings tables if missing
+    (self-heal when a model was added after the DB was first initialized)."""
     try:
-        from db import XMessage, XOpener, engine
+        from db import XMessage, XOpener, AppSetting, engine
         XMessage.__table__.create(bind=engine, checkfirst=True)
         XOpener.__table__.create(bind=engine, checkfirst=True)
+        AppSetting.__table__.create(bind=engine, checkfirst=True)
         return True
     except Exception as e:
         _last_x_log_error[0] = f'ensure tables: {str(e)[:140]}'
         return False
+
+
+def _get_setting(key, default=None):
+    try:
+        from db import SessionLocal, get_app_setting
+        s = SessionLocal()
+        try:
+            return get_app_setting(s, key, default)
+        finally:
+            s.close()
+    except Exception:
+        return default
+
+
+def _set_setting(key, value):
+    def _do():
+        from db import SessionLocal, set_app_setting
+        s = SessionLocal()
+        try:
+            set_app_setting(s, key, value)
+            s.commit()
+        finally:
+            s.close()
+    try:
+        _do()
+    except Exception:
+        if _ensure_x_tables():
+            try:
+                _do()
+            except Exception:
+                pass
 
 
 def _write_x_message(persona, x_user_id, x_username, direction, text):
@@ -2352,7 +2384,7 @@ def _x_refresh(persona):
     tokens = _load_x_tokens()
     t = tokens.get(persona) or {}
     refresh_token = t.get('refresh_token')
-    client_id = t.get('client_id')
+    client_id = t.get('client_id') or (_get_setting('x_client_id') or '')
     if not refresh_token or not client_id:
         return None
     body = urllib.parse.urlencode({
@@ -2714,12 +2746,15 @@ def api_x_auth_url():
     if not _check_admin():
         return jsonify({'error': 'Unauthorized'}), 401
     data = request.json or {}
-    client_id = data.get('client_id', '').strip()
-    redirect_uri = data.get('redirect_uri', '').strip()
+    client_id = data.get('client_id', '').strip() or (_get_setting('x_client_id') or '')
+    redirect_uri = data.get('redirect_uri', '').strip() or (_get_setting('x_redirect_uri') or '')
     persona = data.get('persona', 'lillith')
     if not client_id or not redirect_uri:
         return jsonify({'ok': False, 'error': 'client_id and redirect_uri are required'}), 400
 
+    # Remember the app credentials so future connects/refreshes don't need them re-entered.
+    _set_setting('x_client_id', client_id)
+    _set_setting('x_redirect_uri', redirect_uri)
     _log_x_event('connect_start', persona=persona)
     code_verifier = secrets.token_urlsafe(64)
     code_challenge = urllib.parse.quote(
@@ -2744,6 +2779,18 @@ def api_x_auth_url():
         'code_challenge_method': 'S256',
     })
     return jsonify({'ok': True, 'url': f'https://twitter.com/i/oauth2/authorize?{params}'})
+
+
+@app.route('/api/x/app-config')
+def api_x_app_config():
+    """Return the saved X app Client ID + redirect URI so the connect form can
+    pre-fill them (so they don't need re-entering each connect/reconnect)."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    return jsonify({
+        'client_id': _get_setting('x_client_id') or '',
+        'redirect_uri': _get_setting('x_redirect_uri') or '',
+    })
 
 
 @app.route('/api/x/callback', methods=['POST'])
