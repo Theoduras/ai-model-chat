@@ -96,9 +96,39 @@
     </div>
   </div>
 
-  <div class="form-section" id="auto-section">
-    <div class="section-title">🤖 Auto mode — keep chatting &amp; finding new chats</div>
-    <span class="hint" style="display:block; margin-bottom:14px;">Runs the whole flow on a loop: replies to your incoming DMs, replies to comments on the post below, then finds new people from your own audience (recent followers and people who replied to your posts) and opens fresh chats with them — round after round, until you stop.</span>
+  <div class="form-section" id="chat-section">
+    <div class="section-title">💬 Auto-chat — keep conversations going</div>
+    <span class="hint" style="display:block; margin-bottom:14px;">Engages your existing audience on a loop: replies to incoming DMs, and (optionally) replies to comments on your posts and posts new content. Does NOT start new chats — that's the section below.</span>
+    <div class="auto-toggles">
+      <label class="auto-chk"><input type="checkbox" id="auto-dm" checked> Reply to incoming DMs</label>
+      <label class="auto-chk"><input type="checkbox" id="auto-respond-own"> Reply to comments on my own posts</label>
+      <label class="auto-chk"><input type="checkbox" id="auto-comments"> Reply to comments on the post below</label>
+      <label class="auto-chk"><input type="checkbox" id="auto-post"> Post new content</label>
+    </div>
+    <div class="xbot-grid" style="margin-top:12px;">
+      <div class="field">
+        <label>Seconds between rounds</label>
+        <select id="chat-interval">
+          <option value="45">45s</option><option value="90" selected>90s</option><option value="180">3 min</option><option value="300">5 min</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Post a new tweet every</label>
+        <select id="auto-post-every">
+          <option value="0">1 round</option><option value="5" selected>5 rounds</option><option value="10">10 rounds</option><option value="20">20 rounds</option>
+        </select>
+      </div>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center; margin-top:14px;">
+      <button class="btn-ai" id="chat-start" onclick="startChat()">▶ Start auto-chat</button>
+      <button class="btn-ai" id="chat-stop" style="background:#4c0519; display:none;" onclick="stopChat()">■ Stop</button>
+      <span class="conn-pill" id="chat-state">idle</span>
+    </div>
+  </div>
+
+  <div class="form-section" id="gather-section">
+    <div class="section-title">🧲 Gather new chats — find &amp; message new people</div>
+    <span class="hint" style="display:block; margin-bottom:14px;">Finds fresh people from your own audience (recent followers and people who replied to your posts) and opens new in-character chats with them — skipping anyone you already have a conversation with. Runs on its own loop, independent of auto-chat.</span>
     <div class="xbot-grid">
       <div class="field">
         <label>New chats per round</label>
@@ -108,33 +138,24 @@
       </div>
       <div class="field">
         <label>Seconds between rounds</label>
-        <select id="auto-interval">
-          <option value="45">45s</option><option value="90" selected>90s</option><option value="180">3 min</option><option value="300">5 min</option>
+        <select id="gather-interval">
+          <option value="90">90s</option><option value="180" selected>3 min</option><option value="300">5 min</option><option value="600">10 min</option>
         </select>
       </div>
     </div>
     <div class="auto-toggles">
-      <label class="auto-chk"><input type="checkbox" id="auto-dm" checked> Reply to incoming DMs</label>
-      <label class="auto-chk"><input type="checkbox" id="auto-new" checked> Start new chats</label>
-      <label class="auto-chk"><input type="checkbox" id="auto-comments"> Reply to comments on the post below</label>
-      <label class="auto-chk"><input type="checkbox" id="auto-respond-own"> Reply to comments on my own posts</label>
       <label class="auto-chk"><input type="checkbox" id="auto-follow"> Follow new people first</label>
-      <label class="auto-chk"><input type="checkbox" id="auto-post"> Post new content</label>
-    </div>
-    <div class="xbot-grid" style="margin-top:12px;">
-      <div class="field">
-        <label>Post a new tweet every</label>
-        <select id="auto-post-every">
-          <option value="0">1 round</option><option value="5" selected>5 rounds</option><option value="10">10 rounds</option><option value="20">20 rounds</option>
-        </select>
-      </div>
     </div>
     <div style="display:flex; gap:8px; align-items:center; margin-top:14px;">
-      <button class="btn-ai" id="auto-start" onclick="startAuto()">▶ Start auto mode</button>
-      <button class="btn-ai" id="auto-stop" style="background:#4c0519; display:none;" onclick="stopAuto()">■ Stop</button>
-      <span class="conn-pill" id="auto-state">idle</span>
+      <button class="btn-ai" id="gather-start" onclick="startGather()">▶ Start gathering</button>
+      <button class="btn-ai" id="gather-stop" style="background:#4c0519; display:none;" onclick="stopGather()">■ Stop</button>
+      <span class="conn-pill" id="gather-state">idle</span>
     </div>
-    <div class="auto-log" id="auto-log"></div>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">📜 Activity log</div>
+    <div class="auto-log" id="auto-log"><span class="hint">Auto-chat and gathering activity appears here.</span></div>
   </div>
 
   <div class="form-section">
@@ -386,11 +407,10 @@ async function runFollow(action) {
     (action === 'follow' ? 'Now following @' : 'Unfollowed @') + esc(data.username) + '</span>';
 }
 
-// ── Auto mode ────────────────────────────────────────────────────────────────
-let autoTimer = null, autoRunning = false, autoBusy = false, autoRounds = 0;
-
+// ── Auto loops (chatting + gathering, independent) ───────────────────────────
 function logLine(text, cls) {
   const box = document.getElementById('auto-log');
+  if (box.querySelector('.hint')) box.innerHTML = '';
   const div = document.createElement('div');
   div.className = 'ln' + (cls ? ' ' + cls : '');
   const t = new Date().toLocaleTimeString();
@@ -400,79 +420,139 @@ function logLine(text, cls) {
   while (box.children.length > 200) box.removeChild(box.firstChild);
 }
 
-function autoSetState(txt, cls) {
-  const p = document.getElementById('auto-state');
+function setState(id, txt, cls) {
+  const p = document.getElementById(id);
   p.textContent = txt;
   p.className = 'conn-pill' + (cls ? ' ' + cls : '');
 }
 
-function startAuto() {
+function logActions(label, n, a, data) {
+  logLine(label + ' round ' + n + ' · ' + (a.new_chats || 0) + ' new chats, ' +
+    (a.dm_replies || 0) + ' DM replies, ' + (a.comments || 0) + ' comment replies, ' +
+    (a.follows || 0) + ' follows, ' + (a.posts || 0) + ' posts', 'hd');
+  (data.log || []).forEach(l => logLine(l, 'act'));
+  if (!(data.log || []).length && !Object.values(a).some(Boolean)) {
+    logLine(label + ': nothing new this round — will retry.', null);
+  }
+}
+
+function connectedOrWarn() {
   const info = connStatus[persona()];
-  if (!(info && info.connected)) { logLine('Connect an X account for this persona first.', 'er'); return; }
-  autoRunning = true;
-  autoRounds = 0;
-  document.getElementById('auto-start').style.display = 'none';
-  document.getElementById('auto-stop').style.display = 'inline-flex';
-  logLine('Auto mode started as ' + persona() + '.', 'hd');
-  runAutoRound();
-  const interval = parseInt(document.getElementById('auto-interval').value) * 1000;
-  autoTimer = setInterval(runAutoRound, interval);
+  if (info && info.connected) return true;
+  logLine('Connect an X account for this persona first.', 'er');
+  return false;
 }
 
-function stopAuto() {
-  autoRunning = false;
-  if (autoTimer) clearInterval(autoTimer);
-  autoTimer = null;
-  document.getElementById('auto-start').style.display = 'inline-flex';
-  document.getElementById('auto-stop').style.display = 'none';
-  autoSetState('idle');
-  logLine('Auto mode stopped after ' + autoRounds + ' round(s).', 'hd');
+// Auto-chat loop — engage existing audience, never starts new chats.
+let chatTimer = null, chatRunning = false, chatBusy = false, chatRounds = 0;
+
+function startChat() {
+  if (!connectedOrWarn()) return;
+  chatRunning = true; chatRounds = 0;
+  document.getElementById('chat-start').style.display = 'none';
+  document.getElementById('chat-stop').style.display = 'inline-flex';
+  logLine('Auto-chat started as ' + persona() + '.', 'hd');
+  runChatRound();
+  chatTimer = setInterval(runChatRound, parseInt(document.getElementById('chat-interval').value) * 1000);
 }
 
-async function runAutoRound() {
-  if (!autoRunning || autoBusy) return;
-  autoBusy = true;
-  autoRounds++;
-  autoSetState('running · round ' + autoRounds, 'run');
+function stopChat() {
+  chatRunning = false;
+  if (chatTimer) clearInterval(chatTimer);
+  chatTimer = null;
+  document.getElementById('chat-start').style.display = 'inline-flex';
+  document.getElementById('chat-stop').style.display = 'none';
+  setState('chat-state', 'idle');
+  logLine('Auto-chat stopped after ' + chatRounds + ' round(s).', 'hd');
+}
+
+async function runChatRound() {
+  if (!chatRunning || chatBusy) return;
+  chatBusy = true; chatRounds++;
+  setState('chat-state', 'running · round ' + chatRounds, 'run');
   try {
     const postEvery = parseInt(document.getElementById('auto-post-every').value);
     const wantPost = document.getElementById('auto-post').checked &&
-      (autoRounds === 1 || postEvery <= 0 || (autoRounds - 1) % postEvery === 0);
+      (chatRounds === 1 || postEvery <= 0 || (chatRounds - 1) % postEvery === 0);
     const data = await post('/api/x/auto-run', {
       persona: persona(),
       post: document.getElementById('post').value.trim(),
       post_topic: document.getElementById('post-topic').value.trim(),
-      new_chat_limit: parseInt(document.getElementById('auto-new-limit').value),
       comment_limit: parseInt(document.getElementById('comment-limit').value),
       dm_replies: document.getElementById('auto-dm').checked,
-      new_chats: document.getElementById('auto-new').checked,
+      new_chats: false,
       comments: document.getElementById('auto-comments').checked,
       respond_own: document.getElementById('auto-respond-own').checked,
       post_content: wantPost,
-      follow: document.getElementById('auto-follow').checked,
+      follow: false,
     });
     if (!data.ok) {
-      logLine('Round ' + autoRounds + ' error: ' + data.error, 'er');
-      if (/token expired|No X account/i.test(data.error || '')) stopAuto();
+      logLine('Auto-chat error: ' + data.error, 'er');
+      if (/token expired|No X account/i.test(data.error || '')) stopChat();
     } else {
-      const a = data.actions || {};
-      logLine('Round ' + autoRounds + ' · ' + (a.new_chats || 0) + ' new chats, ' +
-        (a.dm_replies || 0) + ' DM replies, ' + (a.comments || 0) + ' comment replies, ' +
-        (a.follows || 0) + ' follows, ' + (a.posts || 0) + ' posts', 'hd');
-      (data.log || []).forEach(l => logLine(l, 'act'));
-      if (!(data.log || []).length && !Object.values(a).some(Boolean)) {
-        logLine('Nothing new this round — will retry.', null);
-      }
+      logActions('Auto-chat', chatRounds, data.actions || {}, data);
     }
   } catch (e) {
-    logLine('Round ' + autoRounds + ' failed: ' + e, 'er');
+    logLine('Auto-chat round failed: ' + e, 'er');
   } finally {
-    autoBusy = false;
-    if (autoRunning) autoSetState('waiting for next round', 'run');
+    chatBusy = false;
+    if (chatRunning) setState('chat-state', 'waiting for next round', 'run');
   }
 }
 
-window.addEventListener('beforeunload', () => { if (autoRunning) stopAuto(); });
+// Gathering loop — find & open new chats only.
+let gatherTimer = null, gatherRunning = false, gatherBusy = false, gatherRounds = 0;
+
+function startGather() {
+  if (!connectedOrWarn()) return;
+  gatherRunning = true; gatherRounds = 0;
+  document.getElementById('gather-start').style.display = 'none';
+  document.getElementById('gather-stop').style.display = 'inline-flex';
+  logLine('Gathering new chats started as ' + persona() + '.', 'hd');
+  runGatherRound();
+  gatherTimer = setInterval(runGatherRound, parseInt(document.getElementById('gather-interval').value) * 1000);
+}
+
+function stopGather() {
+  gatherRunning = false;
+  if (gatherTimer) clearInterval(gatherTimer);
+  gatherTimer = null;
+  document.getElementById('gather-start').style.display = 'inline-flex';
+  document.getElementById('gather-stop').style.display = 'none';
+  setState('gather-state', 'idle');
+  logLine('Gathering stopped after ' + gatherRounds + ' round(s).', 'hd');
+}
+
+async function runGatherRound() {
+  if (!gatherRunning || gatherBusy) return;
+  gatherBusy = true; gatherRounds++;
+  setState('gather-state', 'running · round ' + gatherRounds, 'run');
+  try {
+    const data = await post('/api/x/auto-run', {
+      persona: persona(),
+      new_chat_limit: parseInt(document.getElementById('auto-new-limit').value),
+      dm_replies: false,
+      new_chats: true,
+      comments: false,
+      respond_own: false,
+      post_content: false,
+      follow: document.getElementById('auto-follow').checked,
+    });
+    if (!data.ok) {
+      logLine('Gathering error: ' + data.error, 'er');
+      if (/token expired|No X account/i.test(data.error || '')) stopGather();
+    } else {
+      logActions('Gathering', gatherRounds, data.actions || {}, data);
+    }
+  } catch (e) {
+    logLine('Gathering round failed: ' + e, 'er');
+  } finally {
+    gatherBusy = false;
+    if (gatherRunning) setState('gather-state', 'waiting for next round', 'run');
+  }
+}
+
+window.addEventListener('beforeunload', () => { if (chatRunning) stopChat(); if (gatherRunning) stopGather(); });
 
 init();
 </script>
