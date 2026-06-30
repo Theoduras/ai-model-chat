@@ -144,6 +144,21 @@ class XMessage(Base):
 Index('ix_xmsg_thread', XMessage.persona, XMessage.x_user_id, XMessage.created_at)
 
 
+class XOpener(Base):
+    """Permanent record of every fan a persona has sent an opening DM to. Never
+    pruned, so an opener is never sent to the same person twice — even after the
+    conversation log ages out."""
+    __tablename__ = 'x_openers'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    created_at = Column(DateTime, default=_now)
+    persona = Column(String(64), index=True)
+    x_user_id = Column(String(64), index=True)
+
+
+Index('ix_xopener_persona_user', XOpener.persona, XOpener.x_user_id)
+
+
 def init_db():
     Base.metadata.create_all(engine)
 
@@ -255,6 +270,25 @@ def list_x_conversations(session, limit=200):
         if len(out) >= limit:
             break
     return out
+
+
+def record_x_opener(session, persona, x_user_id):
+    uid = str(x_user_id or '')
+    if not uid:
+        return None
+    existing = session.query(XOpener).filter_by(persona=persona, x_user_id=uid).first()
+    if existing:
+        return existing
+    o = XOpener(persona=persona, x_user_id=uid)
+    session.add(o)
+    return o
+
+
+def list_x_opener_ids(session, persona):
+    """All fan ids the persona has ever sent an opener to (never pruned)."""
+    rows = session.query(XOpener.x_user_id).filter(
+        XOpener.persona == persona).distinct().all()
+    return {r[0] for r in rows if r[0]}
 
 
 def list_x_known_user_ids(session, persona):

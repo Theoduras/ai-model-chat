@@ -925,11 +925,12 @@ _last_x_log_error = [None]
 
 
 def _ensure_x_tables():
-    """Create the x_messages table if it's missing (self-heal when the model was
-    added after the DB was first initialized)."""
+    """Create the x_messages / x_openers tables if missing (self-heal when a
+    model was added after the DB was first initialized)."""
     try:
-        from db import XMessage, engine
+        from db import XMessage, XOpener, engine
         XMessage.__table__.create(bind=engine, checkfirst=True)
+        XOpener.__table__.create(bind=engine, checkfirst=True)
         return True
     except Exception as e:
         _last_x_log_error[0] = f'ensure tables: {str(e)[:140]}'
@@ -2630,6 +2631,39 @@ def _x_known_user_ids(persona):
         return set()
 
 
+def _x_opener_ids(persona):
+    """Fan ids the persona has ever sent an opener to (permanent, never pruned)."""
+    try:
+        from db import SessionLocal, list_x_opener_ids
+        s = SessionLocal()
+        try:
+            return list_x_opener_ids(s, persona)
+        finally:
+            s.close()
+    except Exception:
+        return set()
+
+
+def _x_record_opener(persona, x_user_id):
+    """Permanently record that the persona sent this fan an opener. Self-heals."""
+    def _do():
+        from db import SessionLocal, record_x_opener
+        s = SessionLocal()
+        try:
+            record_x_opener(s, persona, x_user_id)
+            s.commit()
+        finally:
+            s.close()
+    try:
+        _do()
+    except Exception:
+        if _ensure_x_tables():
+            try:
+                _do()
+            except Exception:
+                pass
+
+
 def _x_audience_candidates(persona, limit, contacted):
     """Find fresh people to DM from the persona's own audience — no keyword
     search. Sources: recent followers, then people who replied to the persona's
@@ -3106,6 +3140,7 @@ def api_x_chat_up():
             _x_call(persona, 'POST', f'/dm_conversations/with/{user["id"]}/messages',
                     body={'text': opener})
             sent = True
+            _x_record_opener(persona, user['id'])
             _log_x_message(persona, user['id'], user['username'], 'out', opener)
             history_key = f'x_hist_{persona}_{user["id"]}'
             hist_file = f'/tmp/{history_key}.json' if IS_VERCEL else os.path.join(BASE_DIR, f'.{history_key}.json')
@@ -3197,6 +3232,7 @@ def api_x_auto_run():
         if do_new and new_chat_limit:
             contacted = set(_x_load_json(_x_state_path(persona, 'contacted'), []))
             contacted |= _x_known_user_ids(persona)
+            contacted |= _x_opener_ids(persona)
             try:
                 candidates = _x_audience_candidates(persona, new_chat_limit, contacted)
             except Exception as e:
@@ -3232,6 +3268,7 @@ def api_x_auto_run():
                                 f'/dm_conversations/with/{u["id"]}/messages',
                                 body={'text': opener})
                         actions['new_chats'] += 1
+                        _x_record_opener(persona, u['id'])
                         _x_save_history(persona, u['id'], [{'role': 'bot', 'content': opener}])
                         _log_x_message(persona, u['id'], u.get('username', ''), 'out', opener)
                         log.append(f"New chat → @{u['username']}: {opener[:50]}")
