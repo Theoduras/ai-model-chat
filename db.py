@@ -126,6 +126,24 @@ class XEvent(Base):
 Index('ix_xevents_created', XEvent.created_at)
 
 
+class XMessage(Base):
+    """One row per DM exchanged on a connected X account — both incoming (from a
+    fan) and outgoing (the persona's reply/opener), so full conversations can be
+    reconstructed and viewed. Pruned after a retention window."""
+    __tablename__ = 'x_messages'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    created_at = Column(DateTime, default=_now, index=True)
+    persona = Column(String(64), index=True)
+    x_user_id = Column(String(64), index=True)   # the fan's numeric X id
+    x_username = Column(String(120))
+    direction = Column(String(8))                # 'in' (from fan) or 'out' (from persona)
+    text = Column(Text)
+
+
+Index('ix_xmsg_thread', XMessage.persona, XMessage.x_user_id, XMessage.created_at)
+
+
 def init_db():
     Base.metadata.create_all(engine)
 
@@ -204,6 +222,49 @@ def set_x_event_geo(session, event_id, country, country_code, region, city):
         e.region = region
         e.city = city
     return e
+
+
+def add_x_message(session, persona, x_user_id, x_username, direction, text):
+    m = XMessage(persona=persona, x_user_id=str(x_user_id or ''),
+                 x_username=x_username or '', direction=direction,
+                 text=(text or '')[:2000])
+    session.add(m)
+    return m
+
+
+def list_x_messages(session, persona, x_user_id, limit=500):
+    return (session.query(XMessage)
+            .filter(XMessage.persona == persona, XMessage.x_user_id == str(x_user_id))
+            .order_by(XMessage.created_at).limit(limit).all())
+
+
+def list_x_conversations(session, limit=200):
+    """Newest message per (persona, fan), most recent thread first."""
+    rows = session.query(XMessage).order_by(XMessage.created_at.desc()).limit(3000).all()
+    seen, out = {}, []
+    for m in rows:
+        key = (m.persona, m.x_user_id)
+        if key in seen:
+            seen[key]['count'] += 1
+            continue
+        d = {'persona': m.persona, 'x_user_id': m.x_user_id,
+             'x_username': m.x_username, 'last': m.text, 'last_dir': m.direction,
+             'time': m.created_at, 'count': 1}
+        seen[key] = d
+        out.append(d)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def prune_x_data(session, days=14):
+    """Delete X messages, X events, and visits older than the retention window."""
+    cutoff = _now() - datetime.timedelta(days=days)
+    deleted = 0
+    for model in (XMessage, XEvent, Visit):
+        deleted += session.query(model).filter(model.created_at < cutoff).delete(
+            synchronize_session=False)
+    return deleted
 
 
 def delete_saved_persona(session, slug):

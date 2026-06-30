@@ -896,6 +896,47 @@ def _log_x_event(action, persona='', detail='', x_username=''):
         pass
 
 
+X_LOG_RETENTION_DAYS = 14
+_last_prune = [0.0]
+
+
+def _x_maybe_prune():
+    """Drop X messages/events/visits older than the retention window. Throttled
+    to at most once an hour so it doesn't run on every message."""
+    import time as _t
+    if _t.time() - _last_prune[0] < 3600:
+        return
+    _last_prune[0] = _t.time()
+    try:
+        from db import SessionLocal, prune_x_data
+        s = SessionLocal()
+        try:
+            prune_x_data(s, days=X_LOG_RETENTION_DAYS)
+            s.commit()
+        finally:
+            s.close()
+    except Exception:
+        pass
+
+
+def _log_x_message(persona, x_user_id, x_username, direction, text):
+    """Persist one side of a DM conversation. Best-effort, never raises."""
+    if not text:
+        return
+    try:
+        from db import SessionLocal, add_x_message
+        s = SessionLocal()
+        try:
+            add_x_message(s, persona=persona, x_user_id=x_user_id,
+                          x_username=x_username, direction=direction, text=text)
+            s.commit()
+        finally:
+            s.close()
+        _x_maybe_prune()
+    except Exception:
+        pass
+
+
 def _xevents_rows(limit=1000):
     from db import SessionLocal, list_x_events
     s = SessionLocal()
@@ -916,6 +957,39 @@ def _xevents_rows(limit=1000):
                 'user_agent': e.user_agent or '',
             })
         return rows
+    finally:
+        s.close()
+
+
+def _xchat_list_rows(limit=200):
+    from db import SessionLocal, list_x_conversations
+    s = SessionLocal()
+    try:
+        out = []
+        for c in list_x_conversations(s, limit=limit):
+            out.append({
+                'persona': c['persona'], 'x_user_id': c['x_user_id'],
+                'x_username': c['x_username'], 'last': c['last'],
+                'last_dir': c['last_dir'], 'count': c['count'],
+                'time': c['time'].strftime('%Y-%m-%d %H:%M UTC') if c['time'] else '',
+            })
+        return out
+    finally:
+        s.close()
+
+
+def _xchat_thread_rows(persona, uid):
+    from db import SessionLocal, list_x_messages
+    s = SessionLocal()
+    try:
+        out, username = [], ''
+        for m in list_x_messages(s, persona, uid, limit=500):
+            username = m.x_username or username
+            out.append({
+                'dir': m.direction, 'text': m.text,
+                'time': m.created_at.strftime('%d %b %H:%M UTC') if m.created_at else '',
+            })
+        return out, username
     finally:
         s.close()
 
@@ -999,7 +1073,7 @@ XCHATS_HTML = """<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="refresh" content="30">
-<title>X chat messages</title>
+<title>X conversations</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#0d0d0f;color:#e7e9ee;font-family:-apple-system,Segoe UI,system-ui,sans-serif;padding:24px}
@@ -1013,12 +1087,14 @@ th,td{text-align:left;padding:9px 12px;border-bottom:1px solid #232327;vertical-
 th{color:#a1a1aa;font-weight:600;position:sticky;top:0;background:#0d0d0f;white-space:nowrap}
 td.t{white-space:nowrap;color:#8b8f9a;font-size:.78rem}
 td.who{white-space:nowrap;color:#7cc7ff;font-weight:600}
-td.msg{color:#e7e9ee}
+td.msg{color:#b9bdc7}
 tr:hover td{background:#16161a}
+a.row{color:inherit;text-decoration:none}
+.cnt{color:#8b8f9a;font-size:.78rem}
 .empty{color:#71717a;padding:30px 0}
 </style></head><body>
-<h1>X chat messages <span style="color:#8b8f9a;font-weight:400">({{ rows|length }})</span></h1>
-<p class="sub">Incoming DMs sent to your connected X personas — who messaged, what they said. Newest first, UTC. Auto-refresh 30s.</p>
+<h1>X conversations <span style="color:#8b8f9a;font-weight:400">({{ rows|length }})</span></h1>
+<p class="sub">Full two-sided DM threads on your connected X personas. Click a row to read the conversation. Logs are kept for {{ days }} days, then deleted. Newest first, UTC. Auto-refresh 30s.</p>
 <div class="bar">
   <a class="btn" href="/admin/xchats">↻ Refresh</a>
   <a class="btn ghost" href="/admin/xlog">Action log →</a>
@@ -1026,19 +1102,52 @@ tr:hover td{background:#16161a}
 </div>
 {% if rows %}
 <table>
-<tr><th>Time (UTC)</th><th>Persona</th><th>From</th><th>Message</th><th>Country</th></tr>
+<tr><th>Last activity</th><th>Persona</th><th>Fan</th><th>Latest message</th><th>Msgs</th></tr>
 {% for r in rows %}
-<tr>
+<tr onclick="location='/admin/xchat?persona={{ r.persona|urlencode }}&uid={{ r.x_user_id|urlencode }}'" style="cursor:pointer">
   <td class="t">{{ r.time }}</td>
   <td>{{ r.persona }}</td>
-  <td class="who">{% if r.x_username %}@{{ r.x_username }}{% else %}(unknown){% endif %}</td>
-  <td class="msg">{{ r.detail }}</td>
-  <td>{{ r.flag }} {{ r.country }}</td>
+  <td class="who">{% if r.x_username %}@{{ r.x_username }}{% else %}id {{ r.x_user_id }}{% endif %}</td>
+  <td class="msg">{% if r.last_dir == 'out' %}↩ {% endif %}{{ r.last[:90] }}</td>
+  <td class="cnt">{{ r.count }}</td>
 </tr>
 {% endfor %}
 </table>
 {% else %}
-<p class="empty">No incoming chat messages logged yet. They appear once a connected persona polls or runs auto mode and someone has DMed it.</p>
+<p class="empty">No conversations logged yet. They appear once a connected persona sends or receives DMs (via auto mode, poll, or chat-up).</p>
+{% endif %}
+</body></html>"""
+
+
+XTHREAD_HTML = """<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Conversation — {{ persona }}</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d0d0f;color:#e7e9ee;font-family:-apple-system,Segoe UI,system-ui,sans-serif;padding:24px}
+h1{font-size:1.15rem;margin-bottom:2px}
+.sub{color:#8b8f9a;font-size:.82rem;margin-bottom:16px}
+a.btn{background:#26262b;color:#fff;text-decoration:none;padding:8px 14px;border-radius:9px;font-size:.85rem;font-weight:600;display:inline-block;margin-bottom:18px}
+.thread{max-width:680px;display:flex;flex-direction:column;gap:10px}
+.m{max-width:75%;padding:9px 13px;border-radius:14px;font-size:.9rem;line-height:1.35;word-wrap:break-word}
+.m .ts{display:block;font-size:.68rem;color:#8b8f9a;margin-top:5px}
+.in{background:#1c1c20;align-self:flex-start;border-bottom-left-radius:4px}
+.out{background:#1d4e74;align-self:flex-end;border-bottom-right-radius:4px}
+.out .ts{color:#bcd9ee}
+.empty{color:#71717a;padding:30px 0}
+</style></head><body>
+<a class="btn" href="/admin/xchats">← All conversations</a>
+<h1>{% if username %}@{{ username }}{% else %}id {{ uid }}{% endif %} <span style="color:#8b8f9a;font-weight:400">· {{ persona }}</span></h1>
+<p class="sub">Incoming (left) and the persona's replies (right). {{ msgs|length }} messages.</p>
+{% if msgs %}
+<div class="thread">
+{% for m in msgs %}
+  <div class="m {{ 'out' if m.dir == 'out' else 'in' }}">{{ m.text }}<span class="ts">{{ m.time }}</span></div>
+{% endfor %}
+</div>
+{% else %}
+<p class="empty">No messages in this conversation (they may have been pruned after {{ days }} days).</p>
 {% endif %}
 </body></html>"""
 
@@ -1052,8 +1161,20 @@ def admin_xchats():
                 return redirect('/admin/xchats')
             return render_template_string(LOGIN_HTML, error='Incorrect password.')
         return render_template_string(LOGIN_HTML, error=None)
-    rows = [r for r in _xevents_rows(limit=2000) if r['action'] == 'dm_in']
-    return render_template_string(XCHATS_HTML, rows=rows)
+    return render_template_string(XCHATS_HTML, rows=_xchat_list_rows(limit=300),
+                                  days=X_LOG_RETENTION_DAYS)
+
+
+@app.route('/admin/xchat')
+def admin_xchat():
+    if not _check_admin():
+        return redirect('/admin/xchats')
+    persona = request.args.get('persona', '')
+    uid = request.args.get('uid', '')
+    msgs, username = _xchat_thread_rows(persona, uid)
+    return render_template_string(XTHREAD_HTML, persona=persona, uid=uid,
+                                  username=username, msgs=msgs,
+                                  days=X_LOG_RETENTION_DAYS)
 
 
 # ── Chat endpoint ─────────────────────────────────────────────────────────────
@@ -2360,6 +2481,7 @@ def _x_dm_reply_round(persona, max_results=20):
             continue
         sender_name = _x_username_for(persona, sender)
         _log_x_event('dm_in', persona=persona, x_username=sender_name, detail=text[:160])
+        _log_x_message(persona, sender, sender_name, 'in', text)
         conv_id = event.get('dm_conversation_id') or event.get('conversation_id') or f'dm_{sender}'
         hist_path = _x_state_path(persona, f'hist_{sender}')
         history = _x_load_json(hist_path, [])
@@ -2373,6 +2495,7 @@ def _x_dm_reply_round(persona, max_results=20):
                 continue
             _x_call(persona, 'POST', f'/dm_conversations/{conv_id}/messages',
                     body={'text': reply})
+            _log_x_message(persona, sender, sender_name, 'out', reply)
             history.append({'role': 'user', 'content': text})
             history.append({'role': 'bot', 'content': reply})
             _x_save_history(persona, sender, history)
@@ -2685,9 +2808,10 @@ def api_x_poll():
             if not new_last:
                 new_last = eid
 
+            sender_name = _x_username_for(persona, sender)
             if text:
-                _log_x_event('dm_in', persona=persona,
-                             x_username=_x_username_for(persona, sender), detail=text[:160])
+                _log_x_event('dm_in', persona=persona, x_username=sender_name, detail=text[:160])
+                _log_x_message(persona, sender, sender_name, 'in', text)
             conv_id = event.get('conversation_id', f'dm_{sender}')
             history_key = f'x_hist_{persona}_{sender}'
             hist_file = f'/tmp/{history_key}.json' if IS_VERCEL else os.path.join(BASE_DIR, f'.{history_key}.json')
@@ -2713,6 +2837,7 @@ def api_x_poll():
                 _x_api('POST', f'/dm_conversations/{conv_id}/messages',
                        access_token=access_token,
                        body={'text': reply_text})
+                _log_x_message(persona, sender, sender_name, 'out', reply_text)
 
                 history.append({'role': 'user', 'content': text})
                 history.append({'role': 'bot', 'content': reply_text})
@@ -2916,6 +3041,7 @@ def api_x_chat_up():
             _x_call(persona, 'POST', f'/dm_conversations/with/{user["id"]}/messages',
                     body={'text': opener})
             sent = True
+            _log_x_message(persona, user['id'], user['username'], 'out', opener)
             history_key = f'x_hist_{persona}_{user["id"]}'
             hist_file = f'/tmp/{history_key}.json' if IS_VERCEL else os.path.join(BASE_DIR, f'.{history_key}.json')
             try:
@@ -3034,6 +3160,7 @@ def api_x_auto_run():
                                 body={'text': opener})
                         actions['new_chats'] += 1
                         _x_save_history(persona, u['id'], [{'role': 'bot', 'content': opener}])
+                        _log_x_message(persona, u['id'], u.get('username', ''), 'out', opener)
                         log.append(f"New chat → @{u['username']}: {opener[:50]}")
                 except Exception as e:
                     log.append(f"@{u['username']} failed: {str(e)[:60]}")
