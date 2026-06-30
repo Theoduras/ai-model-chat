@@ -98,11 +98,7 @@
 
   <div class="form-section" id="auto-section">
     <div class="section-title">🤖 Auto mode — keep chatting &amp; finding new chats</div>
-    <span class="hint" style="display:block; margin-bottom:14px;">Runs the whole flow on a loop: replies to your incoming DMs, replies to comments on the post below, then searches X for new people and opens fresh chats with them — round after round, until you stop.</span>
-    <div class="field full">
-      <label>Find new people matching <span style="font-weight:400;color:#52525b;">(keywords / hashtag the bot searches to find fresh fans)</span></label>
-      <input type="text" id="auto-query" placeholder="e.g. lonely tonight, gym girl, gamer guy, #single">
-    </div>
+    <span class="hint" style="display:block; margin-bottom:14px;">Runs the whole flow on a loop: replies to your incoming DMs, replies to comments on the post below, then finds new people from your own audience (recent followers and people who replied to your posts) and opens fresh chats with them — round after round, until you stop.</span>
     <div class="xbot-grid">
       <div class="field">
         <label>New chats per round</label>
@@ -413,10 +409,6 @@ function autoSetState(txt, cls) {
 function startAuto() {
   const info = connStatus[persona()];
   if (!(info && info.connected)) { logLine('Connect an X account for this persona first.', 'er'); return; }
-  const wantNew = document.getElementById('auto-new').checked;
-  if (wantNew && !document.getElementById('auto-query').value.trim()) {
-    logLine('Enter keywords to find new people, or uncheck "Start new chats".', 'er'); return;
-  }
   autoRunning = true;
   autoRounds = 0;
   document.getElementById('auto-start').style.display = 'none';
@@ -448,7 +440,6 @@ async function runAutoRound() {
       (autoRounds === 1 || postEvery <= 0 || (autoRounds - 1) % postEvery === 0);
     const data = await post('/api/x/auto-run', {
       persona: persona(),
-      query: document.getElementById('auto-query').value.trim(),
       post: document.getElementById('post').value.trim(),
       post_topic: document.getElementById('post-topic').value.trim(),
       new_chat_limit: parseInt(document.getElementById('auto-new-limit').value),

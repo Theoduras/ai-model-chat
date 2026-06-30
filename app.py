@@ -2585,28 +2585,47 @@ def _x_my_recent_tweet_ids(persona, n=5):
     return [t['id'] for t in (res.get('data', []) or [])][:n]
 
 
-def _x_find_new_users(persona, query, limit, contacted):
-    """Search recent tweets matching query and return fresh candidate users
-    (not me, not already contacted)."""
+def _x_audience_candidates(persona, limit, contacted):
+    """Find fresh people to DM from the persona's own audience — no keyword
+    search. Sources: recent followers, then people who replied to the persona's
+    recent posts. Excludes self and already-contacted users."""
     me_id = _x_me_id(persona)
-    q = urllib.parse.quote(f'{query} -is:retweet -is:reply')
-    path = (f'/tweets/search/recent?query={q}&max_results=30'
-            f'&tweet.fields=author_id,text&expansions=author_id'
-            f'&user.fields=username,name')
-    res = _x_call(persona, 'GET', path)
-    users = {u['id']: u for u in (res.get('includes', {}).get('users', []) or [])}
-    out = []
-    seen = set()
-    for tw in res.get('data', []) or []:
-        aid = tw.get('author_id')
-        if not aid or aid == me_id or aid in contacted or aid in seen:
-            continue
-        seen.add(aid)
-        u = users.get(aid, {})
-        out.append({'id': aid, 'username': u.get('username', '?'),
-                    'name': u.get('name', ''), 'tweet': tw.get('text', '')})
-        if len(out) >= limit:
-            break
+    out, seen = [], set()
+
+    def add(uid, username, name='', tweet=''):
+        if not uid or uid == me_id or uid in contacted or uid in seen:
+            return
+        seen.add(uid)
+        out.append({'id': uid, 'username': username or '?', 'name': name, 'tweet': tweet})
+
+    # 1. recent followers
+    try:
+        res = _x_call(persona, 'GET',
+                      f'/users/{me_id}/followers?max_results=50&user.fields=username,name')
+        for u in res.get('data', []) or []:
+            add(u.get('id'), u.get('username'), u.get('name', ''))
+            if len(out) >= limit:
+                return out
+    except Exception:
+        pass
+
+    # 2. people who replied to the persona's recent posts
+    try:
+        for tid in _x_my_recent_tweet_ids(persona, 3):
+            q = urllib.parse.quote(f'conversation_id:{tid}')
+            res = _x_call(persona, 'GET',
+                          f'/tweets/search/recent?query={q}&max_results=30'
+                          f'&tweet.fields=author_id,text&expansions=author_id'
+                          f'&user.fields=username,name')
+            users = {u['id']: u for u in (res.get('includes', {}).get('users', []) or [])}
+            for tw in res.get('data', []) or []:
+                u = users.get(tw.get('author_id'), {})
+                add(tw.get('author_id'), u.get('username'), u.get('name', ''), tw.get('text', ''))
+                if len(out) >= limit:
+                    return out
+    except Exception:
+        pass
+
     return out
 
 
@@ -3130,13 +3149,13 @@ def api_x_auto_run():
                 except Exception as e:
                     log.append(f'Comment round failed: {str(e)[:80]}')
 
-        if do_new and query and new_chat_limit:
+        if do_new and new_chat_limit:
             contacted = set(_x_load_json(_x_state_path(persona, 'contacted'), []))
             try:
-                candidates = _x_find_new_users(persona, query, new_chat_limit, contacted)
+                candidates = _x_audience_candidates(persona, new_chat_limit, contacted)
             except Exception as e:
                 candidates = []
-                log.append(f'Search failed: {str(e)[:80]}')
+                log.append(f'Finding people failed: {str(e)[:80]}')
             me_id = _x_me_id(persona) if (candidates and do_follow) else None
             for u in candidates:
                 try:
@@ -3149,11 +3168,18 @@ def api_x_auto_run():
                         except Exception:
                             pass
                     snippet = (u.get('tweet') or '')[:160]
-                    instruction = (
-                        f"Start a DM with @{u['username']} on X. They recently posted: "
-                        f"\"{snippet}\". Write a warm, natural, in-character opener that "
-                        "reacts to their post and asks something to get them talking. "
-                        "No hashtags, no hard sell.")
+                    if snippet:
+                        instruction = (
+                            f"Start a DM with @{u['username']} on X. They recently posted: "
+                            f"\"{snippet}\". Write a warm, natural, in-character opener that "
+                            "reacts to their post and asks something to get them talking. "
+                            "No hashtags, no hard sell.")
+                    else:
+                        instruction = (
+                            f"Start a DM with @{u['username']} on X — they're part of your "
+                            "audience. Write a warm, natural, in-character opener that's "
+                            "curious about them and asks something to get them talking. "
+                            "No hashtags, no hard sell.")
                     opener = _persona_text(persona, instruction, max_tokens=1024, temperature=0.95)
                     if opener:
                         _x_call(persona, 'POST',
