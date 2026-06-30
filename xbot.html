@@ -120,7 +120,17 @@
       <label class="auto-chk"><input type="checkbox" id="auto-dm" checked> Reply to incoming DMs</label>
       <label class="auto-chk"><input type="checkbox" id="auto-new" checked> Start new chats</label>
       <label class="auto-chk"><input type="checkbox" id="auto-comments"> Reply to comments on the post below</label>
+      <label class="auto-chk"><input type="checkbox" id="auto-respond-own"> Reply to comments on my own posts</label>
       <label class="auto-chk"><input type="checkbox" id="auto-follow"> Follow new people first</label>
+      <label class="auto-chk"><input type="checkbox" id="auto-post"> Post new content</label>
+    </div>
+    <div class="xbot-grid" style="margin-top:12px;">
+      <div class="field">
+        <label>Post a new tweet every</label>
+        <select id="auto-post-every">
+          <option value="0">1 round</option><option value="5" selected>5 rounds</option><option value="10">10 rounds</option><option value="20">20 rounds</option>
+        </select>
+      </div>
     </div>
     <div style="display:flex; gap:8px; align-items:center; margin-top:14px;">
       <button class="btn-ai" id="auto-start" onclick="startAuto()">▶ Start auto mode</button>
@@ -128,6 +138,20 @@
       <span class="conn-pill" id="auto-state">idle</span>
     </div>
     <div class="auto-log" id="auto-log"></div>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">📝 Post new content</div>
+    <span class="hint" style="display:block; margin-bottom:14px;">Writes an original tweet in the chosen persona's voice and posts it to their X account.</span>
+    <div class="field full">
+      <label>Topic / vibe <span style="font-weight:400;color:#52525b;">(optional — leave blank to let the persona pick)</span></label>
+      <input type="text" id="post-topic" placeholder="e.g. lazy Sunday, new photoset teaser, gym day…">
+    </div>
+    <div style="display:flex; gap:8px;">
+      <button class="btn-ai" style="background:#3f3f46;" onclick="runPostNew(true)">Preview draft</button>
+      <button class="btn-ai" onclick="runPostNew(false)">Post now</button>
+    </div>
+    <div class="result-box" id="postnew-result"></div>
   </div>
 
   <div class="form-section">
@@ -143,11 +167,13 @@
           <option>3</option><option>5</option><option>8</option><option>10</option>
         </select>
       </div>
-      <div style="display:flex; gap:8px; padding-bottom:1px;">
+      <div style="display:flex; gap:8px; padding-bottom:1px; flex-wrap:wrap;">
         <button class="btn-ai" style="background:#3f3f46;" onclick="runComment(true)">Preview drafts</button>
         <button class="btn-ai" onclick="runComment(false)">Reply for real</button>
+        <button class="btn-ai" onclick="runRespondOwn()" title="Reply to comments across this persona's own recent posts">Reply on my recent posts</button>
       </div>
     </div>
+    <span class="hint" style="margin-top:8px;">“Reply on my recent posts” ignores the field above and answers new comments on the connected account's latest posts.</span>
     <div class="result-box" id="comment-result"></div>
   </div>
 
@@ -310,6 +336,33 @@ async function runComment(preview) {
   }).join('');
 }
 
+async function runPostNew(preview) {
+  const box = document.getElementById('postnew-result');
+  busy(box, preview ? 'Drafting tweet…' : 'Posting…');
+  const data = await post('/api/x/post', {
+    persona: persona(), topic: document.getElementById('post-topic').value.trim(), preview });
+  if (!data.ok) { err(box, data.error); return; }
+  const tag = data.posted ? '<span class="tag ok">posted</span>' : '<span class="tag" style="background:#3f3f46;color:#a1a1aa;">draft</span>';
+  box.innerHTML = '<div class="reply-card">' + tag +
+    '<div class="rep">' + esc(data.text) + '</div></div>';
+}
+
+async function runRespondOwn() {
+  const box = document.getElementById('comment-result');
+  busy(box, 'Finding comments on your recent posts…');
+  const data = await post('/api/x/respond-own', {
+    persona: persona(), limit: parseInt(document.getElementById('comment-limit').value), preview: false });
+  if (!data.ok) { err(box, data.error); return; }
+  if (!data.replies.length) { box.innerHTML = '<span class="hint">No new comments found on your recent posts.</span>'; return; }
+  box.innerHTML = data.replies.map(r => {
+    const tag = r.posted ? '<span class="tag ok">posted</span>' : '<span class="tag no">failed</span>';
+    return '<div class="reply-card">' + tag +
+      '<div class="from">↪ ' + esc(r.to) + '</div>' +
+      '<div class="cmt">“' + esc(r.comment) + '”</div>' +
+      '<div class="rep">' + esc(r.reply) + '</div></div>';
+  }).join('');
+}
+
 async function runChatUp(preview) {
   const box = document.getElementById('dm-result');
   const target = document.getElementById('dm-target').value.trim();
@@ -389,15 +442,21 @@ async function runAutoRound() {
   autoRounds++;
   autoSetState('running · round ' + autoRounds, 'run');
   try {
+    const postEvery = parseInt(document.getElementById('auto-post-every').value);
+    const wantPost = document.getElementById('auto-post').checked &&
+      (autoRounds === 1 || postEvery <= 0 || (autoRounds - 1) % postEvery === 0);
     const data = await post('/api/x/auto-run', {
       persona: persona(),
       query: document.getElementById('auto-query').value.trim(),
       post: document.getElementById('post').value.trim(),
+      post_topic: document.getElementById('post-topic').value.trim(),
       new_chat_limit: parseInt(document.getElementById('auto-new-limit').value),
       comment_limit: parseInt(document.getElementById('comment-limit').value),
       dm_replies: document.getElementById('auto-dm').checked,
       new_chats: document.getElementById('auto-new').checked,
       comments: document.getElementById('auto-comments').checked,
+      respond_own: document.getElementById('auto-respond-own').checked,
+      post_content: wantPost,
       follow: document.getElementById('auto-follow').checked,
     });
     if (!data.ok) {
@@ -407,7 +466,7 @@ async function runAutoRound() {
       const a = data.actions || {};
       logLine('Round ' + autoRounds + ' · ' + (a.new_chats || 0) + ' new chats, ' +
         (a.dm_replies || 0) + ' DM replies, ' + (a.comments || 0) + ' comment replies, ' +
-        (a.follows || 0) + ' follows', 'hd');
+        (a.follows || 0) + ' follows, ' + (a.posts || 0) + ' posts', 'hd');
       (data.log || []).forEach(l => logLine(l, 'act'));
       if (!(data.log || []).length && !Object.values(a).some(Boolean)) {
         logLine('Nothing new this round — will retry.', null);

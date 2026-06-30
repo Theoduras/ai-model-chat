@@ -2357,6 +2357,26 @@ def _x_comment_round(persona, post, limit, preview=False, skip_seen=False):
     return results
 
 
+def _x_generate_post(persona, topic=''):
+    """Generate one original in-character tweet for a persona."""
+    ctx = f' about: {topic}.' if topic else '.'
+    instruction = (
+        "Write ONE original X post (tweet) as yourself, in-character" + ctx +
+        " Max 270 characters, engaging and human, invite replies, at most one "
+        "hashtag, no @mentions. Return only the tweet text.")
+    text = _persona_text(persona, instruction, max_tokens=120, temperature=1.0)
+    return text.strip().strip('"')[:280]
+
+
+def _x_my_recent_tweet_ids(persona, n=5):
+    """IDs of the persona account's most recent original posts."""
+    me_id = _x_me_id(persona)
+    res = _x_call(persona, 'GET',
+                  f'/users/{me_id}/tweets?max_results={max(5, n)}'
+                  f'&tweet.fields=id&exclude=replies,retweets')
+    return [t['id'] for t in (res.get('data', []) or [])][:n]
+
+
 def _x_find_new_users(persona, query, limit, contacted):
     """Search recent tweets matching query and return fresh candidate users
     (not me, not already contacted)."""
@@ -2714,6 +2734,66 @@ def api_x_comment():
         return jsonify({'ok': False, 'error': str(e)[:200]}), 400
 
 
+@app.route('/api/x/post', methods=['POST'])
+def api_x_post():
+    """Generate and post an original in-character tweet for a persona.
+    Body: {persona, topic (optional), text (override), preview}. With preview,
+    returns the drafted tweet without posting."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    data = request.json or {}
+    persona = data.get('persona', '')
+    topic = (data.get('topic') or '').strip()
+    text = (data.get('text') or '').strip()
+    preview = bool(data.get('preview', False))
+    if not persona:
+        return jsonify({'ok': False, 'error': 'persona is required'}), 400
+    try:
+        if not text:
+            text = _x_generate_post(persona, topic)
+        if not text:
+            return jsonify({'ok': False, 'error': 'Could not generate a post.'}), 400
+        posted = False
+        if not preview:
+            _log_x_event('post', persona=persona, detail=text[:80])
+            _x_call(persona, 'POST', '/tweets', body={'text': text})
+            posted = True
+        return jsonify({'ok': True, 'text': text, 'posted': posted, 'preview': preview})
+    except url_error.HTTPError as e:
+        return jsonify({'ok': False, 'error': f'X API error {e.code}: {e.read()[:200].decode(errors="ignore")}'}), 400
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]}), 400
+
+
+@app.route('/api/x/respond-own', methods=['POST'])
+def api_x_respond_own():
+    """Reply in-character to new comments across the persona's own recent posts.
+    Body: {persona, limit, preview}."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    data = request.json or {}
+    persona = data.get('persona', '')
+    limit = max(1, min(int(data.get('limit', 5)), 10))
+    preview = bool(data.get('preview', False))
+    if not persona:
+        return jsonify({'ok': False, 'error': 'persona is required'}), 400
+    try:
+        _log_x_event('respond-own', persona=persona)
+        results = []
+        remaining = limit
+        for tid in _x_my_recent_tweet_ids(persona, 5):
+            if remaining <= 0:
+                break
+            r = _x_comment_round(persona, tid, remaining, preview=preview, skip_seen=not preview)
+            results += r
+            remaining -= len(r)
+        return jsonify({'ok': True, 'count': len(results), 'replies': results, 'preview': preview})
+    except url_error.HTTPError as e:
+        return jsonify({'ok': False, 'error': f'X API error {e.code}: {e.read()[:200].decode(errors="ignore")}'}), 400
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]}), 400
+
+
 @app.route('/api/x/chat-up', methods=['POST'])
 def api_x_chat_up():
     """Open a DM with a target user using an in-character opener.
@@ -2769,20 +2849,23 @@ def api_x_auto_run():
     flow: keep existing DMs going, reply to a post's comments, then find new
     people and chat them up (optionally following them first). The frontend
     calls this on a loop so the bot keeps finding new chats.
-    Body: {persona, query, post, new_chat_limit, comment_limit,
-           follow, dm_replies, new_chats, comments}."""
+    Body: {persona, query, post, new_chat_limit, comment_limit, post_topic,
+           follow, dm_replies, new_chats, comments, respond_own, post_content}."""
     if not _check_admin():
         return jsonify({'error': 'Unauthorized'}), 401
     data = request.json or {}
     persona = data.get('persona', '')
     query = (data.get('query') or '').strip()
     post = (data.get('post') or '').strip()
+    post_topic = (data.get('post_topic') or '').strip()
     new_chat_limit = max(0, min(int(data.get('new_chat_limit', 2)), 5))
     comment_limit = max(0, min(int(data.get('comment_limit', 0)), 5))
     do_follow = bool(data.get('follow', False))
     do_dm = bool(data.get('dm_replies', True))
     do_new = bool(data.get('new_chats', True))
     do_comments = bool(data.get('comments', True))
+    do_respond_own = bool(data.get('respond_own', False))
+    do_post = bool(data.get('post_content', False))
     if not persona:
         return jsonify({'ok': False, 'error': 'persona is required'}), 400
 
@@ -2791,23 +2874,47 @@ def api_x_auto_run():
         return jsonify({'ok': False, 'error': f'No X account connected for persona "{persona}".'}), 400
 
     _log_x_event('auto-run', persona=persona, detail=query or post)
-    actions = {'dm_replies': 0, 'new_chats': 0, 'follows': 0, 'comments': 0}
+    actions = {'dm_replies': 0, 'new_chats': 0, 'follows': 0, 'comments': 0, 'posts': 0}
     log = []
     try:
+        if do_post:
+            try:
+                text = _x_generate_post(persona, post_topic)
+                if text:
+                    _x_call(persona, 'POST', '/tweets', body={'text': text})
+                    _log_x_event('post', persona=persona, detail=text[:80])
+                    actions['posts'] += 1
+                    log.append(f'Posted: {text[:60]}')
+            except Exception as e:
+                log.append(f'Post failed: {str(e)[:80]}')
+
         if do_dm:
             replied, dlog = _x_dm_reply_round(persona)
             actions['dm_replies'] = replied
             log += dlog
 
-        if do_comments and post and comment_limit:
-            try:
-                res = _x_comment_round(persona, post, comment_limit, skip_seen=True)
-                posted = [r for r in res if r.get('posted')]
-                actions['comments'] = len(posted)
-                for r in posted:
-                    log.append(f"Comment reply → {r['to']}: {r['reply'][:50]}")
-            except Exception as e:
-                log.append(f'Comment round failed: {str(e)[:80]}')
+        if comment_limit and (do_comments and post or do_respond_own):
+            targets = []
+            if do_comments and post:
+                targets.append(post)
+            if do_respond_own:
+                try:
+                    targets += _x_my_recent_tweet_ids(persona, 5)
+                except Exception as e:
+                    log.append(f'Own-posts lookup failed: {str(e)[:80]}')
+            remaining = comment_limit
+            for tid in targets:
+                if remaining <= 0:
+                    break
+                try:
+                    res = _x_comment_round(persona, tid, remaining, skip_seen=True)
+                    posted = [r for r in res if r.get('posted')]
+                    actions['comments'] += len(posted)
+                    remaining -= len(posted)
+                    for r in posted:
+                        log.append(f"Comment reply → {r['to']}: {r['reply'][:50]}")
+                except Exception as e:
+                    log.append(f'Comment round failed: {str(e)[:80]}')
 
         if do_new and query and new_chat_limit:
             contacted = set(_x_load_json(_x_state_path(persona, 'contacted'), []))
