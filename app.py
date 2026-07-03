@@ -3384,6 +3384,21 @@ def _fanvue_save_tokens(persona, tokens):
     _set_setting(f'fanvue_tokens_{persona}', json.dumps(tokens))
 
 
+def _fanvue_token_post(params):
+    """POST to the Fanvue token endpoint using HTTP Basic client authentication
+    (client_secret_basic), which the OAuth client requires."""
+    a = _fanvue_app()
+    creds = f"{a['client_id']}:{a['client_secret']}"
+    basic = __import__('base64').b64encode(creds.encode()).decode()
+    data = urllib.parse.urlencode(params).encode()
+    req = urllib.request.Request(
+        FANVUE_TOKEN_URL, data=data, method='POST',
+        headers={'Content-Type': 'application/x-www-form-urlencoded',
+                 'Authorization': f'Basic {basic}', 'Accept': 'application/json'})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        return json.loads(r.read())
+
+
 def _fanvue_refresh(persona):
     """Refresh a persona's Fanvue access token. Returns the new token or None."""
     t = _fanvue_tokens(persona)
@@ -3391,16 +3406,8 @@ def _fanvue_refresh(persona):
     rt = t.get('refresh_token')
     if not rt or not app_creds['client_id'] or not app_creds['client_secret']:
         return None
-    body = urllib.parse.urlencode({
-        'grant_type': 'refresh_token', 'refresh_token': rt,
-        'client_id': app_creds['client_id'], 'client_secret': app_creds['client_secret'],
-    }).encode()
-    req = urllib.request.Request(FANVUE_TOKEN_URL, data=body,
-                                 headers={'Content-Type': 'application/x-www-form-urlencoded'},
-                                 method='POST')
     try:
-        with urllib.request.urlopen(req, timeout=15) as r:
-            td = json.loads(r.read())
+        td = _fanvue_token_post({'grant_type': 'refresh_token', 'refresh_token': rt})
     except Exception:
         return None
     t['access_token'] = td.get('access_token', t.get('access_token'))
@@ -3514,18 +3521,12 @@ def api_fanvue_callback():
     if not st or state != st.get('state'):
         return jsonify({'ok': False, 'error': 'State mismatch — restart the connection.'}), 400
     a = _fanvue_app()
-    body = urllib.parse.urlencode({
-        'grant_type': 'authorization_code', 'client_id': a['client_id'],
-        'client_secret': a['client_secret'], 'code': code,
-        'redirect_uri': st.get('redirect_uri', a['redirect_uri']),
-        'code_verifier': st.get('v', ''),
-    }).encode()
     try:
-        req = urllib.request.Request(FANVUE_TOKEN_URL, data=body,
-                                     headers={'Content-Type': 'application/x-www-form-urlencoded'},
-                                     method='POST')
-        with urllib.request.urlopen(req, timeout=15) as r:
-            td = json.loads(r.read())
+        td = _fanvue_token_post({
+            'grant_type': 'authorization_code', 'code': code,
+            'redirect_uri': st.get('redirect_uri', a['redirect_uri']),
+            'code_verifier': st.get('v', ''),
+        })
     except url_error.HTTPError as e:
         return jsonify({'ok': False, 'error': f'Token exchange failed {e.code}: {e.read()[:200].decode(errors="ignore")}'}), 400
     except Exception as e:
