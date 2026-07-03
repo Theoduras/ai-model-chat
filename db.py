@@ -324,13 +324,24 @@ def list_x_known_user_ids(session, persona):
 
 
 def prune_x_data(session, days=14):
-    """Delete X messages, X events, and visits older than the retention window."""
+    """Delete X events and visits older than the retention window. X DMs are also
+    pruned, but Fanvue conversation history (x_user_id like 'fv:%') is kept
+    permanently so the bot never forgets what a fan already told it."""
     cutoff = _now() - datetime.timedelta(days=days)
     deleted = 0
-    for model in (XMessage, XEvent, Visit):
+    deleted += session.query(XMessage).filter(
+        XMessage.created_at < cutoff,
+        ~XMessage.x_user_id.like('fv:%')).delete(synchronize_session=False)
+    for model in (XEvent, Visit):
         deleted += session.query(model).filter(model.created_at < cutoff).delete(
             synchronize_session=False)
     return deleted
+
+
+def count_x_messages(session, persona, x_user_id):
+    return (session.query(XMessage)
+            .filter(XMessage.persona == persona, XMessage.x_user_id == str(x_user_id))
+            .count())
 
 
 def delete_saved_persona(session, slug):

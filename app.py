@@ -3650,6 +3650,53 @@ def _fanvue_enabled_list():
         return []
 
 
+def _fanvue_msg_count(persona, fan_key):
+    try:
+        from db import SessionLocal, count_x_messages
+        s = SessionLocal()
+        try:
+            return count_x_messages(s, persona, fan_key)
+        finally:
+            s.close()
+    except Exception:
+        return 0
+
+
+def _fanvue_saved_history(persona, fan_key, limit=40):
+    """Return the saved conversation as [(direction, text), ...], oldest first."""
+    try:
+        from db import SessionLocal, list_x_messages
+        s = SessionLocal()
+        try:
+            rows = list_x_messages(s, persona, fan_key, limit=500)
+            return [(m.direction, m.text) for m in rows][-limit:]
+        finally:
+            s.close()
+    except Exception:
+        return []
+
+
+def _fanvue_import_history(persona, fan_uuid, handle, me_uuid, cap=200):
+    """Pull the full chat history from Fanvue and store it permanently, so the
+    persona remembers everything already discussed. Returns count imported."""
+    try:
+        msgs = _fv_list(_fanvue_call(persona, 'GET', f'/chats/{fan_uuid}/messages?limit={cap}'))
+    except Exception:
+        return 0
+    msgs = sorted(msgs, key=lambda m: _fv_first(m, 'createdAt', 'sentAt', 'timestamp', default=''))
+    fan_key = 'fv:' + fan_uuid
+    n = 0
+    for m in msgs:
+        mt = _fv_first(m, 'text', 'content', 'message', 'body', default='')
+        if not mt:
+            continue
+        sender = _fv_first(m, 'senderUuid', 'authorUuid', 'fromUuid', 'userUuid', default='')
+        direction = 'out' if sender == me_uuid else 'in'
+        _log_x_message(persona, fan_key, handle, direction, mt)
+        n += 1
+    return n
+
+
 def _fanvue_auto_round(persona):
     """One live auto-reply round: reply in-persona to new fan messages, skipping
     other creators when configured. Returns (actions, log)."""
@@ -3680,6 +3727,7 @@ def _fanvue_auto_round(persona):
             continue
         if only and (handle or '').lower() not in only:
             continue
+        fan_key = 'fv:' + fan_uuid
         try:
             msgs = _fv_list(_fanvue_call(persona, 'GET', f'/chats/{fan_uuid}/messages?limit=20'))
         except Exception as e:
@@ -3687,6 +3735,16 @@ def _fanvue_auto_round(persona):
             continue
         if not msgs:
             continue
+
+        # First time we see this fan: import the whole chat history and keep it
+        # permanently, so the bot remembers everything already said.
+        did_import = False
+        if _fanvue_msg_count(persona, fan_key) == 0:
+            n = _fanvue_import_history(persona, fan_uuid, handle, me_uuid)
+            if n:
+                did_import = True
+                log.append(f'Imported {n} past msgs from {handle or fan_uuid}')
+
         # Order oldest→newest; the API may return newest first.
         newest = msgs[-1] if len(msgs) > 1 and _fv_first(msgs[0], 'createdAt', 'sentAt', default='') <= _fv_first(msgs[-1], 'createdAt', 'sentAt', default='') else msgs[0]
         sender = _fv_first(newest, 'senderUuid', 'authorUuid', 'fromUuid', 'userUuid', default='')
@@ -3697,27 +3755,29 @@ def _fanvue_auto_round(persona):
         if cursor.get(fan_uuid) == msg_id:
             continue  # already handled this latest inbound message
 
-        history = []
-        for m in msgs[-12:]:
-            mt = _fv_first(m, 'text', 'content', 'message', 'body', default='')
-            if not mt:
-                continue
-            role = 'bot' if _fv_first(m, 'senderUuid', 'authorUuid', 'fromUuid', 'userUuid', default='') == me_uuid else 'user'
-            history.append({'role': role, 'content': mt})
-        instruction = ("Reply to this Fanvue fan message in-character, warm and "
-                       "engaging, move the conversation along the rapport → tease → "
-                       "offer funnel naturally (never hard-sell), and end with a "
-                       f"question to keep them talking. Their message: \"{text}\"")
+        # Persist the new inbound (import already stored it on first contact).
+        if not did_import:
+            _log_x_message(persona, fan_key, handle, 'in', text)
+
+        # Build the LLM history from the full saved conversation (memory).
+        history = [{'role': 'model' if d == 'out' else 'user', 'content': t}
+                   for (d, t) in _fanvue_saved_history(persona, fan_key, limit=40)]
+        instruction = (
+            "Reply to this Fanvue fan in-character. You have the full earlier "
+            "conversation above — USE it: do not re-ask anything they already told "
+            "you (their name, where they're from, their interests, what they like). "
+            "Be warm and engaging, move the rapport → tease → offer funnel naturally "
+            "(never hard-sell), and end with a question. Their latest message: "
+            f"\"{text}\"")
         reply = _persona_text(persona, instruction, history=history, max_tokens=1024, temperature=0.9)
         if not reply:
             continue
         try:
-            _fanvue_call(persona, 'POST', f'/chats/{fan_uuid}/message', body={'text': reply[:5000]})
+            _fanvue_call(persona, 'POST', f'/chats/{fan_uuid}/messages', body={'text': reply[:5000]})
         except Exception as e:
-            log.append(f'send {handle or fan_uuid} failed: {str(e)[:50]}')
+            log.append(f'send {handle or fan_uuid} failed: {str(e)[:60]}')
             continue
-        _log_x_message(persona, 'fv:' + fan_uuid, handle, 'in', text)
-        _log_x_message(persona, 'fv:' + fan_uuid, handle, 'out', reply)
+        _log_x_message(persona, fan_key, handle, 'out', reply)
         cursor[fan_uuid] = msg_id
         actions['replies'] += 1
         log.append(f'Replied → {handle or fan_uuid}: {reply[:50]}')
@@ -3775,6 +3835,34 @@ def api_fanvue_auto_run():
         return jsonify({'ok': False, 'error': f'Fanvue API {e.code}: {e.read()[:200].decode(errors="ignore")}'}), 400
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)[:200]}), 400
+
+
+@app.route('/api/fanvue/debug')
+def api_fanvue_debug():
+    """Dump raw Fanvue JSON (me / chats / first chat's messages) so the exact
+    field names can be confirmed. Admin-gated; used to fix parsing quickly."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    persona = (request.args.get('persona') or '').strip()
+    out = {}
+    try:
+        out['me'] = _fanvue_call(persona, 'GET', '/users/me')
+    except Exception as e:
+        out['me_error'] = str(e)[:200]
+    try:
+        chats = _fanvue_call(persona, 'GET', '/chats?limit=3')
+        out['chats'] = chats
+        lst = _fv_list(chats)
+        if lst:
+            uid, handle, is_creator = _fv_user_of_chat(lst[0])
+            out['parsed_first'] = {'uuid': uid, 'handle': handle, 'is_creator': is_creator}
+            try:
+                out['first_messages'] = _fanvue_call(persona, 'GET', f'/chats/{uid}/messages?limit=3')
+            except Exception as e:
+                out['messages_error'] = str(e)[:200]
+    except Exception as e:
+        out['chats_error'] = str(e)[:200]
+    return jsonify(out)
 
 
 _fanvue_worker_started = [False]
