@@ -44,7 +44,7 @@
       <label>Choose a model (persona)</label>
       <div class="row-inline">
         <div class="field" style="margin:0;">
-          <select id="persona"></select>
+          <select id="persona" onchange="loadConfig()"></select>
         </div>
         <span class="conn-pill" id="conn-pill">—</span>
         <button class="btn-ai" id="connect-btn" onclick="toggleConnect()">Connect Fanvue</button>
@@ -94,13 +94,18 @@ async function post(url,body){const r=await fetch(url,{method:'POST',headers:{'C
 
 async function init(){
   try{
-    const [pRes,cRes]=await Promise.all([fetch('/api/personas'),fetch('/api/fanvue/config')]);
+    const pRes=await fetch('/api/personas');
     const list=await pRes.json();
-    connState=await cRes.json().catch(()=>({}));
     document.getElementById('persona').innerHTML=list.map(p=>'<option value="'+p.slug+'">'+esc(p.name||p.slug)+'</option>').join('');
-    document.getElementById('fv-base').value=connState.base_url||'https://api.fanvue.com';
-    updateConn();
+    await loadConfig();
   }catch(e){}
+}
+async function loadConfig(){
+  connState=await fetch('/api/fanvue/config?persona='+encodeURIComponent(persona())).then(r=>r.json()).catch(()=>({}));
+  document.getElementById('fv-base').value=connState.base_url||'https://api.fanvue.com';
+  document.getElementById('connect-panel').style.display='none';
+  document.getElementById('config-status').innerHTML='';
+  updateConn();
 }
 function updateConn(){
   const pill=document.getElementById('conn-pill');
@@ -117,11 +122,12 @@ async function saveConfig(){
   const key=document.getElementById('fv-key').value.trim();
   const base=document.getElementById('fv-base').value.trim();
   busy(box,'Saving…');
-  const data=await post('/api/fanvue/config',{api_key:key,base_url:base});
+  const data=await post('/api/fanvue/config',{persona:persona(),api_key:key,base_url:base});
   if(!data.ok){err(box,data.error||'Failed');return;}
-  const c=await fetch('/api/fanvue/config').then(r=>r.json());
-  connState=c;updateConn();
-  box.innerHTML='<span class="hint" style="color:#4ade80;">✓ Saved</span>';
+  connState=await fetch('/api/fanvue/config?persona='+encodeURIComponent(persona())).then(r=>r.json());
+  updateConn();
+  document.getElementById('fv-key').value='';
+  box.innerHTML='<span class="hint" style="color:#4ade80;">✓ Saved for '+esc(persona())+'</span>';
 }
 async function draftReply(){
   const box=document.getElementById('draft-result');

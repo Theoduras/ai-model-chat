@@ -3363,7 +3363,12 @@ def api_x_auto_run():
 FANVUE_DEFAULT_BASE = 'https://api.fanvue.com'
 
 
-def _fanvue_key():
+def _fanvue_key(persona=''):
+    """Per-persona Fanvue API key, falling back to a global key for compatibility."""
+    if persona:
+        k = _get_setting(f'fanvue_api_key_{persona}')
+        if k:
+            return k
     return _get_setting('fanvue_api_key') or ''
 
 
@@ -3371,12 +3376,12 @@ def _fanvue_base():
     return (_get_setting('fanvue_base_url') or FANVUE_DEFAULT_BASE).rstrip('/')
 
 
-def _fanvue_call(method, path, body=None):
-    """Call the Fanvue API with the stored API key (Bearer). Paths are confirmed
-    against Fanvue's API docs; kept in one place so they're easy to adjust."""
-    key = _fanvue_key()
+def _fanvue_call(method, path, persona='', body=None):
+    """Call the Fanvue API with the persona's stored API key (Bearer). Paths are
+    confirmed against Fanvue's API docs; kept in one place so they're easy to adjust."""
+    key = _fanvue_key(persona)
     if not key:
-        raise RuntimeError('No Fanvue API key set. Save one on the Fanvue page first.')
+        raise RuntimeError('No Fanvue API key set for this persona. Save one on the Fanvue page first.')
     url = _fanvue_base() + path
     headers = {'Authorization': f'Bearer {key}', 'Content-Type': 'application/json',
                'Accept': 'application/json'}
@@ -3393,12 +3398,14 @@ def api_fanvue_config():
         return jsonify({'error': 'Unauthorized'}), 401
     if request.method == 'POST':
         data = request.json or {}
-        if 'api_key' in data:
-            _set_setting('fanvue_api_key', (data.get('api_key') or '').strip())
+        persona = (data.get('persona') or '').strip()
+        if 'api_key' in data and persona:
+            _set_setting(f'fanvue_api_key_{persona}', (data.get('api_key') or '').strip())
         if data.get('base_url'):
             _set_setting('fanvue_base_url', data['base_url'].strip().rstrip('/'))
         return jsonify({'ok': True})
-    return jsonify({'connected': bool(_fanvue_key()), 'base_url': _fanvue_base()})
+    persona = (request.args.get('persona') or '').strip()
+    return jsonify({'connected': bool(_fanvue_key(persona)), 'base_url': _fanvue_base()})
 
 
 @app.route('/api/fanvue/draft', methods=['POST'])
