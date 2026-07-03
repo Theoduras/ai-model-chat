@@ -3353,38 +3353,68 @@ def api_x_auto_run():
 
 # ── Fanvue chatbot ────────────────────────────────────────────────────────────
 # Fanvue is an OnlyFans-style platform. This mirrors the X bot: connect an
-# account, reply to fan DMs in the persona's voice, run the conversion funnel,
-# log conversations, and open new-fan chats. The live read/send transport
-# (_fanvue_call) targets Fanvue's official API — confirm the exact base URL and
-# endpoint paths against the creator's AGENT_NOTES / Fanvue API docs before
-# relying on the auto-run/send flows. The draft endpoint works with no Fanvue
-# connection at all (copy/paste use).
+# account via OAuth 2.0 + PKCE, reply to fan DMs in the persona's voice, run the
+# conversion funnel, log conversations, and open new-fan chats. One Fanvue app
+# (client_id + secret) is registered in the Fanvue Builder; each persona connects
+# its own creator account and gets its own tokens.
 
-FANVUE_DEFAULT_BASE = 'https://api.fanvue.com'
-
-
-def _fanvue_key(persona=''):
-    """Per-persona Fanvue API key, falling back to a global key for compatibility."""
-    if persona:
-        k = _get_setting(f'fanvue_api_key_{persona}')
-        if k:
-            return k
-    return _get_setting('fanvue_api_key') or ''
+FANVUE_API_BASE = 'https://api.fanvue.com'
+FANVUE_AUTH_URL = 'https://auth.fanvue.com/oauth2/auth'
+FANVUE_TOKEN_URL = 'https://auth.fanvue.com/oauth2/token'
+FANVUE_API_VERSION = '2025-06-26'
+FANVUE_SCOPES = 'openid offline offline_access read:self read:chat write:chat read:fan'
 
 
-def _fanvue_base():
-    return (_get_setting('fanvue_base_url') or FANVUE_DEFAULT_BASE).rstrip('/')
+def _fanvue_app():
+    return {
+        'client_id': _get_setting('fanvue_client_id') or '',
+        'client_secret': _get_setting('fanvue_client_secret') or '',
+        'redirect_uri': _get_setting('fanvue_redirect_uri') or '',
+    }
 
 
-def _fanvue_call(method, path, persona='', body=None):
-    """Call the Fanvue API with the persona's stored API key (Bearer). Paths are
-    confirmed against Fanvue's API docs; kept in one place so they're easy to adjust."""
-    key = _fanvue_key(persona)
-    if not key:
-        raise RuntimeError('No Fanvue API key set for this persona. Save one on the Fanvue page first.')
-    url = _fanvue_base() + path
-    headers = {'Authorization': f'Bearer {key}', 'Content-Type': 'application/json',
-               'Accept': 'application/json'}
+def _fanvue_tokens(persona):
+    try:
+        return json.loads(_get_setting(f'fanvue_tokens_{persona}') or '{}')
+    except Exception:
+        return {}
+
+
+def _fanvue_save_tokens(persona, tokens):
+    _set_setting(f'fanvue_tokens_{persona}', json.dumps(tokens))
+
+
+def _fanvue_refresh(persona):
+    """Refresh a persona's Fanvue access token. Returns the new token or None."""
+    t = _fanvue_tokens(persona)
+    app_creds = _fanvue_app()
+    rt = t.get('refresh_token')
+    if not rt or not app_creds['client_id'] or not app_creds['client_secret']:
+        return None
+    body = urllib.parse.urlencode({
+        'grant_type': 'refresh_token', 'refresh_token': rt,
+        'client_id': app_creds['client_id'], 'client_secret': app_creds['client_secret'],
+    }).encode()
+    req = urllib.request.Request(FANVUE_TOKEN_URL, data=body,
+                                 headers={'Content-Type': 'application/x-www-form-urlencoded'},
+                                 method='POST')
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            td = json.loads(r.read())
+    except Exception:
+        return None
+    t['access_token'] = td.get('access_token', t.get('access_token'))
+    if td.get('refresh_token'):
+        t['refresh_token'] = td['refresh_token']
+    _fanvue_save_tokens(persona, t)
+    return t['access_token']
+
+
+def _fanvue_api(method, path, access_token, body=None):
+    url = FANVUE_API_BASE + path
+    headers = {'Authorization': f'Bearer {access_token}',
+               'X-Fanvue-API-Version': FANVUE_API_VERSION,
+               'Content-Type': 'application/json', 'Accept': 'application/json'}
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     with urllib.request.urlopen(req, timeout=15) as r:
@@ -3392,20 +3422,147 @@ def _fanvue_call(method, path, persona='', body=None):
         return json.loads(raw) if raw else {}
 
 
-@app.route('/api/fanvue/config', methods=['GET', 'POST'])
+def _fanvue_call(persona, method, path, body=None):
+    """Call the Fanvue API as a persona, refreshing the token once on 401."""
+    t = _fanvue_tokens(persona)
+    at = t.get('access_token')
+    if not at:
+        raise RuntimeError(f'No Fanvue account connected for persona "{persona}".')
+    try:
+        return _fanvue_api(method, path, at, body=body)
+    except url_error.HTTPError as e:
+        if e.code == 401:
+            new = _fanvue_refresh(persona)
+            if new:
+                return _fanvue_api(method, path, new, body=body)
+        raise
+
+
+@app.route('/api/fanvue/config')
 def api_fanvue_config():
+    """App-level OAuth credentials for pre-filling the connect form (never returns
+    the client secret value, only whether one is saved)."""
     if not _check_admin():
         return jsonify({'error': 'Unauthorized'}), 401
-    if request.method == 'POST':
-        data = request.json or {}
-        persona = (data.get('persona') or '').strip()
-        if 'api_key' in data and persona:
-            _set_setting(f'fanvue_api_key_{persona}', (data.get('api_key') or '').strip())
-        if data.get('base_url'):
-            _set_setting('fanvue_base_url', data['base_url'].strip().rstrip('/'))
-        return jsonify({'ok': True})
+    a = _fanvue_app()
+    return jsonify({'client_id': a['client_id'], 'redirect_uri': a['redirect_uri'],
+                    'has_secret': bool(a['client_secret'])})
+
+
+@app.route('/api/fanvue/auth-url', methods=['POST'])
+def api_fanvue_auth_url():
+    """Build the Fanvue OAuth 2.0 + PKCE authorization URL for a persona."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    data = request.json or {}
+    persona = (data.get('persona') or '').strip()
+    client_id = (data.get('client_id') or '').strip() or (_get_setting('fanvue_client_id') or '')
+    client_secret = (data.get('client_secret') or '').strip() or (_get_setting('fanvue_client_secret') or '')
+    redirect_uri = (data.get('redirect_uri') or '').strip() or (_get_setting('fanvue_redirect_uri') or '')
+    if not (persona and client_id and client_secret and redirect_uri):
+        return jsonify({'ok': False, 'error': 'persona, client_id, client_secret and redirect_uri are required'}), 400
+
+    _set_setting('fanvue_client_id', client_id)
+    _set_setting('fanvue_client_secret', client_secret)
+    _set_setting('fanvue_redirect_uri', redirect_uri)
+
+    code_verifier = secrets.token_urlsafe(64)
+    code_challenge = __import__('base64').urlsafe_b64encode(
+        hashlib.sha256(code_verifier.encode()).digest()).rstrip(b'=').decode()
+    state = secrets.token_urlsafe(32)
+    _set_setting(f'fanvue_oauth_{persona}',
+                 json.dumps({'v': code_verifier, 'state': state, 'redirect_uri': redirect_uri}))
+
+    params = urllib.parse.urlencode({
+        'response_type': 'code', 'client_id': client_id, 'redirect_uri': redirect_uri,
+        'scope': FANVUE_SCOPES, 'state': state,
+        'code_challenge': code_challenge, 'code_challenge_method': 'S256',
+    })
+    return jsonify({'ok': True, 'url': f'{FANVUE_AUTH_URL}?{params}'})
+
+
+@app.route('/api/fanvue/oauth-redirect')
+def api_fanvue_oauth_redirect():
+    code = request.args.get('code', '')
+    state = request.args.get('state', '')
+    error = request.args.get('error', '')
+    payload = json.dumps({'type': 'fanvue_oauth', 'code': code, 'state': state, 'error': error})
+    return Response(
+        '<!DOCTYPE html><html><body style="background:#0d0d0f;color:#e7e9ee;'
+        'font-family:system-ui;padding:40px;text-align:center">'
+        '<p>Finishing Fanvue connection… you can close this window.</p><script>'
+        f'try{{window.opener&&window.opener.postMessage({payload},"*");}}catch(e){{}}'
+        'setTimeout(function(){window.close();},400);</script></body></html>',
+        mimetype='text/html')
+
+
+@app.route('/api/fanvue/callback', methods=['POST'])
+def api_fanvue_callback():
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    data = request.json or {}
+    persona = (data.get('persona') or '').strip()
+    code = (data.get('code') or '').strip()
+    state = (data.get('state') or '').strip()
+    if not (persona and code and state):
+        return jsonify({'ok': False, 'error': 'persona, code and state are required'}), 400
+    st = {}
+    try:
+        st = json.loads(_get_setting(f'fanvue_oauth_{persona}') or '{}')
+    except Exception:
+        pass
+    if not st or state != st.get('state'):
+        return jsonify({'ok': False, 'error': 'State mismatch — restart the connection.'}), 400
+    a = _fanvue_app()
+    body = urllib.parse.urlencode({
+        'grant_type': 'authorization_code', 'client_id': a['client_id'],
+        'client_secret': a['client_secret'], 'code': code,
+        'redirect_uri': st.get('redirect_uri', a['redirect_uri']),
+        'code_verifier': st.get('v', ''),
+    }).encode()
+    try:
+        req = urllib.request.Request(FANVUE_TOKEN_URL, data=body,
+                                     headers={'Content-Type': 'application/x-www-form-urlencoded'},
+                                     method='POST')
+        with urllib.request.urlopen(req, timeout=15) as r:
+            td = json.loads(r.read())
+    except url_error.HTTPError as e:
+        return jsonify({'ok': False, 'error': f'Token exchange failed {e.code}: {e.read()[:200].decode(errors="ignore")}'}), 400
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]}), 400
+
+    tokens = {'access_token': td.get('access_token', ''), 'refresh_token': td.get('refresh_token', '')}
+    _fanvue_save_tokens(persona, tokens)
+    username = ''
+    try:
+        me = _fanvue_call(persona, 'GET', '/users/me')
+        username = me.get('handle') or me.get('username') or (me.get('data') or {}).get('handle', '')
+        if username:
+            tokens['username'] = username
+            _fanvue_save_tokens(persona, tokens)
+    except Exception:
+        pass
+    _log_x_event('fanvue_connect', persona=persona, x_username=username)
+    return jsonify({'ok': True, 'username': username})
+
+
+@app.route('/api/fanvue/status')
+def api_fanvue_status():
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
     persona = (request.args.get('persona') or '').strip()
-    return jsonify({'connected': bool(_fanvue_key(persona)), 'base_url': _fanvue_base()})
+    t = _fanvue_tokens(persona)
+    return jsonify({'connected': bool(t.get('access_token')), 'username': t.get('username', '')})
+
+
+@app.route('/api/fanvue/disconnect', methods=['POST'])
+def api_fanvue_disconnect():
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    persona = (request.json or {}).get('persona', '').strip()
+    if persona:
+        _set_setting(f'fanvue_tokens_{persona}', '{}')
+    return jsonify({'ok': True})
 
 
 @app.route('/api/fanvue/draft', methods=['POST'])

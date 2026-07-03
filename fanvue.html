@@ -48,20 +48,32 @@
         </div>
         <span class="conn-pill" id="conn-pill">—</span>
         <button class="btn-ai" id="connect-btn" onclick="toggleConnect()">Connect Fanvue</button>
+        <button class="btn-ai" id="disconnect-btn" style="background:#3f3f46; display:none;" onclick="disconnectFanvue()">Disconnect</button>
       </div>
     </div>
     <div id="connect-panel" style="display:none; margin-top:4px; border-top:1px solid #232327; padding-top:16px;">
       <div class="field full">
-        <label>Fanvue API key</label>
-        <input type="password" id="fv-key" placeholder="fanvue api key" autocomplete="off" spellcheck="false">
+        <label>Fanvue app Client ID</label>
+        <input type="text" id="fv-client-id" placeholder="client id from the Fanvue Builder" autocomplete="off" spellcheck="false">
       </div>
       <div class="field full" style="margin-top:12px;">
-        <label>API base URL <span style="font-weight:400;color:#52525b;">(leave default unless told otherwise)</span></label>
-        <input type="text" id="fv-base" placeholder="https://api.fanvue.com" autocomplete="off" spellcheck="false">
+        <label>Client Secret</label>
+        <input type="password" id="fv-client-secret" placeholder="client secret" autocomplete="off" spellcheck="false">
       </div>
-      <button class="btn-ai" style="margin-top:14px;" onclick="saveConfig()">Save connection</button>
+      <div class="field full" style="margin-top:12px;">
+        <label>Redirect URI <span style="font-weight:400;color:#52525b;">(register this exact URL in your Fanvue app)</span></label>
+        <input type="text" id="fv-redirect" placeholder="https://your-domain/api/fanvue/oauth-redirect" autocomplete="off" spellcheck="false">
+      </div>
+      <button class="btn-ai" style="margin-top:14px;" onclick="startConnect()">Authorize on Fanvue →</button>
+      <div id="connect-step2" style="display:none; margin-top:14px;">
+        <div class="field full">
+          <label>Paste the full callback URL after authorizing</label>
+          <input type="text" id="fv-callback" placeholder="https://…/api/fanvue/oauth-redirect?code=…&state=…" autocomplete="off" spellcheck="false">
+        </div>
+        <button class="btn-ai" style="margin-top:12px;" onclick="completeConnect()">Finish connection ✓</button>
+      </div>
       <div class="result-box" id="config-status"></div>
-      <span class="hint" style="margin-top:8px;">The key is stored server-side and reused for reading/sending Fanvue DMs. Get it from your Fanvue creator/developer settings.</span>
+      <span class="hint" style="margin-top:8px;">Create an app in the <b>Fanvue Builder</b> (developer settings) to get the Client ID + Secret, enable scopes <code>read:self read:chat write:chat read:fan</code> (plus openid/offline), and register the Redirect URI above. Credentials are stored server-side per persona.</span>
     </div>
   </div>
 
@@ -92,42 +104,81 @@ function busy(box,m){box.innerHTML='<span class="hint">'+esc(m)+'</span>';}
 function err(box,m){box.innerHTML='<span class="hint" style="color:#fb7185;">✗ '+esc(m)+'</span>';}
 async function post(url,body){const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});return r.json();}
 
+let appCfg={};
 async function init(){
   try{
-    const pRes=await fetch('/api/personas');
+    const [pRes,aRes]=await Promise.all([fetch('/api/personas'),fetch('/api/fanvue/config')]);
     const list=await pRes.json();
+    appCfg=await aRes.json().catch(()=>({}));
     document.getElementById('persona').innerHTML=list.map(p=>'<option value="'+p.slug+'">'+esc(p.name||p.slug)+'</option>').join('');
     await loadConfig();
   }catch(e){}
 }
 async function loadConfig(){
-  connState=await fetch('/api/fanvue/config?persona='+encodeURIComponent(persona())).then(r=>r.json()).catch(()=>({}));
-  document.getElementById('fv-base').value=connState.base_url||'https://api.fanvue.com';
+  connState=await fetch('/api/fanvue/status?persona='+encodeURIComponent(persona())).then(r=>r.json()).catch(()=>({}));
   document.getElementById('connect-panel').style.display='none';
+  document.getElementById('connect-step2').style.display='none';
   document.getElementById('config-status').innerHTML='';
   updateConn();
 }
 function updateConn(){
   const pill=document.getElementById('conn-pill');
-  if(connState.connected){pill.className='conn-pill ok';pill.textContent='✓ connected';}
+  if(connState.connected){pill.className='conn-pill ok';pill.textContent='✓ '+(connState.username?('@'+connState.username):'connected');}
   else{pill.className='conn-pill err';pill.textContent='Not connected';}
-  document.getElementById('connect-btn').textContent=connState.connected?'Update key':'Connect Fanvue';
+  document.getElementById('connect-btn').textContent=connState.connected?'Reconnect':'Connect Fanvue';
+  document.getElementById('disconnect-btn').style.display=connState.connected?'inline-flex':'none';
+}
+function prefill(){
+  const id=document.getElementById('fv-client-id'), rd=document.getElementById('fv-redirect');
+  if(!id.value&&appCfg.client_id)id.value=appCfg.client_id;
+  if(!rd.value)rd.value=appCfg.redirect_uri||(location.origin+'/api/fanvue/oauth-redirect');
 }
 function toggleConnect(){
   const p=document.getElementById('connect-panel');
   p.style.display=p.style.display==='none'?'block':'none';
+  if(p.style.display==='block')prefill();
 }
-async function saveConfig(){
+async function startConnect(){
   const box=document.getElementById('config-status');
-  const key=document.getElementById('fv-key').value.trim();
-  const base=document.getElementById('fv-base').value.trim();
-  busy(box,'Saving…');
-  const data=await post('/api/fanvue/config',{persona:persona(),api_key:key,base_url:base});
-  if(!data.ok){err(box,data.error||'Failed');return;}
-  connState=await fetch('/api/fanvue/config?persona='+encodeURIComponent(persona())).then(r=>r.json());
-  updateConn();
-  document.getElementById('fv-key').value='';
-  box.innerHTML='<span class="hint" style="color:#4ade80;">✓ Saved for '+esc(persona())+'</span>';
+  const client_id=document.getElementById('fv-client-id').value.trim();
+  const client_secret=document.getElementById('fv-client-secret').value.trim();
+  const redirect_uri=document.getElementById('fv-redirect').value.trim();
+  if(!client_id||!client_secret||!redirect_uri){err(box,'Enter Client ID, Secret and Redirect URI.');return;}
+  busy(box,'Opening Fanvue authorization…');
+  const data=await post('/api/fanvue/auth-url',{persona:persona(),client_id,client_secret,redirect_uri});
+  if(!data.ok){err(box,data.error);return;}
+  window.open(data.url,'fanvue-oauth','width=600,height=760');
+  document.getElementById('connect-step2').style.display='block';
+  box.innerHTML='<span class="hint" style="color:#fbbf24;">Authorize in the popup. It finishes automatically, or paste the URL it lands on below.</span>';
+}
+async function finishWith(code,state){
+  const box=document.getElementById('config-status');
+  if(!code||!state){err(box,'Missing code/state.');return;}
+  busy(box,'Finishing connection…');
+  const data=await post('/api/fanvue/callback',{persona:persona(),code,state});
+  if(!data.ok){err(box,data.error);return;}
+  box.innerHTML='<span class="hint" style="color:#4ade80;">✓ Connected'+(data.username?(' as @'+esc(data.username)):'')+'</span>';
+  setTimeout(loadConfig,900);
+}
+window.addEventListener('message',e=>{
+  const d=e.data||{};
+  if(d.type!=='fanvue_oauth')return;
+  if(d.error){err(document.getElementById('config-status'),'Fanvue returned: '+d.error);return;}
+  finishWith(d.code,d.state);
+});
+async function completeConnect(){
+  const box=document.getElementById('config-status');
+  const cb=document.getElementById('fv-callback').value.trim();
+  if(!cb){err(box,'Paste the callback URL first.');return;}
+  let code,state;
+  try{const u=new URL(cb);code=u.searchParams.get('code');state=u.searchParams.get('state');}
+  catch(e){err(box,'That is not a valid URL.');return;}
+  finishWith(code,state);
+}
+async function disconnectFanvue(){
+  if(!confirm('Disconnect this persona\'s Fanvue account?'))return;
+  await post('/api/fanvue/disconnect',{persona:persona()});
+  await loadConfig();
 }
 async function draftReply(){
   const box=document.getElementById('draft-result');
