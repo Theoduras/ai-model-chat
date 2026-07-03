@@ -2561,22 +2561,42 @@ def _x_dm_reply_round(persona, max_results=20):
         _log_x_event('dm_in', persona=persona, x_username=sender_name, detail=text[:160])
         _log_x_message(persona, sender, sender_name, 'in', text)
         conv_id = event.get('dm_conversation_id') or event.get('conversation_id') or f'dm_{sender}'
-        hist_path = _x_state_path(persona, f'hist_{sender}')
-        history = _x_load_json(hist_path, [])
+        # Use DB history (survives restarts) with JSON file as fallback
+        db_hist = []
         try:
-            instruction = ("Reply to this DM from a fan, in-character, warm and "
-                           "engaging, end with a question to keep them talking. "
-                           f"Their message: \"{text}\"")
-            reply = _persona_text(persona, instruction, history=history,
+            with db.SessionLocal() as s:
+                rows = db.list_x_messages(s, persona, sender, limit=40)
+                db_hist = [{'role': 'model' if r.direction == 'out' else 'user',
+                            'content': r.text} for r in rows]
+        except Exception:
+            pass
+        if not db_hist:
+            hist_path = _x_state_path(persona, f'hist_{sender}')
+            db_hist = _x_load_json(hist_path, [])
+        try:
+            has_history = len(db_hist) > 0
+            instruction = (
+                "Reply to this X DM from a fan. You have the full earlier "
+                "conversation above — USE it: do NOT introduce yourself again, "
+                "do NOT re-state your name/age/location, do NOT re-ask anything "
+                "they already told you. Continue naturally from where you left off. "
+                "Be warm and engaging, end with a question to keep them talking. "
+                f"Their latest message: \"{text}\"") if has_history else (
+                "Reply to this first DM from a fan, in-character, warm and "
+                "engaging, end with a question to keep them talking. "
+                f"Their message: \"{text}\"")
+            reply = _persona_text(persona, instruction, history=db_hist,
                                   max_tokens=1024, temperature=0.9)
             if not reply:
                 continue
             _x_call(persona, 'POST', f'/dm_conversations/{conv_id}/messages',
                     body={'text': reply})
             _log_x_message(persona, sender, sender_name, 'out', reply)
-            history.append({'role': 'user', 'content': text})
-            history.append({'role': 'bot', 'content': reply})
-            _x_save_history(persona, sender, history)
+            hist_path = _x_state_path(persona, f'hist_{sender}')
+            file_hist = _x_load_json(hist_path, [])
+            file_hist.append({'role': 'user', 'content': text})
+            file_hist.append({'role': 'bot', 'content': reply})
+            _x_save_history(persona, sender, file_hist)
             replied += 1
             log.append(f'DM reply → fan: {reply[:60]}')
         except Exception as e:
@@ -3301,6 +3321,13 @@ def api_x_auto_run():
             me_id = _x_me_id(persona) if (candidates and do_follow) else None
             for u in candidates:
                 try:
+                    # Final dedup: skip if we already have ANY messages with this user in DB
+                    try:
+                        with db.SessionLocal() as _s:
+                            if db.count_x_messages(_s, persona, u['id']) > 0:
+                                continue
+                    except Exception:
+                        pass
                     if do_follow and me_id:
                         try:
                             _x_call(persona, 'POST', f'/users/{me_id}/following',
