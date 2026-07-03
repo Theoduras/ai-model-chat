@@ -3654,13 +3654,14 @@ def _fanvue_me_uuid(persona):
 
 
 def _fv_user_of_chat(chat):
-    """Return (uuid, handle, is_creator) for the fan on the other side of a chat."""
+    """Return (fan_uuid, handle, is_creator, chat_uuid) for the fan on the other side of a chat."""
     u = chat.get('user') or chat.get('otherUser') or chat.get('participant') or chat
     uuid = _fv_first(chat, 'userUuid', 'otherUserUuid') or _fv_first(u, 'uuid', 'id')
     handle = _fv_first(u, 'handle', 'username', 'displayName', default='')
     role = str(_fv_first(u, 'role', 'type', default='')).lower()
     is_creator = bool(u.get('isCreator') or u.get('creator') or role == 'creator')
-    return uuid, handle, is_creator
+    chat_uuid = _fv_first(chat, 'uuid', 'id', 'chatUuid', default='')
+    return uuid, handle, is_creator, chat_uuid
 
 
 def _fanvue_auto_settings(persona):
@@ -3746,7 +3747,7 @@ def _fanvue_auto_round(persona):
     for chat in chats:
         if actions['replies'] >= reply_limit:
             break
-        fan_uuid, handle, is_creator = _fv_user_of_chat(chat)
+        fan_uuid, handle, is_creator, chat_uuid = _fv_user_of_chat(chat)
         if not fan_uuid:
             continue
         if exclude_creators and is_creator:
@@ -3799,11 +3800,19 @@ def _fanvue_auto_round(persona):
         reply = _persona_text(persona, instruction, history=history, max_tokens=1024, temperature=0.9)
         if not reply:
             continue
+        send_id = chat_uuid or fan_uuid
         try:
-            _fanvue_call(persona, 'POST', f'/chats/{fan_uuid}/messages', body={'text': reply[:5000]})
+            _fanvue_call(persona, 'POST', f'/chats/{send_id}/messages', body={'text': reply[:5000]})
         except Exception as e:
-            log.append(f'send {handle or fan_uuid} failed: {str(e)[:60]}')
-            continue
+            if send_id == chat_uuid and chat_uuid != fan_uuid:
+                try:
+                    _fanvue_call(persona, 'POST', f'/chats/{fan_uuid}/messages', body={'text': reply[:5000]})
+                except Exception as e2:
+                    log.append(f'send {handle or fan_uuid} failed: {str(e2)[:60]}')
+                    continue
+            else:
+                log.append(f'send {handle or fan_uuid} failed: {str(e)[:60]}')
+                continue
         _log_x_message(persona, fan_key, handle, 'out', reply)
         cursor[fan_uuid] = msg_id
         actions['replies'] += 1
@@ -3881,8 +3890,10 @@ def api_fanvue_debug():
         out['chats'] = chats
         lst = _fv_list(chats)
         if lst:
-            uid, handle, is_creator = _fv_user_of_chat(lst[0])
-            out['parsed_first'] = {'uuid': uid, 'handle': handle, 'is_creator': is_creator}
+            uid, handle, is_creator, cuid = _fv_user_of_chat(lst[0])
+            out['parsed_first'] = {'uuid': uid, 'handle': handle, 'is_creator': is_creator, 'chat_uuid': cuid}
+            out['raw_first_chat_keys'] = list(lst[0].keys()) if isinstance(lst[0], dict) else str(type(lst[0]))
+            out['raw_first_chat'] = lst[0]
             try:
                 out['first_messages'] = _fanvue_call(persona, 'GET', f'/chats/{uid}/messages?limit=3')
             except Exception as e:
