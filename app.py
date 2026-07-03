@@ -3451,9 +3451,18 @@ def _fanvue_api(method, path, access_token, body=None):
                'Content-Type': 'application/json', 'Accept': 'application/json'}
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
-    with urllib.request.urlopen(req, timeout=15) as r:
-        raw = r.read()
-        return json.loads(raw) if raw else {}
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            raw = r.read()
+            return json.loads(raw) if raw else {}
+    except url_error.HTTPError as e:
+        resp_body = ''
+        try:
+            resp_body = e.read().decode()[:500]
+        except Exception:
+            pass
+        chat_log.warning('Fanvue API %s %s → %s: %s', method, url, e.code, resp_body)
+        raise
 
 
 def _fanvue_call(persona, method, path, body=None):
@@ -3800,19 +3809,34 @@ def _fanvue_auto_round(persona):
         reply = _persona_text(persona, instruction, history=history, max_tokens=1024, temperature=0.9)
         if not reply:
             continue
-        send_id = chat_uuid or fan_uuid
-        try:
-            _fanvue_call(persona, 'POST', f'/chats/{send_id}/messages', body={'text': reply[:5000]})
-        except Exception as e:
-            if send_id == chat_uuid and chat_uuid != fan_uuid:
-                try:
-                    _fanvue_call(persona, 'POST', f'/chats/{fan_uuid}/messages', body={'text': reply[:5000]})
-                except Exception as e2:
-                    log.append(f'send {handle or fan_uuid} failed: {str(e2)[:60]}')
-                    continue
-            else:
-                log.append(f'send {handle or fan_uuid} failed: {str(e)[:60]}')
+        msg_body = reply[:5000]
+        send_paths = []
+        if chat_uuid and chat_uuid != fan_uuid:
+            send_paths.append(f'/chats/{chat_uuid}/messages')
+        send_paths.append(f'/chats/{fan_uuid}/messages')
+        send_paths.append(f'/messages')
+        sent = False
+        for sp in send_paths:
+            try:
+                body_variants = [{'text': msg_body}, {'content': msg_body, 'recipientUuid': fan_uuid}]
+                if sp == '/messages':
+                    body_variants = [{'text': msg_body, 'chatUuid': chat_uuid or fan_uuid},
+                                     {'content': msg_body, 'recipientUuid': fan_uuid}]
+                for bv in body_variants:
+                    try:
+                        _fanvue_call(persona, 'POST', sp, body=bv)
+                        sent = True
+                        log.append(f'sent via {sp} keys={list(bv.keys())}')
+                        break
+                    except Exception:
+                        continue
+                if sent:
+                    break
+            except Exception:
                 continue
+        if not sent:
+            log.append(f'send {handle or fan_uuid} failed: all endpoint patterns returned errors')
+            continue
         _log_x_message(persona, fan_key, handle, 'out', reply)
         cursor[fan_uuid] = msg_id
         actions['replies'] += 1
@@ -3898,6 +3922,15 @@ def api_fanvue_debug():
                 out['first_messages'] = _fanvue_call(persona, 'GET', f'/chats/{uid}/messages?limit=3')
             except Exception as e:
                 out['messages_error'] = str(e)[:200]
+            if request.args.get('probe') == '1' and cuid:
+                probes = {}
+                for path in [f'/chats/{cuid}/messages', f'/chats/{uid}/messages', '/messages']:
+                    try:
+                        _fanvue_call(persona, 'POST', path, body={'text': 'test_probe_ignore'})
+                        probes[path] = 'OK'
+                    except Exception as e:
+                        probes[path] = str(e)[:120]
+                out['send_probes'] = probes
     except Exception as e:
         out['chats_error'] = str(e)[:200]
     return jsonify(out)
