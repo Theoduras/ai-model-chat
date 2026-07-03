@@ -89,8 +89,18 @@
   </div>
 
   <div class="form-section">
-    <div class="section-title">🤖 Auto-reply to DMs <span class="soon">wiring in progress</span></div>
-    <span class="hint" style="display:block;">Reads incoming Fanvue DMs and replies in-persona on a loop, with the funnel, conversation logging (14-day retention), and one-opener-per-fan outreach to new subscribers — mirroring the X bot. This needs the exact Fanvue API endpoints from AGENT_NOTES to enable live send/read; the connection + persona engine above are ready.</span>
+    <div class="section-title">🤖 Auto-reply to DMs</div>
+    <span class="hint" style="display:block; margin-bottom:14px;">Reads incoming Fanvue DMs and replies in-persona (with the funnel + conversation logging). Runs <b>server-side</b> — stays on across redeploys and needs no open tab. Turn it on per persona.</span>
+    <div class="auto-toggles" style="display:flex; flex-wrap:wrap; gap:10px 20px;">
+      <label class="soon" style="display:flex;align-items:center;gap:8px;cursor:pointer;background:none;color:#d4d4d8;font-size:.85rem;padding:0"><input type="checkbox" id="fv-auto-enabled" style="width:auto"> <b>Auto-reply enabled</b></label>
+      <label class="soon" style="display:flex;align-items:center;gap:8px;cursor:pointer;background:none;color:#d4d4d8;font-size:.85rem;padding:0"><input type="checkbox" id="fv-exclude-creators" checked style="width:auto"> Exclude other creators (only reply to fans)</label>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center; margin-top:14px;">
+      <button class="btn-ai" onclick="saveAuto()">Save</button>
+      <button class="btn-ai" style="background:#3f3f46;" onclick="runAutoOnce()">Run once now</button>
+      <span class="conn-pill" id="fv-auto-state">off</span>
+    </div>
+    <div class="result-box" id="fv-auto-result"></div>
   </div>
 
 </div>
@@ -120,6 +130,35 @@ async function loadConfig(){
   document.getElementById('connect-step2').style.display='none';
   document.getElementById('config-status').innerHTML='';
   updateConn();
+  loadAuto();
+}
+async function loadAuto(){
+  const a=await fetch('/api/fanvue/auto?persona='+encodeURIComponent(persona())).then(r=>r.json()).catch(()=>({}));
+  document.getElementById('fv-auto-enabled').checked=!!a.enabled;
+  document.getElementById('fv-exclude-creators').checked=a.exclude_creators!==false;
+  const st=document.getElementById('fv-auto-state');
+  st.textContent=a.enabled?'on · server-side':'off';
+  st.className='conn-pill'+(a.enabled?' ok':'');
+}
+async function saveAuto(){
+  const box=document.getElementById('fv-auto-result');
+  busy(box,'Saving…');
+  const data=await post('/api/fanvue/auto',{persona:persona(),
+    enabled:document.getElementById('fv-auto-enabled').checked,
+    exclude_creators:document.getElementById('fv-exclude-creators').checked});
+  if(!data.ok){err(box,data.error||'Failed');return;}
+  box.innerHTML='<span class="hint" style="color:#4ade80;">✓ Saved — '+(data.enabled?'auto-reply is ON (runs server-side)':'auto-reply is off')+'</span>';
+  loadAuto();
+}
+async function runAutoOnce(){
+  const box=document.getElementById('fv-auto-result');
+  busy(box,'Running one round…');
+  const data=await post('/api/fanvue/auto-run',{persona:persona()});
+  if(!data.ok){err(box,data.error);return;}
+  const a=data.actions||{};
+  let html='<span class="hint">'+(a.replies||0)+' replies, '+(a.skipped_creators||0)+' creators skipped.</span>';
+  (data.log||[]).forEach(l=>{html+='<div class="reply-card"><div class="rep">'+esc(l)+'</div></div>';});
+  box.innerHTML=html;
 }
 function updateConn(){
   const pill=document.getElementById('conn-pill');

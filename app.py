@@ -3592,6 +3592,217 @@ def api_fanvue_draft():
         return jsonify({'ok': False, 'error': str(e)[:200]}), 400
 
 
+# ── Fanvue live auto-reply (persistent, survives redeploys) ───────────────────
+# Response shapes vary; parsing is defensive (tries several field names) so it's
+# easy to adjust once we see a real payload.
+
+def _fv_first(d, *keys, default=None):
+    for k in keys:
+        v = d.get(k) if isinstance(d, dict) else None
+        if v not in (None, ''):
+            return v
+    return default
+
+
+def _fv_list(res):
+    if isinstance(res, list):
+        return res
+    if isinstance(res, dict):
+        for k in ('data', 'items', 'chats', 'results', 'messages'):
+            if isinstance(res.get(k), list):
+                return res[k]
+    return []
+
+
+def _fanvue_me_uuid(persona):
+    t = _fanvue_tokens(persona)
+    if t.get('uuid'):
+        return t['uuid']
+    me = _fanvue_call(persona, 'GET', '/users/me')
+    uid = _fv_first(me, 'uuid', 'id') or _fv_first(me.get('data', {}) if isinstance(me, dict) else {}, 'uuid', 'id')
+    if uid:
+        t['uuid'] = uid
+        _fanvue_save_tokens(persona, t)
+    return uid
+
+
+def _fv_user_of_chat(chat):
+    """Return (uuid, handle, is_creator) for the fan on the other side of a chat."""
+    u = chat.get('user') or chat.get('otherUser') or chat.get('participant') or chat
+    uuid = _fv_first(chat, 'userUuid', 'otherUserUuid') or _fv_first(u, 'uuid', 'id')
+    handle = _fv_first(u, 'handle', 'username', 'displayName', default='')
+    role = str(_fv_first(u, 'role', 'type', default='')).lower()
+    is_creator = bool(u.get('isCreator') or u.get('creator') or role == 'creator')
+    return uuid, handle, is_creator
+
+
+def _fanvue_auto_settings(persona):
+    try:
+        return json.loads(_get_setting(f'fanvue_auto_{persona}') or '{}')
+    except Exception:
+        return {}
+
+
+def _fanvue_enabled_list():
+    try:
+        return json.loads(_get_setting('fanvue_auto_personas') or '[]')
+    except Exception:
+        return []
+
+
+def _fanvue_auto_round(persona):
+    """One live auto-reply round: reply in-persona to new fan messages, skipping
+    other creators when configured. Returns (actions, log)."""
+    opts = _fanvue_auto_settings(persona)
+    exclude_creators = opts.get('exclude_creators', True)
+    reply_limit = max(1, min(int(opts.get('reply_limit', 10)), 30))
+    actions = {'replies': 0, 'skipped_creators': 0}
+    log = []
+
+    me_uuid = _fanvue_me_uuid(persona)
+    cursor_key = f'fanvue_cursor_{persona}'
+    try:
+        cursor = json.loads(_get_setting(cursor_key) or '{}')
+    except Exception:
+        cursor = {}
+
+    chats = _fv_list(_fanvue_call(persona, 'GET', '/chats?limit=30'))
+    for chat in chats:
+        if actions['replies'] >= reply_limit:
+            break
+        fan_uuid, handle, is_creator = _fv_user_of_chat(chat)
+        if not fan_uuid:
+            continue
+        if exclude_creators and is_creator:
+            actions['skipped_creators'] += 1
+            continue
+        try:
+            msgs = _fv_list(_fanvue_call(persona, 'GET', f'/chats/{fan_uuid}/messages?limit=20'))
+        except Exception as e:
+            log.append(f'read {handle or fan_uuid} failed: {str(e)[:50]}')
+            continue
+        if not msgs:
+            continue
+        # Order oldest→newest; the API may return newest first.
+        newest = msgs[-1] if len(msgs) > 1 and _fv_first(msgs[0], 'createdAt', 'sentAt', default='') <= _fv_first(msgs[-1], 'createdAt', 'sentAt', default='') else msgs[0]
+        sender = _fv_first(newest, 'senderUuid', 'authorUuid', 'fromUuid', 'userUuid', default='')
+        text = _fv_first(newest, 'text', 'content', 'message', 'body', default='')
+        msg_id = _fv_first(newest, 'uuid', 'id', default='')
+        if not text or sender == me_uuid:
+            continue
+        if cursor.get(fan_uuid) == msg_id:
+            continue  # already handled this latest inbound message
+
+        history = []
+        for m in msgs[-12:]:
+            mt = _fv_first(m, 'text', 'content', 'message', 'body', default='')
+            if not mt:
+                continue
+            role = 'bot' if _fv_first(m, 'senderUuid', 'authorUuid', 'fromUuid', 'userUuid', default='') == me_uuid else 'user'
+            history.append({'role': role, 'content': mt})
+        instruction = ("Reply to this Fanvue fan message in-character, warm and "
+                       "engaging, move the conversation along the rapport → tease → "
+                       "offer funnel naturally (never hard-sell), and end with a "
+                       f"question to keep them talking. Their message: \"{text}\"")
+        reply = _persona_text(persona, instruction, history=history, max_tokens=1024, temperature=0.9)
+        if not reply:
+            continue
+        try:
+            _fanvue_call(persona, 'POST', f'/chats/{fan_uuid}/messages', body={'text': reply})
+        except Exception as e:
+            log.append(f'send {handle or fan_uuid} failed: {str(e)[:50]}')
+            continue
+        _log_x_message(persona, 'fv:' + fan_uuid, handle, 'in', text)
+        _log_x_message(persona, 'fv:' + fan_uuid, handle, 'out', reply)
+        cursor[fan_uuid] = msg_id
+        actions['replies'] += 1
+        log.append(f'Replied → {handle or fan_uuid}: {reply[:50]}')
+
+    _set_setting(cursor_key, json.dumps(cursor))
+    return actions, log
+
+
+@app.route('/api/fanvue/auto', methods=['GET', 'POST'])
+def api_fanvue_auto():
+    """Get or set the persistent auto-reply toggle + options for a persona."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    if request.method == 'POST':
+        data = request.json or {}
+        persona = (data.get('persona') or '').strip()
+        if not persona:
+            return jsonify({'ok': False, 'error': 'persona required'}), 400
+        opts = _fanvue_auto_settings(persona)
+        if 'exclude_creators' in data:
+            opts['exclude_creators'] = bool(data['exclude_creators'])
+        if 'reply_limit' in data:
+            opts['reply_limit'] = int(data['reply_limit'])
+        enabled = bool(data.get('enabled', opts.get('enabled', False)))
+        opts['enabled'] = enabled
+        _set_setting(f'fanvue_auto_{persona}', json.dumps(opts))
+        lst = set(_fanvue_enabled_list())
+        lst.add(persona) if enabled else lst.discard(persona)
+        _set_setting('fanvue_auto_personas', json.dumps(sorted(lst)))
+        return jsonify({'ok': True, 'enabled': enabled, 'options': opts})
+    persona = (request.args.get('persona') or '').strip()
+    opts = _fanvue_auto_settings(persona)
+    return jsonify({'enabled': bool(opts.get('enabled')),
+                    'exclude_creators': opts.get('exclude_creators', True),
+                    'reply_limit': opts.get('reply_limit', 10)})
+
+
+@app.route('/api/fanvue/auto-run', methods=['POST'])
+def api_fanvue_auto_run():
+    """Run one auto-reply round now (also used by the background worker)."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    persona = (request.json or {}).get('persona', '').strip()
+    if not persona:
+        return jsonify({'ok': False, 'error': 'persona required'}), 400
+    if not _fanvue_tokens(persona).get('access_token'):
+        return jsonify({'ok': False, 'error': 'Fanvue not connected for this persona.'}), 400
+    try:
+        actions, log = _fanvue_auto_round(persona)
+        return jsonify({'ok': True, 'actions': actions, 'log': log})
+    except url_error.HTTPError as e:
+        return jsonify({'ok': False, 'error': f'Fanvue API {e.code}: {e.read()[:200].decode(errors="ignore")}'}), 400
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]}), 400
+
+
+_fanvue_worker_started = [False]
+
+
+def _fanvue_worker():
+    """Server-side loop: runs an auto-reply round for every enabled persona on an
+    interval. Reads the enabled list + tokens from the DB, so after a redeploy the
+    new instance resumes automatically without a browser tab."""
+    import time as _t
+    while True:
+        try:
+            for persona in _fanvue_enabled_list():
+                try:
+                    if _fanvue_tokens(persona).get('access_token'):
+                        with app.app_context():
+                            _fanvue_auto_round(persona)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        _t.sleep(90)
+
+
+def _start_fanvue_worker():
+    if _fanvue_worker_started[0]:
+        return
+    _fanvue_worker_started[0] = True
+    threading.Thread(target=_fanvue_worker, daemon=True).start()
+
+
+if os.getenv('FANVUE_WORKER', '1') != '0':
+    _start_fanvue_worker()
+
+
 # ── Error handler ─────────────────────────────────────────────────────────────
 
 @app.errorhandler(Exception)
