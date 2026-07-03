@@ -95,6 +95,10 @@
       <label class="soon" style="display:flex;align-items:center;gap:8px;cursor:pointer;background:none;color:#d4d4d8;font-size:.85rem;padding:0"><input type="checkbox" id="fv-auto-enabled" style="width:auto"> <b>Auto-reply enabled</b></label>
       <label class="soon" style="display:flex;align-items:center;gap:8px;cursor:pointer;background:none;color:#d4d4d8;font-size:.85rem;padding:0"><input type="checkbox" id="fv-exclude-creators" checked style="width:auto"> Exclude other creators (only reply to fans)</label>
     </div>
+    <div class="field full" style="margin-top:12px;">
+      <label>Only reply to these fans <span style="font-weight:400;color:#52525b;">(comma-separated handles — leave blank for everyone; use for testing)</span></label>
+      <input type="text" id="fv-only-handles" placeholder="e.g. girlforfun">
+    </div>
     <div style="display:flex; gap:8px; align-items:center; margin-top:14px;">
       <button class="btn-ai" onclick="saveAuto()">Save</button>
       <button class="btn-ai" style="background:#3f3f46;" onclick="runAutoOnce()">Run once now</button>
@@ -136,6 +140,7 @@ async function loadAuto(){
   const a=await fetch('/api/fanvue/auto?persona='+encodeURIComponent(persona())).then(r=>r.json()).catch(()=>({}));
   document.getElementById('fv-auto-enabled').checked=!!a.enabled;
   document.getElementById('fv-exclude-creators').checked=a.exclude_creators!==false;
+  document.getElementById('fv-only-handles').value=a.only_handles||'';
   const st=document.getElementById('fv-auto-state');
   st.textContent=a.enabled?'on · server-side':'off';
   st.className='conn-pill'+(a.enabled?' ok':'');
@@ -145,7 +150,8 @@ async function saveAuto(){
   busy(box,'Saving…');
   const data=await post('/api/fanvue/auto',{persona:persona(),
     enabled:document.getElementById('fv-auto-enabled').checked,
-    exclude_creators:document.getElementById('fv-exclude-creators').checked});
+    exclude_creators:document.getElementById('fv-exclude-creators').checked,
+    only_handles:document.getElementById('fv-only-handles').value});
   if(!data.ok){err(box,data.error||'Failed');return;}
   box.innerHTML='<span class="hint" style="color:#4ade80;">✓ Saved — '+(data.enabled?'auto-reply is ON (runs server-side)':'auto-reply is off')+'</span>';
   loadAuto();

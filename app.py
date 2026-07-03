@@ -3656,6 +3656,8 @@ def _fanvue_auto_round(persona):
     opts = _fanvue_auto_settings(persona)
     exclude_creators = opts.get('exclude_creators', True)
     reply_limit = max(1, min(int(opts.get('reply_limit', 10)), 30))
+    only = [h.strip().lstrip('@').lower()
+            for h in (opts.get('only_handles') or '').split(',') if h.strip()]
     actions = {'replies': 0, 'skipped_creators': 0}
     log = []
 
@@ -3675,6 +3677,8 @@ def _fanvue_auto_round(persona):
             continue
         if exclude_creators and is_creator:
             actions['skipped_creators'] += 1
+            continue
+        if only and (handle or '').lower() not in only:
             continue
         try:
             msgs = _fv_list(_fanvue_call(persona, 'GET', f'/chats/{fan_uuid}/messages?limit=20'))
@@ -3708,7 +3712,7 @@ def _fanvue_auto_round(persona):
         if not reply:
             continue
         try:
-            _fanvue_call(persona, 'POST', f'/chats/{fan_uuid}/messages', body={'text': reply})
+            _fanvue_call(persona, 'POST', f'/chats/{fan_uuid}/message', body={'text': reply[:5000]})
         except Exception as e:
             log.append(f'send {handle or fan_uuid} failed: {str(e)[:50]}')
             continue
@@ -3737,6 +3741,8 @@ def api_fanvue_auto():
             opts['exclude_creators'] = bool(data['exclude_creators'])
         if 'reply_limit' in data:
             opts['reply_limit'] = int(data['reply_limit'])
+        if 'only_handles' in data:
+            opts['only_handles'] = (data.get('only_handles') or '').strip()
         enabled = bool(data.get('enabled', opts.get('enabled', False)))
         opts['enabled'] = enabled
         _set_setting(f'fanvue_auto_{persona}', json.dumps(opts))
@@ -3748,7 +3754,8 @@ def api_fanvue_auto():
     opts = _fanvue_auto_settings(persona)
     return jsonify({'enabled': bool(opts.get('enabled')),
                     'exclude_creators': opts.get('exclude_creators', True),
-                    'reply_limit': opts.get('reply_limit', 10)})
+                    'reply_limit': opts.get('reply_limit', 10),
+                    'only_handles': opts.get('only_handles', '')})
 
 
 @app.route('/api/fanvue/auto-run', methods=['POST'])
