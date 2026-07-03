@@ -627,6 +627,12 @@ def xbot_page():
         return redirect('/dashboard')
     return send_from_directory(BASE_DIR, 'xbot.html')
 
+@app.route('/fanvue')
+def fanvue_page():
+    if not _check_admin():
+        return redirect('/dashboard')
+    return send_from_directory(BASE_DIR, 'fanvue.html')
+
 @app.route('/profile')
 def profile():
     return redirect('/landing')
@@ -3341,6 +3347,82 @@ def api_x_auto_run():
         if e.code == 401:
             return jsonify({'ok': False, 'error': 'X token expired. Reconnect the account.'}), 400
         return jsonify({'ok': False, 'error': f'X API error {e.code}: {body}'}), 400
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]}), 400
+
+
+# ── Fanvue chatbot ────────────────────────────────────────────────────────────
+# Fanvue is an OnlyFans-style platform. This mirrors the X bot: connect an
+# account, reply to fan DMs in the persona's voice, run the conversion funnel,
+# log conversations, and open new-fan chats. The live read/send transport
+# (_fanvue_call) targets Fanvue's official API — confirm the exact base URL and
+# endpoint paths against the creator's AGENT_NOTES / Fanvue API docs before
+# relying on the auto-run/send flows. The draft endpoint works with no Fanvue
+# connection at all (copy/paste use).
+
+FANVUE_DEFAULT_BASE = 'https://api.fanvue.com'
+
+
+def _fanvue_key():
+    return _get_setting('fanvue_api_key') or ''
+
+
+def _fanvue_base():
+    return (_get_setting('fanvue_base_url') or FANVUE_DEFAULT_BASE).rstrip('/')
+
+
+def _fanvue_call(method, path, body=None):
+    """Call the Fanvue API with the stored API key (Bearer). Paths are confirmed
+    against Fanvue's API docs; kept in one place so they're easy to adjust."""
+    key = _fanvue_key()
+    if not key:
+        raise RuntimeError('No Fanvue API key set. Save one on the Fanvue page first.')
+    url = _fanvue_base() + path
+    headers = {'Authorization': f'Bearer {key}', 'Content-Type': 'application/json',
+               'Accept': 'application/json'}
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    with urllib.request.urlopen(req, timeout=15) as r:
+        raw = r.read()
+        return json.loads(raw) if raw else {}
+
+
+@app.route('/api/fanvue/config', methods=['GET', 'POST'])
+def api_fanvue_config():
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    if request.method == 'POST':
+        data = request.json or {}
+        if 'api_key' in data:
+            _set_setting('fanvue_api_key', (data.get('api_key') or '').strip())
+        if data.get('base_url'):
+            _set_setting('fanvue_base_url', data['base_url'].strip().rstrip('/'))
+        return jsonify({'ok': True})
+    return jsonify({'connected': bool(_fanvue_key()), 'base_url': _fanvue_base()})
+
+
+@app.route('/api/fanvue/draft', methods=['POST'])
+def api_fanvue_draft():
+    """Draft an in-persona, funnel-aware reply to a fan message. Works with no
+    Fanvue connection — for copy/paste or previewing before wiring live send."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    data = request.json or {}
+    persona = data.get('persona', '')
+    message = (data.get('message') or '').strip()
+    history = data.get('history') or []
+    if not persona or not message:
+        return jsonify({'ok': False, 'error': 'persona and message are required'}), 400
+    try:
+        instruction = ("Reply to this Fanvue fan message in-character, warm and "
+                       "engaging, move the conversation along the rapport → tease → "
+                       "offer funnel naturally (never hard-sell), and end with a "
+                       f"question to keep them talking. Their message: \"{message}\"")
+        reply = _persona_text(persona, instruction, history=history,
+                              max_tokens=1024, temperature=0.9)
+        if not reply:
+            return jsonify({'ok': False, 'error': 'Could not generate a reply.'}), 400
+        return jsonify({'ok': True, 'reply': reply})
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)[:200]}), 400
 

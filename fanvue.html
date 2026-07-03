@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fanvue Chatbot</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <script src="/js/devnav.js" defer></script>
+  <style>
+    .fv-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+    .fv-wrap { max-width: 760px; margin: 0 auto; padding: 28px 24px 80px; display: flex; flex-direction: column; gap: 20px; }
+    .result-box { margin-top: 12px; font-size: 0.85rem; display: flex; flex-direction: column; gap: 8px; }
+    .reply-card { background: #0d0d0f; border: 1px solid #2a2a30; border-radius: 10px; padding: 12px 14px; }
+    .reply-card .rep { color: #f4f4f5; white-space: pre-wrap; }
+    .conn-pill { font-size: 0.75rem; padding: 3px 10px; border-radius: 9999px; background: #27272a; color: #a1a1aa; }
+    .conn-pill.ok { background: #14532d; color: #4ade80; }
+    .conn-pill.err { background: #4c0519; color: #fb7185; }
+    .row-inline { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+    .row-inline .field { flex: 1; min-width: 160px; }
+    .soon { font-size: 0.72rem; padding: 2px 8px; border-radius: 9999px; background: #3f3f46; color: #d4d4d8; margin-left: 8px; }
+    textarea { width: 100%; min-height: 90px; resize: vertical; }
+    @media (max-width: 640px) { .fv-wrap { padding: 18px 14px 70px; gap: 16px; } }
+  </style>
+</head>
+<body class="page-dashboard">
+
+<header>
+  <div style="display:flex; align-items:center; gap:10px;">
+    <h1>Fanvue Chatbot</h1>
+    <span class="badge">Fanvue</span>
+  </div>
+  <div style="display:flex; align-items:center; gap:16px;">
+    <a href="/xbot" style="color:#7cc7ff; font-size:0.8rem; text-decoration:none;">𝕏 Bot</a>
+    <a href="/dashboard" style="color:#71717a; font-size:0.8rem; text-decoration:none;">← Dashboard</a>
+  </div>
+</header>
+
+<div class="fv-scroll">
+<div class="fv-wrap">
+
+  <div class="form-section">
+    <div class="section-title">Persona &amp; Fanvue account</div>
+    <div class="field full">
+      <label>Choose a model (persona)</label>
+      <div class="row-inline">
+        <div class="field" style="margin:0;">
+          <select id="persona"></select>
+        </div>
+        <span class="conn-pill" id="conn-pill">—</span>
+        <button class="btn-ai" id="connect-btn" onclick="toggleConnect()">Connect Fanvue</button>
+      </div>
+    </div>
+    <div id="connect-panel" style="display:none; margin-top:4px; border-top:1px solid #232327; padding-top:16px;">
+      <div class="field full">
+        <label>Fanvue API key</label>
+        <input type="password" id="fv-key" placeholder="fanvue api key" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="field full" style="margin-top:12px;">
+        <label>API base URL <span style="font-weight:400;color:#52525b;">(leave default unless told otherwise)</span></label>
+        <input type="text" id="fv-base" placeholder="https://api.fanvue.com" autocomplete="off" spellcheck="false">
+      </div>
+      <button class="btn-ai" style="margin-top:14px;" onclick="saveConfig()">Save connection</button>
+      <div class="result-box" id="config-status"></div>
+      <span class="hint" style="margin-top:8px;">The key is stored server-side and reused for reading/sending Fanvue DMs. Get it from your Fanvue creator/developer settings.</span>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">💬 Draft a reply</div>
+    <span class="hint" style="display:block; margin-bottom:14px;">Generates an in-persona, funnel-aware reply to a fan's message. Works with no connection — copy it into Fanvue, or preview the voice before going live.</span>
+    <div class="field full">
+      <label>Fan's message</label>
+      <textarea id="fan-msg" placeholder="Paste what the fan said…"></textarea>
+    </div>
+    <button class="btn-ai" onclick="draftReply()">Draft reply</button>
+    <div class="result-box" id="draft-result"></div>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">🤖 Auto-reply to DMs <span class="soon">wiring in progress</span></div>
+    <span class="hint" style="display:block;">Reads incoming Fanvue DMs and replies in-persona on a loop, with the funnel, conversation logging (14-day retention), and one-opener-per-fan outreach to new subscribers — mirroring the X bot. This needs the exact Fanvue API endpoints from AGENT_NOTES to enable live send/read; the connection + persona engine above are ready.</span>
+  </div>
+
+</div>
+</div>
+
+<script>
+let connState = {};
+function esc(s){return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function persona(){return document.getElementById('persona').value;}
+function busy(box,m){box.innerHTML='<span class="hint">'+esc(m)+'</span>';}
+function err(box,m){box.innerHTML='<span class="hint" style="color:#fb7185;">✗ '+esc(m)+'</span>';}
+async function post(url,body){const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});return r.json();}
+
+async function init(){
+  try{
+    const [pRes,cRes]=await Promise.all([fetch('/api/personas'),fetch('/api/fanvue/config')]);
+    const list=await pRes.json();
+    connState=await cRes.json().catch(()=>({}));
+    document.getElementById('persona').innerHTML=list.map(p=>'<option value="'+p.slug+'">'+esc(p.name||p.slug)+'</option>').join('');
+    document.getElementById('fv-base').value=connState.base_url||'https://api.fanvue.com';
+    updateConn();
+  }catch(e){}
+}
+function updateConn(){
+  const pill=document.getElementById('conn-pill');
+  if(connState.connected){pill.className='conn-pill ok';pill.textContent='✓ connected';}
+  else{pill.className='conn-pill err';pill.textContent='Not connected';}
+  document.getElementById('connect-btn').textContent=connState.connected?'Update key':'Connect Fanvue';
+}
+function toggleConnect(){
+  const p=document.getElementById('connect-panel');
+  p.style.display=p.style.display==='none'?'block':'none';
+}
+async function saveConfig(){
+  const box=document.getElementById('config-status');
+  const key=document.getElementById('fv-key').value.trim();
+  const base=document.getElementById('fv-base').value.trim();
+  busy(box,'Saving…');
+  const data=await post('/api/fanvue/config',{api_key:key,base_url:base});
+  if(!data.ok){err(box,data.error||'Failed');return;}
+  const c=await fetch('/api/fanvue/config').then(r=>r.json());
+  connState=c;updateConn();
+  box.innerHTML='<span class="hint" style="color:#4ade80;">✓ Saved</span>';
+}
+async function draftReply(){
+  const box=document.getElementById('draft-result');
+  const msg=document.getElementById('fan-msg').value.trim();
+  if(!msg){err(box,'Paste the fan\'s message first.');return;}
+  busy(box,'Writing reply…');
+  const data=await post('/api/fanvue/draft',{persona:persona(),message:msg});
+  if(!data.ok){err(box,data.error);return;}
+  box.innerHTML='<div class="reply-card"><div class="rep">'+esc(data.reply)+'</div></div>';
+}
+init();
+</script>
+</body>
+</html>
