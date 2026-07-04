@@ -3393,7 +3393,7 @@ FANVUE_API_BASE = 'https://api.fanvue.com'
 FANVUE_AUTH_URL = 'https://auth.fanvue.com/oauth2/auth'
 FANVUE_TOKEN_URL = 'https://auth.fanvue.com/oauth2/token'
 FANVUE_API_VERSION = '2025-06-26'
-FANVUE_SCOPES = 'openid offline offline_access read:self read:chat write:chat read:fan'
+FANVUE_SCOPES = 'openid offline offline_access read:self read:chat write:chat read:fan read:creator'
 
 
 def _fanvue_app():
@@ -3540,6 +3540,7 @@ def api_fanvue_auth_url():
         'response_type': 'code', 'client_id': client_id, 'redirect_uri': redirect_uri,
         'scope': FANVUE_SCOPES, 'state': state,
         'code_challenge': code_challenge, 'code_challenge_method': 'S256',
+        'prompt': 'login',
     })
     return jsonify({'ok': True, 'url': f'{FANVUE_AUTH_URL}?{params}'})
 
