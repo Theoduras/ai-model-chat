@@ -3787,8 +3787,10 @@ def _fanvue_auto_round(persona):
         sender = _fv_first(newest, 'senderUuid', 'authorUuid', 'fromUuid', 'userUuid', default='')
         text = _fv_first(newest, 'text', 'content', 'message', 'body', default='')
         msg_id = _fv_first(newest, 'uuid', 'id', default='')
-        if not text or sender == me_uuid:
+        is_own = newest.get('fromMe') or newest.get('isOwn') or newest.get('isMine') or newest.get('isAuthor') or newest.get('direction') == 'out' or newest.get('type') == 'sent'
+        if not text or sender == me_uuid or is_own:
             continue
+        logging.info('FV newest msg keys=%s sender=%s me=%s fromMe=%s', list(newest.keys()), sender, me_uuid, is_own)
         if cursor.get(fan_uuid) == msg_id:
             continue  # already handled this latest inbound message
 
