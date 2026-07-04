@@ -3805,10 +3805,19 @@ def _fanvue_auto_round(persona):
         # Build the LLM history from the full saved conversation (memory).
         history = [{'role': 'model' if d == 'out' else 'user', 'content': t}
                    for (d, t) in _fanvue_saved_history(persona, fan_key, limit=40)]
+        has_history = any(d == 'out' for (d, t) in
+                          _fanvue_saved_history(persona, fan_key, limit=40))
+        intro_rule = (
+            "You are ALREADY mid-conversation with this fan. Do NOT introduce "
+            "yourself, do NOT state your name/age/where you're from, and do NOT "
+            "greet them like it's the first message — just continue naturally. "
+            if has_history else
+            "This is an early message — a short friendly opener is fine. ")
         instruction = (
             "Reply to this Fanvue fan in-character. You have the full earlier "
             "conversation above — USE it: do not re-ask anything they already told "
             "you (their name, where they're from, their interests, what they like). "
+            + intro_rule +
             "Be warm and engaging, move the rapport → tease → offer funnel naturally "
             "(never hard-sell), and end with a question. "
             "IMPORTANT: Write SHORT messages like a real person texting — max 2-3 "
