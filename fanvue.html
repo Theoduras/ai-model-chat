@@ -394,16 +394,22 @@ init();
   </div>
 </div>
 <script>
-function previewMedia(uuid){
+async function previewMedia(uuid){
   const m=(window._ppvMedia||[]).find(x=>x.uuid===uuid);
   if(!m)return;
   const body=document.getElementById('ppv-preview-body');
-  if(m.mediaType==='image'&&m.url){body.innerHTML='<img src="'+esc(m.url)+'" style="max-width:90vw;max-height:80vh;border-radius:10px;">';}
-  else if(m.mediaType==='video'&&m.url){body.innerHTML='<video src="'+esc(m.url)+'" controls autoplay style="max-width:90vw;max-height:80vh;border-radius:10px;"></video>';}
-  else if(m.mediaType==='audio'&&m.url){body.innerHTML='<div style="padding:40px;text-align:center;"><div style="font-size:3rem;">🎵</div><audio src="'+esc(m.url)+'" controls autoplay style="margin-top:16px;"></audio></div>';}
-  else{body.innerHTML='<div style="padding:40px;color:#a1a1aa;">No preview available'+(m.url?'':' (media still processing?)')+'</div>';}
   document.getElementById('ppv-preview-name').textContent=m.name;
   document.getElementById('ppv-preview').style.display='flex';
+  body.innerHTML='<div style="padding:40px;color:#a1a1aa;">Loading…</div>';
+  let d={url:m.url,mediaType:m.mediaType};
+  if(!d.url){
+    try{d=await fetch('/api/fanvue/media-item?persona='+encodeURIComponent(persona())+'&uuid='+encodeURIComponent(uuid)).then(r=>r.json());}catch(e){}
+  }
+  const url=d.url||'', type=d.mediaType||m.mediaType;
+  if(type==='image'&&url){body.innerHTML='<img src="'+esc(url)+'" style="max-width:90vw;max-height:80vh;border-radius:10px;">';}
+  else if(type==='video'&&url){body.innerHTML='<video src="'+esc(url)+'" controls autoplay style="max-width:90vw;max-height:80vh;border-radius:10px;"></video>';}
+  else if(type==='audio'&&url){body.innerHTML='<div style="padding:40px;text-align:center;"><div style="font-size:3rem;">🎵</div><audio src="'+esc(url)+'" controls autoplay style="margin-top:16px;"></audio></div>';}
+  else{body.innerHTML='<div style="padding:40px;color:#a1a1aa;">No preview available'+(d.error?(': '+esc(d.error)):'')+'</div>';}
 }
 function closePreview(e){
   if(e&&e.target&&e.target.closest('#ppv-preview-body'))return;

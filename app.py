@@ -3761,6 +3761,15 @@ def api_fanvue_media():
     if folder:
         q += f'&folderName={urllib.parse.quote(folder)}'
     items, err, folders = [], '', set()
+    # Folder names come from the dedicated vault-folders endpoint (list items
+    # don't carry folderName); ignore its errors so media still loads.
+    try:
+        for f in _fv_list(_fanvue_call(persona, 'GET', '/vault-folders?size=100')):
+            nm = _fv_first(f, 'name', 'folderName', 'title', default='')
+            if nm:
+                folders.add(nm)
+    except Exception:
+        pass
     try:
         rows = _fv_list(_fanvue_call(persona, 'GET', f'/media?{q}'))
         for m in rows:
@@ -3783,6 +3792,29 @@ def api_fanvue_media():
     return jsonify({'media': [m for m in items if m['uuid']],
                     'folders': sorted(folders),
                     'selected': _fanvue_ppv(persona), 'error': err})
+
+
+@app.route('/api/fanvue/media-item')
+def api_fanvue_media_item():
+    """Fetch a single media item (GET /media/{uuid}) which includes signed URLs,
+    for previewing — the list endpoint omits them."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    persona = (request.args.get('persona') or '').strip()
+    uuid = (request.args.get('uuid') or '').strip()
+    if not uuid:
+        return jsonify({'error': 'Missing uuid'}), 400
+    try:
+        m = _fanvue_call(persona, 'GET', f'/media/{uuid}')
+        m = m.get('data', m) if isinstance(m, dict) else {}
+        return jsonify({
+            'uuid': uuid,
+            'mediaType': _fv_first(m, 'mediaType', default=''),
+            'url': m.get('url') or _fv_media_thumb(m) or '',
+            'thumb': _fv_media_thumb(m),
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)[:140]}), 200
 
 
 @app.route('/api/fanvue/ppv', methods=['GET', 'POST'])
