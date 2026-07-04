@@ -3805,10 +3805,8 @@ def _fanvue_auto_round(persona):
             "you (their name, where they're from, their interests, what they like). "
             "Be warm and engaging, move the rapport → tease → offer funnel naturally "
             "(never hard-sell), and end with a question. "
-            "IMPORTANT: Write SHORT messages like a real person texting — max 1-2 "
-            "sentences per message. If you want to say multiple things, separate them "
-            "with a DOUBLE NEWLINE so each chunk is sent as a separate chat bubble. "
-            "Never write a wall of text. Their latest message: "
+            "IMPORTANT: Write SHORT messages like a real person texting — max 2-3 "
+            "sentences. Keep it casual and natural, no walls of text. Their latest message: "
             f"\"{text}\"")
         reply = _persona_text(persona, instruction, history=history, max_tokens=300, temperature=0.9)
         if not reply:
@@ -3818,34 +3816,11 @@ def _fanvue_auto_round(persona):
         cursor[fan_uuid] = msg_id
         _set_setting(cursor_key, json.dumps(cursor))
 
-        # Split reply into separate chat bubbles (double newline = new bubble)
-        chunks = [c.strip() for c in reply.split('\n\n') if c.strip()]
-        if not chunks:
-            chunks = [reply.strip()]
-
-        all_sent = True
-        for chunk in chunks:
-            msg_body = chunk[:2000]
-            sent = False
-            send_errors = []
-            for sp, bv in [
-                (f'/chats/{fan_uuid}/message', {'text': msg_body}),
-            ]:
-                try:
-                    _fanvue_call(persona, 'POST', sp, body=bv)
-                    sent = True
-                    break
-                except Exception as e:
-                    send_errors.append(f'{sp}: {str(e)[:60]}')
-                    continue
-            if not sent:
-                log.append(f'send {handle or fan_uuid} failed: ' + '; '.join(send_errors[:2]))
-                all_sent = False
-                break
-            import time as _ts
-            _ts.sleep(1.5)
-
-        if not all_sent:
+        msg_body = reply.strip()[:2000]
+        try:
+            _fanvue_call(persona, 'POST', f'/chats/{fan_uuid}/message', body={'text': msg_body})
+        except Exception as e:
+            log.append(f'send {handle or fan_uuid} failed: {str(e)[:60]}')
             continue
         _log_x_message(persona, fan_key, handle, 'out', reply)
         actions['replies'] += 1
