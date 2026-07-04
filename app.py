@@ -3804,38 +3804,54 @@ def _fanvue_auto_round(persona):
             "conversation above — USE it: do not re-ask anything they already told "
             "you (their name, where they're from, their interests, what they like). "
             "Be warm and engaging, move the rapport → tease → offer funnel naturally "
-            "(never hard-sell), and end with a question. Their latest message: "
+            "(never hard-sell), and end with a question. "
+            "IMPORTANT: Write SHORT messages like a real person texting — max 1-2 "
+            "sentences per message. If you want to say multiple things, separate them "
+            "with a DOUBLE NEWLINE so each chunk is sent as a separate chat bubble. "
+            "Never write a wall of text. Their latest message: "
             f"\"{text}\"")
-        reply = _persona_text(persona, instruction, history=history, max_tokens=1024, temperature=0.9)
+        reply = _persona_text(persona, instruction, history=history, max_tokens=300, temperature=0.9)
         if not reply:
             continue
-        msg_body = reply[:5000]
-        send_attempts = [
-            (f'/chats/{fan_uuid}/messages', {'text': msg_body}),
-            ('/chats/messages', {'text': msg_body, 'recipientUuid': fan_uuid}),
-            ('/messages', {'text': msg_body, 'recipientUuid': fan_uuid}),
-            (f'/chats/{fan_uuid}/messages', {'text': msg_body, 'type': 'SINGLE_RECIPIENT'}),
-            ('/chats/messages', {'text': msg_body, 'recipientUuid': fan_uuid, 'type': 'SINGLE_RECIPIENT'}),
-            ('/messages', {'text': msg_body, 'recipientUuid': fan_uuid, 'type': 'SINGLE_RECIPIENT'}),
-            (f'/chats/{fan_uuid}/message', {'text': msg_body}),
-            (f'/chat/{fan_uuid}/messages', {'text': msg_body}),
-        ]
-        sent = False
-        send_errors = []
-        for sp, bv in send_attempts:
-            try:
-                _fanvue_call(persona, 'POST', sp, body=bv)
-                sent = True
-                log.append(f'SUCCESS via POST {sp} keys={list(bv.keys())}')
+
+        # Mark cursor BEFORE sending to prevent duplicate replies on retry
+        cursor[fan_uuid] = msg_id
+        _set_setting(cursor_key, json.dumps(cursor))
+
+        # Split reply into separate chat bubbles (double newline = new bubble)
+        chunks = [c.strip() for c in reply.split('\n\n') if c.strip()]
+        if not chunks:
+            chunks = [reply.strip()]
+
+        all_sent = True
+        for chunk in chunks:
+            msg_body = chunk[:2000]
+            sent = False
+            send_errors = []
+            for sp, bv in [
+                (f'/chats/{fan_uuid}/messages', {'text': msg_body}),
+                ('/chats/messages', {'text': msg_body, 'recipientUuid': fan_uuid}),
+                ('/messages', {'text': msg_body, 'recipientUuid': fan_uuid}),
+                (f'/chats/{fan_uuid}/messages', {'text': msg_body, 'type': 'SINGLE_RECIPIENT'}),
+                ('/chats/messages', {'text': msg_body, 'recipientUuid': fan_uuid, 'type': 'SINGLE_RECIPIENT'}),
+            ]:
+                try:
+                    _fanvue_call(persona, 'POST', sp, body=bv)
+                    sent = True
+                    break
+                except Exception as e:
+                    send_errors.append(f'{sp}: {str(e)[:60]}')
+                    continue
+            if not sent:
+                log.append(f'send {handle or fan_uuid} failed: ' + '; '.join(send_errors[:2]))
+                all_sent = False
                 break
-            except Exception as e:
-                send_errors.append(f'{sp}: {str(e)[:80]}')
-                continue
-        if not sent:
-            log.append(f'send {handle or fan_uuid} failed: ' + '; '.join(send_errors[:3]))
+            import time as _ts
+            _ts.sleep(1.5)
+
+        if not all_sent:
             continue
         _log_x_message(persona, fan_key, handle, 'out', reply)
-        cursor[fan_uuid] = msg_id
         actions['replies'] += 1
         log.append(f'Replied → {handle or fan_uuid}: {reply[:50]}')
 
