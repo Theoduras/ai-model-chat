@@ -65,9 +65,9 @@
     <div id="ppv-row" style="display:none; margin-top:12px; border-top:1px solid #232327; padding-top:16px;">
       <label style="display:block;margin-bottom:6px;">💎 PPV content <span style="font-weight:400;color:#52525b;">(pick the Fanvue media this model sends locked, once rapport is built)</span></label>
       <div class="row-inline" style="margin-bottom:10px;">
-        <div class="field" style="margin:0;min-width:150px;">
-          <label style="font-size:.72rem;">Folder</label>
-          <select id="ppv-folder-filter" onchange="loadPpv()"></select>
+        <div class="field" style="margin:0;min-width:180px;flex:1;">
+          <label style="font-size:.72rem;">Folder <span style="color:#52525b;">(type a folder name from Fanvue)</span></label>
+          <input type="text" id="ppv-folder-filter" placeholder="e.g. RTS1 $15" onchange="loadPpv()">
         </div>
         <div class="field" style="margin:0;min-width:120px;">
           <label style="font-size:.72rem;">Type</label>
@@ -195,13 +195,6 @@ async function loadPpv(){
   if(!ppvSel.size)ppvSel=new Set(sel.media_uuids||[]);
   document.getElementById('ppv-price').value=document.getElementById('ppv-price').value||sel.price||'';
   document.getElementById('ppv-caption').value=document.getElementById('ppv-caption').value||sel.caption||'';
-  // Populate folder filter once (keep current selection).
-  const ff=document.getElementById('ppv-folder-filter');
-  if((data.folders||[]).length && ff.options.length<=1){
-    ff.innerHTML='<option value="">All folders</option>'+(data.folders||[]).map(f=>'<option value="'+esc(f)+'"'+(f===folder?' selected':'')+'>'+esc(f)+'</option>').join('');
-  } else if(!(data.folders||[]).length && ff.options.length===0){
-    ff.innerHTML='<option value="">All folders</option>';
-  }
   const hint=document.getElementById('ppv-hint');
   if(data.error){grid.innerHTML='';hint.textContent='⚠ Could not load media: '+data.error;hint.style.color='#fbbf24';return;}
   if(!media.length){grid.innerHTML='';hint.textContent='No media in this view.';hint.style.color='#71717a';return;}
@@ -409,7 +402,16 @@ async function previewMedia(uuid){
   if(type==='image'&&url){body.innerHTML='<img src="'+esc(url)+'" style="max-width:90vw;max-height:80vh;border-radius:10px;">';}
   else if(type==='video'&&url){body.innerHTML='<video src="'+esc(url)+'" controls autoplay style="max-width:90vw;max-height:80vh;border-radius:10px;"></video>';}
   else if(type==='audio'&&url){body.innerHTML='<div style="padding:40px;text-align:center;"><div style="font-size:3rem;">🎵</div><audio src="'+esc(url)+'" controls autoplay style="margin-top:16px;"></audio></div>';}
-  else{body.innerHTML='<div style="padding:40px;color:#a1a1aa;">No preview available'+(d.error?(': '+esc(d.error)):'')+'</div>';}
+  else{
+    const desc=d.description||m.description||'';
+    const tags=(d.tags||[]).map(t=>'<span style="display:inline-block;background:#27272a;border-radius:6px;padding:2px 8px;margin:2px;font-size:.72rem;">'+esc(t)+'</span>').join('');
+    body.innerHTML='<div style="max-width:480px;padding:28px;background:#18181b;border-radius:12px;color:#e4e4e7;">'+
+      '<div style="font-size:2rem;text-align:center;margin-bottom:12px;">'+(type==='video'?'🎬':type==='audio'?'🎵':'🖼️')+'</div>'+
+      (desc?'<div style="font-size:.9rem;line-height:1.5;color:#d4d4d8;">'+esc(desc)+'</div>':'<div style="color:#a1a1aa;">No description.</div>')+
+      (tags?'<div style="margin-top:14px;">'+tags+'</div>':'')+
+      '<div style="margin-top:16px;font-size:.72rem;color:#71717a;">Fanvue’s API doesn’t expose the raw file to apps — this is the AI description of the content. The fan still receives the real media when unlocked.</div>'+
+      '</div>';
+  }
 }
 function closePreview(e){
   if(e&&e.target&&e.target.closest('#ppv-preview-body'))return;

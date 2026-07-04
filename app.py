@@ -3776,66 +3776,63 @@ def api_fanvue_media():
         q += f'&mediaType={mtype}'
     if folder:
         q += f'&folderName={urllib.parse.quote(folder)}'
-    items, err, folders = [], '', set()
-    # Folder names: the folder-list endpoint needs pagination params (bare call
-    # 400s). Try the known variants and take whichever returns rows.
-    for fpath in (f'{scope}/media/folders?page=1&size=100', '/media/folders?page=1&size=100',
-                  f'{scope}/vault-folders?page=1&size=100', '/vault-folders?page=1&size=100'):
-        try:
-            rows = _fv_list(_fanvue_call(persona, 'GET', fpath))
-        except Exception:
-            continue
-        for f in rows:
-            nm = _fv_first(f, 'name', 'folderName', 'title', default='') if isinstance(f, dict) else str(f)
-            if nm:
-                folders.add(nm)
-        if folders:
-            break
+    items, err = [], ''
     try:
         rows = _fv_list(_fanvue_call(persona, 'GET', f'/media?{q}'))
         for m in rows:
             if _fv_first(m, 'status', default='ready') not in ('ready', ''):
                 continue
-            fn = _fv_first(m, 'folderName', 'folder', default='')
-            if fn:
-                folders.add(fn)
+            desc = _fv_first(m, 'description', default='') or ''
             items.append({
                 'uuid': _fv_first(m, 'uuid', 'id', default=''),
-                'name': _fv_first(m, 'name', 'caption', 'description', default='') or '(untitled)',
+                'name': _fv_first(m, 'name', 'caption', default='') or (desc[:40] or '(untitled)'),
                 'mediaType': _fv_first(m, 'mediaType', default=''),
                 'price': _fv_first(m, 'recommendedPrice', default=None),
-                'folder': fn,
+                'description': desc,
                 'thumb': _fv_media_thumb(m),
                 'url': m.get('url') or '',
             })
     except Exception as e:
         err = str(e)[:140]
     return jsonify({'media': [m for m in items if m['uuid']],
-                    'folders': sorted(folders),
                     'selected': _fanvue_ppv(persona), 'error': err})
 
 
 @app.route('/api/fanvue/media-item')
 def api_fanvue_media_item():
-    """Fetch a single media item (GET /media/{uuid}) which includes signed URLs,
-    for previewing — the list endpoint omits them."""
+    """Fetch a single media item for previewing. The owner /media/{uuid} returns
+    metadata only (no signed URL); the consumer endpoint returns signed variant
+    URLs, so try that too. Falls back to the AI description + tags."""
     if not _check_admin():
         return jsonify({'error': 'Unauthorized'}), 401
     persona = (request.args.get('persona') or '').strip()
     uuid = (request.args.get('uuid') or '').strip()
     if not uuid:
         return jsonify({'error': 'Missing uuid'}), 400
+    out = {'uuid': uuid, 'mediaType': '', 'url': '', 'description': '', 'tags': []}
     try:
         m = _fanvue_call(persona, 'GET', f'/media/{uuid}')
         m = m.get('data', m) if isinstance(m, dict) else {}
-        return jsonify({
-            'uuid': uuid,
-            'mediaType': _fv_first(m, 'mediaType', default=''),
-            'url': m.get('url') or _fv_media_thumb(m) or '',
-            'thumb': _fv_media_thumb(m),
-        })
+        out['mediaType'] = _fv_first(m, 'mediaType', default='')
+        out['description'] = _fv_first(m, 'description', 'caption', default='') or ''
+        out['url'] = m.get('url') or _fv_media_thumb(m) or ''
+        t = m.get('tags')
+        if isinstance(t, dict):
+            out['tags'] = t.get('tags') or []
     except Exception as e:
-        return jsonify({'error': str(e)[:140]}), 200
+        out['error'] = str(e)[:140]
+    # No inline URL? Try the consumer endpoint (signed variant URLs).
+    if not out['url']:
+        try:
+            me = _fanvue_me_uuid(persona)
+            c = _fanvue_call(persona, 'GET', f'/media/{uuid}/consumer/{me}')
+            c = c.get('data', c) if isinstance(c, dict) else {}
+            out['url'] = c.get('url') or _fv_media_thumb(c) or ''
+            if not out['mediaType']:
+                out['mediaType'] = _fv_first(c, 'mediaType', default='')
+        except Exception:
+            pass
+    return jsonify(out)
 
 
 @app.route('/api/fanvue/ppv', methods=['GET', 'POST'])
