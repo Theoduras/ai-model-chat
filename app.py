@@ -3721,6 +3721,42 @@ def _fv_list(res):
     return []
 
 
+def _fv_sender(msg):
+    """Extract the sender UUID from a Fanvue message, handling both flat fields
+    and nested sender/author/user/from objects."""
+    if not isinstance(msg, dict):
+        return ''
+    flat = _fv_first(msg, 'senderUuid', 'authorUuid', 'fromUuid', 'userUuid',
+                     'senderId', 'authorId', default='')
+    if flat:
+        return flat
+    for k in ('sender', 'author', 'user', 'from', 'creator', 'owner'):
+        v = msg.get(k)
+        if isinstance(v, dict):
+            uid = _fv_first(v, 'uuid', 'id', default='')
+            if uid:
+                return uid
+        elif isinstance(v, str) and v:
+            return v
+    return ''
+
+
+def _fv_trim(text, max_sentences=2, hard_cap=320):
+    """Trim a reply to at most a couple of sentences at a sentence boundary so
+    it reads short without ever cutting off mid-word."""
+    t = (text or '').strip()
+    if not t:
+        return t
+    parts = re.split(r'(?<=[.!?…])\s+', t)
+    if len(parts) > max_sentences:
+        t = ' '.join(parts[:max_sentences]).strip()
+    if len(t) > hard_cap:
+        cut = t[:hard_cap]
+        sp = cut.rfind(' ')
+        t = (cut[:sp] if sp > 40 else cut).rstrip() + '…'
+    return t
+
+
 def _fanvue_me_uuid(persona):
     creator_uuid = _fanvue_creator(persona).get('uuid')
     if creator_uuid:
@@ -3801,7 +3837,7 @@ def _fanvue_import_history(persona, fan_uuid, handle, me_uuid, cap=200):
         mt = _fv_first(m, 'text', 'content', 'message', 'body', default='')
         if not mt:
             continue
-        sender = _fv_first(m, 'senderUuid', 'authorUuid', 'fromUuid', 'userUuid', default='')
+        sender = _fv_sender(m)
         direction = 'out' if sender == me_uuid else 'in'
         _log_x_message(persona, fan_key, handle, direction, mt)
         n += 1
@@ -3866,18 +3902,21 @@ def _fanvue_auto_round(persona):
 
         # Order oldest→newest; the API may return newest first.
         newest = msgs[-1] if len(msgs) > 1 and _fv_first(msgs[0], 'createdAt', 'sentAt', default='') <= _fv_first(msgs[-1], 'createdAt', 'sentAt', default='') else msgs[0]
-        sender = _fv_first(newest, 'senderUuid', 'authorUuid', 'fromUuid', 'userUuid', default='')
+        sender = _fv_sender(newest)
         text = _fv_first(newest, 'text', 'content', 'message', 'body', default='')
         msg_id = _fv_first(newest, 'uuid', 'id', default='')
-        is_own = newest.get('fromMe') or newest.get('isOwn') or newest.get('isMine') or newest.get('isAuthor') or newest.get('direction') == 'out' or newest.get('type') == 'sent'
+        is_own = bool(newest.get('fromMe') or newest.get('isOwn') or newest.get('isMine') or newest.get('isAuthor') or newest.get('direction') == 'out' or newest.get('type') == 'sent')
         if not text:
             log.append(f'{who}: newest has no text (keys={list(newest.keys())})')
             continue
-        # Fallback self-detection: if the newest text matches something we sent
-        # recently, it's ours regardless of what Fanvue names the sender field.
+        # Durable rule: ONLY reply when the newest message provably came from the
+        # fan. Our own outbound (sender == the creator/me) never equals fan_uuid,
+        # so this can't loop on itself. When the sender can't be resolved, fall
+        # back to explicit "mine" flags and matching our recently-sent text.
         recent_out = {t.strip() for (d, t) in _fanvue_saved_history(persona, fan_key, limit=12) if d == 'out'}
-        if sender == me_uuid or is_own or text.strip() in recent_out:
-            log.append(f'{who}: newest is mine (sender={sender or "?"}, keys={list(newest.keys())}), waiting for their reply')
+        from_fan = (sender == fan_uuid) if sender else (not is_own and text.strip() not in recent_out)
+        if not from_fan:
+            log.append(f'{who}: newest not from fan (sender={sender or "?"}, keys={list(newest.keys())}), waiting')
             continue
         if cursor.get(fan_uuid) == msg_id:
             log.append(f'{who}: already replied to their latest')
@@ -3909,7 +3948,8 @@ def _fanvue_auto_round(persona):
             "text message. No paragraphs, no lists, no walls of text. Ask at most "
             "one quick question. Their latest message: "
             f"\"{text}\"")
-        reply = _persona_text(persona, instruction, history=history, max_tokens=120, temperature=0.9)
+        reply = _persona_text(persona, instruction, history=history, max_tokens=300, temperature=0.9)
+        reply = _fv_trim(reply)
         if not reply:
             continue
 
