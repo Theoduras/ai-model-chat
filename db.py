@@ -16,6 +16,12 @@ from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 # Default: a local SQLite file, so the app runs with zero setup.
 DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///' + os.path.join(
     os.path.dirname(os.path.abspath(__file__)), 'data.db'))
+# Normalize managed-Postgres URL forms to the SQLAlchemy+psycopg2 driver so any
+# pasted connection string works (Neon/Supabase/Heroku style).
+if DATABASE_URL.startswith('postgres://'):
+    DATABASE_URL = 'postgresql+psycopg2://' + DATABASE_URL[len('postgres://'):]
+elif DATABASE_URL.startswith('postgresql://'):
+    DATABASE_URL = 'postgresql+psycopg2://' + DATABASE_URL[len('postgresql://'):]
 
 _connect_args = {'check_same_thread': False} if DATABASE_URL.startswith('sqlite') else {}
 engine = create_engine(DATABASE_URL, connect_args=_connect_args, pool_pre_ping=True)
