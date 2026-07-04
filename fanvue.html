@@ -64,7 +64,22 @@
     </div>
     <div id="ppv-row" style="display:none; margin-top:12px; border-top:1px solid #232327; padding-top:16px;">
       <label style="display:block;margin-bottom:6px;">💎 PPV content <span style="font-weight:400;color:#52525b;">(pick the Fanvue media this model sends locked, once rapport is built)</span></label>
-      <div id="ppv-media-grid" style="display:grid; grid-template-columns:repeat(auto-fill,minmax(100px,1fr)); gap:8px; max-height:230px; overflow-y:auto; padding:4px 0;"></div>
+      <div class="row-inline" style="margin-bottom:10px;">
+        <div class="field" style="margin:0;min-width:150px;">
+          <label style="font-size:.72rem;">Folder</label>
+          <select id="ppv-folder-filter" onchange="loadPpv()"></select>
+        </div>
+        <div class="field" style="margin:0;min-width:120px;">
+          <label style="font-size:.72rem;">Type</label>
+          <select id="ppv-type-filter" onchange="loadPpv()">
+            <option value="">All</option>
+            <option value="image">Images</option>
+            <option value="video">Videos</option>
+            <option value="audio">Audio</option>
+          </select>
+        </div>
+      </div>
+      <div id="ppv-media-grid" style="display:grid; grid-template-columns:repeat(auto-fill,minmax(100px,1fr)); gap:8px; max-height:260px; overflow-y:auto; padding:4px 0;"></div>
       <div class="row-inline" style="margin-top:10px;">
         <div class="field" style="margin:0; min-width:130px;">
           <label style="font-size:.72rem;">Unlock price (min 300)</label>
@@ -170,27 +185,41 @@ async function loadPpv(){
   row.style.display='block';
   const grid=document.getElementById('ppv-media-grid');
   grid.innerHTML='<span class="hint">Loading media…</span>';
+  const folder=document.getElementById('ppv-folder-filter').value||'';
+  const type=document.getElementById('ppv-type-filter').value||'';
   let data={};
-  try{data=await fetch('/api/fanvue/media?persona='+encodeURIComponent(persona())).then(r=>r.json());}catch(e){}
+  try{data=await fetch('/api/fanvue/media?persona='+encodeURIComponent(persona())+'&folder='+encodeURIComponent(folder)+'&type='+encodeURIComponent(type)).then(r=>r.json());}catch(e){}
   const media=data.media||[];
+  window._ppvMedia=media;
   const sel=data.selected||{};
-  ppvSel=new Set(sel.media_uuids||[]);
-  document.getElementById('ppv-price').value=sel.price||'';
-  document.getElementById('ppv-caption').value=sel.caption||'';
+  if(!ppvSel.size)ppvSel=new Set(sel.media_uuids||[]);
+  document.getElementById('ppv-price').value=document.getElementById('ppv-price').value||sel.price||'';
+  document.getElementById('ppv-caption').value=document.getElementById('ppv-caption').value||sel.caption||'';
+  // Populate folder filter once (keep current selection).
+  const ff=document.getElementById('ppv-folder-filter');
+  if((data.folders||[]).length && ff.options.length<=1){
+    ff.innerHTML='<option value="">All folders</option>'+(data.folders||[]).map(f=>'<option value="'+esc(f)+'"'+(f===folder?' selected':'')+'>'+esc(f)+'</option>').join('');
+  } else if(!(data.folders||[]).length && ff.options.length===0){
+    ff.innerHTML='<option value="">All folders</option>';
+  }
   const hint=document.getElementById('ppv-hint');
   if(data.error){grid.innerHTML='';hint.textContent='⚠ Could not load media: '+data.error;hint.style.color='#fbbf24';return;}
-  if(!media.length){grid.innerHTML='';hint.textContent='No media found on this Fanvue account.';hint.style.color='#71717a';return;}
+  if(!media.length){grid.innerHTML='';hint.textContent='No media in this view.';hint.style.color='#71717a';return;}
   grid.innerHTML=media.map(m=>{
     const on=ppvSel.has(m.uuid);
-    const thumb=m.thumb?('background-image:url(\''+esc(m.thumb)+'\');background-size:cover;background-position:center;'):'background:#27272a;';
+    const thumb=m.thumb?('background-image:url(\''+esc(m.thumb)+'\');background-size:cover;background-position:center;'):'background:linear-gradient(135deg,#27272a,#18181b);';
+    const icon=m.mediaType==='video'?'🎬':m.mediaType==='audio'?'🎵':m.mediaType==='image'?'🖼️':'📄';
     return '<div class="ppv-item" data-uuid="'+esc(m.uuid)+'" onclick="togglePpv(this)" '+
       'style="position:relative;aspect-ratio:1;border-radius:8px;cursor:pointer;'+thumb+
       'border:2px solid '+(on?'#4ade80':'transparent')+';overflow:hidden;">'+
-      '<span style="position:absolute;bottom:0;left:0;right:0;font-size:.6rem;padding:2px 4px;background:rgba(0,0,0,.6);color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+
-      (m.mediaType==='video'?'🎬 ':m.mediaType==='audio'?'🎵 ':'')+esc(m.name)+'</span>'+
+      (m.thumb?'':'<span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:1.8rem;opacity:.5;">'+icon+'</span>')+
+      '<span onclick="event.stopPropagation();previewMedia(\''+esc(m.uuid)+'\')" title="Preview" '+
+      'style="position:absolute;top:2px;left:2px;background:rgba(0,0,0,.6);border-radius:6px;padding:1px 5px;font-size:.7rem;cursor:zoom-in;">👁</span>'+
+      '<span style="position:absolute;bottom:0;left:0;right:0;font-size:.6rem;padding:2px 4px;background:rgba(0,0,0,.65);color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+
+      esc(m.name)+'</span>'+
       (on?'<span class="ppv-chk" style="position:absolute;top:2px;right:4px;color:#4ade80;font-weight:700;">✓</span>':'')+'</div>';
   }).join('');
-  hint.textContent=ppvSel.size?(ppvSel.size+' item(s) selected'):'tap media to select what gets sent as PPV';
+  hint.textContent=ppvSel.size?(ppvSel.size+' item(s) selected'):'tap media to select · 👁 to preview';
   hint.style.color='#71717a';
 }
 function togglePpv(el){
@@ -356,6 +385,31 @@ async function draftReply(){
   box.innerHTML='<div class="reply-card"><div class="rep">'+esc(data.reply)+'</div></div>';
 }
 init();
+</script>
+
+<div id="ppv-preview" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:1000;align-items:center;justify-content:center;padding:24px;" onclick="closePreview(event)">
+  <div style="max-width:90vw;max-height:90vh;">
+    <div id="ppv-preview-body" style="display:flex;align-items:center;justify-content:center;"></div>
+    <div id="ppv-preview-name" style="text-align:center;color:#e4e4e7;margin-top:10px;font-size:.85rem;"></div>
+  </div>
+</div>
+<script>
+function previewMedia(uuid){
+  const m=(window._ppvMedia||[]).find(x=>x.uuid===uuid);
+  if(!m)return;
+  const body=document.getElementById('ppv-preview-body');
+  if(m.mediaType==='image'&&m.url){body.innerHTML='<img src="'+esc(m.url)+'" style="max-width:90vw;max-height:80vh;border-radius:10px;">';}
+  else if(m.mediaType==='video'&&m.url){body.innerHTML='<video src="'+esc(m.url)+'" controls autoplay style="max-width:90vw;max-height:80vh;border-radius:10px;"></video>';}
+  else if(m.mediaType==='audio'&&m.url){body.innerHTML='<div style="padding:40px;text-align:center;"><div style="font-size:3rem;">🎵</div><audio src="'+esc(m.url)+'" controls autoplay style="margin-top:16px;"></audio></div>';}
+  else{body.innerHTML='<div style="padding:40px;color:#a1a1aa;">No preview available'+(m.url?'':' (media still processing?)')+'</div>';}
+  document.getElementById('ppv-preview-name').textContent=m.name;
+  document.getElementById('ppv-preview').style.display='flex';
+}
+function closePreview(e){
+  if(e&&e.target&&e.target.closest('#ppv-preview-body'))return;
+  document.getElementById('ppv-preview-body').innerHTML='';
+  document.getElementById('ppv-preview').style.display='none';
+}
 </script>
 </body>
 </html>

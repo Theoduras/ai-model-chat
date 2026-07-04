@@ -3748,30 +3748,40 @@ def _fv_media_thumb(m):
 @app.route('/api/fanvue/media')
 def api_fanvue_media():
     """List the connected creator's Fanvue media so a persona can pick which
-    items to send as PPV. Optional ?type=image|video filter."""
+    items to send as PPV. Optional ?type=image|video|audio and ?folder= filters.
+    Also returns the distinct folder names found so the UI can group by folder."""
     if not _check_admin():
         return jsonify({'error': 'Unauthorized'}), 401
     persona = (request.args.get('persona') or '').strip()
     mtype = (request.args.get('type') or '').strip()
-    q = 'size=50'
+    folder = (request.args.get('folder') or '').strip()
+    q = 'size=50&page=1'
     if mtype:
         q += f'&mediaType={mtype}'
-    items, err = [], ''
+    if folder:
+        q += f'&folderName={urllib.parse.quote(folder)}'
+    items, err, folders = [], '', set()
     try:
         rows = _fv_list(_fanvue_call(persona, 'GET', f'/media?{q}'))
         for m in rows:
             if _fv_first(m, 'status', default='ready') not in ('ready', ''):
                 continue
+            fn = _fv_first(m, 'folderName', 'folder', default='')
+            if fn:
+                folders.add(fn)
             items.append({
                 'uuid': _fv_first(m, 'uuid', 'id', default=''),
                 'name': _fv_first(m, 'name', 'caption', 'description', default='') or '(untitled)',
                 'mediaType': _fv_first(m, 'mediaType', default=''),
                 'price': _fv_first(m, 'recommendedPrice', default=None),
+                'folder': fn,
                 'thumb': _fv_media_thumb(m),
+                'url': m.get('url') or '',
             })
     except Exception as e:
         err = str(e)[:140]
     return jsonify({'media': [m for m in items if m['uuid']],
+                    'folders': sorted(folders),
                     'selected': _fanvue_ppv(persona), 'error': err})
 
 
