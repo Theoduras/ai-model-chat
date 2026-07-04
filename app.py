@@ -3507,12 +3507,42 @@ def api_fanvue_dbinfo():
     external Postgres survives redeploys; the SQLite fallback does not."""
     if not _check_admin():
         return jsonify({'error': 'Unauthorized'}), 401
-    url = os.environ.get('DATABASE_URL', '')
-    backend = 'postgres' if url.startswith(('postgres', 'postgresql')) else ('external' if url else 'sqlite-ephemeral')
+    # Report the URL the app is ACTUALLY using (db.py may build it from the
+    # Cloud SQL env vars), not just a raw DATABASE_URL env read.
+    try:
+        from db import DATABASE_URL as eff
+    except Exception:
+        eff = os.environ.get('DATABASE_URL', '')
+    is_sqlite = eff.startswith('sqlite')
+    backend = 'sqlite-ephemeral' if is_sqlite else ('postgres' if 'postgres' in eff else 'external')
+    # Live connectivity check.
+    db_ok, db_err = False, ''
+    try:
+        from db import SessionLocal
+        from sqlalchemy import text as _text
+        s = SessionLocal()
+        try:
+            s.execute(_text('SELECT 1'))
+            db_ok = True
+        finally:
+            s.close()
+    except Exception as e:
+        db_err = str(e)[:200]
     persona = (request.args.get('persona') or 'lilly').strip()
+    # Mask credentials in the URL before returning it.
+    masked = eff
+    if '@' in eff and '//' in eff:
+        head, tail = eff.split('//', 1)
+        if '@' in tail:
+            masked = head + '//***@' + tail.split('@', 1)[1]
     return jsonify({
         'backend': backend,
-        'persists_across_redeploys': backend != 'sqlite-ephemeral',
+        'persists_across_redeploys': not is_sqlite,
+        'effective_url': masked,
+        'db_connect_ok': db_ok,
+        'db_error': db_err,
+        'saw_cloud_sql_env': bool(os.environ.get('CLOUD_SQL_CONNECTION_NAME') or os.environ.get('INSTANCE_CONNECTION_NAME')),
+        'saw_database_url_env': bool(os.environ.get('DATABASE_URL')),
         'ppv_setting_present': bool(_get_setting(f'fanvue_ppv_{persona}')),
         'ppv_raw': (_get_setting(f'fanvue_ppv_{persona}') or '')[:500],
     })
