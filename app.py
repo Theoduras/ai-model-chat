@@ -3510,7 +3510,6 @@ def api_fanvue_vault_debug():
         return jsonify({'error': 'Unauthorized'}), 401
     persona = (request.args.get('persona') or '').strip()
     scope = _fanvue_scope(persona)
-    at = _fanvue_tokens(persona).get('access_token', '')
     paths = [
         '/vault-folders', f'{scope}/vault-folders',
         '/media', f'{scope}/media',
@@ -3526,7 +3525,7 @@ def api_fanvue_vault_debug():
             continue
         entry = {'path': p}
         try:
-            r = _fanvue_api('GET', p + ('&limit=3' if '?' in p else '?limit=3'), at)
+            r = _fanvue_call(persona, 'GET', p + ('&limit=3' if '?' in p else '?limit=3'))
             body = json.dumps(r)[:400] if not isinstance(r, str) else r[:400]
             entry.update(status=200, body=body)
         except url_error.HTTPError as e:
