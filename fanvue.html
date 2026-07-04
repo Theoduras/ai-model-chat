@@ -15,6 +15,8 @@
     .conn-pill { font-size: 0.75rem; padding: 3px 10px; border-radius: 9999px; background: #27272a; color: #a1a1aa; }
     .conn-pill.ok { background: #14532d; color: #4ade80; }
     .conn-pill.err { background: #4c0519; color: #fb7185; }
+    .conn-pill.running { background: #14532d; color: #4ade80; animation: pulse-glow 2s ease-in-out infinite; }
+    @keyframes pulse-glow { 0%,100%{ opacity:1; } 50%{ opacity:.5; } }
     .row-inline { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
     .row-inline .field { flex: 1; min-width: 160px; }
     .soon { font-size: 0.72rem; padding: 2px 8px; border-radius: 9999px; background: #3f3f46; color: #d4d4d8; margin-left: 8px; }
@@ -100,8 +102,7 @@
       <input type="text" id="fv-only-handles" placeholder="e.g. girlforfun">
     </div>
     <div style="display:flex; gap:8px; align-items:center; margin-top:14px;">
-      <button class="btn-ai" onclick="saveAuto()">Save</button>
-      <button class="btn-ai" style="background:#3f3f46;" onclick="runAutoOnce()">Run once now</button>
+      <button class="btn-ai" onclick="saveAuto()">Save &amp; Run</button>
       <span class="conn-pill" id="fv-auto-state">off</span>
     </div>
     <div class="result-box" id="fv-auto-result"></div>
@@ -142,8 +143,8 @@ async function loadAuto(){
   document.getElementById('fv-exclude-creators').checked=a.exclude_creators!==false;
   document.getElementById('fv-only-handles').value=a.only_handles||'';
   const st=document.getElementById('fv-auto-state');
-  st.textContent=a.enabled?'on · server-side':'off';
-  st.className='conn-pill'+(a.enabled?' ok':'');
+  if(a.enabled){st.textContent='● Running';st.className='conn-pill running';}
+  else{st.textContent='off';st.className='conn-pill';}
 }
 async function saveAuto(){
   const box=document.getElementById('fv-auto-result');
@@ -153,8 +154,18 @@ async function saveAuto(){
     exclude_creators:document.getElementById('fv-exclude-creators').checked,
     only_handles:document.getElementById('fv-only-handles').value});
   if(!data.ok){err(box,data.error||'Failed');return;}
-  box.innerHTML='<span class="hint" style="color:#4ade80;">✓ Saved — '+(data.enabled?'auto-reply is ON (runs server-side)':'auto-reply is off')+'</span>';
   loadAuto();
+  if(data.enabled){
+    busy(box,'Running first round…');
+    const run=await post('/api/fanvue/auto-run',{persona:persona()});
+    if(!run.ok){err(box,run.error);return;}
+    const a=run.actions||{};
+    let html='<span class="hint" style="color:#4ade80;">✓ Saved &amp; running — '+(a.replies||0)+' replies</span>';
+    (run.log||[]).forEach(l=>{html+='<div class="reply-card"><div class="rep">'+esc(l)+'</div></div>';});
+    box.innerHTML=html;
+  } else {
+    box.innerHTML='<span class="hint">Auto-reply is off.</span>';
+  }
 }
 async function runAutoOnce(){
   const box=document.getElementById('fv-auto-result');
@@ -174,8 +185,10 @@ function updateConn(){
   document.getElementById('disconnect-btn').style.display=connState.connected?'inline-flex':'none';
 }
 function prefill(){
-  const id=document.getElementById('fv-client-id'), rd=document.getElementById('fv-redirect');
-  if(!id.value&&appCfg.client_id)id.value=appCfg.client_id;
+  const id=document.getElementById('fv-client-id'), sec=document.getElementById('fv-client-secret'), rd=document.getElementById('fv-redirect');
+  if(!id.value&&appCfg.client_id){id.value=appCfg.client_id;id.type='password';}
+  if(!sec.value&&appCfg.has_secret){sec.value='••••••••••••••••';sec.dataset.masked='1';sec.onfocus=function(){if(this.dataset.masked){this.value='';delete this.dataset.masked;}};}
+  if(!id.value)return;id.onfocus=function(){if(this.type==='password'){this.value='';this.type='text';}};
   if(!rd.value)rd.value=appCfg.redirect_uri||(location.origin+'/api/fanvue/oauth-redirect');
 }
 function toggleConnect(){
@@ -185,10 +198,11 @@ function toggleConnect(){
 }
 async function startConnect(){
   const box=document.getElementById('config-status');
-  const client_id=document.getElementById('fv-client-id').value.trim();
-  const client_secret=document.getElementById('fv-client-secret').value.trim();
+  const idEl=document.getElementById('fv-client-id'), secEl=document.getElementById('fv-client-secret');
+  const client_id=(idEl.type==='password'&&appCfg.client_id)?appCfg.client_id:idEl.value.trim();
+  const client_secret=secEl.dataset.masked==='1'?'':secEl.value.trim();
   const redirect_uri=document.getElementById('fv-redirect').value.trim();
-  if(!client_id||!client_secret||!redirect_uri){err(box,'Enter Client ID, Secret and Redirect URI.');return;}
+  if(!client_id||(!client_secret&&!appCfg.has_secret)||!redirect_uri){err(box,'Enter Client ID, Secret and Redirect URI.');return;}
   busy(box,'Opening Fanvue authorization…');
   const data=await post('/api/fanvue/auth-url',{persona:persona(),client_id,client_secret,redirect_uri});
   if(!data.ok){err(box,data.error);return;}
