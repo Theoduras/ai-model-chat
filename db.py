@@ -14,14 +14,33 @@ from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
 # DATABASE_URL example (Postgres): postgresql+psycopg2://user:pass@host/dbname
 # Default: a local SQLite file, so the app runs with zero setup.
-DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///' + os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), 'data.db'))
-# Normalize managed-Postgres URL forms to the SQLAlchemy+psycopg2 driver so any
-# pasted connection string works (Neon/Supabase/Heroku style).
-if DATABASE_URL.startswith('postgres://'):
-    DATABASE_URL = 'postgresql+psycopg2://' + DATABASE_URL[len('postgres://'):]
-elif DATABASE_URL.startswith('postgresql://'):
-    DATABASE_URL = 'postgresql+psycopg2://' + DATABASE_URL[len('postgresql://'):]
+def _build_database_url():
+    import urllib.parse as _up
+    explicit = os.getenv('DATABASE_URL')
+    if explicit:
+        url = explicit
+    else:
+        # Cloud SQL (Postgres) via the Unix socket Cloud Run mounts at
+        # /cloudsql/<INSTANCE_CONNECTION_NAME> — configured with simple env vars.
+        inst = os.getenv('CLOUD_SQL_CONNECTION_NAME') or os.getenv('INSTANCE_CONNECTION_NAME')
+        user = os.getenv('DB_USER')
+        if inst and user:
+            pw = _up.quote_plus(os.getenv('DB_PASS', ''))
+            name = os.getenv('DB_NAME', 'postgres')
+            return (f'postgresql+psycopg2://{_up.quote_plus(user)}:{pw}@/'
+                    f'{name}?host=/cloudsql/{inst}')
+        # Fallback: local SQLite (ephemeral on Cloud Run — not for production).
+        return 'sqlite:///' + os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), 'data.db')
+    # Normalize managed-Postgres URL forms to the SQLAlchemy+psycopg2 driver.
+    if url.startswith('postgres://'):
+        url = 'postgresql+psycopg2://' + url[len('postgres://'):]
+    elif url.startswith('postgresql://'):
+        url = 'postgresql+psycopg2://' + url[len('postgresql://'):]
+    return url
+
+
+DATABASE_URL = _build_database_url()
 
 _connect_args = {'check_same_thread': False} if DATABASE_URL.startswith('sqlite') else {}
 engine = create_engine(DATABASE_URL, connect_args=_connect_args, pool_pre_ping=True)
