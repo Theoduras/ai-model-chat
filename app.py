@@ -3511,26 +3511,41 @@ def api_fanvue_vault_debug():
     persona = (request.args.get('persona') or '').strip()
     scope = _fanvue_scope(persona)
     paths = [
-        '/vault-folders', f'{scope}/vault-folders',
-        '/media', f'{scope}/media',
-        '/media/folders', f'{scope}/media/folders',
-        '/vault', f'{scope}/vault',
-        '/vaults', '/library', '/collections',
-        '/posts', f'{scope}/posts',
+        '/vault-folders?size=5',
+        '/media?size=1',
+        '/agencies/creators?size=5',
         '/users/me',
     ]
     results = []
+    first_uuid = ''
     for p in paths:
-        if not p:
-            continue
         entry = {'path': p}
         try:
-            r = _fanvue_call(persona, 'GET', p + ('&limit=3' if '?' in p else '?limit=3'))
-            body = json.dumps(r)[:400] if not isinstance(r, str) else r[:400]
-            entry.update(status=200, body=body)
+            r = _fanvue_call(persona, 'GET', p)
+            body = json.dumps(r) if not isinstance(r, str) else r
+            entry.update(status=200, body=body[:900])
+            if p.startswith('/media?'):
+                lst = _fv_list(r)
+                if lst:
+                    first_uuid = _fv_first(lst[0], 'uuid', 'id', default='')
         except url_error.HTTPError as e:
             try:
-                rb = e.read()[:300].decode(errors='ignore')
+                rb = e.read()[:400].decode(errors='ignore')
+            except Exception:
+                rb = ''
+            entry.update(status=e.code, body=rb)
+        except Exception as e:
+            entry.update(status='ERR', body=str(e)[:200])
+        results.append(entry)
+    # Full single-media item to see whether it carries url/variants for preview.
+    if first_uuid:
+        entry = {'path': f'/media/{first_uuid}'}
+        try:
+            r = _fanvue_call(persona, 'GET', f'/media/{first_uuid}')
+            entry.update(status=200, body=json.dumps(r)[:1500])
+        except url_error.HTTPError as e:
+            try:
+                rb = e.read()[:400].decode(errors='ignore')
             except Exception:
                 rb = ''
             entry.update(status=e.code, body=rb)
