@@ -3461,7 +3461,7 @@ def _fanvue_api(method, path, access_token, body=None):
             resp_body = e.read().decode()[:500]
         except Exception:
             pass
-        chat_log.warning('Fanvue API %s %s → %s: %s', method, url, e.code, resp_body)
+        logging.warning('Fanvue API %s %s → %s: %s', method, url, e.code, resp_body)
         raise
 
 
