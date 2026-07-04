@@ -53,6 +53,15 @@
         <button class="btn-ai" id="disconnect-btn" style="background:#3f3f46; display:none;" onclick="disconnectFanvue()">Disconnect</button>
       </div>
     </div>
+    <div class="field full" id="creator-row" style="display:none; margin-top:12px;">
+      <label>Acting as <span style="font-weight:400;color:#52525b;">(this login manages more than one profile — pick which one replies)</span></label>
+      <div class="row-inline">
+        <div class="field" style="margin:0;">
+          <select id="creator-select" onchange="selectCreator()"></select>
+        </div>
+        <span class="hint" id="creator-hint"></span>
+      </div>
+    </div>
     <div id="connect-panel" style="display:none; margin-top:4px; border-top:1px solid #232327; padding-top:16px;">
       <div class="field full">
         <label>Fanvue app Client ID</label>
@@ -135,7 +144,29 @@ async function loadConfig(){
   document.getElementById('connect-step2').style.display='none';
   document.getElementById('config-status').innerHTML='';
   updateConn();
+  loadCreators();
   loadAuto();
+}
+async function loadCreators(){
+  const row=document.getElementById('creator-row');
+  if(!connState.connected){row.style.display='none';return;}
+  let data={};
+  try{data=await fetch('/api/fanvue/creators?persona='+encodeURIComponent(persona())).then(r=>r.json());}catch(e){}
+  const list=data.creators||[];
+  if(list.length<2){row.style.display='none';return;}
+  const sel=(data.selected||{}).uuid||'';
+  document.getElementById('creator-select').innerHTML=
+    '<option value="">— pick a profile —</option>'+
+    list.map(c=>'<option value="'+esc(c.uuid)+'"'+(c.uuid===sel?' selected':'')+'>@'+esc(c.handle||c.uuid)+'</option>').join('');
+  document.getElementById('creator-hint').textContent=sel?'':'⚠ select the profile that should reply';
+  document.getElementById('creator-hint').style.color=sel?'#71717a':'#fbbf24';
+  row.style.display='block';
+}
+async function selectCreator(){
+  const s=document.getElementById('creator-select');
+  const uuid=s.value, handle=(s.options[s.selectedIndex]||{}).text||'';
+  await post('/api/fanvue/creator',{persona:persona(),uuid,handle:handle.replace(/^@/,'')});
+  loadCreators();
 }
 async function loadAuto(){
   const a=await fetch('/api/fanvue/auto?persona='+encodeURIComponent(persona())).then(r=>r.json()).catch(()=>({}));

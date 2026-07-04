@@ -3415,6 +3415,22 @@ def _fanvue_save_tokens(persona, tokens):
     _set_setting(f'fanvue_tokens_{persona}', json.dumps(tokens))
 
 
+def _fanvue_creator(persona):
+    """The selected creator profile for logins that manage several. Returns
+    {'uuid':..., 'handle':...} or {} when acting as the primary account."""
+    try:
+        return json.loads(_get_setting(f'fanvue_creator_{persona}') or '{}')
+    except Exception:
+        return {}
+
+
+def _fanvue_scope(persona):
+    """URL prefix that scopes chat/message calls to the selected creator, or ''
+    when the login has a single profile (acts as the primary account)."""
+    uuid = _fanvue_creator(persona).get('uuid')
+    return f'/creators/{uuid}' if uuid else ''
+
+
 def _fanvue_token_post(params):
     """POST to the Fanvue token endpoint using HTTP Basic client authentication
     (client_secret_basic), which the OAuth client requires."""
@@ -3593,7 +3609,8 @@ def api_fanvue_status():
         return jsonify({'error': 'Unauthorized'}), 401
     persona = (request.args.get('persona') or '').strip()
     t = _fanvue_tokens(persona)
-    return jsonify({'connected': bool(t.get('access_token')), 'username': t.get('username', '')})
+    return jsonify({'connected': bool(t.get('access_token')), 'username': t.get('username', ''),
+                    'creator': _fanvue_creator(persona)})
 
 
 @app.route('/api/fanvue/disconnect', methods=['POST'])
@@ -3604,7 +3621,55 @@ def api_fanvue_disconnect():
     if persona:
         _set_setting(f'fanvue_tokens_{persona}', '{}')
         _set_setting(f'fanvue_cursor_{persona}', '{}')
+        _set_setting(f'fanvue_creator_{persona}', '{}')
     return jsonify({'ok': True})
+
+
+@app.route('/api/fanvue/creators')
+def api_fanvue_creators():
+    """List creator profiles this login can act as. For a single-profile login
+    the agency endpoint 404s, so we fall back to the primary /users/me."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    persona = (request.args.get('persona') or '').strip()
+    creators = []
+    try:
+        rows = _fv_list(_fanvue_call(persona, 'GET', '/agency/creators?limit=50'))
+        for r in rows:
+            uid = _fv_first(r, 'uuid', 'id', 'creatorUuid', default='')
+            handle = _fv_first(r, 'handle', 'username', 'displayName', default='')
+            if uid:
+                creators.append({'uuid': uid, 'handle': handle})
+    except Exception:
+        pass
+    if not creators:
+        try:
+            me = _fanvue_call(persona, 'GET', '/users/me')
+            d = me.get('data', me) if isinstance(me, dict) else {}
+            uid = _fv_first(d, 'uuid', 'id', default='')
+            handle = _fv_first(d, 'handle', 'username', default='')
+            if uid:
+                creators.append({'uuid': uid, 'handle': handle})
+        except Exception:
+            pass
+    return jsonify({'creators': creators, 'selected': _fanvue_creator(persona)})
+
+
+@app.route('/api/fanvue/creator', methods=['POST'])
+def api_fanvue_set_creator():
+    """Select which creator profile the persona acts as; resets the poll cursor
+    so the new account starts clean."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    d = request.json or {}
+    persona = (d.get('persona') or '').strip()
+    if not persona:
+        return jsonify({'ok': False, 'error': 'Missing persona'}), 400
+    uuid = (d.get('uuid') or '').strip()
+    handle = (d.get('handle') or '').strip()
+    _set_setting(f'fanvue_creator_{persona}', json.dumps({'uuid': uuid, 'handle': handle}) if uuid else '{}')
+    _set_setting(f'fanvue_cursor_{persona}', '{}')
+    return jsonify({'ok': True, 'selected': _fanvue_creator(persona)})
 
 
 @app.route('/api/fanvue/draft', methods=['POST'])
@@ -3656,6 +3721,9 @@ def _fv_list(res):
 
 
 def _fanvue_me_uuid(persona):
+    creator_uuid = _fanvue_creator(persona).get('uuid')
+    if creator_uuid:
+        return creator_uuid
     t = _fanvue_tokens(persona)
     if t.get('uuid'):
         return t['uuid']
@@ -3722,7 +3790,7 @@ def _fanvue_import_history(persona, fan_uuid, handle, me_uuid, cap=200):
     """Pull the full chat history from Fanvue and store it permanently, so the
     persona remembers everything already discussed. Returns count imported."""
     try:
-        msgs = _fv_list(_fanvue_call(persona, 'GET', f'/chats/{fan_uuid}/messages?limit={cap}'))
+        msgs = _fv_list(_fanvue_call(persona, 'GET', f'{_fanvue_scope(persona)}/chats/{fan_uuid}/messages?limit={cap}'))
     except Exception:
         return 0
     msgs = sorted(msgs, key=lambda m: _fv_first(m, 'createdAt', 'sentAt', 'timestamp', default=''))
@@ -3757,8 +3825,10 @@ def _fanvue_auto_round(persona):
     except Exception:
         cursor = {}
 
-    chats = _fv_list(_fanvue_call(persona, 'GET', '/chats?limit=30'))
-    log.append(f'{len(chats)} chats found' + (f'; only={only}' if only else ''))
+    scope = _fanvue_scope(persona)
+    chats = _fv_list(_fanvue_call(persona, 'GET', f'{scope}/chats?limit=30'))
+    cr = _fanvue_creator(persona).get('handle')
+    log.append(f'{len(chats)} chats found' + (f' (acting as @{cr})' if cr else '') + (f'; only={only}' if only else ''))
     for chat in chats:
         if actions['replies'] >= reply_limit:
             break
@@ -3776,7 +3846,7 @@ def _fanvue_auto_round(persona):
             continue
         fan_key = 'fv:' + fan_uuid
         try:
-            msgs = _fv_list(_fanvue_call(persona, 'GET', f'/chats/{fan_uuid}/messages?limit=20'))
+            msgs = _fv_list(_fanvue_call(persona, 'GET', f'{scope}/chats/{fan_uuid}/messages?limit=20'))
         except Exception as e:
             log.append(f'read {who} failed: {str(e)[:50]}')
             continue
@@ -3844,7 +3914,7 @@ def _fanvue_auto_round(persona):
 
         msg_body = reply.strip()[:2000]
         try:
-            _fanvue_call(persona, 'POST', f'/chats/{fan_uuid}/message', body={'text': msg_body})
+            _fanvue_call(persona, 'POST', f'{scope}/chats/{fan_uuid}/message', body={'text': msg_body})
         except Exception as e:
             log.append(f'send {handle or fan_uuid} failed: {str(e)[:60]}')
             continue
