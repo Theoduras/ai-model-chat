@@ -3792,10 +3792,15 @@ def _fanvue_auto_round(persona):
         text = _fv_first(newest, 'text', 'content', 'message', 'body', default='')
         msg_id = _fv_first(newest, 'uuid', 'id', default='')
         is_own = newest.get('fromMe') or newest.get('isOwn') or newest.get('isMine') or newest.get('isAuthor') or newest.get('direction') == 'out' or newest.get('type') == 'sent'
-        if not text or sender == me_uuid or is_own:
+        who = handle or fan_uuid[:8]
+        if not text:
+            log.append(f'{who}: newest has no text (keys={list(newest.keys())})')
             continue
-        logging.info('FV newest msg keys=%s sender=%s me=%s fromMe=%s', list(newest.keys()), sender, me_uuid, is_own)
+        if sender == me_uuid or is_own:
+            log.append(f'{who}: newest is mine, waiting for their reply')
+            continue
         if cursor.get(fan_uuid) == msg_id:
+            log.append(f'{who}: already replied to their latest')
             continue  # already handled this latest inbound message
 
         # Persist the new inbound (import already stored it on first contact).
