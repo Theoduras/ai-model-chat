@@ -3634,6 +3634,7 @@ def api_fanvue_creators():
         return jsonify({'error': 'Unauthorized'}), 401
     persona = (request.args.get('persona') or '').strip()
     creators = []
+    agency_err = ''
     try:
         rows = _fv_list(_fanvue_call(persona, 'GET', '/agency/creators?limit=50'))
         for r in rows:
@@ -3641,19 +3642,26 @@ def api_fanvue_creators():
             handle = _fv_first(r, 'handle', 'username', 'displayName', default='')
             if uid:
                 creators.append({'uuid': uid, 'handle': handle})
+    except Exception as e:
+        agency_err = str(e)[:120]
+    seen = {c['uuid'] for c in creators}
+    try:
+        me = _fanvue_call(persona, 'GET', '/users/me')
+        d = me.get('data', me) if isinstance(me, dict) else {}
+        uid = _fv_first(d, 'uuid', 'id', default='')
+        handle = _fv_first(d, 'handle', 'username', default='')
+        if uid and uid not in seen:
+            creators.append({'uuid': uid, 'handle': handle})
     except Exception:
         pass
-    if not creators:
-        try:
-            me = _fanvue_call(persona, 'GET', '/users/me')
-            d = me.get('data', me) if isinstance(me, dict) else {}
-            uid = _fv_first(d, 'uuid', 'id', default='')
-            handle = _fv_first(d, 'handle', 'username', default='')
-            if uid:
-                creators.append({'uuid': uid, 'handle': handle})
-        except Exception:
-            pass
-    return jsonify({'creators': creators, 'selected': _fanvue_creator(persona)})
+    # Keep a previously-chosen (manually entered) profile in the list even if the
+    # API can't enumerate it, so the picker still shows it as selected.
+    sel = _fanvue_creator(persona)
+    if sel.get('uuid') and sel['uuid'] not in {c['uuid'] for c in creators}:
+        creators.append({'uuid': sel['uuid'], 'handle': sel.get('handle', '')})
+    return jsonify({'creators': creators, 'selected': sel,
+                    'agency_error': agency_err,
+                    'allow_manual': True})
 
 
 @app.route('/api/fanvue/creator', methods=['POST'])

@@ -198,20 +198,27 @@ async function loadCreators(){
   let data={};
   try{data=await fetch('/api/fanvue/creators?persona='+encodeURIComponent(persona())).then(r=>r.json());}catch(e){}
   const list=data.creators||[];
-  if(list.length<2){row.style.display='none';return;}
   const sel=(data.selected||{}).uuid||'';
   document.getElementById('creator-select').innerHTML=
-    '<option value="">— pick a profile —</option>'+
-    list.map(c=>'<option value="'+esc(c.uuid)+'"'+(c.uuid===sel?' selected':'')+'>@'+esc(c.handle||c.uuid)+'</option>').join('');
-  document.getElementById('creator-hint').textContent=sel?'':'⚠ select the profile that should reply';
-  document.getElementById('creator-hint').style.color=sel?'#71717a':'#fbbf24';
+    '<option value="">— primary account —</option>'+
+    list.map(c=>'<option value="'+esc(c.uuid)+'"'+(c.uuid===sel?' selected':'')+'>@'+esc(c.handle||c.uuid)+'</option>').join('')+
+    '<option value="__manual__">＋ enter another profile by UUID…</option>';
+  const hint=document.getElementById('creator-hint');
+  if(list.length<2 && data.agency_error){hint.textContent='only this profile is listed ('+data.agency_error+') — use “enter by UUID” for another';hint.style.color='#fbbf24';}
+  else{hint.textContent=sel?'':'pick the profile that should reply';hint.style.color='#71717a';}
   row.style.display='block';
 }
 async function selectCreator(){
   const s=document.getElementById('creator-select');
-  const uuid=s.value, handle=(s.options[s.selectedIndex]||{}).text||'';
-  await post('/api/fanvue/creator',{persona:persona(),uuid,handle:handle.replace(/^@/,'')});
+  let uuid=s.value, handle=(s.options[s.selectedIndex]||{}).text||'';
+  if(uuid==='__manual__'){
+    uuid=(prompt('Paste the Fanvue creator UUID this model should act as:')||'').trim();
+    if(!uuid){loadCreators();return;}
+    handle=(prompt('Handle for this profile (optional, e.g. lillyforfun_):')||'').trim();
+  }
+  await post('/api/fanvue/creator',{persona:persona(),uuid,handle:handle.replace(/^@/,'').replace(/^＋.*/,'')});
   loadCreators();
+  loadPpv();
 }
 async function loadAuto(){
   const a=await fetch('/api/fanvue/auto?persona='+encodeURIComponent(persona())).then(r=>r.json()).catch(()=>({}));
