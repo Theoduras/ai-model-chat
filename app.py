@@ -154,7 +154,10 @@ def db_list_personas():
         from db import SessionLocal, list_saved_personas
     except Exception:
         return []
-    s = SessionLocal()
+    try:
+        s = SessionLocal()
+    except Exception:
+        return []
     try:
         out = []
         for sp in list_saved_personas(s):
@@ -164,8 +167,15 @@ def db_list_personas():
                 config = {}
             out.append({'slug': sp.slug, 'name': sp.name, 'config': config})
         return out
+    except Exception:
+        # DB unreachable (e.g. misconfigured Cloud SQL) — never let saved-copy
+        # loading hide the premade/file personas.
+        return []
     finally:
-        s.close()
+        try:
+            s.close()
+        except Exception:
+            pass
 
 
 def db_save_persona(slug, name, config, prompt):
