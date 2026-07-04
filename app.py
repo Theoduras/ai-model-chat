@@ -3698,16 +3698,32 @@ def api_fanvue_vault_folders():
     scope = _fanvue_scope(persona)
     folders = []
     err = ''
-    try:
-        rows = _fv_list(_fanvue_call(persona, 'GET', f'{scope}/vault-folders?limit=100'))
+    used = ''
+    candidates = [
+        f'{scope}/vault-folders?limit=100',
+        '/vault-folders?limit=100',
+        f'{scope}/media/folders?limit=100',
+        '/media/folders?limit=100',
+        f'{scope}/vault?limit=100',
+    ]
+    for path in candidates:
+        if not path:
+            continue
+        try:
+            rows = _fv_list(_fanvue_call(persona, 'GET', path))
+        except Exception as e:
+            err = str(e)[:120]
+            continue
         for r in rows:
             name = _fv_first(r, 'name', 'folderName', 'title', default='')
             if name:
                 folders.append({'name': name,
                                 'count': _fv_first(r, 'mediaCount', 'count', 'total', default=None)})
-    except Exception as e:
-        err = str(e)[:120]
-    return jsonify({'folders': folders, 'selected': _fanvue_ppv(persona), 'error': err})
+        used = path
+        err = ''
+        break
+    return jsonify({'folders': folders, 'selected': _fanvue_ppv(persona),
+                    'error': err, 'endpoint': used})
 
 
 @app.route('/api/fanvue/ppv', methods=['GET', 'POST'])
