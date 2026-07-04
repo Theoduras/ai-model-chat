@@ -16,17 +16,18 @@ from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 # Default: a local SQLite file, so the app runs with zero setup.
 def _build_database_url():
     import urllib.parse as _up
-    explicit = os.getenv('DATABASE_URL')
+    explicit = (os.getenv('DATABASE_URL') or '').strip()
     if explicit:
         url = explicit
     else:
         # Cloud SQL (Postgres) via the Unix socket Cloud Run mounts at
         # /cloudsql/<INSTANCE_CONNECTION_NAME> — configured with simple env vars.
-        inst = os.getenv('CLOUD_SQL_CONNECTION_NAME') or os.getenv('INSTANCE_CONNECTION_NAME')
-        user = os.getenv('DB_USER')
+        # Strip whitespace: pasted values often carry a stray tab/newline.
+        inst = (os.getenv('CLOUD_SQL_CONNECTION_NAME') or os.getenv('INSTANCE_CONNECTION_NAME') or '').strip()
+        user = (os.getenv('DB_USER') or '').strip()
         if inst and user:
-            pw = _up.quote_plus(os.getenv('DB_PASS', ''))
-            name = os.getenv('DB_NAME', 'postgres')
+            pw = _up.quote_plus((os.getenv('DB_PASS') or '').strip())
+            name = (os.getenv('DB_NAME') or 'postgres').strip()
             return (f'postgresql+psycopg2://{_up.quote_plus(user)}:{pw}@/'
                     f'{name}?host=/cloudsql/{inst}')
         # Fallback: local SQLite (ephemeral on Cloud Run — not for production).
