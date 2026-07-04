@@ -3732,47 +3732,53 @@ def _fanvue_ppv(persona):
         return {}
 
 
-@app.route('/api/fanvue/vault-folders')
-def api_fanvue_vault_folders():
-    """List the connected creator's Fanvue vault folders so a persona can pick
-    which one holds its PPV content."""
+def _fv_media_thumb(m):
+    """Best thumbnail URL for a media item from its variants, else its own url."""
+    for v in (m.get('variants') or []):
+        if isinstance(v, dict) and _fv_first(v, 'variantType', default='').lower() in ('thumbnail', 'preview', 'small'):
+            u = v.get('url')
+            if u:
+                return u
+    vs = m.get('variants') or []
+    if vs and isinstance(vs[0], dict) and vs[0].get('url'):
+        return vs[0]['url']
+    return m.get('url') or ''
+
+
+@app.route('/api/fanvue/media')
+def api_fanvue_media():
+    """List the connected creator's Fanvue media so a persona can pick which
+    items to send as PPV. Optional ?type=image|video filter."""
     if not _check_admin():
         return jsonify({'error': 'Unauthorized'}), 401
     persona = (request.args.get('persona') or '').strip()
-    scope = _fanvue_scope(persona)
-    folders = []
-    err = ''
-    used = ''
-    candidates = [
-        f'{scope}/media/folders?limit=100',
-        '/media/folders?limit=100',
-        f'{scope}/vault-folders?limit=100',
-        '/vault-folders?limit=100',
-    ]
-    for path in candidates:
-        if not path:
-            continue
-        try:
-            rows = _fv_list(_fanvue_call(persona, 'GET', path))
-        except Exception as e:
-            err = str(e)[:120]
-            continue
-        for r in rows:
-            name = _fv_first(r, 'name', 'folderName', 'title', default='')
-            if name:
-                folders.append({'name': name,
-                                'count': _fv_first(r, 'mediaCount', 'count', 'total', default=None)})
-        used = path
-        err = ''
-        break
-    return jsonify({'folders': folders, 'selected': _fanvue_ppv(persona),
-                    'error': err, 'endpoint': used})
+    mtype = (request.args.get('type') or '').strip()
+    q = 'size=50'
+    if mtype:
+        q += f'&mediaType={mtype}'
+    items, err = [], ''
+    try:
+        rows = _fv_list(_fanvue_call(persona, 'GET', f'/media?{q}'))
+        for m in rows:
+            if _fv_first(m, 'status', default='ready') not in ('ready', ''):
+                continue
+            items.append({
+                'uuid': _fv_first(m, 'uuid', 'id', default=''),
+                'name': _fv_first(m, 'name', 'caption', 'description', default='') or '(untitled)',
+                'mediaType': _fv_first(m, 'mediaType', default=''),
+                'price': _fv_first(m, 'recommendedPrice', default=None),
+                'thumb': _fv_media_thumb(m),
+            })
+    except Exception as e:
+        err = str(e)[:140]
+    return jsonify({'media': [m for m in items if m['uuid']],
+                    'selected': _fanvue_ppv(persona), 'error': err})
 
 
 @app.route('/api/fanvue/ppv', methods=['GET', 'POST'])
 def api_fanvue_ppv():
-    """Get or set a persona's PPV settings: which vault folder to pull locked
-    content from, the unlock price, and an optional caption."""
+    """Get or set a persona's PPV settings: which media items to send as locked
+    content, the unlock price, and an optional caption."""
     if not _check_admin():
         return jsonify({'error': 'Unauthorized'}), 401
     if request.method == 'GET':
@@ -3782,10 +3788,18 @@ def api_fanvue_ppv():
     persona = (d.get('persona') or '').strip()
     if not persona:
         return jsonify({'ok': False, 'error': 'Missing persona'}), 400
+    media = d.get('media_uuids') or d.get('media') or []
+    if isinstance(media, str):
+        media = [x.strip() for x in media.split(',') if x.strip()]
+    try:
+        price = int(d.get('price') or 0)
+    except (TypeError, ValueError):
+        price = 0
     cfg = {
-        'folder': (d.get('folder') or '').strip(),
-        'price': d.get('price') or '',
+        'media_uuids': [str(x) for x in media if x],
+        'price': price,
         'caption': (d.get('caption') or '').strip(),
+        'enabled': bool(d.get('enabled', True)) and bool(media),
     }
     _set_setting(f'fanvue_ppv_{persona}', json.dumps(cfg))
     return jsonify({'ok': True, 'ppv': cfg})
@@ -3980,6 +3994,15 @@ def _fanvue_auto_round(persona):
     except Exception:
         cursor = {}
 
+    # PPV config + which fans have already been sent one (send at most once each).
+    ppv = _fanvue_ppv(persona)
+    ppv_on = bool(ppv.get('enabled')) and bool(ppv.get('media_uuids')) and int(ppv.get('price') or 0) >= 300
+    ppv_sent_key = f'fanvue_ppv_sent_{persona}'
+    try:
+        ppv_sent = json.loads(_get_setting(ppv_sent_key) or '{}')
+    except Exception:
+        ppv_sent = {}
+
     scope = _fanvue_scope(persona)
     chats = _fv_list(_fanvue_call(persona, 'GET', f'{scope}/chats?limit=30'))
     cr = _fanvue_creator(persona).get('handle')
@@ -4084,6 +4107,23 @@ def _fanvue_auto_round(persona):
         _log_x_message(persona, fan_key, handle, 'out', reply)
         actions['replies'] += 1
         log.append(f'Replied → {handle or fan_uuid}: {reply[:50]}')
+
+        # PPV offer: once per fan, only after rapport is built (enough back and
+        # forth), send the configured locked media at the set price.
+        if ppv_on and not ppv_sent.get(fan_uuid):
+            exchanged = len(_fanvue_saved_history(persona, fan_key, limit=40))
+            if exchanged >= 6:
+                cap = (ppv.get('caption') or reply).strip()[:2000]
+                try:
+                    _fanvue_call(persona, 'POST', f'{scope}/chats/{fan_uuid}/message',
+                                 body={'text': cap, 'mediaUuids': ppv['media_uuids'],
+                                       'price': int(ppv['price'])})
+                    ppv_sent[fan_uuid] = True
+                    _set_setting(ppv_sent_key, json.dumps(ppv_sent))
+                    actions['ppv'] = actions.get('ppv', 0) + 1
+                    log.append(f'💎 PPV → {handle or fan_uuid} at {ppv["price"]}')
+                except Exception as e:
+                    log.append(f'ppv {handle or fan_uuid} failed: {str(e)[:60]}')
 
     _set_setting(cursor_key, json.dumps(cursor))
     return actions, log
