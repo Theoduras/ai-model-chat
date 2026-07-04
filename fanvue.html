@@ -199,10 +199,10 @@ function toggleConnect(){
 async function startConnect(){
   const box=document.getElementById('config-status');
   const idEl=document.getElementById('fv-client-id'), secEl=document.getElementById('fv-client-secret');
-  const client_id=(idEl.type==='password'&&appCfg.client_id)?appCfg.client_id:idEl.value.trim();
+  const client_id=(idEl.type==='password')?'':idEl.value.trim();
   const client_secret=secEl.dataset.masked==='1'?'':secEl.value.trim();
   const redirect_uri=document.getElementById('fv-redirect').value.trim();
-  if(!client_id||(!client_secret&&!appCfg.has_secret)||!redirect_uri){err(box,'Enter Client ID, Secret and Redirect URI.');return;}
+  if(!client_id&&!appCfg.client_id&&!appCfg.has_secret){err(box,'Enter Client ID and Secret first (they\'ll be saved for next time).');return;}
   busy(box,'Opening Fanvue authorization…');
   const data=await post('/api/fanvue/auth-url',{persona:persona(),client_id,client_secret,redirect_uri});
   if(!data.ok){err(box,data.error);return;}
