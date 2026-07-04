@@ -3511,9 +3511,10 @@ def api_fanvue_vault_debug():
     persona = (request.args.get('persona') or '').strip()
     scope = _fanvue_scope(persona)
     paths = [
-        '/vault-folders?size=5',
+        '/media/folders?page=1&size=100',
+        f'{scope}/media/folders?page=1&size=100',
+        '/media/folders',
         '/media?size=1',
-        '/agencies/creators?size=5',
         '/users/me',
     ]
     results = []
@@ -3776,15 +3777,20 @@ def api_fanvue_media():
     if folder:
         q += f'&folderName={urllib.parse.quote(folder)}'
     items, err, folders = [], '', set()
-    # Folder names come from the dedicated vault-folders endpoint (list items
-    # don't carry folderName); ignore its errors so media still loads.
-    try:
-        for f in _fv_list(_fanvue_call(persona, 'GET', '/vault-folders?size=100')):
-            nm = _fv_first(f, 'name', 'folderName', 'title', default='')
+    # Folder names: the folder-list endpoint needs pagination params (bare call
+    # 400s). Try the known variants and take whichever returns rows.
+    for fpath in (f'{scope}/media/folders?page=1&size=100', '/media/folders?page=1&size=100',
+                  f'{scope}/vault-folders?page=1&size=100', '/vault-folders?page=1&size=100'):
+        try:
+            rows = _fv_list(_fanvue_call(persona, 'GET', fpath))
+        except Exception:
+            continue
+        for f in rows:
+            nm = _fv_first(f, 'name', 'folderName', 'title', default='') if isinstance(f, dict) else str(f)
             if nm:
                 folders.add(nm)
-    except Exception:
-        pass
+        if folders:
+            break
     try:
         rows = _fv_list(_fanvue_call(persona, 'GET', f'/media?{q}'))
         for m in rows:
