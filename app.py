@@ -3501,6 +3501,52 @@ def _fanvue_call(persona, method, path, body=None):
         raise
 
 
+@app.route('/api/fanvue/vault-debug')
+def api_fanvue_vault_debug():
+    """Probe a wide set of Fanvue media/vault endpoints and record the exact
+    status + response body of each, so we can pin the working path/scope. Also
+    writes the result to a log file for later inspection."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    persona = (request.args.get('persona') or '').strip()
+    scope = _fanvue_scope(persona)
+    at = _fanvue_tokens(persona).get('access_token', '')
+    paths = [
+        '/vault-folders', f'{scope}/vault-folders',
+        '/media', f'{scope}/media',
+        '/media/folders', f'{scope}/media/folders',
+        '/vault', f'{scope}/vault',
+        '/vaults', '/library', '/collections',
+        '/posts', f'{scope}/posts',
+        '/users/me',
+    ]
+    results = []
+    for p in paths:
+        if not p:
+            continue
+        entry = {'path': p}
+        try:
+            r = _fanvue_api('GET', p + ('&limit=3' if '?' in p else '?limit=3'), at)
+            body = json.dumps(r)[:400] if not isinstance(r, str) else r[:400]
+            entry.update(status=200, body=body)
+        except url_error.HTTPError as e:
+            try:
+                rb = e.read()[:300].decode(errors='ignore')
+            except Exception:
+                rb = ''
+            entry.update(status=e.code, body=rb)
+        except Exception as e:
+            entry.update(status='ERR', body=str(e)[:200])
+        results.append(entry)
+    out = {'persona': persona, 'scope': scope, 'results': results}
+    try:
+        with open('/tmp/fanvue_vault_debug.json', 'w') as f:
+            json.dump(out, f, indent=2)
+    except Exception:
+        pass
+    return jsonify(out)
+
+
 @app.route('/api/fanvue/config')
 def api_fanvue_config():
     """App-level OAuth credentials for pre-filling the connect form (never returns
