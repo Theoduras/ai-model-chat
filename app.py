@@ -3603,6 +3603,7 @@ def api_fanvue_disconnect():
     persona = (request.json or {}).get('persona', '').strip()
     if persona:
         _set_setting(f'fanvue_tokens_{persona}', '{}')
+        _set_setting(f'fanvue_cursor_{persona}', '{}')
     return jsonify({'ok': True})
 
 
