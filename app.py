@@ -3829,11 +3829,7 @@ def _fanvue_auto_round(persona):
             sent = False
             send_errors = []
             for sp, bv in [
-                (f'/chats/{fan_uuid}/messages', {'text': msg_body}),
-                ('/chats/messages', {'text': msg_body, 'recipientUuid': fan_uuid}),
-                ('/messages', {'text': msg_body, 'recipientUuid': fan_uuid}),
-                (f'/chats/{fan_uuid}/messages', {'text': msg_body, 'type': 'SINGLE_RECIPIENT'}),
-                ('/chats/messages', {'text': msg_body, 'recipientUuid': fan_uuid, 'type': 'SINGLE_RECIPIENT'}),
+                (f'/chats/{fan_uuid}/message', {'text': msg_body}),
             ]:
                 try:
                     _fanvue_call(persona, 'POST', sp, body=bv)
@@ -3938,12 +3934,7 @@ def api_fanvue_debug():
             if request.args.get('probe') == '1':
                 probes = {}
                 test_paths = [
-                    (f'/chats/{uid}/messages', {'text': 'hi'}),
-                    ('/chats/messages', {'text': 'hi', 'recipientUuid': uid}),
-                    ('/messages', {'text': 'hi', 'recipientUuid': uid}),
-                    (f'/chats/{uid}/messages', {'text': 'hi', 'type': 'SINGLE_RECIPIENT'}),
-                    ('/chats/messages', {'text': 'hi', 'recipientUuid': uid, 'type': 'SINGLE_RECIPIENT'}),
-                    (f'/chat/{uid}/messages', {'text': 'hi'}),
+                    (f'/chats/{uid}/message', {'text': 'hi'}),
                 ]
                 for path, body in test_paths:
                     key = f'POST {path} {list(body.keys())}'
