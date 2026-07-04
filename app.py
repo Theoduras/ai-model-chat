@@ -2446,11 +2446,15 @@ def _persona_text(persona, instruction, history=None, max_tokens=1024, temperatu
         contents.append({'role': 'model' if m['role'] in ('bot', 'model') else 'user',
                          'parts': [{'text': m['content']}]})
     contents.append({'role': 'user', 'parts': [{'text': instruction}]})
+    cfg = types.GenerateContentConfig(
+        system_instruction=system_prompt, temperature=temperature,
+        max_output_tokens=max_tokens)
+    try:
+        cfg.thinking_config = types.ThinkingConfig(thinking_budget=0)
+    except Exception:
+        pass
     response = client.models.generate_content(
-        model=MODEL_NAME, contents=contents,
-        config=types.GenerateContentConfig(
-            system_instruction=system_prompt, temperature=temperature,
-            max_output_tokens=max_tokens),
+        model=MODEL_NAME, contents=contents, config=cfg,
     )
     return (response.text or '').strip()
 
