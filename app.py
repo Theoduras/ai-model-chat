@@ -3748,6 +3748,31 @@ def _fanvue_ppv(persona):
         return {}
 
 
+def _fanvue_fan_purchased(persona, fan_uuid, media_uuids):
+    """True if the fan has purchased at least one of the given media items —
+    used to gate advancing to the next PPV tier until they've paid."""
+    if not media_uuids:
+        return False
+    want = set(media_uuids)
+    try:
+        rows = _fv_list(_fanvue_call(persona, 'GET', f'/media?purchasedBy={fan_uuid}&size=50'))
+        for m in rows:
+            if m.get('purchasedByFan') and _fv_first(m, 'uuid', 'id', default='') in want:
+                return True
+    except Exception:
+        pass
+    # Fallback: check each wanted item directly.
+    for u in list(want)[:5]:
+        try:
+            m = _fanvue_call(persona, 'GET', f'/media/{u}?purchasedBy={fan_uuid}')
+            m = m.get('data', m) if isinstance(m, dict) else {}
+            if m.get('purchasedByFan'):
+                return True
+        except Exception:
+            continue
+    return False
+
+
 def _fanvue_ppv_tiers(persona):
     """Return the ordered list of valid PPV tiers for a persona. Normalizes the
     legacy single-set config into one tier. Each tier is
@@ -4094,10 +4119,17 @@ def _fanvue_auto_round(persona):
     ppv_tiers = _fanvue_ppv_tiers(persona)
     ppv_on = bool(_fanvue_ppv(persona).get('enabled', True)) and bool(ppv_tiers)
     ppv_sent_key = f'fanvue_ppv_sent_{persona}'
+    ppv_at_key = f'fanvue_ppv_at_{persona}'
     try:
         ppv_sent = json.loads(_get_setting(ppv_sent_key) or '{}')
     except Exception:
         ppv_sent = {}
+    try:
+        ppv_at = json.loads(_get_setting(ppv_at_key) or '{}')
+    except Exception:
+        ppv_at = {}
+    # Extra messages that must pass after a paid unlock before the next tier.
+    ppv_gap = 8
 
     def _ppv_count(v):
         # Legacy value was a bool (one PPV sent); treat True as 1 tier done.
@@ -4213,13 +4245,22 @@ def _fanvue_auto_round(persona):
         actions['replies'] += 1
         log.append(f'Replied → {handle or fan_uuid}: {reply[:50]}')
 
-        # PPV tiers: send the next unsent tier in order, gated on rapport — each
-        # further tier needs a deeper conversation (tier 1 at ~6 messages, then
-        # +6 per tier), so they escalate as the chat progresses.
+        # PPV tiers: send tier 1 after rapport; each later tier only after the
+        # fan has PAID the previous tier AND a bit more chatting has happened.
         done = _ppv_count(ppv_sent.get(fan_uuid))
         if ppv_on and done < len(ppv_tiers):
             exchanged = len(_fanvue_saved_history(persona, fan_key, limit=200))
-            if exchanged >= 6 + done * 6:
+            send_ppv = False
+            if done == 0:
+                send_ppv = exchanged >= 6
+            else:
+                paid = _fanvue_fan_purchased(persona, fan_uuid, ppv_tiers[done - 1]['media_uuids'])
+                enough_chat = (exchanged - int(ppv_at.get(fan_uuid, 0))) >= ppv_gap
+                if paid and enough_chat:
+                    send_ppv = True
+                elif not paid:
+                    log.append(f'{who}: waiting on payment of tier {done} before next PPV')
+            if send_ppv:
                 tier = ppv_tiers[done]
                 cap = (tier.get('caption') or reply).strip()[:2000]
                 try:
@@ -4227,7 +4268,9 @@ def _fanvue_auto_round(persona):
                                  body={'text': cap, 'mediaUuids': tier['media_uuids'],
                                        'price': int(tier['price'])})
                     ppv_sent[fan_uuid] = done + 1
+                    ppv_at[fan_uuid] = exchanged
                     _set_setting(ppv_sent_key, json.dumps(ppv_sent))
+                    _set_setting(ppv_at_key, json.dumps(ppv_at))
                     actions['ppv'] = actions.get('ppv', 0) + 1
                     log.append(f'💎 PPV tier {done + 1}/{len(ppv_tiers)} → {handle or fan_uuid} at {tier["price"]}')
                 except Exception as e:
