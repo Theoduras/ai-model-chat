@@ -226,8 +226,11 @@ async function loadPpv(){
   window._ppvMedia=data.media||[];
   // Load saved tiers only once (first load), so switching filters keeps edits.
   if(!window._ppvTiersLoaded){
-    const savedTiers=(data.tiers&&data.tiers.length)?data.tiers.map(t=>({media_uuids:t.media_uuids||[],price:t.price||'',caption:t.caption||''})):[{media_uuids:[],price:'',caption:''}];
-    ppvTiers=savedTiers; curTier=0;
+    let saved={};
+    try{saved=await fetch('/api/fanvue/ppv?persona='+encodeURIComponent(persona())).then(r=>r.json());}catch(e){}
+    const st=saved.tiers||[];
+    ppvTiers=st.length?st.map(t=>({media_uuids:t.media_uuids||[],price:t.price||'',caption:t.caption||''})):[{media_uuids:[],price:'',caption:''}];
+    curTier=0;
     ppvSel=new Set(ppvTiers[0].media_uuids||[]);
     document.getElementById('ppv-price').value=ppvTiers[0].price||'';
     document.getElementById('ppv-caption').value=ppvTiers[0].caption||'';
