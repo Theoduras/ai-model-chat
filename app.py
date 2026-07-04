@@ -3501,6 +3501,23 @@ def _fanvue_call(persona, method, path, body=None):
         raise
 
 
+@app.route('/api/fanvue/dbinfo')
+def api_fanvue_dbinfo():
+    """Report which DB backend is in use so persistence can be verified: an
+    external Postgres survives redeploys; the SQLite fallback does not."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    url = os.environ.get('DATABASE_URL', '')
+    backend = 'postgres' if url.startswith(('postgres', 'postgresql')) else ('external' if url else 'sqlite-ephemeral')
+    persona = (request.args.get('persona') or 'lilly').strip()
+    return jsonify({
+        'backend': backend,
+        'persists_across_redeploys': backend != 'sqlite-ephemeral',
+        'ppv_setting_present': bool(_get_setting(f'fanvue_ppv_{persona}')),
+        'ppv_raw': (_get_setting(f'fanvue_ppv_{persona}') or '')[:500],
+    })
+
+
 @app.route('/api/fanvue/vault-debug')
 def api_fanvue_vault_debug():
     """Probe a wide set of Fanvue media/vault endpoints and record the exact
