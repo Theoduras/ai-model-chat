@@ -3810,32 +3810,29 @@ def _fanvue_auto_round(persona):
         if not reply:
             continue
         msg_body = reply[:5000]
-        send_paths = []
-        if chat_uuid and chat_uuid != fan_uuid:
-            send_paths.append(f'/chats/{chat_uuid}/messages')
-        send_paths.append(f'/chats/{fan_uuid}/messages')
-        send_paths.append(f'/messages')
+        send_attempts = [
+            (f'/chats/{fan_uuid}/messages', {'text': msg_body}),
+            ('/chats/messages', {'text': msg_body, 'recipientUuid': fan_uuid}),
+            ('/messages', {'text': msg_body, 'recipientUuid': fan_uuid}),
+            (f'/chats/{fan_uuid}/messages', {'text': msg_body, 'type': 'SINGLE_RECIPIENT'}),
+            ('/chats/messages', {'text': msg_body, 'recipientUuid': fan_uuid, 'type': 'SINGLE_RECIPIENT'}),
+            ('/messages', {'text': msg_body, 'recipientUuid': fan_uuid, 'type': 'SINGLE_RECIPIENT'}),
+            (f'/chats/{fan_uuid}/message', {'text': msg_body}),
+            (f'/chat/{fan_uuid}/messages', {'text': msg_body}),
+        ]
         sent = False
-        for sp in send_paths:
+        send_errors = []
+        for sp, bv in send_attempts:
             try:
-                body_variants = [{'text': msg_body}, {'content': msg_body, 'recipientUuid': fan_uuid}]
-                if sp == '/messages':
-                    body_variants = [{'text': msg_body, 'chatUuid': chat_uuid or fan_uuid},
-                                     {'content': msg_body, 'recipientUuid': fan_uuid}]
-                for bv in body_variants:
-                    try:
-                        _fanvue_call(persona, 'POST', sp, body=bv)
-                        sent = True
-                        log.append(f'sent via {sp} keys={list(bv.keys())}')
-                        break
-                    except Exception:
-                        continue
-                if sent:
-                    break
-            except Exception:
+                _fanvue_call(persona, 'POST', sp, body=bv)
+                sent = True
+                log.append(f'SUCCESS via POST {sp} keys={list(bv.keys())}')
+                break
+            except Exception as e:
+                send_errors.append(f'{sp}: {str(e)[:80]}')
                 continue
         if not sent:
-            log.append(f'send {handle or fan_uuid} failed: all endpoint patterns returned errors')
+            log.append(f'send {handle or fan_uuid} failed: ' + '; '.join(send_errors[:3]))
             continue
         _log_x_message(persona, fan_key, handle, 'out', reply)
         cursor[fan_uuid] = msg_id
@@ -3922,14 +3919,23 @@ def api_fanvue_debug():
                 out['first_messages'] = _fanvue_call(persona, 'GET', f'/chats/{uid}/messages?limit=3')
             except Exception as e:
                 out['messages_error'] = str(e)[:200]
-            if request.args.get('probe') == '1' and cuid:
+            if request.args.get('probe') == '1':
                 probes = {}
-                for path in [f'/chats/{cuid}/messages', f'/chats/{uid}/messages', '/messages']:
+                test_paths = [
+                    (f'/chats/{uid}/messages', {'text': 'hi'}),
+                    ('/chats/messages', {'text': 'hi', 'recipientUuid': uid}),
+                    ('/messages', {'text': 'hi', 'recipientUuid': uid}),
+                    (f'/chats/{uid}/messages', {'text': 'hi', 'type': 'SINGLE_RECIPIENT'}),
+                    ('/chats/messages', {'text': 'hi', 'recipientUuid': uid, 'type': 'SINGLE_RECIPIENT'}),
+                    (f'/chat/{uid}/messages', {'text': 'hi'}),
+                ]
+                for path, body in test_paths:
+                    key = f'POST {path} {list(body.keys())}'
                     try:
-                        _fanvue_call(persona, 'POST', path, body={'text': 'test_probe_ignore'})
-                        probes[path] = 'OK'
+                        _fanvue_call(persona, 'POST', path, body=body)
+                        probes[key] = 'OK'
                     except Exception as e:
-                        probes[path] = str(e)[:120]
+                        probes[key] = str(e)[:120]
                 out['send_probes'] = probes
     except Exception as e:
         out['chats_error'] = str(e)[:200]
