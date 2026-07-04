@@ -3968,7 +3968,7 @@ def _fanvue_worker():
                     pass
         except Exception:
             pass
-        _t.sleep(90)
+        _t.sleep(20)
 
 
 def _start_fanvue_worker():
