@@ -3540,7 +3540,6 @@ def api_fanvue_auth_url():
         'response_type': 'code', 'client_id': client_id, 'redirect_uri': redirect_uri,
         'scope': FANVUE_SCOPES, 'state': state,
         'code_challenge': code_challenge, 'code_challenge_method': 'S256',
-        'prompt': 'login',
     })
     return jsonify({'ok': True, 'url': f'{FANVUE_AUTH_URL}?{params}'})
 
