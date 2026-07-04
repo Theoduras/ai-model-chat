@@ -62,6 +62,22 @@
         <span class="hint" id="creator-hint"></span>
       </div>
     </div>
+    <div id="ppv-row" style="display:none; margin-top:12px; border-top:1px solid #232327; padding-top:16px;">
+      <label style="display:block;margin-bottom:6px;">💎 PPV content folder <span style="font-weight:400;color:#52525b;">(the Fanvue vault folder this model sends locked content from)</span></label>
+      <div class="row-inline">
+        <div class="field" style="margin:0; flex:2;">
+          <select id="ppv-folder"></select>
+        </div>
+        <div class="field" style="margin:0; min-width:110px;">
+          <input type="number" id="ppv-price" placeholder="Price" min="0" step="1">
+        </div>
+        <button class="btn-ai" onclick="savePpv()">Save PPV</button>
+      </div>
+      <div class="field full" style="margin-top:10px;">
+        <input type="text" id="ppv-caption" placeholder="Caption sent with the unlock (optional) — e.g. made something just for you 🙈">
+      </div>
+      <span class="hint" id="ppv-hint" style="display:block;margin-top:6px;"></span>
+    </div>
     <div id="connect-panel" style="display:none; margin-top:4px; border-top:1px solid #232327; padding-top:16px;">
       <div class="field full">
         <label>Fanvue app Client ID</label>
@@ -145,7 +161,36 @@ async function loadConfig(){
   document.getElementById('config-status').innerHTML='';
   updateConn();
   loadCreators();
+  loadPpv();
   loadAuto();
+}
+async function loadPpv(){
+  const row=document.getElementById('ppv-row');
+  if(!connState.connected){row.style.display='none';return;}
+  row.style.display='block';
+  let data={};
+  try{data=await fetch('/api/fanvue/vault-folders?persona='+encodeURIComponent(persona())).then(r=>r.json());}catch(e){}
+  const folders=data.folders||[];
+  const sel=(data.selected||{});
+  const opts='<option value="">— no PPV / off —</option>'+
+    folders.map(f=>'<option value="'+esc(f.name)+'"'+(f.name===sel.folder?' selected':'')+'>'+esc(f.name)+(f.count!=null?(' ('+f.count+')'):'')+'</option>').join('');
+  document.getElementById('ppv-folder').innerHTML=opts;
+  document.getElementById('ppv-price').value=sel.price||'';
+  document.getElementById('ppv-caption').value=sel.caption||'';
+  const hint=document.getElementById('ppv-hint');
+  if(data.error){hint.textContent='⚠ Could not load vault folders: '+data.error;hint.style.color='#fbbf24';}
+  else if(!folders.length){hint.textContent='No vault folders found on this Fanvue account.';hint.style.color='#71717a';}
+  else{hint.textContent=sel.folder?('Sending PPV from “'+sel.folder+'”'+(sel.price?(' at '+sel.price):'')):'Pick a folder to enable PPV sends.';hint.style.color='#71717a';}
+}
+async function savePpv(){
+  const hint=document.getElementById('ppv-hint');
+  const data=await post('/api/fanvue/ppv',{persona:persona(),
+    folder:document.getElementById('ppv-folder').value,
+    price:document.getElementById('ppv-price').value,
+    caption:document.getElementById('ppv-caption').value});
+  if(!data.ok){hint.textContent='✗ '+(data.error||'Failed');hint.style.color='#fb7185';return;}
+  hint.textContent='✓ Saved';hint.style.color='#4ade80';
+  loadPpv();
 }
 async function loadCreators(){
   const row=document.getElementById('creator-row');

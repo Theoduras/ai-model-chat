@@ -3673,6 +3673,57 @@ def api_fanvue_set_creator():
     return jsonify({'ok': True, 'selected': _fanvue_creator(persona)})
 
 
+def _fanvue_ppv(persona):
+    try:
+        return json.loads(_get_setting(f'fanvue_ppv_{persona}') or '{}')
+    except Exception:
+        return {}
+
+
+@app.route('/api/fanvue/vault-folders')
+def api_fanvue_vault_folders():
+    """List the connected creator's Fanvue vault folders so a persona can pick
+    which one holds its PPV content."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    persona = (request.args.get('persona') or '').strip()
+    scope = _fanvue_scope(persona)
+    folders = []
+    err = ''
+    try:
+        rows = _fv_list(_fanvue_call(persona, 'GET', f'{scope}/vault-folders?limit=100'))
+        for r in rows:
+            name = _fv_first(r, 'name', 'folderName', 'title', default='')
+            if name:
+                folders.append({'name': name,
+                                'count': _fv_first(r, 'mediaCount', 'count', 'total', default=None)})
+    except Exception as e:
+        err = str(e)[:120]
+    return jsonify({'folders': folders, 'selected': _fanvue_ppv(persona), 'error': err})
+
+
+@app.route('/api/fanvue/ppv', methods=['GET', 'POST'])
+def api_fanvue_ppv():
+    """Get or set a persona's PPV settings: which vault folder to pull locked
+    content from, the unlock price, and an optional caption."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    if request.method == 'GET':
+        persona = (request.args.get('persona') or '').strip()
+        return jsonify(_fanvue_ppv(persona))
+    d = request.json or {}
+    persona = (d.get('persona') or '').strip()
+    if not persona:
+        return jsonify({'ok': False, 'error': 'Missing persona'}), 400
+    cfg = {
+        'folder': (d.get('folder') or '').strip(),
+        'price': d.get('price') or '',
+        'caption': (d.get('caption') or '').strip(),
+    }
+    _set_setting(f'fanvue_ppv_{persona}', json.dumps(cfg))
+    return jsonify({'ok': True, 'ppv': cfg})
+
+
 @app.route('/api/fanvue/draft', methods=['POST'])
 def api_fanvue_draft():
     """Draft an in-persona, funnel-aware reply to a fan message. Works with no
