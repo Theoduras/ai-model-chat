@@ -3393,7 +3393,7 @@ FANVUE_API_BASE = 'https://api.fanvue.com'
 FANVUE_AUTH_URL = 'https://auth.fanvue.com/oauth2/auth'
 FANVUE_TOKEN_URL = 'https://auth.fanvue.com/oauth2/token'
 FANVUE_API_VERSION = '2025-06-26'
-FANVUE_SCOPES = 'openid offline offline_access read:self read:chat write:chat read:fan'
+FANVUE_SCOPES = 'openid offline offline_access read:self read:chat write:chat read:fan read:media write:media read:post'
 
 
 def _fanvue_app():
@@ -3744,11 +3744,10 @@ def api_fanvue_vault_folders():
     err = ''
     used = ''
     candidates = [
-        f'{scope}/vault-folders?limit=100',
-        '/vault-folders?limit=100',
         f'{scope}/media/folders?limit=100',
         '/media/folders?limit=100',
-        f'{scope}/vault?limit=100',
+        f'{scope}/vault-folders?limit=100',
+        '/vault-folders?limit=100',
     ]
     for path in candidates:
         if not path:
