@@ -3748,6 +3748,31 @@ def _fanvue_ppv(persona):
         return {}
 
 
+def _fanvue_ppv_tiers(persona):
+    """Return the ordered list of valid PPV tiers for a persona. Normalizes the
+    legacy single-set config into one tier. Each tier is
+    {media_uuids:[...], price:int>=300, caption:str}."""
+    cfg = _fanvue_ppv(persona)
+    raw = cfg.get('tiers')
+    if not isinstance(raw, list):
+        raw = [{'media_uuids': cfg.get('media_uuids') or [],
+                'price': cfg.get('price') or 0,
+                'caption': cfg.get('caption') or ''}] if cfg.get('media_uuids') else []
+    tiers = []
+    for t in raw:
+        if not isinstance(t, dict):
+            continue
+        media = [str(x) for x in (t.get('media_uuids') or []) if x]
+        try:
+            price = int(t.get('price') or 0)
+        except (TypeError, ValueError):
+            price = 0
+        if media and price >= 300:
+            tiers.append({'media_uuids': media, 'price': price,
+                          'caption': (t.get('caption') or '').strip()})
+    return tiers
+
+
 def _fv_media_thumb(m):
     """Best thumbnail URL for a media item from its variants, else its own url."""
     for v in (m.get('variants') or []):
@@ -3837,32 +3862,42 @@ def api_fanvue_media_item():
 
 @app.route('/api/fanvue/ppv', methods=['GET', 'POST'])
 def api_fanvue_ppv():
-    """Get or set a persona's PPV settings: which media items to send as locked
-    content, the unlock price, and an optional caption."""
+    """Get or set a persona's ordered PPV tiers. Each tier is
+    {media_uuids:[...], price:int, caption:str}; the bot sends them in order as
+    the chat progresses. Stored per connected Fanvue account (persona)."""
     if not _check_admin():
         return jsonify({'error': 'Unauthorized'}), 401
     if request.method == 'GET':
         persona = (request.args.get('persona') or '').strip()
-        return jsonify(_fanvue_ppv(persona))
+        return jsonify({'tiers': _fanvue_ppv_tiers(persona),
+                        'enabled': bool(_fanvue_ppv(persona).get('enabled', True))})
     d = request.json or {}
     persona = (d.get('persona') or '').strip()
     if not persona:
         return jsonify({'ok': False, 'error': 'Missing persona'}), 400
-    media = d.get('media_uuids') or d.get('media') or []
-    if isinstance(media, str):
-        media = [x.strip() for x in media.split(',') if x.strip()]
-    try:
-        price = int(d.get('price') or 0)
-    except (TypeError, ValueError):
-        price = 0
-    cfg = {
-        'media_uuids': [str(x) for x in media if x],
-        'price': price,
-        'caption': (d.get('caption') or '').strip(),
-        'enabled': bool(d.get('enabled', True)) and bool(media),
-    }
+    tiers_in = d.get('tiers')
+    if not isinstance(tiers_in, list):
+        return jsonify({'ok': False, 'error': 'tiers must be a list'}), 400
+    tiers = []
+    for t in tiers_in:
+        media = t.get('media_uuids') or t.get('media') or []
+        if isinstance(media, str):
+            media = [x.strip() for x in media.split(',') if x.strip()]
+        media = [str(x) for x in media if x]
+        try:
+            price = int(t.get('price') or 0)
+        except (TypeError, ValueError):
+            price = 0
+        # Skip empty tiers silently; reject media-set tiers priced below the min.
+        if not media:
+            continue
+        if price < 300:
+            return jsonify({'ok': False, 'error': 'Each tier needs a price of at least 300'}), 400
+        tiers.append({'media_uuids': media, 'price': price,
+                      'caption': (t.get('caption') or '').strip()})
+    cfg = {'tiers': tiers, 'enabled': bool(d.get('enabled', True)) and bool(tiers)}
     _set_setting(f'fanvue_ppv_{persona}', json.dumps(cfg))
-    return jsonify({'ok': True, 'ppv': cfg})
+    return jsonify({'ok': True, 'tiers': tiers, 'enabled': cfg['enabled']})
 
 
 @app.route('/api/fanvue/draft', methods=['POST'])
@@ -4054,14 +4089,24 @@ def _fanvue_auto_round(persona):
     except Exception:
         cursor = {}
 
-    # PPV config + which fans have already been sent one (send at most once each).
-    ppv = _fanvue_ppv(persona)
-    ppv_on = bool(ppv.get('enabled')) and bool(ppv.get('media_uuids')) and int(ppv.get('price') or 0) >= 300
+    # Ordered PPV tiers + how many tiers each fan has already received, so tiers
+    # go out one at a time, in order, as the conversation deepens.
+    ppv_tiers = _fanvue_ppv_tiers(persona)
+    ppv_on = bool(_fanvue_ppv(persona).get('enabled', True)) and bool(ppv_tiers)
     ppv_sent_key = f'fanvue_ppv_sent_{persona}'
     try:
         ppv_sent = json.loads(_get_setting(ppv_sent_key) or '{}')
     except Exception:
         ppv_sent = {}
+
+    def _ppv_count(v):
+        # Legacy value was a bool (one PPV sent); treat True as 1 tier done.
+        if isinstance(v, bool):
+            return 1 if v else 0
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return 0
 
     scope = _fanvue_scope(persona)
     chats = _fv_list(_fanvue_call(persona, 'GET', f'{scope}/chats?limit=30'))
@@ -4168,20 +4213,23 @@ def _fanvue_auto_round(persona):
         actions['replies'] += 1
         log.append(f'Replied → {handle or fan_uuid}: {reply[:50]}')
 
-        # PPV offer: once per fan, only after rapport is built (enough back and
-        # forth), send the configured locked media at the set price.
-        if ppv_on and not ppv_sent.get(fan_uuid):
-            exchanged = len(_fanvue_saved_history(persona, fan_key, limit=40))
-            if exchanged >= 6:
-                cap = (ppv.get('caption') or reply).strip()[:2000]
+        # PPV tiers: send the next unsent tier in order, gated on rapport — each
+        # further tier needs a deeper conversation (tier 1 at ~6 messages, then
+        # +6 per tier), so they escalate as the chat progresses.
+        done = _ppv_count(ppv_sent.get(fan_uuid))
+        if ppv_on and done < len(ppv_tiers):
+            exchanged = len(_fanvue_saved_history(persona, fan_key, limit=200))
+            if exchanged >= 6 + done * 6:
+                tier = ppv_tiers[done]
+                cap = (tier.get('caption') or reply).strip()[:2000]
                 try:
                     _fanvue_call(persona, 'POST', f'{scope}/chats/{fan_uuid}/message',
-                                 body={'text': cap, 'mediaUuids': ppv['media_uuids'],
-                                       'price': int(ppv['price'])})
-                    ppv_sent[fan_uuid] = True
+                                 body={'text': cap, 'mediaUuids': tier['media_uuids'],
+                                       'price': int(tier['price'])})
+                    ppv_sent[fan_uuid] = done + 1
                     _set_setting(ppv_sent_key, json.dumps(ppv_sent))
                     actions['ppv'] = actions.get('ppv', 0) + 1
-                    log.append(f'💎 PPV → {handle or fan_uuid} at {ppv["price"]}')
+                    log.append(f'💎 PPV tier {done + 1}/{len(ppv_tiers)} → {handle or fan_uuid} at {tier["price"]}')
                 except Exception as e:
                     log.append(f'ppv {handle or fan_uuid} failed: {str(e)[:60]}')
 
