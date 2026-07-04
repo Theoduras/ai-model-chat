@@ -3757,24 +3757,30 @@ def _fanvue_auto_round(persona):
         cursor = {}
 
     chats = _fv_list(_fanvue_call(persona, 'GET', '/chats?limit=30'))
+    log.append(f'{len(chats)} chats found' + (f'; only={only}' if only else ''))
     for chat in chats:
         if actions['replies'] >= reply_limit:
             break
         fan_uuid, handle, is_creator, chat_uuid = _fv_user_of_chat(chat)
         if not fan_uuid:
+            log.append(f'skip chat: no fan_uuid (keys={list(chat.keys())})')
             continue
+        who = handle or fan_uuid[:8]
         if exclude_creators and is_creator:
             actions['skipped_creators'] += 1
+            log.append(f'{who}: skipped (is a creator)')
             continue
         if only and (handle or '').lower() not in only:
+            log.append(f'{who}: skipped (not in only-list)')
             continue
         fan_key = 'fv:' + fan_uuid
         try:
             msgs = _fv_list(_fanvue_call(persona, 'GET', f'/chats/{fan_uuid}/messages?limit=20'))
         except Exception as e:
-            log.append(f'read {handle or fan_uuid} failed: {str(e)[:50]}')
+            log.append(f'read {who} failed: {str(e)[:50]}')
             continue
         if not msgs:
+            log.append(f'{who}: no messages in chat')
             continue
 
         # First time we see this fan: import the whole chat history and keep it
@@ -3792,7 +3798,6 @@ def _fanvue_auto_round(persona):
         text = _fv_first(newest, 'text', 'content', 'message', 'body', default='')
         msg_id = _fv_first(newest, 'uuid', 'id', default='')
         is_own = newest.get('fromMe') or newest.get('isOwn') or newest.get('isMine') or newest.get('isAuthor') or newest.get('direction') == 'out' or newest.get('type') == 'sent'
-        who = handle or fan_uuid[:8]
         if not text:
             log.append(f'{who}: newest has no text (keys={list(newest.keys())})')
             continue
