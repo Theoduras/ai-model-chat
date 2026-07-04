@@ -3393,7 +3393,7 @@ FANVUE_API_BASE = 'https://api.fanvue.com'
 FANVUE_AUTH_URL = 'https://auth.fanvue.com/oauth2/auth'
 FANVUE_TOKEN_URL = 'https://auth.fanvue.com/oauth2/token'
 FANVUE_API_VERSION = '2025-06-26'
-FANVUE_SCOPES = 'openid offline offline_access read:self read:chat write:chat read:fan read:creator'
+FANVUE_SCOPES = 'openid offline offline_access read:self read:chat write:chat read:fan'
 
 
 def _fanvue_app():
