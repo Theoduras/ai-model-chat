@@ -3873,8 +3873,11 @@ def _fanvue_auto_round(persona):
         if not text:
             log.append(f'{who}: newest has no text (keys={list(newest.keys())})')
             continue
-        if sender == me_uuid or is_own:
-            log.append(f'{who}: newest is mine, waiting for their reply')
+        # Fallback self-detection: if the newest text matches something we sent
+        # recently, it's ours regardless of what Fanvue names the sender field.
+        recent_out = {t.strip() for (d, t) in _fanvue_saved_history(persona, fan_key, limit=12) if d == 'out'}
+        if sender == me_uuid or is_own or text.strip() in recent_out:
+            log.append(f'{who}: newest is mine (sender={sender or "?"}, keys={list(newest.keys())}), waiting for their reply')
             continue
         if cursor.get(fan_uuid) == msg_id:
             log.append(f'{who}: already replied to their latest')
@@ -3902,10 +3905,11 @@ def _fanvue_auto_round(persona):
             + intro_rule +
             "Be warm and engaging, move the rapport → tease → offer funnel naturally "
             "(never hard-sell), and end with a question. "
-            "IMPORTANT: Write SHORT messages like a real person texting — max 2-3 "
-            "sentences. Keep it casual and natural, no walls of text. Their latest message: "
+            "CRITICAL: Keep it VERY short — one or two sentences MAX, like a real "
+            "text message. No paragraphs, no lists, no walls of text. Ask at most "
+            "one quick question. Their latest message: "
             f"\"{text}\"")
-        reply = _persona_text(persona, instruction, history=history, max_tokens=300, temperature=0.9)
+        reply = _persona_text(persona, instruction, history=history, max_tokens=120, temperature=0.9)
         if not reply:
             continue
 
