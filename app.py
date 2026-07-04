@@ -3394,9 +3394,9 @@ FANVUE_SCOPES = 'openid offline offline_access read:self read:chat write:chat re
 
 def _fanvue_app():
     return {
-        'client_id': _get_setting('fanvue_client_id') or '',
-        'client_secret': _get_setting('fanvue_client_secret') or '',
-        'redirect_uri': _get_setting('fanvue_redirect_uri') or '',
+        'client_id': _get_setting('fanvue_client_id') or os.environ.get('FANVUE_CLIENT_ID', ''),
+        'client_secret': _get_setting('fanvue_client_secret') or os.environ.get('FANVUE_CLIENT_SECRET', ''),
+        'redirect_uri': _get_setting('fanvue_redirect_uri') or os.environ.get('FANVUE_REDIRECT_URI', ''),
     }
 
 
