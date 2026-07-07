@@ -124,12 +124,9 @@ def _is_premade(slug):
 
 
 def db_get_persona(slug):
-    """Return a saved (copied) persona from the DB as a dict, or None.
-    A premade (repo-file) persona always wins, so any stale DB copy that shadows
-    a premade slug is ignored — this is how a saved persona gets 'promoted' to an
-    original by committing its files."""
-    if _is_premade(slug):
-        return None
+    """Return a saved persona from the DB as a dict, or None. A DB entry for a
+    premade slug is treated as an in-place OVERRIDE that shadows the repo file,
+    so dashboard edits to originals persist (durable in Postgres)."""
     try:
         from db import SessionLocal, get_saved_persona
     except Exception:
@@ -1448,6 +1445,10 @@ def api_personas():
         if os.path.exists(meta_path):
             with open(meta_path, 'r', encoding='utf-8') as f:
                 meta = json.load(f)
+        # A saved DB override for this original wins over the repo file.
+        override = db_get_persona(slug)
+        if override and isinstance(override.get('config'), dict):
+            config = override['config']
         has_img = bool(config.get('avatar')) or len(db_get_images(slug)) > 0
         personas.append({
             'slug': slug,
@@ -1509,13 +1510,8 @@ def api_persona_save(slug):
     if not _validate_age(config):
         return jsonify({'error': 'Age must be 18 or older'}), 400
 
-    # Protect premade originals: never overwrite them.
-    if _is_premade(slug) and not db_get_persona(slug):
-        return jsonify({
-            'error': 'premade_readonly',
-            'message': 'This is a premade model. Save it as a copy to make changes.'
-        }), 409
-
+    # Premade originals can be overridden in place: the edit is saved to the DB
+    # and shadows the repo file (durable in Postgres).
     prompt = build_system_prompt(config)
     name = config.get('name') or slug.capitalize()
     db_save_persona(slug, name, config, prompt)

@@ -1191,19 +1191,12 @@ async function savePersona() {
     }
   }
   status.textContent = 'Saving…'; status.className = 'save-status';
-  const isPremade = personas[currentSlug] && personas[currentSlug].premade;
   try {
     // Photos always save to the current persona (originals included).
     await saveGallery(currentSlug);
 
-    if (isPremade) {
-      // Originals are read-only for text — only the photos are saved.
-      status.textContent = '✓ Photos saved (original text unchanged — use Copy to edit)';
-      status.className = 'save-status ok';
-      renderSidebar();
-      return;
-    }
-
+    // Originals can now be overridden in place — the edit is saved to the DB
+    // and shadows the repo file.
     const res = await fetch('/api/personas/' + currentSlug, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(config)
