@@ -4089,6 +4089,21 @@ def _fv_user_of_chat(chat):
     return uuid, handle, is_creator, chat_uuid
 
 
+def _fv_msg_age_minutes(msg):
+    """Minutes since a Fanvue message was created, or None if unparseable."""
+    raw = _fv_first(msg, 'createdAt', 'sentAt', 'timestamp', default='')
+    if not raw:
+        return None
+    try:
+        s = str(raw).replace('Z', '+00:00')
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - dt).total_seconds() / 60.0
+    except Exception:
+        return None
+
+
 def _fanvue_auto_settings(persona):
     try:
         return json.loads(_get_setting(f'fanvue_auto_{persona}') or '{}')
@@ -4194,6 +4209,16 @@ def _fanvue_auto_round(persona):
         except (TypeError, ValueError):
             return 0
 
+    # Natural re-engagement: if the fan goes quiet, send up to a couple of
+    # gentle follow-ups (spaced out), then wait. Reset when the fan replies.
+    followup_key = f'fanvue_followup_{persona}'
+    try:
+        followups = json.loads(_get_setting(followup_key) or '{}')
+    except Exception:
+        followups = {}
+    FOLLOWUP_MAX = 2          # at most this many nudges per quiet spell
+    FOLLOWUP_BASE_MIN = 180   # first nudge after ~3h silence, then longer
+
     scope = _fanvue_scope(persona)
     chats = _fv_list(_fanvue_call(persona, 'GET', f'{scope}/chats?limit=30'))
     cr = _fanvue_creator(persona).get('handle')
@@ -4248,8 +4273,41 @@ def _fanvue_auto_round(persona):
         recent_out = {t.strip() for (d, t) in _fanvue_saved_history(persona, fan_key, limit=12) if d == 'out'}
         from_fan = (sender == fan_uuid) if sender else (not is_own and text.strip() not in recent_out)
         if not from_fan:
-            log.append(f'{who}: newest not from fan (sender={sender or "?"}, keys={list(newest.keys())}), waiting')
+            # Fan is quiet (our message is newest). Send a spaced, capped
+            # follow-up so chats feel alive without spamming or self-looping.
+            sent_n = int(followups.get(fan_uuid, {}).get('n', 0)) if isinstance(followups.get(fan_uuid), dict) else 0
+            age = _fv_msg_age_minutes(newest)
+            need = FOLLOWUP_BASE_MIN * (sent_n + 1)  # 3h, then 6h, …
+            if actions['replies'] >= reply_limit:
+                continue
+            if sent_n >= FOLLOWUP_MAX or age is None or age < need:
+                log.append(f'{who}: quiet {int(age) if age else "?"}m, follow-ups {sent_n}/{FOLLOWUP_MAX} — waiting')
+                continue
+            hist = [{'role': 'model' if d == 'out' else 'user', 'content': t}
+                    for (d, t) in _fanvue_saved_history(persona, fan_key, limit=40)]
+            fu_instr = (
+                "This fan went quiet and hasn't replied to your last message. Send "
+                "ONE short, warm, natural follow-up like a real person double-texting "
+                "— playful and low-pressure, NOT needy or salesy. Reference something "
+                "from earlier if it fits. Do NOT repeat your previous message. Max 1-2 "
+                "sentences.")
+            fu = _fv_trim(_persona_text(persona, fu_instr, history=hist, max_tokens=200, temperature=0.95))
+            if not fu:
+                continue
+            try:
+                _fanvue_call(persona, 'POST', f'{scope}/chats/{fan_uuid}/message', body={'text': fu})
+            except Exception as e:
+                log.append(f'followup {who} failed: {str(e)[:50]}')
+                continue
+            _log_x_message(persona, fan_key, handle, 'out', fu)
+            followups[fan_uuid] = {'n': sent_n + 1}
+            _set_setting(followup_key, json.dumps(followups))
+            actions['replies'] += 1
+            log.append(f'↩ follow-up {sent_n + 1}/{FOLLOWUP_MAX} → {who}: {fu[:40]}')
             continue
+        # Fan replied — clear any pending follow-up state for them.
+        if followups.pop(fan_uuid, None) is not None:
+            _set_setting(followup_key, json.dumps(followups))
         if cursor.get(fan_uuid) == msg_id:
             log.append(f'{who}: already replied to their latest')
             continue  # already handled this latest inbound message
