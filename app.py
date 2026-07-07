@@ -4412,6 +4412,11 @@ def api_fanvue_auto():
             opts['reply_limit'] = int(data['reply_limit'])
         if 'only_handles' in data:
             opts['only_handles'] = (data.get('only_handles') or '').strip()
+        if 'followup_min' in data:
+            try:
+                _set_setting(f'fanvue_followup_min_{persona}', str(int(float(data['followup_min']))))
+            except (ValueError, TypeError):
+                pass
         enabled = bool(data.get('enabled', opts.get('enabled', False)))
         opts['enabled'] = enabled
         _set_setting(f'fanvue_auto_{persona}', json.dumps(opts))
@@ -4424,7 +4429,8 @@ def api_fanvue_auto():
     return jsonify({'enabled': bool(opts.get('enabled')),
                     'exclude_creators': opts.get('exclude_creators', True),
                     'reply_limit': opts.get('reply_limit', 10),
-                    'only_handles': opts.get('only_handles', '')})
+                    'only_handles': opts.get('only_handles', ''),
+                    'followup_min': int(_get_setting(f'fanvue_followup_min_{persona}') or 30)})
 
 
 @app.route('/api/fanvue/auto-run', methods=['POST'])

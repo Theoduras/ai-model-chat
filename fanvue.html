@@ -142,6 +142,10 @@
       <label>Only reply to these fans <span style="font-weight:400;color:#52525b;">(comma-separated handles — leave blank for everyone; use for testing)</span></label>
       <input type="text" id="fv-only-handles" placeholder="e.g. girlforfun">
     </div>
+    <div class="field full" style="margin-top:12px;">
+      <label>Follow-up after silence <span style="font-weight:400;color:#52525b;">(minutes before nudging a quiet fan — first nudge at this value, second at 2×; max 2. Set low e.g. 5 to test)</span></label>
+      <input type="number" id="fv-followup-min" min="1" step="1" placeholder="30">
+    </div>
     <div style="display:flex; gap:8px; align-items:center; margin-top:14px;">
       <button class="btn-ai" onclick="saveAuto()">Save &amp; Run</button>
       <span class="conn-pill" id="fv-auto-state">off</span>
@@ -319,6 +323,7 @@ async function loadAuto(){
   document.getElementById('fv-auto-enabled').checked=!!a.enabled;
   document.getElementById('fv-exclude-creators').checked=a.exclude_creators!==false;
   document.getElementById('fv-only-handles').value=a.only_handles||'';
+  document.getElementById('fv-followup-min').value=a.followup_min||30;
   const st=document.getElementById('fv-auto-state');
   if(a.enabled){st.textContent='● Running';st.className='conn-pill running';}
   else{st.textContent='off';st.className='conn-pill';}
@@ -329,7 +334,8 @@ async function saveAuto(){
   const data=await post('/api/fanvue/auto',{persona:persona(),
     enabled:document.getElementById('fv-auto-enabled').checked,
     exclude_creators:document.getElementById('fv-exclude-creators').checked,
-    only_handles:document.getElementById('fv-only-handles').value});
+    only_handles:document.getElementById('fv-only-handles').value,
+    followup_min:document.getElementById('fv-followup-min').value});
   if(!data.ok){err(box,data.error||'Failed');return;}
   loadAuto();
   if(data.enabled){
