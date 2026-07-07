@@ -4217,7 +4217,10 @@ def _fanvue_auto_round(persona):
     except Exception:
         followups = {}
     FOLLOWUP_MAX = 2          # at most this many nudges per quiet spell
-    FOLLOWUP_BASE_MIN = 180   # first nudge after ~3h silence, then longer
+    try:
+        FOLLOWUP_BASE_MIN = int(float(_get_setting(f'fanvue_followup_min_{persona}') or 30))
+    except Exception:
+        FOLLOWUP_BASE_MIN = 30   # first nudge after ~30m silence, then longer
 
     scope = _fanvue_scope(persona)
     chats = _fv_list(_fanvue_call(persona, 'GET', f'{scope}/chats?limit=30'))
