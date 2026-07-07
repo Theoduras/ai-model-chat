@@ -4199,6 +4199,9 @@ def _fanvue_auto_round(persona):
         ppv_at = {}
     # Extra messages that must pass after a paid unlock before the next tier.
     ppv_gap = 8
+    # When off, tiers advance on chatting alone (payment can't be verified for
+    # agency-agent testers). When on, each later tier waits for the prior payment.
+    ppv_require_payment = (_get_setting(f'fanvue_ppv_require_payment_{persona}') or '0') == '1'
 
     def _ppv_count(v):
         # Legacy value was a bool (one PPV sent); treat True as 1 tier done.
@@ -4369,8 +4372,8 @@ def _fanvue_auto_round(persona):
             if done == 0:
                 send_ppv = exchanged >= 6
             else:
-                paid = _fanvue_fan_purchased(persona, fan_uuid, ppv_tiers[done - 1]['media_uuids'])
                 enough_chat = (exchanged - int(ppv_at.get(fan_uuid, 0))) >= ppv_gap
+                paid = (not ppv_require_payment) or _fanvue_fan_purchased(persona, fan_uuid, ppv_tiers[done - 1]['media_uuids'])
                 if paid and enough_chat:
                     send_ppv = True
                 elif not paid:
@@ -4417,6 +4420,8 @@ def api_fanvue_auto():
                 _set_setting(f'fanvue_followup_min_{persona}', str(int(float(data['followup_min']))))
             except (ValueError, TypeError):
                 pass
+        if 'ppv_require_payment' in data:
+            _set_setting(f'fanvue_ppv_require_payment_{persona}', '1' if data['ppv_require_payment'] else '0')
         enabled = bool(data.get('enabled', opts.get('enabled', False)))
         opts['enabled'] = enabled
         _set_setting(f'fanvue_auto_{persona}', json.dumps(opts))
@@ -4430,7 +4435,8 @@ def api_fanvue_auto():
                     'exclude_creators': opts.get('exclude_creators', True),
                     'reply_limit': opts.get('reply_limit', 10),
                     'only_handles': opts.get('only_handles', ''),
-                    'followup_min': int(_get_setting(f'fanvue_followup_min_{persona}') or 30)})
+                    'followup_min': int(_get_setting(f'fanvue_followup_min_{persona}') or 30),
+                    'ppv_require_payment': (_get_setting(f'fanvue_ppv_require_payment_{persona}') or '0') == '1'})
 
 
 @app.route('/api/fanvue/auto-run', methods=['POST'])

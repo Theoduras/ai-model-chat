@@ -137,6 +137,7 @@
     <div class="auto-toggles" style="display:flex; flex-wrap:wrap; gap:10px 20px;">
       <label class="soon" style="display:flex;align-items:center;gap:8px;cursor:pointer;background:none;color:#d4d4d8;font-size:.85rem;padding:0"><input type="checkbox" id="fv-auto-enabled" style="width:auto"> <b>Auto-reply enabled</b></label>
       <label class="soon" style="display:flex;align-items:center;gap:8px;cursor:pointer;background:none;color:#d4d4d8;font-size:.85rem;padding:0"><input type="checkbox" id="fv-exclude-creators" checked style="width:auto"> Exclude other creators (only reply to fans)</label>
+      <label class="soon" style="display:flex;align-items:center;gap:8px;cursor:pointer;background:none;color:#d4d4d8;font-size:.85rem;padding:0"><input type="checkbox" id="fv-ppv-require-payment" style="width:auto"> Require payment before next PPV tier <span style="color:#52525b">(off = tiers flow on chatting; use off for testing)</span></label>
     </div>
     <div class="field full" style="margin-top:12px;">
       <label>Only reply to these fans <span style="font-weight:400;color:#52525b;">(comma-separated handles — leave blank for everyone; use for testing)</span></label>
@@ -324,6 +325,7 @@ async function loadAuto(){
   document.getElementById('fv-exclude-creators').checked=a.exclude_creators!==false;
   document.getElementById('fv-only-handles').value=a.only_handles||'';
   document.getElementById('fv-followup-min').value=a.followup_min||30;
+  document.getElementById('fv-ppv-require-payment').checked=!!a.ppv_require_payment;
   const st=document.getElementById('fv-auto-state');
   if(a.enabled){st.textContent='● Running';st.className='conn-pill running';}
   else{st.textContent='off';st.className='conn-pill';}
@@ -335,7 +337,8 @@ async function saveAuto(){
     enabled:document.getElementById('fv-auto-enabled').checked,
     exclude_creators:document.getElementById('fv-exclude-creators').checked,
     only_handles:document.getElementById('fv-only-handles').value,
-    followup_min:document.getElementById('fv-followup-min').value});
+    followup_min:document.getElementById('fv-followup-min').value,
+    ppv_require_payment:document.getElementById('fv-ppv-require-payment').checked});
   if(!data.ok){err(box,data.error||'Failed');return;}
   loadAuto();
   if(data.enabled){
