@@ -30,9 +30,13 @@ def _build_database_url():
             name = (os.getenv('DB_NAME') or 'postgres').strip()
             return (f'postgresql+psycopg2://{_up.quote_plus(user)}:{pw}@/'
                     f'{name}?host=/cloudsql/{inst}')
-        # Fallback: local SQLite (ephemeral on Cloud Run — not for production).
-        return 'sqlite:///' + os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), 'data.db')
+        # Fallback: local SQLite. On Cloud Run the app dir is read-only, so use a
+        # writable location (/tmp or DATA_DIR) — ephemeral, not for production.
+        data_dir = (os.getenv('DATA_DIR') or '').strip()
+        if not data_dir:
+            app_dir = os.path.dirname(os.path.abspath(__file__))
+            data_dir = app_dir if os.access(app_dir, os.W_OK) else '/tmp'
+        return 'sqlite:///' + os.path.join(data_dir, 'data.db')
     # Normalize managed-Postgres URL forms to the SQLAlchemy+psycopg2 driver.
     if url.startswith('postgres://'):
         url = 'postgresql+psycopg2://' + url[len('postgres://'):]
