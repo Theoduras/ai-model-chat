@@ -1512,9 +1512,13 @@ def api_persona_save(slug):
 
     # Premade originals can be overridden in place: the edit is saved to the DB
     # and shadows the repo file (durable in Postgres).
-    prompt = build_system_prompt(config)
-    name = config.get('name') or slug.capitalize()
-    db_save_persona(slug, name, config, prompt)
+    try:
+        prompt = build_system_prompt(config)
+        name = config.get('name') or slug.capitalize()
+        db_save_persona(slug, name, config, prompt)
+    except Exception as e:
+        logging.exception('persona save failed for %s', slug)
+        return jsonify({'error': f'Save failed: {e}'}), 500
     return jsonify({'ok': True, 'slug': slug, 'prompt': prompt})
 
 
@@ -1549,9 +1553,13 @@ def api_persona_copy():
     if not _validate_age(config):
         return jsonify({'error': 'Age must be 18 or older'}), 400
 
-    slug = unique_copy_slug(new_name)
-    prompt = build_system_prompt(config)
-    db_save_persona(slug, new_name, config, prompt)
+    try:
+        slug = unique_copy_slug(new_name)
+        prompt = build_system_prompt(config)
+        db_save_persona(slug, new_name, config, prompt)
+    except Exception as e:
+        logging.exception('persona copy failed for %s', new_name)
+        return jsonify({'error': f'Copy failed: {e}'}), 500
     return jsonify({'ok': True, 'slug': slug, 'name': new_name})
 
 
