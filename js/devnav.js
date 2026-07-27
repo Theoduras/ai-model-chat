@@ -36,6 +36,7 @@
     bar.appendChild(btn('/landing', 'Landing'));
     bar.appendChild(btn('/xbot', '𝕏 Bot'));
     bar.appendChild(btn('/fanvue', 'Fanvue'));
+    bar.appendChild(btn('/threads', 'Threads'));
     document.body.appendChild(bar);
   }
 

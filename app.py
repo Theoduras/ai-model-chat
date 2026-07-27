@@ -5,6 +5,7 @@ import re
 import logging
 import hashlib
 import secrets
+import time
 import threading
 import urllib.request
 import urllib.parse
@@ -639,6 +640,12 @@ def fanvue_page():
     if not _check_admin():
         return redirect('/dashboard')
     return send_from_directory(BASE_DIR, 'fanvue.html')
+
+@app.route('/threads')
+def threads_page():
+    if not _check_admin():
+        return redirect('/dashboard')
+    return send_from_directory(BASE_DIR, 'threads.html')
 
 @app.route('/profile')
 def profile():
@@ -4548,6 +4555,420 @@ if os.getenv('FANVUE_WORKER', '1') != '0':
 def handle_exception(e):
     error_logger.error(f'Unhandled: {e}', exc_info=True)
     return jsonify({'error': 'Internal server error'}), 500
+
+
+# ── Threads (Meta) reply-bot ─────────────────────────────────────────────────
+# Public-only engagement: auto-reply to comments/replies on the persona's own
+# posts and to mentions. No DMs (unsupported by the Threads API). Tokens are
+# stored in the DB settings so they survive redeploys (durable with Cloud SQL).
+
+THREADS_GRAPH = 'https://graph.threads.net'
+THREADS_API = THREADS_GRAPH + '/v1.0'
+
+
+def _threads_load_tokens():
+    try:
+        return json.loads(_get_setting('threads_tokens') or '{}')
+    except Exception:
+        return {}
+
+
+def _threads_save_tokens(data):
+    _set_setting('threads_tokens', json.dumps(data))
+
+
+def _threads_api(method, url, body=None):
+    headers = {'Content-Type': 'application/json'} if body else {}
+    data = json.dumps(body).encode() if body else None
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    with urllib.request.urlopen(req, timeout=15) as r:
+        raw = r.read()
+        return json.loads(raw) if raw else {}
+
+
+def _threads_refresh(persona):
+    """Refresh a long-lived token (valid 60d, refreshable after 24h)."""
+    tokens = _threads_load_tokens()
+    t = tokens.get(persona) or {}
+    tok = t.get('access_token')
+    if not tok:
+        return None
+    try:
+        url = (f'{THREADS_GRAPH}/refresh_access_token?grant_type=th_refresh_token'
+               f'&access_token={urllib.parse.quote(tok)}')
+        td = _threads_api('GET', url)
+    except Exception:
+        return None
+    if td.get('access_token'):
+        t['access_token'] = td['access_token']
+        t['expires_at'] = int(time.time()) + int(td.get('expires_in', 5184000))
+        tokens[persona] = t
+        _threads_save_tokens(tokens)
+    return t.get('access_token')
+
+
+def _threads_token(persona):
+    tokens = _threads_load_tokens()
+    t = tokens.get(persona) or {}
+    tok = t.get('access_token')
+    if not tok:
+        raise RuntimeError(f'No Threads account connected for persona "{persona}".')
+    # Proactively refresh if within 3 days of expiry.
+    if t.get('expires_at') and t['expires_at'] - time.time() < 259200:
+        refreshed = _threads_refresh(persona)
+        if refreshed:
+            return refreshed
+    return tok
+
+
+def _threads_uid(persona):
+    return (_threads_load_tokens().get(persona) or {}).get('user_id', '')
+
+
+def _threads_call(persona, method, path, params=None, body=None):
+    """Call the Threads graph API as a persona. `path` is like '/{uid}/threads'."""
+    tok = _threads_token(persona)
+    q = dict(params or {})
+    q['access_token'] = tok
+    url = f'{THREADS_API}{path}?{urllib.parse.urlencode(q)}'
+    return _threads_api(method, url, body=body)
+
+
+def _threads_publish(persona, text, reply_to_id=None):
+    """Two-step publish: create a text container, then publish it. Returns media id."""
+    uid = _threads_uid(persona)
+    params = {'media_type': 'TEXT', 'text': text[:500]}
+    if reply_to_id:
+        params['reply_to_id'] = reply_to_id
+    created = _threads_call(persona, 'POST', f'/{uid}/threads', params=params)
+    creation_id = created.get('id')
+    if not creation_id:
+        raise RuntimeError(f'Threads container failed: {created}')
+    published = _threads_call(persona, 'POST', f'/{uid}/threads_publish',
+                              params={'creation_id': creation_id})
+    return published.get('id', '')
+
+
+def _threads_recent_posts(persona, limit=10):
+    uid = _threads_uid(persona)
+    res = _threads_call(persona, 'GET', f'/{uid}/threads',
+                        params={'fields': 'id,text,timestamp', 'limit': limit})
+    return res.get('data', []) or []
+
+
+def _threads_replies(persona, media_id):
+    res = _threads_call(persona, 'GET', f'/{media_id}/replies',
+                        params={'fields': 'id,text,username,timestamp'})
+    return res.get('data', []) or []
+
+
+def _threads_mentions(persona, limit=15):
+    uid = _threads_uid(persona)
+    try:
+        res = _threads_call(persona, 'GET', f'/{uid}/mentions',
+                            params={'fields': 'id,text,username,timestamp', 'limit': limit})
+        return res.get('data', []) or []
+    except Exception:
+        return []
+
+
+def _threads_auto_round(persona, reply_comments=True, reply_mentions=True,
+                        limit=10, preview=False):
+    """One engagement round: reply in-persona to new replies on the persona's own
+    posts and to new mentions. Skips own replies + anything already handled."""
+    actions = {'comment_replies': 0, 'mention_replies': 0}
+    log = []
+    replies_out = []
+    tokens = _threads_load_tokens()
+    t = tokens.get(persona) or {}
+    my_username = (t.get('username') or '').lower()
+    seen_key = f'threads_seen_{persona}'
+    try:
+        seen = set(json.loads(_get_setting(seen_key) or '[]'))
+    except Exception:
+        seen = set()
+
+    targets = []
+    if reply_comments:
+        for post in _threads_recent_posts(persona, limit=limit):
+            for rep in _threads_replies(persona, post.get('id', '')):
+                targets.append(('comment', rep))
+    if reply_mentions:
+        for m in _threads_mentions(persona, limit=limit):
+            targets.append(('mention', m))
+
+    for kind, item in targets:
+        rid = item.get('id', '')
+        text = (item.get('text') or '').strip()
+        who = item.get('username', '')
+        if not rid or not text or rid in seen:
+            continue
+        if who and who.lower() == my_username:
+            seen.add(rid)
+            continue
+        instr = (f'A fan {("replied to your post" if kind=="comment" else "mentioned you")} '
+                 f'on Threads: "{text}". Write ONE short, warm, in-character public reply '
+                 f'— playful, natural, 1-2 sentences, no hashtags, not salesy.')
+        reply = _fv_trim(_persona_text(persona, instr, max_tokens=180, temperature=0.9))
+        if not reply:
+            continue
+        posted = False
+        if not preview:
+            try:
+                _threads_publish(persona, reply, reply_to_id=rid)
+                posted = True
+                seen.add(rid)
+                actions['comment_replies' if kind == 'comment' else 'mention_replies'] += 1
+                log.append(f'↪ {kind} @{who}: {reply[:50]}')
+            except Exception as e:
+                log.append(f'reply @{who} failed: {str(e)[:50]}')
+        replies_out.append({'kind': kind, 'to': who, 'comment': text,
+                            'reply': reply, 'posted': posted})
+
+    if not preview:
+        _set_setting(seen_key, json.dumps(list(seen)[-500:]))
+    return actions, log, replies_out
+
+
+@app.route('/api/threads/app-config')
+def api_threads_app_config():
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    return jsonify({
+        'client_id': _get_setting('threads_client_id') or '',
+        'redirect_uri': _get_setting('threads_redirect_uri') or '',
+        'has_secret': bool(_get_setting('threads_client_secret')),
+    })
+
+
+@app.route('/api/threads/auth-url', methods=['POST'])
+def api_threads_auth_url():
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    data = request.json or {}
+    client_id = (data.get('client_id') or '').strip() or (_get_setting('threads_client_id') or '')
+    client_secret = (data.get('client_secret') or '').strip() or (_get_setting('threads_client_secret') or '')
+    redirect_uri = (data.get('redirect_uri') or '').strip() or (_get_setting('threads_redirect_uri') or '')
+    persona = (data.get('persona') or 'lilith').strip()
+    if not client_id or not client_secret or not redirect_uri:
+        return jsonify({'ok': False, 'error': 'client_id, client_secret and redirect_uri are required'}), 400
+    _set_setting('threads_client_id', client_id)
+    _set_setting('threads_client_secret', client_secret)
+    _set_setting('threads_redirect_uri', redirect_uri)
+    state = secrets.token_urlsafe(16)
+    _set_setting('threads_oauth_state', json.dumps({'state': state, 'persona': persona}))
+    params = urllib.parse.urlencode({
+        'client_id': client_id,
+        'redirect_uri': redirect_uri,
+        'scope': 'threads_basic,threads_content_publish,threads_read_replies,threads_manage_replies',
+        'response_type': 'code',
+        'state': state,
+    })
+    return jsonify({'ok': True, 'url': f'https://threads.net/oauth/authorize?{params}'})
+
+
+@app.route('/api/threads/oauth-redirect', methods=['GET'])
+def api_threads_oauth_redirect():
+    code = request.args.get('code', '')
+    state = request.args.get('state', '')
+    error = request.args.get('error_description', '') or request.args.get('error', '')
+    payload = json.dumps({'type': 'threads_oauth', 'code': code, 'state': state, 'error': error})
+    html = """<!DOCTYPE html><html><head><meta charset="utf-8"><title>Threads Authorization</title>
+<style>body{background:#0d0d0f;color:#f4f4f5;font-family:system-ui,sans-serif;display:flex;
+align-items:center;justify-content:center;min-height:100vh;text-align:center;padding:24px}
+.card{max-width:420px}</style></head><body><div class="card">
+<h2>%s</h2><p id="msg">Returning you to the bot…</p></div>
+<script>var data=%s;try{if(window.opener){window.opener.postMessage(data,'*');
+document.getElementById('msg').textContent='Connected — you can close this window.';
+setTimeout(function(){window.close();},1200);}}catch(e){}</script></body></html>""" % (
+        'Authorization failed' if error else 'Authorized ✓', payload)
+    return html, (400 if error else 200), {'Content-Type': 'text/html; charset=utf-8'}
+
+
+@app.route('/api/threads/callback', methods=['POST'])
+def api_threads_callback():
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    data = request.json or {}
+    code = (data.get('code') or '').strip()
+    state = (data.get('state') or '').strip()
+    try:
+        saved = json.loads(_get_setting('threads_oauth_state') or '{}')
+    except Exception:
+        saved = {}
+    if not saved or state != saved.get('state'):
+        return jsonify({'ok': False, 'error': 'State mismatch or expired. Start again.'}), 400
+    persona = saved.get('persona', 'lilith')
+    client_id = _get_setting('threads_client_id') or ''
+    client_secret = _get_setting('threads_client_secret') or ''
+    redirect_uri = _get_setting('threads_redirect_uri') or ''
+    # Step 1: short-lived token.
+    body = urllib.parse.urlencode({
+        'client_id': client_id, 'client_secret': client_secret,
+        'grant_type': 'authorization_code', 'redirect_uri': redirect_uri, 'code': code,
+    }).encode()
+    try:
+        req = urllib.request.Request(f'{THREADS_GRAPH}/oauth/access_token', data=body,
+            headers={'Content-Type': 'application/x-www-form-urlencoded'}, method='POST')
+        with urllib.request.urlopen(req, timeout=15) as r:
+            short = json.loads(r.read())
+    except url_error.HTTPError as e:
+        try:
+            msg = json.loads(e.read()).get('error_message', str(e))
+        except Exception:
+            msg = str(e)
+        return jsonify({'ok': False, 'error': f'Threads token exchange failed: {msg}'}), 400
+    short_tok = short.get('access_token', '')
+    user_id = str(short.get('user_id', ''))
+    # Step 2: exchange for a long-lived token (60 days).
+    access_token, expires_in = short_tok, 3600
+    try:
+        ll = _threads_api('GET',
+            f'{THREADS_GRAPH}/access_token?grant_type=th_exchange_token'
+            f'&client_secret={urllib.parse.quote(client_secret)}'
+            f'&access_token={urllib.parse.quote(short_tok)}')
+        if ll.get('access_token'):
+            access_token = ll['access_token']
+            expires_in = int(ll.get('expires_in', 5184000))
+    except Exception:
+        pass
+    # Fetch username.
+    username = ''
+    try:
+        me = _threads_api('GET',
+            f'{THREADS_API}/me?fields=id,username&access_token={urllib.parse.quote(access_token)}')
+        username = me.get('username', '')
+        user_id = str(me.get('id', user_id))
+    except Exception:
+        pass
+    tokens = _threads_load_tokens()
+    tokens[persona] = {'access_token': access_token, 'user_id': user_id,
+                       'username': username, 'expires_at': int(time.time()) + expires_in}
+    _threads_save_tokens(tokens)
+    _set_setting('threads_oauth_state', '')
+    return jsonify({'ok': True, 'username': username, 'persona': persona})
+
+
+@app.route('/api/threads/status', methods=['GET'])
+def api_threads_status():
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    tokens = _threads_load_tokens()
+    return jsonify({p: {'username': t.get('username', ''), 'connected': bool(t.get('access_token'))}
+                    for p, t in tokens.items()})
+
+
+@app.route('/api/threads/disconnect', methods=['POST'])
+def api_threads_disconnect():
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    persona = (request.json or {}).get('persona', '').strip()
+    tokens = _threads_load_tokens()
+    tokens.pop(persona, None)
+    _threads_save_tokens(tokens)
+    return jsonify({'ok': True})
+
+
+@app.route('/api/threads/publish', methods=['POST'])
+def api_threads_publish():
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    data = request.json or {}
+    persona = (data.get('persona') or '').strip()
+    topic = (data.get('topic') or '').strip()
+    preview = bool(data.get('preview'))
+    if not persona:
+        return jsonify({'ok': False, 'error': 'persona required'}), 400
+    instr = (f'Write ONE short, in-character Threads post{" about: " + topic if topic else ""}. '
+             f'Natural and casual, 1-2 sentences, at most one emoji, no hashtags.')
+    try:
+        text = _fv_trim(_persona_text(persona, instr, max_tokens=200, temperature=0.95), hard_cap=480)
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+    if preview:
+        return jsonify({'ok': True, 'text': text, 'posted': False})
+    try:
+        mid = _threads_publish(persona, text)
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+    return jsonify({'ok': True, 'text': text, 'posted': True, 'id': mid})
+
+
+@app.route('/api/threads/auto', methods=['GET', 'POST'])
+def api_threads_auto():
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    if request.method == 'POST':
+        data = request.json or {}
+        persona = (data.get('persona') or '').strip()
+        if not persona:
+            return jsonify({'ok': False, 'error': 'persona required'}), 400
+        opts = {
+            'reply_comments': bool(data.get('reply_comments', True)),
+            'reply_mentions': bool(data.get('reply_mentions', True)),
+            'enabled': bool(data.get('enabled', False)),
+        }
+        _set_setting(f'threads_auto_{persona}', json.dumps(opts))
+        try:
+            lst = set(json.loads(_get_setting('threads_auto_personas') or '[]'))
+        except Exception:
+            lst = set()
+        lst.add(persona) if opts['enabled'] else lst.discard(persona)
+        _set_setting('threads_auto_personas', json.dumps(sorted(lst)))
+        return jsonify({'ok': True, 'options': opts})
+    persona = (request.args.get('persona') or '').strip()
+    try:
+        opts = json.loads(_get_setting(f'threads_auto_{persona}') or '{}')
+    except Exception:
+        opts = {}
+    return jsonify({'enabled': bool(opts.get('enabled')),
+                    'reply_comments': opts.get('reply_comments', True),
+                    'reply_mentions': opts.get('reply_mentions', True)})
+
+
+@app.route('/api/threads/auto-run', methods=['POST'])
+def api_threads_auto_run():
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    data = request.json or {}
+    persona = (data.get('persona') or '').strip()
+    if not persona:
+        return jsonify({'ok': False, 'error': 'persona required'}), 400
+    try:
+        actions, log, replies = _threads_auto_round(
+            persona,
+            reply_comments=bool(data.get('reply_comments', True)),
+            reply_mentions=bool(data.get('reply_mentions', True)),
+            preview=bool(data.get('preview')))
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
+    return jsonify({'ok': True, 'actions': actions, 'log': log, 'replies': replies})
+
+
+@app.route('/api/threads/webhook', methods=['GET', 'POST'])
+def api_threads_webhook():
+    """Meta webhook: GET verifies the subscription challenge; POST receives
+    replies/mentions events and runs an engagement round for the account."""
+    if request.method == 'GET':
+        verify = _get_setting('threads_webhook_verify_token') or 'threads-verify'
+        if (request.args.get('hub.mode') == 'subscribe'
+                and request.args.get('hub.verify_token') == verify):
+            return request.args.get('hub.challenge', ''), 200
+        return 'forbidden', 403
+    # POST: fire a round for every enabled persona (cheap; seen-set dedupes).
+    try:
+        personas = json.loads(_get_setting('threads_auto_personas') or '[]')
+    except Exception:
+        personas = []
+    for persona in personas:
+        try:
+            opts = json.loads(_get_setting(f'threads_auto_{persona}') or '{}')
+            _threads_auto_round(persona,
+                                reply_comments=opts.get('reply_comments', True),
+                                reply_mentions=opts.get('reply_mentions', True))
+        except Exception:
+            continue
+    return jsonify({'ok': True}), 200
 
 
 if __name__ == '__main__':

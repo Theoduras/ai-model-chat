@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Threads Engagement Bot</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <script src="/js/devnav.js" defer></script>
+  <style>
+    .xbot-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+    .xbot-wrap { max-width: 760px; margin: 0 auto; padding: 28px 24px 80px; display: flex; flex-direction: column; gap: 20px; }
+    .xbot-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    @media (max-width: 640px) { .xbot-grid { grid-template-columns: 1fr; } }
+    .result-box { margin-top: 12px; font-size: 0.82rem; display: flex; flex-direction: column; gap: 8px; }
+    .reply-card { background: #0d0d0f; border: 1px solid #2a2a30; border-radius: 10px; padding: 12px 14px; }
+    .reply-card .from { color: #818cf8; font-weight: 600; font-size: 0.78rem; }
+    .reply-card .cmt { color: #a1a1aa; margin: 4px 0 8px; font-style: italic; }
+    .reply-card .rep { color: #f4f4f5; }
+    .reply-card .tag { float: right; font-size: 0.7rem; padding: 1px 8px; border-radius: 9999px; }
+    .tag.ok { background: #14532d; color: #4ade80; }
+    .tag.no { background: #4c0519; color: #fb7185; }
+    .conn-pill { font-size: 0.75rem; padding: 3px 10px; border-radius: 9999px; background: #27272a; color: #a1a1aa; }
+    .conn-pill.ok { background: #14532d; color: #4ade80; }
+    .conn-pill.err { background: #4c0519; color: #fb7185; }
+    .conn-pill.run { background: #312e81; color: #c7d2fe; }
+    .auto-toggles { display: flex; flex-wrap: wrap; gap: 10px 20px; margin-top: 14px; }
+    .auto-chk { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: #d4d4d8; cursor: pointer; }
+    .auto-chk input { width: auto; }
+    .auto-log { margin-top: 14px; max-height: 240px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; font-size: 0.78rem; font-family: ui-monospace, monospace; }
+    .auto-log .ln { color: #a1a1aa; border-left: 2px solid #27272a; padding: 2px 0 2px 10px; }
+    .auto-log .ln.act { color: #4ade80; border-left-color: #14532d; }
+    .auto-log .ln.hd { color: #818cf8; border-left-color: #312e81; }
+    .auto-log .ln.er { color: #fb7185; border-left-color: #4c0519; }
+    .row-inline { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+    .row-inline .field { flex: 1; min-width: 160px; }
+    .steps { font-size: 0.8rem; color: #a1a1aa; line-height: 1.55; padding-left: 18px; }
+    .steps li { margin-bottom: 6px; }
+    .steps code { background:#18181b; padding:1px 6px; border-radius:5px; color:#c7d2fe; }
+    .note { background:#4c051922; border:1px solid #7f1d1d; color:#fca5a5; border-radius:8px; padding:10px 12px; font-size:0.8rem; }
+    @media (max-width: 640px) {
+      .xbot-wrap { padding: 18px 14px 70px; gap: 16px; }
+      .reply-card .tag { float: none; display: inline-block; margin-bottom: 6px; }
+    }
+  </style>
+</head>
+<body class="page-dashboard">
+
+<header>
+  <div style="display:flex; align-items:center; gap:10px;">
+    <h1>Threads Engagement Bot</h1>
+    <span class="badge">@</span>
+  </div>
+  <div style="display:flex; align-items:center; gap:16px;">
+    <a href="/dashboard" style="color:#71717a; font-size:0.8rem; text-decoration:none;">← Dashboard</a>
+  </div>
+</header>
+
+<div class="xbot-scroll">
+<div class="xbot-wrap">
+
+  <div class="form-section">
+    <div class="section-title">Persona &amp; Account</div>
+    <div class="field full">
+      <label>Choose a model (persona)</label>
+      <div class="row-inline">
+        <div class="field" style="margin:0;">
+          <select id="persona" onchange="updateConn()"></select>
+        </div>
+        <span class="conn-pill" id="conn-pill">—</span>
+        <button class="btn-ai" id="connect-btn" onclick="toggleConnect()">Connect Threads</button>
+        <button class="btn-ai" id="disconnect-btn" style="background:#3f3f46; display:none;" onclick="disconnectThreads()">Disconnect</button>
+      </div>
+      <span class="hint">Only personas with a connected Threads account can post or reply. Threads is public-only — no DMs.</span>
+    </div>
+
+    <div id="connect-panel" style="display:none; margin-top:4px; border-top:1px solid #232327; padding-top:16px;">
+      <div class="section-title" style="font-size:0.85rem;">How to connect</div>
+      <ol class="steps">
+        <li>Create a Meta app at <a href="https://developers.facebook.com/apps" target="_blank" style="color:#818cf8;">developers.facebook.com</a> and add the <b>Threads API</b> use case.</li>
+        <li>In the app's Threads settings, add these scopes: <code>threads_basic</code>, <code>threads_content_publish</code>, <code>threads_read_replies</code>, <code>threads_manage_replies</code>.</li>
+        <li>Set the <b>Redirect Callback URI</b> below as an allowed redirect URI in the app.</li>
+        <li>Copy the app's <b>Threads App ID</b> and <b>Threads App Secret</b> into the fields below.</li>
+        <li>Click <b>Authorize on Threads</b>, approve in the popup — done.</li>
+      </ol>
+      <div class="field full" style="margin-top:12px;">
+        <label>Threads App ID (client_id)</label>
+        <input type="text" id="th-client-id" placeholder="your-threads-app-id" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="field full" style="margin-top:12px;">
+        <label>Threads App Secret (client_secret)</label>
+        <input type="password" id="th-client-secret" placeholder="••••••••" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="field full" style="margin-top:12px;">
+        <label>Redirect Callback URI <span style="font-weight:400;color:#52525b;">(must match your app exactly)</span></label>
+        <input type="text" id="th-redirect-uri" placeholder="https://your-domain/api/threads/oauth-redirect" autocomplete="off" spellcheck="false">
+      </div>
+      <div style="display:flex; gap:8px; margin-top:14px;">
+        <button class="btn-ai" onclick="startConnect()">Authorize on Threads →</button>
+      </div>
+      <div id="connect-step2" style="display:none; margin-top:14px;">
+        <div class="field full">
+          <label>Paste the full callback URL after authorizing</label>
+          <input type="text" id="th-callback-url" placeholder="https://…/api/threads/oauth-redirect?code=…&state=…" autocomplete="off" spellcheck="false">
+        </div>
+        <button class="btn-ai" style="margin-top:12px;" onclick="completeConnect()">Finish connection ✓</button>
+      </div>
+      <div class="result-box" id="connect-status"></div>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">💬 Auto-reply — engage comments &amp; mentions</div>
+    <span class="hint" style="display:block; margin-bottom:6px;">Replies in-persona to new replies on the persona's own posts and to new mentions. Runs <b>server-side</b> and via webhooks — stays on across redeploys.</span>
+    <div class="auto-toggles">
+      <label class="auto-chk"><input type="checkbox" id="auto-comments" checked> Reply to comments on my posts</label>
+      <label class="auto-chk"><input type="checkbox" id="auto-mentions" checked> Reply to mentions</label>
+    </div>
+    <div class="field" style="margin-top:12px; max-width:220px;">
+      <label>Seconds between rounds</label>
+      <select id="chat-interval">
+        <option value="90">90s</option><option value="180" selected>3 min</option><option value="300">5 min</option><option value="600">10 min</option>
+      </select>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center; margin-top:14px; flex-wrap:wrap;">
+      <button class="btn-ai" id="chat-start" onclick="startChat()">▶ Start auto-reply</button>
+      <button class="btn-ai" id="chat-stop" style="background:#4c0519; display:none;" onclick="stopChat()">■ Stop</button>
+      <button class="btn-ai" style="background:#3f3f46;" onclick="saveAuto()">Save server-side</button>
+      <span class="conn-pill" id="chat-state">idle</span>
+    </div>
+    <div class="result-box" id="auto-result"></div>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">📜 Activity log</div>
+    <div class="auto-log" id="auto-log"><span class="hint">Auto-reply activity appears here.</span></div>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">📝 Publish a post</div>
+    <span class="hint" style="display:block; margin-bottom:14px;">Writes an original Threads post in the persona's voice and publishes it.</span>
+    <div class="field full">
+      <label>Topic / vibe <span style="font-weight:400;color:#52525b;">(optional)</span></label>
+      <input type="text" id="post-topic" placeholder="e.g. lazy Sunday, gym day, new photoset teaser…">
+    </div>
+    <div style="display:flex; gap:8px;">
+      <button class="btn-ai" style="background:#3f3f46;" onclick="runPublish(true)">Preview draft</button>
+      <button class="btn-ai" onclick="runPublish(false)">Publish now</button>
+    </div>
+    <div class="result-box" id="publish-result"></div>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">🔗 Webhook (real-time)</div>
+    <span class="hint" style="display:block; margin-bottom:8px;">For instant replies without polling, add this in your Meta app's Threads webhook settings (topics: <code>replies</code>, <code>mentions</code>):</span>
+    <div class="field full">
+      <label>Callback URL</label>
+      <input type="text" id="wh-url" readonly>
+    </div>
+    <div class="field full" style="margin-top:10px;">
+      <label>Verify token <span style="font-weight:400;color:#52525b;">(default shown; set env <code>threads_webhook_verify_token</code> to change)</span></label>
+      <input type="text" id="wh-token" value="threads-verify" readonly>
+    </div>
+    <div class="note" style="margin-top:12px;">⚠ Threads has <b>no DM API</b> — this bot only does public replies, mentions, and posts. The PPV / paid-content funnel is not possible on Threads.</div>
+  </div>
+
+</div>
+</div>
+
+<script>
+let connStatus = {}, appConfig = {};
+function esc(s){ return (s||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function persona(){ return document.getElementById('persona').value; }
+
+async function init(){
+  try {
+    const [pRes, sRes, cRes] = await Promise.all([
+      fetch('/api/personas'), fetch('/api/threads/status'), fetch('/api/threads/app-config')]);
+    const list = await pRes.json();
+    connStatus = await sRes.json();
+    appConfig = await cRes.json().catch(()=>({}));
+    const sel = document.getElementById('persona');
+    sel.innerHTML = list.map(p=>'<option value="'+p.slug+'">'+esc(p.name||p.slug)+'</option>').join('');
+    document.getElementById('wh-url').value = location.origin + '/api/threads/webhook';
+    prefillConnect(); updateConn(); loadAuto();
+  } catch(e){}
+}
+
+function prefillConnect(){
+  const idEl=document.getElementById('th-client-id'), uriEl=document.getElementById('th-redirect-uri');
+  if(!idEl.value && appConfig.client_id) idEl.value = appConfig.client_id;
+  if(!uriEl.value) uriEl.value = appConfig.redirect_uri || (location.origin + '/api/threads/oauth-redirect');
+}
+
+function updateConn(){
+  const pill=document.getElementById('conn-pill'), info=connStatus[persona()];
+  const connected=!!(info && info.connected);
+  if(connected){ pill.className='conn-pill ok'; pill.textContent='✓ @'+info.username; }
+  else { pill.className='conn-pill err'; pill.textContent='Not connected'; }
+  document.getElementById('connect-btn').textContent = connected?'Reconnect':'Connect Threads';
+  document.getElementById('disconnect-btn').style.display = connected?'inline-flex':'none';
+  document.getElementById('connect-panel').style.display='none';
+  document.getElementById('connect-step2').style.display='none';
+  document.getElementById('connect-status').innerHTML='';
+  loadAuto();
+}
+
+function toggleConnect(){
+  const p=document.getElementById('connect-panel');
+  p.style.display = p.style.display==='none'?'block':'none';
+  if(p.style.display==='block') prefillConnect();
+}
+
+async function startConnect(){
+  const box=document.getElementById('connect-status');
+  const clientId=document.getElementById('th-client-id').value.trim();
+  const clientSecret=document.getElementById('th-client-secret').value.trim();
+  const redirectUri=document.getElementById('th-redirect-uri').value.trim();
+  if(!clientId){ err(box,'Enter your Threads App ID.'); return; }
+  if(!clientSecret){ err(box,'Enter your Threads App Secret.'); return; }
+  if(!redirectUri){ err(box,'Enter the Redirect Callback URI.'); return; }
+  busy(box,'Opening Threads authorization…');
+  const data=await post('/api/threads/auth-url',{client_id:clientId, client_secret:clientSecret, redirect_uri:redirectUri, persona:persona()});
+  if(!data.ok){ err(box,data.error); return; }
+  window.open(data.url,'threads-oauth','width=600,height=760');
+  document.getElementById('connect-step2').style.display='block';
+  box.innerHTML='<span class="hint" style="color:#fbbf24;">Authorize in the popup, then paste the URL it lands on below.</span>';
+}
+
+async function finishWith(code, state){
+  const box=document.getElementById('connect-status');
+  if(!code||!state){ err(box,'Could not find code/state in that URL.'); return; }
+  busy(box,'Finishing connection…');
+  const data=await post('/api/threads/callback',{code, state});
+  if(!data.ok){ err(box,data.error); return; }
+  box.innerHTML='<span class="hint" style="color:#4ade80;">✓ Connected as @'+esc(data.username)+'</span>';
+  connStatus = await (await fetch('/api/threads/status')).json();
+  setTimeout(updateConn,1100);
+}
+
+window.addEventListener('message',(e)=>{
+  const d=e.data||{};
+  if(d.type!=='threads_oauth') return;
+  if(d.error){ err(document.getElementById('connect-status'),'Threads returned: '+d.error); return; }
+  finishWith(d.code,d.state);
+});
+
+async function completeConnect(){
+  const box=document.getElementById('connect-status');
+  const cb=document.getElementById('th-callback-url').value.trim();
+  if(!cb){ err(box,'Paste the callback URL first.'); return; }
+  let code,state;
+  try{ const u=new URL(cb); code=u.searchParams.get('code'); state=u.searchParams.get('state'); }
+  catch(e){ err(box,'That is not a valid URL.'); return; }
+  await finishWith(code,state);
+}
+
+async function disconnectThreads(){
+  if(!confirm('Disconnect this persona’s Threads account?')) return;
+  await post('/api/threads/disconnect',{persona:persona()});
+  delete connStatus[persona()]; updateConn();
+}
+
+function busy(box,msg){ box.innerHTML='<span class="hint">'+esc(msg)+'</span>'; }
+function err(box,msg){ box.innerHTML='<span class="hint" style="color:#fb7185;">✗ '+esc(msg)+'</span>'; }
+async function post(url,body){
+  const res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  return res.json();
+}
+
+async function runPublish(preview){
+  const box=document.getElementById('publish-result');
+  busy(box, preview?'Drafting post…':'Publishing…');
+  const data=await post('/api/threads/publish',{persona:persona(), topic:document.getElementById('post-topic').value.trim(), preview});
+  if(!data.ok){ err(box,data.error); return; }
+  const tag=data.posted?'<span class="tag ok">posted</span>':'<span class="tag" style="background:#3f3f46;color:#a1a1aa;">draft</span>';
+  box.innerHTML='<div class="reply-card">'+tag+'<div class="rep">'+esc(data.text)+'</div></div>';
+}
+
+async function loadAuto(){
+  try{
+    const a=await (await fetch('/api/threads/auto?persona='+encodeURIComponent(persona()))).json();
+    document.getElementById('auto-comments').checked = a.reply_comments!==false;
+    document.getElementById('auto-mentions').checked = a.reply_mentions!==false;
+    const st=document.getElementById('chat-state');
+    if(a.enabled){ st.textContent='● server-side on'; st.className='conn-pill run'; }
+  }catch(e){}
+}
+
+async function saveAuto(){
+  const box=document.getElementById('auto-result');
+  busy(box,'Saving…');
+  const data=await post('/api/threads/auto',{persona:persona(),
+    reply_comments:document.getElementById('auto-comments').checked,
+    reply_mentions:document.getElementById('auto-mentions').checked,
+    enabled:true});
+  if(!data.ok){ err(box,data.error); return; }
+  box.innerHTML='<span class="hint" style="color:#4ade80;">✓ Saved — runs server-side + via webhook.</span>';
+  loadAuto();
+}
+
+// Browser-driven loop (for live testing without webhooks)
+function logLine(text,cls){
+  const box=document.getElementById('auto-log');
+  if(box.querySelector('.hint')) box.innerHTML='';
+  const div=document.createElement('div');
+  div.className='ln'+(cls?' '+cls:'');
+  div.textContent='['+new Date().toLocaleTimeString()+'] '+text;
+  box.appendChild(div); box.scrollTop=box.scrollHeight;
+  while(box.children.length>200) box.removeChild(box.firstChild);
+}
+function setState(txt,cls){ const p=document.getElementById('chat-state'); p.textContent=txt; p.className='conn-pill'+(cls?' '+cls:''); }
+
+let chatTimer=null, chatRunning=false, chatBusy=false, chatRounds=0;
+function startChat(){
+  const info=connStatus[persona()];
+  if(!(info&&info.connected)){ logLine('Connect a Threads account for this persona first.','er'); return; }
+  chatRunning=true; chatRounds=0;
+  document.getElementById('chat-start').style.display='none';
+  document.getElementById('chat-stop').style.display='inline-flex';
+  logLine('Auto-reply started as '+persona()+'.','hd');
+  runChatRound();
+  chatTimer=setInterval(runChatRound, parseInt(document.getElementById('chat-interval').value)*1000);
+}
+function stopChat(){
+  chatRunning=false; if(chatTimer) clearInterval(chatTimer); chatTimer=null;
+  document.getElementById('chat-start').style.display='inline-flex';
+  document.getElementById('chat-stop').style.display='none';
+  setState('idle');
+  logLine('Auto-reply stopped after '+chatRounds+' round(s).','hd');
+}
+async function runChatRound(){
+  if(!chatRunning||chatBusy) return;
+  chatBusy=true; chatRounds++;
+  setState('running · round '+chatRounds,'run');
+  try{
+    const data=await post('/api/threads/auto-run',{persona:persona(),
+      reply_comments:document.getElementById('auto-comments').checked,
+      reply_mentions:document.getElementById('auto-mentions').checked});
+    if(!data.ok){ logLine('Error: '+data.error,'er'); if(/No Threads account/i.test(data.error||'')) stopChat(); }
+    else {
+      const a=data.actions||{};
+      logLine('Round '+chatRounds+' · '+(a.comment_replies||0)+' comment replies, '+(a.mention_replies||0)+' mention replies','hd');
+      (data.log||[]).forEach(l=>logLine(l,'act'));
+      if(!(data.log||[]).length) logLine('Nothing new this round — will retry.',null);
+    }
+  }catch(e){ logLine('Round failed: '+e,'er'); }
+  finally{ chatBusy=false; if(chatRunning) setState('waiting for next round','run'); }
+}
+window.addEventListener('beforeunload',()=>{ if(chatRunning) stopChat(); });
+
+init();
+</script>
+</body>
+</html>
