@@ -5422,6 +5422,15 @@ def api_telegram_platform():
         me = _tg_api(token, 'getMe')
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 400
+    try:
+        return _tg_platform_save(plat, token, base, me)
+    except Exception as e:
+        logging.exception('telegram platform save failed')
+        return jsonify({'ok': False,
+                        'error': f'{e.__class__.__name__}: {str(e)[:300]}'}), 500
+
+
+def _tg_platform_save(plat, token, base, me):
     plat = {
         'bot_token': token,
         'bot_id': me.get('id'),
@@ -5443,8 +5452,31 @@ def api_telegram_platform():
         except Exception as e:
             return jsonify({'ok': False, 'error': str(e)}), 400
     _tg_save_platform(plat)
+    if not _tg_platform().get('bot_token'):
+        return jsonify({'ok': False, 'error': 'Saved nothing — the settings database '
+                                              'is not writable on this deployment, so '
+                                              'the bot cannot stay connected.'}), 500
     return jsonify({'ok': True, 'username': plat['username'],
                     'webhook_set': plat['webhook_set']})
+
+
+@app.route('/api/telegram/diag')
+def api_telegram_diag():
+    """Why is this deployment failing? Reports whether settings actually persist."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    probe = f'diag-{int(time.time())}'
+    _set_setting('telegram_diag', probe)
+    out = {'settings_writable': _get_setting('telegram_diag') == probe,
+           'platform_configured': bool(_tg_platform().get('bot_token')),
+           'personas_connected': len(_tg_load_bots()),
+           'last_db_error': _last_x_log_error[0]}
+    try:
+        from db import engine
+        out['db_url'] = str(engine.url).split('@')[-1]
+    except Exception as e:
+        out['db_url'] = f'unavailable: {str(e)[:120]}'
+    return jsonify(out)
 
 
 @app.route('/api/telegram/hosted', methods=['POST'])
