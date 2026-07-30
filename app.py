@@ -5170,6 +5170,9 @@ def _tg_history(persona, chat_id, limit=30):
 
 
 def _tg_generate(persona, chat_id, instruction):
+    if client is None:
+        # No Gemini configured — still answer, so the pipeline is testable.
+        return local_fallback_reply(instruction)
     history = _tg_history(persona, chat_id)
     return _fv_trim(_persona_text(persona, instruction, history=history,
                                   max_tokens=400, temperature=0.9), hard_cap=420)
@@ -5657,6 +5660,50 @@ def api_telegram_test():
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 400
     return jsonify({'ok': True})
+
+
+def _tg_poll_round(offset):
+    """One getUpdates pass for the platform bot. Returns the next offset.
+    Polling needs no public HTTPS URL, so the bot is testable from a laptop or
+    from behind a host whose previews sit behind an auth wall."""
+    plat = _tg_platform()
+    token = plat.get('bot_token')
+    if not token:
+        return offset
+    params = {'timeout': 25, 'allowed_updates': ['message']}
+    if offset:
+        params['offset'] = offset
+    try:
+        updates = _tg_api(token, 'getUpdates', params)
+    except Exception:
+        time.sleep(5)
+        return offset
+    for u in updates or []:
+        offset = int(u.get('update_id', 0)) + 1
+        try:
+            with app.app_context():
+                _tg_handle_platform_update(u)
+        except Exception:
+            error_logger.error('telegram poll update failed', exc_info=True)
+    return offset
+
+
+def _tg_poll_worker():
+    """Long-poll loop, enabled with TELEGRAM_POLL=1. Mutually exclusive with the
+    webhook, so the webhook is removed first."""
+    plat = _tg_platform()
+    if plat.get('bot_token'):
+        try:
+            _tg_api(plat['bot_token'], 'deleteWebhook', {'drop_pending_updates': False})
+        except Exception:
+            pass
+    offset = 0
+    while True:
+        offset = _tg_poll_round(offset)
+
+
+if os.getenv('TELEGRAM_POLL', '0') == '1':
+    threading.Thread(target=_tg_poll_worker, daemon=True).start()
 
 
 _tg_worker_started = [False]
