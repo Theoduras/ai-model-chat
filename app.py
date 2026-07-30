@@ -537,6 +537,33 @@ except Exception as _db_err:
     print(f'DB init skipped: {_db_err}')
 
 
+# The app serves static assets straight from the project root (static_folder=
+# BASE_DIR), which otherwise publishes the source, the database and .env at "/".
+# Everything the browser legitimately needs is html/css/js/images, so block the
+# rest before Flask's static handler ever sees it.
+_BLOCKED_SUFFIXES = ('.py', '.pyc', '.pyo', '.db', '.sqlite', '.sqlite3', '.db-journal',
+                     '.log', '.env', '.pem', '.key', '.cfg', '.ini', '.toml', '.lock',
+                     '.txt', '.md', '.yml', '.yaml')
+_BLOCKED_DIRS = ('personas/', 'logs/', '__pycache__/', 'templates/', '.git/')
+_ALLOWED_FILES = {'/robots.txt'}
+
+
+@app.before_request
+def _block_source_files():
+    path = (request.path or '/').lower()
+    if path in _ALLOWED_FILES:
+        return None
+    stripped = path.lstrip('/')
+    if any(seg.startswith('.') for seg in stripped.split('/') if seg):
+        return ('Not found', 404)
+    if stripped.startswith(_BLOCKED_DIRS):
+        return ('Not found', 404)
+    # Only guard bare files, never the app's own routes (which carry no suffix).
+    if path.endswith(_BLOCKED_SUFFIXES):
+        return ('Not found', 404)
+    return None
+
+
 @app.route('/healthz')
 def healthz():
     return jsonify({'status': 'ok'}), 200
