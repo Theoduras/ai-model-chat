@@ -647,6 +647,11 @@ def threads_page():
         return redirect('/dashboard')
     return send_from_directory(BASE_DIR, 'threads.html')
 
+@app.route('/comingsoon')
+@app.route('/soon')
+def comingsoon_page():
+    return send_from_directory(BASE_DIR, 'comingsoon.html')
+
 @app.route('/profile')
 def profile():
     return redirect('/landing')
