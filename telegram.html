@@ -31,6 +31,10 @@
     table.fans td { padding:6px 8px; border-bottom:1px solid #1c1c20; color:#d4d4d8; }
     .dot { font-size:0.9rem; }
     .dot.y { color:#4ade80; } .dot.n { color:#3f3f46; }
+    .mode-tabs { display:flex; gap:8px; }
+    .mode-tab { background:#18181b; border:1px solid #2a2a30; color:#a1a1aa; border-radius:9px; padding:9px 14px; font-size:0.82rem; cursor:pointer; }
+    .mode-tab.active { background:#312e81; border-color:#4338ca; color:#e0e7ff; }
+    .mode-tab span { font-size:0.66rem; background:#4338ca; color:#e0e7ff; border-radius:9999px; padding:1px 7px; margin-left:6px; }
     @media (max-width: 640px) {
       .xbot-wrap { padding: 18px 14px 70px; gap: 16px; }
       .stats { grid-template-columns: repeat(2, 1fr); }
@@ -68,23 +72,47 @@
     </div>
 
     <div id="connect-panel" style="display:none; margin-top:4px; border-top:1px solid #232327; padding-top:16px;">
-      <div class="section-title" style="font-size:0.85rem;">How to connect</div>
-      <ol class="steps">
-        <li>In Telegram, open <a href="https://t.me/BotFather" target="_blank" style="color:#818cf8;">@BotFather</a> and send <code>/newbot</code>.</li>
-        <li>Give it a display name, then a username ending in <code>bot</code>.</li>
-        <li>BotFather replies with a token like <code>7123456789:AAH…</code> — paste it below.</li>
-        <li>Optional: send <code>/setuserpic</code> and <code>/setdescription</code> to BotFather to brand the bot as the persona.</li>
-        <li>Click <b>Connect</b> — the webhook is registered for you automatically.</li>
-      </ol>
-      <div class="field full" style="margin-top:12px;">
-        <label>Bot token</label>
-        <input type="password" id="bot-token" placeholder="1234567890:AA…" autocomplete="off" spellcheck="false">
+      <div class="mode-tabs">
+        <button class="mode-tab active" id="tab-hosted" onclick="setMode('hosted')">Use our bot <span>recommended</span></button>
+        <button class="mode-tab" id="tab-own" onclick="setMode('own')">Use my own bot</button>
       </div>
-      <div class="field full" style="margin-top:12px;">
-        <label>Public base URL <span style="font-weight:400;color:#52525b;">(must be HTTPS for webhooks)</span></label>
-        <input type="text" id="base-url" autocomplete="off" spellcheck="false">
+
+      <div id="mode-hosted" style="margin-top:16px;">
+        <p class="hint" style="display:block; margin-bottom:12px;">One click. You get a personal link on <b id="plat-handle">our bot</b> — put it in your bio, and anyone who opens it lands in a private chat with your persona. Nothing to install, no token to manage.</p>
+        <div id="plat-missing" class="note" style="display:none; border-color:#7f1d1d; color:#fca5a5;">The platform bot isn't set up on this server yet — see <b>Platform bot</b> at the bottom of this page.</div>
+        <button class="btn-ai" id="hosted-btn" onclick="connectHosted()">Connect with our bot →</button>
+        <div id="hosted-out" style="display:none; margin-top:16px;">
+          <div class="field full">
+            <label>Your connect code</label>
+            <input type="text" id="my-code" readonly onclick="this.select()">
+          </div>
+          <div class="field full" style="margin-top:12px;">
+            <label>Your link <span style="font-weight:400;color:#52525b;">(share this — bio, link tree, X, anywhere)</span></label>
+            <input type="text" id="share-link" readonly onclick="this.select()">
+          </div>
+          <button class="btn-ai" style="background:#3f3f46; margin-top:12px;" onclick="copyShare()">Copy link</button>
+          <a class="btn-ai" id="open-tg" style="background:#3f3f46; margin-top:12px; text-decoration:none; display:inline-flex;" target="_blank">Open in Telegram</a>
+        </div>
       </div>
-      <button class="btn-ai" style="margin-top:14px;" onclick="connectBot()">Connect →</button>
+
+      <div id="mode-own" style="display:none; margin-top:16px;">
+        <ol class="steps">
+          <li>In Telegram, open <a href="https://t.me/BotFather" target="_blank" style="color:#818cf8;">@BotFather</a> and send <code>/newbot</code>.</li>
+          <li>Give it a display name, then a username ending in <code>bot</code>.</li>
+          <li>BotFather replies with a token like <code>7123456789:AAH…</code> — paste it below.</li>
+          <li>Optional: send <code>/setuserpic</code> and <code>/setdescription</code> to BotFather to brand the bot as the persona.</li>
+          <li>Click <b>Connect</b> — the webhook is registered for you automatically.</li>
+        </ol>
+        <div class="field full" style="margin-top:12px;">
+          <label>Bot token</label>
+          <input type="password" id="bot-token" placeholder="1234567890:AA…" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="field full" style="margin-top:12px;">
+          <label>Public base URL <span style="font-weight:400;color:#52525b;">(must be HTTPS for webhooks)</span></label>
+          <input type="text" id="base-url" autocomplete="off" spellcheck="false">
+        </div>
+        <button class="btn-ai" style="margin-top:14px;" onclick="connectBot()">Connect →</button>
+      </div>
       <div class="result-box" id="connect-status"></div>
     </div>
   </div>
@@ -140,11 +168,31 @@
     <div class="note" style="margin-top:12px;">Local development has no public HTTPS URL, so the webhook is skipped — deploy, or point the base URL at a tunnel, to receive messages.</div>
   </div>
 
+  <div class="form-section">
+    <div class="section-title">⚙️ Platform bot <span style="font-weight:400;font-size:0.75rem;color:#52525b;">— operator only, set once</span></div>
+    <span class="hint" style="display:block; margin-bottom:10px;">The shared bot every subscriber connects to. Create it once in <a href="https://t.me/BotFather" target="_blank" style="color:#818cf8;">@BotFather</a> (<code>/newbot</code>), paste the token here, and from then on creators connect with one click.</span>
+    <div class="row-inline">
+      <div class="field">
+        <label>Platform bot token</label>
+        <input type="password" id="plat-token" placeholder="1234567890:AA…" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="field">
+        <label>Public base URL</label>
+        <input type="text" id="plat-base" autocomplete="off" spellcheck="false">
+      </div>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center; margin-top:14px; flex-wrap:wrap;">
+      <button class="btn-ai" onclick="savePlatform()">Save platform bot</button>
+      <span class="conn-pill" id="plat-pill">—</span>
+    </div>
+    <div class="result-box" id="plat-status"></div>
+  </div>
+
 </div>
 </div>
 
 <script>
-let connStatus = {};
+let connStatus = {}, platform = {};
 function esc(s){ return (s||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function persona(){ return document.getElementById('persona').value; }
 function busy(box,msg){ box.innerHTML='<span class="hint">'+esc(msg)+'</span>'; }
@@ -157,28 +205,94 @@ async function post(url,body){
 
 async function init(){
   try{
-    const [pRes,sRes]=await Promise.all([fetch('/api/personas'),fetch('/api/telegram/status')]);
+    const [pRes,sRes,fRes]=await Promise.all([
+      fetch('/api/personas'),fetch('/api/telegram/status'),fetch('/api/telegram/platform')]);
     const list=await pRes.json();
     connStatus=await sRes.json();
+    platform=await fRes.json().catch(()=>({}));
     document.getElementById('persona').innerHTML =
       list.map(p=>'<option value="'+p.slug+'">'+esc(p.name||p.slug)+'</option>').join('');
     document.getElementById('base-url').value=location.origin;
+    document.getElementById('plat-base').value=platform.base_url||location.origin;
+    renderPlatform();
     updateConn();
   }catch(e){}
+}
+
+function renderPlatform(){
+  const pill=document.getElementById('plat-pill');
+  if(platform.configured){
+    pill.className='conn-pill ok';
+    pill.textContent='✓ @'+(platform.username||'bot')+(platform.webhook_set?'':' · webhook pending');
+  } else { pill.className='conn-pill err'; pill.textContent='Not configured'; }
+  document.getElementById('plat-handle').textContent =
+    platform.username ? '@'+platform.username : 'our bot';
+  document.getElementById('plat-missing').style.display = platform.configured?'none':'block';
+  document.getElementById('hosted-btn').disabled = !platform.configured;
+}
+
+async function savePlatform(){
+  const box=document.getElementById('plat-status');
+  busy(box,'Registering the platform bot…');
+  const data=await post('/api/telegram/platform',{
+    bot_token:document.getElementById('plat-token').value.trim(),
+    base_url:document.getElementById('plat-base').value.trim()});
+  if(!data.ok){ err(box,data.error); return; }
+  document.getElementById('plat-token').value='';
+  ok(box,'Platform bot is @'+data.username+(data.webhook_set?' — webhook registered.':' — webhook skipped (needs HTTPS).'));
+  platform=await (await fetch('/api/telegram/platform')).json();
+  renderPlatform();
+}
+
+function setMode(m){
+  document.getElementById('tab-hosted').classList.toggle('active',m==='hosted');
+  document.getElementById('tab-own').classList.toggle('active',m==='own');
+  document.getElementById('mode-hosted').style.display=m==='hosted'?'block':'none';
+  document.getElementById('mode-own').style.display=m==='own'?'block':'none';
+  document.getElementById('connect-status').innerHTML='';
+}
+
+function showShare(info){
+  const out=document.getElementById('hosted-out');
+  if(!info || !info.share_link){ out.style.display='none'; return; }
+  out.style.display='block';
+  document.getElementById('my-code').value=info.code||'';
+  document.getElementById('share-link').value=info.share_link;
+  document.getElementById('open-tg').href=info.share_link;
+}
+
+async function connectHosted(){
+  const box=document.getElementById('connect-status');
+  busy(box,'Setting up your link…');
+  const data=await post('/api/telegram/hosted',{persona:persona()});
+  if(!data.ok){ err(box,data.error); return; }
+  ok(box,'Connected to @'+data.username+' — share the link below.');
+  showShare(data);
+  connStatus=await (await fetch('/api/telegram/status')).json();
+  const pill=document.getElementById('conn-pill');
+  pill.className='conn-pill ok'; pill.textContent='✓ @'+data.username;
+}
+
+function copyShare(){
+  const el=document.getElementById('share-link');
+  el.select(); document.execCommand('copy');
+  ok(document.getElementById('connect-status'),'Link copied.');
 }
 
 function updateConn(){
   const pill=document.getElementById('conn-pill'), info=connStatus[persona()]||{};
   if(info.connected){
     pill.className='conn-pill ok';
-    pill.textContent='✓ @'+(info.username||'bot');
+    pill.textContent='✓ @'+(info.username||'bot')+(info.mode==='hosted'?' · shared':'');
   } else {
     pill.className='conn-pill err'; pill.textContent='Not connected';
   }
-  document.getElementById('connect-btn').textContent=info.connected?'Reconnect':'Connect bot';
+  document.getElementById('connect-btn').textContent=info.connected?'Connection settings':'Connect bot';
   document.getElementById('disconnect-btn').style.display=info.connected?'inline-flex':'none';
   document.getElementById('connect-panel').style.display='none';
   document.getElementById('connect-status').innerHTML='';
+  setMode(info.mode==='own'?'own':'hosted');
+  showShare(info.share_link?info:null);
   document.getElementById('cta-url').value=info.cta_url||'';
   document.getElementById('cta-label').value=info.cta_label||'';
   loadSettings(); loadStats();

@@ -5007,8 +5007,30 @@ def _tg_save_bots(data):
     _set_setting('telegram_bots', json.dumps(data))
 
 
+def _tg_platform():
+    """The one platform-owned bot every subscriber can share, so a creator never
+    has to touch BotFather. Set up once by the operator."""
+    try:
+        return json.loads(_get_setting('telegram_platform') or '{}')
+    except Exception:
+        return {}
+
+
+def _tg_save_platform(data):
+    _set_setting('telegram_platform', json.dumps(data))
+
+
 def _tg_bot(persona):
-    bot = _tg_load_bots().get(persona) or {}
+    """Connection record for a persona. Hosted personas borrow the platform
+    bot's token and identity but keep their own code, CTA and fan state."""
+    bot = dict(_tg_load_bots().get(persona) or {})
+    if bot.get('mode') == 'hosted':
+        plat = _tg_platform()
+        if not plat.get('bot_token'):
+            raise RuntimeError('The platform Telegram bot is not configured yet.')
+        bot['bot_token'] = plat['bot_token']
+        bot['username'] = plat.get('username', '')
+        bot['base_url'] = plat.get('base_url') or bot.get('base_url', '')
     if not bot.get('bot_token'):
         raise RuntimeError(f'No Telegram bot connected for persona "{persona}".')
     return bot
@@ -5019,6 +5041,26 @@ def _tg_persona_for_path(path_id):
         if bot.get('path_id') == path_id:
             return persona, bot
     return None, None
+
+
+def _tg_persona_for_code(code):
+    for persona, bot in _tg_load_bots().items():
+        if bot.get('code') and bot['code'] == code:
+            return persona
+    return None
+
+
+def _tg_routes():
+    """chat_id → persona, so a fan on the shared bot keeps talking to the same
+    creator after the first deep-linked /start."""
+    try:
+        return json.loads(_get_setting('telegram_routes') or '{}')
+    except Exception:
+        return {}
+
+
+def _tg_save_routes(routes):
+    _set_setting('telegram_routes', json.dumps(routes))
 
 
 def _tg_api(token, method, payload=None):
@@ -5082,9 +5124,17 @@ def _tg_fan_key(chat_id):
 
 
 def _tg_cta_link(bot, chat_id):
-    """Tracked redirect through our own server so clicks are measurable."""
+    """Tracked redirect through our own server so clicks are measurable. Keyed on
+    the persona's own code, which is unique even when the bot itself is shared."""
     base = (bot.get('base_url') or '').rstrip('/')
-    return f'{base}/go/{bot.get("path_id")}/{chat_id}'
+    return f'{base}/go/{bot.get("code") or bot.get("path_id")}/{chat_id}'
+
+
+def _tg_share_link(bot):
+    """The link a creator puts in their bio. The payload routes the fan to them."""
+    if not (bot.get('username') and bot.get('code')):
+        return ''
+    return f'https://t.me/{bot["username"]}?start={bot["code"]}'
 
 
 def _tg_history(persona, chat_id, limit=30):
@@ -5204,18 +5254,59 @@ def _tg_followup_round(persona):
     return sent
 
 
+def _tg_handle_platform_update(update):
+    """Shared-bot dispatch. A fan arriving through a creator's deep link sends
+    `/start <code>`; that binds the chat to the creator for every later message."""
+    msg = update.get('message') or {}
+    chat = msg.get('chat') or {}
+    chat_id = str(chat.get('id') or '')
+    text = (msg.get('text') or '').strip()
+    if not chat_id or not text:
+        return
+    plat = _tg_platform()
+    routes = _tg_routes()
+    persona = routes.get(chat_id)
+
+    parts = text.split(None, 1)
+    if parts and parts[0] in ('/start', '/connect'):
+        payload = (parts[1] if len(parts) > 1 else '').strip()
+        if payload:
+            matched = _tg_persona_for_code(payload)
+            if not matched:
+                _tg_api(plat['bot_token'], 'sendMessage',
+                        {'chat_id': chat_id, 'text': "That link doesn't look right — "
+                                                     'ask for a fresh one.'})
+                return
+            persona = matched
+            routes[chat_id] = persona
+            _tg_save_routes(routes)
+        # Let the opener branch in _tg_handle_update see a bare /start.
+        msg['text'] = '/start'
+    if not persona:
+        _tg_api(plat['bot_token'], 'sendMessage',
+                {'chat_id': chat_id, 'text': 'Open this chat from the link you were '
+                                             'given so I know who you came for.'})
+        return
+    _tg_handle_update(persona, update)
+
+
 @app.route('/api/telegram/webhook/<path_id>', methods=['POST'])
 def api_telegram_webhook(path_id):
     """Telegram pushes every update here. Ack within milliseconds — Gemini runs
     on a worker thread, because a slow 200 makes Telegram redeliver the update."""
-    persona, bot = _tg_persona_for_path(path_id)
-    if not persona:
-        return '', 404
-    if request.headers.get('X-Telegram-Bot-Api-Secret-Token', '') != bot.get('secret', ''):
+    plat = _tg_platform()
+    if plat.get('path_id') and plat['path_id'] == path_id:
+        persona, secret = None, plat.get('secret', '')
+    else:
+        persona, bot = _tg_persona_for_path(path_id)
+        if not persona:
+            return '', 404
+        secret = bot.get('secret', '')
+    if request.headers.get('X-Telegram-Bot-Api-Secret-Token', '') != secret:
         return '', 401
     update = request.get_json(silent=True) or {}
     uid = update.get('update_id')
-    seen_key = f'telegram_seen_{persona}'
+    seen_key = f'telegram_seen_{persona or "platform"}'
     try:
         seen = json.loads(_get_setting(seen_key) or '[]')
     except Exception:
@@ -5227,7 +5318,10 @@ def api_telegram_webhook(path_id):
     def work():
         with app.app_context():
             try:
-                _tg_handle_update(persona, update)
+                if persona:
+                    _tg_handle_update(persona, update)
+                else:
+                    _tg_handle_platform_update(update)
             except Exception:
                 error_logger.error('telegram update failed', exc_info=True)
 
@@ -5235,11 +5329,14 @@ def api_telegram_webhook(path_id):
     return '', 200
 
 
-@app.route('/go/<path_id>/<chat_id>')
-def telegram_cta_click(path_id, chat_id):
+@app.route('/go/<ref>/<chat_id>')
+def telegram_cta_click(ref, chat_id):
     """Tracked CTA redirect — records the click, then forwards to the creator's page."""
-    persona, bot = _tg_persona_for_path(path_id)
-    if not persona or not (bot.get('cta_url') or '').strip():
+    persona = _tg_persona_for_code(ref)
+    bot = (_tg_load_bots().get(persona) or {}) if persona else {}
+    if not persona:
+        persona, bot = _tg_persona_for_path(ref)
+    if not persona or not ((bot or {}).get('cta_url') or '').strip():
         return redirect('/')
     fans = _tg_fans(persona)
     fan = fans.get(str(chat_id))
@@ -5270,9 +5367,11 @@ def api_telegram_connect():
     bots = _tg_load_bots()
     existing = bots.get(persona) or {}
     bot = {
+        'mode': 'own',
         'bot_token': token,
         'bot_id': me.get('id'),
         'username': me.get('username', ''),
+        'code': existing.get('code') or secrets.token_urlsafe(9),
         'path_id': existing.get('path_id') or secrets.token_urlsafe(24),
         'secret': existing.get('secret') or secrets.token_urlsafe(24),
         'base_url': base,
@@ -5300,16 +5399,102 @@ def api_telegram_connect():
                     'webhook_url': f'{base}/api/telegram/webhook/{bot["path_id"]}'})
 
 
+@app.route('/api/telegram/platform', methods=['GET', 'POST'])
+def api_telegram_platform():
+    """Operator-side: register the single shared bot once. Every subscriber then
+    connects with one click — no BotFather, no token of their own."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    plat = _tg_platform()
+    if request.method == 'GET':
+        return jsonify({'configured': bool(plat.get('bot_token')),
+                        'username': plat.get('username', ''),
+                        'webhook_set': bool(plat.get('webhook_set')),
+                        'base_url': plat.get('base_url', '')})
+    data = request.json or {}
+    token = (data.get('bot_token') or '').strip() or plat.get('bot_token', '')
+    if not token:
+        return jsonify({'ok': False, 'error': 'bot_token is required'}), 400
+    base = (data.get('base_url') or plat.get('base_url') or request.url_root).strip().rstrip('/')
+    if base.startswith('http://') and 'localhost' not in base and '127.0.0.1' not in base:
+        base = 'https://' + base[len('http://'):]
+    try:
+        me = _tg_api(token, 'getMe')
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+    plat = {
+        'bot_token': token,
+        'bot_id': me.get('id'),
+        'username': me.get('username', ''),
+        'path_id': plat.get('path_id') or secrets.token_urlsafe(24),
+        'secret': plat.get('secret') or secrets.token_urlsafe(24),
+        'base_url': base,
+        'webhook_set': False,
+    }
+    if base.startswith('https://'):
+        try:
+            _tg_api(token, 'setWebhook', {
+                'url': f'{base}/api/telegram/webhook/{plat["path_id"]}',
+                'secret_token': plat['secret'],
+                'allowed_updates': ['message'],
+                'drop_pending_updates': True,
+            })
+            plat['webhook_set'] = True
+        except Exception as e:
+            return jsonify({'ok': False, 'error': str(e)}), 400
+    _tg_save_platform(plat)
+    return jsonify({'ok': True, 'username': plat['username'],
+                    'webhook_set': plat['webhook_set']})
+
+
+@app.route('/api/telegram/hosted', methods=['POST'])
+def api_telegram_hosted():
+    """Subscriber-side one-click connect: mint this persona's code on the shared
+    bot and hand back the link they put in their bio."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    data = request.json or {}
+    persona = (data.get('persona') or '').strip()
+    if not persona:
+        return jsonify({'ok': False, 'error': 'persona required'}), 400
+    plat = _tg_platform()
+    if not plat.get('bot_token'):
+        return jsonify({'ok': False, 'error': 'The platform Telegram bot is not '
+                                              'configured yet.'}), 400
+    bots = _tg_load_bots()
+    existing = bots.get(persona) or {}
+    bot = dict(existing)
+    bot.update({
+        'mode': 'hosted',
+        'code': existing.get('code') or secrets.token_urlsafe(9),
+        'base_url': plat.get('base_url', ''),
+        'connected_at': int(time.time()),
+    })
+    bot.pop('bot_token', None)
+    bot.pop('path_id', None)
+    bots[persona] = bot
+    _tg_save_bots(bots)
+    return jsonify({'ok': True, 'code': bot['code'],
+                    'username': plat.get('username', ''),
+                    'share_link': _tg_share_link({**bot, 'username': plat.get('username', '')})})
+
+
 @app.route('/api/telegram/status')
 def api_telegram_status():
     if not _check_admin():
         return jsonify({'error': 'Unauthorized'}), 401
+    plat = _tg_platform()
     out = {}
     for persona, bot in _tg_load_bots().items():
+        hosted = bot.get('mode') == 'hosted'
+        username = plat.get('username', '') if hosted else bot.get('username', '')
         out[persona] = {
-            'connected': bool(bot.get('bot_token')),
-            'username': bot.get('username', ''),
-            'webhook_set': bool(bot.get('webhook_set')),
+            'connected': bool(bot.get('bot_token')) or (hosted and bool(plat.get('bot_token'))),
+            'mode': bot.get('mode', 'own'),
+            'username': username,
+            'code': bot.get('code', ''),
+            'share_link': _tg_share_link({**bot, 'username': username}),
+            'webhook_set': bool(plat.get('webhook_set') if hosted else bot.get('webhook_set')),
             'cta_url': bot.get('cta_url', ''),
             'cta_label': bot.get('cta_label', ''),
         }
@@ -5323,12 +5508,17 @@ def api_telegram_disconnect():
     persona = ((request.json or {}).get('persona') or '').strip()
     bots = _tg_load_bots()
     bot = bots.pop(persona, None)
-    if bot and bot.get('bot_token'):
+    # Only an own-bot record owns its webhook; the shared bot's must stay put.
+    if bot and bot.get('mode') != 'hosted' and bot.get('bot_token'):
         try:
             _tg_api(bot['bot_token'], 'deleteWebhook', {'drop_pending_updates': False})
         except Exception:
             pass
     _tg_save_bots(bots)
+    routes = _tg_routes()
+    trimmed = {k: v for k, v in routes.items() if v != persona}
+    if len(trimmed) != len(routes):
+        _tg_save_routes(trimmed)
     return jsonify({'ok': True})
 
 
