@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Telegram Bot</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <script src="/js/devnav.js" defer></script>
+  <style>
+    .xbot-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+    .xbot-wrap { max-width: 760px; margin: 0 auto; padding: 28px 24px 80px; display: flex; flex-direction: column; gap: 20px; }
+    .result-box { margin-top: 12px; font-size: 0.82rem; display: flex; flex-direction: column; gap: 8px; }
+    .conn-pill { font-size: 0.75rem; padding: 3px 10px; border-radius: 9999px; background: #27272a; color: #a1a1aa; }
+    .conn-pill.ok { background: #14532d; color: #4ade80; }
+    .conn-pill.err { background: #4c0519; color: #fb7185; }
+    .conn-pill.run { background: #312e81; color: #c7d2fe; }
+    .auto-chk { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: #d4d4d8; cursor: pointer; margin-top: 12px; }
+    .auto-chk input { width: auto; }
+    .row-inline { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+    .row-inline .field { flex: 1; min-width: 160px; }
+    .steps { font-size: 0.8rem; color: #a1a1aa; line-height: 1.55; padding-left: 18px; }
+    .steps li { margin-bottom: 6px; }
+    .steps code { background:#18181b; padding:1px 6px; border-radius:5px; color:#c7d2fe; }
+    .note { background:#0d0d0f; border:1px solid #2a2a30; color:#a1a1aa; border-radius:8px; padding:10px 12px; font-size:0.8rem; }
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+    .stat { background:#0d0d0f; border:1px solid #2a2a30; border-radius:10px; padding:14px; text-align:center; }
+    .stat b { display:block; font-size:1.4rem; color:#f4f4f5; }
+    .stat span { font-size:0.72rem; color:#71717a; text-transform:uppercase; letter-spacing:.06em; }
+    table.fans { width:100%; border-collapse:collapse; margin-top:14px; font-size:0.78rem; }
+    table.fans th { text-align:left; color:#71717a; font-weight:500; padding:6px 8px; border-bottom:1px solid #27272a; }
+    table.fans td { padding:6px 8px; border-bottom:1px solid #1c1c20; color:#d4d4d8; }
+    .dot { font-size:0.9rem; }
+    .dot.y { color:#4ade80; } .dot.n { color:#3f3f46; }
+    @media (max-width: 640px) {
+      .xbot-wrap { padding: 18px 14px 70px; gap: 16px; }
+      .stats { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body class="page-dashboard">
+
+<header>
+  <div style="display:flex; align-items:center; gap:10px;">
+    <h1>Telegram Bot</h1>
+    <span class="badge">✈</span>
+  </div>
+  <div style="display:flex; align-items:center; gap:16px;">
+    <a href="/dashboard" style="color:#71717a; font-size:0.8rem; text-decoration:none;">← Dashboard</a>
+  </div>
+</header>
+
+<div class="xbot-scroll">
+<div class="xbot-wrap">
+
+  <div class="form-section">
+    <div class="section-title">Persona &amp; Bot</div>
+    <div class="field full">
+      <label>Choose a model (persona)</label>
+      <div class="row-inline">
+        <div class="field" style="margin:0;">
+          <select id="persona" onchange="updateConn()"></select>
+        </div>
+        <span class="conn-pill" id="conn-pill">—</span>
+        <button class="btn-ai" id="connect-btn" onclick="togglePanel()">Connect bot</button>
+        <button class="btn-ai" id="disconnect-btn" style="background:#3f3f46; display:none;" onclick="disconnectBot()">Disconnect</button>
+      </div>
+      <span class="hint">Each persona gets its own Telegram bot. Fans DM the bot directly — full private chat, unlike Threads.</span>
+    </div>
+
+    <div id="connect-panel" style="display:none; margin-top:4px; border-top:1px solid #232327; padding-top:16px;">
+      <div class="section-title" style="font-size:0.85rem;">How to connect</div>
+      <ol class="steps">
+        <li>In Telegram, open <a href="https://t.me/BotFather" target="_blank" style="color:#818cf8;">@BotFather</a> and send <code>/newbot</code>.</li>
+        <li>Give it a display name, then a username ending in <code>bot</code>.</li>
+        <li>BotFather replies with a token like <code>7123456789:AAH…</code> — paste it below.</li>
+        <li>Optional: send <code>/setuserpic</code> and <code>/setdescription</code> to BotFather to brand the bot as the persona.</li>
+        <li>Click <b>Connect</b> — the webhook is registered for you automatically.</li>
+      </ol>
+      <div class="field full" style="margin-top:12px;">
+        <label>Bot token</label>
+        <input type="password" id="bot-token" placeholder="1234567890:AA…" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="field full" style="margin-top:12px;">
+        <label>Public base URL <span style="font-weight:400;color:#52525b;">(must be HTTPS for webhooks)</span></label>
+        <input type="text" id="base-url" autocomplete="off" spellcheck="false">
+      </div>
+      <button class="btn-ai" style="margin-top:14px;" onclick="connectBot()">Connect →</button>
+      <div class="result-box" id="connect-status"></div>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">🎯 Funnel &amp; CTA</div>
+    <span class="hint" style="display:block; margin-bottom:12px;">The bot chats in-persona, then drops your link once rapport is built. The link is served through this app (<code>/go/…</code>) so every click is counted. No PPV or payments here.</span>
+    <div class="field full">
+      <label>Destination URL <span style="font-weight:400;color:#52525b;">(OnlyFans, Fanvue, your own page…)</span></label>
+      <input type="text" id="cta-url" placeholder="https://onlyfans.com/yourname" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="field full" style="margin-top:12px;">
+      <label>Link label <span style="font-weight:400;color:#52525b;">(shown before the link, in her voice)</span></label>
+      <input type="text" id="cta-label" placeholder="come find me here" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="row-inline" style="margin-top:12px;">
+      <div class="field">
+        <label>Send the CTA after N fan messages</label>
+        <input type="number" id="cta-after" min="1" max="50" value="6">
+      </div>
+      <div class="field">
+        <label>Follow up after N minutes of silence</label>
+        <input type="number" id="followup-min" min="5" max="1440" value="45">
+      </div>
+    </div>
+    <label class="auto-chk"><input type="checkbox" id="followups" checked> Follow up on quiet fans and unclicked links (max 2 nudges each)</label>
+    <label class="auto-chk"><input type="checkbox" id="enabled" checked> Bot active — reply to incoming Telegram messages</label>
+    <div style="display:flex; gap:8px; margin-top:14px;">
+      <button class="btn-ai" onclick="saveSettings()">Save settings</button>
+    </div>
+    <div class="result-box" id="settings-status"></div>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">📊 Conversion</div>
+    <div class="stats">
+      <div class="stat"><b id="s-fans">0</b><span>Fans</span></div>
+      <div class="stat"><b id="s-sent">0</b><span>CTAs sent</span></div>
+      <div class="stat"><b id="s-clicked">0</b><span>Clicks</span></div>
+      <div class="stat"><b id="s-rate">0%</b><span>Click rate</span></div>
+    </div>
+    <div id="fans-table"></div>
+    <button class="btn-ai" style="background:#3f3f46; margin-top:14px;" onclick="loadStats()">Refresh</button>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">🔗 Webhook</div>
+    <span class="hint" style="display:block; margin-bottom:8px;">Registered automatically on connect. The path is unguessable and every request is checked against a per-bot secret header, so nobody else can puppet your persona.</span>
+    <div class="field full">
+      <label>Callback URL</label>
+      <input type="text" id="wh-url" readonly placeholder="connect a bot first">
+    </div>
+    <div class="note" style="margin-top:12px;">Local development has no public HTTPS URL, so the webhook is skipped — deploy, or point the base URL at a tunnel, to receive messages.</div>
+  </div>
+
+</div>
+</div>
+
+<script>
+let connStatus = {};
+function esc(s){ return (s||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function persona(){ return document.getElementById('persona').value; }
+function busy(box,msg){ box.innerHTML='<span class="hint">'+esc(msg)+'</span>'; }
+function err(box,msg){ box.innerHTML='<span class="hint" style="color:#fb7185;">✗ '+esc(msg)+'</span>'; }
+function ok(box,msg){ box.innerHTML='<span class="hint" style="color:#4ade80;">✓ '+esc(msg)+'</span>'; }
+async function post(url,body){
+  const res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  return res.json();
+}
+
+async function init(){
+  try{
+    const [pRes,sRes]=await Promise.all([fetch('/api/personas'),fetch('/api/telegram/status')]);
+    const list=await pRes.json();
+    connStatus=await sRes.json();
+    document.getElementById('persona').innerHTML =
+      list.map(p=>'<option value="'+p.slug+'">'+esc(p.name||p.slug)+'</option>').join('');
+    document.getElementById('base-url').value=location.origin;
+    updateConn();
+  }catch(e){}
+}
+
+function updateConn(){
+  const pill=document.getElementById('conn-pill'), info=connStatus[persona()]||{};
+  if(info.connected){
+    pill.className='conn-pill ok';
+    pill.textContent='✓ @'+(info.username||'bot');
+  } else {
+    pill.className='conn-pill err'; pill.textContent='Not connected';
+  }
+  document.getElementById('connect-btn').textContent=info.connected?'Reconnect':'Connect bot';
+  document.getElementById('disconnect-btn').style.display=info.connected?'inline-flex':'none';
+  document.getElementById('connect-panel').style.display='none';
+  document.getElementById('connect-status').innerHTML='';
+  document.getElementById('cta-url').value=info.cta_url||'';
+  document.getElementById('cta-label').value=info.cta_label||'';
+  loadSettings(); loadStats();
+}
+
+function togglePanel(){
+  const p=document.getElementById('connect-panel');
+  p.style.display=p.style.display==='none'?'block':'none';
+}
+
+async function connectBot(){
+  const box=document.getElementById('connect-status');
+  const token=document.getElementById('bot-token').value.trim();
+  if(!token){ err(box,'Paste the token BotFather gave you.'); return; }
+  busy(box,'Talking to Telegram…');
+  const data=await post('/api/telegram/connect',{
+    persona:persona(), bot_token:token,
+    base_url:document.getElementById('base-url').value.trim(),
+    cta_url:document.getElementById('cta-url').value.trim(),
+    cta_label:document.getElementById('cta-label').value.trim()});
+  if(!data.ok){ err(box,data.error); return; }
+  document.getElementById('bot-token').value='';
+  document.getElementById('wh-url').value=data.webhook_url||'';
+  ok(box,'Connected as @'+data.username+(data.webhook_set?' — webhook registered.':' — webhook skipped (needs HTTPS).'));
+  connStatus=await (await fetch('/api/telegram/status')).json();
+  setTimeout(()=>{ const s=document.getElementById('connect-status').innerHTML; updateConn(); document.getElementById('connect-status').innerHTML=s; },900);
+}
+
+async function disconnectBot(){
+  if(!confirm('Disconnect this persona’s Telegram bot?')) return;
+  await post('/api/telegram/disconnect',{persona:persona()});
+  delete connStatus[persona()]; updateConn();
+}
+
+async function loadSettings(){
+  try{
+    const s=await (await fetch('/api/telegram/settings?persona='+encodeURIComponent(persona()))).json();
+    document.getElementById('cta-after').value=s.cta_after;
+    document.getElementById('followup-min').value=s.followup_min;
+    document.getElementById('followups').checked=s.followups!==false;
+    document.getElementById('enabled').checked=!!s.enabled;
+  }catch(e){}
+}
+
+async function saveSettings(){
+  const box=document.getElementById('settings-status');
+  busy(box,'Saving…');
+  const data=await post('/api/telegram/settings',{
+    persona:persona(),
+    enabled:document.getElementById('enabled').checked,
+    followups:document.getElementById('followups').checked,
+    cta_after:parseInt(document.getElementById('cta-after').value||'6'),
+    followup_min:parseInt(document.getElementById('followup-min').value||'45'),
+    cta_url:document.getElementById('cta-url').value.trim(),
+    cta_label:document.getElementById('cta-label').value.trim()});
+  if(!data.ok){ err(box,data.error); return; }
+  ok(box,'Saved.');
+  connStatus=await (await fetch('/api/telegram/status')).json();
+}
+
+async function loadStats(){
+  try{
+    const s=await (await fetch('/api/telegram/stats?persona='+encodeURIComponent(persona()))).json();
+    document.getElementById('s-fans').textContent=s.fans||0;
+    document.getElementById('s-sent').textContent=s.cta_sent||0;
+    document.getElementById('s-clicked').textContent=s.cta_clicked||0;
+    document.getElementById('s-rate').textContent=(s.click_rate||0)+'%';
+    const rows=s.rows||[];
+    document.getElementById('fans-table').innerHTML = rows.length ?
+      '<table class="fans"><tr><th>Fan</th><th>Msgs</th><th>CTA</th><th>Clicked</th><th>Nudges</th></tr>'+
+      rows.map(r=>'<tr><td>'+esc(r.name)+'</td><td>'+r.messages+'</td><td><span class="dot '+(r.cta_sent?'y':'n')+'">●</span></td><td><span class="dot '+(r.cta_clicked?'y':'n')+'">●</span></td><td>'+r.followups+'</td></tr>').join('')+
+      '</table>'
+      : '<span class="hint" style="display:block;margin-top:12px;">No fans yet — message the bot on Telegram to start a conversation.</span>';
+  }catch(e){}
+}
+
+init();
+</script>
+</body>
+</html>
