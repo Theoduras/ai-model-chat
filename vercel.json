@@ -1,15 +1,5 @@
 {
   "framework": "flask",
   "buildCommand": "pip install -r requirements.txt",
-  "installCommand": "pip install -r requirements.txt",
-  "rewrites": [
-    { "source": "/api/(.*)", "destination": "/app.py" },
-    { "source": "/chat", "destination": "/app.py" },
-    { "source": "/dashboard", "destination": "/app.py" },
-    { "source": "/dashboard/logout", "destination": "/app.py" },
-    { "source": "/landing", "destination": "/app.py" },
-    { "source": "/profile", "destination": "/app.py" },
-    { "source": "/admin", "destination": "/app.py" },
-    { "source": "/admin/logout", "destination": "/app.py" }
-  ]
+  "installCommand": "pip install -r requirements.txt"
 }
