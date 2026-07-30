@@ -5457,23 +5457,34 @@ def api_telegram_hosted():
     persona = (data.get('persona') or '').strip()
     if not persona:
         return jsonify({'ok': False, 'error': 'persona required'}), 400
-    plat = _tg_platform()
-    if not plat.get('bot_token'):
-        return jsonify({'ok': False, 'error': 'The platform Telegram bot is not '
-                                              'configured yet.'}), 400
-    bots = _tg_load_bots()
-    existing = bots.get(persona) or {}
-    bot = dict(existing)
-    bot.update({
-        'mode': 'hosted',
-        'code': existing.get('code') or secrets.token_urlsafe(9),
-        'base_url': plat.get('base_url', ''),
-        'connected_at': int(time.time()),
-    })
-    bot.pop('bot_token', None)
-    bot.pop('path_id', None)
-    bots[persona] = bot
-    _tg_save_bots(bots)
+    try:
+        plat = _tg_platform()
+        if not plat.get('bot_token'):
+            return jsonify({'ok': False, 'error': 'The platform Telegram bot is not '
+                                                  'configured yet — set it up under '
+                                                  '"Platform bot" below.'}), 400
+        bots = _tg_load_bots()
+        existing = bots.get(persona) or {}
+        bot = dict(existing)
+        bot.update({
+            'mode': 'hosted',
+            'code': existing.get('code') or secrets.token_urlsafe(9),
+            'base_url': plat.get('base_url', ''),
+            'connected_at': int(time.time()),
+        })
+        bot.pop('bot_token', None)
+        bot.pop('path_id', None)
+        bots[persona] = bot
+        _tg_save_bots(bots)
+        # _set_setting swallows write errors, so confirm it actually landed —
+        # otherwise the UI would report success on a read-only database.
+        if not (_tg_load_bots().get(persona) or {}).get('code'):
+            return jsonify({'ok': False, 'error': 'Could not save the connection — '
+                                                  'the settings database is not '
+                                                  'writable on this deployment.'}), 500
+    except Exception as e:
+        logging.exception('telegram hosted connect failed')
+        return jsonify({'ok': False, 'error': str(e)[:300] or e.__class__.__name__}), 500
     return jsonify({'ok': True, 'code': bot['code'],
                     'username': plat.get('username', ''),
                     'share_link': _tg_share_link({**bot, 'username': plat.get('username', '')})})

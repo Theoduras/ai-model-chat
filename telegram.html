@@ -203,20 +203,35 @@ async function post(url,body){
   return res.json();
 }
 
+async function getJSON(url){
+  const r=await fetch(url,{headers:{'Accept':'application/json'}});
+  const t=await r.text();
+  try{ return JSON.parse(t); }
+  catch(e){ throw new Error(r.status===200?'unexpected response':'HTTP '+r.status); }
+}
+
 async function init(){
+  document.getElementById('base-url').value=location.origin;
+  document.getElementById('plat-base').value=location.origin;
+  // Each call is independent — one failure must not blank the whole page.
   try{
-    const [pRes,sRes,fRes]=await Promise.all([
-      fetch('/api/personas'),fetch('/api/telegram/status'),fetch('/api/telegram/platform')]);
-    const list=await pRes.json();
-    connStatus=await sRes.json();
-    platform=await fRes.json().catch(()=>({}));
-    document.getElementById('persona').innerHTML =
-      list.map(p=>'<option value="'+p.slug+'">'+esc(p.name||p.slug)+'</option>').join('');
-    document.getElementById('base-url').value=location.origin;
-    document.getElementById('plat-base').value=platform.base_url||location.origin;
-    renderPlatform();
-    updateConn();
-  }catch(e){}
+    const list=await getJSON('/api/personas');
+    const sel=document.getElementById('persona');
+    if(Array.isArray(list) && list.length){
+      sel.innerHTML=list.map(p=>'<option value="'+p.slug+'">'+esc(p.name||p.slug)+'</option>').join('');
+    } else {
+      sel.innerHTML='<option value="">No personas found</option>';
+    }
+  }catch(e){
+    document.getElementById('persona').innerHTML='<option value="">Could not load personas ('+esc(e.message)+')</option>';
+  }
+  try{ connStatus=await getJSON('/api/telegram/status'); }catch(e){ connStatus={}; }
+  try{
+    platform=await getJSON('/api/telegram/platform');
+    if(platform.base_url) document.getElementById('plat-base').value=platform.base_url;
+  }catch(e){ platform={}; }
+  renderPlatform();
+  updateConn();
 }
 
 function renderPlatform(){
@@ -263,6 +278,7 @@ function showShare(info){
 
 async function connectHosted(){
   const box=document.getElementById('connect-status');
+  if(!persona()){ err(box,'Pick a persona first — the list above is empty.'); return; }
   busy(box,'Setting up your link…');
   const data=await post('/api/telegram/hosted',{persona:persona()});
   if(!data.ok){ err(box,data.error); return; }
