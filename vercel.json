@@ -10,13 +10,6 @@
     { "source": "/landing", "destination": "/app.py" },
     { "source": "/profile", "destination": "/app.py" },
     { "source": "/admin", "destination": "/app.py" },
-    { "source": "/admin/logout", "destination": "/app.py" },
-    { "source": "/xbot", "destination": "/app.py" },
-    { "source": "/fanvue", "destination": "/app.py" },
-    { "source": "/threads", "destination": "/app.py" },
-    { "source": "/telegram", "destination": "/app.py" },
-    { "source": "/go/(.*)", "destination": "/app.py" },
-    { "source": "/comingsoon", "destination": "/app.py" },
-    { "source": "/soon", "destination": "/app.py" }
+    { "source": "/admin/logout", "destination": "/app.py" }
   ]
 }
