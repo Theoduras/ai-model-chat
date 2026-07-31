@@ -5789,6 +5789,335 @@ if os.getenv('TELEGRAM_POLL', '0') == '1':
     threading.Thread(target=_tg_poll_worker, daemon=True).start()
 
 
+# ── Telegram user accounts (MTProto) ─────────────────────────────────────────
+# A real account rather than a bot: no "bot" label, no /start required, and it
+# can open a conversation itself. Same persona, memory, funnel and typing
+# behaviour as the bot path — only the transport differs. Needs a long-lived
+# process, so Cloud Run must run with min-instances 1.
+
+_tgu_runners = {}
+_tgu_errors = {}
+
+
+def _tgu_accounts():
+    try:
+        return json.loads(_get_setting('tguser_accounts') or '{}')
+    except Exception:
+        return {}
+
+
+def _tgu_save_accounts(data):
+    _set_setting('tguser_accounts', json.dumps(data))
+
+
+def _tgu_app_creds():
+    """api_id/api_hash from my.telegram.org — one pair covers every account."""
+    return (_get_setting('tguser_api_id') or os.getenv('TELEGRAM_API_ID', ''),
+            _get_setting('tguser_api_hash') or os.getenv('TELEGRAM_API_HASH', ''))
+
+
+def _tgu_fan_key(chat_id):
+    return f'tgu:{chat_id}'
+
+
+def _tgu_plan(persona, chat_id, name, text):
+    """Build the reply for one incoming DM: same persona voice, memory, funnel
+    and CTA as the bot path. Returns the timing plan the runner acts on."""
+    cfg = _tg_settings(persona)
+    acct = _tgu_accounts().get(persona) or {}
+    fans = _tg_fans(persona)
+    key = str(chat_id)
+    fan = fans.get(key) or {}
+    fan['name'] = name
+    fan['last_in'] = int(time.time())
+    fan['followups'] = 0
+    fan['in_count'] = int(fan.get('in_count', 0)) + 1
+
+    _log_x_message(persona, _tgu_fan_key(chat_id), name, 'in', text)
+
+    cta_url = (acct.get('cta_url') or '').strip()
+    cta_due = bool(cta_url) and not fan.get('cta_sent') and fan['in_count'] >= cfg['cta_after']
+    ask_rule = ('End with ONE question that follows from what they just said — never '
+                'generic, never one you have already asked. ')
+    if cta_due:
+        instruction = (
+            f'Reply in-character to this fan on Telegram: "{text}". Answer what they '
+            'actually said first, then tease — in one natural sentence — that you post '
+            'more somewhere more private. Do NOT paste a link or a URL and do not name '
+            'the site; a link is appended after your message. ' + ask_rule)
+    else:
+        instruction = (
+            f'Reply in-character to this fan on Telegram: "{text}". Warm and engaging, '
+            'react to what they just said before anything else, reference what they '
+            'have told you before, and let interest build slowly — no selling yet. '
+            + ask_rule)
+
+    history = [{'role': 'model' if d == 'out' else 'user', 'content': t}
+               for d, t in _fanvue_saved_history(persona, _tgu_fan_key(chat_id), limit=30)]
+    if client is None:
+        reply = local_fallback_reply(text)
+    else:
+        reply = _fv_trim(_persona_text(persona, instruction, history=history,
+                                       max_tokens=400, temperature=0.9), hard_cap=420)
+    if not reply:
+        return None
+
+    chunks = _tg_bursts(reply) if cfg['humanize'] else [reply]
+    if cta_due:
+        label = (acct.get('cta_label') or 'come see').strip()
+        base = (acct.get('base_url') or '').rstrip('/')
+        link = f'{base}/go/{acct.get("code")}/{chat_id}'
+        chunks[-1] = f'{chunks[-1]}\n\n{label} → {link}'
+        fan['cta_sent'] = int(time.time())
+
+    fans[key] = fan
+    _tg_save_fans(persona, fans)
+    read = min(0.8 + len(text) / 90.0, TG_READ_CAP) if cfg['humanize'] else 0
+    return {'read': read, 'cps': cfg['typing_speed'] if cfg['humanize'] else 999,
+            'chunks': chunks}
+
+
+def _tgu_on_sent(persona, chat_id, name, text):
+    _log_x_message(persona, _tgu_fan_key(chat_id), name, 'out', text)
+    fans = _tg_fans(persona)
+    fan = fans.get(str(chat_id)) or {}
+    fan['last_out'] = int(time.time())
+    fans[str(chat_id)] = fan
+    _tg_save_fans(persona, fans)
+
+
+def _tgu_import():
+    """Import the MTProto layer, turning a missing dependency into a clear
+    message rather than an opaque 500."""
+    try:
+        import tg_user
+        return tg_user
+    except Exception as e:
+        raise RuntimeError(
+            f'Telegram user-account support is unavailable ({e.__class__.__name__}: '
+            f'{str(e)[:120]}). Install it with: pip install telethon') from e
+
+
+def _tgu_start(persona):
+    """Bring one persona's account online (idempotent)."""
+    AccountRunner = _tgu_import().AccountRunner
+    acct = _tgu_accounts().get(persona) or {}
+    api_id, api_hash = _tgu_app_creds()
+    if not (acct.get('session') and api_id and api_hash):
+        return False
+    r = _tgu_runners.get(persona)
+    if r and r.alive():
+        return True
+
+    def plan(chat_id, name, text):
+        with app.app_context():
+            try:
+                return _tgu_plan(persona, chat_id, name, text)
+            except Exception as e:
+                _tgu_errors[persona] = str(e)[:300]
+                return None
+
+    def sent(p, chat_id, name, text):
+        with app.app_context():
+            try:
+                _tgu_on_sent(p, chat_id, name, text)
+            except Exception:
+                pass
+
+    def err(p, msg):
+        _tgu_errors[p] = msg
+
+    runner = AccountRunner(persona, api_id, api_hash, acct['session'],
+                           plan, on_sent=sent, on_error=err)
+    _tgu_runners[persona] = runner
+    _tgu_errors.pop(persona, None)
+    runner.start()
+    return True
+
+
+def _tgu_stop(persona):
+    r = _tgu_runners.pop(persona, None)
+    if r:
+        r.stop()
+
+
+@app.route('/api/tguser/config', methods=['GET', 'POST'])
+def api_tguser_config():
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    api_id, api_hash = _tgu_app_creds()
+    if request.method == 'GET':
+        return jsonify({'api_id': api_id, 'has_hash': bool(api_hash)})
+    data = request.json or {}
+    if data.get('api_id'):
+        _set_setting('tguser_api_id', str(data['api_id']).strip())
+    if data.get('api_hash'):
+        _set_setting('tguser_api_hash', str(data['api_hash']).strip())
+    return jsonify({'ok': True})
+
+
+@app.route('/api/tguser/send-code', methods=['POST'])
+def api_tguser_send_code():
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    data = request.json or {}
+    persona = (data.get('persona') or '').strip()
+    phone = (data.get('phone') or '').strip()
+    api_id, api_hash = _tgu_app_creds()
+    if not persona or not phone:
+        return jsonify({'ok': False, 'error': 'persona and phone are required'}), 400
+    if not (api_id and api_hash):
+        return jsonify({'ok': False, 'error': 'Set the Telegram api_id and api_hash first.'}), 400
+    try:
+        session_str, code_hash = _tgu_import().send_code(api_id, api_hash, phone)
+    except Exception as e:
+        return jsonify({'ok': False, 'error': f'{e.__class__.__name__}: {str(e)[:250]}'}), 400
+    _set_setting(f'tguser_login_{persona}',
+                 json.dumps({'session': session_str, 'hash': code_hash, 'phone': phone}))
+    return jsonify({'ok': True, 'sent_to': phone})
+
+
+@app.route('/api/tguser/sign-in', methods=['POST'])
+def api_tguser_sign_in():
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    data = request.json or {}
+    persona = (data.get('persona') or '').strip()
+    code = (data.get('code') or '').strip()
+    password = (data.get('password') or '').strip() or None
+    api_id, api_hash = _tgu_app_creds()
+    try:
+        pending = json.loads(_get_setting(f'tguser_login_{persona}') or '{}')
+    except Exception:
+        pending = {}
+    if not pending.get('session'):
+        return jsonify({'ok': False, 'error': 'Request a code first.'}), 400
+    try:
+        session_str, me, needs_pw = _tgu_import().sign_in(
+            api_id, api_hash, pending['session'], pending['phone'],
+            code, pending['hash'], password=password)
+    except Exception as e:
+        return jsonify({'ok': False, 'error': f'{e.__class__.__name__}: {str(e)[:250]}'}), 400
+    if needs_pw:
+        pending['session'] = session_str
+        _set_setting(f'tguser_login_{persona}', json.dumps(pending))
+        return jsonify({'ok': True, 'needs_password': True})
+
+    accounts = _tgu_accounts()
+    existing = accounts.get(persona) or {}
+    accounts[persona] = {
+        'session': session_str,
+        'code': existing.get('code') or secrets.token_urlsafe(9),
+        'base_url': (data.get('base_url') or existing.get('base_url')
+                     or request.url_root).strip().rstrip('/'),
+        'cta_url': existing.get('cta_url', ''),
+        'cta_label': existing.get('cta_label', ''),
+        'connected_at': int(time.time()),
+        **me,
+    }
+    _tgu_save_accounts(accounts)
+    _set_setting(f'tguser_login_{persona}', '')
+    _tgu_start(persona)
+    return jsonify({'ok': True, 'account': {k: me[k] for k in ('username', 'first_name', 'phone')}})
+
+
+@app.route('/api/tguser/status')
+def api_tguser_status():
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    out = {}
+    for persona, a in _tgu_accounts().items():
+        r = _tgu_runners.get(persona)
+        out[persona] = {
+            'connected': bool(a.get('session')),
+            'running': bool(r and r.alive()),
+            'username': a.get('username', ''),
+            'first_name': a.get('first_name', ''),
+            'phone': a.get('phone', ''),
+            'cta_url': a.get('cta_url', ''),
+            'cta_label': a.get('cta_label', ''),
+            'error': _tgu_errors.get(persona, ''),
+        }
+    return jsonify(out)
+
+
+@app.route('/api/tguser/control', methods=['POST'])
+def api_tguser_control():
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    data = request.json or {}
+    persona = (data.get('persona') or '').strip()
+    action = (data.get('action') or '').strip()
+    if action == 'stop':
+        _tgu_stop(persona)
+        return jsonify({'ok': True, 'running': False})
+    if action == 'disconnect':
+        _tgu_stop(persona)
+        accounts = _tgu_accounts()
+        accounts.pop(persona, None)
+        _tgu_save_accounts(accounts)
+        return jsonify({'ok': True})
+    if action == 'cta':
+        accounts = _tgu_accounts()
+        if persona in accounts:
+            accounts[persona]['cta_url'] = (data.get('cta_url') or '').strip()
+            accounts[persona]['cta_label'] = (data.get('cta_label') or '').strip()
+            if data.get('base_url'):
+                accounts[persona]['base_url'] = data['base_url'].strip().rstrip('/')
+            _tgu_save_accounts(accounts)
+        return jsonify({'ok': True})
+    try:
+        started = _tgu_start(persona)
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:300]}), 400
+    r = _tgu_runners.get(persona)
+    return jsonify({'ok': started, 'running': bool(r and r.alive()),
+                    'error': _tgu_errors.get(persona, ''),
+                    'hint': ('' if started else
+                             'No stored session or api_id/api_hash — sign in first.')})
+
+
+@app.route('/api/tguser/send', methods=['POST'])
+def api_tguser_send():
+    """Open a conversation first — the thing a bot account cannot do."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    data = request.json or {}
+    persona = (data.get('persona') or '').strip()
+    peer = (data.get('peer') or '').strip()
+    text = (data.get('text') or '').strip()
+    acct = _tgu_accounts().get(persona) or {}
+    api_id, api_hash = _tgu_app_creds()
+    if not (acct.get('session') and peer):
+        return jsonify({'ok': False, 'error': 'Connect an account and give a @username or phone.'}), 400
+    if not text:
+        instr = (f'Write ONE short, warm, in-character opening message to {peer} on '
+                 'Telegram. Natural, curious about them, no hard sell. End with a question.')
+        try:
+            text = _fv_trim(_persona_text(persona, instr, max_tokens=200, temperature=0.95))
+        except Exception as e:
+            return jsonify({'ok': False, 'error': str(e)[:250]}), 400
+    try:
+        _tgu_import().send_message(api_id, api_hash, acct['session'], peer, text)
+    except Exception as e:
+        return jsonify({'ok': False, 'error': f'{e.__class__.__name__}: {str(e)[:250]}'}), 400
+    return jsonify({'ok': True, 'text': text})
+
+
+def _tgu_boot():
+    """Reconnect every stored account after a restart."""
+    with app.app_context():
+        for persona in _tgu_accounts():
+            try:
+                _tgu_start(persona)
+            except Exception as e:
+                _tgu_errors[persona] = str(e)[:300]
+
+
+if os.getenv('TGUSER_AUTOSTART', '1') != '0':
+    threading.Thread(target=_tgu_boot, daemon=True).start()
+
+
 _tg_worker_started = [False]
 
 

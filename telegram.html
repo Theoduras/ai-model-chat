@@ -181,6 +181,68 @@
   </div>
 
   <div class="form-section">
+    <div class="section-title">👤 Real account <span style="font-weight:400;font-size:0.75rem;color:#52525b;">— no “bot” label, no /start</span></div>
+    <span class="hint" style="display:block; margin-bottom:10px;">Signs in as an actual Telegram account instead of a bot. It shows up as a person, fans can message it without pressing START, and it can open conversations itself. Needs its own phone number.</span>
+    <div class="note" style="border-color:#7f1d1d; color:#fca5a5; margin-bottom:14px;">⚠ Automating a user account is against the spirit of Telegram’s terms. Accounts that message people who haven’t written first get rate-limited or banned — use a number you can afford to lose, and keep the volume low.</div>
+
+    <div class="row-inline">
+      <div class="field">
+        <label>api_id <span style="font-weight:400;color:#52525b;">(my.telegram.org)</span></label>
+        <input type="text" id="tgu-api-id" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="field">
+        <label>api_hash</label>
+        <input type="password" id="tgu-api-hash" placeholder="••••••••" autocomplete="off" spellcheck="false">
+      </div>
+    </div>
+    <button class="btn-ai" style="background:#3f3f46; margin-top:12px;" onclick="saveTguConfig()">Save API credentials</button>
+
+    <div class="field full" style="margin-top:16px;">
+      <label>Phone number <span style="font-weight:400;color:#52525b;">(with country code)</span></label>
+      <input type="text" id="tgu-phone" placeholder="+31600000000" autocomplete="off" spellcheck="false">
+    </div>
+    <div style="display:flex; gap:8px; align-items:center; margin-top:12px; flex-wrap:wrap;">
+      <button class="btn-ai" onclick="tguSendCode()">Send login code →</button>
+      <span class="conn-pill" id="tgu-pill">—</span>
+      <button class="btn-ai" id="tgu-start" style="background:#3f3f46; display:none;" onclick="tguControl('start')">▶ Go online</button>
+      <button class="btn-ai" id="tgu-stop" style="background:#4c0519; display:none;" onclick="tguControl('stop')">■ Stop</button>
+      <button class="btn-ai" id="tgu-disc" style="background:#3f3f46; display:none;" onclick="tguDisconnect()">Disconnect</button>
+    </div>
+
+    <div id="tgu-code-panel" style="display:none; margin-top:14px;">
+      <div class="row-inline">
+        <div class="field">
+          <label>Login code from Telegram</label>
+          <input type="text" id="tgu-code" placeholder="12345" autocomplete="off">
+        </div>
+        <div class="field">
+          <label>2FA password <span style="font-weight:400;color:#52525b;">(only if enabled)</span></label>
+          <input type="password" id="tgu-password" placeholder="••••••••" autocomplete="off">
+        </div>
+      </div>
+      <button class="btn-ai" style="margin-top:12px;" onclick="tguSignIn()">Sign in ✓</button>
+    </div>
+    <div class="result-box" id="tgu-status"></div>
+
+    <div style="margin-top:18px; border-top:1px solid #232327; padding-top:14px;">
+      <div class="section-title" style="font-size:0.85rem;">Message someone first</div>
+      <span class="hint" style="display:block; margin-bottom:10px;">The thing a bot account can’t do. Leave the message blank and she’ll write her own opener.</span>
+      <div class="row-inline">
+        <div class="field">
+          <label>@username or phone</label>
+          <input type="text" id="tgu-peer" placeholder="@someone" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="field">
+          <label>Message <span style="font-weight:400;color:#52525b;">(optional)</span></label>
+          <input type="text" id="tgu-text" placeholder="leave blank to generate" autocomplete="off">
+        </div>
+      </div>
+      <button class="btn-ai" style="margin-top:12px;" onclick="tguSend()">Send opener</button>
+      <div class="result-box" id="tgu-send-result"></div>
+    </div>
+  </div>
+
+  <div class="form-section">
     <div class="section-title">⚙️ Platform bot <span style="font-weight:400;font-size:0.75rem;color:#52525b;">— operator only, set once</span></div>
     <span class="hint" style="display:block; margin-bottom:10px;">The shared bot every subscriber connects to. Create it once in <a href="https://t.me/BotFather" target="_blank" style="color:#818cf8;">@BotFather</a> (<code>/newbot</code>), paste the token here, and from then on creators connect with one click.</span>
     <div class="row-inline">
@@ -405,6 +467,98 @@ async function loadStats(){
       : '<span class="hint" style="display:block;margin-top:12px;">No fans yet — message the bot on Telegram to start a conversation.</span>';
   }catch(e){}
 }
+
+// ── Real account (MTProto) ──
+let tguStatus = {};
+
+async function loadTgu(){
+  try{
+    const cfg=await getJSON('/api/tguser/config');
+    if(cfg.api_id && !document.getElementById('tgu-api-id').value)
+      document.getElementById('tgu-api-id').value=cfg.api_id;
+    tguStatus=await getJSON('/api/tguser/status');
+  }catch(e){ tguStatus={}; }
+  renderTgu();
+}
+
+function renderTgu(){
+  const a=tguStatus[persona()]||{}, pill=document.getElementById('tgu-pill');
+  if(a.connected){
+    const who=a.username?('@'+a.username):(a.first_name||a.phone||'account');
+    pill.className='conn-pill '+(a.running?'ok':'run');
+    pill.textContent=(a.running?'● live as ':'○ offline · ')+who;
+  } else { pill.className='conn-pill'; pill.textContent='Not signed in'; }
+  document.getElementById('tgu-start').style.display=(a.connected&&!a.running)?'inline-flex':'none';
+  document.getElementById('tgu-stop').style.display=(a.connected&&a.running)?'inline-flex':'none';
+  document.getElementById('tgu-disc').style.display=a.connected?'inline-flex':'none';
+  if(a.error) err(document.getElementById('tgu-status'), a.error);
+}
+
+async function saveTguConfig(){
+  const box=document.getElementById('tgu-status');
+  busy(box,'Saving…');
+  const d=await post('/api/tguser/config',{
+    api_id:document.getElementById('tgu-api-id').value.trim(),
+    api_hash:document.getElementById('tgu-api-hash').value.trim()});
+  if(!d.ok){ err(box,d.error||'failed'); return; }
+  document.getElementById('tgu-api-hash').value='';
+  ok(box,'API credentials saved.');
+}
+
+async function tguSendCode(){
+  const box=document.getElementById('tgu-status');
+  const phone=document.getElementById('tgu-phone').value.trim();
+  if(!phone){ err(box,'Enter the phone number first.'); return; }
+  busy(box,'Asking Telegram for a code…');
+  const d=await post('/api/tguser/send-code',{persona:persona(), phone});
+  if(!d.ok){ err(box,d.error); return; }
+  document.getElementById('tgu-code-panel').style.display='block';
+  ok(box,'Code sent to '+d.sent_to+' — check Telegram on that number.');
+}
+
+async function tguSignIn(){
+  const box=document.getElementById('tgu-status');
+  busy(box,'Signing in…');
+  const d=await post('/api/tguser/sign-in',{persona:persona(),
+    code:document.getElementById('tgu-code').value.trim(),
+    password:document.getElementById('tgu-password').value.trim(),
+    base_url:location.origin});
+  if(!d.ok){ err(box,d.error); return; }
+  if(d.needs_password){ err(box,'Two-step verification is on — enter the password and sign in again.'); return; }
+  document.getElementById('tgu-code-panel').style.display='none';
+  document.getElementById('tgu-code').value=''; document.getElementById('tgu-password').value='';
+  ok(box,'Signed in as '+(d.account.username?('@'+d.account.username):d.account.first_name)+' — now live.');
+  loadTgu();
+}
+
+async function tguControl(action){
+  const box=document.getElementById('tgu-status');
+  busy(box, action==='stop'?'Stopping…':'Connecting…');
+  const d=await post('/api/tguser/control',{persona:persona(), action});
+  if(!d.ok){ err(box, d.error||d.hint||'failed'); }
+  else ok(box, action==='stop'?'Stopped.':'Online — answering DMs.');
+  loadTgu();
+}
+
+async function tguDisconnect(){
+  if(!confirm('Disconnect this account? The stored session is deleted.')) return;
+  await post('/api/tguser/control',{persona:persona(), action:'disconnect'});
+  loadTgu();
+}
+
+async function tguSend(){
+  const box=document.getElementById('tgu-send-result');
+  const peer=document.getElementById('tgu-peer').value.trim();
+  if(!peer){ err(box,'Enter a @username or phone number.'); return; }
+  busy(box,'Sending…');
+  const d=await post('/api/tguser/send',{persona:persona(), peer,
+    text:document.getElementById('tgu-text').value.trim()});
+  if(!d.ok){ err(box,d.error); return; }
+  box.innerHTML='<div class="reply-card"><span class="tag ok">sent</span><div class="rep">'+esc(d.text)+'</div></div>';
+}
+
+const _updateConn=updateConn;
+updateConn=function(){ _updateConn(); loadTgu(); };
 
 init();
 </script>
