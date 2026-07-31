@@ -607,6 +607,7 @@ function newPersona() {
   renderForm(slug, { name });
   galleryImages = [];
   renderGallery();
+  loadMedia();
   document.getElementById('action-bar').style.display = 'flex';
 }
 
@@ -740,6 +741,23 @@ function renderForm(slug, cfg) {
       <input type="file" id="photo-file-input" accept="image/*" multiple style="display:none;" onchange="onPhotoFiles(event)">
       <span class="hint" id="photo-status"></span>
       <span class="hint" style="margin-top:2px;">First photo creates a fictional face; "More of her" keeps the same person in new shots. Photos save to the database on Save.</span>
+    </div>
+
+    <div class="form-section">
+      <div class="section-title" style="display:flex;align-items:center;justify-content:space-between;">
+        <span>Media Library</span>
+        <label class="btn-ai" style="cursor:pointer;margin:0;font-size:12px;">
+          + Upload Photos
+          <input type="file" accept="image/*" multiple style="display:none;" onchange="onMediaFiles(event)">
+        </label>
+      </div>
+      <span class="hint">Tag your photos by location, outfit, and lighting. The AI sends them in chat when the moment fits.</span>
+      <span class="hint" id="media-status" style="color:#f87171;"></span>
+      <div id="media-grid" style="display:flex;flex-direction:column;gap:12px;margin-top:8px;"></div>
+      <span class="hint" style="margin-top:4px;">
+        <b>Purpose</b>: Main (profile), Tease (flirty preview), Behind-the-scenes, Custom.
+        <b>Lighting</b>: Day, Night, Golden hour, Studio, etc.
+      </span>
     </div>
 
     <div class="form-section">
@@ -1254,6 +1272,7 @@ async function loadGallery(slug) {
     if (Array.isArray(data.images)) galleryImages = data.images.slice(0, MAX_PHOTOS);
   } catch(e) {}
   renderGallery();
+  loadMedia();
 }
 
 function removePhoto(i) { galleryImages.splice(i, 1); renderGallery(); }
@@ -1324,6 +1343,99 @@ async function saveGallery(slug) {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ images: galleryImages })
     });
+  } catch(e) {}
+}
+
+// ── Tagged media library ─────────────────────────────────────────────────────
+
+const MEDIA_PURPOSES = ['', 'Main', 'Tease', 'Behind-the-scenes', 'Custom'];
+const MEDIA_LIGHTING = ['', 'Day time', 'Night time', 'Golden hour', 'Studio', 'Indoor', 'Outdoor'];
+
+function setMediaStatus(msg, ok) {
+  const el = document.getElementById('media-status');
+  if (!el) return;
+  el.textContent = msg || '';
+  el.style.color = ok === true ? '#22c55e' : ok === false ? '#ef4444' : '#a1a1aa';
+}
+
+async function loadMedia() {
+  if (!currentSlug) return;
+  const grid = document.getElementById('media-grid');
+  if (!grid) return;
+  try {
+    const res = await fetch('/api/personas/' + currentSlug + '/media');
+    const data = await res.json();
+    renderMedia(data.items || []);
+  } catch(e) { setMediaStatus('Could not load media', false); }
+}
+
+function renderMedia(items) {
+  const grid = document.getElementById('media-grid');
+  if (!grid) return;
+  if (!items.length) {
+    grid.innerHTML = '<span class="hint">No tagged photos yet. Upload some above.</span>';
+    return;
+  }
+  grid.innerHTML = items.map(it => `
+    <div style="display:flex;gap:12px;background:#18181b;border:1px solid #27272a;border-radius:8px;padding:10px;">
+      <img src="${it.thumb}" style="width:70px;height:90px;object-fit:cover;border-radius:6px;flex-shrink:0;">
+      <div style="flex:1;display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <div><label style="font-size:11px;">Purpose</label>
+          <select onchange="updateMedia('${it.id}','purpose',this.value)">
+            ${MEDIA_PURPOSES.map(p => `<option${p===it.purpose?' selected':''}>${p}</option>`).join('')}
+          </select></div>
+        <div><label style="font-size:11px;">Lighting</label>
+          <select onchange="updateMedia('${it.id}','lighting',this.value)">
+            ${MEDIA_LIGHTING.map(l => `<option${l===it.lighting?' selected':''}>${l}</option>`).join('')}
+          </select></div>
+        <div><label style="font-size:11px;">Location</label>
+          <input value="${esc(it.location)}" placeholder="bedroom, beach…"
+            onchange="updateMedia('${it.id}','location',this.value)"></div>
+        <div><label style="font-size:11px;">Outfit</label>
+          <input value="${esc(it.outfit)}" placeholder="black dress, bikini…"
+            onchange="updateMedia('${it.id}','outfit',this.value)"></div>
+      </div>
+      <button type="button" onclick="deleteMedia('${it.id}')"
+        style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:18px;align-self:start;">×</button>
+    </div>`).join('');
+}
+
+function onMediaFiles(ev) {
+  if (!currentSlug) { setMediaStatus('Save the persona first.', false); ev.target.value=''; return; }
+  const files = Array.from(ev.target.files || []);
+  setMediaStatus('Uploading ' + files.length + ' photo(s)…', null);
+  let done = 0;
+  files.forEach(file => {
+    const reader = new FileReader();
+    reader.onload = async e => {
+      try {
+        await fetch('/api/personas/' + currentSlug + '/media', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: e.target.result })
+        });
+      } catch(err) {}
+      if (++done === files.length) { setMediaStatus('✓ Uploaded — now tag them', true); loadMedia(); }
+    };
+    reader.readAsDataURL(file);
+  });
+  ev.target.value = '';
+}
+
+async function updateMedia(id, field, value) {
+  try {
+    const body = {}; body[field] = value;
+    await fetch('/api/personas/' + currentSlug + '/media/' + id, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    setMediaStatus('✓ Saved', true);
+  } catch(e) { setMediaStatus('✗ Save failed', false); }
+}
+
+async function deleteMedia(id) {
+  try {
+    await fetch('/api/personas/' + currentSlug + '/media/' + id, { method: 'DELETE' });
+    loadMedia();
   } catch(e) {}
 }
 

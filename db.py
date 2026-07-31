@@ -114,6 +114,25 @@ class PersonaImages(Base):
     updated_at = Column(DateTime, default=_now, onupdate=_now)
 
 
+class PersonaMedia(Base):
+    """Tagged media items for a persona. Each image is tagged with location,
+    outfit, lighting, and purpose so the chat engine can pick the right photo
+    to send based on conversation context."""
+    __tablename__ = 'persona_media'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    slug = Column(String(64), nullable=False, index=True)
+    image_data = Column(Text, nullable=False)
+    location = Column(String(120), default='')
+    outfit = Column(String(120), default='')
+    lighting = Column(String(60), default='')
+    purpose = Column(String(60), default='')
+    created_at = Column(DateTime, default=_now)
+
+
+Index('ix_media_slug_purpose', PersonaMedia.slug, PersonaMedia.purpose)
+
+
 class Visit(Base):
     """One row per page view on the site — used for the visitor log
     (who's on the dev page: IP, geolocation, time, path)."""
@@ -211,6 +230,21 @@ class XOpener(Base):
 
 
 Index('ix_xopener_persona_user', XOpener.persona, XOpener.x_user_id)
+
+
+def list_persona_media(session, slug):
+    return session.query(PersonaMedia).filter_by(slug=slug).order_by(PersonaMedia.created_at).all()
+
+
+def get_persona_media(session, media_id):
+    return session.get(PersonaMedia, media_id)
+
+
+def delete_persona_media(session, media_id):
+    row = session.get(PersonaMedia, media_id)
+    if row:
+        session.delete(row)
+    return row
 
 
 def init_db():

@@ -2205,6 +2205,149 @@ def api_persona_images_save(slug):
     return jsonify({'ok': True, 'count': len(saved)})
 
 
+# ── Tagged media library ──────────────────────────────────────────────────────
+
+@app.route('/api/personas/<slug>/media', methods=['GET'])
+def api_persona_media_list(slug):
+    if not re.match(r'^[a-z0-9_-]+$', slug):
+        return jsonify({'error': 'Invalid slug'}), 400
+    from db import SessionLocal, list_persona_media
+    s = SessionLocal()
+    try:
+        rows = list_persona_media(s, slug)
+        return jsonify({'items': [{
+            'id': r.id, 'location': r.location or '', 'outfit': r.outfit or '',
+            'lighting': r.lighting or '', 'purpose': r.purpose or '',
+            'thumb': f'/api/personas/{slug}/media/{r.id}/image',
+        } for r in rows]})
+    finally:
+        s.close()
+
+
+@app.route('/api/personas/<slug>/media', methods=['POST'])
+def api_persona_media_save(slug):
+    if not re.match(r'^[a-z0-9_-]+$', slug):
+        return jsonify({'error': 'Invalid slug'}), 400
+    data = request.json or {}
+    image = data.get('image', '')
+    if not image or not image.startswith('data:'):
+        return jsonify({'error': 'image must be a data URL'}), 400
+    from db import SessionLocal, PersonaMedia
+    s = SessionLocal()
+    try:
+        row = PersonaMedia(
+            slug=slug, image_data=image,
+            location=str(data.get('location', ''))[:120],
+            outfit=str(data.get('outfit', ''))[:120],
+            lighting=str(data.get('lighting', ''))[:60],
+            purpose=str(data.get('purpose', ''))[:60],
+        )
+        s.add(row)
+        s.commit()
+        return jsonify({'ok': True, 'id': row.id})
+    finally:
+        s.close()
+
+
+@app.route('/api/personas/<slug>/media/<media_id>', methods=['PUT'])
+def api_persona_media_update(slug, media_id):
+    if not re.match(r'^[a-z0-9_-]+$', slug):
+        return jsonify({'error': 'Invalid slug'}), 400
+    data = request.json or {}
+    from db import SessionLocal, get_persona_media
+    s = SessionLocal()
+    try:
+        row = get_persona_media(s, media_id)
+        if not row or row.slug != slug:
+            return jsonify({'error': 'Not found'}), 404
+        for f in ('location', 'outfit', 'lighting', 'purpose'):
+            if f in data:
+                setattr(row, f, str(data[f])[:120])
+        if 'image' in data and data['image'].startswith('data:'):
+            row.image_data = data['image']
+        s.commit()
+        return jsonify({'ok': True})
+    finally:
+        s.close()
+
+
+@app.route('/api/personas/<slug>/media/<media_id>', methods=['DELETE'])
+def api_persona_media_delete(slug, media_id):
+    if not re.match(r'^[a-z0-9_-]+$', slug):
+        return jsonify({'error': 'Invalid slug'}), 400
+    from db import SessionLocal, delete_persona_media
+    s = SessionLocal()
+    try:
+        row = delete_persona_media(s, media_id)
+        if not row or row.slug != slug:
+            return jsonify({'error': 'Not found'}), 404
+        s.commit()
+        return jsonify({'ok': True})
+    finally:
+        s.close()
+
+
+@app.route('/api/personas/<slug>/media/<media_id>/image')
+def api_persona_media_image(slug, media_id):
+    if not re.match(r'^[a-z0-9_-]+$', slug):
+        return ('', 400)
+    from db import SessionLocal, get_persona_media
+    s = SessionLocal()
+    try:
+        row = get_persona_media(s, media_id)
+        if not row or row.slug != slug:
+            return ('', 404)
+        return _serve_data_url(row.image_data)
+    finally:
+        s.close()
+
+
+@app.route('/api/personas/<slug>/media/pick', methods=['POST'])
+def api_persona_media_pick(slug):
+    """Pick the best media item for a given context. Used by the chat engine
+    to decide which photo to send alongside a message."""
+    if not re.match(r'^[a-z0-9_-]+$', slug):
+        return jsonify({'error': 'Invalid slug'}), 400
+    data = request.json or {}
+    from db import SessionLocal, list_persona_media
+    s = SessionLocal()
+    try:
+        rows = list_persona_media(s, slug)
+        if not rows:
+            return jsonify({'match': None})
+        picked = _pick_media(rows,
+                             purpose=data.get('purpose', ''),
+                             lighting=data.get('lighting', ''),
+                             location=data.get('location', ''),
+                             outfit=data.get('outfit', ''))
+        if not picked:
+            return jsonify({'match': None})
+        return jsonify({'match': {
+            'id': picked.id,
+            'url': f'/api/personas/{slug}/media/{picked.id}/image',
+        }})
+    finally:
+        s.close()
+
+
+def _pick_media(rows, purpose='', lighting='', location='', outfit=''):
+    """Score media items against requested tags; highest match wins."""
+    best, best_score = None, -1
+    for r in rows:
+        score = 0
+        if purpose and r.purpose and r.purpose.lower() == purpose.lower():
+            score += 4
+        if lighting and r.lighting and r.lighting.lower() == lighting.lower():
+            score += 2
+        if location and r.location and location.lower() in r.location.lower():
+            score += 2
+        if outfit and r.outfit and outfit.lower() in r.outfit.lower():
+            score += 1
+        if score > best_score:
+            best, best_score = r, score
+    return best if best_score > 0 else None
+
+
 # ── Backstory AI interview ────────────────────────────────────────────────────
 
 @app.route('/api/backstory/interview', methods=['POST'])
@@ -5121,6 +5264,47 @@ def _tg_send(persona, chat_id, text):
                     'disable_web_page_preview': False})
 
 
+def _tg_send_photo(persona, chat_id, image_data, caption=''):
+    """Send a photo via the Telegram Bot API. image_data is a base64 data URL."""
+    import base64 as b64mod
+    bot = _tg_bot(persona)
+    token = bot['bot_token']
+    try:
+        header, b64 = image_data.split(',', 1)
+        raw = b64mod.b64decode(b64)
+    except Exception:
+        return None
+    ext = 'jpg'
+    if 'png' in header:
+        ext = 'png'
+    url = f'{TELEGRAM_API}/bot{token}/sendPhoto'
+    boundary = '----TgMedia' + str(int(time.time()))
+    body = (
+        f'--{boundary}\r\n'
+        f'Content-Disposition: form-data; name="chat_id"\r\n\r\n{chat_id}\r\n'
+    )
+    if caption:
+        body += (
+            f'--{boundary}\r\n'
+            f'Content-Disposition: form-data; name="caption"\r\n\r\n{caption[:1024]}\r\n'
+        )
+    body = body.encode()
+    body += (
+        f'--{boundary}\r\n'
+        f'Content-Disposition: form-data; name="photo"; filename="photo.{ext}"\r\n'
+        f'Content-Type: image/{ext}\r\n\r\n'
+    ).encode()
+    body += raw
+    body += f'\r\n--{boundary}--\r\n'.encode()
+    req = urllib.request.Request(url, data=body, method='POST',
+        headers={'Content-Type': f'multipart/form-data; boundary={boundary}'})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return json.loads(r.read() or b'{}')
+    except Exception:
+        return None
+
+
 def _tg_typing(persona, chat_id, seconds):
     """Hold the "typing…" indicator for a while. Telegram clears it after ~5s,
     so it has to be re-sent to span a longer burst."""
@@ -5156,25 +5340,30 @@ def _tg_bursts(text):
     return [' '.join(parts[:cut]).strip(), ' '.join(parts[cut:]).strip()]
 
 
-def _tg_send_human(persona, chat_id, text, incoming=''):
+def _tg_send_human(persona, chat_id, text, incoming='', photo_data=None):
     """Send a reply the way a person would: a pause to read, then visible typing
-    scaled to the length of what she's writing, split across a burst or two."""
+    scaled to the length of what she's writing, split across a burst or two.
+    If photo_data (base64 data URL) is provided, sends a photo after the text."""
     cfg = _tg_settings(persona)
     if not cfg['humanize']:
         _tg_send(persona, chat_id, text)
+        if photo_data:
+            _tg_send_photo(persona, chat_id, photo_data)
         return
     cps = max(4, cfg['typing_speed'])
-    # Reading pause — longer for a longer incoming message.
     time.sleep(min(0.8 + len(incoming) / 90.0, TG_READ_CAP) * random.uniform(0.7, 1.3))
     for i, chunk in enumerate(_tg_bursts(text)):
         if not chunk:
             continue
         if i:
-            # Beat between messages, as if starting the next thought.
             time.sleep(random.uniform(0.6, 1.6))
         dur = min(max(len(chunk) / float(cps), 1.2), TG_TYPE_CAP) * random.uniform(0.85, 1.2)
         _tg_typing(persona, chat_id, dur)
         _tg_send(persona, chat_id, chunk)
+    if photo_data:
+        time.sleep(random.uniform(0.8, 2.0))
+        _tg_typing(persona, chat_id, random.uniform(1.0, 2.5))
+        _tg_send_photo(persona, chat_id, photo_data)
 
 
 def _tg_settings(persona):
@@ -5233,11 +5422,55 @@ def _tg_history(persona, chat_id, limit=30):
 
 def _tg_generate(persona, chat_id, instruction):
     if client is None:
-        # No Gemini configured — still answer, so the pipeline is testable.
         return local_fallback_reply(instruction)
     history = _tg_history(persona, chat_id)
     return _fv_trim(_persona_text(persona, instruction, history=history,
                                   max_tokens=400, temperature=0.9), hard_cap=420)
+
+
+def _tg_media_catalog(persona):
+    """Return a short text describing available tagged media for prompt injection."""
+    try:
+        from db import SessionLocal, list_persona_media
+        s = SessionLocal()
+        try:
+            rows = list_persona_media(s, persona)
+        finally:
+            s.close()
+    except Exception:
+        return '', []
+    if not rows:
+        return '', []
+    purposes = sorted(set(r.purpose for r in rows if r.purpose))
+    lightings = sorted(set(r.lighting for r in rows if r.lighting))
+    locations = sorted(set(r.location for r in rows if r.location))
+    outfits = sorted(set(r.outfit for r in rows if r.outfit))
+    parts = []
+    if purposes:
+        parts.append(f'purposes: {", ".join(purposes)}')
+    if lightings:
+        parts.append(f'lighting: {", ".join(lightings)}')
+    if locations:
+        parts.append(f'locations: {", ".join(locations)}')
+    if outfits:
+        parts.append(f'outfits: {", ".join(outfits)}')
+    catalog = 'Available photos — ' + '; '.join(parts) + '.'
+    return catalog, rows
+
+
+def _tg_parse_photo_tag(reply):
+    """Extract [SEND_PHOTO:key=value,...] from the reply text, returning
+    (clean_text, tag_dict). Example: [SEND_PHOTO:purpose=tease,lighting=night]"""
+    m = re.search(r'\[SEND_PHOTO:([^\]]+)\]', reply)
+    if not m:
+        return reply, {}
+    tags = {}
+    for pair in m.group(1).split(','):
+        if '=' in pair:
+            k, v = pair.split('=', 1)
+            tags[k.strip().lower()] = v.strip()
+    clean = reply[:m.start()].rstrip() + reply[m.end():]
+    return clean.strip(), tags
 
 
 def _tg_handle_update(persona, update):
@@ -5265,6 +5498,17 @@ def _tg_handle_update(persona, update):
     cta_url = (bot.get('cta_url') or '').strip()
     cta_due = bool(cta_url) and not fan.get('cta_sent') and fan['in_count'] >= cfg['cta_after']
 
+    catalog, media_rows = _tg_media_catalog(persona)
+    photo_rule = ''
+    if catalog:
+        photo_rule = (
+            f'\n\nYou have photos you can share. {catalog} '
+            'When the conversation naturally calls for it — a fan asks to see you, '
+            'you mention what you\'re doing, or you want to tease — add the tag '
+            '[SEND_PHOTO:purpose=X,lighting=Y] at the very end of your message '
+            '(X/Y from the available options). Only do this when it fits the moment, '
+            'not every message. Never mention the tag to the fan.')
+
     ask_rule = (
         'End with ONE question that follows from what they just said — never a '
         'generic "how are you", never a question you have already asked, and never '
@@ -5273,31 +5517,41 @@ def _tg_handle_update(persona, update):
         instruction = (
             f'A new fan just opened a chat with you on Telegram (they go by "{who}"). '
             'Write ONE short, warm, in-character opener that introduces you without '
-            'sounding scripted. ' + ask_rule)
+            'sounding scripted. ' + ask_rule + photo_rule)
     elif cta_due:
         instruction = (
             f'Reply in-character to this fan on Telegram: "{text}". Answer what they '
             'actually said first, then tease — in one natural sentence — that you post '
             'more somewhere more private. Do NOT paste a link or a URL, do not '
             'hard-sell, and do not name the site; a link is appended after your '
-            'message. ' + ask_rule)
+            'message. ' + ask_rule + photo_rule)
     else:
         instruction = (
             f'Reply in-character to this fan on Telegram: "{text}". Warm and engaging, '
             'react to what they just said before anything else, reference what they '
             'have told you before, and let interest build slowly — no selling, no '
-            'hinting at paid content yet. ' + ask_rule)
+            'hinting at paid content yet. ' + ask_rule + photo_rule)
 
     reply = _tg_generate(persona, chat_id, instruction)
     if not reply:
         return
+
+    photo_data = None
+    reply, photo_tags = _tg_parse_photo_tag(reply)
+    if photo_tags and media_rows:
+        safe = {k: v for k, v in photo_tags.items()
+                if k in ('purpose', 'lighting', 'location', 'outfit')}
+        picked = _pick_media(media_rows, **safe)
+        if picked:
+            photo_data = picked.image_data
+
     if cta_due:
         label = (bot.get('cta_label') or 'come see').strip()
         reply = f'{reply}\n\n{label} → {_tg_cta_link(bot, chat_id)}'
         fan['cta_sent'] = int(time.time())
         fan['cta_count'] = int(fan.get('cta_count', 0)) + 1
 
-    _tg_send_human(persona, chat_id, reply, incoming=text)
+    _tg_send_human(persona, chat_id, reply, incoming=text, photo_data=photo_data)
     _log_x_message(persona, _tg_fan_key(chat_id), who, 'out', reply)
     fan['last_out'] = int(time.time())
     fans[str(chat_id)] = fan
