@@ -3624,6 +3624,20 @@ def _pick_media(rows, outfits=None, purpose='', lighting='', location='', outfit
 
 # ── Backstory AI interview ────────────────────────────────────────────────────
 
+BACKSTORY_TOPICS = [
+    {'label': 'work or job',
+     'detail': 'how they earn money day to day'},
+    {'label': 'hobbies',
+     'detail': 'what they do for fun, not related to work or study'},
+    {'label': 'social life and free time',
+     'detail': 'who they spend time with and where they go'},
+    {'label': 'study or education background',
+     'detail': 'what they studied or are studying, and how they feel about it'},
+    {'label': 'personality quirks',
+     'detail': 'a specific habit, fear, or contradiction that makes them memorable'},
+]
+
+
 @app.route('/api/backstory/interview', methods=['POST'])
 def api_backstory_interview():
     """Drive an interactive backstory interview via Gemini.
@@ -3664,6 +3678,54 @@ def api_backstory_interview():
     else:
         age_job_context = ""
 
+    # The topic sequence is tracked server-side. Left to the model it loses its
+    # place — especially once answers are "(skipped)" — and re-asks a topic it
+    # has already covered, reworded.
+    asked = []
+    for msg in messages:
+        if msg.get('role') != 'assistant':
+            continue
+        try:
+            q = json.loads(msg.get('content', '')).get('question')
+        except Exception:
+            q = None
+        if q:
+            asked.append(q)
+
+    topic_index = len(asked)
+    if action == 'randomize' and topic_index:
+        topic_index -= 1        # same topic again, just fresh options
+    topic = BACKSTORY_TOPICS[topic_index] if topic_index < len(BACKSTORY_TOPICS) else None
+
+    if asked:
+        already = ('\n\nAlready asked — do NOT ask these again, and do NOT ask a '
+                   'reworded version of them:\n'
+                   + '\n'.join(f'- {q}' for q in asked))
+    else:
+        already = ''
+
+    if topic:
+        this_turn = (
+            f'\n\nThis turn ask about ONE topic only: {topic["label"]} '
+            f'({topic["detail"]}). Ask nothing outside that topic. '
+            f'This is question {topic_index + 1} of {len(BACKSTORY_TOPICS)}.'
+        )
+    elif topic_index == len(BACKSTORY_TOPICS):
+        this_turn = (
+            '\n\nAll topics are covered. Output exactly: '
+            '{"question": "Got everything I need for a solid backstory. '
+            'Generate it now or add more?", '
+            '"options": ["Generate now", "Add one more thing", "Keep going"]}'
+        )
+    else:
+        # They chose to keep going past the check-in: ask something genuinely new.
+        this_turn = (
+            '\n\nThe core topics are done and they asked for more. Ask ONE fresh '
+            'question about a detail not covered yet — family, a formative moment, '
+            'what they want next, a possession that matters to them. It must not '
+            'overlap with anything already asked.'
+        )
+
     interview_system = (
         f"You are building a backstory for an AI chatbot persona named {name}, "
         + (f"age {age}, " if age else "")
@@ -3671,8 +3733,6 @@ def api_backstory_interview():
         + (f"personality archetype: {archetype}." if archetype else ".")
         + ("\n\n" + age_job_context if age_job_context else "")
         + "\n\n"
-        "Ask questions across exactly these 5 topics in order: work/job, hobbies, free time, "
-        "study/education background, personality quirks. One question per topic, then offer to finalize.\n\n"
         "Name, age, and location are already known — do NOT ask about them.\n\n"
         "Rules:\n"
         "- Output ONLY a valid JSON object each turn, nothing else.\n"
@@ -3682,10 +3742,9 @@ def api_backstory_interview():
         "- Options: 3 distinct, specific, realistic answers. "
         f"Tailor them to {archetype} archetype, age {age}, location {location}. "
         "Each option is 4-10 words. No vague options like 'something creative'.\n"
-        "- After all 5 topics are covered output: "
-        '{"question": "Got everything I need for a solid backstory. Generate it now or add more?", '
-        '"options": ["Generate now", "Add one more thing", "Keep going"]}\n'
+        "- A skipped answer means move on, never re-ask that topic.\n"
         "- Never write the backstory itself unless told to finalize."
+        + already + this_turn
     )
 
     if age_int and age_int <= 24:
@@ -3747,7 +3806,7 @@ def api_backstory_interview():
                 'Do not reuse any of the previous options. Output JSON only.'
             )}]})
         elif not contents:
-            contents.append({'role': 'user', 'parts': [{'text': 'Start with the first question (work/job). Output JSON only.'}]})
+            contents.append({'role': 'user', 'parts': [{'text': 'Ask the first question. Output JSON only.'}]})
 
     try:
         resp = client.models.generate_content(
