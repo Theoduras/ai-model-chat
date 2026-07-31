@@ -925,7 +925,7 @@ p.sub{color:var(--text-muted);font-size:.9rem;margin-bottom:24px}
 label{display:block;font-size:.8rem;color:var(--text-3);margin-bottom:6px}
 input{width:100%;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 14px;color:var(--text);font-size:.95rem;outline:none;margin-bottom:16px;font-family:var(--font);transition:border-color .2s}
 input:focus{border-color:var(--accent)}
-button{width:100%;background:var(--grad);background-size:300% 100%;animation:sweep 3s linear infinite;color:#fff;border:none;border-radius:12px;padding:14px;font-size:.95rem;font-weight:600;cursor:pointer;font-family:var(--font);transition:transform .1s,box-shadow .2s}
+button{width:100%;background:var(--grad);background-size:300% 100%;color:#fff;border:none;border-radius:12px;padding:14px;font-size:.95rem;font-weight:600;cursor:pointer;font-family:var(--font);transition:transform .1s,box-shadow .2s}
 button:hover{transform:translateY(-2px);box-shadow:0 8px 26px #ff2d7855;animation:sweep .55s linear infinite}
 button:disabled{opacity:.6;cursor:not-allowed;transform:none;animation:none}
 .err{background:#3f1515;border:1px solid #7f1d1d;border-radius:10px;padding:10px 14px;font-size:.85rem;color:#fca5a5;margin-bottom:16px}

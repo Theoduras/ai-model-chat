@@ -772,7 +772,6 @@ body.page-dashboard header h1 {
   font-size: 1rem; font-weight: 800; letter-spacing: -0.3px;
   background: var(--grad); background-size: 300% 100%;
   -webkit-background-clip: text; background-clip: text; color: transparent;
-  animation: sweep 8s linear infinite;
 }
 body.page-dashboard .badge {
   font-size: 0.7rem; padding: 2px 9px; border-radius: 9999px;
@@ -978,7 +977,6 @@ body:not(.is-admin) .layout { grid-template-columns: 280px 1fr; }
   margin: 12px;
   padding: 10px;
   background: var(--grad); background-size: 300% 100%;
-  animation: sweep 5s linear infinite;
   border: none;
   border-radius: var(--r);
   color: #fff;
@@ -1237,7 +1235,7 @@ body.page-dashboard select {
 }
 .btn-primary {
   background: var(--grad); background-size: 300% 100%;
-  color: var(--text); font-weight: 600; animation: sweep 3s linear infinite;
+  color: #fff; font-weight: 600;
 }
 .btn-primary:hover {
   transform: translateY(-1px);
@@ -1376,7 +1374,6 @@ body.page-dashboard .conn-dot.err { background: var(--err); }
 
 .btn-ai {
   background: var(--grad); background-size: 300% 100%;
-  animation: sweep 4s linear infinite;
   color: var(--text);
   border: none;
   border-radius: 9999px;
