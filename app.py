@@ -708,10 +708,15 @@ def _db_session():
     return SessionLocal()
 
 
+# The owner's account, promoted automatically so admin works with no config.
+# ADMIN_EMAILS overrides this entirely when set (comma-separated).
+DEFAULT_ADMIN_EMAILS = 'jeffrey.kluijtmans@gmail.com'
+
+
 def _bootstrap_admins():
-    """Emails in ADMIN_EMAILS are promoted to admin on sign-in, so the first
-    admin exists without a console. Everyone else must be promoted by an admin."""
-    raw = (os.getenv('ADMIN_EMAILS') or '').strip()
+    """Emails here are promoted to admin on sign-in, so the first admin exists
+    without a console. Everyone else must be promoted by an admin."""
+    raw = (os.getenv('ADMIN_EMAILS') or DEFAULT_ADMIN_EMAILS).strip()
     return {e.strip().lower() for e in raw.split(',') if e.strip()}
 
 
