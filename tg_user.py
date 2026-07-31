@@ -195,13 +195,13 @@ class AccountRunner:
         if initial > 0:
             await asyncio.sleep(initial)
         await asyncio.sleep(max(0.0, float(plan.get('read', 0))))
-        cps = max(4, int(plan.get('cps', 14)))
+        cps = max(2, int(plan.get('cps', 14)))
         for i, chunk in enumerate(plan['chunks']):
             if not chunk:
                 continue
             if i:
                 await asyncio.sleep(1.0)
-            dur = min(max(len(chunk) / float(cps), 1.2), 11.0)
+            dur = min(max(len(chunk) / float(cps), 1.2), 22.0)
             async with client.action(event.chat_id, 'typing'):
                 await asyncio.sleep(dur)
             await client.send_message(event.chat_id, chunk)
