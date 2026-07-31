@@ -12,23 +12,23 @@
     .xbot-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
     @media (max-width: 640px) { .xbot-grid { grid-template-columns: 1fr; } }
     .result-box { margin-top: 12px; font-size: 0.82rem; display: flex; flex-direction: column; gap: 8px; }
-    .reply-card { background: #0d0d0f; border: 1px solid #2a2a30; border-radius: 10px; padding: 12px 14px; }
-    .reply-card .from { color: #818cf8; font-weight: 600; font-size: 0.78rem; }
-    .reply-card .cmt { color: #a1a1aa; margin: 4px 0 8px; font-style: italic; }
-    .reply-card .rep { color: #f4f4f5; }
+    .reply-card { background: var(--bg); border: 1px solid #2a2a30; border-radius: 10px; padding: 12px 14px; }
+    .reply-card .from { color: var(--accent); font-weight: 600; font-size: 0.78rem; }
+    .reply-card .cmt { color: var(--text-3); margin: 4px 0 8px; font-style: italic; }
+    .reply-card .rep { color: var(--text); }
     .reply-card .tag { float: right; font-size: 0.7rem; padding: 1px 8px; border-radius: 9999px; }
     .tag.ok { background: #14532d; color: #4ade80; }
     .tag.no { background: #4c0519; color: #fb7185; }
-    .conn-pill { font-size: 0.75rem; padding: 3px 10px; border-radius: 9999px; background: #27272a; color: #a1a1aa; }
+    .conn-pill { font-size: 0.75rem; padding: 3px 10px; border-radius: 9999px; background: var(--surface); color: var(--text-3); }
     .conn-pill.ok { background: #14532d; color: #4ade80; }
     .conn-pill.err { background: #4c0519; color: #fb7185; }
     .auto-toggles { display: flex; flex-wrap: wrap; gap: 10px 20px; margin-top: 14px; }
-    .auto-chk { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: #d4d4d8; cursor: pointer; }
+    .auto-chk { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--text-2); cursor: pointer; }
     .auto-chk input { width: auto; }
     .auto-log { margin-top: 14px; max-height: 240px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; font-size: 0.78rem; font-family: ui-monospace, monospace; }
-    .auto-log .ln { color: #a1a1aa; border-left: 2px solid #27272a; padding: 2px 0 2px 10px; }
+    .auto-log .ln { color: var(--text-3); border-left: 2px solid var(--surface); padding: 2px 0 2px 10px; }
     .auto-log .ln.act { color: #4ade80; border-left-color: #14532d; }
-    .auto-log .ln.hd { color: #818cf8; border-left-color: #312e81; }
+    .auto-log .ln.hd { color: var(--accent); border-left-color: #312e81; }
     .auto-log .ln.er { color: #fb7185; border-left-color: #4c0519; }
     .conn-pill.run { background: #312e81; color: #c7d2fe; }
     .row-inline { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
@@ -50,7 +50,7 @@
   </div>
   <div style="display:flex; align-items:center; gap:16px;">
     <a href="/admin/xchats" style="color:#7cc7ff; font-size:0.8rem; text-decoration:none;">💬 Chat log</a>
-    <a href="/dashboard" style="color:#71717a; font-size:0.8rem; text-decoration:none;">← Dashboard</a>
+    <a href="/dashboard" style="color:var(--text-muted); font-size:0.8rem; text-decoration:none;">← Dashboard</a>
   </div>
 </header>
 
@@ -67,18 +67,18 @@
         </div>
         <span class="conn-pill" id="conn-pill">—</span>
         <button class="btn-ai" id="connect-btn" onclick="toggleConnect()">Connect X</button>
-        <button class="btn-ai" id="disconnect-btn" style="background:#3f3f46; display:none;" onclick="disconnectX()">Disconnect</button>
+        <button class="btn-ai" id="disconnect-btn" style="background:var(--border); display:none;" onclick="disconnectX()">Disconnect</button>
       </div>
       <span class="hint">Only personas with a connected X account can act on X.</span>
     </div>
 
-    <div id="connect-panel" style="display:none; margin-top:4px; border-top:1px solid #232327; padding-top:16px;">
+    <div id="connect-panel" style="display:none; margin-top:4px; border-top:1px solid var(--border-soft); padding-top:16px;">
       <div class="field full">
         <label>X app OAuth 2.0 Client ID</label>
         <input type="text" id="x-client-id" placeholder="your-app-client-id" autocomplete="off" spellcheck="false">
       </div>
       <div class="field full" style="margin-top:12px;">
-        <label>Redirect URI <span style="font-weight:400;color:#52525b;">(must match your X app's callback URL exactly)</span></label>
+        <label>Redirect URI <span style="font-weight:400;color:var(--text-muted);">(must match your X app's callback URL exactly)</span></label>
         <input type="text" id="x-redirect-uri" placeholder="https://your-domain/api/x/oauth-redirect" autocomplete="off" spellcheck="false">
       </div>
       <div style="display:flex; gap:8px; margin-top:14px;">
@@ -92,7 +92,7 @@
         <button class="btn-ai" style="margin-top:12px;" onclick="completeConnect()">Finish connection ✓</button>
       </div>
       <div class="result-box" id="connect-status"></div>
-      <span class="hint" style="margin-top:8px;">Need an X app? Create one at <a href="https://developer.x.com" target="_blank" style="color:#818cf8;">developer.x.com</a> with OAuth 2.0 enabled and scopes for tweet, follows, dm, and users. Set the Redirect URI above as a Callback URL in the app's user-authentication settings.</span>
+      <span class="hint" style="margin-top:8px;">Need an X app? Create one at <a href="https://developer.x.com" target="_blank" style="color:var(--accent);">developer.x.com</a> with OAuth 2.0 enabled and scopes for tweet, follows, dm, and users. Set the Redirect URI above as a Callback URL in the app's user-authentication settings.</span>
     </div>
   </div>
 
@@ -162,11 +162,11 @@
     <div class="section-title">📝 Post new content</div>
     <span class="hint" style="display:block; margin-bottom:14px;">Writes an original tweet in the chosen persona's voice and posts it to their X account.</span>
     <div class="field full">
-      <label>Topic / vibe <span style="font-weight:400;color:#52525b;">(optional — leave blank to let the persona pick)</span></label>
+      <label>Topic / vibe <span style="font-weight:400;color:var(--text-muted);">(optional — leave blank to let the persona pick)</span></label>
       <input type="text" id="post-topic" placeholder="e.g. lazy Sunday, new photoset teaser, gym day…">
     </div>
     <div style="display:flex; gap:8px;">
-      <button class="btn-ai" style="background:#3f3f46;" onclick="runPostNew(true)">Preview draft</button>
+      <button class="btn-ai" style="background:var(--border);" onclick="runPostNew(true)">Preview draft</button>
       <button class="btn-ai" onclick="runPostNew(false)">Post now</button>
     </div>
     <div class="result-box" id="postnew-result"></div>
@@ -186,7 +186,7 @@
         </select>
       </div>
       <div style="display:flex; gap:8px; padding-bottom:1px; flex-wrap:wrap;">
-        <button class="btn-ai" style="background:#3f3f46;" onclick="runComment(true)">Preview drafts</button>
+        <button class="btn-ai" style="background:var(--border);" onclick="runComment(true)">Preview drafts</button>
         <button class="btn-ai" onclick="runComment(false)">Reply for real</button>
         <button class="btn-ai" onclick="runRespondOwn()" title="Reply to comments across this persona's own recent posts">Reply on my recent posts</button>
       </div>
@@ -202,11 +202,11 @@
       <input type="text" id="dm-target" placeholder="@username">
     </div>
     <div class="field full">
-      <label>Context / note <span style="font-weight:400;color:#52525b;">(optional — helps tailor the opener)</span></label>
+      <label>Context / note <span style="font-weight:400;color:var(--text-muted);">(optional — helps tailor the opener)</span></label>
       <input type="text" id="dm-note" placeholder="e.g. liked 3 of my posts, into gaming…">
     </div>
     <div style="display:flex; gap:8px;">
-      <button class="btn-ai" style="background:#3f3f46;" onclick="runChatUp(true)">Preview opener</button>
+      <button class="btn-ai" style="background:var(--border);" onclick="runChatUp(true)">Preview opener</button>
       <button class="btn-ai" onclick="runChatUp(false)">Send DM</button>
     </div>
     <div class="result-box" id="dm-result"></div>
@@ -220,7 +220,7 @@
     </div>
     <div style="display:flex; gap:8px;">
       <button class="btn-ai" onclick="runFollow('follow')">Follow</button>
-      <button class="btn-ai" style="background:#3f3f46;" onclick="runFollow('unfollow')">Unfollow</button>
+      <button class="btn-ai" style="background:var(--border);" onclick="runFollow('unfollow')">Unfollow</button>
     </div>
     <div class="result-box" id="follow-result"></div>
   </div>
@@ -293,7 +293,7 @@ async function startConnect() {
   if (!data.ok) { err(box, data.error); return; }
   window.open(data.url, 'x-oauth', 'width=600,height=720');
   document.getElementById('connect-step2').style.display = 'block';
-  box.innerHTML = '<span class="hint" style="color:#fbbf24;">Authorize in the popup, then paste the URL it lands on below.</span>';
+  box.innerHTML = '<span class="hint" style="color:var(--warn);">Authorize in the popup, then paste the URL it lands on below.</span>';
 }
 
 async function finishWith(code, state) {
@@ -370,7 +370,7 @@ async function runPostNew(preview) {
   const data = await post('/api/x/post', {
     persona: persona(), topic: document.getElementById('post-topic').value.trim(), preview });
   if (!data.ok) { err(box, data.error); return; }
-  const tag = data.posted ? '<span class="tag ok">posted</span>' : '<span class="tag" style="background:#3f3f46;color:#a1a1aa;">draft</span>';
+  const tag = data.posted ? '<span class="tag ok">posted</span>' : '<span class="tag" style="background:var(--border);color:var(--text-3);">draft</span>';
   box.innerHTML = '<div class="reply-card">' + tag +
     '<div class="rep">' + esc(data.text) + '</div></div>';
 }
@@ -400,7 +400,7 @@ async function runChatUp(preview) {
     persona: persona(), target,
     note: document.getElementById('dm-note').value.trim(), preview });
   if (!data.ok) { err(box, data.error); return; }
-  const tag = data.sent ? '<span class="tag ok">sent</span>' : '<span class="tag" style="background:#3f3f46;color:#a1a1aa;">draft</span>';
+  const tag = data.sent ? '<span class="tag ok">sent</span>' : '<span class="tag" style="background:var(--border);color:var(--text-3);">draft</span>';
   box.innerHTML = '<div class="reply-card">' + tag +
     '<div class="from">→ @' + esc(data.username) + '</div>' +
     '<div class="rep">' + esc(data.opener) + '</div></div>';

@@ -30,15 +30,15 @@
         <path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" stroke-linecap="round" stroke-linejoin="round"/>
       </svg>
     </button>
-    <a href="/xbot" title="X engagement bot" style="display:inline-flex; align-items:center; gap:6px; font-size:0.78rem; font-weight:600; color:#fff; text-decoration:none; background:linear-gradient(135deg,#6366f1,#ec4899); padding:6px 13px; border-radius:9999px; box-shadow:0 2px 8px rgba(99,102,241,0.25);">𝕏<span class="xbot-label"> Engagement Bot</span></a>
+    <a href="/xbot" title="X engagement bot" style="display:inline-flex; align-items:center; gap:6px; font-size:0.78rem; font-weight:600; color:#fff; text-decoration:none; background:linear-gradient(135deg,var(--accent),var(--accent-2)); padding:6px 13px; border-radius:9999px; box-shadow:0 2px 8px rgba(99,102,241,0.25);">𝕏<span class="xbot-label"> Engagement Bot</span></a>
     <a href="/account/profile" class="hdr-nav-link" title="Your profile">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="15" height="15" aria-hidden="true">
         <path d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.5 20.1a7.5 7.5 0 0 1 15 0A17.9 17.9 0 0 1 12 21.75c-2.68 0-5.22-.58-7.5-1.63Z" stroke-linecap="round" stroke-linejoin="round"/>
       </svg><span class="hdr-nav-label">Profile</span></a>
     <a href="/account" class="hdr-nav-link" title="Account and billing"><span class="hdr-nav-label">Account</span></a>
     <a href="/admin/users" class="hdr-nav-link" id="hdr-admin-link" style="display:none;" title="Manage users"><span class="hdr-nav-label">Admin</span></a>
-    <a href="/landing" class="dash-link-secondary" style="color:#71717a; font-size:0.8rem; text-decoration:none;">← Back to site</a>
-    <a href="/dashboard/logout" class="dash-link-secondary" style="color:#71717a; font-size:0.8rem; text-decoration:none;" title="Log out">Log out</a>
+    <a href="/landing" class="dash-link-secondary" style="color:var(--text-muted); font-size:0.8rem; text-decoration:none;">← Back to site</a>
+    <a href="/dashboard/logout" class="dash-link-secondary" style="color:var(--text-muted); font-size:0.8rem; text-decoration:none;" title="Log out">Log out</a>
   </div>
 </header>
 
@@ -64,7 +64,7 @@
           <button class="btn btn-secondary" type="button" onclick="toggleKeyVisibility()" id="key-toggle-btn" style="padding:9px 14px;">Show</button>
         </div>
         <span class="hint">Saved to the <code>.env</code> file as <code>GEMINI_API_KEY</code> and applied immediately — no restart needed.</span>
-        <span class="hint">Get a free key at <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:#818cf8;">aistudio.google.com/app/apikey</a></span>
+        <span class="hint">Get a free key at <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--accent);">aistudio.google.com/app/apikey</a></span>
       </div>
       <div class="modal-footer">
         <span class="save-status" id="key-save-status"></span>
@@ -113,7 +113,7 @@
     <div class="sidebar-header">
       <span>Personas</span>
       <div style="display:flex; align-items:center; gap:4px;">
-        <span id="persona-count" style="font-size:0.7rem; color:#52525b;"></span>
+        <span id="persona-count" style="font-size:0.7rem; color:var(--text-muted);"></span>
         <button class="btn-new-folder" onclick="newFolder()" title="New folder">📁</button>
       </div>
     </div>
@@ -582,7 +582,7 @@ function renderSidebar() {
       '<span class="folder-name">' + esc(folder.name) + '</span>' +
       '<span class="folder-actions">' +
         '<button class="folder-action-btn" onclick="event.stopPropagation();renameFolder(\'' + folder.id + '\')" title="Rename">✏</button>' +
-        '<button class="folder-action-btn" onclick="event.stopPropagation();deleteFolder(\'' + folder.id + '\')" title="Delete" style="color:#ef4444;">✕</button>' +
+        '<button class="folder-action-btn" onclick="event.stopPropagation();deleteFolder(\'' + folder.id + '\')" title="Delete" style="color:var(--err);">✕</button>' +
       '</span>';
     header.onclick = () => toggleFolder(folder.id);
     section.appendChild(header);
@@ -709,7 +709,7 @@ function renderForm(slug, cfg) {
   fa.innerHTML = `
     <div style="display:flex; align-items:baseline; gap:10px;">
       <h2 style="font-size:1.1rem; font-weight:600;">${cfg.name || slug}</h2>
-      <span style="font-size:0.75rem; color:#52525b;">/${slug}</span>
+      <span style="font-size:0.75rem; color:var(--text-muted);">/${slug}</span>
     </div>
 
     <div class="form-section">
@@ -717,8 +717,8 @@ function renderForm(slug, cfg) {
       <div class="field-row" style="align-items:flex-start;">
         <div class="field" style="flex:0 0 auto; text-align:center;">
           <label>Profile Picture</label>
-          <div id="avatar-preview" style="width:88px;height:88px;border-radius:50%;background:#27272a;border:2px dashed #52525b;display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;margin:0 auto 6px;" onclick="document.getElementById('f-avatar-input').click()">
-            ${cfg.avatar ? '<img src="' + esc(cfg.avatar) + '" style="width:100%;height:100%;object-fit:cover;">' : '<span style="font-size:28px;color:#71717a;">+</span>'}
+          <div id="avatar-preview" style="width:88px;height:88px;border-radius:50%;background:var(--surface);border:2px dashed var(--text-muted);display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;margin:0 auto 6px;" onclick="document.getElementById('f-avatar-input').click()">
+            ${cfg.avatar ? '<img src="' + esc(cfg.avatar) + '" style="width:100%;height:100%;object-fit:cover;">' : '<span style="font-size:28px;color:var(--text-muted);">+</span>'}
           </div>
           <input type="file" id="f-avatar-input" accept="image/*" style="display:none;" onchange="handleAvatarUpload(this)">
           <button type="button" class="btn btn-ghost" style="font-size:11px;padding:2px 8px;" onclick="document.getElementById('f-avatar-input').click()">Upload</button>
@@ -765,7 +765,7 @@ function renderForm(slug, cfg) {
         <label style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px;">
           <span>Backstory</span>
           <span style="display:flex; gap:6px;">
-            <button type="button" class="btn-ai" style="background:#3f3f46;" id="backstory-rand-btn" onclick="randomizeBackstory()">🎲 Randomize</button>
+            <button type="button" class="btn-ai" style="background:var(--border);" id="backstory-rand-btn" onclick="randomizeBackstory()">🎲 Randomize</button>
             <button type="button" class="btn-ai" onclick="openBackstoryAI()">✨ Build with AI</button>
           </span>
         </label>
@@ -777,10 +777,10 @@ function renderForm(slug, cfg) {
 
     <div class="form-section">
       <div class="section-title" style="flex-wrap:wrap;">
-        <span style="margin-right:auto;">Photos <span style="font-weight:400; color:#52525b; font-size:0.8rem;">(up to 5 — same person)</span></span>
+        <span style="margin-right:auto;">Photos <span style="font-weight:400; color:var(--text-muted); font-size:0.8rem;">(up to 5 — same person)</span></span>
         <span style="display:flex; gap:6px;">
           <button type="button" class="btn-ai" id="gen-face-btn" onclick="generateFirstPhoto()" title="Generate a new fictional face">✨ New face</button>
-          <button type="button" class="btn-ai" style="background:#3f3f46;" id="gen-more-btn" onclick="generateMorePhotos()" title="Add more shots of the same person">＋ More of her</button>
+          <button type="button" class="btn-ai" style="background:var(--border);" id="gen-more-btn" onclick="generateMorePhotos()" title="Add more shots of the same person">＋ More of her</button>
           <button type="button" class="btn-section-save" style="margin-left:0;" onclick="savePhotosSection(this)">Save</button>
         </span>
       </div>
@@ -835,7 +835,7 @@ function renderForm(slug, cfg) {
           <span>Speech Style Rules</span>
           <span style="display:flex; gap:6px;">
             <button type="button" class="btn-ai" id="speech-gen-btn" onclick="generateSpeechStyle(false)">✨ Generate</button>
-            <button type="button" class="btn-ai" style="background:#3f3f46;" id="speech-rand-btn" onclick="generateSpeechStyle(true)">🎲 Randomize</button>
+            <button type="button" class="btn-ai" style="background:var(--border);" id="speech-rand-btn" onclick="generateSpeechStyle(true)">🎲 Randomize</button>
           </span>
         </label>
         <textarea id="f-speech" placeholder="Click ✨ Generate to auto-fill based on your persona, or write your own rules here.">${esc(cfg.speech_style || '')}</textarea>
@@ -864,7 +864,7 @@ function renderForm(slug, cfg) {
           <span>Topics the persona naturally returns to</span>
           <span style="display:flex; gap:6px;">
             <button type="button" class="btn-ai" id="interests-gen-btn" onclick="generateInterests(false)">✨ Generate</button>
-            <button type="button" class="btn-ai" style="background:#3f3f46;" id="interests-rand-btn" onclick="generateInterests(true)">🎲 Randomize</button>
+            <button type="button" class="btn-ai" style="background:var(--border);" id="interests-rand-btn" onclick="generateInterests(true)">🎲 Randomize</button>
           </span>
         </label>
         <input type="text" id="f-interests" value="${esc(cfg.interests || '')}" placeholder="gaming, fitness, tattoos, music, cooking…">
@@ -1039,9 +1039,9 @@ function renderForm(slug, cfg) {
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <button type="button" class="btn btn-ghost" onclick="xOAuthConnect()" id="x-connect-btn">Connect X Account</button>
         <button type="button" class="btn btn-ghost" onclick="xPollDMs()" id="x-poll-btn" style="display:none;">Poll DMs Now</button>
-        <button type="button" class="btn btn-ghost" onclick="xDisconnect()" id="x-disconnect-btn" style="display:none;color:#ef4444;border-color:#ef4444;">Disconnect</button>
+        <button type="button" class="btn btn-ghost" onclick="xDisconnect()" id="x-disconnect-btn" style="display:none;color:var(--err);border-color:var(--err);">Disconnect</button>
       </div>
-      <div id="x-poll-status" style="font-size:13px;color:#71717a;margin-top:10px;"></div>
+      <div id="x-poll-status" style="font-size:13px;color:var(--text-muted);margin-top:10px;"></div>
       <div style="margin-top:14px;">
         <label style="font-size:12px;">OAuth Client ID</label>
         <input type="text" id="x-client-id" placeholder="your-app-client-id" style="font-size:13px;margin-top:4px;">
@@ -1123,14 +1123,14 @@ function renderPlatformsSection(platforms) {
       '<div class="field" style="margin-top:8px;"><label style="font-size:12px;">' + esc(f.label) + '</label>' +
       '<input type="' + f.type + '" id="plat-' + p.id + '-' + f.id + '" value="' + esc(cfg[f.id] || '') + '" placeholder="' + (f.type === 'password' ? '••••••••••••••••' : f.label) + '" style="font-size:13px;"></div>'
     ).join('');
-    return '<div class="platform-card" id="platcard-' + p.id + '" style="border:1px solid #3f3f46; border-radius:10px; padding:14px; margin-bottom:10px; ' + (enabled ? 'border-color:' + p.color + ';' : '') + '">' +
+    return '<div class="platform-card" id="platcard-' + p.id + '" style="border:1px solid var(--border); border-radius:10px; padding:14px; margin-bottom:10px; ' + (enabled ? 'border-color:' + p.color + ';' : '') + '">' +
       '<div style="display:flex; align-items:center; gap:10px;">' +
       '<div class="toggle"><label class="toggle"><input type="checkbox" id="plat-' + p.id + '-enabled" ' + (enabled ? 'checked' : '') + ' onchange="togglePlatform(\'' + p.id + '\', this.checked)"><span class="toggle-track"></span></label></div>' +
       '<span style="font-weight:600; color:' + p.color + '; font-size:14px;">' + p.label + '</span>' +
-      '<span id="plat-' + p.id + '-badge" style="margin-left:auto; font-size:12px; color:#71717a;"></span>' +
+      '<span id="plat-' + p.id + '-badge" style="margin-left:auto; font-size:12px; color:var(--text-muted);"></span>' +
       '<button type="button" class="btn btn-ghost" id="plat-' + p.id + '-testbtn" onclick="testPlatformBtn(\'' + p.id + '\')" style="font-size:12px; padding:3px 10px; display:' + (enabled ? 'inline-flex' : 'none') + ';">Test</button>' +
       '</div><div id="plat-' + p.id + '-fields" style="display:' + (enabled ? 'block' : 'none') + '; padding-top:4px;">' +
-      fieldsHtml + '<div id="plat-' + p.id + '-error" style="font-size:12px; color:#ef4444; margin-top:6px; display:none;"></div></div></div>';
+      fieldsHtml + '<div id="plat-' + p.id + '-error" style="font-size:12px; color:var(--err); margin-top:6px; display:none;"></div></div></div>';
   }).join('');
 }
 
@@ -1139,7 +1139,7 @@ function togglePlatform(id, on) {
   document.getElementById('plat-' + id + '-testbtn').style.display = on ? 'inline-flex' : 'none';
   const card = document.getElementById('platcard-' + id);
   const p = PLATFORMS.find(x => x.id === id);
-  card.style.borderColor = on ? p.color : '#3f3f46';
+  card.style.borderColor = on ? p.color : 'var(--border)';
   if (!on) setPlatformStatus(id, null, '');
 }
 
@@ -1161,9 +1161,9 @@ function setPlatformStatus(id, ok, msg) {
   const badge = document.getElementById('plat-' + id + '-badge');
   const errEl = document.getElementById('plat-' + id + '-error');
   if (ok === true) {
-    badge.textContent = '✓ ' + (msg || 'Connected'); badge.style.color = '#22c55e'; errEl.style.display = 'none';
+    badge.textContent = '✓ ' + (msg || 'Connected'); badge.style.color = 'var(--ok)'; errEl.style.display = 'none';
   } else if (ok === false) {
-    badge.textContent = '✗ Failed'; badge.style.color = '#ef4444';
+    badge.textContent = '✗ Failed'; badge.style.color = 'var(--err)';
     errEl.textContent = msg || 'Connection failed.'; errEl.style.display = 'block';
   } else {
     badge.textContent = ''; errEl.style.display = 'none';
@@ -1207,12 +1207,12 @@ async function loadXStatus() {
     const connectBtn   = document.getElementById('x-connect-btn');
     if (!statusEl) return;
     if (info && info.connected) {
-      statusEl.innerHTML = '<span style="color:#22c55e;font-size:13px;">✓ Connected as @' + info.username + '</span>';
+      statusEl.innerHTML = '<span style="color:var(--ok);font-size:13px;">✓ Connected as @' + info.username + '</span>';
       pollBtn.style.display = 'inline-flex';
       disconnectBtn.style.display = 'inline-flex';
       connectBtn.textContent = 'Reconnect';
     } else {
-      statusEl.innerHTML = '<span style="color:#71717a;font-size:13px;">Not connected</span>';
+      statusEl.innerHTML = '<span style="color:var(--text-muted);font-size:13px;">Not connected</span>';
       pollBtn.style.display = 'none';
       disconnectBtn.style.display = 'none';
       connectBtn.textContent = 'Connect X Account';
@@ -1237,7 +1237,7 @@ async function xOAuthConnect() {
     if (statusEl) statusEl.innerHTML = '<span style="color:#f59e0b;font-size:13px;">Waiting for authorization… complete it in the popup, then paste the callback URL below.</span>';
     document.getElementById('x-poll-status').innerHTML =
       '<div style="margin-top:8px;">' +
-      '<label style="font-size:12px;color:#a1a1aa;">After authorizing, copy the full callback URL from your browser and paste it here:</label>' +
+      '<label style="font-size:12px;color:var(--text-3);">After authorizing, copy the full callback URL from your browser and paste it here:</label>' +
       '<input type="text" id="x-callback-url" placeholder="https://your-domain.vercel.app/api/x/oauth-redirect?code=...&state=..." style="font-size:13px;margin-top:4px;">' +
       '<button type="button" class="btn btn-ghost" onclick="xCompleteAuth()" style="margin-top:6px;font-size:13px;">Complete Connection</button></div>';
   } catch(e) { alert('Error: ' + e.message); }
@@ -1273,12 +1273,12 @@ async function xPollDMs() {
     });
     const data = await res.json();
     if (data.ok) {
-      statusEl.style.color = '#22c55e';
+      statusEl.style.color = 'var(--ok)';
       statusEl.textContent = 'Replied to ' + data.replied + ' new DM(s).' + (data.errors.length ? ' Errors: ' + data.errors.join('; ') : '');
     } else {
-      statusEl.style.color = '#ef4444'; statusEl.textContent = data.error;
+      statusEl.style.color = 'var(--err)'; statusEl.textContent = data.error;
     }
-  } catch(e) { statusEl.style.color = '#ef4444'; statusEl.textContent = 'Network error: ' + e.message; }
+  } catch(e) { statusEl.style.color = 'var(--err)'; statusEl.textContent = 'Network error: ' + e.message; }
   btn.disabled = false; btn.textContent = 'Poll DMs Now';
 }
 
@@ -1363,7 +1363,7 @@ function handleAvatarUpload(input) {
 
 function clearAvatar() {
   document.getElementById('f-avatar').value = '';
-  document.getElementById('avatar-preview').innerHTML = '<span style="font-size:28px;color:#71717a;">+</span>';
+  document.getElementById('avatar-preview').innerHTML = '<span style="font-size:28px;color:var(--text-muted);">+</span>';
 }
 
 function collectConfig() {
@@ -1572,7 +1572,7 @@ function setPhotoStatus(msg, ok) {
   const el = document.getElementById('photo-status');
   if (!el) return;
   el.textContent = msg;
-  el.style.color = ok === true ? '#22c55e' : ok === false ? '#ef4444' : '#a1a1aa';
+  el.style.color = ok === true ? 'var(--ok)' : ok === false ? 'var(--err)' : 'var(--text-3)';
 }
 
 async function saveGallery(slug) {
@@ -1601,7 +1601,7 @@ function setMediaStatus(msg, ok) {
   const el = document.getElementById('media-status');
   if (!el) return;
   el.textContent = msg || '';
-  el.style.color = ok === true ? '#22c55e' : ok === false ? '#ef4444' : '#5a5a63';
+  el.style.color = ok === true ? 'var(--ok)' : ok === false ? 'var(--err)' : '#5a5a63';
 }
 
 async function loadMedia() {
@@ -2273,21 +2273,21 @@ function switchTabByName(name) {
 
 function renderFunnelPreview() {
   const stages = [
-    { name: 'Warm',    desc: 'Friendly opener, build rapport, ask about the fan.',              color: '#22c55e' },
+    { name: 'Warm',    desc: 'Friendly opener, build rapport, ask about the fan.',              color: 'var(--ok)' },
     { name: 'Engage',  desc: 'Reference what the fan shared. Create a sense of being known.',   color: '#84cc16' },
     { name: 'Intrigue',desc: 'Drop hints about exclusive content without hard-selling.',         color: '#eab308' },
     { name: 'Tease',   desc: 'Light flirt or behind-the-scenes reference implying more exists.',color: '#f97316' },
-    { name: 'Offer',   desc: 'Natural, in-character mention of paid post / PPV / subscription perk.', color: '#ef4444' },
+    { name: 'Offer',   desc: 'Natural, in-character mention of paid post / PPV / subscription perk.', color: 'var(--err)' },
     { name: 'Close',   desc: 'Reinforce value. Make the fan feel special for buying.',           color: '#a855f7' },
   ];
   const config = collectConfig();
   const paceNote = { slow: 'Slow burn — funnel progresses over many sessions.', moderate: 'Moderate — funnel completes over a few conversations.', fast: 'Fast — funnel progresses within a single conversation.', instant: 'Instant — moves to tease/offer very quickly.' }[config.flirt_pace] || '';
   document.getElementById('preview-content').innerHTML =
-    '<div style="margin-bottom:12px; font-size:0.78rem; color:#71717a;">' + paceNote + '</div>' +
+    '<div style="margin-bottom:12px; font-size:0.78rem; color:var(--text-muted);">' + paceNote + '</div>' +
     stages.map(s =>
       '<div class="funnel-stage"><div class="funnel-dot" style="background:' + s.color + ';"></div><div><div class="funnel-stage-name">' + s.name + '</div><div class="funnel-stage-desc">' + s.desc + '</div></div></div>'
     ).join('') +
-    (config.conversion_triggers ? '<div style="margin-top:14px; font-size:0.75rem; color:#52525b;"><strong style="color:#a1a1aa;">Custom triggers:</strong><br>' + esc(config.conversion_triggers) + '</div>' : '');
+    (config.conversion_triggers ? '<div style="margin-top:14px; font-size:0.75rem; color:var(--text-muted);"><strong style="color:var(--text-3);">Custom triggers:</strong><br>' + esc(config.conversion_triggers) + '</div>' : '');
 }
 
 async function generateInterests(randomize) {
@@ -2379,7 +2379,7 @@ function phaseBlock(ph, i) {
             <span class="hint">Recommended: increase with each phase.</span>
           </div>
         </div>
-        ${chatPhases.length > 2 ? '<button type="button" class="btn btn-ghost" style="color:#ef4444;border-color:#ef4444;font-size:0.75rem;margin-top:6px;" onclick="removePhase('+i+')">Remove phase</button>' : ''}
+        ${chatPhases.length > 2 ? '<button type="button" class="btn btn-ghost" style="color:var(--err);border-color:var(--err);font-size:0.75rem;margin-top:6px;" onclick="removePhase('+i+')">Remove phase</button>' : ''}
       </div>
     </div>`;
 }

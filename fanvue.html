@@ -10,16 +10,16 @@
     .fv-scroll { flex: 1; min-height: 0; overflow-y: auto; }
     .fv-wrap { max-width: 760px; margin: 0 auto; padding: 28px 24px 80px; display: flex; flex-direction: column; gap: 20px; }
     .result-box { margin-top: 12px; font-size: 0.85rem; display: flex; flex-direction: column; gap: 8px; }
-    .reply-card { background: #0d0d0f; border: 1px solid #2a2a30; border-radius: 10px; padding: 12px 14px; }
-    .reply-card .rep { color: #f4f4f5; white-space: pre-wrap; }
-    .conn-pill { font-size: 0.75rem; padding: 3px 10px; border-radius: 9999px; background: #27272a; color: #a1a1aa; }
+    .reply-card { background: var(--bg); border: 1px solid #2a2a30; border-radius: 10px; padding: 12px 14px; }
+    .reply-card .rep { color: var(--text); white-space: pre-wrap; }
+    .conn-pill { font-size: 0.75rem; padding: 3px 10px; border-radius: 9999px; background: var(--surface); color: var(--text-3); }
     .conn-pill.ok { background: #14532d; color: #4ade80; }
     .conn-pill.err { background: #4c0519; color: #fb7185; }
     .conn-pill.running { background: #14532d; color: #4ade80; animation: pulse-glow 2s ease-in-out infinite; }
     @keyframes pulse-glow { 0%,100%{ opacity:1; } 50%{ opacity:.5; } }
     .row-inline { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
     .row-inline .field { flex: 1; min-width: 160px; }
-    .soon { font-size: 0.72rem; padding: 2px 8px; border-radius: 9999px; background: #3f3f46; color: #d4d4d8; margin-left: 8px; }
+    .soon { font-size: 0.72rem; padding: 2px 8px; border-radius: 9999px; background: var(--border); color: var(--text-2); margin-left: 8px; }
     textarea { width: 100%; min-height: 90px; resize: vertical; }
     @media (max-width: 640px) { .fv-wrap { padding: 18px 14px 70px; gap: 16px; } }
   </style>
@@ -33,7 +33,7 @@
   </div>
   <div style="display:flex; align-items:center; gap:16px;">
     <a href="/xbot" style="color:#7cc7ff; font-size:0.8rem; text-decoration:none;">𝕏 Bot</a>
-    <a href="/dashboard" style="color:#71717a; font-size:0.8rem; text-decoration:none;">← Dashboard</a>
+    <a href="/dashboard" style="color:var(--text-muted); font-size:0.8rem; text-decoration:none;">← Dashboard</a>
   </div>
 </header>
 
@@ -50,11 +50,11 @@
         </div>
         <span class="conn-pill" id="conn-pill">—</span>
         <button class="btn-ai" id="connect-btn" onclick="toggleConnect()">Connect Fanvue</button>
-        <button class="btn-ai" id="disconnect-btn" style="background:#3f3f46; display:none;" onclick="disconnectFanvue()">Disconnect</button>
+        <button class="btn-ai" id="disconnect-btn" style="background:var(--border); display:none;" onclick="disconnectFanvue()">Disconnect</button>
       </div>
     </div>
     <div class="field full" id="creator-row" style="display:none; margin-top:12px;">
-      <label>Acting as <span style="font-weight:400;color:#52525b;">(this login manages more than one profile — pick which one replies)</span></label>
+      <label>Acting as <span style="font-weight:400;color:var(--text-muted);">(this login manages more than one profile — pick which one replies)</span></label>
       <div class="row-inline">
         <div class="field" style="margin:0;">
           <select id="creator-select" onchange="selectCreator()"></select>
@@ -62,11 +62,11 @@
         <span class="hint" id="creator-hint"></span>
       </div>
     </div>
-    <div id="ppv-row" style="display:none; margin-top:12px; border-top:1px solid #232327; padding-top:16px;">
-      <label style="display:block;margin-bottom:6px;">💎 PPV content <span style="font-weight:400;color:#52525b;">(pick the Fanvue media this model sends locked, once rapport is built)</span></label>
+    <div id="ppv-row" style="display:none; margin-top:12px; border-top:1px solid var(--border-soft); padding-top:16px;">
+      <label style="display:block;margin-bottom:6px;">💎 PPV content <span style="font-weight:400;color:var(--text-muted);">(pick the Fanvue media this model sends locked, once rapport is built)</span></label>
       <div class="row-inline" style="margin-bottom:10px;">
         <div class="field" style="margin:0;min-width:180px;flex:1;">
-          <label style="font-size:.72rem;">Folder <span style="color:#52525b;">(type a folder name from Fanvue)</span></label>
+          <label style="font-size:.72rem;">Folder <span style="color:var(--text-muted);">(type a folder name from Fanvue)</span></label>
           <input type="text" id="ppv-folder-filter" placeholder="e.g. RTS1 $15" onchange="loadPpv()">
         </div>
         <div class="field" style="margin:0;min-width:120px;">
@@ -92,9 +92,9 @@
         <input type="text" id="ppv-caption" placeholder="Caption for this tier (optional) — e.g. made something just for you 🙈" onchange="stashTier()">
       </div>
       <span class="hint" id="ppv-hint" style="display:block;margin-top:6px;"></span>
-      <span class="hint" style="display:block;margin-top:4px;color:#52525b;">Tiers are sent in order as the chat deepens — Tier 1 first, then Tier 2 later, and so on.</span>
+      <span class="hint" style="display:block;margin-top:4px;color:var(--text-muted);">Tiers are sent in order as the chat deepens — Tier 1 first, then Tier 2 later, and so on.</span>
     </div>
-    <div id="connect-panel" style="display:none; margin-top:4px; border-top:1px solid #232327; padding-top:16px;">
+    <div id="connect-panel" style="display:none; margin-top:4px; border-top:1px solid var(--border-soft); padding-top:16px;">
       <div class="field full">
         <label>Fanvue app Client ID</label>
         <input type="text" id="fv-client-id" placeholder="client id from the Fanvue Builder" autocomplete="off" spellcheck="false">
@@ -104,7 +104,7 @@
         <input type="password" id="fv-client-secret" placeholder="client secret" autocomplete="off" spellcheck="false">
       </div>
       <div class="field full" style="margin-top:12px;">
-        <label>Redirect URI <span style="font-weight:400;color:#52525b;">(register this exact URL in your Fanvue app)</span></label>
+        <label>Redirect URI <span style="font-weight:400;color:var(--text-muted);">(register this exact URL in your Fanvue app)</span></label>
         <input type="text" id="fv-redirect" placeholder="https://your-domain/api/fanvue/oauth-redirect" autocomplete="off" spellcheck="false">
       </div>
       <button class="btn-ai" style="margin-top:14px;" onclick="startConnect()">Authorize on Fanvue →</button>
@@ -135,16 +135,16 @@
     <div class="section-title">🤖 Auto-reply to DMs</div>
     <span class="hint" style="display:block; margin-bottom:14px;">Reads incoming Fanvue DMs and replies in-persona (with the funnel + conversation logging). Runs <b>server-side</b> — stays on across redeploys and needs no open tab. Turn it on per persona.</span>
     <div class="auto-toggles" style="display:flex; flex-wrap:wrap; gap:10px 20px;">
-      <label class="soon" style="display:flex;align-items:center;gap:8px;cursor:pointer;background:none;color:#d4d4d8;font-size:.85rem;padding:0"><input type="checkbox" id="fv-auto-enabled" style="width:auto"> <b>Auto-reply enabled</b></label>
-      <label class="soon" style="display:flex;align-items:center;gap:8px;cursor:pointer;background:none;color:#d4d4d8;font-size:.85rem;padding:0"><input type="checkbox" id="fv-exclude-creators" checked style="width:auto"> Exclude other creators (only reply to fans)</label>
-      <label class="soon" style="display:flex;align-items:center;gap:8px;cursor:pointer;background:none;color:#d4d4d8;font-size:.85rem;padding:0"><input type="checkbox" id="fv-ppv-require-payment" style="width:auto"> Require payment before next PPV tier <span style="color:#52525b">(off = tiers flow on chatting; use off for testing)</span></label>
+      <label class="soon" style="display:flex;align-items:center;gap:8px;cursor:pointer;background:none;color:var(--text-2);font-size:.85rem;padding:0"><input type="checkbox" id="fv-auto-enabled" style="width:auto"> <b>Auto-reply enabled</b></label>
+      <label class="soon" style="display:flex;align-items:center;gap:8px;cursor:pointer;background:none;color:var(--text-2);font-size:.85rem;padding:0"><input type="checkbox" id="fv-exclude-creators" checked style="width:auto"> Exclude other creators (only reply to fans)</label>
+      <label class="soon" style="display:flex;align-items:center;gap:8px;cursor:pointer;background:none;color:var(--text-2);font-size:.85rem;padding:0"><input type="checkbox" id="fv-ppv-require-payment" style="width:auto"> Require payment before next PPV tier <span style="color:var(--text-muted)">(off = tiers flow on chatting; use off for testing)</span></label>
     </div>
     <div class="field full" style="margin-top:12px;">
-      <label>Only reply to these fans <span style="font-weight:400;color:#52525b;">(comma-separated handles — leave blank for everyone; use for testing)</span></label>
+      <label>Only reply to these fans <span style="font-weight:400;color:var(--text-muted);">(comma-separated handles — leave blank for everyone; use for testing)</span></label>
       <input type="text" id="fv-only-handles" placeholder="e.g. girlforfun">
     </div>
     <div class="field full" style="margin-top:12px;">
-      <label>Follow-up after silence <span style="font-weight:400;color:#52525b;">(minutes before nudging a quiet fan — first nudge at this value, second at 2×; max 2. Set low e.g. 5 to test)</span></label>
+      <label>Follow-up after silence <span style="font-weight:400;color:var(--text-muted);">(minutes before nudging a quiet fan — first nudge at this value, second at 2×; max 2. Set low e.g. 5 to test)</span></label>
       <input type="number" id="fv-followup-min" min="1" step="1" placeholder="30">
     </div>
     <div style="display:flex; gap:8px; align-items:center; margin-top:14px;">
@@ -202,10 +202,10 @@ function renderTierBar(){
     const on=i===curTier;
     const n=(t.media_uuids||[]).length;
     return '<span onclick="switchTier('+i+')" style="cursor:pointer;padding:4px 12px;border-radius:9999px;font-size:.78rem;'+
-      (on?'background:#7c3aed;color:#fff;':'background:#27272a;color:#a1a1aa;')+'">Tier '+(i+1)+(n?(' ('+n+')'):'')+'</span>';
+      (on?'background:var(--accent);color:#fff;':'background:var(--surface);color:var(--text-3);')+'">Tier '+(i+1)+(n?(' ('+n+')'):'')+'</span>';
   }).join('')+
-  '<span onclick="addTier()" title="Add tier" style="cursor:pointer;padding:4px 10px;border-radius:9999px;background:#18181b;border:1px dashed #3f3f46;color:#d4d4d8;font-size:.78rem;">＋ tier</span>'+
-  (ppvTiers.length>1?'<span onclick="removeTier()" title="Remove this tier" style="cursor:pointer;padding:4px 10px;border-radius:9999px;background:#18181b;color:#fb7185;font-size:.78rem;">🗑 tier '+(curTier+1)+'</span>':'');
+  '<span onclick="addTier()" title="Add tier" style="cursor:pointer;padding:4px 10px;border-radius:9999px;background:var(--panel);border:1px dashed var(--border);color:var(--text-2);font-size:.78rem;">＋ tier</span>'+
+  (ppvTiers.length>1?'<span onclick="removeTier()" title="Remove this tier" style="cursor:pointer;padding:4px 10px;border-radius:9999px;background:var(--panel);color:#fb7185;font-size:.78rem;">🗑 tier '+(curTier+1)+'</span>':'');
 }
 function switchTier(i){ stashTier(); curTier=i; applyTier(); }
 function addTier(){ stashTier(); ppvTiers.push({media_uuids:[],price:'',caption:''}); curTier=ppvTiers.length-1; applyTier(); }
@@ -242,7 +242,7 @@ async function loadPpv(){
     window._ppvTiersLoaded=true;
   }
   const hint=document.getElementById('ppv-hint');
-  if(data.error){grid.innerHTML='';hint.textContent='⚠ Could not load media: '+data.error;hint.style.color='#fbbf24';renderTierBar();return;}
+  if(data.error){grid.innerHTML='';hint.textContent='⚠ Could not load media: '+data.error;hint.style.color='var(--warn)';renderTierBar();return;}
   renderTierBar();
   renderGrid();
 }
@@ -250,10 +250,10 @@ function renderGrid(){
   const grid=document.getElementById('ppv-media-grid');
   const media=window._ppvMedia||[];
   const hint=document.getElementById('ppv-hint');
-  if(!media.length){grid.innerHTML='';hint.textContent='No media in this view.';hint.style.color='#71717a';return;}
+  if(!media.length){grid.innerHTML='';hint.textContent='No media in this view.';hint.style.color='var(--text-muted)';return;}
   grid.innerHTML=media.map(m=>{
     const on=ppvSel.has(m.uuid);
-    const thumb=m.thumb?('background-image:url(\''+esc(m.thumb)+'\');background-size:cover;background-position:center;'):'background:linear-gradient(135deg,#27272a,#18181b);';
+    const thumb=m.thumb?('background-image:url(\''+esc(m.thumb)+'\');background-size:cover;background-position:center;'):'background:linear-gradient(135deg,var(--surface),var(--panel));';
     const icon=m.mediaType==='video'?'🎬':m.mediaType==='audio'?'🎵':m.mediaType==='image'?'🖼️':'📄';
     return '<div class="ppv-item" data-uuid="'+esc(m.uuid)+'" onclick="togglePpv(this)" '+
       'style="position:relative;aspect-ratio:1;border-radius:8px;cursor:pointer;'+thumb+
@@ -266,7 +266,7 @@ function renderGrid(){
       (on?'<span class="ppv-chk" style="position:absolute;top:2px;right:4px;color:#4ade80;font-weight:700;">✓</span>':'')+'</div>';
   }).join('');
   hint.textContent=ppvSel.size?('Tier '+(curTier+1)+': '+ppvSel.size+' item(s) selected'):('Tier '+(curTier+1)+': tap media to select · 👁 to preview');
-  hint.style.color='#71717a';
+  hint.style.color='var(--text-muted)';
 }
 function togglePpv(el){
   const u=el.dataset.uuid;
@@ -303,8 +303,8 @@ async function loadCreators(){
     list.map(c=>'<option value="'+esc(c.uuid)+'"'+(c.uuid===sel?' selected':'')+'>@'+esc(c.handle||c.uuid)+'</option>').join('')+
     '<option value="__manual__">＋ enter another profile by UUID…</option>';
   const hint=document.getElementById('creator-hint');
-  if(list.length<2 && data.agency_error){hint.textContent='only this profile is listed ('+data.agency_error+') — use “enter by UUID” for another';hint.style.color='#fbbf24';}
-  else{hint.textContent=sel?'':'pick the profile that should reply';hint.style.color='#71717a';}
+  if(list.length<2 && data.agency_error){hint.textContent='only this profile is listed ('+data.agency_error+') — use “enter by UUID” for another';hint.style.color='var(--warn)';}
+  else{hint.textContent=sel?'':'pick the profile that should reply';hint.style.color='var(--text-muted)';}
   row.style.display='block';
 }
 async function selectCreator(){
@@ -394,7 +394,7 @@ async function startConnect(){
   if(!data.ok){err(box,data.error);return;}
   window.open(data.url,'fanvue-oauth','width=600,height=760');
   document.getElementById('connect-step2').style.display='block';
-  box.innerHTML='<span class="hint" style="color:#fbbf24;">Authorize in the popup. It finishes automatically, or paste the URL it lands on below.</span>';
+  box.innerHTML='<span class="hint" style="color:var(--warn);">Authorize in the popup. It finishes automatically, or paste the URL it lands on below.</span>';
 }
 async function finishWith(code,state){
   const box=document.getElementById('config-status');
@@ -440,7 +440,7 @@ init();
 <div id="ppv-preview" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:1000;align-items:center;justify-content:center;padding:24px;" onclick="closePreview(event)">
   <div style="max-width:90vw;max-height:90vh;">
     <div id="ppv-preview-body" style="display:flex;align-items:center;justify-content:center;"></div>
-    <div id="ppv-preview-name" style="text-align:center;color:#e4e4e7;margin-top:10px;font-size:.85rem;"></div>
+    <div id="ppv-preview-name" style="text-align:center;color:var(--text);margin-top:10px;font-size:.85rem;"></div>
   </div>
 </div>
 <script>
@@ -450,7 +450,7 @@ async function previewMedia(uuid){
   const body=document.getElementById('ppv-preview-body');
   document.getElementById('ppv-preview-name').textContent=m.name;
   document.getElementById('ppv-preview').style.display='flex';
-  body.innerHTML='<div style="padding:40px;color:#a1a1aa;">Loading…</div>';
+  body.innerHTML='<div style="padding:40px;color:var(--text-3);">Loading…</div>';
   let d={url:m.url,mediaType:m.mediaType};
   if(!d.url){
     try{d=await fetch('/api/fanvue/media-item?persona='+encodeURIComponent(persona())+'&uuid='+encodeURIComponent(uuid)).then(r=>r.json());}catch(e){}
@@ -461,12 +461,12 @@ async function previewMedia(uuid){
   else if(type==='audio'&&url){body.innerHTML='<div style="padding:40px;text-align:center;"><div style="font-size:3rem;">🎵</div><audio src="'+esc(url)+'" controls autoplay style="margin-top:16px;"></audio></div>';}
   else{
     const desc=d.description||m.description||'';
-    const tags=(d.tags||[]).map(t=>'<span style="display:inline-block;background:#27272a;border-radius:6px;padding:2px 8px;margin:2px;font-size:.72rem;">'+esc(t)+'</span>').join('');
-    body.innerHTML='<div style="max-width:480px;padding:28px;background:#18181b;border-radius:12px;color:#e4e4e7;">'+
+    const tags=(d.tags||[]).map(t=>'<span style="display:inline-block;background:var(--surface);border-radius:6px;padding:2px 8px;margin:2px;font-size:.72rem;">'+esc(t)+'</span>').join('');
+    body.innerHTML='<div style="max-width:480px;padding:28px;background:var(--panel);border-radius:12px;color:var(--text);">'+
       '<div style="font-size:2rem;text-align:center;margin-bottom:12px;">'+(type==='video'?'🎬':type==='audio'?'🎵':'🖼️')+'</div>'+
-      (desc?'<div style="font-size:.9rem;line-height:1.5;color:#d4d4d8;">'+esc(desc)+'</div>':'<div style="color:#a1a1aa;">No description.</div>')+
+      (desc?'<div style="font-size:.9rem;line-height:1.5;color:var(--text-2);">'+esc(desc)+'</div>':'<div style="color:var(--text-3);">No description.</div>')+
       (tags?'<div style="margin-top:14px;">'+tags+'</div>':'')+
-      '<div style="margin-top:16px;font-size:.72rem;color:#71717a;">Fanvue’s API doesn’t expose the raw file to apps — this is the AI description of the content. The fan still receives the real media when unlocked.</div>'+
+      '<div style="margin-top:16px;font-size:.72rem;color:var(--text-muted);">Fanvue’s API doesn’t expose the raw file to apps — this is the AI description of the content. The fan still receives the real media when unlocked.</div>'+
       '</div>';
   }
 }
