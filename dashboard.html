@@ -31,6 +31,12 @@
       </svg>
     </button>
     <a href="/xbot" title="X engagement bot" style="display:inline-flex; align-items:center; gap:6px; font-size:0.78rem; font-weight:600; color:#fff; text-decoration:none; background:linear-gradient(135deg,#6366f1,#ec4899); padding:6px 13px; border-radius:9999px; box-shadow:0 2px 8px rgba(99,102,241,0.25);">𝕏<span class="xbot-label"> Engagement Bot</span></a>
+    <a href="/account/profile" class="hdr-nav-link" title="Your profile">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="15" height="15" aria-hidden="true">
+        <path d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.5 20.1a7.5 7.5 0 0 1 15 0A17.9 17.9 0 0 1 12 21.75c-2.68 0-5.22-.58-7.5-1.63Z" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg><span class="hdr-nav-label">Profile</span></a>
+    <a href="/account" class="hdr-nav-link" title="Account and billing"><span class="hdr-nav-label">Account</span></a>
+    <a href="/admin/users" class="hdr-nav-link" id="hdr-admin-link" style="display:none;" title="Manage users"><span class="hdr-nav-label">Admin</span></a>
     <a href="/landing" class="dash-link-secondary" style="color:#71717a; font-size:0.8rem; text-decoration:none;">← Back to site</a>
     <a href="/dashboard/logout" class="dash-link-secondary" style="color:#71717a; font-size:0.8rem; text-decoration:none;" title="Log out">Log out</a>
   </div>
@@ -228,8 +234,16 @@ function lsSetFolderOpen(id, open) {
   try { localStorage.setItem('admin_folder_open_' + id, open ? 'true' : 'false'); } catch(e) {}
 }
 
+async function showAdminLinkIfAdmin() {
+  try {
+    const me = await (await fetch('/api/me')).json();
+    if (me.is_admin) document.getElementById('hdr-admin-link').style.display = '';
+  } catch (e) {}
+}
+
 async function init() {
   loadConfig();
+  showAdminLinkIfAdmin();
   const seen = new Set();
   try {
     const res = await fetch('/api/personas');

@@ -1258,6 +1258,19 @@ def account_profile():
     return render_template_string(PROFILE_HTML, user=view, p=p, saved=saved)
 
 
+@app.route('/api/me')
+def api_me():
+    """Who is signed in, for the header nav. Open by design: it reports nothing
+    a signed-out caller could not already infer."""
+    user = _current_user()
+    if not user:
+        return jsonify({'signed_in': False}), 200
+    return jsonify({'signed_in': True, 'email': user['email'],
+                    'name': user.get('name', ''), 'tier': user.get('tier', ''),
+                    'status': user.get('status'),
+                    'is_admin': bool(user.get('is_admin'))}), 200
+
+
 @app.route('/account')
 def account():
     user = _current_user()
