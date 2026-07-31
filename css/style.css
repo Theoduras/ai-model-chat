@@ -1142,6 +1142,8 @@ body.page-dashboard select {
 .btn-secondary:hover { background: #3f3f46; }
 .btn-ghost  { background: transparent; color: #71717a; border: 1px solid #27272a; }
 .btn-ghost:hover { color: #e4e4e7; border-color: #52525b; }
+.platform-tab.active { background: #818cf8; color: #fff; border-color: #818cf8; }
+.platform-tab.active:hover { background: #6366f1; border-color: #6366f1; }
 .save-status { font-size: 0.8rem; color: #71717a; align-self: center; margin-left: auto; }
 .save-status.ok  { color: #22c55e; }
 .save-status.err { color: #ef4444; }
