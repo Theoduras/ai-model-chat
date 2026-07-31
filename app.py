@@ -910,7 +910,7 @@ button:hover{background:#ff2d78}
 ACCOUNT_CSS = """
 @import url('https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Inter:wght@400;500;600&display=swap');
 :root{--bg:#0e0e0e;--panel:#111113;--surface:#1c1c1c;--border:#2e2e2e;
---text:#fff;--text-2:#c9c9c9;--text-3:#a7a7a7;--text-muted:#6b6b6b;
+--text:#f0ece9;--text-2:#bdb8b4;--text-3:#97918d;--text-muted:#6b6663;
 --accent:#ff5c38;--accent-2:#ff2d78;--accent-3:#7c3aed;
 --grad:linear-gradient(120deg,#ff5c38,#ff2d78 30%,#7c3aed 60%,#ff2d78 80%,#ff5c38);
 --font:'Inter',system-ui,sans-serif;--display:'Sora','Inter',system-ui,sans-serif}
