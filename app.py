@@ -4073,6 +4073,59 @@ def api_config_set_key():
 
 # ── X.com OAuth 2.0 PKCE + DM bot ───────────────────────────────────────────
 
+class XApiError(url_error.HTTPError):
+    """HTTPError that carries X's own explanation. A bare "HTTP Error 403:
+    Forbidden" hides whether the fan has DMs closed, the token is missing a
+    scope, or the API tier forbids the call — the JSON body says which."""
+
+    def __init__(self, e, detail, raw=b''):
+        super().__init__(e.url, e.code, e.reason, e.headers, None)
+        self.detail = detail
+        self._raw = raw
+
+    def read(self, *_a):
+        # The body was already consumed to build `detail`; hand back the copy so
+        # callers that report e.read() keep working.
+        return self._raw
+
+    def __str__(self):
+        return f'X API {self.code}: {self.detail}' if self.detail else super().__str__()
+
+
+_X_403_HINTS = (
+    ('cannot send messages', 'they only accept DMs from people they follow'),
+    ('not permitted', 'your X app is missing a required scope — reconnect the account'),
+    ('client-not-enrolled', 'your X API plan does not include this endpoint'),
+    ('unsupported authentication', 'reconnect the account with OAuth 2.0'),
+)
+
+
+def _x_http_error(e):
+    """Rebuild an HTTPError with X's JSON detail folded into the message."""
+    detail = ''
+    try:
+        body = e.read()
+    except Exception:
+        body = b''
+    raw = body.decode(errors='ignore') if body else ''
+    if raw:
+        try:
+            d = json.loads(raw)
+            errs = d.get('errors') or []
+            detail = (d.get('detail') or d.get('title')
+                      or (errs[0].get('message') if errs and isinstance(errs[0], dict) else '')
+                      or raw[:200])
+        except Exception:
+            detail = raw[:200]
+    if e.code == 403 and detail:
+        low = detail.lower()
+        for needle, hint in _X_403_HINTS:
+            if needle in low:
+                detail = f'{detail} ({hint})'
+                break
+    return XApiError(e, detail.strip(), body)
+
+
 def _x_api(method, path, access_token=None, bearer=None, body=None):
     """Simple X API v2 helper. Returns parsed JSON dict."""
     url = f'https://api.twitter.com/2{path}'
@@ -4083,9 +4136,12 @@ def _x_api(method, path, access_token=None, bearer=None, body=None):
         headers['Authorization'] = f'Bearer {bearer}'
     data = json.dumps(body).encode() if body else None
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
-    with urllib.request.urlopen(req, timeout=10) as r:
-        raw = r.read()
-        return json.loads(raw) if raw else {}
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            raw = r.read()
+            return json.loads(raw) if raw else {}
+    except url_error.HTTPError as e:
+        raise _x_http_error(e) from None
 
 
 def _x_refresh(persona):
@@ -4226,72 +4282,285 @@ def _x_username_for(persona, uid):
     return name
 
 
+X_FOLLOWUP_MAX = 2
+X_READ_CAP = 12.0
+X_TYPE_CAP = 25.0
+
+
+def _x_fans(persona):
+    """Per-fan DM state (last seen in/out, follow-ups sent). Kept in the settings
+    table rather than /tmp so it survives a redeploy."""
+    try:
+        return json.loads(_get_setting(f'x_fans_{persona}') or '{}')
+    except Exception:
+        return {}
+
+
+def _x_save_fans(persona, fans):
+    _set_setting(f'x_fans_{persona}', json.dumps(fans))
+
+
+def _x_touch_fan(persona, uid, username, direction, fans=None):
+    """Record that a message went in or out, so follow-ups know who went quiet."""
+    own = fans is None
+    if own:
+        fans = _x_fans(persona)
+    fan = fans.get(str(uid)) or {}
+    if username:
+        fan['name'] = username
+    if direction == 'in':
+        fan['last_in'] = int(time.time())
+        fan['followups'] = 0
+    else:
+        fan['last_out'] = int(time.time())
+    fans[str(uid)] = fan
+    if own:
+        _x_save_fans(persona, fans)
+    return fans
+
+
+X_SEEN_EVENTS_MAX = 400
+
+
+def _x_seen_events(persona):
+    """DM event ids already handled. A set beats a single high-water mark: it
+    does not depend on X returning events in any particular order, so a reply
+    can never be skipped because a newer event sorted ahead of it."""
+    try:
+        raw = json.loads(_get_setting(f'x_seen_events_{persona}') or '[]')
+        return set(raw) if isinstance(raw, list) else set()
+    except Exception:
+        return set()
+
+
+def _x_mark_seen(persona, event_ids):
+    ids = [e for e in event_ids if e]
+    if not ids:
+        return
+    seen = _x_seen_events(persona)
+    seen.update(ids)
+    _set_setting(f'x_seen_events_{persona}',
+                 json.dumps(list(seen)[-X_SEEN_EVENTS_MAX:]))
+
+
+def _x_history(persona, uid, limit=40):
+    """Past DMs with one fan, oldest first, in Gemini history shape. Survives
+    restarts — unlike the /tmp JSON mirror, which Vercel and Cloud Run wipe."""
+    try:
+        from db import SessionLocal, list_x_messages
+        s = SessionLocal()
+        try:
+            return [{'role': 'model' if r.direction == 'out' else 'user', 'content': r.text}
+                    for r in list_x_messages(s, persona, uid, limit=limit)]
+        finally:
+            s.close()
+    except Exception as exc:
+        logger.warning('_x_history failed for %s/%s: %s', persona, uid, exc)
+        return []
+
+
+def _x_messaged_before(persona, uid):
+    """True when this account already has DMs on record with the user, so the
+    gathering loop never opens a second cold chat with the same person."""
+    try:
+        from db import SessionLocal, count_x_messages
+        s = SessionLocal()
+        try:
+            return count_x_messages(s, persona, uid) > 0
+        finally:
+            s.close()
+    except Exception:
+        return False
+
+
+def _x_cta_link(persona, uid, cta_url):
+    """Route the CTA through our own redirect so X clicks are measurable, the way
+    Telegram's are. Falls back to the raw link when no public base URL is known
+    (the worker has no request context to borrow one from)."""
+    base = (os.getenv('PUBLIC_BASE_URL') or _get_setting('public_base_url') or '').rstrip('/')
+    if not base:
+        return cta_url
+    return f'{base}/go/x/{persona}/{uid}'
+
+
+@app.route('/go/x/<persona>/<uid>')
+def x_cta_click(persona, uid):
+    """Tracked CTA redirect for X DMs — records the click, then forwards on."""
+    if not re.match(r'^[a-z0-9_-]+$', persona or ''):
+        return redirect('/')
+    cta = _phases_cta(persona)
+    url = (cta.get('cta_url') or (_tg_load_bots().get(persona) or {}).get('cta_url') or '').strip()
+    if not url:
+        return redirect('/')
+    fans = _x_fans(persona)
+    fan = fans.get(str(uid))
+    if fan is not None and not fan.get('cta_clicked'):
+        fan['cta_clicked'] = int(time.time())
+        fans[str(uid)] = fan
+        _x_save_fans(persona, fans)
+    return redirect(url, code=302)
+
+
+def _x_send_dm(persona, conv_id, text):
+    _x_call(persona, 'POST', f'/dm_conversations/{conv_id}/messages', body={'text': text})
+
+
+def _x_send_human(persona, conv_id, text, incoming='', cfg=None):
+    """Send a DM the way a person would: a pause to read, then a delay scaled to
+    how long the reply takes to type, split across a burst or two. X has no
+    typing indicator, so the delay is the only signal — it just has to feel
+    unhurried rather than instant."""
+    cfg = cfg or _x_behavior(persona)
+    if not cfg.get('humanize', True):
+        _x_send_dm(persona, conv_id, text)
+        return
+    cps = max(2, int(cfg.get('typing_speed') or 14) // 4)
+    time.sleep(random.uniform(15, 120))
+    time.sleep(min(0.8 + len(incoming) / 90.0, X_READ_CAP) * random.uniform(0.7, 1.3))
+    for i, chunk in enumerate(_tg_bursts(text)):
+        if not chunk:
+            continue
+        if i:
+            time.sleep(random.uniform(0.6, 1.6))
+        time.sleep(min(max(len(chunk) / float(cps), 1.2), X_TYPE_CAP) * random.uniform(0.85, 1.2))
+        _x_send_dm(persona, conv_id, chunk)
+
+
 def _x_dm_reply_round(persona, max_results=20):
     """Reply in-character to new incoming DMs. Returns (replied_count, log_lines)."""
+    cfg = _x_behavior(persona)
+    if not cfg.get('enabled', True):
+        return 0, ['X bot is switched off for this persona (Dashboard → Platform Bot Behavior).']
     tokens = _load_x_tokens()
     t = tokens.get(persona) or {}
     user_id = t.get('user_id', '')
-    if not t.get('access_token') or not user_id:
-        return 0, []
-    cursor_path = _x_state_path(persona, 'dm_cursor')
-    cursor = _x_load_json(cursor_path, {})
-    last_seen = cursor.get('last_event_id', '')
+    if not t.get('access_token'):
+        return 0, [f'No X account connected for "{persona}".']
+    if not user_id:
+        # Recoverable: the connect flow stores this, but /users/me can fail there.
+        try:
+            user_id = ((_x_call(persona, 'GET', '/users/me') or {}).get('data') or {}).get('id', '')
+        except Exception as e:
+            return 0, [f'Could not identify the connected account: {str(e)[:160]}']
+        if not user_id:
+            return 0, ['The connected X account has no user id stored — reconnect it '
+                       'on the X Bot tab so replies can tell your messages from theirs.']
+        t['user_id'] = user_id
+        tokens[persona] = t
+        _save_x_tokens(tokens)
+    seen = _x_seen_events(persona)
     path = ('/dm_events?dm_event.fields=id,text,sender_id,created_at,dm_conversation_id'
             f'&event_types=MessageCreate&max_results={max_results}')
     try:
         convs = _x_call(persona, 'GET', path)
     except Exception as e:
-        return 0, [f'DM read failed: {str(e)[:80]}']
+        return 0, [f'DM read failed: {str(e)[:200]}']
     events = convs.get('data', []) or []
     replied = 0
     log = []
-    new_last = last_seen
-    for event in events:
+    if not events:
+        return 0, ['No DM events returned by X (nobody has messaged this account yet).']
+    # First run on this account: remember what is already there instead of
+    # replying to the whole backlog at once.
+    if not seen:
+        _x_mark_seen(persona, [e.get('id', '') for e in events])
+        return 0, [f'First DM check — {len(events)} existing message(s) noted; '
+                   'replies start from the next one in.']
+    incoming = [e for e in events
+                if e.get('sender_id') != user_id and e.get('id') not in seen]
+    if not incoming:
+        return 0, []
+    phases = _phases(persona)
+    cta = _phases_cta(persona)
+    cta_url = (cta.get('cta_url') or (_tg_load_bots().get(persona) or {}).get('cta_url') or '').strip()
+    cta_label = (cta.get('cta_label') or 'come see').strip()
+    fans = _x_fans(persona)
+    handled = []
+    # Oldest first, so a burst of messages is answered in the order it was sent.
+    for event in sorted(incoming, key=lambda e: e.get('created_at') or '')[-max_results:]:
         eid = event.get('id', '')
         sender = event.get('sender_id', '')
         text = event.get('text', '').strip()
-        if sender == user_id:
-            continue
-        if eid == last_seen:
-            break
-        if not new_last:
-            new_last = eid
+        handled.append(eid)
         if not text:
             continue
         sender_name = _x_username_for(persona, sender)
         _log_x_event('dm_in', persona=persona, x_username=sender_name, detail=text[:160])
         _log_x_message(persona, sender, sender_name, 'in', text)
         conv_id = event.get('dm_conversation_id') or event.get('conversation_id') or f'dm_{sender}'
+
+        fan = fans.get(str(sender)) or {}
+        fan['name'] = sender_name or fan.get('name', '')
+        fan['conv_id'] = conv_id
+        fan['last_in'] = int(time.time())
+        fan['followups'] = 0
+        fan['in_count'] = int(fan.get('in_count', 0)) + 1
+        if not fan.get('first_in'):
+            fan['first_in'] = int(time.time())
+        fans[str(sender)] = fan
+
+        phase_idx = _fan_phase(phases, fan)
+        is_cta_phase = phase_idx == len(phases) - 1
+        cta_asked = _cta_asked(text)
+        # An explicit ask overrides both the phase gate and the once-only gate.
+        cta_due = bool(cta_url) and (cta_asked or (not fan.get('cta_sent') and is_cta_phase))
         # Use DB history (survives restarts) with JSON file as fallback
-        db_hist = []
-        try:
-            with db.SessionLocal() as s:
-                rows = db.list_x_messages(s, persona, sender, limit=40)
-                db_hist = [{'role': 'model' if r.direction == 'out' else 'user',
-                            'content': r.text} for r in rows]
-        except Exception:
-            pass
+        db_hist = _x_history(persona, sender)
         if not db_hist:
             hist_path = _x_state_path(persona, f'hist_{sender}')
             db_hist = _x_load_json(hist_path, [])
         try:
             has_history = len(db_hist) > 0
-            instruction = (
-                "Reply to this X DM from a fan. You have the full earlier "
-                "conversation above — USE it: do NOT introduce yourself again, "
-                "do NOT re-state your name/age/location, do NOT re-ask anything "
-                "they already told you. Continue naturally from where you left off. "
-                "Be warm and engaging, end with a question to keep them talking. "
-                f"Their latest message: \"{text}\"") if has_history else (
-                "Reply to this first DM from a fan, in-character, warm and "
-                "engaging, end with a question to keep them talking. "
-                f"Their message: \"{text}\"")
+            continuity = (
+                "You have the full earlier conversation above — USE it: do NOT "
+                "introduce yourself again, do NOT re-state your name/age/location, "
+                "do NOT re-ask anything they already told you. Continue naturally "
+                "from where you left off. ") if has_history else ''
+            ask_rule = (
+                'End with ONE question that follows from what they just said — never '
+                'a generic "how are you", never a question you have already asked, '
+                'and never more than one. ')
+            if cta_asked and cta_due:
+                instruction = (
+                    f'Reply in-character to this fan\'s X DM: "{text}". {continuity}'
+                    'They are asking where else to find you — answer them directly and '
+                    'warmly, say yes, that is where you post the rest. Do NOT deflect, '
+                    'do NOT answer with a question, and do NOT paste a link yourself; '
+                    'a link is appended after your message. Keep it to one or two '
+                    'short sentences.')
+            elif cta_due:
+                instruction = (
+                    f'Reply in-character to this fan\'s X DM: "{text}". {continuity}'
+                    'Answer what they actually said first, then tease — in one natural '
+                    'sentence — that you post more somewhere more private. Do NOT paste '
+                    'a link or a URL, do not hard-sell, and do not name the site; a link '
+                    'is appended after your message. ' + ask_rule)
+            else:
+                instruction = (
+                    f'Reply in-character to this fan\'s X DM: "{text}". {continuity}'
+                    'Warm and engaging, react to what they just said before anything '
+                    'else, reference what they have told you before, and let interest '
+                    'build slowly — no selling, no hinting at paid content yet. '
+                    + ask_rule)
             reply = _persona_text(persona, instruction, history=db_hist,
                                   max_tokens=1024, temperature=0.9)
             if not reply:
                 continue
-            _x_call(persona, 'POST', f'/dm_conversations/{conv_id}/messages',
-                    body={'text': reply})
+            if cta_due:
+                link = _x_cta_link(persona, sender, cta_url)
+                reply = f'{reply}\n\n{cta_label} → {link}'
+                fan['cta_sent'] = int(time.time())
+                fan['cta_count'] = int(fan.get('cta_count', 0)) + 1
+                logger.info('CTA SENT [x/%s] fan=%s trigger=%s phase=%d count=%d link=%s',
+                            persona, sender_name or sender,
+                            'asked' if cta_asked else 'phase', phase_idx,
+                            fan['cta_count'], link)
+            elif cta_asked and not cta_url:
+                logger.warning('CTA asked on X but no cta_url configured [%s] fan=%s',
+                               persona, sender_name or sender)
+            _x_send_human(persona, conv_id, reply, incoming=text, cfg=cfg)
+            fan['last_out'] = int(time.time())
+            fans[str(sender)] = fan
             _log_x_message(persona, sender, sender_name, 'out', reply)
             hist_path = _x_state_path(persona, f'hist_{sender}')
             file_hist = _x_load_json(hist_path, [])
@@ -4299,12 +4568,68 @@ def _x_dm_reply_round(persona, max_results=20):
             file_hist.append({'role': 'bot', 'content': reply})
             _x_save_history(persona, sender, file_hist)
             replied += 1
-            log.append(f'DM reply → fan: {reply[:60]}')
+            log.append(f'DM reply → {sender_name or sender} (phase {phase_idx + 1}/{len(phases)})'
+                       + (' + link' if cta_due else '') + f': {reply[:60]}')
         except Exception as e:
-            log.append(f'DM reply failed: {str(e)[:60]}')
-    cursor['last_event_id'] = new_last or last_seen
-    _x_save_json(cursor_path, cursor)
+            log.append(f'DM reply failed: {str(e)[:200]}')
+    _x_save_fans(persona, fans)
+    _x_mark_seen(persona, handled)
+    logger.info('X DM round [%s]: %d events, %d new, %d replied',
+                persona, len(events), len(incoming), replied)
     return replied, log
+
+
+def _x_followup_round(persona):
+    """Re-engage fans who went quiet on X, and nudge once on an unclicked link.
+    Capped at X_FOLLOWUP_MAX per fan so it never turns into spam."""
+    cfg = _x_behavior(persona)
+    if not cfg.get('enabled', True) or not cfg.get('followups', True):
+        return 0, []
+    gap_min = max(5, int(cfg.get('followup_min') or 45))
+    fans = _x_fans(persona)
+    now = int(time.time())
+    sent = 0
+    log = []
+    for uid, fan in list(fans.items()):
+        last = max(int(fan.get('last_in') or 0), int(fan.get('last_out') or 0))
+        if not last or int(fan.get('last_in') or 0) > int(fan.get('last_out') or 0):
+            continue  # they spoke last — the reply path handles it
+        n = int(fan.get('followups', 0))
+        if n >= X_FOLLOWUP_MAX:
+            continue
+        if (now - last) / 60.0 < gap_min * (n + 1):
+            continue
+        conv_id = fan.get('conv_id')
+        if not conv_id:
+            continue
+        if fan.get('cta_sent') and not fan.get('cta_clicked'):
+            instruction = (
+                'This fan went quiet after you sent them your link. Write ONE short, '
+                'light, in-character nudge — curious whether they had a look, playful, '
+                'zero pressure, no link. One or two sentences.')
+        else:
+            instruction = (
+                'This fan went quiet in your X DMs. Write ONE short, in-character '
+                'message that reopens the conversation — reference something they '
+                'mentioned before if you can, and ask them something easy to answer.')
+        try:
+            hist = _x_history(persona, uid)
+            text = _fv_trim(_persona_text(persona, instruction, history=hist,
+                                          max_tokens=400, temperature=0.9), hard_cap=420)
+            if not text:
+                continue
+            _x_send_human(persona, conv_id, text, cfg=cfg)
+            _log_x_message(persona, uid, fan.get('name', ''), 'out', text)
+            fan['followups'] = n + 1
+            fan['last_out'] = int(time.time())
+            fans[uid] = fan
+            sent += 1
+            log.append(f'Follow-up {n + 1}/{X_FOLLOWUP_MAX} → {fan.get("name") or uid}: {text[:60]}')
+        except Exception as e:
+            log.append(f'Follow-up failed for {fan.get("name") or uid}: {str(e)[:200]}')
+    if sent:
+        _x_save_fans(persona, fans)
+    return sent, log
 
 
 def _x_comment_round(persona, post, limit, preview=False, skip_seen=False):
@@ -4639,6 +4964,56 @@ def api_x_disconnect():
     return jsonify({'ok': True})
 
 
+@app.route('/api/x/dm-debug')
+def api_x_dm_debug():
+    """Why a DM did or didn't get answered: what X returned, which events count
+    as new, and the per-fan state the funnel runs on."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    persona = (request.args.get('persona') or '').strip()
+    t = (_load_x_tokens() or {}).get(persona) or {}
+    out = {'persona': persona,
+           'connected': bool(t.get('access_token')),
+           'username': t.get('username', ''),
+           'stored_user_id': t.get('user_id', ''),
+           'behavior': _x_behavior(persona),
+           'cta_url': (_phases_cta(persona) or {}).get('cta_url', ''),
+           'seen_event_count': len(_x_seen_events(persona)),
+           'fans': _x_fans(persona)}
+    if not t.get('access_token'):
+        out['verdict'] = 'No X account connected for this persona.'
+        return jsonify(out)
+    if not out['behavior'].get('enabled', True):
+        out['verdict'] = 'Bot is switched off in Dashboard → Platform Bot Behavior → X.com.'
+    try:
+        raw = _x_call(persona, 'GET',
+                      '/dm_events?dm_event.fields=id,text,sender_id,created_at,'
+                      f'dm_conversation_id&event_types=MessageCreate&max_results=20')
+    except Exception as e:
+        out['read_error'] = str(e)[:300]
+        out['verdict'] = out.get('verdict') or 'Reading DMs failed — see read_error.'
+        return jsonify(out)
+    events = raw.get('data', []) or []
+    seen = _x_seen_events(persona)
+    out['events'] = [{'id': e.get('id'), 'from': e.get('sender_id'),
+                      'mine': e.get('sender_id') == t.get('user_id'),
+                      'already_handled': e.get('id') in seen,
+                      'at': e.get('created_at'), 'text': (e.get('text') or '')[:120]}
+                     for e in events]
+    out['event_count'] = len(events)
+    out['new_incoming'] = sum(1 for e in out['events']
+                              if not e['mine'] and not e['already_handled'])
+    if not out.get('verdict'):
+        if not events:
+            out['verdict'] = 'X returned no DM events at all.'
+        elif not out['new_incoming']:
+            out['verdict'] = ('All returned events are either your own or already '
+                              'answered — nothing new to reply to.')
+        else:
+            out['verdict'] = f"{out['new_incoming']} message(s) are due a reply on the next round."
+    return jsonify(out)
+
+
 @app.route('/api/x/poll', methods=['POST'])
 def api_x_poll():
     """Read new DMs for a persona's connected X account and reply via Gemini."""
@@ -4968,7 +5343,8 @@ def api_x_auto_run():
         return jsonify({'ok': False, 'error': f'No X account connected for persona "{persona}".'}), 400
 
     _log_x_event('auto-run', persona=persona, detail=query or post)
-    actions = {'dm_replies': 0, 'new_chats': 0, 'follows': 0, 'comments': 0, 'posts': 0}
+    actions = {'dm_replies': 0, 'followups': 0, 'new_chats': 0, 'follows': 0,
+               'comments': 0, 'posts': 0}
     log = []
     try:
         if do_post:
@@ -4986,6 +5362,9 @@ def api_x_auto_run():
             replied, dlog = _x_dm_reply_round(persona)
             actions['dm_replies'] = replied
             log += dlog
+            nudged, flog = _x_followup_round(persona)
+            actions['followups'] = nudged
+            log += flog
 
         if comment_limit and (do_comments and post or do_respond_own):
             targets = []
@@ -5023,12 +5402,8 @@ def api_x_auto_run():
             for u in candidates:
                 try:
                     # Final dedup: skip if we already have ANY messages with this user in DB
-                    try:
-                        with db.SessionLocal() as _s:
-                            if db.count_x_messages(_s, persona, u['id']) > 0:
-                                continue
-                    except Exception:
-                        pass
+                    if _x_messaged_before(persona, u['id']):
+                        continue
                     if do_follow and me_id:
                         try:
                             _x_call(persona, 'POST', f'/users/{me_id}/following',
@@ -5061,7 +5436,7 @@ def api_x_auto_run():
                         _log_x_message(persona, u['id'], u.get('username', ''), 'out', opener)
                         log.append(f"New chat → @{u['username']}: {opener[:50]}")
                 except Exception as e:
-                    log.append(f"@{u['username']} failed: {str(e)[:60]}")
+                    log.append(f"@{u['username']} failed: {str(e)[:200]}")
                 finally:
                     contacted.add(u['id'])
             _x_save_json(_x_state_path(persona, 'contacted'), list(contacted)[-1000:])
@@ -5099,6 +5474,19 @@ def _fanvue_app():
         'client_secret': _get_setting('fanvue_client_secret') or os.environ.get('FANVUE_CLIENT_SECRET', ''),
         'redirect_uri': _get_setting('fanvue_redirect_uri') or os.environ.get('FANVUE_REDIRECT_URI', ''),
     }
+
+
+_fanvue_lock_guard = threading.Lock()
+_fanvue_round_locks = {}
+_fanvue_refresh_locks = {}
+
+
+def _fanvue_persona_lock(store, persona):
+    with _fanvue_lock_guard:
+        lk = store.get(persona)
+        if lk is None:
+            lk = store[persona] = threading.Lock()
+        return lk
 
 
 def _fanvue_tokens(persona):
@@ -5144,21 +5532,30 @@ def _fanvue_token_post(params):
 
 
 def _fanvue_refresh(persona):
-    """Refresh a persona's Fanvue access token. Returns the new token or None."""
-    t = _fanvue_tokens(persona)
-    app_creds = _fanvue_app()
-    rt = t.get('refresh_token')
-    if not rt or not app_creds['client_id'] or not app_creds['client_secret']:
-        return None
-    try:
-        td = _fanvue_token_post({'grant_type': 'refresh_token', 'refresh_token': rt})
-    except Exception:
-        return None
-    t['access_token'] = td.get('access_token', t.get('access_token'))
-    if td.get('refresh_token'):
-        t['refresh_token'] = td['refresh_token']
-    _fanvue_save_tokens(persona, t)
-    return t['access_token']
+    """Refresh a persona's Fanvue access token. Returns the new token or None.
+
+    Serialised per persona: Fanvue rotates the refresh token, so two threads
+    redeeming the same one would invalidate the account's connection."""
+    lock = _fanvue_persona_lock(_fanvue_refresh_locks, persona)
+    before = _fanvue_tokens(persona).get('access_token')
+    with lock:
+        t = _fanvue_tokens(persona)
+        # Another thread refreshed while we waited — reuse its token.
+        if t.get('access_token') and t.get('access_token') != before:
+            return t['access_token']
+        app_creds = _fanvue_app()
+        rt = t.get('refresh_token')
+        if not rt or not app_creds['client_id'] or not app_creds['client_secret']:
+            return None
+        try:
+            td = _fanvue_token_post({'grant_type': 'refresh_token', 'refresh_token': rt})
+        except Exception:
+            return None
+        t['access_token'] = td.get('access_token', t.get('access_token'))
+        if td.get('refresh_token'):
+            t['refresh_token'] = td['refresh_token']
+        _fanvue_save_tokens(persona, t)
+        return t['access_token']
 
 
 def _fanvue_api(method, path, access_token, body=None):
@@ -6168,6 +6565,31 @@ def api_fanvue_auto():
                     'ppv_require_payment': (_get_setting(f'fanvue_ppv_require_payment_{persona}') or '0') == '1'})
 
 
+@app.route('/api/fanvue/accounts')
+def api_fanvue_accounts():
+    """Every persona's Fanvue connection at a glance, so several accounts can be
+    watched running side by side."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    enabled = set(_fanvue_enabled_list())
+    out = []
+    slugs = {p.get('slug') for p in db_list_personas()} | enabled
+    for slug in sorted(s for s in slugs if s):
+        tok = _fanvue_tokens(slug)
+        if not tok.get('access_token') and slug not in enabled:
+            continue
+        lock = _fanvue_round_locks.get(slug)
+        out.append({
+            'persona': slug,
+            'name': slug,
+            'connected': bool(tok.get('access_token')),
+            'auto': slug in enabled,
+            'running': bool(lock and lock.locked()),
+            'creator': _fanvue_creator(slug).get('handle', ''),
+        })
+    return jsonify({'accounts': out, 'active': sum(1 for a in out if a['auto'] and a['connected'])})
+
+
 @app.route('/api/fanvue/auto-run', methods=['POST'])
 def api_fanvue_auto_run():
     """Run one auto-reply round now (also used by the background worker)."""
@@ -6179,7 +6601,8 @@ def api_fanvue_auto_run():
     if not _fanvue_tokens(persona).get('access_token'):
         return jsonify({'ok': False, 'error': 'Fanvue not connected for this persona.'}), 400
     try:
-        actions, log = _fanvue_auto_round(persona)
+        res = _fanvue_round_now(persona, block=True)
+        actions, log = res if res else ({}, [])
         return jsonify({'ok': True, 'actions': actions, 'log': log})
     except url_error.HTTPError as e:
         return jsonify({'ok': False, 'error': f'Fanvue API {e.code}: {e.read()[:200].decode(errors="ignore")}'}), 400
@@ -6233,22 +6656,57 @@ def api_fanvue_debug():
 _fanvue_worker_started = [False]
 
 
+def _fanvue_round_now(persona, block=False):
+    """Run one round for a persona, never letting that persona overlap itself.
+    Returns (actions, log) or None when a round was already in flight."""
+    lock = _fanvue_persona_lock(_fanvue_round_locks, persona)
+    if not lock.acquire(blocking=block):
+        return None
+    try:
+        with app.app_context():
+            return _fanvue_auto_round(persona)
+    finally:
+        lock.release()
+
+
 def _fanvue_worker():
     """Server-side loop: runs an auto-reply round for every enabled persona on an
     interval. Reads the enabled list + tokens from the DB, so after a redeploy the
-    new instance resumes automatically without a browser tab."""
+    new instance resumes automatically without a browser tab.
+
+    Rounds run in parallel, one thread per connected account, so a slow or
+    chatty account never delays the others. Per-persona locks mean an account
+    whose round outlives the interval is simply skipped next tick."""
     import time as _t
+    from concurrent.futures import ThreadPoolExecutor
+    pool = ThreadPoolExecutor(max_workers=max(1, int(os.getenv('FANVUE_WORKERS', '8'))),
+                              thread_name_prefix='fanvue')
+
+    pending = set()
+
+    def _one(persona):
+        try:
+            _fanvue_round_now(persona)
+        except Exception:
+            logger.exception('fanvue round failed for %s', persona)
+        finally:
+            with _fanvue_lock_guard:
+                pending.discard(persona)
+
     while True:
         try:
-            for persona in _fanvue_enabled_list():
-                try:
-                    if _fanvue_tokens(persona).get('access_token'):
-                        with app.app_context():
-                            _fanvue_auto_round(persona)
-                except Exception:
-                    pass
+            live = [p for p in _fanvue_enabled_list()
+                    if _fanvue_tokens(p).get('access_token')]
+            for persona in live:
+                # Don't queue an account that is still running or waiting from
+                # an earlier tick — the queue would grow without bound.
+                with _fanvue_lock_guard:
+                    if persona in pending:
+                        continue
+                    pending.add(persona)
+                pool.submit(_one, persona)
         except Exception:
-            pass
+            logger.exception('fanvue worker tick failed')
         _t.sleep(20)
 
 
@@ -8104,6 +8562,59 @@ def _tg_worker():
                     pass
         except Exception:
             pass
+
+
+_x_worker_started = [False]
+_x_round_locks = {}
+
+
+def _x_enabled_list():
+    """Personas with a connected X account and the bot switched on."""
+    out = []
+    for persona, t in (_load_x_tokens() or {}).items():
+        if (t or {}).get('access_token') and _x_behavior(persona).get('enabled', True):
+            out.append(persona)
+    return out
+
+
+def _x_worker():
+    """Server-side loop: keeps DM replies and follow-ups running for every
+    connected X account without an open browser tab, in parallel so one busy
+    account never holds up the others."""
+    import time as _t
+    from concurrent.futures import ThreadPoolExecutor
+    pool = ThreadPoolExecutor(max_workers=max(1, int(os.getenv('X_WORKERS', '8'))),
+                              thread_name_prefix='xbot')
+    pending = set()
+    guard = threading.Lock()
+
+    def _one(persona):
+        try:
+            with app.app_context():
+                _x_dm_reply_round(persona)
+                _x_followup_round(persona)
+        except Exception:
+            logger.exception('x round failed for %s', persona)
+        finally:
+            with guard:
+                pending.discard(persona)
+
+    while True:
+        _t.sleep(60)
+        try:
+            for persona in _x_enabled_list():
+                with guard:
+                    if persona in pending:
+                        continue
+                    pending.add(persona)
+                pool.submit(_one, persona)
+        except Exception:
+            logger.exception('x worker tick failed')
+
+
+if os.getenv('X_WORKER', '1') != '0' and not _x_worker_started[0]:
+    _x_worker_started[0] = True
+    threading.Thread(target=_x_worker, daemon=True).start()
 
 
 if os.getenv('TELEGRAM_WORKER', '1') != '0' and not _tg_worker_started[0]:

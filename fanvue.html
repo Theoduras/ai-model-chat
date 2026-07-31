@@ -159,6 +159,12 @@
     <div class="result-box" id="fv-auto-result"></div>
   </div>
 
+  <div class="form-section">
+    <div class="section-title">👥 Connected accounts</div>
+    <span class="hint" style="display:block; margin-bottom:14px;">Every persona with a Fanvue connection. Accounts with auto-reply on all run <b>at the same time</b> — one worker per account, so a busy inbox never holds up the others.</span>
+    <div id="fv-accounts"><span class="hint">Loading…</span></div>
+  </div>
+
 </div>
 </div>
 
@@ -190,6 +196,7 @@ async function loadConfig(){
   window._ppvTiersLoaded=false;
   loadPpv();
   loadAuto();
+  loadAccounts();
 }
 let ppvSel=new Set();
 let ppvTiers=[{media_uuids:[],price:'',caption:''}];
@@ -351,6 +358,7 @@ async function saveAuto(){
     ppv_require_payment:document.getElementById('fv-ppv-require-payment').checked});
   if(!data.ok){err(box,data.error||'Failed');return;}
   loadAuto();
+  loadAccounts();
   if(data.enabled){
     busy(box,'Running first round…');
     const run=await post('/api/fanvue/auto-run',{persona:persona()});
@@ -362,6 +370,20 @@ async function saveAuto(){
   } else {
     box.innerHTML='<span class="hint">Auto-reply is off.</span>';
   }
+}
+async function loadAccounts(){
+  const box=document.getElementById('fv-accounts');
+  let d={};
+  try{d=await fetch('/api/fanvue/accounts').then(r=>r.json());}catch(e){}
+  const list=d.accounts||[];
+  if(!list.length){box.innerHTML='<span class="hint">No Fanvue accounts connected yet.</span>';return;}
+  box.innerHTML=list.map(a=>{
+    const state=a.running?'● running now':(a.auto&&a.connected?'● auto-reply on':(a.connected?'connected — auto off':'not connected'));
+    const col=a.running?'#4ade80':(a.auto&&a.connected?'#4ade80':'var(--text-muted)');
+    return '<div class="reply-card"><div class="rep"><b>'+esc(a.name)+'</b>'
+      +(a.creator?' <span style="color:var(--text-muted)">@'+esc(a.creator)+'</span>':'')
+      +' <span style="color:'+col+'">'+state+'</span></div></div>';
+  }).join('')+'<span class="hint">'+(d.active||0)+' running concurrently.</span>';
 }
 async function runAutoOnce(){
   const box=document.getElementById('fv-auto-result');
