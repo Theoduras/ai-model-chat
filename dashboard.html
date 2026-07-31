@@ -1461,17 +1461,17 @@ function outfitBlock(o) {
         <div class="outfit-fields">
           <div class="field">
             <label>Name</label>
-            <input value="${esc(o.name)}" placeholder="e.g. In bed"
+            <input type="text" value="${esc(o.name)}" placeholder="e.g. In bed"
               onchange="editOutfit(${o.n},'name',this.value)">
           </div>
           <div class="field">
             <label>Clothing</label>
-            <input value="${esc(o.clothing)}" placeholder="e.g. black shirt"
+            <input type="text" value="${esc(o.clothing)}" placeholder="e.g. black shirt"
               onchange="editOutfit(${o.n},'clothing',this.value)">
           </div>
           <div class="field">
             <label>Place / setting</label>
-            <input value="${esc(o.location)}" placeholder="e.g. home in bed"
+            <input type="text" value="${esc(o.location)}" placeholder="e.g. home in bed"
               onchange="editOutfit(${o.n},'location',this.value)">
           </div>
           <div class="field">
