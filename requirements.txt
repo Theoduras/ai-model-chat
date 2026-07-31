@@ -5,3 +5,4 @@ google-auth
 gunicorn
 sqlalchemy
 psycopg2-binary
+telethon
