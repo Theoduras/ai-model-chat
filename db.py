@@ -138,6 +138,25 @@ class PersonaMedia(Base):
 Index('ix_media_slug_purpose', PersonaMedia.slug, PersonaMedia.purpose)
 
 
+class MediaOutfitLink(Base):
+    """Places a vault photo in an outfit. A photo can be in several outfits, and
+    removing it from one leaves the photo itself untouched."""
+    __tablename__ = 'media_outfit_links'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    slug = Column(String(64), nullable=False, index=True)
+    media_id = Column(String(32), ForeignKey('persona_media.id'), nullable=False, index=True)
+    outfit = Column(String(120), nullable=False)
+    position = Column(Integer, default=0)
+    created_at = Column(DateTime, default=_now)
+
+
+Index('ix_link_slug_outfit', MediaOutfitLink.slug, MediaOutfitLink.outfit,
+      MediaOutfitLink.position)
+Index('ix_link_media_outfit', MediaOutfitLink.media_id, MediaOutfitLink.outfit,
+      unique=True)
+
+
 class Visit(Base):
     """One row per page view on the site — used for the visitor log
     (who's on the dev page: IP, geolocation, time, path)."""
@@ -243,6 +262,97 @@ def list_persona_media(session, slug):
     return (session.query(PersonaMedia).filter_by(slug=slug)
             .order_by(func.coalesce(PersonaMedia.position, 0),
                       PersonaMedia.created_at).all())
+
+
+def list_media_links(session, slug):
+    return (session.query(MediaOutfitLink).filter_by(slug=slug)
+            .order_by(func.coalesce(MediaOutfitLink.position, 0),
+                      MediaOutfitLink.created_at).all())
+
+
+def link_media_to_outfit(session, slug, media_id, outfit):
+    """Idempotent: linking the same photo to the same outfit twice is a no-op."""
+    outfit = str(outfit)
+    existing = (session.query(MediaOutfitLink)
+                .filter_by(media_id=media_id, outfit=outfit).first())
+    if existing:
+        return existing
+    last = (session.query(func.max(MediaOutfitLink.position))
+            .filter_by(slug=slug, outfit=outfit).scalar())
+    link = MediaOutfitLink(slug=slug, media_id=media_id, outfit=outfit,
+                           position=(last or 0) + 1)
+    session.add(link)
+    return link
+
+
+def unlink_media_from_outfit(session, media_id, outfit):
+    rows = session.query(MediaOutfitLink).filter_by(
+        media_id=media_id, outfit=str(outfit)).all()
+    for r in rows:
+        session.delete(r)
+    return len(rows)
+
+
+def delete_media_links(session, media_id):
+    for r in session.query(MediaOutfitLink).filter_by(media_id=media_id).all():
+        session.delete(r)
+
+
+def reorder_media_links(session, slug, entries):
+    """entries: [{'media_id':..., 'outfit':...}, ...] in display order. Links
+    not mentioned for an outfit are removed, so a drag out of an outfit sticks."""
+    existing = {(l.media_id, l.outfit): l
+                for l in session.query(MediaOutfitLink).filter_by(slug=slug).all()}
+    seen = set()
+    for i, e in enumerate(entries):
+        mid, outfit = e.get('media_id'), str(e.get('outfit', ''))
+        if not mid or not outfit:
+            continue
+        key = (mid, outfit)
+        seen.add(key)
+        link = existing.get(key)
+        if link is None:
+            link = MediaOutfitLink(slug=slug, media_id=mid, outfit=outfit)
+            session.add(link)
+        link.position = i
+    for key, link in existing.items():
+        if key not in seen:
+            session.delete(link)
+    return len(seen)
+
+
+def sync_legacy_outfit(session, media_ids):
+    """Mirror each photo's first link back into PersonaMedia.outfit.
+
+    The chat sender picks photos by that column, so a photo placed through the
+    vault would never be sent if it were left empty.
+    """
+    for mid in set(media_ids or []):
+        row = session.get(PersonaMedia, mid)
+        if row is None:
+            continue
+        link = (session.query(MediaOutfitLink).filter_by(media_id=mid)
+                .order_by(func.coalesce(MediaOutfitLink.position, 0)).first())
+        row.outfit = link.outfit if link else ''
+
+
+def backfill_media_links(session):
+    """One-time: turn each photo's legacy outfit column into a link. Safe to
+    run repeatedly — it only adds links that are missing."""
+    have = {(l.media_id, l.outfit)
+            for l in session.query(MediaOutfitLink.media_id,
+                                   MediaOutfitLink.outfit).all()}
+    added = 0
+    rows = session.query(PersonaMedia).filter(
+        PersonaMedia.outfit != '', PersonaMedia.outfit.isnot(None)).all()
+    for r in rows:
+        if (r.id, str(r.outfit)) in have:
+            continue
+        session.add(MediaOutfitLink(slug=r.slug, media_id=r.id,
+                                    outfit=str(r.outfit),
+                                    position=r.position or 0))
+        added += 1
+    return added
 
 
 def reorder_persona_media(session, slug, ordered_ids):
@@ -362,6 +472,17 @@ def init_db():
             _add_missing_columns(table, model)
         except Exception:
             pass
+    # Existing photos carry their outfit in a column; give each one a link so
+    # the vault sees the same layout the outfits already show.
+    try:
+        s = SessionLocal()
+        try:
+            if backfill_media_links(s):
+                s.commit()
+        finally:
+            s.close()
+    except Exception:
+        pass
 
 
 def get_persona_images_row(session, slug):

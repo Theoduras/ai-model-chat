@@ -3514,22 +3514,36 @@ def _safe_outfit_num(row):
 def api_persona_media_list(slug):
     if not re.match(r'^[a-z0-9_-]+$', slug):
         return jsonify({'error': 'Invalid slug'}), 400
-    from db import SessionLocal, list_persona_media
+    from db import SessionLocal, list_persona_media, list_media_links
     outfits = _outfits(slug)
     s = SessionLocal()
     try:
         rows = list_persona_media(s, slug)
-        items = []
+        links = list_media_links(s, slug)
+        by_media = {}
+        for l in links:
+            by_media.setdefault(l.media_id, []).append(l.outfit)
+
+        vault = []
         for r in rows:
             o = _outfit_of(r, outfits)
-            items.append({
+            vault.append({
                 'id': r.id, 'purpose': r.purpose or '',
-                'outfit': r.outfit or '',
+                'outfits': by_media.get(r.id, []),
+                'outfit': r.outfit or '',        # legacy, kept during migration
                 'location': (o or {}).get('location', ''),
                 'lighting': (o or {}).get('lighting', ''),
                 'thumb': f'/api/personas/{slug}/media/{r.id}/image',
             })
-        return jsonify({'items': items, 'outfits': outfits})
+
+        # One entry per placement, which is what the outfit strips render.
+        placements = [{'media_id': l.media_id, 'outfit': l.outfit,
+                       'position': l.position or 0} for l in links]
+        # `items` keeps the old shape so anything still reading it works.
+        items = [dict(v, outfit=(v['outfits'][0] if v['outfits'] else ''))
+                 for v in vault]
+        return jsonify({'items': items, 'vault': vault,
+                        'links': placements, 'outfits': outfits})
     finally:
         s.close()
 
@@ -3564,6 +3578,12 @@ def api_persona_media_save(slug):
             purpose=str(data.get('purpose', ''))[:60],
         )
         s.add(row)
+        s.flush()
+        # Uploading straight into an outfit also places it there. Without an
+        # outfit the photo simply lands in the vault, unassigned.
+        if row.outfit:
+            from db import link_media_to_outfit
+            link_media_to_outfit(s, slug, row.id, row.outfit)
         s.commit()
         return jsonify({'ok': True, 'id': row.id})
     finally:
@@ -3572,20 +3592,77 @@ def api_persona_media_save(slug):
 
 @app.route('/api/personas/<slug>/media/reorder', methods=['POST'])
 def api_persona_media_reorder(slug):
-    """Persist a drag-and-drop reorder. Body: {order: [{id, outfit}, ...]}"""
+    """Persist the outfit layout after a drag.
+    Body: {order: [{media_id, outfit}, ...]} in display order."""
     if not re.match(r'^[a-z0-9_-]+$', slug):
         return jsonify({'error': 'Invalid slug'}), 400
     order = (request.json or {}).get('order')
     if not isinstance(order, list):
         return jsonify({'error': 'order must be a list'}), 400
-    from db import SessionLocal, reorder_persona_media
+    # Accept the older {id, outfit} shape too.
+    entries = [{'media_id': e.get('media_id') or e.get('id'),
+                'outfit': e.get('outfit', '')} for e in order]
+    from db import SessionLocal, reorder_media_links, sync_legacy_outfit
     s = SessionLocal()
     try:
-        n = reorder_persona_media(s, slug, order)
+        n = reorder_media_links(s, slug, entries)
+        s.flush()
+        sync_legacy_outfit(s, [e['media_id'] for e in entries if e.get('media_id')])
         s.commit()
     finally:
         s.close()
     return jsonify({'ok': True, 'updated': n})
+
+
+@app.route('/api/personas/<slug>/media/link', methods=['POST'])
+def api_persona_media_link(slug):
+    """Put vault photos into an outfit. Body: {media_ids: [...], outfit: 'N'}"""
+    if not re.match(r'^[a-z0-9_-]+$', slug):
+        return jsonify({'error': 'Invalid slug'}), 400
+    data = request.json or {}
+    outfit = str(data.get('outfit', '')).strip()
+    media_ids = data.get('media_ids') or ([data['media_id']] if data.get('media_id') else [])
+    if not outfit or not media_ids:
+        return jsonify({'error': 'outfit and media_ids are required'}), 400
+    from db import (SessionLocal, PersonaMedia, link_media_to_outfit,
+                    sync_legacy_outfit)
+    s = SessionLocal()
+    try:
+        added = 0
+        for mid in media_ids:
+            row = s.get(PersonaMedia, mid)
+            if row is None or row.slug != slug:
+                continue        # never link another persona's photo
+            link_media_to_outfit(s, slug, mid, outfit)
+            added += 1
+        s.flush()
+        sync_legacy_outfit(s, media_ids)
+        s.commit()
+    finally:
+        s.close()
+    return jsonify({'ok': True, 'linked': added})
+
+
+@app.route('/api/personas/<slug>/media/unlink', methods=['POST'])
+def api_persona_media_unlink(slug):
+    """Take a photo out of an outfit. The photo stays in the vault."""
+    if not re.match(r'^[a-z0-9_-]+$', slug):
+        return jsonify({'error': 'Invalid slug'}), 400
+    data = request.json or {}
+    outfit = str(data.get('outfit', '')).strip()
+    media_id = data.get('media_id')
+    if not outfit or not media_id:
+        return jsonify({'error': 'outfit and media_id are required'}), 400
+    from db import SessionLocal, unlink_media_from_outfit, sync_legacy_outfit
+    s = SessionLocal()
+    try:
+        n = unlink_media_from_outfit(s, media_id, outfit)
+        s.flush()
+        sync_legacy_outfit(s, [media_id])
+        s.commit()
+    finally:
+        s.close()
+    return jsonify({'ok': True, 'removed': n})
 
 
 @app.route('/api/personas/<slug>/media/<media_id>', methods=['PUT'])
@@ -3614,11 +3691,14 @@ def api_persona_media_update(slug, media_id):
 def api_persona_media_delete(slug, media_id):
     if not re.match(r'^[a-z0-9_-]+$', slug):
         return jsonify({'error': 'Invalid slug'}), 400
-    from db import SessionLocal, delete_persona_media
+    from db import SessionLocal, delete_persona_media, delete_media_links
     s = SessionLocal()
     try:
+        # Links first: a leftover link would point at a photo that is gone.
+        delete_media_links(s, media_id)
         row = delete_persona_media(s, media_id)
         if not row or row.slug != slug:
+            s.rollback()
             return jsonify({'error': 'Not found'}), 404
         s.commit()
         return jsonify({'ok': True})
