@@ -500,7 +500,7 @@ init_gemini_client()
 MODEL_NAME = 'gemini-2.5-flash'
 
 # Default persona slug (used when no persona param given)
-DEFAULT_PERSONA = 'lillith'
+DEFAULT_PERSONA = 'lilly'
 
 # Cache of loaded system prompts {slug: str}
 _prompt_cache = {}
@@ -3065,7 +3065,7 @@ def api_x_auth_url():
     data = request.json or {}
     client_id = data.get('client_id', '').strip() or (_get_setting('x_client_id') or '')
     redirect_uri = data.get('redirect_uri', '').strip() or (_get_setting('x_redirect_uri') or '')
-    persona = data.get('persona', 'lillith')
+    persona = data.get('persona', 'lilly')
     if not client_id or not redirect_uri:
         return jsonify({'ok': False, 'error': 'client_id and redirect_uri are required'}), 400
 
@@ -3130,7 +3130,7 @@ def api_x_callback():
     client_id = saved['client_id']
     redirect_uri = saved['redirect_uri']
     code_verifier = saved['code_verifier']
-    persona = saved.get('persona', 'lillith')
+    persona = saved.get('persona', 'lilly')
 
     body = urllib.parse.urlencode({
         'grant_type': 'authorization_code',
@@ -3228,7 +3228,7 @@ def api_x_poll():
     if not _check_admin():
         return jsonify({'error': 'Unauthorized'}), 401
     data = request.json or {}
-    persona = data.get('persona', 'lillith')
+    persona = data.get('persona', 'lilly')
     _log_x_event('poll_dm', persona=persona)
 
     tokens = _load_x_tokens()

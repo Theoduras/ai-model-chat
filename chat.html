@@ -100,7 +100,7 @@ const chatEl = document.getElementById('chat');
 const inp = document.getElementById('input');
 const typingRow = document.getElementById('typing-row');
 let u = null, m = { recentTopics: [], lastTopic: null }, h = [], s = 3.5, l = Date.now(), avatarUrl = null, personaName = '…';
-let persona = new URLSearchParams(location.search).get('persona') || 'lillith';
+let persona = new URLSearchParams(location.search).get('persona') || 'lilly';
 let PFX = 'persona_' + persona + '_';
 
 if (window.self !== window.top) { document.body.classList.add('embed'); }
