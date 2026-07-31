@@ -138,6 +138,11 @@
       <label class="soon" style="display:flex;align-items:center;gap:8px;cursor:pointer;background:none;color:var(--text-2);font-size:.85rem;padding:0"><input type="checkbox" id="fv-auto-enabled" style="width:auto"> <b>Auto-reply enabled</b></label>
       <label class="soon" style="display:flex;align-items:center;gap:8px;cursor:pointer;background:none;color:var(--text-2);font-size:.85rem;padding:0"><input type="checkbox" id="fv-exclude-creators" checked style="width:auto"> Exclude other creators (only reply to fans)</label>
       <label class="soon" style="display:flex;align-items:center;gap:8px;cursor:pointer;background:none;color:var(--text-2);font-size:.85rem;padding:0"><input type="checkbox" id="fv-ppv-require-payment" style="width:auto"> Require payment before next PPV tier <span style="color:var(--text-muted)">(off = tiers flow on chatting; use off for testing)</span></label>
+      <label class="soon" style="display:flex;align-items:center;gap:8px;cursor:pointer;background:none;color:var(--text-2);font-size:.85rem;padding:0"><input type="checkbox" id="fv-online-only" style="width:auto" onchange="document.getElementById('fv-online-grace-wrap').style.display=this.checked?'':'none'"> Only reply to fans who are online <span style="color:var(--text-muted)">(skip everyone else this round)</span></label>
+    </div>
+    <div class="field full" id="fv-online-grace-wrap" style="margin-top:12px;display:none;">
+      <label>Count as online for <span style="font-weight:400;color:var(--text-muted);">(minutes since last seen — presence flickers when a fan backgrounds the app, so a small window avoids missing them. 0 = only while the flag says online.)</span></label>
+      <input type="number" id="fv-online-grace" min="0" max="120" step="1" value="5" style="max-width:160px;">
     </div>
     <div class="field full" style="margin-top:12px;">
       <label>Only reply to these fans <span style="font-weight:400;color:var(--text-muted);">(comma-separated handles — leave blank for everyone; use for testing)</span></label>
@@ -324,6 +329,9 @@ async function loadAuto(){
   document.getElementById('fv-auto-enabled').checked=!!a.enabled;
   document.getElementById('fv-exclude-creators').checked=a.exclude_creators!==false;
   document.getElementById('fv-only-handles').value=a.only_handles||'';
+  document.getElementById('fv-online-only').checked=!!a.online_only;
+  document.getElementById('fv-online-grace').value=(a.online_grace!==undefined?a.online_grace:5);
+  document.getElementById('fv-online-grace-wrap').style.display=a.online_only?'':'none';
   document.getElementById('fv-followup-min').value=a.followup_min||30;
   document.getElementById('fv-ppv-require-payment').checked=!!a.ppv_require_payment;
   const st=document.getElementById('fv-auto-state');
@@ -337,6 +345,8 @@ async function saveAuto(){
     enabled:document.getElementById('fv-auto-enabled').checked,
     exclude_creators:document.getElementById('fv-exclude-creators').checked,
     only_handles:document.getElementById('fv-only-handles').value,
+    online_only:document.getElementById('fv-online-only').checked,
+    online_grace:parseInt(document.getElementById('fv-online-grace').value||'5',10),
     followup_min:document.getElementById('fv-followup-min').value,
     ppv_require_payment:document.getElementById('fv-ppv-require-payment').checked});
   if(!data.ok){err(box,data.error||'Failed');return;}

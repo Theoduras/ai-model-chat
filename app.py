@@ -5780,6 +5780,32 @@ def _fv_user_of_chat(chat):
     return uuid, handle, is_creator, chat_uuid
 
 
+def _fv_chat_online(chat, grace_minutes=5):
+    """Whether the fan on this chat is around right now.
+
+    Fanvue puts `online` (bool) and `lastSeenAt` (date|null) on the chat itself,
+    not on the nested user. Presence flickers when someone backgrounds the app,
+    so anyone seen within the grace window still counts as online. lastSeenAt is
+    null when the fan hides it — then only the explicit flag is trusted.
+    """
+    flag = chat.get('online')
+    if flag is True:
+        return True
+    seen = _fv_first(chat, 'lastSeenAt', 'lastSeen', default='')
+    if seen:
+        try:
+            s = str(seen).replace('Z', '+00:00')
+            dt = datetime.fromisoformat(s)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            mins = (datetime.now(timezone.utc) - dt).total_seconds() / 60.0
+            if mins <= grace_minutes:
+                return True
+        except Exception:
+            pass
+    return False
+
+
 def _fv_msg_age_minutes(msg):
     """Minutes since a Fanvue message was created, or None if unparseable."""
     raw = _fv_first(msg, 'createdAt', 'sentAt', 'timestamp', default='')
@@ -5861,10 +5887,12 @@ def _fanvue_auto_round(persona):
     other creators when configured. Returns (actions, log)."""
     opts = _fanvue_auto_settings(persona)
     exclude_creators = opts.get('exclude_creators', True)
+    online_only = bool(opts.get('online_only'))
+    online_grace = max(0, min(int(opts.get('online_grace', 5)), 120))
     reply_limit = max(1, min(int(opts.get('reply_limit', 10)), 30))
     only = [h.strip().lstrip('@').lower()
             for h in (opts.get('only_handles') or '').split(',') if h.strip()]
-    actions = {'replies': 0, 'skipped_creators': 0}
+    actions = {'replies': 0, 'skipped_creators': 0, 'skipped_offline': 0}
     log = []
 
     me_uuid = _fanvue_me_uuid(persona)
@@ -5934,6 +5962,10 @@ def _fanvue_auto_round(persona):
             continue
         if only and (handle or '').lower() not in only:
             log.append(f'{who}: skipped (not in only-list)')
+            continue
+        if online_only and not _fv_chat_online(chat, online_grace):
+            actions['skipped_offline'] += 1
+            log.append(f'{who}: skipped (offline)')
             continue
         fan_key = 'fv:' + fan_uuid
         try:
@@ -6106,6 +6138,10 @@ def api_fanvue_auto():
             opts['reply_limit'] = int(data['reply_limit'])
         if 'only_handles' in data:
             opts['only_handles'] = (data.get('only_handles') or '').strip()
+        if 'online_only' in data:
+            opts['online_only'] = bool(data['online_only'])
+        if 'online_grace' in data:
+            opts['online_grace'] = max(0, min(int(data['online_grace'] or 5), 120))
         if 'followup_min' in data:
             try:
                 _set_setting(f'fanvue_followup_min_{persona}', str(int(float(data['followup_min']))))
@@ -6126,6 +6162,8 @@ def api_fanvue_auto():
                     'exclude_creators': opts.get('exclude_creators', True),
                     'reply_limit': opts.get('reply_limit', 10),
                     'only_handles': opts.get('only_handles', ''),
+                    'online_only': bool(opts.get('online_only')),
+                    'online_grace': opts.get('online_grace', 5),
                     'followup_min': int(_get_setting(f'fanvue_followup_min_{persona}') or 30),
                     'ppv_require_payment': (_get_setting(f'fanvue_ppv_require_payment_{persona}') or '0') == '1'})
 
