@@ -1326,7 +1326,7 @@ def api_me():
     user = _current_user()
     if not user:
         return jsonify({'signed_in': False}), 200
-    return jsonify({'signed_in': True, 'email': user['email'],
+    return jsonify({'signed_in': True, 'id': user['id'], 'email': user['email'],
                     'name': user.get('name', ''), 'tier': user.get('tier', ''),
                     'status': user.get('status'),
                     'is_admin': bool(user.get('is_admin'))}), 200
