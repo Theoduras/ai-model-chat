@@ -799,7 +799,8 @@ button:disabled{opacity:.6;cursor:not-allowed}
 .tier li:before{content:'✓';color:#7c3aed;margin-right:8px}
 .bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;font-size:.85rem;color:#a1a1aa}
 .bar a{color:#a78bfa;text-decoration:none}
-@media(min-width:900px){.wrap.wide{max-width:1000px}.tiers{grid-template-columns:repeat(3,1fr)}}
+@media(min-width:700px){.wrap.wide{max-width:760px}.tiers{grid-template-columns:repeat(2,1fr)}}
+@media(min-width:1180px){.wrap.wide{max-width:1240px}.tiers{grid-template-columns:repeat(4,1fr)}}
 """
 
 REGISTER_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
