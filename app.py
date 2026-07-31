@@ -6082,8 +6082,19 @@ def api_telegram_diag():
         return jsonify({'error': 'Unauthorized'}), 401
     probe = f'diag-{int(time.time())}'
     _set_setting('telegram_diag', probe)
+    plat = _tg_platform()
+    wh_info = None
+    if plat.get('bot_token'):
+        try:
+            wh_info = _tg_api(plat['bot_token'], 'getWebhookInfo', {})
+        except Exception as e:
+            wh_info = {'error': str(e)[:200]}
     out = {'settings_writable': _get_setting('telegram_diag') == probe,
-           'platform_configured': bool(_tg_platform().get('bot_token')),
+           'platform_configured': bool(plat.get('bot_token')),
+           'platform_username': plat.get('username', ''),
+           'webhook_url': (wh_info or {}).get('url', ''),
+           'webhook_pending': (wh_info or {}).get('pending_update_count', 0),
+           'webhook_last_error': (wh_info or {}).get('last_error_message', ''),
            'personas_connected': len(_tg_load_bots()),
            'last_db_error': _last_x_log_error[0]}
     try:
