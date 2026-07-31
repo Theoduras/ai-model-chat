@@ -626,6 +626,12 @@ def _oxapay_key():
     return (os.getenv('OXAPAY_MERCHANT_KEY') or '').strip()
 
 
+def _dev_payments_enabled():
+    """Dev-only: lets a plan be activated without paying. Off unless
+    DEV_FAKE_PAYMENTS=1 is set explicitly, so production can never hit it."""
+    return (os.getenv('DEV_FAKE_PAYMENTS') or '').strip() == '1'
+
+
 def _db_session():
     from db import SessionLocal
     return SessionLocal()
@@ -825,9 +831,29 @@ plan is active{% if user.expires_at %} until {{ user.expires_at[:10] }}{% endif 
 <div class="price">${{ t.price }}<span>/{{ t.days }} days</span></div>
 <ul>{% for f in t.features %}<li>{{ f }}</li>{% endfor %}</ul>
 <button data-tier="{{ key }}">{{ 'Renew' if user.status == 'expired' else 'Pay with crypto' }}</button>
+{% if dev_mode %}<button class="dev" data-dev-tier="{{ key }}"
+ style="background:#27272a;color:#fbbf24;margin-top:8px">Activate free (dev)</button>{% endif %}
 </div>{% endfor %}
-</div></div>
+</div>
+{% if dev_mode %}<p style="text-align:center;color:#fbbf24;font-size:.8rem;margin-top:18px">
+Dev mode: DEV_FAKE_PAYMENTS=1 is set, so plans can be activated without paying.
+Unset it before going live.</p>{% endif %}
+</div>
 <script>
+document.querySelectorAll('button[data-dev-tier]').forEach(function(b){
+  b.addEventListener('click', async function(){
+    b.disabled = true; b.textContent = 'Activating...';
+    try {
+      var r = await fetch('/api/billing/dev-activate', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({tier: b.dataset.devTier})});
+      var d = await r.json();
+      if (d.ok) { window.location = '/dashboard'; return; }
+      alert(d.error || 'Could not activate.');
+    } catch (e) { alert('Could not activate.'); }
+    b.disabled = false; b.textContent = 'Activate free (dev)';
+  });
+});
 document.querySelectorAll('button[data-tier]').forEach(function(b){
   b.addEventListener('click', async function(){
     b.disabled = true; var old = b.textContent; b.textContent = 'Creating invoice...';
@@ -968,7 +994,8 @@ def pricing():
     user = _current_user() or {'email': '', 'status': 'unpaid', 'tier': '',
                                'expires_at': None}
     return render_template_string(BILLING_HTML, user=user, tiers=TIERS,
-                                  order=DEFAULT_TIER_ORDER)
+                                  order=DEFAULT_TIER_ORDER,
+                                  dev_mode=_dev_payments_enabled())
 
 
 @app.route('/billing')
@@ -977,7 +1004,8 @@ def billing():
     if not user:
         return redirect('/login?next=/billing')
     return render_template_string(BILLING_HTML, user=user, tiers=TIERS,
-                                  order=DEFAULT_TIER_ORDER)
+                                  order=DEFAULT_TIER_ORDER,
+                                  dev_mode=_dev_payments_enabled())
 
 
 @app.route('/billing/return')
@@ -1042,6 +1070,40 @@ def api_billing_checkout():
     logger.info('CHECKOUT [%s] user=%s tier=%s order=%s track=%s',
                 'oxapay', user['email'], tier_key, order_id, track_id)
     return jsonify({'payment_url': pay_url, 'track_id': track_id})
+
+
+@app.route('/api/billing/dev-activate', methods=['POST'])
+def api_billing_dev_activate():
+    """Activate a plan without payment. Requires DEV_FAKE_PAYMENTS=1."""
+    if not _dev_payments_enabled():
+        return jsonify({'error': 'Not available'}), 404
+    user = _current_user()
+    if not user:
+        return jsonify({'error': 'Sign in required'}), 401
+    tier_key = (request.get_json(silent=True) or {}).get('tier', '')
+    tier = TIERS.get(tier_key)
+    if not tier:
+        return jsonify({'error': 'Unknown plan'}), 400
+
+    from db import User, Payment
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    s = _db_session()
+    try:
+        u = s.get(User, user['id'])
+        start = u.expires_at if (u.expires_at and u.expires_at > now) else now
+        u.tier = tier_key
+        u.status = 'active'
+        u.expires_at = start + timedelta(days=int(tier.get('days', 30)))
+        s.add(Payment(user_id=u.id, tier=tier_key, amount=str(tier['price']),
+                      currency='USD', order_id=f'dev-{secrets.token_hex(6)}',
+                      status='dev', paid_at=now))
+        expires = u.expires_at
+        s.commit()
+    finally:
+        s.close()
+    logger.warning('DEV ACTIVATION (no payment taken) user=%s tier=%s until=%s',
+                   user['email'], tier_key, expires)
+    return jsonify({'ok': True, 'tier': tier_key, 'expires_at': expires.isoformat()})
 
 
 @app.route('/api/billing/webhook', methods=['POST'])
