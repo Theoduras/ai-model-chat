@@ -4073,6 +4073,59 @@ def api_config_set_key():
 
 # ── X.com OAuth 2.0 PKCE + DM bot ───────────────────────────────────────────
 
+class XApiError(url_error.HTTPError):
+    """HTTPError that carries X's own explanation. A bare "HTTP Error 403:
+    Forbidden" hides whether the fan has DMs closed, the token is missing a
+    scope, or the API tier forbids the call — the JSON body says which."""
+
+    def __init__(self, e, detail, raw=b''):
+        super().__init__(e.url, e.code, e.reason, e.headers, None)
+        self.detail = detail
+        self._raw = raw
+
+    def read(self, *_a):
+        # The body was already consumed to build `detail`; hand back the copy so
+        # callers that report e.read() keep working.
+        return self._raw
+
+    def __str__(self):
+        return f'X API {self.code}: {self.detail}' if self.detail else super().__str__()
+
+
+_X_403_HINTS = (
+    ('cannot send messages', 'they only accept DMs from people they follow'),
+    ('not permitted', 'your X app is missing a required scope — reconnect the account'),
+    ('client-not-enrolled', 'your X API plan does not include this endpoint'),
+    ('unsupported authentication', 'reconnect the account with OAuth 2.0'),
+)
+
+
+def _x_http_error(e):
+    """Rebuild an HTTPError with X's JSON detail folded into the message."""
+    detail = ''
+    try:
+        body = e.read()
+    except Exception:
+        body = b''
+    raw = body.decode(errors='ignore') if body else ''
+    if raw:
+        try:
+            d = json.loads(raw)
+            errs = d.get('errors') or []
+            detail = (d.get('detail') or d.get('title')
+                      or (errs[0].get('message') if errs and isinstance(errs[0], dict) else '')
+                      or raw[:200])
+        except Exception:
+            detail = raw[:200]
+    if e.code == 403 and detail:
+        low = detail.lower()
+        for needle, hint in _X_403_HINTS:
+            if needle in low:
+                detail = f'{detail} ({hint})'
+                break
+    return XApiError(e, detail.strip(), body)
+
+
 def _x_api(method, path, access_token=None, bearer=None, body=None):
     """Simple X API v2 helper. Returns parsed JSON dict."""
     url = f'https://api.twitter.com/2{path}'
@@ -4083,9 +4136,12 @@ def _x_api(method, path, access_token=None, bearer=None, body=None):
         headers['Authorization'] = f'Bearer {bearer}'
     data = json.dumps(body).encode() if body else None
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
-    with urllib.request.urlopen(req, timeout=10) as r:
-        raw = r.read()
-        return json.loads(raw) if raw else {}
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            raw = r.read()
+            return json.loads(raw) if raw else {}
+    except url_error.HTTPError as e:
+        raise _x_http_error(e) from None
 
 
 def _x_refresh(persona):
@@ -4364,7 +4420,7 @@ def _x_dm_reply_round(persona, max_results=20):
     try:
         convs = _x_call(persona, 'GET', path)
     except Exception as e:
-        return 0, [f'DM read failed: {str(e)[:80]}']
+        return 0, [f'DM read failed: {str(e)[:200]}']
     events = convs.get('data', []) or []
     replied = 0
     log = []
@@ -4473,7 +4529,7 @@ def _x_dm_reply_round(persona, max_results=20):
             log.append(f'DM reply → {sender_name or sender} (phase {phase_idx + 1}/{len(phases)})'
                        + (' + link' if cta_due else '') + f': {reply[:60]}')
         except Exception as e:
-            log.append(f'DM reply failed: {str(e)[:60]}')
+            log.append(f'DM reply failed: {str(e)[:200]}')
     _x_save_fans(persona, fans)
     cursor['last_event_id'] = new_last or last_seen
     _x_save_json(cursor_path, cursor)
@@ -4527,7 +4583,7 @@ def _x_followup_round(persona):
             sent += 1
             log.append(f'Follow-up {n + 1}/{X_FOLLOWUP_MAX} → {fan.get("name") or uid}: {text[:60]}')
         except Exception as e:
-            log.append(f'Follow-up failed for {fan.get("name") or uid}: {str(e)[:60]}')
+            log.append(f'Follow-up failed for {fan.get("name") or uid}: {str(e)[:200]}')
     if sent:
         _x_save_fans(persona, fans)
     return sent, log
@@ -5287,7 +5343,7 @@ def api_x_auto_run():
                         _log_x_message(persona, u['id'], u.get('username', ''), 'out', opener)
                         log.append(f"New chat → @{u['username']}: {opener[:50]}")
                 except Exception as e:
-                    log.append(f"@{u['username']} failed: {str(e)[:60]}")
+                    log.append(f"@{u['username']} failed: {str(e)[:200]}")
                 finally:
                     contacted.add(u['id'])
             _x_save_json(_x_state_path(persona, 'contacted'), list(contacted)[-1000:])
