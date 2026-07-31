@@ -5692,6 +5692,14 @@ if os.getenv('FANVUE_WORKER', '1') != '0':
 
 @app.errorhandler(Exception)
 def handle_exception(e):
+    # HTTPException covers 404/405/403 and friends. Without this they would be
+    # reported as "Internal server error" 500, making a mistyped URL look like
+    # a crash — and burying real 500s in the noise.
+    from werkzeug.exceptions import HTTPException
+    if isinstance(e, HTTPException):
+        if (request.path or '').startswith('/api/'):
+            return jsonify({'error': e.name, 'status': e.code}), e.code
+        return e
     error_logger.error(f'Unhandled: {e}', exc_info=True)
     return jsonify({'error': 'Internal server error'}), 500
 
