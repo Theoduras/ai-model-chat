@@ -191,6 +191,9 @@ class AccountRunner:
         if not plan or not plan.get('chunks'):
             return
 
+        initial = max(0.0, float(plan.get('initial_delay', 0)))
+        if initial > 0:
+            await asyncio.sleep(initial)
         await asyncio.sleep(max(0.0, float(plan.get('read', 0))))
         cps = max(4, int(plan.get('cps', 14)))
         for i, chunk in enumerate(plan['chunks']):
