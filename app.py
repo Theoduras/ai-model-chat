@@ -2290,11 +2290,24 @@ def _clean_phase(p):
     }
 
 
+def _phases_cta(slug):
+    try:
+        raw = json.loads(_get_setting(f'phases_cta_{slug}') or '{}')
+        if isinstance(raw, dict):
+            return raw
+    except Exception:
+        pass
+    bot = _tg_load_bots().get(slug) or {}
+    return {'cta_url': bot.get('cta_url', ''), 'cta_label': bot.get('cta_label', '')}
+
+
 @app.route('/api/personas/<slug>/phases', methods=['GET'])
 def api_persona_phases(slug):
     if not re.match(r'^[a-z0-9_-]+$', slug):
         return jsonify({'error': 'Invalid slug'}), 400
-    return jsonify({'phases': _phases(slug)})
+    cta = _phases_cta(slug)
+    return jsonify({'phases': _phases(slug), 'cta_url': cta.get('cta_url', ''),
+                    'cta_label': cta.get('cta_label', '')})
 
 
 @app.route('/api/personas/<slug>/phases', methods=['POST'])
@@ -2307,6 +2320,16 @@ def api_persona_phases_save(slug):
         return jsonify({'error': 'At least 2 phases required'}), 400
     clean = [_clean_phase(p) for p in items[:10]]
     _set_setting(f'phases_{slug}', json.dumps(clean))
+    cta = {
+        'cta_url': str(data.get('cta_url', ''))[:500].strip(),
+        'cta_label': str(data.get('cta_label', ''))[:120].strip(),
+    }
+    _set_setting(f'phases_cta_{slug}', json.dumps(cta))
+    bots = _tg_load_bots()
+    if slug in bots:
+        bots[slug]['cta_url'] = cta['cta_url']
+        bots[slug]['cta_label'] = cta['cta_label']
+        _tg_save_bots(bots)
     return jsonify({'ok': True, 'phases': _phases(slug)})
 
 
@@ -5715,8 +5738,10 @@ def _tg_handle_update(persona, update):
     current_phase = phases[phase_idx] if phase_idx < len(phases) else phases[-1]
     photo_rate = current_phase.get('photo_rate', 20)
 
-    cta_url = (bot.get('cta_url') or '').strip()
-    cta_due = bool(cta_url) and not fan.get('cta_sent') and fan['in_count'] >= cfg['cta_after']
+    cta = _phases_cta(persona)
+    cta_url = (cta.get('cta_url') or bot.get('cta_url') or '').strip()
+    is_cta_phase = phase_idx == len(phases) - 1
+    cta_due = bool(cta_url) and not fan.get('cta_sent') and is_cta_phase
 
     catalog, media_rows, media_outfits = _tg_media_catalog(persona)
     photo_rule = ''
@@ -5777,7 +5802,7 @@ def _tg_handle_update(persona, update):
             picked_media_id = picked.id
 
     if cta_due:
-        label = (bot.get('cta_label') or 'come see').strip()
+        label = (cta.get('cta_label') or bot.get('cta_label') or 'come see').strip()
         reply = f'{reply}\n\n{label} → {_tg_cta_link(bot, chat_id)}'
         fan['cta_sent'] = int(time.time())
         fan['cta_count'] = int(fan.get('cta_count', 0)) + 1

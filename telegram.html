@@ -117,44 +117,32 @@
     </div>
   </div>
 
-  <div class="form-section">
-    <div class="section-title">🎯 Funnel &amp; CTA</div>
-    <span class="hint" style="display:block; margin-bottom:12px;">The bot chats in-persona, then drops your link once rapport is built. The link is served through this app (<code>/go/…</code>) so every click is counted. No PPV or payments here.</span>
-    <div class="field full">
-      <label>Destination URL <span style="font-weight:400;color:#52525b;">(OnlyFans, Fanvue, your own page…)</span></label>
-      <input type="text" id="cta-url" placeholder="https://onlyfans.com/yourname" autocomplete="off" spellcheck="false">
-    </div>
-    <div class="field full" style="margin-top:12px;">
-      <label>Link label <span style="font-weight:400;color:#52525b;">(shown before the link, in her voice)</span></label>
-      <input type="text" id="cta-label" placeholder="come find me here" autocomplete="off" spellcheck="false">
-    </div>
-    <div class="row-inline" style="margin-top:12px;">
-      <div class="field">
-        <label>Send the CTA after N fan messages</label>
-        <input type="number" id="cta-after" min="1" max="50" value="6">
-      </div>
-      <div class="field">
+  <div class=”form-section”>
+    <div class=”section-title”>⚙️ Bot Behavior</div>
+    <span class=”hint” style=”display:block; margin-bottom:12px;”>CTA link and funnel phases are configured per-persona in the <a href=”/dashboard” style=”color:#818cf8;”>Dashboard</a> under Chat Phases &amp; CTA.</span>
+    <div class=”row-inline”>
+      <div class=”field”>
         <label>Follow up after N minutes of silence</label>
-        <input type="number" id="followup-min" min="5" max="1440" value="45">
+        <input type=”number” id=”followup-min” min=”5” max=”1440” value=”45”>
       </div>
     </div>
-    <label class="auto-chk"><input type="checkbox" id="followups" checked> Follow up on quiet fans and unclicked links (max 2 nudges each)</label>
-    <label class="auto-chk"><input type="checkbox" id="enabled" checked> Bot active — reply to incoming Telegram messages</label>
-    <label class="auto-chk"><input type="checkbox" id="humanize" checked> Type like a human — pause to read, show “typing…”, send in bursts</label>
-    <div class="field" style="margin-top:12px; max-width:260px;">
+    <label class=”auto-chk”><input type=”checkbox” id=”followups” checked> Follow up on quiet fans and unclicked links (max 2 nudges each)</label>
+    <label class=”auto-chk”><input type=”checkbox” id=”enabled” checked> Bot active — reply to incoming Telegram messages</label>
+    <label class=”auto-chk”><input type=”checkbox” id=”humanize” checked> Type like a human — pause to read, show “typing…”, send in bursts</label>
+    <div class=”field” style=”margin-top:12px; max-width:260px;”>
       <label>Typing speed</label>
-      <select id="typing-speed">
-        <option value="8">Slow — thumbs on a phone</option>
-        <option value="14" selected>Natural</option>
-        <option value="22">Fast texter</option>
-        <option value="34">Very fast</option>
+      <select id=”typing-speed”>
+        <option value=”8”>Slow — thumbs on a phone</option>
+        <option value=”14” selected>Natural</option>
+        <option value=”22”>Fast texter</option>
+        <option value=”34”>Very fast</option>
       </select>
-      <span class="hint">A reply takes about a second per this many characters, plus a pause to read.</span>
+      <span class=”hint”>A reply takes about a second per this many characters, plus a pause to read.</span>
     </div>
-    <div style="display:flex; gap:8px; margin-top:14px;">
-      <button class="btn-ai" onclick="saveSettings()">Save settings</button>
+    <div style=”display:flex; gap:8px; margin-top:14px;”>
+      <button class=”btn-ai” onclick=”saveSettings()”>Save settings</button>
     </div>
-    <div class="result-box" id="settings-status"></div>
+    <div class=”result-box” id=”settings-status”></div>
   </div>
 
   <div class="form-section">
@@ -354,9 +342,7 @@ async function connectHosted(){
   const box=document.getElementById('connect-status');
   if(!persona()){ err(box,'Pick a persona first — the list above is empty.'); return; }
   busy(box,'Setting up your link…');
-  const data=await post('/api/telegram/hosted',{persona:persona(),
-    cta_url:document.getElementById('cta-url').value.trim(),
-    cta_label:document.getElementById('cta-label').value.trim()});
+  const data=await post('/api/telegram/hosted',{persona:persona()});
   if(!data.ok){ err(box,data.error); return; }
   ok(box,'Connected to @'+data.username+' — share the link below.');
   showShare(data);
@@ -385,8 +371,6 @@ function updateConn(){
   document.getElementById('connect-status').innerHTML='';
   setMode(info.mode==='own'?'own':'hosted');
   showShare(info.share_link?info:null);
-  document.getElementById('cta-url').value=info.cta_url||'';
-  document.getElementById('cta-label').value=info.cta_label||'';
   loadSettings(); loadStats();
 }
 
@@ -402,9 +386,7 @@ async function connectBot(){
   busy(box,'Talking to Telegram…');
   const data=await post('/api/telegram/connect',{
     persona:persona(), bot_token:token,
-    base_url:document.getElementById('base-url').value.trim(),
-    cta_url:document.getElementById('cta-url').value.trim(),
-    cta_label:document.getElementById('cta-label').value.trim()});
+    base_url:document.getElementById('base-url').value.trim()});
   if(!data.ok){ err(box,data.error); return; }
   document.getElementById('bot-token').value='';
   document.getElementById('wh-url').value=data.webhook_url||'';
@@ -422,7 +404,6 @@ async function disconnectBot(){
 async function loadSettings(){
   try{
     const s=await (await fetch('/api/telegram/settings?persona='+encodeURIComponent(persona()))).json();
-    document.getElementById('cta-after').value=s.cta_after;
     document.getElementById('followup-min').value=s.followup_min;
     document.getElementById('followups').checked=s.followups!==false;
     document.getElementById('enabled').checked=!!s.enabled;
@@ -440,10 +421,7 @@ async function saveSettings(){
     followups:document.getElementById('followups').checked,
     humanize:document.getElementById('humanize').checked,
     typing_speed:parseInt(document.getElementById('typing-speed').value||'14'),
-    cta_after:parseInt(document.getElementById('cta-after').value||'6'),
-    followup_min:parseInt(document.getElementById('followup-min').value||'45'),
-    cta_url:document.getElementById('cta-url').value.trim(),
-    cta_label:document.getElementById('cta-label').value.trim()});
+    followup_min:parseInt(document.getElementById('followup-min').value||'45')});
   if(!data.ok){ err(box,data.error); return; }
   ok(box,'Saved.');
   connStatus=await (await fetch('/api/telegram/status')).json();
