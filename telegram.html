@@ -159,6 +159,7 @@
 
   <div class="form-section">
     <div class="section-title">📊 Conversion</div>
+    <div id="cta-warning" class="note" style="display:none; border-color:#7f1d1d; color:#fca5a5; margin-bottom:14px;"></div>
     <div class="stats">
       <div class="stat"><b id="s-fans">0</b><span>Fans</span></div>
       <div class="stat"><b id="s-sent">0</b><span>CTAs sent</span></div>
@@ -291,7 +292,9 @@ async function connectHosted(){
   const box=document.getElementById('connect-status');
   if(!persona()){ err(box,'Pick a persona first — the list above is empty.'); return; }
   busy(box,'Setting up your link…');
-  const data=await post('/api/telegram/hosted',{persona:persona()});
+  const data=await post('/api/telegram/hosted',{persona:persona(),
+    cta_url:document.getElementById('cta-url').value.trim(),
+    cta_label:document.getElementById('cta-label').value.trim()});
   if(!data.ok){ err(box,data.error); return; }
   ok(box,'Connected to @'+data.username+' — share the link below.');
   showShare(data);
@@ -391,6 +394,9 @@ async function loadStats(){
     document.getElementById('s-sent').textContent=s.cta_sent||0;
     document.getElementById('s-clicked').textContent=s.cta_clicked||0;
     document.getElementById('s-rate').textContent=(s.click_rate||0)+'%';
+    const warn=document.getElementById('cta-warning');
+    if(s.warning){ warn.style.display='block'; warn.textContent='⚠ '+s.warning; }
+    else { warn.style.display='none'; }
     const rows=s.rows||[];
     document.getElementById('fans-table').innerHTML = rows.length ?
       '<table class="fans"><tr><th>Fan</th><th>Msgs</th><th>CTA</th><th>Clicked</th><th>Nudges</th></tr>'+

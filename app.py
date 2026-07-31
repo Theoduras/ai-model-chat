@@ -5601,6 +5601,11 @@ def api_telegram_hosted():
             'base_url': plat.get('base_url', ''),
             'connected_at': int(time.time()),
         })
+        # Carry the CTA through: connecting used to drop whatever was typed in
+        # the funnel fields, which silently left the CTA disabled.
+        for key in ('cta_url', 'cta_label'):
+            if data.get(key) is not None:
+                bot[key] = (data.get(key) or '').strip() or bot.get(key, '')
         bot.pop('bot_token', None)
         bot.pop('path_id', None)
         bots[persona] = bot
@@ -5709,9 +5714,18 @@ def api_telegram_stats():
             'cta_sent': bool(f.get('cta_sent')), 'cta_clicked': bool(f.get('cta_clicked')),
             'followups': f.get('followups', 0),
         })
+    bot = _tg_load_bots().get(persona) or {}
+    cfg = _tg_settings(persona)
+    ready = [r for r in rows if not r['cta_sent'] and r['messages'] >= cfg['cta_after']]
+    warning = ''
+    if not (bot.get('cta_url') or '').strip():
+        warning = ('No destination URL set, so the CTA is disabled and no link will '
+                   'ever be sent' + (f' — {len(ready)} fan(s) are already past the '
+                                     f'{cfg["cta_after"]}-message threshold.' if ready else '.'))
     return jsonify({'fans': len(fans), 'cta_sent': sent, 'cta_clicked': clicked,
                     'click_rate': round(100.0 * clicked / sent, 1) if sent else 0.0,
-                    'rows': rows})
+                    'cta_url': bot.get('cta_url', ''), 'cta_after': cfg['cta_after'],
+                    'waiting': len(ready), 'warning': warning, 'rows': rows})
 
 
 @app.route('/api/telegram/test', methods=['POST'])
