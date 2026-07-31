@@ -2303,6 +2303,24 @@ def _phases_cta(slug):
     return {'cta_url': bot.get('cta_url', ''), 'cta_label': bot.get('cta_label', '')}
 
 
+_CTA_ASK_RE = re.compile(
+    r'\b('
+    r'fanvue|fan\s?vue|onlyfans|only\s?fans|\bof\s?page\b|patreon|'
+    r'subscri\w*|premium|paywall|'
+    r'(where|how)\s+(else\s+)?(can|do)\s+i\s+(find|see|follow|get)\s+(you|more)|'
+    r'(other|another|different)\s+(page|site|platform|account)|'
+    r'(send|share|got|have|drop)\s+(me\s+)?(a\s+|the\s+|your\s+)?link|'
+    r'link\s+(to|for)\b|'
+    r'(your|the)\s+(cta|link|page|profile)'
+    r')\b', re.I)
+
+
+def _cta_asked(text):
+    """True when the fan is asking where else to find her / for the link, so the
+    CTA goes out on request instead of waiting for the final phase."""
+    return bool(_CTA_ASK_RE.search(text or ''))
+
+
 @app.route('/api/personas/<slug>/phases', methods=['GET'])
 def api_persona_phases(slug):
     if not re.match(r'^[a-z0-9_-]+$', slug):
@@ -5778,7 +5796,9 @@ def _tg_handle_update(persona, update):
     cta = _phases_cta(persona)
     cta_url = (cta.get('cta_url') or bot.get('cta_url') or '').strip()
     is_cta_phase = phase_idx == len(phases) - 1
-    cta_due = bool(cta_url) and not fan.get('cta_sent') and is_cta_phase
+    cta_asked = _cta_asked(text)
+    # An explicit ask overrides both the phase gate and the once-only gate.
+    cta_due = bool(cta_url) and (cta_asked or (not fan.get('cta_sent') and is_cta_phase))
 
     catalog, media_rows, media_outfits = _tg_media_catalog(persona)
     photo_rule = ''
@@ -5802,6 +5822,13 @@ def _tg_handle_update(persona, update):
             f'A new fan just opened a chat with you on Telegram (they go by "{who}"). '
             'Write ONE short, warm, in-character opener that introduces you without '
             'sounding scripted. ' + ask_rule + photo_rule)
+    elif cta_asked and cta_due:
+        instruction = (
+            f'Reply in-character to this fan on Telegram: "{text}". They are asking '
+            'where else to find you — answer them directly and warmly, say yes, that '
+            'is where you post the rest. Do NOT deflect, do NOT answer with a question, '
+            'and do NOT paste a link yourself; a link is appended after your message. '
+            'Keep it to one or two short sentences. ' + photo_rule)
     elif cta_due:
         instruction = (
             f'Reply in-character to this fan on Telegram: "{text}". Answer what they '
@@ -5846,9 +5873,15 @@ def _tg_handle_update(persona, update):
 
     if cta_due:
         label = (cta.get('cta_label') or bot.get('cta_label') or 'come see').strip()
-        reply = f'{reply}\n\n{label} → {_tg_cta_link(bot, chat_id)}'
+        link = _tg_cta_link(bot, chat_id)
+        reply = f'{reply}\n\n{label} → {link}'
         fan['cta_sent'] = int(time.time())
         fan['cta_count'] = int(fan.get('cta_count', 0)) + 1
+        logger.info('CTA SENT [%s] fan=%s trigger=%s phase=%d count=%d link=%s',
+                    persona, chat_id, 'asked' if cta_asked else 'phase',
+                    phase_idx, fan['cta_count'], link)
+    elif cta_asked and not cta_url:
+        logger.warning('CTA asked but no cta_url configured [%s] fan=%s', persona, chat_id)
 
     _tg_send_human(persona, chat_id, reply, incoming=text, photo_data=photo_data)
     if picked_media_id:
@@ -6450,7 +6483,9 @@ def _tgu_plan(persona, chat_id, name, text):
     cta = _phases_cta(persona)
     cta_url = (cta.get('cta_url') or acct.get('cta_url') or '').strip()
     is_cta_phase = phase_idx == len(phases) - 1
-    cta_due = bool(cta_url) and not fan.get('cta_sent') and is_cta_phase
+    cta_asked = _cta_asked(text)
+    # An explicit ask overrides both the phase gate and the once-only gate.
+    cta_due = bool(cta_url) and (cta_asked or (not fan.get('cta_sent') and is_cta_phase))
 
     catalog, media_rows, media_outfits = _tg_media_catalog(persona)
     photo_rule = ''
@@ -6467,7 +6502,14 @@ def _tgu_plan(persona, chat_id, name, text):
 
     ask_rule = ('End with ONE question that follows from what they just said — never '
                 'generic, never one you have already asked. ')
-    if cta_due:
+    if cta_asked and cta_due:
+        instruction = (
+            f'Reply in-character to this fan on Telegram: "{text}". They are asking '
+            'where else to find you — answer them directly and warmly, say yes, that '
+            'is where you post the rest. Do NOT deflect, do NOT answer with a question, '
+            'and do NOT paste a link yourself; a link is appended after your message. '
+            'Keep it to one or two short sentences. ' + photo_rule)
+    elif cta_due:
         instruction = (
             f'Reply in-character to this fan on Telegram: "{text}". Answer what they '
             'actually said first, then tease — in one natural sentence — that you post '
@@ -6520,6 +6562,12 @@ def _tgu_plan(persona, chat_id, name, text):
         link = cta_url
         chunks[-1] = f'{chunks[-1]}\n\n{label} → {link}'
         fan['cta_sent'] = int(time.time())
+        fan['cta_count'] = int(fan.get('cta_count', 0)) + 1
+        logger.info('CTA SENT [%s] fan=%s trigger=%s phase=%d count=%d link=%s',
+                    persona, chat_id, 'asked' if cta_asked else 'phase',
+                    phase_idx, fan['cta_count'], link)
+    elif cta_asked and not cta_url:
+        logger.warning('CTA asked but no cta_url configured [%s] fan=%s', persona, chat_id)
 
     if picked_media_id:
         _fan_record_sent_photo(persona, chat_id, picked_media_id)
