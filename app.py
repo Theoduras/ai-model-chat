@@ -6384,8 +6384,9 @@ def _tgu_fan_key(chat_id):
 
 
 def _tgu_plan(persona, chat_id, name, text):
-    """Build the reply for one incoming DM: same persona voice, memory, funnel
-    and CTA as the bot path. Returns the timing plan the runner acts on."""
+    """Build the reply for one incoming DM: same persona voice, memory, funnel,
+    CTA and photo sending as the bot path. Returns the timing plan the runner
+    acts on, including optional photo_data for the runner to send."""
     cfg = _tg_settings(persona)
     acct = _tgu_accounts().get(persona) or {}
     fans = _tg_fans(persona)
@@ -6393,13 +6394,36 @@ def _tgu_plan(persona, chat_id, name, text):
     fan = fans.get(key) or {}
     fan['name'] = name
     fan['last_in'] = int(time.time())
+    if not fan.get('first_in'):
+        fan['first_in'] = int(time.time())
     fan['followups'] = 0
     fan['in_count'] = int(fan.get('in_count', 0)) + 1
 
     _log_x_message(persona, _tgu_fan_key(chat_id), name, 'in', text)
 
-    cta_url = (acct.get('cta_url') or '').strip()
-    cta_due = bool(cta_url) and not fan.get('cta_sent') and fan['in_count'] >= cfg['cta_after']
+    phases = _phases(persona)
+    phase_idx = _fan_phase(phases, fan)
+    current_phase = phases[phase_idx] if phase_idx < len(phases) else phases[-1]
+    photo_rate = current_phase.get('photo_rate', 20)
+
+    cta = _phases_cta(persona)
+    cta_url = (cta.get('cta_url') or acct.get('cta_url') or '').strip()
+    is_cta_phase = phase_idx == len(phases) - 1
+    cta_due = bool(cta_url) and not fan.get('cta_sent') and is_cta_phase
+
+    catalog, media_rows, media_outfits = _tg_media_catalog(persona)
+    photo_rule = ''
+    if catalog:
+        photo_rule = (
+            f'\n\nYou have photos you can share. {catalog} '
+            'Each outfit is one consistent look — same clothes, same place — so '
+            'stay within a single outfit and pick the one that fits where you are '
+            'and what you are doing right now. Share photos generously — when a '
+            'fan asks to see you, when you mention what you are doing, when you '
+            'want to flirt or tease, or just to keep things visual and fun. Add '
+            'the tag [SEND_PHOTO:outfit=N,purpose=X] at the very end of your '
+            'message. Never mention the tag to the fan.')
+
     ask_rule = ('End with ONE question that follows from what they just said — never '
                 'generic, never one you have already asked. ')
     if cta_due:
@@ -6407,13 +6431,13 @@ def _tgu_plan(persona, chat_id, name, text):
             f'Reply in-character to this fan on Telegram: "{text}". Answer what they '
             'actually said first, then tease — in one natural sentence — that you post '
             'more somewhere more private. Do NOT paste a link or a URL and do not name '
-            'the site; a link is appended after your message. ' + ask_rule)
+            'the site; a link is appended after your message. ' + ask_rule + photo_rule)
     else:
         instruction = (
             f'Reply in-character to this fan on Telegram: "{text}". Warm and engaging, '
             'react to what they just said before anything else, reference what they '
             'have told you before, and let interest build slowly — no selling yet. '
-            + ask_rule)
+            + ask_rule + photo_rule)
 
     history = [{'role': 'model' if d == 'out' else 'user', 'content': t}
                for d, t in _fanvue_saved_history(persona, _tgu_fan_key(chat_id), limit=30)]
@@ -6425,19 +6449,43 @@ def _tgu_plan(persona, chat_id, name, text):
     if not reply:
         return None
 
+    photo_data = None
+    picked_media_id = None
+    reply, photo_tags = _tg_parse_photo_tag(reply)
+    sent_ids = _fan_sent_photos(persona, chat_id) if media_rows else set()
+    roll = random.randint(1, 100) if media_rows else 0
+    roll_hit = media_rows and roll <= photo_rate
+    logger.info('MTProto photo decision: %d media, rate=%d, roll=%d, hit=%s, tags=%s',
+                len(media_rows), photo_rate, roll, roll_hit, bool(photo_tags))
+    if photo_tags and media_rows:
+        safe = {k: v for k, v in photo_tags.items()
+                if k in ('purpose', 'lighting', 'location', 'outfit')}
+        picked = _pick_media(media_rows, outfits=media_outfits, **safe)
+        if picked and picked.id not in sent_ids:
+            photo_data = picked.image_data
+            picked_media_id = picked.id
+    if not photo_data and roll_hit:
+        picked = _pick_phase_photo(media_rows, media_outfits, sent_ids)
+        if picked:
+            photo_data = picked.image_data
+            picked_media_id = picked.id
+
     chunks = _tg_bursts(reply) if cfg['humanize'] else [reply]
     if cta_due:
-        label = (acct.get('cta_label') or 'come see').strip()
+        label = (cta.get('cta_label') or acct.get('cta_label') or 'come see').strip()
         base = (acct.get('base_url') or '').rstrip('/')
         link = f'{base}/go/{acct.get("code")}/{chat_id}'
         chunks[-1] = f'{chunks[-1]}\n\n{label} → {link}'
         fan['cta_sent'] = int(time.time())
 
+    if picked_media_id:
+        _fan_record_sent_photo(persona, chat_id, picked_media_id)
+
     fans[key] = fan
     _tg_save_fans(persona, fans)
     read = min(0.8 + len(text) / 90.0, TG_READ_CAP) if cfg['humanize'] else 0
     return {'read': read, 'cps': cfg['typing_speed'] if cfg['humanize'] else 999,
-            'chunks': chunks}
+            'chunks': chunks, 'photo_data': photo_data}
 
 
 def _tgu_on_sent(persona, chat_id, name, text):

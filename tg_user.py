@@ -204,3 +204,13 @@ class AccountRunner:
             await client.send_message(event.chat_id, chunk)
             if self.on_sent:
                 self.on_sent(self.persona, chat_id, name, chunk)
+
+        photo_data = plan.get('photo_data')
+        if photo_data:
+            import base64, io
+            raw = photo_data
+            if ',' in raw:
+                raw = raw.split(',', 1)[1]
+            buf = io.BytesIO(base64.b64decode(raw))
+            buf.name = 'photo.jpg'
+            await client.send_file(event.chat_id, buf)
