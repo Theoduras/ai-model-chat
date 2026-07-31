@@ -175,10 +175,35 @@ function closeMobilePanels() {
   _overlay().classList.remove('open');
 }
 
-function lsPersonaKey(slug) { return 'admin_persona_cfg_' + slug; }
-function lsSlugsKey() { return 'admin_persona_slugs'; }
-function lsFoldersKey() { return 'admin_folders'; }
-function lsFolderAssignKey(slug) { return 'admin_folder_assign_' + slug; }
+// The persona cache is per signed-in user. Without this suffix a new account
+// on a shared browser would inherit whatever the previous user had cached.
+let CURRENT_UID = 'anon';
+function lsNs() { return '_u' + CURRENT_UID; }
+
+function lsPersonaKey(slug) { return 'admin_persona_cfg_' + slug + lsNs(); }
+function lsSlugsKey() { return 'admin_persona_slugs' + lsNs(); }
+function lsFoldersKey() { return 'admin_folders' + lsNs(); }
+function lsFolderAssignKey(slug) { return 'admin_folder_assign_' + slug + lsNs(); }
+function lsPromptKey(slug) { return 'persona_prompt_' + slug + lsNs(); }
+function lsFolderOpenKey(id) { return 'admin_folder_open_' + id + lsNs(); }
+
+// Drop the pre-namespacing keys, which were shared across accounts. The server
+// holds the real personas, so this only clears a cache.
+function lsPurgeLegacy() {
+  try {
+    const stale = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k) continue;
+      const legacy = (k.startsWith('admin_persona_cfg_') || k === 'admin_persona_slugs' ||
+                      k === 'admin_folders' || k.startsWith('admin_folder_assign_') ||
+                      k.startsWith('admin_folder_open_') || k.startsWith('persona_prompt_'));
+      // Namespaced keys end in _u<uid>; anything else is pre-namespacing.
+      if (legacy && !/_u([0-9a-f]{32}|anon)$/.test(k)) stale.push(k);
+    }
+    stale.forEach(k => localStorage.removeItem(k));
+  } catch (e) {}
+}
 
 function lsSavePersona(slug, config) {
   try {
@@ -204,7 +229,7 @@ function lsDeletePersona(slug) {
   try {
     localStorage.removeItem(lsPersonaKey(slug));
     localStorage.removeItem(lsFolderAssignKey(slug));
-    localStorage.removeItem('persona_prompt_' + slug);
+    localStorage.removeItem(lsPromptKey(slug));
     const slugs = JSON.parse(localStorage.getItem(lsSlugsKey()) || '[]').filter(s => s !== slug);
     localStorage.setItem(lsSlugsKey(), JSON.stringify(slugs));
   } catch(e) {}
@@ -227,23 +252,28 @@ function lsSetPersonaFolder(slug, folderId) {
 }
 
 function lsFolderOpen(id) {
-  try { return localStorage.getItem('admin_folder_open_' + id) !== 'false'; } catch(e) { return true; }
+  try { return localStorage.getItem(lsFolderOpenKey(id)) !== 'false'; } catch(e) { return true; }
 }
 
 function lsSetFolderOpen(id, open) {
-  try { localStorage.setItem('admin_folder_open_' + id, open ? 'true' : 'false'); } catch(e) {}
+  try { localStorage.setItem(lsFolderOpenKey(id), open ? 'true' : 'false'); } catch(e) {}
 }
 
-async function showAdminLinkIfAdmin() {
+// Must run before any ls* call, so the cache is read under the right user.
+async function identifyUser() {
   try {
     const me = await (await fetch('/api/me')).json();
+    CURRENT_UID = me.signed_in ? me.id : 'anon';
     if (me.is_admin) document.getElementById('hdr-admin-link').style.display = '';
-  } catch (e) {}
+  } catch (e) {
+    CURRENT_UID = 'anon';
+  }
+  lsPurgeLegacy();
 }
 
 async function init() {
+  await identifyUser();
   loadConfig();
-  showAdminLinkIfAdmin();
   const seen = new Set();
   try {
     const res = await fetch('/api/personas');
@@ -1373,7 +1403,7 @@ async function saveSection(btn) {
     }
     if (!data.ok) throw new Error(data.error || 'save failed');
     lsSavePersona(currentSlug, config);
-    if (data.prompt) localStorage.setItem('persona_prompt_' + currentSlug, data.prompt);
+    if (data.prompt) localStorage.setItem(lsPromptKey(currentSlug), data.prompt);
     flashSaved(btn);
   } catch(e) {
     flashSaved(btn, false);
@@ -1414,7 +1444,7 @@ async function savePersona() {
     }
     if (data.ok) {
       lsSavePersona(currentSlug, config);
-      if (data.prompt) localStorage.setItem('persona_prompt_' + currentSlug, data.prompt);
+      if (data.prompt) localStorage.setItem(lsPromptKey(currentSlug), data.prompt);
       status.textContent = '✓ Saved & deployed'; status.className = 'save-status ok';
       if (personas[currentSlug]) personas[currentSlug].name = config.name || currentSlug;
       renderSidebar();
@@ -1819,7 +1849,7 @@ async function testChat() {
     body: JSON.stringify(config)
   });
   const data = await res.json().catch(() => ({}));
-  if (data.prompt) localStorage.setItem('persona_prompt_' + currentSlug, data.prompt);
+  if (data.prompt) localStorage.setItem(lsPromptKey(currentSlug), data.prompt);
   window.open('/chat?persona=' + currentSlug, '_blank');
 }
 
