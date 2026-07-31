@@ -2874,6 +2874,19 @@ def api_generate_image():
     import base64
     reference = data.get('reference')  # optional data URL of an existing photo
 
+    # Optional outfit lock: keeps clothing, place and lighting identical across
+    # a set, so the shots read as one moment rather than five separate days.
+    outfit = data.get('outfit') or {}
+    outfit_bits = []
+    if outfit.get('clothing'):
+        outfit_bits.append(f"wearing exactly {outfit['clothing']}")
+    if outfit.get('location'):
+        outfit_bits.append(f"in the same place: {outfit['location']}")
+    if outfit.get('lighting'):
+        outfit_bits.append(f"{outfit['lighting']} lighting")
+    outfit_clause = (' She must be ' + ', '.join(outfit_bits) + '. '
+                     if outfit_bits else ' ')
+
     try:
         # With a reference photo, use the Gemini image model to keep the SAME
         # person across shots. Without one, generate a fresh face via Imagen.
@@ -2882,9 +2895,11 @@ def api_generate_image():
             ref_mime = head.split(';')[0].replace('data:', '') or 'image/png'
             edit_prompt = (
                 f"Generate a new photorealistic photo of the exact same woman shown in the reference image — "
-                f"identical face, hair and features — now as {framing}. "
-                "Keep her identity perfectly consistent. Realistic, natural lighting, Instagram aesthetic. "
-                "Fictional AI-generated person."
+                f"identical face, hair and features — now as {framing}."
+                + outfit_clause +
+                "Keep her identity, clothing and surroundings perfectly consistent with the reference, "
+                "as if taken in the same session minutes apart — only the pose and framing change. "
+                "Realistic, natural lighting, Instagram aesthetic. Fictional AI-generated person."
             )
             resp = client.models.generate_content(
                 model=os.getenv('GEMINI_IMAGE_MODEL', 'gemini-2.5-flash-image'),

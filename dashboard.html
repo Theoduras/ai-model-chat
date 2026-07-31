@@ -1650,6 +1650,23 @@ function outfitBlock(o) {
           ${photos.map(it => photoTile(it)).join('')}
           <div class="outfit-drop" onclick="addPhotosTo(${o.n})">+ Add photos</div>
         </div>
+        <div class="outfit-gen">
+          ${galleryImages.length ? `<div class="outfit-seed">
+            <span class="outfit-seed-label">From Photos tab:</span>
+            ${galleryImages.map((src, i) => `
+              <img src="${src}" class="outfit-seed-img" title="Add this photo to the outfit"
+                   onclick="useGalleryPhoto(${o.n}, ${i})">`).join('')}
+          </div>` : `<span class="hint">Add a photo in the Photos tab, or upload one here, to generate a matching set.</span>`}
+          <div class="outfit-gen-row">
+            <button type="button" class="btn-ai" onclick="generateOutfitSet(${o.n}, this)"
+              title="Generate matching shots from the first photo in this outfit">
+              ✨ Generate matching set</button>
+            <select id="outfit-gen-count-${o.n}" class="outfit-gen-count" title="How many to generate">
+              ${[1,2,3,4,5].map(n => `<option value="${n}"${n === 4 ? ' selected' : ''}>${n} photo${n === 1 ? '' : 's'}</option>`).join('')}
+            </select>
+            <span class="outfit-gen-status" id="outfit-gen-status-${o.n}"></span>
+          </div>
+        </div>
       </div>
     </div>`;
 }
@@ -1719,6 +1736,80 @@ async function saveOutfits(btn) {
 function addPhotosTo(n) {
   uploadTarget = n;
   document.getElementById('outfit-file-input').click();
+}
+
+// Copy a photo from the Photos tab into an outfit, so the face set and the
+// media library share the same person.
+async function useGalleryPhoto(n, idx) {
+  if (!currentSlug) { setMediaStatus('Save the persona first.', false); return; }
+  const src = galleryImages[idx];
+  if (!src) return;
+  setMediaStatus('Adding photo…', null);
+  try {
+    await fetch('/api/personas/' + currentSlug + '/media', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: src, outfit: String(n) })
+    });
+    openOutfit = n;
+    await loadMedia();
+    setMediaStatus('✓ Photo added to outfit ' + n, true);
+  } catch (e) {
+    setMediaStatus('Could not add photo.', false);
+  }
+}
+
+// Generate a set of shots that keep the same person, clothing and setting.
+// Seeds from the outfit's own first photo, falling back to the Photos tab.
+const OUTFIT_SHOTS = ['half', 'full', 'candid', 'mirror', 'portrait'];
+
+async function generateOutfitSet(n, btn) {
+  if (!currentSlug) { setMediaStatus('Save the persona first.', false); return; }
+  const status = document.getElementById('outfit-gen-status-' + n);
+  const existing = photosOf(n);
+  const seed = (existing[0] && existing[0].thumb) || galleryImages[0];
+  if (!seed) {
+    if (status) status.textContent = 'Add one photo first — it sets the look to match.';
+    return;
+  }
+  const count = parseInt((document.getElementById('outfit-gen-count-' + n) || {}).value || '4', 10);
+  const outfit = mediaOutfits.find(o => String(o.n) === String(n)) || {};
+  const spec = { clothing: outfit.clothing || '', location: outfit.location || '',
+                 lighting: outfit.lighting || '' };
+
+  btn.disabled = true;
+  const label = btn.textContent;
+  let made = 0;
+  for (let i = 0; i < count; i++) {
+    btn.textContent = `Generating ${i + 1}/${count}…`;
+    if (status) status.textContent = '';
+    try {
+      const res = await fetch('/api/generate/image', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reference: seed, outfit: spec,
+                               shot: OUTFIT_SHOTS[i % OUTFIT_SHOTS.length],
+                               config: collectConfig() })
+      });
+      const data = await res.json();
+      if (data.ok && data.image) {
+        await fetch('/api/personas/' + currentSlug + '/media', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: data.image, outfit: String(n),
+                                 location: spec.location, lighting: spec.lighting })
+        });
+        made++;
+      } else if (status) {
+        status.textContent = data.error || 'Generation failed.';
+      }
+    } catch (e) {
+      if (status) status.textContent = 'Generation failed.';
+    }
+  }
+  btn.disabled = false;
+  btn.textContent = label;
+  openOutfit = n;
+  await loadMedia();
+  const el = document.getElementById('outfit-gen-status-' + n);
+  if (el) el.textContent = made ? `✓ Added ${made} photo${made === 1 ? '' : 's'}` : '';
 }
 
 function onMediaFiles(ev) {
