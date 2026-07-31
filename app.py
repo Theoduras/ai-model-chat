@@ -2935,9 +2935,12 @@ def api_generate_image():
             )
             resp = client.models.generate_content(
                 model=os.getenv('GEMINI_IMAGE_MODEL', 'gemini-2.5-flash-image'),
+                # Image first: the reference is the subject, the text only says
+                # what to change about it. Leading with text invites the model
+                # to treat the prompt as a fresh generation and ignore the photo.
                 contents=[{'role': 'user', 'parts': [
-                    {'text': edit_prompt},
                     {'inline_data': {'mime_type': ref_mime, 'data': b64}},
+                    {'text': edit_prompt},
                 ]}],
             )
             for part in (resp.candidates[0].content.parts if resp.candidates else []):
@@ -2947,7 +2950,9 @@ def api_generate_image():
                     mime = getattr(inline, 'mime_type', None) or 'image/png'
                     b = raw if isinstance(raw, (bytes, bytearray)) else base64.b64decode(raw)
                     durl = f"data:{mime};base64," + base64.b64encode(b).decode()
-                    return jsonify({'ok': True, 'image': durl, 'appearance': appearance})
+                    return jsonify({'ok': True, 'image': durl,
+                                    'appearance': appearance,
+                                    'used_reference': True})
             return jsonify({'ok': False, 'error': 'No image returned from reference (it may have been filtered).'}), 200
 
         prompt = (
@@ -2975,7 +2980,9 @@ def api_generate_image():
         if not raw:
             return jsonify({'ok': False, 'error': 'Empty image data.'}), 200
         durl = f"data:{mime};base64," + base64.b64encode(raw).decode()
-        return jsonify({'ok': True, 'image': durl, 'appearance': appearance})
+        # used_reference False means this is a brand-new face, not the same person.
+        return jsonify({'ok': True, 'image': durl, 'appearance': appearance,
+                        'used_reference': False})
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)[:300]}), 200
 

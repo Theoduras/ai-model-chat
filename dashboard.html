@@ -1794,6 +1794,13 @@ async function generateOutfitSet(n, btn) {
                                config: collectConfig() })
       });
       const data = await res.json();
+      // A result generated without the reference is a different person, so it
+      // is discarded rather than quietly added to the outfit.
+      if (data.ok && data.image && data.used_reference === false) {
+        if (status) status.textContent =
+          'Server ignored the reference photo — reload the page (hard refresh) and try again.';
+        break;
+      }
       if (data.ok && data.image) {
         await fetch('/api/personas/' + currentSlug + '/media', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
