@@ -2381,11 +2381,37 @@ def _fan_record_sent_photo(persona, chat_id, media_id):
     _set_setting(f'sent_photos_{persona}_{chat_id}', json.dumps(list(sent)))
 
 
-def _pick_phase_photo(media_rows, outfits, sent_ids):
-    """Pick a random photo based on time of day, avoiding already-sent ones."""
+OUTFIT_LOCK_SECONDS = 7200  # 2 hours before switching outfit
+
+
+def _fan_outfit_lock(persona, chat_id):
+    """Return (locked_outfit_number, lock_timestamp) or (None, 0)."""
+    try:
+        raw = json.loads(_get_setting(f'outfit_lock_{persona}_{chat_id}') or '{}')
+        outfit = raw.get('outfit')
+        ts = int(raw.get('ts', 0))
+        if outfit and (int(time.time()) - ts) < OUTFIT_LOCK_SECONDS:
+            return int(outfit), ts
+    except Exception:
+        pass
+    return None, 0
+
+
+def _fan_set_outfit_lock(persona, chat_id, outfit_num):
+    _set_setting(f'outfit_lock_{persona}_{chat_id}',
+                 json.dumps({'outfit': outfit_num, 'ts': int(time.time())}))
+
+
+def _pick_phase_photo(media_rows, outfits, sent_ids, locked_outfit=None):
+    """Pick a random photo, respecting outfit lock and avoiding duplicates."""
     available = [r for r in media_rows if r.id not in sent_ids]
     if not available:
         return None
+    if locked_outfit is not None:
+        outfit_avail = [r for r in available
+                        if _safe_outfit_num(r) == locked_outfit]
+        if outfit_avail:
+            available = outfit_avail
     hour = datetime.now(timezone.utc).hour
     if 6 <= hour < 12:
         tod = 'Day time'
@@ -2395,22 +2421,27 @@ def _pick_phase_photo(media_rows, outfits, sent_ids):
         tod = 'Golden hour'
     else:
         tod = 'Night time'
-    outfit_day = (datetime.now(timezone.utc).toordinal() % OUTFIT_COUNT) + 1
     scored = []
     for r in available:
         s = 1
         o = _outfit_of(r, outfits)
         if o and o.get('lighting', '').lower() == tod.lower():
             s += 2
-        try:
-            if int(r.outfit) == outfit_day:
+        if locked_outfit is None:
+            outfit_day = (datetime.now(timezone.utc).toordinal() % OUTFIT_COUNT) + 1
+            if _safe_outfit_num(r) == outfit_day:
                 s += 3
-        except (TypeError, ValueError):
-            pass
         scored.append((s, r))
     scored.sort(key=lambda x: -x[0])
     top = [x for x in scored if x[0] == scored[0][0]]
     return random.choice(top)[1]
+
+
+def _safe_outfit_num(row):
+    try:
+        return int(row.outfit)
+    except (TypeError, ValueError):
+        return None
 
 
 @app.route('/api/personas/<slug>/media', methods=['GET'])
@@ -5581,7 +5612,8 @@ def _tg_send_human(persona, chat_id, text, incoming='', photo_data=None):
         if photo_data:
             _tg_send_photo(persona, chat_id, photo_data)
         return
-    cps = max(4, cfg['typing_speed'])
+    cps = max(4, cfg['typing_speed'] // 2)
+    time.sleep(random.uniform(0, 120))
     time.sleep(min(0.8 + len(incoming) / 90.0, TG_READ_CAP) * random.uniform(0.7, 1.3))
     for i, chunk in enumerate(_tg_bursts(text)):
         if not chunk:
@@ -5792,19 +5824,22 @@ def _tg_handle_update(persona, update):
     picked_media_id = None
     reply, photo_tags = _tg_parse_photo_tag(reply)
     sent_ids = _fan_sent_photos(persona, chat_id) if media_rows else set()
+    locked_outfit, _ = _fan_outfit_lock(persona, chat_id)
     roll = random.randint(1, 100) if media_rows else 0
     roll_hit = media_rows and roll <= photo_rate
-    logger.info('Photo decision: %d media, rate=%d, roll=%d, hit=%s, tags=%s, sent=%d',
-                len(media_rows), photo_rate, roll, roll_hit, bool(photo_tags), len(sent_ids))
+    logger.info('Photo decision: %d media, rate=%d, roll=%d, hit=%s, tags=%s, sent=%d, outfit_lock=%s',
+                len(media_rows), photo_rate, roll, roll_hit, bool(photo_tags), len(sent_ids), locked_outfit)
     if photo_tags and media_rows:
         safe = {k: v for k, v in photo_tags.items()
                 if k in ('purpose', 'lighting', 'location', 'outfit')}
+        if locked_outfit is not None:
+            safe['outfit'] = str(locked_outfit)
         picked = _pick_media(media_rows, outfits=media_outfits, **safe)
         if picked and picked.id not in sent_ids:
             photo_data = picked.image_data
             picked_media_id = picked.id
     if not photo_data and roll_hit:
-        picked = _pick_phase_photo(media_rows, media_outfits, sent_ids)
+        picked = _pick_phase_photo(media_rows, media_outfits, sent_ids, locked_outfit=locked_outfit)
         if picked:
             photo_data = picked.image_data
             picked_media_id = picked.id
@@ -5818,6 +5853,10 @@ def _tg_handle_update(persona, update):
     _tg_send_human(persona, chat_id, reply, incoming=text, photo_data=photo_data)
     if picked_media_id:
         _fan_record_sent_photo(persona, chat_id, picked_media_id)
+        outfit_num = _safe_outfit_num(
+            next((r for r in media_rows if r.id == picked_media_id), None))
+        if outfit_num is not None:
+            _fan_set_outfit_lock(persona, chat_id, outfit_num)
     _log_x_message(persona, _tg_fan_key(chat_id), who, 'out', reply)
     fan['last_out'] = int(time.time())
     fans[str(chat_id)] = fan
@@ -6455,19 +6494,22 @@ def _tgu_plan(persona, chat_id, name, text):
     picked_media_id = None
     reply, photo_tags = _tg_parse_photo_tag(reply)
     sent_ids = _fan_sent_photos(persona, chat_id) if media_rows else set()
+    locked_outfit, _ = _fan_outfit_lock(persona, chat_id)
     roll = random.randint(1, 100) if media_rows else 0
     roll_hit = media_rows and roll <= photo_rate
-    logger.info('MTProto photo decision: %d media, rate=%d, roll=%d, hit=%s, tags=%s',
-                len(media_rows), photo_rate, roll, roll_hit, bool(photo_tags))
+    logger.info('MTProto photo decision: %d media, rate=%d, roll=%d, hit=%s, tags=%s, outfit_lock=%s',
+                len(media_rows), photo_rate, roll, roll_hit, bool(photo_tags), locked_outfit)
     if photo_tags and media_rows:
         safe = {k: v for k, v in photo_tags.items()
                 if k in ('purpose', 'lighting', 'location', 'outfit')}
+        if locked_outfit is not None:
+            safe['outfit'] = str(locked_outfit)
         picked = _pick_media(media_rows, outfits=media_outfits, **safe)
         if picked and picked.id not in sent_ids:
             photo_data = picked.image_data
             picked_media_id = picked.id
     if not photo_data and roll_hit:
-        picked = _pick_phase_photo(media_rows, media_outfits, sent_ids)
+        picked = _pick_phase_photo(media_rows, media_outfits, sent_ids, locked_outfit=locked_outfit)
         if picked:
             photo_data = picked.image_data
             picked_media_id = picked.id
@@ -6475,18 +6517,23 @@ def _tgu_plan(persona, chat_id, name, text):
     chunks = _tg_bursts(reply) if cfg['humanize'] else [reply]
     if cta_due:
         label = (cta.get('cta_label') or acct.get('cta_label') or 'come see').strip()
-        base = (acct.get('base_url') or '').rstrip('/')
-        link = f'{base}/go/{acct.get("code")}/{chat_id}'
+        link = cta_url
         chunks[-1] = f'{chunks[-1]}\n\n{label} → {link}'
         fan['cta_sent'] = int(time.time())
 
     if picked_media_id:
         _fan_record_sent_photo(persona, chat_id, picked_media_id)
+        outfit_num = _safe_outfit_num(
+            next((r for r in media_rows if r.id == picked_media_id), None))
+        if outfit_num is not None:
+            _fan_set_outfit_lock(persona, chat_id, outfit_num)
 
     fans[key] = fan
     _tg_save_fans(persona, fans)
+    initial_delay = random.uniform(0, 120) if cfg['humanize'] else 0
     read = min(0.8 + len(text) / 90.0, TG_READ_CAP) if cfg['humanize'] else 0
-    return {'read': read, 'cps': cfg['typing_speed'] if cfg['humanize'] else 999,
+    cps = max(4, int(cfg['typing_speed'] // 2)) if cfg['humanize'] else 999
+    return {'read': read, 'cps': cps, 'initial_delay': initial_delay,
             'chunks': chunks, 'photo_data': photo_data}
 
 
