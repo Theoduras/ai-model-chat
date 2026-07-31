@@ -119,6 +119,7 @@
         </select>
       </div>
     </div>
+    <div class="hint" id="x-behavior-summary" style="display:block; margin-top:12px;"></div>
     <div style="display:flex; gap:8px; align-items:center; margin-top:14px;">
       <button class="btn-ai" id="chat-start" onclick="startChat()">▶ Start auto-chat</button>
       <button class="btn-ai" id="chat-stop" style="background:#4c0519; display:none;" onclick="stopChat()">■ Stop</button>
@@ -274,6 +275,29 @@ function updateConn() {
   document.getElementById('connect-panel').style.display = 'none';
   document.getElementById('connect-step2').style.display = 'none';
   document.getElementById('connect-status').innerHTML = '';
+  loadBehaviorSummary();
+}
+
+// The Dashboard → Platform Bot Behavior → X.com panel governs how these rounds
+// actually send. Show it here so the two tabs don't look independent.
+async function loadBehaviorSummary() {
+  const el = document.getElementById('x-behavior-summary');
+  if (!el || !persona()) return;
+  let s = {}, f = {};
+  try {
+    [s, f] = await Promise.all([
+      fetch('/api/x/settings?persona=' + encodeURIComponent(persona())).then(r => r.json()),
+      fetch('/api/personas/' + encodeURIComponent(persona()) + '/phases').then(r => r.json())
+    ]);
+  } catch (e) { return; }
+  const speed = { 8: 'slow', 14: 'natural', 22: 'fast', 34: 'very fast' }[s.typing_speed] || s.typing_speed;
+  const bits = [
+    s.enabled ? 'bot <b>active</b>' : 'bot <b>off</b> — DM rounds will do nothing',
+    s.humanize ? 'human typing (' + speed + ')' : 'instant sending',
+    s.followups ? 'follow-ups after ' + s.followup_min + ' min' : 'no follow-ups',
+    (f.cta_url ? 'funnel link → <b>' + esc(f.cta_url) + '</b>' : 'no funnel link set')
+  ];
+  el.innerHTML = 'From Dashboard → Platform Bot Behavior → X.com: ' + bits.join(' · ') + '.';
 }
 
 function toggleConnect() {
@@ -438,7 +462,8 @@ function setState(id, txt, cls) {
 
 function logActions(label, n, a, data) {
   logLine(label + ' round ' + n + ' · ' + (a.new_chats || 0) + ' new chats, ' +
-    (a.dm_replies || 0) + ' DM replies, ' + (a.comments || 0) + ' comment replies, ' +
+    (a.dm_replies || 0) + ' DM replies, ' + (a.followups || 0) + ' follow-ups, ' +
+    (a.comments || 0) + ' comment replies, ' +
     (a.follows || 0) + ' follows, ' + (a.posts || 0) + ' posts', 'hd');
   (data.log || []).forEach(l => logLine(l, 'act'));
   if (!(data.log || []).length && !Object.values(a).some(Boolean)) {

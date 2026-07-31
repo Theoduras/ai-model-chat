@@ -4226,8 +4226,131 @@ def _x_username_for(persona, uid):
     return name
 
 
+X_FOLLOWUP_MAX = 2
+X_READ_CAP = 12.0
+X_TYPE_CAP = 25.0
+
+
+def _x_fans(persona):
+    """Per-fan DM state (last seen in/out, follow-ups sent). Kept in the settings
+    table rather than /tmp so it survives a redeploy."""
+    try:
+        return json.loads(_get_setting(f'x_fans_{persona}') or '{}')
+    except Exception:
+        return {}
+
+
+def _x_save_fans(persona, fans):
+    _set_setting(f'x_fans_{persona}', json.dumps(fans))
+
+
+def _x_touch_fan(persona, uid, username, direction, fans=None):
+    """Record that a message went in or out, so follow-ups know who went quiet."""
+    own = fans is None
+    if own:
+        fans = _x_fans(persona)
+    fan = fans.get(str(uid)) or {}
+    if username:
+        fan['name'] = username
+    if direction == 'in':
+        fan['last_in'] = int(time.time())
+        fan['followups'] = 0
+    else:
+        fan['last_out'] = int(time.time())
+    fans[str(uid)] = fan
+    if own:
+        _x_save_fans(persona, fans)
+    return fans
+
+
+def _x_history(persona, uid, limit=40):
+    """Past DMs with one fan, oldest first, in Gemini history shape. Survives
+    restarts — unlike the /tmp JSON mirror, which Vercel and Cloud Run wipe."""
+    try:
+        from db import SessionLocal, list_x_messages
+        s = SessionLocal()
+        try:
+            return [{'role': 'model' if r.direction == 'out' else 'user', 'content': r.text}
+                    for r in list_x_messages(s, persona, uid, limit=limit)]
+        finally:
+            s.close()
+    except Exception as exc:
+        logger.warning('_x_history failed for %s/%s: %s', persona, uid, exc)
+        return []
+
+
+def _x_messaged_before(persona, uid):
+    """True when this account already has DMs on record with the user, so the
+    gathering loop never opens a second cold chat with the same person."""
+    try:
+        from db import SessionLocal, count_x_messages
+        s = SessionLocal()
+        try:
+            return count_x_messages(s, persona, uid) > 0
+        finally:
+            s.close()
+    except Exception:
+        return False
+
+
+def _x_cta_link(persona, uid, cta_url):
+    """Route the CTA through our own redirect so X clicks are measurable, the way
+    Telegram's are. Falls back to the raw link when no public base URL is known
+    (the worker has no request context to borrow one from)."""
+    base = (os.getenv('PUBLIC_BASE_URL') or _get_setting('public_base_url') or '').rstrip('/')
+    if not base:
+        return cta_url
+    return f'{base}/go/x/{persona}/{uid}'
+
+
+@app.route('/go/x/<persona>/<uid>')
+def x_cta_click(persona, uid):
+    """Tracked CTA redirect for X DMs — records the click, then forwards on."""
+    if not re.match(r'^[a-z0-9_-]+$', persona or ''):
+        return redirect('/')
+    cta = _phases_cta(persona)
+    url = (cta.get('cta_url') or (_tg_load_bots().get(persona) or {}).get('cta_url') or '').strip()
+    if not url:
+        return redirect('/')
+    fans = _x_fans(persona)
+    fan = fans.get(str(uid))
+    if fan is not None and not fan.get('cta_clicked'):
+        fan['cta_clicked'] = int(time.time())
+        fans[str(uid)] = fan
+        _x_save_fans(persona, fans)
+    return redirect(url, code=302)
+
+
+def _x_send_dm(persona, conv_id, text):
+    _x_call(persona, 'POST', f'/dm_conversations/{conv_id}/messages', body={'text': text})
+
+
+def _x_send_human(persona, conv_id, text, incoming='', cfg=None):
+    """Send a DM the way a person would: a pause to read, then a delay scaled to
+    how long the reply takes to type, split across a burst or two. X has no
+    typing indicator, so the delay is the only signal — it just has to feel
+    unhurried rather than instant."""
+    cfg = cfg or _x_behavior(persona)
+    if not cfg.get('humanize', True):
+        _x_send_dm(persona, conv_id, text)
+        return
+    cps = max(2, int(cfg.get('typing_speed') or 14) // 4)
+    time.sleep(random.uniform(15, 120))
+    time.sleep(min(0.8 + len(incoming) / 90.0, X_READ_CAP) * random.uniform(0.7, 1.3))
+    for i, chunk in enumerate(_tg_bursts(text)):
+        if not chunk:
+            continue
+        if i:
+            time.sleep(random.uniform(0.6, 1.6))
+        time.sleep(min(max(len(chunk) / float(cps), 1.2), X_TYPE_CAP) * random.uniform(0.85, 1.2))
+        _x_send_dm(persona, conv_id, chunk)
+
+
 def _x_dm_reply_round(persona, max_results=20):
     """Reply in-character to new incoming DMs. Returns (replied_count, log_lines)."""
+    cfg = _x_behavior(persona)
+    if not cfg.get('enabled', True):
+        return 0, ['X bot is switched off for this persona (Dashboard → Platform Bot Behavior).']
     tokens = _load_x_tokens()
     t = tokens.get(persona) or {}
     user_id = t.get('user_id', '')
@@ -4246,6 +4369,11 @@ def _x_dm_reply_round(persona, max_results=20):
     replied = 0
     log = []
     new_last = last_seen
+    phases = _phases(persona)
+    cta = _phases_cta(persona)
+    cta_url = (cta.get('cta_url') or (_tg_load_bots().get(persona) or {}).get('cta_url') or '').strip()
+    cta_label = (cta.get('cta_label') or 'come see').strip()
+    fans = _x_fans(persona)
     for event in events:
         eid = event.get('id', '')
         sender = event.get('sender_id', '')
@@ -4262,36 +4390,79 @@ def _x_dm_reply_round(persona, max_results=20):
         _log_x_event('dm_in', persona=persona, x_username=sender_name, detail=text[:160])
         _log_x_message(persona, sender, sender_name, 'in', text)
         conv_id = event.get('dm_conversation_id') or event.get('conversation_id') or f'dm_{sender}'
+
+        fan = fans.get(str(sender)) or {}
+        fan['name'] = sender_name or fan.get('name', '')
+        fan['conv_id'] = conv_id
+        fan['last_in'] = int(time.time())
+        fan['followups'] = 0
+        fan['in_count'] = int(fan.get('in_count', 0)) + 1
+        if not fan.get('first_in'):
+            fan['first_in'] = int(time.time())
+        fans[str(sender)] = fan
+
+        phase_idx = _fan_phase(phases, fan)
+        is_cta_phase = phase_idx == len(phases) - 1
+        cta_asked = _cta_asked(text)
+        # An explicit ask overrides both the phase gate and the once-only gate.
+        cta_due = bool(cta_url) and (cta_asked or (not fan.get('cta_sent') and is_cta_phase))
         # Use DB history (survives restarts) with JSON file as fallback
-        db_hist = []
-        try:
-            with db.SessionLocal() as s:
-                rows = db.list_x_messages(s, persona, sender, limit=40)
-                db_hist = [{'role': 'model' if r.direction == 'out' else 'user',
-                            'content': r.text} for r in rows]
-        except Exception:
-            pass
+        db_hist = _x_history(persona, sender)
         if not db_hist:
             hist_path = _x_state_path(persona, f'hist_{sender}')
             db_hist = _x_load_json(hist_path, [])
         try:
             has_history = len(db_hist) > 0
-            instruction = (
-                "Reply to this X DM from a fan. You have the full earlier "
-                "conversation above — USE it: do NOT introduce yourself again, "
-                "do NOT re-state your name/age/location, do NOT re-ask anything "
-                "they already told you. Continue naturally from where you left off. "
-                "Be warm and engaging, end with a question to keep them talking. "
-                f"Their latest message: \"{text}\"") if has_history else (
-                "Reply to this first DM from a fan, in-character, warm and "
-                "engaging, end with a question to keep them talking. "
-                f"Their message: \"{text}\"")
+            continuity = (
+                "You have the full earlier conversation above — USE it: do NOT "
+                "introduce yourself again, do NOT re-state your name/age/location, "
+                "do NOT re-ask anything they already told you. Continue naturally "
+                "from where you left off. ") if has_history else ''
+            ask_rule = (
+                'End with ONE question that follows from what they just said — never '
+                'a generic "how are you", never a question you have already asked, '
+                'and never more than one. ')
+            if cta_asked and cta_due:
+                instruction = (
+                    f'Reply in-character to this fan\'s X DM: "{text}". {continuity}'
+                    'They are asking where else to find you — answer them directly and '
+                    'warmly, say yes, that is where you post the rest. Do NOT deflect, '
+                    'do NOT answer with a question, and do NOT paste a link yourself; '
+                    'a link is appended after your message. Keep it to one or two '
+                    'short sentences.')
+            elif cta_due:
+                instruction = (
+                    f'Reply in-character to this fan\'s X DM: "{text}". {continuity}'
+                    'Answer what they actually said first, then tease — in one natural '
+                    'sentence — that you post more somewhere more private. Do NOT paste '
+                    'a link or a URL, do not hard-sell, and do not name the site; a link '
+                    'is appended after your message. ' + ask_rule)
+            else:
+                instruction = (
+                    f'Reply in-character to this fan\'s X DM: "{text}". {continuity}'
+                    'Warm and engaging, react to what they just said before anything '
+                    'else, reference what they have told you before, and let interest '
+                    'build slowly — no selling, no hinting at paid content yet. '
+                    + ask_rule)
             reply = _persona_text(persona, instruction, history=db_hist,
                                   max_tokens=1024, temperature=0.9)
             if not reply:
                 continue
-            _x_call(persona, 'POST', f'/dm_conversations/{conv_id}/messages',
-                    body={'text': reply})
+            if cta_due:
+                link = _x_cta_link(persona, sender, cta_url)
+                reply = f'{reply}\n\n{cta_label} → {link}'
+                fan['cta_sent'] = int(time.time())
+                fan['cta_count'] = int(fan.get('cta_count', 0)) + 1
+                logger.info('CTA SENT [x/%s] fan=%s trigger=%s phase=%d count=%d link=%s',
+                            persona, sender_name or sender,
+                            'asked' if cta_asked else 'phase', phase_idx,
+                            fan['cta_count'], link)
+            elif cta_asked and not cta_url:
+                logger.warning('CTA asked on X but no cta_url configured [%s] fan=%s',
+                               persona, sender_name or sender)
+            _x_send_human(persona, conv_id, reply, incoming=text, cfg=cfg)
+            fan['last_out'] = int(time.time())
+            fans[str(sender)] = fan
             _log_x_message(persona, sender, sender_name, 'out', reply)
             hist_path = _x_state_path(persona, f'hist_{sender}')
             file_hist = _x_load_json(hist_path, [])
@@ -4299,12 +4470,67 @@ def _x_dm_reply_round(persona, max_results=20):
             file_hist.append({'role': 'bot', 'content': reply})
             _x_save_history(persona, sender, file_hist)
             replied += 1
-            log.append(f'DM reply → fan: {reply[:60]}')
+            log.append(f'DM reply → {sender_name or sender} (phase {phase_idx + 1}/{len(phases)})'
+                       + (' + link' if cta_due else '') + f': {reply[:60]}')
         except Exception as e:
             log.append(f'DM reply failed: {str(e)[:60]}')
+    _x_save_fans(persona, fans)
     cursor['last_event_id'] = new_last or last_seen
     _x_save_json(cursor_path, cursor)
     return replied, log
+
+
+def _x_followup_round(persona):
+    """Re-engage fans who went quiet on X, and nudge once on an unclicked link.
+    Capped at X_FOLLOWUP_MAX per fan so it never turns into spam."""
+    cfg = _x_behavior(persona)
+    if not cfg.get('enabled', True) or not cfg.get('followups', True):
+        return 0, []
+    gap_min = max(5, int(cfg.get('followup_min') or 45))
+    fans = _x_fans(persona)
+    now = int(time.time())
+    sent = 0
+    log = []
+    for uid, fan in list(fans.items()):
+        last = max(int(fan.get('last_in') or 0), int(fan.get('last_out') or 0))
+        if not last or int(fan.get('last_in') or 0) > int(fan.get('last_out') or 0):
+            continue  # they spoke last — the reply path handles it
+        n = int(fan.get('followups', 0))
+        if n >= X_FOLLOWUP_MAX:
+            continue
+        if (now - last) / 60.0 < gap_min * (n + 1):
+            continue
+        conv_id = fan.get('conv_id')
+        if not conv_id:
+            continue
+        if fan.get('cta_sent') and not fan.get('cta_clicked'):
+            instruction = (
+                'This fan went quiet after you sent them your link. Write ONE short, '
+                'light, in-character nudge — curious whether they had a look, playful, '
+                'zero pressure, no link. One or two sentences.')
+        else:
+            instruction = (
+                'This fan went quiet in your X DMs. Write ONE short, in-character '
+                'message that reopens the conversation — reference something they '
+                'mentioned before if you can, and ask them something easy to answer.')
+        try:
+            hist = _x_history(persona, uid)
+            text = _fv_trim(_persona_text(persona, instruction, history=hist,
+                                          max_tokens=400, temperature=0.9), hard_cap=420)
+            if not text:
+                continue
+            _x_send_human(persona, conv_id, text, cfg=cfg)
+            _log_x_message(persona, uid, fan.get('name', ''), 'out', text)
+            fan['followups'] = n + 1
+            fan['last_out'] = int(time.time())
+            fans[uid] = fan
+            sent += 1
+            log.append(f'Follow-up {n + 1}/{X_FOLLOWUP_MAX} → {fan.get("name") or uid}: {text[:60]}')
+        except Exception as e:
+            log.append(f'Follow-up failed for {fan.get("name") or uid}: {str(e)[:60]}')
+    if sent:
+        _x_save_fans(persona, fans)
+    return sent, log
 
 
 def _x_comment_round(persona, post, limit, preview=False, skip_seen=False):
@@ -4968,7 +5194,8 @@ def api_x_auto_run():
         return jsonify({'ok': False, 'error': f'No X account connected for persona "{persona}".'}), 400
 
     _log_x_event('auto-run', persona=persona, detail=query or post)
-    actions = {'dm_replies': 0, 'new_chats': 0, 'follows': 0, 'comments': 0, 'posts': 0}
+    actions = {'dm_replies': 0, 'followups': 0, 'new_chats': 0, 'follows': 0,
+               'comments': 0, 'posts': 0}
     log = []
     try:
         if do_post:
@@ -4986,6 +5213,9 @@ def api_x_auto_run():
             replied, dlog = _x_dm_reply_round(persona)
             actions['dm_replies'] = replied
             log += dlog
+            nudged, flog = _x_followup_round(persona)
+            actions['followups'] = nudged
+            log += flog
 
         if comment_limit and (do_comments and post or do_respond_own):
             targets = []
@@ -5023,12 +5253,8 @@ def api_x_auto_run():
             for u in candidates:
                 try:
                     # Final dedup: skip if we already have ANY messages with this user in DB
-                    try:
-                        with db.SessionLocal() as _s:
-                            if db.count_x_messages(_s, persona, u['id']) > 0:
-                                continue
-                    except Exception:
-                        pass
+                    if _x_messaged_before(persona, u['id']):
+                        continue
                     if do_follow and me_id:
                         try:
                             _x_call(persona, 'POST', f'/users/{me_id}/following',
@@ -8187,6 +8413,59 @@ def _tg_worker():
                     pass
         except Exception:
             pass
+
+
+_x_worker_started = [False]
+_x_round_locks = {}
+
+
+def _x_enabled_list():
+    """Personas with a connected X account and the bot switched on."""
+    out = []
+    for persona, t in (_load_x_tokens() or {}).items():
+        if (t or {}).get('access_token') and _x_behavior(persona).get('enabled', True):
+            out.append(persona)
+    return out
+
+
+def _x_worker():
+    """Server-side loop: keeps DM replies and follow-ups running for every
+    connected X account without an open browser tab, in parallel so one busy
+    account never holds up the others."""
+    import time as _t
+    from concurrent.futures import ThreadPoolExecutor
+    pool = ThreadPoolExecutor(max_workers=max(1, int(os.getenv('X_WORKERS', '8'))),
+                              thread_name_prefix='xbot')
+    pending = set()
+    guard = threading.Lock()
+
+    def _one(persona):
+        try:
+            with app.app_context():
+                _x_dm_reply_round(persona)
+                _x_followup_round(persona)
+        except Exception:
+            logger.exception('x round failed for %s', persona)
+        finally:
+            with guard:
+                pending.discard(persona)
+
+    while True:
+        _t.sleep(60)
+        try:
+            for persona in _x_enabled_list():
+                with guard:
+                    if persona in pending:
+                        continue
+                    pending.add(persona)
+                pool.submit(_one, persona)
+        except Exception:
+            logger.exception('x worker tick failed')
+
+
+if os.getenv('X_WORKER', '1') != '0' and not _x_worker_started[0]:
+    _x_worker_started[0] = True
+    threading.Thread(target=_x_worker, daemon=True).start()
 
 
 if os.getenv('TELEGRAM_WORKER', '1') != '0' and not _tg_worker_started[0]:
