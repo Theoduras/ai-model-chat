@@ -1448,6 +1448,21 @@ body.page-dashboard .conn-dot.err { background: #ef4444; }
 }
 .outfit-drop:hover { border-color: #6366f1; color: #a1a1aa; background: #17171b; }
 
+.outfit-gen { margin-top: 12px; padding-top: 12px; border-top: 1px solid #232327; }
+.outfit-seed { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.outfit-seed-label { font-size: 0.72rem; color: #71717a; margin-right: 2px; }
+.outfit-seed-img {
+  width: 34px; height: 44px; object-fit: cover; border-radius: 5px;
+  border: 1px solid #3f3f46; cursor: pointer; transition: border-color .15s, transform .15s;
+}
+.outfit-seed-img:hover { border-color: #7c3aed; transform: translateY(-1px); }
+.outfit-gen-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.outfit-gen-count {
+  background: #27272a; border: 1px solid #3f3f46; border-radius: 7px;
+  color: #d4d4d8; font-size: 0.75rem; padding: 6px 8px;
+}
+.outfit-gen-status { font-size: 0.75rem; color: #a1a1aa; }
+
 .modal-overlay {
   position: fixed;
   inset: 0;
