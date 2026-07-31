@@ -2874,6 +2874,34 @@ def api_generate_image():
     import base64
     reference = data.get('reference')  # optional data URL of an existing photo
 
+    # A stored photo can be referenced by id; the browser only holds its URL,
+    # not the bytes, so the image is loaded here.
+    ref_media_id = data.get('reference_media')
+    ref_slug = data.get('reference_slug')
+    if ref_media_id and not reference:
+        try:
+            from db import SessionLocal, get_persona_media
+            s = SessionLocal()
+            try:
+                row = get_persona_media(s, ref_media_id)
+                if row and (not ref_slug or row.slug == ref_slug):
+                    reference = row.image_data
+            finally:
+                s.close()
+        except Exception:
+            logger.warning('reference_media lookup failed for %s', ref_media_id)
+        if not reference:
+            return jsonify({'ok': False,
+                            'error': 'Could not load the reference photo.'}), 200
+
+    # A requested-but-unusable reference must not silently fall through to a
+    # fresh face: that returns a different person, which is never what was asked.
+    if reference and not (isinstance(reference, str) and reference.startswith('data:')):
+        logger.warning('generate/image got an unusable reference (%s)',
+                       str(reference)[:60])
+        return jsonify({'ok': False,
+                        'error': 'The reference photo could not be read.'}), 200
+
     # Optional outfit lock: keeps clothing, place and lighting identical across
     # a set, so the shots read as one moment rather than five separate days.
     outfit = data.get('outfit') or {}
@@ -2884,8 +2912,12 @@ def api_generate_image():
         outfit_bits.append(f"in the same place: {outfit['location']}")
     if outfit.get('lighting'):
         outfit_bits.append(f"{outfit['lighting']} lighting")
-    outfit_clause = (' She must be ' + ', '.join(outfit_bits) + '. '
-                     if outfit_bits else ' ')
+    if outfit_bits:
+        outfit_clause = ' She must be ' + ', '.join(outfit_bits) + '. '
+    else:
+        # Nothing described, so the reference image is the only spec there is.
+        outfit_clause = (' Copy the clothing, hairstyle, location and lighting '
+                         'exactly as they appear in the reference image. ')
 
     try:
         # With a reference photo, use the Gemini image model to keep the SAME

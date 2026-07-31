@@ -1766,8 +1766,11 @@ async function generateOutfitSet(n, btn) {
   if (!currentSlug) { setMediaStatus('Save the persona first.', false); return; }
   const status = document.getElementById('outfit-gen-status-' + n);
   const existing = photosOf(n);
-  const seed = (existing[0] && existing[0].thumb) || galleryImages[0];
-  if (!seed) {
+  // An outfit photo is referenced by id: the browser holds only its URL, and
+  // the generator needs the actual bytes to keep the same person.
+  const seedId = existing[0] && existing[0].id;
+  const seedData = seedId ? null : galleryImages[0];
+  if (!seedId && !seedData) {
     if (status) status.textContent = 'Add one photo first — it sets the look to match.';
     return;
   }
@@ -1785,7 +1788,8 @@ async function generateOutfitSet(n, btn) {
     try {
       const res = await fetch('/api/generate/image', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reference: seed, outfit: spec,
+        body: JSON.stringify({ reference: seedData, reference_media: seedId,
+                               reference_slug: currentSlug, outfit: spec,
                                shot: OUTFIT_SHOTS[i % OUTFIT_SHOTS.length],
                                config: collectConfig() })
       });
