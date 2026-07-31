@@ -8,7 +8,8 @@ import datetime
 import uuid
 
 from sqlalchemy import (
-    create_engine, Column, String, Text, DateTime, ForeignKey, Index
+    create_engine, Column, String, Text, DateTime, ForeignKey, Index, Integer,
+    func
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
@@ -130,6 +131,7 @@ class PersonaMedia(Base):
     outfit = Column(String(120), default='')
     lighting = Column(String(60), default='')
     purpose = Column(String(60), default='')
+    position = Column(Integer, default=0)   # manual sort order within an outfit
     created_at = Column(DateTime, default=_now)
 
 
@@ -236,7 +238,28 @@ Index('ix_xopener_persona_user', XOpener.persona, XOpener.x_user_id)
 
 
 def list_persona_media(session, slug):
-    return session.query(PersonaMedia).filter_by(slug=slug).order_by(PersonaMedia.created_at).all()
+    # coalesce: rows created before `position` existed have NULL, and NULLs sort
+    # differently on SQLite and Postgres.
+    return (session.query(PersonaMedia).filter_by(slug=slug)
+            .order_by(func.coalesce(PersonaMedia.position, 0),
+                      PersonaMedia.created_at).all())
+
+
+def reorder_persona_media(session, slug, ordered_ids):
+    """Apply a new order, and move items between outfits, in one pass.
+    ordered_ids is [{'id': ..., 'outfit': ...}, ...] in display order."""
+    rows = {r.id: r for r in session.query(PersonaMedia).filter_by(slug=slug).all()}
+    changed = 0
+    for i, entry in enumerate(ordered_ids):
+        row = rows.get(entry.get('id'))
+        if row is None:
+            continue
+        row.position = i
+        outfit = entry.get('outfit')
+        if outfit is not None:
+            row.outfit = str(outfit)[:120]
+        changed += 1
+    return changed
 
 
 def get_persona_media(session, media_id):
@@ -333,7 +356,8 @@ def _add_missing_columns(table_name, model):
 
 def init_db():
     Base.metadata.create_all(engine)
-    for table, model in (('users', User), ('saved_personas', SavedPersona)):
+    for table, model in (('users', User), ('saved_personas', SavedPersona),
+                         ('persona_media', PersonaMedia)):
         try:
             _add_missing_columns(table, model)
         except Exception:

@@ -1448,6 +1448,16 @@ body.page-dashboard .conn-dot.err { background: #ef4444; }
 }
 .outfit-drop:hover { border-color: #6366f1; color: #a1a1aa; background: #17171b; }
 
+.outfit-photo[draggable="true"] { cursor: grab; }
+.outfit-photo.dragging { opacity: .4; cursor: grabbing; }
+.outfit-photo.drop-before { box-shadow: -3px 0 0 0 #7c3aed; }
+.outfit-photo.drop-after  { box-shadow:  3px 0 0 0 #7c3aed; }
+.outfit-photos.drop-active {
+  outline: 2px dashed #7c3aed; outline-offset: 4px; border-radius: 10px;
+  background: #7c3aed0d;
+}
+.outfit-drop small { display: block; font-size: 0.66rem; color: #52525b; margin-top: 3px; }
+
 .outfit-gen { margin-top: 12px; padding-top: 12px; border-top: 1px solid #232327; }
 .outfit-seed { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
 .outfit-seed-label { font-size: 0.72rem; color: #71717a; margin-right: 2px; }

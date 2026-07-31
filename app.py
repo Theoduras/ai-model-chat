@@ -3570,6 +3570,24 @@ def api_persona_media_save(slug):
         s.close()
 
 
+@app.route('/api/personas/<slug>/media/reorder', methods=['POST'])
+def api_persona_media_reorder(slug):
+    """Persist a drag-and-drop reorder. Body: {order: [{id, outfit}, ...]}"""
+    if not re.match(r'^[a-z0-9_-]+$', slug):
+        return jsonify({'error': 'Invalid slug'}), 400
+    order = (request.json or {}).get('order')
+    if not isinstance(order, list):
+        return jsonify({'error': 'order must be a list'}), 400
+    from db import SessionLocal, reorder_persona_media
+    s = SessionLocal()
+    try:
+        n = reorder_persona_media(s, slug, order)
+        s.commit()
+    finally:
+        s.close()
+    return jsonify({'ok': True, 'updated': n})
+
+
 @app.route('/api/personas/<slug>/media/<media_id>', methods=['PUT'])
 def api_persona_media_update(slug, media_id):
     if not re.match(r'^[a-z0-9_-]+$', slug):

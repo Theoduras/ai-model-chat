@@ -1646,9 +1646,12 @@ function outfitBlock(o) {
             </select>
           </div>
         </div>
-        <div class="outfit-photos">
+        <div class="outfit-photos" data-outfit="${o.n}"
+             ondragover="onOutfitDragOver(event,${o.n})"
+             ondragleave="onOutfitDragLeave(event)"
+             ondrop="onOutfitDrop(event,${o.n})">
           ${photos.map(it => photoTile(it)).join('')}
-          <div class="outfit-drop" onclick="addPhotosTo(${o.n})">+ Add photos</div>
+          <div class="outfit-drop" onclick="addPhotosTo(${o.n})">+ Add photos<small>or drop files here</small></div>
         </div>
         <div class="outfit-gen">
           ${galleryImages.length ? `<div class="outfit-seed">
@@ -1688,8 +1691,13 @@ function unassignedBlock(items) {
 
 function photoTile(it) {
   return `
-    <div class="outfit-photo">
-      <img src="${it.thumb}" alt="">
+    <div class="outfit-photo" draggable="true" data-mid="${it.id}"
+         ondragstart="onPhotoDragStart(event,'${it.id}')"
+         ondragend="onPhotoDragEnd(event)"
+         ondragover="onPhotoDragOver(event,'${it.id}')"
+         ondragleave="onPhotoDragLeave(event)"
+         ondrop="onPhotoDrop(event,'${it.id}')">
+      <img src="${it.thumb}" alt="" draggable="false">
       <button type="button" class="rm" title="Remove" onclick="deleteMedia('${it.id}')">×</button>
       <select title="Purpose" onchange="updateMedia('${it.id}','purpose',this.value)">
         ${MEDIA_PURPOSES.map(p => `<option${p === it.purpose ? ' selected' : ''}>${p || '— purpose —'}</option>`).join('')}
@@ -1736,6 +1744,131 @@ async function saveOutfits(btn) {
 function addPhotosTo(n) {
   uploadTarget = n;
   document.getElementById('outfit-file-input').click();
+}
+
+// ── Drag to rearrange, and drop files to upload ──────────────────────────────
+let dragMediaId = null;
+
+function onPhotoDragStart(ev, id) {
+  dragMediaId = id;
+  ev.dataTransfer.effectAllowed = 'move';
+  // Firefox needs data set for the drag to start at all.
+  try { ev.dataTransfer.setData('text/plain', id); } catch (e) {}
+  const tile = ev.currentTarget;
+  if (tile) setTimeout(() => tile.classList.add('dragging'), 0);
+}
+
+function onPhotoDragEnd(ev) {
+  dragMediaId = null;
+  document.querySelectorAll('.outfit-photo').forEach(el =>
+    el.classList.remove('dragging', 'drop-before', 'drop-after'));
+  document.querySelectorAll('.outfit-photos').forEach(el =>
+    el.classList.remove('drop-active'));
+}
+
+function onPhotoDragOver(ev, id) {
+  if (!dragMediaId || dragMediaId === id) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  ev.dataTransfer.dropEffect = 'move';
+  const tile = ev.currentTarget;
+  const r = tile.getBoundingClientRect();
+  const after = (ev.clientX - r.left) > r.width / 2;
+  tile.classList.toggle('drop-before', !after);
+  tile.classList.toggle('drop-after', after);
+}
+
+function onPhotoDragLeave(ev) {
+  ev.currentTarget.classList.remove('drop-before', 'drop-after');
+}
+
+async function onPhotoDrop(ev, targetId) {
+  if (!dragMediaId || dragMediaId === targetId) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  const tile = ev.currentTarget;
+  const r = tile.getBoundingClientRect();
+  const after = (ev.clientX - r.left) > r.width / 2;
+  const target = mediaItems.find(it => it.id === targetId);
+  const moving = mediaItems.find(it => it.id === dragMediaId);
+  if (!target || !moving) return;
+
+  moving.outfit = target.outfit;          // dropping onto a tile adopts its outfit
+  const rest = mediaItems.filter(it => it.id !== dragMediaId);
+  const at = rest.findIndex(it => it.id === targetId);
+  rest.splice(after ? at + 1 : at, 0, moving);
+  mediaItems = rest;
+  onPhotoDragEnd(ev);
+  renderOutfits();
+  await persistMediaOrder();
+}
+
+function onOutfitDragOver(ev, n) {
+  if (dragMediaId) { ev.preventDefault(); ev.dataTransfer.dropEffect = 'move'; }
+  else if (ev.dataTransfer && Array.from(ev.dataTransfer.types || []).includes('Files')) {
+    ev.preventDefault();
+    ev.dataTransfer.dropEffect = 'copy';
+  } else return;
+  ev.currentTarget.classList.add('drop-active');
+}
+
+function onOutfitDragLeave(ev) {
+  ev.currentTarget.classList.remove('drop-active');
+}
+
+async function onOutfitDrop(ev, n) {
+  const files = Array.from((ev.dataTransfer && ev.dataTransfer.files) || [])
+    .filter(f => f.type.startsWith('image/'));
+  ev.preventDefault();
+  ev.currentTarget.classList.remove('drop-active');
+
+  if (files.length) { await uploadMediaFiles(files, n); return; }
+
+  // A tile dropped on empty space in the outfit moves it to the end of it.
+  if (!dragMediaId) return;
+  const moving = mediaItems.find(it => it.id === dragMediaId);
+  if (!moving) return;
+  moving.outfit = String(n);
+  mediaItems = mediaItems.filter(it => it.id !== dragMediaId).concat([moving]);
+  onPhotoDragEnd(ev);
+  renderOutfits();
+  await persistMediaOrder();
+}
+
+async function persistMediaOrder() {
+  if (!currentSlug) return;
+  try {
+    await fetch('/api/personas/' + currentSlug + '/media/reorder', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order: mediaItems.map(it => ({ id: it.id, outfit: it.outfit || '' })) })
+    });
+    setMediaStatus('✓ Order saved', true);
+  } catch (e) {
+    setMediaStatus('Could not save the new order.', false);
+  }
+}
+
+// Shared by the file picker and by dropping files onto an outfit.
+async function uploadMediaFiles(files, outfitN) {
+  if (!currentSlug) { setMediaStatus('Save the persona first.', false); return; }
+  setMediaStatus('Uploading ' + files.length + ' photo(s)…', null);
+  const readAsDataURL = f => new Promise(res => {
+    const r = new FileReader(); r.onload = e => res(e.target.result); r.readAsDataURL(f);
+  });
+  let added = 0;
+  for (const file of files) {
+    try {
+      const image = await readAsDataURL(file);
+      await fetch('/api/personas/' + currentSlug + '/media', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image, outfit: outfitN ? String(outfitN) : '' })
+      });
+      added++;
+    } catch (e) {}
+  }
+  openOutfit = outfitN;
+  await loadMedia();
+  setMediaStatus(added ? '✓ Added ' + added + ' photo(s)' : 'Upload failed.', !!added);
 }
 
 // Copy a photo from the Photos tab into an outfit, so the face set and the
@@ -1824,31 +1957,11 @@ async function generateOutfitSet(n, btn) {
 }
 
 function onMediaFiles(ev) {
-  if (!currentSlug) { setMediaStatus('Save the persona first.', false); ev.target.value = ''; return; }
   const files = Array.from(ev.target.files || []);
-  if (!files.length) return;
   const target = uploadTarget;
-  setMediaStatus('Uploading ' + files.length + ' photo(s)…', null);
-  let done = 0;
-  files.forEach(file => {
-    const reader = new FileReader();
-    reader.onload = async e => {
-      try {
-        await fetch('/api/personas/' + currentSlug + '/media', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: e.target.result, outfit: target ? String(target) : '' })
-        });
-      } catch(err) {}
-      if (++done === files.length) {
-        setMediaStatus('✓ Added ' + files.length + ' photo(s)', true);
-        openOutfit = target;
-        loadMedia();
-      }
-    };
-    reader.readAsDataURL(file);
-  });
   ev.target.value = '';
   uploadTarget = null;
+  if (files.length) uploadMediaFiles(files, target);
 }
 
 async function updateMedia(id, field, value) {
