@@ -4319,6 +4319,30 @@ def _x_touch_fan(persona, uid, username, direction, fans=None):
     return fans
 
 
+X_SEEN_EVENTS_MAX = 400
+
+
+def _x_seen_events(persona):
+    """DM event ids already handled. A set beats a single high-water mark: it
+    does not depend on X returning events in any particular order, so a reply
+    can never be skipped because a newer event sorted ahead of it."""
+    try:
+        raw = json.loads(_get_setting(f'x_seen_events_{persona}') or '[]')
+        return set(raw) if isinstance(raw, list) else set()
+    except Exception:
+        return set()
+
+
+def _x_mark_seen(persona, event_ids):
+    ids = [e for e in event_ids if e]
+    if not ids:
+        return
+    seen = _x_seen_events(persona)
+    seen.update(ids)
+    _set_setting(f'x_seen_events_{persona}',
+                 json.dumps(list(seen)[-X_SEEN_EVENTS_MAX:]))
+
+
 def _x_history(persona, uid, limit=40):
     """Past DMs with one fan, oldest first, in Gemini history shape. Survives
     restarts — unlike the /tmp JSON mirror, which Vercel and Cloud Run wipe."""
@@ -4410,11 +4434,21 @@ def _x_dm_reply_round(persona, max_results=20):
     tokens = _load_x_tokens()
     t = tokens.get(persona) or {}
     user_id = t.get('user_id', '')
-    if not t.get('access_token') or not user_id:
-        return 0, []
-    cursor_path = _x_state_path(persona, 'dm_cursor')
-    cursor = _x_load_json(cursor_path, {})
-    last_seen = cursor.get('last_event_id', '')
+    if not t.get('access_token'):
+        return 0, [f'No X account connected for "{persona}".']
+    if not user_id:
+        # Recoverable: the connect flow stores this, but /users/me can fail there.
+        try:
+            user_id = ((_x_call(persona, 'GET', '/users/me') or {}).get('data') or {}).get('id', '')
+        except Exception as e:
+            return 0, [f'Could not identify the connected account: {str(e)[:160]}']
+        if not user_id:
+            return 0, ['The connected X account has no user id stored — reconnect it '
+                       'on the X Bot tab so replies can tell your messages from theirs.']
+        t['user_id'] = user_id
+        tokens[persona] = t
+        _save_x_tokens(tokens)
+    seen = _x_seen_events(persona)
     path = ('/dm_events?dm_event.fields=id,text,sender_id,created_at,dm_conversation_id'
             f'&event_types=MessageCreate&max_results={max_results}')
     try:
@@ -4424,22 +4458,30 @@ def _x_dm_reply_round(persona, max_results=20):
     events = convs.get('data', []) or []
     replied = 0
     log = []
-    new_last = last_seen
+    if not events:
+        return 0, ['No DM events returned by X (nobody has messaged this account yet).']
+    # First run on this account: remember what is already there instead of
+    # replying to the whole backlog at once.
+    if not seen:
+        _x_mark_seen(persona, [e.get('id', '') for e in events])
+        return 0, [f'First DM check — {len(events)} existing message(s) noted; '
+                   'replies start from the next one in.']
+    incoming = [e for e in events
+                if e.get('sender_id') != user_id and e.get('id') not in seen]
+    if not incoming:
+        return 0, []
     phases = _phases(persona)
     cta = _phases_cta(persona)
     cta_url = (cta.get('cta_url') or (_tg_load_bots().get(persona) or {}).get('cta_url') or '').strip()
     cta_label = (cta.get('cta_label') or 'come see').strip()
     fans = _x_fans(persona)
-    for event in events:
+    handled = []
+    # Oldest first, so a burst of messages is answered in the order it was sent.
+    for event in sorted(incoming, key=lambda e: e.get('created_at') or '')[-max_results:]:
         eid = event.get('id', '')
         sender = event.get('sender_id', '')
         text = event.get('text', '').strip()
-        if sender == user_id:
-            continue
-        if eid == last_seen:
-            break
-        if not new_last:
-            new_last = eid
+        handled.append(eid)
         if not text:
             continue
         sender_name = _x_username_for(persona, sender)
@@ -4531,8 +4573,9 @@ def _x_dm_reply_round(persona, max_results=20):
         except Exception as e:
             log.append(f'DM reply failed: {str(e)[:200]}')
     _x_save_fans(persona, fans)
-    cursor['last_event_id'] = new_last or last_seen
-    _x_save_json(cursor_path, cursor)
+    _x_mark_seen(persona, handled)
+    logger.info('X DM round [%s]: %d events, %d new, %d replied',
+                persona, len(events), len(incoming), replied)
     return replied, log
 
 
@@ -4919,6 +4962,56 @@ def api_x_disconnect():
     tokens.pop(persona, None)
     _save_x_tokens(tokens)
     return jsonify({'ok': True})
+
+
+@app.route('/api/x/dm-debug')
+def api_x_dm_debug():
+    """Why a DM did or didn't get answered: what X returned, which events count
+    as new, and the per-fan state the funnel runs on."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    persona = (request.args.get('persona') or '').strip()
+    t = (_load_x_tokens() or {}).get(persona) or {}
+    out = {'persona': persona,
+           'connected': bool(t.get('access_token')),
+           'username': t.get('username', ''),
+           'stored_user_id': t.get('user_id', ''),
+           'behavior': _x_behavior(persona),
+           'cta_url': (_phases_cta(persona) or {}).get('cta_url', ''),
+           'seen_event_count': len(_x_seen_events(persona)),
+           'fans': _x_fans(persona)}
+    if not t.get('access_token'):
+        out['verdict'] = 'No X account connected for this persona.'
+        return jsonify(out)
+    if not out['behavior'].get('enabled', True):
+        out['verdict'] = 'Bot is switched off in Dashboard → Platform Bot Behavior → X.com.'
+    try:
+        raw = _x_call(persona, 'GET',
+                      '/dm_events?dm_event.fields=id,text,sender_id,created_at,'
+                      f'dm_conversation_id&event_types=MessageCreate&max_results=20')
+    except Exception as e:
+        out['read_error'] = str(e)[:300]
+        out['verdict'] = out.get('verdict') or 'Reading DMs failed — see read_error.'
+        return jsonify(out)
+    events = raw.get('data', []) or []
+    seen = _x_seen_events(persona)
+    out['events'] = [{'id': e.get('id'), 'from': e.get('sender_id'),
+                      'mine': e.get('sender_id') == t.get('user_id'),
+                      'already_handled': e.get('id') in seen,
+                      'at': e.get('created_at'), 'text': (e.get('text') or '')[:120]}
+                     for e in events]
+    out['event_count'] = len(events)
+    out['new_incoming'] = sum(1 for e in out['events']
+                              if not e['mine'] and not e['already_handled'])
+    if not out.get('verdict'):
+        if not events:
+            out['verdict'] = 'X returned no DM events at all.'
+        elif not out['new_incoming']:
+            out['verdict'] = ('All returned events are either your own or already '
+                              'answered — nothing new to reply to.')
+        else:
+            out['verdict'] = f"{out['new_incoming']} message(s) are due a reply on the next round."
+    return jsonify(out)
 
 
 @app.route('/api/x/poll', methods=['POST'])
