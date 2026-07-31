@@ -6208,6 +6208,40 @@ def api_telegram_settings():
     return jsonify({'ok': True, 'settings': opts})
 
 
+def _x_behavior(persona):
+    raw = _get_setting(f'x_behavior_{persona}')
+    defaults = {'enabled': True, 'humanize': True, 'followups': True,
+                'followup_min': 45, 'typing_speed': 14}
+    if raw:
+        try:
+            return {**defaults, **json.loads(raw)}
+        except Exception:
+            pass
+    return defaults
+
+
+@app.route('/api/x/settings', methods=['GET', 'POST'])
+def api_x_settings():
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    if request.method == 'GET':
+        persona = (request.args.get('persona') or '').strip()
+        return jsonify(_x_behavior(persona))
+    data = request.json or {}
+    persona = (data.get('persona') or '').strip()
+    if not persona:
+        return jsonify({'ok': False, 'error': 'persona required'}), 400
+    opts = {
+        'enabled': bool(data.get('enabled')),
+        'followup_min': max(5, int(data.get('followup_min') or 45)),
+        'followups': bool(data.get('followups', True)),
+        'humanize': bool(data.get('humanize', True)),
+        'typing_speed': max(4, min(int(data.get('typing_speed') or 14), 40)),
+    }
+    _set_setting(f'x_behavior_{persona}', json.dumps(opts))
+    return jsonify({'ok': True, 'settings': opts})
+
+
 @app.route('/api/telegram/stats')
 def api_telegram_stats():
     """Funnel numbers for the connected bot: fans, CTAs sent, clicks."""

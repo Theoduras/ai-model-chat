@@ -587,7 +587,7 @@ async function loadPersona(slug) {
   document.getElementById('action-bar').style.display = 'flex';
   loadGallery(slug);
   loadPhases();
-  loadTgBehavior();
+  loadAllBehavior();
   if (!config.speech_style) generateSpeechStyle(false);
   if (!config.conversion_triggers) generateTriggers();
   loadXStatus();
@@ -867,54 +867,95 @@ function renderForm(slug, cfg) {
     </div>
 
     <div class="form-section">
-      <div class="section-title">
-        Telegram Bot Behavior
-        <button type="button" class="btn-section-save" onclick="saveTgBehavior(this)">Save</button>
+      <div class="section-title">Platform Bot Behavior</div>
+      <span class="hint">Configure how the bot behaves on each platform. Connect platforms in their respective tabs.</span>
+
+      <div class="platform-behavior-tabs" style="display:flex; gap:6px; margin-top:12px;">
+        <button type="button" class="btn btn-ghost platform-tab active" data-platform="tg" onclick="switchBehaviorTab('tg')">Telegram</button>
+        <button type="button" class="btn btn-ghost platform-tab" data-platform="x" onclick="switchBehaviorTab('x')">X.com</button>
       </div>
-      <span class="hint">How the Telegram bot behaves when chatting with fans. Connect the bot itself in the <a href="/telegram" style="color:#818cf8;">Telegram</a> tab.</span>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:10px;">
-        <div class="field">
-          <div class="toggle-row">
-            <label class="toggle">
-              <input type="checkbox" id="f-tg-enabled" checked>
-              <span class="toggle-track"></span>
-            </label>
-            <span class="toggle-label">Bot active</span>
+
+      <div id="behavior-tg" class="behavior-panel" style="margin-top:10px;">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+          <div class="field">
+            <div class="toggle-row">
+              <label class="toggle"><input type="checkbox" id="f-tg-enabled" checked><span class="toggle-track"></span></label>
+              <span class="toggle-label">Bot active</span>
+            </div>
+            <span class="hint">Reply to incoming Telegram messages.</span>
           </div>
-          <span class="hint">Reply to incoming Telegram messages.</span>
-        </div>
-        <div class="field">
-          <div class="toggle-row">
-            <label class="toggle">
-              <input type="checkbox" id="f-tg-humanize" checked>
-              <span class="toggle-track"></span>
-            </label>
-            <span class="toggle-label">Type like a human</span>
+          <div class="field">
+            <div class="toggle-row">
+              <label class="toggle"><input type="checkbox" id="f-tg-humanize" checked><span class="toggle-track"></span></label>
+              <span class="toggle-label">Type like a human</span>
+            </div>
+            <span class="hint">Pause to read, show "typing…", send in bursts.</span>
           </div>
-          <span class="hint">Pause to read, show "typing…", send in bursts.</span>
-        </div>
-        <div class="field">
-          <div class="toggle-row">
-            <label class="toggle">
-              <input type="checkbox" id="f-tg-followups" checked>
-              <span class="toggle-track"></span>
-            </label>
-            <span class="toggle-label">Follow up on quiet fans</span>
+          <div class="field">
+            <div class="toggle-row">
+              <label class="toggle"><input type="checkbox" id="f-tg-followups" checked><span class="toggle-track"></span></label>
+              <span class="toggle-label">Follow up on quiet fans</span>
+            </div>
+            <span class="hint">Nudge fans who go silent and unclicked links (max 2 each).</span>
           </div>
-          <span class="hint">Nudge fans who go silent and unclicked links (max 2 each).</span>
+          <div class="field">
+            <label>Follow-up delay (minutes)</label>
+            <input type="number" id="f-tg-followup-min" min="5" max="1440" value="45">
+          </div>
+          <div class="field">
+            <label>Typing Speed</label>
+            <select id="f-tg-typing-speed">
+              <option value="8">Slow — thumbs on a phone</option>
+              <option value="14" selected>Natural</option>
+              <option value="22">Fast texter</option>
+              <option value="34">Very fast</option>
+            </select>
+          </div>
         </div>
-        <div class="field">
-          <label>Follow-up delay (minutes)</label>
-          <input type="number" id="f-tg-followup-min" min="5" max="1440" value="45">
+        <div style="margin-top:10px;">
+          <button type="button" class="btn-section-save" onclick="savePlatformBehavior('tg', this)">Save Telegram</button>
         </div>
-        <div class="field">
-          <label>Typing Speed</label>
-          <select id="f-tg-typing-speed">
-            <option value="8">Slow — thumbs on a phone</option>
-            <option value="14" selected>Natural</option>
-            <option value="22">Fast texter</option>
-            <option value="34">Very fast</option>
-          </select>
+      </div>
+
+      <div id="behavior-x" class="behavior-panel" style="margin-top:10px; display:none;">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+          <div class="field">
+            <div class="toggle-row">
+              <label class="toggle"><input type="checkbox" id="f-x-enabled" checked><span class="toggle-track"></span></label>
+              <span class="toggle-label">Bot active</span>
+            </div>
+            <span class="hint">Reply to incoming X DMs.</span>
+          </div>
+          <div class="field">
+            <div class="toggle-row">
+              <label class="toggle"><input type="checkbox" id="f-x-humanize" checked><span class="toggle-track"></span></label>
+              <span class="toggle-label">Type like a human</span>
+            </div>
+            <span class="hint">Add natural delays before replying.</span>
+          </div>
+          <div class="field">
+            <div class="toggle-row">
+              <label class="toggle"><input type="checkbox" id="f-x-followups" checked><span class="toggle-track"></span></label>
+              <span class="toggle-label">Follow up on quiet fans</span>
+            </div>
+            <span class="hint">Nudge fans who go silent (max 2 each).</span>
+          </div>
+          <div class="field">
+            <label>Follow-up delay (minutes)</label>
+            <input type="number" id="f-x-followup-min" min="5" max="1440" value="45">
+          </div>
+          <div class="field">
+            <label>Typing Speed</label>
+            <select id="f-x-typing-speed">
+              <option value="8">Slow — thumbs on a phone</option>
+              <option value="14" selected>Natural</option>
+              <option value="22">Fast texter</option>
+              <option value="34">Very fast</option>
+            </select>
+          </div>
+        </div>
+        <div style="margin-top:10px;">
+          <button type="button" class="btn-section-save" onclick="savePlatformBehavior('x', this)">Save X.com</button>
         </div>
       </div>
     </div>
@@ -1928,30 +1969,47 @@ async function savePhases(btn) {
   } catch(e) { flashSaved(btn, false); }
 }
 
-async function loadTgBehavior() {
+const PLATFORM_ENDPOINTS = {
+  tg: '/api/telegram/settings',
+  x: '/api/x/settings'
+};
+
+function switchBehaviorTab(platform) {
+  document.querySelectorAll('.platform-tab').forEach(t => t.classList.toggle('active', t.dataset.platform === platform));
+  document.querySelectorAll('.behavior-panel').forEach(p => p.style.display = 'none');
+  document.getElementById('behavior-' + platform).style.display = '';
+}
+
+async function loadPlatformBehavior(platform) {
   if (!currentSlug) return;
   try {
-    const s = await (await fetch('/api/telegram/settings?persona=' + encodeURIComponent(currentSlug))).json();
-    document.getElementById('f-tg-followup-min').value = s.followup_min || 45;
-    document.getElementById('f-tg-followups').checked = s.followups !== false;
-    document.getElementById('f-tg-enabled').checked = !!s.enabled;
-    document.getElementById('f-tg-humanize').checked = s.humanize !== false;
-    if (s.typing_speed) document.getElementById('f-tg-typing-speed').value = String(s.typing_speed);
+    const s = await (await fetch(PLATFORM_ENDPOINTS[platform] + '?persona=' + encodeURIComponent(currentSlug))).json();
+    const p = 'f-' + platform + '-';
+    document.getElementById(p + 'followup-min').value = s.followup_min || 45;
+    document.getElementById(p + 'followups').checked = s.followups !== false;
+    document.getElementById(p + 'enabled').checked = !!s.enabled;
+    document.getElementById(p + 'humanize').checked = s.humanize !== false;
+    if (s.typing_speed) document.getElementById(p + 'typing-speed').value = String(s.typing_speed);
   } catch(e) {}
 }
 
-async function saveTgBehavior(btn) {
+async function loadAllBehavior() {
+  await Promise.all(['tg', 'x'].map(p => loadPlatformBehavior(p)));
+}
+
+async function savePlatformBehavior(platform, btn) {
   if (!currentSlug) return;
+  const p = 'f-' + platform + '-';
   try {
-    const res = await fetch('/api/telegram/settings', {
+    const res = await fetch(PLATFORM_ENDPOINTS[platform], {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         persona: currentSlug,
-        enabled: document.getElementById('f-tg-enabled').checked,
-        followups: document.getElementById('f-tg-followups').checked,
-        humanize: document.getElementById('f-tg-humanize').checked,
-        typing_speed: parseInt(document.getElementById('f-tg-typing-speed').value || '14'),
-        followup_min: parseInt(document.getElementById('f-tg-followup-min').value || '45')
+        enabled: document.getElementById(p + 'enabled').checked,
+        followups: document.getElementById(p + 'followups').checked,
+        humanize: document.getElementById(p + 'humanize').checked,
+        typing_speed: parseInt(document.getElementById(p + 'typing-speed').value || '14'),
+        followup_min: parseInt(document.getElementById(p + 'followup-min').value || '45')
       })
     });
     const data = await res.json();
