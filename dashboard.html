@@ -842,11 +842,23 @@ function renderForm(slug, cfg) {
 
     <div class="form-section">
       <div class="section-title">
-        Chat Phases
+        Chat Phases &amp; CTA
         <button type="button" class="btn-section-save" onclick="savePhases(this)">Save</button>
       </div>
-      <span class="hint">Control the conversation arc. Each phase sets interest level and photo frequency. Photos are randomly chosen by time of day and outfit rotation — the same photo is never sent twice to the same person.</span>
+      <span class="hint">Control the conversation arc. Each phase sets interest level and photo frequency. The CTA link is sent once the fan reaches the final phase.</span>
       <span class="hint" id="phases-status"></span>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px;">
+        <div class="field">
+          <label>CTA Destination URL</label>
+          <input type="text" id="f-cta-url" placeholder="https://onlyfans.com/yourname">
+          <span class="hint">OnlyFans, Fanvue, your own page…</span>
+        </div>
+        <div class="field">
+          <label>CTA Link Label</label>
+          <input type="text" id="f-cta-label" placeholder="come find me here">
+          <span class="hint">Shown before the link, in her voice.</span>
+        </div>
+      </div>
       <div id="phases-list"></div>
       <div style="margin-top:8px;">
         <button type="button" class="btn btn-ghost" onclick="addPhase()" style="font-size:0.78rem;">+ Add Phase</button>
@@ -1764,6 +1776,8 @@ async function loadPhases() {
     const res = await fetch('/api/personas/' + currentSlug + '/phases');
     const data = await res.json();
     chatPhases = data.phases || [];
+    document.getElementById('f-cta-url').value = data.cta_url || '';
+    document.getElementById('f-cta-label').value = data.cta_label || '';
   } catch(e) { chatPhases = []; }
   renderPhases();
 }
@@ -1849,7 +1863,11 @@ async function savePhases(btn) {
   try {
     const res = await fetch('/api/personas/' + currentSlug + '/phases', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phases: chatPhases })
+      body: JSON.stringify({
+        phases: chatPhases,
+        cta_url: v('f-cta-url'),
+        cta_label: v('f-cta-label')
+      })
     });
     if (!res.ok) throw new Error('save failed');
     flashSaved(btn);
