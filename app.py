@@ -601,6 +601,11 @@ def _save_x_tokens(data):
 # PLACEHOLDER PRICING — swap `price` for the real numbers when they're decided.
 # `days` is how long one payment keeps the account active.
 TIERS = {
+    'free': {'name': 'Free', 'price': 0, 'days': 3650,
+             'blurb': 'Try the builder, no card needed.',
+             'features': ['1 AI persona', 'Persona builder + preview',
+                          'Telegram chat', 'No photo sending',
+                          'Community support']},
     'starter': {'name': 'Starter', 'price': 29, 'days': 30,
                 'blurb': 'One persona, Telegram only.',
                 'features': ['1 AI persona', 'Telegram chat', 'Photo sending',
@@ -617,7 +622,7 @@ TIERS = {
                             'Scheduled follow-ups', 'Conversation analytics',
                             'Dedicated support']},
 }
-DEFAULT_TIER_ORDER = ['starter', 'pro', 'agency']
+DEFAULT_TIER_ORDER = ['free', 'starter', 'pro', 'agency']
 
 OXAPAY_API = 'https://api.oxapay.com/v1/payment/invoice'
 
@@ -661,6 +666,19 @@ def _current_user():
 
 def _user_is_active(user):
     return bool(user) and user.get('status') == 'active'
+
+
+def _activate_plan(session_db, user_row, tier_key):
+    """Put a user on a plan. Renewals extend unexpired time rather than
+    truncating it. Returns the new expiry."""
+    tier = TIERS.get(tier_key) or {}
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    start = (user_row.expires_at
+             if (user_row.expires_at and user_row.expires_at > now) else now)
+    user_row.tier = tier_key
+    user_row.status = 'active'
+    user_row.expires_at = start + timedelta(days=int(tier.get('days', 30)))
+    return user_row.expires_at
 
 
 # Creator-facing surface: needs a logged-in customer on an active plan.
@@ -828,9 +846,9 @@ plan is active{% if user.expires_at %} until {{ user.expires_at[:10] }}{% endif 
 {% for key in order %}{% set t = tiers[key] %}
 <div class="tier {{ 'featured' if key == 'pro' else '' }}">
 <h2>{{ t.name }}</h2><div class="blurb">{{ t.blurb }}</div>
-<div class="price">${{ t.price }}<span>/{{ t.days }} days</span></div>
+<div class="price">{% if t.price == 0 %}Free<span> forever</span>{% else %}${{ t.price }}<span>/{{ t.days }} days</span>{% endif %}</div>
 <ul>{% for f in t.features %}<li>{{ f }}</li>{% endfor %}</ul>
-<button data-tier="{{ key }}">{{ 'Renew' if user.status == 'expired' else 'Pay with crypto' }}</button>
+<button data-tier="{{ key }}">{{ 'Start free' if t.price == 0 else ('Renew' if user.status == 'expired' else 'Pay with crypto') }}</button>
 {% if dev_mode %}<button class="dev" data-dev-tier="{{ key }}"
  style="background:#27272a;color:#fbbf24;margin-top:8px">Activate free (dev)</button>{% endif %}
 </div>{% endfor %}
@@ -863,6 +881,7 @@ document.querySelectorAll('button[data-tier]').forEach(function(b){
         body: JSON.stringify({tier: b.dataset.tier})});
       var d = await r.json();
       if (d.payment_url) { window.location = d.payment_url; return; }
+      if (d.redirect) { window.location = d.redirect; return; }
       alert(d.error || 'Could not start checkout.');
     } catch (e) { alert('Could not start checkout.'); }
     b.disabled = false; b.textContent = old;
@@ -890,6 +909,7 @@ td{padding:8px 0;border-bottom:1px solid #1f1f22;color:#d4d4d8}
 <div class="row"><span>Status</span><span class="pill {{ user.status }}">{{ user.status }}</span></div>
 <div class="row"><span>{{ 'Renews' if user.status == 'active' else 'Expired' }}</span>
 <span>{{ user.expires_at[:10] if user.expires_at else '—' }}</span></div>
+<a class="btn" style="background:#27272a" href="/account/profile">Edit profile</a>
 {% if user.status == 'active' %}<a class="btn" href="/dashboard">Go to dashboard</a>
 <a class="btn" style="background:#27272a" href="/billing">Change plan</a>
 {% else %}<a class="btn" href="/billing">Choose a plan</a>{% endif %}
@@ -901,6 +921,65 @@ td{padding:8px 0;border-bottom:1px solid #1f1f22;color:#d4d4d8}
 <td>${{ p.amount }}</td><td>{{ p.status }}</td></tr>{% endfor %}</table>
 </div>{% endif %}
 </div></body></html>"""
+
+
+PROFILE_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Your profile</title>
+<style>""" + ACCOUNT_CSS + """
+textarea{width:100%;background:#27272a;border:1px solid #3f3f46;border-radius:10px;padding:11px 14px;color:#f4f4f5;font-size:.95rem;outline:none;margin-bottom:16px;font-family:inherit;resize:vertical;min-height:88px}
+textarea:focus{border-color:#7c3aed}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
+.ghost{display:block;text-align:center;margin-top:12px;color:#71717a;font-size:.85rem;text-decoration:none}
+</style></head><body><div class="wrap">
+<div class="bar"><a href="/account">← My account</a><a href="/logout">Sign out</a></div>
+<div class="card">
+<h1>{{ 'Welcome — tell us about you' if not user.onboarded else 'Your profile' }}</h1>
+<p class="sub">{{ 'This shapes the defaults in your persona builder. You can change it any time.' if not user.onboarded else 'Update your details.' }}</p>
+{% if saved %}<div class="ok">Profile saved.</div>{% endif %}
+{% if error %}<div class="err">{{ error }}</div>{% endif %}
+<form method="post">
+<label>Your name</label><input type="text" name="name" value="{{ p.name }}" autocomplete="name">
+<label>Brand / creator name</label><input type="text" name="brand" value="{{ p.brand }}" placeholder="The name fans know you by">
+<div class="two"><div><label>Country</label><input type="text" name="country" value="{{ p.country }}"></div>
+<div><label>Timezone</label><input type="text" name="timezone" value="{{ p.timezone }}" placeholder="Europe/Amsterdam"></div></div>
+<div class="two"><div><label>Phone</label><input type="text" name="phone" value="{{ p.phone }}"></div>
+<div><label>Website</label><input type="text" name="website" value="{{ p.website }}" placeholder="https://"></div></div>
+<label>About you</label><textarea name="bio" placeholder="A few lines about your content and audience.">{{ p.bio }}</textarea>
+<button type="submit">{{ 'Save and continue' if not user.onboarded else 'Save changes' }}</button>
+</form>
+{% if not user.onboarded %}<a class="ghost" href="/dashboard">Skip for now</a>{% endif %}
+</div></div></body></html>"""
+
+
+@app.route('/account/profile', methods=['GET', 'POST'])
+def account_profile():
+    user = _current_user()
+    if not user:
+        return redirect('/login?next=/account/profile')
+    from db import User
+    fields = ('name', 'brand', 'country', 'timezone', 'phone', 'website', 'bio')
+    s = _db_session()
+    try:
+        u = s.get(User, user['id'])
+        if u is None:
+            return redirect('/login')
+        saved = False
+        if request.method == 'POST':
+            for f in fields:
+                setattr(u, f, (request.form.get(f) or '').strip()[:500])
+            first_time = u.onboarded_at is None
+            if first_time:
+                u.onboarded_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            s.commit()
+            logger.info('PROFILE SAVED user=%s first_time=%s', u.email, first_time)
+            if first_time:
+                return redirect('/dashboard')
+            saved = True
+        p = {f: (getattr(u, f) or '') for f in fields}
+        view = dict(user, onboarded=u.onboarded_at is not None)
+    finally:
+        s.close()
+    return render_template_string(PROFILE_HTML, user=view, p=p, saved=saved)
 
 
 @app.route('/account')
@@ -1025,6 +1104,23 @@ def api_billing_checkout():
     tier = TIERS.get(tier_key)
     if not tier:
         return jsonify({'error': 'Unknown plan'}), 400
+
+    # Free plans need no invoice — activate and send them to fill in the profile.
+    if not float(tier.get('price') or 0):
+        from db import User, Payment
+        s = _db_session()
+        try:
+            u = s.get(User, user['id'])
+            expires = _activate_plan(s, u, tier_key)
+            s.add(Payment(user_id=u.id, tier=tier_key, amount='0', currency='USD',
+                          order_id=f'free-{secrets.token_hex(6)}', status='free',
+                          paid_at=datetime.now(timezone.utc).replace(tzinfo=None)))
+            s.commit()
+        finally:
+            s.close()
+        logger.info('FREE PLAN ACTIVATED user=%s until=%s', user['email'], expires)
+        return jsonify({'ok': True, 'tier': tier_key, 'redirect': '/account/profile'})
+
     if not _oxapay_key():
         logger.error('Checkout attempted with no OXAPAY_MERCHANT_KEY set')
         return jsonify({'error': 'Payments are not configured yet.'}), 503
@@ -1090,10 +1186,7 @@ def api_billing_dev_activate():
     s = _db_session()
     try:
         u = s.get(User, user['id'])
-        start = u.expires_at if (u.expires_at and u.expires_at > now) else now
-        u.tier = tier_key
-        u.status = 'active'
-        u.expires_at = start + timedelta(days=int(tier.get('days', 30)))
+        _activate_plan(s, u, tier_key)
         s.add(Payment(user_id=u.id, tier=tier_key, amount=str(tier['price']),
                       currency='USD', order_id=f'dev-{secrets.token_hex(6)}',
                       status='dev', paid_at=now))
@@ -1144,15 +1237,9 @@ def api_billing_webhook():
             pay.paid_at = now
             u = s.get(User, pay.user_id)
             if u:
-                tier = TIERS.get(pay.tier) or {}
-                days = int(tier.get('days', 30))
-                # Renewals extend an unexpired plan rather than truncating it.
-                start = u.expires_at if (u.expires_at and u.expires_at > now) else now
-                u.tier = pay.tier
-                u.status = 'active'
-                u.expires_at = start + timedelta(days=days)
+                expires = _activate_plan(s, u, pay.tier)
                 logger.info('PLAN ACTIVATED user=%s tier=%s until=%s order=%s',
-                            u.email, pay.tier, u.expires_at, order_id)
+                            u.email, pay.tier, expires, order_id)
         s.commit()
     finally:
         s.close()

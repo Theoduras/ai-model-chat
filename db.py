@@ -255,11 +255,20 @@ class User(Base):
     email = Column(String(255), unique=True, nullable=False, index=True)
     password_hash = Column(String(255), nullable=False)
     name = Column(String(120), default='')
-    tier = Column(String(32), default='')          # '' until a payment clears
+    tier = Column(String(32), default='')          # '' until a plan is chosen
     status = Column(String(16), default='unpaid')  # unpaid | active | expired
     expires_at = Column(DateTime)
     created_at = Column(DateTime, default=_now)
     last_login = Column(DateTime)
+
+    # Creator profile, filled in after signup.
+    brand = Column(String(120), default='')
+    country = Column(String(80), default='')
+    timezone = Column(String(64), default='')
+    phone = Column(String(40), default='')
+    website = Column(String(255), default='')
+    bio = Column(Text, default='')
+    onboarded_at = Column(DateTime)
 
 
 class Payment(Base):
@@ -298,8 +307,28 @@ def get_payment_by_order(session, order_id):
     return session.query(Payment).filter(Payment.order_id == order_id).first()
 
 
+def _add_missing_columns(table_name, model):
+    """create_all() only creates whole tables, so columns added to a model after
+    a table already exists need an explicit ALTER."""
+    from sqlalchemy import inspect, text
+    insp = inspect(engine)
+    if table_name not in insp.get_table_names():
+        return
+    have = {c['name'] for c in insp.get_columns(table_name)}
+    with engine.begin() as conn:
+        for col in model.__table__.columns:
+            if col.name in have:
+                continue
+            ddl = col.type.compile(engine.dialect)
+            conn.execute(text(f'ALTER TABLE {table_name} ADD COLUMN {col.name} {ddl}'))
+
+
 def init_db():
     Base.metadata.create_all(engine)
+    try:
+        _add_missing_columns('users', User)
+    except Exception:
+        pass
 
 
 def get_persona_images_row(session, slug):
