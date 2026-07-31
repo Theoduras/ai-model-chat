@@ -537,6 +537,33 @@ except Exception as _db_err:
     print(f'DB init skipped: {_db_err}')
 
 
+# The app serves static assets straight from the project root (static_folder=
+# BASE_DIR), which otherwise publishes the source, the database and .env at "/".
+# Everything the browser legitimately needs is html/css/js/images, so block the
+# rest before Flask's static handler ever sees it.
+_BLOCKED_SUFFIXES = ('.py', '.pyc', '.pyo', '.db', '.sqlite', '.sqlite3', '.db-journal',
+                     '.log', '.env', '.pem', '.key', '.cfg', '.ini', '.toml', '.lock',
+                     '.txt', '.md', '.yml', '.yaml')
+_BLOCKED_DIRS = ('personas/', 'logs/', '__pycache__/', 'templates/', '.git/')
+_ALLOWED_FILES = {'/robots.txt'}
+
+
+@app.before_request
+def _block_source_files():
+    path = (request.path or '/').lower()
+    if path in _ALLOWED_FILES:
+        return None
+    stripped = path.lstrip('/')
+    if any(seg.startswith('.') for seg in stripped.split('/') if seg):
+        return ('Not found', 404)
+    if stripped.startswith(_BLOCKED_DIRS):
+        return ('Not found', 404)
+    # Only guard bare files, never the app's own routes (which carry no suffix).
+    if path.endswith(_BLOCKED_SUFFIXES):
+        return ('Not found', 404)
+    return None
+
+
 @app.route('/healthz')
 def healthz():
     return jsonify({'status': 'ok'}), 200
@@ -646,6 +673,12 @@ def threads_page():
     if not _check_admin():
         return redirect('/dashboard')
     return send_from_directory(BASE_DIR, 'threads.html')
+
+@app.route('/telegram')
+def telegram_page():
+    if not _check_admin():
+        return redirect('/dashboard')
+    return send_from_directory(BASE_DIR, 'telegram.html')
 
 @app.route('/comingsoon')
 @app.route('/soon')
@@ -4974,6 +5007,728 @@ def api_threads_webhook():
         except Exception:
             continue
     return jsonify({'ok': True}), 200
+
+
+# ── Telegram DM bot ───────────────────────────────────────────────────────────
+# Each persona connects its own BotFather bot, so this is multi-tenant from the
+# start: the webhook URL carries an unguessable path id that identifies which
+# persona a message belongs to, and Telegram echoes a per-bot secret header that
+# is checked before anything is generated. The bot chats in-persona and funnels
+# fans to the creator's own platform (OnlyFans/Fanvue/…) through a tracked link
+# so clicks can be counted and followed up on. No PPV here.
+
+TELEGRAM_API = 'https://api.telegram.org'
+TG_CTA_AFTER_DEFAULT = 6        # fan messages before the first CTA
+TG_FOLLOWUP_MIN_DEFAULT = 45    # minutes of silence before a nudge
+TG_FOLLOWUP_MAX = 2
+
+
+def _tg_load_bots():
+    try:
+        return json.loads(_get_setting('telegram_bots') or '{}')
+    except Exception:
+        return {}
+
+
+def _tg_save_bots(data):
+    _set_setting('telegram_bots', json.dumps(data))
+
+
+def _tg_platform():
+    """The one platform-owned bot every subscriber can share, so a creator never
+    has to touch BotFather. Set up once by the operator."""
+    try:
+        return json.loads(_get_setting('telegram_platform') or '{}')
+    except Exception:
+        return {}
+
+
+def _tg_save_platform(data):
+    _set_setting('telegram_platform', json.dumps(data))
+
+
+def _tg_bot(persona):
+    """Connection record for a persona. Hosted personas borrow the platform
+    bot's token and identity but keep their own code, CTA and fan state."""
+    bot = dict(_tg_load_bots().get(persona) or {})
+    if bot.get('mode') == 'hosted':
+        plat = _tg_platform()
+        if not plat.get('bot_token'):
+            raise RuntimeError('The platform Telegram bot is not configured yet.')
+        bot['bot_token'] = plat['bot_token']
+        bot['username'] = plat.get('username', '')
+        bot['base_url'] = plat.get('base_url') or bot.get('base_url', '')
+    if not bot.get('bot_token'):
+        raise RuntimeError(f'No Telegram bot connected for persona "{persona}".')
+    return bot
+
+
+def _tg_persona_for_path(path_id):
+    for persona, bot in _tg_load_bots().items():
+        if bot.get('path_id') == path_id:
+            return persona, bot
+    return None, None
+
+
+def _tg_persona_for_code(code):
+    for persona, bot in _tg_load_bots().items():
+        if bot.get('code') and bot['code'] == code:
+            return persona
+    return None
+
+
+def _tg_routes():
+    """chat_id → persona, so a fan on the shared bot keeps talking to the same
+    creator after the first deep-linked /start."""
+    try:
+        return json.loads(_get_setting('telegram_routes') or '{}')
+    except Exception:
+        return {}
+
+
+def _tg_save_routes(routes):
+    _set_setting('telegram_routes', json.dumps(routes))
+
+
+def _tg_api(token, method, payload=None):
+    url = f'{TELEGRAM_API}/bot{token}/{method}'
+    data = json.dumps(payload).encode() if payload else None
+    headers = {'Content-Type': 'application/json'} if payload else {}
+    req = urllib.request.Request(url, data=data, headers=headers,
+                                 method='POST' if payload else 'GET')
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            res = json.loads(r.read() or b'{}')
+    except url_error.HTTPError as e:
+        try:
+            msg = json.loads(e.read()).get('description', str(e))
+        except Exception:
+            msg = str(e)
+        raise RuntimeError(f'Telegram {method} failed: {msg}')
+    if not res.get('ok'):
+        raise RuntimeError(f'Telegram {method} failed: {res.get("description", res)}')
+    return res.get('result', {})
+
+
+def _tg_send(persona, chat_id, text):
+    bot = _tg_bot(persona)
+    return _tg_api(bot['bot_token'], 'sendMessage',
+                   {'chat_id': chat_id, 'text': text[:4000],
+                    'disable_web_page_preview': False})
+
+
+def _tg_settings(persona):
+    try:
+        s = json.loads(_get_setting(f'telegram_auto_{persona}') or '{}')
+    except Exception:
+        s = {}
+    return {
+        'enabled': bool(s.get('enabled')),
+        'cta_after': int(s.get('cta_after') or TG_CTA_AFTER_DEFAULT),
+        'followup_min': int(s.get('followup_min') or TG_FOLLOWUP_MIN_DEFAULT),
+        'followups': bool(s.get('followups', True)),
+    }
+
+
+def _tg_enabled_list():
+    return [p for p, b in _tg_load_bots().items()
+            if b.get('bot_token') and _tg_settings(p)['enabled']]
+
+
+def _tg_fans(persona):
+    try:
+        return json.loads(_get_setting(f'telegram_fans_{persona}') or '{}')
+    except Exception:
+        return {}
+
+
+def _tg_save_fans(persona, fans):
+    _set_setting(f'telegram_fans_{persona}', json.dumps(fans))
+
+
+def _tg_fan_key(chat_id):
+    return f'tg:{chat_id}'
+
+
+def _tg_cta_link(bot, chat_id):
+    """Tracked redirect through our own server so clicks are measurable. Keyed on
+    the persona's own code, which is unique even when the bot itself is shared."""
+    base = (bot.get('base_url') or '').rstrip('/')
+    return f'{base}/go/{bot.get("code") or bot.get("path_id")}/{chat_id}'
+
+
+def _tg_share_link(bot):
+    """The link a creator puts in their bio. The payload routes the fan to them."""
+    if not (bot.get('username') and bot.get('code')):
+        return ''
+    return f'https://t.me/{bot["username"]}?start={bot["code"]}'
+
+
+def _tg_history(persona, chat_id, limit=30):
+    return [{'role': 'model' if d == 'out' else 'user', 'content': t}
+            for d, t in _fanvue_saved_history(persona, _tg_fan_key(chat_id), limit=limit)]
+
+
+def _tg_generate(persona, chat_id, instruction):
+    if client is None:
+        # No Gemini configured — still answer, so the pipeline is testable.
+        return local_fallback_reply(instruction)
+    history = _tg_history(persona, chat_id)
+    return _fv_trim(_persona_text(persona, instruction, history=history,
+                                  max_tokens=400, temperature=0.9), hard_cap=420)
+
+
+def _tg_handle_update(persona, update):
+    """Generate and send one in-persona reply. Runs off the webhook thread."""
+    msg = update.get('message') or update.get('edited_message') or {}
+    chat = msg.get('chat') or {}
+    chat_id = chat.get('id')
+    text = (msg.get('text') or '').strip()
+    if not chat_id or not text or chat.get('type') != 'private':
+        return
+    frm = msg.get('from') or {}
+    who = frm.get('username') or frm.get('first_name') or str(chat_id)
+
+    bot = _tg_bot(persona)
+    cfg = _tg_settings(persona)
+    fans = _tg_fans(persona)
+    fan = fans.get(str(chat_id)) or {}
+    fan['name'] = who
+    fan['last_in'] = int(time.time())
+    fan['followups'] = 0
+    fan['in_count'] = int(fan.get('in_count', 0)) + (0 if text == '/start' else 1)
+
+    _log_x_message(persona, _tg_fan_key(chat_id), who, 'in', text)
+
+    cta_url = (bot.get('cta_url') or '').strip()
+    cta_due = bool(cta_url) and not fan.get('cta_sent') and fan['in_count'] >= cfg['cta_after']
+
+    if text == '/start':
+        instruction = (
+            f'A new fan just opened a chat with you on Telegram (they go by "{who}"). '
+            'Write ONE short, warm, in-character opener that introduces you without '
+            'sounding scripted and ends with a question about them.')
+    elif cta_due:
+        instruction = (
+            f'Reply in-character to this fan on Telegram: "{text}". Keep the rapport '
+            'warm, then tease — in one natural sentence — that you post more there, '
+            'somewhere more private. Do NOT paste a link or a URL, do not hard-sell, '
+            'and do not name the site; a link is appended after your message.')
+    else:
+        instruction = (
+            f'Reply in-character to this fan on Telegram: "{text}". Warm and engaging, '
+            'reference what they have told you before, move the rapport → intrigue → '
+            'tease funnel along naturally, never hard-sell, and end with a question '
+            'that keeps them talking.')
+
+    reply = _tg_generate(persona, chat_id, instruction)
+    if not reply:
+        return
+    if cta_due:
+        label = (bot.get('cta_label') or 'come see').strip()
+        reply = f'{reply}\n\n{label} → {_tg_cta_link(bot, chat_id)}'
+        fan['cta_sent'] = int(time.time())
+        fan['cta_count'] = int(fan.get('cta_count', 0)) + 1
+
+    _tg_send(persona, chat_id, reply)
+    _log_x_message(persona, _tg_fan_key(chat_id), who, 'out', reply)
+    fan['last_out'] = int(time.time())
+    fans[str(chat_id)] = fan
+    _tg_save_fans(persona, fans)
+
+
+def _tg_followup_round(persona):
+    """Re-engage fans who went quiet, and nudge once on an unclicked CTA.
+    Capped at TG_FOLLOWUP_MAX per fan so it never turns into spam."""
+    cfg = _tg_settings(persona)
+    if not cfg['followups']:
+        return 0
+    bot = _tg_load_bots().get(persona) or {}
+    fans = _tg_fans(persona)
+    now = int(time.time())
+    sent = 0
+    for chat_id, fan in list(fans.items()):
+        last = max(int(fan.get('last_in') or 0), int(fan.get('last_out') or 0))
+        if not last or fan.get('last_in', 0) > fan.get('last_out', 0):
+            continue  # they spoke last — the reply path handles it
+        n = int(fan.get('followups', 0))
+        if n >= TG_FOLLOWUP_MAX:
+            continue
+        if (now - last) / 60.0 < cfg['followup_min'] * (n + 1):
+            continue
+        cta_pending = bool(fan.get('cta_sent')) and not fan.get('cta_clicked')
+        if cta_pending:
+            instruction = (
+                'This fan went quiet after you sent them your link. Write ONE short, '
+                'light, in-character nudge — curious whether they had a look, playful, '
+                'zero pressure, no link. One or two sentences.')
+        else:
+            instruction = (
+                'This fan went quiet on Telegram. Write ONE short, in-character message '
+                'that reopens the conversation — reference something they mentioned '
+                'before if you can, and ask them something easy to answer.')
+        try:
+            text = _tg_generate(persona, chat_id, instruction)
+            if not text:
+                continue
+            _tg_send(persona, chat_id, text)
+            _log_x_message(persona, _tg_fan_key(chat_id), fan.get('name', ''), 'out', text)
+            fan['followups'] = n + 1
+            fan['last_out'] = now
+            fans[chat_id] = fan
+            sent += 1
+        except Exception:
+            continue
+    if sent:
+        _tg_save_fans(persona, fans)
+    return sent
+
+
+def _tg_handle_platform_update(update):
+    """Shared-bot dispatch. A fan arriving through a creator's deep link sends
+    `/start <code>`; that binds the chat to the creator for every later message."""
+    msg = update.get('message') or {}
+    chat = msg.get('chat') or {}
+    chat_id = str(chat.get('id') or '')
+    text = (msg.get('text') or '').strip()
+    if not chat_id or not text:
+        return
+    plat = _tg_platform()
+    routes = _tg_routes()
+    persona = routes.get(chat_id)
+
+    parts = text.split(None, 1)
+    if parts and parts[0] in ('/start', '/connect'):
+        payload = (parts[1] if len(parts) > 1 else '').strip()
+        if payload:
+            matched = _tg_persona_for_code(payload)
+            if not matched:
+                _tg_api(plat['bot_token'], 'sendMessage',
+                        {'chat_id': chat_id, 'text': "That link doesn't look right — "
+                                                     'ask for a fresh one.'})
+                return
+            persona = matched
+            routes[chat_id] = persona
+            _tg_save_routes(routes)
+        # Let the opener branch in _tg_handle_update see a bare /start.
+        msg['text'] = '/start'
+    if not persona:
+        _tg_api(plat['bot_token'], 'sendMessage',
+                {'chat_id': chat_id, 'text': 'Open this chat from the link you were '
+                                             'given so I know who you came for.'})
+        return
+    _tg_handle_update(persona, update)
+
+
+@app.route('/api/telegram/webhook/<path_id>', methods=['POST'])
+def api_telegram_webhook(path_id):
+    """Telegram pushes every update here. Ack within milliseconds — Gemini runs
+    on a worker thread, because a slow 200 makes Telegram redeliver the update."""
+    plat = _tg_platform()
+    if plat.get('path_id') and plat['path_id'] == path_id:
+        persona, secret = None, plat.get('secret', '')
+    else:
+        persona, bot = _tg_persona_for_path(path_id)
+        if not persona:
+            return '', 404
+        secret = bot.get('secret', '')
+    if request.headers.get('X-Telegram-Bot-Api-Secret-Token', '') != secret:
+        return '', 401
+    update = request.get_json(silent=True) or {}
+    uid = update.get('update_id')
+    seen_key = f'telegram_seen_{persona or "platform"}'
+    try:
+        seen = json.loads(_get_setting(seen_key) or '[]')
+    except Exception:
+        seen = []
+    if uid in seen:
+        return '', 200
+    _set_setting(seen_key, json.dumps((seen + [uid])[-300:]))
+
+    def work():
+        with app.app_context():
+            try:
+                if persona:
+                    _tg_handle_update(persona, update)
+                else:
+                    _tg_handle_platform_update(update)
+            except Exception:
+                error_logger.error('telegram update failed', exc_info=True)
+
+    threading.Thread(target=work, daemon=True).start()
+    return '', 200
+
+
+@app.route('/go/<ref>/<chat_id>')
+def telegram_cta_click(ref, chat_id):
+    """Tracked CTA redirect — records the click, then forwards to the creator's page."""
+    persona = _tg_persona_for_code(ref)
+    bot = (_tg_load_bots().get(persona) or {}) if persona else {}
+    if not persona:
+        persona, bot = _tg_persona_for_path(ref)
+    if not persona or not ((bot or {}).get('cta_url') or '').strip():
+        return redirect('/')
+    fans = _tg_fans(persona)
+    fan = fans.get(str(chat_id))
+    if fan is not None and not fan.get('cta_clicked'):
+        fan['cta_clicked'] = int(time.time())
+        fans[str(chat_id)] = fan
+        _tg_save_fans(persona, fans)
+    return redirect(bot['cta_url'], code=302)
+
+
+@app.route('/api/telegram/connect', methods=['POST'])
+def api_telegram_connect():
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    data = request.json or {}
+    persona = (data.get('persona') or '').strip()
+    token = (data.get('bot_token') or '').strip()
+    if not persona or not token:
+        return jsonify({'ok': False, 'error': 'persona and bot_token are required'}), 400
+    base = (data.get('base_url') or request.url_root).strip().rstrip('/')
+    if base.startswith('http://') and 'localhost' not in base and '127.0.0.1' not in base:
+        base = 'https://' + base[len('http://'):]
+    try:
+        me = _tg_api(token, 'getMe')
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+
+    bots = _tg_load_bots()
+    existing = bots.get(persona) or {}
+    bot = {
+        'mode': 'own',
+        'bot_token': token,
+        'bot_id': me.get('id'),
+        'username': me.get('username', ''),
+        'code': existing.get('code') or secrets.token_urlsafe(9),
+        'path_id': existing.get('path_id') or secrets.token_urlsafe(24),
+        'secret': existing.get('secret') or secrets.token_urlsafe(24),
+        'base_url': base,
+        'cta_url': (data.get('cta_url') or existing.get('cta_url') or '').strip(),
+        'cta_label': (data.get('cta_label') or existing.get('cta_label') or '').strip(),
+        'connected_at': int(time.time()),
+    }
+    if base.startswith('https://'):
+        try:
+            _tg_api(token, 'setWebhook', {
+                'url': f'{base}/api/telegram/webhook/{bot["path_id"]}',
+                'secret_token': bot['secret'],
+                'allowed_updates': ['message'],
+                'drop_pending_updates': True,
+            })
+            bot['webhook_set'] = True
+        except Exception as e:
+            return jsonify({'ok': False, 'error': str(e)}), 400
+    else:
+        bot['webhook_set'] = False
+    bots[persona] = bot
+    _tg_save_bots(bots)
+    return jsonify({'ok': True, 'username': bot['username'],
+                    'webhook_set': bot['webhook_set'],
+                    'webhook_url': f'{base}/api/telegram/webhook/{bot["path_id"]}'})
+
+
+@app.route('/api/telegram/platform', methods=['GET', 'POST'])
+def api_telegram_platform():
+    """Operator-side: register the single shared bot once. Every subscriber then
+    connects with one click — no BotFather, no token of their own."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    plat = _tg_platform()
+    if request.method == 'GET':
+        return jsonify({'configured': bool(plat.get('bot_token')),
+                        'username': plat.get('username', ''),
+                        'webhook_set': bool(plat.get('webhook_set')),
+                        'base_url': plat.get('base_url', '')})
+    data = request.json or {}
+    token = (data.get('bot_token') or '').strip() or plat.get('bot_token', '')
+    if not token:
+        return jsonify({'ok': False, 'error': 'bot_token is required'}), 400
+    base = (data.get('base_url') or plat.get('base_url') or request.url_root).strip().rstrip('/')
+    if base.startswith('http://') and 'localhost' not in base and '127.0.0.1' not in base:
+        base = 'https://' + base[len('http://'):]
+    try:
+        me = _tg_api(token, 'getMe')
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+    try:
+        return _tg_platform_save(plat, token, base, me)
+    except Exception as e:
+        logging.exception('telegram platform save failed')
+        return jsonify({'ok': False,
+                        'error': f'{e.__class__.__name__}: {str(e)[:300]}'}), 500
+
+
+def _tg_platform_save(plat, token, base, me):
+    plat = {
+        'bot_token': token,
+        'bot_id': me.get('id'),
+        'username': me.get('username', ''),
+        'path_id': plat.get('path_id') or secrets.token_urlsafe(24),
+        'secret': plat.get('secret') or secrets.token_urlsafe(24),
+        'base_url': base,
+        'webhook_set': False,
+    }
+    if base.startswith('https://'):
+        try:
+            _tg_api(token, 'setWebhook', {
+                'url': f'{base}/api/telegram/webhook/{plat["path_id"]}',
+                'secret_token': plat['secret'],
+                'allowed_updates': ['message'],
+                'drop_pending_updates': True,
+            })
+            plat['webhook_set'] = True
+        except Exception as e:
+            return jsonify({'ok': False, 'error': str(e)}), 400
+    _tg_save_platform(plat)
+    if not _tg_platform().get('bot_token'):
+        return jsonify({'ok': False, 'error': 'Saved nothing — the settings database '
+                                              'is not writable on this deployment, so '
+                                              'the bot cannot stay connected.'}), 500
+    return jsonify({'ok': True, 'username': plat['username'],
+                    'webhook_set': plat['webhook_set']})
+
+
+@app.route('/api/telegram/diag')
+def api_telegram_diag():
+    """Why is this deployment failing? Reports whether settings actually persist."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    probe = f'diag-{int(time.time())}'
+    _set_setting('telegram_diag', probe)
+    out = {'settings_writable': _get_setting('telegram_diag') == probe,
+           'platform_configured': bool(_tg_platform().get('bot_token')),
+           'personas_connected': len(_tg_load_bots()),
+           'last_db_error': _last_x_log_error[0]}
+    try:
+        from db import engine
+        out['db_url'] = str(engine.url).split('@')[-1]
+    except Exception as e:
+        out['db_url'] = f'unavailable: {str(e)[:120]}'
+    return jsonify(out)
+
+
+@app.route('/api/telegram/hosted', methods=['POST'])
+def api_telegram_hosted():
+    """Subscriber-side one-click connect: mint this persona's code on the shared
+    bot and hand back the link they put in their bio."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    data = request.json or {}
+    persona = (data.get('persona') or '').strip()
+    if not persona:
+        return jsonify({'ok': False, 'error': 'persona required'}), 400
+    try:
+        plat = _tg_platform()
+        if not plat.get('bot_token'):
+            return jsonify({'ok': False, 'error': 'The platform Telegram bot is not '
+                                                  'configured yet — set it up under '
+                                                  '"Platform bot" below.'}), 400
+        bots = _tg_load_bots()
+        existing = bots.get(persona) or {}
+        bot = dict(existing)
+        bot.update({
+            'mode': 'hosted',
+            'code': existing.get('code') or secrets.token_urlsafe(9),
+            'base_url': plat.get('base_url', ''),
+            'connected_at': int(time.time()),
+        })
+        bot.pop('bot_token', None)
+        bot.pop('path_id', None)
+        bots[persona] = bot
+        _tg_save_bots(bots)
+        # _set_setting swallows write errors, so confirm it actually landed —
+        # otherwise the UI would report success on a read-only database.
+        if not (_tg_load_bots().get(persona) or {}).get('code'):
+            return jsonify({'ok': False, 'error': 'Could not save the connection — '
+                                                  'the settings database is not '
+                                                  'writable on this deployment.'}), 500
+    except Exception as e:
+        logging.exception('telegram hosted connect failed')
+        return jsonify({'ok': False, 'error': str(e)[:300] or e.__class__.__name__}), 500
+    return jsonify({'ok': True, 'code': bot['code'],
+                    'username': plat.get('username', ''),
+                    'share_link': _tg_share_link({**bot, 'username': plat.get('username', '')})})
+
+
+@app.route('/api/telegram/status')
+def api_telegram_status():
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    plat = _tg_platform()
+    out = {}
+    for persona, bot in _tg_load_bots().items():
+        hosted = bot.get('mode') == 'hosted'
+        username = plat.get('username', '') if hosted else bot.get('username', '')
+        out[persona] = {
+            'connected': bool(bot.get('bot_token')) or (hosted and bool(plat.get('bot_token'))),
+            'mode': bot.get('mode', 'own'),
+            'username': username,
+            'code': bot.get('code', ''),
+            'share_link': _tg_share_link({**bot, 'username': username}),
+            'webhook_set': bool(plat.get('webhook_set') if hosted else bot.get('webhook_set')),
+            'cta_url': bot.get('cta_url', ''),
+            'cta_label': bot.get('cta_label', ''),
+        }
+    return jsonify(out)
+
+
+@app.route('/api/telegram/disconnect', methods=['POST'])
+def api_telegram_disconnect():
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    persona = ((request.json or {}).get('persona') or '').strip()
+    bots = _tg_load_bots()
+    bot = bots.pop(persona, None)
+    # Only an own-bot record owns its webhook; the shared bot's must stay put.
+    if bot and bot.get('mode') != 'hosted' and bot.get('bot_token'):
+        try:
+            _tg_api(bot['bot_token'], 'deleteWebhook', {'drop_pending_updates': False})
+        except Exception:
+            pass
+    _tg_save_bots(bots)
+    routes = _tg_routes()
+    trimmed = {k: v for k, v in routes.items() if v != persona}
+    if len(trimmed) != len(routes):
+        _tg_save_routes(trimmed)
+    return jsonify({'ok': True})
+
+
+@app.route('/api/telegram/settings', methods=['GET', 'POST'])
+def api_telegram_settings():
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    if request.method == 'GET':
+        return jsonify(_tg_settings((request.args.get('persona') or '').strip()))
+    data = request.json or {}
+    persona = (data.get('persona') or '').strip()
+    if not persona:
+        return jsonify({'ok': False, 'error': 'persona required'}), 400
+    opts = {
+        'enabled': bool(data.get('enabled')),
+        'cta_after': max(1, int(data.get('cta_after') or TG_CTA_AFTER_DEFAULT)),
+        'followup_min': max(5, int(data.get('followup_min') or TG_FOLLOWUP_MIN_DEFAULT)),
+        'followups': bool(data.get('followups', True)),
+    }
+    _set_setting(f'telegram_auto_{persona}', json.dumps(opts))
+    bots = _tg_load_bots()
+    if persona in bots:
+        if 'cta_url' in data:
+            bots[persona]['cta_url'] = (data.get('cta_url') or '').strip()
+        if 'cta_label' in data:
+            bots[persona]['cta_label'] = (data.get('cta_label') or '').strip()
+        _tg_save_bots(bots)
+    return jsonify({'ok': True, 'settings': opts})
+
+
+@app.route('/api/telegram/stats')
+def api_telegram_stats():
+    """Funnel numbers for the connected bot: fans, CTAs sent, clicks."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    persona = (request.args.get('persona') or '').strip()
+    fans = _tg_fans(persona)
+    sent = sum(1 for f in fans.values() if f.get('cta_sent'))
+    clicked = sum(1 for f in fans.values() if f.get('cta_clicked'))
+    rows = []
+    for chat_id, f in sorted(fans.items(),
+                             key=lambda kv: kv[1].get('last_in', 0), reverse=True)[:50]:
+        rows.append({
+            'chat_id': chat_id, 'name': f.get('name', ''),
+            'messages': f.get('in_count', 0), 'last_in': f.get('last_in', 0),
+            'cta_sent': bool(f.get('cta_sent')), 'cta_clicked': bool(f.get('cta_clicked')),
+            'followups': f.get('followups', 0),
+        })
+    return jsonify({'fans': len(fans), 'cta_sent': sent, 'cta_clicked': clicked,
+                    'click_rate': round(100.0 * clicked / sent, 1) if sent else 0.0,
+                    'rows': rows})
+
+
+@app.route('/api/telegram/test', methods=['POST'])
+def api_telegram_test():
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    data = request.json or {}
+    persona = (data.get('persona') or '').strip()
+    chat_id = (data.get('chat_id') or '').strip()
+    text = (data.get('text') or 'Test message from your bot.').strip()
+    if not persona or not chat_id:
+        return jsonify({'ok': False, 'error': 'persona and chat_id are required'}), 400
+    try:
+        _tg_send(persona, chat_id, text)
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+    return jsonify({'ok': True})
+
+
+def _tg_poll_round(offset):
+    """One getUpdates pass for the platform bot. Returns the next offset.
+    Polling needs no public HTTPS URL, so the bot is testable from a laptop or
+    from behind a host whose previews sit behind an auth wall."""
+    plat = _tg_platform()
+    token = plat.get('bot_token')
+    if not token:
+        return offset
+    params = {'timeout': 25, 'allowed_updates': ['message']}
+    if offset:
+        params['offset'] = offset
+    try:
+        updates = _tg_api(token, 'getUpdates', params)
+    except Exception:
+        time.sleep(5)
+        return offset
+    for u in updates or []:
+        offset = int(u.get('update_id', 0)) + 1
+        try:
+            with app.app_context():
+                _tg_handle_platform_update(u)
+        except Exception:
+            error_logger.error('telegram poll update failed', exc_info=True)
+    return offset
+
+
+def _tg_poll_worker():
+    """Long-poll loop, enabled with TELEGRAM_POLL=1. Mutually exclusive with the
+    webhook, so the webhook is removed first."""
+    plat = _tg_platform()
+    if plat.get('bot_token'):
+        try:
+            _tg_api(plat['bot_token'], 'deleteWebhook', {'drop_pending_updates': False})
+        except Exception:
+            pass
+    offset = 0
+    while True:
+        offset = _tg_poll_round(offset)
+
+
+if os.getenv('TELEGRAM_POLL', '0') == '1':
+    threading.Thread(target=_tg_poll_worker, daemon=True).start()
+
+
+_tg_worker_started = [False]
+
+
+def _tg_worker():
+    """Server-side follow-up loop. Replies are webhook-driven; this only handles
+    re-engagement, so a slow tick is fine."""
+    import time as _t
+    while True:
+        _t.sleep(120)
+        try:
+            for persona in _tg_enabled_list():
+                try:
+                    with app.app_context():
+                        _tg_followup_round(persona)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+
+if os.getenv('TELEGRAM_WORKER', '1') != '0' and not _tg_worker_started[0]:
+    _tg_worker_started[0] = True
+    threading.Thread(target=_tg_worker, daemon=True).start()
 
 
 if __name__ == '__main__':
