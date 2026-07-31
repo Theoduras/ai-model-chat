@@ -708,6 +708,13 @@ def _db_session():
     return SessionLocal()
 
 
+def _bootstrap_admins():
+    """Emails in ADMIN_EMAILS are promoted to admin on sign-in, so the first
+    admin exists without a console. Everyone else must be promoted by an admin."""
+    raw = (os.getenv('ADMIN_EMAILS') or '').strip()
+    return {e.strip().lower() for e in raw.split(',') if e.strip()}
+
+
 def _current_user():
     """The logged-in customer, or None. Refreshes an expired subscription."""
     uid = session.get('user_id')
@@ -723,15 +730,21 @@ def _current_user():
                 and u.expires_at < datetime.now(timezone.utc).replace(tzinfo=None)):
             u.status = 'expired'
             s.commit()
+        if u.role != 'admin' and u.email in _bootstrap_admins():
+            u.role = 'admin'
+            s.commit()
+            logger.info('ADMIN BOOTSTRAPPED from ADMIN_EMAILS: %s', u.email)
         return {'id': u.id, 'email': u.email, 'name': u.name, 'tier': u.tier,
-                'status': u.status,
+                'status': u.status, 'role': u.role or 'user',
+                'is_admin': (u.role or 'user') == 'admin',
                 'expires_at': u.expires_at.isoformat() if u.expires_at else None}
     finally:
         s.close()
 
 
 def _user_is_active(user):
-    return bool(user) and user.get('status') == 'active'
+    """Admins are never paywalled — they get the whole app regardless of plan."""
+    return bool(user) and (user.get('is_admin') or user.get('status') == 'active')
 
 
 def _activate_plan(session_db, user_row, tier_key):
@@ -976,6 +989,7 @@ td{padding:8px 0;border-bottom:1px solid #1f1f22;color:#d4d4d8}
 <div class="row"><span>Status</span><span class="pill {{ user.status }}">{{ user.status }}</span></div>
 <div class="row"><span>{{ 'Renews' if user.status == 'active' else 'Expired' }}</span>
 <span>{{ user.expires_at[:10] if user.expires_at else '—' }}</span></div>
+{% if user.is_admin %}<a class="btn" style="background:#2e1065;color:#c4b5fd" href="/admin/users">Admin · manage users</a>{% endif %}
 <a class="btn" style="background:#27272a" href="/account/profile">Edit profile</a>
 {% if user.status == 'active' %}<a class="btn" href="/dashboard">Go to dashboard</a>
 <a class="btn" style="background:#27272a" href="/billing">Change plan</a>
@@ -1016,6 +1030,201 @@ textarea:focus{border-color:#7c3aed}
 </form>
 {% if not user.onboarded %}<a class="ghost" href="/dashboard">Skip for now</a>{% endif %}
 </div></div></body></html>"""
+
+
+ADMIN_USERS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Users</title>
+<style>""" + ACCOUNT_CSS + """
+table{width:100%;border-collapse:collapse;font-size:.85rem}
+th{text-align:left;color:#71717a;font-weight:500;padding:8px 10px;border-bottom:1px solid #2a2a2d;white-space:nowrap}
+td{padding:10px;border-bottom:1px solid #1f1f22;color:#d4d4d8}
+tr:hover td{background:#1c1c20}
+a.email{color:#a78bfa;text-decoration:none;font-weight:500}
+.pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:.72rem;font-weight:600}
+.pill.active{background:#14321f;color:#86efac}
+.pill.unpaid,.pill.expired{background:#3f1515;color:#fca5a5}
+.pill.admin{background:#2e1065;color:#c4b5fd}
+.scroll{overflow-x:auto}
+</style></head><body><div class="wrap wide" style="max-width:1100px">
+<div class="bar"><span>Admin · {{ users|length }} user{{ '' if users|length == 1 else 's' }}</span>
+<span><a href="/dashboard">Dashboard</a> &nbsp; <a href="/logout">Sign out</a></span></div>
+<div class="card"><div class="scroll"><table>
+<tr><th>Email</th><th>Name</th><th>Role</th><th>Plan</th><th>Status</th><th>Renews</th><th>Joined</th></tr>
+{% for u in users %}<tr>
+<td><a class="email" href="/admin/users/{{ u.id }}">{{ u.email }}</a></td>
+<td>{{ u.name or '—' }}</td>
+<td>{% if u.role == 'admin' %}<span class="pill admin">admin</span>{% else %}user{% endif %}</td>
+<td>{{ u.tier or '—' }}</td>
+<td><span class="pill {{ u.status }}">{{ u.status }}</span></td>
+<td>{{ u.expires or '—' }}</td><td>{{ u.created or '—' }}</td>
+</tr>{% endfor %}
+</table></div></div></div></body></html>"""
+
+ADMIN_USER_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>{{ u.email }}</title>
+<style>""" + ACCOUNT_CSS + """
+textarea{width:100%;background:#27272a;border:1px solid #3f3f46;border-radius:10px;padding:11px 14px;color:#f4f4f5;font-size:.95rem;outline:none;margin-bottom:16px;font-family:inherit;resize:vertical;min-height:80px}
+select{width:100%;background:#27272a;border:1px solid #3f3f46;border-radius:10px;padding:11px 14px;color:#f4f4f5;font-size:.95rem;margin-bottom:16px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
+h2{font-size:1rem;margin-bottom:14px}
+.danger{background:#7f1d1d}.danger:hover{background:#991b1b}
+</style></head><body><div class="wrap">
+<div class="bar"><a href="/admin/users">← All users</a><a href="/logout">Sign out</a></div>
+{% if saved %}<div class="ok">{{ saved }}</div>{% endif %}
+{% if error %}<div class="err">{{ error }}</div>{% endif %}
+
+<div class="card"><h2>Account</h2>
+<form method="post" action="/admin/users/{{ u.id }}">
+<input type="hidden" name="action" value="account">
+<label>Email</label><input type="email" name="email" value="{{ u.email }}" required>
+<div class="two">
+<div><label>Role</label><select name="role">
+<option value="user" {{ 'selected' if u.role != 'admin' }}>user</option>
+<option value="admin" {{ 'selected' if u.role == 'admin' }}>admin</option>
+</select></div>
+<div><label>Status</label><select name="status">
+{% for s in ['unpaid','active','expired'] %}<option value="{{ s }}" {{ 'selected' if u.status == s }}>{{ s }}</option>{% endfor %}
+</select></div></div>
+<div class="two">
+<div><label>Plan</label><select name="tier">
+<option value="">— none —</option>
+{% for k in order %}<option value="{{ k }}" {{ 'selected' if u.tier == k }}>{{ tiers[k].name }}</option>{% endfor %}
+</select></div>
+<div><label>Renews (YYYY-MM-DD)</label><input type="text" name="expires" value="{{ u.expires }}" placeholder="blank = none"></div>
+</div>
+<button type="submit">Save account</button></form></div>
+
+<div class="card" style="margin-top:16px"><h2>Profile</h2>
+<form method="post" action="/admin/users/{{ u.id }}">
+<input type="hidden" name="action" value="profile">
+<label>Name</label><input type="text" name="name" value="{{ p.name }}">
+<label>Brand</label><input type="text" name="brand" value="{{ p.brand }}">
+<div class="two"><div><label>Country</label><input type="text" name="country" value="{{ p.country }}"></div>
+<div><label>Timezone</label><input type="text" name="timezone" value="{{ p.timezone }}"></div></div>
+<div class="two"><div><label>Phone</label><input type="text" name="phone" value="{{ p.phone }}"></div>
+<div><label>Website</label><input type="text" name="website" value="{{ p.website }}"></div></div>
+<label>Bio</label><textarea name="bio">{{ p.bio }}</textarea>
+<button type="submit">Save profile</button></form></div>
+
+<div class="card" style="margin-top:16px"><h2>Set password</h2>
+<p class="sub">Replaces the password immediately. Tell them out of band.</p>
+<form method="post" action="/admin/users/{{ u.id }}">
+<input type="hidden" name="action" value="password">
+<label>New password</label><input type="password" name="password" required placeholder="At least 8 characters">
+<button type="submit" class="danger">Set password</button></form></div>
+
+</div></body></html>"""
+
+
+def _require_admin():
+    """None when the caller is an admin, else the response to send instead."""
+    user = _current_user()
+    if not user:
+        if (request.path or '').startswith('/api/'):
+            return jsonify({'error': 'Sign in required'}), 401
+        return redirect('/login?next=' + urllib.parse.quote(request.path or '/'))
+    if not user.get('is_admin'):
+        logger.warning('ADMIN DENIED user=%s path=%s', user['email'], request.path)
+        # 404 rather than 403, so the admin surface isn't discoverable.
+        if (request.path or '').startswith('/api/'):
+            return jsonify({'error': 'Not found'}), 404
+        return ('Not found', 404)
+    return None
+
+
+def _fmt_date(dt):
+    return dt.strftime('%Y-%m-%d') if dt else ''
+
+
+@app.route('/admin/users')
+def admin_users():
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    from db import list_users
+    s = _db_session()
+    try:
+        rows = [{'id': u.id, 'email': u.email, 'name': u.name,
+                 'role': u.role or 'user', 'tier': u.tier, 'status': u.status,
+                 'expires': _fmt_date(u.expires_at), 'created': _fmt_date(u.created_at)}
+                for u in list_users(s)]
+    finally:
+        s.close()
+    return render_template_string(ADMIN_USERS_HTML, users=rows)
+
+
+@app.route('/admin/users/<uid>', methods=['GET', 'POST'])
+def admin_user_detail(uid):
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    from werkzeug.security import generate_password_hash
+    from db import User, get_user_by_email
+    me = _current_user()
+    pfields = ('name', 'brand', 'country', 'timezone', 'phone', 'website', 'bio')
+    s = _db_session()
+    try:
+        u = s.get(User, uid)
+        if u is None:
+            return ('Not found', 404)
+        saved = error = ''
+        if request.method == 'POST':
+            action = request.form.get('action', '')
+            if action == 'profile':
+                for f in pfields:
+                    setattr(u, f, (request.form.get(f) or '').strip()[:500])
+                s.commit()
+                saved = 'Profile updated.'
+                logger.info('ADMIN EDIT profile by=%s target=%s', me['email'], u.email)
+
+            elif action == 'password':
+                pw = request.form.get('password') or ''
+                if len(pw) < 8:
+                    error = 'Password must be at least 8 characters.'
+                else:
+                    u.password_hash = generate_password_hash(pw)
+                    s.commit()
+                    saved = 'Password changed.'
+                    logger.warning('ADMIN PASSWORD RESET by=%s target=%s',
+                                   me['email'], u.email)
+
+            elif action == 'account':
+                email = (request.form.get('email') or '').strip().lower()
+                role = request.form.get('role', 'user')
+                clash = get_user_by_email(s, email) if email != u.email else None
+                if not email or '@' not in email:
+                    error = 'Enter a valid email.'
+                elif clash:
+                    error = 'Another account already uses that email.'
+                elif u.id == me['id'] and role != 'admin':
+                    # Otherwise an admin can lock themselves out of this page.
+                    error = 'You cannot remove your own admin role.'
+                else:
+                    u.email = email
+                    u.role = 'admin' if role == 'admin' else 'user'
+                    u.status = request.form.get('status', u.status)
+                    u.tier = request.form.get('tier', '') or ''
+                    raw = (request.form.get('expires') or '').strip()
+                    try:
+                        u.expires_at = datetime.strptime(raw, '%Y-%m-%d') if raw else None
+                    except ValueError:
+                        error = 'Renews must look like 2026-12-31.'
+                    if not error:
+                        s.commit()
+                        saved = 'Account updated.'
+                        logger.info('ADMIN EDIT account by=%s target=%s role=%s '
+                                    'status=%s tier=%s', me['email'], u.email,
+                                    u.role, u.status, u.tier)
+            if error:
+                s.rollback()
+
+        view = {'id': u.id, 'email': u.email, 'role': u.role or 'user',
+                'status': u.status, 'tier': u.tier, 'expires': _fmt_date(u.expires_at)}
+        p = {f: (getattr(u, f) or '') for f in pfields}
+    finally:
+        s.close()
+    return render_template_string(ADMIN_USER_HTML, u=view, p=p, saved=saved,
+                                  error=error, tiers=TIERS, order=DEFAULT_TIER_ORDER)
 
 
 @app.route('/account/profile', methods=['GET', 'POST'])
