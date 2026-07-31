@@ -5429,7 +5429,7 @@ TG_FOLLOWUP_MIN_DEFAULT = 45    # minutes of silence before a nudge
 TG_FOLLOWUP_MAX = 2
 TG_TYPING_CPS = 14              # characters "typed" per second
 TG_READ_CAP = 4.5               # longest pause before she starts typing
-TG_TYPE_CAP = 11.0              # longest single typing burst
+TG_TYPE_CAP = 22.0              # longest single typing burst
 
 
 def _tg_load_bots():
@@ -5612,8 +5612,8 @@ def _tg_send_human(persona, chat_id, text, incoming='', photo_data=None):
         if photo_data:
             _tg_send_photo(persona, chat_id, photo_data)
         return
-    cps = max(4, cfg['typing_speed'] // 2)
-    time.sleep(random.uniform(0, 120))
+    cps = max(2, cfg['typing_speed'] // 4)
+    time.sleep(random.uniform(15, 120))
     time.sleep(min(0.8 + len(incoming) / 90.0, TG_READ_CAP) * random.uniform(0.7, 1.3))
     for i, chunk in enumerate(_tg_bursts(text)):
         if not chunk:
@@ -6530,9 +6530,9 @@ def _tgu_plan(persona, chat_id, name, text):
 
     fans[key] = fan
     _tg_save_fans(persona, fans)
-    initial_delay = random.uniform(0, 120) if cfg['humanize'] else 0
+    initial_delay = random.uniform(15, 120) if cfg['humanize'] else 0
     read = min(0.8 + len(text) / 90.0, TG_READ_CAP) if cfg['humanize'] else 0
-    cps = max(4, int(cfg['typing_speed'] // 2)) if cfg['humanize'] else 999
+    cps = max(2, int(cfg['typing_speed'] // 4)) if cfg['humanize'] else 999
     return {'read': read, 'cps': cps, 'initial_delay': initial_delay,
             'chunks': chunks, 'photo_data': photo_data}
 
