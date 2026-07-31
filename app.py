@@ -6,6 +6,7 @@ import logging
 import hashlib
 import secrets
 import time
+import random
 import threading
 import urllib.request
 import urllib.parse
@@ -5018,9 +5019,12 @@ def api_threads_webhook():
 # so clicks can be counted and followed up on. No PPV here.
 
 TELEGRAM_API = 'https://api.telegram.org'
-TG_CTA_AFTER_DEFAULT = 6        # fan messages before the first CTA
+TG_CTA_AFTER_DEFAULT = 6        # earliest fan message the CTA may appear on
 TG_FOLLOWUP_MIN_DEFAULT = 45    # minutes of silence before a nudge
 TG_FOLLOWUP_MAX = 2
+TG_TYPING_CPS = 14              # characters "typed" per second
+TG_READ_CAP = 4.5               # longest pause before she starts typing
+TG_TYPE_CAP = 11.0              # longest single typing burst
 
 
 def _tg_load_bots():
@@ -5117,6 +5121,62 @@ def _tg_send(persona, chat_id, text):
                     'disable_web_page_preview': False})
 
 
+def _tg_typing(persona, chat_id, seconds):
+    """Hold the "typing…" indicator for a while. Telegram clears it after ~5s,
+    so it has to be re-sent to span a longer burst."""
+    bot = _tg_bot(persona)
+    end = time.time() + seconds
+    while True:
+        try:
+            _tg_api(bot['bot_token'], 'sendChatAction',
+                    {'chat_id': chat_id, 'action': 'typing'})
+        except Exception:
+            return
+        left = end - time.time()
+        if left <= 0:
+            return
+        time.sleep(min(4.0, left))
+
+
+def _tg_bursts(text):
+    """Split a reply into the 1-2 chunks a real person would send, breaking at a
+    sentence boundary rather than mid-thought."""
+    t = (text or '').strip()
+    if len(t) < 90:
+        return [t]
+    parts = [p for p in re.split(r'(?<=[.!?…])\s+', t) if p]
+    if len(parts) < 2:
+        return [t]
+    half, cut, best = len(t) / 2.0, 0, None
+    for i in range(1, len(parts)):
+        head = ' '.join(parts[:i])
+        d = abs(len(head) - half)
+        if best is None or d < best:
+            best, cut = d, i
+    return [' '.join(parts[:cut]).strip(), ' '.join(parts[cut:]).strip()]
+
+
+def _tg_send_human(persona, chat_id, text, incoming=''):
+    """Send a reply the way a person would: a pause to read, then visible typing
+    scaled to the length of what she's writing, split across a burst or two."""
+    cfg = _tg_settings(persona)
+    if not cfg['humanize']:
+        _tg_send(persona, chat_id, text)
+        return
+    cps = max(4, cfg['typing_speed'])
+    # Reading pause — longer for a longer incoming message.
+    time.sleep(min(0.8 + len(incoming) / 90.0, TG_READ_CAP) * random.uniform(0.7, 1.3))
+    for i, chunk in enumerate(_tg_bursts(text)):
+        if not chunk:
+            continue
+        if i:
+            # Beat between messages, as if starting the next thought.
+            time.sleep(random.uniform(0.6, 1.6))
+        dur = min(max(len(chunk) / float(cps), 1.2), TG_TYPE_CAP) * random.uniform(0.85, 1.2)
+        _tg_typing(persona, chat_id, dur)
+        _tg_send(persona, chat_id, chunk)
+
+
 def _tg_settings(persona):
     try:
         s = json.loads(_get_setting(f'telegram_auto_{persona}') or '{}')
@@ -5127,6 +5187,8 @@ def _tg_settings(persona):
         'cta_after': int(s.get('cta_after') or TG_CTA_AFTER_DEFAULT),
         'followup_min': int(s.get('followup_min') or TG_FOLLOWUP_MIN_DEFAULT),
         'followups': bool(s.get('followups', True)),
+        'humanize': bool(s.get('humanize', True)),
+        'typing_speed': int(s.get('typing_speed') or TG_TYPING_CPS),
     }
 
 
@@ -5203,23 +5265,28 @@ def _tg_handle_update(persona, update):
     cta_url = (bot.get('cta_url') or '').strip()
     cta_due = bool(cta_url) and not fan.get('cta_sent') and fan['in_count'] >= cfg['cta_after']
 
+    ask_rule = (
+        'End with ONE question that follows from what they just said — never a '
+        'generic "how are you", never a question you have already asked, and never '
+        'more than one. ')
     if text == '/start':
         instruction = (
             f'A new fan just opened a chat with you on Telegram (they go by "{who}"). '
             'Write ONE short, warm, in-character opener that introduces you without '
-            'sounding scripted and ends with a question about them.')
+            'sounding scripted. ' + ask_rule)
     elif cta_due:
         instruction = (
-            f'Reply in-character to this fan on Telegram: "{text}". Keep the rapport '
-            'warm, then tease — in one natural sentence — that you post more there, '
-            'somewhere more private. Do NOT paste a link or a URL, do not hard-sell, '
-            'and do not name the site; a link is appended after your message.')
+            f'Reply in-character to this fan on Telegram: "{text}". Answer what they '
+            'actually said first, then tease — in one natural sentence — that you post '
+            'more somewhere more private. Do NOT paste a link or a URL, do not '
+            'hard-sell, and do not name the site; a link is appended after your '
+            'message. ' + ask_rule)
     else:
         instruction = (
             f'Reply in-character to this fan on Telegram: "{text}". Warm and engaging, '
-            'reference what they have told you before, move the rapport → intrigue → '
-            'tease funnel along naturally, never hard-sell, and end with a question '
-            'that keeps them talking.')
+            'react to what they just said before anything else, reference what they '
+            'have told you before, and let interest build slowly — no selling, no '
+            'hinting at paid content yet. ' + ask_rule)
 
     reply = _tg_generate(persona, chat_id, instruction)
     if not reply:
@@ -5230,7 +5297,7 @@ def _tg_handle_update(persona, update):
         fan['cta_sent'] = int(time.time())
         fan['cta_count'] = int(fan.get('cta_count', 0)) + 1
 
-    _tg_send(persona, chat_id, reply)
+    _tg_send_human(persona, chat_id, reply, incoming=text)
     _log_x_message(persona, _tg_fan_key(chat_id), who, 'out', reply)
     fan['last_out'] = int(time.time())
     fans[str(chat_id)] = fan
@@ -5610,6 +5677,8 @@ def api_telegram_settings():
         'cta_after': max(1, int(data.get('cta_after') or TG_CTA_AFTER_DEFAULT)),
         'followup_min': max(5, int(data.get('followup_min') or TG_FOLLOWUP_MIN_DEFAULT)),
         'followups': bool(data.get('followups', True)),
+        'humanize': bool(data.get('humanize', True)),
+        'typing_speed': max(4, min(int(data.get('typing_speed') or TG_TYPING_CPS), 40)),
     }
     _set_setting(f'telegram_auto_{persona}', json.dumps(opts))
     bots = _tg_load_bots()

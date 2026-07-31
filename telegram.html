@@ -140,6 +140,17 @@
     </div>
     <label class="auto-chk"><input type="checkbox" id="followups" checked> Follow up on quiet fans and unclicked links (max 2 nudges each)</label>
     <label class="auto-chk"><input type="checkbox" id="enabled" checked> Bot active — reply to incoming Telegram messages</label>
+    <label class="auto-chk"><input type="checkbox" id="humanize" checked> Type like a human — pause to read, show “typing…”, send in bursts</label>
+    <div class="field" style="margin-top:12px; max-width:260px;">
+      <label>Typing speed</label>
+      <select id="typing-speed">
+        <option value="8">Slow — thumbs on a phone</option>
+        <option value="14" selected>Natural</option>
+        <option value="22">Fast texter</option>
+        <option value="34">Very fast</option>
+      </select>
+      <span class="hint">A reply takes about a second per this many characters, plus a pause to read.</span>
+    </div>
     <div style="display:flex; gap:8px; margin-top:14px;">
       <button class="btn-ai" onclick="saveSettings()">Save settings</button>
     </div>
@@ -350,6 +361,8 @@ async function loadSettings(){
     document.getElementById('followup-min').value=s.followup_min;
     document.getElementById('followups').checked=s.followups!==false;
     document.getElementById('enabled').checked=!!s.enabled;
+    document.getElementById('humanize').checked=s.humanize!==false;
+    if(s.typing_speed) document.getElementById('typing-speed').value=String(s.typing_speed);
   }catch(e){}
 }
 
@@ -360,6 +373,8 @@ async function saveSettings(){
     persona:persona(),
     enabled:document.getElementById('enabled').checked,
     followups:document.getElementById('followups').checked,
+    humanize:document.getElementById('humanize').checked,
+    typing_speed:parseInt(document.getElementById('typing-speed').value||'14'),
     cta_after:parseInt(document.getElementById('cta-after').value||'6'),
     followup_min:parseInt(document.getElementById('followup-min').value||'45'),
     cta_url:document.getElementById('cta-url').value.trim(),
