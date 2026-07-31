@@ -6517,8 +6517,7 @@ def _tgu_plan(persona, chat_id, name, text):
     chunks = _tg_bursts(reply) if cfg['humanize'] else [reply]
     if cta_due:
         label = (cta.get('cta_label') or acct.get('cta_label') or 'come see').strip()
-        base = (acct.get('base_url') or '').rstrip('/')
-        link = f'{base}/go/{acct.get("code")}/{chat_id}'
+        link = cta_url
         chunks[-1] = f'{chunks[-1]}\n\n{label} → {link}'
         fan['cta_sent'] = int(time.time())
 
