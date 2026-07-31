@@ -2207,21 +2207,91 @@ def api_persona_images_save(slug):
 
 # ── Tagged media library ──────────────────────────────────────────────────────
 
+OUTFIT_COUNT = 6
+
+
+def _outfits(slug):
+    """The persona's six outfit definitions. Each outfit is one consistent look:
+    same clothing, same place, same setting — so every photo tagged to it is
+    visually coherent and can be sent as if shot in one sitting."""
+    try:
+        saved = json.loads(_get_setting(f'outfits_{slug}') or '[]')
+    except Exception:
+        saved = []
+    out = []
+    for i in range(OUTFIT_COUNT):
+        s = saved[i] if i < len(saved) and isinstance(saved[i], dict) else {}
+        out.append({
+            'n': i + 1,
+            'name': str(s.get('name', ''))[:80],
+            'clothing': str(s.get('clothing', ''))[:120],
+            'location': str(s.get('location', ''))[:120],
+            'lighting': str(s.get('lighting', ''))[:60],
+        })
+    return out
+
+
+@app.route('/api/personas/<slug>/outfits', methods=['GET'])
+def api_persona_outfits(slug):
+    if not re.match(r'^[a-z0-9_-]+$', slug):
+        return jsonify({'error': 'Invalid slug'}), 400
+    return jsonify({'outfits': _outfits(slug)})
+
+
+@app.route('/api/personas/<slug>/outfits', methods=['POST'])
+def api_persona_outfits_save(slug):
+    if not re.match(r'^[a-z0-9_-]+$', slug):
+        return jsonify({'error': 'Invalid slug'}), 400
+    data = request.json or {}
+    items = data.get('outfits', [])
+    if not isinstance(items, list):
+        return jsonify({'error': 'outfits must be a list'}), 400
+    clean = []
+    for i in range(OUTFIT_COUNT):
+        s = items[i] if i < len(items) and isinstance(items[i], dict) else {}
+        clean.append({
+            'name': str(s.get('name', ''))[:80],
+            'clothing': str(s.get('clothing', ''))[:120],
+            'location': str(s.get('location', ''))[:120],
+            'lighting': str(s.get('lighting', ''))[:60],
+        })
+    _set_setting(f'outfits_{slug}', json.dumps(clean))
+    return jsonify({'ok': True, 'outfits': _outfits(slug)})
+
+
 @app.route('/api/personas/<slug>/media', methods=['GET'])
 def api_persona_media_list(slug):
     if not re.match(r'^[a-z0-9_-]+$', slug):
         return jsonify({'error': 'Invalid slug'}), 400
     from db import SessionLocal, list_persona_media
+    outfits = _outfits(slug)
     s = SessionLocal()
     try:
         rows = list_persona_media(s, slug)
-        return jsonify({'items': [{
-            'id': r.id, 'location': r.location or '', 'outfit': r.outfit or '',
-            'lighting': r.lighting or '', 'purpose': r.purpose or '',
-            'thumb': f'/api/personas/{slug}/media/{r.id}/image',
-        } for r in rows]})
+        items = []
+        for r in rows:
+            o = _outfit_of(r, outfits)
+            items.append({
+                'id': r.id, 'purpose': r.purpose or '',
+                'outfit': r.outfit or '',
+                'location': (o or {}).get('location', ''),
+                'lighting': (o or {}).get('lighting', ''),
+                'thumb': f'/api/personas/{slug}/media/{r.id}/image',
+            })
+        return jsonify({'items': items, 'outfits': outfits})
     finally:
         s.close()
+
+
+def _outfit_of(row, outfits):
+    """Resolve a media row's outfit number to its definition, or None."""
+    try:
+        n = int(row.outfit)
+    except (TypeError, ValueError):
+        return None
+    if 1 <= n <= len(outfits):
+        return outfits[n - 1]
+    return None
 
 
 @app.route('/api/personas/<slug>/media', methods=['POST'])
@@ -2315,7 +2385,7 @@ def api_persona_media_pick(slug):
         rows = list_persona_media(s, slug)
         if not rows:
             return jsonify({'match': None})
-        picked = _pick_media(rows,
+        picked = _pick_media(rows, outfits=_outfits(slug),
                              purpose=data.get('purpose', ''),
                              lighting=data.get('lighting', ''),
                              location=data.get('location', ''),
@@ -2330,19 +2400,26 @@ def api_persona_media_pick(slug):
         s.close()
 
 
-def _pick_media(rows, purpose='', lighting='', location='', outfit=''):
-    """Score media items against requested tags; highest match wins."""
+def _pick_media(rows, outfits=None, purpose='', lighting='', location='', outfit='', **_ignored):
+    """Score media items against requested tags; highest match wins.
+
+    Lighting and location live on the outfit, not the photo, so a photo inherits
+    whatever its outfit defines. Unknown tag keys are ignored rather than raising —
+    the tags come from the model, so a stray key must not break the send."""
+    outfits = outfits or []
+    want_outfit = str(outfit).strip().lower().replace('outfit ', '')
     best, best_score = None, -1
     for r in rows:
+        o = _outfit_of(r, outfits) or {}
         score = 0
         if purpose and r.purpose and r.purpose.lower() == purpose.lower():
             score += 4
-        if lighting and r.lighting and r.lighting.lower() == lighting.lower():
+        if want_outfit and str(r.outfit or '').strip() == want_outfit:
+            score += 3
+        if lighting and o.get('lighting') and o['lighting'].lower() == lighting.lower():
             score += 2
-        if location and r.location and location.lower() in r.location.lower():
+        if location and o.get('location') and location.lower() in o['location'].lower():
             score += 2
-        if outfit and r.outfit and outfit.lower() in r.outfit.lower():
-            score += 1
         if score > best_score:
             best, best_score = r, score
     return best if best_score > 0 else None
@@ -5429,7 +5506,8 @@ def _tg_generate(persona, chat_id, instruction):
 
 
 def _tg_media_catalog(persona):
-    """Return a short text describing available tagged media for prompt injection."""
+    """Describe the persona's outfits for prompt injection, so she picks a look
+    that fits the moment rather than a loose bag of tags."""
     try:
         from db import SessionLocal, list_persona_media
         s = SessionLocal()
@@ -5438,24 +5516,30 @@ def _tg_media_catalog(persona):
         finally:
             s.close()
     except Exception:
-        return '', []
+        return '', [], []
     if not rows:
-        return '', []
+        return '', [], []
+    outfits = _outfits(persona)
+    used = set()
+    for r in rows:
+        try:
+            used.add(int(r.outfit))
+        except (TypeError, ValueError):
+            continue
+    lines = []
+    for o in outfits:
+        if o['n'] not in used:
+            continue
+        bits = [b for b in (o['clothing'], o['location'], o['lighting']) if b]
+        label = o['name'] or f'Outfit {o["n"]}'
+        lines.append(f'Outfit {o["n"]} ({label})' + (f' — {", ".join(bits)}' if bits else ''))
+    if not lines:
+        return '', [], []
     purposes = sorted(set(r.purpose for r in rows if r.purpose))
-    lightings = sorted(set(r.lighting for r in rows if r.lighting))
-    locations = sorted(set(r.location for r in rows if r.location))
-    outfits = sorted(set(r.outfit for r in rows if r.outfit))
-    parts = []
+    catalog = 'Your photo sets: ' + '; '.join(lines) + '.'
     if purposes:
-        parts.append(f'purposes: {", ".join(purposes)}')
-    if lightings:
-        parts.append(f'lighting: {", ".join(lightings)}')
-    if locations:
-        parts.append(f'locations: {", ".join(locations)}')
-    if outfits:
-        parts.append(f'outfits: {", ".join(outfits)}')
-    catalog = 'Available photos — ' + '; '.join(parts) + '.'
-    return catalog, rows
+        catalog += f' Purposes available: {", ".join(purposes)}.'
+    return catalog, rows, outfits
 
 
 def _tg_parse_photo_tag(reply):
@@ -5498,16 +5582,18 @@ def _tg_handle_update(persona, update):
     cta_url = (bot.get('cta_url') or '').strip()
     cta_due = bool(cta_url) and not fan.get('cta_sent') and fan['in_count'] >= cfg['cta_after']
 
-    catalog, media_rows = _tg_media_catalog(persona)
+    catalog, media_rows, media_outfits = _tg_media_catalog(persona)
     photo_rule = ''
     if catalog:
         photo_rule = (
             f'\n\nYou have photos you can share. {catalog} '
-            'When the conversation naturally calls for it — a fan asks to see you, '
-            'you mention what you\'re doing, or you want to tease — add the tag '
-            '[SEND_PHOTO:purpose=X,lighting=Y] at the very end of your message '
-            '(X/Y from the available options). Only do this when it fits the moment, '
-            'not every message. Never mention the tag to the fan.')
+            'Each outfit is one consistent look — same clothes, same place — so '
+            'stay within a single outfit and pick the one that fits where you are '
+            'and what you are doing right now. When the moment naturally calls for '
+            'it — a fan asks to see you, you mention what you are up to, or you '
+            'want to tease — add the tag [SEND_PHOTO:outfit=N,purpose=X] at the '
+            'very end of your message. Only when it fits, not every message, and '
+            'never mention the tag to the fan.')
 
     ask_rule = (
         'End with ONE question that follows from what they just said — never a '
@@ -5541,7 +5627,7 @@ def _tg_handle_update(persona, update):
     if photo_tags and media_rows:
         safe = {k: v for k, v in photo_tags.items()
                 if k in ('purpose', 'lighting', 'location', 'outfit')}
-        picked = _pick_media(media_rows, **safe)
+        picked = _pick_media(media_rows, outfits=media_outfits, **safe)
         if picked:
             photo_data = picked.image_data
 
