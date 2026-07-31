@@ -1,5 +1,6 @@
 from flask import Flask, request, jsonify, send_from_directory, session, redirect, url_for, render_template_string, Response
 import os
+import sys
 import json
 import re
 import logging
@@ -33,6 +34,12 @@ except Exception:
 
 logger = logging.getLogger('app')
 logger.setLevel(logging.INFO)
+# Needs its own stdout handler: with no handler anywhere, logging falls back to
+# lastResort (WARNING) and every info() line is dropped before Cloud Run sees it.
+if not logger.handlers:
+    _ah = logging.StreamHandler(sys.stdout)
+    _ah.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    logger.addHandler(_ah)
 error_logger = logging.getLogger('error_logger')
 error_logger.setLevel(logging.ERROR)
 if not any(isinstance(h, logging.StreamHandler) for h in error_logger.handlers):
