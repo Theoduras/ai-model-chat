@@ -31,6 +31,8 @@ try:
 except Exception:
     LOG_DIR = None
 
+logger = logging.getLogger('app')
+logger.setLevel(logging.INFO)
 error_logger = logging.getLogger('error_logger')
 error_logger.setLevel(logging.ERROR)
 if not any(isinstance(h, logging.StreamHandler) for h in error_logger.handlers):
