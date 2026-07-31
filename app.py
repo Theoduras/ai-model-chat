@@ -538,7 +538,28 @@ def local_fallback_reply(msg):
 
 app = Flask(__name__, static_folder=BASE_DIR, static_url_path='',
             template_folder=os.path.join(BASE_DIR, 'templates'))
-app.secret_key = os.getenv('SECRET_KEY') or secrets.token_hex(32)
+def _session_secret():
+    """A signing key that survives restarts. Prefers SECRET_KEY, else reuses one
+    kept in the database, so sessions on Cloud Run outlive a new revision
+    instead of silently logging everyone out."""
+    env = (os.getenv('SECRET_KEY') or '').strip()
+    if env:
+        return env
+    try:
+        from db import SessionLocal, get_app_setting, set_app_setting
+        s = SessionLocal()
+        try:
+            stored = get_app_setting(s, 'flask_secret_key')
+            if not stored:
+                stored = secrets.token_hex(32)
+                set_app_setting(s, 'flask_secret_key', stored)
+                s.commit()
+            return stored
+        finally:
+            s.close()
+    except Exception:
+        # No database yet — fall back to a per-process key.
+        return secrets.token_hex(32)
 
 
 try:
@@ -546,6 +567,37 @@ try:
     init_db()
 except Exception as _db_err:
     print(f'DB init skipped: {_db_err}')
+
+# After init_db, so the settings table exists to read the stored key from.
+app.secret_key = _session_secret()
+
+
+def _persistence_warnings():
+    """Config that silently loses customer accounts, surfaced at startup.
+
+    Both are fatal to sign-in on serverless: an ephemeral SQLite file is wiped
+    between cold starts, and a per-instance random secret key means a session
+    cookie signed by one instance is rejected by the next.
+    """
+    warns = []
+    try:
+        from db import DATABASE_URL
+    except Exception:
+        return warns
+    if DATABASE_URL.startswith('sqlite'):
+        where = 'an ephemeral /tmp file' if IS_VERCEL else 'a local file'
+        warns.append(
+            f'Database is SQLite ({where}). Accounts and payments will not '
+            'survive a redeploy or cold start — set DATABASE_URL to Postgres.')
+    if not (os.getenv('SECRET_KEY') or '').strip() and DATABASE_URL.startswith('sqlite'):
+        warns.append(
+            'SECRET_KEY is unset and there is no durable database to keep a '
+            'generated one in, so sign-in will not survive a restart.')
+    return warns
+
+
+for _w in _persistence_warnings():
+    print(f'CONFIG WARNING: {_w}')
 
 
 # The app serves static assets straight from the project root (static_folder=
@@ -577,7 +629,21 @@ def _block_source_files():
 
 @app.route('/healthz')
 def healthz():
-    return jsonify({'status': 'ok'}), 200
+    """Reports whether account storage is durable. Names no credentials —
+    only the backend kind and whether required config is present."""
+    try:
+        from db import DATABASE_URL
+        backend = DATABASE_URL.split(':', 1)[0].split('+')[0]
+    except Exception:
+        backend = 'unknown'
+    warns = _persistence_warnings()
+    return jsonify({
+        'status': 'ok',
+        'db': backend,
+        'secret_key_set': bool((os.getenv('SECRET_KEY') or '').strip()),
+        'accounts_persist': not warns,
+        'warnings': warns,
+    }), 200
 
 
 X_TOKENS_FILE = '/tmp/x_tokens.json' if IS_VERCEL else os.path.join(BASE_DIR, 'x_tokens.json')
