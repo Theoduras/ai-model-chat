@@ -729,6 +729,16 @@ body.page-dashboard header {
 body.page-dashboard header h1 { font-size: 1rem; font-weight: 600; color: #fff; letter-spacing: -0.3px; }
 body.page-dashboard .badge { font-size: 0.7rem; background: #3f3f46; padding: 2px 8px; border-radius: 9999px; color: #a1a1aa; }
 
+.hdr-nav-link {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 0.78rem; color: #a1a1aa; text-decoration: none;
+  padding: 5px 10px; border-radius: 8px; border: 1px solid transparent;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.hdr-nav-link:hover { background: #27272a; color: #f4f4f5; border-color: #3f3f46; }
+#hdr-admin-link { color: #c4b5fd; }
+#hdr-admin-link:hover { background: #2e1065; border-color: #4c1d95; color: #ddd6fe; }
+
 .layout {
   flex: 1;
   display: grid;
