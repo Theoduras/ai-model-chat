@@ -14,9 +14,9 @@
 
   /* Warm off-white rather than #fff — pure white glares on a near-black UI. */
   --text:        #f0ece9;
-  --text-2:      #bdb8b4;
-  --text-3:      #97918d;
-  --text-muted:  #6b6663;
+  --text-2:      #cdc8c4;
+  --text-3:      #ada7a3;
+  --text-muted:  #85807c;
 
   --accent:      #ff5c38;
   --accent-2:    #ff2d78;
@@ -1070,7 +1070,7 @@ body:not(.is-admin) .layout { grid-template-columns: 280px 1fr; }
   box-shadow: 0 0 0 1px var(--accent-soft), 0 2px 12px rgba(0,0,0,0.3);
 }
 .section-title {
-  font-size: 0.72rem;
+  font-size: 0.82rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 1px;
@@ -1089,15 +1089,28 @@ body:not(.is-admin) .layout { grid-template-columns: 280px 1fr; }
   background: linear-gradient(180deg, var(--accent), var(--accent-2));
   flex-shrink: 0;
 }
-.field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
-.field { display: flex; flex-direction: column; gap: 7px; }
+.field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 20px; align-items: start; }
+.field { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
 .field.full { grid-column: 1 / -1; }
 
+/* The avatar keeps the same column edges as every other row, so the form reads
+   as one grid. Its picture and buttons sit side by side rather than leaving the
+   column half empty with a stretched Upload button. */
+.field-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.identity-avatar .avatar-block { display: flex; align-items: center; gap: 14px; }
+.identity-avatar .avatar-actions {
+  display: flex; flex-direction: column; gap: 6px; align-items: flex-start;
+}
+.identity-avatar .avatar-actions .btn {
+  padding: 5px 14px; font-size: 0.78rem; white-space: nowrap;
+}
+
 body.page-dashboard label {
-  font-size: 0.78rem;
+  font-size: 0.84rem;
   font-weight: 600;
-  color: var(--text-3);
+  color: var(--text-2);
   letter-spacing: 0.2px;
+  line-height: 1.4;
 }
 
 body.page-dashboard input[type="text"],
@@ -1109,8 +1122,9 @@ body.page-dashboard select {
   border: 1px solid var(--border);
   border-radius: 9px;
   color: var(--text);
-  padding: 10px 13px;
-  font-size: 0.875rem;
+  padding: 11px 14px;
+  font-size: 0.95rem;
+  line-height: 1.5;
   font-family: inherit;
   transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
   width: 100%;
@@ -1139,7 +1153,7 @@ body.page-dashboard select {
   cursor: pointer;
 }
 
-.hint { font-size: 0.72rem; color: #5a5a63; line-height: 1.45; }
+.hint { font-size: 0.79rem; color: var(--text-muted); line-height: 1.6; }
 
 .slider-row { display: flex; align-items: center; gap: 14px; }
 .slider-row input[type="range"] {
@@ -1222,13 +1236,17 @@ body.page-dashboard select {
   background: var(--bg);
   position: sticky;
   bottom: 0;
+  flex-wrap: nowrap;
+  align-items: center;
 }
+/* Larger type made these wrap to two rows; keep the bar one line tall. */
+.action-bar .btn { flex-shrink: 0; white-space: nowrap; padding: 10px 17px; }
 .btn {
-  padding: 9px 20px;
+  padding: 10px 22px;
   border-radius: var(--r);
   font-family: var(--font);
-  font-size: 0.875rem;
-  font-weight: 500;
+  font-size: 0.92rem;
+  font-weight: 600;
   cursor: pointer;
   border: none;
   transition: all 0.15s;
@@ -1377,8 +1395,8 @@ body.page-dashboard .conn-dot.err { background: var(--err); }
   color: var(--text);
   border: none;
   border-radius: 9999px;
-  padding: 5px 13px;
-  font-size: 0.72rem;
+  padding: 6px 14px;
+  font-size: 0.78rem;
   font-weight: 600;
   cursor: pointer;
   box-shadow: 0 2px 8px #ff5c3840;
@@ -1724,7 +1742,7 @@ body.page-dashboard code {
     scrollbar-width: none;
   }
   .action-bar::-webkit-scrollbar { display: none; }
-  .action-bar .btn { flex-shrink: 0; white-space: nowrap; }
+  .action-bar .btn { flex-shrink: 0; white-space: nowrap; padding: 10px 18px; }
   .action-bar .save-status { flex-shrink: 0; }
 
   /* Modals fill the small screen comfortably */

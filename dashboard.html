@@ -753,33 +753,22 @@ function renderForm(slug, cfg) {
 
     <div class="form-section">
       <div class="section-title">Identity<button type="button" class="btn-section-save" onclick="saveSection(this)">Save</button></div>
-      <div class="field-row" style="align-items:flex-start;">
-        <div class="field" style="flex:0 0 auto; text-align:center;">
+      <div class="field-row">
+        <div class="field-col">
+        <div class="field identity-avatar">
           <label>Profile Picture</label>
-          <div id="avatar-preview" style="width:88px;height:88px;border-radius:50%;background:var(--surface);border:2px dashed var(--text-muted);display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;margin:0 auto 6px;" onclick="document.getElementById('f-avatar-input').click()">
+          <div class="avatar-block">
+          <div id="avatar-preview" style="width:88px;height:88px;border-radius:50%;background:var(--surface);border:2px dashed var(--text-muted);display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;flex:0 0 auto;" onclick="document.getElementById('f-avatar-input').click()">
             ${cfg.avatar ? '<img src="' + esc(cfg.avatar) + '" style="width:100%;height:100%;object-fit:cover;">' : '<span style="font-size:28px;color:var(--text-muted);">+</span>'}
           </div>
           <input type="file" id="f-avatar-input" accept="image/*" style="display:none;" onchange="handleAvatarUpload(this)">
-          <button type="button" class="btn btn-ghost" style="font-size:11px;padding:2px 8px;" onclick="document.getElementById('f-avatar-input').click()">Upload</button>
-          ${cfg.avatar ? '<button type="button" class="btn btn-ghost" style="font-size:11px;padding:2px 8px;margin-left:4px;" onclick="clearAvatar()">Remove</button>' : ''}
+          <div class="avatar-actions">
+            <button type="button" class="btn btn-ghost" onclick="document.getElementById('f-avatar-input').click()">Upload</button>
+            ${cfg.avatar ? '<button type="button" class="btn btn-ghost" onclick="clearAvatar()">Remove</button>' : ''}
+          </div>
+          </div>
           <input type="hidden" id="f-avatar" value="${esc(cfg.avatar || '')}">
         </div>
-        <div style="flex:1; display:flex; flex-direction:column; gap:12px;">
-          <div class="field">
-            <label>Display Name</label>
-            <input type="text" id="f-name" value="${esc(cfg.name || '')}" placeholder="e.g. Aria">
-          </div>
-          <div class="field">
-            <label>Age</label>
-            <input type="number" id="f-age" value="${esc(cfg.age || '')}" placeholder="e.g. 23" min="18" step="1">
-          </div>
-          <div class="field">
-            <label>Gender</label>
-            <select id="f-gender">${opt(['Female', 'Male', 'Trans Female to Male', 'Trans Male to Female'], cfg.gender || 'Female')}</select>
-          </div>
-        </div>
-      </div>
-      <div class="field-row">
         <div class="field">
           <label>Location</label>
           <div style="position:relative;">
@@ -795,11 +784,27 @@ function renderForm(slug, cfg) {
           </div>
           <span class="hint" id="mirror-hint" style="display:${cfg.mirror_location ? 'block' : 'none'}">Persona claims to be from wherever the fan is — asks naturally if unknown, then mirrors it.</span>
         </div>
+        </div>
+        <div class="field-col">
+          <div class="field">
+            <label>Display Name</label>
+            <input type="text" id="f-name" value="${esc(cfg.name || '')}" placeholder="e.g. Aria">
+          </div>
+          <div class="field">
+            <label>Age</label>
+            <input type="number" id="f-age" value="${esc(cfg.age || '')}" placeholder="e.g. 23" min="18" step="1">
+          </div>
+          <div class="field">
+            <label>Gender</label>
+            <select id="f-gender">${opt(['Female', 'Male', 'Trans Female to Male', 'Trans Male to Female'], cfg.gender || 'Female')}</select>
+          </div>
         <div class="field">
           <label>Personality Archetype</label>
           <select id="f-archetype">${opt(['Deadpan / Dry', 'Bubbly / Sweet', 'Dominant / Edgy', 'Girl-Next-Door', 'Mysterious / Dark', 'Playful / Teasing', 'Intellectual / Witty'], cfg.archetype)}</select>
         </div>
+        </div>
       </div>
+
       <div class="field full">
         <label style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px;">
           <span>Backstory</span>
