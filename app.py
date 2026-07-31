@@ -2263,9 +2263,9 @@ def api_persona_outfits_save(slug):
 
 DEFAULT_PHASES = [
     {'name': 'Phase 1', 'duration_type': 'exchanges', 'duration_value': 20,
-     'interest': 'low', 'photo_rate': 15},
+     'interest': 'low', 'photo_rate': 40},
     {'name': 'CTA Phase', 'duration_type': 'exchanges', 'duration_value': 0,
-     'interest': 'high', 'photo_rate': 50},
+     'interest': 'high', 'photo_rate': 60},
 ]
 
 
@@ -5667,10 +5667,13 @@ def _tg_media_catalog(persona):
             rows = list_persona_media(s, persona)
         finally:
             s.close()
-    except Exception:
+    except Exception as exc:
+        logger.warning('_tg_media_catalog failed for %s: %s', persona, exc)
         return '', [], []
     if not rows:
+        logger.info('No media rows for persona %s', persona)
         return '', [], []
+    logger.info('Found %d media rows for persona %s', len(rows), persona)
     outfits = _outfits(persona)
     used = set()
     for r in rows:
@@ -5750,11 +5753,11 @@ def _tg_handle_update(persona, update):
             f'\n\nYou have photos you can share. {catalog} '
             'Each outfit is one consistent look — same clothes, same place — so '
             'stay within a single outfit and pick the one that fits where you are '
-            'and what you are doing right now. When the moment naturally calls for '
-            'it — a fan asks to see you, you mention what you are up to, or you '
-            'want to tease — add the tag [SEND_PHOTO:outfit=N,purpose=X] at the '
-            'very end of your message. Only when it fits, not every message, and '
-            'never mention the tag to the fan.')
+            'and what you are doing right now. Share photos generously — when a '
+            'fan asks to see you, when you mention what you are doing, when you '
+            'want to flirt or tease, or just to keep things visual and fun. Add '
+            'the tag [SEND_PHOTO:outfit=N,purpose=X] at the very end of your '
+            'message. Never mention the tag to the fan.')
 
     ask_rule = (
         'End with ONE question that follows from what they just said — never a '
@@ -5787,7 +5790,10 @@ def _tg_handle_update(persona, update):
     picked_media_id = None
     reply, photo_tags = _tg_parse_photo_tag(reply)
     sent_ids = _fan_sent_photos(persona, chat_id) if media_rows else set()
-    should_send_photo = media_rows and random.randint(1, 100) <= photo_rate
+    roll = random.randint(1, 100) if media_rows else 0
+    roll_hit = media_rows and roll <= photo_rate
+    logger.info('Photo decision: %d media, rate=%d, roll=%d, hit=%s, tags=%s, sent=%d',
+                len(media_rows), photo_rate, roll, roll_hit, bool(photo_tags), len(sent_ids))
     if photo_tags and media_rows:
         safe = {k: v for k, v in photo_tags.items()
                 if k in ('purpose', 'lighting', 'location', 'outfit')}
@@ -5795,7 +5801,7 @@ def _tg_handle_update(persona, update):
         if picked and picked.id not in sent_ids:
             photo_data = picked.image_data
             picked_media_id = picked.id
-    elif should_send_photo and not photo_tags:
+    if not photo_data and roll_hit:
         picked = _pick_phase_photo(media_rows, media_outfits, sent_ids)
         if picked:
             photo_data = picked.image_data
