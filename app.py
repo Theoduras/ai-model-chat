@@ -5,6 +5,7 @@ import json
 import re
 import logging
 import hashlib
+import hmac
 import secrets
 import time
 import random
@@ -12,7 +13,7 @@ import threading
 import urllib.request
 import urllib.parse
 import urllib.error as url_error
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
@@ -595,6 +596,108 @@ def _save_x_tokens(data):
         json.dump(data, f)
 
 
+# ── Customer accounts, tiers and the paywall ─────────────────────────────────
+
+# PLACEHOLDER PRICING — swap `price` for the real numbers when they're decided.
+# `days` is how long one payment keeps the account active.
+TIERS = {
+    'starter': {'name': 'Starter', 'price': 29, 'days': 30,
+                'blurb': 'One persona, Telegram only.',
+                'features': ['1 AI persona', 'Telegram chat', 'Photo sending',
+                             'Funnel phases + CTA', 'Email support']},
+    'pro': {'name': 'Pro', 'price': 79, 'days': 30,
+            'blurb': 'Five personas, every platform.',
+            'features': ['5 AI personas', 'Telegram, X and Fanvue',
+                         'Photo sending + outfit locking', 'Funnel phases + CTA',
+                         'Scheduled follow-ups', 'Priority support']},
+    'agency': {'name': 'Agency', 'price': 199, 'days': 30,
+               'blurb': 'Unlimited personas for a roster.',
+               'features': ['Unlimited AI personas', 'Every platform',
+                            'Photo sending + outfit locking', 'Funnel phases + CTA',
+                            'Scheduled follow-ups', 'Conversation analytics',
+                            'Dedicated support']},
+}
+DEFAULT_TIER_ORDER = ['starter', 'pro', 'agency']
+
+OXAPAY_API = 'https://api.oxapay.com/v1/payment/invoice'
+
+
+def _oxapay_key():
+    return (os.getenv('OXAPAY_MERCHANT_KEY') or '').strip()
+
+
+def _db_session():
+    from db import SessionLocal
+    return SessionLocal()
+
+
+def _current_user():
+    """The logged-in customer, or None. Refreshes an expired subscription."""
+    uid = session.get('user_id')
+    if not uid:
+        return None
+    from db import User
+    s = _db_session()
+    try:
+        u = s.get(User, uid)
+        if u is None:
+            return None
+        if (u.status == 'active' and u.expires_at
+                and u.expires_at < datetime.now(timezone.utc).replace(tzinfo=None)):
+            u.status = 'expired'
+            s.commit()
+        return {'id': u.id, 'email': u.email, 'name': u.name, 'tier': u.tier,
+                'status': u.status,
+                'expires_at': u.expires_at.isoformat() if u.expires_at else None}
+    finally:
+        s.close()
+
+
+def _user_is_active(user):
+    return bool(user) and user.get('status') == 'active'
+
+
+# Creator-facing surface: needs a logged-in customer on an active plan.
+_PAID_PAGES = ('/dashboard', '/xbot', '/fanvue', '/threads', '/telegram', '/admin')
+_PAID_API = ('/api/telegram', '/api/tguser', '/api/x', '/api/xlog', '/api/threads',
+             '/api/fanvue', '/api/platforms', '/api/visitors', '/api/generate',
+             '/api/backstory', '/api/config', '/api/whatsapp')
+# Fan-facing and auth/billing routes stay open.
+_OPEN_PATHS = ('/login', '/register', '/logout', '/pricing', '/billing',
+               '/account', '/api/billing', '/healthz', '/go/',
+               '/dashboard/logout', '/admin/logout')
+
+
+def _path_needs_plan(path, method):
+    if path.startswith(_OPEN_PATHS):
+        return False
+    if path.startswith(_PAID_PAGES) or path.startswith(_PAID_API):
+        return True
+    # chat.html reads personas to render the fan chat, so only writes are gated.
+    if path.startswith('/api/personas') and method not in ('GET', 'HEAD', 'OPTIONS'):
+        return True
+    return False
+
+
+@app.before_request
+def _require_paid_account():
+    path = request.path or '/'
+    if not _path_needs_plan(path, request.method):
+        return None
+    user = _current_user()
+    wants_json = path.startswith('/api/')
+    if not user:
+        if wants_json:
+            return jsonify({'error': 'Sign in required'}), 401
+        return redirect('/login?next=' + urllib.parse.quote(path))
+    if not _user_is_active(user):
+        if wants_json:
+            return jsonify({'error': 'Subscription required',
+                            'status': user['status']}), 402
+        return redirect('/billing')
+    return None
+
+
 def _admin_password():
     return os.getenv('ADMIN_PASSWORD', '')
 
@@ -641,6 +744,357 @@ button:hover{background:#6d28d9}
 </div>
 </body>
 </html>"""
+
+
+ACCOUNT_CSS = """
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d0d0f;color:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:32px 16px}
+.wrap{width:100%;max-width:420px}
+.card{background:#18181b;border:1px solid #2a2a2d;border-radius:16px;padding:36px 32px}
+h1{font-size:1.3rem;font-weight:700;margin-bottom:8px}
+p.sub{color:#71717a;font-size:.9rem;margin-bottom:24px}
+label{display:block;font-size:.8rem;color:#a1a1aa;margin-bottom:6px}
+input{width:100%;background:#27272a;border:1px solid #3f3f46;border-radius:10px;padding:11px 14px;color:#f4f4f5;font-size:.95rem;outline:none;margin-bottom:16px}
+input:focus{border-color:#7c3aed}
+button{width:100%;background:#7c3aed;color:#fff;border:none;border-radius:10px;padding:13px;font-size:.95rem;font-weight:600;cursor:pointer}
+button:hover{background:#6d28d9}
+button:disabled{opacity:.6;cursor:not-allowed}
+.err{background:#3f1515;border:1px solid #7f1d1d;border-radius:8px;padding:10px 14px;font-size:.85rem;color:#fca5a5;margin-bottom:16px}
+.ok{background:#14321f;border:1px solid #166534;border-radius:8px;padding:10px 14px;font-size:.85rem;color:#86efac;margin-bottom:16px}
+.alt{text-align:center;margin-top:18px;font-size:.85rem;color:#71717a}
+.alt a{color:#a78bfa;text-decoration:none}
+.tiers{display:grid;gap:16px;margin-top:8px}
+.tier{background:#18181b;border:1px solid #2a2a2d;border-radius:14px;padding:22px}
+.tier.featured{border-color:#7c3aed}
+.tier h2{font-size:1.05rem;margin-bottom:4px}
+.price{font-size:1.9rem;font-weight:700;margin:10px 0 2px}
+.price span{font-size:.85rem;font-weight:400;color:#71717a}
+.blurb{color:#a1a1aa;font-size:.85rem;margin-bottom:12px}
+.tier ul{list-style:none;margin-bottom:16px}
+.tier li{font-size:.85rem;color:#d4d4d8;padding:4px 0}
+.tier li:before{content:'✓';color:#7c3aed;margin-right:8px}
+.bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;font-size:.85rem;color:#a1a1aa}
+.bar a{color:#a78bfa;text-decoration:none}
+@media(min-width:900px){.wrap.wide{max-width:1000px}.tiers{grid-template-columns:repeat(3,1fr)}}
+"""
+
+REGISTER_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Create account</title>
+<style>""" + ACCOUNT_CSS + """</style></head><body><div class="wrap"><div class="card">
+<h1>Create your account</h1><p class="sub">Start building your AI persona.</p>
+{% if error %}<div class="err">{{ error }}</div>{% endif %}
+<form method="post">
+<label>Name</label><input type="text" name="name" autocomplete="name" value="{{ name or '' }}">
+<label>Email</label><input type="email" name="email" required autocomplete="email" value="{{ email or '' }}">
+<label>Password</label><input type="password" name="password" required autocomplete="new-password" placeholder="At least 8 characters">
+<button type="submit">Create account</button></form>
+<div class="alt">Already have an account? <a href="/login">Sign in</a></div>
+</div></div></body></html>"""
+
+SIGNIN_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign in</title>
+<style>""" + ACCOUNT_CSS + """</style></head><body><div class="wrap"><div class="card">
+<h1>Sign in</h1><p class="sub">Welcome back.</p>
+{% if error %}<div class="err">{{ error }}</div>{% endif %}
+<form method="post">
+<label>Email</label><input type="email" name="email" required autocomplete="email" value="{{ email or '' }}">
+<label>Password</label><input type="password" name="password" required autocomplete="current-password">
+<button type="submit">Sign in</button></form>
+<div class="alt">No account yet? <a href="/register">Create one</a></div>
+</div></div></body></html>"""
+
+BILLING_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Choose a plan</title>
+<style>""" + ACCOUNT_CSS + """</style></head><body><div class="wrap wide">
+<div class="bar"><span>Signed in as {{ user.email }}</span><a href="/logout">Sign out</a></div>
+{% if user.status == 'active' %}
+<div class="ok">Your <strong>{{ tiers[user.tier].name if user.tier in tiers else user.tier }}</strong>
+plan is active{% if user.expires_at %} until {{ user.expires_at[:10] }}{% endif %}.
+<a href="/dashboard">Go to dashboard</a></div>
+{% elif user.status == 'expired' %}
+<div class="err">Your plan has expired. Renew below to regain access.</div>
+{% else %}
+<h1 style="margin-bottom:6px">Choose a plan</h1>
+<p class="sub">Payment is in crypto via Oxapay. Access unlocks as soon as it confirms.</p>
+{% endif %}
+{% if error %}<div class="err">{{ error }}</div>{% endif %}
+<div class="tiers">
+{% for key in order %}{% set t = tiers[key] %}
+<div class="tier {{ 'featured' if key == 'pro' else '' }}">
+<h2>{{ t.name }}</h2><div class="blurb">{{ t.blurb }}</div>
+<div class="price">${{ t.price }}<span>/{{ t.days }} days</span></div>
+<ul>{% for f in t.features %}<li>{{ f }}</li>{% endfor %}</ul>
+<button data-tier="{{ key }}">{{ 'Renew' if user.status == 'expired' else 'Pay with crypto' }}</button>
+</div>{% endfor %}
+</div></div>
+<script>
+document.querySelectorAll('button[data-tier]').forEach(function(b){
+  b.addEventListener('click', async function(){
+    b.disabled = true; var old = b.textContent; b.textContent = 'Creating invoice...';
+    try {
+      var r = await fetch('/api/billing/checkout', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({tier: b.dataset.tier})});
+      var d = await r.json();
+      if (d.payment_url) { window.location = d.payment_url; return; }
+      alert(d.error || 'Could not start checkout.');
+    } catch (e) { alert('Could not start checkout.'); }
+    b.disabled = false; b.textContent = old;
+  });
+});
+</script></body></html>"""
+
+
+ACCOUNT_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>My account</title>
+<style>""" + ACCOUNT_CSS + """
+table{width:100%;border-collapse:collapse;margin-top:8px;font-size:.85rem}
+th{text-align:left;color:#71717a;font-weight:500;padding:6px 0;border-bottom:1px solid #2a2a2d}
+td{padding:8px 0;border-bottom:1px solid #1f1f22;color:#d4d4d8}
+.row{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid #1f1f22;font-size:.9rem}
+.row span:first-child{color:#71717a}
+.pill{display:inline-block;padding:2px 10px;border-radius:999px;font-size:.75rem;font-weight:600}
+.pill.active{background:#14321f;color:#86efac}.pill.unpaid,.pill.expired{background:#3f1515;color:#fca5a5}
+.btn{display:block;text-align:center;background:#7c3aed;color:#fff;border-radius:10px;padding:12px;margin-top:18px;text-decoration:none;font-weight:600;font-size:.9rem}
+</style></head><body><div class="wrap">
+<div class="bar"><span>My account</span><a href="/logout">Sign out</a></div>
+<div class="card">
+<h1>{{ user.name or user.email }}</h1><p class="sub">{{ user.email }}</p>
+<div class="row"><span>Plan</span><span>{{ tiers[user.tier].name if user.tier in tiers else '—' }}</span></div>
+<div class="row"><span>Status</span><span class="pill {{ user.status }}">{{ user.status }}</span></div>
+<div class="row"><span>{{ 'Renews' if user.status == 'active' else 'Expired' }}</span>
+<span>{{ user.expires_at[:10] if user.expires_at else '—' }}</span></div>
+{% if user.status == 'active' %}<a class="btn" href="/dashboard">Go to dashboard</a>
+<a class="btn" style="background:#27272a" href="/billing">Change plan</a>
+{% else %}<a class="btn" href="/billing">Choose a plan</a>{% endif %}
+</div>
+{% if payments %}<div class="card" style="margin-top:16px">
+<h1 style="font-size:1rem">Payment history</h1>
+<table><tr><th>Date</th><th>Plan</th><th>Amount</th><th>Status</th></tr>
+{% for p in payments %}<tr><td>{{ p.date }}</td><td>{{ p.tier }}</td>
+<td>${{ p.amount }}</td><td>{{ p.status }}</td></tr>{% endfor %}</table>
+</div>{% endif %}
+</div></body></html>"""
+
+
+@app.route('/account')
+def account():
+    user = _current_user()
+    if not user:
+        return redirect('/login?next=/account')
+    from db import Payment
+    s = _db_session()
+    try:
+        rows = (s.query(Payment).filter(Payment.user_id == user['id'])
+                .order_by(Payment.created_at.desc()).limit(25).all())
+        payments = [{'date': p.created_at.strftime('%Y-%m-%d') if p.created_at else '',
+                     'tier': (TIERS.get(p.tier) or {}).get('name', p.tier),
+                     'amount': p.amount, 'status': p.status} for p in rows]
+    finally:
+        s.close()
+    return render_template_string(ACCOUNT_HTML, user=user, tiers=TIERS,
+                                  payments=payments)
+
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    from werkzeug.security import generate_password_hash
+    from db import create_user, get_user_by_email
+    if request.method == 'GET':
+        if _current_user():
+            return redirect('/billing')
+        return render_template_string(REGISTER_HTML)
+    email = (request.form.get('email') or '').strip().lower()
+    password = request.form.get('password') or ''
+    name = (request.form.get('name') or '').strip()
+    if not email or '@' not in email:
+        return render_template_string(REGISTER_HTML, error='Enter a valid email.',
+                                      email=email, name=name)
+    if len(password) < 8:
+        return render_template_string(REGISTER_HTML,
+                                      error='Password must be at least 8 characters.',
+                                      email=email, name=name)
+    s = _db_session()
+    try:
+        if get_user_by_email(s, email):
+            return render_template_string(
+                REGISTER_HTML, error='That email is already registered.',
+                email=email, name=name)
+        u = create_user(s, email, generate_password_hash(password), name)
+        s.commit()
+        session['user_id'] = u.id
+    finally:
+        s.close()
+    return redirect('/billing')
+
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    from werkzeug.security import check_password_hash
+    from db import get_user_by_email
+    nxt = request.args.get('next') or ''
+    if request.method == 'GET':
+        if _current_user():
+            return redirect(nxt or '/billing')
+        return render_template_string(SIGNIN_HTML)
+    email = (request.form.get('email') or '').strip().lower()
+    password = request.form.get('password') or ''
+    s = _db_session()
+    try:
+        u = get_user_by_email(s, email)
+        if not u or not check_password_hash(u.password_hash, password):
+            return render_template_string(SIGNIN_HTML, error='Wrong email or password.',
+                                          email=email)
+        u.last_login = datetime.now(timezone.utc).replace(tzinfo=None)
+        s.commit()
+        session['user_id'] = u.id
+        active = u.status == 'active'
+    finally:
+        s.close()
+    if nxt.startswith('/') and active:
+        return redirect(nxt)
+    return redirect('/dashboard' if active else '/billing')
+
+
+@app.route('/logout')
+def logout():
+    session.pop('user_id', None)
+    session.pop('admin_authed', None)
+    return redirect('/login')
+
+
+@app.route('/pricing')
+def pricing():
+    user = _current_user() or {'email': '', 'status': 'unpaid', 'tier': '',
+                               'expires_at': None}
+    return render_template_string(BILLING_HTML, user=user, tiers=TIERS,
+                                  order=DEFAULT_TIER_ORDER)
+
+
+@app.route('/billing')
+def billing():
+    user = _current_user()
+    if not user:
+        return redirect('/login?next=/billing')
+    return render_template_string(BILLING_HTML, user=user, tiers=TIERS,
+                                  order=DEFAULT_TIER_ORDER)
+
+
+@app.route('/billing/return')
+def billing_return():
+    user = _current_user()
+    if not user:
+        return redirect('/login')
+    return redirect('/dashboard' if _user_is_active(user) else '/billing')
+
+
+@app.route('/api/billing/checkout', methods=['POST'])
+def api_billing_checkout():
+    user = _current_user()
+    if not user:
+        return jsonify({'error': 'Sign in required'}), 401
+    tier_key = (request.get_json(silent=True) or {}).get('tier', '')
+    tier = TIERS.get(tier_key)
+    if not tier:
+        return jsonify({'error': 'Unknown plan'}), 400
+    if not _oxapay_key():
+        logger.error('Checkout attempted with no OXAPAY_MERCHANT_KEY set')
+        return jsonify({'error': 'Payments are not configured yet.'}), 503
+
+    from db import Payment
+    order_id = f'{user["id"]}-{secrets.token_hex(6)}'
+    base = (os.getenv('PUBLIC_BASE_URL') or request.url_root).rstrip('/')
+    body = json.dumps({
+        'amount': tier['price'],
+        'currency': 'USD',
+        'lifetime': 60,
+        'order_id': order_id,
+        'email': user['email'],
+        'description': f'{tier["name"]} plan — {tier["days"]} days',
+        'callback_url': f'{base}/api/billing/webhook',
+        'return_url': f'{base}/billing/return',
+    }).encode()
+    req = urllib.request.Request(
+        OXAPAY_API, data=body,
+        headers={'Content-Type': 'application/json',
+                 'merchant_api_key': _oxapay_key()})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            payload = json.loads(resp.read().decode())
+    except Exception:
+        error_logger.error('Oxapay invoice creation failed', exc_info=True)
+        return jsonify({'error': 'Could not reach the payment provider.'}), 502
+
+    data = payload.get('data') or {}
+    pay_url, track_id = data.get('payment_url'), data.get('track_id')
+    if not pay_url:
+        logger.error('Oxapay returned no payment_url: %s', str(payload)[:300])
+        return jsonify({'error': 'Payment provider rejected the request.'}), 502
+
+    s = _db_session()
+    try:
+        s.add(Payment(user_id=user['id'], tier=tier_key, amount=str(tier['price']),
+                      currency='USD', order_id=order_id, track_id=str(track_id or ''),
+                      status='pending'))
+        s.commit()
+    finally:
+        s.close()
+    logger.info('CHECKOUT [%s] user=%s tier=%s order=%s track=%s',
+                'oxapay', user['email'], tier_key, order_id, track_id)
+    return jsonify({'payment_url': pay_url, 'track_id': track_id})
+
+
+@app.route('/api/billing/webhook', methods=['POST'])
+def api_billing_webhook():
+    """Oxapay payment callback. Signed with HMAC-SHA512 over the raw body."""
+    raw = request.get_data()
+    key = _oxapay_key()
+    sent = request.headers.get('HMAC', '')
+    if not key:
+        error_logger.error('Oxapay webhook received but no merchant key configured')
+        return ('ok', 200)
+    expected = hmac.new(key.encode(), raw, hashlib.sha512).hexdigest()
+    if not hmac.compare_digest(expected, sent):
+        logger.warning('Oxapay webhook rejected: bad HMAC signature')
+        return ('ok', 200)
+
+    try:
+        payload = json.loads(raw.decode() or '{}')
+    except Exception:
+        return ('ok', 200)
+    order_id = str(payload.get('order_id') or '')
+    status = str(payload.get('status') or '')
+    logger.info('PAYMENT WEBHOOK order=%s status=%s track=%s type=%s',
+                order_id, status, payload.get('track_id'), payload.get('type'))
+    if not order_id:
+        return ('ok', 200)
+
+    from db import User, get_payment_by_order
+    s = _db_session()
+    try:
+        pay = get_payment_by_order(s, order_id)
+        if not pay:
+            logger.warning('Oxapay webhook for unknown order %s', order_id)
+            return ('ok', 200)
+        pay.status = status
+        if status.lower() == 'paid' and not pay.paid_at:
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            pay.paid_at = now
+            u = s.get(User, pay.user_id)
+            if u:
+                tier = TIERS.get(pay.tier) or {}
+                days = int(tier.get('days', 30))
+                # Renewals extend an unexpired plan rather than truncating it.
+                start = u.expires_at if (u.expires_at and u.expires_at > now) else now
+                u.tier = pay.tier
+                u.status = 'active'
+                u.expires_at = start + timedelta(days=days)
+                logger.info('PLAN ACTIVATED user=%s tier=%s until=%s order=%s',
+                            u.email, pay.tier, u.expires_at, order_id)
+        s.commit()
+    finally:
+        s.close()
+    return ('ok', 200)
 
 
 # ── Static pages ─────────────────────────────────────────────────────────────

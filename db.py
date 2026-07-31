@@ -247,6 +247,57 @@ def delete_persona_media(session, media_id):
     return row
 
 
+class User(Base):
+    """A paying customer of the platform (a creator), as opposed to a fan."""
+    __tablename__ = 'users'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    email = Column(String(255), unique=True, nullable=False, index=True)
+    password_hash = Column(String(255), nullable=False)
+    name = Column(String(120), default='')
+    tier = Column(String(32), default='')          # '' until a payment clears
+    status = Column(String(16), default='unpaid')  # unpaid | active | expired
+    expires_at = Column(DateTime)
+    created_at = Column(DateTime, default=_now)
+    last_login = Column(DateTime)
+
+
+class Payment(Base):
+    """One row per Oxapay invoice, created at checkout and updated by webhook."""
+    __tablename__ = 'payments'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    user_id = Column(String(32), ForeignKey('users.id'), nullable=False, index=True)
+    tier = Column(String(32), nullable=False)
+    amount = Column(String(32), default='')
+    currency = Column(String(16), default='USD')
+    order_id = Column(String(64), unique=True, index=True)
+    track_id = Column(String(64), index=True)
+    status = Column(String(24), default='pending')  # pending | Paying | Paid | expired
+    created_at = Column(DateTime, default=_now)
+    paid_at = Column(DateTime)
+
+
+Index('ix_payments_user_created', Payment.user_id, Payment.created_at)
+
+
+def get_user_by_email(session, email):
+    return session.query(User).filter(
+        User.email == (email or '').strip().lower()).first()
+
+
+def create_user(session, email, password_hash, name=''):
+    u = User(email=(email or '').strip().lower(),
+             password_hash=password_hash, name=name or '')
+    session.add(u)
+    session.flush()
+    return u
+
+
+def get_payment_by_order(session, order_id):
+    return session.query(Payment).filter(Payment.order_id == order_id).first()
+
+
 def init_db():
     Base.metadata.create_all(engine)
 
