@@ -255,6 +255,7 @@ class User(Base):
     email = Column(String(255), unique=True, nullable=False, index=True)
     password_hash = Column(String(255), nullable=False)
     name = Column(String(120), default='')
+    role = Column(String(16), default='user')      # user | admin
     tier = Column(String(32), default='')          # '' until a plan is chosen
     status = Column(String(16), default='unpaid')  # unpaid | active | expired
     expires_at = Column(DateTime)
@@ -305,6 +306,10 @@ def create_user(session, email, password_hash, name=''):
 
 def get_payment_by_order(session, order_id):
     return session.query(Payment).filter(Payment.order_id == order_id).first()
+
+
+def list_users(session, limit=500):
+    return session.query(User).order_by(User.created_at.desc()).limit(limit).all()
 
 
 def _add_missing_columns(table_name, model):
