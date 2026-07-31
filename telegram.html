@@ -140,6 +140,17 @@
     </div>
     <label class="auto-chk"><input type="checkbox" id="followups" checked> Follow up on quiet fans and unclicked links (max 2 nudges each)</label>
     <label class="auto-chk"><input type="checkbox" id="enabled" checked> Bot active — reply to incoming Telegram messages</label>
+    <label class="auto-chk"><input type="checkbox" id="humanize" checked> Type like a human — pause to read, show “typing…”, send in bursts</label>
+    <div class="field" style="margin-top:12px; max-width:260px;">
+      <label>Typing speed</label>
+      <select id="typing-speed">
+        <option value="8">Slow — thumbs on a phone</option>
+        <option value="14" selected>Natural</option>
+        <option value="22">Fast texter</option>
+        <option value="34">Very fast</option>
+      </select>
+      <span class="hint">A reply takes about a second per this many characters, plus a pause to read.</span>
+    </div>
     <div style="display:flex; gap:8px; margin-top:14px;">
       <button class="btn-ai" onclick="saveSettings()">Save settings</button>
     </div>
@@ -148,6 +159,7 @@
 
   <div class="form-section">
     <div class="section-title">📊 Conversion</div>
+    <div id="cta-warning" class="note" style="display:none; border-color:#7f1d1d; color:#fca5a5; margin-bottom:14px;"></div>
     <div class="stats">
       <div class="stat"><b id="s-fans">0</b><span>Fans</span></div>
       <div class="stat"><b id="s-sent">0</b><span>CTAs sent</span></div>
@@ -280,7 +292,9 @@ async function connectHosted(){
   const box=document.getElementById('connect-status');
   if(!persona()){ err(box,'Pick a persona first — the list above is empty.'); return; }
   busy(box,'Setting up your link…');
-  const data=await post('/api/telegram/hosted',{persona:persona()});
+  const data=await post('/api/telegram/hosted',{persona:persona(),
+    cta_url:document.getElementById('cta-url').value.trim(),
+    cta_label:document.getElementById('cta-label').value.trim()});
   if(!data.ok){ err(box,data.error); return; }
   ok(box,'Connected to @'+data.username+' — share the link below.');
   showShare(data);
@@ -350,6 +364,8 @@ async function loadSettings(){
     document.getElementById('followup-min').value=s.followup_min;
     document.getElementById('followups').checked=s.followups!==false;
     document.getElementById('enabled').checked=!!s.enabled;
+    document.getElementById('humanize').checked=s.humanize!==false;
+    if(s.typing_speed) document.getElementById('typing-speed').value=String(s.typing_speed);
   }catch(e){}
 }
 
@@ -360,6 +376,8 @@ async function saveSettings(){
     persona:persona(),
     enabled:document.getElementById('enabled').checked,
     followups:document.getElementById('followups').checked,
+    humanize:document.getElementById('humanize').checked,
+    typing_speed:parseInt(document.getElementById('typing-speed').value||'14'),
     cta_after:parseInt(document.getElementById('cta-after').value||'6'),
     followup_min:parseInt(document.getElementById('followup-min').value||'45'),
     cta_url:document.getElementById('cta-url').value.trim(),
@@ -376,6 +394,9 @@ async function loadStats(){
     document.getElementById('s-sent').textContent=s.cta_sent||0;
     document.getElementById('s-clicked').textContent=s.cta_clicked||0;
     document.getElementById('s-rate').textContent=(s.click_rate||0)+'%';
+    const warn=document.getElementById('cta-warning');
+    if(s.warning){ warn.style.display='block'; warn.textContent='⚠ '+s.warning; }
+    else { warn.style.display='none'; }
     const rows=s.rows||[];
     document.getElementById('fans-table').innerHTML = rows.length ?
       '<table class="fans"><tr><th>Fan</th><th>Msgs</th><th>CTA</th><th>Clicked</th><th>Nudges</th></tr>'+
