@@ -99,6 +99,9 @@ class SavedPersona(Base):
     name = Column(String(120))
     config_json = Column(Text, nullable=False)   # JSON-encoded builder config
     prompt = Column(Text, nullable=False)
+    # Which customer owns this persona. NULL means it predates per-user
+    # ownership (or is a house persona) and is visible to admins only.
+    owner_id = Column(String(32), index=True)
     created_at = Column(DateTime, default=_now)
     updated_at = Column(DateTime, default=_now, onupdate=_now)
 
@@ -330,10 +333,11 @@ def _add_missing_columns(table_name, model):
 
 def init_db():
     Base.metadata.create_all(engine)
-    try:
-        _add_missing_columns('users', User)
-    except Exception:
-        pass
+    for table, model in (('users', User), ('saved_personas', SavedPersona)):
+        try:
+            _add_missing_columns(table, model)
+        except Exception:
+            pass
 
 
 def get_persona_images_row(session, slug):
@@ -357,15 +361,24 @@ def get_saved_persona(session, slug):
     return session.get(SavedPersona, slug)
 
 
-def upsert_saved_persona(session, slug, name, config_json, prompt):
+def upsert_saved_persona(session, slug, name, config_json, prompt, owner_id=None):
     sp = session.get(SavedPersona, slug)
     if sp is None:
-        sp = SavedPersona(slug=slug)
+        sp = SavedPersona(slug=slug, owner_id=owner_id)
         session.add(sp)
+    elif owner_id and not sp.owner_id:
+        # First write by a real owner claims a previously unowned persona.
+        sp.owner_id = owner_id
     sp.name = name
     sp.config_json = config_json
     sp.prompt = prompt
     return sp
+
+
+def list_saved_personas_for_owner(session, owner_id):
+    return (session.query(SavedPersona)
+            .filter(SavedPersona.owner_id == owner_id)
+            .order_by(SavedPersona.name).all())
 
 
 def add_visit(session, ip, path, user_agent='', referrer='',
