@@ -157,10 +157,10 @@ def db_get_persona(slug):
         s.close()
 
 
-def db_list_personas():
-    """Return all saved (copied) personas as a list of dicts."""
+def db_list_personas(owner_id=None):
+    """Saved personas as dicts. With owner_id, only that customer's."""
     try:
-        from db import SessionLocal, list_saved_personas
+        from db import SessionLocal, list_saved_personas, list_saved_personas_for_owner
     except Exception:
         return []
     try:
@@ -169,7 +169,9 @@ def db_list_personas():
         return []
     try:
         out = []
-        for sp in list_saved_personas(s):
+        rows = (list_saved_personas_for_owner(s, owner_id) if owner_id
+                else list_saved_personas(s))
+        for sp in rows:
             try:
                 config = json.loads(sp.config_json)
             except Exception:
@@ -187,15 +189,47 @@ def db_list_personas():
             pass
 
 
-def db_save_persona(slug, name, config, prompt):
+def db_save_persona(slug, name, config, prompt, owner_id=None):
     from db import SessionLocal, upsert_saved_persona
     s = SessionLocal()
     try:
-        upsert_saved_persona(s, slug, name, json.dumps(config, ensure_ascii=False), prompt)
+        upsert_saved_persona(s, slug, name, json.dumps(config, ensure_ascii=False),
+                             prompt, owner_id=owner_id)
         s.commit()
     finally:
         s.close()
     _prompt_cache.pop(slug, None)
+
+
+def _persona_owner(slug):
+    """owner_id of a saved persona, or None if unowned/nonexistent."""
+    try:
+        from db import SessionLocal, SavedPersona
+        s = SessionLocal()
+        try:
+            sp = s.get(SavedPersona, slug)
+            return sp.owner_id if sp else None
+        finally:
+            s.close()
+    except Exception:
+        return None
+
+
+def _can_edit_persona(slug, user):
+    """Admins edit anything. Everyone else only their own, plus slugs that do
+    not exist yet (creating). Premade repo personas are house-owned."""
+    if not user:
+        return False
+    if user.get('is_admin'):
+        return True
+    owner = _persona_owner(slug)
+    if owner:
+        return owner == user['id']
+    # No DB row: free to create unless a premade repo persona holds the slug.
+    return not _is_premade(slug)
+
+
+_PERSONA_WRITE_RE = re.compile(r'^/api/personas/([a-z0-9_-]+)')
 
 
 PERSONA_PHOTOS_DIR = os.path.join(PERSONAS_DIR, 'photos')
@@ -570,6 +604,7 @@ except Exception as _db_err:
 
 # After init_db, so the settings table exists to read the stored key from.
 app.secret_key = _session_secret()
+app.permanent_session_lifetime = timedelta(days=30)   # "keep me signed in"
 
 
 def _persistence_warnings():
@@ -806,6 +841,24 @@ def _require_paid_account():
     return None
 
 
+@app.before_request
+def _guard_persona_writes():
+    """Stop one customer editing another's persona, covering the sub-resources
+    (media, images, outfits, phases) as well as the persona itself."""
+    if request.method in ('GET', 'HEAD', 'OPTIONS'):
+        return None
+    m = _PERSONA_WRITE_RE.match(request.path or '')
+    if not m:
+        return None
+    slug = m.group(1)
+    if slug == 'copy':          # creates a new slug; checked in the handler
+        return None
+    if not _can_edit_persona(slug, _current_user()):
+        logger.warning('PERSONA WRITE DENIED slug=%s path=%s', slug, request.path)
+        return jsonify({'error': 'Not found'}), 404
+    return None
+
+
 def _admin_password():
     return os.getenv('ADMIN_PASSWORD', '')
 
@@ -908,6 +961,9 @@ SIGNIN_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <form method="post">
 <label>Email</label><input type="email" name="email" required autocomplete="email" value="{{ email or '' }}">
 <label>Password</label><input type="password" name="password" required autocomplete="current-password">
+<label style="display:flex;align-items:center;gap:8px;margin:-4px 0 18px;color:#a1a1aa;cursor:pointer">
+<input type="checkbox" name="remember" value="1" checked
+ style="width:auto;margin:0;accent-color:#7c3aed;cursor:pointer">Keep me signed in for 30 days</label>
 <button type="submit">Sign in</button></form>
 <div class="alt">No account yet? <a href="/register">Create one</a></div>
 </div></div></body></html>"""
@@ -1322,6 +1378,7 @@ def register():
         u = create_user(s, email, generate_password_hash(password), name)
         s.commit()
         session['user_id'] = u.id
+        session.permanent = True
     finally:
         s.close()
     return redirect('/billing')
@@ -1347,7 +1404,10 @@ def login():
         u.last_login = datetime.now(timezone.utc).replace(tzinfo=None)
         s.commit()
         session['user_id'] = u.id
-        active = u.status == 'active'
+        # Permanent sessions last PERMANENT_SESSION_LIFETIME; otherwise the
+        # cookie is dropped when the browser closes.
+        session.permanent = bool(request.form.get('remember'))
+        active = u.status == 'active' or (u.role or 'user') == 'admin'
     finally:
         s.close()
     if nxt.startswith('/') and active:
@@ -2374,7 +2434,27 @@ def api_profile_save():
 
 @app.route('/api/personas')
 def api_personas():
-    """List all available personas."""
+    """List personas visible to the caller.
+
+    Signed-in customers see only personas they own; admins see everything,
+    premade repo personas included. Anonymous callers get the full list
+    because that is the public fan chat picker.
+    """
+    viewer = _current_user()
+    if viewer and not viewer.get('is_admin'):
+        own = []
+        for sp in db_list_personas(owner_id=viewer['id']):
+            config = sp.get('config', {})
+            has_img = bool(config.get('avatar')) or len(db_get_images(sp['slug'])) > 0
+            own.append({
+                'slug': sp['slug'],
+                'name': sp.get('name') or config.get('name') or sp['slug'].capitalize(),
+                'avatar': f"/api/personas/{sp['slug']}/avatar" if has_img else None,
+                'config': config,
+                'premade': False,
+            })
+        return jsonify(own)
+
     # Collect slugs from both static personas dir and /tmp (Vercel writes)
     slugs = set()
     for fname in os.listdir(PERSONAS_DIR):
@@ -2467,7 +2547,9 @@ def api_persona_save(slug):
     try:
         prompt = build_system_prompt(config)
         name = config.get('name') or slug.capitalize()
-        db_save_persona(slug, name, config, prompt)
+        me = _current_user()
+        db_save_persona(slug, name, config, prompt,
+                        owner_id=(me or {}).get('id'))
     except Exception as e:
         logging.exception('persona save failed for %s', slug)
         return jsonify({'error': f'Save failed: {e}'}), 500
@@ -2484,6 +2566,12 @@ def api_persona_copy():
         return jsonify({'error': 'Invalid source slug'}), 400
     if not new_name:
         return jsonify({'error': 'A name is required for the copy'}), 400
+    # You may only copy a persona you can already see.
+    me = _current_user()
+    if not me:
+        return jsonify({'error': 'Sign in required'}), 401
+    if not me.get('is_admin') and _persona_owner(source) != me['id']:
+        return jsonify({'error': 'Not found'}), 404
 
     # Prefer a live config sent from the editor (carries unsaved edits); else
     # pull the source config from the DB or repo files.
@@ -2508,7 +2596,9 @@ def api_persona_copy():
     try:
         slug = unique_copy_slug(new_name)
         prompt = build_system_prompt(config)
-        db_save_persona(slug, new_name, config, prompt)
+        me = _current_user()
+        db_save_persona(slug, new_name, config, prompt,
+                        owner_id=(me or {}).get('id'))
     except Exception as e:
         logging.exception('persona copy failed for %s', new_name)
         return jsonify({'error': f'Copy failed: {e}'}), 500
