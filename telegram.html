@@ -513,7 +513,7 @@ async function tguSendCode(){
   const d=await post('/api/tguser/send-code',{persona:persona(), phone});
   if(!d.ok){ err(box,d.error); return; }
   document.getElementById('tgu-code-panel').style.display='block';
-  ok(box,'Code sent to '+d.sent_to+' — check Telegram on that number.');
+  ok(box,'Code sent to '+d.sent_to+' — look for a message from "Telegram" inside the Telegram app (not SMS). If nothing arrives within 60 s, try sending again.');
 }
 
 async function tguSignIn(){
