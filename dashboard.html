@@ -586,6 +586,7 @@ async function loadPersona(slug) {
   renderForm(slug, config);
   document.getElementById('action-bar').style.display = 'flex';
   loadGallery(slug);
+  loadPhases();
   if (!config.speech_style) generateSpeechStyle(false);
   if (!config.conversion_triggers) generateTriggers();
   loadXStatus();
@@ -836,6 +837,19 @@ function renderForm(slug, cfg) {
         <textarea id="f-triggers" placeholder="Auto-fills when you save — or click Regenerate.">${esc(cfg.conversion_triggers || '')}</textarea>
         <span class="hint" id="triggers-gen-status"></span>
         <span class="hint" style="margin-top:2px;">When and how to introduce PPV offers. Editable — tweak to match your style.</span>
+      </div>
+    </div>
+
+    <div class="form-section">
+      <div class="section-title">
+        Chat Phases
+        <button type="button" class="btn-section-save" onclick="savePhases(this)">Save</button>
+      </div>
+      <span class="hint">Control the conversation arc. Each phase sets interest level and photo frequency. Photos are randomly chosen by time of day and outfit rotation — the same photo is never sent twice to the same person.</span>
+      <span class="hint" id="phases-status"></span>
+      <div id="phases-list"></div>
+      <div style="margin-top:8px;">
+        <button type="button" class="btn btn-ghost" onclick="addPhase()" style="font-size:0.78rem;">+ Add Phase</button>
       </div>
     </div>
 
@@ -1739,6 +1753,107 @@ async function generateInterests(randomize) {
     setTimeout(() => { status.textContent = ''; }, 2000);
   } catch(e) { status.textContent = '✗ ' + e.message; }
   btn.disabled = false;
+}
+
+// ── Chat phases ─────────────────────────────────────────────────────────────
+let chatPhases = [];
+
+async function loadPhases() {
+  if (!currentSlug) return;
+  try {
+    const res = await fetch('/api/personas/' + currentSlug + '/phases');
+    const data = await res.json();
+    chatPhases = data.phases || [];
+  } catch(e) { chatPhases = []; }
+  renderPhases();
+}
+
+function renderPhases() {
+  const box = document.getElementById('phases-list');
+  if (!box) return;
+  box.innerHTML = chatPhases.map((ph, i) => phaseBlock(ph, i)).join('');
+}
+
+function phaseBlock(ph, i) {
+  const dtOpts = [['exchanges','Exchanges'],['days','Days'],['exchanges_and_days','Exchanges and Days']];
+  const intOpts = ['low','medium','high'];
+  const isLast = i === chatPhases.length - 1;
+  return `
+    <div class="outfit" style="margin-bottom:6px;">
+      <div class="outfit-head" onclick="this.parentElement.classList.toggle('is-open')">
+        <span class="outfit-num">${i + 1}</span>
+        <span class="outfit-name">${esc(ph.name || 'Phase ' + (i+1))}</span>
+        <span class="outfit-meta">${esc(ph.interest || 'low')} interest · ${ph.photo_rate || 0}% photos</span>
+        <span class="outfit-caret">▶</span>
+      </div>
+      <div class="outfit-body">
+        <div class="outfit-fields">
+          <div class="field">
+            <label>Phase Name</label>
+            <input type="text" value="${esc(ph.name)}" onchange="chatPhases[${i}].name=this.value;renderPhases()">
+          </div>
+          <div class="field">
+            <label>Interest Level</label>
+            <select onchange="chatPhases[${i}].interest=this.value">
+              ${intOpts.map(o => '<option value="'+o+'"'+(ph.interest===o?' selected':'')+'>'+o+'</option>').join('')}
+            </select>
+          </div>
+          <div class="field">
+            <label>Duration Type</label>
+            <select onchange="chatPhases[${i}].duration_type=this.value;renderPhases()">
+              ${dtOpts.map(([v,l]) => '<option value="'+v+'"'+(ph.duration_type===v?' selected':'')+'>'+l+'</option>').join('')}
+            </select>
+          </div>
+          ${ph.duration_type === 'exchanges' || ph.duration_type === 'exchanges_and_days' ? `
+          <div class="field">
+            <label>Exchanges${isLast ? ' (ignored — last phase)' : ''}</label>
+            <input type="number" min="0" value="${ph.duration_value || 0}" onchange="chatPhases[${i}].duration_value=+this.value"${isLast ? ' disabled' : ''}>
+          </div>` : ''}
+          ${ph.duration_type === 'days' || ph.duration_type === 'exchanges_and_days' ? `
+          <div class="field">
+            <label>Days${isLast ? ' (ignored — last phase)' : ''}</label>
+            <input type="number" min="0" value="${ph.duration_days || 0}" onchange="chatPhases[${i}].duration_days=+this.value"${isLast ? ' disabled' : ''}>
+          </div>` : ''}
+          <div class="field full">
+            <label>Photo Sending Rate: <strong>${ph.photo_rate || 0}%</strong></label>
+            <div class="slider-row">
+              <input type="range" min="0" max="100" value="${ph.photo_rate || 0}" oninput="chatPhases[${i}].photo_rate=+this.value;this.closest('.field').querySelector('strong').textContent=this.value+'%'">
+            </div>
+            <div class="slider-labels"><span>0% text only</span><span>50%</span><span>100% every msg</span></div>
+            <span class="hint">Recommended: increase with each phase.</span>
+          </div>
+        </div>
+        ${chatPhases.length > 2 ? '<button type="button" class="btn btn-ghost" style="color:#ef4444;border-color:#ef4444;font-size:0.75rem;margin-top:6px;" onclick="removePhase('+i+')">Remove phase</button>' : ''}
+      </div>
+    </div>`;
+}
+
+function addPhase() {
+  const last = chatPhases[chatPhases.length - 1];
+  chatPhases.splice(chatPhases.length - 1, 0, {
+    name: 'Phase ' + chatPhases.length,
+    duration_type: 'exchanges', duration_value: 20, duration_days: 0,
+    interest: 'medium', photo_rate: Math.min(100, (last?.photo_rate || 20) + 10)
+  });
+  renderPhases();
+}
+
+function removePhase(i) {
+  if (chatPhases.length <= 2) return;
+  chatPhases.splice(i, 1);
+  renderPhases();
+}
+
+async function savePhases(btn) {
+  if (!currentSlug) return;
+  try {
+    const res = await fetch('/api/personas/' + currentSlug + '/phases', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phases: chatPhases })
+    });
+    if (!res.ok) throw new Error('save failed');
+    flashSaved(btn);
+  } catch(e) { flashSaved(btn, false); }
 }
 
 function v(id) { const el = document.getElementById(id); return el ? el.value.trim() : ''; }

@@ -2259,6 +2259,135 @@ def api_persona_outfits_save(slug):
     return jsonify({'ok': True, 'outfits': _outfits(slug)})
 
 
+# ── Chat phases ──────────────────────────────────────────────────────────────
+
+DEFAULT_PHASES = [
+    {'name': 'Phase 1', 'duration_type': 'exchanges', 'duration_value': 20,
+     'interest': 'low', 'photo_rate': 15},
+    {'name': 'CTA Phase', 'duration_type': 'exchanges', 'duration_value': 0,
+     'interest': 'high', 'photo_rate': 50},
+]
+
+
+def _phases(slug):
+    try:
+        saved = json.loads(_get_setting(f'phases_{slug}') or '[]')
+        if isinstance(saved, list) and saved:
+            return saved
+    except Exception:
+        pass
+    return list(DEFAULT_PHASES)
+
+
+def _clean_phase(p):
+    return {
+        'name': str(p.get('name', ''))[:60],
+        'duration_type': p.get('duration_type', 'exchanges') if p.get('duration_type') in ('exchanges', 'days', 'exchanges_and_days') else 'exchanges',
+        'duration_value': max(0, int(p.get('duration_value', 0))),
+        'duration_days': max(0, int(p.get('duration_days', 0))),
+        'interest': p.get('interest', 'low') if p.get('interest') in ('low', 'medium', 'high') else 'low',
+        'photo_rate': max(0, min(100, int(p.get('photo_rate', 20)))),
+    }
+
+
+@app.route('/api/personas/<slug>/phases', methods=['GET'])
+def api_persona_phases(slug):
+    if not re.match(r'^[a-z0-9_-]+$', slug):
+        return jsonify({'error': 'Invalid slug'}), 400
+    return jsonify({'phases': _phases(slug)})
+
+
+@app.route('/api/personas/<slug>/phases', methods=['POST'])
+def api_persona_phases_save(slug):
+    if not re.match(r'^[a-z0-9_-]+$', slug):
+        return jsonify({'error': 'Invalid slug'}), 400
+    data = request.json or {}
+    items = data.get('phases', [])
+    if not isinstance(items, list) or len(items) < 2:
+        return jsonify({'error': 'At least 2 phases required'}), 400
+    clean = [_clean_phase(p) for p in items[:10]]
+    _set_setting(f'phases_{slug}', json.dumps(clean))
+    return jsonify({'ok': True, 'phases': _phases(slug)})
+
+
+def _fan_phase(phases, fan):
+    """Determine which phase index a fan is in based on exchange count and days."""
+    exchanges = int(fan.get('in_count', 0))
+    first_ts = int(fan.get('first_in', 0))
+    days = 0
+    if first_ts:
+        days = max(0, (int(time.time()) - first_ts)) // 86400
+    total_ex = 0
+    total_days = 0
+    for i, ph in enumerate(phases):
+        dv = ph.get('duration_value', 0)
+        dd = ph.get('duration_days', 0)
+        dt = ph.get('duration_type', 'exchanges')
+        if i == len(phases) - 1:
+            return i
+        if dt == 'exchanges':
+            if dv <= 0 or exchanges < total_ex + dv:
+                return i
+            total_ex += dv
+        elif dt == 'days':
+            if dd <= 0 or days < total_days + dd:
+                return i
+            total_days += dd
+        else:  # exchanges_and_days
+            if (dv <= 0 or exchanges < total_ex + dv) and (dd <= 0 or days < total_days + dd):
+                return i
+            total_ex += dv
+            total_days += dd
+    return len(phases) - 1
+
+
+def _fan_sent_photos(persona, chat_id):
+    """Set of media IDs already sent to this fan."""
+    try:
+        raw = json.loads(_get_setting(f'sent_photos_{persona}_{chat_id}') or '[]')
+        return set(raw) if isinstance(raw, list) else set()
+    except Exception:
+        return set()
+
+
+def _fan_record_sent_photo(persona, chat_id, media_id):
+    sent = _fan_sent_photos(persona, chat_id)
+    sent.add(media_id)
+    _set_setting(f'sent_photos_{persona}_{chat_id}', json.dumps(list(sent)))
+
+
+def _pick_phase_photo(media_rows, outfits, sent_ids):
+    """Pick a random photo based on time of day, avoiding already-sent ones."""
+    available = [r for r in media_rows if r.id not in sent_ids]
+    if not available:
+        return None
+    hour = datetime.now(timezone.utc).hour
+    if 6 <= hour < 12:
+        tod = 'Day time'
+    elif 12 <= hour < 17:
+        tod = 'Day time'
+    elif 17 <= hour < 21:
+        tod = 'Golden hour'
+    else:
+        tod = 'Night time'
+    outfit_day = (datetime.now(timezone.utc).toordinal() % OUTFIT_COUNT) + 1
+    scored = []
+    for r in available:
+        s = 1
+        o = _outfit_of(r, outfits)
+        if o and o.get('lighting', '').lower() == tod.lower():
+            s += 2
+        try:
+            if int(r.outfit) == outfit_day:
+                s += 3
+        except (TypeError, ValueError):
+            pass
+        scored.append((s, r))
+    scored.sort(key=lambda x: -x[0])
+    top = [x for x in scored if x[0] == scored[0][0]]
+    return random.choice(top)[1]
+
+
 @app.route('/api/personas/<slug>/media', methods=['GET'])
 def api_persona_media_list(slug):
     if not re.match(r'^[a-z0-9_-]+$', slug):
@@ -5574,10 +5703,17 @@ def _tg_handle_update(persona, update):
     fan = fans.get(str(chat_id)) or {}
     fan['name'] = who
     fan['last_in'] = int(time.time())
+    if not fan.get('first_in'):
+        fan['first_in'] = int(time.time())
     fan['followups'] = 0
     fan['in_count'] = int(fan.get('in_count', 0)) + (0 if text == '/start' else 1)
 
     _log_x_message(persona, _tg_fan_key(chat_id), who, 'in', text)
+
+    phases = _phases(persona)
+    phase_idx = _fan_phase(phases, fan)
+    current_phase = phases[phase_idx] if phase_idx < len(phases) else phases[-1]
+    photo_rate = current_phase.get('photo_rate', 20)
 
     cta_url = (bot.get('cta_url') or '').strip()
     cta_due = bool(cta_url) and not fan.get('cta_sent') and fan['in_count'] >= cfg['cta_after']
@@ -5623,13 +5759,22 @@ def _tg_handle_update(persona, update):
         return
 
     photo_data = None
+    picked_media_id = None
     reply, photo_tags = _tg_parse_photo_tag(reply)
+    sent_ids = _fan_sent_photos(persona, chat_id) if media_rows else set()
+    should_send_photo = media_rows and random.randint(1, 100) <= photo_rate
     if photo_tags and media_rows:
         safe = {k: v for k, v in photo_tags.items()
                 if k in ('purpose', 'lighting', 'location', 'outfit')}
         picked = _pick_media(media_rows, outfits=media_outfits, **safe)
+        if picked and picked.id not in sent_ids:
+            photo_data = picked.image_data
+            picked_media_id = picked.id
+    elif should_send_photo and not photo_tags:
+        picked = _pick_phase_photo(media_rows, media_outfits, sent_ids)
         if picked:
             photo_data = picked.image_data
+            picked_media_id = picked.id
 
     if cta_due:
         label = (bot.get('cta_label') or 'come see').strip()
@@ -5638,6 +5783,8 @@ def _tg_handle_update(persona, update):
         fan['cta_count'] = int(fan.get('cta_count', 0)) + 1
 
     _tg_send_human(persona, chat_id, reply, incoming=text, photo_data=photo_data)
+    if picked_media_id:
+        _fan_record_sent_photo(persona, chat_id, picked_media_id)
     _log_x_message(persona, _tg_fan_key(chat_id), who, 'out', reply)
     fan['last_out'] = int(time.time())
     fans[str(chat_id)] = fan
