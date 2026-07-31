@@ -667,7 +667,7 @@ function renderForm(slug, cfg) {
     </div>
 
     <div class="form-section">
-      <div class="section-title">Identity</div>
+      <div class="section-title">Identity<button type="button" class="btn-section-save" onclick="saveSection(this)">Save</button></div>
       <div class="field-row" style="align-items:flex-start;">
         <div class="field" style="flex:0 0 auto; text-align:center;">
           <label>Profile Picture</label>
@@ -735,6 +735,7 @@ function renderForm(slug, cfg) {
         <span style="display:flex; gap:6px;">
           <button type="button" class="btn-ai" id="gen-face-btn" onclick="generateFirstPhoto()" title="Generate a new fictional face">✨ New face</button>
           <button type="button" class="btn-ai" style="background:#3f3f46;" id="gen-more-btn" onclick="generateMorePhotos()" title="Add more shots of the same person">＋ More of her</button>
+          <button type="button" class="btn-section-save" style="margin-left:0;" onclick="savePhotosSection(this)">Save</button>
         </span>
       </div>
       <div class="photo-grid" id="photo-grid"></div>
@@ -744,19 +745,15 @@ function renderForm(slug, cfg) {
     </div>
 
     <div class="form-section">
-      <div class="section-title" style="display:flex;align-items:center;justify-content:space-between;">
-        <span>Media Library</span>
-        <label class="btn-ai" style="cursor:pointer;margin:0;font-size:12px;">
-          + Upload Photos
-          <input type="file" accept="image/*" multiple style="display:none;" onchange="onMediaFiles(event)">
-        </label>
+      <div class="section-title">
+        Outfits &amp; Media
+        <button type="button" class="btn-section-save" onclick="saveOutfits(this)">Save</button>
       </div>
-      <span class="hint">Six outfits, each one consistent look — same clothing, same place, same setting. Assign every photo to an outfit; the AI stays within one outfit when it sends.</span>
-      <span class="hint" id="media-status" style="color:#f87171;"></span>
-      <div id="outfit-defs" style="display:flex;flex-direction:column;gap:8px;margin-top:10px;"></div>
-      <div id="media-grid" style="display:flex;flex-direction:column;gap:16px;margin-top:14px;"></div>
-      <span class="hint" style="margin-top:4px;">
-        Fill in the six outfits above, then assign each photo to one.
+      <span class="hint">Six outfits, each one consistent look — same clothing, same place, same setting. Open an outfit to describe it and add its photos.</span>
+      <span class="hint" id="media-status"></span>
+      <div id="outfit-list" style="display:flex;flex-direction:column;gap:8px;"></div>
+      <input type="file" id="outfit-file-input" accept="image/*" multiple style="display:none;" onchange="onMediaFiles(event)">
+      <span class="hint">
         <b>Purpose</b> marks what a shot is for: Main (profile), Tease (flirty preview),
         Behind-the-scenes, Custom. Lighting and place come from the outfit, so every
         photo in a set stays consistent.
@@ -764,7 +761,7 @@ function renderForm(slug, cfg) {
     </div>
 
     <div class="form-section">
-      <div class="section-title">Voice &amp; Speech Style</div>
+      <div class="section-title">Voice &amp; Speech Style<button type="button" class="btn-section-save" onclick="saveSection(this)">Save</button></div>
       <div class="field full">
         <label style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px;">
           <span>Speech Style Rules</span>
@@ -793,7 +790,7 @@ function renderForm(slug, cfg) {
     </div>
 
     <div class="form-section">
-      <div class="section-title">Interests &amp; Hooks</div>
+      <div class="section-title">Interests &amp; Hooks<button type="button" class="btn-section-save" onclick="saveSection(this)">Save</button></div>
       <div class="field full">
         <label style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px;">
           <span>Topics the persona naturally returns to</span>
@@ -809,7 +806,7 @@ function renderForm(slug, cfg) {
     </div>
 
     <div class="form-section">
-      <div class="section-title">Flirt &amp; Content Rules</div>
+      <div class="section-title">Flirt &amp; Content Rules<button type="button" class="btn-section-save" onclick="saveSection(this)">Save</button></div>
       <div class="field">
         <label>Flirt Escalation Pace</label>
         <select id="f-flirt">${opt(['slow', 'moderate', 'fast', 'instant'], cfg.flirt_pace)}</select>
@@ -830,7 +827,7 @@ function renderForm(slug, cfg) {
     </div>
 
     <div class="form-section">
-      <div class="section-title">Conversion Funnel</div>
+      <div class="section-title">Conversion Funnel<button type="button" class="btn-section-save" onclick="saveSection(this)">Save</button></div>
       <div class="field full">
         <label style="display:flex; align-items:center; justify-content:space-between;">
           <span>Conversion Triggers</span>
@@ -1197,6 +1194,57 @@ function collectConfig() {
   };
 }
 
+function flashSaved(btn, ok = true) {
+  if (!btn) return;
+  const original = btn.dataset.label || btn.textContent;
+  btn.dataset.label = original;
+  btn.textContent = ok ? '✓ Saved' : '✗ Failed';
+  btn.classList.add(ok ? 'saved' : 'failed');
+  setTimeout(() => {
+    btn.textContent = original;
+    btn.classList.remove('saved', 'failed');
+  }, 1600);
+}
+
+async function savePhotosSection(btn) {
+  if (!currentSlug) return;
+  try {
+    await saveGallery(currentSlug);
+    flashSaved(btn);
+  } catch(e) { flashSaved(btn, false); }
+}
+
+// Every section edits one shared config object, so a section Save writes the
+// whole config — it just reports back where the user is looking.
+async function saveSection(btn) {
+  if (!currentSlug) return;
+  const config = collectConfig();
+  const ageNum = parseInt(config.age);
+  if (!config.age || isNaN(ageNum) || ageNum < 18) {
+    alert('Age must be 18 or older.');
+    document.getElementById('f-age').focus();
+    return;
+  }
+  try {
+    const res = await fetch('/api/personas/' + currentSlug, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config)
+    });
+    const data = await res.json();
+    if (res.status === 409 && data.error === 'premade_readonly') {
+      // Originals are read-only; fall back to the full save, which forks a copy.
+      flashSaved(btn);
+      return savePersona();
+    }
+    if (!data.ok) throw new Error(data.error || 'save failed');
+    lsSavePersona(currentSlug, config);
+    if (data.prompt) localStorage.setItem('persona_prompt_' + currentSlug, data.prompt);
+    flashSaved(btn);
+  } catch(e) {
+    flashSaved(btn, false);
+  }
+}
+
 async function savePersona() {
   if (!currentSlug) return;
   const config = collectConfig();
@@ -1354,58 +1402,31 @@ async function saveGallery(slug) {
 const MEDIA_PURPOSES = ['', 'Main', 'Tease', 'Behind-the-scenes', 'Custom'];
 const MEDIA_LIGHTING = ['', 'Day time', 'Night time', 'Golden hour', 'Studio', 'Indoor', 'Outdoor'];
 let mediaOutfits = [];
+let mediaItems = [];
+let openOutfit = null;      // which outfit is expanded
+let uploadTarget = null;    // outfit the file picker is adding to
 
 function setMediaStatus(msg, ok) {
   const el = document.getElementById('media-status');
   if (!el) return;
   el.textContent = msg || '';
-  el.style.color = ok === true ? '#22c55e' : ok === false ? '#ef4444' : '#a1a1aa';
+  el.style.color = ok === true ? '#22c55e' : ok === false ? '#ef4444' : '#5a5a63';
 }
 
 async function loadMedia() {
   if (!currentSlug) return;
-  const grid = document.getElementById('media-grid');
-  if (!grid) return;
+  if (!document.getElementById('outfit-list')) return;
   try {
     const res = await fetch('/api/personas/' + currentSlug + '/media');
     const data = await res.json();
     mediaOutfits = data.outfits || [];
-    renderOutfitDefs();
-    renderMedia(data.items || []);
+    mediaItems = data.items || [];
+    renderOutfits();
   } catch(e) { setMediaStatus('Could not load media', false); }
 }
 
-function renderOutfitDefs() {
-  const box = document.getElementById('outfit-defs');
-  if (!box) return;
-  box.innerHTML = mediaOutfits.map(o => `
-    <div style="display:grid;grid-template-columns:34px 1fr 1fr 1fr 1fr;gap:8px;align-items:center;
-                background:#18181b;border:1px solid #27272a;border-radius:8px;padding:8px 10px;">
-      <span style="font-size:12px;color:#71717a;font-weight:600;">${o.n}</span>
-      <input value="${esc(o.name)}" placeholder="Name (e.g. Cosy night in)"
-        onchange="updateOutfit(${o.n},'name',this.value)">
-      <input value="${esc(o.clothing)}" placeholder="Clothing"
-        onchange="updateOutfit(${o.n},'clothing',this.value)">
-      <input value="${esc(o.location)}" placeholder="Place / setting"
-        onchange="updateOutfit(${o.n},'location',this.value)">
-      <select onchange="updateOutfit(${o.n},'lighting',this.value)">
-        ${MEDIA_LIGHTING.map(l => `<option${l===o.lighting?' selected':''}>${l}</option>`).join('')}
-      </select>
-    </div>`).join('');
-}
-
-async function updateOutfit(n, field, value) {
-  const o = mediaOutfits[n - 1];
-  if (!o) return;
-  o[field] = value;
-  try {
-    await fetch('/api/personas/' + currentSlug + '/outfits', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ outfits: mediaOutfits })
-    });
-    setMediaStatus('✓ Outfit saved', true);
-    loadMedia();
-  } catch(e) { setMediaStatus('✗ Save failed', false); }
+function photosOf(n) {
+  return mediaItems.filter(it => String(it.outfit) === String(n));
 }
 
 function outfitLabel(o) {
@@ -1414,54 +1435,132 @@ function outfitLabel(o) {
          (bits.length ? ' · ' + bits.join(', ') : '');
 }
 
-function renderMedia(items) {
-  const grid = document.getElementById('media-grid');
-  if (!grid) return;
-  if (!items.length) {
-    grid.innerHTML = '<span class="hint">No photos yet. Upload some above, then assign each to an outfit.</span>';
-    return;
-  }
-  const groups = {};
-  items.forEach(it => { (groups[it.outfit || ''] = groups[it.outfit || ''] || []).push(it); });
-  const keys = mediaOutfits.map(o => String(o.n)).concat(['']);
-  grid.innerHTML = keys.filter(k => groups[k]).map(k => {
-    const o = mediaOutfits[parseInt(k, 10) - 1];
-    const title = o ? outfitLabel(o) : 'Unassigned — pick an outfit for these';
-    return `
-      <div>
-        <div style="font-size:12px;font-weight:600;color:${o ? '#a1a1aa' : '#f59e0b'};margin-bottom:6px;">
-          ${esc(title)} <span style="font-weight:400;">(${groups[k].length})</span>
-        </div>
-        <div style="display:flex;flex-direction:column;gap:8px;">
-          ${groups[k].map(it => mediaCard(it)).join('')}
-        </div>
-      </div>`;
-  }).join('');
+function renderOutfits() {
+  const box = document.getElementById('outfit-list');
+  if (!box) return;
+  const unassigned = mediaItems.filter(it => !it.outfit);
+  box.innerHTML = mediaOutfits.map(o => outfitBlock(o)).join('') +
+    (unassigned.length ? unassignedBlock(unassigned) : '');
 }
 
-function mediaCard(it) {
+function outfitBlock(o) {
+  const photos = photosOf(o.n);
+  const meta = [o.clothing, o.location, o.lighting].filter(Boolean).join(' · ');
+  const open = openOutfit === o.n;
+  const named = !!o.name;
   return `
-    <div style="display:flex;gap:12px;background:#18181b;border:1px solid #27272a;border-radius:8px;padding:10px;">
-      <img src="${it.thumb}" style="width:70px;height:90px;object-fit:cover;border-radius:6px;flex-shrink:0;">
-      <div style="flex:1;display:grid;grid-template-columns:1fr 1fr;gap:8px;">
-        <div><label style="font-size:11px;">Outfit</label>
-          <select onchange="updateMedia('${it.id}','outfit',this.value)">
-            <option value=""${!it.outfit ? ' selected' : ''}>— pick an outfit —</option>
-            ${mediaOutfits.map(o => `<option value="${o.n}"${String(o.n)===String(it.outfit)?' selected':''}>${esc(outfitLabel(o))}</option>`).join('')}
-          </select></div>
-        <div><label style="font-size:11px;">Purpose</label>
-          <select onchange="updateMedia('${it.id}','purpose',this.value)">
-            ${MEDIA_PURPOSES.map(p => `<option${p===it.purpose?' selected':''}>${p}</option>`).join('')}
-          </select></div>
+    <div class="outfit${open ? ' is-open' : ''}">
+      <div class="outfit-head" onclick="toggleOutfit(${o.n})">
+        <span class="outfit-num${named ? '' : ' empty'}">${o.n}</span>
+        <span class="outfit-name${named ? '' : ' empty'}">${named ? esc(o.name) : 'Untitled outfit'}</span>
+        <span class="outfit-meta">${esc(meta)}</span>
+        <span class="outfit-count${photos.length ? '' : ' zero'}">${photos.length} photo${photos.length === 1 ? '' : 's'}</span>
+        <span class="outfit-caret">▶</span>
       </div>
-      <button type="button" onclick="deleteMedia('${it.id}')"
-        style="background:none;border:none;color:#ef4444;cursor:pointer;font-size:18px;align-self:start;">×</button>
+      <div class="outfit-body">
+        <div class="outfit-fields">
+          <div class="field">
+            <label>Name</label>
+            <input value="${esc(o.name)}" placeholder="e.g. In bed"
+              onchange="editOutfit(${o.n},'name',this.value)">
+          </div>
+          <div class="field">
+            <label>Clothing</label>
+            <input value="${esc(o.clothing)}" placeholder="e.g. black shirt"
+              onchange="editOutfit(${o.n},'clothing',this.value)">
+          </div>
+          <div class="field">
+            <label>Place / setting</label>
+            <input value="${esc(o.location)}" placeholder="e.g. home in bed"
+              onchange="editOutfit(${o.n},'location',this.value)">
+          </div>
+          <div class="field">
+            <label>Lighting</label>
+            <select onchange="editOutfit(${o.n},'lighting',this.value)">
+              ${MEDIA_LIGHTING.map(l => `<option${l === o.lighting ? ' selected' : ''}>${l}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div class="outfit-photos">
+          ${photos.map(it => photoTile(it)).join('')}
+          <div class="outfit-drop" onclick="addPhotosTo(${o.n})">+ Add photos</div>
+        </div>
+      </div>
     </div>`;
 }
 
+function unassignedBlock(items) {
+  return `
+    <div class="outfit is-open" style="border-color:#7c5010;">
+      <div class="outfit-head" style="cursor:default;">
+        <span class="outfit-num empty">?</span>
+        <span class="outfit-name" style="color:#f59e0b;">Unassigned</span>
+        <span class="outfit-meta">Pick an outfit for each so they can be sent</span>
+        <span class="outfit-count">${items.length}</span>
+      </div>
+      <div class="outfit-body">
+        <div class="outfit-photos">${items.map(it => photoTile(it)).join('')}</div>
+      </div>
+    </div>`;
+}
+
+function photoTile(it) {
+  return `
+    <div class="outfit-photo">
+      <img src="${it.thumb}" alt="">
+      <button type="button" class="rm" title="Remove" onclick="deleteMedia('${it.id}')">×</button>
+      <select title="Purpose" onchange="updateMedia('${it.id}','purpose',this.value)">
+        ${MEDIA_PURPOSES.map(p => `<option${p === it.purpose ? ' selected' : ''}>${p || '— purpose —'}</option>`).join('')}
+      </select>
+    </div>`;
+}
+
+function toggleOutfit(n) {
+  openOutfit = openOutfit === n ? null : n;
+  renderOutfits();
+}
+
+// Held in memory until Save, so a half-typed outfit never reaches the AI.
+function editOutfit(n, field, value) {
+  const o = mediaOutfits[n - 1];
+  if (!o) return;
+  o[field] = value;
+  setMediaStatus('Unsaved changes — press Save', null);
+  const head = document.querySelectorAll('.outfit')[n - 1];
+  if (head) {
+    const meta = [o.clothing, o.location, o.lighting].filter(Boolean).join(' · ');
+    head.querySelector('.outfit-meta').textContent = meta;
+    const nameEl = head.querySelector('.outfit-name');
+    nameEl.textContent = o.name || 'Untitled outfit';
+    nameEl.classList.toggle('empty', !o.name);
+    head.querySelector('.outfit-num').classList.toggle('empty', !o.name);
+  }
+}
+
+async function saveOutfits(btn) {
+  if (!currentSlug) { setMediaStatus('Save the persona first.', false); return; }
+  try {
+    const res = await fetch('/api/personas/' + currentSlug + '/outfits', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ outfits: mediaOutfits })
+    });
+    if (!res.ok) throw new Error('save failed');
+    flashSaved(btn);
+    setMediaStatus('', null);
+    loadMedia();
+  } catch(e) { flashSaved(btn, false); setMediaStatus('Could not save outfits', false); }
+}
+
+function addPhotosTo(n) {
+  uploadTarget = n;
+  document.getElementById('outfit-file-input').click();
+}
+
 function onMediaFiles(ev) {
-  if (!currentSlug) { setMediaStatus('Save the persona first.', false); ev.target.value=''; return; }
+  if (!currentSlug) { setMediaStatus('Save the persona first.', false); ev.target.value = ''; return; }
   const files = Array.from(ev.target.files || []);
+  if (!files.length) return;
+  const target = uploadTarget;
   setMediaStatus('Uploading ' + files.length + ' photo(s)…', null);
   let done = 0;
   files.forEach(file => {
@@ -1470,14 +1569,19 @@ function onMediaFiles(ev) {
       try {
         await fetch('/api/personas/' + currentSlug + '/media', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: e.target.result })
+          body: JSON.stringify({ image: e.target.result, outfit: target ? String(target) : '' })
         });
       } catch(err) {}
-      if (++done === files.length) { setMediaStatus('✓ Uploaded — now assign each to an outfit', true); loadMedia(); }
+      if (++done === files.length) {
+        setMediaStatus('✓ Added ' + files.length + ' photo(s)', true);
+        openOutfit = target;
+        loadMedia();
+      }
     };
     reader.readAsDataURL(file);
   });
   ev.target.value = '';
+  uploadTarget = null;
 }
 
 async function updateMedia(id, field, value) {

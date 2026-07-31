@@ -1282,6 +1282,160 @@ body.page-dashboard .conn-dot.err { background: #ef4444; }
 .btn-ai:active { transform: translateY(0); }
 .btn-ai:disabled { opacity: 0.5; cursor: default; transform: none; box-shadow: none; }
 
+/* Per-section save button, sits at the right edge of a .section-title */
+.btn-section-save {
+  margin-left: auto;
+  background: #232327;
+  color: #a1a1aa;
+  border: 1px solid #2f2f36;
+  border-radius: 7px;
+  padding: 4px 12px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.btn-section-save:hover { background: #2c2c32; color: #e4e4e7; border-color: #3f3f46; }
+.btn-section-save.saved { background: #14532d; color: #86efac; border-color: #166534; }
+.btn-section-save.failed { background: #4c1d24; color: #fca5a5; border-color: #7f1d1d; }
+
+/* ── Outfits ──────────────────────────────────────────────────────────────── */
+
+.outfit {
+  background: #131316;
+  border: 1px solid #232327;
+  border-radius: 11px;
+  overflow: hidden;
+  transition: border-color 0.15s;
+}
+.outfit:hover { border-color: #2f2f36; }
+.outfit.is-open { border-color: #3a3a55; }
+
+.outfit-head {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 11px 14px;
+  cursor: pointer;
+  user-select: none;
+}
+.outfit-head:hover { background: #17171b; }
+
+.outfit-num {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  background: linear-gradient(135deg, #6366f1, #ec4899);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.outfit-num.empty { background: #27272a; color: #52525b; }
+
+.outfit-name { font-size: 0.85rem; font-weight: 600; color: #e4e4e7; }
+.outfit-name.empty { color: #52525b; font-weight: 400; font-style: italic; }
+.outfit-meta {
+  font-size: 0.72rem;
+  color: #71717a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.outfit-count {
+  flex-shrink: 0;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: #a1a1aa;
+  background: #232327;
+  border-radius: 9999px;
+  padding: 2px 9px;
+}
+.outfit-count.zero { color: #52525b; background: #1c1c20; }
+.outfit-caret {
+  flex-shrink: 0;
+  color: #52525b;
+  font-size: 0.7rem;
+  transition: transform 0.18s;
+}
+.outfit.is-open .outfit-caret { transform: rotate(90deg); }
+
+.outfit-body {
+  display: none;
+  padding: 4px 14px 14px;
+  border-top: 1px solid #202024;
+}
+.outfit.is-open .outfit-body { display: block; }
+
+.outfit-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  padding: 14px 0;
+}
+
+.outfit-photos {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 10px;
+  padding-top: 4px;
+}
+.outfit-photo {
+  position: relative;
+  aspect-ratio: 3 / 4;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #1c1c20;
+  border: 1px solid #27272a;
+}
+.outfit-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.outfit-photo select {
+  position: absolute;
+  left: 5px; right: 5px; bottom: 5px;
+  width: auto;
+  font-size: 0.66rem;
+  padding: 3px 6px;
+  background: rgba(9,9,11,0.9);
+  border: 1px solid #3f3f46;
+  border-radius: 5px;
+  color: #e4e4e7;
+}
+.outfit-photo .rm {
+  position: absolute;
+  top: 4px; right: 4px;
+  width: 20px; height: 20px;
+  border: none;
+  border-radius: 5px;
+  background: rgba(9,9,11,0.8);
+  color: #f87171;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.outfit-photo:hover .rm { opacity: 1; }
+.outfit-photo .rm:hover { background: #7f1d1d; color: #fff; }
+
+.outfit-drop {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 3 / 4;
+  border: 1px dashed #3f3f46;
+  border-radius: 8px;
+  color: #52525b;
+  font-size: 0.72rem;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.outfit-drop:hover { border-color: #6366f1; color: #a1a1aa; background: #17171b; }
+
 .modal-overlay {
   position: fixed;
   inset: 0;
