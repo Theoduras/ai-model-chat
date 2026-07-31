@@ -5101,6 +5101,19 @@ def _fanvue_app():
     }
 
 
+_fanvue_lock_guard = threading.Lock()
+_fanvue_round_locks = {}
+_fanvue_refresh_locks = {}
+
+
+def _fanvue_persona_lock(store, persona):
+    with _fanvue_lock_guard:
+        lk = store.get(persona)
+        if lk is None:
+            lk = store[persona] = threading.Lock()
+        return lk
+
+
 def _fanvue_tokens(persona):
     try:
         return json.loads(_get_setting(f'fanvue_tokens_{persona}') or '{}')
@@ -5144,21 +5157,30 @@ def _fanvue_token_post(params):
 
 
 def _fanvue_refresh(persona):
-    """Refresh a persona's Fanvue access token. Returns the new token or None."""
-    t = _fanvue_tokens(persona)
-    app_creds = _fanvue_app()
-    rt = t.get('refresh_token')
-    if not rt or not app_creds['client_id'] or not app_creds['client_secret']:
-        return None
-    try:
-        td = _fanvue_token_post({'grant_type': 'refresh_token', 'refresh_token': rt})
-    except Exception:
-        return None
-    t['access_token'] = td.get('access_token', t.get('access_token'))
-    if td.get('refresh_token'):
-        t['refresh_token'] = td['refresh_token']
-    _fanvue_save_tokens(persona, t)
-    return t['access_token']
+    """Refresh a persona's Fanvue access token. Returns the new token or None.
+
+    Serialised per persona: Fanvue rotates the refresh token, so two threads
+    redeeming the same one would invalidate the account's connection."""
+    lock = _fanvue_persona_lock(_fanvue_refresh_locks, persona)
+    before = _fanvue_tokens(persona).get('access_token')
+    with lock:
+        t = _fanvue_tokens(persona)
+        # Another thread refreshed while we waited — reuse its token.
+        if t.get('access_token') and t.get('access_token') != before:
+            return t['access_token']
+        app_creds = _fanvue_app()
+        rt = t.get('refresh_token')
+        if not rt or not app_creds['client_id'] or not app_creds['client_secret']:
+            return None
+        try:
+            td = _fanvue_token_post({'grant_type': 'refresh_token', 'refresh_token': rt})
+        except Exception:
+            return None
+        t['access_token'] = td.get('access_token', t.get('access_token'))
+        if td.get('refresh_token'):
+            t['refresh_token'] = td['refresh_token']
+        _fanvue_save_tokens(persona, t)
+        return t['access_token']
 
 
 def _fanvue_api(method, path, access_token, body=None):
@@ -6168,6 +6190,31 @@ def api_fanvue_auto():
                     'ppv_require_payment': (_get_setting(f'fanvue_ppv_require_payment_{persona}') or '0') == '1'})
 
 
+@app.route('/api/fanvue/accounts')
+def api_fanvue_accounts():
+    """Every persona's Fanvue connection at a glance, so several accounts can be
+    watched running side by side."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    enabled = set(_fanvue_enabled_list())
+    out = []
+    slugs = {p.get('slug') for p in db_list_personas()} | enabled
+    for slug in sorted(s for s in slugs if s):
+        tok = _fanvue_tokens(slug)
+        if not tok.get('access_token') and slug not in enabled:
+            continue
+        lock = _fanvue_round_locks.get(slug)
+        out.append({
+            'persona': slug,
+            'name': slug,
+            'connected': bool(tok.get('access_token')),
+            'auto': slug in enabled,
+            'running': bool(lock and lock.locked()),
+            'creator': _fanvue_creator(slug).get('handle', ''),
+        })
+    return jsonify({'accounts': out, 'active': sum(1 for a in out if a['auto'] and a['connected'])})
+
+
 @app.route('/api/fanvue/auto-run', methods=['POST'])
 def api_fanvue_auto_run():
     """Run one auto-reply round now (also used by the background worker)."""
@@ -6179,7 +6226,8 @@ def api_fanvue_auto_run():
     if not _fanvue_tokens(persona).get('access_token'):
         return jsonify({'ok': False, 'error': 'Fanvue not connected for this persona.'}), 400
     try:
-        actions, log = _fanvue_auto_round(persona)
+        res = _fanvue_round_now(persona, block=True)
+        actions, log = res if res else ({}, [])
         return jsonify({'ok': True, 'actions': actions, 'log': log})
     except url_error.HTTPError as e:
         return jsonify({'ok': False, 'error': f'Fanvue API {e.code}: {e.read()[:200].decode(errors="ignore")}'}), 400
@@ -6233,22 +6281,57 @@ def api_fanvue_debug():
 _fanvue_worker_started = [False]
 
 
+def _fanvue_round_now(persona, block=False):
+    """Run one round for a persona, never letting that persona overlap itself.
+    Returns (actions, log) or None when a round was already in flight."""
+    lock = _fanvue_persona_lock(_fanvue_round_locks, persona)
+    if not lock.acquire(blocking=block):
+        return None
+    try:
+        with app.app_context():
+            return _fanvue_auto_round(persona)
+    finally:
+        lock.release()
+
+
 def _fanvue_worker():
     """Server-side loop: runs an auto-reply round for every enabled persona on an
     interval. Reads the enabled list + tokens from the DB, so after a redeploy the
-    new instance resumes automatically without a browser tab."""
+    new instance resumes automatically without a browser tab.
+
+    Rounds run in parallel, one thread per connected account, so a slow or
+    chatty account never delays the others. Per-persona locks mean an account
+    whose round outlives the interval is simply skipped next tick."""
     import time as _t
+    from concurrent.futures import ThreadPoolExecutor
+    pool = ThreadPoolExecutor(max_workers=max(1, int(os.getenv('FANVUE_WORKERS', '8'))),
+                              thread_name_prefix='fanvue')
+
+    pending = set()
+
+    def _one(persona):
+        try:
+            _fanvue_round_now(persona)
+        except Exception:
+            logger.exception('fanvue round failed for %s', persona)
+        finally:
+            with _fanvue_lock_guard:
+                pending.discard(persona)
+
     while True:
         try:
-            for persona in _fanvue_enabled_list():
-                try:
-                    if _fanvue_tokens(persona).get('access_token'):
-                        with app.app_context():
-                            _fanvue_auto_round(persona)
-                except Exception:
-                    pass
+            live = [p for p in _fanvue_enabled_list()
+                    if _fanvue_tokens(p).get('access_token')]
+            for persona in live:
+                # Don't queue an account that is still running or waiting from
+                # an earlier tick — the queue would grow without bound.
+                with _fanvue_lock_guard:
+                    if persona in pending:
+                        continue
+                    pending.add(persona)
+                pool.submit(_one, persona)
         except Exception:
-            pass
+            logger.exception('fanvue worker tick failed')
         _t.sleep(20)
 
 
