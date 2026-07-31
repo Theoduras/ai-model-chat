@@ -41,9 +41,18 @@
     document.body.appendChild(bar);
   }
 
+  // Developer tool: admins only, even on a dev host. Normal customers reach
+  // the platforms through the dashboard's Platforms dropdown instead.
+  function mountIfAdmin() {
+    fetch('/api/me')
+      .then(function (r) { return r.json(); })
+      .then(function (me) { if (me && me.is_admin) mount(); })
+      .catch(function () {});
+  }
+
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', mount);
+    document.addEventListener('DOMContentLoaded', mountIfAdmin);
   } else {
-    mount();
+    mountIfAdmin();
   }
 })();

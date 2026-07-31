@@ -772,6 +772,39 @@ body.page-dashboard header {
 body.page-dashboard header h1 { font-size: 1rem; font-weight: 600; color: #fff; letter-spacing: -0.3px; }
 body.page-dashboard .badge { font-size: 0.7rem; background: var(--border); padding: 2px 8px; border-radius: 9999px; color: var(--text-3); }
 
+/* Admin-only chrome. Hidden while the identity check is in flight so it never
+   flashes for a normal user, then revealed only for admins. */
+body.auth-pending .admin-only,
+body:not(.is-admin) .admin-only { display: none !important; }
+
+/* Without the preview panel the editor should take the freed column. */
+body:not(.is-admin) .layout { grid-template-columns: 280px 1fr; }
+
+/* ── Header dropdown ── */
+.hdr-dd { position: relative; display: inline-flex; }
+.hdr-dd > button {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: none; border: 1px solid transparent; cursor: pointer;
+  font-family: var(--font);
+}
+.hdr-dd > button svg { transition: transform 0.18s; }
+.hdr-dd.open > button { background: var(--surface); color: var(--text); border-color: var(--border); }
+.hdr-dd.open > button svg { transform: rotate(180deg); }
+.hdr-menu {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 200;
+  min-width: 170px; padding: 6px;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--r); box-shadow: 0 12px 32px rgba(0,0,0,0.5);
+  display: none; flex-direction: column; gap: 2px;
+}
+.hdr-dd.open .hdr-menu { display: flex; }
+.hdr-menu a {
+  display: block; padding: 9px 12px; border-radius: var(--r-sm);
+  color: var(--text-2); text-decoration: none; font-size: 0.82rem;
+  transition: background 0.14s, color 0.14s;
+}
+.hdr-menu a:hover { background: var(--surface); color: var(--text); }
+
 .hdr-nav-link {
   display: inline-flex; align-items: center; gap: 5px;
   font-size: 0.78rem; color: var(--text-3); text-decoration: none;
