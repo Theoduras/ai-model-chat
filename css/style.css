@@ -98,24 +98,22 @@ h1, h2, h3, .brand, .display {
   .devnav-btn { padding: 5px 9px; font-size: 0.72rem; }
 }
 
-/* ── CSS Custom Properties (chat palette) ── */
+/* ── Chat-page aliases ──
+   Only names the chat page uses that the shared tokens do not already provide.
+   Re-declaring a shared name here (--bg, --text, --accent…) would either shadow
+   it globally or, if it referenced itself, form a cycle that voids the property
+   everywhere — which is what turned the dashboard white. */
 :root {
-  --bg: var(--bg);
-  --surface: var(--panel);
-  --surface2: var(--surface);
-  --border: var(--border);
-  --accent: var(--accent);
-  --accent-msg: var(--accent-2);
-  --text: var(--text);
-  --text-muted: var(--text-muted);
-  --text-dim: var(--text-muted);
-  --online: var(--ok);
-  --bubble-bot: var(--panel-2);
-  --bubble-user: var(--accent-soft);
+  --surface2:      var(--surface);
+  --accent-msg:    var(--accent-2);
+  --text-dim:      var(--text-muted);
+  --online:        var(--ok);
+  --bubble-bot:    var(--panel-2);
+  --bubble-user:   var(--accent-soft);
   --radius-bubble: 20px;
-  --header-h: 72px;
-  --input-h: 72px;
-  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --header-h:      72px;
+  --input-h:       72px;
+  --safe-bottom:   env(safe-area-inset-bottom, 0px);
 }
 
 /* ══════════════════════════════════════
