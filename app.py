@@ -6218,6 +6218,125 @@ def _fv_msg_age_minutes(msg):
         return None
 
 
+FV_READ_CAP = 12.0
+FV_TYPE_CAP = 25.0
+_fv_ppv_locks = {}
+_fv_reply_pool = [None]
+
+
+def _fv_humanize_cfg(persona):
+    """Reply pacing for Fanvue, same shape and defaults as Telegram's."""
+    opts = _fanvue_auto_settings(persona)
+    return {'humanize': bool(opts.get('humanize', True)),
+            'typing_speed': max(4, min(int(opts.get('typing_speed') or 14), 40))}
+
+
+def _fv_send_text(persona, scope, fan_uuid, text):
+    _fanvue_call(persona, 'POST', f'{scope}/chats/{fan_uuid}/message',
+                 body={'text': text[:2000]})
+
+
+def _fv_send_human(persona, scope, fan_uuid, text, incoming='', cfg=None):
+    """Send a Fanvue reply the way a person would: a pause to read, then a delay
+    scaled to how long the reply takes to type, split across a burst or two.
+    Same pacing as Telegram — Fanvue has no typing indicator, so the delay is
+    the only signal that someone is on the other end."""
+    cfg = cfg or _fv_humanize_cfg(persona)
+    if not cfg['humanize']:
+        _fv_send_text(persona, scope, fan_uuid, text)
+        return
+    cps = max(2, int(cfg['typing_speed']) // 4)
+    time.sleep(random.uniform(15, 120))
+    time.sleep(min(0.8 + len(incoming) / 90.0, FV_READ_CAP) * random.uniform(0.7, 1.3))
+    for i, chunk in enumerate(_tg_bursts(text)):
+        if not chunk:
+            continue
+        if i:
+            time.sleep(random.uniform(0.6, 1.6))
+        time.sleep(min(max(len(chunk) / float(cps), 1.2), FV_TYPE_CAP) * random.uniform(0.85, 1.2))
+        _fv_send_text(persona, scope, fan_uuid, chunk)
+
+
+def _ppv_count(v):
+    # Legacy value was a bool (one PPV sent); treat True as 1 tier done.
+    if isinstance(v, bool):
+        return 1 if v else 0
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx):
+    """Consider the next PPV tier for this fan. Serialised per persona because
+    paced replies land from several worker threads at once, and the tier
+    counters are a read-modify-write on one shared setting."""
+    tiers = ctx['tiers']
+    with _fanvue_persona_lock(_fv_ppv_locks, persona):
+        try:
+            ppv_sent = json.loads(_get_setting(ctx['sent_key']) or '{}')
+        except Exception:
+            ppv_sent = {}
+        try:
+            ppv_at = json.loads(_get_setting(ctx['at_key']) or '{}')
+        except Exception:
+            ppv_at = {}
+        done = _ppv_count(ppv_sent.get(fan_uuid))
+        if done >= len(tiers):
+            return
+        exchanged = len(_fanvue_saved_history(persona, fan_key, limit=200))
+        if done == 0:
+            send_ppv = exchanged >= 6
+        else:
+            enough_chat = (exchanged - int(ppv_at.get(fan_uuid, 0))) >= ctx['gap']
+            paid = (not ctx['require_payment']) or _fanvue_fan_purchased(
+                persona, fan_uuid, tiers[done - 1]['media_uuids'])
+            if not paid:
+                logger.info('Fanvue [%s] %s: waiting on payment of tier %d',
+                            persona, handle or fan_uuid, done)
+            send_ppv = paid and enough_chat
+        if not send_ppv:
+            return
+        tier = tiers[done]
+        cap = (tier.get('caption') or reply).strip()[:2000]
+        try:
+            _fanvue_call(persona, 'POST', f'{scope}/chats/{fan_uuid}/message',
+                         body={'text': cap, 'mediaUuids': tier['media_uuids'],
+                               'price': int(tier['price'])})
+        except Exception as e:
+            logger.warning('Fanvue PPV to %s failed: %s', handle or fan_uuid, str(e)[:120])
+            return
+        ppv_sent[fan_uuid] = done + 1
+        ppv_at[fan_uuid] = exchanged
+        _set_setting(ctx['sent_key'], json.dumps(ppv_sent))
+        _set_setting(ctx['at_key'], json.dumps(ppv_at))
+        logger.info('PPV SENT [%s] tier %d/%d → %s at %s', persona, done + 1,
+                    len(tiers), handle or fan_uuid, tier['price'])
+
+
+def _fv_deliver(persona, scope, fan_uuid, fan_key, handle, reply, incoming, cfg, ppv_ctx):
+    """Pace out one reply, then consider the next PPV tier so the paid drop
+    always lands after the message it belongs to."""
+    with app.app_context():
+        try:
+            _fv_send_human(persona, scope, fan_uuid, reply, incoming=incoming, cfg=cfg)
+        except Exception as e:
+            logger.warning('Fanvue send to %s failed: %s', handle or fan_uuid, str(e)[:120])
+            return
+        _log_x_message(persona, fan_key, handle, 'out', reply)
+        if ppv_ctx:
+            _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ppv_ctx)
+
+
+def _fv_pool():
+    if _fv_reply_pool[0] is None:
+        from concurrent.futures import ThreadPoolExecutor
+        _fv_reply_pool[0] = ThreadPoolExecutor(
+            max_workers=max(1, int(os.getenv('FANVUE_REPLY_WORKERS', '12'))),
+            thread_name_prefix='fvreply')
+    return _fv_reply_pool[0]
+
+
 def _fanvue_auto_settings(persona):
     try:
         return json.loads(_get_setting(f'fanvue_auto_{persona}') or '{}')
@@ -6305,28 +6424,12 @@ def _fanvue_auto_round(persona):
     ppv_on = bool(_fanvue_ppv(persona).get('enabled', True)) and bool(ppv_tiers)
     ppv_sent_key = f'fanvue_ppv_sent_{persona}'
     ppv_at_key = f'fanvue_ppv_at_{persona}'
-    try:
-        ppv_sent = json.loads(_get_setting(ppv_sent_key) or '{}')
-    except Exception:
-        ppv_sent = {}
-    try:
-        ppv_at = json.loads(_get_setting(ppv_at_key) or '{}')
-    except Exception:
-        ppv_at = {}
+    hcfg = _fv_humanize_cfg(persona)
     # Extra messages that must pass after a paid unlock before the next tier.
     ppv_gap = 8
     # When off, tiers advance on chatting alone (payment can't be verified for
     # agency-agent testers). When on, each later tier waits for the prior payment.
     ppv_require_payment = (_get_setting(f'fanvue_ppv_require_payment_{persona}') or '0') == '1'
-
-    def _ppv_count(v):
-        # Legacy value was a bool (one PPV sent); treat True as 1 tier done.
-        if isinstance(v, bool):
-            return 1 if v else 0
-        try:
-            return int(v)
-        except (TypeError, ValueError):
-            return 0
 
     # Natural re-engagement: if the fan goes quiet, send up to a couple of
     # gentle follow-ups (spaced out), then wait. Reset when the fan replies.
@@ -6420,16 +6523,16 @@ def _fanvue_auto_round(persona):
             fu = _fv_trim(_persona_text(persona, fu_instr, history=hist, max_tokens=200, temperature=0.95))
             if not fu:
                 continue
-            try:
-                _fanvue_call(persona, 'POST', f'{scope}/chats/{fan_uuid}/message', body={'text': fu})
-            except Exception as e:
-                log.append(f'followup {who} failed: {str(e)[:50]}')
-                continue
-            _log_x_message(persona, fan_key, handle, 'out', fu)
             followups[fan_uuid] = {'n': sent_n + 1}
             _set_setting(followup_key, json.dumps(followups))
             actions['replies'] += 1
-            log.append(f'↩ follow-up {sent_n + 1}/{FOLLOWUP_MAX} → {who}: {fu[:40]}')
+            if hcfg['humanize']:
+                _fv_pool().submit(_fv_deliver, persona, scope, fan_uuid, fan_key,
+                                  handle, fu, '', hcfg, None)
+                log.append(f'↩ follow-up {sent_n + 1}/{FOLLOWUP_MAX} → {who} (typing…): {fu[:40]}')
+            else:
+                _fv_deliver(persona, scope, fan_uuid, fan_key, handle, fu, '', hcfg, None)
+                log.append(f'↩ follow-up {sent_n + 1}/{FOLLOWUP_MAX} → {who}: {fu[:40]}')
             continue
         # Fan replied — clear any pending follow-up state for them.
         if followups.pop(fan_uuid, None) is not None:
@@ -6473,46 +6576,17 @@ def _fanvue_auto_round(persona):
         cursor[fan_uuid] = msg_id
         _set_setting(cursor_key, json.dumps(cursor))
 
-        msg_body = reply.strip()[:2000]
-        try:
-            _fanvue_call(persona, 'POST', f'{scope}/chats/{fan_uuid}/message', body={'text': msg_body})
-        except Exception as e:
-            log.append(f'send {handle or fan_uuid} failed: {str(e)[:60]}')
-            continue
-        _log_x_message(persona, fan_key, handle, 'out', reply)
+        ppv_ctx = {'tiers': ppv_tiers, 'gap': ppv_gap, 'sent_key': ppv_sent_key,
+                   'at_key': ppv_at_key, 'require_payment': ppv_require_payment} if ppv_on else None
+        args = (persona, scope, fan_uuid, fan_key, handle, reply.strip(), text, hcfg, ppv_ctx)
         actions['replies'] += 1
-        log.append(f'Replied → {handle or fan_uuid}: {reply[:50]}')
-
-        # PPV tiers: send tier 1 after rapport; each later tier only after the
-        # fan has PAID the previous tier AND a bit more chatting has happened.
-        done = _ppv_count(ppv_sent.get(fan_uuid))
-        if ppv_on and done < len(ppv_tiers):
-            exchanged = len(_fanvue_saved_history(persona, fan_key, limit=200))
-            send_ppv = False
-            if done == 0:
-                send_ppv = exchanged >= 6
-            else:
-                enough_chat = (exchanged - int(ppv_at.get(fan_uuid, 0))) >= ppv_gap
-                paid = (not ppv_require_payment) or _fanvue_fan_purchased(persona, fan_uuid, ppv_tiers[done - 1]['media_uuids'])
-                if paid and enough_chat:
-                    send_ppv = True
-                elif not paid:
-                    log.append(f'{who}: waiting on payment of tier {done} before next PPV')
-            if send_ppv:
-                tier = ppv_tiers[done]
-                cap = (tier.get('caption') or reply).strip()[:2000]
-                try:
-                    _fanvue_call(persona, 'POST', f'{scope}/chats/{fan_uuid}/message',
-                                 body={'text': cap, 'mediaUuids': tier['media_uuids'],
-                                       'price': int(tier['price'])})
-                    ppv_sent[fan_uuid] = done + 1
-                    ppv_at[fan_uuid] = exchanged
-                    _set_setting(ppv_sent_key, json.dumps(ppv_sent))
-                    _set_setting(ppv_at_key, json.dumps(ppv_at))
-                    actions['ppv'] = actions.get('ppv', 0) + 1
-                    log.append(f'💎 PPV tier {done + 1}/{len(ppv_tiers)} → {handle or fan_uuid} at {tier["price"]}')
-                except Exception as e:
-                    log.append(f'ppv {handle or fan_uuid} failed: {str(e)[:60]}')
+        if hcfg['humanize']:
+            # Pace it on a worker so one fan's pause never delays the next fan.
+            _fv_pool().submit(_fv_deliver, *args)
+            log.append(f'Replying → {handle or fan_uuid} (typing…): {reply[:50]}')
+        else:
+            _fv_deliver(*args)
+            log.append(f'Replied → {handle or fan_uuid}: {reply[:50]}')
 
     _set_setting(cursor_key, json.dumps(cursor))
     return actions, log
@@ -6539,6 +6613,10 @@ def api_fanvue_auto():
             opts['online_only'] = bool(data['online_only'])
         if 'online_grace' in data:
             opts['online_grace'] = max(0, min(int(data['online_grace'] or 5), 120))
+        if 'humanize' in data:
+            opts['humanize'] = bool(data['humanize'])
+        if 'typing_speed' in data:
+            opts['typing_speed'] = max(4, min(int(data['typing_speed'] or 14), 40))
         if 'followup_min' in data:
             try:
                 _set_setting(f'fanvue_followup_min_{persona}', str(int(float(data['followup_min']))))
@@ -6561,6 +6639,8 @@ def api_fanvue_auto():
                     'only_handles': opts.get('only_handles', ''),
                     'online_only': bool(opts.get('online_only')),
                     'online_grace': opts.get('online_grace', 5),
+                    'humanize': bool(opts.get('humanize', True)),
+                    'typing_speed': max(4, min(int(opts.get('typing_speed') or 14), 40)),
                     'followup_min': int(_get_setting(f'fanvue_followup_min_{persona}') or 30),
                     'ppv_require_payment': (_get_setting(f'fanvue_ppv_require_payment_{persona}') or '0') == '1'})
 
