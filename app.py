@@ -7445,6 +7445,25 @@ def _tg_send_human(persona, chat_id, text, incoming='', photo_data=None):
         _tg_send_photo(persona, chat_id, photo_data)
 
 
+TG_TRACE_MAX = 120
+
+
+def _tg_trace(persona, stage, detail=''):
+    """Append one line to the persona's Telegram trace. Kept in the database so
+    it survives a redeploy and can be read from the browser — Cloud Run's logs
+    are awkward to reach when a bot has simply gone quiet."""
+    key = f'tg_trace_{persona or "platform"}'
+    try:
+        rows = json.loads(_get_setting(key) or '[]')
+        if not isinstance(rows, list):
+            rows = []
+    except Exception:
+        rows = []
+    rows.append({'at': int(time.time()), 'stage': stage, 'detail': str(detail)[:300]})
+    _set_setting(key, json.dumps(rows[-TG_TRACE_MAX:]))
+    logger.info('TG[%s] %s: %s', persona, stage, str(detail)[:200])
+
+
 def _tg_clean_only_fans(value):
     """Normalise the fan picker's value: a list of chat ids and/or @usernames.
     Empty means the bot talks to everyone, which is the default."""
@@ -7602,8 +7621,13 @@ def _tg_handle_update(persona, update):
 
     bot = _tg_bot(persona)
     cfg = _tg_settings(persona)
+    if not cfg['enabled']:
+        _tg_trace(persona, 'skipped',
+                  f'{who} ({chat_id}) — bot is switched off in Platform Bot Behavior')
+        return
     if not _tg_fan_allowed(cfg, chat_id, who):
-        logger.info('TG skip [%s] %s (%s) — not in the selected fans', persona, who, chat_id)
+        _tg_trace(persona, 'skipped',
+                  f"{who} ({chat_id}) — not in the {len(cfg['only_fans'])} selected fan(s)")
         return
     fans = _tg_fans(persona)
     fan = fans.get(str(chat_id)) or {}
@@ -7673,6 +7697,7 @@ def _tg_handle_update(persona, update):
 
     reply = _tg_generate(persona, chat_id, instruction)
     if not reply:
+        _tg_trace(persona, 'error', f'{who}: the model returned nothing — no reply sent')
         return
 
     photo_data = None
@@ -7711,7 +7736,12 @@ def _tg_handle_update(persona, update):
     elif cta_asked and not cta_url:
         logger.warning('CTA asked but no cta_url configured [%s] fan=%s', persona, chat_id)
 
-    _tg_send_human(persona, chat_id, reply, incoming=text, photo_data=photo_data)
+    try:
+        _tg_send_human(persona, chat_id, reply, incoming=text, photo_data=photo_data)
+        _tg_trace(persona, 'sent', f'→ {who}: {reply[:120]}')
+    except Exception as e:
+        _tg_trace(persona, 'error', f'send to {who} failed: {str(e)[:200]}')
+        raise
     if picked_media_id:
         _fan_record_sent_photo(persona, chat_id, picked_media_id)
         outfit_num = _safe_outfit_num(
@@ -7802,10 +7832,13 @@ def _tg_handle_platform_update(update):
         # Let the opener branch in _tg_handle_update see a bare /start.
         msg['text'] = '/start'
     if not persona:
+        _tg_trace(None, 'skipped',
+                  f'chat {chat_id} is not bound to a creator — asked them for their link')
         _tg_api(plat['bot_token'], 'sendMessage',
                 {'chat_id': chat_id, 'text': 'Open this chat from the link you were '
                                              'given so I know who you came for.'})
         return
+    _tg_trace(None, 'routed', f'chat {chat_id} → {persona}')
     _tg_handle_update(persona, update)
 
 
@@ -7836,12 +7869,17 @@ def api_telegram_webhook(path_id):
 
     def work():
         with app.app_context():
+            msg = update.get('message') or update.get('edited_message') or {}
+            _tg_trace(persona, 'webhook',
+                      f"update {uid} from {(msg.get('from') or {}).get('username') or (msg.get('chat') or {}).get('id')}: "
+                      f"{(msg.get('text') or '')[:80]}")
             try:
                 if persona:
                     _tg_handle_update(persona, update)
                 else:
                     _tg_handle_platform_update(update)
-            except Exception:
+            except Exception as e:
+                _tg_trace(persona, 'error', f'update failed: {str(e)[:200]}')
                 error_logger.error('telegram update failed', exc_info=True)
 
     threading.Thread(target=work, daemon=True).start()
@@ -8178,6 +8216,73 @@ def api_x_settings():
         opts['typing_speed'] = max(4, min(int(data['typing_speed'] or 14), 40))
     _set_setting(f'x_behavior_{persona}', json.dumps(opts))
     return jsonify({'ok': True, 'settings': opts})
+
+
+@app.route('/api/telegram/trace')
+def api_telegram_trace():
+    """Recent Telegram activity for a persona plus a verdict on the setup, so a
+    bot that has gone quiet can be diagnosed without digging through logs."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    persona = (request.args.get('persona') or '').strip()
+    cfg = _tg_settings(persona)
+    bot = _tg_load_bots().get(persona) or {}
+    try:
+        own = json.loads(_get_setting(f'tg_trace_{persona}') or '[]')
+    except Exception:
+        own = []
+    try:
+        shared = json.loads(_get_setting('tg_trace_platform') or '[]')
+    except Exception:
+        shared = []
+    rows = sorted(own + shared, key=lambda r: r.get('at', 0))[-TG_TRACE_MAX:]
+
+    problems = []
+    if not bot.get('bot_token'):
+        problems.append('No Telegram bot is connected for this persona.')
+    if not cfg['enabled']:
+        problems.append('Bot active is OFF — turn it on in Dashboard → Platform '
+                        'Bot Behavior → Telegram.')
+    if cfg['only_fans']:
+        problems.append(f"Only replying to {len(cfg['only_fans'])} selected fan(s): "
+                        + ', '.join(cfg['only_fans'][:8]))
+    hook = {}
+    if bot.get('bot_token'):
+        try:
+            hook = _tg_api(bot['bot_token'], 'getWebhookInfo') or {}
+        except Exception as e:
+            problems.append(f'Could not reach Telegram: {str(e)[:160]}')
+        if hook:
+            if not hook.get('url'):
+                problems.append('No webhook is registered — Telegram has nowhere to '
+                                'deliver messages. Reconnect the bot.')
+            if hook.get('last_error_message'):
+                problems.append('Telegram could not deliver to us: '
+                                + str(hook['last_error_message'])[:160])
+            if hook.get('pending_update_count'):
+                problems.append(f"{hook['pending_update_count']} update(s) are queued "
+                                'and undelivered.')
+    if not rows:
+        problems.append('No Telegram activity recorded yet — if you have messaged the '
+                        'bot since this version deployed, the update never arrived.')
+    return jsonify({'persona': persona, 'enabled': cfg['enabled'],
+                    'only_fans': cfg['only_fans'],
+                    'connected': bool(bot.get('bot_token')),
+                    'username': bot.get('username', ''),
+                    'webhook': {'url': hook.get('url', ''),
+                                'pending': hook.get('pending_update_count', 0),
+                                'last_error': hook.get('last_error_message', '')},
+                    'problems': problems, 'rows': rows})
+
+
+@app.route('/api/telegram/trace', methods=['DELETE'])
+def api_telegram_trace_clear():
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    persona = (request.args.get('persona') or '').strip()
+    _set_setting(f'tg_trace_{persona}', '[]')
+    _set_setting('tg_trace_platform', '[]')
+    return jsonify({'ok': True})
 
 
 @app.route('/api/telegram/stats')
