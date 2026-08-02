@@ -2868,6 +2868,40 @@ _SHOT_FRAMING = {
 }
 
 
+def _gemini_image_parts(resp):
+    """Parts from an image response, tolerating a candidate with no content.
+    A filtered request comes back with content set to None, which reaching
+    straight through to .parts turns into an unhelpful AttributeError."""
+    cand = (getattr(resp, 'candidates', None) or [None])[0]
+    content = getattr(cand, 'content', None) if cand is not None else None
+    return list(getattr(content, 'parts', None) or [])
+
+
+def _gemini_block_reason(resp):
+    """Plain-English reason an image response carried no picture."""
+    bits = []
+    cand = (getattr(resp, 'candidates', None) or [None])[0]
+    if cand is None:
+        bits.append('the model returned no candidates')
+    else:
+        finish = getattr(cand, 'finish_reason', None)
+        if finish:
+            bits.append(f'finish reason {getattr(finish, "name", finish)}')
+        safety = getattr(cand, 'safety_ratings', None) or []
+        blocked = [getattr(r, 'category', '') for r in safety if getattr(r, 'blocked', False)]
+        if blocked:
+            bits.append('blocked for ' + ', '.join(str(b) for b in blocked))
+    feedback = getattr(resp, 'prompt_feedback', None)
+    block = getattr(feedback, 'block_reason', None) if feedback else None
+    if block:
+        bits.append(f'the prompt itself was blocked ({getattr(block, "name", block)})')
+    if not bits:
+        return ('it was filtered. Try a less revealing reference photo or a '
+                'different pose.')
+    return (', '.join(bits) + '. This is usually the safety filter — try a less '
+            'revealing reference photo or a different pose.')
+
+
 @app.route('/api/generate/image', methods=['POST'])
 def api_generate_image():
     """Generate a photorealistic image of a fictional person via Google Imagen.
@@ -2952,7 +2986,7 @@ def api_generate_image():
                     {'text': edit_prompt},
                 ]}],
             )
-            for part in (resp.candidates[0].content.parts if resp.candidates else []):
+            for part in _gemini_image_parts(resp):
                 inline = getattr(part, 'inline_data', None)
                 if inline and getattr(inline, 'data', None):
                     raw = inline.data
@@ -2962,7 +2996,9 @@ def api_generate_image():
                     return jsonify({'ok': True, 'image': durl,
                                     'appearance': appearance,
                                     'used_reference': True})
-            return jsonify({'ok': False, 'error': 'No image returned from reference (it may have been filtered).'}), 200
+            return jsonify({'ok': False,
+                            'error': 'No image came back from the reference photo — '
+                                     + _gemini_block_reason(resp)}), 200
 
         prompt = (
             f"Photorealistic {framing} of {appearance}. "
