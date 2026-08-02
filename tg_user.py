@@ -207,6 +207,10 @@ class AccountRunner:
             return
 
         initial = max(0.0, float(plan.get('initial_delay', 0)))
+        # She waits before answering like a person would, so without this line
+        # the log looks stalled for a couple of minutes after 'received'.
+        self._trace('planning', f"{name}: {len(plan['chunks'])} message(s), "
+                                f"first one in about {int(initial + plan.get('read', 0))}s")
         if initial > 0:
             await asyncio.sleep(initial)
         await asyncio.sleep(max(0.0, float(plan.get('read', 0))))
