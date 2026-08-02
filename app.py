@@ -4418,6 +4418,33 @@ def _x_mark_seen(persona, event_ids):
                  json.dumps(list(seen)[-X_SEEN_EVENTS_MAX:]))
 
 
+# Phrases that only make sense if the other person wrote first. An opener
+# containing one of these is answering a message that never existed.
+_REPLY_TELL_RE = re.compile(
+    r"(pop(ped|ping)?\s+up\s+in\s+my|in\s+my\s+(dms|inbox)|"
+    r"thanks?\s+(you\s+)?for\s+(the\s+)?(message|dm|reaching|writing|msg)|"
+    r"you\s+(just\s+)?(messaged|dm'?d|wrote|reached out)|"
+    r"nice\s+to\s+hear\s+from\s+you|good\s+to\s+hear\s+from\s+you|"
+    r"glad\s+you\s+(messaged|wrote|reached)|replying\s+to\s+you)", re.I)
+
+
+def _x_fix_cold_opener(persona, opener, instruction):
+    """A cold opener that talks as though the fan messaged first reads as a bot.
+    Regenerate once with the mistake named; give up rather than send it."""
+    if not opener or not _REPLY_TELL_RE.search(opener):
+        return opener
+    logger.info('cold opener implied an earlier message, regenerating: %s', opener[:80])
+    retry = _persona_text(
+        persona,
+        instruction + ' Your previous attempt wrongly implied they had already '
+                      'messaged you. They have not. Write it again without that.',
+        max_tokens=1024, temperature=0.9)
+    if retry and not _REPLY_TELL_RE.search(retry):
+        return retry
+    logger.warning('cold opener still implied an earlier message — not sending')
+    return ''
+
+
 def _x_history(persona, uid, limit=40):
     """Past DMs with one fan, oldest first, in Gemini history shape. Survives
     restarts — unlike the /tmp JSON mirror, which Vercel and Cloud Run wipe."""
@@ -4830,12 +4857,114 @@ def _x_record_opener(persona, x_user_id):
                 pass
 
 
-def _x_audience_candidates(persona, limit, contacted):
-    """Find fresh people to DM from the persona's own audience — no keyword
-    search. Sources: recent followers, then people who replied to the persona's
-    recent posts. Excludes self and already-contacted users."""
+X_FEED_POST_AGE_MIN = 30    # only mine posts this fresh
+X_FEED_REPLY_AGE_MIN = 15   # only people who replied this recently
+X_FEED_POSTS_SCANNED = 12   # posts to open per round, newest first
+
+
+def _x_rfc3339(dt):
+    """X wants RFC3339 to the second, and rejects a start_time that is not
+    comfortably in the past."""
+    return dt.replace(microsecond=0).isoformat().replace('+00:00', 'Z')
+
+
+def _x_parse_time(value):
+    try:
+        return datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+    except (TypeError, ValueError):
+        return None
+
+
+def _x_feed_candidates(persona, limit, contacted, me_id,
+                       post_age_min=None, reply_age_min=None):
+    """People who just replied to someone else's post in her feed.
+
+    Someone mid-conversation on a creator's fresh post is the warmest cold
+    audience there is, so the newest replier is tried first. Returns [] when
+    the feed is unavailable, letting the caller fall back."""
+    post_age_min = int(post_age_min or X_FEED_POST_AGE_MIN)
+    reply_age_min = int(reply_age_min or X_FEED_REPLY_AGE_MIN)
+    now = datetime.now(timezone.utc)
+    # 30s of slack: X rejects a start_time that is not clearly in the past.
+    posts_since = now - timedelta(minutes=post_age_min)
+    replies_since = now - timedelta(minutes=reply_age_min)
+
+    try:
+        feed = _x_call(persona, 'GET',
+                       f'/users/{me_id}/timelines/reverse_chronological'
+                       f'?max_results=50&start_time={_x_rfc3339(posts_since)}'
+                       '&tweet.fields=created_at,author_id,conversation_id')
+    except Exception as e:
+        logger.info('home feed unavailable for %s: %s', persona, str(e)[:160])
+        return []
+
+    posts = []
+    for tw in feed.get('data', []) or []:
+        if tw.get('author_id') == me_id:
+            continue  # her own post — those are handled elsewhere
+        at = _x_parse_time(tw.get('created_at'))
+        if at and at < posts_since:
+            continue
+        posts.append((at or now, tw))
+    posts.sort(key=lambda p: p[0], reverse=True)
+    if not posts:
+        logger.info('no feed posts newer than %d min for %s', post_age_min, persona)
+        return []
+
+    found, seen = [], set()
+    for _, tw in posts[:X_FEED_POSTS_SCANNED]:
+        cid = tw.get('conversation_id') or tw.get('id')
+        if not cid:
+            continue
+        q = urllib.parse.quote(f'conversation_id:{cid}')
+        try:
+            res = _x_call(persona, 'GET',
+                          f'/tweets/search/recent?query={q}&max_results=50'
+                          f'&start_time={_x_rfc3339(replies_since)}'
+                          '&tweet.fields=author_id,text,created_at'
+                          '&expansions=author_id&user.fields=username,name')
+        except Exception as e:
+            logger.info('replies for %s unavailable: %s', cid, str(e)[:120])
+            continue
+        users = {u['id']: u for u in (res.get('includes', {}).get('users', []) or [])}
+        for reply in res.get('data', []) or []:
+            uid = reply.get('author_id')
+            if not uid or uid == me_id or uid in contacted or uid in seen:
+                continue
+            at = _x_parse_time(reply.get('created_at'))
+            if at and at < replies_since:
+                continue
+            seen.add(uid)
+            u = users.get(uid, {})
+            found.append({'id': uid, 'username': u.get('username') or '?',
+                          'name': u.get('name', ''), 'tweet': reply.get('text', ''),
+                          'at': at or now})
+
+    # Freshest replier first — someone who typed a minute ago is far more
+    # likely to still be at their phone than someone from fifteen.
+    found.sort(key=lambda c: c['at'], reverse=True)
+    logger.info('feed scan [%s]: %d posts, %d fresh repliers', persona,
+                len(posts[:X_FEED_POSTS_SCANNED]), len(found))
+    for c in found:
+        c.pop('at', None)
+    return found[:limit]
+
+
+def _x_audience_candidates(persona, limit, contacted,
+                           post_age_min=None, reply_age_min=None):
+    """Find fresh people to DM. Preferred source is live conversation in her
+    feed; if that is empty or unavailable, fall back to her own audience —
+    recent followers, then people who replied to her own posts."""
     me_id = _x_me_id(persona)
     out, seen = [], set()
+
+    fresh = _x_feed_candidates(persona, limit, contacted, me_id,
+                               post_age_min=post_age_min, reply_age_min=reply_age_min)
+    for c in fresh:
+        seen.add(c['id'])
+        out.append(c)
+    if len(out) >= limit:
+        return out[:limit]
 
     def add(uid, username, name='', tweet=''):
         if not uid or uid == me_id or uid in contacted or uid in seen:
@@ -4843,7 +4972,7 @@ def _x_audience_candidates(persona, limit, contacted):
         seen.add(uid)
         out.append({'id': uid, 'username': username or '?', 'name': name, 'tweet': tweet})
 
-    # 1. recent followers
+    # Fallback 1: recent followers
     try:
         res = _x_call(persona, 'GET',
                       f'/users/{me_id}/followers?max_results=50&user.fields=username,name')
@@ -4854,7 +4983,7 @@ def _x_audience_candidates(persona, limit, contacted):
     except Exception:
         pass
 
-    # 2. people who replied to the persona's recent posts
+    # Fallback 2: people who replied to the persona's recent posts
     try:
         for tid in _x_my_recent_tweet_ids(persona, 3):
             q = urllib.parse.quote(f'conversation_id:{tid}')
@@ -5469,7 +5598,10 @@ def api_x_auto_run():
             contacted |= _x_known_user_ids(persona)
             contacted |= _x_opener_ids(persona)
             try:
-                candidates = _x_audience_candidates(persona, new_chat_limit, contacted)
+                candidates = _x_audience_candidates(
+                    persona, new_chat_limit, contacted,
+                    post_age_min=data.get('post_age_min'),
+                    reply_age_min=data.get('reply_age_min'))
             except Exception as e:
                 candidates = []
                 log.append(f'Finding people failed: {str(e)[:80]}')
@@ -5488,19 +5620,29 @@ def api_x_auto_run():
                         except Exception:
                             pass
                     snippet = (u.get('tweet') or '')[:160]
+                    # Spelled out because the model otherwise writes these as
+                    # replies — "nice to see you pop up in my dms" to someone who
+                    # has never messaged her.
+                    cold_rule = (
+                        " THIS PERSON HAS NEVER MESSAGED YOU. You are messaging them "
+                        "first, out of the blue. Do not thank them for anything, do not "
+                        "reference them writing to you, appearing in your DMs, replying, "
+                        "or 'popping up' — none of that happened. Do not greet them as if "
+                        "you already know each other. No hashtags, no hard sell.")
                     if snippet:
                         instruction = (
-                            f"Start a DM with @{u['username']} on X. They recently posted: "
-                            f"\"{snippet}\". Write a warm, natural, in-character opener that "
-                            "reacts to their post and asks something to get them talking. "
-                            "No hashtags, no hard sell.")
+                            f"Write the first-ever DM to @{u['username']} on X. They recently "
+                            f"posted: \"{snippet}\". Open with something warm and in-character "
+                            "that reacts to that post, and ask one question to get them "
+                            "talking." + cold_rule)
                     else:
                         instruction = (
-                            f"Start a DM with @{u['username']} on X — they're part of your "
-                            "audience. Write a warm, natural, in-character opener that's "
-                            "curious about them and asks something to get them talking. "
-                            "No hashtags, no hard sell.")
+                            f"Write the first-ever DM to @{u['username']} on X — they are "
+                            "someone you found, not someone who contacted you. Open with "
+                            "something warm and in-character, curious about them, and ask "
+                            "one question to get them talking." + cold_rule)
                     opener = _persona_text(persona, instruction, max_tokens=1024, temperature=0.95)
+                    opener = _x_fix_cold_opener(persona, opener, instruction)
                     if opener:
                         _x_call(persona, 'POST',
                                 f'/dm_conversations/with/{u["id"]}/messages',

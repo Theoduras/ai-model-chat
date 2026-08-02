@@ -167,6 +167,14 @@
         </select>
       </div>
       <div class="field">
+        <label>Only posts newer than <span style="font-weight:400;color:var(--text-muted);">(minutes)</span></label>
+        <input type="number" id="gather-post-age" min="5" max="180" value="30">
+      </div>
+      <div class="field">
+        <label>Only people who replied within <span style="font-weight:400;color:var(--text-muted);">(minutes)</span></label>
+        <input type="number" id="gather-reply-age" min="1" max="120" value="15">
+      </div>
+      <div class="field">
         <label>Seconds between rounds</label>
         <select id="gather-interval">
           <option value="90">90s</option><option value="180" selected>3 min</option><option value="300">5 min</option><option value="600">10 min</option>
@@ -627,6 +635,8 @@ async function runGatherRound() {
     const data = await post('/api/x/auto-run', {
       persona: persona(),
       new_chat_limit: parseInt(document.getElementById('auto-new-limit').value),
+      post_age_min: parseInt(document.getElementById('gather-post-age').value||'30',10),
+      reply_age_min: parseInt(document.getElementById('gather-reply-age').value||'15',10),
       dm_replies: false,
       new_chats: true,
       comments: false,
