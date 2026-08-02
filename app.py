@@ -8110,18 +8110,25 @@ def api_telegram_settings():
     persona = (data.get('persona') or '').strip()
     if not persona:
         return jsonify({'ok': False, 'error': 'persona required'}), 400
-    opts = {
-        'enabled': bool(data.get('enabled')),
-        'cta_after': max(1, int(data.get('cta_after') or TG_CTA_AFTER_DEFAULT)),
-        'followup_min': max(5, int(data.get('followup_min') or TG_FOLLOWUP_MIN_DEFAULT)),
-        'followups': bool(data.get('followups', True)),
-        'humanize': bool(data.get('humanize', True)),
-        'typing_speed': max(4, min(int(data.get('typing_speed') or TG_TYPING_CPS), 40)),
-        # The dashboard's behaviour panel posts without this key — keep the
-        # existing picks rather than silently resetting to "everyone".
-        'only_fans': (_tg_clean_only_fans(data.get('only_fans')) if 'only_fans' in data
-                      else _tg_settings(persona)['only_fans']),
-    }
+    # Merge, never rebuild: several panels save different subsets of these
+    # settings, and a missing key must mean "leave it alone" rather than
+    # "reset to the default" — otherwise saving the fan picker from the
+    # Telegram tab would silently switch the bot off.
+    opts = _tg_settings(persona)
+    if 'enabled' in data:
+        opts['enabled'] = bool(data['enabled'])
+    if 'cta_after' in data:
+        opts['cta_after'] = max(1, int(data['cta_after'] or TG_CTA_AFTER_DEFAULT))
+    if 'followup_min' in data:
+        opts['followup_min'] = max(5, int(data['followup_min'] or TG_FOLLOWUP_MIN_DEFAULT))
+    if 'followups' in data:
+        opts['followups'] = bool(data['followups'])
+    if 'humanize' in data:
+        opts['humanize'] = bool(data['humanize'])
+    if 'typing_speed' in data:
+        opts['typing_speed'] = max(4, min(int(data['typing_speed'] or TG_TYPING_CPS), 40))
+    if 'only_fans' in data:
+        opts['only_fans'] = _tg_clean_only_fans(data['only_fans'])
     _set_setting(f'telegram_auto_{persona}', json.dumps(opts))
     bots = _tg_load_bots()
     if persona in bots:
@@ -8156,13 +8163,19 @@ def api_x_settings():
     persona = (data.get('persona') or '').strip()
     if not persona:
         return jsonify({'ok': False, 'error': 'persona required'}), 400
-    opts = {
-        'enabled': bool(data.get('enabled')),
-        'followup_min': max(5, int(data.get('followup_min') or 45)),
-        'followups': bool(data.get('followups', True)),
-        'humanize': bool(data.get('humanize', True)),
-        'typing_speed': max(4, min(int(data.get('typing_speed') or 14), 40)),
-    }
+    # Merge rather than rebuild, for the same reason as the Telegram endpoint:
+    # a key the caller left out must keep its saved value.
+    opts = _x_behavior(persona)
+    if 'enabled' in data:
+        opts['enabled'] = bool(data['enabled'])
+    if 'followup_min' in data:
+        opts['followup_min'] = max(5, int(data['followup_min'] or 45))
+    if 'followups' in data:
+        opts['followups'] = bool(data['followups'])
+    if 'humanize' in data:
+        opts['humanize'] = bool(data['humanize'])
+    if 'typing_speed' in data:
+        opts['typing_speed'] = max(4, min(int(data['typing_speed'] or 14), 40))
     _set_setting(f'x_behavior_{persona}', json.dumps(opts))
     return jsonify({'ok': True, 'settings': opts})
 
