@@ -116,7 +116,7 @@ class AccountRunner:
     """
 
     def __init__(self, persona, api_id, api_hash, session_str, plan, on_sent=None,
-                 on_error=None):
+                 on_error=None, on_trace=None):
         self.persona = persona
         self.api_id = api_id
         self.api_hash = api_hash
@@ -124,6 +124,7 @@ class AccountRunner:
         self.plan = plan
         self.on_sent = on_sent
         self.on_error = on_error
+        self.on_trace = on_trace
         self._thread = None
         self._loop = None
         self._stop = threading.Event()
@@ -173,22 +174,36 @@ class AccountRunner:
             raise RuntimeError('Session is no longer authorized — sign in again.')
         await client.run_until_disconnected()
 
+    def _trace(self, stage, detail=''):
+        if self.on_trace:
+            try:
+                self.on_trace(self.persona, stage, detail)
+            except Exception:
+                pass
+
     async def _handle(self, client, event):
-        if not event.is_private or event.out:
+        if event.out:
+            return
+        if not event.is_private:
+            self._trace('ignored', 'message was not a private chat')
             return
         text = (event.raw_text or '').strip()
         if not text:
+            self._trace('ignored', 'message had no text (sticker, media or service)')
             return
         sender = await event.get_sender()
-        if getattr(sender, 'bot', False):
-            return
         chat_id = event.chat_id
         name = (getattr(sender, 'username', '') or
                 getattr(sender, 'first_name', '') or str(chat_id))
+        if getattr(sender, 'bot', False):
+            self._trace('ignored', f'{name} is a bot account')
+            return
+        self._trace('received', f'{name} ({chat_id}): {text[:80]}')
 
         # Gemini is blocking, so keep it off the event loop.
         plan = await asyncio.to_thread(self.plan, chat_id, name, text)
         if not plan or not plan.get('chunks'):
+            self._trace('no-reply', f'{name}: nothing to send back')
             return
 
         initial = max(0.0, float(plan.get('initial_delay', 0)))
@@ -204,7 +219,12 @@ class AccountRunner:
             dur = min(max(len(chunk) / float(cps), 1.2), 22.0)
             async with client.action(event.chat_id, 'typing'):
                 await asyncio.sleep(dur)
-            await client.send_message(event.chat_id, chunk)
+            try:
+                await client.send_message(event.chat_id, chunk)
+            except Exception as e:
+                self._trace('error', f'send to {name} failed: {str(e)[:180]}')
+                raise
+            self._trace('sent', f'→ {name}: {chunk[:120]}')
             if self.on_sent:
                 self.on_sent(self.persona, chat_id, name, chunk)
 

@@ -8238,6 +8238,37 @@ def api_telegram_trace():
     rows = sorted(own + shared, key=lambda r: r.get('at', 0))[-TG_TRACE_MAX:]
 
     problems = []
+    # The personal account (MTProto) is a separate transport from the bot: no
+    # token, no webhook, a long-lived client instead. Report on it in its own
+    # terms, and only fall through to bot checks when a bot is also connected.
+    acct = _tgu_accounts().get(persona) or {}
+    runner = _tgu_runners.get(persona)
+    personal = {'connected': bool(acct.get('session')),
+                'running': bool(runner and runner.alive()),
+                'username': acct.get('username', ''),
+                'error': _tgu_errors.get(persona, '')}
+    if personal['connected']:
+        if not personal['running']:
+            problems.append('The personal Telegram account is signed in but NOT running '
+                            '— press Start on the Real account panel. It also stops on a '
+                            'redeploy, so it has to be started again after one.')
+        if personal['error']:
+            problems.append('Personal account error: ' + str(personal['error'])[:200])
+        if cfg['only_fans']:
+            problems.append(f"Only replying to {len(cfg['only_fans'])} selected fan(s): "
+                            + ', '.join(cfg['only_fans'][:8]))
+        if not rows:
+            problems.append('No Telegram activity recorded yet — if you have messaged the '
+                            'account since this version deployed, the message never '
+                            'reached the running client.')
+        return jsonify({'persona': persona, 'transport': 'personal account',
+                        'enabled': cfg['enabled'], 'only_fans': cfg['only_fans'],
+                        'connected': True, 'mode': 'personal account',
+                        'username': personal['username'], 'bound_chats': None,
+                        'personal': personal,
+                        'webhook': {'url': '', 'pending': 0, 'last_error': ''},
+                        'problems': problems, 'rows': rows})
+
     # A hosted connection rides the platform bot and deliberately has no token
     # of its own, so both the connection check and the webhook check have to
     # look at the shared bot instead.
@@ -8435,8 +8466,12 @@ def _tgu_plan(persona, chat_id, name, text):
     CTA and photo sending as the bot path. Returns the timing plan the runner
     acts on, including optional photo_data for the runner to send."""
     cfg = _tg_settings(persona)
+    # Deliberately no `enabled` check here: that toggle has only ever gated the
+    # bot path, and the personal account replies independently of it.
     if not _tg_fan_allowed(cfg, chat_id, name):
-        logger.info('TG skip [%s] %s (%s) — not in the selected fans', persona, name, chat_id)
+        _tg_trace(persona, 'skipped',
+                  f"{name} ({chat_id}) — not in the {len(cfg['only_fans'])} selected fan(s): "
+                  + ', '.join(cfg['only_fans'][:8]))
         return None
     acct = _tgu_accounts().get(persona) or {}
     fans = _tg_fans(persona)
@@ -8610,9 +8645,21 @@ def _tgu_start(persona):
 
     def err(p, msg):
         _tgu_errors[p] = msg
+        with app.app_context():
+            try:
+                _tg_trace(p, 'error', msg)
+            except Exception:
+                pass
+
+    def trace(p, stage, detail):
+        with app.app_context():
+            try:
+                _tg_trace(p, stage, detail)
+            except Exception:
+                pass
 
     runner = AccountRunner(persona, api_id, api_hash, acct['session'],
-                           plan, on_sent=sent, on_error=err)
+                           plan, on_sent=sent, on_error=err, on_trace=trace)
     _tgu_runners[persona] = runner
     _tgu_errors.pop(persona, None)
     runner.start()
