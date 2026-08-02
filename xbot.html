@@ -96,6 +96,35 @@
     </div>
   </div>
 
+  <div class="form-section">
+    <div class="section-title">⚙️ How she replies</div>
+    <span class="hint" style="display:block; margin-bottom:14px;">Governs every DM this account sends — the rounds below and the server-side worker both obey it.</span>
+    <div class="auto-toggles" style="display:flex; flex-wrap:wrap; gap:10px 22px;">
+      <label class="auto-chk" style="margin-top:0;"><input type="checkbox" id="f-x-enabled" checked> <b>Bot active</b> <span style="color:var(--text-muted)">— reply to incoming DMs</span></label>
+      <label class="auto-chk" style="margin-top:0;"><input type="checkbox" id="f-x-humanize" checked> Type like a human <span style="color:var(--text-muted)">— pause to read, then type at a believable speed</span></label>
+      <label class="auto-chk" style="margin-top:0;"><input type="checkbox" id="f-x-followups" checked> Follow up on quiet fans <span style="color:var(--text-muted)">— max 2 nudges each</span></label>
+    </div>
+    <div class="xbot-grid" style="margin-top:14px;">
+      <div class="field">
+        <label>Typing speed</label>
+        <select id="f-x-typing-speed">
+          <option value="8">Slow — thumbs on a phone</option>
+          <option value="14" selected>Natural</option>
+          <option value="22">Fast texter</option>
+          <option value="34">Very fast</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Follow-up delay (minutes)</label>
+        <input type="number" id="f-x-followup-min" min="5" max="1440" value="45">
+      </div>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center; margin-top:14px;">
+      <button class="btn-ai" onclick="saveBehaviour(this)">Save</button>
+      <span class="hint" id="behaviour-status"></span>
+    </div>
+  </div>
+
   <div class="form-section" id="chat-section">
     <div class="section-title">💬 Auto-chat — keep conversations going</div>
     <span class="hint" style="display:block; margin-bottom:14px;">Engages your existing audience on a loop: replies to incoming DMs, and (optionally) replies to comments on your posts and posts new content. Does NOT start new chats — that's the section below.</span>
@@ -276,10 +305,42 @@ function updateConn() {
   document.getElementById('connect-step2').style.display = 'none';
   document.getElementById('connect-status').innerHTML = '';
   loadBehaviorSummary();
+  loadBehaviour();
 }
 
-// The Dashboard → Platform Bot Behavior → X.com panel governs how these rounds
-// actually send. Show it here so the two tabs don't look independent.
+async function loadBehaviour(){
+  if(!persona()) return;
+  let s={};
+  try{ s=await (await fetch('/api/x/settings?persona='+encodeURIComponent(persona()))).json(); }catch(e){ return; }
+  document.getElementById('f-x-enabled').checked = s.enabled !== false;
+  document.getElementById('f-x-humanize').checked = s.humanize !== false;
+  document.getElementById('f-x-followups').checked = s.followups !== false;
+  document.getElementById('f-x-followup-min').value = s.followup_min || 45;
+  if(s.typing_speed) document.getElementById('f-x-typing-speed').value = String(s.typing_speed);
+}
+
+async function saveBehaviour(btn){
+  const st=document.getElementById('behaviour-status');
+  st.textContent='Saving…'; st.style.color='var(--text-muted)';
+  try{
+    const r=await fetch('/api/x/settings',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({persona:persona(),
+        enabled:document.getElementById('f-x-enabled').checked,
+        humanize:document.getElementById('f-x-humanize').checked,
+        followups:document.getElementById('f-x-followups').checked,
+        typing_speed:parseInt(document.getElementById('f-x-typing-speed').value||'14',10),
+        followup_min:parseInt(document.getElementById('f-x-followup-min').value||'45',10)})});
+    const d=await r.json();
+    if(!d.ok) throw new Error(d.error||'failed');
+    st.textContent='✓ Saved'; st.style.color='#4ade80';
+    loadBehaviorSummary();
+  }catch(e){ st.textContent='✗ '+e; st.style.color='#fb7185'; }
+}
+
+// This tab now owns the behaviour settings, so the summary just reflects them
+// Reflect the saved behaviour and the funnel link next to the controls, so the
+// effect of a change is visible without leaving the section.
 async function loadBehaviorSummary() {
   const el = document.getElementById('x-behavior-summary');
   if (!el || !persona()) return;
@@ -297,7 +358,7 @@ async function loadBehaviorSummary() {
     s.followups ? 'follow-ups after ' + s.followup_min + ' min' : 'no follow-ups',
     (f.cta_url ? 'funnel link → <b>' + esc(f.cta_url) + '</b>' : 'no funnel link set')
   ];
-  el.innerHTML = 'From Dashboard → Platform Bot Behavior → X.com: ' + bits.join(' · ') + '.';
+  el.innerHTML = 'Live: ' + bits.join(' · ') + '.';
 }
 
 function toggleConnect() {
