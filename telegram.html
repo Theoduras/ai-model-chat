@@ -132,7 +132,13 @@
       <div class="stat"><b id="s-rate">0%</b><span>Click rate</span></div>
     </div>
     <div id="fans-table"></div>
-    <button class="btn-ai" style="background:var(--border); margin-top:14px;" onclick="loadStats()">Refresh</button>
+    <div style="display:flex; gap:8px; align-items:center; margin-top:14px; flex-wrap:wrap;">
+      <button class="btn-ai" style="background:var(--border);" onclick="loadStats()">Refresh</button>
+      <button class="btn-ai" onclick="saveOnlyFans()">Save who she talks to</button>
+      <button class="btn-ai" style="background:var(--border);" onclick="selectAllFans(false)">Talk to everyone</button>
+      <span class="hint" id="only-fans-state"></span>
+    </div>
+    <span class="hint" style="display:block; margin-top:8px;">Tick the fans she should reply to. With none ticked she talks to <b>everyone</b> — that's the default. Skipped fans get no replies and no follow-ups; their messages are simply ignored.</span>
   </div>
 
   <div class="form-section">
@@ -389,12 +395,39 @@ async function loadStats(){
     if(s.warning){ warn.style.display='block'; warn.textContent='⚠ '+s.warning; }
     else { warn.style.display='none'; }
     const rows=s.rows||[];
+    const only=s.only_fans||[];
+    const picked=new Set(only.map(v=>String(v).toLowerCase()));
+    const isOn=r=>picked.has(String(r.chat_id).toLowerCase())||picked.has(String(r.name||'').toLowerCase());
     document.getElementById('fans-table').innerHTML = rows.length ?
-      '<table class="fans"><tr><th>Fan</th><th>Msgs</th><th>CTA</th><th>Clicked</th><th>Nudges</th></tr>'+
-      rows.map(r=>'<tr><td>'+esc(r.name)+'</td><td>'+r.messages+'</td><td><span class="dot '+(r.cta_sent?'y':'n')+'">●</span></td><td><span class="dot '+(r.cta_clicked?'y':'n')+'">●</span></td><td>'+r.followups+'</td></tr>').join('')+
+      '<table class="fans"><tr><th>Talk to</th><th>Fan</th><th>Msgs</th><th>CTA</th><th>Clicked</th><th>Nudges</th></tr>'+
+      rows.map(r=>'<tr><td><input type="checkbox" class="fan-pick" data-id="'+esc(r.chat_id)+'"'+
+        (only.length&&isOn(r)?' checked':'')+' style="width:auto;"></td><td>'+esc(r.name)+'</td><td>'+r.messages+'</td><td><span class="dot '+(r.cta_sent?'y':'n')+'">●</span></td><td><span class="dot '+(r.cta_clicked?'y':'n')+'">●</span></td><td>'+r.followups+'</td></tr>').join('')+
       '</table>'
       : '<span class="hint" style="display:block;margin-top:12px;">No fans yet — message the bot on Telegram to start a conversation.</span>';
+    const st=document.getElementById('only-fans-state');
+    st.textContent = only.length ? ('Replying to '+only.length+' selected fan(s) only.')
+                                 : 'Replying to everyone.';
+    st.style.color = only.length ? '#4ade80' : 'var(--text-muted)';
   }catch(e){}
+}
+
+function selectAllFans(on){
+  document.querySelectorAll('.fan-pick').forEach(c=>{c.checked=on;});
+  saveOnlyFans();
+}
+
+async function saveOnlyFans(){
+  const ids=[...document.querySelectorAll('.fan-pick')].filter(c=>c.checked).map(c=>c.dataset.id);
+  const st=document.getElementById('only-fans-state');
+  st.textContent='Saving…'; st.style.color='var(--text-muted)';
+  try{
+    const r=await fetch('/api/telegram/settings',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({persona:persona(), only_fans:ids})});
+    const d=await r.json();
+    if(!d.ok) throw new Error(d.error||'failed');
+    loadStats();
+  }catch(e){ st.textContent='✗ '+e; st.style.color='#fb7185'; }
 }
 
 // ── Real account (MTProto) ──

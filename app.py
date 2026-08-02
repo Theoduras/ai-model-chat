@@ -7445,11 +7445,36 @@ def _tg_send_human(persona, chat_id, text, incoming='', photo_data=None):
         _tg_send_photo(persona, chat_id, photo_data)
 
 
+def _tg_clean_only_fans(value):
+    """Normalise the fan picker's value: a list of chat ids and/or @usernames.
+    Empty means the bot talks to everyone, which is the default."""
+    if isinstance(value, str):
+        value = value.split(',')
+    if not isinstance(value, list):
+        return []
+    out = []
+    for v in value:
+        v = str(v).strip().lstrip('@')
+        if v and v not in out:
+            out.append(v)
+    return out[:200]
+
+
+def _tg_fan_allowed(cfg, chat_id, name=''):
+    """True when this fan is one the bot is allowed to talk to."""
+    only = cfg.get('only_fans') or []
+    if not only:
+        return True
+    wanted = {o.strip().lstrip('@').lower() for o in only}
+    return str(chat_id) in wanted or (name or '').strip().lstrip('@').lower() in wanted
+
+
 def _tg_settings(persona):
     try:
         s = json.loads(_get_setting(f'telegram_auto_{persona}') or '{}')
     except Exception:
         s = {}
+    only = s.get('only_fans')
     return {
         'enabled': bool(s.get('enabled')),
         'cta_after': int(s.get('cta_after') or TG_CTA_AFTER_DEFAULT),
@@ -7457,6 +7482,8 @@ def _tg_settings(persona):
         'followups': bool(s.get('followups', True)),
         'humanize': bool(s.get('humanize', True)),
         'typing_speed': int(s.get('typing_speed') or TG_TYPING_CPS),
+        # Empty list = talk to everyone. Entries are chat ids and/or @usernames.
+        'only_fans': [str(x).strip() for x in only if str(x).strip()] if isinstance(only, list) else [],
     }
 
 
@@ -7575,6 +7602,9 @@ def _tg_handle_update(persona, update):
 
     bot = _tg_bot(persona)
     cfg = _tg_settings(persona)
+    if not _tg_fan_allowed(cfg, chat_id, who):
+        logger.info('TG skip [%s] %s (%s) — not in the selected fans', persona, who, chat_id)
+        return
     fans = _tg_fans(persona)
     fan = fans.get(str(chat_id)) or {}
     fan['name'] = who
@@ -7705,6 +7735,8 @@ def _tg_followup_round(persona):
     now = int(time.time())
     sent = 0
     for chat_id, fan in list(fans.items()):
+        if not _tg_fan_allowed(cfg, chat_id, fan.get('name', '')):
+            continue
         last = max(int(fan.get('last_in') or 0), int(fan.get('last_out') or 0))
         if not last or fan.get('last_in', 0) > fan.get('last_out', 0):
             continue  # they spoke last — the reply path handles it
@@ -8085,6 +8117,10 @@ def api_telegram_settings():
         'followups': bool(data.get('followups', True)),
         'humanize': bool(data.get('humanize', True)),
         'typing_speed': max(4, min(int(data.get('typing_speed') or TG_TYPING_CPS), 40)),
+        # The dashboard's behaviour panel posts without this key — keep the
+        # existing picks rather than silently resetting to "everyone".
+        'only_fans': (_tg_clean_only_fans(data.get('only_fans')) if 'only_fans' in data
+                      else _tg_settings(persona)['only_fans']),
     }
     _set_setting(f'telegram_auto_{persona}', json.dumps(opts))
     bots = _tg_load_bots()
@@ -8148,6 +8184,7 @@ def api_telegram_stats():
             'messages': f.get('in_count', 0), 'last_in': f.get('last_in', 0),
             'cta_sent': bool(f.get('cta_sent')), 'cta_clicked': bool(f.get('cta_clicked')),
             'followups': f.get('followups', 0),
+            'selected': _tg_fan_allowed(_tg_settings(persona), chat_id, f.get('name', '')),
         })
     bot = _tg_load_bots().get(persona) or {}
     cfg = _tg_settings(persona)
@@ -8160,7 +8197,8 @@ def api_telegram_stats():
     return jsonify({'fans': len(fans), 'cta_sent': sent, 'cta_clicked': clicked,
                     'click_rate': round(100.0 * clicked / sent, 1) if sent else 0.0,
                     'cta_url': bot.get('cta_url', ''), 'cta_after': cfg['cta_after'],
-                    'waiting': len(ready), 'warning': warning, 'rows': rows})
+                    'waiting': len(ready), 'warning': warning, 'rows': rows,
+                    'only_fans': cfg['only_fans']})
 
 
 @app.route('/api/telegram/test', methods=['POST'])
@@ -8260,6 +8298,9 @@ def _tgu_plan(persona, chat_id, name, text):
     CTA and photo sending as the bot path. Returns the timing plan the runner
     acts on, including optional photo_data for the runner to send."""
     cfg = _tg_settings(persona)
+    if not _tg_fan_allowed(cfg, chat_id, name):
+        logger.info('TG skip [%s] %s (%s) — not in the selected fans', persona, name, chat_id)
+        return None
     acct = _tgu_accounts().get(persona) or {}
     fans = _tg_fans(persona)
     key = str(chat_id)
