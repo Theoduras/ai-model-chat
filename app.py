@@ -8238,8 +8238,24 @@ def api_telegram_trace():
     rows = sorted(own + shared, key=lambda r: r.get('at', 0))[-TG_TRACE_MAX:]
 
     problems = []
-    if not bot.get('bot_token'):
+    # A hosted connection rides the platform bot and deliberately has no token
+    # of its own, so both the connection check and the webhook check have to
+    # look at the shared bot instead.
+    plat = _tg_platform()
+    hosted = bot.get('mode') == 'hosted' or (bool(bot.get('code')) and not bot.get('bot_token'))
+    token = bot.get('bot_token') or (plat.get('bot_token') if hosted else '')
+    handle = bot.get('username') or (plat.get('username', '') if hosted else '')
+    if hosted and not plat.get('bot_token'):
+        problems.append('This persona uses the shared bot, but no platform bot is '
+                        'set up on this server.')
+    elif not token:
         problems.append('No Telegram bot is connected for this persona.')
+    if hosted:
+        mine = [c for c, p in (_tg_routes() or {}).items() if p == persona]
+        if not mine:
+            problems.append('No Telegram chat is bound to this persona yet — a fan has '
+                            'to open your connect link once so the shared bot knows who '
+                            'they came for.')
     if not cfg['enabled']:
         problems.append('Bot active is OFF — turn it on in Dashboard → Platform '
                         'Bot Behavior → Telegram.')
@@ -8247,9 +8263,9 @@ def api_telegram_trace():
         problems.append(f"Only replying to {len(cfg['only_fans'])} selected fan(s): "
                         + ', '.join(cfg['only_fans'][:8]))
     hook = {}
-    if bot.get('bot_token'):
+    if token:
         try:
-            hook = _tg_api(bot['bot_token'], 'getWebhookInfo') or {}
+            hook = _tg_api(token, 'getWebhookInfo') or {}
         except Exception as e:
             problems.append(f'Could not reach Telegram: {str(e)[:160]}')
         if hook:
@@ -8267,8 +8283,11 @@ def api_telegram_trace():
                         'bot since this version deployed, the update never arrived.')
     return jsonify({'persona': persona, 'enabled': cfg['enabled'],
                     'only_fans': cfg['only_fans'],
-                    'connected': bool(bot.get('bot_token')),
-                    'username': bot.get('username', ''),
+                    'connected': bool(token),
+                    'mode': 'shared bot' if hosted else 'own bot',
+                    'username': handle,
+                    'bound_chats': len([c for c, p in (_tg_routes() or {}).items()
+                                        if p == persona]) if hosted else None,
                     'webhook': {'url': hook.get('url', ''),
                                 'pending': hook.get('pending_update_count', 0),
                                 'last_error': hook.get('last_error_message', '')},
