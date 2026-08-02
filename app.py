@@ -2877,6 +2877,35 @@ def _gemini_image_parts(resp):
     return list(getattr(content, 'parts', None) or [])
 
 
+IMAGE_ATTEMPTS = 3
+
+
+def _gemini_finish_reason(resp):
+    """The finish reason name from an image response, or '' if there is none."""
+    cand = (getattr(resp, 'candidates', None) or [None])[0]
+    finish = getattr(cand, 'finish_reason', None) if cand is not None else None
+    return str(getattr(finish, 'name', finish) or '')
+
+
+# IMAGE_OTHER is a catch-all for "no image came back" and is NOT a safety block:
+# an ambiguous prompt, a stalled generation or a transient API problem all land
+# here, and Google's own guidance is to retry before concluding anything.
+_RETRYABLE_IMAGE_REASONS = {'IMAGE_OTHER', 'OTHER', ''}
+
+_IMAGE_REASON_HELP = {
+    'IMAGE_SAFETY': 'the safety filter rejected it — try a different pose or photo',
+    'PROHIBITED_CONTENT': 'the content policy rejected it — try a different pose or photo',
+    'IMAGE_PROHIBITED_CONTENT': 'the content policy rejected it — try a different pose or photo',
+    'SAFETY': 'the safety filter rejected it — try a different pose or photo',
+    'IMAGE_RECITATION': 'it looked too close to a copyrighted image',
+    'RECITATION': 'it looked too close to a copyrighted image',
+    'IMAGE_OTHER': 'the model just did not produce one. This is usually temporary '
+                   'rather than anything about your photo — try again',
+    'OTHER': 'the model just did not produce one. This is usually temporary — try again',
+    'MAX_TOKENS': 'the response was cut short',
+}
+
+
 def _gemini_block_reason(resp):
     """Plain-English reason an image response carried no picture."""
     bits = []
@@ -2884,9 +2913,9 @@ def _gemini_block_reason(resp):
     if cand is None:
         bits.append('the model returned no candidates')
     else:
-        finish = getattr(cand, 'finish_reason', None)
+        finish = _gemini_finish_reason(resp)
         if finish:
-            bits.append(f'finish reason {getattr(finish, "name", finish)}')
+            bits.append(_IMAGE_REASON_HELP.get(finish, f'finish reason {finish}'))
         safety = getattr(cand, 'safety_ratings', None) or []
         blocked = [getattr(r, 'category', '') for r in safety if getattr(r, 'blocked', False)]
         if blocked:
@@ -2895,11 +2924,7 @@ def _gemini_block_reason(resp):
     block = getattr(feedback, 'block_reason', None) if feedback else None
     if block:
         bits.append(f'the prompt itself was blocked ({getattr(block, "name", block)})')
-    if not bits:
-        return ('it was filtered. Try a less revealing reference photo or a '
-                'different pose.')
-    return (', '.join(bits) + '. This is usually the safety filter — try a less '
-            'revealing reference photo or a different pose.')
+    return ', '.join(bits) if bits else 'no reason was given. Try again.' 
 
 
 @app.route('/api/generate/image', methods=['POST'])
@@ -2976,26 +3001,40 @@ def api_generate_image():
                 "as if taken in the same session minutes apart — only the pose and framing change. "
                 "Realistic, natural lighting, Instagram aesthetic. Fictional AI-generated person."
             )
-            resp = client.models.generate_content(
-                model=os.getenv('GEMINI_IMAGE_MODEL', 'gemini-2.5-flash-image'),
-                # Image first: the reference is the subject, the text only says
-                # what to change about it. Leading with text invites the model
-                # to treat the prompt as a fresh generation and ignore the photo.
-                contents=[{'role': 'user', 'parts': [
-                    {'inline_data': {'mime_type': ref_mime, 'data': b64}},
-                    {'text': edit_prompt},
-                ]}],
-            )
-            for part in _gemini_image_parts(resp):
-                inline = getattr(part, 'inline_data', None)
-                if inline and getattr(inline, 'data', None):
-                    raw = inline.data
-                    mime = getattr(inline, 'mime_type', None) or 'image/png'
-                    b = raw if isinstance(raw, (bytes, bytearray)) else base64.b64decode(raw)
-                    durl = f"data:{mime};base64," + base64.b64encode(b).decode()
-                    return jsonify({'ok': True, 'image': durl,
-                                    'appearance': appearance,
-                                    'used_reference': True})
+            # The image model returns nothing at all often enough that a single
+            # attempt is unreliable, so retry the retryable reasons before
+            # telling the creator it failed.
+            resp = None
+            for attempt in range(IMAGE_ATTEMPTS):
+                resp = client.models.generate_content(
+                    model=os.getenv('GEMINI_IMAGE_MODEL', 'gemini-2.5-flash-image'),
+                    # Image first: the reference is the subject, the text only says
+                    # what to change about it. Leading with text invites the model
+                    # to treat the prompt as a fresh generation and ignore the photo.
+                    contents=[{'role': 'user', 'parts': [
+                        {'inline_data': {'mime_type': ref_mime, 'data': b64}},
+                        {'text': edit_prompt},
+                    ]}],
+                )
+                for part in _gemini_image_parts(resp):
+                    inline = getattr(part, 'inline_data', None)
+                    if inline and getattr(inline, 'data', None):
+                        raw = inline.data
+                        mime = getattr(inline, 'mime_type', None) or 'image/png'
+                        b = raw if isinstance(raw, (bytes, bytearray)) else base64.b64decode(raw)
+                        durl = f"data:{mime};base64," + base64.b64encode(b).decode()
+                        if attempt:
+                            logger.info('reference image succeeded on attempt %d', attempt + 1)
+                        return jsonify({'ok': True, 'image': durl,
+                                        'appearance': appearance,
+                                        'used_reference': True})
+                reason = _gemini_finish_reason(resp)
+                logger.warning('reference image attempt %d/%d produced nothing (%s)',
+                               attempt + 1, IMAGE_ATTEMPTS, reason or 'no reason')
+                if reason not in _RETRYABLE_IMAGE_REASONS:
+                    break  # a real refusal — retrying just wastes a call
+                if attempt < IMAGE_ATTEMPTS - 1:
+                    time.sleep(0.8 * (attempt + 1))
             return jsonify({'ok': False,
                             'error': 'No image came back from the reference photo — '
                                      + _gemini_block_reason(resp)}), 200
