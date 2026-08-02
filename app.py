@@ -4418,6 +4418,33 @@ def _x_mark_seen(persona, event_ids):
                  json.dumps(list(seen)[-X_SEEN_EVENTS_MAX:]))
 
 
+# Phrases that only make sense if the other person wrote first. An opener
+# containing one of these is answering a message that never existed.
+_REPLY_TELL_RE = re.compile(
+    r"(pop(ped|ping)?\s+up\s+in\s+my|in\s+my\s+(dms|inbox)|"
+    r"thanks?\s+(you\s+)?for\s+(the\s+)?(message|dm|reaching|writing|msg)|"
+    r"you\s+(just\s+)?(messaged|dm'?d|wrote|reached out)|"
+    r"nice\s+to\s+hear\s+from\s+you|good\s+to\s+hear\s+from\s+you|"
+    r"glad\s+you\s+(messaged|wrote|reached)|replying\s+to\s+you)", re.I)
+
+
+def _x_fix_cold_opener(persona, opener, instruction):
+    """A cold opener that talks as though the fan messaged first reads as a bot.
+    Regenerate once with the mistake named; give up rather than send it."""
+    if not opener or not _REPLY_TELL_RE.search(opener):
+        return opener
+    logger.info('cold opener implied an earlier message, regenerating: %s', opener[:80])
+    retry = _persona_text(
+        persona,
+        instruction + ' Your previous attempt wrongly implied they had already '
+                      'messaged you. They have not. Write it again without that.',
+        max_tokens=1024, temperature=0.9)
+    if retry and not _REPLY_TELL_RE.search(retry):
+        return retry
+    logger.warning('cold opener still implied an earlier message — not sending')
+    return ''
+
+
 def _x_history(persona, uid, limit=40):
     """Past DMs with one fan, oldest first, in Gemini history shape. Survives
     restarts — unlike the /tmp JSON mirror, which Vercel and Cloud Run wipe."""
@@ -5488,19 +5515,29 @@ def api_x_auto_run():
                         except Exception:
                             pass
                     snippet = (u.get('tweet') or '')[:160]
+                    # Spelled out because the model otherwise writes these as
+                    # replies — "nice to see you pop up in my dms" to someone who
+                    # has never messaged her.
+                    cold_rule = (
+                        " THIS PERSON HAS NEVER MESSAGED YOU. You are messaging them "
+                        "first, out of the blue. Do not thank them for anything, do not "
+                        "reference them writing to you, appearing in your DMs, replying, "
+                        "or 'popping up' — none of that happened. Do not greet them as if "
+                        "you already know each other. No hashtags, no hard sell.")
                     if snippet:
                         instruction = (
-                            f"Start a DM with @{u['username']} on X. They recently posted: "
-                            f"\"{snippet}\". Write a warm, natural, in-character opener that "
-                            "reacts to their post and asks something to get them talking. "
-                            "No hashtags, no hard sell.")
+                            f"Write the first-ever DM to @{u['username']} on X. They recently "
+                            f"posted: \"{snippet}\". Open with something warm and in-character "
+                            "that reacts to that post, and ask one question to get them "
+                            "talking." + cold_rule)
                     else:
                         instruction = (
-                            f"Start a DM with @{u['username']} on X — they're part of your "
-                            "audience. Write a warm, natural, in-character opener that's "
-                            "curious about them and asks something to get them talking. "
-                            "No hashtags, no hard sell.")
+                            f"Write the first-ever DM to @{u['username']} on X — they are "
+                            "someone you found, not someone who contacted you. Open with "
+                            "something warm and in-character, curious about them, and ask "
+                            "one question to get them talking." + cold_rule)
                     opener = _persona_text(persona, instruction, max_tokens=1024, temperature=0.95)
+                    opener = _x_fix_cold_opener(persona, opener, instruction)
                     if opener:
                         _x_call(persona, 'POST',
                                 f'/dm_conversations/with/{u["id"]}/messages',
