@@ -4505,7 +4505,7 @@ def _x_dm_reply_round(persona, max_results=20):
     """Reply in-character to new incoming DMs. Returns (replied_count, log_lines)."""
     cfg = _x_behavior(persona)
     if not cfg.get('enabled', True):
-        return 0, ['X bot is switched off for this persona (Dashboard → Platform Bot Behavior).']
+        return 0, ['X bot is switched off for this persona (see "How she replies").']
     tokens = _load_x_tokens()
     t = tokens.get(persona) or {}
     user_id = t.get('user_id', '')
@@ -5059,7 +5059,7 @@ def api_x_dm_debug():
         out['verdict'] = 'No X account connected for this persona.'
         return jsonify(out)
     if not out['behavior'].get('enabled', True):
-        out['verdict'] = 'Bot is switched off in Dashboard → Platform Bot Behavior → X.com.'
+        out['verdict'] = 'Bot is switched off under "How she replies" on the X Bot tab.'
     try:
         raw = _x_call(persona, 'GET',
                       '/dm_events?dm_event.fields=id,text,sender_id,created_at,'
@@ -7716,7 +7716,7 @@ def _tg_handle_update(persona, update):
     cfg = _tg_settings(persona)
     if not cfg['enabled']:
         _tg_trace(persona, 'skipped',
-                  f'{who} ({chat_id}) — bot is switched off in Platform Bot Behavior')
+                  f'{who} ({chat_id}) — bot is switched off under "How she replies"')
         return
     if not _tg_fan_allowed(cfg, chat_id, who):
         _tg_trace(persona, 'skipped',
@@ -8394,8 +8394,8 @@ def api_telegram_trace():
                             'to open your connect link once so the shared bot knows who '
                             'they came for.')
     if not cfg['enabled']:
-        problems.append('Bot active is OFF — turn it on in Dashboard → Platform '
-                        'Bot Behavior → Telegram.')
+        problems.append('Bot active is OFF — turn it on under "How she replies" '
+                        'at the top of this page.')
     if cfg['only_fans']:
         problems.append(f"Only replying to {len(cfg['only_fans'])} selected fan(s): "
                         + ', '.join(cfg['only_fans'][:8]))

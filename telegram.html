@@ -117,49 +117,33 @@
     </div>
   </div>
 
-  <div class=”form-section”>
-    <div class=”section-title”>⚙️ Bot Behavior</div>
-    <span class=”hint” style=”display:block; margin-bottom:8px;”>Bot behavior settings (active, humanize, typing speed, follow-ups) are now configured per-persona in the <a href=”/dashboard” style=”color:var(--accent);”>Dashboard</a> under Telegram Bot Behavior.</span>
-  </div>
-
   <div class="form-section">
-    <div class="section-title">📊 Conversion</div>
-    <div id="cta-warning" class="note" style="display:none; border-color:#7f1d1d; color:#fca5a5; margin-bottom:14px;"></div>
-    <div class="stats">
-      <div class="stat"><b id="s-fans">0</b><span>Fans</span></div>
-      <div class="stat"><b id="s-sent">0</b><span>CTAs sent</span></div>
-      <div class="stat"><b id="s-clicked">0</b><span>Clicks</span></div>
-      <div class="stat"><b id="s-rate">0%</b><span>Click rate</span></div>
+    <div class="section-title">⚙️ How she replies</div>
+    <span class="hint" style="display:block; margin-bottom:14px;">Applies to both the bot and the personal account below.</span>
+    <div class="auto-toggles" style="display:flex; flex-wrap:wrap; gap:10px 22px;">
+      <label class="auto-chk" style="margin-top:0;"><input type="checkbox" id="f-tg-enabled" checked> <b>Bot active</b> <span style="color:var(--text-muted)">— reply to incoming messages</span></label>
+      <label class="auto-chk" style="margin-top:0;"><input type="checkbox" id="f-tg-humanize" checked> Type like a human <span style="color:var(--text-muted)">— pause to read, show “typing…”, send in bursts</span></label>
+      <label class="auto-chk" style="margin-top:0;"><input type="checkbox" id="f-tg-followups" checked> Follow up on quiet fans <span style="color:var(--text-muted)">— max 2 nudges each</span></label>
     </div>
-    <div id="fans-table"></div>
-    <div style="display:flex; gap:8px; align-items:center; margin-top:14px; flex-wrap:wrap;">
-      <button class="btn-ai" style="background:var(--border);" onclick="loadStats()">Refresh</button>
-      <button class="btn-ai" onclick="saveOnlyFans()">Save who she talks to</button>
-      <button class="btn-ai" style="background:var(--border);" onclick="selectAllFans(false)">Talk to everyone</button>
-      <span class="hint" id="only-fans-state"></span>
+    <div class="xbot-grid" style="margin-top:14px;">
+      <div class="field">
+        <label>Typing speed</label>
+        <select id="f-tg-typing-speed">
+          <option value="8">Slow — thumbs on a phone</option>
+          <option value="14" selected>Natural</option>
+          <option value="22">Fast texter</option>
+          <option value="34">Very fast</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Follow-up delay (minutes)</label>
+        <input type="number" id="f-tg-followup-min" min="5" max="1440" value="45">
+      </div>
     </div>
-    <span class="hint" style="display:block; margin-top:8px;">Tick the fans she should reply to. With none ticked she talks to <b>everyone</b> — that's the default. Skipped fans get no replies and no follow-ups; their messages are simply ignored.</span>
-  </div>
-
-  <div class="form-section">
-    <div class="section-title">🩺 Activity log</div>
-    <span class="hint" style="display:block; margin-bottom:10px;">Every incoming message and what the bot did with it. If she has gone quiet, the reason is here.</span>
-    <div id="trace-problems"></div>
-    <div id="trace-rows"><span class="hint">Loading…</span></div>
-    <div style="display:flex; gap:8px; margin-top:12px;">
-      <button class="btn-ai" style="background:var(--border);" onclick="loadTrace()">Refresh</button>
-      <button class="btn-ai" style="background:var(--border);" onclick="clearTrace()">Clear</button>
+    <div style="display:flex; gap:8px; align-items:center; margin-top:14px;">
+      <button class="btn-ai" onclick="saveBehaviour(this)">Save</button>
+      <span class="hint" id="behaviour-status"></span>
     </div>
-  </div>
-
-  <div class="form-section">
-    <div class="section-title">🔗 Webhook</div>
-    <span class="hint" style="display:block; margin-bottom:8px;">Registered automatically on connect. The path is unguessable and every request is checked against a per-bot secret header, so nobody else can puppet your persona.</span>
-    <div class="field full">
-      <label>Callback URL</label>
-      <input type="text" id="wh-url" readonly placeholder="connect a bot first">
-    </div>
-    <div class="note" style="margin-top:12px;">Local development has no public HTTPS URL, so the webhook is skipped — deploy, or point the base URL at a tunnel, to receive messages.</div>
   </div>
 
   <div class="form-section">
@@ -222,6 +206,51 @@
       <button class="btn-ai" style="margin-top:12px;" onclick="tguSend()">Send opener</button>
       <div class="result-box" id="tgu-send-result"></div>
     </div>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">📊 Conversion</div>
+    <div id="cta-warning" class="note" style="display:none; border-color:#7f1d1d; color:#fca5a5; margin-bottom:14px;"></div>
+    <div class="stats">
+      <div class="stat"><b id="s-fans">0</b><span>Fans</span></div>
+      <div class="stat"><b id="s-sent">0</b><span>CTAs sent</span></div>
+      <div class="stat"><b id="s-clicked">0</b><span>Clicks</span></div>
+      <div class="stat"><b id="s-rate">0%</b><span>Click rate</span></div>
+    </div>
+    <div id="fans-table"></div>
+    <div style="display:flex; gap:8px; align-items:center; margin-top:14px; flex-wrap:wrap;">
+      <button class="btn-ai" style="background:var(--border);" onclick="loadStats()">Refresh</button>
+      <button class="btn-ai" onclick="saveOnlyFans()">Save who she talks to</button>
+      <button class="btn-ai" style="background:var(--border);" onclick="selectAllFans(false)">Talk to everyone</button>
+      <span class="hint" id="only-fans-state"></span>
+    </div>
+    <span class="hint" style="display:block; margin-top:8px;">Tick the fans she should reply to. With none ticked she talks to <b>everyone</b> — that's the default. Skipped fans get no replies and no follow-ups; their messages are simply ignored.</span>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">🩺 Activity log</div>
+    <span class="hint" style="display:block; margin-bottom:10px;">Every incoming message and what the bot did with it. If she has gone quiet, the reason is here.</span>
+    <div id="trace-problems"></div>
+    <div id="trace-rows"><span class="hint">Loading…</span></div>
+    <div style="display:flex; gap:8px; margin-top:12px;">
+      <button class="btn-ai" style="background:var(--border);" onclick="loadTrace()">Refresh</button>
+      <button class="btn-ai" style="background:var(--border);" onclick="clearTrace()">Clear</button>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">🤖 Telegram bot plumbing <span style="font-weight:400;font-size:0.75rem;color:var(--text-muted);">— only needed if you use a bot rather than the account above</span></div>
+    <span class="hint" style="display:block;">Connect a bot at the top of this page. The settings below are the wiring behind it.</span>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">🔗 Webhook</div>
+    <span class="hint" style="display:block; margin-bottom:8px;">Registered automatically on connect. The path is unguessable and every request is checked against a per-bot secret header, so nobody else can puppet your persona.</span>
+    <div class="field full">
+      <label>Callback URL</label>
+      <input type="text" id="wh-url" readonly placeholder="connect a bot first">
+    </div>
+    <div class="note" style="margin-top:12px;">Local development has no public HTTPS URL, so the webhook is skipped — deploy, or point the base URL at a tunnel, to receive messages.</div>
   </div>
 
   <div class="form-section">
@@ -367,6 +396,7 @@ function updateConn(){
   showShare(info.share_link?info:null);
   loadStats();
   loadTrace();
+  loadBehaviour();
 }
 
 function togglePanel(){
@@ -421,6 +451,36 @@ async function loadStats(){
                                  : 'Replying to everyone.';
     st.style.color = only.length ? '#4ade80' : 'var(--text-muted)';
   }catch(e){}
+}
+
+async function loadBehaviour(){
+  if(!persona()) return;
+  let s={};
+  try{ s=await (await fetch('/api/telegram/settings?persona='+encodeURIComponent(persona()))).json(); }catch(e){ return; }
+  document.getElementById('f-tg-enabled').checked = !!s.enabled;
+  document.getElementById('f-tg-humanize').checked = s.humanize !== false;
+  document.getElementById('f-tg-followups').checked = s.followups !== false;
+  document.getElementById('f-tg-followup-min').value = s.followup_min || 45;
+  if(s.typing_speed) document.getElementById('f-tg-typing-speed').value = String(s.typing_speed);
+}
+
+async function saveBehaviour(btn){
+  const st=document.getElementById('behaviour-status');
+  st.textContent='Saving…'; st.style.color='var(--text-muted)';
+  try{
+    const r=await fetch('/api/telegram/settings',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({persona:persona(),
+        enabled:document.getElementById('f-tg-enabled').checked,
+        humanize:document.getElementById('f-tg-humanize').checked,
+        followups:document.getElementById('f-tg-followups').checked,
+        typing_speed:parseInt(document.getElementById('f-tg-typing-speed').value||'14',10),
+        followup_min:parseInt(document.getElementById('f-tg-followup-min').value||'45',10)})});
+    const d=await r.json();
+    if(!d.ok) throw new Error(d.error||'failed');
+    st.textContent='✓ Saved'; st.style.color='#4ade80';
+    loadTrace();
+  }catch(e){ st.textContent='✗ '+e; st.style.color='#fb7185'; }
 }
 
 async function loadTrace(){
