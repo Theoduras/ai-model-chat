@@ -8269,6 +8269,19 @@ def api_telegram_trace():
                         'webhook': {'url': '', 'pending': 0, 'last_error': ''},
                         'problems': problems, 'rows': rows})
 
+    # Sessions are keyed by persona. Signing the account in while a different
+    # persona was selected leaves it attached to that slug, and this persona
+    # silently has no client at all — worth naming, because the account itself
+    # looks perfectly fine in Telegram.
+    others = [p for p, a in (_tgu_accounts() or {}).items()
+              if p != persona and (a or {}).get('session')]
+    if others:
+        labels = ', '.join(
+            f"{p} (@{(_tgu_accounts()[p] or {}).get('username') or '?'})" for p in others[:5])
+        problems.append('This persona has no personal Telegram account, but one is '
+                        f'signed in under: {labels}. Messages to that account are '
+                        'answered as that persona, not this one.')
+
     # A hosted connection rides the platform bot and deliberately has no token
     # of its own, so both the connection check and the webhook check have to
     # look at the shared bot instead.
