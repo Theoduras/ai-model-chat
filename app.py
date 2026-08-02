@@ -7545,12 +7545,30 @@ def _tg_history(persona, chat_id, limit=30):
             for d, t in _fanvue_saved_history(persona, _tg_fan_key(chat_id), limit=limit)]
 
 
+_PLACEHOLDER_RE = re.compile(
+    r"[ \t]*,?[ \t]*\[[^\]]{0,40}(name|fan|user|city|topic|interest|here)[^\]]{0,40}\]",
+    re.I)
+
+
+def _strip_placeholders(text):
+    """Remove a bracketed placeholder the model left in, e.g. "[fan's name]",
+    along with the comma that introduced it. A prompt rule reduces these but
+    does not eliminate them, and one reaching a fan reads as a broken
+    mail-merge."""
+    if not text or '[' not in text:
+        return text
+    cleaned = _PLACEHOLDER_RE.sub('', text)
+    cleaned = re.sub(r'\s+([?!.,])', r'\1', cleaned)
+    return re.sub(r'[ \t]{2,}', ' ', cleaned).strip()
+
+
 def _tg_generate(persona, chat_id, instruction):
     if client is None:
         return local_fallback_reply(instruction)
     history = _tg_history(persona, chat_id)
-    return _fv_trim(_persona_text(persona, instruction, history=history,
-                                  max_tokens=400, temperature=0.9), hard_cap=420)
+    return _strip_placeholders(
+        _fv_trim(_persona_text(persona, instruction, history=history,
+                               max_tokens=400, temperature=0.9), hard_cap=420))
 
 
 def _tg_media_catalog(persona):
@@ -8526,33 +8544,39 @@ def _tgu_plan(persona, chat_id, name, text):
 
     ask_rule = ('End with ONE question that follows from what they just said — never '
                 'generic, never one you have already asked. ')
+    # The model has been caught sending a literal "[fan's name]" to a fan.
+    no_placeholder = ('Write the message exactly as it should be sent. Never emit a '
+                      'placeholder in brackets such as [fan\'s name] or [name] — if you '
+                      'do not know something, leave it out entirely. ')
     if cta_asked and cta_due:
         instruction = (
             f'Reply in-character to this fan on Telegram: "{text}". They are asking '
             'where else to find you — answer them directly and warmly, say yes, that '
             'is where you post the rest. Do NOT deflect, do NOT answer with a question, '
             'and do NOT paste a link yourself; a link is appended after your message. '
-            'Keep it to one or two short sentences. ' + photo_rule)
+            'Keep it to one or two short sentences. ' + no_placeholder + photo_rule)
     elif cta_due:
         instruction = (
             f'Reply in-character to this fan on Telegram: "{text}". Answer what they '
             'actually said first, then tease — in one natural sentence — that you post '
             'more somewhere more private. Do NOT paste a link or a URL and do not name '
-            'the site; a link is appended after your message. ' + ask_rule + photo_rule)
+            'the site; a link is appended after your message. '
+            + ask_rule + no_placeholder + photo_rule)
     else:
         instruction = (
             f'Reply in-character to this fan on Telegram: "{text}". Warm and engaging, '
             'react to what they just said before anything else, reference what they '
             'have told you before, and let interest build slowly — no selling yet. '
-            + ask_rule + photo_rule)
+            + ask_rule + no_placeholder + photo_rule)
 
     history = [{'role': 'model' if d == 'out' else 'user', 'content': t}
                for d, t in _fanvue_saved_history(persona, _tgu_fan_key(chat_id), limit=30)]
     if client is None:
         reply = local_fallback_reply(text)
     else:
-        reply = _fv_trim(_persona_text(persona, instruction, history=history,
-                                       max_tokens=400, temperature=0.9), hard_cap=420)
+        reply = _strip_placeholders(
+            _fv_trim(_persona_text(persona, instruction, history=history,
+                                   max_tokens=400, temperature=0.9), hard_cap=420))
     if not reply:
         return None
 
@@ -8647,6 +8671,14 @@ def _tgu_start(persona):
                 return _tgu_plan(persona, chat_id, name, text)
             except Exception as e:
                 _tgu_errors[persona] = str(e)[:300]
+                # Without this the failure only lived in memory, and the log
+                # showed a reply that simply never arrived.
+                try:
+                    _tg_trace(persona, 'error',
+                              f'building the reply for {name} failed: {str(e)[:200]}')
+                except Exception:
+                    pass
+                logger.exception('tgu plan failed for %s', persona)
                 return None
 
     def sent(p, chat_id, name, text):
