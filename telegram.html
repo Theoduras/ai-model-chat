@@ -428,7 +428,8 @@ async function loadTrace(){
   try{
     const d=await (await fetch('/api/telegram/trace?persona='+encodeURIComponent(persona()))).json();
     pb.innerHTML=(d.problems||[]).map(p=>'<div class="note" style="border-color:#7f1d1d;color:#fca5a5;margin-bottom:8px;">⚠ '+esc(p)+'</div>').join('')
-      || '<div class="note" style="border-color:#14532d;color:#4ade80;margin-bottom:8px;">✓ Connected as @'+esc(d.username||'?')+', bot active, webhook registered.</div>';
+      || '<div class="note" style="border-color:#14532d;color:#4ade80;margin-bottom:8px;">✓ Connected via the '+esc(d.mode||'bot')+' @'+esc(d.username||'?')+
+         (d.bound_chats!=null?(' · '+d.bound_chats+' chat(s) bound to this persona'):'')+', bot active, webhook registered.</div>';
     const rows=(d.rows||[]).slice().reverse();
     const col={sent:'#4ade80',error:'#fb7185',skipped:'#fbbf24',webhook:'var(--text-muted)',routed:'#c7d2fe'};
     box.innerHTML = rows.length ?
