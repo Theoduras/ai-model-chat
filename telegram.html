@@ -427,9 +427,16 @@ async function loadTrace(){
   const box=document.getElementById('trace-rows'), pb=document.getElementById('trace-problems');
   try{
     const d=await (await fetch('/api/telegram/trace?persona='+encodeURIComponent(persona()))).json();
-    pb.innerHTML=(d.problems||[]).map(p=>'<div class="note" style="border-color:#7f1d1d;color:#fca5a5;margin-bottom:8px;">⚠ '+esc(p)+'</div>').join('')
-      || '<div class="note" style="border-color:#14532d;color:#4ade80;margin-bottom:8px;">✓ Connected via the '+esc(d.mode||'bot')+' @'+esc(d.username||'?')+
-         (d.bound_chats!=null?(' · '+d.bound_chats+' chat(s) bound to this persona'):'')+', bot active, webhook registered.</div>';
+    // Always show what it is and whether it is live — that is the first thing
+    // you need when nothing is arriving, problems or not.
+    var live = d.personal ? (d.personal.running?'● running':'○ stopped')
+                          : (d.webhook&&d.webhook.url?'● webhook registered':'○ no webhook');
+    var head='<div class="note" style="border-color:'+((d.problems||[]).length?'#3f3f46':'#14532d')+
+      ';color:'+((d.problems||[]).length?'var(--text-2)':'#4ade80')+';margin-bottom:8px;">'+
+      ((d.problems||[]).length?'':'✓ ')+esc(d.mode||'bot')+
+      (d.username?(' @'+esc(d.username)):'')+' · '+live+
+      (d.bound_chats!=null?(' · '+d.bound_chats+' chat(s) bound'):'')+'</div>';
+    pb.innerHTML=head+(d.problems||[]).map(p=>'<div class="note" style="border-color:#7f1d1d;color:#fca5a5;margin-bottom:8px;">⚠ '+esc(p)+'</div>').join('');
     const rows=(d.rows||[]).slice().reverse();
     const col={sent:'#4ade80',error:'#fb7185',skipped:'#fbbf24',webhook:'var(--text-muted)',routed:'#c7d2fe'};
     box.innerHTML = rows.length ?
