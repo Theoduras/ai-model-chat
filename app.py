@@ -4976,6 +4976,13 @@ def _x_feed_candidates(persona, limit, contacted, me_id,
 
 X_SEEN_TWEETS_MAX = 600
 
+# X returns this when the account may not reply to a stranger's post. It is a
+# property of the account, not of the post, so one rejection means every other
+# post in the round will be rejected too.
+_X_REPLY_BLOCKED_RE = re.compile(
+    r'only reply to or quote posts where you are mentioned|'
+    r'not permitted to (reply|create)', re.I)
+
 
 def _x_seen_tweets(persona):
     """Tweet ids already replied to. In the database, not /tmp, so a redeploy
@@ -5024,11 +5031,13 @@ def _x_feed_engage_round(persona, post_limit=4, reply_limit=8, post_age_min=None
 
     seen = _x_seen_tweets(persona)
     handled = []
+    comment_tries = 0
     for post in posts[:X_FEED_POSTS_SCANNED]:
         author = (post.get('_author') or {}).get('username', '?')
         text = (post.get('text') or '').strip()
 
-        if do_posts and actions['post_comments'] < post_limit and post['id'] not in seen:
+        if do_posts and comment_tries < post_limit and post['id'] not in seen:
+            comment_tries += 1  # a rejected attempt still costs the budget
             instruction = (
                 'Leave a short public comment on this post from another creator. '
                 'React to what it actually says — one or two lines, warm and '
@@ -5046,7 +5055,16 @@ def _x_feed_engage_round(persona, post_limit=4, reply_limit=8, post_age_min=None
                     handled.append(post['id'])
                     log.append(f'💬 commented on @{author}: {comment[:60]}')
                 except Exception as e:
-                    log.append(f'comment on @{author} failed: {str(e)[:120]}')
+                    if _X_REPLY_BLOCKED_RE.search(str(e)):
+                        # X refuses replies from this account to strangers'
+                        # posts. Retrying the next eleven is pointless and
+                        # spends a Gemini call each time.
+                        do_posts = False
+                        log.append('Public commenting is blocked for this account: '
+                                   + str(e)[:160]
+                                   + ' — skipping comments for the rest of this round.')
+                    else:
+                        log.append(f'comment on @{author} failed: {str(e)[:140]}')
 
         if not (do_replies or do_likes):
             continue
