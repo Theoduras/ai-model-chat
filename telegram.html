@@ -142,6 +142,17 @@
   </div>
 
   <div class="form-section">
+    <div class="section-title">🩺 Activity log</div>
+    <span class="hint" style="display:block; margin-bottom:10px;">Every incoming message and what the bot did with it. If she has gone quiet, the reason is here.</span>
+    <div id="trace-problems"></div>
+    <div id="trace-rows"><span class="hint">Loading…</span></div>
+    <div style="display:flex; gap:8px; margin-top:12px;">
+      <button class="btn-ai" style="background:var(--border);" onclick="loadTrace()">Refresh</button>
+      <button class="btn-ai" style="background:var(--border);" onclick="clearTrace()">Clear</button>
+    </div>
+  </div>
+
+  <div class="form-section">
     <div class="section-title">🔗 Webhook</div>
     <span class="hint" style="display:block; margin-bottom:8px;">Registered automatically on connect. The path is unguessable and every request is checked against a per-bot secret header, so nobody else can puppet your persona.</span>
     <div class="field full">
@@ -355,6 +366,7 @@ function updateConn(){
   setMode(info.mode==='own'?'own':'hosted');
   showShare(info.share_link?info:null);
   loadStats();
+  loadTrace();
 }
 
 function togglePanel(){
@@ -409,6 +421,28 @@ async function loadStats(){
                                  : 'Replying to everyone.';
     st.style.color = only.length ? '#4ade80' : 'var(--text-muted)';
   }catch(e){}
+}
+
+async function loadTrace(){
+  const box=document.getElementById('trace-rows'), pb=document.getElementById('trace-problems');
+  try{
+    const d=await (await fetch('/api/telegram/trace?persona='+encodeURIComponent(persona()))).json();
+    pb.innerHTML=(d.problems||[]).map(p=>'<div class="note" style="border-color:#7f1d1d;color:#fca5a5;margin-bottom:8px;">⚠ '+esc(p)+'</div>').join('')
+      || '<div class="note" style="border-color:#14532d;color:#4ade80;margin-bottom:8px;">✓ Connected as @'+esc(d.username||'?')+', bot active, webhook registered.</div>';
+    const rows=(d.rows||[]).slice().reverse();
+    const col={sent:'#4ade80',error:'#fb7185',skipped:'#fbbf24',webhook:'var(--text-muted)',routed:'#c7d2fe'};
+    box.innerHTML = rows.length ?
+      '<table class="fans"><tr><th>Time</th><th>What</th><th>Detail</th></tr>'+
+      rows.map(r=>'<tr><td style="white-space:nowrap;">'+new Date((r.at||0)*1000).toLocaleTimeString()+
+        '</td><td style="color:'+(col[r.stage]||'var(--text-2)')+'">'+esc(r.stage)+
+        '</td><td>'+esc(r.detail||'')+'</td></tr>').join('')+'</table>'
+      : '<span class="hint">Nothing recorded yet. Send the bot a message on Telegram, then hit Refresh.</span>';
+  }catch(e){ box.innerHTML='<span class="hint" style="color:#fb7185;">Could not load the log: '+esc(String(e))+'</span>'; }
+}
+
+async function clearTrace(){
+  await fetch('/api/telegram/trace?persona='+encodeURIComponent(persona()),{method:'DELETE'});
+  loadTrace();
 }
 
 function selectAllFans(on){
