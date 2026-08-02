@@ -4875,6 +4875,72 @@ def _x_parse_time(value):
         return None
 
 
+def _x_fresh_feed_posts(persona, me_id, post_age_min=None):
+    """Posts from the accounts she follows, newer than the window, newest first.
+    Her own posts are left out — other rounds handle those. Returns [] when the
+    home timeline is unavailable, which is not on every API plan."""
+    post_age_min = int(post_age_min or X_FEED_POST_AGE_MIN)
+    now = datetime.now(timezone.utc)
+    posts_since = now - timedelta(minutes=post_age_min)
+    try:
+        feed = _x_call(persona, 'GET',
+                       f'/users/{me_id}/timelines/reverse_chronological'
+                       f'?max_results=50&start_time={_x_rfc3339(posts_since)}'
+                       '&tweet.fields=created_at,author_id,conversation_id'
+                       '&expansions=author_id&user.fields=username,name')
+    except Exception as e:
+        logger.info('home feed unavailable for %s: %s', persona, str(e)[:160])
+        return []
+    authors = {u['id']: u for u in (feed.get('includes', {}).get('users', []) or [])}
+    posts = []
+    for tw in feed.get('data', []) or []:
+        if tw.get('author_id') == me_id:
+            continue
+        at = _x_parse_time(tw.get('created_at'))
+        if at and at < posts_since:
+            continue
+        tw['_author'] = authors.get(tw.get('author_id'), {})
+        posts.append((at or now, tw))
+    posts.sort(key=lambda p: p[0], reverse=True)
+    if not posts:
+        logger.info('no feed posts newer than %d min for %s', post_age_min, persona)
+    return [tw for _, tw in posts]
+
+
+def _x_fresh_replies(persona, post, me_id, reply_age_min=None):
+    """People replying under a post within the window, newest reply first —
+    someone who typed a minute ago is far more likely to still be there."""
+    reply_age_min = int(reply_age_min or X_FEED_REPLY_AGE_MIN)
+    replies_since = datetime.now(timezone.utc) - timedelta(minutes=reply_age_min)
+    cid = post.get('conversation_id') or post.get('id')
+    if not cid:
+        return []
+    q = urllib.parse.quote(f'conversation_id:{cid}')
+    try:
+        res = _x_call(persona, 'GET',
+                      f'/tweets/search/recent?query={q}&max_results=50'
+                      f'&start_time={_x_rfc3339(replies_since)}'
+                      '&tweet.fields=author_id,text,created_at,conversation_id'
+                      '&expansions=author_id&user.fields=username,name')
+    except Exception as e:
+        logger.info('replies for %s unavailable: %s', cid, str(e)[:120])
+        return []
+    users = {u['id']: u for u in (res.get('includes', {}).get('users', []) or [])}
+    out = []
+    for reply in res.get('data', []) or []:
+        uid = reply.get('author_id')
+        if not uid or uid == me_id or reply.get('id') == cid:
+            continue
+        at = _x_parse_time(reply.get('created_at'))
+        if at and at < replies_since:
+            continue
+        reply['_author'] = users.get(uid, {})
+        reply['_at'] = at or datetime.now(timezone.utc)
+        out.append(reply)
+    out.sort(key=lambda r: r['_at'], reverse=True)
+    return out
+
+
 def _x_feed_candidates(persona, limit, contacted, me_id,
                        post_age_min=None, reply_age_min=None):
     """People who just replied to someone else's post in her feed.
@@ -4882,63 +4948,21 @@ def _x_feed_candidates(persona, limit, contacted, me_id,
     Someone mid-conversation on a creator's fresh post is the warmest cold
     audience there is, so the newest replier is tried first. Returns [] when
     the feed is unavailable, letting the caller fall back."""
-    post_age_min = int(post_age_min or X_FEED_POST_AGE_MIN)
-    reply_age_min = int(reply_age_min or X_FEED_REPLY_AGE_MIN)
-    now = datetime.now(timezone.utc)
-    # 30s of slack: X rejects a start_time that is not clearly in the past.
-    posts_since = now - timedelta(minutes=post_age_min)
-    replies_since = now - timedelta(minutes=reply_age_min)
-
-    try:
-        feed = _x_call(persona, 'GET',
-                       f'/users/{me_id}/timelines/reverse_chronological'
-                       f'?max_results=50&start_time={_x_rfc3339(posts_since)}'
-                       '&tweet.fields=created_at,author_id,conversation_id')
-    except Exception as e:
-        logger.info('home feed unavailable for %s: %s', persona, str(e)[:160])
-        return []
-
-    posts = []
-    for tw in feed.get('data', []) or []:
-        if tw.get('author_id') == me_id:
-            continue  # her own post — those are handled elsewhere
-        at = _x_parse_time(tw.get('created_at'))
-        if at and at < posts_since:
-            continue
-        posts.append((at or now, tw))
-    posts.sort(key=lambda p: p[0], reverse=True)
+    posts = _x_fresh_feed_posts(persona, me_id, post_age_min)
     if not posts:
-        logger.info('no feed posts newer than %d min for %s', post_age_min, persona)
         return []
 
     found, seen = [], set()
-    for _, tw in posts[:X_FEED_POSTS_SCANNED]:
-        cid = tw.get('conversation_id') or tw.get('id')
-        if not cid:
-            continue
-        q = urllib.parse.quote(f'conversation_id:{cid}')
-        try:
-            res = _x_call(persona, 'GET',
-                          f'/tweets/search/recent?query={q}&max_results=50'
-                          f'&start_time={_x_rfc3339(replies_since)}'
-                          '&tweet.fields=author_id,text,created_at'
-                          '&expansions=author_id&user.fields=username,name')
-        except Exception as e:
-            logger.info('replies for %s unavailable: %s', cid, str(e)[:120])
-            continue
-        users = {u['id']: u for u in (res.get('includes', {}).get('users', []) or [])}
-        for reply in res.get('data', []) or []:
+    for tw in posts[:X_FEED_POSTS_SCANNED]:
+        for reply in _x_fresh_replies(persona, tw, me_id, reply_age_min=reply_age_min):
             uid = reply.get('author_id')
-            if not uid or uid == me_id or uid in contacted or uid in seen:
-                continue
-            at = _x_parse_time(reply.get('created_at'))
-            if at and at < replies_since:
+            if uid in contacted or uid in seen:
                 continue
             seen.add(uid)
-            u = users.get(uid, {})
+            u = reply['_author']
             found.append({'id': uid, 'username': u.get('username') or '?',
                           'name': u.get('name', ''), 'tweet': reply.get('text', ''),
-                          'at': at or now})
+                          'at': reply['_at']})
 
     # Freshest replier first — someone who typed a minute ago is far more
     # likely to still be at their phone than someone from fifteen.
@@ -4948,6 +4972,123 @@ def _x_feed_candidates(persona, limit, contacted, me_id,
     for c in found:
         c.pop('at', None)
     return found[:limit]
+
+
+X_SEEN_TWEETS_MAX = 600
+
+
+def _x_seen_tweets(persona):
+    """Tweet ids already replied to. In the database, not /tmp, so a redeploy
+    does not make her answer the same person twice."""
+    try:
+        raw = json.loads(_get_setting(f'x_seen_tweets_{persona}') or '[]')
+        return set(raw) if isinstance(raw, list) else set()
+    except Exception:
+        return set()
+
+
+def _x_mark_tweets_seen(persona, ids):
+    ids = [i for i in ids if i]
+    if not ids:
+        return
+    seen = _x_seen_tweets(persona)
+    seen.update(ids)
+    _set_setting(f'x_seen_tweets_{persona}', json.dumps(list(seen)[-X_SEEN_TWEETS_MAX:]))
+
+
+def _x_like(persona, me_id, tweet_id):
+    try:
+        _x_call(persona, 'POST', f'/users/{me_id}/likes', body={'tweet_id': tweet_id})
+        return True
+    except Exception as e:
+        logger.info('like %s failed: %s', tweet_id, str(e)[:120])
+        return False
+
+
+def _x_feed_engage_round(persona, post_limit=4, reply_limit=8, post_age_min=None,
+                         reply_age_min=None, do_posts=True, do_replies=True,
+                         do_likes=True):
+    """Work the feed: leave a short comment on fresh posts from the creators she
+    follows, then like and answer the people replying under them — newest
+    replier first, since they are the ones still holding their phone."""
+    me_id = _x_me_id(persona)
+    actions = {'post_comments': 0, 'reply_answers': 0, 'likes': 0}
+    log = []
+    if not me_id:
+        return actions, ['No X account connected.']
+
+    posts = _x_fresh_feed_posts(persona, me_id, post_age_min)
+    if not posts:
+        return actions, [f'No posts in the feed from the last '
+                         f'{int(post_age_min or X_FEED_POST_AGE_MIN)} minutes.']
+
+    seen = _x_seen_tweets(persona)
+    handled = []
+    for post in posts[:X_FEED_POSTS_SCANNED]:
+        author = (post.get('_author') or {}).get('username', '?')
+        text = (post.get('text') or '').strip()
+
+        if do_posts and actions['post_comments'] < post_limit and post['id'] not in seen:
+            instruction = (
+                'Leave a short public comment on this post from another creator. '
+                'React to what it actually says — one or two lines, warm and '
+                'natural, the kind of thing that makes people look at your '
+                'profile. No hashtags, no pitch, no emoji spam. '
+                f'Their post: "{text[:400]}"')
+            comment = _persona_text(persona, instruction, max_tokens=200, temperature=0.95)
+            comment = _strip_placeholders(_fv_trim(comment, max_sentences=2, hard_cap=240))
+            if comment:
+                try:
+                    _x_call(persona, 'POST', '/tweets',
+                            body={'text': comment[:280],
+                                  'reply': {'in_reply_to_tweet_id': post['id']}})
+                    actions['post_comments'] += 1
+                    handled.append(post['id'])
+                    log.append(f'💬 commented on @{author}: {comment[:60]}')
+                except Exception as e:
+                    log.append(f'comment on @{author} failed: {str(e)[:120]}')
+
+        if not (do_replies or do_likes):
+            continue
+        for reply in _x_fresh_replies(persona, post, me_id, reply_age_min=reply_age_min):
+            if actions['reply_answers'] >= reply_limit:
+                break
+            rid = reply.get('id')
+            if rid in seen or rid in handled:
+                continue
+            who = (reply.get('_author') or {}).get('username', '?')
+            said = (reply.get('text') or '').strip()
+            if not said:
+                continue
+            if do_likes and _x_like(persona, me_id, rid):
+                actions['likes'] += 1
+            if not do_replies:
+                handled.append(rid)
+                continue
+            instruction = (
+                'Someone replied under a post you are also in the comments of. '
+                'Answer THEM, warmly and specifically — pick up on what they '
+                'actually said and respond as though you are into it. If they '
+                'say "can we go out already" you say something like "I would '
+                'love to haha". One short line, in character, no hashtags, no '
+                f'pitch. They said: "{said[:300]}"')
+            answer = _persona_text(persona, instruction, max_tokens=200, temperature=0.95)
+            answer = _strip_placeholders(_fv_trim(answer, max_sentences=2, hard_cap=200))
+            if not answer:
+                continue
+            try:
+                _x_call(persona, 'POST', '/tweets',
+                        body={'text': answer[:280], 'reply': {'in_reply_to_tweet_id': rid}})
+                actions['reply_answers'] += 1
+                handled.append(rid)
+                log.append(f'↩ @{who} said "{said[:40]}" → {answer[:60]}')
+            except Exception as e:
+                log.append(f'reply to @{who} failed: {str(e)[:120]}')
+
+    _x_mark_tweets_seen(persona, handled)
+    logger.info('feed engage [%s]: %d comments, %d answers, %d likes', persona,
+                actions['post_comments'], actions['reply_answers'], actions['likes'])
+    return actions, log
 
 
 def _x_audience_candidates(persona, limit, contacted,
@@ -5548,7 +5689,8 @@ def api_x_auto_run():
 
     _log_x_event('auto-run', persona=persona, detail=query or post)
     actions = {'dm_replies': 0, 'followups': 0, 'new_chats': 0, 'follows': 0,
-               'comments': 0, 'posts': 0}
+               'comments': 0, 'posts': 0, 'post_comments': 0, 'reply_answers': 0,
+               'likes': 0}
     log = []
     try:
         if do_post:
@@ -5561,6 +5703,19 @@ def api_x_auto_run():
                     log.append(f'Posted: {text[:60]}')
             except Exception as e:
                 log.append(f'Post failed: {str(e)[:80]}')
+
+        if bool(data.get('feed_engage')):
+            fa, flog = _x_feed_engage_round(
+                persona,
+                post_limit=max(0, min(int(data.get('feed_post_limit', 4)), 15)),
+                reply_limit=max(0, min(int(data.get('feed_reply_limit', 8)), 25)),
+                post_age_min=data.get('post_age_min'),
+                reply_age_min=data.get('reply_age_min'),
+                do_posts=bool(data.get('feed_comment_posts', True)),
+                do_replies=bool(data.get('feed_answer_replies', True)),
+                do_likes=bool(data.get('feed_like_replies', True)))
+            actions.update(fa)
+            log += flog
 
         if do_dm:
             replied, dlog = _x_dm_reply_round(persona)

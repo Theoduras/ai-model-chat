@@ -133,6 +133,7 @@
       <label class="auto-chk"><input type="checkbox" id="auto-respond-own"> Reply to comments on my own posts</label>
       <label class="auto-chk"><input type="checkbox" id="auto-comments"> Reply to comments on the post below</label>
       <label class="auto-chk"><input type="checkbox" id="auto-post"> Post new content</label>
+      <label class="auto-chk"><input type="checkbox" id="auto-feed-engage" checked> Work the feed <span style="color:var(--text-muted)">— comment on fresh posts, then like and answer the newest people replying</span></label>
     </div>
     <div class="xbot-grid" style="margin-top:12px;">
       <div class="field">
@@ -140,6 +141,14 @@
         <select id="chat-interval">
           <option value="45">45s</option><option value="90" selected>90s</option><option value="180">3 min</option><option value="300">5 min</option>
         </select>
+      </div>
+      <div class="field">
+        <label>Comments per round <span style="font-weight:400;color:var(--text-muted);">(on other people's posts)</span></label>
+        <input type="number" id="feed-post-limit" min="0" max="15" value="4">
+      </div>
+      <div class="field">
+        <label>Answers per round <span style="font-weight:400;color:var(--text-muted);">(to people replying)</span></label>
+        <input type="number" id="feed-reply-limit" min="0" max="25" value="8">
       </div>
       <div class="field">
         <label>Post a new tweet every</label>
@@ -532,7 +541,8 @@ function setState(id, txt, cls) {
 function logActions(label, n, a, data) {
   logLine(label + ' round ' + n + ' · ' + (a.new_chats || 0) + ' new chats, ' +
     (a.dm_replies || 0) + ' DM replies, ' + (a.followups || 0) + ' follow-ups, ' +
-    (a.comments || 0) + ' comment replies, ' +
+    (a.post_comments || 0) + ' post comments, ' + (a.reply_answers || 0) + ' answers, ' +
+    (a.likes || 0) + ' likes, ' + (a.comments || 0) + ' comment replies, ' +
     (a.follows || 0) + ' follows, ' + (a.posts || 0) + ' posts', 'hd');
   (data.log || []).forEach(l => logLine(l, 'act'));
   if (!(data.log || []).length && !Object.values(a).some(Boolean)) {
@@ -589,6 +599,11 @@ async function runChatRound() {
       respond_own: document.getElementById('auto-respond-own').checked,
       post_content: wantPost,
       follow: false,
+      feed_engage: document.getElementById('auto-feed-engage').checked,
+      feed_post_limit: parseInt(document.getElementById('feed-post-limit').value||'4',10),
+      feed_reply_limit: parseInt(document.getElementById('feed-reply-limit').value||'8',10),
+      post_age_min: parseInt(document.getElementById('gather-post-age').value||'30',10),
+      reply_age_min: parseInt(document.getElementById('gather-reply-age').value||'15',10),
     });
     if (!data.ok) {
       logLine('Auto-chat error: ' + data.error, 'er');
