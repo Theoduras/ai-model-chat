@@ -6330,6 +6330,11 @@ def _fanvue_ppv_tiers(persona):
     return tiers
 
 
+# Fanvue serves media only through variant URLs, and only when the request asks
+# for them by name. blurred is what a locked item may legitimately show.
+FV_MEDIA_VARIANTS = 'main,thumbnail,thumbnail_gallery,blurred'
+
+
 def _fv_media_thumb(m):
     """Best thumbnail URL for a media item from its variants, else its own url."""
     for v in (m.get('variants') or []):
@@ -6353,7 +6358,9 @@ def api_fanvue_media():
     persona = (request.args.get('persona') or '').strip()
     mtype = (request.args.get('type') or '').strip()
     folder = (request.args.get('folder') or '').strip()
-    q = 'size=50&page=1'
+    # Without `variants` Fanvue returns metadata only — no URL at all, so
+    # nothing renders. The URLs live on the variant objects, not the item.
+    q = f'size=50&page=1&variants={FV_MEDIA_VARIANTS}'
     if mtype:
         q += f'&mediaType={mtype}'
     if folder:
@@ -6362,7 +6369,10 @@ def api_fanvue_media():
     try:
         rows = _fv_list(_fanvue_call(persona, 'GET', f'/media?{q}'))
         for m in rows:
-            if _fv_first(m, 'status', default='ready') not in ('ready', ''):
+            # Fanvue reports FINALISED for a usable item; anything else comes
+            # back as uuid + status only, with no variants to show.
+            if str(_fv_first(m, 'status', default='') or '').lower() \
+                    not in ('finalised', 'finalized', 'ready', ''):
                 continue
             desc = _fv_first(m, 'description', default='') or ''
             items.append({
@@ -6393,7 +6403,7 @@ def api_fanvue_media_item():
         return jsonify({'error': 'Missing uuid'}), 400
     out = {'uuid': uuid, 'mediaType': '', 'url': '', 'description': '', 'tags': []}
     try:
-        m = _fanvue_call(persona, 'GET', f'/media/{uuid}')
+        m = _fanvue_call(persona, 'GET', f'/media/{uuid}?variants={FV_MEDIA_VARIANTS}')
         m = m.get('data', m) if isinstance(m, dict) else {}
         out['mediaType'] = _fv_first(m, 'mediaType', default='')
         out['description'] = _fv_first(m, 'description', 'caption', default='') or ''
