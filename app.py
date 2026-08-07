@@ -6459,7 +6459,7 @@ def api_fanvue_ppv():
         if not media:
             continue
         if price < 300:
-            return jsonify({'ok': False, 'error': 'Each tier needs a price of at least 300'}), 400
+            return jsonify({'ok': False, 'error': 'Each tier needs a price of at least $3'}), 400
         tiers.append({'media_uuids': media, 'price': price,
                       'caption': (t.get('caption') or '').strip()})
     cfg = {'tiers': tiers, 'enabled': bool(d.get('enabled', True)) and bool(tiers)}
