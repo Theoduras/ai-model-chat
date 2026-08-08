@@ -6520,6 +6520,42 @@ def api_fanvue_media_item():
     return jsonify(out)
 
 
+@app.route('/api/fanvue/media-lookup', methods=['POST'])
+def api_fanvue_media_lookup():
+    """Thumbnails for specific media uuids, so a tier can show its own items
+    even when the folder filter is pointing somewhere else."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    d = request.json or {}
+    persona = (d.get('persona') or '').strip()
+    uuids = [str(u).strip() for u in (d.get('uuids') or []) if str(u).strip()][:60]
+    out = []
+    for u in uuids:
+        item = {'uuid': u, 'name': '', 'mediaType': '', 'thumb': ''}
+        try:
+            m = _fanvue_call(persona, 'GET', f'/media/{u}?variants={FV_MEDIA_VARIANTS}')
+            m = m.get('data', m) if isinstance(m, dict) else {}
+            desc = _fv_first(m, 'description', default='') or ''
+            item['name'] = _fv_first(m, 'name', 'caption', default='') or (desc[:40] or u[:8])
+            item['mediaType'] = _fv_first(m, 'mediaType', default='')
+            item['thumb'] = _fv_media_thumb(m) or m.get('url') or ''
+        except Exception:
+            pass
+        if not item['thumb']:
+            # The owner record carries no signed URL for some items; the consumer
+            # view of our own media does.
+            try:
+                me = _fanvue_me_uuid(persona)
+                c = _fanvue_call(persona, 'GET', f'/media/{u}/consumer/{me}')
+                c = c.get('data', c) if isinstance(c, dict) else {}
+                item['thumb'] = _fv_media_thumb(c) or c.get('url') or ''
+                item['mediaType'] = item['mediaType'] or _fv_first(c, 'mediaType', default='')
+            except Exception:
+                pass
+        out.append(item)
+    return jsonify({'media': out})
+
+
 @app.route('/api/fanvue/ppv', methods=['GET', 'POST'])
 def api_fanvue_ppv():
     """Get or set a persona's PPV content sets. A set is a themed bundle with
