@@ -6426,7 +6426,6 @@ def _fv_pick_set(sets, progress, context, hour):
 # Fanvue serves media only through variant URLs, and only when the request asks
 # for them by name. blurred is what a locked item may legitimately show.
 FV_MEDIA_VARIANTS = 'main,thumbnail,thumbnail_gallery,blurred'
-FV_MEDIA_MAX_PAGES = 12
 
 
 def _fv_media_thumb(m):
@@ -6442,35 +6441,54 @@ def _fv_media_thumb(m):
     return m.get('url') or ''
 
 
+@app.route('/api/fanvue/folders')
+def api_fanvue_folders():
+    """The creator's vault folders, so the picker can filter by folder without
+    the name having to be typed exactly."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    persona = (request.args.get('persona') or '').strip()
+    folders, page = [], 1
+    try:
+        while page <= 20:
+            res = _fanvue_call(persona, 'GET', f'/vault/folders?page={page}&size=50')
+            for f in _fv_list(res):
+                if f.get('name'):
+                    folders.append({'name': f['name'], 'count': f.get('mediaCount')})
+            if not ((res or {}).get('pagination') or {}).get('hasMore'):
+                break
+            page += 1
+    except Exception as e:
+        return jsonify({'folders': folders, 'error': str(e)[:140]})
+    return jsonify({'folders': folders})
+
+
 @app.route('/api/fanvue/media')
 def api_fanvue_media():
-    """List the connected creator's Fanvue media so a persona can pick which
-    items to send as PPV. Optional ?type=image|video|audio and ?folder= filters.
-    Also returns the distinct folder names found so the UI can group by folder."""
+    """One page of the connected creator's Fanvue media, so the picker can load
+    lazily instead of pulling the whole vault. Optional ?type=image|video|audio
+    and ?folder= filters; ?page= walks the pages."""
     if not _check_admin():
         return jsonify({'error': 'Unauthorized'}), 401
     persona = (request.args.get('persona') or '').strip()
     mtype = (request.args.get('type') or '').strip()
     folder = (request.args.get('folder') or '').strip()
+    try:
+        page = max(1, int(request.args.get('page') or 1))
+    except (TypeError, ValueError):
+        page = 1
     # Without `variants` Fanvue returns metadata only — no URL at all, so
     # nothing renders. The URLs live on the variant objects, not the item.
-    q = f'size=50&variants={FV_MEDIA_VARIANTS}'
+    q = f'size=50&page={page}&variants={FV_MEDIA_VARIANTS}'
     if mtype:
         q += f'&mediaType={mtype}'
     if folder:
         q += f'&folderName={urllib.parse.quote(folder)}'
-    items, err = [], ''
+    items, err, has_more = [], '', False
     try:
-        rows, page = [], 1
-        # One page is 50 items; a real vault holds far more, so walk the pages.
-        while page <= FV_MEDIA_MAX_PAGES:
-            res = _fanvue_call(persona, 'GET', f'/media?{q}&page={page}')
-            batch = _fv_list(res)
-            rows += batch
-            if not batch or not ((res or {}).get('pagination') or {}).get('hasMore'):
-                break
-            page += 1
-        for m in rows:
+        res = _fanvue_call(persona, 'GET', f'/media?{q}')
+        has_more = bool(((res or {}).get('pagination') or {}).get('hasMore'))
+        for m in _fv_list(res):
             # Fanvue reports FINALISED for a usable item; anything else comes
             # back as uuid + status only, with no variants to show.
             if str(_fv_first(m, 'status', default='') or '').lower() \
@@ -6488,7 +6506,8 @@ def api_fanvue_media():
             })
     except Exception as e:
         err = str(e)[:140]
-    return jsonify({'media': [m for m in items if m['uuid']],
+    return jsonify({'media': [m for m in items if m['uuid']], 'page': page,
+                    'has_more': has_more,
                     'selected': _fanvue_ppv(persona), 'error': err})
 
 
