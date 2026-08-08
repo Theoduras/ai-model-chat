@@ -164,6 +164,15 @@
       <input type="text" id="fv-only-handles" placeholder="e.g. girlforfun">
     </div>
     <div class="field full" style="margin-top:12px;">
+      <label>Fanvue lists <span style="font-weight:400;color:var(--text-muted);">(her smart segments and custom lists — set each one to include or exclude. Any list on "include" means she only talks to fans in those lists.)</span></label>
+      <div id="fv-lists"><span class="hint">Loading…</span></div>
+      <button class="btn-ai" style="background:var(--border);margin-top:8px;" onclick="loadLists(true)">Refresh lists</button>
+    </div>
+    <div class="field full" style="margin-top:12px;">
+      <label>PPV test phrase <span style="font-weight:400;color:var(--text-muted);">(for testing only — when a fan sends a message containing this, the last PPV she sent them counts as paid, so the next tier can go out without a real purchase. Leave blank to switch off.)</span></label>
+      <input type="text" id="fv-ppv-test-phrase" placeholder="e.g. unlocked" style="max-width:260px;">
+    </div>
+    <div class="field full" style="margin-top:12px;">
       <label>Follow-up after silence <span style="font-weight:400;color:var(--text-muted);">(minutes before nudging a quiet fan — first nudge at this value, second at 2×; max 2. Set low e.g. 5 to test)</span></label>
       <input type="number" id="fv-followup-min" min="1" step="1" placeholder="30">
     </div>
@@ -414,10 +423,46 @@ async function loadAuto(){
   document.getElementById('fv-typing-wrap').style.display=(a.humanize!==false)?'':'none';
   document.getElementById('fv-followup-min').value=a.followup_min||30;
   document.getElementById('fv-ppv-require-payment').checked=!!a.ppv_require_payment;
+  document.getElementById('fv-ppv-test-phrase').value=a.ppv_test_phrase||'';
+  listPick={};
+  (a.include_lists||[]).forEach(l=>{listPick[l.kind+':'+l.id]='include';});
+  (a.exclude_lists||[]).forEach(l=>{listPick[l.kind+':'+l.id]='exclude';});
+  loadLists();
   const st=document.getElementById('fv-auto-state');
   if(a.enabled){st.textContent='● Running';st.className='conn-pill running';}
   else{st.textContent='off';st.className='conn-pill';}
 }
+let listPick={};      // "kind:id" → 'include' | 'exclude'
+let listsCache=[];
+async function loadLists(refresh){
+  const box=document.getElementById('fv-lists');
+  if(!connState.connected){box.innerHTML='<span class="hint">Connect Fanvue to load her lists.</span>';return;}
+  if(refresh) box.innerHTML='<span class="hint">Loading…</span>';
+  try{
+    const d=await fetch('/api/fanvue/lists?persona='+encodeURIComponent(persona())+(refresh?'&refresh=1':'')).then(r=>r.json());
+    listsCache=d.lists||[];
+    if(d.error){box.innerHTML='<span class="hint">'+esc(d.error)+'</span>';return;}
+    if(!listsCache.length){box.innerHTML='<span class="hint">No lists on this Fanvue account yet.</span>';return;}
+    box.innerHTML='<table class="fans"><tr><th>List</th><th>Type</th><th>Fans</th><th>Use</th></tr>'+
+      listsCache.map(l=>{
+        const k=l.kind+':'+l.id, v=listPick[k]||'';
+        return '<tr><td>'+esc(l.name)+'</td><td style="color:var(--text-muted)">'+esc(l.kind)+
+          '</td><td>'+(l.count!=null?l.count:'—')+'</td><td>'+
+          '<select data-key="'+esc(k)+'" class="fv-list-pick" style="max-width:130px;padding:2px 6px;font-size:.75rem;">'+
+          ['','include','exclude'].map(o=>'<option value="'+o+'"'+(v===o?' selected':'')+'>'+
+            (o===''?'—':(o==='include'?'Include':'Exclude'))+'</option>').join('')+
+          '</select></td></tr>';
+      }).join('')+'</table>';
+    box.querySelectorAll('.fv-list-pick').forEach(s=>{
+      s.onchange=()=>{ if(s.value) listPick[s.dataset.key]=s.value; else delete listPick[s.dataset.key]; };
+    });
+  }catch(e){ box.innerHTML='<span class="hint" style="color:#fb7185;">Could not load lists: '+esc(String(e))+'</span>'; }
+}
+function pickedLists(kind){
+  return listsCache.filter(l=>listPick[l.kind+':'+l.id]===kind)
+                   .map(l=>({kind:l.kind,id:l.id,name:l.name}));
+}
+
 async function saveAuto(){
   const box=document.getElementById('fv-auto-result');
   busy(box,'Saving…');
@@ -430,7 +475,10 @@ async function saveAuto(){
     humanize:document.getElementById('fv-humanize').checked,
     typing_speed:parseInt(document.getElementById('fv-typing-speed').value||'14',10),
     followup_min:document.getElementById('fv-followup-min').value,
-    ppv_require_payment:document.getElementById('fv-ppv-require-payment').checked});
+    ppv_require_payment:document.getElementById('fv-ppv-require-payment').checked,
+    ppv_test_phrase:document.getElementById('fv-ppv-test-phrase').value,
+    include_lists:pickedLists('include'),
+    exclude_lists:pickedLists('exclude')});
   if(!data.ok){err(box,data.error||'Failed');return;}
   loadAuto();
   loadAccounts();
