@@ -316,14 +316,22 @@ const mediaSeen={};
 function rememberMedia(list){ (list||[]).forEach(m=>{ if(m.uuid) mediaSeen[m.uuid]=m; }); }
 function mediaIcon(m){ return m&&m.mediaType==='video'?'🎬':m&&m.mediaType==='audio'?'🎵':'🖼️'; }
 let lookupPending=false;
-async function fillMissingThumbs(ids){
-  const missing=ids.filter(u=>!mediaSeen[u]||!mediaSeen[u].thumb);
+const lookupTried=new Set();
+// The list view leaves some items without a variant URL. Ask for those by uuid,
+// once each, and redraw when they come back.
+async function fillMissingThumbs(ids,after){
+  const missing=ids.filter(u=>!lookupTried.has(u)&&(!mediaSeen[u]||!mediaSeen[u].thumb)).slice(0,60);
   if(!missing.length||lookupPending) return;
   lookupPending=true;
+  missing.forEach(u=>lookupTried.add(u));
   try{
     const d=await post('/api/fanvue/media-lookup',{persona:persona(),uuids:missing});
     rememberMedia(d.media||[]);
-    renderTierContents();
+    (d.media||[]).forEach(m=>{
+      const cur=(window._ppvMedia||[]).find(x=>x.uuid===m.uuid);
+      if(cur&&!cur.thumb&&m.thumb) cur.thumb=m.thumb;
+    });
+    (after||renderTierContents)();
   }catch(e){}
   lookupPending=false;
 }
@@ -351,7 +359,7 @@ function renderTierContents(){
         '<span style="position:absolute;bottom:0;left:0;right:0;font-size:.6rem;padding:2px 4px;background:rgba(0,0,0,.65);color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+
         esc(m.name||'')+'</span></div>';
     }).join('')+'</div></div>';
-  fillMissingThumbs(ids);
+  fillMissingThumbs(ids,renderTierContents);
 }
 function dropFromTier(u){
   ppvSel.delete(u); stashTier(); renderSetBar(); renderTierBar();
@@ -485,6 +493,7 @@ function renderGrid(){
   }).join('');
   hint.textContent=ppvSel.size?(where+': '+ppvSel.size+' item(s) selected'):(where+': tap media to select · 👁 to preview');
   hint.style.color='var(--text-muted)';
+  fillMissingThumbs(media.filter(m=>!m.thumb).map(m=>m.uuid),renderGrid);
 }
 function togglePpv(el){
   const u=el.dataset.uuid;

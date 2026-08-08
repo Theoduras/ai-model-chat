@@ -6426,6 +6426,7 @@ def _fv_pick_set(sets, progress, context, hour):
 # Fanvue serves media only through variant URLs, and only when the request asks
 # for them by name. blurred is what a locked item may legitimately show.
 FV_MEDIA_VARIANTS = 'main,thumbnail,thumbnail_gallery,blurred'
+FV_MEDIA_MAX_PAGES = 12
 
 
 def _fv_media_thumb(m):
@@ -6453,14 +6454,22 @@ def api_fanvue_media():
     folder = (request.args.get('folder') or '').strip()
     # Without `variants` Fanvue returns metadata only — no URL at all, so
     # nothing renders. The URLs live on the variant objects, not the item.
-    q = f'size=50&page=1&variants={FV_MEDIA_VARIANTS}'
+    q = f'size=50&variants={FV_MEDIA_VARIANTS}'
     if mtype:
         q += f'&mediaType={mtype}'
     if folder:
         q += f'&folderName={urllib.parse.quote(folder)}'
     items, err = [], ''
     try:
-        rows = _fv_list(_fanvue_call(persona, 'GET', f'/media?{q}'))
+        rows, page = [], 1
+        # One page is 50 items; a real vault holds far more, so walk the pages.
+        while page <= FV_MEDIA_MAX_PAGES:
+            res = _fanvue_call(persona, 'GET', f'/media?{q}&page={page}')
+            batch = _fv_list(res)
+            rows += batch
+            if not batch or not ((res or {}).get('pagination') or {}).get('hasMore'):
+                break
+            page += 1
         for m in rows:
             # Fanvue reports FINALISED for a usable item; anything else comes
             # back as uuid + status only, with no variants to show.
