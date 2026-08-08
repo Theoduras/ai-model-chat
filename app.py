@@ -4266,6 +4266,106 @@ def _x_call(persona, method, path, body=None):
         raise
 
 
+# ── Fan memory ────────────────────────────────────────────────────────────────
+# What she has been told about a fan, kept per fan and fed back into every
+# reply. Without it she re-asks what he already answered, which is the fastest
+# way to sound like a bot.
+
+FAN_MEM_KEYS = ('name', 'job', 'schedule', 'location', 'partner', 'age',
+                'doing_now', 'plans', 'interests', 'notes')
+
+
+def _fan_mem_key(persona, fan_key):
+    return f'fan_mem_{persona}_{fan_key}'
+
+
+def _fan_memory(persona, fan_key):
+    try:
+        m = json.loads(_get_setting(_fan_mem_key(persona, fan_key)) or '{}')
+        return m if isinstance(m, dict) else {}
+    except Exception:
+        return {}
+
+
+def _fan_mem_clean(mem):
+    """Keep the known shape and drop anything empty or oversized."""
+    out = {}
+    for k in FAN_MEM_KEYS:
+        v = mem.get(k)
+        if isinstance(v, list):
+            v = [str(x).strip()[:120] for x in v if str(x).strip()][:10]
+            if v:
+                out[k] = v
+        elif v not in (None, '', [], {}):
+            out[k] = str(v).strip()[:200]
+    return out
+
+
+def _fan_memory_update(persona, fan_key, incoming, reply=''):
+    """Fold what the fan just said into his profile. Best effort: a failure here
+    must never stop a reply going out."""
+    if not (incoming or '').strip():
+        return _fan_memory(persona, fan_key)
+    old = _fan_memory(persona, fan_key)
+    system = (
+        "You maintain a short factual profile of one person from a chat. "
+        "Return ONLY JSON with these keys: name, job, schedule, location, partner, "
+        "age, doing_now, plans, interests, notes. `interests`, `plans` and `notes` "
+        "are arrays of short strings; the rest are short strings. "
+        "Carry every existing value forward unless the new message contradicts or "
+        "updates it. `job` is what they do for work, in their words. `schedule` is "
+        "their working hours or shift pattern, including when they finish. "
+        "`doing_now` is what they are doing right now and when they said it. "
+        "Add nothing that was not said or clearly implied. Use \"\" for unknown.")
+    user = (f"Existing profile:\n{json.dumps(old, ensure_ascii=False)}\n\n"
+            f"They just said:\n{incoming[:1500]}")
+    if reply:
+        user += f"\n\nShe replied:\n{reply[:500]}"
+    try:
+        resp = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=[{'role': 'user', 'parts': [{'text': user}]}],
+            config=types.GenerateContentConfig(
+                system_instruction=system, temperature=0.2,
+                max_output_tokens=500, response_mime_type='application/json'),
+        )
+        mem = json.loads((resp.text or '{}').strip())
+        if not isinstance(mem, dict):
+            return old
+    except Exception as e:
+        logger.info('fan memory update failed for %s: %s', fan_key, str(e)[:120])
+        return old
+    merged = _fan_mem_clean({**old, **mem})
+    if merged != old:
+        _set_setting(_fan_mem_key(persona, fan_key), json.dumps(merged))
+    return merged
+
+
+LABELS = {'name': 'Name', 'job': 'Work', 'schedule': 'Their hours',
+          'location': 'Where they are', 'partner': 'Relationship', 'age': 'Age',
+          'doing_now': 'Doing right now', 'plans': 'Coming up',
+          'interests': 'Into', 'notes': 'Other things they told you'}
+
+
+def _fan_memory_block(mem):
+    """The prompt fragment that stops her asking what she already knows."""
+    mem = _fan_mem_clean(mem or {})
+    if not mem:
+        return ''
+    lines = []
+    for k in FAN_MEM_KEYS:
+        v = mem.get(k)
+        if not v:
+            continue
+        lines.append(f"- {LABELS[k]}: " + ('; '.join(v) if isinstance(v, list) else v))
+    return (
+        "WHAT YOU ALREADY KNOW ABOUT THIS FAN — treat it as remembered, never ask "
+        "for it again:\n" + '\n'.join(lines) +
+        "\nBuild on it instead: if you know they are at work, ask about that job, "
+        "when their shift ends, how it is going today — not what they are doing. "
+        "Refer back to it naturally, the way someone who was listening would.\n\n")
+
+
 def _persona_text(persona, instruction, history=None, max_tokens=1024, temperature=0.9):
     """Generate an in-character message for a persona via Gemini."""
     system_prompt = get_system_prompt(persona)
@@ -4644,6 +4744,8 @@ def _x_dm_reply_round(persona, max_results=20):
                     'else, reference what they have told you before, and let interest '
                     'build slowly — no selling, no hinting at paid content yet. '
                     + ask_rule)
+            _fan_memory_update(persona, f'x:{sender}', text)
+            instruction = _fan_memory_block(_fan_memory(persona, f'x:{sender}')) + instruction
             reply = _persona_text(persona, instruction, history=db_hist,
                                   max_tokens=1024, temperature=0.9)
             if not reply:
@@ -7288,6 +7390,7 @@ def _fanvue_auto_round(persona):
         # Build the LLM history from the full saved conversation (memory).
         history = [{'role': 'model' if d == 'out' else 'user', 'content': t}
                    for (d, t) in _fanvue_saved_history(persona, fan_key, limit=40)]
+        _fan_memory_update(persona, fan_key, text)
         has_history = any(d == 'out' for (d, t) in
                           _fanvue_saved_history(persona, fan_key, limit=40))
         intro_rule = (
@@ -7307,6 +7410,7 @@ def _fanvue_auto_round(persona):
             "text message. No paragraphs, no lists, no walls of text. Ask at most "
             "one quick question. Their latest message: "
             f"\"{text}\"")
+        instruction = _fan_memory_block(_fan_memory(persona, fan_key)) + instruction
         reply = _persona_text(persona, instruction, history=history, max_tokens=300, temperature=0.9)
         reply = _fv_trim(reply)
         if not reply:
@@ -8395,6 +8499,7 @@ def _tg_generate(persona, chat_id, instruction):
     if client is None:
         return local_fallback_reply(instruction)
     history = _tg_history(persona, chat_id)
+    instruction = _fan_memory_block(_fan_memory(persona, _tg_fan_key(chat_id))) + instruction
     return _strip_placeholders(
         _fv_trim(_persona_text(persona, instruction, history=history,
                                max_tokens=400, temperature=0.9), hard_cap=420))
@@ -8487,6 +8592,7 @@ def _tg_handle_update(persona, update):
 
     _log_x_message(persona, _tg_fan_key(chat_id), who, 'in', text)
     _tg_trace(persona, 'received', f'← {who}: {text}')
+    _fan_memory_update(persona, _tg_fan_key(chat_id), text)
 
     phases = _phases(persona)
     phase_idx = _fan_phase(phases, fan)
@@ -9410,6 +9516,8 @@ def _tgu_plan(persona, chat_id, name, text):
 
     history = [{'role': 'model' if d == 'out' else 'user', 'content': t}
                for d, t in _fanvue_saved_history(persona, _tgu_fan_key(chat_id), limit=30)]
+    _fan_memory_update(persona, _tgu_fan_key(chat_id), text)
+    instruction = _fan_memory_block(_fan_memory(persona, _tgu_fan_key(chat_id))) + instruction
     if client is None:
         reply = local_fallback_reply(text)
     else:
