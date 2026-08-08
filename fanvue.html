@@ -21,6 +21,9 @@
     .row-inline .field { flex: 1; min-width: 160px; }
     .soon { font-size: 0.72rem; padding: 2px 8px; border-radius: 9999px; background: var(--border); color: var(--text-2); margin-left: 8px; }
     textarea { width: 100%; min-height: 90px; resize: vertical; }
+    table.fans { width:100%; border-collapse:collapse; margin-top:14px; font-size:0.78rem; }
+    table.fans th { text-align:left; color:var(--text-muted); font-weight:500; padding:6px 8px; border-bottom:1px solid var(--surface); }
+    table.fans td { padding:6px 8px; border-bottom:1px solid var(--panel-2); color:var(--text-2); vertical-align:top; }
     @media (max-width: 640px) { .fv-wrap { padding: 18px 14px 70px; gap: 16px; } }
   </style>
 </head>
@@ -83,8 +86,8 @@
       <div id="ppv-media-grid" style="display:grid; grid-template-columns:repeat(auto-fill,minmax(100px,1fr)); gap:8px; max-height:260px; overflow-y:auto; padding:4px 0;"></div>
       <div class="row-inline" style="margin-top:10px;">
         <div class="field" style="margin:0; min-width:130px;">
-          <label style="font-size:.72rem;">This tier's unlock price (min 300)</label>
-          <input type="number" id="ppv-price" placeholder="e.g. 1000" min="300" step="100" onchange="stashTier()">
+          <label style="font-size:.72rem;">This tier's unlock price in $ (min $3)</label>
+          <input type="number" id="ppv-price" placeholder="e.g. 10" min="3" step="1" onchange="stashTier()">
         </div>
         <button class="btn-ai" onclick="savePpv()">Save all tiers</button>
       </div>
@@ -161,6 +164,15 @@
       <input type="text" id="fv-only-handles" placeholder="e.g. girlforfun">
     </div>
     <div class="field full" style="margin-top:12px;">
+      <label>Fanvue lists <span style="font-weight:400;color:var(--text-muted);">(her smart segments and custom lists — set each one to include or exclude. Any list on "include" means she only talks to fans in those lists.)</span></label>
+      <div id="fv-lists"><span class="hint">Loading…</span></div>
+      <button class="btn-ai" style="background:var(--border);margin-top:8px;" onclick="loadLists(true)">Refresh lists</button>
+    </div>
+    <div class="field full" style="margin-top:12px;">
+      <label>PPV test phrase <span style="font-weight:400;color:var(--text-muted);">(for testing only — when a fan sends a message containing this, the last PPV she sent them counts as paid, so the next tier can go out without a real purchase. Leave blank to switch off.)</span></label>
+      <input type="text" id="fv-ppv-test-phrase" placeholder="e.g. unlocked" style="max-width:260px;">
+    </div>
+    <div class="field full" style="margin-top:12px;">
       <label>Follow-up after silence <span style="font-weight:400;color:var(--text-muted);">(minutes before nudging a quiet fan — first nudge at this value, second at 2×; max 2. Set low e.g. 5 to test)</span></label>
       <input type="number" id="fv-followup-min" min="1" step="1" placeholder="30">
     </div>
@@ -169,6 +181,20 @@
       <span class="conn-pill" id="fv-auto-state">off</span>
     </div>
     <div class="result-box" id="fv-auto-result"></div>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">🩺 Activity log</div>
+    <span class="hint" style="display:block; margin-bottom:10px;">Everything that has been said — each fan message that came in and every reply, PPV drop and error that went out. Updates by itself every few seconds.</span>
+    <div id="fv-trace-problems"></div>
+    <div id="fv-trace-rows"><span class="hint">Loading…</span></div>
+    <div style="display:flex; gap:8px; align-items:center; margin-top:12px;">
+      <button class="btn-ai" style="background:var(--border);" onclick="loadTrace()">Refresh</button>
+      <button class="btn-ai" style="background:var(--border);" onclick="clearTrace()">Clear</button>
+      <label style="font-size:.75rem;color:var(--text-muted);display:flex;align-items:center;gap:6px;">
+        <input type="checkbox" id="fv-trace-live" checked style="width:auto;"> live
+      </label>
+    </div>
   </div>
 
   <div class="form-section">
@@ -209,10 +235,51 @@ async function loadConfig(){
   loadPpv();
   loadAuto();
   loadAccounts();
+  loadTrace();
+  startTraceLoop();
 }
+
+async function loadTrace(){
+  const box=document.getElementById('fv-trace-rows'), pb=document.getElementById('fv-trace-problems');
+  try{
+    const d=await (await fetch('/api/fanvue/trace?persona='+encodeURIComponent(persona()))).json();
+    const bad=(d.problems||[]).length;
+    const live=d.connected?(d.enabled?(d.running?'● replying now':'● auto-reply on'):'○ auto-reply off'):'○ not connected';
+    pb.innerHTML='<div class="note" style="border-color:'+(bad?'#3f3f46':'#14532d')+';color:'+(bad?'var(--text-2)':'#4ade80')+';margin-bottom:8px;">'+
+      (bad?'':'✓ ')+esc(d.persona||'')+' · '+live+'</div>'+
+      (d.problems||[]).map(p=>'<div class="note" style="border-color:#7f1d1d;color:#fca5a5;margin-bottom:8px;">⚠ '+esc(p)+'</div>').join('');
+    const rows=(d.rows||[]).slice().reverse();
+    const col={received:'#c7d2fe',sent:'#4ade80',ppv:'#f0abfc',typing:'var(--text-muted)','follow-up':'#fbbf24',error:'#fb7185'};
+    box.innerHTML = rows.length ?
+      '<table class="fans"><tr><th>Time</th><th>What</th><th>Message</th></tr>'+
+      rows.map(r=>'<tr><td style="white-space:nowrap;">'+new Date((r.at||0)*1000).toLocaleTimeString()+
+        '</td><td style="color:'+(col[r.stage]||'var(--text-2)')+'">'+esc(r.stage)+
+        '</td><td style="white-space:pre-wrap;">'+esc(r.detail||'')+'</td></tr>').join('')+'</table>'
+      : '<span class="hint">Nothing recorded yet — the first line appears as soon as a fan writes.</span>';
+  }catch(e){ box.innerHTML='<span class="hint" style="color:#fb7185;">Could not load the log: '+esc(String(e))+'</span>'; }
+}
+
+async function clearTrace(){
+  await fetch('/api/fanvue/trace?persona='+encodeURIComponent(persona()),{method:'DELETE'});
+  loadTrace();
+}
+
+let traceTimer=null;
+function startTraceLoop(){
+  if(traceTimer) return;
+  traceTimer=setInterval(()=>{
+    if(document.hidden) return;
+    if(!document.getElementById('fv-trace-live').checked) return;
+    loadTrace();
+  },5000);
+}
+
 let ppvSel=new Set();
 let ppvTiers=[{media_uuids:[],price:'',caption:''}];
 let curTier=0;
+// Fanvue prices in cents; the creator types dollars.
+function centsToDollars(c){ c=parseInt(c||'0',10); return c?String(c/100):''; }
+function dollarsToCents(d){ d=parseFloat(d||'0'); return isNaN(d)?0:Math.round(d*100); }
 function stashTier(){
   ppvTiers[curTier]={
     media_uuids:[...ppvSel],
@@ -258,7 +325,7 @@ async function loadPpv(){
     let saved={};
     try{saved=await fetch('/api/fanvue/ppv?persona='+encodeURIComponent(persona())).then(r=>r.json());}catch(e){}
     const st=saved.tiers||[];
-    ppvTiers=st.length?st.map(t=>({media_uuids:t.media_uuids||[],price:t.price||'',caption:t.caption||''})):[{media_uuids:[],price:'',caption:''}];
+    ppvTiers=st.length?st.map(t=>({media_uuids:t.media_uuids||[],price:centsToDollars(t.price),caption:t.caption||''})):[{media_uuids:[],price:'',caption:''}];
     curTier=0;
     ppvSel=new Set(ppvTiers[0].media_uuids||[]);
     document.getElementById('ppv-price').value=ppvTiers[0].price||'';
@@ -306,13 +373,13 @@ function togglePpv(el){
 async function savePpv(){
   stashTier();
   const hint=document.getElementById('ppv-hint');
-  const tiers=ppvTiers.filter(t=>(t.media_uuids||[]).length).map(t=>({media_uuids:t.media_uuids,price:parseInt(t.price||'0',10),caption:t.caption||''}));
+  const tiers=ppvTiers.filter(t=>(t.media_uuids||[]).length).map(t=>({media_uuids:t.media_uuids,price:dollarsToCents(t.price),caption:t.caption||''}));
   for(let i=0;i<tiers.length;i++){
-    if(tiers[i].price<300){hint.textContent='✗ Tier '+(i+1)+' needs a price of at least 300';hint.style.color='#fb7185';return;}
+    if(tiers[i].price<300){hint.textContent='✗ Tier '+(i+1)+' needs a price of at least $3';hint.style.color='#fb7185';return;}
   }
   const data=await post('/api/fanvue/ppv',{persona:persona(),tiers:tiers});
   if(!data.ok){hint.textContent='✗ '+(data.error||'Failed');hint.style.color='#fb7185';return;}
-  hint.textContent=data.enabled?('✓ Saved '+data.tiers.length+' tier(s) — sent in order as chats deepen'):'✓ Saved (PPV off — add media + price ≥300 to a tier)';
+  hint.textContent=data.enabled?('✓ Saved '+data.tiers.length+' tier(s) — sent in order as chats deepen'):'✓ Saved (PPV off — add media + price ≥$3 to a tier)';
   hint.style.color='#4ade80';
 }
 async function loadCreators(){
@@ -356,10 +423,46 @@ async function loadAuto(){
   document.getElementById('fv-typing-wrap').style.display=(a.humanize!==false)?'':'none';
   document.getElementById('fv-followup-min').value=a.followup_min||30;
   document.getElementById('fv-ppv-require-payment').checked=!!a.ppv_require_payment;
+  document.getElementById('fv-ppv-test-phrase').value=a.ppv_test_phrase||'';
+  listPick={};
+  (a.include_lists||[]).forEach(l=>{listPick[l.kind+':'+l.id]='include';});
+  (a.exclude_lists||[]).forEach(l=>{listPick[l.kind+':'+l.id]='exclude';});
+  loadLists();
   const st=document.getElementById('fv-auto-state');
   if(a.enabled){st.textContent='● Running';st.className='conn-pill running';}
   else{st.textContent='off';st.className='conn-pill';}
 }
+let listPick={};      // "kind:id" → 'include' | 'exclude'
+let listsCache=[];
+async function loadLists(refresh){
+  const box=document.getElementById('fv-lists');
+  if(!connState.connected){box.innerHTML='<span class="hint">Connect Fanvue to load her lists.</span>';return;}
+  if(refresh) box.innerHTML='<span class="hint">Loading…</span>';
+  try{
+    const d=await fetch('/api/fanvue/lists?persona='+encodeURIComponent(persona())+(refresh?'&refresh=1':'')).then(r=>r.json());
+    listsCache=d.lists||[];
+    if(d.error){box.innerHTML='<span class="hint">'+esc(d.error)+'</span>';return;}
+    if(!listsCache.length){box.innerHTML='<span class="hint">No lists on this Fanvue account yet.</span>';return;}
+    box.innerHTML='<table class="fans"><tr><th>List</th><th>Type</th><th>Fans</th><th>Use</th></tr>'+
+      listsCache.map(l=>{
+        const k=l.kind+':'+l.id, v=listPick[k]||'';
+        return '<tr><td>'+esc(l.name)+'</td><td style="color:var(--text-muted)">'+esc(l.kind)+
+          '</td><td>'+(l.count!=null?l.count:'—')+'</td><td>'+
+          '<select data-key="'+esc(k)+'" class="fv-list-pick" style="max-width:130px;padding:2px 6px;font-size:.75rem;">'+
+          ['','include','exclude'].map(o=>'<option value="'+o+'"'+(v===o?' selected':'')+'>'+
+            (o===''?'—':(o==='include'?'Include':'Exclude'))+'</option>').join('')+
+          '</select></td></tr>';
+      }).join('')+'</table>';
+    box.querySelectorAll('.fv-list-pick').forEach(s=>{
+      s.onchange=()=>{ if(s.value) listPick[s.dataset.key]=s.value; else delete listPick[s.dataset.key]; };
+    });
+  }catch(e){ box.innerHTML='<span class="hint" style="color:#fb7185;">Could not load lists: '+esc(String(e))+'</span>'; }
+}
+function pickedLists(kind){
+  return listsCache.filter(l=>listPick[l.kind+':'+l.id]===kind)
+                   .map(l=>({kind:l.kind,id:l.id,name:l.name}));
+}
+
 async function saveAuto(){
   const box=document.getElementById('fv-auto-result');
   busy(box,'Saving…');
@@ -372,7 +475,10 @@ async function saveAuto(){
     humanize:document.getElementById('fv-humanize').checked,
     typing_speed:parseInt(document.getElementById('fv-typing-speed').value||'14',10),
     followup_min:document.getElementById('fv-followup-min').value,
-    ppv_require_payment:document.getElementById('fv-ppv-require-payment').checked});
+    ppv_require_payment:document.getElementById('fv-ppv-require-payment').checked,
+    ppv_test_phrase:document.getElementById('fv-ppv-test-phrase').value,
+    include_lists:pickedLists('include'),
+    exclude_lists:pickedLists('exclude')});
   if(!data.ok){err(box,data.error||'Failed');return;}
   loadAuto();
   loadAccounts();

@@ -6459,7 +6459,7 @@ def api_fanvue_ppv():
         if not media:
             continue
         if price < 300:
-            return jsonify({'ok': False, 'error': 'Each tier needs a price of at least 300'}), 400
+            return jsonify({'ok': False, 'error': 'Each tier needs a price of at least $3'}), 400
         tiers.append({'media_uuids': media, 'price': price,
                       'caption': (t.get('caption') or '').strip()})
     cfg = {'tiers': tiers, 'enabled': bool(d.get('enabled', True)) and bool(tiers)}
@@ -6631,6 +6631,106 @@ def _fv_humanize_cfg(persona):
             'typing_speed': max(4, min(int(opts.get('typing_speed') or 14), 40))}
 
 
+_fv_list_cache = {}
+FV_LIST_CACHE_SEC = 600
+
+
+def _fanvue_chat_lists(persona):
+    """Fanvue's two kinds of chat list: smart ones (fixed string ids, computed by
+    Fanvue) and the creator's own custom ones (UUIDs)."""
+    out = []
+    try:
+        for l in _fv_list(_fanvue_call(persona, 'GET', '/chats/lists/smart')):
+            out.append({'kind': 'smart', 'id': l.get('uuid') or '',
+                        'name': l.get('name') or l.get('uuid') or '',
+                        'count': l.get('count')})
+    except Exception as e:
+        logger.info('Fanvue smart lists failed for %s: %s', persona, str(e)[:120])
+    page = 1
+    while page <= 10:
+        try:
+            res = _fanvue_call(persona, 'GET', f'/chats/lists/custom?page={page}&size=50')
+        except Exception as e:
+            logger.info('Fanvue custom lists failed for %s: %s', persona, str(e)[:120])
+            break
+        for l in _fv_list(res):
+            out.append({'kind': 'custom', 'id': l.get('uuid') or '',
+                        'name': l.get('name') or '', 'count': l.get('membersCount')})
+        if not ((res or {}).get('pagination') or {}).get('hasMore'):
+            break
+        page += 1
+    return [l for l in out if l['id']]
+
+
+def _fanvue_list_members(persona, kind, list_id):
+    """Fan UUIDs in one list. Membership is a snapshot Fanvue recomputes, so it
+    is cached briefly rather than read on every round."""
+    key = (persona, kind, list_id)
+    hit = _fv_list_cache.get(key)
+    if hit and time.time() - hit[0] < FV_LIST_CACHE_SEC:
+        return hit[1]
+    members, page = set(), 1
+    while page <= 20:
+        try:
+            res = _fanvue_call(persona, 'GET',
+                               f'/chats/lists/{kind}/{list_id}?page={page}&size=50')
+        except Exception as e:
+            logger.info('Fanvue list %s/%s failed: %s', kind, list_id, str(e)[:120])
+            break
+        for u in _fv_list(res):
+            uid = _fv_first(u, 'uuid', 'id', default='')
+            if uid:
+                members.add(uid)
+        if not ((res or {}).get('pagination') or {}).get('hasMore'):
+            break
+        page += 1
+    _fv_list_cache[key] = (time.time(), members)
+    return members
+
+
+def _fv_clean_lists(value):
+    """Normalise a saved list selection: [{kind, id, name}]."""
+    out = []
+    for l in (value or []):
+        if not isinstance(l, dict):
+            continue
+        kind = 'custom' if l.get('kind') == 'custom' else 'smart'
+        lid = str(l.get('id') or '').strip()
+        if lid:
+            out.append({'kind': kind, 'id': lid, 'name': str(l.get('name') or lid)[:80]})
+    return out
+
+
+def _fv_list_filter(persona, opts):
+    """Resolve the include/exclude list settings into (include_uuids, exclude_uuids).
+    include is None when no list is selected, meaning everyone is allowed."""
+    inc = None
+    for l in _fv_clean_lists(opts.get('include_lists')):
+        inc = (inc or set()) | _fanvue_list_members(persona, l['kind'], l['id'])
+    exc = set()
+    for l in _fv_clean_lists(opts.get('exclude_lists')):
+        exc |= _fanvue_list_members(persona, l['kind'], l['id'])
+    return inc, exc
+
+
+FV_TRACE_MAX = 200
+
+
+def _fv_trace(persona, stage, detail=''):
+    """Append one line to the persona's Fanvue activity log. Stored in the
+    database so it survives a redeploy and can be read from the browser."""
+    key = f'fanvue_trace_{persona}'
+    try:
+        rows = json.loads(_get_setting(key) or '[]')
+        if not isinstance(rows, list):
+            rows = []
+    except Exception:
+        rows = []
+    rows.append({'at': int(time.time()), 'stage': stage, 'detail': str(detail)[:500]})
+    _set_setting(key, json.dumps(rows[-FV_TRACE_MAX:]))
+    logger.info('FV[%s] %s: %s', persona, stage, str(detail)[:200])
+
+
 def _fv_send_text(persona, scope, fan_uuid, text):
     _fanvue_call(persona, 'POST', f'{scope}/chats/{fan_uuid}/message',
                  body={'text': text[:2000]})
@@ -6685,12 +6785,18 @@ def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx):
         if done >= len(tiers):
             return
         exchanged = len(_fanvue_saved_history(persona, fan_key, limit=200))
+        try:
+            test_paid = json.loads(_get_setting(ctx['paid_key']) or '{}')
+        except Exception:
+            test_paid = {}
         if done == 0:
             send_ppv = exchanged >= 6
         else:
             enough_chat = (exchanged - int(ppv_at.get(fan_uuid, 0))) >= ctx['gap']
-            paid = (not ctx['require_payment']) or _fanvue_fan_purchased(
-                persona, fan_uuid, tiers[done - 1]['media_uuids'])
+            paid = (not ctx['require_payment']) \
+                or int(test_paid.get(fan_uuid, 0) or 0) >= done \
+                or _fanvue_fan_purchased(
+                    persona, fan_uuid, tiers[done - 1]['media_uuids'])
             if not paid:
                 logger.info('Fanvue [%s] %s: waiting on payment of tier %d',
                             persona, handle or fan_uuid, done)
@@ -6705,6 +6811,7 @@ def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx):
                                'price': int(tier['price'])})
         except Exception as e:
             logger.warning('Fanvue PPV to %s failed: %s', handle or fan_uuid, str(e)[:120])
+            _fv_trace(persona, 'error', f'PPV to {handle or fan_uuid} failed: {str(e)[:200]}')
             return
         ppv_sent[fan_uuid] = done + 1
         ppv_at[fan_uuid] = exchanged
@@ -6712,6 +6819,8 @@ def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx):
         _set_setting(ctx['at_key'], json.dumps(ppv_at))
         logger.info('PPV SENT [%s] tier %d/%d → %s at %s', persona, done + 1,
                     len(tiers), handle or fan_uuid, tier['price'])
+        _fv_trace(persona, 'ppv', f"💎 tier {done + 1}/{len(tiers)} → {handle or fan_uuid} "
+                                  f"at ${tier['price'] / 100:g}: {cap}")
 
 
 def _fv_deliver(persona, scope, fan_uuid, fan_key, handle, reply, incoming, cfg, ppv_ctx):
@@ -6722,8 +6831,10 @@ def _fv_deliver(persona, scope, fan_uuid, fan_key, handle, reply, incoming, cfg,
             _fv_send_human(persona, scope, fan_uuid, reply, incoming=incoming, cfg=cfg)
         except Exception as e:
             logger.warning('Fanvue send to %s failed: %s', handle or fan_uuid, str(e)[:120])
+            _fv_trace(persona, 'error', f'send to {handle or fan_uuid} failed: {str(e)[:200]}')
             return
         _log_x_message(persona, fan_key, handle, 'out', reply)
+        _fv_trace(persona, 'sent', f'→ {handle or fan_uuid}: {reply}')
         if ppv_ctx:
             _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ppv_ctx)
 
@@ -6808,8 +6919,10 @@ def _fanvue_auto_round(persona):
     reply_limit = max(1, min(int(opts.get('reply_limit', 10)), 30))
     only = [h.strip().lstrip('@').lower()
             for h in (opts.get('only_handles') or '').split(',') if h.strip()]
-    actions = {'replies': 0, 'skipped_creators': 0, 'skipped_offline': 0}
+    actions = {'replies': 0, 'skipped_creators': 0, 'skipped_offline': 0,
+               'skipped_lists': 0}
     log = []
+    inc_lists, exc_lists = _fv_list_filter(persona, opts)
 
     me_uuid = _fanvue_me_uuid(persona)
     cursor_key = f'fanvue_cursor_{persona}'
@@ -6824,6 +6937,8 @@ def _fanvue_auto_round(persona):
     ppv_on = bool(_fanvue_ppv(persona).get('enabled', True)) and bool(ppv_tiers)
     ppv_sent_key = f'fanvue_ppv_sent_{persona}'
     ppv_at_key = f'fanvue_ppv_at_{persona}'
+    ppv_paid_key = f'fanvue_ppv_testpaid_{persona}'
+    ppv_test_phrase = (opts.get('ppv_test_phrase') or '').strip().lower()
     hcfg = _fv_humanize_cfg(persona)
     # Extra messages that must pass after a paid unlock before the next tier.
     ppv_gap = 8
@@ -6862,6 +6977,14 @@ def _fanvue_auto_round(persona):
             continue
         if only and (handle or '').lower() not in only:
             log.append(f'{who}: skipped (not in only-list)')
+            continue
+        if inc_lists is not None and fan_uuid not in inc_lists:
+            actions['skipped_lists'] += 1
+            log.append(f'{who}: skipped (not in the included list(s))')
+            continue
+        if fan_uuid in exc_lists:
+            actions['skipped_lists'] += 1
+            log.append(f'{who}: skipped (in an excluded list)')
             continue
         if online_only and not _fv_chat_online(chat, online_grace):
             actions['skipped_offline'] += 1
@@ -6930,6 +7053,8 @@ def _fanvue_auto_round(persona):
                 _fv_pool().submit(_fv_deliver, persona, scope, fan_uuid, fan_key,
                                   handle, fu, '', hcfg, None)
                 log.append(f'↩ follow-up {sent_n + 1}/{FOLLOWUP_MAX} → {who} (typing…): {fu[:40]}')
+                _fv_trace(persona, 'follow-up',
+                          f'{who} went quiet — nudge {sent_n + 1}/{FOLLOWUP_MAX} on the way')
             else:
                 _fv_deliver(persona, scope, fan_uuid, fan_key, handle, fu, '', hcfg, None)
                 log.append(f'↩ follow-up {sent_n + 1}/{FOLLOWUP_MAX} → {who}: {fu[:40]}')
@@ -6944,6 +7069,23 @@ def _fanvue_auto_round(persona):
         # Persist the new inbound (import already stored it on first contact).
         if not did_import:
             _log_x_message(persona, fan_key, handle, 'in', text)
+        _fv_trace(persona, 'received', f'← {who}: {text}')
+
+        # Testing aid: a phrase the tester sends to stand in for a real unlock,
+        # so the next PPV tier can be reached without paying for the last one.
+        if ppv_test_phrase and ppv_test_phrase in text.lower():
+            try:
+                paid_map = json.loads(_get_setting(ppv_paid_key) or '{}')
+            except Exception:
+                paid_map = {}
+            try:
+                sent_map = json.loads(_get_setting(ppv_sent_key) or '{}')
+            except Exception:
+                sent_map = {}
+            paid_map[fan_uuid] = _ppv_count(sent_map.get(fan_uuid))
+            _set_setting(ppv_paid_key, json.dumps(paid_map))
+            _fv_trace(persona, 'ppv', f'{who} said the test phrase — tier '
+                                      f'{paid_map[fan_uuid]} counted as paid')
 
         # Build the LLM history from the full saved conversation (memory).
         history = [{'role': 'model' if d == 'out' else 'user', 'content': t}
@@ -6970,6 +7112,7 @@ def _fanvue_auto_round(persona):
         reply = _persona_text(persona, instruction, history=history, max_tokens=300, temperature=0.9)
         reply = _fv_trim(reply)
         if not reply:
+            _fv_trace(persona, 'error', f'{who}: the model returned nothing — no reply sent')
             continue
 
         # Mark cursor BEFORE sending to prevent duplicate replies on retry
@@ -6977,13 +7120,15 @@ def _fanvue_auto_round(persona):
         _set_setting(cursor_key, json.dumps(cursor))
 
         ppv_ctx = {'tiers': ppv_tiers, 'gap': ppv_gap, 'sent_key': ppv_sent_key,
-                   'at_key': ppv_at_key, 'require_payment': ppv_require_payment} if ppv_on else None
+                   'at_key': ppv_at_key, 'paid_key': ppv_paid_key,
+                   'require_payment': ppv_require_payment} if ppv_on else None
         args = (persona, scope, fan_uuid, fan_key, handle, reply.strip(), text, hcfg, ppv_ctx)
         actions['replies'] += 1
         if hcfg['humanize']:
             # Pace it on a worker so one fan's pause never delays the next fan.
             _fv_pool().submit(_fv_deliver, *args)
             log.append(f'Replying → {handle or fan_uuid} (typing…): {reply[:50]}')
+            _fv_trace(persona, 'typing', f'{who}: writing a reply…')
         else:
             _fv_deliver(*args)
             log.append(f'Replied → {handle or fan_uuid}: {reply[:50]}')
@@ -7022,6 +7167,12 @@ def api_fanvue_auto():
                 _set_setting(f'fanvue_followup_min_{persona}', str(int(float(data['followup_min']))))
             except (ValueError, TypeError):
                 pass
+        if 'include_lists' in data:
+            opts['include_lists'] = _fv_clean_lists(data['include_lists'])
+        if 'exclude_lists' in data:
+            opts['exclude_lists'] = _fv_clean_lists(data['exclude_lists'])
+        if 'ppv_test_phrase' in data:
+            opts['ppv_test_phrase'] = (data.get('ppv_test_phrase') or '').strip()[:80]
         if 'ppv_require_payment' in data:
             _set_setting(f'fanvue_ppv_require_payment_{persona}', '1' if data['ppv_require_payment'] else '0')
         enabled = bool(data.get('enabled', opts.get('enabled', False)))
@@ -7041,8 +7192,75 @@ def api_fanvue_auto():
                     'online_grace': opts.get('online_grace', 5),
                     'humanize': bool(opts.get('humanize', True)),
                     'typing_speed': max(4, min(int(opts.get('typing_speed') or 14), 40)),
+                    'include_lists': _fv_clean_lists(opts.get('include_lists')),
+                    'exclude_lists': _fv_clean_lists(opts.get('exclude_lists')),
+                    'ppv_test_phrase': opts.get('ppv_test_phrase', ''),
                     'followup_min': int(_get_setting(f'fanvue_followup_min_{persona}') or 30),
                     'ppv_require_payment': (_get_setting(f'fanvue_ppv_require_payment_{persona}') or '0') == '1'})
+
+
+@app.route('/api/fanvue/lists')
+def api_fanvue_lists():
+    """The persona's Fanvue chat lists — smart segments and custom lists — for
+    the include/exclude picker."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    persona = (request.args.get('persona') or '').strip()
+    if not _fanvue_tokens(persona).get('access_token'):
+        return jsonify({'lists': [], 'error': 'Fanvue not connected for this persona.'})
+    if request.args.get('refresh') == '1':
+        for k in [k for k in _fv_list_cache if k[0] == persona]:
+            _fv_list_cache.pop(k, None)
+    opts = _fanvue_auto_settings(persona)
+    return jsonify({'lists': _fanvue_chat_lists(persona),
+                    'include_lists': _fv_clean_lists(opts.get('include_lists')),
+                    'exclude_lists': _fv_clean_lists(opts.get('exclude_lists'))})
+
+
+@app.route('/api/fanvue/trace', methods=['GET', 'DELETE'])
+def api_fanvue_trace():
+    """Recent Fanvue chat activity for a persona — what came in, what went out,
+    PPV drops and errors — plus a verdict when nothing is happening."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    persona = (request.args.get('persona') or '').strip()
+    if request.method == 'DELETE':
+        _set_setting(f'fanvue_trace_{persona}', '[]')
+        return jsonify({'ok': True})
+    try:
+        rows = json.loads(_get_setting(f'fanvue_trace_{persona}') or '[]')
+    except Exception:
+        rows = []
+    if not isinstance(rows, list):
+        rows = []
+    opts = _fanvue_auto_settings(persona)
+    connected = bool(_fanvue_tokens(persona).get('access_token'))
+    lock = _fanvue_round_locks.get(persona)
+    problems = []
+    if not connected:
+        problems.append('Fanvue is not connected for this persona.')
+    elif not opts.get('enabled'):
+        problems.append('Auto-reply is off — turn it on for her to answer fans.')
+    elif not rows:
+        problems.append('No activity recorded yet. Rounds run every 20s; a line '
+                        'appears here as soon as a fan writes.')
+    if opts.get('only_handles'):
+        problems.append('Only replying to: ' + opts['only_handles'])
+    if opts.get('online_only'):
+        problems.append('Only replying to fans who are online right now.')
+    if _fv_clean_lists(opts.get('include_lists')):
+        problems.append('Only replying to fans in: ' + ', '.join(
+            l['name'] for l in _fv_clean_lists(opts['include_lists'])))
+    if _fv_clean_lists(opts.get('exclude_lists')):
+        problems.append('Never replying to fans in: ' + ', '.join(
+            l['name'] for l in _fv_clean_lists(opts['exclude_lists'])))
+    if opts.get('ppv_test_phrase'):
+        problems.append('PPV test phrase is active: "%s" — a fan saying it counts '
+                        'as a paid unlock.' % opts['ppv_test_phrase'])
+    return jsonify({'persona': persona, 'connected': connected,
+                    'enabled': bool(opts.get('enabled')),
+                    'running': bool(lock and lock.locked()),
+                    'problems': problems, 'rows': rows[-FV_TRACE_MAX:]})
 
 
 @app.route('/api/fanvue/accounts')
@@ -7167,8 +7385,13 @@ def _fanvue_worker():
     def _one(persona):
         try:
             _fanvue_round_now(persona)
-        except Exception:
+        except Exception as e:
             logger.exception('fanvue round failed for %s', persona)
+            try:
+                with app.app_context():
+                    _fv_trace(persona, 'error', f'round failed: {str(e)[:200]}')
+            except Exception:
+                pass
         finally:
             with _fanvue_lock_guard:
                 pending.discard(persona)
