@@ -315,6 +315,18 @@ function theSet(){ return ppvSets[curSet]||(ppvSets[curSet]=blankSet(curSet+1));
 const mediaSeen={};
 function rememberMedia(list){ (list||[]).forEach(m=>{ if(m.uuid) mediaSeen[m.uuid]=m; }); }
 function mediaIcon(m){ return m&&m.mediaType==='video'?'🎬':m&&m.mediaType==='audio'?'🎵':'🖼️'; }
+let lookupPending=false;
+async function fillMissingThumbs(ids){
+  const missing=ids.filter(u=>!mediaSeen[u]||!mediaSeen[u].thumb);
+  if(!missing.length||lookupPending) return;
+  lookupPending=true;
+  try{
+    const d=await post('/api/fanvue/media-lookup',{persona:persona(),uuids:missing});
+    rememberMedia(d.media||[]);
+    renderTierContents();
+  }catch(e){}
+  lookupPending=false;
+}
 function renderTierContents(){
   const box=document.getElementById('ppv-tier-contents');
   const ids=[...ppvSel];
@@ -329,7 +341,7 @@ function renderTierContents(){
     ' — '+ids.length+' item'+(ids.length===1?'':'s')+' the fan unlocks together</div>'+
     '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:8px;">'+
     ids.map(u=>{
-      const m=mediaSeen[u]||{uuid:u,name:'(not in this folder)'};
+      const m=mediaSeen[u]||{uuid:u,name:'loading…'};
       const thumb=m.thumb?('background-image:url(\''+esc(m.thumb)+'\');background-size:cover;background-position:center;')
                          :'background:linear-gradient(135deg,var(--surface),var(--panel-2));';
       return '<div style="position:relative;aspect-ratio:1;border-radius:8px;overflow:hidden;'+thumb+'">'+
@@ -339,6 +351,7 @@ function renderTierContents(){
         '<span style="position:absolute;bottom:0;left:0;right:0;font-size:.6rem;padding:2px 4px;background:rgba(0,0,0,.65);color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+
         esc(m.name||'')+'</span></div>';
     }).join('')+'</div></div>';
+  fillMissingThumbs(ids);
 }
 function dropFromTier(u){
   ppvSel.delete(u); stashTier(); renderSetBar(); renderTierBar();
