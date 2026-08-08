@@ -8281,7 +8281,7 @@ def _tg_trace(persona, stage, detail=''):
             rows = []
     except Exception:
         rows = []
-    rows.append({'at': int(time.time()), 'stage': stage, 'detail': str(detail)[:300]})
+    rows.append({'at': int(time.time()), 'stage': stage, 'detail': str(detail)[:500]})
     _set_setting(key, json.dumps(rows[-TG_TRACE_MAX:]))
     logger.info('TG[%s] %s: %s', persona, stage, str(detail)[:200])
 
@@ -8301,13 +8301,19 @@ def _tg_clean_only_fans(value):
     return out[:200]
 
 
-def _tg_fan_allowed(cfg, chat_id, name=''):
-    """True when this fan is one the bot is allowed to talk to."""
-    only = cfg.get('only_fans') or []
-    if not only:
-        return True
-    wanted = {o.strip().lstrip('@').lower() for o in only}
+def _tg_fan_matches(entries, chat_id, name=''):
+    """True when a chat id / @username list names this fan."""
+    wanted = {str(e).strip().lstrip('@').lower() for e in (entries or []) if str(e).strip()}
     return str(chat_id) in wanted or (name or '').strip().lstrip('@').lower() in wanted
+
+
+def _tg_fan_allowed(cfg, chat_id, name=''):
+    """True when this fan is one the bot is allowed to talk to. An exclude entry
+    always wins, so a blocked fan stays blocked even inside the only-list."""
+    if _tg_fan_matches(cfg.get('exclude_fans'), chat_id, name):
+        return False
+    only = cfg.get('only_fans') or []
+    return not only or _tg_fan_matches(only, chat_id, name)
 
 
 def _tg_settings(persona):
@@ -8325,6 +8331,7 @@ def _tg_settings(persona):
         'typing_speed': int(s.get('typing_speed') or TG_TYPING_CPS),
         # Empty list = talk to everyone. Entries are chat ids and/or @usernames.
         'only_fans': [str(x).strip() for x in only if str(x).strip()] if isinstance(only, list) else [],
+        'exclude_fans': _tg_clean_only_fans(s.get('exclude_fans')),
     }
 
 
@@ -8479,6 +8486,7 @@ def _tg_handle_update(persona, update):
     fan['in_count'] = int(fan.get('in_count', 0)) + (0 if text == '/start' else 1)
 
     _log_x_message(persona, _tg_fan_key(chat_id), who, 'in', text)
+    _tg_trace(persona, 'received', f'← {who}: {text}')
 
     phases = _phases(persona)
     phase_idx = _fan_phase(phases, fan)
@@ -8578,7 +8586,7 @@ def _tg_handle_update(persona, update):
 
     try:
         _tg_send_human(persona, chat_id, reply, incoming=text, photo_data=photo_data)
-        _tg_trace(persona, 'sent', f'→ {who}: {reply[:120]}')
+        _tg_trace(persona, 'sent', f'→ {who}: {reply}')
     except Exception as e:
         _tg_trace(persona, 'error', f'send to {who} failed: {str(e)[:200]}')
         raise
@@ -9007,6 +9015,8 @@ def api_telegram_settings():
         opts['typing_speed'] = max(4, min(int(data['typing_speed'] or TG_TYPING_CPS), 40))
     if 'only_fans' in data:
         opts['only_fans'] = _tg_clean_only_fans(data['only_fans'])
+    if 'exclude_fans' in data:
+        opts['exclude_fans'] = _tg_clean_only_fans(data['exclude_fans'])
     _set_setting(f'telegram_auto_{persona}', json.dumps(opts))
     bots = _tg_load_bots()
     if persona in bots:
@@ -9097,12 +9107,16 @@ def api_telegram_trace():
         if cfg['only_fans']:
             problems.append(f"Only replying to {len(cfg['only_fans'])} selected fan(s): "
                             + ', '.join(cfg['only_fans'][:8]))
+        if cfg['exclude_fans']:
+            problems.append(f"Never replying to {len(cfg['exclude_fans'])} excluded fan(s): "
+                            + ', '.join(cfg['exclude_fans'][:8]))
         if not rows:
             problems.append('No Telegram activity recorded yet — if you have messaged the '
                             'account since this version deployed, the message never '
                             'reached the running client.')
         return jsonify({'persona': persona, 'transport': 'personal account',
                         'enabled': cfg['enabled'], 'only_fans': cfg['only_fans'],
+                        'exclude_fans': cfg['exclude_fans'],
                         'connected': True, 'mode': 'personal account',
                         'username': personal['username'], 'bound_chats': None,
                         'personal': personal,
@@ -9146,6 +9160,9 @@ def api_telegram_trace():
     if cfg['only_fans']:
         problems.append(f"Only replying to {len(cfg['only_fans'])} selected fan(s): "
                         + ', '.join(cfg['only_fans'][:8]))
+    if cfg['exclude_fans']:
+        problems.append(f"Never replying to {len(cfg['exclude_fans'])} excluded fan(s): "
+                        + ', '.join(cfg['exclude_fans'][:8]))
     hook = {}
     if token:
         try:
@@ -9166,7 +9183,7 @@ def api_telegram_trace():
         problems.append('No Telegram activity recorded yet — if you have messaged the '
                         'bot since this version deployed, the update never arrived.')
     return jsonify({'persona': persona, 'enabled': cfg['enabled'],
-                    'only_fans': cfg['only_fans'],
+                    'only_fans': cfg['only_fans'], 'exclude_fans': cfg['exclude_fans'],
                     'connected': bool(token),
                     'mode': 'shared bot' if hosted else 'own bot',
                     'username': handle,
@@ -9219,7 +9236,7 @@ def api_telegram_stats():
                     'click_rate': round(100.0 * clicked / sent, 1) if sent else 0.0,
                     'cta_url': bot.get('cta_url', ''), 'cta_after': cfg['cta_after'],
                     'waiting': len(ready), 'warning': warning, 'rows': rows,
-                    'only_fans': cfg['only_fans']})
+                    'only_fans': cfg['only_fans'], 'exclude_fans': cfg['exclude_fans']})
 
 
 @app.route('/api/telegram/test', methods=['POST'])

@@ -224,17 +224,57 @@
       <button class="btn-ai" style="background:var(--border);" onclick="selectAllFans(false)">Talk to everyone</button>
       <span class="hint" id="only-fans-state"></span>
     </div>
-    <span class="hint" style="display:block; margin-top:8px;">Tick the fans she should reply to. With none ticked she talks to <b>everyone</b> — that's the default. Skipped fans get no replies and no follow-ups; their messages are simply ignored.</span>
+    <span class="hint" style="display:block; margin-top:8px;">Tick <b>Talk to</b> for the fans she should reply to — with none ticked she talks to <b>everyone</b>, which is the default. Tick <b>Block</b> to shut a fan out entirely; a block always wins, even over a Talk-to tick. Skipped fans get no replies and no follow-ups; their messages are simply ignored.</span>
   </div>
+
+    <div class="form-section">
+      <div class="section-title">
+        Outfits &amp; Media
+        <button type="button" class="btn-section-save" onclick="saveOutfits(this)">Save</button>
+      </div>
+      <span class="hint">Six outfits, each one consistent look — same clothing, same place, same setting. Open an outfit to describe it and add its photos.</span>
+      <span class="hint" id="media-status"></span>
+      <div class="vault" id="vault"
+           ondragover="onVaultDragOver(event)" ondragleave="onVaultDragLeave(event)"
+           ondrop="onVaultDrop(event)">
+        <div class="vault-head">
+          <span class="vault-title">Media Vault <span id="vault-count"></span></span>
+          <div class="vault-tools">
+            <select id="vault-filter" onchange="setVaultFilter(this.value)">
+              <option value="all">All photos</option>
+              <option value="unassigned">Unassigned</option>
+              <option value="assigned">In an outfit</option>
+            </select>
+            <button type="button" class="btn-ai" onclick="addPhotosTo('')">+ Upload</button>
+            <span class="vault-sel" id="vault-sel"></span>
+            <select id="vault-add-target" class="vault-add-target"></select>
+            <button type="button" class="btn-ai" id="vault-add-btn" onclick="vaultAddToOutfit()" disabled>Add to outfit</button>
+            <button type="button" class="btn-ai vault-danger" id="vault-del-btn" onclick="vaultDeleteSelected()" disabled>Delete</button>
+          </div>
+        </div>
+        <div class="vault-grid" id="vault-grid"></div>
+        <span class="hint">Every photo you upload or generate lands here. Select some and add them to an outfit — the same photo can be used in more than one. Drop files anywhere on the vault to upload.</span>
+      </div>
+
+      <div id="outfit-list" style="display:flex;flex-direction:column;gap:8px;"></div>
+      <input type="file" id="outfit-file-input" accept="image/*" multiple style="display:none;" onchange="onMediaFiles(event)">
+      <span class="hint">
+        <b>Purpose</b> marks what a shot is for: Main (profile), Tease (flirty preview),
+        Behind-the-scenes, Custom. Lighting and place come from the outfit, so every
+        photo in a set stays consistent.
+      </span>
 
   <div class="form-section">
     <div class="section-title">🩺 Activity log</div>
     <span class="hint" style="display:block; margin-bottom:10px;">Every incoming message and what the bot did with it. If she has gone quiet, the reason is here.</span>
     <div id="trace-problems"></div>
     <div id="trace-rows"><span class="hint">Loading…</span></div>
-    <div style="display:flex; gap:8px; margin-top:12px;">
+    <div style="display:flex; gap:8px; align-items:center; margin-top:12px;">
       <button class="btn-ai" style="background:var(--border);" onclick="loadTrace()">Refresh</button>
       <button class="btn-ai" style="background:var(--border);" onclick="clearTrace()">Clear</button>
+      <label style="font-size:.75rem;color:var(--text-muted);display:flex;align-items:center;gap:6px;">
+        <input type="checkbox" id="tg-trace-live" checked style="width:auto;"> live
+      </label>
     </div>
   </div>
 
@@ -396,7 +436,20 @@ function updateConn(){
   showShare(info.share_link?info:null);
   loadStats();
   loadTrace();
+  startTraceLoop();
   loadBehaviour();
+  loadMedia();
+}
+
+let traceTimer=null;
+function startTraceLoop(){
+  if(traceTimer) return;
+  traceTimer=setInterval(()=>{
+    if(document.hidden) return;
+    const live=document.getElementById('tg-trace-live');
+    if(!live||!live.checked) return;
+    loadTrace();
+  },5000);
 }
 
 function togglePanel(){
@@ -440,16 +493,22 @@ async function loadStats(){
     const only=s.only_fans||[];
     const picked=new Set(only.map(v=>String(v).toLowerCase()));
     const isOn=r=>picked.has(String(r.chat_id).toLowerCase())||picked.has(String(r.name||'').toLowerCase());
+    const blocked=new Set((s.exclude_fans||[]).map(v=>String(v).toLowerCase()));
+    const isOff=r=>blocked.has(String(r.chat_id).toLowerCase())||blocked.has(String(r.name||'').toLowerCase());
     document.getElementById('fans-table').innerHTML = rows.length ?
-      '<table class="fans"><tr><th>Talk to</th><th>Fan</th><th>Msgs</th><th>CTA</th><th>Clicked</th><th>Nudges</th></tr>'+
+      '<table class="fans"><tr><th>Talk to</th><th>Block</th><th>Fan</th><th>Msgs</th><th>CTA</th><th>Clicked</th><th>Nudges</th></tr>'+
       rows.map(r=>'<tr><td><input type="checkbox" class="fan-pick" data-id="'+esc(r.chat_id)+'"'+
-        (only.length&&isOn(r)?' checked':'')+' style="width:auto;"></td><td>'+esc(r.name)+'</td><td>'+r.messages+'</td><td><span class="dot '+(r.cta_sent?'y':'n')+'">●</span></td><td><span class="dot '+(r.cta_clicked?'y':'n')+'">●</span></td><td>'+r.followups+'</td></tr>').join('')+
+        (only.length&&isOn(r)?' checked':'')+' style="width:auto;"></td>'+
+        '<td><input type="checkbox" class="fan-block" data-id="'+esc(r.chat_id)+'"'+
+        (isOff(r)?' checked':'')+' style="width:auto;"></td><td>'+esc(r.name)+'</td><td>'+r.messages+'</td><td><span class="dot '+(r.cta_sent?'y':'n')+'">●</span></td><td><span class="dot '+(r.cta_clicked?'y':'n')+'">●</span></td><td>'+r.followups+'</td></tr>').join('')+
       '</table>'
       : '<span class="hint" style="display:block;margin-top:12px;">No fans yet — message the bot on Telegram to start a conversation.</span>';
     const st=document.getElementById('only-fans-state');
-    st.textContent = only.length ? ('Replying to '+only.length+' selected fan(s) only.')
-                                 : 'Replying to everyone.';
-    st.style.color = only.length ? '#4ade80' : 'var(--text-muted)';
+    const ex=(s.exclude_fans||[]).length;
+    st.textContent = (only.length ? ('Replying to '+only.length+' selected fan(s) only.')
+                                  : 'Replying to everyone.')
+                   + (ex?(' Blocking '+ex+' fan(s).'):'');
+    st.style.color = (only.length||ex) ? '#4ade80' : 'var(--text-muted)';
   }catch(e){}
 }
 
@@ -498,12 +557,13 @@ async function loadTrace(){
       (d.bound_chats!=null?(' · '+d.bound_chats+' chat(s) bound'):'')+'</div>';
     pb.innerHTML=head+(d.problems||[]).map(p=>'<div class="note" style="border-color:#7f1d1d;color:#fca5a5;margin-bottom:8px;">⚠ '+esc(p)+'</div>').join('');
     const rows=(d.rows||[]).slice().reverse();
-    const col={sent:'#4ade80',error:'#fb7185',skipped:'#fbbf24',webhook:'var(--text-muted)',routed:'#c7d2fe'};
+    const col={received:'#c7d2fe',sent:'#4ade80',error:'#fb7185',skipped:'#fbbf24',
+               planning:'var(--text-muted)',webhook:'var(--text-muted)',routed:'#c7d2fe'};
     box.innerHTML = rows.length ?
       '<table class="fans"><tr><th>Time</th><th>What</th><th>Detail</th></tr>'+
       rows.map(r=>'<tr><td style="white-space:nowrap;">'+new Date((r.at||0)*1000).toLocaleTimeString()+
         '</td><td style="color:'+(col[r.stage]||'var(--text-2)')+'">'+esc(r.stage)+
-        '</td><td>'+esc(r.detail||'')+'</td></tr>').join('')+'</table>'
+        '</td><td style="white-space:pre-wrap;">'+esc(r.detail||'')+'</td></tr>').join('')+'</table>'
       : '<span class="hint">Nothing recorded yet. Send the bot a message on Telegram, then hit Refresh.</span>';
   }catch(e){ box.innerHTML='<span class="hint" style="color:#fb7185;">Could not load the log: '+esc(String(e))+'</span>'; }
 }
@@ -520,12 +580,13 @@ function selectAllFans(on){
 
 async function saveOnlyFans(){
   const ids=[...document.querySelectorAll('.fan-pick')].filter(c=>c.checked).map(c=>c.dataset.id);
+  const blocked=[...document.querySelectorAll('.fan-block')].filter(c=>c.checked).map(c=>c.dataset.id);
   const st=document.getElementById('only-fans-state');
   st.textContent='Saving…'; st.style.color='var(--text-muted)';
   try{
     const r=await fetch('/api/telegram/settings',{method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({persona:persona(), only_fans:ids})});
+      body:JSON.stringify({persona:persona(), only_fans:ids, exclude_fans:blocked})});
     const d=await r.json();
     if(!d.ok) throw new Error(d.error||'failed');
     loadStats();
@@ -625,6 +686,600 @@ const _updateConn=updateConn;
 updateConn=function(){ _updateConn(); loadTgu(); };
 
 init();
+
+// ── Outfits & Media ─────────────────────────────────────────────────────────
+// Ported from the dashboard so the photos she sends live next to the chat that
+// sends them. `currentSlug` is what that code calls the persona; the generator
+// seeds from an outfit photo here, since there is no upload gallery on this tab.
+let galleryImages = [];
+Object.defineProperty(window, 'currentSlug', { get: () => persona() });
+
+// ── Tagged media library ─────────────────────────────────────────────────────
+
+const MEDIA_PURPOSES = ['', 'Main', 'Tease', 'Behind-the-scenes', 'Custom'];
+const MEDIA_LIGHTING = ['', 'Day time', 'Night time', 'Golden hour', 'Studio', 'Indoor', 'Outdoor'];
+let mediaVault = [];        // every uploaded/generated photo
+let mediaLinks = [];        // {media_id, outfit, position} placements
+let vaultSelected = new Set();
+let vaultFilter = 'all';
+let mediaOutfits = [];
+let mediaItems = [];
+let openOutfit = null;      // which outfit is expanded
+let uploadTarget = null;    // outfit the file picker is adding to
+
+function setMediaStatus(msg, ok) {
+  const el = document.getElementById('media-status');
+  if (!el) return;
+  el.textContent = msg || '';
+  el.style.color = ok === true ? 'var(--ok)' : ok === false ? 'var(--err)' : '#5a5a63';
+}
+
+async function loadMedia() {
+  if (!currentSlug) return;
+  if (!document.getElementById('outfit-list')) return;
+  try {
+    const res = await fetch('/api/personas/' + currentSlug + '/media');
+    const data = await res.json();
+    mediaOutfits = data.outfits || [];
+    mediaItems = data.items || [];
+    mediaVault = data.vault || data.items || [];
+    mediaLinks = data.links || [];
+    renderVault();
+    renderOutfits();
+  } catch(e) { setMediaStatus('Could not load media', false); }
+}
+
+// An outfit's photos come from its links, in link order — one vault photo can
+// appear in several outfits.
+function photosOf(n) {
+  const byId = {};
+  mediaVault.forEach(v => { byId[v.id] = v; });
+  return mediaLinks
+    .filter(l => String(l.outfit) === String(n))
+    .sort((a, b) => (a.position || 0) - (b.position || 0))
+    .map(l => byId[l.media_id])
+    .filter(Boolean);
+}
+
+function outfitLabel(o) {
+  const bits = [o.clothing, o.location, o.lighting].filter(Boolean);
+  return 'Outfit ' + o.n + (o.name ? ' — ' + o.name : '') +
+         (bits.length ? ' · ' + bits.join(', ') : '');
+}
+
+function renderOutfits() {
+  const box = document.getElementById('outfit-list');
+  if (!box) return;
+  // Unassigned photos live in the vault now, badged "–", so no separate block.
+  box.innerHTML = mediaOutfits.map(o => outfitBlock(o)).join('');
+}
+
+function outfitBlock(o) {
+  const photos = photosOf(o.n);
+  const meta = [o.clothing, o.location, o.lighting].filter(Boolean).join(' · ');
+  const open = openOutfit === o.n;
+  const named = !!o.name;
+  return `
+    <div class="outfit${open ? ' is-open' : ''}">
+      <div class="outfit-head" onclick="toggleOutfit(${o.n})">
+        <span class="outfit-num${named ? '' : ' empty'}">${o.n}</span>
+        <span class="outfit-name${named ? '' : ' empty'}">${named ? esc(o.name) : 'Untitled outfit'}</span>
+        <span class="outfit-meta">${esc(meta)}</span>
+        <span class="outfit-count${photos.length ? '' : ' zero'}">${photos.length} photo${photos.length === 1 ? '' : 's'}</span>
+        <span class="outfit-caret">▶</span>
+      </div>
+      <div class="outfit-body">
+        <div class="outfit-fields">
+          <div class="field">
+            <label>Name</label>
+            <input type="text" value="${esc(o.name)}" placeholder="e.g. In bed"
+              onchange="editOutfit(${o.n},'name',this.value)">
+          </div>
+          <div class="field">
+            <label>Clothing</label>
+            <input type="text" value="${esc(o.clothing)}" placeholder="e.g. black shirt"
+              onchange="editOutfit(${o.n},'clothing',this.value)">
+          </div>
+          <div class="field">
+            <label>Place / setting</label>
+            <input type="text" value="${esc(o.location)}" placeholder="e.g. home in bed"
+              onchange="editOutfit(${o.n},'location',this.value)">
+          </div>
+          <div class="field">
+            <label>Lighting</label>
+            <select onchange="editOutfit(${o.n},'lighting',this.value)">
+              ${MEDIA_LIGHTING.map(l => `<option${l === o.lighting ? ' selected' : ''}>${l}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div class="outfit-photos" data-outfit="${o.n}"
+             ondragover="onOutfitDragOver(event,${o.n})"
+             ondragleave="onOutfitDragLeave(event)"
+             ondrop="onOutfitDrop(event,${o.n})">
+          ${photos.map(it => photoTile(it, o.n)).join('')}
+          <div class="outfit-drop" onclick="addPhotosTo(${o.n})">+ Add photos<small>or drop files here</small></div>
+        </div>
+        <div class="outfit-gen">
+          ${galleryImages.length ? `<div class="outfit-seed">
+            <span class="outfit-seed-label">From Photos tab:</span>
+            ${galleryImages.map((src, i) => `
+              <img src="${src}" class="outfit-seed-img" title="Add this photo to the outfit"
+                   onclick="useGalleryPhoto(${o.n}, ${i})">`).join('')}
+          </div>` : `<span class="hint">Add a photo in the Photos tab, or upload one here, to generate a matching set.</span>`}
+          <div class="outfit-gen-row">
+            <button type="button" class="btn-ai" onclick="generateOutfitSet(${o.n}, this)"
+              title="Generate matching shots from the first photo in this outfit">
+              ✨ Generate matching set</button>
+            <select id="outfit-gen-count-${o.n}" class="outfit-gen-count" title="How many to generate">
+              ${[1,2,3,4,5].map(n => `<option value="${n}"${n === 4 ? ' selected' : ''}>${n} photo${n === 1 ? '' : 's'}</option>`).join('')}
+            </select>
+            <span class="outfit-gen-status" id="outfit-gen-status-${o.n}"></span>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+
+function photoTile(it, outfitN) {
+  const n = outfitN === undefined ? '' : outfitN;
+  return `
+    <div class="outfit-photo" draggable="true" data-mid="${it.id}"
+         ondragstart="onPhotoDragStart(event,'${it.id}','${n}')"
+         ondragend="onPhotoDragEnd(event)"
+         ondragover="onPhotoDragOver(event,'${it.id}','${n}')"
+         ondragleave="onPhotoDragLeave(event)"
+         ondrop="onPhotoDrop(event,'${it.id}','${n}')">
+      <img src="${it.thumb}" alt="" draggable="false">
+      <button type="button" class="rm" title="Remove from this outfit (stays in the vault)"
+        onclick="event.stopPropagation();unlinkFromOutfit('${it.id}','${n}')">×</button>
+      <select title="Purpose" onchange="updateMedia('${it.id}','purpose',this.value)">
+        ${MEDIA_PURPOSES.map(p => `<option${p === it.purpose ? ' selected' : ''}>${p || '— purpose —'}</option>`).join('')}
+      </select>
+    </div>`;
+}
+
+function toggleOutfit(n) {
+  openOutfit = openOutfit === n ? null : n;
+  renderOutfits();
+}
+
+// Held in memory until Save, so a half-typed outfit never reaches the AI.
+function editOutfit(n, field, value) {
+  const o = mediaOutfits[n - 1];
+  if (!o) return;
+  o[field] = value;
+  setMediaStatus('Unsaved changes — press Save', null);
+  const head = document.querySelectorAll('.outfit')[n - 1];
+  if (head) {
+    const meta = [o.clothing, o.location, o.lighting].filter(Boolean).join(' · ');
+    head.querySelector('.outfit-meta').textContent = meta;
+    const nameEl = head.querySelector('.outfit-name');
+    nameEl.textContent = o.name || 'Untitled outfit';
+    nameEl.classList.toggle('empty', !o.name);
+    head.querySelector('.outfit-num').classList.toggle('empty', !o.name);
+  }
+}
+
+async function saveOutfits(btn) {
+  if (!currentSlug) { setMediaStatus('Save the persona first.', false); return; }
+  try {
+    const res = await fetch('/api/personas/' + currentSlug + '/outfits', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ outfits: mediaOutfits })
+    });
+    if (!res.ok) throw new Error('save failed');
+    flashSaved(btn);
+    setMediaStatus('', null);
+    loadMedia();
+  } catch(e) { flashSaved(btn, false); setMediaStatus('Could not save outfits', false); }
+}
+
+function addPhotosTo(n) {
+  uploadTarget = n;
+  document.getElementById('outfit-file-input').click();
+}
+
+// ── Media Vault ──────────────────────────────────────────────────────────────
+function vaultVisible() {
+  if (vaultFilter === 'unassigned') return mediaVault.filter(v => !(v.outfits || []).length);
+  if (vaultFilter === 'assigned') return mediaVault.filter(v => (v.outfits || []).length);
+  return mediaVault;
+}
+
+function setVaultFilter(v) { vaultFilter = v; renderVault(); }
+
+function renderVault() {
+  const grid = document.getElementById('vault-grid');
+  if (!grid) return;
+  const items = vaultVisible();
+  // Drop selections for photos that no longer exist.
+  vaultSelected.forEach(id => { if (!mediaVault.some(v => v.id === id)) vaultSelected.delete(id); });
+
+  grid.innerHTML = items.length ? items.map(v => {
+    const inOutfits = (v.outfits || []);
+    const badge = inOutfits.length
+      ? `<span class="vault-badge" title="In outfit ${inOutfits.join(', ')}">${inOutfits.join(',')}</span>`
+      : '<span class="vault-badge none" title="Not in any outfit">–</span>';
+    return `
+      <div class="vault-item${vaultSelected.has(v.id) ? ' selected' : ''}"
+           onclick="toggleVaultSelect('${v.id}')"
+           draggable="true" ondragstart="onVaultItemDragStart(event,'${v.id}')"
+           ondragend="onPhotoDragEnd(event)">
+        <img src="${v.thumb}" alt="" draggable="false">
+        ${badge}
+        <button type="button" class="rm" title="Delete from vault"
+          onclick="event.stopPropagation();vaultDeleteOne('${v.id}')">×</button>
+      </div>`;
+  }).join('') : `<div class="vault-empty">No photos yet — upload some, or generate them in an outfit.</div>`;
+
+  const count = document.getElementById('vault-count');
+  if (count) count.textContent = mediaVault.length ? `(${mediaVault.length})` : '';
+  const target = document.getElementById('vault-add-target');
+  if (target) {
+    const keep = target.value;
+    target.innerHTML = mediaOutfits.map(o =>
+      `<option value="${o.n}">Outfit ${o.n}${o.name ? ' — ' + esc(o.name) : ''}</option>`).join('');
+    if (keep) target.value = keep;
+  }
+  updateVaultSelectionUI();
+}
+
+function toggleVaultSelect(id) {
+  if (vaultSelected.has(id)) vaultSelected.delete(id); else vaultSelected.add(id);
+  const el = document.querySelector(`.vault-item[onclick*="${id}"]`);
+  if (el) el.classList.toggle('selected', vaultSelected.has(id));
+  updateVaultSelectionUI();
+}
+
+function updateVaultSelectionUI() {
+  const n = vaultSelected.size;
+  const sel = document.getElementById('vault-sel');
+  if (sel) sel.textContent = n ? `${n} selected` : '';
+  const add = document.getElementById('vault-add-btn');
+  const del = document.getElementById('vault-del-btn');
+  if (add) add.disabled = !n;
+  if (del) del.disabled = !n;
+}
+
+async function vaultAddToOutfit() {
+  if (!currentSlug || !vaultSelected.size) return;
+  const outfit = (document.getElementById('vault-add-target') || {}).value;
+  if (!outfit) return;
+  setMediaStatus('Adding to outfit ' + outfit + '…', null);
+  try {
+    const res = await fetch('/api/personas/' + currentSlug + '/media/link', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ media_ids: Array.from(vaultSelected), outfit: String(outfit) })
+    });
+    const d = await res.json();
+    vaultSelected.clear();
+    openOutfit = parseInt(outfit, 10);
+    await loadMedia();
+    setMediaStatus('✓ Added ' + (d.linked || 0) + ' photo(s) to outfit ' + outfit, true);
+  } catch (e) { setMediaStatus('Could not add to outfit.', false); }
+}
+
+async function vaultDeleteSelected() {
+  if (!currentSlug || !vaultSelected.size) return;
+  const n = vaultSelected.size;
+  if (!confirm('Delete ' + n + ' photo(s) from the vault? They are removed from every outfit too.')) return;
+  setMediaStatus('Deleting…', null);
+  for (const id of Array.from(vaultSelected)) {
+    try { await fetch('/api/personas/' + currentSlug + '/media/' + id, { method: 'DELETE' }); } catch (e) {}
+  }
+  vaultSelected.clear();
+  await loadMedia();
+  setMediaStatus('✓ Deleted ' + n + ' photo(s)', true);
+}
+
+async function vaultDeleteOne(id) {
+  if (!currentSlug) return;
+  if (!confirm('Delete this photo? It is removed from every outfit too.')) return;
+  try { await fetch('/api/personas/' + currentSlug + '/media/' + id, { method: 'DELETE' }); } catch (e) {}
+  vaultSelected.delete(id);
+  await loadMedia();
+  setMediaStatus('✓ Photo deleted', true);
+}
+
+function onVaultItemDragStart(ev, id) {
+  dragMediaId = id;
+  dragFromOutfit = null;          // from the vault, so it is a copy into an outfit
+  ev.dataTransfer.effectAllowed = 'copy';
+  try { ev.dataTransfer.setData('text/plain', id); } catch (e) {}
+}
+
+function onVaultDragOver(ev) {
+  if (!(ev.dataTransfer && Array.from(ev.dataTransfer.types || []).includes('Files'))) return;
+  ev.preventDefault();
+  ev.dataTransfer.dropEffect = 'copy';
+  ev.currentTarget.classList.add('drop-active');
+}
+
+function onVaultDragLeave(ev) { ev.currentTarget.classList.remove('drop-active'); }
+
+async function onVaultDrop(ev) {
+  const files = Array.from((ev.dataTransfer && ev.dataTransfer.files) || [])
+    .filter(f => f.type.startsWith('image/'));
+  if (!files.length) return;
+  ev.preventDefault();
+  ev.currentTarget.classList.remove('drop-active');
+  await uploadMediaFiles(files, '');     // straight into the vault, unassigned
+}
+
+// ── Drag to rearrange, and drop files to upload ──────────────────────────────
+let dragMediaId = null;
+let dragFromOutfit = null;
+
+function onPhotoDragStart(ev, id, fromOutfit) {
+  dragMediaId = id;
+  dragFromOutfit = fromOutfit === '' ? null : String(fromOutfit);
+  ev.dataTransfer.effectAllowed = 'move';
+  // Firefox needs data set for the drag to start at all.
+  try { ev.dataTransfer.setData('text/plain', id); } catch (e) {}
+  const tile = ev.currentTarget;
+  if (tile) setTimeout(() => tile.classList.add('dragging'), 0);
+}
+
+// Rebuild the flat link list from what is on screen, then save it.
+function linksInDisplayOrder() {
+  const out = [];
+  mediaOutfits.forEach(o => {
+    photosOf(o.n).forEach(p => out.push({ media_id: p.id, outfit: String(o.n) }));
+  });
+  return out;
+}
+
+function moveLink(mediaId, fromOutfit, toOutfit, beforeMediaId, after) {
+  // Drop within the same outfit reorders; across outfits moves the placement.
+  mediaLinks = mediaLinks.filter(l =>
+    !(l.media_id === mediaId && String(l.outfit) === String(fromOutfit)));
+  const already = mediaLinks.some(l =>
+    l.media_id === mediaId && String(l.outfit) === String(toOutfit));
+  if (!already) mediaLinks.push({ media_id: mediaId, outfit: String(toOutfit), position: 0 });
+
+  const inOutfit = mediaLinks.filter(l => String(l.outfit) === String(toOutfit));
+  const moved = inOutfit.find(l => l.media_id === mediaId);
+  const rest = inOutfit.filter(l => l.media_id !== mediaId);
+  let at = rest.length;
+  if (beforeMediaId) {
+    const i = rest.findIndex(l => l.media_id === beforeMediaId);
+    if (i !== -1) at = after ? i + 1 : i;
+  }
+  rest.splice(at, 0, moved);
+  rest.forEach((l, i) => { l.position = i; });
+  mediaLinks = mediaLinks.filter(l => String(l.outfit) !== String(toOutfit)).concat(rest);
+}
+
+function onPhotoDragEnd(ev) {
+  dragMediaId = null;
+  document.querySelectorAll('.outfit-photo').forEach(el =>
+    el.classList.remove('dragging', 'drop-before', 'drop-after'));
+  document.querySelectorAll('.outfit-photos').forEach(el =>
+    el.classList.remove('drop-active'));
+}
+
+function onPhotoDragOver(ev, id, outfitN) {
+  if (!dragMediaId || dragMediaId === id) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  ev.dataTransfer.dropEffect = 'move';
+  const tile = ev.currentTarget;
+  const r = tile.getBoundingClientRect();
+  const after = (ev.clientX - r.left) > r.width / 2;
+  tile.classList.toggle('drop-before', !after);
+  tile.classList.toggle('drop-after', after);
+}
+
+function onPhotoDragLeave(ev) {
+  ev.currentTarget.classList.remove('drop-before', 'drop-after');
+}
+
+async function onPhotoDrop(ev, targetId, outfitN) {
+  if (!dragMediaId || dragMediaId === targetId) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  const tile = ev.currentTarget;
+  const r = tile.getBoundingClientRect();
+  const after = (ev.clientX - r.left) > r.width / 2;
+  const mid = dragMediaId;
+  moveLink(mid, dragFromOutfit, outfitN, targetId, after);
+  onPhotoDragEnd(ev);
+  renderVault();
+  renderOutfits();
+  await persistMediaOrder();
+}
+
+function onOutfitDragOver(ev, n) {
+  if (dragMediaId) { ev.preventDefault(); ev.dataTransfer.dropEffect = 'move'; }
+  else if (ev.dataTransfer && Array.from(ev.dataTransfer.types || []).includes('Files')) {
+    ev.preventDefault();
+    ev.dataTransfer.dropEffect = 'copy';
+  } else return;
+  ev.currentTarget.classList.add('drop-active');
+}
+
+function onOutfitDragLeave(ev) {
+  ev.currentTarget.classList.remove('drop-active');
+}
+
+async function onOutfitDrop(ev, n) {
+  const files = Array.from((ev.dataTransfer && ev.dataTransfer.files) || [])
+    .filter(f => f.type.startsWith('image/'));
+  ev.preventDefault();
+  ev.currentTarget.classList.remove('drop-active');
+
+  if (files.length) { await uploadMediaFiles(files, n); return; }
+
+  // A tile dropped on empty space in the outfit goes to the end of it.
+  if (!dragMediaId) return;
+  moveLink(dragMediaId, dragFromOutfit, n, null, false);
+  onPhotoDragEnd(ev);
+  renderVault();
+  renderOutfits();
+  await persistMediaOrder();
+}
+
+async function unlinkFromOutfit(mediaId, outfitN) {
+  if (!currentSlug || !outfitN) return;
+  try {
+    await fetch('/api/personas/' + currentSlug + '/media/unlink', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ media_id: mediaId, outfit: String(outfitN) })
+    });
+    openOutfit = parseInt(outfitN, 10);
+    await loadMedia();
+    setMediaStatus('✓ Removed from outfit — still in the vault', true);
+  } catch (e) { setMediaStatus('Could not remove from outfit.', false); }
+}
+
+async function persistMediaOrder() {
+  if (!currentSlug) return;
+  try {
+    await fetch('/api/personas/' + currentSlug + '/media/reorder', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order: linksInDisplayOrder() })
+    });
+    setMediaStatus('✓ Order saved', true);
+  } catch (e) {
+    setMediaStatus('Could not save the new order.', false);
+  }
+}
+
+// Shared by the file picker and by dropping files onto an outfit.
+async function uploadMediaFiles(files, outfitN) {
+  if (!currentSlug) { setMediaStatus('Save the persona first.', false); return; }
+  setMediaStatus('Uploading ' + files.length + ' photo(s)…', null);
+  const readAsDataURL = f => new Promise(res => {
+    const r = new FileReader(); r.onload = e => res(e.target.result); r.readAsDataURL(f);
+  });
+  let added = 0;
+  for (const file of files) {
+    try {
+      const image = await readAsDataURL(file);
+      await fetch('/api/personas/' + currentSlug + '/media', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image, outfit: outfitN ? String(outfitN) : '' })
+      });
+      added++;
+    } catch (e) {}
+  }
+  openOutfit = outfitN;
+  await loadMedia();
+  setMediaStatus(added ? '✓ Added ' + added + ' photo(s)' : 'Upload failed.', !!added);
+}
+
+// Copy a photo from the Photos tab into an outfit, so the face set and the
+// media library share the same person.
+async function useGalleryPhoto(n, idx) {
+  if (!currentSlug) { setMediaStatus('Save the persona first.', false); return; }
+  const src = galleryImages[idx];
+  if (!src) return;
+  setMediaStatus('Adding photo…', null);
+  try {
+    await fetch('/api/personas/' + currentSlug + '/media', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: src, outfit: String(n) })
+    });
+    openOutfit = n;
+    await loadMedia();
+    setMediaStatus('✓ Photo added to outfit ' + n, true);
+  } catch (e) {
+    setMediaStatus('Could not add photo.', false);
+  }
+}
+
+// Generate a set of shots that keep the same person, clothing and setting.
+// Seeds from the outfit's own first photo, falling back to the Photos tab.
+const OUTFIT_SHOTS = ['half', 'full', 'candid', 'mirror', 'portrait'];
+
+async function generateOutfitSet(n, btn) {
+  if (!currentSlug) { setMediaStatus('Save the persona first.', false); return; }
+  const status = document.getElementById('outfit-gen-status-' + n);
+  const existing = photosOf(n);
+  // An outfit photo is referenced by id: the browser holds only its URL, and
+  // the generator needs the actual bytes to keep the same person.
+  const seedId = existing[0] && existing[0].id;
+  const seedData = seedId ? null : galleryImages[0];
+  if (!seedId && !seedData) {
+    if (status) status.textContent = 'Add one photo first — it sets the look to match.';
+    return;
+  }
+  const count = parseInt((document.getElementById('outfit-gen-count-' + n) || {}).value || '4', 10);
+  const outfit = mediaOutfits.find(o => String(o.n) === String(n)) || {};
+  const spec = { clothing: outfit.clothing || '', location: outfit.location || '',
+                 lighting: outfit.lighting || '' };
+
+  btn.disabled = true;
+  const label = btn.textContent;
+  let made = 0;
+  for (let i = 0; i < count; i++) {
+    btn.textContent = `Generating ${i + 1}/${count}…`;
+    if (status) status.textContent = '';
+    try {
+      const res = await fetch('/api/generate/image', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reference: seedData, reference_media: seedId,
+                               reference_slug: currentSlug, outfit: spec,
+                               shot: OUTFIT_SHOTS[i % OUTFIT_SHOTS.length],
+                               config: collectConfig() })
+      });
+      const data = await res.json();
+      // A result generated without the reference is a different person, so it
+      // is discarded rather than quietly added to the outfit.
+      if (data.ok && data.image && data.used_reference === false) {
+        if (status) status.textContent =
+          'Server ignored the reference photo — reload the page (hard refresh) and try again.';
+        break;
+      }
+      if (data.ok && data.image) {
+        await fetch('/api/personas/' + currentSlug + '/media', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: data.image, outfit: String(n),
+                                 location: spec.location, lighting: spec.lighting })
+        });
+        made++;
+      } else if (status) {
+        status.textContent = data.error || 'Generation failed.';
+      }
+    } catch (e) {
+      if (status) status.textContent = 'Generation failed.';
+    }
+  }
+  btn.disabled = false;
+  btn.textContent = label;
+  openOutfit = n;
+  await loadMedia();
+  const el = document.getElementById('outfit-gen-status-' + n);
+  if (el) el.textContent = made ? `✓ Added ${made} photo${made === 1 ? '' : 's'}` : '';
+}
+
+function onMediaFiles(ev) {
+  const files = Array.from(ev.target.files || []);
+  const target = uploadTarget;
+  ev.target.value = '';
+  uploadTarget = null;
+  if (files.length) uploadMediaFiles(files, target);
+}
+
+async function updateMedia(id, field, value) {
+  try {
+    const body = {}; body[field] = value;
+    await fetch('/api/personas/' + currentSlug + '/media/' + id, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    setMediaStatus('✓ Saved', true);
+  } catch(e) { setMediaStatus('✗ Save failed', false); }
+}
+
+async function deleteMedia(id) {
+  try {
+    await fetch('/api/personas/' + currentSlug + '/media/' + id, { method: 'DELETE' });
+    loadMedia();
+  } catch(e) {}
+}
+
 </script>
 </body>
 </html>
