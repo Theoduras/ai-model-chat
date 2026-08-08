@@ -69,8 +69,12 @@
       <label style="display:block;margin-bottom:6px;">💎 PPV content <span style="font-weight:400;color:var(--text-muted);">(pick the Fanvue media this model sends locked, once rapport is built)</span></label>
       <div class="row-inline" style="margin-bottom:10px;">
         <div class="field" style="margin:0;min-width:180px;flex:1;">
-          <label style="font-size:.72rem;">Folder <span style="color:var(--text-muted);">(type a folder name from Fanvue)</span></label>
-          <input type="text" id="ppv-folder-filter" placeholder="e.g. RTS1 $15" onchange="loadPpv()">
+          <label style="font-size:.72rem;">Folder</label>
+          <select id="ppv-folder-filter" onchange="loadPpv()"><option value="">All folders</option></select>
+        </div>
+        <div class="field" style="margin:0;min-width:160px;flex:1;">
+          <label style="font-size:.72rem;">Search <span style="color:var(--text-muted);">(name or description)</span></label>
+          <input type="text" id="ppv-search" placeholder="e.g. bikini" oninput="renderGrid()">
         </div>
         <div class="field" style="margin:0;min-width:120px;">
           <label style="font-size:.72rem;">Type</label>
@@ -108,7 +112,11 @@
       <div id="ppv-tier-bar" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px;"></div>
       <div id="ppv-tier-contents" style="margin-bottom:12px;"></div>
       <label style="font-size:.72rem;display:block;margin-bottom:4px;">Add from your Fanvue media</label>
-      <div id="ppv-media-grid" style="display:grid; grid-template-columns:repeat(auto-fill,minmax(100px,1fr)); gap:8px; max-height:260px; overflow-y:auto; padding:4px 0;"></div>
+      <div id="ppv-media-grid" style="display:grid; grid-template-columns:repeat(auto-fill,minmax(100px,1fr)); gap:8px; max-height:320px; overflow-y:auto; padding:4px 0;" onscroll="onGridScroll()"></div>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:6px;">
+        <button class="btn-ai" id="ppv-more-btn" style="background:var(--border);display:none;" onclick="loadMoreMedia()">Load more</button>
+        <span class="hint" id="ppv-count"></span>
+      </div>
       <div class="row-inline" style="margin-top:10px;">
         <div class="field" style="margin:0; min-width:130px;">
           <label style="font-size:.72rem;">This tier's unlock price in $ (min $3)</label>
@@ -434,16 +442,57 @@ function applyTier(){
   renderTierContents();
   renderGrid();
 }
+let mediaPage=1, mediaHasMore=false, mediaLoading=false;
+async function fetchMediaPage(page){
+  const folder=document.getElementById('ppv-folder-filter').value||'';
+  const type=document.getElementById('ppv-type-filter').value||'';
+  return fetch('/api/fanvue/media?persona='+encodeURIComponent(persona())+
+    '&folder='+encodeURIComponent(folder)+'&type='+encodeURIComponent(type)+
+    '&page='+page).then(r=>r.json());
+}
+async function loadFolders(){
+  const sel=document.getElementById('ppv-folder-filter');
+  const keep=sel.value;
+  try{
+    const d=await fetch('/api/fanvue/folders?persona='+encodeURIComponent(persona())).then(r=>r.json());
+    sel.innerHTML='<option value="">All folders</option>'+
+      (d.folders||[]).map(f=>'<option value="'+esc(f.name)+'">'+esc(f.name)+
+        (f.count!=null?(' ('+f.count+')'):'')+'</option>').join('');
+    sel.value=keep;
+  }catch(e){}
+}
+async function loadMoreMedia(){
+  if(mediaLoading||!mediaHasMore) return;
+  mediaLoading=true;
+  const btn=document.getElementById('ppv-more-btn');
+  btn.textContent='Loading…';
+  try{
+    const d=await fetchMediaPage(mediaPage+1);
+    mediaPage=d.page||(mediaPage+1);
+    mediaHasMore=!!d.has_more;
+    const have=new Set((window._ppvMedia||[]).map(m=>m.uuid));
+    window._ppvMedia=(window._ppvMedia||[]).concat((d.media||[]).filter(m=>!have.has(m.uuid)));
+    rememberMedia(d.media||[]);
+    renderGrid();
+  }catch(e){}
+  btn.textContent='Load more';
+  mediaLoading=false;
+}
+// Pull the next page a little before the bottom, so scrolling feels endless.
+function onGridScroll(){
+  const g=document.getElementById('ppv-media-grid');
+  if(mediaHasMore&&!mediaLoading&&g.scrollTop+g.clientHeight>=g.scrollHeight-120) loadMoreMedia();
+}
 async function loadPpv(){
   const row=document.getElementById('ppv-row');
   if(!connState.connected){row.style.display='none';return;}
   row.style.display='block';
   const grid=document.getElementById('ppv-media-grid');
   grid.innerHTML='<span class="hint">Loading media…</span>';
-  const folder=document.getElementById('ppv-folder-filter').value||'';
-  const type=document.getElementById('ppv-type-filter').value||'';
+  if(!window._ppvFoldersLoaded){ window._ppvFoldersLoaded=true; loadFolders(); }
   let data={};
-  try{data=await fetch('/api/fanvue/media?persona='+encodeURIComponent(persona())+'&folder='+encodeURIComponent(folder)+'&type='+encodeURIComponent(type)).then(r=>r.json());}catch(e){}
+  try{data=await fetchMediaPage(1);}catch(e){}
+  mediaPage=1; mediaHasMore=!!data.has_more;
   window._ppvMedia=data.media||[];
   rememberMedia(window._ppvMedia);
   // Load saved sets only once (first load), so switching filters keeps edits.
@@ -473,10 +522,19 @@ async function loadPpv(){
 }
 function renderGrid(){
   const grid=document.getElementById('ppv-media-grid');
-  const media=window._ppvMedia||[];
+  const all=window._ppvMedia||[];
+  const q=(document.getElementById('ppv-search').value||'').trim().toLowerCase();
+  // Search filters what has been loaded; Fanvue's media list has no search of
+  // its own, so keep scrolling to pull in more pages first.
+  const media=q?all.filter(m=>((m.name||'')+' '+(m.description||'')).toLowerCase().includes(q)):all;
   const hint=document.getElementById('ppv-hint');
   const where=(theSet().name||('Set '+(curSet+1)))+' · tier '+(curTier+1);
-  if(!media.length){grid.innerHTML='';hint.textContent='No media in this view.';hint.style.color='var(--text-muted)';return;}
+  const count=document.getElementById('ppv-count');
+  const btn=document.getElementById('ppv-more-btn');
+  btn.style.display=mediaHasMore?'':'none';
+  count.textContent=(q?(media.length+' of '+all.length+' loaded match “'+q+'”')
+                      :(all.length+' loaded'))+(mediaHasMore?' · scroll for more':'');
+  if(!media.length){grid.innerHTML='';hint.textContent=q?'Nothing loaded matches that search.':'No media in this view.';hint.style.color='var(--text-muted)';return;}
   grid.innerHTML=media.map(m=>{
     const on=ppvSel.has(m.uuid);
     const thumb=m.thumb?('background-image:url(\''+esc(m.thumb)+'\');background-size:cover;background-position:center;'):'background:linear-gradient(135deg,var(--surface),var(--panel));';
