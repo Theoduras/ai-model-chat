@@ -7138,6 +7138,16 @@ def _ppv_progress(value, sets):
     return {sets[0]['id']: n} if n and sets else {}
 
 
+def _fv_last_tier(sets, progress):
+    """The tier most recently sent to this fan: (set, index). The one they did
+    not buy, which is what a retry repeats."""
+    for s in reversed(sets):
+        n = int(progress.get(s['id'], 0) or 0)
+        if n:
+            return s, min(n - 1, len(s['tiers']) - 1)
+    return None, 0
+
+
 def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx, context=''):
     """Consider the next PPV drop for this fan: pick the set that fits what was
     just said and the hour, then send its next tier in order. Serialised per
@@ -7163,6 +7173,11 @@ def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx, context
             test_paid = json.loads(_get_setting(ctx['paid_key']) or '{}')
         except Exception:
             test_paid = {}
+        try:
+            retries = json.loads(_get_setting(ctx['retry_key']) or '{}')
+        except Exception:
+            retries = {}
+        resend = False
 
         progress = _ppv_progress(ppv_sent.get(fan_uuid), sets)
         total_done = sum(progress.values())
@@ -7175,19 +7190,33 @@ def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx, context
                 or int(test_paid.get(fan_uuid, 0) or 0) >= total_done \
                 or _fanvue_fan_purchased(persona, fan_uuid,
                                          last_sent.get(fan_uuid) or [])
+            send_ppv = paid and enough_chat
             if not paid:
                 logger.info('Fanvue [%s] %s: waiting on payment of the last PPV',
                             persona, handle or fan_uuid)
-            send_ppv = paid and enough_chat
-        if not send_ppv:
+                # An unbought drop otherwise blocks this fan for good. After
+                # enough more chat, offer the same one again a few times.
+                tries = int(retries.get(fan_uuid, 0) or 0)
+                waited = exchanged - int(ppv_at.get(fan_uuid, 0))
+                if (ctx.get('retry_after') and tries < ctx.get('retry_max', 0)
+                        and waited >= ctx['retry_after']):
+                    resend = True
+        if not (send_ppv or resend):
             return
 
         hour = int(time.strftime('%H', time.localtime(time.time() + 60 * int(
             ctx.get('tz_offset') or 0))))
-        chosen = _fv_pick_set(sets, progress, (context or '') + ' ' + (reply or ''), hour)
-        if not chosen:
-            return
-        idx = int(progress.get(chosen['id'], 0) or 0)
+        if resend:
+            # Repeat the tier they did not buy, not the next one.
+            chosen, idx = _fv_last_tier(sets, progress)
+            if not chosen:
+                return
+        else:
+            chosen = _fv_pick_set(sets, progress,
+                                  (context or '') + ' ' + (reply or ''), hour)
+            if not chosen:
+                return
+            idx = int(progress.get(chosen['id'], 0) or 0)
         tier = chosen['tiers'][idx]
         cap = (tier.get('caption') or reply).strip()[:2000]
         try:
@@ -7198,18 +7227,26 @@ def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx, context
             logger.warning('Fanvue PPV to %s failed: %s', handle or fan_uuid, str(e)[:120])
             _fv_trace(persona, 'error', f'PPV to {handle or fan_uuid} failed: {str(e)[:200]}')
             return
-        progress[chosen['id']] = idx + 1
-        ppv_sent[fan_uuid] = progress
+        if resend:
+            retries[fan_uuid] = int(retries.get(fan_uuid, 0) or 0) + 1
+            _set_setting(ctx['retry_key'], json.dumps(retries))
+        else:
+            progress[chosen['id']] = idx + 1
+            ppv_sent[fan_uuid] = progress
+            retries.pop(fan_uuid, None)
+            _set_setting(ctx['sent_key'], json.dumps(ppv_sent))
+            _set_setting(ctx['retry_key'], json.dumps(retries))
         ppv_at[fan_uuid] = exchanged
         last_sent[fan_uuid] = tier['media_uuids']
-        _set_setting(ctx['sent_key'], json.dumps(ppv_sent))
         _set_setting(ctx['at_key'], json.dumps(ppv_at))
         _set_setting(ctx['last_key'], json.dumps(last_sent))
-        logger.info('PPV SENT [%s] %s tier %d/%d -> %s at %s', persona, chosen['name'],
-                    idx + 1, len(chosen['tiers']), handle or fan_uuid, tier['price'])
+        again = ' again' if resend else ''
+        logger.info('PPV SENT%s [%s] %s tier %d/%d -> %s at %s', again, persona,
+                    chosen['name'], idx + 1, len(chosen['tiers']),
+                    handle or fan_uuid, tier['price'])
         _fv_trace(persona, 'ppv',
-                  f"\U0001F48E {chosen['name']} tier {idx + 1}/{len(chosen['tiers'])} "
-                  f"\u2192 {handle or fan_uuid} at ${tier['price'] / 100:g}: {cap}")
+                  f"\U0001F48E {chosen['name']} tier {idx + 1}/{len(chosen['tiers'])}"
+                  f"{again} \u2192 {handle or fan_uuid} at ${tier['price'] / 100:g}: {cap}")
 
 
 def _fv_deliver(persona, scope, fan_uuid, fan_key, handle, reply, incoming, cfg, ppv_ctx):
@@ -7334,6 +7371,9 @@ def _fanvue_auto_round(persona):
     # Messages that must pass before the first drop, and between later ones.
     ppv_first_after = max(1, min(int(opts.get('ppv_first_after', 6) or 6), 200))
     ppv_gap = max(1, min(int(opts.get('ppv_gap', 8) or 8), 200))
+    # Offer an unbought drop again after this much more chat, at most this often.
+    ppv_retry_after = max(0, min(int(opts.get('ppv_retry_after', 0) or 0), 500))
+    ppv_retry_max = max(0, min(int(opts.get('ppv_retry_max', 1) or 0), 10))
     # When off, tiers advance on chatting alone (payment can't be verified for
     # agency-agent testers). When on, each later tier waits for the prior payment.
     ppv_require_payment = (_get_setting(f'fanvue_ppv_require_payment_{persona}') or '0') == '1'
@@ -7514,6 +7554,8 @@ def _fanvue_auto_round(persona):
         _set_setting(cursor_key, json.dumps(cursor))
 
         ppv_ctx = {'sets': ppv_sets, 'gap': ppv_gap, 'first_after': ppv_first_after,
+                   'retry_after': ppv_retry_after, 'retry_max': ppv_retry_max,
+                   'retry_key': f'fanvue_ppv_retry_{persona}',
                    'sent_key': ppv_sent_key,
                    'at_key': ppv_at_key, 'paid_key': ppv_paid_key,
                    'last_key': f'fanvue_ppv_last_{persona}', 'tz_offset': ppv_tz,
@@ -7575,6 +7617,10 @@ def api_fanvue_auto():
             opts['ppv_first_after'] = max(1, min(int(data['ppv_first_after'] or 6), 200))
         if 'ppv_gap' in data:
             opts['ppv_gap'] = max(1, min(int(data['ppv_gap'] or 8), 200))
+        if 'ppv_retry_after' in data:
+            opts['ppv_retry_after'] = max(0, min(int(data['ppv_retry_after'] or 0), 500))
+        if 'ppv_retry_max' in data:
+            opts['ppv_retry_max'] = max(0, min(int(data['ppv_retry_max'] or 0), 10))
         if 'ppv_test_phrase' in data:
             opts['ppv_test_phrase'] = (data.get('ppv_test_phrase') or '').strip()[:80]
         if 'ppv_require_payment' in data:
@@ -7603,8 +7649,41 @@ def api_fanvue_auto():
                     'ppv_test_phrase': opts.get('ppv_test_phrase', ''),
                     'ppv_first_after': int(opts.get('ppv_first_after', 6) or 6),
                     'ppv_gap': int(opts.get('ppv_gap', 8) or 8),
+                    'ppv_retry_after': int(opts.get('ppv_retry_after', 0) or 0),
+                    'ppv_retry_max': int(opts.get('ppv_retry_max', 1) or 0),
                     'followup_min': int(_get_setting(f'fanvue_followup_min_{persona}') or 30),
                     'ppv_require_payment': (_get_setting(f'fanvue_ppv_require_payment_{persona}') or '0') == '1'})
+
+
+@app.route('/api/fanvue/ppv-reset', methods=['POST'])
+def api_fanvue_ppv_reset():
+    """Forget what has already been sent, so the sets start from the top again.
+    With a fan_uuid it resets that one fan; without, everyone on this persona."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    d = request.json or {}
+    persona = (d.get('persona') or '').strip()
+    if not persona:
+        return jsonify({'ok': False, 'error': 'Missing persona'}), 400
+    fan = (d.get('fan_uuid') or '').strip()
+    keys = [f'fanvue_ppv_sent_{persona}', f'fanvue_ppv_at_{persona}',
+            f'fanvue_ppv_last_{persona}', f'fanvue_ppv_testpaid_{persona}',
+            f'fanvue_ppv_retry_{persona}']
+    cleared = 0
+    for k in keys:
+        if fan:
+            try:
+                m = json.loads(_get_setting(k) or '{}')
+            except Exception:
+                m = {}
+            if isinstance(m, dict) and m.pop(fan, None) is not None:
+                cleared += 1
+                _set_setting(k, json.dumps(m))
+        else:
+            _set_setting(k, '{}')
+    who = fan or 'every fan'
+    _fv_trace(persona, 'ppv', f'PPV progress reset for {who} — the sets start again')
+    return jsonify({'ok': True, 'fan_uuid': fan, 'cleared': cleared if fan else len(keys)})
 
 
 @app.route('/api/fanvue/lists')
