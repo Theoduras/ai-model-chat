@@ -6899,7 +6899,43 @@ def _fv_humanize_cfg(persona):
     """Reply pacing for Fanvue, same shape and defaults as Telegram's."""
     opts = _fanvue_auto_settings(persona)
     return {'humanize': bool(opts.get('humanize', True)),
-            'typing_speed': max(4, min(int(opts.get('typing_speed') or 14), 40))}
+            'typing_speed': max(4, min(int(opts.get('typing_speed') or 14), 40)),
+            'react_rate': max(0, min(int(opts.get('react_rate', 25)), 100)),
+            'quote_rate': max(0, min(int(opts.get('quote_rate', 25)), 100))}
+
+
+# Fanvue's API has neither reactions nor reply-to, so both are written into the
+# message itself: a lone emoji reads as a like, a quoted line as a reply.
+FV_REACTIONS = (
+    (r"\b(ha+|haha|lol|lmao|funny|joke)\b", ["\U0001F602", "\U0001F923", "\U0001F605"]),
+    (r"\b(love|miss|beautiful|gorgeous|cute|sweet)\b", ["\U0001F970", "\U0001F60D", "\u2764\ufe0f"]),
+    (r"\b(sexy|hot|damn|wow|omg)\b", ["\U0001F60F", "\U0001F525", "\U0001F633"]),
+    (r"\b(sad|tired|rough|sorry|stress\w*)\b", ["\U0001F97A", "\U0001F622", "\U0001FAF6"]),
+    (r"\b(work|shift|busy|early|late)\b", ["\U0001F634", "\U0001FAE0", "\U0001F629"]),
+    (r"\?\s*$", ["\U0001F914", "\U0001F440"]),
+)
+FV_REACTION_FALLBACK = ["\U0001F60A", "\U0001F604", "\U0001F609", "\U0001F440", "\U0001F648"]
+
+
+def _fv_reaction_for(text):
+    """An emoji answering the tone of what he said, the way a like would."""
+    t = (text or '').lower().strip()
+    for pattern, emojis in FV_REACTIONS:
+        if re.search(pattern, t):
+            return random.choice(emojis)
+    return random.choice(FV_REACTION_FALLBACK)
+
+
+def _fv_quote_prefix(incoming):
+    """A quoted line standing in for Fanvue's missing reply-to. Only worth it
+    when there is enough to quote, and trimmed so it stays one line."""
+    t = ' '.join((incoming or '').split())
+    if len(t) < 15:
+        return ''
+    if len(t) > 80:
+        t = t[:77].rstrip() + '\u2026'
+    return '\u201c' + t + '\u201d\n'
+
 
 
 _fv_list_cache = {}
@@ -7019,13 +7055,22 @@ def _fv_send_human(persona, scope, fan_uuid, text, incoming='', cfg=None):
     cps = max(2, int(cfg['typing_speed']) // 4)
     time.sleep(random.uniform(15, 120))
     time.sleep(min(0.8 + len(incoming) / 90.0, FV_READ_CAP) * random.uniform(0.7, 1.3))
+    # React first, the way someone taps a heart before they start typing.
+    if incoming and random.randint(1, 100) <= cfg.get('react_rate', 0):
+        try:
+            _fv_send_text(persona, scope, fan_uuid, _fv_reaction_for(incoming))
+            time.sleep(random.uniform(1.0, 3.0))
+        except Exception as e:
+            logger.info('Fanvue reaction failed: %s', str(e)[:120])
+    quote = (_fv_quote_prefix(incoming)
+             if incoming and random.randint(1, 100) <= cfg.get('quote_rate', 0) else '')
     for i, chunk in enumerate(_tg_bursts(text)):
         if not chunk:
             continue
         if i:
             time.sleep(random.uniform(0.6, 1.6))
         time.sleep(min(max(len(chunk) / float(cps), 1.2), FV_TYPE_CAP) * random.uniform(0.85, 1.2))
-        _fv_send_text(persona, scope, fan_uuid, chunk)
+        _fv_send_text(persona, scope, fan_uuid, (quote + chunk) if i == 0 else chunk)
 
 
 def _ppv_count(v):
@@ -7465,6 +7510,10 @@ def api_fanvue_auto():
             opts['humanize'] = bool(data['humanize'])
         if 'typing_speed' in data:
             opts['typing_speed'] = max(4, min(int(data['typing_speed'] or 14), 40))
+        if 'react_rate' in data:
+            opts['react_rate'] = max(0, min(int(data['react_rate'] or 0), 100))
+        if 'quote_rate' in data:
+            opts['quote_rate'] = max(0, min(int(data['quote_rate'] or 0), 100))
         if 'followup_min' in data:
             try:
                 _set_setting(f'fanvue_followup_min_{persona}', str(int(float(data['followup_min']))))
@@ -7495,6 +7544,8 @@ def api_fanvue_auto():
                     'online_grace': opts.get('online_grace', 5),
                     'humanize': bool(opts.get('humanize', True)),
                     'typing_speed': max(4, min(int(opts.get('typing_speed') or 14), 40)),
+                    'react_rate': max(0, min(int(opts.get('react_rate', 25)), 100)),
+                    'quote_rate': max(0, min(int(opts.get('quote_rate', 25)), 100)),
                     'include_lists': _fv_clean_lists(opts.get('include_lists')),
                     'exclude_lists': _fv_clean_lists(opts.get('exclude_lists')),
                     'ppv_test_phrase': opts.get('ppv_test_phrase', ''),

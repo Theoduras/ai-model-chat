@@ -188,6 +188,16 @@
         <option value="34">Very fast</option>
       </select>
     </div>
+    <div class="row-inline" id="fv-react-wrap" style="margin-top:12px;">
+      <div class="field" style="margin:0;">
+        <label>React with an emoji <span style="font-weight:400;color:var(--text-muted);">(% of replies — Fanvue has no reaction button, so she sends the emoji as its own message just before she answers. 0 = never)</span></label>
+        <input type="number" id="fv-react-rate" min="0" max="100" step="5" value="25" style="max-width:120px;">
+      </div>
+      <div class="field" style="margin:0;">
+        <label>Quote what he said <span style="font-weight:400;color:var(--text-muted);">(% of replies — Fanvue has no reply-to, so his line is quoted above her answer. 0 = never)</span></label>
+        <input type="number" id="fv-quote-rate" min="0" max="100" step="5" value="25" style="max-width:120px;">
+      </div>
+    </div>
     <div class="field full" id="fv-online-grace-wrap" style="margin-top:12px;display:none;">
       <label>Count as online for <span style="font-weight:400;color:var(--text-muted);">(minutes since last seen — presence flickers when a fan backgrounds the app, so a small window avoids missing them. 0 = only while the flag says online.)</span></label>
       <input type="number" id="fv-online-grace" min="0" max="120" step="1" value="5" style="max-width:160px;">
@@ -632,6 +642,8 @@ async function loadAuto(){
   document.getElementById('fv-online-grace-wrap').style.display=a.online_only?'':'none';
   document.getElementById('fv-humanize').checked=a.humanize!==false;
   document.getElementById('fv-typing-speed').value=String(a.typing_speed||14);
+  document.getElementById('fv-react-rate').value=(a.react_rate!==undefined?a.react_rate:25);
+  document.getElementById('fv-quote-rate').value=(a.quote_rate!==undefined?a.quote_rate:25);
   document.getElementById('fv-typing-wrap').style.display=(a.humanize!==false)?'':'none';
   document.getElementById('fv-followup-min').value=a.followup_min||30;
   document.getElementById('fv-ppv-require-payment').checked=!!a.ppv_require_payment;
@@ -686,6 +698,8 @@ async function saveAuto(){
     online_grace:parseInt(document.getElementById('fv-online-grace').value||'5',10),
     humanize:document.getElementById('fv-humanize').checked,
     typing_speed:parseInt(document.getElementById('fv-typing-speed').value||'14',10),
+    react_rate:parseInt(document.getElementById('fv-react-rate').value||'0',10),
+    quote_rate:parseInt(document.getElementById('fv-quote-rate').value||'0',10),
     followup_min:document.getElementById('fv-followup-min').value,
     ppv_require_payment:document.getElementById('fv-ppv-require-payment').checked,
     ppv_test_phrase:document.getElementById('fv-ppv-test-phrase').value,
