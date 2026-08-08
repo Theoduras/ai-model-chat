@@ -83,13 +83,13 @@
         </div>
       </div>
       <div id="ppv-set-bar" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px;"></div>
-      <div id="ppv-set-fields" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:10px;">
+      <div id="ppv-set-fields" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px 14px;margin-bottom:12px;">
         <div class="field" style="margin:0;">
           <label style="font-size:.72rem;">Set name</label>
           <input type="text" id="ppv-set-name" placeholder="e.g. In bed" onchange="stashSet()">
         </div>
-        <div class="field" style="margin:0;">
-          <label style="font-size:.72rem;">What she's doing in it <span style="color:var(--text-muted);">(matched against the chat)</span></label>
+        <div class="field" style="margin:0;grid-column:1/-1;">
+          <label style="font-size:.72rem;">What she's doing in it <span style="color:var(--text-muted);">— matched against what's said in the chat</span></label>
           <input type="text" id="ppv-set-scene" placeholder="e.g. lying in bed in the morning" onchange="stashSet()">
         </div>
         <div class="field" style="margin:0;">
@@ -106,6 +106,8 @@
         </div>
       </div>
       <div id="ppv-tier-bar" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px;"></div>
+      <div id="ppv-tier-contents" style="margin-bottom:12px;"></div>
+      <label style="font-size:.72rem;display:block;margin-bottom:4px;">Add from your Fanvue media</label>
       <div id="ppv-media-grid" style="display:grid; grid-template-columns:repeat(auto-fill,minmax(100px,1fr)); gap:8px; max-height:260px; overflow-y:auto; padding:4px 0;"></div>
       <div class="row-inline" style="margin-top:10px;">
         <div class="field" style="margin:0; min-width:130px;">
@@ -308,6 +310,40 @@ let curSet=0, curTier=0;
 function centsToDollars(c){ c=parseInt(c||'0',10); return c?String(c/100):''; }
 function dollarsToCents(d){ d=parseFloat(d||'0'); return isNaN(d)?0:Math.round(d*100); }
 function theSet(){ return ppvSets[curSet]||(ppvSets[curSet]=blankSet(curSet+1)); }
+// Every item seen in any folder view, so a tier can still show its own media
+// after the folder filter moves away from it.
+const mediaSeen={};
+function rememberMedia(list){ (list||[]).forEach(m=>{ if(m.uuid) mediaSeen[m.uuid]=m; }); }
+function mediaIcon(m){ return m&&m.mediaType==='video'?'🎬':m&&m.mediaType==='audio'?'🎵':'🖼️'; }
+function renderTierContents(){
+  const box=document.getElementById('ppv-tier-contents');
+  const ids=[...ppvSel];
+  const where=(theSet().name||('Set '+(curSet+1)))+' · tier '+(curTier+1);
+  if(!ids.length){
+    box.innerHTML='<div class="note" style="margin:0;color:var(--text-muted);">'+esc(where)+
+      ' is empty — tap media below to put it in this tier.</div>';
+    return;
+  }
+  box.innerHTML='<div style="border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--panel);">'+
+    '<div style="font-size:.72rem;color:var(--text-muted);margin-bottom:8px;">In '+esc(where)+
+    ' — '+ids.length+' item'+(ids.length===1?'':'s')+' the fan unlocks together</div>'+
+    '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:8px;">'+
+    ids.map(u=>{
+      const m=mediaSeen[u]||{uuid:u,name:'(not in this folder)'};
+      const thumb=m.thumb?('background-image:url(\''+esc(m.thumb)+'\');background-size:cover;background-position:center;')
+                         :'background:linear-gradient(135deg,var(--surface),var(--panel-2));';
+      return '<div style="position:relative;aspect-ratio:1;border-radius:8px;overflow:hidden;'+thumb+'">'+
+        (m.thumb?'':'<span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:1.5rem;opacity:.5;">'+mediaIcon(m)+'</span>')+
+        '<span onclick="previewMedia(\''+esc(u)+'\')" title="Preview" style="position:absolute;top:2px;left:2px;background:rgba(0,0,0,.6);border-radius:6px;padding:1px 5px;font-size:.7rem;cursor:zoom-in;">👁</span>'+
+        '<span onclick="dropFromTier(\''+esc(u)+'\')" title="Remove from this tier" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);border-radius:6px;padding:1px 5px;font-size:.7rem;cursor:pointer;color:#fb7185;">✕</span>'+
+        '<span style="position:absolute;bottom:0;left:0;right:0;font-size:.6rem;padding:2px 4px;background:rgba(0,0,0,.65);color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+
+        esc(m.name||'')+'</span></div>';
+    }).join('')+'</div></div>';
+}
+function dropFromTier(u){
+  ppvSel.delete(u); stashTier(); renderSetBar(); renderTierBar();
+  renderTierContents(); renderGrid();
+}
 function stashTier(){
   theSet().tiers[curTier]={
     media_uuids:[...ppvSel],
@@ -374,6 +410,7 @@ function applyTier(){
   document.getElementById('ppv-price').value=t.price||'';
   document.getElementById('ppv-caption').value=t.caption||'';
   renderTierBar();
+  renderTierContents();
   renderGrid();
 }
 async function loadPpv(){
@@ -387,6 +424,7 @@ async function loadPpv(){
   let data={};
   try{data=await fetch('/api/fanvue/media?persona='+encodeURIComponent(persona())+'&folder='+encodeURIComponent(folder)+'&type='+encodeURIComponent(type)).then(r=>r.json());}catch(e){}
   window._ppvMedia=data.media||[];
+  rememberMedia(window._ppvMedia);
   // Load saved sets only once (first load), so switching filters keeps edits.
   if(!window._ppvTiersLoaded){
     let saved={};
@@ -406,9 +444,10 @@ async function loadPpv(){
     applySet();
   }
   const hint=document.getElementById('ppv-hint');
-  if(data.error){grid.innerHTML='';hint.textContent='⚠ Could not load media: '+data.error;hint.style.color='var(--warn)';renderSetBar();renderTierBar();return;}
+  if(data.error){grid.innerHTML='';hint.textContent='⚠ Could not load media: '+data.error;hint.style.color='var(--warn)';renderSetBar();renderTierBar();renderTierContents();return;}
   renderSetBar();
   renderTierBar();
+  renderTierContents();
   renderGrid();
 }
 function renderGrid(){
@@ -442,7 +481,7 @@ function togglePpv(el){
   let chk=el.querySelector('.ppv-chk');
   if(on&&!chk){chk=document.createElement('span');chk.className='ppv-chk';chk.textContent='✓';chk.style.cssText='position:absolute;top:2px;right:4px;color:#4ade80;font-weight:700;';el.appendChild(chk);}
   if(!on&&chk)chk.remove();
-  stashTier(); renderSetBar(); renderTierBar();
+  stashTier(); renderSetBar(); renderTierBar(); renderTierContents();
   document.getElementById('ppv-hint').textContent=
     (theSet().name||('Set '+(curSet+1)))+' · tier '+(curTier+1)+': '+ppvSel.size+' item(s) selected';
 }
@@ -693,7 +732,7 @@ init();
 </div>
 <script>
 async function previewMedia(uuid){
-  const m=(window._ppvMedia||[]).find(x=>x.uuid===uuid);
+  const m=(window._ppvMedia||[]).find(x=>x.uuid===uuid)||mediaSeen[uuid];
   if(!m)return;
   const body=document.getElementById('ppv-preview-body');
   document.getElementById('ppv-preview-name').textContent=m.name;
