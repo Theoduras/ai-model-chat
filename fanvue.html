@@ -211,6 +211,16 @@
       <div id="fv-lists"><span class="hint">Loading…</span></div>
       <button class="btn-ai" style="background:var(--border);margin-top:8px;" onclick="loadLists(true)">Refresh lists</button>
     </div>
+    <div class="row-inline" style="margin-top:12px;">
+      <div class="field" style="margin:0;">
+        <label>First PPV after <span style="font-weight:400;color:var(--text-muted);">(messages in the chat, both directions, before the first locked drop)</span></label>
+        <input type="number" id="fv-ppv-first-after" min="1" max="200" step="1" value="6" style="max-width:120px;">
+      </div>
+      <div class="field" style="margin:0;">
+        <label>Messages between PPVs <span style="font-weight:400;color:var(--text-muted);">(how much more chat before the next tier can go out)</span></label>
+        <input type="number" id="fv-ppv-gap" min="1" max="200" step="1" value="8" style="max-width:120px;">
+      </div>
+    </div>
     <div class="field full" style="margin-top:12px;">
       <label>PPV test phrase <span style="font-weight:400;color:var(--text-muted);">(for testing only — when a fan sends a message containing this, the last PPV she sent them counts as paid, so the next tier can go out without a real purchase. Leave blank to switch off.)</span></label>
       <input type="text" id="fv-ppv-test-phrase" placeholder="e.g. unlocked" style="max-width:260px;">
@@ -648,6 +658,8 @@ async function loadAuto(){
   document.getElementById('fv-followup-min').value=a.followup_min||30;
   document.getElementById('fv-ppv-require-payment').checked=!!a.ppv_require_payment;
   document.getElementById('fv-ppv-test-phrase').value=a.ppv_test_phrase||'';
+  document.getElementById('fv-ppv-first-after').value=a.ppv_first_after||6;
+  document.getElementById('fv-ppv-gap').value=a.ppv_gap||8;
   listPick={};
   (a.include_lists||[]).forEach(l=>{listPick[l.kind+':'+l.id]='include';});
   (a.exclude_lists||[]).forEach(l=>{listPick[l.kind+':'+l.id]='exclude';});
@@ -703,6 +715,8 @@ async function saveAuto(){
     followup_min:document.getElementById('fv-followup-min').value,
     ppv_require_payment:document.getElementById('fv-ppv-require-payment').checked,
     ppv_test_phrase:document.getElementById('fv-ppv-test-phrase').value,
+    ppv_first_after:parseInt(document.getElementById('fv-ppv-first-after').value||'6',10),
+    ppv_gap:parseInt(document.getElementById('fv-ppv-gap').value||'8',10),
     include_lists:pickedLists('include'),
     exclude_lists:pickedLists('exclude')});
   if(!data.ok){err(box,data.error||'Failed');return;}

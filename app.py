@@ -7122,7 +7122,7 @@ def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx, context
         total_done = sum(progress.values())
         exchanged = len(_fanvue_saved_history(persona, fan_key, limit=200))
         if total_done == 0:
-            send_ppv = exchanged >= 6
+            send_ppv = exchanged >= ctx.get('first_after', 6)
         else:
             enough_chat = (exchanged - int(ppv_at.get(fan_uuid, 0))) >= ctx['gap']
             paid = (not ctx['require_payment']) \
@@ -7285,8 +7285,9 @@ def _fanvue_auto_round(persona):
     ppv_paid_key = f'fanvue_ppv_testpaid_{persona}'
     ppv_test_phrase = (opts.get('ppv_test_phrase') or '').strip().lower()
     hcfg = _fv_humanize_cfg(persona)
-    # Extra messages that must pass after a paid unlock before the next tier.
-    ppv_gap = 8
+    # Messages that must pass before the first drop, and between later ones.
+    ppv_first_after = max(1, min(int(opts.get('ppv_first_after', 6) or 6), 200))
+    ppv_gap = max(1, min(int(opts.get('ppv_gap', 8) or 8), 200))
     # When off, tiers advance on chatting alone (payment can't be verified for
     # agency-agent testers). When on, each later tier waits for the prior payment.
     ppv_require_payment = (_get_setting(f'fanvue_ppv_require_payment_{persona}') or '0') == '1'
@@ -7466,7 +7467,8 @@ def _fanvue_auto_round(persona):
         cursor[fan_uuid] = msg_id
         _set_setting(cursor_key, json.dumps(cursor))
 
-        ppv_ctx = {'sets': ppv_sets, 'gap': ppv_gap, 'sent_key': ppv_sent_key,
+        ppv_ctx = {'sets': ppv_sets, 'gap': ppv_gap, 'first_after': ppv_first_after,
+                   'sent_key': ppv_sent_key,
                    'at_key': ppv_at_key, 'paid_key': ppv_paid_key,
                    'last_key': f'fanvue_ppv_last_{persona}', 'tz_offset': ppv_tz,
                    'require_payment': ppv_require_payment} if ppv_on else None
@@ -7523,6 +7525,10 @@ def api_fanvue_auto():
             opts['include_lists'] = _fv_clean_lists(data['include_lists'])
         if 'exclude_lists' in data:
             opts['exclude_lists'] = _fv_clean_lists(data['exclude_lists'])
+        if 'ppv_first_after' in data:
+            opts['ppv_first_after'] = max(1, min(int(data['ppv_first_after'] or 6), 200))
+        if 'ppv_gap' in data:
+            opts['ppv_gap'] = max(1, min(int(data['ppv_gap'] or 8), 200))
         if 'ppv_test_phrase' in data:
             opts['ppv_test_phrase'] = (data.get('ppv_test_phrase') or '').strip()[:80]
         if 'ppv_require_payment' in data:
@@ -7549,6 +7555,8 @@ def api_fanvue_auto():
                     'include_lists': _fv_clean_lists(opts.get('include_lists')),
                     'exclude_lists': _fv_clean_lists(opts.get('exclude_lists')),
                     'ppv_test_phrase': opts.get('ppv_test_phrase', ''),
+                    'ppv_first_after': int(opts.get('ppv_first_after', 6) or 6),
+                    'ppv_gap': int(opts.get('ppv_gap', 8) or 8),
                     'followup_min': int(_get_setting(f'fanvue_followup_min_{persona}') or 30),
                     'ppv_require_payment': (_get_setting(f'fanvue_ppv_require_payment_{persona}') or '0') == '1'})
 
