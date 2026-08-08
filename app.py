@@ -6631,6 +6631,24 @@ def _fv_humanize_cfg(persona):
             'typing_speed': max(4, min(int(opts.get('typing_speed') or 14), 40))}
 
 
+FV_TRACE_MAX = 200
+
+
+def _fv_trace(persona, stage, detail=''):
+    """Append one line to the persona's Fanvue activity log. Stored in the
+    database so it survives a redeploy and can be read from the browser."""
+    key = f'fanvue_trace_{persona}'
+    try:
+        rows = json.loads(_get_setting(key) or '[]')
+        if not isinstance(rows, list):
+            rows = []
+    except Exception:
+        rows = []
+    rows.append({'at': int(time.time()), 'stage': stage, 'detail': str(detail)[:500]})
+    _set_setting(key, json.dumps(rows[-FV_TRACE_MAX:]))
+    logger.info('FV[%s] %s: %s', persona, stage, str(detail)[:200])
+
+
 def _fv_send_text(persona, scope, fan_uuid, text):
     _fanvue_call(persona, 'POST', f'{scope}/chats/{fan_uuid}/message',
                  body={'text': text[:2000]})
@@ -6705,6 +6723,7 @@ def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx):
                                'price': int(tier['price'])})
         except Exception as e:
             logger.warning('Fanvue PPV to %s failed: %s', handle or fan_uuid, str(e)[:120])
+            _fv_trace(persona, 'error', f'PPV to {handle or fan_uuid} failed: {str(e)[:200]}')
             return
         ppv_sent[fan_uuid] = done + 1
         ppv_at[fan_uuid] = exchanged
@@ -6712,6 +6731,8 @@ def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx):
         _set_setting(ctx['at_key'], json.dumps(ppv_at))
         logger.info('PPV SENT [%s] tier %d/%d → %s at %s', persona, done + 1,
                     len(tiers), handle or fan_uuid, tier['price'])
+        _fv_trace(persona, 'ppv', f"💎 tier {done + 1}/{len(tiers)} → {handle or fan_uuid} "
+                                  f"at ${tier['price'] / 100:g}: {cap}")
 
 
 def _fv_deliver(persona, scope, fan_uuid, fan_key, handle, reply, incoming, cfg, ppv_ctx):
@@ -6722,8 +6743,10 @@ def _fv_deliver(persona, scope, fan_uuid, fan_key, handle, reply, incoming, cfg,
             _fv_send_human(persona, scope, fan_uuid, reply, incoming=incoming, cfg=cfg)
         except Exception as e:
             logger.warning('Fanvue send to %s failed: %s', handle or fan_uuid, str(e)[:120])
+            _fv_trace(persona, 'error', f'send to {handle or fan_uuid} failed: {str(e)[:200]}')
             return
         _log_x_message(persona, fan_key, handle, 'out', reply)
+        _fv_trace(persona, 'sent', f'→ {handle or fan_uuid}: {reply}')
         if ppv_ctx:
             _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ppv_ctx)
 
@@ -6930,6 +6953,8 @@ def _fanvue_auto_round(persona):
                 _fv_pool().submit(_fv_deliver, persona, scope, fan_uuid, fan_key,
                                   handle, fu, '', hcfg, None)
                 log.append(f'↩ follow-up {sent_n + 1}/{FOLLOWUP_MAX} → {who} (typing…): {fu[:40]}')
+                _fv_trace(persona, 'follow-up',
+                          f'{who} went quiet — nudge {sent_n + 1}/{FOLLOWUP_MAX} on the way')
             else:
                 _fv_deliver(persona, scope, fan_uuid, fan_key, handle, fu, '', hcfg, None)
                 log.append(f'↩ follow-up {sent_n + 1}/{FOLLOWUP_MAX} → {who}: {fu[:40]}')
@@ -6944,6 +6969,7 @@ def _fanvue_auto_round(persona):
         # Persist the new inbound (import already stored it on first contact).
         if not did_import:
             _log_x_message(persona, fan_key, handle, 'in', text)
+        _fv_trace(persona, 'received', f'← {who}: {text}')
 
         # Build the LLM history from the full saved conversation (memory).
         history = [{'role': 'model' if d == 'out' else 'user', 'content': t}
@@ -6970,6 +6996,7 @@ def _fanvue_auto_round(persona):
         reply = _persona_text(persona, instruction, history=history, max_tokens=300, temperature=0.9)
         reply = _fv_trim(reply)
         if not reply:
+            _fv_trace(persona, 'error', f'{who}: the model returned nothing — no reply sent')
             continue
 
         # Mark cursor BEFORE sending to prevent duplicate replies on retry
@@ -6984,6 +7011,7 @@ def _fanvue_auto_round(persona):
             # Pace it on a worker so one fan's pause never delays the next fan.
             _fv_pool().submit(_fv_deliver, *args)
             log.append(f'Replying → {handle or fan_uuid} (typing…): {reply[:50]}')
+            _fv_trace(persona, 'typing', f'{who}: writing a reply…')
         else:
             _fv_deliver(*args)
             log.append(f'Replied → {handle or fan_uuid}: {reply[:50]}')
@@ -7043,6 +7071,43 @@ def api_fanvue_auto():
                     'typing_speed': max(4, min(int(opts.get('typing_speed') or 14), 40)),
                     'followup_min': int(_get_setting(f'fanvue_followup_min_{persona}') or 30),
                     'ppv_require_payment': (_get_setting(f'fanvue_ppv_require_payment_{persona}') or '0') == '1'})
+
+
+@app.route('/api/fanvue/trace', methods=['GET', 'DELETE'])
+def api_fanvue_trace():
+    """Recent Fanvue chat activity for a persona — what came in, what went out,
+    PPV drops and errors — plus a verdict when nothing is happening."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    persona = (request.args.get('persona') or '').strip()
+    if request.method == 'DELETE':
+        _set_setting(f'fanvue_trace_{persona}', '[]')
+        return jsonify({'ok': True})
+    try:
+        rows = json.loads(_get_setting(f'fanvue_trace_{persona}') or '[]')
+    except Exception:
+        rows = []
+    if not isinstance(rows, list):
+        rows = []
+    opts = _fanvue_auto_settings(persona)
+    connected = bool(_fanvue_tokens(persona).get('access_token'))
+    lock = _fanvue_round_locks.get(persona)
+    problems = []
+    if not connected:
+        problems.append('Fanvue is not connected for this persona.')
+    elif not opts.get('enabled'):
+        problems.append('Auto-reply is off — turn it on for her to answer fans.')
+    elif not rows:
+        problems.append('No activity recorded yet. Rounds run every 20s; a line '
+                        'appears here as soon as a fan writes.')
+    if opts.get('only_handles'):
+        problems.append('Only replying to: ' + opts['only_handles'])
+    if opts.get('online_only'):
+        problems.append('Only replying to fans who are online right now.')
+    return jsonify({'persona': persona, 'connected': connected,
+                    'enabled': bool(opts.get('enabled')),
+                    'running': bool(lock and lock.locked()),
+                    'problems': problems, 'rows': rows[-FV_TRACE_MAX:]})
 
 
 @app.route('/api/fanvue/accounts')
@@ -7167,8 +7232,13 @@ def _fanvue_worker():
     def _one(persona):
         try:
             _fanvue_round_now(persona)
-        except Exception:
+        except Exception as e:
             logger.exception('fanvue round failed for %s', persona)
+            try:
+                with app.app_context():
+                    _fv_trace(persona, 'error', f'round failed: {str(e)[:200]}')
+            except Exception:
+                pass
         finally:
             with _fanvue_lock_guard:
                 pending.discard(persona)

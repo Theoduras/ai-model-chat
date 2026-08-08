@@ -21,6 +21,9 @@
     .row-inline .field { flex: 1; min-width: 160px; }
     .soon { font-size: 0.72rem; padding: 2px 8px; border-radius: 9999px; background: var(--border); color: var(--text-2); margin-left: 8px; }
     textarea { width: 100%; min-height: 90px; resize: vertical; }
+    table.fans { width:100%; border-collapse:collapse; margin-top:14px; font-size:0.78rem; }
+    table.fans th { text-align:left; color:var(--text-muted); font-weight:500; padding:6px 8px; border-bottom:1px solid var(--surface); }
+    table.fans td { padding:6px 8px; border-bottom:1px solid var(--panel-2); color:var(--text-2); vertical-align:top; }
     @media (max-width: 640px) { .fv-wrap { padding: 18px 14px 70px; gap: 16px; } }
   </style>
 </head>
@@ -172,6 +175,20 @@
   </div>
 
   <div class="form-section">
+    <div class="section-title">🩺 Activity log</div>
+    <span class="hint" style="display:block; margin-bottom:10px;">Everything that has been said — each fan message that came in and every reply, PPV drop and error that went out. Updates by itself every few seconds.</span>
+    <div id="fv-trace-problems"></div>
+    <div id="fv-trace-rows"><span class="hint">Loading…</span></div>
+    <div style="display:flex; gap:8px; align-items:center; margin-top:12px;">
+      <button class="btn-ai" style="background:var(--border);" onclick="loadTrace()">Refresh</button>
+      <button class="btn-ai" style="background:var(--border);" onclick="clearTrace()">Clear</button>
+      <label style="font-size:.75rem;color:var(--text-muted);display:flex;align-items:center;gap:6px;">
+        <input type="checkbox" id="fv-trace-live" checked style="width:auto;"> live
+      </label>
+    </div>
+  </div>
+
+  <div class="form-section">
     <div class="section-title">👥 Connected accounts</div>
     <span class="hint" style="display:block; margin-bottom:14px;">Every persona with a Fanvue connection. Accounts with auto-reply on all run <b>at the same time</b> — one worker per account, so a busy inbox never holds up the others.</span>
     <div id="fv-accounts"><span class="hint">Loading…</span></div>
@@ -209,7 +226,45 @@ async function loadConfig(){
   loadPpv();
   loadAuto();
   loadAccounts();
+  loadTrace();
+  startTraceLoop();
 }
+
+async function loadTrace(){
+  const box=document.getElementById('fv-trace-rows'), pb=document.getElementById('fv-trace-problems');
+  try{
+    const d=await (await fetch('/api/fanvue/trace?persona='+encodeURIComponent(persona()))).json();
+    const bad=(d.problems||[]).length;
+    const live=d.connected?(d.enabled?(d.running?'● replying now':'● auto-reply on'):'○ auto-reply off'):'○ not connected';
+    pb.innerHTML='<div class="note" style="border-color:'+(bad?'#3f3f46':'#14532d')+';color:'+(bad?'var(--text-2)':'#4ade80')+';margin-bottom:8px;">'+
+      (bad?'':'✓ ')+esc(d.persona||'')+' · '+live+'</div>'+
+      (d.problems||[]).map(p=>'<div class="note" style="border-color:#7f1d1d;color:#fca5a5;margin-bottom:8px;">⚠ '+esc(p)+'</div>').join('');
+    const rows=(d.rows||[]).slice().reverse();
+    const col={received:'#c7d2fe',sent:'#4ade80',ppv:'#f0abfc',typing:'var(--text-muted)','follow-up':'#fbbf24',error:'#fb7185'};
+    box.innerHTML = rows.length ?
+      '<table class="fans"><tr><th>Time</th><th>What</th><th>Message</th></tr>'+
+      rows.map(r=>'<tr><td style="white-space:nowrap;">'+new Date((r.at||0)*1000).toLocaleTimeString()+
+        '</td><td style="color:'+(col[r.stage]||'var(--text-2)')+'">'+esc(r.stage)+
+        '</td><td style="white-space:pre-wrap;">'+esc(r.detail||'')+'</td></tr>').join('')+'</table>'
+      : '<span class="hint">Nothing recorded yet — the first line appears as soon as a fan writes.</span>';
+  }catch(e){ box.innerHTML='<span class="hint" style="color:#fb7185;">Could not load the log: '+esc(String(e))+'</span>'; }
+}
+
+async function clearTrace(){
+  await fetch('/api/fanvue/trace?persona='+encodeURIComponent(persona()),{method:'DELETE'});
+  loadTrace();
+}
+
+let traceTimer=null;
+function startTraceLoop(){
+  if(traceTimer) return;
+  traceTimer=setInterval(()=>{
+    if(document.hidden) return;
+    if(!document.getElementById('fv-trace-live').checked) return;
+    loadTrace();
+  },5000);
+}
+
 let ppvSel=new Set();
 let ppvTiers=[{media_uuids:[],price:'',caption:''}];
 let curTier=0;
