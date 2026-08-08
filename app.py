@@ -6305,29 +6305,122 @@ def _fanvue_fan_purchased(persona, fan_uuid, media_uuids):
     return False
 
 
+def _fv_clean_tier(t):
+    """One tier inside a set: the media, its price in cents, and its caption."""
+    if not isinstance(t, dict):
+        return None
+    media = [str(x) for x in (t.get('media_uuids') or t.get('media') or []) if x]
+    try:
+        price = int(t.get('price') or 0)
+    except (TypeError, ValueError):
+        price = 0
+    if not media or price < 300:
+        return None
+    return {'media_uuids': media, 'price': price,
+            'caption': (t.get('caption') or '').strip()}
+
+
+def _fv_clean_set(s, index=0):
+    """Normalise one PPV content set. A set is a themed bundle — like an outfit
+    — holding its own ordered tiers, plus the cues that decide when it fits:
+    what she is doing in it, words that hint at it, and the hours it suits."""
+    if not isinstance(s, dict):
+        return None
+    tiers = [t for t in (_fv_clean_tier(x) for x in (s.get('tiers') or [])) if t]
+    if not tiers:
+        # A set saved in the old flat shape is its own single tier.
+        one = _fv_clean_tier(s)
+        if not one:
+            return None
+        tiers = [one]
+    kw = s.get('keywords')
+    if isinstance(kw, str):
+        kw = kw.split(',')
+    keywords = [w.strip().lower() for w in (kw or []) if str(w).strip()][:30]
+
+    def _hour(v):
+        try:
+            h = int(v)
+        except (TypeError, ValueError):
+            return None
+        return h if 0 <= h <= 23 else None
+
+    return {
+        'id': str(s.get('id') or '').strip() or f'set{index + 1}',
+        'name': (s.get('name') or f'Set {index + 1}').strip()[:60],
+        'tiers': tiers,
+        'scene': (s.get('scene') or '').strip()[:200],
+        'keywords': keywords,
+        'hour_from': _hour(s.get('hour_from')),
+        'hour_to': _hour(s.get('hour_to')),
+    }
+
+
+def _fanvue_ppv_sets(persona):
+    """Every valid PPV content set for a persona, in creator order. An older
+    flat `tiers` list is read as one set, so nothing already saved is lost."""
+    cfg = _fanvue_ppv(persona)
+    raw = cfg.get('sets')
+    if isinstance(raw, list):
+        out = []
+        for i, s in enumerate(raw):
+            c = _fv_clean_set(s, i)
+            if c:
+                out.append(c)
+        return out
+    legacy = _fanvue_ppv_tiers(persona)
+    if not legacy:
+        return []
+    return [{'id': 'set1', 'name': 'Set 1', 'tiers': legacy, 'scene': '',
+             'keywords': [], 'hour_from': None, 'hour_to': None}]
+
+
 def _fanvue_ppv_tiers(persona):
-    """Return the ordered list of valid PPV tiers for a persona. Normalizes the
-    legacy single-set config into one tier. Each tier is
-    {media_uuids:[...], price:int>=300, caption:str}."""
+    """The legacy flat tier list, still read so old configs keep working."""
     cfg = _fanvue_ppv(persona)
     raw = cfg.get('tiers')
     if not isinstance(raw, list):
         raw = [{'media_uuids': cfg.get('media_uuids') or [],
                 'price': cfg.get('price') or 0,
                 'caption': cfg.get('caption') or ''}] if cfg.get('media_uuids') else []
-    tiers = []
-    for t in raw:
-        if not isinstance(t, dict):
-            continue
-        media = [str(x) for x in (t.get('media_uuids') or []) if x]
-        try:
-            price = int(t.get('price') or 0)
-        except (TypeError, ValueError):
-            price = 0
-        if media and price >= 300:
-            tiers.append({'media_uuids': media, 'price': price,
-                          'caption': (t.get('caption') or '').strip()})
-    return tiers
+    return [t for t in (_fv_clean_tier(x) for x in raw) if t]
+
+
+def _fv_hour_fits(s, hour):
+    """True when the set suits this hour. A window that wraps midnight (22→6)
+    is read as crossing the night rather than as an empty range."""
+    a, b = s.get('hour_from'), s.get('hour_to')
+    if a is None or b is None:
+        return True
+    return a <= hour <= b if a <= b else (hour >= a or hour <= b)
+
+
+def _fv_pick_set(sets, progress, context, hour):
+    """Choose the set that fits the moment: what has just been said in chat and
+    the time of day. `progress` is {set_id: tiers already sent to this fan};
+    a set drops out once its tiers are exhausted. Falls back to creator order so
+    a set with no cues at all still goes out. None when nothing is left."""
+    left = [s for s in sets
+            if int(progress.get(s['id'], 0) or 0) < len(s['tiers'])]
+    if not left:
+        return None
+    words = set(re.findall(r"[a-z']+", (context or '').lower()))
+    best, best_score = None, float('-inf')
+    for i, s in enumerate(left):
+        score = 0.0
+        for k in s['keywords']:
+            # Multi-word keywords are matched as a phrase, single words on the
+            # word set so "bedroom" never counts as "bed".
+            if (' ' in k and k in (context or '').lower()) or (' ' not in k and k in words):
+                score += 3
+        scene_words = {w for w in re.findall(r"[a-z']+", s['scene'].lower()) if len(w) > 3}
+        score += 1.5 * len(scene_words & words)
+        if s.get('hour_from') is not None and s.get('hour_to') is not None:
+            score += 2 if _fv_hour_fits(s, hour) else -5
+        score -= i * 0.01          # keep creator order as the tie-break
+        if score > best_score:
+            best, best_score = s, score
+    return best
 
 
 # Fanvue serves media only through variant URLs, and only when the request asks
@@ -6429,42 +6522,54 @@ def api_fanvue_media_item():
 
 @app.route('/api/fanvue/ppv', methods=['GET', 'POST'])
 def api_fanvue_ppv():
-    """Get or set a persona's ordered PPV tiers. Each tier is
-    {media_uuids:[...], price:int, caption:str}; the bot sends them in order as
-    the chat progresses. Stored per connected Fanvue account (persona)."""
+    """Get or set a persona's PPV content sets. A set is a themed bundle with
+    its own ordered tiers plus the cues that pick it: scene, keywords and an
+    hour window. Stored per connected Fanvue account (persona)."""
     if not _check_admin():
         return jsonify({'error': 'Unauthorized'}), 401
     if request.method == 'GET':
         persona = (request.args.get('persona') or '').strip()
-        return jsonify({'tiers': _fanvue_ppv_tiers(persona),
-                        'enabled': bool(_fanvue_ppv(persona).get('enabled', True))})
+        cfg = _fanvue_ppv(persona)
+        return jsonify({'sets': _fanvue_ppv_sets(persona),
+                        'tz_offset': cfg.get('tz_offset') or 0,
+                        'enabled': bool(cfg.get('enabled', True))})
     d = request.json or {}
     persona = (d.get('persona') or '').strip()
     if not persona:
         return jsonify({'ok': False, 'error': 'Missing persona'}), 400
-    tiers_in = d.get('tiers')
-    if not isinstance(tiers_in, list):
-        return jsonify({'ok': False, 'error': 'tiers must be a list'}), 400
-    tiers = []
-    for t in tiers_in:
-        media = t.get('media_uuids') or t.get('media') or []
-        if isinstance(media, str):
-            media = [x.strip() for x in media.split(',') if x.strip()]
-        media = [str(x) for x in media if x]
-        try:
-            price = int(t.get('price') or 0)
-        except (TypeError, ValueError):
-            price = 0
-        # Skip empty tiers silently; reject media-set tiers priced below the min.
-        if not media:
+    raw = d.get('sets')
+    if not isinstance(raw, list):
+        # Older callers still post a flat tier list; treat it as one set.
+        raw = [{'name': 'Set 1', 'tiers': d.get('tiers') or []}]
+    sets, seen = [], set()
+    for i, s in enumerate(raw):
+        if not isinstance(s, dict):
             continue
-        if price < 300:
-            return jsonify({'ok': False, 'error': 'Each tier needs a price of at least $3'}), 400
-        tiers.append({'media_uuids': media, 'price': price,
-                      'caption': (t.get('caption') or '').strip()})
-    cfg = {'tiers': tiers, 'enabled': bool(d.get('enabled', True)) and bool(tiers)}
+        for t in (s.get('tiers') or []):
+            if isinstance(t, dict) and (t.get('media_uuids') or t.get('media')):
+                try:
+                    price = int(t.get('price') or 0)
+                except (TypeError, ValueError):
+                    price = 0
+                if price < 300:
+                    return jsonify({'ok': False, 'error':
+                                    f"\"{s.get('name') or ('Set ' + str(i + 1))}\" "
+                                    'has a tier priced under $3'}), 400
+        c = _fv_clean_set(s, i)
+        if not c:
+            continue
+        while c['id'] in seen:
+            c['id'] += '_'
+        seen.add(c['id'])
+        sets.append(c)
+    try:
+        tz = int(d.get('tz_offset') or 0)
+    except (TypeError, ValueError):
+        tz = 0
+    cfg = {'sets': sets, 'tz_offset': max(-840, min(tz, 840)),
+           'enabled': bool(d.get('enabled', True)) and bool(sets)}
     _set_setting(f'fanvue_ppv_{persona}', json.dumps(cfg))
-    return jsonify({'ok': True, 'tiers': tiers, 'enabled': cfg['enabled']})
+    return jsonify({'ok': True, 'sets': sets, 'enabled': cfg['enabled']})
 
 
 @app.route('/api/fanvue/draft', methods=['POST'])
@@ -6767,11 +6872,23 @@ def _ppv_count(v):
         return 0
 
 
-def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx):
-    """Consider the next PPV tier for this fan. Serialised per persona because
-    paced replies land from several worker threads at once, and the tier
-    counters are a read-modify-write on one shared setting."""
-    tiers = ctx['tiers']
+def _ppv_progress(value, sets):
+    """Per-fan progress as {set_id: tiers sent}. A legacy integer counted tiers
+    in one flat list, which is exactly the first set here."""
+    if isinstance(value, dict):
+        return {str(k): int(v or 0) for k, v in value.items()}
+    n = _ppv_count(value)
+    return {sets[0]['id']: n} if n and sets else {}
+
+
+def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx, context=''):
+    """Consider the next PPV drop for this fan: pick the set that fits what was
+    just said and the hour, then send its next tier in order. Serialised per
+    persona because paced replies land from several worker threads at once and
+    the counters are a read-modify-write on one shared setting."""
+    sets = ctx['sets']
+    if not sets:
+        return
     with _fanvue_persona_lock(_fv_ppv_locks, persona):
         try:
             ppv_sent = json.loads(_get_setting(ctx['sent_key']) or '{}')
@@ -6781,29 +6898,40 @@ def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx):
             ppv_at = json.loads(_get_setting(ctx['at_key']) or '{}')
         except Exception:
             ppv_at = {}
-        done = _ppv_count(ppv_sent.get(fan_uuid))
-        if done >= len(tiers):
-            return
-        exchanged = len(_fanvue_saved_history(persona, fan_key, limit=200))
+        try:
+            last_sent = json.loads(_get_setting(ctx['last_key']) or '{}')
+        except Exception:
+            last_sent = {}
         try:
             test_paid = json.loads(_get_setting(ctx['paid_key']) or '{}')
         except Exception:
             test_paid = {}
-        if done == 0:
+
+        progress = _ppv_progress(ppv_sent.get(fan_uuid), sets)
+        total_done = sum(progress.values())
+        exchanged = len(_fanvue_saved_history(persona, fan_key, limit=200))
+        if total_done == 0:
             send_ppv = exchanged >= 6
         else:
             enough_chat = (exchanged - int(ppv_at.get(fan_uuid, 0))) >= ctx['gap']
             paid = (not ctx['require_payment']) \
-                or int(test_paid.get(fan_uuid, 0) or 0) >= done \
-                or _fanvue_fan_purchased(
-                    persona, fan_uuid, tiers[done - 1]['media_uuids'])
+                or int(test_paid.get(fan_uuid, 0) or 0) >= total_done \
+                or _fanvue_fan_purchased(persona, fan_uuid,
+                                         last_sent.get(fan_uuid) or [])
             if not paid:
-                logger.info('Fanvue [%s] %s: waiting on payment of tier %d',
-                            persona, handle or fan_uuid, done)
+                logger.info('Fanvue [%s] %s: waiting on payment of the last PPV',
+                            persona, handle or fan_uuid)
             send_ppv = paid and enough_chat
         if not send_ppv:
             return
-        tier = tiers[done]
+
+        hour = int(time.strftime('%H', time.localtime(time.time() + 60 * int(
+            ctx.get('tz_offset') or 0))))
+        chosen = _fv_pick_set(sets, progress, (context or '') + ' ' + (reply or ''), hour)
+        if not chosen:
+            return
+        idx = int(progress.get(chosen['id'], 0) or 0)
+        tier = chosen['tiers'][idx]
         cap = (tier.get('caption') or reply).strip()[:2000]
         try:
             _fanvue_call(persona, 'POST', f'{scope}/chats/{fan_uuid}/message',
@@ -6813,14 +6941,18 @@ def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx):
             logger.warning('Fanvue PPV to %s failed: %s', handle or fan_uuid, str(e)[:120])
             _fv_trace(persona, 'error', f'PPV to {handle or fan_uuid} failed: {str(e)[:200]}')
             return
-        ppv_sent[fan_uuid] = done + 1
+        progress[chosen['id']] = idx + 1
+        ppv_sent[fan_uuid] = progress
         ppv_at[fan_uuid] = exchanged
+        last_sent[fan_uuid] = tier['media_uuids']
         _set_setting(ctx['sent_key'], json.dumps(ppv_sent))
         _set_setting(ctx['at_key'], json.dumps(ppv_at))
-        logger.info('PPV SENT [%s] tier %d/%d → %s at %s', persona, done + 1,
-                    len(tiers), handle or fan_uuid, tier['price'])
-        _fv_trace(persona, 'ppv', f"💎 tier {done + 1}/{len(tiers)} → {handle or fan_uuid} "
-                                  f"at ${tier['price'] / 100:g}: {cap}")
+        _set_setting(ctx['last_key'], json.dumps(last_sent))
+        logger.info('PPV SENT [%s] %s tier %d/%d -> %s at %s', persona, chosen['name'],
+                    idx + 1, len(chosen['tiers']), handle or fan_uuid, tier['price'])
+        _fv_trace(persona, 'ppv',
+                  f"\U0001F48E {chosen['name']} tier {idx + 1}/{len(chosen['tiers'])} "
+                  f"\u2192 {handle or fan_uuid} at ${tier['price'] / 100:g}: {cap}")
 
 
 def _fv_deliver(persona, scope, fan_uuid, fan_key, handle, reply, incoming, cfg, ppv_ctx):
@@ -6836,7 +6968,8 @@ def _fv_deliver(persona, scope, fan_uuid, fan_key, handle, reply, incoming, cfg,
         _log_x_message(persona, fan_key, handle, 'out', reply)
         _fv_trace(persona, 'sent', f'→ {handle or fan_uuid}: {reply}')
         if ppv_ctx:
-            _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ppv_ctx)
+            _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ppv_ctx,
+                          context=incoming)
 
 
 def _fv_pool():
@@ -6933,8 +7066,9 @@ def _fanvue_auto_round(persona):
 
     # Ordered PPV tiers + how many tiers each fan has already received, so tiers
     # go out one at a time, in order, as the conversation deepens.
-    ppv_tiers = _fanvue_ppv_tiers(persona)
-    ppv_on = bool(_fanvue_ppv(persona).get('enabled', True)) and bool(ppv_tiers)
+    ppv_sets = _fanvue_ppv_sets(persona)
+    ppv_on = bool(_fanvue_ppv(persona).get('enabled', True)) and bool(ppv_sets)
+    ppv_tz = _fanvue_ppv(persona).get('tz_offset') or 0
     ppv_sent_key = f'fanvue_ppv_sent_{persona}'
     ppv_at_key = f'fanvue_ppv_at_{persona}'
     ppv_paid_key = f'fanvue_ppv_testpaid_{persona}'
@@ -7082,7 +7216,7 @@ def _fanvue_auto_round(persona):
                 sent_map = json.loads(_get_setting(ppv_sent_key) or '{}')
             except Exception:
                 sent_map = {}
-            paid_map[fan_uuid] = _ppv_count(sent_map.get(fan_uuid))
+            paid_map[fan_uuid] = sum(_ppv_progress(sent_map.get(fan_uuid), ppv_sets).values())
             _set_setting(ppv_paid_key, json.dumps(paid_map))
             _fv_trace(persona, 'ppv', f'{who} said the test phrase — tier '
                                       f'{paid_map[fan_uuid]} counted as paid')
@@ -7119,8 +7253,9 @@ def _fanvue_auto_round(persona):
         cursor[fan_uuid] = msg_id
         _set_setting(cursor_key, json.dumps(cursor))
 
-        ppv_ctx = {'tiers': ppv_tiers, 'gap': ppv_gap, 'sent_key': ppv_sent_key,
+        ppv_ctx = {'sets': ppv_sets, 'gap': ppv_gap, 'sent_key': ppv_sent_key,
                    'at_key': ppv_at_key, 'paid_key': ppv_paid_key,
+                   'last_key': f'fanvue_ppv_last_{persona}', 'tz_offset': ppv_tz,
                    'require_payment': ppv_require_payment} if ppv_on else None
         args = (persona, scope, fan_uuid, fan_key, handle, reply.strip(), text, hcfg, ppv_ctx)
         actions['replies'] += 1

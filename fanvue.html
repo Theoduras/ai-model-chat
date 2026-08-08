@@ -82,6 +82,29 @@
           </select>
         </div>
       </div>
+      <div id="ppv-set-bar" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px;"></div>
+      <div id="ppv-set-fields" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:10px;">
+        <div class="field" style="margin:0;">
+          <label style="font-size:.72rem;">Set name</label>
+          <input type="text" id="ppv-set-name" placeholder="e.g. In bed" onchange="stashSet()">
+        </div>
+        <div class="field" style="margin:0;">
+          <label style="font-size:.72rem;">What she's doing in it <span style="color:var(--text-muted);">(matched against the chat)</span></label>
+          <input type="text" id="ppv-set-scene" placeholder="e.g. lying in bed in the morning" onchange="stashSet()">
+        </div>
+        <div class="field" style="margin:0;">
+          <label style="font-size:.72rem;">Trigger words <span style="color:var(--text-muted);">(comma separated)</span></label>
+          <input type="text" id="ppv-set-keywords" placeholder="e.g. bed, sleepy, goodnight" onchange="stashSet()">
+        </div>
+        <div class="field" style="margin:0;">
+          <label style="font-size:.72rem;">Hours it suits <span style="color:var(--text-muted);">(0–23, blank = any)</span></label>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <input type="number" id="ppv-set-from" min="0" max="23" placeholder="from" onchange="stashSet()" style="max-width:80px;">
+            <span style="color:var(--text-muted);">→</span>
+            <input type="number" id="ppv-set-to" min="0" max="23" placeholder="to" onchange="stashSet()" style="max-width:80px;">
+          </div>
+        </div>
+      </div>
       <div id="ppv-tier-bar" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px;"></div>
       <div id="ppv-media-grid" style="display:grid; grid-template-columns:repeat(auto-fill,minmax(100px,1fr)); gap:8px; max-height:260px; overflow-y:auto; padding:4px 0;"></div>
       <div class="row-inline" style="margin-top:10px;">
@@ -89,13 +112,13 @@
           <label style="font-size:.72rem;">This tier's unlock price in $ (min $3)</label>
           <input type="number" id="ppv-price" placeholder="e.g. 10" min="3" step="1" onchange="stashTier()">
         </div>
-        <button class="btn-ai" onclick="savePpv()">Save all tiers</button>
+        <button class="btn-ai" onclick="savePpv()">Save all sets</button>
       </div>
       <div class="field full" style="margin-top:10px;">
         <input type="text" id="ppv-caption" placeholder="Caption for this tier (optional) — e.g. made something just for you 🙈" onchange="stashTier()">
       </div>
       <span class="hint" id="ppv-hint" style="display:block;margin-top:6px;"></span>
-      <span class="hint" style="display:block;margin-top:4px;color:var(--text-muted);">Tiers are sent in order as the chat deepens — Tier 1 first, then Tier 2 later, and so on.</span>
+      <span class="hint" style="display:block;margin-top:4px;color:var(--text-muted);">Each set is one theme — like an outfit. She picks the set that matches what was just said in chat and the time of day, then sends that set's tiers in order as the chat deepens.</span>
     </div>
     <div id="connect-panel" style="display:none; margin-top:4px; border-top:1px solid var(--border-soft); padding-top:16px;">
       <div class="field full">
@@ -275,34 +298,78 @@ function startTraceLoop(){
 }
 
 let ppvSel=new Set();
-let ppvTiers=[{media_uuids:[],price:'',caption:''}];
-let curTier=0;
+// Sets are themed bundles, like outfits; each holds its own ordered tiers.
+function blankTier(){ return {media_uuids:[],price:'',caption:''}; }
+function blankSet(n){ return {id:'set'+n,name:'Set '+n,scene:'',keywords:'',
+                              hour_from:'',hour_to:'',tiers:[blankTier()]}; }
+let ppvSets=[blankSet(1)];
+let curSet=0, curTier=0;
 // Fanvue prices in cents; the creator types dollars.
 function centsToDollars(c){ c=parseInt(c||'0',10); return c?String(c/100):''; }
 function dollarsToCents(d){ d=parseFloat(d||'0'); return isNaN(d)?0:Math.round(d*100); }
+function theSet(){ return ppvSets[curSet]||(ppvSets[curSet]=blankSet(curSet+1)); }
 function stashTier(){
-  ppvTiers[curTier]={
+  theSet().tiers[curTier]={
     media_uuids:[...ppvSel],
     price:document.getElementById('ppv-price').value,
     caption:document.getElementById('ppv-caption').value
   };
 }
+function stashSet(){
+  const s=theSet();
+  s.name=document.getElementById('ppv-set-name').value;
+  s.scene=document.getElementById('ppv-set-scene').value;
+  s.keywords=document.getElementById('ppv-set-keywords').value;
+  s.hour_from=document.getElementById('ppv-set-from').value;
+  s.hour_to=document.getElementById('ppv-set-to').value;
+  renderSetBar();
+}
+function pill(label,on,onclick,extra){
+  return '<span onclick="'+onclick+'" style="cursor:pointer;padding:4px 12px;border-radius:9999px;font-size:.78rem;'+
+    (on?'background:var(--accent);color:#fff;':(extra||'background:var(--surface);color:var(--text-3);'))+'">'+label+'</span>';
+}
+function renderSetBar(){
+  const bar=document.getElementById('ppv-set-bar');
+  bar.innerHTML=ppvSets.map((s,i)=>{
+    const n=(s.tiers||[]).filter(t=>(t.media_uuids||[]).length).length;
+    return pill(esc(s.name||('Set '+(i+1)))+(n?(' · '+n+' tier'+(n===1?'':'s')):''),
+                i===curSet,'switchSet('+i+')');
+  }).join('')+
+  pill('＋ set',false,'addSet()','background:var(--panel);border:1px dashed var(--border);color:var(--text-2);')+
+  (ppvSets.length>1?pill('🗑 set',false,'removeSet()','background:var(--panel);color:#fb7185;'):'');
+}
 function renderTierBar(){
   const bar=document.getElementById('ppv-tier-bar');
-  bar.innerHTML=ppvTiers.map((t,i)=>{
-    const on=i===curTier;
+  const tiers=theSet().tiers||[];
+  bar.innerHTML=tiers.map((t,i)=>{
     const n=(t.media_uuids||[]).length;
-    return '<span onclick="switchTier('+i+')" style="cursor:pointer;padding:4px 12px;border-radius:9999px;font-size:.78rem;'+
-      (on?'background:var(--accent);color:#fff;':'background:var(--surface);color:var(--text-3);')+'">Tier '+(i+1)+(n?(' ('+n+')'):'')+'</span>';
+    return pill('Tier '+(i+1)+(n?(' ('+n+')'):''),i===curTier,'switchTier('+i+')');
   }).join('')+
-  '<span onclick="addTier()" title="Add tier" style="cursor:pointer;padding:4px 10px;border-radius:9999px;background:var(--panel);border:1px dashed var(--border);color:var(--text-2);font-size:.78rem;">＋ tier</span>'+
-  (ppvTiers.length>1?'<span onclick="removeTier()" title="Remove this tier" style="cursor:pointer;padding:4px 10px;border-radius:9999px;background:var(--panel);color:#fb7185;font-size:.78rem;">🗑 tier '+(curTier+1)+'</span>':'');
+  pill('＋ tier',false,'addTier()','background:var(--panel);border:1px dashed var(--border);color:var(--text-2);')+
+  (tiers.length>1?pill('🗑 tier '+(curTier+1),false,'removeTier()','background:var(--panel);color:#fb7185;'):'');
 }
+function switchSet(i){ stashTier(); stashSet(); curSet=i; curTier=0; applySet(); }
+function addSet(){ stashTier(); stashSet(); ppvSets.push(blankSet(ppvSets.length+1));
+                   curSet=ppvSets.length-1; curTier=0; applySet(); }
+function removeSet(){ ppvSets.splice(curSet,1); if(!ppvSets.length)ppvSets=[blankSet(1)];
+                      curSet=Math.max(0,curSet-1); curTier=0; applySet(); }
 function switchTier(i){ stashTier(); curTier=i; applyTier(); }
-function addTier(){ stashTier(); ppvTiers.push({media_uuids:[],price:'',caption:''}); curTier=ppvTiers.length-1; applyTier(); }
-function removeTier(){ ppvTiers.splice(curTier,1); if(!ppvTiers.length)ppvTiers=[{media_uuids:[],price:'',caption:''}]; curTier=Math.max(0,curTier-1); applyTier(); }
+function addTier(){ stashTier(); theSet().tiers.push(blankTier());
+                    curTier=theSet().tiers.length-1; applyTier(); }
+function removeTier(){ const t=theSet().tiers; t.splice(curTier,1);
+                       if(!t.length)t.push(blankTier()); curTier=Math.max(0,curTier-1); applyTier(); }
+function applySet(){
+  const s=theSet();
+  document.getElementById('ppv-set-name').value=s.name||'';
+  document.getElementById('ppv-set-scene').value=s.scene||'';
+  document.getElementById('ppv-set-keywords').value=s.keywords||'';
+  document.getElementById('ppv-set-from').value=(s.hour_from===0||s.hour_from)?s.hour_from:'';
+  document.getElementById('ppv-set-to').value=(s.hour_to===0||s.hour_to)?s.hour_to:'';
+  renderSetBar();
+  applyTier();
+}
 function applyTier(){
-  const t=ppvTiers[curTier]||{media_uuids:[]};
+  const t=theSet().tiers[curTier]||blankTier();
   ppvSel=new Set(t.media_uuids||[]);
   document.getElementById('ppv-price').value=t.price||'';
   document.getElementById('ppv-caption').value=t.caption||'';
@@ -320,20 +387,27 @@ async function loadPpv(){
   let data={};
   try{data=await fetch('/api/fanvue/media?persona='+encodeURIComponent(persona())+'&folder='+encodeURIComponent(folder)+'&type='+encodeURIComponent(type)).then(r=>r.json());}catch(e){}
   window._ppvMedia=data.media||[];
-  // Load saved tiers only once (first load), so switching filters keeps edits.
+  // Load saved sets only once (first load), so switching filters keeps edits.
   if(!window._ppvTiersLoaded){
     let saved={};
     try{saved=await fetch('/api/fanvue/ppv?persona='+encodeURIComponent(persona())).then(r=>r.json());}catch(e){}
-    const st=saved.tiers||[];
-    ppvTiers=st.length?st.map(t=>({media_uuids:t.media_uuids||[],price:centsToDollars(t.price),caption:t.caption||''})):[{media_uuids:[],price:'',caption:''}];
-    curTier=0;
-    ppvSel=new Set(ppvTiers[0].media_uuids||[]);
-    document.getElementById('ppv-price').value=ppvTiers[0].price||'';
-    document.getElementById('ppv-caption').value=ppvTiers[0].caption||'';
+    const st=saved.sets||[];
+    ppvSets=st.length?st.map((s,i)=>({
+      id:s.id||('set'+(i+1)), name:s.name||('Set '+(i+1)), scene:s.scene||'',
+      keywords:(s.keywords||[]).join(', '),
+      hour_from:(s.hour_from===0||s.hour_from)?s.hour_from:'',
+      hour_to:(s.hour_to===0||s.hour_to)?s.hour_to:'',
+      tiers:(s.tiers||[]).map(t=>({media_uuids:t.media_uuids||[],
+                                   price:centsToDollars(t.price),caption:t.caption||''}))
+    })):[blankSet(1)];
+    ppvSets.forEach(s=>{ if(!s.tiers.length) s.tiers=[blankTier()]; });
+    curSet=0; curTier=0;
     window._ppvTiersLoaded=true;
+    applySet();
   }
   const hint=document.getElementById('ppv-hint');
-  if(data.error){grid.innerHTML='';hint.textContent='⚠ Could not load media: '+data.error;hint.style.color='var(--warn)';renderTierBar();return;}
+  if(data.error){grid.innerHTML='';hint.textContent='⚠ Could not load media: '+data.error;hint.style.color='var(--warn)';renderSetBar();renderTierBar();return;}
+  renderSetBar();
   renderTierBar();
   renderGrid();
 }
@@ -341,6 +415,7 @@ function renderGrid(){
   const grid=document.getElementById('ppv-media-grid');
   const media=window._ppvMedia||[];
   const hint=document.getElementById('ppv-hint');
+  const where=(theSet().name||('Set '+(curSet+1)))+' · tier '+(curTier+1);
   if(!media.length){grid.innerHTML='';hint.textContent='No media in this view.';hint.style.color='var(--text-muted)';return;}
   grid.innerHTML=media.map(m=>{
     const on=ppvSel.has(m.uuid);
@@ -356,7 +431,7 @@ function renderGrid(){
       esc(m.name)+'</span>'+
       (on?'<span class="ppv-chk" style="position:absolute;top:2px;right:4px;color:#4ade80;font-weight:700;">✓</span>':'')+'</div>';
   }).join('');
-  hint.textContent=ppvSel.size?('Tier '+(curTier+1)+': '+ppvSel.size+' item(s) selected'):('Tier '+(curTier+1)+': tap media to select · 👁 to preview');
+  hint.textContent=ppvSel.size?(where+': '+ppvSel.size+' item(s) selected'):(where+': tap media to select · 👁 to preview');
   hint.style.color='var(--text-muted)';
 }
 function togglePpv(el){
@@ -367,19 +442,37 @@ function togglePpv(el){
   let chk=el.querySelector('.ppv-chk');
   if(on&&!chk){chk=document.createElement('span');chk.className='ppv-chk';chk.textContent='✓';chk.style.cssText='position:absolute;top:2px;right:4px;color:#4ade80;font-weight:700;';el.appendChild(chk);}
   if(!on&&chk)chk.remove();
-  stashTier(); renderTierBar();
-  document.getElementById('ppv-hint').textContent='Tier '+(curTier+1)+': '+ppvSel.size+' item(s) selected';
+  stashTier(); renderSetBar(); renderTierBar();
+  document.getElementById('ppv-hint').textContent=
+    (theSet().name||('Set '+(curSet+1)))+' · tier '+(curTier+1)+': '+ppvSel.size+' item(s) selected';
 }
 async function savePpv(){
-  stashTier();
+  stashTier(); stashSet();
   const hint=document.getElementById('ppv-hint');
-  const tiers=ppvTiers.filter(t=>(t.media_uuids||[]).length).map(t=>({media_uuids:t.media_uuids,price:dollarsToCents(t.price),caption:t.caption||''}));
-  for(let i=0;i<tiers.length;i++){
-    if(tiers[i].price<300){hint.textContent='✗ Tier '+(i+1)+' needs a price of at least $3';hint.style.color='#fb7185';return;}
+  const sets=[];
+  for(let i=0;i<ppvSets.length;i++){
+    const s=ppvSets[i];
+    const tiers=(s.tiers||[]).filter(t=>(t.media_uuids||[]).length)
+      .map(t=>({media_uuids:t.media_uuids,price:dollarsToCents(t.price),caption:t.caption||''}));
+    if(!tiers.length) continue;
+    for(let j=0;j<tiers.length;j++){
+      if(tiers[j].price<300){
+        hint.textContent='✗ '+(s.name||('Set '+(i+1)))+' tier '+(j+1)+' needs a price of at least $3';
+        hint.style.color='#fb7185'; return;
+      }
+    }
+    sets.push({id:s.id||('set'+(i+1)), name:s.name||('Set '+(i+1)), scene:s.scene||'',
+               keywords:(s.keywords||'').split(',').map(w=>w.trim()).filter(Boolean),
+               hour_from:s.hour_from===''?null:parseInt(s.hour_from,10),
+               hour_to:s.hour_to===''?null:parseInt(s.hour_to,10),
+               tiers:tiers});
   }
-  const data=await post('/api/fanvue/ppv',{persona:persona(),tiers:tiers});
+  const data=await post('/api/fanvue/ppv',{persona:persona(),sets:sets,
+    tz_offset:-new Date().getTimezoneOffset()});
   if(!data.ok){hint.textContent='✗ '+(data.error||'Failed');hint.style.color='#fb7185';return;}
-  hint.textContent=data.enabled?('✓ Saved '+data.tiers.length+' tier(s) — sent in order as chats deepen'):'✓ Saved (PPV off — add media + price ≥$3 to a tier)';
+  hint.textContent=data.enabled
+    ?('✓ Saved '+data.sets.length+' set(s) — she picks the one that fits the chat and the hour')
+    :'✓ Saved (PPV off — add media + a price ≥$3 to a set)';
   hint.style.color='#4ade80';
 }
 async function loadCreators(){
