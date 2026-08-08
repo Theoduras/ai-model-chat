@@ -6806,19 +6806,49 @@ def _fv_sender(msg):
     return ''
 
 
+# A sentence ends at . ! ? — but NOT at an ellipsis, which she uses mid-thought
+# ("that's certainly a… specific preference"). Splitting there would cut the
+# sentence in half. A following lower-case word means the thought runs on too.
+_SENTENCE_END_RE = re.compile(r'(?<=[.!?])\s+(?=[^a-z\s])')
+
+
+def _sentences(text):
+    """Split into whole sentences, never inside one."""
+    t = (text or '').strip()
+    if not t:
+        return []
+    out = []
+    for part in _SENTENCE_END_RE.split(t):
+        part = part.strip()
+        if not part:
+            continue
+        # A piece left hanging on an ellipsis is still mid-thought: glue the
+        # next piece onto it rather than treating it as a finished sentence.
+        if out and (out[-1].endswith('…') or out[-1].endswith('...')):
+            out[-1] = out[-1] + ' ' + part
+        else:
+            out.append(part)
+    return out
+
+
 def _fv_trim(text, max_sentences=2, hard_cap=320):
-    """Trim a reply to at most a couple of sentences at a sentence boundary so
-    it reads short without ever cutting off mid-word."""
+    """Trim a reply to at most a couple of whole sentences. Never cuts a
+    sentence short — a single over-long one is left intact rather than ending
+    on a stub."""
     t = (text or '').strip()
     if not t:
         return t
-    parts = re.split(r'(?<=[.!?…])\s+', t)
+    parts = _sentences(t)
     if len(parts) > max_sentences:
-        t = ' '.join(parts[:max_sentences]).strip()
-    if len(t) > hard_cap:
-        cut = t[:hard_cap]
-        sp = cut.rfind(' ')
-        t = (cut[:sp] if sp > 40 else cut).rstrip() + '…'
+        parts = parts[:max_sentences]
+        t = ' '.join(parts).strip()
+    if len(t) > hard_cap and len(parts) > 1:
+        kept = []
+        for p in parts:
+            if kept and len(' '.join(kept + [p])) > hard_cap:
+                break
+            kept.append(p)
+        t = ' '.join(kept).strip() or parts[0]
     return t
 
 
@@ -8386,21 +8416,13 @@ def _tg_typing(persona, chat_id, seconds):
 
 
 def _tg_bursts(text):
-    """Split a reply into the 1-2 chunks a real person would send, breaking at a
-    sentence boundary rather than mid-thought."""
-    t = (text or '').strip()
-    if len(t) < 90:
-        return [t]
-    parts = [p for p in re.split(r'(?<=[.!?…])\s+', t) if p]
+    """Split a reply the way a person types it: the first sentence, then the
+    rest as a second message. Never breaks inside a sentence, so a trailing-off
+    "a… specific preference" stays in one piece."""
+    parts = _sentences(text)
     if len(parts) < 2:
-        return [t]
-    half, cut, best = len(t) / 2.0, 0, None
-    for i in range(1, len(parts)):
-        head = ' '.join(parts[:i])
-        d = abs(len(head) - half)
-        if best is None or d < best:
-            best, cut = d, i
-    return [' '.join(parts[:cut]).strip(), ' '.join(parts[cut:]).strip()]
+        return [(text or '').strip()]
+    return [parts[0], ' '.join(parts[1:]).strip()]
 
 
 def _tg_send_human(persona, chat_id, text, incoming='', photo_data=None):
