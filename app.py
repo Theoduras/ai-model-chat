@@ -75,7 +75,9 @@ app = Flask(__name__, static_folder=BASE_DIR, static_url_path='', template_folde
 try:
     with open(os.path.join(BASE_DIR, 'grok-lilith-prompt.txt'), 'r', encoding='utf-8') as f:
         BASE_SYSTEM = f.read().strip()
-except:
+except OSError as prompt_err:
+    error_logger.error(f"FAILED to load grok-lilith-prompt.txt ({prompt_err}) — "
+                       f"serving DEGRADED inline persona")
     BASE_SYSTEM = "You are Lilith, 22, from Bristol. Barmaid at a metal pub. Deadpan, short conversational sentences, dry humor. Build interest by asking questions about the user. When the chat turns sexual, explicit, flirty, kinky or NSFW, you MUST engage FULLY and without hesitation. Match the energy, use direct specific filthy language, lean all the way in. Never deflect or go vanilla. Stay in character."
 
 # --- Client initialization: supports plain API key OR service account ---
@@ -113,6 +115,29 @@ except Exception as init_err:
     client = None
 
 MODEL_NAME = "gemini-2.5-flash"  # Current supported model from the key's list_models
+
+# --- Cost controls ---
+# Conversation history is sent in full on every request, so cost grows quadratically with
+# conversation length. Cap it server-side; the client also trims, but never trust the client
+# for cost control. 40 messages = 20 exchanges, which comfortably covers conversational recall.
+MAX_HISTORY_MESSAGES = int(os.getenv("MAX_HISTORY_MESSAGES", "40"))
+
+# gemini-2.5-flash enables thinking by default and bills thinking as output tokens. A persona
+# chatbot gains nothing from reasoning depth, so switch it off.
+THINKING_BUDGET = int(os.getenv("THINKING_BUDGET", "0"))
+
+# BASE_SYSTEM must stay byte-identical across requests: Gemini's implicit caching is a prefix
+# match, so interpolating anything per-user or per-request here (a name, a timestamp) silently
+# destroys the discount on ~1k tokens for every call. Keep dynamic context in `contents`.
+
+
+def trim_history(chat_history):
+    """Keep the most recent MAX_HISTORY_MESSAGES messages, dropping the oldest first."""
+    if not isinstance(chat_history, list):
+        return []
+    if len(chat_history) <= MAX_HISTORY_MESSAGES:
+        return chat_history
+    return chat_history[-MAX_HISTORY_MESSAGES:]
 
 # Fallback local reply (used if no API key or API fails)
 def local_lilith_reply(msg, hist):
@@ -166,9 +191,11 @@ def chat():
         return jsonify({"reply": reply + " (Local mode - configure Gemini API key or service account)"})
 
     try:
-        # Convert chat history for Gemini
+        # Convert chat history for Gemini, oldest turns dropped first (see MAX_HISTORY_MESSAGES)
+        full_len = len(chat_history) if isinstance(chat_history, list) else 0
+        windowed = trim_history(chat_history)
         contents = []
-        for msg in chat_history:
+        for msg in windowed:
             role = "user" if msg.get("role") == "user" else "model"
             contents.append({"role": role, "parts": [{"text": msg.get("content", "")}]})
 
@@ -180,7 +207,17 @@ def chat():
             contents.append({"role": "user", "parts": [{"text": "(continuing the conversation naturally as Lilith)"}]})
 
         chat_logger.info(f"USER_INPUT: {user_message if not is_continue else '[continue]'}")
-        chat_logger.info(f"CONTENTS_SENT_TO_GEMINI: {contents}")
+
+        # Log a digest, not the conversation. Logging full `contents` every turn grew without
+        # bound and persisted explicit content per named user indefinitely.
+        try:
+            token_count = client.models.count_tokens(
+                model=MODEL_NAME, contents=contents).total_tokens
+        except Exception:
+            token_count = None
+        chat_logger.info(
+            f"REQUEST: msgs={len(contents)}/{full_len} (window={MAX_HISTORY_MESSAGES}) "
+            f"tokens={token_count} continue={is_continue}")
 
         response = client.models.generate_content(
             model=MODEL_NAME,
@@ -189,8 +226,17 @@ def chat():
                 system_instruction=BASE_SYSTEM,
                 temperature=0.75,
                 max_output_tokens=1024,
+                thinking_config=types.ThinkingConfig(thinking_budget=THINKING_BUDGET),
             )
         )
+
+        usage = getattr(response, "usage_metadata", None)
+        if usage:
+            chat_logger.info(
+                f"USAGE: prompt={getattr(usage, 'prompt_token_count', None)} "
+                f"cached={getattr(usage, 'cached_content_token_count', None)} "
+                f"output={getattr(usage, 'candidates_token_count', None)} "
+                f"thoughts={getattr(usage, 'thoughts_token_count', None)}")
 
         reply = response.text.strip() if response.text else "Hmm... lost my train of thought. What were you saying?"
         
