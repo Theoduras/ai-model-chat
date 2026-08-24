@@ -142,10 +142,19 @@
   <div style="display:flex; flex-direction:column; overflow:hidden;">
     <div class="form-area" id="form-area">
       <div class="empty-state">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-          <path d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-        <p>Select a persona from the sidebar<br>or create a new one.</p>
+        <div class="es-card">
+          <div class="es-eyebrow">Getting started</div>
+          <h2 class="es-title">Create your first persona</h2>
+          <p class="es-sub">A persona is the character your fans talk to &mdash; her voice, her story, and the way she turns a chat into a sale. We&rsquo;ll walk you through it one question at a time.</p>
+          <ol class="es-steps">
+            <li><span class="es-num">1</span><div><strong>Who she is</strong><span>Name, age, looks and backstory.</span></div></li>
+            <li><span class="es-num">2</span><div><strong>How she talks</strong><span>Tone, warmth and how fast she flirts.</span></div></li>
+            <li><span class="es-num">3</span><div><strong>How she earns</strong><span>What you sell and when she offers it.</span></div></li>
+            <li><span class="es-num">4</span><div><strong>Go live</strong><span>Test the chat, then connect a platform.</span></div></li>
+          </ol>
+          <button class="btn btn-primary es-cta" onclick="newPersona()">+ Create a persona</button>
+          <p class="es-foot">About 3 minutes. Nothing is published until you hit Save &amp; Deploy.</p>
+        </div>
       </div>
     </div>
     <div class="action-bar" id="action-bar" style="display:none;">
@@ -175,6 +184,7 @@
 
 <script>
 let currentSlug = null;
+const EMPTY_HTML = document.getElementById('form-area').innerHTML;
 let currentTab = 'prompt';
 const personas = {};
 
@@ -599,8 +609,7 @@ async function deletePersona(slug) {
     lsDeletePersona(slug);
     if (currentSlug === slug) {
       currentSlug = null;
-      document.getElementById('form-area').innerHTML =
-        '<div class="empty-state"><p>Select a persona from the sidebar<br>or create a new one.</p></div>';
+      document.getElementById('form-area').innerHTML = EMPTY_HTML;
       document.getElementById('action-bar').style.display = 'none';
     }
     document.getElementById('persona-count').textContent = Object.keys(personas).length;
@@ -608,7 +617,17 @@ async function deletePersona(slug) {
   } catch(e) { alert('Could not delete: ' + e.message); }
 }
 
+function tuneEmptyState() {
+  const card = document.querySelector('#form-area .es-card');
+  if (!card || !Object.keys(personas).length) return;
+  card.querySelector('.es-title').textContent = 'Pick a persona, or build another';
+  card.querySelector('.es-sub').textContent =
+    'Open one from the sidebar to keep editing her, or start a new character from scratch. The setup walks you through it one question at a time.';
+  card.querySelector('.es-cta').textContent = '+ New persona';
+}
+
 function renderSidebar() {
+  tuneEmptyState();
   const list = document.getElementById('persona-list');
   list.innerHTML = '';
   const folders = lsFolders();

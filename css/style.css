@@ -1378,6 +1378,52 @@ body.page-dashboard select {
 .empty-state svg { width: 48px; height: 48px; opacity: 0.4; }
 .empty-state p { font-size: 0.875rem; }
 
+.es-card {
+  width: 100%;
+  max-width: 470px;
+  padding: 30px 30px 24px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--panel);
+  text-align: left;
+  color: var(--text);
+}
+.es-eyebrow {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.es-title { font-size: 1.35rem; font-weight: 700; margin: 6px 0 8px; }
+.es-sub { font-size: 0.88rem; line-height: 1.55; color: var(--text-3); margin: 0; }
+.es-steps {
+  list-style: none;
+  margin: 20px 0 22px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.es-steps li { display: flex; align-items: flex-start; gap: 12px; }
+.es-num {
+  flex-shrink: 0;
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  font-size: 0.75rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.es-steps strong { display: block; font-size: 0.85rem; font-weight: 600; }
+.es-steps span:not(.es-num) { font-size: 0.78rem; color: var(--text-muted); }
+.es-cta { width: 100%; justify-content: center; }
+.es-foot { font-size: 0.72rem; color: var(--text-muted); margin: 12px 0 0; text-align: center; }
+
 .conn-badge {
   display: flex;
   align-items: center;
