@@ -27,7 +27,7 @@ From the repository root:
 ```bash
 gcloud run deploy ai-model-chat \
   --source . \
-  --region us-central1 \
+  --region europe-west4 \
   --allow-unauthenticated \
   --set-env-vars "GEMINI_API_KEY=YOUR_KEY,ADMIN_PASSWORD=YOUR_PASSWORD"
 ```
@@ -35,7 +35,7 @@ gcloud run deploy ai-model-chat \
 Cloud Run builds the `Dockerfile`, deploys it, and prints a live HTTPS URL like:
 
 ```
-https://ai-model-chat-xxxxx-uc.a.run.app
+https://ai-model-chat-xxxxxxxxx.europe-west4.run.app
 ```
 
 That URL works immediately — no domain required.
@@ -43,7 +43,7 @@ That URL works immediately — no domain required.
 > **Secrets:** for production, prefer Secret Manager over `--set-env-vars`:
 > ```bash
 > echo -n "YOUR_KEY" | gcloud secrets create gemini-api-key --data-file=-
-> gcloud run deploy ai-model-chat --source . --region us-central1 \
+> gcloud run deploy ai-model-chat --source . --region europe-west4 \
 >   --update-secrets "GEMINI_API_KEY=gemini-api-key:latest"
 > ```
 
@@ -58,7 +58,7 @@ never run a deploy command by hand. One-time setup:
    ```bash
    gcloud services enable cloudbuild.googleapis.com run.googleapis.com artifactregistry.googleapis.com
    gcloud artifacts repositories create ai-model-chat \
-     --repository-format=docker --location=us-central1
+     --repository-format=docker --location=europe-west4
    ```
 2. Connect the GitHub repo and create the trigger (Console is easiest):
    **Cloud Build → Triggers → Create trigger** → connect `Theoduras/ai-model-chat`,
@@ -70,9 +70,14 @@ never run a deploy command by hand. One-time setup:
      --branch-pattern="^deploy/cloud-run-online$" \
      --build-config=cloudbuild.yaml
    ```
+   This is the **live** trigger, so it needs no substitutions —
+   `cloudbuild.yaml` already defaults to `ai-model-chat` in `europe-west4`.
+   A trigger for any other environment must override `_SERVICE` (and
+   `_REGION` if it differs), or it deploys over live. See
+   [ENVIRONMENTS.md](ENVIRONMENTS.md).
 3. Set secrets once on the Cloud Run service (they persist across deploys):
    ```bash
-   gcloud run services update ai-model-chat --region us-central1 \
+   gcloud run services update ai-model-chat --region europe-west4 \
      --set-env-vars "GEMINI_API_KEY=...,API_KEYS=...,ADMIN_PASSWORD=..."
    ```
 
@@ -99,7 +104,7 @@ own (e.g. `chat.yourbrand.com`):
    gcloud run domain-mappings create \
      --service ai-model-chat \
      --domain chat.yourbrand.com \
-     --region us-central1
+     --region europe-west4
    ```
 3. Add the DNS records gcloud prints to your registrar. HTTPS is automatic.
 
@@ -116,9 +121,9 @@ chat without holding the history itself.
 
 ```bash
 # Create a Cloud SQL Postgres instance, then deploy with:
-gcloud run deploy ai-model-chat --source . --region us-central1 \
-  --add-cloudsql-instances YOUR_PROJECT:us-central1:YOUR_INSTANCE \
-  --set-env-vars "DATABASE_URL=postgresql+psycopg2://USER:PASS@/DBNAME?host=/cloudsql/YOUR_PROJECT:us-central1:YOUR_INSTANCE"
+gcloud run deploy ai-model-chat --source . --region europe-west4 \
+  --add-cloudsql-instances YOUR_PROJECT:europe-west4:YOUR_INSTANCE \
+  --set-env-vars "DATABASE_URL=postgresql+psycopg2://USER:PASS@/DBNAME?host=/cloudsql/YOUR_PROJECT:europe-west4:YOUR_INSTANCE"
 ```
 
 Tables are created automatically on startup.
