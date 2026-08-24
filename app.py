@@ -1354,7 +1354,57 @@ def api_me():
     return jsonify({'signed_in': True, 'id': user['id'], 'email': user['email'],
                     'name': user.get('name', ''), 'tier': user.get('tier', ''),
                     'status': user.get('status'),
-                    'is_admin': bool(user.get('is_admin'))}), 200
+                    'is_admin': bool(user.get('is_admin')),
+                    'setup': _get_setup(user['id'])}), 200
+
+
+def _get_setup(uid):
+    """Guided-setup progress for every persona this creator owns."""
+    from db import User
+    s = _db_session()
+    try:
+        u = s.get(User, uid)
+        return json.loads((u.setup_json if u else '') or '{}')
+    except Exception:
+        return {}
+    finally:
+        s.close()
+
+
+@app.route('/api/me/setup', methods=['POST'])
+def api_me_setup():
+    """Record how far the creator got in the guided setup for one persona."""
+    user = _current_user()
+    if not user:
+        return jsonify({'error': 'not signed in'}), 401
+    data = request.get_json(silent=True) or {}
+    slug = (data.get('slug') or '').strip()
+    if not slug:
+        return jsonify({'error': 'slug required'}), 400
+
+    from db import User
+    s = _db_session()
+    try:
+        u = s.get(User, user['id'])
+        if not u:
+            return jsonify({'error': 'not found'}), 404
+        try:
+            state = json.loads(u.setup_json or '{}')
+        except Exception:
+            state = {}
+        entry = state.get(slug) or {}
+        if 'done' in data:
+            entry['done'] = bool(data['done'])
+        if isinstance(data.get('seen'), list):
+            # Steps only ever accumulate, so a stale client cannot un-see one.
+            merged = set(entry.get('seen') or []) | {str(k) for k in data['seen']}
+            entry['seen'] = sorted(merged)
+        state[slug] = entry
+        u.setup_json = json.dumps(state)
+        s.commit()
+        return jsonify({'ok': True, 'setup': state}), 200
+    finally:
+        s.close()
 
 
 @app.route('/account')

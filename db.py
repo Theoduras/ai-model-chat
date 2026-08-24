@@ -407,6 +407,12 @@ class User(Base):
     bio = Column(Text, default='')
     onboarded_at = Column(DateTime)
 
+    # Guided persona setup, keyed by persona slug:
+    # {"aria": {"done": true, "seen": ["basics", "personality"]}}
+    # On the user rather than the persona so progress follows the creator
+    # across browsers.
+    setup_json = Column(Text, default='')
+
 
 class Payment(Base):
     """One row per Oxapay invoice, created at checkout and updated by webhook."""
