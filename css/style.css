@@ -2369,3 +2369,12 @@ body.ob-running .form-area {
   .ob-rail { display: none; }
   .ob-stepwrap { padding: 22px 18px; }
 }
+
+.name-slug {
+  margin-top: 8px;
+  min-height: 16px;
+  font-size: 0.74rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text-muted);
+}
+#name-ok:disabled { opacity: 0.45; cursor: not-allowed; }

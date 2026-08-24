@@ -93,6 +93,25 @@
   </div>
 </div>
 
+<!-- Name prompt -->
+<div class="modal-overlay" id="name-modal" onclick="if(event.target===this)nameCancel()">
+  <div class="modal" style="max-width:420px;">
+    <div class="modal-header">
+      <h2 id="name-title">Name your persona</h2>
+      <button class="modal-close" onclick="nameCancel()" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p class="hint" id="name-hint" style="margin-bottom:12px;"></p>
+      <input type="text" id="name-input" autocomplete="off" spellcheck="false" style="width:100%;">
+      <div class="name-slug" id="name-slug"></div>
+      <div class="modal-footer" style="margin-top:18px;">
+        <button class="btn btn-ghost" onclick="nameCancel()">Cancel</button>
+        <button class="btn btn-primary" id="name-ok" onclick="nameConfirm()">Create</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Backstory AI Interview Modal -->
 <div class="modal-overlay" id="backstory-modal" onclick="if(event.target===this)closeBackstoryAI()">
   <div class="modal" style="max-width:580px; display:flex; flex-direction:column; max-height:90vh;">
@@ -701,11 +720,62 @@ async function loadPersona(slug) {
   loadXStatus();
 }
 
-function newPersona() {
-  const name = prompt('Persona display name:');
+function slugify(name) {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
+let nameResolve = null;
+
+function askName(opts) {
+  const modal = document.getElementById('name-modal');
+  const input = document.getElementById('name-input');
+  document.getElementById('name-title').textContent = opts.title;
+  document.getElementById('name-hint').textContent = opts.hint || '';
+  document.getElementById('name-ok').textContent = opts.confirm || 'Create';
+  input.placeholder = opts.placeholder || '';
+  input.value = opts.value || '';
+  modal.classList.add('open');
+  nameSlugPreview();
+  setTimeout(function () { input.focus(); input.select(); }, 30);
+  return new Promise(function (resolve) { nameResolve = resolve; });
+}
+
+function nameSlugPreview() {
+  const slug = slugify(document.getElementById('name-input').value.trim());
+  const el = document.getElementById('name-slug');
+  el.textContent = slug ? 'Saved as ' + slug : '';
+  document.getElementById('name-ok').disabled = !slug;
+}
+
+function nameClose(value) {
+  document.getElementById('name-modal').classList.remove('open');
+  const resolve = nameResolve;
+  nameResolve = null;
+  if (resolve) resolve(value);
+}
+
+function nameConfirm() {
+  const name = document.getElementById('name-input').value.trim();
+  if (!slugify(name)) return;
+  nameClose(name);
+}
+
+function nameCancel() { nameClose(null); }
+
+document.getElementById('name-input').addEventListener('input', nameSlugPreview);
+document.getElementById('name-input').addEventListener('keydown', function (e) {
+  if (e.key === 'Enter') nameConfirm();
+  if (e.key === 'Escape') nameCancel();
+});
+
+async function newPersona() {
+  const name = await askName({
+    title: 'Name your persona',
+    hint: 'This is what fans see at the top of the chat. You can change it later.',
+    placeholder: 'e.g. Nova'
+  });
   if (!name) return;
-  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  if (!slug) return;
+  const slug = slugify(name);
   currentSlug = slug;
   if (!personas[slug]) {
     personas[slug] = { slug, name, config: {}, premade: false };
