@@ -31,7 +31,8 @@ Deploy the app straight from GitHub using only your browser. ~10 minutes.
 
 ## 2. Service settings
 
-1. **Region:** `us-central1` (or closest to your audience).
+1. **Region:** `europe-west4` — the region both existing services run in.
+   Picking another one creates a service the rest of the setup cannot see.
 2. **Authentication:** choose **Allow unauthenticated invocations**
    (this is a public website — fans need to reach it).
 3. Expand **Container(s), Volumes, Networking, Security** →
