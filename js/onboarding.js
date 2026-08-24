@@ -84,16 +84,39 @@
   function byId(id) { return document.getElementById(id); }
   function val(id) { var e = byId(id); return e ? e.value : ''; }
 
-  function visitKey() { return 'ob-seen-' + state.slug; }
-  function seen() {
-    try { return JSON.parse(localStorage.getItem(visitKey()) || '[]'); } catch (e) { return []; }
+  // Progress lives on the user row, served by /api/me and mirrored here so the
+  // rail can re-render without a round trip. Writes go straight to the server —
+  // a creator who switches browsers picks up where they left off.
+  function setupMap() {
+    if (!window.USER_SETUP) window.USER_SETUP = {};
+    return window.USER_SETUP;
   }
+  function entry(slug) {
+    var m = setupMap();
+    if (!m[slug]) m[slug] = {};
+    return m[slug];
+  }
+  function seen() { return entry(state.slug).seen || []; }
   function visited(key) { return seen().indexOf(key) !== -1; }
+
+  function pushSetup(patch) {
+    if (!state.slug) return Promise.resolve();
+    return fetch('/api/me/setup', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(Object.assign({ slug: state.slug }, patch))
+    }).catch(function () {});
+  }
+
   function markVisited(key) {
-    var all = seen();
-    if (all.indexOf(key) !== -1) return;
-    all.push(key);
-    try { localStorage.setItem(visitKey(), JSON.stringify(all)); } catch (e) {}
+    if (visited(key)) return Promise.resolve();
+    var e = entry(state.slug);
+    e.seen = seen().concat([key]);
+    return pushSetup({ seen: e.seen });
+  }
+
+  function markDone(done) {
+    entry(state.slug).done = done;
+    return pushSetup({ done: done });
   }
 
   // The label, input and hint all live in one .field wrapper — move that, not
@@ -227,7 +250,8 @@
     },
 
     isComplete: function (slug) {
-      try { return localStorage.getItem('ob-done-' + slug) === '1'; } catch (e) { return false; }
+      var m = (window.USER_SETUP || {})[slug];
+      return !!(m && m.done);
     },
 
     // Called at the end of renderForm(). Everything the wizard shows is already
@@ -268,7 +292,7 @@
     back: function () { this.goto(state.idx - 1); },
 
     next: async function () {
-      markVisited(STEPS[state.idx].key);
+      await markVisited(STEPS[state.idx].key);
       await saveQuiet();
       if (state.idx === STEPS.length - 1) return this.finish();
       unmount();
@@ -278,7 +302,7 @@
 
     finish: async function () {
       await saveQuiet();
-      try { localStorage.setItem('ob-done-' + state.slug, '1'); } catch (e) {}
+      await markDone(true);
       var name = (state.cfg.name || state.slug);
       unmount();
       byId('form-area').innerHTML =
@@ -315,13 +339,15 @@
       if (bar) bar.style.display = 'flex';
       document.body.classList.remove('ob-running');
       state.on = false;
-      try { localStorage.setItem('ob-done-' + state.slug, '1'); } catch (e) {}
+      markDone(true);
     },
 
     // Let a creator run the guided flow again from the full builder.
     restart: function (slug) {
-      try { localStorage.removeItem('ob-done-' + slug); } catch (e) {}
-      if (typeof loadPersona === 'function') loadPersona(slug);
+      state.slug = slug;
+      markDone(false).then(function () {
+        if (typeof loadPersona === 'function') loadPersona(slug);
+      });
     },
   };
 

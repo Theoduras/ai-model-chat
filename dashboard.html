@@ -284,6 +284,7 @@ async function identifyUser() {
   try {
     const me = await (await fetch('/api/me')).json();
     CURRENT_UID = me.signed_in ? me.id : 'anon';
+    window.USER_SETUP = me.setup || {};
     if (me.is_admin) {
       document.body.classList.add('is-admin');
       document.getElementById('hdr-admin-link').style.display = '';
