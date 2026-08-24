@@ -2,10 +2,43 @@
 
 Two separate Cloud Run services, each auto-deploying from its own git branch.
 
-| | Git branch | Cloud Run service | URL | Audience |
-|---|---|---|---|---|
-| **LIVE** 🟢 | `deploy/cloud-run-online` | `ai-model-chat` | (your europe-west4 URL) | Fans / clients |
-| **DEV** 🛠️ | `develop` | `ai-model-chat-dev` | (the dev URL) | Internal testing only |
+| | Git branch | Cloud Run service | Region | URL | Audience |
+|---|---|---|---|---|---|
+| **LIVE** 🟢 | `deploy/cloud-run-online` | `ai-model-chat` | `europe-west4` | (your live URL) | Fans / clients |
+| **DEV** 🛠️ | `develop` | `ai-model-chat-dev` | `europe-west4` | https://ai-model-chat-dev-793708886252.europe-west4.run.app | Internal testing only |
+
+## Cloud Build triggers — the substitutions matter
+
+Both environments build from the **same** `cloudbuild.yaml`. Which service a
+push lands on is decided entirely by the trigger's substitution variables, and
+the file's defaults point at **live**:
+
+| Trigger | Branch pattern | Required substitutions |
+|---|---|---|
+| live | `^deploy/cloud-run-online$` | none — the defaults are correct |
+| dev | `^develop$` | `_SERVICE=ai-model-chat-dev`, `_REGION=europe-west4` |
+
+**A dev trigger that does not override `_SERVICE` deploys `develop` over the
+live service.** If the dev URL stops picking up pushes, check that first:
+Cloud Build → Triggers → the `develop` trigger → Substitution variables.
+
+Creating the dev trigger from scratch:
+
+```bash
+gcloud artifacts repositories create ai-model-chat-dev \
+  --repository-format=docker --location=europe-west4   # once, if missing
+
+gcloud builds triggers create github \
+  --name=ai-model-chat-dev \
+  --repo-name=ai-model-chat --repo-owner=Theoduras \
+  --branch-pattern="^develop$" \
+  --build-config=cloudbuild.yaml \
+  --substitutions=_SERVICE=ai-model-chat-dev,_REGION=europe-west4
+```
+
+Each service keeps its own image repository at
+`{region}-docker.pkg.dev/{project}/{service}/app`, so a new `_SERVICE` needs a
+matching Artifact Registry repo before its first build succeeds.
 
 ## How changes flow
 
