@@ -78,17 +78,68 @@ def get_chat_logger(user):
     return logger, safe_user
 
 
-def response_asks_question(text):
-    if not text:
+QUESTION_STARTERS = ('what', 'why', 'how', 'when', 'where', 'who', 'which',
+                     'do you', 'did you', 'are you', 'have you', 'can you',
+                     'would you', 'could you', 'tell me')
+
+
+def _sentences(text):
+    return [s for s in re.split(r'(?<=[.!?\u2026])\s+|\n+', (text or '').strip()) if s.strip()]
+
+
+def sentence_asks_question(sentence):
+    s = (sentence or '').strip().lower()
+    if not s:
         return False
-    text = text.strip().lower()
-    if text.endswith('?'):
+    if s.endswith('?'):
         return True
-    for starter in ['what', 'why', 'how', 'when', 'where', 'who', 'which',
-                    'do you', 'are you', 'can you', 'would you', 'could you']:
-        if starter in text:
-            return True
-    return False
+    return any(s.startswith(w) for w in QUESTION_STARTERS)
+
+
+def response_asks_question(text):
+    """True when the reply actually puts a question to the fan. Matches on the
+    sentence level so a word like "somewhat" no longer counts as a question."""
+    return any(sentence_asks_question(s) for s in _sentences(text))
+
+
+QUESTION_FREQ_RULES = {
+    'rarely': ('Ask the fan a question only rarely — around one reply in five. '
+               'Most of your replies are statements: react, share something about '
+               'yourself, let them carry it.'),
+    'sometimes': ('Ask the fan a question sometimes — around one reply in three. '
+                  'The rest of the time just react and share something of your own '
+                  'instead of putting another question to them.'),
+    'often': ('Ask the fan a question often, but not every time — around two '
+              'replies in three.'),
+    'very often': 'Ask the fan a question in nearly every reply.',
+}
+
+QUESTION_LIMIT_RULE = (
+    'Never put more than ONE question in a reply. If your last message already '
+    'asked something the fan has not answered yet, do not ask anything new — '
+    'respond to what they did say, or wait.')
+
+
+def question_freq_rule(config):
+    freq = (config or {}).get('question_freq') or 'often'
+    desc = QUESTION_FREQ_RULES.get(freq, QUESTION_FREQ_RULES['often'])
+    return f'Question frequency: {desc} {QUESTION_LIMIT_RULE}'
+
+
+def trim_extra_questions(reply, allow_question=True):
+    """Drop question sentences past the budget. Keeps the first question when
+    one is allowed, so a reply never lands as a burst of questions."""
+    parts = _sentences(reply)
+    kept, budget = [], (1 if allow_question else 0)
+    for s in parts:
+        if sentence_asks_question(s):
+            if budget <= 0:
+                continue
+            budget -= 1
+        kept.append(s)
+    if not kept or len(kept) == len(parts):
+        return reply
+    return ' '.join(kept)
 
 
 def _read_file(path):
@@ -450,7 +501,7 @@ def build_system_prompt(config):
     nsfw_level = config.get('nsfw_level', 'suggestive')
     interests = config.get('interests', '')
     conversion_triggers = config.get('conversion_triggers', '')
-    question_freq = config.get('question_freq', 'often')
+    question_rule = question_freq_rule(config)
     mirror_location = config.get('mirror_location', False)
 
     # No location set → automatically match the fan's location.
@@ -534,7 +585,7 @@ Voice rules:
 - You are {warmth_desc} in your interactions.
 - {flirt_pace_note}
 - Keep each reply to 1-2 sentences only. Short, like a real text message. Never write a paragraph.
-- Ask ONE question per message maximum — and only if you have nothing more pressing to respond to. Wait for the reply before asking anything else.
+- {question_rule}
 - No emojis. Zero. Not even one.
 - Always complete every sentence. Never cut off mid-thought.
 - Write mostly in lowercase — only capitalise proper names (people, cities) and the word "I". Everything else stays lowercase.
@@ -658,6 +709,8 @@ def get_system_prompt(slug):
             prompt = load_persona_prompt(DEFAULT_PERSONA) or 'You are a friendly assistant.'
         if 'ANSWER ORDINARY QUESTIONS' not in prompt:
             prompt = prompt.rstrip() + ANSWER_RULE
+        if 'Question frequency:' not in prompt:
+            prompt = prompt.rstrip() + '\n\n' + question_freq_rule(load_persona_config(slug))
         _prompt_cache[slug] = prompt
     return _prompt_cache[slug]
 
@@ -2449,6 +2502,29 @@ def _chat_exchanges(history):
     return n + 1
 
 
+def _recent_bot_questions(history, n):
+    """Whether each of the last n bot replies asked a question, newest first."""
+    bots = [m.get('content') or '' for m in (history or [])
+            if (m.get('role') or '') != 'user']
+    return [response_asks_question(t) for t in reversed(bots[-n:])]
+
+
+def question_allowed(config, history):
+    """False when she has already asked more than her configured frequency
+    allows, so the next reply just responds instead of stacking questions."""
+    freq = (config or {}).get('question_freq') or 'often'
+    if freq == 'very often':
+        return True
+    asked = _recent_bot_questions(history, 2)
+    if not asked:
+        return True
+    if freq == 'rarely':
+        return not any(asked)
+    if freq == 'sometimes':
+        return not asked[0]
+    return not (len(asked) > 1 and asked[0] and asked[1])
+
+
 def _chat_channel_rules(slug, config, incoming, skip_spicy, history=None):
     """Per-request rules for the browser chat.
 
@@ -2471,6 +2547,12 @@ def _chat_channel_rules(slug, config, incoming, skip_spicy, history=None):
         rules.append(
             'You have no photos to send yet, so never claim you just sent one — '
             'promise it instead, in your own voice.')
+
+    if not question_allowed(config, history):
+        rules.append(
+            'You have just asked the fan a question — do not ask another one in '
+            'this reply. React to what they said and share something of your own '
+            'instead. No question mark at the end.')
 
     spicy_mode = config.get('spicy_cta', 'normal')
     spicy = not skip_spicy and spicy_mode != 'off' and _spicy_asked(incoming)
@@ -2634,6 +2716,8 @@ def chat():
         chat_logger.info(f'USER [{persona_slug}]: {user_message if not is_continue else "[continue]"}')
         reply = generate_reply(system_prompt, chat_history, user_message, is_continue)
         reply, photo = _chat_take_photo(persona_slug, reply)
+        reply = trim_extra_questions(
+            reply, is_greeting or question_allowed(config, chat_history))
         reply = strip_ppv_marker(reply)
         if cta:
             reply = f"{reply}\n\n{cta['label']} → {cta['url']}"
