@@ -1402,6 +1402,10 @@ def api_me_setup():
             # Steps only ever accumulate, so a stale client cannot un-see one.
             merged = set(entry.get('seen') or []) | {str(k) for k in data['seen']}
             entry['seen'] = sorted(merged)
+        # Whether the creator has been shown the guided tour, and how it ended.
+        # Once set it stays set — replaying is an explicit action, not a reset.
+        if data.get('tour') in ('done', 'skipped'):
+            entry['tour'] = data['tour']
         state[slug] = entry
         u.setup_json = json.dumps(state)
         s.commit()

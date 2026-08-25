@@ -79,7 +79,33 @@
       done: function () { return !!(val('f-cta-url') || '').trim(); } },
   ];
 
+  // The tour explains the frame the wizard puts people inside — what the step
+  // panel is, where progress lives, and that the rail on the right is the
+  // persona talking. It runs once per creator, not once per persona.
+  var TOUR = [
+    { anchor: '.ob-stepwrap', placement: 'right',
+      title: 'One thing at a time',
+      body: 'Setup is split into ten short steps. Each one asks a single question about your persona — answer it and continue. Nothing here is permanent; you can change any of it later.' },
+
+    { anchor: '#ob-step-body', placement: 'right',
+      title: 'This is the actual setting',
+      body: 'Whatever appears in this box is a real field on your persona. Fill it in and it saves automatically when you hit Continue.' },
+
+    { anchor: '.ob-rail', placement: 'right',
+      title: 'Where you are',
+      body: 'Four stages, ten steps. The bar shows how far along you are, and you can jump back to any step you have already passed by clicking it.' },
+
+    { anchor: '.preview-panel', placement: 'left',
+      title: 'She updates as you type',
+      body: 'This is your persona speaking, rebuilt from your answers as you make them. Watch it change when you adjust her personality or warmth — it is the fastest way to tell whether she sounds right.' },
+
+    { anchor: '.ob-foot', placement: 'top',
+      title: 'Continue, or skip ahead',
+      body: 'Continue saves the step and moves on. If you would rather see every setting at once, "Skip setup" hands you the full builder — and you can come back to this guide any time.' },
+  ];
+
   var state = { slug: null, idx: 0, cfg: {}, on: false };
+  var tour  = { idx: 0, on: false, nodes: null, raf: 0 };
 
   function byId(id) { return document.getElementById(id); }
   function val(id) { var e = byId(id); return e ? e.value : ''; }
@@ -203,11 +229,12 @@
           '<h2 class="ob-step-h">' + esc(step.title) + '</h2>' +
           '<p class="ob-step-s">' + esc(step.sub) + '</p>' +
           '<div class="ob-card" id="ob-step-body"></div>' +
-          '<div class="ob-foot">' +
+          '<div class="ob-foot" id="ob-foot">' +
             (state.idx > 0 ? '<button class="btn btn-ghost" onclick="Onboarding.back()">← Back</button>' : '') +
             '<button class="btn btn-primary" onclick="Onboarding.next()">' +
               (state.idx === STEPS.length - 1 ? 'Finish ✓' : 'Continue →') + '</button>' +
             '<span class="ob-saved" id="ob-saved"></span>' +
+            '<button class="ob-skip" onclick="Onboarding.tourReplay()">Show me around again</button>' +
             '<button class="ob-skip" onclick="Onboarding.exit()">Skip setup — show me everything</button>' +
           '</div>' +
         '</div>' +
@@ -248,12 +275,176 @@
     }
   }
 
+  // ── Guided tour ───────────────────────────────────────────────────────────
+  // The spotlight is four solid rectangles around the anchor rather than one
+  // element with a huge spread shadow: the gap is a real hole, so the
+  // highlighted control stays clickable and nothing breaks inside a scroll
+  // container.
+  function tourBuild() {
+    if (tour.nodes) return tour.nodes;
+    var root = document.createElement('div');
+    root.className = 'obt-root';
+    root.innerHTML =
+      '<div class="obt-mask obt-t"></div><div class="obt-mask obt-r"></div>' +
+      '<div class="obt-mask obt-b"></div><div class="obt-mask obt-l"></div>' +
+      '<div class="obt-ring"></div>' +
+      '<div class="obt-dialog" role="dialog" aria-modal="true" aria-labelledby="obt-title">' +
+        '<button class="obt-close" type="button" aria-label="Close guide">&times;</button>' +
+        '<h3 class="obt-title" id="obt-title"></h3>' +
+        '<p class="obt-body"></p>' +
+        '<div class="obt-foot">' +
+          '<span class="obt-count"></span>' +
+          '<button class="btn btn-ghost obt-back" type="button">Back</button>' +
+          '<button class="btn btn-primary obt-next" type="button">Next</button>' +
+        '</div>' +
+      '</div>';
+    document.body.appendChild(root);
+
+    root.querySelector('.obt-close').onclick = function () { Onboarding.tourEnd(true); };
+    root.querySelector('.obt-back').onclick  = function () { tourGo(tour.idx - 1); };
+    root.querySelector('.obt-next').onclick  = function () { tourGo(tour.idx + 1); };
+    // Clicking the dimmed area is the usual way out of an overlay.
+    ['obt-t', 'obt-r', 'obt-b', 'obt-l'].forEach(function (c) {
+      root.querySelector('.' + c).onclick = function () { Onboarding.tourEnd(true); };
+    });
+
+    tour.nodes = {
+      root: root,
+      t: root.querySelector('.obt-t'), r: root.querySelector('.obt-r'),
+      b: root.querySelector('.obt-b'), l: root.querySelector('.obt-l'),
+      ring: root.querySelector('.obt-ring'),
+      dialog: root.querySelector('.obt-dialog'),
+      title: root.querySelector('.obt-title'),
+      bodyEl: root.querySelector('.obt-body'),
+      count: root.querySelector('.obt-count'),
+      back: root.querySelector('.obt-back'),
+      next: root.querySelector('.obt-next'),
+    };
+    return tour.nodes;
+  }
+
+  function tourPosition() {
+    if (!tour.on) return;
+    var n = tour.nodes, step = TOUR[tour.idx];
+    var el = document.querySelector(step.anchor);
+    var vw = window.innerWidth, vh = window.innerHeight;
+    var pad = 8;
+
+    // No usable anchor — either it is missing (a narrow viewport hides the rail)
+    // or the viewport is too small for a coach-mark to point at anything without
+    // covering it. Both dim the whole screen; the dialog docks as a sheet via CSS.
+    if (!el || !el.getBoundingClientRect().width || vw <= 700) {
+      n.root.classList.add('obt-nospot');
+      n.t.style.cssText = 'top:0;left:0;width:100%;height:100%';
+      n.r.style.cssText = n.b.style.cssText = n.l.style.cssText = 'display:none';
+      if (vw <= 700) {
+        // The bottom-sheet rule owns placement here (it uses !important, so any
+        // inline position would be ignored anyway).
+        n.dialog.style.cssText = '';
+      } else {
+        n.dialog.style.top = '50%';
+        n.dialog.style.left = '50%';
+        n.dialog.style.transform = 'translate(-50%, -50%)';
+      }
+      return;
+    }
+    n.root.classList.remove('obt-nospot');
+    n.r.style.display = n.b.style.display = n.l.style.display = '';
+
+    var b = el.getBoundingClientRect();
+    var x = Math.max(0, b.left - pad), y = Math.max(0, b.top - pad);
+    var w = Math.min(vw, b.right + pad) - x, h = Math.min(vh, b.bottom + pad) - y;
+
+    n.t.style.cssText = 'top:0;left:0;width:100%;height:' + y + 'px';
+    n.b.style.cssText = 'top:' + (y + h) + 'px;left:0;width:100%;height:' + Math.max(0, vh - y - h) + 'px';
+    n.l.style.cssText = 'top:' + y + 'px;left:0;width:' + x + 'px;height:' + h + 'px';
+    n.r.style.cssText = 'top:' + y + 'px;left:' + (x + w) + 'px;width:' + Math.max(0, vw - x - w) + 'px;height:' + h + 'px';
+    n.ring.style.cssText = 'top:' + y + 'px;left:' + x + 'px;width:' + w + 'px;height:' + h + 'px';
+
+    // Place the dialog on the requested side, then clamp it into the viewport.
+    n.dialog.style.transform = '';
+    var dw = n.dialog.offsetWidth, dh = n.dialog.offsetHeight, gap = 14;
+    var dx, dy;
+    if (step.placement === 'left')       { dx = x - dw - gap;  dy = y; }
+    else if (step.placement === 'top')   { dx = x;             dy = y - dh - gap; }
+    else if (step.placement === 'bottom'){ dx = x;             dy = y + h + gap; }
+    else                                 { dx = x + w + gap;   dy = y; }
+
+    // If the preferred side has no room, flip to the opposite one.
+    if (dx + dw > vw - 12) dx = x - dw - gap;
+    if (dx < 12)           dx = Math.min(x + w + gap, vw - dw - 12);
+    if (dy + dh > vh - 12) dy = y - dh - gap;
+
+    n.dialog.style.left = Math.max(12, Math.min(dx, vw - dw - 12)) + 'px';
+    n.dialog.style.top  = Math.max(12, Math.min(dy, vh - dh - 12)) + 'px';
+  }
+
+  function tourSchedule() {
+    if (tour.raf) return;
+    tour.raf = requestAnimationFrame(function () { tour.raf = 0; tourPosition(); });
+  }
+
+  function tourGo(i) {
+    if (i < 0) return;
+    if (i >= TOUR.length) return Onboarding.tourEnd(false);
+    tour.idx = i;
+    var n = tourBuild(), step = TOUR[i];
+    n.title.textContent = step.title;
+    n.bodyEl.textContent = step.body;
+    n.count.textContent = (i + 1) + ' of ' + TOUR.length;
+    n.back.style.visibility = i === 0 ? 'hidden' : 'visible';
+    n.next.textContent = i === TOUR.length - 1 ? 'Got it' : 'Next';
+    tourPosition();
+    n.next.focus();
+  }
+
+  function tourKey(e) {
+    if (!tour.on) return;
+    if (e.key === 'Escape')     { e.preventDefault(); Onboarding.tourEnd(true); }
+    else if (e.key === 'ArrowRight') tourGo(tour.idx + 1);
+    else if (e.key === 'ArrowLeft')  tourGo(tour.idx - 1);
+  }
+
   var Onboarding = {
 
     // Non-admins get the wizard; admins keep the full form.
     active: function () {
       return !document.body.classList.contains('is-admin');
     },
+
+    tourSeen: function () {
+      var m = (window.USER_SETUP || {})[state.slug];
+      return !!(m && m.tour);
+    },
+
+    tourStart: function (force) {
+      if (tour.on || !state.on) return;
+      if (!force && this.tourSeen()) return;
+      tour.on = true;
+      tour.idx = 0;
+      tourBuild().root.classList.add('on');
+      document.body.classList.add('obt-open');
+      window.addEventListener('resize', tourSchedule);
+      window.addEventListener('scroll', tourSchedule, true);
+      document.addEventListener('keydown', tourKey);
+      tourGo(0);
+    },
+
+    // Skipped and finished both mean "do not show me this again" — the flag
+    // records which so the wizard footer can offer the right wording.
+    tourEnd: function (skipped) {
+      if (!tour.on) return;
+      tour.on = false;
+      if (tour.nodes) tour.nodes.root.classList.remove('on');
+      document.body.classList.remove('obt-open');
+      window.removeEventListener('resize', tourSchedule);
+      window.removeEventListener('scroll', tourSchedule, true);
+      document.removeEventListener('keydown', tourKey);
+      entry(state.slug).tour = skipped ? 'skipped' : 'done';
+      pushSetup({ tour: entry(state.slug).tour });
+    },
+
+    tourReplay: function () { this.tourStart(true); },
 
     isComplete: function (slug) {
       var m = (window.USER_SETUP || {})[slug];
@@ -263,6 +454,7 @@
     // Called at the end of renderForm(). Everything the wizard shows is already
     // in the DOM at this point.
     onFormRendered: function (slug, cfg) {
+      if (state.on) { state.cfg = cfg || state.cfg; return; }
       if (!this.active() || this.isComplete(slug)) return;
       state.slug = slug;
       state.cfg = cfg || {};
@@ -281,6 +473,8 @@
 
       state.idx = this.firstUnfinished();
       render();
+      var self = this;
+      requestAnimationFrame(function () { self.tourStart(false); });
     },
 
     firstUnfinished: function () {
@@ -333,6 +527,7 @@
     // Drop the wizard and hand back the ordinary builder.
     exit: function () {
       if (!state.on) return;
+      this.tourEnd(true);
       unmount();
       var hold = stash();
       var fa = byId('form-area');

@@ -246,6 +246,7 @@
   </div>
 
   <aside class="preview-panel" aria-label="Preview">
+   <div class="preview-card">
     <div class="preview-header"><span>Preview</span></div>
     <div class="preview-tabs">
       <div class="preview-tab active" onclick="switchTab('chat', this)">Live Chat</div>
@@ -277,6 +278,7 @@
         <p style="font-size:0.75rem;">Configure a persona and click Preview Prompt.</p>
       </div>
     </div>
+   </div>
   </aside>
 
 </div>
@@ -664,8 +666,14 @@ function bsSetBusy(busy, msg) {
   const custom = document.getElementById('bs-custom');
   if (custom) custom.disabled = busy;
   document.querySelectorAll('#bs-options button').forEach(b => b.disabled = busy);
-  document.getElementById('bs-status').textContent = msg || '';
-  document.getElementById('bs-status').className = 'save-status';
+  const st = document.getElementById('bs-status');
+  st.className = 'save-status';
+  if (busy) {
+    st.innerHTML = '<span class="busy-label"><span class="loader-dots" role="status" aria-live="polite">'
+      + '<i></i><i></i><i></i></span>' + esc(msg || 'Thinking…') + '</span>';
+  } else {
+    st.textContent = msg || '';
+  }
 }
 
 function bsShowQuestion(question, options) {
@@ -1762,11 +1770,34 @@ async function xDisconnect() {
   await loadXStatus();
 }
 
+// Every generate/randomize action shares one in-flight shape: disable the
+// button, show dots plus what is being made, then report the outcome. Kept in
+// one place so a new AI action cannot quietly ship without a loading state.
+function setBusy(btnId, statusId, label) {
+  const btn = document.getElementById(btnId);
+  const st  = document.getElementById(statusId);
+  if (btn) btn.disabled = true;
+  if (st) {
+    st.className = 'save-status';
+    st.innerHTML = '<span class="busy-label"><span class="loader-dots" role="status" aria-live="polite">'
+      + '<i></i><i></i><i></i></span>' + esc(label) + '</span>';
+  }
+}
+
+function clearBusy(btnId, statusId, msg, ok) {
+  const btn = document.getElementById(btnId);
+  const st  = document.getElementById(statusId);
+  if (btn) btn.disabled = false;
+  if (!st) return;
+  st.className = 'save-status ' + (ok ? 'ok' : 'err');
+  st.textContent = msg;
+  if (ok) setTimeout(() => { if (st.textContent === msg) { st.textContent = ''; st.className = 'save-status'; } }, 2000);
+}
+
+
 async function randomizeBackstory() {
-  const btn    = document.getElementById('backstory-rand-btn');
-  const status = document.getElementById('backstory-rand-status');
-  if (!btn || !status) return;
-  btn.disabled = true; status.textContent = 'Generating…';
+  if (!document.getElementById('backstory-rand-btn')) return;
+  setBusy('backstory-rand-btn', 'backstory-rand-status', 'Writing her backstory…');
   try {
     const res  = await fetch('/api/generate/backstory', {
       method: 'POST', headers: {'Content-Type':'application/json'},
@@ -1776,16 +1807,13 @@ async function randomizeBackstory() {
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || 'error');
     document.getElementById('f-backstory').value = data.text;
-    status.textContent = '✓ Done';
-    setTimeout(() => { status.textContent = ''; }, 2000);
-  } catch(e) { status.textContent = '✗ ' + e.message; }
-  btn.disabled = false;
+    clearBusy('backstory-rand-btn', 'backstory-rand-status', '✓ Done', true);
+  } catch(e) { clearBusy('backstory-rand-btn', 'backstory-rand-status', '✗ ' + e.message, false); }
 }
 
 async function generateSpeechStyle(randomize) {
-  const btn    = document.getElementById(randomize ? 'speech-rand-btn' : 'speech-gen-btn');
-  const status = document.getElementById('speech-gen-status');
-  btn.disabled = true; status.textContent = randomize ? 'Randomizing…' : 'Generating…';
+  const sBtnId = randomize ? 'speech-rand-btn' : 'speech-gen-btn';
+  setBusy(sBtnId, 'speech-gen-status', randomize ? 'Finding a new voice…' : 'Writing her voice…');
   try {
     const res  = await fetch('/api/generate/speech-style', {
       method: 'POST', headers: {'Content-Type':'application/json'},
@@ -1795,16 +1823,12 @@ async function generateSpeechStyle(randomize) {
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || 'error');
     document.getElementById('f-speech').value = data.text;
-    status.textContent = '✓ Done';
-    setTimeout(() => { status.textContent = ''; }, 2000);
-  } catch(e) { status.textContent = '✗ ' + e.message; }
-  btn.disabled = false;
+    clearBusy(sBtnId, 'speech-gen-status', '✓ Done', true);
+  } catch(e) { clearBusy(sBtnId, 'speech-gen-status', '✗ ' + e.message, false); }
 }
 
 async function generateTriggers() {
-  const btn    = document.getElementById('triggers-gen-btn');
-  const status = document.getElementById('triggers-gen-status');
-  btn.disabled = true; status.textContent = 'Generating…';
+  setBusy('triggers-gen-btn', 'triggers-gen-status', 'Finding her openings…');
   try {
     const res  = await fetch('/api/generate/conversion-triggers', {
       method: 'POST', headers: {'Content-Type':'application/json'},
@@ -1814,10 +1838,8 @@ async function generateTriggers() {
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || 'error');
     document.getElementById('f-triggers').value = data.text;
-    status.textContent = '✓ Done';
-    setTimeout(() => { status.textContent = ''; }, 2000);
-  } catch(e) { status.textContent = '✗ ' + e.message; }
-  btn.disabled = false;
+    clearBusy('triggers-gen-btn', 'triggers-gen-status', '✓ Done', true);
+  } catch(e) { clearBusy('triggers-gen-btn', 'triggers-gen-status', '✗ ' + e.message, false); }
 }
 
 function handleAvatarUpload(input) {
@@ -2019,7 +2041,8 @@ async function generateFirstPhoto() {
   if (galleryImages.length >= MAX_PHOTOS) { setPhotoStatus('Max 5 photos.', false); return; }
   const btn = document.getElementById('gen-face-btn');
   if (btn) btn.disabled = true;
-  setPhotoStatus('✨ Generating a new face…', null);
+  setPhotoBusy(true, 'Generating a new face…');
+  setPhotoStatus('Generating a new face…', null);
   try {
     const res = await fetch('/api/generate/image', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -2030,7 +2053,7 @@ async function generateFirstPhoto() {
     galleryImages.push(data.image); renderGallery();
     setPhotoStatus('✓ Face added — use "More of her" for matching shots', true);
   } catch(e) { setPhotoStatus('✗ ' + e.message, false); }
-  finally { if (btn) btn.disabled = false; }
+  finally { setPhotoBusy(false); if (btn) btn.disabled = false; }
 }
 
 async function generateMorePhotos() {
@@ -2043,7 +2066,8 @@ async function generateMorePhotos() {
   try {
     while (galleryImages.length < MAX_PHOTOS) {
       const shot = shots[(galleryImages.length - 1) % shots.length];
-      setPhotoStatus('✨ Generating photo ' + (galleryImages.length + 1) + ' of the same person…', null);
+      setPhotoBusy(true, 'Generating photo ' + (galleryImages.length + 1) + ' of the same person…');
+      setPhotoStatus('Generating photo ' + (galleryImages.length + 1) + ' of the same person…', null);
       const res = await fetch('/api/generate/image', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reference, shot, config: collectConfig() })
@@ -2054,7 +2078,7 @@ async function generateMorePhotos() {
     }
     setPhotoStatus('✓ Photo set complete', true);
   } catch(e) { setPhotoStatus('✗ ' + e.message, false); }
-  finally { if (btn) btn.disabled = false; }
+  finally { setPhotoBusy(false); if (btn) btn.disabled = false; }
 }
 
 function setPhotoStatus(msg, ok) {
@@ -2062,6 +2086,23 @@ function setPhotoStatus(msg, ok) {
   if (!el) return;
   el.textContent = msg;
   el.style.color = ok === true ? 'var(--ok)' : ok === false ? 'var(--err)' : 'var(--text-3)';
+}
+
+// Image generation is the longest wait in the builder, so it scrims the grid
+// it is about to change rather than only tinting a button somewhere else.
+function setPhotoBusy(on, label) {
+  const grid = document.getElementById('photo-grid');
+  if (!grid) return;
+  grid.classList.add('loader-host');
+  let ov = grid.querySelector('.loader-overlay');
+  if (!on) { if (ov) ov.remove(); return; }
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.className = 'loader-overlay';
+    grid.appendChild(ov);
+  }
+  ov.innerHTML = '<span class="loader-dots lg" role="status" aria-live="polite"><i></i><i></i><i></i></span>'
+    + '<span>' + esc(label) + '</span>';
 }
 
 async function saveGallery(slug) {
@@ -2076,10 +2117,7 @@ async function saveGallery(slug) {
 
 async function fillAllInfo() {
   if (!currentSlug) return;
-  const btn = document.getElementById('fillall-btn');
-  const status = document.getElementById('save-status');
-  status.textContent = '✨ Generating a complete persona…'; status.className = 'save-status';
-  if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; }
+  setBusy('fillall-btn', 'save-status', 'Generating a complete persona…');
   try {
     const res = await fetch('/api/generate/persona', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -2092,12 +2130,9 @@ async function fillAllInfo() {
     renderForm(currentSlug, cfg);                       // repopulate every field at once
     if (personas[currentSlug]) personas[currentSlug].name = cfg.name || currentSlug;
     renderSidebar();
-    status.textContent = '✓ Filled — review, then Save & Deploy'; status.className = 'save-status ok';
+    clearBusy('fillall-btn', 'save-status', '✓ Filled — review, then Save & Deploy', true);
   } catch(e) {
-    status.textContent = '✗ ' + e.message; status.className = 'save-status err';
-  } finally {
-    const b = document.getElementById('fillall-btn');
-    if (b) { b.disabled = false; b.style.opacity = '1'; }
+    clearBusy('fillall-btn', 'save-status', '✗ ' + e.message, false);
   }
 }
 
@@ -2201,9 +2236,8 @@ function renderFunnelPreview() {
 }
 
 async function generateInterests(randomize) {
-  const btn    = document.getElementById(randomize ? 'interests-rand-btn' : 'interests-gen-btn');
-  const status = document.getElementById('interests-gen-status');
-  btn.disabled = true; status.textContent = randomize ? 'Randomizing…' : 'Generating…';
+  const iBtnId = randomize ? 'interests-rand-btn' : 'interests-gen-btn';
+  setBusy(iBtnId, 'interests-gen-status', randomize ? 'Finding new interests…' : 'Picking her interests…');
   try {
     const res  = await fetch('/api/generate/interests', {
       method: 'POST', headers: {'Content-Type':'application/json'},
@@ -2213,10 +2247,8 @@ async function generateInterests(randomize) {
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || 'error');
     document.getElementById('f-interests').value = data.text;
-    status.textContent = '✓ Done';
-    setTimeout(() => { status.textContent = ''; }, 2000);
-  } catch(e) { status.textContent = '✗ ' + e.message; }
-  btn.disabled = false;
+    clearBusy(iBtnId, 'interests-gen-status', '✓ Done', true);
+  } catch(e) { clearBusy(iBtnId, 'interests-gen-status', '✗ ' + e.message, false); }
 }
 
 // ── Chat phases ─────────────────────────────────────────────────────────────

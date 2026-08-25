@@ -16,7 +16,7 @@
   --text:        #f0ece9;
   --text-2:      #cdc8c4;
   --text-3:      #ada7a3;
-  --text-muted:  #85807c;
+  --text-muted:  #8d8884;
 
   --accent:      #ff5c38;
   --accent-2:    #ff2d78;
@@ -31,9 +31,27 @@
 
   --font:    'Inter', system-ui, -apple-system, sans-serif;
   --display: 'Sora', 'Inter', system-ui, sans-serif;
+  --r-xs: 6px;
   --r-sm: 8px;
   --r:    12px;
   --r-lg: 16px;
+  --r-xl: 24px;
+
+  /* Text that sits on top of --accent. Coral is dark enough for white here,
+     but the light theme darkens the accent further, so both stay legible. */
+  --accent-ink: #fff;
+
+  /* Elevation. The shadow colour is a token so light mode can use a warm,
+     low-alpha shade instead of the black that reads as a smudge on white. */
+  --shadow-c:        rgba(0,0,0,0.45);
+  --shadow-c-strong: rgba(0,0,0,0.6);
+  --shadow-sm: 0 1px 2px var(--shadow-c);
+  --shadow:    0 2px 8px var(--shadow-c);
+  --shadow-md: 0 8px 24px var(--shadow-c);
+  --shadow-lg: 0 20px 60px var(--shadow-c-strong);
+
+  /* One focus ring for the whole app — borders alone are not a focus state. */
+  --ring: 0 0 0 3px var(--accent-soft);
 }
 
 /* Light theme. Only the palette changes — every rule below reads these tokens,
@@ -47,19 +65,29 @@
   --border:      #d9d5d0;
   --border-soft: #e8e4e0;
 
-  /* Warm near-black rather than #000 — pure black is harsh on a warm off-white. */
+  /* Warm near-black rather than #000 — pure black is harsh on a warm off-white.
+     --text-3 and --text-muted carry most of the app's secondary copy (hints,
+     save status, tabs, placeholders), so both clear 4.5:1 on --panel. */
   --text:        #1a1614;
   --text-2:      #3b3532;
-  --text-3:      #6a635e;
-  --text-muted:  #918a85;
+  --text-3:      #57504b;
+  --text-muted:  #6e6762;
 
+  /* The dark palette's coral is only ~3:1 as text on white. Darkened here so
+     accent text and borders stay readable; the gradient is unchanged because
+     it is only ever used behind --accent-ink. */
+  --accent:      #c53c20;
   --accent-soft: #ff5c3814;
   --accent-line: #ff5c3866;
 
   /* The dark palette's greens and ambers wash out on white. */
-  --ok:    #15a349;
-  --warn:  #b45309;
-  --err:   #dc2626;
+  --ok:    #0f7038;
+  --warn:  #a04a08;
+  --err:   #c81e1e;
+
+  /* Black at dark-mode alpha reads as a grey smudge on white — warm and sheer. */
+  --shadow-c:        rgba(23,20,18,0.08);
+  --shadow-c-strong: rgba(23,20,18,0.16);
 }
 
 /* ── Universal Reset ── */
@@ -73,6 +101,24 @@ h1, h2, h3, .brand, .display {
 
 @keyframes sweep { 0% { background-position: 0% 50%; } 100% { background-position: 150% 50%; } }
 
+/* One focus state for the whole app. Border-colour alone was the only cue, which
+   is invisible on the controls that already have a coloured border — keyboard
+   users had nothing to follow. :focus-visible keeps it off mouse clicks. */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible,
+.preview-tab:focus-visible,
+.rail-item:focus-visible,
+.ob-rstep:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: var(--ring);
+  border-radius: var(--r-xs);
+}
+
 /* ── Dev-only navigation bar (devnav.js) ── */
 .devnav {
   position: fixed;
@@ -83,11 +129,11 @@ h1, h2, h3, .brand, .display {
   display: flex;
   align-items: center;
   gap: 4px;
-  background: rgba(20,20,23,0.92);
+  background: var(--panel);
   border: 1px solid var(--border);
   padding: 6px;
   border-radius: var(--r);
-  box-shadow: 0 6px 20px rgba(0,0,0,0.45);
+  box-shadow: var(--shadow-md);
   backdrop-filter: blur(8px);
   font-family: var(--font);
 }
@@ -108,7 +154,7 @@ h1, h2, h3, .brand, .display {
   transition: background 0.15s, color 0.15s;
 }
 .devnav-btn:hover { background: var(--surface); color: var(--text); }
-.devnav-btn.active { background: var(--accent); color: var(--text); }
+.devnav-btn.active { background: var(--accent); color: var(--accent-ink); }
 
 /* On phones the top-center bar collides with page headers — dock it to the
    bottom and shrink it so it stays out of the way. */
@@ -142,6 +188,13 @@ h1, h2, h3, .brand, .display {
   --safe-bottom:   env(safe-area-inset-bottom, 0px);
 }
 
+/* The 8%-alpha coral that reads fine over a near-black page all but vanishes on
+   #faf9f8. Declared after the alias block so it wins over --bubble-user's
+   var(--accent-soft) reference. */
+:root[data-theme="light"] {
+  --bubble-user: #ff5c3824;
+}
+
 /* ══════════════════════════════════════
    CHAT PAGE  (body.page-chat)
    ══════════════════════════════════════ */
@@ -166,9 +219,9 @@ body.page-chat {
   display: flex;
   flex-direction: column;
   background: var(--surface);
-  border-radius: 24px;
+  border-radius: var(--r-xl);
   border: 1px solid var(--border);
-  box-shadow: 0 32px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.03);
+  box-shadow: var(--shadow-lg);
   overflow: hidden;
   position: relative;
 }
@@ -410,6 +463,9 @@ body.page-chat .conn-dot.err { background: var(--err); }
      the light theme (and inside the builder's preview rail) fixed pale text
      disappears into the page. */
   color: var(--text);
+  /* The fill is translucent by design, so the edge is what separates the bubble
+     from the page — without it the light theme shows an untethered block of text. */
+  border: 1px solid var(--accent-line);
   border-radius: var(--radius-bubble) var(--radius-bubble) 6px var(--radius-bubble);
 }
 .msg-row.bot.cont .bubble  { border-top-left-radius: 6px; }
@@ -565,9 +621,9 @@ body.page-chat.embed .persona-rail { display: none; }
   display: flex;
   flex-direction: column;
   background: var(--surface);
-  border-radius: 24px;
+  border-radius: var(--r-xl);
   border: 1px solid var(--border);
-  box-shadow: 0 32px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.03);
+  box-shadow: var(--shadow-lg);
   overflow: hidden;
 }
 .persona-rail-header {
@@ -674,7 +730,7 @@ body.page-chat.embed .persona-rail { display: none; }
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 32px 80px rgba(0,0,0,0.6);
+  box-shadow: var(--shadow-lg);
   transform: translateY(8px);
   transition: transform 0.25s ease;
 }
@@ -787,7 +843,7 @@ body.page-dashboard {
 
 body.page-dashboard header {
   background: var(--panel);
-  border-bottom: 1px solid var(--surface);
+  border-bottom: 1px solid var(--border-soft);
   padding: 14px 24px;
   display: flex;
   align-items: center;
@@ -916,7 +972,7 @@ body:not(.is-admin) .admin-only { display: none !important; }
 
 .sb-foot {
   flex-shrink: 0; padding: 8px 10px 10px;
-  border-top: 1px solid var(--surface);
+  border-top: 1px solid var(--border-soft);
   display: flex; flex-direction: column; gap: 2px;
 }
 .persona-item {
@@ -957,7 +1013,7 @@ body:not(.is-admin) .admin-only { display: none !important; }
   overflow: hidden;
   max-height: 220px;
   overflow-y: auto;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  box-shadow: var(--shadow-md);
 }
 .geo-item { padding: 8px 12px; font-size: 0.85rem; color: var(--text); cursor: pointer; }
 .geo-item:hover { background: var(--surface); }
@@ -974,7 +1030,7 @@ body:not(.is-admin) .admin-only { display: none !important; }
   border-radius: var(--r);
   overflow: hidden;
   background: var(--panel);
-  border: 1px solid var(--surface);
+  border: 1px solid var(--border-soft);
 }
 .photo-cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .photo-add {
@@ -1065,7 +1121,7 @@ body:not(.is-admin) .admin-only { display: none !important; }
   background: var(--grad); background-size: 300% 100%;
   border: none;
   border-radius: var(--r);
-  color: #fff;
+  color: var(--accent-ink);
   font-size: 0.8rem;
   font-weight: 600;
   cursor: pointer;
@@ -1149,13 +1205,13 @@ body:not(.is-admin) .admin-only { display: none !important; }
   border: 1px solid var(--border-soft);
   border-radius: var(--r-lg);
   padding: 20px 22px;
-  box-shadow: 0 1px 0 rgba(255,255,255,0.02) inset, 0 2px 8px rgba(0,0,0,0.25);
+  box-shadow: var(--shadow);
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 .form-section:hover { border-color: var(--border); }
 .form-section:focus-within {
   border-color: var(--border);
-  box-shadow: 0 0 0 1px var(--accent-soft), 0 2px 12px rgba(0,0,0,0.3);
+  box-shadow: 0 0 0 1px var(--accent-soft), var(--shadow);
 }
 .section-title {
   font-size: 0.82rem;
@@ -1208,7 +1264,7 @@ body.page-dashboard textarea,
 body.page-dashboard select {
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--r-sm);
   color: var(--text);
   padding: 11px 14px;
   font-size: 0.95rem;
@@ -1274,7 +1330,7 @@ body.page-dashboard select {
   border-radius: 50%;
   background: #fff;
   border: 2px solid var(--warmth-color, var(--accent));
-  box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+  box-shadow: var(--shadow-sm);
   cursor: pointer;
   transition: transform 0.12s, border-color 0.12s;
 }
@@ -1323,7 +1379,7 @@ body.page-dashboard select {
   height: 16px;
   background: white;
   border-radius: 50%;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+  box-shadow: var(--shadow-sm);
   transition: transform 0.2s;
 }
 .toggle input:checked + .toggle-track::after { transform: translateX(18px); }
@@ -1334,7 +1390,7 @@ body.page-dashboard select {
   display: flex;
   gap: 10px;
   padding: 16px 32px;
-  border-top: 1px solid var(--surface);
+  border-top: 1px solid var(--border-soft);
   background: var(--bg);
   position: sticky;
   bottom: 0;
@@ -1355,7 +1411,7 @@ body.page-dashboard select {
 }
 .btn-primary {
   background: var(--grad); background-size: 300% 100%;
-  color: #fff; font-weight: 600;
+  color: var(--accent-ink); font-weight: 600;
 }
 .btn-primary:hover {
   transform: translateY(-1px);
@@ -1364,20 +1420,33 @@ body.page-dashboard select {
 }
 .btn-secondary { background: var(--surface); color: var(--text); }
 .btn-secondary:hover { background: var(--border); color: var(--accent); }
-.btn-ghost  { background: transparent; color: var(--text-muted); border: 1px solid var(--surface); }
+.btn-ghost  { background: transparent; color: var(--text-muted); border: 1px solid var(--border-soft); }
 .btn-ghost:hover { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); }
-.platform-tab.active { background: var(--accent); color: var(--text); border-color: var(--accent); }
+.platform-tab.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .platform-tab.active:hover { background: var(--accent); border-color: var(--accent); }
 .save-status { font-size: 0.8rem; color: var(--text-muted); align-self: center; margin-left: auto; }
 .save-status.ok  { color: var(--ok); }
 .save-status.err { color: var(--err); }
 
+/* The rail is a card floating in its column, not a walled-off third pane — same
+   recipe as .form-section one elevation step up, so it matches what it sits beside. */
 .preview-panel {
-  border-left: 1px solid var(--surface);
   display: flex;
   flex-direction: column;
   overflow: hidden;
   height: 100%;
+  padding: 14px 14px 14px 0;
+}
+.preview-card {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--panel);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-md);
 }
 .preview-header {
   padding: 14px 16px 10px;
@@ -1386,26 +1455,31 @@ body.page-dashboard select {
   text-transform: uppercase;
   letter-spacing: 0.8px;
   color: var(--text-muted);
-  border-bottom: 1px solid var(--surface);
+  border-bottom: 1px solid var(--border-soft);
   display: flex;
   align-items: center;
   justify-content: space-between;
 }
-.preview-tabs { display: flex; border-bottom: 1px solid var(--surface); }
+.preview-tabs { display: flex; border-bottom: 1px solid var(--border-soft); }
 .preview-tab {
-  padding: 10px 16px;
+  padding: 13px 16px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
   font-size: 0.8rem;
+  font-weight: 500;
   cursor: pointer;
   color: var(--text-muted);
   border-bottom: 2px solid transparent;
-  transition: all 0.15s;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
-.preview-tab.active { color: var(--accent); border-color: var(--accent); }
+.preview-tab:hover { color: var(--text-2); background: var(--panel-2); }
+.preview-tab.active { color: var(--accent); border-color: var(--accent); font-weight: 600; }
 .preview-content { flex: 1; overflow-y: auto; padding: 16px; }
 
 .prompt-box {
   background: var(--panel);
-  border: 1px solid var(--surface);
+  border: 1px solid var(--border-soft);
   border-radius: var(--r-sm);
   padding: 14px;
   font-size: 0.78rem;
@@ -1429,7 +1503,7 @@ body.page-dashboard select {
 .funnel-stage {
   padding: 10px 14px;
   background: var(--panel);
-  border: 1px solid var(--surface);
+  border: 1px solid var(--border-soft);
   border-radius: var(--r-sm);
   display: flex;
   align-items: center;
@@ -1459,7 +1533,7 @@ body.page-dashboard select {
   max-width: 470px;
   padding: 30px 30px 24px;
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: var(--r-lg);
   background: var(--panel);
   text-align: left;
   color: var(--text);
@@ -1510,7 +1584,7 @@ body.page-dashboard select {
   padding: 4px 10px;
   border-radius: 9999px;
   background: var(--panel);
-  border: 1px solid var(--surface);
+  border: 1px solid var(--border-soft);
   transition: border-color 0.15s;
 }
 .conn-badge:hover { border-color: var(--border); }
@@ -1561,7 +1635,68 @@ body.page-dashboard .conn-dot.err { background: var(--err); }
 }
 .btn-ai:hover { transform: translateY(-1px); box-shadow: 0 4px 14px #ff2d7855; filter: brightness(1.06); }
 .btn-ai:active { transform: translateY(0); }
-.btn-ai:disabled { opacity: 0.5; cursor: default; transform: none; box-shadow: none; }
+.btn-ai:disabled { opacity: 0.55; cursor: wait; filter: saturate(0.6); transform: none; box-shadow: none; }
+
+/* ── Loading ──────────────────────────────────────────────────────────────
+   Generation used to show only a text swap and a faded button, which people
+   missed and clicked through. Three staggered dots read as "working" at a
+   glance and cost nothing. */
+.loader-dots {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  vertical-align: middle;
+}
+.loader-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: dot-bounce 1.4s ease-in-out infinite both;
+}
+.loader-dots i:nth-child(2) { animation-delay: 0.16s; }
+.loader-dots i:nth-child(3) { animation-delay: 0.32s; }
+.loader-dots.lg { gap: 7px; }
+.loader-dots.lg i { width: 10px; height: 10px; }
+
+@keyframes dot-bounce {
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.45; }
+  40%           { transform: scale(1);   opacity: 1; }
+}
+
+/* Inline status line: dots plus what is being generated. */
+.busy-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-2);
+  font-size: 0.8rem;
+}
+
+/* Photo generation is the longest wait and the grid is the thing changing, so
+   it gets a scrim over the grid rather than a label beside a button. */
+.loader-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  border-radius: var(--r-lg);
+  background: color-mix(in srgb, var(--panel) 72%, transparent);
+  backdrop-filter: blur(2px);
+  color: var(--text-2);
+  font-size: 0.82rem;
+  text-align: center;
+  padding: 16px;
+}
+.loader-host { position: relative; }
+
+@media (prefers-reduced-motion: reduce) {
+  .loader-dots i { animation: none; opacity: 0.7; }
+}
 
 /* Per-section save button, sits at the right edge of a .section-title */
 .btn-section-save {
@@ -1578,8 +1713,8 @@ body.page-dashboard .conn-dot.err { background: var(--err); }
   transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 .btn-section-save:hover { background: var(--border); color: var(--text); border-color: var(--border); }
-.btn-section-save.saved { background: #14532d; color: var(--ok); border-color: var(--ok); }
-.btn-section-save.failed { background: #4c1d24; color: var(--err); border-color: #7f1d1d; }
+.btn-section-save.saved { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); border-color: var(--ok); }
+.btn-section-save.failed { background: color-mix(in srgb, var(--err) 16%, transparent); color: var(--err); border-color: var(--err); }
 
 /* ── Outfits ──────────────────────────────────────────────────────────────── */
 
@@ -1671,7 +1806,7 @@ body.page-dashboard .conn-dot.err { background: var(--err); }
   border-radius: var(--r-sm);
   overflow: hidden;
   background: var(--panel-2);
-  border: 1px solid var(--surface);
+  border: 1px solid var(--border-soft);
 }
 .outfit-photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .outfit-photo select {
@@ -1801,11 +1936,11 @@ body.page-dashboard .conn-dot.err { background: var(--err); }
 .modal-overlay.open { display: flex; }
 .modal {
   background: var(--panel);
-  border: 1px solid var(--surface);
+  border: 1px solid var(--border-soft);
   border-radius: var(--r-lg);
   width: 100%;
   max-width: 480px;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+  box-shadow: var(--shadow-lg);
   animation: modalIn 0.15s ease-out;
 }
 @keyframes modalIn {
@@ -1817,7 +1952,7 @@ body.page-dashboard .conn-dot.err { background: var(--err); }
   align-items: center;
   justify-content: space-between;
   padding: 18px 22px;
-  border-bottom: 1px solid var(--surface);
+  border-bottom: 1px solid var(--border-soft);
 }
 .modal-header h2 { font-size: 1.05rem; font-weight: 600; color: var(--text); }
 .modal-close {
@@ -1846,7 +1981,7 @@ body.page-dashboard .conn-dot.err { background: var(--err); }
   gap: 9px;
   padding: 11px 14px;
   background: var(--panel);
-  border: 1px solid var(--surface);
+  border: 1px solid var(--border-soft);
   border-radius: var(--r-sm);
   font-size: 0.82rem;
   color: var(--text-3);
@@ -1880,8 +2015,10 @@ body.page-dashboard code {
     will-change: transform;
   }
   .sidebar { left: 0; border-right: 1px solid var(--surface); transform: translateX(-101%); }
-  .preview-panel { right: 0; width: 340px; border-left: 1px solid var(--surface); transform: translateX(101%); }
-  .sidebar.open, .preview-panel.open { transform: translateX(0); box-shadow: 0 0 50px rgba(0,0,0,0.7); }
+  .preview-panel { right: 0; width: 340px; border-left: 1px solid var(--border-soft); transform: translateX(101%); }
+  .sidebar.open, .preview-panel.open { transform: translateX(0); box-shadow: var(--shadow-lg); }
+  .preview-panel { padding: 0; }
+  .preview-card { border-radius: var(--r-lg) 0 0 var(--r-lg); border-right: none; box-shadow: none; }
 
   body.page-dashboard header { padding: 11px 14px; }
   body.page-dashboard header h1 { font-size: 0.92rem; }
@@ -1932,8 +2069,8 @@ body.page-landing {
 }
 
 body.page-landing nav {
-  background: white;
-  border-bottom: 1px solid var(--text);
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
   padding: 1rem 1.5rem;
   display: flex;
   align-items: center;
@@ -1954,7 +2091,7 @@ body.page-landing nav {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--panel);
+  color: var(--text-2);
   font-weight: 600;
   font-size: 0.9rem;
 }
@@ -2104,12 +2241,13 @@ body.page-landing nav {
   gap: 0.5rem;
 }
 .stat-card {
-  background: white;
-  color: var(--panel);
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border-soft);
   padding: 0.65rem 0.5rem;
   border-radius: var(--r);
   text-align: center;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+  box-shadow: var(--shadow);
   transition: transform 0.2s;
   display: flex;
   flex-direction: column;
@@ -2206,7 +2344,7 @@ body.page-landing nav {
   flex-direction: column;
   transform: translateX(100%);
   transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
-  box-shadow: -8px 0 40px rgba(0,0,0,0.5);
+  box-shadow: var(--shadow-lg);
 }
 .chat-drawer.open {
   transform: translateX(0);
@@ -2412,6 +2550,111 @@ body.ob-running .form-area {
 }
 .ob-skip:hover { color: var(--text-3); }
 
+/* ── Guided tour overlay ──────────────────────────────────────────────────
+   The dim is four rectangles fitted around the highlighted element, leaving a
+   real hole rather than a shadow spread — so whatever is being explained is
+   still visible at full contrast and still clickable. */
+.obt-root { position: fixed; inset: 0; z-index: 4000; pointer-events: none; }
+.obt-root.on { pointer-events: auto; }
+.obt-root:not(.on) { display: none; }
+
+.obt-mask {
+  position: fixed;
+  background: rgba(8,7,7,0.72);
+  backdrop-filter: blur(2px);
+  animation: obt-fade 0.18s ease-out;
+}
+.obt-ring {
+  position: fixed;
+  border: 2px solid var(--accent-line);
+  border-radius: var(--r);
+  pointer-events: none;
+  transition: top 0.18s ease, left 0.18s ease, width 0.18s ease, height 0.18s ease;
+}
+.obt-root.obt-nospot .obt-ring { display: none; }
+.obt-root.obt-nospot .obt-t {
+  inset: 0; width: 100%; height: 100%;
+}
+.obt-root.obt-nospot .obt-r,
+.obt-root.obt-nospot .obt-b,
+.obt-root.obt-nospot .obt-l { display: none; }
+
+.obt-dialog {
+  position: fixed;
+  width: min(380px, calc(100vw - 24px));
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 18px 20px 16px;
+  animation: modalIn 0.2s ease-out;
+}
+.obt-title {
+  font-family: var(--display);
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 7px;
+  padding-right: 26px;
+}
+/* Body copy in a teaching dialog is primary text, not a muted hint. */
+.obt-body { font-size: 0.875rem; line-height: 1.55; color: var(--text-2); }
+.obt-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+}
+.obt-count {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-right: auto;
+  font-variant-numeric: tabular-nums;
+}
+.obt-foot .btn { padding: 8px 16px; font-size: 0.84rem; }
+.obt-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-sm);
+  color: var(--text-3);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.obt-close:hover { background: var(--surface-2); color: var(--text); }
+
+body.obt-open { overflow: hidden; }
+
+@keyframes obt-fade { from { opacity: 0; } to { opacity: 1; } }
+
+/* Coach-marks do not fit a phone — dock the dialog as a bottom sheet and drop
+   the spotlight, which would cover most of the screen anyway. */
+@media (max-width: 700px) {
+  .obt-dialog {
+    top: auto !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    width: 100%;
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+    padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  }
+  .obt-ring { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .obt-mask, .obt-dialog { animation: none; }
+  .obt-ring { transition: none; }
+}
+
 /* Finished state */
 .ob-done { padding: 56px 40px; text-align: center; overflow-y: auto; }
 .ob-seal {
@@ -2491,13 +2734,15 @@ body.ob-running .form-area {
 .preview-chat .chat-window { padding: 14px 12px; gap: 8px; }
 .preview-chat .bubble { font-size: 0.8rem; max-width: 84%; padding: 9px 12px; }
 .preview-chat .msg-av { width: 24px; height: 24px; font-size: 0.6rem; }
-.preview-chat .input-area { padding: 10px 12px; }
+.preview-chat .input-area { padding: 10px 12px; background: var(--panel-2); }
+.preview-chat .input-area input:disabled,
+.preview-chat .send-btn:disabled { cursor: default; }
 .preview-chat .input-wrap { min-height: 38px; }
 .preview-chat .send-btn { width: 38px; height: 38px; }
 .preview-chat .send-btn svg { width: 16px; height: 16px; }
 .pc-section-label {
   align-self: center;
-  font-size: 0.62rem;
+  font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
