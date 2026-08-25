@@ -2645,6 +2645,41 @@ def _chat_take_photo(slug, reply):
     return reply, f'/api/personas/{slug}/media/{picked.id}/image'
 
 
+def _chat_sent_photo_ids(history):
+    ids = set()
+    for m in history or []:
+        found = re.search(r'/media/(\d+)/image', (m.get('photo') or ''))
+        if found:
+            ids.add(int(found.group(1)))
+    return ids
+
+
+def _chat_phase_photo(slug, history):
+    """Roll the current phase's photo rate, the way the Telegram side does.
+
+    The browser chat keeps no fan record, so the phase and the photos already
+    sent are read off the history the client posts.
+    """
+    pool = _chat_photo_pool(slug)
+    if not pool:
+        return None
+    phases = _phases(slug)
+    idx = _fan_phase(phases, {'in_count': _chat_exchanges(history)})
+    phase = phases[idx] if idx < len(phases) else phases[-1]
+    try:
+        rate = max(0, min(100, int(phase.get('photo_rate', 20))))
+    except (TypeError, ValueError):
+        rate = 20
+    if rate <= 0 or random.randint(1, 100) > rate:
+        return None
+    if isinstance(pool[0], str):
+        return f'/api/personas/{slug}/image/{random.randrange(len(pool))}'
+    picked = _pick_phase_photo(pool, _outfits(slug), _chat_sent_photo_ids(history))
+    if not picked:
+        return None
+    return f'/api/personas/{slug}/media/{picked.id}/image'
+
+
 def generate_reply(system_prompt, chat_history, user_message, is_continue=False):
     """Call Gemini with the given history and return the reply text.
 
@@ -2716,6 +2751,8 @@ def chat():
         chat_logger.info(f'USER [{persona_slug}]: {user_message if not is_continue else "[continue]"}')
         reply = generate_reply(system_prompt, chat_history, user_message, is_continue)
         reply, photo = _chat_take_photo(persona_slug, reply)
+        if not photo and not is_greeting:
+            photo = _chat_phase_photo(persona_slug, chat_history)
         reply = trim_extra_questions(
             reply, is_greeting or question_allowed(config, chat_history))
         reply = strip_ppv_marker(reply)
