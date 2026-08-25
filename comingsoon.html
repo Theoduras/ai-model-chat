@@ -90,6 +90,9 @@ p.sub{font-size:17px;color:var(--text-soft);line-height:1.65;margin-bottom:36px;
 /* The chat asks for the full viewport when its profile card opens, which needs
    more room than the demo panel has. */
 .demo.expanded{position:fixed;inset:0;z-index:60;max-width:none;width:100%;height:100%;border-radius:0;border:0;box-shadow:none}
+/* While the on-screen keyboard is up the panel is pinned to whatever is still
+   visible, so the chat's own header cannot be scrolled off the top. */
+.demo.kbd{position:fixed;left:0;right:0;z-index:60;max-width:none;width:100%;margin:0;border-radius:0;border:0;box-shadow:none}
 @media(max-width:900px){
   .split{grid-template-columns:1fr}
   .left{min-height:auto;padding:40px 26px}
@@ -166,6 +169,19 @@ p.sub{font-size:17px;color:var(--text-soft);line-height:1.65;margin-bottom:36px;
 </div>
 
 <script>
+var vv=window.visualViewport;
+
+function fitToKeyboard(){
+  var demo=document.querySelector('.demo');
+  if(!demo||!demo.classList.contains('kbd')) return;
+  var h=vv?vv.height:window.innerHeight;
+  var top=vv?vv.offsetTop:0;
+  demo.style.top=top+'px';
+  demo.style.height=h+'px';
+  if(window.scrollY) window.scrollTo(0,0);
+}
+if(vv){vv.addEventListener('resize',fitToKeyboard);vv.addEventListener('scroll',fitToKeyboard);}
+
 window.addEventListener('message',function(e){
   var d=e.data;
   if(!d||typeof d!=='object'||!d.vf) return;
@@ -173,6 +189,8 @@ window.addEventListener('message',function(e){
   if(!demo) return;
   if(d.vf==='profile-open') demo.classList.add('expanded');
   if(d.vf==='profile-close') demo.classList.remove('expanded');
+  if(d.vf==='input-focus'){demo.classList.add('kbd');fitToKeyboard();}
+  if(d.vf==='input-blur'){demo.classList.remove('kbd');demo.style.top='';demo.style.height='';}
 });
 
 function subscribe(e){

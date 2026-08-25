@@ -583,6 +583,11 @@ function greet() {
 }
 
 inp.addEventListener('keypress', e => { if (e.key === 'Enter') se(); });
+
+// Embedded, the keyboard shrinks the host page's viewport, not this frame's —
+// only the host can resize us to what is still visible.
+inp.addEventListener('focus', () => tellParent('input-focus'));
+inp.addEventListener('blur', () => tellParent('input-blur'));
 document.getElementById('name-input').addEventListener('keypress', e => { if (e.key === 'Enter') submitName(); });
 
 function isRealName(n) {
