@@ -209,6 +209,7 @@
   }
 
   function render() {
+    document.body.classList.remove('browsing', 'embedding');
     var step = STEPS[state.idx];
     var stage = STAGES.filter(function (s) { return s.key === step.stage; })[0];
     var inStage = STEPS.filter(function (s) { return s.stage === step.stage; });
@@ -234,8 +235,12 @@
             '<button class="btn btn-primary" onclick="Onboarding.next()">' +
               (state.idx === STEPS.length - 1 ? 'Finish ✓' : 'Continue →') + '</button>' +
             '<span class="ob-saved" id="ob-saved"></span>' +
-            '<button class="ob-skip" onclick="Onboarding.tourReplay()">Show me around again</button>' +
-            '<button class="ob-skip" onclick="Onboarding.exit()">Skip setup — show me everything</button>' +
+            '<div class="ob-alt">' +
+              '<button class="ob-skip" type="button" onclick="Onboarding.tourReplay()">' +
+                '<span class="ob-skip-icon" aria-hidden="true">◎</span>Show me around</button>' +
+              '<button class="ob-skip" type="button" onclick="Onboarding.exit()">' +
+                '<span class="ob-skip-icon" aria-hidden="true">⚙</span>Skip setup</button>' +
+            '</div>' +
           '</div>' +
         '</div>' +
       '</div>';

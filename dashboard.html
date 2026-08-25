@@ -147,9 +147,6 @@
           <span class="sb-badge" id="persona-count"></span>
         </a>
         <div class="sb-quick" id="sb-quick"></div>
-
-        <div class="sb-label sb-label-personas">Your personas</div>
-        <div class="persona-list" id="persona-list"></div>
         <button class="btn-new" onclick="newPersona()">+ New Persona</button>
 
         <div class="sb-label">Workspace</div>
@@ -382,10 +379,7 @@ function lsNs() { return '_u' + CURRENT_UID; }
 
 function lsPersonaKey(slug) { return 'admin_persona_cfg_' + slug + lsNs(); }
 function lsSlugsKey() { return 'admin_persona_slugs' + lsNs(); }
-function lsFoldersKey() { return 'admin_folders' + lsNs(); }
-function lsFolderAssignKey(slug) { return 'admin_folder_assign_' + slug + lsNs(); }
 function lsPromptKey(slug) { return 'persona_prompt_' + slug + lsNs(); }
-function lsFolderOpenKey(id) { return 'admin_folder_open_' + id + lsNs(); }
 
 // Drop the pre-namespacing keys, which were shared across accounts. The server
 // holds the real personas, so this only clears a cache.
@@ -428,36 +422,17 @@ function lsLoadSlugs() {
 function lsDeletePersona(slug) {
   try {
     localStorage.removeItem(lsPersonaKey(slug));
-    localStorage.removeItem(lsFolderAssignKey(slug));
     localStorage.removeItem(lsPromptKey(slug));
     const slugs = JSON.parse(localStorage.getItem(lsSlugsKey()) || '[]').filter(s => s !== slug);
     localStorage.setItem(lsSlugsKey(), JSON.stringify(slugs));
   } catch(e) {}
 }
 
-function lsFolders() {
-  try { return JSON.parse(localStorage.getItem(lsFoldersKey()) || '[]'); } catch(e) { return []; }
-}
 
-function lsSaveFolders(folders) {
-  try { localStorage.setItem(lsFoldersKey(), JSON.stringify(folders)); } catch(e) {}
-}
 
-function lsPersonaFolder(slug) {
-  try { return localStorage.getItem(lsFolderAssignKey(slug)) || null; } catch(e) { return null; }
-}
 
-function lsSetPersonaFolder(slug, folderId) {
-  try { localStorage.setItem(lsFolderAssignKey(slug), folderId); } catch(e) {}
-}
 
-function lsFolderOpen(id) {
-  try { return localStorage.getItem(lsFolderOpenKey(id)) !== 'false'; } catch(e) { return true; }
-}
 
-function lsSetFolderOpen(id, open) {
-  try { localStorage.setItem(lsFolderOpenKey(id), open ? 'true' : 'false'); } catch(e) {}
-}
 
 // Must run before any ls* call, so the cache is read under the right user.
 // Body starts as .auth-pending, which hides .admin-only, so admin controls
@@ -547,16 +522,6 @@ async function init() {
     if (!cfg) return;
     personas[slug] = { slug, name: cfg.name || slug, config: cfg };
     seen.add(slug);
-  });
-
-  let folders = lsFolders();
-  if (folders.length === 0) {
-    folders = [{ id: 'main', name: 'Main' }];
-    lsSaveFolders(folders);
-  }
-
-  seen.forEach(slug => {
-    if (!lsPersonaFolder(slug)) lsSetPersonaFolder(slug, folders[0].id);
   });
 
   applySidebarDefault();
@@ -854,34 +819,73 @@ async function toggleFavorite(slug, ev) {
   }
 }
 
-// Favorited personas if any exist, otherwise everything when there's little
-// enough to show without asking the creator to pick — capped at 3 either way.
+// Favourites first, then whatever else fits — capped at 3, with "Show all"
+// covering the rest. Returning favourites *only* meant one starred persona
+// collapsed the whole sidebar list to a single row.
 function quickPersonas() {
   const all = Object.values(personas);
-  const favs = all.filter(p => (p.config || {}).favorite);
-  const pool = favs.length ? favs : (all.length <= 3 ? all : []);
-  return pool.slice(0, 3);
+  const fav = p => !!(p.config || {}).favorite;
+  return all.filter(fav).concat(all.filter(p => !fav(p))).slice(0, 3);
 }
 
 function renderQuickList() {
   const host = document.getElementById('sb-quick');
   if (!host) return;
-  const items = quickPersonas();
-  host.innerHTML = items.map(p => {
-    const cfg = p.config || {};
-    return '<div class="sb-quick-item" onclick="loadPersona(\'' + p.slug + '\')">' +
-      '<div class="sb-quick-thumb">' + personaThumb(p, 22) + '</div>' +
-      '<span>' + esc(p.name || p.slug) + '</span>' +
-      starBtn(p.slug, !!cfg.favorite, 'sb-star') +
-    '</div>';
-  }).join('');
+  host.innerHTML = '';
+  quickPersonas().forEach(p => host.appendChild(buildPersonaItem(p)));
+
+  // The list is capped, so without a way out a creator with four unfavourited
+  // personas would see none of them here.
+  const total = Object.keys(personas).length;
+  if (total > host.children.length) {
+    const more = document.createElement('button');
+    more.type = 'button';
+    more.className = 'sb-showall';
+    more.textContent = 'Show all (' + total + ')';
+    more.onclick = showPersonaBrowser;
+    host.appendChild(more);
+  }
+
+  if (currentSlug) {
+    const active = document.getElementById('item-' + currentSlug);
+    if (active) active.classList.add('active');
+  }
+}
+
+const PROGRESS_FIELDS = {
+  name: 'name', age: 'age', archetype: 'personality', backstory: 'backstory',
+  speech_style: 'speech style', interests: 'interests', avatar: 'photo',
+  cta_url: 'your link',
+};
+
+function progressFilled(cfg) {
+  return Object.keys(PROGRESS_FIELDS).filter(k => String((cfg || {})[k] || '').trim().length > 0);
 }
 
 function personaProgress(cfg) {
-  cfg = cfg || {};
-  const fields = ['name', 'age', 'archetype', 'backstory', 'speech_style', 'interests', 'avatar', 'cta_url'];
-  const filled = fields.filter(k => String(cfg[k] || '').trim().length > 0).length;
-  return Math.round((filled / fields.length) * 100);
+  const keys = Object.keys(PROGRESS_FIELDS);
+  return Math.round((progressFilled(cfg).length / keys.length) * 100);
+}
+
+// Names what is still blank, so the bar says what to do next rather than just
+// how far along you are. Separate from personaProgress, whose integer return is
+// concatenated into markup in several places.
+function personaMissing(cfg) {
+  const filled = new Set(progressFilled(cfg));
+  return Object.keys(PROGRESS_FIELDS).filter(k => !filled.has(k)).map(k => PROGRESS_FIELDS[k]);
+}
+
+function progressTitle(pct, cfg) {
+  const missing = personaMissing(cfg);
+  return missing.length ? pct + '% complete — still needs ' + missing.join(', ')
+                        : 'Complete — every field is filled in';
+}
+
+function progressBarHtml(pct, cfg) {
+  return '<div class="pg-bar" role="progressbar" aria-valuenow="' + pct + '" aria-valuemin="0" ' +
+    'aria-valuemax="100" aria-label="Persona completeness" title="' + esc(progressTitle(pct, cfg)) + '">' +
+    '<i style="width:' + pct + '%;background:' + progressBand(pct) + ';"></i></div>' +
+    '<span class="pg-pct" style="color:' + progressBand(pct) + ';">' + pct + '%</span>';
 }
 
 function progressBand(pct) {
@@ -893,6 +897,100 @@ function progressBand(pct) {
 function pgViewKey() { return 'admin_pg_view' + lsNs(); }
 function pgView() { try { return localStorage.getItem(pgViewKey()) || 'cards'; } catch(e) { return 'cards'; } }
 function setPgView(v) { try { localStorage.setItem(pgViewKey(), v); } catch(e) {} renderPersonaBrowser(); }
+
+// ── Gallery filter & sort ────────────────────────────────────────────────────
+// Persisted like the view toggle so a creator's shortlist survives a reload.
+function pgFilterKey() { return 'admin_pg_filter' + lsNs(); }
+function pgSortKey()   { return 'admin_pg_sort' + lsNs(); }
+
+function pgFilter() {
+  try { return JSON.parse(localStorage.getItem(pgFilterKey()) || '{}') || {}; }
+  catch(e) { return {}; }
+}
+function pgSort() { try { return localStorage.getItem(pgSortKey()) || 'name'; } catch(e) { return 'name'; } }
+
+function savePgFilter(f) { try { localStorage.setItem(pgFilterKey(), JSON.stringify(f)); } catch(e) {} }
+
+// Which dropdown is open survives the full re-render that every keystroke and
+// every toggle triggers — same reason pgQuery is kept out here.
+let pgMenu = null;
+function togglePgMenu(name) { pgMenu = (pgMenu === name) ? null : name; renderPersonaBrowser(); }
+function closePgMenu() { if (pgMenu) { pgMenu = null; renderPersonaBrowser(); } }
+
+function setPgSort(v) { try { localStorage.setItem(pgSortKey(), v); } catch(e) {} pgMenu = null; renderPersonaBrowser(); }
+
+// Values inside one category are OR'd; the categories AND together.
+function togglePgFilter(cat, value) {
+  const f = pgFilter();
+  const list = f[cat] || [];
+  f[cat] = list.includes(value) ? list.filter(x => x !== value) : list.concat([value]);
+  if (!f[cat].length) delete f[cat];
+  savePgFilter(f);
+  renderPersonaBrowser();
+}
+function clearPgFilter() { savePgFilter({}); pgMenu = null; renderPersonaBrowser(); }
+function pgFilterCount() { return Object.values(pgFilter()).reduce((n, v) => n + v.length, 0); }
+
+function completionBand(pct) {
+  if (pct >= 100) return 'complete';
+  return pct > 0 ? 'partial' : 'empty';
+}
+
+const COMPLETION_LABELS = { complete: 'Complete', partial: 'In progress', empty: 'Not started' };
+const NSFW_LABELS = { off: 'Off', suggestive: 'Suggestive', moderate: 'Moderate', explicit: 'Explicit' };
+
+function personaNsfw(cfg) {
+  if (!cfg.nsfw) return 'off';
+  return String(cfg.nsfw_level || 'suggestive').toLowerCase();
+}
+
+// Archetypes come from the personas present rather than a hardcoded list, so a
+// custom archetype is filterable the moment it exists.
+function pgArchetypes() {
+  const seen = new Set();
+  Object.values(personas).forEach(p => {
+    const a = ((p.config || {}).archetype || '').trim();
+    if (a) seen.add(a);
+  });
+  return [...seen].sort();
+}
+
+function matchesPgFilter(p) {
+  const f = pgFilter();
+  const cfg = p.config || {};
+  const pct = personaProgress(Object.assign({ name: p.name, avatar: p.avatar }, cfg));
+  if (f.favorite && f.favorite.length && !cfg.favorite) return false;
+  if (f.archetype && f.archetype.length && !f.archetype.includes((cfg.archetype || '').trim())) return false;
+  if (f.completion && f.completion.length && !f.completion.includes(completionBand(pct))) return false;
+  if (f.nsfw && f.nsfw.length && !f.nsfw.includes(personaNsfw(cfg))) return false;
+  return true;
+}
+
+function sortPgSlugs(slugs) {
+  const sort = pgSort();
+  const pctOf = p => personaProgress(Object.assign({ name: p.name, avatar: p.avatar }, p.config || {}));
+  const nameOf = p => (p.name || p.slug || '').toLowerCase();
+  return slugs.slice().sort((a, b) => {
+    const pa = personas[a], pb = personas[b];
+    if (sort === 'completion') return pctOf(pb) - pctOf(pa) || nameOf(pa).localeCompare(nameOf(pb));
+    if (sort === 'recent') {
+      // Personas from the repo have no timestamp; keep them after saved ones
+      // rather than letting an empty string sort them to the top.
+      const ta = pa.updated_at || pa.created_at || '';
+      const tb = pb.updated_at || pb.created_at || '';
+      if (ta && tb) return tb.localeCompare(ta);
+      if (ta !== tb) return ta ? -1 : 1;
+      return nameOf(pa).localeCompare(nameOf(pb));
+    }
+    if (sort === 'favorite') {
+      const fa = (pa.config || {}).favorite ? 0 : 1;
+      const fb = (pb.config || {}).favorite ? 0 : 1;
+      if (fa !== fb) return fa - fb;
+      return nameOf(pa).localeCompare(nameOf(pb));
+    }
+    return nameOf(pa).localeCompare(nameOf(pb));
+  });
+}
 
 function clearSbActive() {
   document.querySelectorAll('.sb-item.active').forEach(el => el.classList.remove('active'));
@@ -930,6 +1028,75 @@ function personaThumb(p, size) {
     : '<div class="pg-initials" style="font-size:' + Math.round(size * 0.32) + 'px;">' + esc((p.name || p.slug).slice(0,2).toUpperCase()) + '</div>';
 }
 
+function pgCheckRow(cat, value, label) {
+  const on = (pgFilter()[cat] || []).includes(value);
+  return '<button type="button" class="pg-opt' + (on ? ' on' : '') + '" role="menuitemcheckbox" ' +
+    'aria-checked="' + on + '" onclick="event.stopPropagation();togglePgFilter(\'' + cat + '\',' +
+    JSON.stringify(value).replace(/"/g, '&quot;') + ')">' +
+    '<span class="pg-tick" aria-hidden="true">' + (on ? '✓' : '') + '</span>' + esc(label) + '</button>';
+}
+
+function pgFilterMenuHtml() {
+  const n = pgFilterCount();
+  const arche = pgArchetypes();
+  const groups =
+    '<div class="pg-opt-h">Status</div>' +
+    Object.keys(COMPLETION_LABELS).map(k => pgCheckRow('completion', k, COMPLETION_LABELS[k])).join('') +
+    (arche.length ? '<div class="pg-opt-h">Personality</div>' +
+      arche.map(a => pgCheckRow('archetype', a, a)).join('') : '') +
+    '<div class="pg-opt-h">Content level</div>' +
+    Object.keys(NSFW_LABELS).map(k => pgCheckRow('nsfw', k, NSFW_LABELS[k])).join('') +
+    '<div class="pg-opt-h">Other</div>' +
+    pgCheckRow('favorite', 'yes', 'Favourites only') +
+    (n ? '<button type="button" class="pg-opt pg-opt-clear" onclick="event.stopPropagation();clearPgFilter()">Clear all filters</button>' : '');
+
+  return '<div class="pg-menu' + (pgMenu === 'filter' ? ' open' : '') + '">' +
+    '<button type="button" class="pg-ctl' + (n ? ' active' : '') + '" aria-haspopup="true" ' +
+    'aria-expanded="' + (pgMenu === 'filter') + '" onclick="event.stopPropagation();togglePgMenu(\'filter\')">' +
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" width="14" height="14" aria-hidden="true">' +
+      '<path d="M3 5h18M6 12h12M10 19h4" stroke-linecap="round"/></svg>Filter' +
+      (n ? '<span class="pg-ctl-n">' + n + '</span>' : '') +
+    '</button>' +
+    '<div class="pg-pop" role="menu">' + groups + '</div></div>';
+}
+
+const SORT_LABELS = { name: 'Name (A–Z)', completion: 'Most complete', recent: 'Recently updated', favorite: 'Favourites first' };
+
+function pgSortMenuHtml() {
+  const cur = pgSort();
+  return '<div class="pg-menu' + (pgMenu === 'sort' ? ' open' : '') + '">' +
+    '<button type="button" class="pg-ctl" aria-haspopup="true" aria-expanded="' + (pgMenu === 'sort') + '" ' +
+    'onclick="event.stopPropagation();togglePgMenu(\'sort\')">' +
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" width="14" height="14" aria-hidden="true">' +
+      '<path d="M7 4v16M7 20l-3-3M17 20V4M17 4l3 3" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+      esc(SORT_LABELS[cur] || SORT_LABELS.name) +
+    '</button>' +
+    '<div class="pg-pop" role="menu">' +
+      Object.keys(SORT_LABELS).map(k =>
+        '<button type="button" class="pg-opt' + (k === cur ? ' on' : '') + '" role="menuitemradio" ' +
+        'aria-checked="' + (k === cur) + '" onclick="event.stopPropagation();setPgSort(\'' + k + '\')">' +
+        '<span class="pg-tick" aria-hidden="true">' + (k === cur ? '✓' : '') + '</span>' +
+        esc(SORT_LABELS[k]) + '</button>').join('') +
+    '</div></div>';
+}
+
+function pgStatusHtml(shown, total) {
+  if (shown === total && !pgQuery) return '';
+  return '<div class="pg-status">Showing <strong>' + shown + '</strong> of ' + total +
+    (pgFilterCount() ? ' <button type="button" class="pg-clear" onclick="clearPgFilter()">Clear filters</button>' : '') +
+    '</div>';
+}
+
+// A filtered-away grid is not the same as owning no personas — say which.
+function pgEmptyHtml() {
+  const bits = [];
+  if (pgQuery) bits.push('the search “' + esc(pgQuery) + '”');
+  if (pgFilterCount()) bits.push('the filters you picked');
+  return '<div class="pg-none">' +
+    '<div class="pg-none-t">Nothing matches ' + (bits.join(' and ') || 'that') + '</div>' +
+    '<button type="button" class="btn btn-secondary" onclick="clearPgFilter();setPgQuery(\'\')">Reset</button></div>';
+}
+
 function renderPersonaBrowser() {
   const allSlugs = Object.keys(personas);
   const fa = document.getElementById('form-area');
@@ -940,7 +1107,8 @@ function renderPersonaBrowser() {
   }
   document.body.classList.add('browsing');
   const view = pgView();
-  const slugs = allSlugs.filter(slug => matchesQuery(personas[slug], pgQuery));
+  const slugs = sortPgSlugs(allSlugs.filter(slug =>
+    matchesQuery(personas[slug], pgQuery) && matchesPgFilter(personas[slug])));
   const cards = slugs.map(slug => {
     const p = personas[slug];
     const cfg = p.config || {};
@@ -954,7 +1122,7 @@ function renderPersonaBrowser() {
         '<div class="pg-row-thumb">' + personaThumb(p, 48) + '</div>' +
         '<div class="pg-row-info"><div class="pg-row-name">' + esc(p.name || slug) + '</div>' +
         '<div class="pg-row-sub">' + sub + '</div></div>' +
-        '<div class="pg-row-bar"><div class="pg-bar"><i style="width:' + pct + '%;background:' + progressBand(pct) + ';"></i></div></div>' +
+        '<div class="pg-row-bar">' + progressBarHtml(pct, cfg) + '</div>' +
         star +
         '<button type="button" class="btn btn-ghost pg-open" onclick="event.stopPropagation();loadPersona(\'' + slug + '\')">Open</button>' +
         delBtn + '</div>';
@@ -965,7 +1133,7 @@ function renderPersonaBrowser() {
         '<div class="pg-card-text"><div class="pg-card-name">' + esc(p.name || slug) + '</div>' +
         '<div class="pg-card-sub">' + sub + '</div></div></div>' +
       '<div class="pg-card-foot">' +
-        '<div class="pg-bar"><i style="width:' + pct + '%;background:' + progressBand(pct) + ';"></i></div>' +
+        progressBarHtml(pct, cfg) +
         '<button type="button" class="btn btn-primary pg-open" onclick="event.stopPropagation();loadPersona(\'' + slug + '\')">Open</button>' +
       '</div></div>';
   }).join('');
@@ -980,13 +1148,16 @@ function renderPersonaBrowser() {
         '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="14" height="14" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3" stroke-linecap="round"/></svg>' +
         '<input type="text" placeholder="Search personas…" value="' + esc(pgQuery) + '" oninput="setPgQuery(this.value)">' +
       '</div>' +
+      pgFilterMenuHtml() +
+      pgSortMenuHtml() +
       '<div class="pg-toggle">' +
         '<button type="button" class="' + (view === 'cards' ? 'active' : '') + '" onclick="setPgView(\'cards\')">▦ Cards</button>' +
         '<button type="button" class="' + (view === 'list' ? 'active' : '') + '" onclick="setPgView(\'list\')">☰ List</button>' +
       '</div></div>' +
+    pgStatusHtml(slugs.length, allSlugs.length) +
     (slugs.length
       ? '<div class="' + (view === 'list' ? 'pg-list' : 'pg-grid') + '">' + cards + '</div>'
-      : '<div class="sb-no-match" style="padding:20px 4px;">No personas match "' + esc(pgQuery) + '"</div>');
+      : pgEmptyHtml());
   // The search box's own oninput re-renders this whole block, which would
   // otherwise steal focus and the cursor position on every keystroke.
   if (pgFocusPending !== null) {
@@ -1002,57 +1173,6 @@ function renderPersonaBrowser() {
 function renderSidebar() {
   if (!currentSlug) renderPersonaBrowser();
   renderQuickList();
-  const list = document.getElementById('persona-list');
-  if (!list) return;
-  list.innerHTML = '';
-  const folders = lsFolders();
-  const slugs = Object.keys(personas).filter(slug => matchesQuery(personas[slug]));
-
-  if (sbQuery && !slugs.length) {
-    list.innerHTML = '<div class="sb-no-match">No personas match "' + esc(sbQuery) + '"</div>';
-    return;
-  }
-
-  const assigned = new Set();
-  folders.forEach(folder => {
-    const folderSlugs = slugs.filter(slug => lsPersonaFolder(slug) === folder.id);
-    folderSlugs.forEach(slug => assigned.add(slug));
-    if (sbQuery && !folderSlugs.length) return;
-
-    const section = document.createElement('div');
-    section.className = 'folder-section';
-    section.id = 'folder-section-' + folder.id;
-
-    const isOpen = sbQuery || lsFolderOpen(folder.id);
-    const header = document.createElement('div');
-    header.className = 'folder-header';
-    header.innerHTML =
-      '<span class="folder-arrow ' + (isOpen ? 'open' : '') + '">▶</span>' +
-      '<span class="folder-name">' + esc(folder.name) + '</span>' +
-      '<span class="folder-actions">' +
-        '<button class="folder-action-btn" onclick="event.stopPropagation();renameFolder(\'' + folder.id + '\')" title="Rename">✏</button>' +
-        '<button class="folder-action-btn" onclick="event.stopPropagation();deleteFolder(\'' + folder.id + '\')" title="Delete" style="color:var(--err);">✕</button>' +
-      '</span>';
-    header.onclick = () => toggleFolder(folder.id);
-    section.appendChild(header);
-
-    const items = document.createElement('div');
-    items.className = 'folder-items' + (isOpen ? '' : ' collapsed');
-    items.id = 'folder-items-' + folder.id;
-
-    folderSlugs.forEach(slug => items.appendChild(buildPersonaItem(personas[slug])));
-    section.appendChild(items);
-    list.appendChild(section);
-  });
-
-  slugs.forEach(slug => {
-    if (!assigned.has(slug)) list.appendChild(buildPersonaItem(personas[slug]));
-  });
-
-  if (currentSlug) {
-    const active = document.getElementById('item-' + currentSlug);
-    if (active) active.classList.add('active');
-  }
 }
 
 async function loadPersona(slug) {
@@ -1232,8 +1352,6 @@ async function newPersona() {
   currentSlug = slug;
   if (!personas[slug]) {
     personas[slug] = { slug, name, config: {}, premade: false };
-    const folders = lsFolders();
-    if (folders.length > 0) lsSetPersonaFolder(slug, folders[0].id);
     document.getElementById('persona-count').textContent = Object.keys(personas).length;
   }
   renderSidebar();
@@ -1251,52 +1369,10 @@ function showActionBar() {
   document.getElementById('action-bar').style.display = 'flex';
 }
 
-function toggleFolder(id) {
-  const items = document.getElementById('folder-items-' + id);
-  const arrow = document.querySelector('#folder-section-' + id + ' .folder-arrow');
-  if (!items) return;
-  const open = items.classList.toggle('collapsed');
-  if (arrow) arrow.classList.toggle('open', !open);
-  lsSetFolderOpen(id, !open);
-}
 
-function newFolder() {
-  const name = prompt('Folder name:');
-  if (!name || !name.trim()) return;
-  const id = 'f_' + Date.now();
-  const folders = lsFolders();
-  folders.push({ id, name: name.trim() });
-  lsSaveFolders(folders);
-  renderSidebar();
-}
 
-function renameFolder(id) {
-  const folders = lsFolders();
-  const folder = folders.find(f => f.id === id);
-  if (!folder) return;
-  const name = prompt('Rename folder:', folder.name);
-  if (!name || !name.trim()) return;
-  folder.name = name.trim();
-  lsSaveFolders(folders);
-  renderSidebar();
-}
 
-function deleteFolder(id) {
-  const folders = lsFolders();
-  const folder = folders.find(f => f.id === id);
-  if (!folder) return;
-  if (!confirm('Delete folder "' + folder.name + '"? Personas in it will be unfoldered.')) return;
-  lsSaveFolders(folders.filter(f => f.id !== id));
-  Object.keys(personas).forEach(slug => {
-    if (lsPersonaFolder(slug) === id) lsSetPersonaFolder(slug, folders[0]?.id || '');
-  });
-  renderSidebar();
-}
 
-function assignFolder(slug, folderId) {
-  lsSetPersonaFolder(slug, folderId);
-  renderSidebar();
-}
 
 function renderForm(slug, cfg) {
   document.body.classList.remove('browsing');
@@ -1571,6 +1647,10 @@ function pickLocation(label) {
 document.addEventListener('click', e => {
   const box = document.getElementById('geo-suggest');
   if (box && !e.target.closest('#f-location') && !e.target.closest('#geo-suggest')) box.style.display = 'none';
+  if (pgMenu && !e.target.closest('.pg-menu')) closePgMenu();
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && pgMenu) closePgMenu();
 });
 
 // Leaving location blank automatically means "match the fan's location".
@@ -2154,8 +2234,6 @@ async function copyPersona(presetConfig) {
     if (!data.ok) throw new Error(data.error || 'Could not copy');
     await saveGallery(data.slug);   // carry the current photos onto the copy
     personas[data.slug] = { slug: data.slug, name: data.name, config: { ...config, name: data.name }, premade: false };
-    const folders = lsFolders();
-    if (folders.length > 0) lsSetPersonaFolder(data.slug, folders[0].id);
     document.getElementById('persona-count').textContent = Object.keys(personas).length;
     status.textContent = '✓ Copied as "' + data.name + '"'; status.className = 'save-status ok';
     renderSidebar();

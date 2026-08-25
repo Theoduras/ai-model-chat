@@ -176,7 +176,12 @@ def db_list_personas(owner_id=None):
                 config = json.loads(sp.config_json)
             except Exception:
                 config = {}
-            out.append({'slug': sp.slug, 'name': sp.name, 'config': config})
+            out.append({
+                'slug': sp.slug, 'name': sp.name, 'config': config,
+                # Surfaced so the dashboard can sort by recency.
+                'created_at': sp.created_at.isoformat() if sp.created_at else None,
+                'updated_at': sp.updated_at.isoformat() if sp.updated_at else None,
+            })
         return out
     except Exception:
         # DB unreachable (e.g. misconfigured Cloud SQL) — never let saved-copy
@@ -2534,6 +2539,8 @@ def api_personas():
                 'avatar': f"/api/personas/{sp['slug']}/avatar" if has_img else None,
                 'config': config,
                 'premade': False,
+                'created_at': sp.get('created_at'),
+                'updated_at': sp.get('updated_at'),
             })
         return jsonify(own)
 
@@ -2583,7 +2590,9 @@ def api_personas():
             'name': sp.get('name') or config.get('name') or sp['slug'].capitalize(),
             'avatar': f"/api/personas/{sp['slug']}/avatar" if has_img else None,
             'config': config,
-            'premade': False
+            'premade': False,
+            'created_at': sp.get('created_at'),
+            'updated_at': sp.get('updated_at'),
         })
     return jsonify(personas)
 
