@@ -5,8 +5,7 @@
   var saved = null;
   try { saved = localStorage.getItem(KEY); } catch (e) {}
 
-  var theme = saved || (window.matchMedia &&
-    window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+  var theme = saved || 'light';
   document.documentElement.setAttribute('data-theme', theme);
 
   window.getTheme = function () {
@@ -26,14 +25,6 @@
   window.toggleTheme = function () {
     window.setTheme(window.getTheme() === 'light' ? 'dark' : 'light');
   };
-
-  // Follow the OS only until the user picks a side themselves.
-  if (!saved && window.matchMedia) {
-    window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', function (e) {
-      try { if (localStorage.getItem(KEY)) return; } catch (err) {}
-      document.documentElement.setAttribute('data-theme', e.matches ? 'light' : 'dark');
-    });
-  }
 
   document.addEventListener('DOMContentLoaded', function () { window.setTheme(window.getTheme()); });
 })();
