@@ -482,17 +482,23 @@ def _language_block(location, mirror_location):
 
 # How fast she feels. Reply speed is the pause before she starts typing (she is
 # "reading"); typing speed is how long the bubble runs, scaled by message length.
+# The wait and the typing time are paid one after the other, on top of the
+# model round trip, so the old numbers put "slow" at 13-17s before a single
+# word appeared and ~20s for a two-bubble reply — long enough to read as
+# broken rather than unhurried. Retuned to land slow around 7s to first word.
+# The whole ladder moves together: these are relative, and dropping only slow
+# would have made it faster than natural.
 REPLY_SPEED = {
     'instant': {'base': 200,  'jitter': 300,  'per_char': 0},
-    'fast':    {'base': 900,  'jitter': 1200, 'per_char': 12},
-    'natural': {'base': 1800, 'jitter': 3500, 'per_char': 35},
-    'slow':    {'base': 4000, 'jitter': 6000, 'per_char': 60},
+    'fast':    {'base': 600,  'jitter': 700,  'per_char': 8},
+    'natural': {'base': 1100, 'jitter': 1600, 'per_char': 18},
+    'slow':    {'base': 2000, 'jitter': 2600, 'per_char': 32},
 }
 
 TYPING_SPEED = {
-    'fast':    {'base': 500,  'per_char': 28, 'max': 4500},
-    'natural': {'base': 900,  'per_char': 45, 'max': 7000},
-    'slow':    {'base': 1600, 'per_char': 70, 'max': 12000},
+    'fast':    {'base': 400,  'per_char': 18, 'max': 3000},
+    'natural': {'base': 700,  'per_char': 30, 'max': 5000},
+    'slow':    {'base': 1100, 'per_char': 45, 'max': 7000},
 }
 
 

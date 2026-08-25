@@ -133,8 +133,8 @@ let personaCfg = {}, profileImages = [], profileIdx = 0;
 
 // Delivery pacing, sent back by /chat from the creator's settings. These are
 // the fallbacks used before the first reply lands.
-let pacing = { reply: { base: 1800, jitter: 3500, per_char: 35 },
-               typing: { base: 900, per_char: 45, max: 7000 } };
+let pacing = { reply: { base: 1100, jitter: 1600, per_char: 18 },
+               typing: { base: 700, per_char: 30, max: 5000 } };
 // Floored: she never starts typing the instant the message lands, she reads it first.
 function replyDelay(text) {
   const r = pacing.reply || {};
