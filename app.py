@@ -409,7 +409,10 @@ def build_system_prompt(config):
         'instant': 'Be playful and flirtatious from the very first reply.'
     }.get(flirt_pace, 'Let flirtation develop naturally.')
 
-    interests_block = f'\nYour personal interests: {interests}' if interests else ''
+    interests_block = (
+        f'\nYour personal interests: {interests}. Talk about these like you actually live them — specific opinions, real experience, small details — not just naming the topic.'
+        if interests else ''
+    )
     triggers_block = f'\nExtra conversion triggers: {conversion_triggers}' if conversion_triggers else ''
     language_block = _language_block(location, mirror_location)
 
@@ -2880,7 +2883,8 @@ def api_generate_persona():
         "capitalisation, emoji use, slang, quirks — matching the archetype and backstory), "
         "warmth (integer 1-5, consistent with the archetype), "
         'question_freq (one of ["rarely","sometimes","often","very often"]), '
-        "interests (comma-separated string of 5-8 topics that fit the backstory), "
+        "interests (comma-separated string of 5-8 topics that fit the backstory — keep it down-to-earth "
+        "and relatable, things a normal person spends time on, at most one leaning intellectual or niche), "
         'flirt_pace (one of ["slow","moderate","fast","instant"], consistent with the archetype), '
         "nsfw_enabled (boolean), nsfw_level (one of [\"suggestive\",\"moderate\",\"explicit\"]), "
         "conversion_triggers (1-2 sentences, in their own voice, on how they naturally introduce paid content). "
@@ -3236,8 +3240,11 @@ def api_generate_interests():
     prompt = (
         f"{'Randomly generate' if randomize else 'Generate'} a comma-separated list of interests for "
         f"{name}, {age}, archetype: {archetype}. Backstory: {backstory}. "
-        "Topics should feel authentic to the persona and spark natural conversation. "
-        "Examples of format: gaming, fitness, tattoos, astrology, cooking, true crime, fashion"
+        "Keep it down-to-earth and relatable — things a normal person actually spends time on: shows, "
+        "food, workouts, music, pets, travel, hobbies, sports, beauty, family, her city. At most one or "
+        "two can lean intellectual or niche if it fits the backstory — don't make the whole list read "
+        "like a resume. Examples of format: reality TV, iced coffee, her dog, hot yoga, k-pop, tattoos, "
+        "true crime podcasts, thrifting"
     )
     try:
         resp = client.models.generate_content(

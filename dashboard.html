@@ -720,6 +720,21 @@ async function loadPersona(slug) {
   loadXStatus();
 }
 
+const WARMTH_COLORS = ['#5b8bb0', '#7a9e8e', '#e0b24f', '#ff5c38', '#ff2d78'];
+
+function updateWarmthSlider(el) {
+  const v = parseInt(el.value, 10) || 1;
+  document.getElementById('warmth-val').textContent = v;
+  const color = WARMTH_COLORS[v - 1];
+  const pct = ((v - 1) / 4) * 100;
+  el.style.setProperty('--warmth-color', color);
+  el.style.background =
+    'linear-gradient(90deg, ' + WARMTH_COLORS.slice(0, v).join(', ') +
+    (v > 1 ? ' ' + pct + '%' : '') + ', var(--surface-2) ' + pct + '%)';
+  document.getElementById('warmth-val').style.color = color;
+  document.getElementById('warmth-val').style.borderColor = color;
+}
+
 function slugify(name) {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
@@ -954,7 +969,7 @@ function renderForm(slug, cfg) {
       <div class="field">
         <label>Warmth Level</label>
         <div class="slider-row">
-          <input type="range" id="f-warmth" min="1" max="5" value="${cfg.warmth || 3}" oninput="document.getElementById('warmth-val').textContent=this.value">
+          <input type="range" class="warmth-slider" id="f-warmth" min="1" max="5" value="${cfg.warmth || 3}" oninput="updateWarmthSlider(this)">
           <span class="slider-val" id="warmth-val">${cfg.warmth || 3}</span>
         </div>
         <div class="slider-labels"><span>Cold</span><span>Distant</span><span>Friendly</span><span>Warm</span><span>Affectionate</span></div>
@@ -1069,6 +1084,7 @@ function renderForm(slug, cfg) {
       </div>
     </div>
   `;
+  updateWarmthSlider(document.getElementById('f-warmth'));
   if (window.Onboarding) Onboarding.onFormRendered(slug, cfg);
 }
 

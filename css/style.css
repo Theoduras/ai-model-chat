@@ -1189,21 +1189,32 @@ body.page-dashboard select {
   height: 6px;
   border-radius: 9999px;
   border: none;
-  background: linear-gradient(90deg, var(--accent), var(--accent-2));
+  outline: none;
+  background: var(--surface-2);
   padding: 0;
   cursor: pointer;
 }
+.slider-row input[type="range"]:focus,
+.slider-row input[type="range"]:focus-visible,
+.slider-row input[type="range"]:active {
+  outline: none;
+  box-shadow: none;
+}
+.slider-row input[type="range"]::-webkit-slider-runnable-track { background: transparent; }
+.slider-row input[type="range"]::-moz-range-track { background: transparent; }
+.slider-row input[type="range"]::-moz-range-progress { background: transparent; }
 .slider-row input[type="range"]::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
   width: 18px;
   height: 18px;
+  margin-top: 0;
   border-radius: 50%;
   background: #fff;
-  border: 2px solid var(--accent);
-  box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+  border: 2px solid var(--warmth-color, var(--accent));
+  box-shadow: 0 2px 6px rgba(0,0,0,0.35);
   cursor: pointer;
-  transition: transform 0.12s;
+  transition: transform 0.12s, border-color 0.12s;
 }
 .slider-row input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.12); }
 .slider-row input[type="range"]::-moz-range-thumb {
@@ -1211,8 +1222,9 @@ body.page-dashboard select {
   height: 16px;
   border-radius: 50%;
   background: #fff;
-  border: 2px solid var(--accent);
+  border: 2px solid var(--warmth-color, var(--accent));
   cursor: pointer;
+  transition: border-color 0.12s;
 }
 .slider-labels { display: flex; justify-content: space-between; font-size: 0.64rem; color: var(--text-muted); margin-top: 4px; }
 .slider-val {
@@ -1222,8 +1234,10 @@ body.page-dashboard select {
   min-width: 26px;
   text-align: center;
   background: var(--surface);
+  border: 2px solid transparent;
   border-radius: var(--r-sm);
   padding: 2px 0;
+  transition: color 0.12s, border-color 0.12s;
 }
 
 .toggle { position: relative; width: 40px; height: 22px; flex-shrink: 0; }
