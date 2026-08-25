@@ -597,7 +597,7 @@ body.page-chat .conn-dot.err { background: var(--err); }
     border: none;
     box-shadow: none;
   }
-  .chat-container { height: var(--app-height, 100dvh); }
+  .chat-container { height: var(--app-height, 99vh); }
   .header { height: auto; padding: 12px 16px; padding-top: max(12px, env(safe-area-inset-top)); }
   .header-avatar-wrap img { width: 40px; height: 40px; }
   .bubble { max-width: 82%; }
