@@ -249,6 +249,7 @@
               <option value="all">All photos</option>
               <option value="unassigned">Unassigned</option>
               <option value="assigned">In an outfit</option>
+              <option value="nsfw">NSFW</option>
             </select>
             <button type="button" class="btn-ai" onclick="addPhotosTo('')">+ Upload</button>
             <span class="vault-sel" id="vault-sel"></span>
@@ -258,7 +259,7 @@
           </div>
         </div>
         <div class="vault-grid" id="vault-grid"></div>
-        <span class="hint">Every photo you upload or generate lands here. Select some and add them to an outfit — the same photo can be used in more than one. Drop files anywhere on the vault to upload.</span>
+        <span class="hint">Every photo you upload or generate lands here. Select some and add them to an outfit — the same photo can be used in more than one. Drop files anywhere on the vault to upload. Mark a photo <b>18+</b> to hold it out of every normal send — it's only ever sent as the preview that goes with the CTA link.</span>
       </div>
 
       <div id="outfit-list" style="display:flex;flex-direction:column;gap:8px;"></div>
@@ -889,6 +890,7 @@ function addPhotosTo(n) {
 function vaultVisible() {
   if (vaultFilter === 'unassigned') return mediaVault.filter(v => !(v.outfits || []).length);
   if (vaultFilter === 'assigned') return mediaVault.filter(v => (v.outfits || []).length);
+  if (vaultFilter === 'nsfw') return mediaVault.filter(v => v.nsfw);
   return mediaVault;
 }
 
@@ -907,12 +909,15 @@ function renderVault() {
       ? `<span class="vault-badge" title="In outfit ${inOutfits.join(', ')}">${inOutfits.join(',')}</span>`
       : '<span class="vault-badge none" title="Not in any outfit">–</span>';
     return `
-      <div class="vault-item${vaultSelected.has(v.id) ? ' selected' : ''}"
+      <div class="vault-item${vaultSelected.has(v.id) ? ' selected' : ''}${v.nsfw ? ' is-nsfw' : ''}"
            onclick="toggleVaultSelect('${v.id}')"
            draggable="true" ondragstart="onVaultItemDragStart(event,'${v.id}')"
            ondragend="onPhotoDragEnd(event)">
         <img src="${v.thumb}" alt="" draggable="false">
         ${badge}
+        <button type="button" class="nsfw-toggle"
+          title="${v.nsfw ? 'Marked NSFW — only sent at the CTA moment' : 'Mark as NSFW'}"
+          onclick="event.stopPropagation();toggleVaultNsfw('${v.id}',${!v.nsfw})">18+</button>
         <button type="button" class="rm" title="Delete from vault"
           onclick="event.stopPropagation();vaultDeleteOne('${v.id}')">×</button>
       </div>`;
@@ -1276,6 +1281,15 @@ async function updateMedia(id, field, value) {
     });
     setMediaStatus('✓ Saved', true);
   } catch(e) { setMediaStatus('✗ Save failed', false); }
+}
+
+// Flips the vault grid immediately rather than waiting on loadMedia() — the
+// toggle needs to feel instant, it's the only control on the tile itself.
+async function toggleVaultNsfw(id, on) {
+  const row = mediaVault.find(v => v.id === id);
+  if (row) row.nsfw = on;
+  renderVault();
+  await updateMedia(id, 'nsfw', on);
 }
 
 async function deleteMedia(id) {

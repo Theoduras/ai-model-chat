@@ -2621,6 +2621,17 @@ def _recent_bot_questions(history, n):
     return [response_asks_question(t) for t in reversed(bots[-n:])]
 
 
+def _spicy_ask_count(history, incoming=''):
+    """How many times the fan has asked for explicit content, across the visible
+    history plus the message they just sent. Used to release the NSFW vault
+    after N asks — a repeated ask is as strong a buying signal as one instant
+    one, it just takes the fan longer to make it.
+    """
+    fan_msgs = [m.get('content') or '' for m in (history or [])
+                if (m.get('role') or '') == 'user']
+    return sum(1 for t in fan_msgs + [incoming] if _spicy_asked(t))
+
+
 def question_allowed(config, history):
     """False when she has already asked more than her configured frequency
     allows, so the next reply just responds instead of stacking questions."""
@@ -2667,7 +2678,8 @@ def _chat_channel_rules(slug, config, incoming, skip_spicy, history=None):
             'instead. No question mark at the end.')
 
     spicy_mode = config.get('spicy_cta', 'normal')
-    spicy = not skip_spicy and spicy_mode != 'off' and _spicy_asked(incoming)
+    spicy_now = not skip_spicy and _spicy_asked(incoming)
+    spicy = spicy_mode != 'off' and spicy_now
 
     cta_cfg = _phases_cta(slug)
     url = (cta_cfg.get('cta_url') or '').strip()
@@ -2684,11 +2696,12 @@ def _chat_channel_rules(slug, config, incoming, skip_spicy, history=None):
         if (m.get('role') or '') != 'user')
     fan = {'cta_sent': already_sent}
     cta_asked = _cta_asked(incoming)
-    cta_due = (not skip_spicy) and _cta_due(slug, incoming, fan, is_cta_phase, url)
+    spicy_count = 0 if skip_spicy else _spicy_ask_count(history, incoming)
+    cta_due = (not skip_spicy) and _cta_due(slug, incoming, fan, is_cta_phase, url, spicy_count)
     logger.info('CTA decision [%s]: due=%s url=%s exchanges=%d cta_phase=%s '
-                'already_sent=%s asked=%s spicy=%s opener=%s',
+                'already_sent=%s asked=%s spicy=%s spicy_count=%d opener=%s',
                 slug, cta_due, 'set' if url else 'MISSING', exchanges,
-                is_cta_phase, already_sent, cta_asked, spicy, skip_spicy)
+                is_cta_phase, already_sent, cta_asked, spicy, spicy_count, skip_spicy)
 
     if cta_due:
         if cta_asked:
@@ -2697,7 +2710,7 @@ def _chat_channel_rules(slug, config, incoming, skip_spicy, history=None):
                 'say yes, that is where the rest of it lives. Do not deflect and do '
                 f'not paste a URL yourself; the link is appended after your message, '
                 f'phrased as "{label}".')
-        elif spicy:
+        elif spicy_now:
             rules.append(
                 'They are asking to see explicit content. That is a buying signal: '
                 'tease them once, then tell them where the rest of it lives and invite '
@@ -2719,13 +2732,18 @@ def _chat_channel_rules(slug, config, incoming, skip_spicy, history=None):
 
 
 def _chat_photo_pool(slug):
-    """(tagged media rows, gallery data URLs) she can actually send here."""
+    """(tagged media rows, gallery data URLs) she can actually send here.
+
+    A photo marked NSFW in the vault is never in this pool — it is held out
+    of every normal send, model-requested or phase-rolled, and only ever
+    reaches the fan through _chat_nsfw_pool at the CTA moment.
+    """
     rows = []
     try:
         from db import SessionLocal, list_persona_media
         sess = SessionLocal()
         try:
-            rows = list_persona_media(sess, slug) or []
+            rows = [r for r in (list_persona_media(sess, slug) or []) if not r.nsfw]
         finally:
             sess.close()
     except Exception:
@@ -2736,6 +2754,32 @@ def _chat_photo_pool(slug):
         return db_get_images(slug)
     except Exception:
         return []
+
+
+def _chat_nsfw_pool(slug):
+    """The vault photos marked NSFW, for the moment the CTA goes out.
+
+    The legacy gallery (db_get_images) has no NSFW tag at all, so it never
+    contributes here — only tagged media rows can be explicit.
+    """
+    try:
+        from db import SessionLocal, list_persona_media
+        sess = SessionLocal()
+        try:
+            return [r for r in (list_persona_media(sess, slug) or []) if r.nsfw]
+        finally:
+            sess.close()
+    except Exception:
+        return []
+
+
+def _chat_nsfw_photo(slug):
+    """Pick one NSFW vault photo to send with the CTA, or None if she has none."""
+    pool = _chat_nsfw_pool(slug)
+    if not pool:
+        return None
+    picked = random.choice(pool)
+    return f'/api/personas/{slug}/media/{picked.id}/image'
 
 
 def _chat_take_photo(slug, reply):
@@ -2878,10 +2922,17 @@ def chat():
             reply, is_greeting or question_allowed(config, chat_history))
         reply = strip_ppv_marker(reply)
         if cta:
+            # The vault photo is the preview that goes with the link — she is
+            # not showing a tease shot and then, separately, asking the fan to
+            # go look elsewhere. Falls back to whatever photo was already
+            # resolved (or none) if nothing in the vault is marked NSFW.
+            nsfw_photo = _chat_nsfw_photo(persona_slug)
+            if nsfw_photo:
+                photo = nsfw_photo
             reply = f"{reply}\n\n{cta['label']} → {cta['url']}"
-            logger.info('CTA SENT [%s] user=%s exchange=%d -> %s',
+            logger.info('CTA SENT [%s] user=%s exchange=%d nsfw_photo=%s -> %s',
                         persona_slug, safe_user,
-                        _chat_exchanges(chat_history), cta['url'])
+                        _chat_exchanges(chat_history), bool(nsfw_photo), cta['url'])
         chat_logger.info(f'BOT [{persona_slug}]: {reply[:120]}{" +photo" if photo else ""}')
         return jsonify({'reply': reply, 'photo': photo, 'pacing': pacing})
 
@@ -4026,21 +4077,32 @@ def _cta_asked(text):
     return bool(_CTA_ASK_RE.search(text or ''))
 
 
-def _cta_due(persona, text, fan, is_cta_phase, cta_url):
+def _cta_due(persona, text, fan, is_cta_phase, cta_url, spicy_count=0):
     """Whether the CTA link goes out with this reply.
 
     Asking where else to find her always overrides the phase gate. Asking to see
     explicit content does too, when the creator set spicy_cta to fast/instant —
     on "instant" it also overrides the once-only gate, so a fan who keeps asking
     keeps being pointed at the page.
+
+    spicy_count is how many times the fan has asked for explicit content so
+    far, this message included — 0 unless the caller tracks it (currently
+    only the browser chat does, via _spicy_ask_count). Once it reaches the
+    creator's threshold the CTA fires too, on top of whatever spicy_cta is
+    set to: a fan who keeps asking is a strong signal on its own, separate
+    from the fast/instant single-shot modes above.
     """
     if not cta_url:
         return False
     if _cta_asked(text):
         return True
-    mode = load_persona_config(persona).get('spicy_cta', 'normal')
+    cfg = load_persona_config(persona)
+    mode = cfg.get('spicy_cta', 'normal')
     if mode in ('fast', 'instant') and _spicy_asked(text):
         return mode == 'instant' or not fan.get('cta_sent')
+    threshold = cfg.get('spicy_release_after') or 0
+    if threshold and spicy_count >= threshold and not fan.get('cta_sent'):
+        return True
     return not fan.get('cta_sent') and is_cta_phase
 
 
@@ -4208,6 +4270,7 @@ def api_persona_media_list(slug):
                 'outfit': r.outfit or '',        # legacy, kept during migration
                 'location': (o or {}).get('location', ''),
                 'lighting': (o or {}).get('lighting', ''),
+                'nsfw': bool(r.nsfw),
                 'thumb': f'/api/personas/{slug}/media/{r.id}/image',
             })
 
@@ -4251,6 +4314,7 @@ def api_persona_media_save(slug):
             outfit=str(data.get('outfit', ''))[:120],
             lighting=str(data.get('lighting', ''))[:60],
             purpose=str(data.get('purpose', ''))[:60],
+            nsfw=bool(data.get('nsfw')),
         )
         s.add(row)
         s.flush()
@@ -4354,6 +4418,8 @@ def api_persona_media_update(slug, media_id):
         for f in ('location', 'outfit', 'lighting', 'purpose'):
             if f in data:
                 setattr(row, f, str(data[f])[:120])
+        if 'nsfw' in data:
+            row.nsfw = bool(data['nsfw'])
         if 'image' in data and data['image'].startswith('data:'):
             row.image_data = data['image']
         s.commit()
