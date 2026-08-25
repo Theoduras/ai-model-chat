@@ -515,6 +515,9 @@ def build_system_prompt(config):
     conversion_triggers = config.get('conversion_triggers', '')
     question_rule = question_freq_rule(config)
     mirror_location = config.get('mirror_location', False)
+    emoji_use = config.get('emoji_use', 'none')
+    reply_length = config.get('reply_length', 'short')
+    lowercase = config.get('lowercase', True)
 
     # No location set → automatically match the fan's location.
     if not (location or '').strip():
@@ -523,6 +526,37 @@ def build_system_prompt(config):
 
     warmth_map = {1: 'cold and distant', 2: 'reserved', 3: 'friendly', 4: 'warm', 5: 'affectionate'}
     warmth_desc = warmth_map.get(warmth, 'friendly')
+
+    # A cold or reserved persona was still told to build genuine warmth, which
+    # pulls straight against her own warmth setting. She stays attentive at the
+    # low end — she just does not perform affection she is not set to have.
+    if warmth <= 2:
+        rapport_note = ('Earn her interest slowly — pay attention and remember what the fan says, '
+                        'but stay measured. Do not gush, and do not act closer than you feel.')
+    else:
+        rapport_note = 'Build genuine warmth — the fan must like you as a person before anything else happens.'
+
+    # These three were hardcoded, which silently contradicted any creator who
+    # wrote "uses lots of emojis" or "long rambling messages" in Speech Style.
+    # The defaults reproduce the old behaviour exactly.
+    emoji_map = {
+        'none': 'No emojis. Zero. Not even one.',
+        'rare': 'Emojis almost never — at most one every several messages, and only when it genuinely lands.',
+        'some': 'The odd emoji is fine — roughly one every few messages, never more than one per reply.',
+        'lots': 'Use emojis freely, the way she texts — one or two per reply wherever they fit.',
+    }
+    emoji_note = emoji_map.get(emoji_use, emoji_map['none'])
+
+    length_map = {
+        'short': 'Keep each reply to 1-2 sentences only. Short, like a real text message. Never write a paragraph.',
+        'medium': 'Keep each reply to 2-4 sentences. Conversational, but never a wall of text.',
+        'long': 'Longer replies are fine — up to a short paragraph when she has something to say. Still never lecture.',
+    }
+    length_note = length_map.get(reply_length, length_map['short'])
+
+    case_note = ('Write mostly in lowercase — only capitalise proper names (people, cities) '
+                 'and the word "I". Everything else stays lowercase.') if lowercase else (
+                 'Use ordinary sentence capitalisation, the way most people type.')
 
     nsfw_level_map = {
         'suggestive': 'Be suggestive and flirtatious. Hint at things without going explicit.',
@@ -590,11 +624,11 @@ Personality: {archetype}. {speech_style}
 Voice rules:
 - You are {warmth_desc} in your interactions.
 - {flirt_pace_note}
-- Keep each reply to 1-2 sentences only. Short, like a real text message. Never write a paragraph.
+- {length_note}
 - {question_rule}
-- No emojis. Zero. Not even one.
+- {emoji_note}
 - Always complete every sentence. Never cut off mid-thought.
-- Write mostly in lowercase — only capitalise proper names (people, cities) and the word "I". Everything else stays lowercase.
+- {case_note}
 - Always write numbers as digits, never as words. Write "3" not "three", "19" not "nineteen".
 - Your opening message to a new fan must always feel fresh and slightly different — vary the phrasing and opener every time, but keep the same casual warm vibe.{location_block}{interests_block}
 
@@ -609,10 +643,10 @@ Character rules:
 - Stay 100% in character as {name} at all times. Never mention being an AI.
 - Sound like a real person texting — casual, natural, not robotic or formal.
 - React to what was just said first. Don't jump ahead to a new topic before acknowledging the current one.
-- Build genuine warmth — the fan must like you as a person before anything else happens.
+- {rapport_note}
 - ANSWER ORDINARY QUESTIONS PROPERLY. If the fan asks something normal — what you like, what you do, how your day was, what you are up to, where you are from — give a real, specific answer about yourself, then ask them something back. Deflecting a normal question with "that's for another time", "you'll have to find out", "some things are better discovered" or anything like it is WRONG: it reads as evasive and kills the conversation. Only genuinely private things (your address, real name, phone number) are off limits, and you say that plainly rather than being coy.
 - Teasing is ONLY for sexual or explicit requests. When the fan pushes there: engage — don't shut it down or go cold — but make clear that YOU set the pace, not them. Be playful about it: tease, hint, slow things down deliberately. A response like "easy... I go at my own speed" keeps them hooked without giving everything at once.
-- Never deflect the same thing twice. If the fan asks again, or says you did not answer, ANSWER IT — properly and warmly. Repeated dodging is the fastest way to lose them.{ppv_block}{triggers_block}
+- Never deflect the same thing twice. If the fan asks again, or says you did not answer, ANSWER IT — properly and directly. Repeated dodging is the fastest way to lose them.{ppv_block}{triggers_block}
 
 You are {name} in a text conversation on a fan platform. Respond only as {name}. One short text at a time.{language_block}"""
 
@@ -705,7 +739,7 @@ Answering rules (CRITICAL):
 - ANSWER ORDINARY QUESTIONS PROPERLY. If the fan asks something normal — what you like, what you do, how your day was, what you are up to, where you are from — give a real, specific answer about yourself, then ask them something back. Deflecting a normal question with "that's for another time", "you'll have to find out", "some things are better discovered" or anything like it is WRONG: it reads as evasive and kills the conversation.
 - Only genuinely private things (your address, real name, phone number) are off limits, and you say that plainly rather than being coy.
 - Teasing and holding back are ONLY for sexual or explicit requests, never for getting-to-know-you questions.
-- Never deflect the same thing twice. If the fan asks again, or says you did not answer, ANSWER IT — properly and warmly. Repeated dodging is the fastest way to lose them."""
+- Never deflect the same thing twice. If the fan asks again, or says you did not answer, ANSWER IT — properly and directly. Repeated dodging is the fastest way to lose them."""
 
 
 def get_system_prompt(slug):
@@ -2508,6 +2542,28 @@ def _chat_exchanges(history):
     return n + 1
 
 
+def _chat_first_seen(history):
+    """When this fan first wrote, from the oldest timestamped message.
+
+    The browser chat keeps no fan record, so a days-based phase has no other
+    clock. Histories saved before messages carried a `ts` return 0, which reads
+    as "started today" rather than erroring — those fans age from now on.
+    """
+    for m in (history or []):
+        try:
+            ts = int(m.get('ts') or 0)
+        except (TypeError, ValueError):
+            continue
+        if ts > 0:
+            return ts
+    return 0
+
+
+def _chat_fan(history):
+    """The fan shape _fan_phase expects, derived from the posted history."""
+    return {'in_count': _chat_exchanges(history), 'first_in': _chat_first_seen(history)}
+
+
 def _recent_bot_questions(history, n):
     """Whether each of the last n bot replies asked a question, newest first."""
     bots = [m.get('content') or '' for m in (history or [])
@@ -2572,7 +2628,7 @@ def _chat_channel_rules(slug, config, incoming, skip_spicy, history=None):
     # the link already went out in one of her earlier replies.
     phases = _phases(slug)
     exchanges = _chat_exchanges(history)
-    is_cta_phase = _fan_phase(phases, {'in_count': exchanges}) == len(phases) - 1
+    is_cta_phase = _fan_phase(phases, _chat_fan(history)) == len(phases) - 1
     already_sent = bool(url) and any(
         url in (m.get('content') or '') for m in (history or [])
         if (m.get('role') or '') != 'user')
@@ -2674,7 +2730,7 @@ def _chat_phase_photo(slug, history):
     if not pool:
         return None
     phases = _phases(slug)
-    idx = _fan_phase(phases, {'in_count': _chat_exchanges(history)})
+    idx = _fan_phase(phases, _chat_fan(history))
     phase = phases[idx] if idx < len(phases) else phases[-1]
     try:
         rate = max(0, min(100, int(phase.get('photo_rate', 20))))
@@ -3209,6 +3265,9 @@ def _normalize_persona(cfg):
         warmth = 3
     out['warmth'] = max(1, min(5, warmth))
     out['question_freq'] = _pick(cfg.get('question_freq'), ['rarely', 'sometimes', 'often', 'very often'], 'often')
+    out['emoji_use'] = _pick(cfg.get('emoji_use'), ['none', 'rare', 'some', 'lots'], 'none')
+    out['reply_length'] = _pick(cfg.get('reply_length'), ['short', 'medium', 'long'], 'short')
+    out['lowercase'] = bool(cfg.get('lowercase', True))
     interests = cfg.get('interests')
     if isinstance(interests, list):
         interests = ', '.join(str(i) for i in interests)
@@ -3865,7 +3924,9 @@ def _clean_phase(p):
         'duration_type': p.get('duration_type', 'exchanges') if p.get('duration_type') in ('exchanges', 'days', 'exchanges_and_days') else 'exchanges',
         'duration_value': max(0, int(p.get('duration_value', 0))),
         'duration_days': max(0, int(p.get('duration_days', 0))),
-        'interest': p.get('interest', 'low') if p.get('interest') in ('low', 'medium', 'high') else 'low',
+        # No 'interest' key: it was validated here but never read by the prompt
+        # builder, so creators were setting a control that did nothing. Existing
+        # saved phases still carry it; it is simply dropped on the next save.
         'photo_rate': max(0, min(100, int(p.get('photo_rate', 20)))),
     }
 

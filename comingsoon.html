@@ -28,16 +28,15 @@ body{font-family:'Inter',system-ui,sans-serif;background:#0e0e0e;color:#fff}
 .pill .d{width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px #ff5c3833;animation:pulse 2s infinite}
 @keyframes pulse{0%,100%{box-shadow:0 0 0 4px #ff5c3833}50%{box-shadow:0 0 0 7px #ff5c3811}}
 h1{font-family:'Sora';font-weight:800;font-size:58px;line-height:1.08;letter-spacing:-.02em;margin-bottom:24px}
-h1 u{text-decoration:none;background:linear-gradient(120deg,#ff5c38,#ff2d78 30%,#7c3aed 55%,#ff2d78 80%,#ff5c38);background-size:300% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:sweep 4s linear infinite}
+h1 u{text-decoration:none;background:linear-gradient(120deg,#ff5c38,#ff2d78 30%,#7c3aed 55%,#ff2d78 80%,#ff5c38);background-size:300% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:sweep 4s ease-in-out infinite alternate}
 p.sub{font-size:17px;color:#a7a7a7;line-height:1.65;margin-bottom:36px;max-width:480px}
 .cta{display:flex;gap:10px;max-width:480px}
 .cta input{flex:1;background:#1c1c1c;border:1px solid #2e2e2e;outline:0;color:#fff;padding:15px 18px;font-size:15px;border-radius:12px;transition:border-color .2s}
 .cta input:focus{border-color:var(--accent)}
-.cta button{background:linear-gradient(120deg,#ff5c38,#ff2d78 30%,#7c3aed 60%,#ff2d78 80%,#ff5c38);background-size:300% 100%;background-position:0% 50%;border:0;color:#fff;font-weight:600;padding:15px 26px;border-radius:12px;font-size:15px;cursor:pointer;white-space:nowrap;transition:transform .1s,box-shadow .2s}
-.cta button:hover{transform:translateY(-2px) scale(1.03);box-shadow:0 8px 30px #ff2d7866;animation:sweep .55s linear infinite}
-.cta button:active{transform:translateY(0) scale(1.05);box-shadow:0 4px 24px #7c3aed88;animation:sweepRev .32s linear infinite}
-@keyframes sweep{0%{background-position:0% 50%}100%{background-position:150% 50%}}
-@keyframes sweepRev{0%{background-position:150% 50%}100%{background-position:0% 50%}}
+.cta button{background:linear-gradient(120deg,#ff5c38,#ff2d78 30%,#7c3aed 60%,#ff2d78 80%,#ff5c38);background-size:300% 100%;background-position:0% 50%;border:0;color:#fff;font-weight:600;padding:15px 26px;border-radius:12px;font-size:15px;cursor:pointer;white-space:nowrap;transition:transform .25s ease-out,box-shadow .25s ease-out}
+.cta button:hover{transform:translateY(-2px) scale(1.03);box-shadow:0 8px 30px #ff2d7866;animation:sweep 3s ease-in-out infinite alternate}
+.cta button:active{transform:translateY(0) scale(1.05);box-shadow:0 4px 24px #7c3aed88}
+@keyframes sweep{0%{background-position:0% 50%}100%{background-position:100% 50%}}
 .note{font-size:13px;color:#6b6b6b;margin-top:14px}
 .meta{display:flex;gap:26px;font-size:13px;color:#6b6b6b}
 .meta a{color:#6b6b6b;text-decoration:none;transition:color .2s}
