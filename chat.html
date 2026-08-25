@@ -79,13 +79,8 @@
 <div class="profile-modal" id="profile-modal" onclick="if(event.target===this)closeProfile()">
   <div class="profile-card">
     <button class="profile-close" onclick="closeProfile()" aria-label="Close">✕</button>
-    <div class="profile-gallery" id="profile-gallery">
-      <img id="profile-photo" src="" alt="" onclick="toggleProfileFullscreen()">
-      <button class="pg-nav prev" id="pg-prev" onclick="profileStep(-1)" aria-label="Previous">‹</button>
-      <button class="pg-nav next" id="pg-next" onclick="profileStep(1)" aria-label="Next">›</button>
-      <div class="pg-dots" id="pg-dots"></div>
-    </div>
     <div class="profile-info">
+      <span class="profile-eyebrow">Profile</span>
       <div class="profile-name-row">
         <span class="profile-name" id="profile-name"></span>
         <span class="profile-age" id="profile-age"></span>
@@ -94,6 +89,16 @@
       <div class="profile-loc" id="profile-loc"></div>
       <div class="profile-bio" id="profile-bio"></div>
       <div class="profile-interests" id="profile-interests"></div>
+      <div class="profile-actions">
+        <button class="pf-btn primary" onclick="closeProfile()">Message me</button>
+        <button class="pf-btn" onclick="toggleProfileFullscreen()">View photos</button>
+      </div>
+    </div>
+    <div class="profile-gallery" id="profile-gallery">
+      <img id="profile-photo" src="" alt="" onclick="toggleProfileFullscreen()">
+      <button class="pg-nav prev" id="pg-prev" onclick="profileStep(-1)" aria-label="Previous">‹</button>
+      <button class="pg-nav next" id="pg-next" onclick="profileStep(1)" aria-label="Next">›</button>
+      <div class="pg-thumbs" id="pg-dots"></div>
     </div>
   </div>
 </div>
@@ -191,9 +196,12 @@ function renderProfileGallery() {
   document.getElementById('pg-prev').style.display = multi ? 'flex' : 'none';
   document.getElementById('pg-next').style.display = multi ? 'flex' : 'none';
   document.getElementById('pg-dots').innerHTML = multi
-    ? imgs.map((_, i) => '<span class="pg-dot' + (i === profileIdx ? ' active' : '') + '"></span>').join('')
+    ? imgs.map((src, i) => '<button type="button" class="pg-thumb' + (i === profileIdx ? ' active' : '') +
+        '" onclick="profileGo(' + i + ')"><img src="' + src.replace(/"/g, '&quot;') + '" alt=""></button>').join('')
     : '';
 }
+
+function profileGo(i) { profileIdx = i; renderProfileGallery(); }
 
 function profileStep(dir) { profileIdx += dir; renderProfileGallery(); }
 function closeProfile() {
