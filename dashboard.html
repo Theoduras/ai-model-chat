@@ -1412,6 +1412,7 @@ function showActionBar() {
 
 function renderForm(slug, cfg) {
   document.body.classList.remove('browsing');
+  loadedConfig = cfg || {};
   const fa = document.getElementById('form-area');
   fa.innerHTML = `
     <div style="display:flex; align-items:baseline; gap:10px;">
@@ -1785,10 +1786,15 @@ function clearAvatar() {
   setAvatar('');
 }
 
+// Keys the form has no field for (favorite, anything added later) would be
+// dropped by a save if the config were rebuilt from the inputs alone.
+let loadedConfig = {};
+
 function collectConfig() {
   const locVal = v('f-location').trim();
   const mirror = (document.getElementById('f-mirror-location')?.checked || false) || !locVal;
   return {
+    ...loadedConfig,
     name: v('f-name'), age: v('f-age'), gender: v('f-gender'),
     location: locVal, mirror_location: mirror,
     archetype: v('f-archetype'), backstory: v('f-backstory'), speech_style: v('f-speech'),
@@ -1861,8 +1867,9 @@ async function savePersona() {
   const status = document.getElementById('save-status');
   status.textContent = 'Saving…'; status.className = 'save-status';
   try {
-    // Photos always save to the current persona (originals included).
+    // Photos and phases always save to the current persona (originals included).
     await saveGallery(currentSlug);
+    await postPhases(currentSlug);
 
     // Originals can now be overridden in place — the edit is saved to the DB
     // and shadows the repo file.
@@ -2264,18 +2271,25 @@ function removePhase(i) {
   renderPhases();
 }
 
+// Phases and the CTA live in their own store, not in the persona config, so
+// every save path has to write them explicitly.
+async function postPhases(slug) {
+  if (!document.getElementById('f-cta-url')) return;   // form not rendered
+  const res = await fetch('/api/personas/' + slug + '/phases', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      phases: chatPhases,
+      cta_url: v('f-cta-url'),
+      cta_label: v('f-cta-label')
+    })
+  });
+  if (!res.ok) throw new Error('phases save failed');
+}
+
 async function savePhases(btn) {
   if (!currentSlug) return;
   try {
-    const res = await fetch('/api/personas/' + currentSlug + '/phases', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        phases: chatPhases,
-        cta_url: v('f-cta-url'),
-        cta_label: v('f-cta-label')
-      })
-    });
-    if (!res.ok) throw new Error('save failed');
+    await postPhases(currentSlug);
     flashSaved(btn);
   } catch(e) { flashSaved(btn, false); }
 }
