@@ -621,6 +621,16 @@ body.page-chat.embed .chat-shell {
   gap: 0;
 }
 body.page-chat.embed .persona-rail { display: none; }
+/* The demo embed is wide enough to show the rail, and it is part of the pitch. */
+body.page-chat.embed.demo { padding: 0; }
+body.page-chat.embed.demo .chat-shell { gap: 14px; padding: 14px; }
+body.page-chat.embed.demo .chat-container { border-radius: var(--r-xl); border: 1px solid var(--border); }
+body.page-chat.embed.demo .persona-rail { display: flex; }
+@media (max-width: 720px) {
+  body.page-chat.embed.demo .persona-rail { display: none; }
+  body.page-chat.embed.demo .chat-shell { padding: 0; }
+  body.page-chat.embed.demo .chat-container { border-radius: 0; border: none; }
+}
 
 /* ── Persona rail (chat-side switcher) ── */
 .chat-shell {

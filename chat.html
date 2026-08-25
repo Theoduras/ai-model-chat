@@ -108,10 +108,15 @@ const chatEl = document.getElementById('chat');
 const inp = document.getElementById('input');
 const typingRow = document.getElementById('typing-row');
 let u = null, m = { recentTopics: [], lastTopic: null }, h = [], s = 3.5, l = Date.now(), avatarUrl = null, personaName = '…';
-let persona = new URLSearchParams(location.search).get('persona') || 'lilly';
+const params = new URLSearchParams(location.search);
+let persona = params.get('persona') || 'lilly';
+// Demo mode (the coming-soon page): always opens on the name screen and keeps
+// nothing, so every visitor gets the same first-run experience.
+const DEMO = params.get('demo') === '1';
 let PFX = 'persona_' + persona + '_';
 
 if (window.self !== window.top) { document.body.classList.add('embed'); }
+if (DEMO) document.body.classList.add('demo');
 
 function applyPersonaConfig(cfg) {
   avatarUrl = null;
@@ -233,7 +238,9 @@ function renderRail(list) {
 
 function loadPersonaList() {
   return fetch('/api/personas').then(r => r.ok ? r.json() : []).then(list => {
-    renderRail(Array.isArray(list) ? list : []);
+    let items = Array.isArray(list) ? list : [];
+    if (DEMO) items = items.filter(p => p.slug === persona);   // the demo shows one model
+    renderRail(items);
   }).catch(() => {});
 }
 
@@ -263,17 +270,17 @@ function chatBody(extra) {
   return JSON.stringify({ ...extra, user: u, persona, ...(sp ? { system_prompt: sp } : {}) });
 }
 
-function sc() { if (u) localStorage.setItem(PFX + 'chat_' + u, JSON.stringify(h)); }
-function sm() { if (u) localStorage.setItem(PFX + 'mem_' + u, JSON.stringify(m)); }
+function sc() { if (u && !DEMO) localStorage.setItem(PFX + 'chat_' + u, JSON.stringify(h)); }
+function sm() { if (u && !DEMO) localStorage.setItem(PFX + 'mem_' + u, JSON.stringify(m)); }
 
 function ld() {
-  u = localStorage.getItem(PFX + 'user');
+  if (!DEMO) u = localStorage.getItem(PFX + 'user');
   if (!isRealName(u)) u = null;   // ignore legacy / auto-generated placeholders
   m = { recentTopics: [], lastTopic: null };
-  const sv = localStorage.getItem(PFX + 'mem_' + u);
+  const sv = DEMO ? null : localStorage.getItem(PFX + 'mem_' + u);
   if (sv) try { m = { ...m, ...JSON.parse(sv) }; } catch (e) {}
   h = [];
-  const ch = localStorage.getItem(PFX + 'chat_' + u);
+  const ch = DEMO ? null : localStorage.getItem(PFX + 'chat_' + u);
   if (ch) try { h = JSON.parse(ch); } catch (e) {}
   const el = document.getElementById('user-name');
   if (el) { el.textContent = u || 'Guest'; el.onclick = cu; el.title = 'Switch user'; }
@@ -306,7 +313,7 @@ function submitName() {
   document.getElementById('name-gate').classList.add('hidden');
   if (prev && name !== prev) { sm(); sc(); }
   u = name;
-  localStorage.setItem(PFX + 'user', u);
+  if (!DEMO) localStorage.setItem(PFX + 'user', u);
   ld();
   // "you're back" only when this name actually has a conversation stored.
   if (h.length === 0) {
@@ -555,7 +562,7 @@ function isRealName(n) {
 }
 
 function hasName() {
-  return isRealName(localStorage.getItem(PFX + 'user'));
+  return !DEMO && isRealName(localStorage.getItem(PFX + 'user'));
 }
 
 if (hasName()) {

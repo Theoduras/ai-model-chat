@@ -81,11 +81,11 @@ p.sub{font-size:17px;color:var(--text-soft);line-height:1.65;margin-bottom:36px;
 .ring{position:absolute;border:1.5px solid #ffffff44;border-radius:50%}
 .ring.a{width:360px;height:360px;top:-70px;right:-120px}
 .ring.b{width:210px;height:210px;top:6px;right:-10px}
-.rhead{position:relative;z-index:2;max-width:460px;margin:0 auto 22px}
+.rhead{position:relative;z-index:2;max-width:880px;margin:0 auto 22px}
 .rlabel{font-size:12px;letter-spacing:.25em;text-transform:uppercase;color:#ffffffcc;margin-bottom:10px}
 .rtitle{font-family:'Sora';font-weight:800;font-size:30px;line-height:1.15;letter-spacing:-.01em;color:#fff}
 .rsub{font-size:14.5px;color:#ffffffcc;line-height:1.55;margin-top:8px}
-.demo{position:relative;z-index:2;width:100%;max-width:460px;margin:0 auto;height:min(620px,72vh);border-radius:20px;overflow:hidden;background:var(--bg);border:1px solid #ffffff33;box-shadow:0 24px 60px #00000055}
+.demo{position:relative;z-index:2;width:100%;max-width:880px;margin:0 auto;height:min(700px,78vh);border-radius:20px;overflow:hidden;background:var(--bg);border:1px solid #ffffff33;box-shadow:0 24px 60px #00000055}
 .demo iframe{width:100%;height:100%;border:0;display:block}
 @media(max-width:900px){
   .split{grid-template-columns:1fr}
@@ -139,7 +139,7 @@ p.sub{font-size:17px;color:var(--text-soft);line-height:1.65;margin-bottom:36px;
       <div class="rsub">Say hi and see how the persona replies — this is the same engine that runs your funnel.</div>
     </div>
     <div class="demo">
-      <iframe src="/chat" title="Live persona chat demo" loading="lazy"></iframe>
+      <iframe src="/chat?persona=nova&amp;demo=1" title="Live persona chat demo" loading="lazy"></iframe>
     </div>
   </div>
 
