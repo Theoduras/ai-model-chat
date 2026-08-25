@@ -2658,6 +2658,7 @@ body.obt-open { overflow: hidden; }
   padding: 12px 14px; cursor: pointer;
 }
 .ps-pick.on { border-color: var(--accent, #a855f7); }
+.ps-pick.off { opacity: 0.5; cursor: default; }
 .ps-pick input { grid-row: 1 / span 2; margin: 0; }
 .ps-pick-t { font-size: 0.86rem; font-weight: 600; }
 .ps-pick-d { font-size: 0.75rem; color: var(--text-muted); line-height: 1.5; }

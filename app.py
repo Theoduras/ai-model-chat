@@ -3316,24 +3316,33 @@ def api_platforms_overview():
         personas = []
     tg_bots = _tg_load_bots()
     tg_plat = _tg_platform()
+    tgu_accounts = _tgu_accounts()
+    tgu_ready = all(_tgu_app_creds())
     x_tokens = _load_x_tokens() or {}
     threads_tokens = _threads_load_tokens() or {}
     out = {}
     for p in personas:
         slug = p['slug']
         bot = tg_bots.get(slug) or {}
+        acct = tgu_accounts.get(slug) or {}
         hosted = bot.get('mode') == 'hosted'
         tg_user = tg_plat.get('username', '') if hosted else bot.get('username', '')
         xt = x_tokens.get(slug) or {}
         th = threads_tokens.get(slug) or {}
         out[slug] = {
             'name': p.get('name') or slug,
-            'telegram': {
+            'telegram': ({
+                # A personal account and a bot are mutually exclusive per model,
+                # and the personal account is the stronger claim on the slug.
+                'connected': True, 'mode': 'user',
+                'username': acct.get('username', '') or acct.get('first_name', ''),
+                'share_link': '',
+            } if acct.get('session') else {
                 'connected': bool(bot.get('bot_token')) or (hosted and bool(tg_plat.get('bot_token'))),
                 'mode': bot.get('mode', ''),
                 'username': tg_user,
                 'share_link': _tg_share_link({**bot, 'username': tg_user}) if bot else '',
-            },
+            }),
             'x': {'connected': bool(xt.get('access_token')),
                   'username': xt.get('username', '')},
             'fanvue': {'connected': bool(_fanvue_tokens(slug).get('access_token')),
@@ -3342,7 +3351,8 @@ def api_platforms_overview():
                         'username': th.get('username', '')},
         }
     return jsonify({'personas': out,
-                    'telegram_platform_ready': bool(tg_plat.get('bot_token'))})
+                    'telegram_platform_ready': bool(tg_plat.get('bot_token')),
+                    'telegram_user_ready': tgu_ready})
 
 
 @app.route('/api/personas/<slug>/avatar')
@@ -9887,9 +9897,8 @@ def _tgu_stop(persona):
 
 
 @app.route('/api/tguser/config', methods=['GET', 'POST'])
+@operator_only
 def api_tguser_config():
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     api_id, api_hash = _tgu_app_creds()
     if request.method == 'GET':
         return jsonify({'api_id': api_id, 'has_hash': bool(api_hash)})
@@ -9902,9 +9911,8 @@ def api_tguser_config():
 
 
 @app.route('/api/tguser/send-code', methods=['POST'])
+@platform_scoped
 def api_tguser_send_code():
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     data = request.json or {}
     persona = (data.get('persona') or '').strip()
     phone = (data.get('phone') or '').strip()
@@ -9923,9 +9931,8 @@ def api_tguser_send_code():
 
 
 @app.route('/api/tguser/sign-in', methods=['POST'])
+@platform_scoped
 def api_tguser_sign_in():
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     data = request.json or {}
     persona = (data.get('persona') or '').strip()
     code = (data.get('code') or '').strip()
@@ -9968,10 +9975,14 @@ def api_tguser_sign_in():
 
 @app.route('/api/tguser/status')
 def api_tguser_status():
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
+    # Filtered rather than scoped, for the same reason as the bot status route:
+    # there is no persona argument to key on, and the phone number here is far
+    # more sensitive than a share link.
+    allowed = owned_slugs()
     out = {}
     for persona, a in _tgu_accounts().items():
+        if allowed is not None and persona not in allowed:
+            continue
         r = _tgu_runners.get(persona)
         out[persona] = {
             'connected': bool(a.get('session')),
@@ -9987,9 +9998,8 @@ def api_tguser_status():
 
 
 @app.route('/api/tguser/control', methods=['POST'])
+@platform_scoped
 def api_tguser_control():
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     data = request.json or {}
     persona = (data.get('persona') or '').strip()
     action = (data.get('action') or '').strip()
@@ -10023,10 +10033,9 @@ def api_tguser_control():
 
 
 @app.route('/api/tguser/send', methods=['POST'])
+@platform_scoped
 def api_tguser_send():
     """Open a conversation first — the thing a bot account cannot do."""
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     data = request.json or {}
     persona = (data.get('persona') or '').strip()
     peer = (data.get('peer') or '').strip()
