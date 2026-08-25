@@ -467,7 +467,19 @@ _SPICY_ASK_RE = re.compile(
     r'(show|send|got|have|see)\s+(me\s+)?(some\s+|any\s+|more\s+|your\s+)?'
     r'(pic|pics|photo|photos|vid|vids|video|videos|tits|ass|body|content)|'
     r'more\s+(spicy|naughty|explicit|of\s+you)|'
-    r'(let\s+me\s+see|wanna\s+see|want\s+to\s+see)'
+    r'(let\s+me\s+see|wanna\s+see|want\s+to\s+see)|'
+    # naakt / laat zien / stuur een foto — Dutch
+    r'naakt\w*|(laat|mag ik)\s+(me\s+|het\s+)?zien|'
+    r'(stuur|heb je|mag ik)\s+(me\s+|mij\s+|een\s+|je\s+)*(foto|fotos|foto\'s|filmpje|video)\w*|'
+    # nackt / zeig mir — German
+    r'nackt\w*|zeig\s+mir|(schick|hast du)\s+(mir\s+)?(ein\s+|deine\s+)?(bild|bilder|foto)\w*|'
+    # nue / montre-moi — French
+    r'\bnue?s?\b|montre[-\s]moi|(envoie|as-tu)\s+(moi\s+)?(une\s+|des\s+|tes\s+)?photos?|'
+    # desnuda / enséñame — Spanish / Portuguese
+    r'desnuda\w*|ens\u00e9\u00f1ame|mu\u00e9strame|(m\u00e1ndame|manda)\s+(una\s+|unas\s+|tus\s+)?fotos?|'
+    r'pelada\w*|me\s+mostra|'
+    # nuda / mostrami — Italian
+    r'nuda\w*|mostrami|(mandami|hai)\s+(una\s+|delle\s+|le tue\s+)?foto'
     r')\b', re.I)
 
 
@@ -512,14 +524,6 @@ def build_system_prompt(config):
     warmth_map = {1: 'cold and distant', 2: 'reserved', 3: 'friendly', 4: 'warm', 5: 'affectionate'}
     warmth_desc = warmth_map.get(warmth, 'friendly')
 
-    flirt_map = {
-        'slow': 'Build flirtation very gradually. Stay friendly and curious for many messages before any hint of attraction.',
-        'moderate': 'Allow natural flirtation to develop over the course of a conversation.',
-        'fast': 'Be openly flirtatious fairly early once rapport is established.',
-        'instant': 'Be immediately playful and flirtatious from the first message.'
-    }
-    flirt_desc = flirt_map.get(flirt_pace, flirt_map['moderate'])
-
     nsfw_level_map = {
         'suggestive': 'Be suggestive and flirtatious. Hint at things without going explicit.',
         'moderate': 'Be openly sexual in language. Moderately explicit — describe feelings, sensations, intentions vividly.',
@@ -560,14 +564,15 @@ Sales funnel (follow this arc across the conversation):
 - STEP 2 — CONNECT: When they reply, pick up on their name, age, or location. Make a playful comment that creates a real-world connection — e.g. if they're from California, say you've always wanted to visit and you've just found your tour guide. Make them feel like they could actually meet you.
 - STEP 3 — BOND OVER INTERESTS: Get onto what they enjoy doing for fun. When they tell you, share one of your own interests and pick something from their list you'd genuinely want to try with them. Make it feel like a real plan, not just small talk.
 - STEP 4 — FIND OUT WHAT THEY'RE LOOKING FOR: Work out what they're here for on the platform. Have a real conversation about it. Don't rush past this.
-- STEP 5 — HEAT UP (SEXTING BEGINS): Steer onto what they're into. When they share, tell them yours. Use playful naughty emojis (🔥😈💦🫦🥵). Match their energy and go slightly further each time.
+- STEP 5 — HEAT UP (SEXTING BEGINS): Steer onto what they're into. When they share, tell them yours. Match their energy and go slightly further each time.
 - STEP 6 — IGNITE: Get them picturing what they'd do to you if you were together right now. Be vivid in your reply. Create scenes. Describe what YOU would do to them. Build heat, don't resolve it.
-- STEP 7 — CHALLENGE: Tell them you're getting really naughty and challenge them — say something like "I don't think you could handle me when I really let go 😈". Men hate being challenged. Keep raising the stakes each time they respond.
-- STEP 8 — FIRST DROP: After the tension peaks, send something. Write a caption so intriguing they have to know what's inside — tease a specific body part, action, or scenario without revealing it. Example: "I recorded something for you earlier… I wasn't going to send it but here 🙈🔥"
+- STEP 7 — CHALLENGE: Tell them you're getting really naughty and challenge them — say something like "I don't think you could handle me when I really let go". Men hate being challenged. Keep raising the stakes each time they respond.
+- STEP 8 — FIRST DROP: After the tension peaks, send something. Write a caption so intriguing they have to know what's inside — tease a specific body part, action, or scenario without revealing it. Example: "I recorded something for you earlier… I wasn't going to send it but here"
 - STEP 9 — KEEP THE THREAD HOT: After they react, keep sexting for 2-3 more messages. Stay in the scene.
-- STEP 10 — SECOND DROP: Send again with a caption that promises more of what they just saw — or goes one level further. Example: "That was just the warm-up… wait til you see what comes next 💦"
+- STEP 10 — SECOND DROP: Send again with a caption that promises more of what they just saw — or goes one level further. Example: "That was just the warm-up… wait til you see what comes next"
 - STEP 11 — LADDER UP: Repeat — sext 2-3 messages, then drop again, escalating each time. Keep returning to conversation between drops so it never feels like a hard sell.
 - After the final drop, bring the conversation back down. Be warm, funny, turn it back to them. The goal is they come back tomorrow.
+- The Voice rules above outrank every step here — emoji use, sentence length, lowercase, all of it. A step never licenses breaking them.
 - A step is a direction, not a question to fire off. The question frequency rule above overrides every step here: when it says not to ask, move the step forward by sharing something of your own and let them come to you. A step can take several messages.
 - NEVER write a marker, a tag or a bracketed word like "[PPV]" in your message. What you send is decided outside the text — whether that is a photo here or a paid unlock on a paid platform. Write only the caption, in your own voice.{nsfw_desc and chr(10) + '- Content level: ' + nsfw_desc}"""
 
@@ -606,7 +611,7 @@ Character rules:
 - React to what was just said first. Don't jump ahead to a new topic before acknowledging the current one.
 - Build genuine warmth — the fan must like you as a person before anything else happens.
 - ANSWER ORDINARY QUESTIONS PROPERLY. If the fan asks something normal — what you like, what you do, how your day was, what you are up to, where you are from — give a real, specific answer about yourself, then ask them something back. Deflecting a normal question with "that's for another time", "you'll have to find out", "some things are better discovered" or anything like it is WRONG: it reads as evasive and kills the conversation. Only genuinely private things (your address, real name, phone number) are off limits, and you say that plainly rather than being coy.
-- Teasing is ONLY for sexual or explicit requests. When the fan pushes there: engage — don't shut it down or go cold — but make clear that YOU set the pace, not them. Be playful about it: tease, hint, slow things down deliberately. A response like "easy... I go at my own speed 😏" keeps them hooked without giving everything at once.
+- Teasing is ONLY for sexual or explicit requests. When the fan pushes there: engage — don't shut it down or go cold — but make clear that YOU set the pace, not them. Be playful about it: tease, hint, slow things down deliberately. A response like "easy... I go at my own speed" keeps them hooked without giving everything at once.
 - Never deflect the same thing twice. If the fan asks again, or says you did not answer, ANSWER IT — properly and warmly. Repeated dodging is the fastest way to lose them.{ppv_block}{triggers_block}
 
 You are {name} in a text conversation on a fan platform. Respond only as {name}. One short text at a time.{language_block}"""
@@ -2574,6 +2579,10 @@ def _chat_channel_rules(slug, config, incoming, skip_spicy, history=None):
     fan = {'cta_sent': already_sent}
     cta_asked = _cta_asked(incoming)
     cta_due = (not skip_spicy) and _cta_due(slug, incoming, fan, is_cta_phase, url)
+    logger.info('CTA decision [%s]: due=%s url=%s exchanges=%d cta_phase=%s '
+                'already_sent=%s asked=%s spicy=%s opener=%s',
+                slug, cta_due, 'set' if url else 'MISSING', exchanges,
+                is_cta_phase, already_sent, cta_asked, spicy, skip_spicy)
 
     if cta_due:
         if cta_asked:
@@ -2714,7 +2723,7 @@ def generate_reply(system_prompt, chat_history, user_message, is_continue=False)
     recent_bot = [msg.get('content', '').strip().lower()
                   for msg in chat_history[-6:] if msg.get('role') in ('lilith', 'bot', 'model')]
     if reply.strip().lower() in recent_bot:
-        reply = "still here, just thinking 😶"
+        reply = "still here, just thinking"
     return reply
 
 
@@ -3872,15 +3881,31 @@ def _phases_cta(slug):
     return {'cta_url': bot.get('cta_url', ''), 'cta_label': bot.get('cta_label', '')}
 
 
+# She mirrors the fan's language (see _language_block), so an English-only
+# trigger meant a Dutch or German fan asking for the link was never heard.
 _CTA_ASK_RE = re.compile(
     r'\b('
     r'fanvue|fan\s?vue|onlyfans|only\s?fans|\bof\s?page\b|patreon|'
     r'subscri\w*|premium|paywall|'
+    r'abonnement|abonnieren|abonament|suscri\w*|assinatura|abbonamento|'
+    r'linkje|enlace|lien|collegamento|'
     r'(where|how)\s+(else\s+)?(can|do)\s+i\s+(find|see|follow|get)\s+(you|more)|'
     r'(other|another|different)\s+(page|site|platform|account)|'
     r'(send|share|got|have|drop)\s+(me\s+)?(a\s+|the\s+|your\s+)?link|'
     r'link\s+(to|for)\b|'
-    r'(your|the)\s+(cta|link|page|profile)'
+    r'(your|the)\s+(cta|link|page|profile)|'
+    # waar kan/vind ik je / meer van jou — Dutch
+    r'waar\s+(kan|vind|zie)\s+ik\s+(je|jou|jullie|meer)|meer\s+van\s+(je|jou)|'
+    r'(stuur|geef|deel)\s+(me\s+|mij\s+)?(je\s+|de\s+|een\s+)?link|'
+    # wo finde ich / schick mir den link — German
+    r'wo\s+(finde|sehe)\s+ich\s+(dich|mehr)|(schick|gib)\s+mir\s+(den\s+|deinen\s+)?link|'
+    # où puis-je te trouver / ton lien — French
+    r'o\u00f9\s+(puis-je|est-ce que je peux)\s+te\s+(trouver|suivre)|ton\s+lien|'
+    # dónde puedo verte / tu enlace — Spanish / Portuguese
+    r'd\u00f3nde\s+puedo\s+(verte|encontrarte|seguirte)|tu\s+(enlace|link)|'
+    r'onde\s+(posso|eu)\s+(te\s+)?(ver|achar|encontrar)|seu\s+link|'
+    # dove posso trovarti / il tuo link — Italian
+    r'dove\s+posso\s+(trovarti|seguirti|vederti)|il\s+tuo\s+link'
     r')\b', re.I)
 
 
