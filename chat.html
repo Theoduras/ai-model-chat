@@ -239,7 +239,10 @@ function renderRail(list) {
 function loadPersonaList() {
   return fetch('/api/personas').then(r => r.ok ? r.json() : []).then(list => {
     let items = Array.isArray(list) ? list : [];
-    if (DEMO) items = items.filter(p => p.slug === persona);   // the demo shows one model
+    if (DEMO) {   // the demo shows one model, unless that slug is missing
+      const only = items.filter(p => p.slug === persona);
+      if (only.length) items = only;
+    }
     renderRail(items);
   }).catch(() => {});
 }

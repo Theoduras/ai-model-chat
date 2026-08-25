@@ -605,6 +605,11 @@ body.page-chat.embed {
   padding: 0;
   align-items: stretch;
   justify-content: stretch;
+  /* A definite height, so the shell's height:100% has something to resolve
+     against — min-height alone leaves it sized to its content. */
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
 }
 body.page-chat.embed .chat-container {
   max-width: 100%;
@@ -622,13 +627,13 @@ body.page-chat.embed .chat-shell {
 }
 body.page-chat.embed .persona-rail { display: none; }
 /* The demo embed is wide enough to show the rail, and it is part of the pitch. */
-body.page-chat.embed.demo { padding: 0; }
-body.page-chat.embed.demo .chat-shell { gap: 14px; padding: 14px; }
+body.page-chat.embed.demo { padding: 14px; }
+body.page-chat.embed.demo .chat-shell { gap: 14px; height: 100%; max-height: 100%; }
 body.page-chat.embed.demo .chat-container { border-radius: var(--r-xl); border: 1px solid var(--border); }
 body.page-chat.embed.demo .persona-rail { display: flex; }
 @media (max-width: 720px) {
+  body.page-chat.embed.demo { padding: 0; }
   body.page-chat.embed.demo .persona-rail { display: none; }
-  body.page-chat.embed.demo .chat-shell { padding: 0; }
   body.page-chat.embed.demo .chat-container { border-radius: 0; border: none; }
 }
 
