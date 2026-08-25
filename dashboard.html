@@ -1619,6 +1619,11 @@ function renderForm(slug, cfg) {
         <select id="f-spicy-cta">${opt(['off', 'normal', 'fast', 'instant'], cfg.spicy_cta || 'normal')}</select>
         <span class="hint">A fan asking to see more is a buying signal. "Fast" brings your CTA link forward to the next reply or two; "instant" sends it in that same reply, every time they ask.</span>
       </div>
+      <div class="field">
+        <label>Release an explicit preview after</label>
+        <input type="number" id="f-spicy-release" min="0" max="10" step="1" value="${cfg.spicy_release_after === undefined ? 3 : cfg.spicy_release_after}">
+        <span class="hint">Once a fan has asked this many times, the CTA fires with a photo from your NSFW vault attached — a preview, not just a link. 0 turns this off. Needs at least one photo marked NSFW in Outfits &amp; Media.</span>
+      </div>
     </div>
 
     <div class="form-section">
@@ -1824,6 +1829,7 @@ function collectConfig() {
     lowercase: document.getElementById('f-lowercase')?.checked ?? true,
     reply_speed: v('f-reply-speed'), typing_speed: v('f-typing-speed'),
     spicy_cta: v('f-spicy-cta'),
+    spicy_release_after: parseInt(v('f-spicy-release')) || 0,
     interests: v('f-interests'), flirt_pace: v('f-flirt'),
     nsfw_enabled: document.getElementById('f-nsfw')?.checked || false,
     nsfw_level: v('f-nsfw-level'), conversion_triggers: v('f-triggers'),

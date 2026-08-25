@@ -9,7 +9,7 @@ import uuid
 
 from sqlalchemy import (
     create_engine, Column, String, Text, DateTime, ForeignKey, Index, Integer,
-    func
+    Boolean, func
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
@@ -132,6 +132,12 @@ class PersonaMedia(Base):
     lighting = Column(String(60), default='')
     purpose = Column(String(60), default='')
     position = Column(Integer, default=0)   # manual sort order within an outfit
+    # Kept separate from `purpose`: NSFW photos are released outside any
+    # outfit, at the CTA moment, so they need to be flaggable from the vault
+    # grid directly rather than only from inside an outfit's tile editor.
+    # No nullable=False / server default, matching the other tag columns —
+    # ALTER TABLE ADD COLUMN NOT NULL fails on SQLite once the table has rows.
+    nsfw = Column(Boolean, default=False)
     created_at = Column(DateTime, default=_now)
 
 
