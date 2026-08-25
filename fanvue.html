@@ -324,7 +324,7 @@ async function loadTrace(){
       (bad?'':'✓ ')+esc(d.persona||'')+' · '+live+'</div>'+
       (d.problems||[]).map(p=>'<div class="note" style="border-color:#7f1d1d;color:#fca5a5;margin-bottom:8px;">⚠ '+esc(p)+'</div>').join('');
     const rows=(d.rows||[]).slice().reverse();
-    const col={received:'#c7d2fe',sent:'#4ade80',ppv:'#f0abfc',typing:'var(--text-muted)','follow-up':'#fbbf24',error:'#fb7185'};
+    const col={received:'#c7d2fe',sent:'#4ade80',ppv:'#f0abfc',typing:'var(--text-muted)','follow-up':'#fbbf24',error:'#fb7185',idle:'var(--text-muted)'};
     box.innerHTML = rows.length ?
       '<table class="fans"><tr><th>Time</th><th>What</th><th>Message</th></tr>'+
       rows.map(r=>'<tr><td style="white-space:nowrap;">'+new Date((r.at||0)*1000).toLocaleTimeString()+

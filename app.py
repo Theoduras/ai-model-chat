@@ -8333,6 +8333,29 @@ def _fanvue_auto_round(persona):
             log.append(f'Replied → {handle or fan_uuid}: {reply[:50]}')
 
     _set_setting(cursor_key, json.dumps(cursor))
+
+    # A round that replies to nobody leaves no trace at all, which reads as "the
+    # bot is dead" when it is really just skipping every chat. Record why —
+    # once per change, so a steady state does not fill the log every 20s.
+    if not actions['replies']:
+        why = []
+        if not chats:
+            why.append('no chats')
+        if actions['skipped_offline']:
+            why.append(f"{actions['skipped_offline']} offline")
+        if actions['skipped_lists']:
+            why.append(f"{actions['skipped_lists']} filtered by list")
+        if actions['skipped_creators']:
+            why.append(f"{actions['skipped_creators']} are creators")
+        summary = f"{len(chats)} chats, no replies" + (' — ' + ', '.join(why) if why else
+                                                       ' — everyone already answered')
+        state_key = f'fanvue_lastidle_{persona}'
+        if _get_setting(state_key) != summary:
+            _set_setting(state_key, summary)
+            _fv_trace(persona, 'idle', summary)
+    else:
+        _set_setting(f'fanvue_lastidle_{persona}', '')
+
     return actions, log
 
 
