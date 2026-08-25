@@ -629,7 +629,6 @@ async function deletePersona(slug) {
     lsDeletePersona(slug);
     if (currentSlug === slug) {
       currentSlug = null;
-      document.getElementById('form-area').innerHTML = EMPTY_HTML;
       document.getElementById('action-bar').style.display = 'none';
     }
     document.getElementById('persona-count').textContent = Object.keys(personas).length;
@@ -637,17 +636,85 @@ async function deletePersona(slug) {
   } catch(e) { alert('Could not delete: ' + e.message); }
 }
 
-function tuneEmptyState() {
-  const card = document.querySelector('#form-area .es-card');
-  if (!card || !Object.keys(personas).length) return;
-  card.querySelector('.es-title').textContent = 'Pick a persona, or build another';
-  card.querySelector('.es-sub').textContent =
-    'Open one from the sidebar to keep editing her, or start a new character from scratch. The setup walks you through it one question at a time.';
-  card.querySelector('.es-cta').textContent = '+ New persona';
+function personaProgress(cfg) {
+  cfg = cfg || {};
+  const fields = ['name', 'age', 'archetype', 'backstory', 'speech_style', 'interests', 'avatar', 'cta_url'];
+  const filled = fields.filter(k => String(cfg[k] || '').trim().length > 0).length;
+  return Math.round((filled / fields.length) * 100);
+}
+
+function progressBand(pct) {
+  if (pct >= 75) return 'var(--ok)';
+  if (pct >= 40) return 'var(--warn)';
+  return 'var(--err)';
+}
+
+function pgViewKey() { return 'admin_pg_view' + lsNs(); }
+function pgView() { try { return localStorage.getItem(pgViewKey()) || 'cards'; } catch(e) { return 'cards'; } }
+function setPgView(v) { try { localStorage.setItem(pgViewKey(), v); } catch(e) {} renderPersonaBrowser(); }
+
+function showPersonaBrowser() {
+  currentSlug = null;
+  document.querySelectorAll('.persona-item').forEach(el => el.classList.remove('active'));
+  document.getElementById('action-bar').style.display = 'none';
+  renderPersonaBrowser();
+}
+
+function personaThumb(p, size) {
+  return p.avatar
+    ? '<img src="' + p.avatar + '?t=' + Date.now() + '" style="width:100%;height:100%;object-fit:cover;">'
+    : '<div class="pg-initials" style="font-size:' + Math.round(size * 0.32) + 'px;">' + esc((p.name || p.slug).slice(0,2).toUpperCase()) + '</div>';
+}
+
+function renderPersonaBrowser() {
+  const slugs = Object.keys(personas);
+  const fa = document.getElementById('form-area');
+  if (!slugs.length) {
+    document.body.classList.remove('browsing');
+    fa.innerHTML = EMPTY_HTML;
+    return;
+  }
+  document.body.classList.add('browsing');
+  const view = pgView();
+  const cards = slugs.map(slug => {
+    const p = personas[slug];
+    const cfg = p.config || {};
+    const pct = personaProgress(Object.assign({ name: p.name, avatar: p.avatar }, cfg));
+    const sub = esc(cfg.archetype || p.slug);
+    const delBtn = p.premade ? '' :
+      '<button type="button" class="pg-del" title="Delete" onclick="event.stopPropagation();deletePersona(\'' + slug + '\')">✕</button>';
+    if (view === 'list') {
+      return '<div class="pg-row" onclick="loadPersona(\'' + slug + '\')">' +
+        '<div class="pg-row-thumb">' + personaThumb(p, 48) + '</div>' +
+        '<div class="pg-row-info"><div class="pg-row-name">' + esc(p.name || slug) + '</div>' +
+        '<div class="pg-row-sub">' + sub + '</div></div>' +
+        '<div class="pg-row-bar"><div class="pg-bar"><i style="width:' + pct + '%;background:' + progressBand(pct) + ';"></i></div></div>' +
+        '<button type="button" class="btn btn-ghost pg-open" onclick="event.stopPropagation();loadPersona(\'' + slug + '\')">Open</button>' +
+        delBtn + '</div>';
+    }
+    return '<div class="pg-card" onclick="loadPersona(\'' + slug + '\')">' +
+      '<div class="pg-card-img">' + personaThumb(p, 220) +
+        '<div class="pg-scrim"></div>' + delBtn +
+        '<div class="pg-card-text"><div class="pg-card-name">' + esc(p.name || slug) + '</div>' +
+        '<div class="pg-card-sub">' + sub + '</div></div></div>' +
+      '<div class="pg-card-foot">' +
+        '<div class="pg-bar"><i style="width:' + pct + '%;background:' + progressBand(pct) + ';"></i></div>' +
+        '<button type="button" class="btn btn-primary pg-open" onclick="event.stopPropagation();loadPersona(\'' + slug + '\')">Open</button>' +
+      '</div></div>';
+  }).join('');
+
+  fa.innerHTML =
+    '<div class="pg-head">' +
+      '<h2 style="font-size:1.1rem;font-weight:600;">Your personas</h2>' +
+      '<div class="pg-toggle">' +
+        '<button type="button" class="' + (view === 'cards' ? 'active' : '') + '" onclick="setPgView(\'cards\')">▦ Cards</button>' +
+        '<button type="button" class="' + (view === 'list' ? 'active' : '') + '" onclick="setPgView(\'list\')">☰ List</button>' +
+      '</div></div>' +
+    '<div class="' + (view === 'list' ? 'pg-list' : 'pg-grid') + '">' + cards + '</div>';
 }
 
 function renderSidebar() {
-  tuneEmptyState();
+  if (!currentSlug) renderPersonaBrowser();
   const list = document.getElementById('persona-list');
   list.innerHTML = '';
   const folders = lsFolders();
@@ -901,9 +968,11 @@ function assignFolder(slug, folderId) {
 }
 
 function renderForm(slug, cfg) {
+  document.body.classList.remove('browsing');
   const fa = document.getElementById('form-area');
   fa.innerHTML = `
     <div style="display:flex; align-items:baseline; gap:10px;">
+      <button type="button" class="btn-back-gallery" onclick="showPersonaBrowser()">&larr; All personas</button>
       <h2 style="font-size:1.1rem; font-weight:600;">${cfg.name || slug}</h2>
       <span style="font-size:0.75rem; color:var(--text-muted);">/${slug}</span>
     </div>
