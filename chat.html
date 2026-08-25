@@ -514,7 +514,7 @@ function ss(ok) {
   if (txt) txt.textContent = ok ? 'Online' : 'Offline';
 }
 
-function ck() { fetch('/').then(() => ss(true)).catch(() => ss(false)); }
+function ck() { fetch('/chat', { method: 'HEAD' }).then(() => ss(true)).catch(() => ss(false)); }
 
 // The opening message is only ever in flight once, and it is dropped outright
 // if the fan speaks first — she would not follow their message with an

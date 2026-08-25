@@ -1923,7 +1923,6 @@ def dashboard():
         return render_template_string(LOGIN_HTML, error=None)
     return send_from_directory(BASE_DIR, 'dashboard.html')
 
-@app.route('/', methods=['GET'])
 @app.route('/chat', methods=['GET'])
 def chat_page():
     return send_from_directory(BASE_DIR, 'chat.html')
@@ -1959,10 +1958,17 @@ def telegram_page():
         return redirect('/dashboard')
     return send_from_directory(BASE_DIR, 'telegram.html')
 
+@app.route('/', methods=['GET'])
+def home_page():
+    return send_from_directory(BASE_DIR, 'comingsoon.html')
+
+
+# The page moved to the root; the old paths stay as redirects for links already
+# out in the wild.
 @app.route('/comingsoon')
 @app.route('/soon')
 def comingsoon_page():
-    return send_from_directory(BASE_DIR, 'comingsoon.html')
+    return redirect('/')
 
 @app.route('/profile')
 def profile():

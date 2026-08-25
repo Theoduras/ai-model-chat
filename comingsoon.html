@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>velvetfunnel.app — Coming Soon</title>
-<meta name="description" content="Fully automated chat, posting and engagement funnels from social media into your own platform — one persona, one API.">
+<title>Velvetfunnel.app · One stop shop</title>
+<meta name="description" content="Fully automated chat, posting and engagement funnels from social media into your own platform. One persona, one API.">
 <!-- Not deferred: theme.js sets data-theme before first paint, otherwise the
      page flashes dark for a user who chose light. -->
 <script src="/js/theme.js"></script>
@@ -115,14 +115,14 @@ p.sub{font-size:17px;color:var(--text-soft);line-height:1.65;margin-bottom:36px;
       </nav>
     </div>
     <div class="lc">
-      <div class="pill"><span class="d"></span>Coming Soon</div>
+      <div class="pill"><span class="d"></span>One stop shop</div>
       <h1>Your persona,<br><u>fully automated.</u></h1>
-      <p class="sub">A fully automated chat, posting and engagement funnel that turns social‑media followers into fans on your own platform — running around the clock, in your voice.</p>
+      <p class="sub">A fully automated chat, posting and engagement funnel that turns social media followers into fans on your own platform, running around the clock, in your voice.</p>
       <form class="cta" onsubmit="return subscribe(event)">
         <input id="email" type="email" placeholder="Enter your email" required>
-        <button type="submit">Join waitlist</button>
+        <button type="submit">Sign up for news</button>
       </form>
-      <div class="note" id="note">Be the first to get access when we launch.</div>
+      <div class="note" id="note">Product news, new features and tips, straight to your inbox.</div>
     </div>
     <div class="meta">
       <span>© 2026 velvetfunnel.app</span>
@@ -136,7 +136,7 @@ p.sub{font-size:17px;color:var(--text-soft);line-height:1.65;margin-bottom:36px;
     <div class="rhead">
       <div class="rlabel">Live demo</div>
       <div class="rtitle">Try it out yourself</div>
-      <div class="rsub">Say hi and see how the persona replies — this is the same engine that runs your funnel.</div>
+      <div class="rsub">Say hi and see how the persona replies. This is the same engine that runs your funnel.</div>
     </div>
     <div class="demo">
       <iframe src="/chat?persona=nova&amp;demo=1" title="Live persona chat demo" loading="lazy"></iframe>
@@ -151,8 +151,8 @@ function subscribe(e){
   var email=document.getElementById('email').value.trim();
   var note=document.getElementById('note');
   if(!email){return false;}
-  // Placeholder: wire to your email/waitlist backend when ready.
-  note.textContent="✓ You're on the list — we'll be in touch.";
+  // Placeholder: wire to your email/news backend when ready.
+  note.textContent="✓ You're signed up. Look out for our next update.";
   note.style.color="#ff9d85";
   document.getElementById('email').value='';
   return false;
