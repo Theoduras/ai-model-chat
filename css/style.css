@@ -102,7 +102,7 @@ h1, h2, h3, .brand, .display {
   letter-spacing: -0.015em;
 }
 
-@keyframes sweep { 0% { background-position: 0% 50%; } 100% { background-position: 150% 50%; } }
+@keyframes sweep { 0% { background-position: 0% 50%; } 100% { background-position: 100% 50%; } }
 
 /* One focus state for the whole app. Border-colour alone was the only cue, which
    is invisible on the controls that already have a coloured border — keyboard
@@ -1143,10 +1143,10 @@ body:not(.is-admin) .admin-only { display: none !important; }
   font-weight: 600;
   cursor: pointer;
   text-align: center;
-  transition: transform 0.12s, box-shadow 0.18s;
+  transition: transform 0.25s ease-out, box-shadow 0.25s ease-out;
   flex-shrink: 0;
 }
-.btn-new:hover { transform: translateY(-1px); box-shadow: 0 6px 20px #ff2d7855; animation: sweep .6s linear infinite; }
+.btn-new:hover { transform: translateY(-1px); box-shadow: 0 6px 20px #ff2d7855; animation: sweep 3s ease-in-out infinite alternate; }
 
 
 
@@ -1372,7 +1372,9 @@ body.page-dashboard select {
   font-weight: 600;
   cursor: pointer;
   border: none;
-  transition: all 0.15s;
+  transition: transform 0.25s ease-out, box-shadow 0.25s ease-out,
+              background-color 0.2s ease-out, color 0.2s ease-out,
+              border-color 0.2s ease-out;
 }
 .btn-primary {
   background: var(--grad); background-size: 300% 100%;
@@ -1381,7 +1383,7 @@ body.page-dashboard select {
 .btn-primary:hover {
   transform: translateY(-1px);
   box-shadow: 0 8px 24px #ff2d7855;
-  animation: sweep .55s linear infinite;
+  animation: sweep 3s ease-in-out infinite alternate;
 }
 .btn-secondary { background: var(--surface); color: var(--text); }
 .btn-secondary:hover { background: var(--border); color: var(--accent); }
@@ -1661,6 +1663,7 @@ body.page-dashboard .conn-dot.err { background: var(--err); }
 
 @media (prefers-reduced-motion: reduce) {
   .loader-dots i { animation: none; opacity: 0.7; }
+  .btn-primary:hover, .btn-new:hover { animation: none; }
 }
 
 /* Per-section save button, sits at the right edge of a .section-title */
