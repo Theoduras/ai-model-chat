@@ -298,10 +298,11 @@ function submitName() {
   u = name;
   localStorage.setItem(PFX + 'user', u);
   ld();
-  if (prev && prev !== name) {
-    setTimeout(() => addMsg("hey, you're back", false), 400);
-  } else if (h.length === 0) {
+  // "you're back" only when this name actually has a conversation stored.
+  if (h.length === 0) {
     greet();
+  } else if (prev && prev !== name) {
+    setTimeout(() => addMsg("hey, you're back", false), 400);
   }
 }
 

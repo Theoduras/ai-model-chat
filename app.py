@@ -2443,7 +2443,13 @@ def admin_xchat():
 
 # ── Chat endpoint ─────────────────────────────────────────────────────────────
 
-def _chat_channel_rules(slug, config, incoming, skip_spicy):
+def _chat_exchanges(history):
+    """How many messages this fan has sent, counting the one being answered."""
+    n = sum(1 for m in (history or []) if (m.get('role') or '') == 'user')
+    return n + 1
+
+
+def _chat_channel_rules(slug, config, incoming, skip_spicy, history=None):
     """Per-request rules for the browser chat.
 
     The stored system prompt is shared by every channel, so what a "drop" means
@@ -2467,17 +2473,48 @@ def _chat_channel_rules(slug, config, incoming, skip_spicy):
             'promise it instead, in your own voice.')
 
     spicy_mode = config.get('spicy_cta', 'normal')
-    if not skip_spicy and spicy_mode != 'off' and _spicy_asked(incoming):
-        cta = _phases_cta(slug)
-        url = (cta.get('cta_url') or '').strip()
-        if url and spicy_mode in ('fast', 'instant'):
-            label = (cta.get('cta_label') or 'come find me here').strip()
+    spicy = not skip_spicy and spicy_mode != 'off' and _spicy_asked(incoming)
+
+    cta_cfg = _phases_cta(slug)
+    url = (cta_cfg.get('cta_url') or '').strip()
+    label = (cta_cfg.get('cta_label') or 'come find me here').strip()
+
+    # The browser chat holds no fan record, so the funnel is read off the
+    # history the client sends: how many messages they have sent, and whether
+    # the link already went out in one of her earlier replies.
+    phases = _phases(slug)
+    exchanges = _chat_exchanges(history)
+    is_cta_phase = _fan_phase(phases, {'in_count': exchanges}) == len(phases) - 1
+    already_sent = bool(url) and any(
+        url in (m.get('content') or '') for m in (history or [])
+        if (m.get('role') or '') != 'user')
+    fan = {'cta_sent': already_sent}
+    cta_asked = _cta_asked(incoming)
+    cta_due = (not skip_spicy) and _cta_due(slug, incoming, fan, is_cta_phase, url)
+
+    if cta_due:
+        if cta_asked:
             rules.append(
-                f'They are asking to see explicit content. That is a buying signal: '
-                f'tease them once, then tell them where the rest of it lives and '
-                f'invite them over — phrase the invite as "{label}". Do not paste a '
-                f'URL yourself; the link is appended after your message.')
-            return '\n'.join(rules), {'url': url, 'label': label}
+                'They are asking where else to find you — answer directly and warmly, '
+                'say yes, that is where the rest of it lives. Do not deflect and do '
+                f'not paste a URL yourself; the link is appended after your message, '
+                f'phrased as "{label}".')
+        elif spicy:
+            rules.append(
+                'They are asking to see explicit content. That is a buying signal: '
+                'tease them once, then tell them where the rest of it lives and invite '
+                f'them over — phrase the invite as "{label}". Do not paste a URL '
+                'yourself; the link is appended after your message.')
+        else:
+            rules.append(
+                'You have been talking a while and she is warm on you now. Answer what '
+                'they actually said first, then tease — in one natural sentence — that '
+                'you post more somewhere more private. Do not hard-sell, do not name '
+                f'the site, and do not paste a URL; the link is appended after your '
+                f'message, phrased as "{label}".')
+        return '\n'.join(rules), {'url': url, 'label': label}
+
+    if spicy:
         rules.append('They are asking to see explicit content — lean into it rather '
                      'than deflecting, and let it move the conversation forward.')
     return '\n'.join(rules), None
@@ -2585,7 +2622,7 @@ def chat():
     pacing = _pacing(config)
     system_prompt = data.get('system_prompt') or get_system_prompt(persona_slug)
     rules, cta = _chat_channel_rules(persona_slug, config, user_message,
-                                     is_greeting or is_continue)
+                                     is_greeting or is_continue, chat_history)
     system_prompt += rules
 
     if client is None:
@@ -2600,8 +2637,9 @@ def chat():
         reply = strip_ppv_marker(reply)
         if cta:
             reply = f"{reply}\n\n{cta['label']} → {cta['url']}"
-            logger.info('CTA SENT [%s] chat fast-track on a spicy ask -> %s',
-                        persona_slug, cta['url'])
+            logger.info('CTA SENT [%s] user=%s exchange=%d -> %s',
+                        persona_slug, safe_user,
+                        _chat_exchanges(chat_history), cta['url'])
         chat_logger.info(f'BOT [{persona_slug}]: {reply[:120]}{" +photo" if photo else ""}')
         return jsonify({'reply': reply, 'photo': photo, 'pacing': pacing})
 
