@@ -1842,14 +1842,6 @@ async function savePersona() {
   const ageNum = parseInt(config.age);
   if (!config.age || isNaN(ageNum) || ageNum < 18) { alert('Age must be 18 or older.'); document.getElementById('f-age').focus(); return; }
   const status = document.getElementById('save-status');
-  const enabledPlatforms = Object.entries(config.platforms || {}).filter(([, p]) => p.enabled);
-  if (enabledPlatforms.length) {
-    status.textContent = 'Testing platform connections…'; status.className = 'save-status';
-    for (const [id, creds] of enabledPlatforms) {
-      const result = await testPlatformAPI(id, creds);
-      setPlatformStatus(id, result.ok, result.ok ? result.info : result.error);
-    }
-  }
   status.textContent = 'Saving…'; status.className = 'save-status';
   try {
     // Photos always save to the current persona (originals included).
@@ -1872,7 +1864,10 @@ async function savePersona() {
       lsSavePersona(currentSlug, config);
       if (data.prompt) localStorage.setItem(lsPromptKey(currentSlug), data.prompt);
       status.textContent = '✓ Saved & deployed'; status.className = 'save-status ok';
-      if (personas[currentSlug]) personas[currentSlug].name = config.name || currentSlug;
+      if (personas[currentSlug]) {
+        personas[currentSlug].name = config.name || currentSlug;
+        personas[currentSlug].avatar = config.avatar || '';
+      }
       renderSidebar();
       showPromptPreview(data.prompt);
     } else { throw new Error(data.error || 'Unknown error'); }

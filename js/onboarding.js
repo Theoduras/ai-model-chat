@@ -270,14 +270,28 @@
     state.cfg = collectConfig();
     var note = byId('ob-saved');
     try {
+      // Photos live outside the config blob and save through their own endpoint,
+      // so posting collectConfig() alone silently dropped everything the photo
+      // step generated.
+      if (typeof saveGallery === 'function') await saveGallery(state.slug);
       await fetch('/api/personas/' + state.slug, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(state.cfg)
       });
+      refreshSidebarEntry();
       if (note) note.textContent = 'Saved';
     } catch (e) {
       if (note) note.textContent = 'Not saved — check your connection';
     }
+  }
+
+  // The sidebar renders from the `personas` map, not from the form, so its name
+  // and thumbnail stay stale until that map is told what was just saved.
+  function refreshSidebarEntry() {
+    if (typeof personas !== 'object' || !personas || !personas[state.slug]) return;
+    personas[state.slug].name = state.cfg.name || state.slug;
+    personas[state.slug].avatar = state.cfg.avatar || '';
+    if (typeof renderSidebar === 'function') renderSidebar();
   }
 
   // ── Guided tour ───────────────────────────────────────────────────────────
@@ -467,6 +481,8 @@
       state.on = true;
 
       var fa = byId('form-area');
+      var stale = byId('ob-stash');
+      if (stale) stale.remove();
       var hold = document.createElement('div');
       hold.id = 'ob-stash';
       hold.style.display = 'none';
@@ -511,6 +527,10 @@
       await markDone(true);
       var name = (state.cfg.name || state.slug);
       unmount();
+      // The done card is an ordinary page, not a wizard frame: leaving
+      // ob-running on the body kept .form-area at overflow:hidden and killed
+      // scrolling here and on the full builder the creator lands on next.
+      document.body.classList.remove('ob-running');
       byId('form-area').innerHTML =
         '<div class="ob-done">' +
           '<div class="ob-seal">✓</div>' +

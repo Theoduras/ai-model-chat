@@ -2665,7 +2665,7 @@ body.obt-open { overflow: hidden; }
 .ps-ok { color: var(--ok, #22c55e); font-size: 0.82rem; margin-bottom: 10px; }
 .ps-err { color: var(--err, #ef4444); font-size: 0.78rem; margin-top: 10px; }
 
-.ps-hub { padding: 26px 28px; max-width: 880px; }
+.ps-hub { padding: 26px 28px; max-width: 880px; overflow-y: auto; flex: 1; min-height: 0; }
 .ps-tablewrap { overflow-x: auto; margin-top: 18px; }
 .ps-table { border-collapse: collapse; width: 100%; font-size: 0.8rem; }
 .ps-table th, .ps-table td {
