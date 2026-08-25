@@ -474,6 +474,24 @@ body.page-chat .conn-dot.err { background: var(--err); }
 .msg-row.bot.cont .bubble  { border-top-left-radius: 6px; }
 .msg-row.user.cont .bubble { border-top-right-radius: 6px; }
 
+.bubble-photo {
+  display: block;
+  width: 100%;
+  max-width: 260px;
+  max-height: 340px;
+  object-fit: cover;
+  border-radius: 12px;
+  margin-bottom: 8px;
+  cursor: zoom-in;
+}
+
+.bubble-link {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  word-break: break-all;
+}
+
 .bubble-time {
   display: block;
   font-size: 10px;

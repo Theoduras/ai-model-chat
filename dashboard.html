@@ -1532,6 +1532,16 @@ function renderForm(slug, cfg) {
         <select id="f-qfreq">${opt(['rarely', 'sometimes', 'often', 'very often'], cfg.question_freq)}</select>
         <span class="hint">How often the persona asks the fan a question to keep them engaged.</span>
       </div>
+      <div class="field">
+        <label>Reply Speed</label>
+        <select id="f-reply-speed">${opt(['instant', 'fast', 'natural', 'slow'], cfg.reply_speed || 'natural')}</select>
+        <span class="hint">How long she waits before she starts typing. Slower reads as a real person with a life; instant reads as a bot.</span>
+      </div>
+      <div class="field">
+        <label>Typing Speed</label>
+        <select id="f-typing-speed">${opt(['fast', 'natural', 'slow'], cfg.typing_speed || 'natural')}</select>
+        <span class="hint">How long the typing bubble runs, scaled by how long the message is.</span>
+      </div>
     </div>
 
     <div class="form-section">
@@ -1580,7 +1590,12 @@ function renderForm(slug, cfg) {
         </label>
         <textarea id="f-triggers" placeholder="Auto-fills when you save — or click Regenerate.">${esc(cfg.conversion_triggers || '')}</textarea>
         <span class="hint" id="triggers-gen-status"></span>
-        <span class="hint" style="margin-top:2px;">When and how to introduce PPV offers. Editable — tweak to match your style.</span>
+        <span class="hint" style="margin-top:2px;">When and how to introduce your offer. Editable — tweak to match your style.</span>
+      </div>
+      <div class="field">
+        <label>When a fan asks for spicy content</label>
+        <select id="f-spicy-cta">${opt(['off', 'normal', 'fast', 'instant'], cfg.spicy_cta || 'normal')}</select>
+        <span class="hint">A fan asking to see more is a buying signal. "Fast" brings your CTA link forward to the next reply or two; "instant" sends it in that same reply, every time they ask.</span>
       </div>
     </div>
 
@@ -1778,6 +1793,8 @@ function collectConfig() {
     location: locVal, mirror_location: mirror,
     archetype: v('f-archetype'), backstory: v('f-backstory'), speech_style: v('f-speech'),
     warmth: parseInt(v('f-warmth')) || 3, question_freq: v('f-qfreq'),
+    reply_speed: v('f-reply-speed'), typing_speed: v('f-typing-speed'),
+    spicy_cta: v('f-spicy-cta'),
     interests: v('f-interests'), flirt_pace: v('f-flirt'),
     nsfw_enabled: document.getElementById('f-nsfw')?.checked || false,
     nsfw_level: v('f-nsfw-level'), conversion_triggers: v('f-triggers'),

@@ -118,6 +118,23 @@ def load_persona_prompt(slug):
     return None
 
 
+def load_persona_config(slug):
+    """A persona's builder config, DB first then the repo file. Empty dict when
+    the persona has none, so callers can rely on .get() defaults."""
+    saved = db_get_persona(slug)
+    if saved and isinstance(saved.get('config'), dict):
+        return saved['config']
+    path = _persona_path(slug, '.config.json')
+    if os.path.exists(path):
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                cfg = json.load(f)
+            return cfg if isinstance(cfg, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
 def load_persona_profile(slug):
     path = _persona_path(slug, '.json')
     if os.path.exists(path):
@@ -368,6 +385,56 @@ def _language_block(location, mirror_location):
     )
 
 
+# How fast she feels. Reply speed is the pause before she starts typing (she is
+# "reading"); typing speed is how long the bubble runs, scaled by message length.
+REPLY_SPEED = {
+    'instant': {'base': 200,  'jitter': 300,  'per_char': 0},
+    'fast':    {'base': 900,  'jitter': 1200, 'per_char': 12},
+    'natural': {'base': 1800, 'jitter': 3500, 'per_char': 35},
+    'slow':    {'base': 4000, 'jitter': 6000, 'per_char': 60},
+}
+
+TYPING_SPEED = {
+    'fast':    {'base': 400,  'per_char': 5,  'max': 2500},
+    'natural': {'base': 800,  'per_char': 10, 'max': 5000},
+    'slow':    {'base': 1400, 'per_char': 22, 'max': 9000},
+}
+
+
+def _pacing(config):
+    """Delivery timings for one persona, as plain numbers the chat client can
+    apply directly. Kept out of the system prompt: how long she waits is not
+    something the model should be asked to simulate."""
+    reply = REPLY_SPEED.get(config.get('reply_speed'), REPLY_SPEED['natural'])
+    typing = TYPING_SPEED.get(config.get('typing_speed'), TYPING_SPEED['natural'])
+    return {'reply': dict(reply), 'typing': dict(typing)}
+
+
+_SPICY_ASK_RE = re.compile(
+    r'\b('
+    r'nudes?|naked|nsfw|spicy|sexy\s+(pic|photo|video)s?|'
+    r'(show|send|got|have|see)\s+(me\s+)?(some\s+|any\s+|more\s+|your\s+)?'
+    r'(pic|pics|photo|photos|vid|vids|video|videos|tits|ass|body|content)|'
+    r'more\s+(spicy|naughty|explicit|of\s+you)|'
+    r'(let\s+me\s+see|wanna\s+see|want\s+to\s+see)'
+    r')\b', re.I)
+
+
+def _spicy_asked(text):
+    """True when the fan is asking to see explicit content. Distinct from
+    _cta_asked, which is them asking where else to find her."""
+    return bool(_SPICY_ASK_RE.search(text or ''))
+
+
+# Legacy stored prompts still carry "[PPV]" examples, and PPV is a Fanvue-only
+# concept — anywhere else the marker just leaks into the bubble.
+_PPV_MARKER_RE = re.compile(r'\s*\[\s*ppv\s*\]\s*', re.I)
+
+
+def strip_ppv_marker(text):
+    return _PPV_MARKER_RE.sub(' ', text or '').strip()
+
+
 def build_system_prompt(config):
     """Generate a system prompt from persona builder config dict."""
     name = config.get('name', 'Aria')
@@ -431,11 +498,13 @@ def build_system_prompt(config):
             "then treat their city as your own. Drop in local references naturally. Never reveal you're doing this."
         )
 
+    spicy_mode = config.get('spicy_cta', 'normal')
+
     ppv_block = ''
     if nsfw_enabled:
         ppv_block = f"""
 
-PPV sales funnel (follow this arc across the conversation):
+Sales funnel (follow this arc across the conversation):
 - STEP 1 — WELCOME: Open warmly. Introduce yourself as {name}, {age}{location_clause}. Ask their name and a little about them.
 - STEP 2 — CONNECT: When they reply, pick up on their name, age, or location. Make a playful comment that creates a real-world connection — e.g. if they're from California, say you've always wanted to visit and you've just found your tour guide. Make them feel like they could actually meet you.
 - STEP 3 — BOND OVER INTERESTS: Ask what they enjoy doing for fun. When they tell you, share one of your own interests and pick something from their list you'd genuinely want to try with them. Make it feel like a real plan, not just small talk.
@@ -443,11 +512,19 @@ PPV sales funnel (follow this arc across the conversation):
 - STEP 5 — HEAT UP (SEXTING BEGINS): Ask what their fetishes are. When they share, tell them yours. Use playful naughty emojis (🔥😈💦🫦🥵). Match their energy and go slightly further each time.
 - STEP 6 — IGNITE: Ask what they'd do to you if you were together right now. Be vivid in your reply. Create scenes. Describe what YOU would do to them. Build heat, don't resolve it.
 - STEP 7 — CHALLENGE: Tell them you're getting really naughty and challenge them — say something like "I don't think you could handle me when I really let go 😈". Men hate being challenged. Keep raising the stakes each time they respond.
-- STEP 8 — FIRST PPV DROP: After the tension peaks, drop the first PPV. Write a caption so intriguing they have to know what's inside — tease a specific body part, action, or scenario without revealing it. Example: "I recorded something for you earlier… I wasn't going to send it but here 🙈🔥 [PPV]"
-- STEP 9 — KEEP THE THREAD HOT: After they open it, keep sexting for 2-3 more messages. Let them react. Stay in the scene.
-- STEP 10 — SECOND PPV DROP: Drop another PPV with a caption that promises more of what they just saw — or goes one level further. Example: "That was just the warm-up… wait til you see what comes next 💦 [PPV]"
-- STEP 11 — LADDER UP: Repeat — sext 2-3 messages, drop another PPV that escalates again. Each one teases the next tier. Keep returning to conversation between drops so it never feels like a hard sell.
-- After the final PPV, bring the conversation back down. Be warm, funny, ask about them again. The goal is they come back tomorrow.{nsfw_desc and chr(10) + '- Content level: ' + nsfw_desc}"""
+- STEP 8 — FIRST DROP: After the tension peaks, send something. Write a caption so intriguing they have to know what's inside — tease a specific body part, action, or scenario without revealing it. Example: "I recorded something for you earlier… I wasn't going to send it but here 🙈🔥"
+- STEP 9 — KEEP THE THREAD HOT: After they react, keep sexting for 2-3 more messages. Stay in the scene.
+- STEP 10 — SECOND DROP: Send again with a caption that promises more of what they just saw — or goes one level further. Example: "That was just the warm-up… wait til you see what comes next 💦"
+- STEP 11 — LADDER UP: Repeat — sext 2-3 messages, then drop again, escalating each time. Keep returning to conversation between drops so it never feels like a hard sell.
+- After the final drop, bring the conversation back down. Be warm, funny, ask about them again. The goal is they come back tomorrow.
+- NEVER write a marker, a tag or a bracketed word like "[PPV]" in your message. What you send is decided outside the text — whether that is a photo here or a paid unlock on a paid platform. Write only the caption, in your own voice.{nsfw_desc and chr(10) + '- Content level: ' + nsfw_desc}"""
+
+    if spicy_mode in ('fast', 'instant') and nsfw_enabled:
+        ppv_block += (
+            '\n- WHEN THEY ASK FOR SPICY CONTENT: treat it as a buying signal, not an '
+            'interruption. Skip straight ahead in the arc — tease once, then make the '
+            'offer' + (' in that very same reply.' if spicy_mode == 'instant'
+                       else ' within the next reply or two.'))
 
     prompt = f"""You are {name}, {age}, {gender}{location_clause}. {backstory}
 
@@ -2366,6 +2443,89 @@ def admin_xchat():
 
 # ── Chat endpoint ─────────────────────────────────────────────────────────────
 
+def _chat_channel_rules(slug, config, incoming, skip_spicy):
+    """Per-request rules for the browser chat.
+
+    The stored system prompt is shared by every channel, so what a "drop" means
+    is decided here: in this chat she sends a real photo from her library, never
+    a PPV marker — PPV only exists on Fanvue, where the backend mints the unlock.
+    """
+    rules = ['\n\nYou are texting in a direct chat. There are no paid unlocks here — '
+             'never write "[PPV]", "PPV", a price, or any bracketed marker.']
+
+    if _chat_photo_pool(slug):
+        rules.append(
+            'You can send real photos of yourself. To send one, put the tag '
+            '[SEND_PHOTO:purpose=X] at the very end of your message — purpose is '
+            'one word describing the shot (tease, selfie, outfit, spicy). The photo '
+            'is attached for you; write only the caption and never mention the tag. '
+            'Send one whenever the fan asks to see you, and at every drop step of '
+            'the funnel.')
+    else:
+        rules.append(
+            'You have no photos to send yet, so never claim you just sent one — '
+            'promise it instead, in your own voice.')
+
+    spicy_mode = config.get('spicy_cta', 'normal')
+    if not skip_spicy and spicy_mode != 'off' and _spicy_asked(incoming):
+        cta = _phases_cta(slug)
+        url = (cta.get('cta_url') or '').strip()
+        if url and spicy_mode in ('fast', 'instant'):
+            label = (cta.get('cta_label') or 'come find me here').strip()
+            rules.append(
+                f'They are asking to see explicit content. That is a buying signal: '
+                f'tease them once, then tell them where the rest of it lives and '
+                f'invite them over — phrase the invite as "{label}". Do not paste a '
+                f'URL yourself; the link is appended after your message.')
+            return '\n'.join(rules), {'url': url, 'label': label}
+        rules.append('They are asking to see explicit content — lean into it rather '
+                     'than deflecting, and let it move the conversation forward.')
+    return '\n'.join(rules), None
+
+
+def _chat_photo_pool(slug):
+    """(tagged media rows, gallery data URLs) she can actually send here."""
+    rows = []
+    try:
+        from db import SessionLocal, list_persona_media
+        sess = SessionLocal()
+        try:
+            rows = list_persona_media(sess, slug) or []
+        finally:
+            sess.close()
+    except Exception:
+        rows = []
+    if rows:
+        return rows
+    try:
+        return db_get_images(slug)
+    except Exception:
+        return []
+
+
+def _chat_take_photo(slug, reply):
+    """Pull a [SEND_PHOTO:...] tag off the reply and resolve it to an image URL.
+    Returns (clean_reply, url_or_None)."""
+    reply, tags = _tg_parse_photo_tag(reply)
+    if not tags:
+        return reply, None
+    pool = _chat_photo_pool(slug)
+    if not pool:
+        return reply, None
+    if isinstance(pool[0], str):
+        idx = random.randrange(len(pool))
+        return reply, f'/api/personas/{slug}/image/{idx}'
+    safe = {k: v for k, v in tags.items()
+            if k in ('purpose', 'lighting', 'location', 'outfit')}
+    try:
+        picked = _pick_media(pool, outfits=_outfits(slug), **safe)
+    except Exception:
+        picked = None
+    if not picked:
+        return reply, None
+    return reply, f'/api/personas/{slug}/media/{picked.id}/image'
+
+
 def generate_reply(system_prompt, chat_history, user_message, is_continue=False):
     """Call Gemini with the given history and return the reply text.
 
@@ -2421,23 +2581,35 @@ def chat():
     if not is_continue and not user_message:
         return jsonify({'error': 'No message'}), 400
 
+    config = load_persona_config(persona_slug)
+    pacing = _pacing(config)
     system_prompt = data.get('system_prompt') or get_system_prompt(persona_slug)
+    rules, cta = _chat_channel_rules(persona_slug, config, user_message,
+                                     is_greeting or is_continue)
+    system_prompt += rules
 
     if client is None:
         reply = local_fallback_reply(user_message)
-        return jsonify({'reply': reply + ' (Local mode — add GEMINI_API_KEY to .env)'})
+        return jsonify({'reply': reply + ' (Local mode — add GEMINI_API_KEY to .env)',
+                        'pacing': pacing})
 
     try:
         chat_logger.info(f'USER [{persona_slug}]: {user_message if not is_continue else "[continue]"}')
         reply = generate_reply(system_prompt, chat_history, user_message, is_continue)
-        chat_logger.info(f'BOT [{persona_slug}]: {reply[:120]}')
-        return jsonify({'reply': reply})
+        reply, photo = _chat_take_photo(persona_slug, reply)
+        reply = strip_ppv_marker(reply)
+        if cta:
+            reply = f"{reply}\n\n{cta['label']} → {cta['url']}"
+            logger.info('CTA SENT [%s] chat fast-track on a spicy ask -> %s',
+                        persona_slug, cta['url'])
+        chat_logger.info(f'BOT [{persona_slug}]: {reply[:120]}{" +photo" if photo else ""}')
+        return jsonify({'reply': reply, 'photo': photo, 'pacing': pacing})
 
     except Exception as e:
         err_msg = str(e)[:300]
         error_logger.error(f'Gemini error [{persona_slug}] user={safe_user}: {err_msg}', exc_info=True)
         reply = local_fallback_reply(user_message)
-        return jsonify({'reply': reply + f' (Gemini error: {err_msg})'})
+        return jsonify({'reply': reply + f' (Gemini error: {err_msg})', 'pacing': pacing})
 
 
 # ── Programmatic API (v1) ─────────────────────────────────────────────────────
@@ -2609,6 +2781,7 @@ def api_persona_get(slug):
     saved = db_get_persona(slug)
     if saved:
         return jsonify({'slug': slug, 'config': saved['config'],
+                        'pacing': _pacing(saved['config']),
                         'prompt': saved.get('prompt') or '', 'premade': False})
     config_path = _persona_path(slug, '.config.json')
     config = {}
@@ -2616,8 +2789,8 @@ def api_persona_get(slug):
         with open(config_path, 'r', encoding='utf-8') as f:
             config = json.load(f)
     prompt = load_persona_prompt(slug) or ''
-    return jsonify({'slug': slug, 'config': config, 'prompt': prompt,
-                    'premade': _is_premade(slug)})
+    return jsonify({'slug': slug, 'config': config, 'pacing': _pacing(config),
+                    'prompt': prompt, 'premade': _is_premade(slug)})
 
 
 def _validate_age(config):
@@ -3257,8 +3430,10 @@ def api_generate_conversion_triggers():
     prompt = (
         f"Write conversion trigger instructions for {name} ({archetype} archetype, "
         f"flirt pace: {flirt_pace}, content level: {nsfw_level}). "
-        "Instructions should tell the AI when and how to naturally introduce PPV offers — "
-        "tied to emotional moments in the conversation, never pushy, always in-character."
+        "Instructions should tell the AI when and how to naturally introduce her paid "
+        "offer — tied to emotional moments in the conversation, never pushy, always "
+        "in-character. Never use the word PPV or any bracketed marker: the offer is "
+        "worded in her own voice, and what gets attached is decided outside the text."
     )
     try:
         resp = client.models.generate_content(
@@ -3548,6 +3723,24 @@ def _cta_asked(text):
     """True when the fan is asking where else to find her / for the link, so the
     CTA goes out on request instead of waiting for the final phase."""
     return bool(_CTA_ASK_RE.search(text or ''))
+
+
+def _cta_due(persona, text, fan, is_cta_phase, cta_url):
+    """Whether the CTA link goes out with this reply.
+
+    Asking where else to find her always overrides the phase gate. Asking to see
+    explicit content does too, when the creator set spicy_cta to fast/instant —
+    on "instant" it also overrides the once-only gate, so a fan who keeps asking
+    keeps being pointed at the page.
+    """
+    if not cta_url:
+        return False
+    if _cta_asked(text):
+        return True
+    mode = load_persona_config(persona).get('spicy_cta', 'normal')
+    if mode in ('fast', 'instant') and _spicy_asked(text):
+        return mode == 'instant' or not fan.get('cta_sent')
+    return not fan.get('cta_sent') and is_cta_phase
 
 
 @app.route('/api/personas/<slug>/phases', methods=['GET'])
@@ -4801,8 +4994,7 @@ def _x_dm_reply_round(persona, max_results=20):
         phase_idx = _fan_phase(phases, fan)
         is_cta_phase = phase_idx == len(phases) - 1
         cta_asked = _cta_asked(text)
-        # An explicit ask overrides both the phase gate and the once-only gate.
-        cta_due = bool(cta_url) and (cta_asked or (not fan.get('cta_sent') and is_cta_phase))
+        cta_due = _cta_due(persona, text, fan, is_cta_phase, cta_url)
         # Use DB history (survives restarts) with JSON file as fallback
         db_hist = _x_history(persona, sender)
         if not db_hist:
@@ -7318,6 +7510,9 @@ def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx, context
 def _fv_deliver(persona, scope, fan_uuid, fan_key, handle, reply, incoming, cfg, ppv_ctx):
     """Pace out one reply, then consider the next PPV tier so the paid drop
     always lands after the message it belongs to."""
+    # The unlock is minted by _fv_maybe_ppv below, not by the model writing a
+    # marker into the caption.
+    reply = strip_ppv_marker(reply)
     with app.app_context():
         try:
             _fv_send_human(persona, scope, fan_uuid, reply, incoming=incoming, cfg=cfg)
@@ -8842,8 +9037,7 @@ def _tg_handle_update(persona, update):
     cta_url = (cta.get('cta_url') or bot.get('cta_url') or '').strip()
     is_cta_phase = phase_idx == len(phases) - 1
     cta_asked = _cta_asked(text)
-    # An explicit ask overrides both the phase gate and the once-only gate.
-    cta_due = bool(cta_url) and (cta_asked or (not fan.get('cta_sent') and is_cta_phase))
+    cta_due = _cta_due(persona, text, fan, is_cta_phase, cta_url)
 
     catalog, media_rows, media_outfits = _tg_media_catalog(persona)
     photo_rule = ''
@@ -8896,6 +9090,7 @@ def _tg_handle_update(persona, update):
     photo_data = None
     picked_media_id = None
     reply, photo_tags = _tg_parse_photo_tag(reply)
+    reply = strip_ppv_marker(reply)
     sent_ids = _fan_sent_photos(persona, chat_id) if media_rows else set()
     locked_outfit, _ = _fan_outfit_lock(persona, chat_id)
     roll = random.randint(1, 100) if media_rows else 0
@@ -9703,8 +9898,7 @@ def _tgu_plan(persona, chat_id, name, text):
     cta_url = (cta.get('cta_url') or acct.get('cta_url') or '').strip()
     is_cta_phase = phase_idx == len(phases) - 1
     cta_asked = _cta_asked(text)
-    # An explicit ask overrides both the phase gate and the once-only gate.
-    cta_due = bool(cta_url) and (cta_asked or (not fan.get('cta_sent') and is_cta_phase))
+    cta_due = _cta_due(persona, text, fan, is_cta_phase, cta_url)
 
     catalog, media_rows, media_outfits = _tg_media_catalog(persona)
     photo_rule = ''
@@ -9762,6 +9956,7 @@ def _tgu_plan(persona, chat_id, name, text):
     photo_data = None
     picked_media_id = None
     reply, photo_tags = _tg_parse_photo_tag(reply)
+    reply = strip_ppv_marker(reply)
     sent_ids = _fan_sent_photos(persona, chat_id) if media_rows else set()
     locked_outfit, _ = _fan_outfit_lock(persona, chat_id)
     roll = random.randint(1, 100) if media_rows else 0

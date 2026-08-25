@@ -131,9 +131,24 @@ function applyPersonaConfig(cfg) {
 
 let personaCfg = {}, profileImages = [], profileIdx = 0;
 
+// Delivery pacing, sent back by /chat from the creator's settings. These are
+// the fallbacks used before the first reply lands.
+let pacing = { reply: { base: 1800, jitter: 3500, per_char: 35 },
+               typing: { base: 800, per_char: 10, max: 5000 } };
+function replyDelay(text) {
+  const r = pacing.reply || {};
+  return (r.base || 0) + Math.random() * (r.jitter || 0)
+       + Math.min((text || '').length * (r.per_char || 0), 3500);
+}
+function typingDelay(text) {
+  const t = pacing.typing || {};
+  return Math.min((t.base || 0) + (text || '').length * (t.per_char || 0), t.max || 5000);
+}
+
 function loadPersonaConfig() {
   return fetch('/api/personas/' + persona).then(r => r.ok ? r.json() : null).then(d => {
     personaCfg = (d && d.config) || {};
+    if (d && d.pacing) pacing = d.pacing;
     applyPersonaConfig(personaCfg);
     return fetch('/api/personas/' + persona + '/images').then(r => r.ok ? r.json() : { images: [] }).then(g => {
       profileImages = Array.isArray(g.images) ? g.images : [];
@@ -252,7 +267,7 @@ function ld() {
   if (el) { el.textContent = u || 'Guest'; el.onclick = cu; el.title = 'Switch user'; }
   chatEl.innerHTML = '';
   chatEl.appendChild(typingRow);
-  h.forEach(x => { insertMsg(x.content, x.role === 'user'); });
+  h.forEach(x => { insertMsg(x.content, x.role === 'user', x.photo); });
   chatEl.scrollTop = chatEl.scrollHeight;
 }
 
@@ -291,7 +306,16 @@ function cu() { showNameGate({ prefill: u || '', title: 'Switch user', sub: 'Ent
 
 function ts() { return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
 
-function insertMsg(text, isUser) {
+// Bubble text is model output, so it goes in escaped. Line breaks become <br>
+// and a bare URL becomes a link — the CTA arrives as "label → https://…".
+function bubbleHTML(text) {
+  const esc = (text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return esc.replace(/https?:\/\/[^\s<]+/g,
+      u => '<a class="bubble-link" href="' + u + '" target="_blank" rel="noopener noreferrer">' + u + '</a>')
+    .replace(/\n/g, '<br>');
+}
+
+function insertMsg(text, isUser, photo) {
   const prev = chatEl.lastElementChild;
   const prevIsUser = prev && prev.classList.contains('user');
   const prevIsBot  = prev && prev.classList.contains('bot');
@@ -311,18 +335,19 @@ function insertMsg(text, isUser) {
   }
   const bub = document.createElement('div');
   bub.className = 'bubble';
-  bub.innerHTML = text + '<span class="bubble-time">' + ts() + '</span>';
+  bub.innerHTML = (photo ? '<img class="bubble-photo" src="' + photo + '" alt="">' : '')
+    + bubbleHTML(text) + '<span class="bubble-time">' + ts() + '</span>';
   row.appendChild(bub);
   chatEl.insertBefore(row, typingRow);
   chatEl.scrollTop = chatEl.scrollHeight;
   return row;
 }
 
-function addMsg(text, isUser) {
+function addMsg(text, isUser, photo) {
   const r = isUser ? 'user' : 'bot';
-  if (h.length && h[h.length - 1].role === r && h[h.length - 1].content.trim() === text.trim()) return;
-  h.push({ role: r, content: text });
-  insertMsg(text, isUser);
+  if (h.length && h[h.length - 1].role === r && h[h.length - 1].content.trim() === text.trim() && !photo) return;
+  h.push({ role: r, content: text, photo: photo || null });
+  insertMsg(text, isUser, photo);
   sc();
   if (!isUser && window.parent !== window) {
     try { window.parent.postMessage({ type: 'new_message' }, '*'); } catch(e) {}
@@ -352,20 +377,21 @@ function splitChunks(text) {
   return [clean.slice(0, mid).join(' '), clean.slice(mid).join(' ')].filter(Boolean);
 }
 
-function deliverChunks(chunks, idx, onDone) {
+function deliverChunks(chunks, idx, onDone, photo) {
   if (idx >= chunks.length) { if (onDone) onDone(); return; }
   showTyping(false);
-  addMsg(chunks[idx], false);
-  if (idx + 1 < chunks.length) {
+  const last = idx + 1 >= chunks.length;
+  addMsg(chunks[idx], false, last ? photo : null);
+  if (!last) {
     const next = chunks[idx + 1];
-    const delay = 800 + next.length * 10 + Math.random() * 700;
-    setTimeout(() => { showTyping(true); setTimeout(() => deliverChunks(chunks, idx + 1, onDone), delay); }, 200);
+    const delay = typingDelay(next) + Math.random() * 700;
+    setTimeout(() => { showTyping(true); setTimeout(() => deliverChunks(chunks, idx + 1, onDone, photo), delay); }, 200);
   } else {
     if (onDone) onDone();
   }
 }
 
-function cs(text, cb) { ss(true); const chunks = splitChunks(text); deliverChunks(chunks, 0, cb); }
+function cs(text, cb, photo) { ss(true); const chunks = splitChunks(text); deliverChunks(chunks, 0, cb, photo); }
 
 let st = null, ot = null;
 function ri() { clearTimeout(st); clearTimeout(ot); }
@@ -404,16 +430,17 @@ function processQueue() {
   const x = msgQueue.shift();
   um(x);
   const histSnapshot = h.slice();   // only turns answered so far — not later queued messages
-  const initialDelay = 1800 + Math.random() * 3500 + Math.min(x.length * 35, 3500);
+  const initialDelay = replyDelay(x);
   showTyping(true);
   setTimeout(() => {
     fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: chatBody({ message: x, history: histSnapshot }) })
       .then(r => r.json()).then(d => {
+        if (d.pacing) pacing = d.pacing;
         h.push({ role: 'user', content: x }); sm();
         if (d.reply) {
           const recentBot = h.slice(-6).filter(m => m.role === 'bot').map(m => m.content.trim().toLowerCase());
           if (recentBot.includes(d.reply.trim().toLowerCase())) { showTyping(false); sc(); ss(true); processQueue(); return; }
-          cs(d.reply, () => { sc(); processQueue(); });
+          cs(d.reply, () => { sc(); processQueue(); }, d.photo);
         } else {
           showTyping(false); addMsg('something went weird on my end. try again?', false); sc(); ss(false); processQueue();
         }
@@ -434,11 +461,11 @@ function ck() { fetch('/').then(() => ss(true)).catch(() => ss(false)); }
 
 function greet() {
   if (h.length !== 0) return;
-  const greetDelay = 1500 + Math.random() * 2000;
+  const greetDelay = replyDelay('');
   showTyping(true);
   setTimeout(() => {
     fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: chatBody({ message: '__greeting__', history: [] }) })
-      .then(r => r.json()).then(d => { if (d.reply) { cs(d.reply, si); } else { showTyping(false); addMsg('hey', false); si(); } })
+      .then(r => r.json()).then(d => { if (d.pacing) pacing = d.pacing; if (d.reply) { cs(d.reply, si, d.photo); } else { showTyping(false); addMsg('hey', false); si(); } })
       .catch(() => { showTyping(false); addMsg('hey', false); si(); });
   }, greetDelay);
 }

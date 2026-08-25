@@ -58,6 +58,12 @@
       pick: function () { return fields(['f-interests']); },
       done: function (c) { return (c.interests || '').trim().length > 2; } },
 
+    { stage: 'talks', key: 'pacing', nav: 'Reply speed',
+      title: 'How fast does she reply?',
+      sub: 'The pause before she starts typing, and how long the typing bubble runs. Slow feels like a real person with a life — instant feels like a bot.',
+      pick: function () { return fields(['f-reply-speed', 'f-typing-speed']); },
+      done: function (c) { return !!c.reply_speed; } },
+
     { stage: 'earns', key: 'flirt', nav: 'Flirting pace',
       title: 'How fast does she flirt?',
       sub: 'A slow burn keeps fans chatting for weeks. Instant converts faster but burns out sooner.',
@@ -75,7 +81,7 @@
     { stage: 'earns', key: 'convert', nav: 'Your link',
       title: 'Where do you want fans to end up?',
       sub: 'Your subscription or PPV link, and the moments she uses to bring it up in character.',
-      pick: function () { return fields(['f-triggers', 'f-cta-url', 'f-cta-label']); },
+      pick: function () { return fields(['f-triggers', 'f-cta-url', 'f-cta-label', 'f-spicy-cta']); },
       done: function () { return !!(val('f-cta-url') || '').trim(); } },
   ];
 
@@ -85,7 +91,7 @@
   var TOUR = [
     { anchor: '.ob-stepwrap', placement: 'right',
       title: 'One thing at a time',
-      body: 'Setup is split into ten short steps. Each one asks a single question about your persona — answer it and continue. Nothing here is permanent; you can change any of it later.' },
+      body: 'Setup is split into a handful of short steps. Each one asks a single question about your persona — answer it and continue. Nothing here is permanent; you can change any of it later.' },
 
     { anchor: '#ob-step-body', placement: 'right',
       title: 'This is the actual setting',
@@ -93,7 +99,7 @@
 
     { anchor: '.ob-rail', placement: 'right',
       title: 'Where you are',
-      body: 'Four stages, ten steps. The bar shows how far along you are, and you can jump back to any step you have already passed by clicking it.' },
+      body: 'Four stages. The bar shows how far along you are, and you can jump back to any step you have already passed by clicking it.' },
 
     { anchor: '.preview-panel', placement: 'left',
       title: 'She updates as you type',
