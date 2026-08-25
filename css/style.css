@@ -2649,6 +2649,37 @@ body.obt-open { overflow: hidden; }
   .ob-stepwrap { padding: 22px 18px; }
 }
 
+/* Platform setup wizard — reuses the .ob-* shell, adds its own step widgets. */
+.ps-picks { display: grid; gap: 10px; }
+.ps-pick {
+  display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto;
+  column-gap: 10px; align-items: center;
+  border: 1px solid var(--border); border-radius: 10px;
+  padding: 12px 14px; cursor: pointer;
+}
+.ps-pick.on { border-color: var(--accent, #a855f7); }
+.ps-pick input { grid-row: 1 / span 2; margin: 0; }
+.ps-pick-t { font-size: 0.86rem; font-weight: 600; }
+.ps-pick-d { font-size: 0.75rem; color: var(--text-muted); line-height: 1.5; }
+.ps-ok { color: var(--ok, #22c55e); font-size: 0.82rem; margin-bottom: 10px; }
+.ps-err { color: var(--err, #ef4444); font-size: 0.78rem; margin-top: 10px; }
+
+.ps-hub { padding: 26px 28px; max-width: 880px; }
+.ps-tablewrap { overflow-x: auto; margin-top: 18px; }
+.ps-table { border-collapse: collapse; width: 100%; font-size: 0.8rem; }
+.ps-table th, .ps-table td {
+  border-bottom: 1px solid var(--border); padding: 10px 12px; text-align: left;
+}
+.ps-table thead th { color: var(--text-muted); font-weight: 600; }
+.ps-table tbody th { font-weight: 600; white-space: nowrap; }
+.ps-chip {
+  font: inherit; font-size: 0.73rem; cursor: pointer; white-space: nowrap;
+  border: 1px solid var(--border); border-radius: 999px;
+  padding: 4px 11px; background: transparent; color: var(--text-muted);
+}
+.ps-chip.on { border-color: var(--ok, #22c55e); color: var(--ok, #22c55e); }
+.ps-chip.soon { cursor: default; opacity: 0.55; }
+
 .name-slug {
   margin-top: 8px;
   min-height: 16px;

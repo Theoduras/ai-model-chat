@@ -461,6 +461,7 @@
     onFormRendered: function (slug, cfg) {
       if (state.on) { state.cfg = cfg || state.cfg; return; }
       if (!this.active() || this.isComplete(slug)) return;
+      if (document.body.classList.contains('ps-running')) return;
       state.slug = slug;
       state.cfg = cfg || {};
       state.on = true;
@@ -516,12 +517,13 @@
           '<h2 class="ob-done-h">' + esc(name) + ' is ready.</h2>' +
           '<p class="ob-done-s">Her personality, voice and funnel are set. Connect a platform and she\'ll start answering fans on her own.</p>' +
           '<div class="ob-nxt">' +
-            '<a class="ob-nxt-c" href="/telegram"><div class="ob-nxt-i">💬</div>' +
+            '<a class="ob-nxt-c" href="#" onclick="PlatformSetup.open(\'telegram\',\'' +
+                esc(state.slug) + '\');return false;"><div class="ob-nxt-i">💬</div>' +
               '<div class="ob-nxt-t">Connect Telegram</div>' +
               '<div class="ob-nxt-d">Point a Telegram account at her so she replies to real fans.</div></a>' +
-            '<a class="ob-nxt-c" href="/fanvue"><div class="ob-nxt-i">💎</div>' +
-              '<div class="ob-nxt-t">Set up Fanvue</div>' +
-              '<div class="ob-nxt-d">Load the photo sets she offers and what each costs to unlock.</div></a>' +
+            '<a class="ob-nxt-c" href="#" onclick="PlatformSetup.hub();return false;"><div class="ob-nxt-i">💎</div>' +
+              '<div class="ob-nxt-t">See all platforms</div>' +
+              '<div class="ob-nxt-d">Every model against every platform she can work on.</div></a>' +
             '<a class="ob-nxt-c" href="#" onclick="Onboarding.exit();return false;"><div class="ob-nxt-i">⚙️</div>' +
               '<div class="ob-nxt-t">Fine-tune her</div>' +
               '<div class="ob-nxt-d">Open the full builder to adjust anything you set up here.</div></a>' +
@@ -530,7 +532,7 @@
     },
 
     // Drop the wizard and hand back the ordinary builder.
-    exit: function () {
+    exit: function (keepProgress) {
       if (!state.on) return;
       this.tourEnd(true);
       unmount();
@@ -545,7 +547,9 @@
       if (bar) bar.style.display = 'flex';
       document.body.classList.remove('ob-running');
       state.on = false;
-      markDone(true);
+      // The platform wizard takes over #form-area the same way; when it is the
+      // one calling, backing out of the builder must not count as finishing it.
+      if (!keepProgress) markDone(true);
     },
 
     // Let a creator run the guided flow again from the full builder.

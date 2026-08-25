@@ -15,6 +15,8 @@ import urllib.parse
 import urllib.error as url_error
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
+from utils import (platform_scoped, operator_only, _is_operator,
+                   owned_slugs)
 from google import genai
 from google.genai import types
 
@@ -1710,27 +1712,30 @@ def chat_page():
 def landing():
     return send_from_directory(BASE_DIR, 'landingpage.html')
 
+# Operator consoles. _is_operator() rather than _check_admin() on purpose: with
+# ADMIN_PASSWORD unset the latter is true for everyone, which would hand every
+# paying creator the shared-bot registration and trace panels.
 @app.route('/xbot')
 def xbot_page():
-    if not _check_admin():
+    if not _is_operator():
         return redirect('/dashboard')
     return send_from_directory(BASE_DIR, 'xbot.html')
 
 @app.route('/fanvue')
 def fanvue_page():
-    if not _check_admin():
+    if not _is_operator():
         return redirect('/dashboard')
     return send_from_directory(BASE_DIR, 'fanvue.html')
 
 @app.route('/threads')
 def threads_page():
-    if not _check_admin():
+    if not _is_operator():
         return redirect('/dashboard')
     return send_from_directory(BASE_DIR, 'threads.html')
 
 @app.route('/telegram')
 def telegram_page():
-    if not _check_admin():
+    if not _is_operator():
         return redirect('/dashboard')
     return send_from_directory(BASE_DIR, 'telegram.html')
 
@@ -3298,79 +3303,46 @@ def api_generate_interests():
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)[:200]}), 200
 
-@app.route('/api/platforms/test', methods=['POST'])
-def api_platform_test():
-    """Test platform API credentials and return ok/error with a specific fix hint."""
-    import urllib.request
-    import urllib.error as url_error
-
-    data = request.json or {}
-    platform = data.get('platform', '')
-    creds = data.get('credentials', {})
-
-    def http_get(url, headers):
-        req = urllib.request.Request(url, headers=headers)
-        with urllib.request.urlopen(req, timeout=8) as r:
-            return json.loads(r.read())
-
-    if platform == 'discord':
-        token = creds.get('bot_token', '').strip()
-        if not token:
-            return jsonify({'ok': False, 'error': 'Bot Token is required. Find it in Discord Developer Portal → Your App → Bot → Token.'})
-        try:
-            user = http_get('https://discord.com/api/v10/users/@me', {'Authorization': f'Bot {token}'})
-            name = user.get('username', 'Unknown')
-            return jsonify({'ok': True, 'info': f'Connected as {name}'})
-        except url_error.HTTPError as e:
-            if e.code == 401:
-                return jsonify({'ok': False, 'error': 'Invalid Bot Token. Go to Discord Developer Portal → Your App → Bot → Reset Token and paste the new value.'})
-            return jsonify({'ok': False, 'error': f'Discord returned error {e.code}. Check your bot permissions.'})
-        except Exception as e:
-            return jsonify({'ok': False, 'error': f'Could not reach Discord: {str(e)[:120]}'})
-
-    elif platform == 'x':
-        bearer = creds.get('bearer_token', '').strip()
-        if not bearer:
-            return jsonify({'ok': False, 'error': 'Bearer Token is required. Find it in X Developer Portal → Your Project → Keys and Tokens → Bearer Token.'})
-        try:
-            resp = http_get('https://api.twitter.com/2/users/me', {'Authorization': f'Bearer {bearer}'})
-            name = resp.get('data', {}).get('name') or resp.get('data', {}).get('username', 'Unknown')
-            return jsonify({'ok': True, 'info': f'Connected as @{name}'})
-        except url_error.HTTPError as e:
-            if e.code == 401:
-                return jsonify({'ok': False, 'error': 'Invalid Bearer Token. Go to X Developer Portal → Your App → Keys and Tokens → Bearer Token and regenerate it.'})
-            if e.code == 403:
-                return jsonify({'ok': False, 'error': 'Access denied. Make sure your X app has Read permissions enabled in Developer Portal → App Settings → User authentication settings.'})
-            return jsonify({'ok': False, 'error': f'X API returned error {e.code}.'})
-        except Exception as e:
-            return jsonify({'ok': False, 'error': f'Could not reach X API: {str(e)[:120]}'})
-
-    elif platform == 'fanvue':
-        key = creds.get('api_key', '').strip()
-        if not key:
-            return jsonify({'ok': False, 'error': 'API Key is required. Find it in your Fanvue Creator Dashboard → Settings → API.'})
-        if len(key) < 16:
-            return jsonify({'ok': False, 'error': 'API Key looks too short. Copy the full key from Fanvue Creator Dashboard → Settings → API.'})
-        return jsonify({'ok': True, 'info': 'Credentials saved — connection verified on first fan message.'})
-
-    elif platform == 'fansly':
-        key = creds.get('api_key', '').strip()
-        if not key:
-            return jsonify({'ok': False, 'error': 'Session Token is required. Find it in Fansly → Account Settings → API Access.'})
-        if len(key) < 16:
-            return jsonify({'ok': False, 'error': 'Token looks too short. Copy the full token from Fansly → Account Settings → API Access.'})
-        return jsonify({'ok': True, 'info': 'Credentials saved — connection verified on first fan message.'})
-
-    elif platform == 'onlyfans':
-        key = creds.get('api_key', '').strip()
-        uid = creds.get('user_id', '').strip()
-        if not key:
-            return jsonify({'ok': False, 'error': 'API Key is required. Apply for API access at onlyfans.com/my/settings/account/api.'})
-        if not uid:
-            return jsonify({'ok': False, 'error': 'User ID is required. Find your numeric User ID in your OnlyFans profile URL or API settings.'})
-        return jsonify({'ok': True, 'info': 'Credentials saved — OnlyFans API access requires approved creator status.'})
-
-    return jsonify({'ok': False, 'error': f'Unknown platform: {platform}'}), 400
+@app.route('/api/platforms/overview')
+def api_platforms_overview():
+    """Per-persona connection state across every platform, for the creator's
+    own personas only. One owner check here replaces four fan-out calls."""
+    user = _current_user()
+    if _is_operator():
+        personas = db_list_personas()
+    elif user:
+        personas = db_list_personas(owner_id=user['id'])
+    else:
+        personas = []
+    tg_bots = _tg_load_bots()
+    tg_plat = _tg_platform()
+    x_tokens = _load_x_tokens() or {}
+    threads_tokens = _threads_load_tokens() or {}
+    out = {}
+    for p in personas:
+        slug = p['slug']
+        bot = tg_bots.get(slug) or {}
+        hosted = bot.get('mode') == 'hosted'
+        tg_user = tg_plat.get('username', '') if hosted else bot.get('username', '')
+        xt = x_tokens.get(slug) or {}
+        th = threads_tokens.get(slug) or {}
+        out[slug] = {
+            'name': p.get('name') or slug,
+            'telegram': {
+                'connected': bool(bot.get('bot_token')) or (hosted and bool(tg_plat.get('bot_token'))),
+                'mode': bot.get('mode', ''),
+                'username': tg_user,
+                'share_link': _tg_share_link({**bot, 'username': tg_user}) if bot else '',
+            },
+            'x': {'connected': bool(xt.get('access_token')),
+                  'username': xt.get('username', '')},
+            'fanvue': {'connected': bool(_fanvue_tokens(slug).get('access_token')),
+                       'username': ''},
+            'threads': {'connected': bool(th.get('access_token')),
+                        'username': th.get('username', '')},
+        }
+    return jsonify({'personas': out,
+                    'telegram_platform_ready': bool(tg_plat.get('bot_token'))})
 
 
 @app.route('/api/personas/<slug>/avatar')
@@ -9116,9 +9088,8 @@ def telegram_cta_click(ref, chat_id):
 
 
 @app.route('/api/telegram/connect', methods=['POST'])
+@platform_scoped
 def api_telegram_connect():
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     data = request.json or {}
     persona = (data.get('persona') or '').strip()
     token = (data.get('bot_token') or '').strip()
@@ -9168,11 +9139,10 @@ def api_telegram_connect():
 
 
 @app.route('/api/telegram/platform', methods=['GET', 'POST'])
+@operator_only
 def api_telegram_platform():
     """Operator-side: register the single shared bot once. Every subscriber then
     connects with one click — no BotFather, no token of their own."""
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     plat = _tg_platform()
     if request.method == 'GET':
         return jsonify({'configured': bool(plat.get('bot_token')),
@@ -9229,10 +9199,9 @@ def _tg_platform_save(plat, token, base, me):
 
 
 @app.route('/api/telegram/diag')
+@operator_only
 def api_telegram_diag():
     """Why is this deployment failing? Reports whether settings actually persist."""
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     probe = f'diag-{int(time.time())}'
     _set_setting('telegram_diag', probe)
     plat = _tg_platform()
@@ -9259,11 +9228,10 @@ def api_telegram_diag():
 
 
 @app.route('/api/telegram/hosted', methods=['POST'])
+@platform_scoped
 def api_telegram_hosted():
     """Subscriber-side one-click connect: mint this persona's code on the shared
     bot and hand back the link they put in their bio."""
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     data = request.json or {}
     persona = (data.get('persona') or '').strip()
     if not persona:
@@ -9308,11 +9276,14 @@ def api_telegram_hosted():
 
 @app.route('/api/telegram/status')
 def api_telegram_status():
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
+    # No persona argument to scope on, so filter the result instead: a creator
+    # sees only their own bots, never another persona's code or share link.
+    allowed = owned_slugs()
     plat = _tg_platform()
     out = {}
     for persona, bot in _tg_load_bots().items():
+        if allowed is not None and persona not in allowed:
+            continue
         hosted = bot.get('mode') == 'hosted'
         username = plat.get('username', '') if hosted else bot.get('username', '')
         out[persona] = {
@@ -9329,9 +9300,8 @@ def api_telegram_status():
 
 
 @app.route('/api/telegram/disconnect', methods=['POST'])
+@platform_scoped
 def api_telegram_disconnect():
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     persona = ((request.json or {}).get('persona') or '').strip()
     bots = _tg_load_bots()
     bot = bots.pop(persona, None)
@@ -9350,9 +9320,8 @@ def api_telegram_disconnect():
 
 
 @app.route('/api/telegram/settings', methods=['GET', 'POST'])
+@platform_scoped
 def api_telegram_settings():
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     if request.method == 'GET':
         return jsonify(_tg_settings((request.args.get('persona') or '').strip()))
     data = request.json or {}
@@ -9432,11 +9401,10 @@ def api_x_settings():
 
 
 @app.route('/api/telegram/trace')
+@operator_only
 def api_telegram_trace():
     """Recent Telegram activity for a persona plus a verdict on the setup, so a
     bot that has gone quiet can be diagnosed without digging through logs."""
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     persona = (request.args.get('persona') or '').strip()
     cfg = _tg_settings(persona)
     bot = _tg_load_bots().get(persona) or {}
@@ -9559,9 +9527,8 @@ def api_telegram_trace():
 
 
 @app.route('/api/telegram/trace', methods=['DELETE'])
+@operator_only
 def api_telegram_trace_clear():
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     persona = (request.args.get('persona') or '').strip()
     _set_setting(f'tg_trace_{persona}', '[]')
     _set_setting('tg_trace_platform', '[]')
@@ -9569,10 +9536,9 @@ def api_telegram_trace_clear():
 
 
 @app.route('/api/telegram/stats')
+@operator_only
 def api_telegram_stats():
     """Funnel numbers for the connected bot: fans, CTAs sent, clicks."""
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     persona = (request.args.get('persona') or '').strip()
     fans = _tg_fans(persona)
     sent = sum(1 for f in fans.values() if f.get('cta_sent'))
@@ -9603,9 +9569,8 @@ def api_telegram_stats():
 
 
 @app.route('/api/telegram/test', methods=['POST'])
+@operator_only
 def api_telegram_test():
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     data = request.json or {}
     persona = (data.get('persona') or '').strip()
     chat_id = (data.get('chat_id') or '').strip()
