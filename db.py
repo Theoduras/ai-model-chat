@@ -9,7 +9,7 @@ import uuid
 
 from sqlalchemy import (
     create_engine, Column, String, Text, DateTime, ForeignKey, Index, Integer,
-    Boolean, func
+    func
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
@@ -118,6 +118,18 @@ class PersonaImages(Base):
     updated_at = Column(DateTime, default=_now, onupdate=_now)
 
 
+class PersonaNsfwImages(Base):
+    """Up to 5 NSFW images per persona, same shape as PersonaImages. Kept as a
+    wholly separate pool rather than a flag on PersonaMedia: these photos must
+    never reach a normal send, and a dedicated table makes that structural
+    rather than something a query can get wrong."""
+    __tablename__ = 'persona_nsfw_images'
+
+    slug = Column(String(64), primary_key=True)
+    images_json = Column(Text, nullable=False, default='[]')
+    updated_at = Column(DateTime, default=_now, onupdate=_now)
+
+
 class PersonaMedia(Base):
     """Tagged media items for a persona. Each image is tagged with location,
     outfit, lighting, and purpose so the chat engine can pick the right photo
@@ -132,12 +144,6 @@ class PersonaMedia(Base):
     lighting = Column(String(60), default='')
     purpose = Column(String(60), default='')
     position = Column(Integer, default=0)   # manual sort order within an outfit
-    # Kept separate from `purpose`: NSFW photos are released outside any
-    # outfit, at the CTA moment, so they need to be flaggable from the vault
-    # grid directly rather than only from inside an outfit's tile editor.
-    # No nullable=False / server default, matching the other tag columns —
-    # ALTER TABLE ADD COLUMN NOT NULL fails on SQLite once the table has rows.
-    nsfw = Column(Boolean, default=False)
     created_at = Column(DateTime, default=_now)
 
 
@@ -478,8 +484,7 @@ def _add_missing_columns(table_name, model):
 
 def init_db():
     Base.metadata.create_all(engine)
-    for table, model in (('users', User), ('saved_personas', SavedPersona),
-                         ('persona_media', PersonaMedia)):
+    for table, model in (('users', User), ('saved_personas', SavedPersona)):
         try:
             _add_missing_columns(table, model)
         except Exception:
@@ -505,6 +510,19 @@ def set_persona_images_row(session, slug, images_json):
     row = session.get(PersonaImages, slug)
     if row is None:
         row = PersonaImages(slug=slug)
+        session.add(row)
+    row.images_json = images_json
+    return row
+
+
+def get_persona_nsfw_images_row(session, slug):
+    return session.get(PersonaNsfwImages, slug)
+
+
+def set_persona_nsfw_images_row(session, slug, images_json):
+    row = session.get(PersonaNsfwImages, slug)
+    if row is None:
+        row = PersonaNsfwImages(slug=slug)
         session.add(row)
     row.images_json = images_json
     return row

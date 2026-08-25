@@ -2732,18 +2732,13 @@ def _chat_channel_rules(slug, config, incoming, skip_spicy, history=None):
 
 
 def _chat_photo_pool(slug):
-    """(tagged media rows, gallery data URLs) she can actually send here.
-
-    A photo marked NSFW in the vault is never in this pool — it is held out
-    of every normal send, model-requested or phase-rolled, and only ever
-    reaches the fan through _chat_nsfw_pool at the CTA moment.
-    """
+    """(tagged media rows, gallery data URLs) she can actually send here."""
     rows = []
     try:
         from db import SessionLocal, list_persona_media
         sess = SessionLocal()
         try:
-            rows = [r for r in (list_persona_media(sess, slug) or []) if not r.nsfw]
+            rows = list_persona_media(sess, slug) or []
         finally:
             sess.close()
     except Exception:
@@ -2756,30 +2751,47 @@ def _chat_photo_pool(slug):
         return []
 
 
-def _chat_nsfw_pool(slug):
-    """The vault photos marked NSFW, for the moment the CTA goes out.
-
-    The legacy gallery (db_get_images) has no NSFW tag at all, so it never
-    contributes here — only tagged media rows can be explicit.
-    """
+def db_get_nsfw_images(slug):
+    """NSFW image data URLs for a persona — a wholly separate pool from
+    db_get_images, held out of every normal send and only ever reached
+    through _chat_nsfw_photo at the CTA moment. No repo-file fallback: there
+    is no baked-in NSFW set to fall back to."""
     try:
-        from db import SessionLocal, list_persona_media
-        sess = SessionLocal()
+        from db import SessionLocal, get_persona_nsfw_images_row
+        s = SessionLocal()
         try:
-            return [r for r in (list_persona_media(sess, slug) or []) if r.nsfw]
+            row = get_persona_nsfw_images_row(s, slug)
+            if row:
+                parsed = json.loads(row.images_json)
+                if isinstance(parsed, list):
+                    return parsed
         finally:
-            sess.close()
+            s.close()
     except Exception:
-        return []
+        pass
+    return []
+
+
+def db_set_nsfw_images(slug, images):
+    """Persist a persona's NSFW images (list of data URLs, capped at 5)."""
+    from db import SessionLocal, set_persona_nsfw_images_row
+    clean = [i for i in (images or []) if isinstance(i, str) and i.startswith('data:')][:5]
+    s = SessionLocal()
+    try:
+        set_persona_nsfw_images_row(s, slug, json.dumps(clean))
+        s.commit()
+    finally:
+        s.close()
+    return clean
 
 
 def _chat_nsfw_photo(slug):
-    """Pick one NSFW vault photo to send with the CTA, or None if she has none."""
-    pool = _chat_nsfw_pool(slug)
+    """Pick one NSFW photo to send with the CTA, or None if she has none."""
+    pool = db_get_nsfw_images(slug)
     if not pool:
         return None
-    picked = random.choice(pool)
-    return f'/api/personas/{slug}/media/{picked.id}/image'
+    idx = random.randrange(len(pool))
+    return f'/api/personas/{slug}/nsfw-image/{idx}'
 
 
 def _chat_take_photo(slug, reply):
@@ -3489,7 +3501,19 @@ _SHOT_FRAMING = {
     'full': 'a full-body photo in a casual outfit',
     'candid': 'a candid lifestyle photo doing an everyday activity',
     'mirror': 'a mirror selfie holding a phone',
+    # NSFW gallery shots. Imagen's own safety filter still applies (relaxed a
+    # notch below, not disabled), so these are written to be the most
+    # suggestive framing that plausibly clears it — lingerie and implied,
+    # never explicit. Genuinely explicit content is a manual upload into the
+    # same slots, not something this endpoint can promise to generate.
+    'lingerie': 'a boudoir photo in matching lingerie, soft window light',
+    'implied': "an implied-nude photo — bare shoulders and back, the camera "
+               "angle and framing suggesting more than it shows",
+    'sheer': 'a photo in a sheer, partially see-through robe, artistic and moody',
+    'bedroom': 'a sultry, relaxed bedroom photo, intimate mood',
 }
+
+_NSFW_SHOTS = ('lingerie', 'implied', 'sheer', 'bedroom')
 
 
 def _gemini_image_parts(resp):
@@ -3562,6 +3586,7 @@ def api_generate_image():
     appearance = (data.get('appearance') or _appearance_from_config(cfg)).strip()
     shot = (data.get('shot') or 'portrait').strip().lower()
     framing = _SHOT_FRAMING.get(shot, _SHOT_FRAMING['portrait'])
+    nsfw_shot = shot in _NSFW_SHOTS
 
     import base64
     reference = data.get('reference')  # optional data URL of an existing photo
@@ -3623,7 +3648,10 @@ def api_generate_image():
                 + outfit_clause +
                 "Keep her identity, clothing and surroundings perfectly consistent with the reference, "
                 "as if taken in the same session minutes apart — only the pose and framing change. "
-                "Realistic, natural lighting, Instagram aesthetic. Fictional AI-generated person."
+                "Realistic, natural lighting. "
+                + ("Tasteful boudoir aesthetic, alluring but not explicit. "
+                   if nsfw_shot else "Instagram aesthetic. ")
+                + "Fictional AI-generated person."
             )
             # The image model returns nothing at all often enough that a single
             # attempt is unreliable, so retry the retryable reasons before
@@ -3663,10 +3691,15 @@ def api_generate_image():
                             'error': 'No image came back from the reference photo — '
                                      + _gemini_block_reason(resp)}), 200
 
+        style_bits = (
+            "Tasteful boudoir aesthetic, soft flattering light, alluring but not explicit."
+            if nsfw_shot else
+            "Modern Instagram aesthetic, attractive, friendly expression."
+        )
         prompt = (
             f"Photorealistic {framing} of {appearance}. "
-            "Natural lighting, realistic skin texture and detail, modern Instagram aesthetic, "
-            "attractive, friendly expression. "
+            "Natural lighting, realistic skin texture and detail. "
+            f"{style_bits} "
             "This is a fictional, AI-generated person who does not exist in real life."
         )
         resp = client.models.generate_images(
@@ -3676,12 +3709,19 @@ def api_generate_image():
                 number_of_images=1,
                 aspect_ratio='3:4',
                 person_generation='ALLOW_ADULT',
-                safety_filter_level='BLOCK_LOW_AND_ABOVE',
+                # Widened a notch for the suggestive shots, not disabled —
+                # Imagen still refuses anything it reads as explicit either way.
+                safety_filter_level=(
+                    'BLOCK_MEDIUM_AND_ABOVE' if nsfw_shot else 'BLOCK_LOW_AND_ABOVE'),
             ),
         )
         gen = (resp.generated_images or [None])[0]
         if not gen or not getattr(gen, 'image', None):
-            return jsonify({'ok': False, 'error': 'No image returned (it may have been filtered).'}), 200
+            msg = ('No image returned — the model likely filtered this shot. '
+                   'Try a different one, or upload your own photo instead.'
+                   if nsfw_shot else
+                   'No image returned (it may have been filtered).')
+            return jsonify({'ok': False, 'error': msg}), 200
         img = gen.image
         raw = getattr(img, 'image_bytes', None)
         mime = getattr(img, 'mime_type', None) or 'image/png'
@@ -3942,6 +3982,41 @@ def api_persona_images_save(slug):
     if not isinstance(images, list):
         return jsonify({'error': 'images must be a list'}), 400
     saved = db_set_images(slug, images)
+    return jsonify({'ok': True, 'count': len(saved)})
+
+
+# Same shape as the gallery above, entirely separate storage — these never
+# reach a normal send, only _chat_nsfw_photo at the CTA moment.
+@app.route('/api/personas/<slug>/nsfw-images', methods=['GET'])
+def api_persona_nsfw_images(slug):
+    if not re.match(r'^[a-z0-9_-]+$', slug):
+        return jsonify({'error': 'Invalid slug'}), 400
+    imgs = db_get_nsfw_images(slug)
+    if request.args.get('full') == '1':
+        return jsonify({'count': len(imgs), 'images': imgs})
+    return jsonify({'count': len(imgs), 'images': [f'/api/personas/{slug}/nsfw-image/{i}' for i in range(len(imgs))]})
+
+
+@app.route('/api/personas/<slug>/nsfw-image/<int:idx>')
+def api_persona_nsfw_image(slug, idx):
+    if not re.match(r'^[a-z0-9_-]+$', slug):
+        return ('', 400)
+    imgs = db_get_nsfw_images(slug)
+    if idx < 0 or idx >= len(imgs):
+        return ('', 404)
+    return _serve_data_url(imgs[idx])
+
+
+@app.route('/api/personas/<slug>/nsfw-images', methods=['POST'])
+def api_persona_nsfw_images_save(slug):
+    """Save a persona's NSFW images to the DB (max 5)."""
+    if not re.match(r'^[a-z0-9_-]+$', slug):
+        return jsonify({'error': 'Invalid slug'}), 400
+    data = request.json or {}
+    images = data.get('images', [])
+    if not isinstance(images, list):
+        return jsonify({'error': 'images must be a list'}), 400
+    saved = db_set_nsfw_images(slug, images)
     return jsonify({'ok': True, 'count': len(saved)})
 
 
@@ -4270,7 +4345,6 @@ def api_persona_media_list(slug):
                 'outfit': r.outfit or '',        # legacy, kept during migration
                 'location': (o or {}).get('location', ''),
                 'lighting': (o or {}).get('lighting', ''),
-                'nsfw': bool(r.nsfw),
                 'thumb': f'/api/personas/{slug}/media/{r.id}/image',
             })
 
@@ -4314,7 +4388,6 @@ def api_persona_media_save(slug):
             outfit=str(data.get('outfit', ''))[:120],
             lighting=str(data.get('lighting', ''))[:60],
             purpose=str(data.get('purpose', ''))[:60],
-            nsfw=bool(data.get('nsfw')),
         )
         s.add(row)
         s.flush()
@@ -4418,8 +4491,6 @@ def api_persona_media_update(slug, media_id):
         for f in ('location', 'outfit', 'lighting', 'purpose'):
             if f in data:
                 setattr(row, f, str(data[f])[:120])
-        if 'nsfw' in data:
-            row.nsfw = bool(data['nsfw'])
         if 'image' in data and data['image'].startswith('data:'):
             row.image_data = data['image']
         s.commit()

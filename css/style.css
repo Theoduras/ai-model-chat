@@ -1863,14 +1863,6 @@ body.page-dashboard .conn-dot.err { background: var(--err); }
   background: var(--accent)cc; color: var(--text); font-size: 0.62rem; font-weight: 700;
 }
 .vault-badge.none { background: var(--border)cc; color: var(--text-3); }
-.vault-item.is-nsfw { border-color: var(--err); }
-.vault-item .nsfw-toggle {
-  position: absolute; bottom: 3px; right: 3px; padding: 1px 6px; border: none;
-  border-radius: 999px; background: var(--border)cc; color: var(--text-3);
-  font-size: 0.62rem; font-weight: 700; cursor: pointer; opacity: 0; transition: opacity .15s;
-}
-.vault-item:hover .nsfw-toggle, .vault-item.is-nsfw .nsfw-toggle { opacity: 1; }
-.vault-item.is-nsfw .nsfw-toggle { background: var(--err)cc; color: var(--text); }
 .vault-empty { grid-column: 1 / -1; color: var(--text-muted); font-size: 0.8rem; padding: 18px 0; text-align: center; }
 
 .outfit-photo[draggable="true"] { cursor: grab; }

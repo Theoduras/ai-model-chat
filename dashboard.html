@@ -1233,6 +1233,7 @@ async function loadPersona(slug) {
   renderForm(slug, config);
   showActionBar();
   loadGallery(slug);
+  loadNsfwGallery(slug);
   loadPhases();
   if (!config.speech_style) generateSpeechStyle(false);
   if (!config.conversion_triggers) generateTriggers();
@@ -1506,6 +1507,21 @@ function renderForm(slug, cfg) {
       <span class="hint" style="margin-top:2px;">First photo creates a fictional face; "More of her" keeps the same person in new shots. Photos save to the database on Save.</span>
     </div>
 
+    <div class="form-section">
+      <div class="section-title" style="flex-wrap:wrap;">
+        <span style="margin-right:auto;">NSFW Photos <span style="font-weight:400; color:var(--text-muted); font-size:0.8rem;">(up to 5 — held back until the CTA)</span></span>
+        <span style="display:flex; gap:6px;">
+          <button type="button" class="btn-ai" id="gen-nsfw-face-btn" onclick="generateNsfwFirstPhoto()" title="Generate a new suggestive shot">✨ New face</button>
+          <button type="button" class="btn-ai" style="background:var(--border);" id="gen-nsfw-more-btn" onclick="generateNsfwMorePhotos()" title="Add more shots of the same person">＋ More of her</button>
+          <button type="button" class="btn-section-save" style="margin-left:0;" onclick="saveNsfwPhotosSection(this)">Save</button>
+        </span>
+      </div>
+      <div class="photo-grid" id="nsfw-photo-grid"></div>
+      <input type="file" id="nsfw-photo-file-input" accept="image/*" multiple style="display:none;" onchange="onNsfwPhotoFiles(event)">
+      <span class="hint" id="nsfw-photo-status"></span>
+      <span class="hint" style="margin-top:2px;">These never go out in a normal reply — only alongside the CTA link, once a fan has asked enough times (set below). Generated shots are the most suggestive the model will allow; for anything more explicit, upload your own.</span>
+    </div>
+
 
     <div class="form-section">
       <div class="section-title">Voice &amp; Speech Style<button type="button" class="btn-section-save" onclick="saveSection(this)">Save</button></div>
@@ -1622,7 +1638,7 @@ function renderForm(slug, cfg) {
       <div class="field">
         <label>Release an explicit preview after</label>
         <input type="number" id="f-spicy-release" min="0" max="10" step="1" value="${cfg.spicy_release_after === undefined ? 3 : cfg.spicy_release_after}">
-        <span class="hint">Once a fan has asked this many times, the CTA fires with a photo from your NSFW vault attached — a preview, not just a link. 0 turns this off. Needs at least one photo marked NSFW in Outfits &amp; Media.</span>
+        <span class="hint">Once a fan has asked this many times, the CTA fires with a photo from NSFW Photos above attached — a preview, not just a link. 0 turns this off. Needs at least one photo in that section.</span>
       </div>
     </div>
 
@@ -1898,6 +1914,7 @@ async function savePersona() {
   try {
     // Photos and phases always save to the current persona (originals included).
     await saveGallery(currentSlug);
+    await saveNsfwGallery(currentSlug);
     await postPhases(currentSlug);
 
     // Originals can now be overridden in place — the edit is saved to the DB
@@ -2074,6 +2091,140 @@ async function saveGallery(slug) {
   } catch(e) {}
 }
 
+// ── NSFW photo pool (max 5, held out of every normal send) ──
+// Same shape as the gallery above, entirely separate storage and endpoints —
+// these never reach a normal reply, only the CTA moment (app.py _chat_nsfw_photo).
+let nsfwGalleryImages = [];   // array of data URLs
+
+function renderNsfwGallery() {
+  const grid = document.getElementById('nsfw-photo-grid');
+  if (!grid) return;
+  grid.innerHTML = '';
+  nsfwGalleryImages.forEach((src, i) => {
+    const cell = document.createElement('div');
+    cell.className = 'photo-cell';
+    cell.innerHTML = '<img src="' + src + '" alt="nsfw photo ' + (i+1) + '">' +
+      '<button type="button" class="photo-del" title="Remove" onclick="removeNsfwPhoto(' + i + ')">✕</button>' +
+      (i === 0 ? '<span class="photo-badge">18+</span>' : '');
+    grid.appendChild(cell);
+  });
+  if (nsfwGalleryImages.length < MAX_PHOTOS) {
+    const add = document.createElement('div');
+    add.className = 'photo-cell photo-add';
+    add.title = 'Upload a photo';
+    add.innerHTML = '<span>＋</span>';
+    add.onclick = () => document.getElementById('nsfw-photo-file-input').click();
+    grid.appendChild(add);
+  }
+}
+
+async function loadNsfwGallery(slug) {
+  nsfwGalleryImages = [];
+  renderNsfwGallery();
+  try {
+    const res = await fetch('/api/personas/' + slug + '/nsfw-images?full=1');
+    const data = await res.json();
+    if (Array.isArray(data.images)) nsfwGalleryImages = data.images.slice(0, MAX_PHOTOS);
+  } catch(e) {}
+  renderNsfwGallery();
+}
+
+function removeNsfwPhoto(i) { nsfwGalleryImages.splice(i, 1); renderNsfwGallery(); }
+
+function onNsfwPhotoFiles(ev) {
+  const files = Array.from(ev.target.files || []);
+  let remaining = MAX_PHOTOS - nsfwGalleryImages.length;
+  files.slice(0, remaining).forEach(file => {
+    const reader = new FileReader();
+    reader.onload = e => { if (nsfwGalleryImages.length < MAX_PHOTOS) { nsfwGalleryImages.push(e.target.result); renderNsfwGallery(); } };
+    reader.readAsDataURL(file);
+  });
+  ev.target.value = '';
+}
+
+async function generateNsfwFirstPhoto() {
+  if (nsfwGalleryImages.length >= MAX_PHOTOS) { setNsfwPhotoStatus('Max 5 photos.', false); return; }
+  const btn = document.getElementById('gen-nsfw-face-btn');
+  if (btn) btn.disabled = true;
+  setNsfwPhotoBusy(true, 'Generating a new shot…');
+  setNsfwPhotoStatus('Generating a new shot…', null);
+  try {
+    const res = await fetch('/api/generate/image', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config: collectConfig(), shot: 'lingerie' })
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Generation failed');
+    nsfwGalleryImages.push(data.image); renderNsfwGallery();
+    setNsfwPhotoStatus('✓ Shot added — use "More of her" for matching shots', true);
+  } catch(e) { setNsfwPhotoStatus('✗ ' + e.message, false); }
+  finally { setNsfwPhotoBusy(false); if (btn) btn.disabled = false; }
+}
+
+async function generateNsfwMorePhotos() {
+  if (!nsfwGalleryImages.length) { setNsfwPhotoStatus('Make a face first with "New face".', false); return; }
+  if (nsfwGalleryImages.length >= MAX_PHOTOS) { setNsfwPhotoStatus('Max 5 photos.', false); return; }
+  const btn = document.getElementById('gen-nsfw-more-btn');
+  if (btn) btn.disabled = true;
+  const shots = ['implied', 'sheer', 'bedroom', 'lingerie'];
+  const reference = nsfwGalleryImages[0];
+  try {
+    while (nsfwGalleryImages.length < MAX_PHOTOS) {
+      const shot = shots[(nsfwGalleryImages.length - 1) % shots.length];
+      setNsfwPhotoBusy(true, 'Generating photo ' + (nsfwGalleryImages.length + 1) + ' of the same person…');
+      setNsfwPhotoStatus('Generating photo ' + (nsfwGalleryImages.length + 1) + ' of the same person…', null);
+      const res = await fetch('/api/generate/image', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reference, shot, config: collectConfig() })
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Generation failed');
+      nsfwGalleryImages.push(data.image); renderNsfwGallery();
+    }
+    setNsfwPhotoStatus('✓ Photo set complete', true);
+  } catch(e) { setNsfwPhotoStatus('✗ ' + e.message, false); }
+  finally { setNsfwPhotoBusy(false); if (btn) btn.disabled = false; }
+}
+
+function setNsfwPhotoStatus(msg, ok) {
+  const el = document.getElementById('nsfw-photo-status');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = ok === true ? 'var(--ok)' : ok === false ? 'var(--err)' : 'var(--text-3)';
+}
+
+function setNsfwPhotoBusy(on, label) {
+  const grid = document.getElementById('nsfw-photo-grid');
+  if (!grid) return;
+  grid.classList.add('loader-host');
+  let ov = grid.querySelector('.loader-overlay');
+  if (!on) { if (ov) ov.remove(); return; }
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.className = 'loader-overlay';
+    grid.appendChild(ov);
+  }
+  ov.innerHTML = '<span class="loader-dots lg" role="status" aria-live="polite"><i></i><i></i><i></i></span>'
+    + '<span>' + esc(label) + '</span>';
+}
+
+async function saveNsfwGallery(slug) {
+  try {
+    await fetch('/api/personas/' + slug + '/nsfw-images', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ images: nsfwGalleryImages })
+    });
+  } catch(e) {}
+}
+
+async function saveNsfwPhotosSection(btn) {
+  if (!currentSlug) return;
+  try {
+    await saveNsfwGallery(currentSlug);
+    flashSaved(btn);
+  } catch(e) { flashSaved(btn, false); }
+}
+
 
 async function fillAllInfo() {
   if (!currentSlug) return;
@@ -2113,6 +2264,7 @@ async function copyPersona(presetConfig) {
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || 'Could not copy');
     await saveGallery(data.slug);   // carry the current photos onto the copy
+    await saveNsfwGallery(data.slug);
     personas[data.slug] = { slug: data.slug, name: data.name, config: { ...config, name: data.name }, premade: false };
     document.getElementById('persona-count').textContent = Object.keys(personas).length;
     status.textContent = '✓ Copied as "' + data.name + '"'; status.className = 'save-status ok';
