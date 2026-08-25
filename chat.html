@@ -9,6 +9,22 @@
        page flashes dark for a user who chose light. -->
   <script src="/js/theme.js"></script>
   <script src="/js/devnav.js" defer></script>
+  <script>
+  // Keeps the chat container sized to the visible viewport so the on-screen
+  // keyboard pushes the input bar up instead of covering it.
+  (function () {
+    function setAppHeight() {
+      var h = (window.visualViewport ? window.visualViewport.height : window.innerHeight);
+      document.documentElement.style.setProperty('--app-height', h + 'px');
+    }
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', setAppHeight);
+      window.visualViewport.addEventListener('scroll', setAppHeight);
+    }
+    window.addEventListener('resize', setAppHeight);
+    setAppHeight();
+  })();
+  </script>
 </head>
 <body class="page-chat">
 
