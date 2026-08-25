@@ -134,16 +134,19 @@ let personaCfg = {}, profileImages = [], profileIdx = 0;
 // Delivery pacing, sent back by /chat from the creator's settings. These are
 // the fallbacks used before the first reply lands.
 let pacing = { reply: { base: 1800, jitter: 3500, per_char: 35 },
-               typing: { base: 800, per_char: 10, max: 5000 } };
+               typing: { base: 900, per_char: 45, max: 7000 } };
+// Floored: she never starts typing the instant the message lands, she reads it first.
 function replyDelay(text) {
   const r = pacing.reply || {};
-  return (r.base || 0) + Math.random() * (r.jitter || 0)
-       + Math.min((text || '').length * (r.per_char || 0), 3500);
+  return Math.max(800, (r.base || 0) + Math.random() * (r.jitter || 0)
+       + Math.min((text || '').length * (r.per_char || 0), 3500));
 }
 function typingDelay(text) {
   const t = pacing.typing || {};
-  return Math.min((t.base || 0) + (text || '').length * (t.per_char || 0), t.max || 5000);
+  return Math.min((t.base || 0) + (text || '').length * (t.per_char || 0), t.max || 9000);
 }
+// Beat between finishing one bubble and starting to type the next one.
+function interChunkPause() { return 700 + Math.random() * 1300; }
 
 function loadPersonaConfig() {
   return fetch('/api/personas/' + persona).then(r => r.ok ? r.json() : null).then(d => {
@@ -399,14 +402,24 @@ function deliverChunks(chunks, idx, onDone, photo) {
   addMsg(chunks[idx], false, last ? photo : null);
   if (!last) {
     const next = chunks[idx + 1];
-    const delay = typingDelay(next) + Math.random() * 700;
-    setTimeout(() => { showTyping(true); setTimeout(() => deliverChunks(chunks, idx + 1, onDone, photo), delay); }, 200);
+    setTimeout(() => {
+      showTyping(true);
+      setTimeout(() => deliverChunks(chunks, idx + 1, onDone, photo), typingDelay(next));
+    }, interChunkPause());
   } else {
     if (onDone) onDone();
   }
 }
 
-function cs(text, cb, photo) { ss(true); const chunks = splitChunks(text); deliverChunks(chunks, 0, cb, photo); }
+// The bubble may already have been running while the reply was in flight; only
+// hold it for whatever is left of the time that first chunk should take to type.
+function cs(text, cb, photo, typingSince) {
+  ss(true);
+  const chunks = splitChunks(text);
+  const elapsed = typingSince ? Date.now() - typingSince : 0;
+  const hold = Math.max(0, typingDelay(chunks[0]) - elapsed);
+  setTimeout(() => deliverChunks(chunks, 0, cb, photo), hold);
+}
 
 let st = null, ot = null;
 function ri() { clearTimeout(st); clearTimeout(ot); }
@@ -446,8 +459,10 @@ function processQueue() {
   um(x);
   const histSnapshot = h.slice();   // only turns answered so far — not later queued messages
   const initialDelay = replyDelay(x);
-  showTyping(true);
+  let typingSince = 0;
   setTimeout(() => {
+    showTyping(true);
+    typingSince = Date.now();
     fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: chatBody({ message: x, history: histSnapshot }) })
       .then(r => r.json()).then(d => {
         if (d.pacing) pacing = d.pacing;
@@ -455,7 +470,7 @@ function processQueue() {
         if (d.reply) {
           const recentBot = h.slice(-6).filter(m => m.role === 'bot').map(m => m.content.trim().toLowerCase());
           if (recentBot.includes(d.reply.trim().toLowerCase())) { showTyping(false); sc(); ss(true); processQueue(); return; }
-          cs(d.reply, () => { sc(); processQueue(); }, d.photo);
+          cs(d.reply, () => { sc(); processQueue(); }, d.photo, typingSince);
         } else {
           showTyping(false); addMsg('something went weird on my end. try again?', false); sc(); ss(false); processQueue();
         }
@@ -477,10 +492,12 @@ function ck() { fetch('/').then(() => ss(true)).catch(() => ss(false)); }
 function greet() {
   if (h.length !== 0) return;
   const greetDelay = replyDelay('');
-  showTyping(true);
+  let typingSince = 0;
   setTimeout(() => {
+    showTyping(true);
+    typingSince = Date.now();
     fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: chatBody({ message: '__greeting__', history: [] }) })
-      .then(r => r.json()).then(d => { if (d.pacing) pacing = d.pacing; if (d.reply) { cs(d.reply, si, d.photo); } else { showTyping(false); addMsg('hey', false); si(); } })
+      .then(r => r.json()).then(d => { if (d.pacing) pacing = d.pacing; if (d.reply) { cs(d.reply, si, d.photo, typingSince); } else { showTyping(false); addMsg('hey', false); si(); } })
       .catch(() => { showTyping(false); addMsg('hey', false); si(); });
   }, greetDelay);
 }

@@ -395,9 +395,9 @@ REPLY_SPEED = {
 }
 
 TYPING_SPEED = {
-    'fast':    {'base': 400,  'per_char': 5,  'max': 2500},
-    'natural': {'base': 800,  'per_char': 10, 'max': 5000},
-    'slow':    {'base': 1400, 'per_char': 22, 'max': 9000},
+    'fast':    {'base': 500,  'per_char': 28, 'max': 4500},
+    'natural': {'base': 900,  'per_char': 45, 'max': 7000},
+    'slow':    {'base': 1600, 'per_char': 70, 'max': 12000},
 }
 
 
