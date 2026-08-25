@@ -78,22 +78,56 @@ def get_chat_logger(user):
     return logger, safe_user
 
 
-QUESTION_STARTERS = ('what', 'why', 'how', 'when', 'where', 'who', 'which',
-                     'do you', 'did you', 'are you', 'have you', 'can you',
-                     'would you', 'could you', 'tell me')
+# She mirrors the fan's language and a lowercase persona drops the question
+# mark, so an English-only list meant her Dutch questions were never counted \u2014
+# the frequency limit then had nothing to limit. Same languages as _cta_asked.
+QUESTION_STARTERS = (
+    # English
+    'what', 'why', 'how', 'when', 'where', 'who', 'which',
+    'do you', 'did you', 'are you', 'have you', 'can you',
+    'would you', 'could you', 'tell me',
+    # Dutch
+    'wat', 'waarom', 'hoe', 'wanneer', 'waar', 'wie', 'welke', 'welk',
+    'ben je', 'ben jij', 'heb je', 'heb jij', 'kun je', 'kun jij',
+    'wil je', 'wil jij', 'vind je', 'denk je', 'hou je', 'zou je',
+    'vertel me', 'vertel eens',
+    # German
+    'was', 'warum', 'wieso', 'wie', 'wann', 'wo', 'wer',
+    'welche', 'welcher', 'welches', 'bist du', 'hast du', 'kannst du',
+    'willst du', 'magst du', 'w\u00fcrdest du', 'erz\u00e4hl mir',
+    # French
+    'pourquoi', 'comment', 'quand', 'o\u00f9', 'qui', 'quel', 'quelle',
+    'est-ce que', 'es-tu', 'as-tu', 'peux-tu', 'veux-tu', 'dis-moi',
+    # Spanish / Portuguese
+    'qu\u00e9', 'por qu\u00e9', 'c\u00f3mo', 'cu\u00e1ndo', 'd\u00f3nde',
+    'qui\u00e9n', 'cu\u00e1l', 'eres', 'tienes', 'puedes', 'quieres', 'dime',
+    'o que', 'por que', 'quando', 'onde', 'quem', 'qual', 'me diz',
+    # Italian
+    'cosa', 'perch\u00e9', 'quale', 'sei tu', 'hai', 'puoi', 'vuoi', 'dimmi',
+)
 
+# A question is often tacked on after a comma or an ellipsis ("en jij dan,
+# kooke...wat voor situaties"), and _sentences deliberately glues ellipsis
+# fragments back together, so the starter has to be looked for per clause.
+_CLAUSE_SPLIT_RE = re.compile(r'(?:\.{3}|\u2026|,)\s*')
 
-def _sentences(text):
-    return [s for s in re.split(r'(?<=[.!?\u2026])\s+|\n+', (text or '').strip()) if s.strip()]
+# A clause frequently opens on a conjunction ("en wat voor soort seks...").
+_LEAD_CONJ_RE = re.compile(
+    r'^(?:en|and|of|or|maar|but|dus|so|und|oder|aber|et|ou|mais|y|pero|ma)\s+',
+    re.I)
 
 
 def sentence_asks_question(sentence):
     s = (sentence or '').strip().lower()
     if not s:
         return False
-    if s.endswith('?'):
+    if '?' in s:
         return True
-    return any(s.startswith(w) for w in QUESTION_STARTERS)
+    for clause in _CLAUSE_SPLIT_RE.split(s):
+        clause = _LEAD_CONJ_RE.sub('', clause.strip())
+        if clause.startswith(QUESTION_STARTERS):
+            return True
+    return False
 
 
 def response_asks_question(text):
@@ -128,18 +162,28 @@ def question_freq_rule(config):
 
 def trim_extra_questions(reply, allow_question=True):
     """Drop question sentences past the budget. Keeps the first question when
-    one is allowed, so a reply never lands as a burst of questions."""
-    parts = _sentences(reply)
-    kept, budget = [], (1 if allow_question else 0)
-    for s in parts:
-        if sentence_asks_question(s):
-            if budget <= 0:
-                continue
-            budget -= 1
-        kept.append(s)
-    if not kept or len(kept) == len(parts):
+    one is allowed, so a reply never lands as a burst of questions.
+
+    Works line by line and keeps the original breaks: they are her paragraphing,
+    and joining everything with spaces turned a two-line reply into a run-on.
+    """
+    budget = 1 if allow_question else 0
+    pieces = re.split(r'(\n+)', (reply or '').strip())
+    out, dropped = [], False
+    for i in range(0, len(pieces), 2):
+        kept = []
+        for s in _sentences(pieces[i]):
+            if sentence_asks_question(s):
+                if budget <= 0:
+                    dropped = True
+                    continue
+                budget -= 1
+            kept.append(s)
+        if kept:
+            out.append((pieces[i - 1] if i and out else '') + ' '.join(kept))
+    if not dropped or not out:
         return reply
-    return ' '.join(kept)
+    return ''.join(out)
 
 
 def _read_file(path):
@@ -7349,7 +7393,12 @@ def _fv_sender(msg):
 # A sentence ends at . ! ? — but NOT at an ellipsis, which she uses mid-thought
 # ("that's certainly a… specific preference"). Splitting there would cut the
 # sentence in half. A following lower-case word means the thought runs on too.
-_SENTENCE_END_RE = re.compile(r'(?<=[.!?])\s+(?=[^a-z\s])')
+# Requiring a non-lowercase character after the break meant a lowercase persona
+# — the default — never split at all: her whole reply counted as one sentence,
+# so question trimming and message bursts silently did nothing. A hard line
+# break ends a thought too; the ellipsis glue below still keeps "a… specific
+# preference" in one piece.
+_SENTENCE_END_RE = re.compile(r'(?<=[.!?])\s+')
 
 
 def _sentences(text):
@@ -7358,16 +7407,23 @@ def _sentences(text):
     if not t:
         return []
     out = []
-    for part in _SENTENCE_END_RE.split(t):
-        part = part.strip()
-        if not part:
+    for line in re.split(r'\n+', t):
+        line = line.strip()
+        if not line:
             continue
-        # A piece left hanging on an ellipsis is still mid-thought: glue the
-        # next piece onto it rather than treating it as a finished sentence.
-        if out and (out[-1].endswith('…') or out[-1].endswith('...')):
-            out[-1] = out[-1] + ' ' + part
-        else:
-            out.append(part)
+        start = len(out)
+        for part in _SENTENCE_END_RE.split(line):
+            part = part.strip()
+            if not part:
+                continue
+            # A piece left hanging on an ellipsis is still mid-thought: glue the
+            # next piece onto it rather than treating it as a finished sentence.
+            # Only within a line — she habitually trails off on "..." before a
+            # break, and gluing across it merged two questions into one.
+            if len(out) > start and (out[-1].endswith('…') or out[-1].endswith('...')):
+                out[-1] = out[-1] + ' ' + part
+            else:
+                out.append(part)
     return out
 
 

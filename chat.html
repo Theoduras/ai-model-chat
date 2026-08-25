@@ -439,9 +439,10 @@ function si() {
   ot = setTimeout(() => { addMsg("i'll catch you later", false); ss(false); }, 480000);
 }
 
-// Queue of user messages awaiting a reply. Multiple quick messages are
-// answered one at a time, in order — as if she reads and replies to the
-// first before noticing the next.
+// Queue of user messages awaiting a reply. Anything that arrives while she is
+// still reading gets folded into the same reply — a person catching up on four
+// quick lines answers once, not four times. Replying to each in turn meant a
+// burst took minutes to clear and left her answering a message back.
 let msgQueue = [], processing = false;
 
 function se() {
@@ -461,18 +462,20 @@ function processQueue() {
   if (!msgQueue.length) { processing = false; si(); return; }
   processing = true;
   ri();
-  const x = msgQueue.shift();
+  let x = msgQueue.shift();
   um(x);
   const histSnapshot = h.slice();   // only turns answered so far — not later queued messages
   const initialDelay = replyDelay(x);
   let typingSince = 0;
   setTimeout(() => {
+    // Everything that landed while she was reading is part of the same turn.
+    while (msgQueue.length) { const nx = msgQueue.shift(); um(nx); x += '\n' + nx; }
     showTyping(true);
     typingSince = Date.now();
     fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: chatBody({ message: x, history: histSnapshot }) })
       .then(r => r.json()).then(d => {
         if (d.pacing) pacing = d.pacing;
-        h.push({ role: 'user', content: x }); sm();
+        h.push({ role: 'user', content: x, ts: Math.floor(Date.now() / 1000) }); sm();
         if (d.reply) {
           const recentBot = h.slice(-6).filter(m => m.role === 'bot').map(m => m.content.trim().toLowerCase());
           if (recentBot.includes(d.reply.trim().toLowerCase())) { showTyping(false); sc(); ss(true); processQueue(); return; }
@@ -481,7 +484,7 @@ function processQueue() {
           showTyping(false); addMsg('something went weird on my end. try again?', false); sc(); ss(false); processQueue();
         }
       }).catch(() => {
-        showTyping(false); h.push({ role: 'user', content: x }); addMsg('something went wrong. please try again.', false); sc(); ss(false); processQueue();
+        showTyping(false); h.push({ role: 'user', content: x, ts: Math.floor(Date.now() / 1000) }); addMsg('something went wrong. please try again.', false); sc(); ss(false); processQueue();
       });
   }, initialDelay);
 }
