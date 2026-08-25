@@ -2852,6 +2852,52 @@ def _chat_phase_photo(slug, history):
     return f'/api/personas/{slug}/media/{picked.id}/image'
 
 
+# gemini-2.5 models reason before answering. When the response carries those
+# thought parts, reaching for response.text pastes the whole chain of thought
+# into the chat bubble, so every call that produces a message the fan sees
+# turns thinking off and reads only the visible parts.
+def _no_thinking(cfg):
+    try:
+        cfg.thinking_config = types.ThinkingConfig(thinking_budget=0)
+    except Exception:
+        pass
+    return cfg
+
+
+_THINK_HEADER = re.compile(
+    r'^[\s*_#>`]*(think(ing)?|thought(s)?|reasoning|analysis|scratchpad)[\s:*_#>`-]*$',
+    re.I)
+_REASONING_BLOCK = re.compile(
+    r'^\s*(\d+[.)]\s|[-*]\s|constraint|confidence|checklist|plan\b|draft\b)', re.I)
+
+
+def _strip_thinking(text):
+    """Drop a reasoning preamble a model leaked into its visible reply."""
+    if not text:
+        return ''
+    text = re.sub(r'(?is)<(think|thinking|thought|reasoning)>.*?(</\1>|\Z)', '', text)
+    blocks = [b for b in re.split(r'\n\s*\n', text.strip()) if b.strip()]
+    if not blocks or not _THINK_HEADER.match(blocks[0].splitlines()[0]):
+        return text.strip()
+    rest = blocks[1:]
+    while rest and _REASONING_BLOCK.match(rest[0]):
+        rest = rest[1:]
+    return '\n\n'.join(rest).strip()
+
+
+def _gemini_text(resp):
+    """Visible reply text from a response, excluding any thought parts."""
+    cand = (getattr(resp, 'candidates', None) or [None])[0]
+    content = getattr(cand, 'content', None) if cand is not None else None
+    parts = list(getattr(content, 'parts', None) or [])
+    if parts:
+        visible = ''.join(p.text for p in parts
+                          if getattr(p, 'text', None)
+                          and not getattr(p, 'thought', False))
+        return _strip_thinking(visible)
+    return _strip_thinking(getattr(resp, 'text', None) or '')
+
+
 def generate_reply(system_prompt, chat_history, user_message, is_continue=False):
     """Call Gemini with the given history and return the reply text.
 
@@ -2871,14 +2917,14 @@ def generate_reply(system_prompt, chat_history, user_message, is_continue=False)
     response = client.models.generate_content(
         model=MODEL_NAME,
         contents=contents,
-        config=types.GenerateContentConfig(
+        config=_no_thinking(types.GenerateContentConfig(
             system_instruction=system_prompt,
             temperature=0.75,
             max_output_tokens=1024,
-        )
+        ))
     )
 
-    reply = response.text.strip() if response.text else "Hmm. What were you saying?"
+    reply = _gemini_text(response) or "Hmm. What were you saying?"
     if len(reply) > 1400:
         reply = reply[:1397] + '...'
 
@@ -5102,17 +5148,13 @@ def _persona_text(persona, instruction, history=None, max_tokens=1024, temperatu
         contents.append({'role': 'model' if m['role'] in ('bot', 'model') else 'user',
                          'parts': [{'text': m['content']}]})
     contents.append({'role': 'user', 'parts': [{'text': instruction}]})
-    cfg = types.GenerateContentConfig(
+    cfg = _no_thinking(types.GenerateContentConfig(
         system_instruction=system_prompt, temperature=temperature,
-        max_output_tokens=max_tokens)
-    try:
-        cfg.thinking_config = types.ThinkingConfig(thinking_budget=0)
-    except Exception:
-        pass
+        max_output_tokens=max_tokens))
     response = client.models.generate_content(
         model=MODEL_NAME, contents=contents, config=cfg,
     )
-    return (response.text or '').strip()
+    return _gemini_text(response)
 
 
 def _x_resolve_user(persona, handle):
@@ -6274,9 +6316,11 @@ def api_x_poll():
                 response = client.models.generate_content(
                     model=MODEL_NAME,
                     contents=contents,
-                    config=types.GenerateContentConfig(system_instruction=system_prompt, temperature=0.85, max_output_tokens=1024),
+                    config=_no_thinking(types.GenerateContentConfig(
+                        system_instruction=system_prompt, temperature=0.85,
+                        max_output_tokens=1024)),
                 )
-                reply_text = (response.text or '').strip()
+                reply_text = _gemini_text(response)
                 if not reply_text:
                     continue
 
