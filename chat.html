@@ -232,6 +232,7 @@ function loadPersonaList() {
 async function switchPersona(slug) {
   if (slug === persona) return;
   ri();
+  cancelGreet();
   sm(); sc();
   const prevU = u;
   persona = slug;
@@ -293,6 +294,7 @@ function submitName() {
   const name = input.value.trim();
   if (!name) { input.focus(); return; }
   const prev = u;
+  cancelGreet();
   document.getElementById('name-gate').classList.add('hidden');
   if (prev && name !== prev) { sm(); sc(); }
   u = name;
@@ -443,6 +445,7 @@ let msgQueue = [], processing = false;
 function se() {
   const x = inp.value.trim();
   if (!x) return;
+  cancelGreet();
   insertMsg(x, true);   // show immediately; committed to history when processed
   inp.value = '';
   const n = Date.now(), d = (n - l) / 1000;
@@ -490,16 +493,43 @@ function ss(ok) {
 
 function ck() { fetch('/').then(() => ss(true)).catch(() => ss(false)); }
 
+// The opening message is only ever in flight once, and it is dropped outright
+// if the fan speaks first — she would not follow their message with an
+// unprompted introduction.
+let greetSeq = 0, greetTimer = null, greetPending = false;
+
+function cancelGreet() {
+  if (!greetPending) return;
+  greetSeq++;
+  clearTimeout(greetTimer);
+  greetTimer = null;
+  greetPending = false;
+  showTyping(false);
+}
+
 function greet() {
-  if (h.length !== 0) return;
+  if (h.length !== 0 || greetPending) return;
+  const token = ++greetSeq;
+  const stale = () => token !== greetSeq;
+  greetPending = true;
   const greetDelay = replyDelay('');
   let typingSince = 0;
-  setTimeout(() => {
+  greetTimer = setTimeout(() => {
     showTyping(true);
     typingSince = Date.now();
     fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: chatBody({ message: '__greeting__', history: [] }) })
-      .then(r => r.json()).then(d => { if (d.pacing) pacing = d.pacing; if (d.reply) { cs(d.reply, si, d.photo, typingSince); } else { showTyping(false); addMsg('hey', false); si(); } })
-      .catch(() => { showTyping(false); addMsg('hey', false); si(); });
+      .then(r => r.json()).then(d => {
+        if (stale()) return;
+        greetPending = false;
+        if (d.pacing) pacing = d.pacing;
+        if (d.reply) { cs(d.reply, si, d.photo, typingSince); }
+        else { showTyping(false); addMsg('hey', false); si(); }
+      })
+      .catch(() => {
+        if (stale()) return;
+        greetPending = false;
+        showTyping(false); addMsg('hey', false); si();
+      });
   }, greetDelay);
 }
 
