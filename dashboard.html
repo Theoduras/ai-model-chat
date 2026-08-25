@@ -248,10 +248,31 @@
   <aside class="preview-panel admin-only" aria-label="Preview">
     <div class="preview-header"><span>Preview</span></div>
     <div class="preview-tabs">
-      <div class="preview-tab active" onclick="switchTab('prompt', this)">System Prompt</div>
+      <div class="preview-tab active" onclick="switchTab('chat', this)">Live Chat</div>
+      <div class="preview-tab" onclick="switchTab('prompt', this)">System Prompt</div>
       <div class="preview-tab" onclick="switchTab('funnel', this)">Funnel</div>
     </div>
-    <div class="preview-content" id="preview-content">
+    <div class="preview-chat" id="preview-chat">
+      <div class="header">
+        <div class="header-avatar-wrap">
+          <img id="pc-avatar" src="" alt="" style="display:none;">
+          <div id="pc-avatar-fallback" class="pc-av-fallback">AI</div>
+          <div class="online-dot"></div>
+        </div>
+        <div class="header-info">
+          <div class="header-name" id="pc-name">Persona</div>
+          <div class="header-meta" id="pc-meta">Fill in the form to preview her</div>
+        </div>
+      </div>
+      <div class="chat-window" id="pc-window"></div>
+      <div class="input-area">
+        <div class="input-wrap"><input type="text" placeholder="Message…" disabled aria-label="Live preview — not sendable"></div>
+        <button class="send-btn" type="button" disabled aria-label="Preview only">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+        </button>
+      </div>
+    </div>
+    <div class="preview-content" id="preview-content" style="display:none;">
       <div class="empty-state" style="padding:20px; min-height:auto;">
         <p style="font-size:0.75rem;">Configure a persona and click Preview Prompt.</p>
       </div>
@@ -1053,46 +1074,69 @@ async function loadPersona(slug) {
   loadXStatus();
 }
 
-// Example panels. Anything carrying [data-ex] gets the matching sample exchange,
-// so the wizard and the full form share one renderer.
-const FAN_AV_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="15" height="15" aria-hidden="true"><circle cx="12" cy="8" r="3.5"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0" stroke-linecap="round"/></svg>';
 
-function exHerAvatar(cfg) {
+// Live chat preview (right-hand panel). Consolidates what used to be several
+// small "How she'd sound" widgets scattered through the form into one
+// persistent panel styled like the real fan-facing chat window.
+const EX_SECTIONS = [
+  ['archetype', 'Archetype'],
+  ['voice', 'Voice & warmth'],
+  ['interests', 'Interests'],
+  ['flirt', 'Flirt pace'],
+  ['funnel', 'Conversion funnel'],
+];
+
+function pcAvatarHtml(cfg) {
   const src = (cfg.avatar || '').trim();
-  if (src) return '<img src="' + src + '" alt="">';
+  if (src) return '<img class="msg-av" src="' + esc(src) + '" alt="">';
   const initials = esc((cfg.name || 'AI').slice(0, 2).toUpperCase());
-  return '<span>' + initials + '</span>';
+  return '<div class="msg-av pc-av-fallback">' + initials + '</div>';
 }
 
-function renderExamples(root) {
-  if (!window.PersonaExamples) return;
-  const hosts = (root || document).querySelectorAll('[data-ex]');
-  if (!hosts.length) return;
+function renderChatPreview() {
+  const panel = document.getElementById('preview-chat');
+  if (!panel || !window.PersonaExamples) return;
   const cfg = collectConfig();
-  const herAv = exHerAvatar(cfg);
-  hosts.forEach(host => {
-    const build = window.PersonaExamples[host.dataset.ex];
+  const name = cfg.name || 'Persona';
+  document.getElementById('pc-name').textContent = name;
+  const metaParts = [];
+  if (cfg.location && !cfg.mirror_location) metaParts.push(cfg.location);
+  if (cfg.age) metaParts.push(cfg.age);
+  document.getElementById('pc-meta').textContent = metaParts.join(' · ') || 'Fill in the form to preview her';
+
+  const avatarSrc = (cfg.avatar || '').trim();
+  const avatarImg = document.getElementById('pc-avatar');
+  const avatarFallback = document.getElementById('pc-avatar-fallback');
+  if (avatarSrc) {
+    avatarImg.src = avatarSrc; avatarImg.style.display = '';
+    avatarFallback.style.display = 'none';
+  } else {
+    avatarImg.style.display = 'none';
+    avatarFallback.textContent = name.slice(0, 2).toUpperCase();
+    avatarFallback.style.display = 'flex';
+  }
+
+  const win = document.getElementById('pc-window');
+  let html = '';
+  EX_SECTIONS.forEach(([key, label]) => {
+    const build = window.PersonaExamples[key];
     if (!build) return;
     let ex;
     try { ex = build(cfg); } catch (e) { return; }
-    host.innerHTML =
-      '<div class="ex-panel-h">How she\'d sound' +
-        (ex.caption ? '<span>' + esc(ex.caption) + '</span>' : '') +
-      '</div>' +
-      (ex.turns && ex.turns.length
-        ? '<div class="chat-preview">' + ex.turns.map(t => {
-            const fan = t.who === 'fan';
-            return '<div class="ex-row ' + (fan ? 'fan' : 'her') + '">' +
-              '<div class="ex-av ' + (fan ? 'ex-av-fan' : 'ex-av-her') + '">' + (fan ? FAN_AV_SVG : herAv) + '</div>' +
-              '<div class="chat-bubble ' + (fan ? 'user' : 'bot') + '">' + esc(t.text) + '</div>' +
-            '</div>';
-          }).join('') + '</div>'
-        : '') +
-      (ex.note ? '<div class="ex-note">' + esc(ex.note) + '</div>' : '');
+    if (!ex.turns || !ex.turns.length) return;
+    html += '<div class="pc-section-label">' + esc(label) + (ex.caption ? ' — ' + esc(ex.caption) : '') + '</div>';
+    ex.turns.forEach(t => {
+      const isUser = t.who === 'fan';
+      html += '<div class="msg-row ' + (isUser ? 'user' : 'bot') + '">' +
+        (!isUser ? pcAvatarHtml(cfg) : '') +
+        '<div class="bubble">' + esc(t.text) + '</div></div>';
+    });
+    if (ex.note) html += '<div class="pc-section-note">' + esc(ex.note) + '</div>';
   });
+  win.innerHTML = html || '<div class="pc-empty">Fill in the form to see a live preview.</div>';
 }
 
-const EX_FIELDS = ['f-archetype', 'f-warmth', 'f-qfreq', 'f-speech', 'f-interests',
+const EX_FIELDS = ['f-name', 'f-age', 'f-location', 'f-avatar', 'f-archetype', 'f-warmth', 'f-qfreq', 'f-speech', 'f-interests',
                    'f-flirt', 'f-nsfw', 'f-nsfw-level', 'f-triggers', 'f-cta-label'];
 let exTimer = null;
 
@@ -1102,7 +1146,7 @@ let exTimer = null;
   document.getElementById('form-area').addEventListener(evt, e => {
     if (!e.target || EX_FIELDS.indexOf(e.target.id) === -1) return;
     clearTimeout(exTimer);
-    exTimer = setTimeout(() => renderExamples(document), 150);
+    exTimer = setTimeout(renderChatPreview, 150);
   });
 });
 
@@ -1307,7 +1351,6 @@ function renderForm(slug, cfg) {
         <div class="field">
           <label>Personality Archetype</label>
           <select id="f-archetype">${opt(['Deadpan / Dry', 'Bubbly / Sweet', 'Dominant / Edgy', 'Girl-Next-Door', 'Mysterious / Dark', 'Playful / Teasing', 'Intellectual / Witty'], cfg.archetype)}</select>
-          <div class="ex-panel" data-ex="archetype"></div>
         </div>
         </div>
       </div>
@@ -1369,7 +1412,6 @@ function renderForm(slug, cfg) {
         <select id="f-qfreq">${opt(['rarely', 'sometimes', 'often', 'very often'], cfg.question_freq)}</select>
         <span class="hint">How often the persona asks the fan a question to keep them engaged.</span>
       </div>
-      <div class="ex-panel" data-ex="voice"></div>
     </div>
 
     <div class="form-section">
@@ -1386,7 +1428,6 @@ function renderForm(slug, cfg) {
         <span class="hint" id="interests-gen-status"></span>
         <span class="hint" style="margin-top:2px;">Comma-separated. These appear in conversation naturally.</span>
       </div>
-      <div class="ex-panel" data-ex="interests"></div>
     </div>
 
     <div class="form-section">
@@ -1408,7 +1449,6 @@ function renderForm(slug, cfg) {
         <label>NSFW Level</label>
         <select id="f-nsfw-level">${opt(['suggestive', 'moderate', 'explicit'], cfg.nsfw_level)}</select>
       </div>
-      <div class="ex-panel" data-ex="flirt"></div>
     </div>
 
     <div class="form-section">
@@ -1422,7 +1462,6 @@ function renderForm(slug, cfg) {
         <span class="hint" id="triggers-gen-status"></span>
         <span class="hint" style="margin-top:2px;">When and how to introduce PPV offers. Editable — tweak to match your style.</span>
       </div>
-      <div class="ex-panel" data-ex="funnel"></div>
     </div>
 
     <div class="form-section">
@@ -1481,7 +1520,7 @@ function renderForm(slug, cfg) {
   // A hand-uploaded avatar keeps ownership across reloads; anything else follows photo 1.
   avatarFromPhoto = !cfg.avatar || !!cfg.avatar_from_photo;
   updateWarmthSlider(document.getElementById('f-warmth'));
-  renderExamples(document);
+  renderChatPreview();
   if (window.Onboarding) Onboarding.onFormRendered(slug, cfg);
 }
 
@@ -2125,15 +2164,19 @@ function switchTab(name, el) {
   currentTab = name;
   document.querySelectorAll('.preview-tab').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
+  document.getElementById('preview-chat').style.display = name === 'chat' ? 'flex' : 'none';
+  document.getElementById('preview-content').style.display = name === 'chat' ? 'none' : 'block';
   if (name === 'funnel') renderFunnelPreview();
 }
 
 function switchTabByName(name) {
   document.querySelectorAll('.preview-tab').forEach((t, i) => {
-    if ((i === 0 && name === 'prompt') || (i === 1 && name === 'funnel')) {
+    if ((i === 0 && name === 'chat') || (i === 1 && name === 'prompt') || (i === 2 && name === 'funnel')) {
       t.classList.add('active'); currentTab = name;
     } else { t.classList.remove('active'); }
   });
+  document.getElementById('preview-chat').style.display = name === 'chat' ? 'flex' : 'none';
+  document.getElementById('preview-content').style.display = name === 'chat' ? 'none' : 'block';
 }
 
 function renderFunnelPreview() {

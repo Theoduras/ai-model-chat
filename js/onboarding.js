@@ -79,12 +79,6 @@
       done: function () { return !!(val('f-cta-url') || '').trim(); } },
   ];
 
-  // Steps whose setting has a sample exchange worth showing under it.
-  var EXAMPLE_FOR = {
-    personality: 'archetype', speech: 'voice', warmth: 'voice',
-    interests: 'interests', flirt: 'flirt', nsfw: 'flirt', convert: 'funnel'
-  };
-
   var state = { slug: null, idx: 0, cfg: {}, on: false };
 
   function byId(id) { return document.getElementById(id); }
@@ -225,16 +219,11 @@
       body.innerHTML = '<p class="hint">Nothing to fill in here — continue.</p>';
     }
 
-    // Outside #ob-step-body on purpose: unmount() ships that element's children
-    // back to the stash, and they must stay exactly the real form nodes.
-    var ex = EXAMPLE_FOR[step.key];
-    if (ex && typeof renderExamples === 'function') {
-      var panel = document.createElement('div');
-      panel.className = 'ex-panel';
-      panel.setAttribute('data-ex', ex);
-      body.parentNode.insertBefore(panel, byId('ob-step-body').nextSibling);
-      renderExamples(panel.parentNode);
-    }
+    // The persistent live-chat panel on the right (renderChatPreview, in
+    // dashboard.html) already shows how these fields sound — no separate
+    // inline preview needed here. Just make sure it reflects this step's
+    // fields as they were moved into the wizard frame.
+    if (typeof renderChatPreview === 'function') renderChatPreview();
   }
 
   // Park the current step's nodes back in the stash so they survive navigation.

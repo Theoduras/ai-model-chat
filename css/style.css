@@ -2456,64 +2456,72 @@ body.ob-running .form-area {
 }
 #name-ok:disabled { opacity: 0.45; cursor: not-allowed; }
 
-.ex-panel {
-  margin-top: 10px;
-  padding: 9px 11px 10px;
-  background: var(--panel-2);
-  border: 1px solid var(--border-soft);
-  border-radius: var(--r-md);
-}
-.ex-panel:empty { display: none; }
-.ex-panel-h {
+/* Live chat preview — right-hand panel. Reuses the real chat page's own
+   classes (.header, .chat-window, .msg-row, .bubble, .input-area, .msg-av)
+   so this panel is visually identical to chat.html, just sized to fit a
+   340px rail instead of centered full-page. */
+.preview-chat {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
-  flex-wrap: wrap;
-  font-size: 0.6rem;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.preview-chat .header {
+  min-height: auto;
+  padding: 12px 14px;
+  gap: 10px;
+}
+.preview-chat .header-avatar-wrap img,
+.preview-chat .pc-av-fallback {
+  width: 38px;
+  height: 38px;
+}
+.pc-av-fallback {
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: #fff;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
   font-weight: 700;
-  letter-spacing: 0.08em;
+}
+.preview-chat .online-dot { width: 10px; height: 10px; }
+.preview-chat .chat-window { padding: 14px 12px; gap: 8px; }
+.preview-chat .bubble { font-size: 0.8rem; max-width: 84%; padding: 9px 12px; }
+.preview-chat .msg-av { width: 24px; height: 24px; font-size: 0.6rem; }
+.preview-chat .input-area { padding: 10px 12px; }
+.preview-chat .input-wrap { min-height: 38px; }
+.preview-chat .send-btn { width: 38px; height: 38px; }
+.preview-chat .send-btn svg { width: 16px; height: 16px; }
+.pc-section-label {
+  align-self: center;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-muted);
-  margin-bottom: 7px;
+  background: var(--surface);
+  padding: 3px 11px;
+  border-radius: 9999px;
+  margin: 10px 0 4px;
+  text-align: center;
 }
-.ex-panel-h span {
-  letter-spacing: 0;
-  text-transform: none;
-  font-weight: 600;
-  font-size: 0.72rem;
-  color: var(--accent);
-}
-.ex-panel .chat-preview { gap: 6px; }
-.ex-panel .chat-bubble {
-  font-size: 0.74rem;
-  max-width: 76%;
-  padding: 6px 10px;
-  line-height: 1.4;
-}
-/* Colours from the reference: her line reads as a solid dark bubble, the
-   fan's as a plain bordered one — high contrast, distinct from the site's
-   own orange chat bubbles so an example never looks like a real message. */
-.ex-panel .chat-bubble.bot  { background: var(--text); color: var(--bg); border-bottom-left-radius: 4px; }
-.ex-panel .chat-bubble.user { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-bottom-right-radius: 4px; }
-.ex-row { display: flex; align-items: flex-end; gap: 6px; }
-.ex-row + .ex-row { margin-top: 2px; }
-.ex-row.her { justify-content: flex-start; }
-.ex-row.fan { justify-content: flex-end; }
-.ex-row.fan .chat-bubble { order: 1; }
-.ex-row.fan .ex-av { order: 2; }
-.ex-av {
-  flex: 0 0 auto; width: 19px; height: 19px; border-radius: 50%;
-  overflow: hidden; display: flex; align-items: center; justify-content: center;
-  font-size: 0.5rem; font-weight: 700; color: #fff;
-}
-.ex-av img { width: 100%; height: 100%; object-fit: cover; }
-.ex-av-her { background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
-.ex-av-fan { background: var(--surface-2); color: var(--text-muted); }
-.ex-note {
-  margin-top: 7px;
+.pc-section-label:first-child { margin-top: 0; }
+.pc-section-note {
+  align-self: stretch;
   font-size: 0.68rem;
   line-height: 1.5;
   color: var(--text-muted);
+  padding: 0 4px 4px;
+}
+.pc-empty {
+  margin: auto;
+  text-align: center;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  padding: 20px;
 }
 
 /* Persona gallery — cards/list browsing view — and embedded sidebar pages share the
