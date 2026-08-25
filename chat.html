@@ -368,13 +368,28 @@ function um(x) {
   if (t.length) { m.recentTopics = [...m.recentTopics, ...t].slice(-4); m.lastTopic = t[t.length - 1]; }
 }
 
+// Split a long reply into two bubbles at a sentence boundary. Both halves are
+// slices of the original string, so nothing can be dropped and the blank line
+// before the CTA survives. A dot inside a URL is not a sentence boundary —
+// "onlyfans.com/miss.andrea" is one link, not three sentences.
 function splitChunks(text) {
   if (text.length < 120) return [text];
-  const parts = text.match(/[^.!?…]*[.!?…]+(?=\s|$)|[^.!?…]+$/g) || [text];
-  const clean = parts.map(s => s.trim()).filter(Boolean);
-  if (clean.length <= 2) return [text];
-  const mid = Math.ceil(clean.length / 2);
-  return [clean.slice(0, mid).join(' '), clean.slice(mid).join(' ')].filter(Boolean);
+  const urls = [];
+  const re = /https?:\/\/\S+/g;
+  let m;
+  while ((m = re.exec(text))) urls.push([m.index, m.index + m[0].length]);
+  const inUrl = i => urls.some(u => i >= u[0] && i < u[1]);
+  const bounds = [];
+  for (let i = 0; i < text.length; i++) {
+    if ('.!?\u2026'.indexOf(text[i]) < 0 || inUrl(i)) continue;
+    let j = i;
+    while (j + 1 < text.length && '.!?\u2026'.indexOf(text[j + 1]) >= 0) j++;
+    if (j + 1 < text.length && /\s/.test(text[j + 1])) bounds.push(j + 1);
+    i = j;
+  }
+  if (bounds.length < 2) return [text];
+  const cut = bounds[Math.ceil((bounds.length + 1) / 2) - 1];
+  return [text.slice(0, cut).trim(), text.slice(cut).trim()].filter(Boolean);
 }
 
 function deliverChunks(chunks, idx, onDone, photo) {
