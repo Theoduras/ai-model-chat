@@ -17,6 +17,9 @@
     <button class="icon-btn mobile-only" onclick="openSidebar()" title="Personas" aria-label="Open personas">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="20" height="20"><path d="M4 6h16M4 12h16M4 18h16" stroke-linecap="round"/></svg>
     </button>
+    <button class="icon-btn desk-only" onclick="toggleSidebar()" title="Show or hide the persona list" aria-label="Toggle persona list">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="20" height="20"><path d="M4 6h16M4 12h16M4 18h16" stroke-linecap="round"/></svg>
+    </button>
     <h1>Persona Builder</h1>
     <span class="badge">Dashboard</span>
   </div>
@@ -209,6 +212,22 @@ let currentTab = 'prompt';
 const personas = {};
 
 function _overlay() { return document.getElementById('mobile-overlay'); }
+function sidebarKey() { return 'admin_sidebar' + lsNs(); }
+
+function toggleSidebar() {
+  const off = document.body.classList.toggle('sidebar-off');
+  try { localStorage.setItem(sidebarKey(), off ? 'off' : 'on'); } catch(e) {}
+}
+
+// Default: visible while there is nothing to browse, out of the way once there is.
+// An explicit toggle is remembered and outranks that.
+function applySidebarDefault() {
+  let saved = null;
+  try { saved = localStorage.getItem(sidebarKey()); } catch(e) {}
+  const off = saved ? saved === 'off' : Object.keys(personas).length > 0;
+  document.body.classList.toggle('sidebar-off', off);
+}
+
 function openSidebar() {
   document.querySelector('.sidebar').classList.add('open');
   _overlay().classList.add('open');
@@ -379,6 +398,7 @@ async function init() {
     if (!lsPersonaFolder(slug)) lsSetPersonaFolder(slug, folders[0].id);
   });
 
+  applySidebarDefault();
   renderSidebar();
   document.getElementById('persona-count').textContent = seen.size;
 }
@@ -705,7 +725,10 @@ function renderPersonaBrowser() {
 
   fa.innerHTML =
     '<div class="pg-head">' +
-      '<h2 style="font-size:1.1rem;font-weight:600;">Your personas</h2>' +
+      '<div class="pg-head-l">' +
+        '<h2 style="font-size:1.1rem;font-weight:600;">Your personas</h2>' +
+        '<button type="button" class="btn btn-primary" onclick="newPersona()">+ New persona</button>' +
+      '</div>' +
       '<div class="pg-toggle">' +
         '<button type="button" class="' + (view === 'cards' ? 'active' : '') + '" onclick="setPgView(\'cards\')">▦ Cards</button>' +
         '<button type="button" class="' + (view === 'list' ? 'active' : '') + '" onclick="setPgView(\'list\')">☰ List</button>' +
