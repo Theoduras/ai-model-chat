@@ -96,10 +96,9 @@ p.sub{font-size:17px;color:var(--text-soft);line-height:1.65;margin-bottom:36px;
   .topbar{flex-wrap:wrap;gap:14px}
   .auth a{padding:8px 15px;font-size:13px}
   h1{font-size:46px}
-  .right{padding:40px 20px}
+  /* Stacked, the demo still gets a screen of its own rather than a slice. */
+  .right{padding:32px 20px 20px;height:100dvh}
   .ring.a{width:240px;height:240px}
-  .right{height:auto}
-  .demo{height:76vh;flex:none}
 }
 @media(max-width:600px){
   .left{padding:28px 18px}
@@ -111,12 +110,11 @@ p.sub{font-size:17px;color:var(--text-soft);line-height:1.65;margin-bottom:36px;
   .cta input,.cta button{width:100%}
   .cta button{padding:14px 20px}
   .meta{flex-wrap:wrap;gap:14px;font-size:12px}
-  .right{padding:28px 16px}
-  .ring.a{width:160px;height:160px;top:-40px;right:-70px}
-  .ring.b{width:100px;height:100px}
-  .rtitle{font-size:22px}
-  .rsub{font-size:13px}
-  .demo{height:64vh;border-radius:14px}
+  /* On a phone the demo is the whole screen: no framing, no heading above it. */
+  .right{padding:0;height:100dvh}
+  .rhead{display:none}
+  .ring.a,.ring.b{display:none}
+  .demo{max-width:none;flex:none;height:100dvh;border:0;border-radius:0;box-shadow:none}
   .auth a{padding:7px 12px;font-size:12.5px}
 }
 </style>
