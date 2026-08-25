@@ -2392,3 +2392,38 @@ body.ob-running .form-area {
   color: var(--text-muted);
 }
 #name-ok:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.ex-panel {
+  margin-top: 12px;
+  padding: 12px 14px 13px;
+  background: var(--panel-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-lg);
+}
+.ex-panel:empty { display: none; }
+.ex-panel-h {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+.ex-panel-h span {
+  letter-spacing: 0;
+  text-transform: none;
+  font-weight: 600;
+  font-size: 0.72rem;
+  color: var(--accent);
+}
+.ex-panel .chat-bubble { font-size: 0.8rem; }
+.ex-note {
+  margin-top: 10px;
+  font-size: 0.72rem;
+  line-height: 1.55;
+  color: var(--text-muted);
+}

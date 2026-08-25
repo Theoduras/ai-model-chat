@@ -7,7 +7,8 @@
   <script src="/js/theme.js"></script>
   <link rel="stylesheet" href="/css/style.css">
   <script src="/js/devnav.js" defer></script>
-  <script src="/js/onboarding.js" defer></script>
+  <script src="/js/examples.js" defer></script>
+<script src="/js/onboarding.js" defer></script>
 </head>
 <body class="page-dashboard auth-pending">
 
@@ -720,6 +721,45 @@ async function loadPersona(slug) {
   loadXStatus();
 }
 
+// Example panels. Anything carrying [data-ex] gets the matching sample exchange,
+// so the wizard and the full form share one renderer.
+function renderExamples(root) {
+  if (!window.PersonaExamples) return;
+  const hosts = (root || document).querySelectorAll('[data-ex]');
+  if (!hosts.length) return;
+  const cfg = collectConfig();
+  hosts.forEach(host => {
+    const build = window.PersonaExamples[host.dataset.ex];
+    if (!build) return;
+    let ex;
+    try { ex = build(cfg); } catch (e) { return; }
+    host.innerHTML =
+      '<div class="ex-panel-h">How she\'d sound' +
+        (ex.caption ? '<span>' + esc(ex.caption) + '</span>' : '') +
+      '</div>' +
+      (ex.turns && ex.turns.length
+        ? '<div class="chat-preview">' + ex.turns.map(t =>
+            '<div class="chat-bubble ' + (t.who === 'fan' ? 'user' : 'bot') + '">' + esc(t.text) + '</div>'
+          ).join('') + '</div>'
+        : '') +
+      (ex.note ? '<div class="ex-note">' + esc(ex.note) + '</div>' : '');
+  });
+}
+
+const EX_FIELDS = ['f-archetype', 'f-warmth', 'f-qfreq', 'f-speech', 'f-interests',
+                   'f-flirt', 'f-nsfw', 'f-nsfw-level', 'f-triggers', 'f-cta-label'];
+let exTimer = null;
+
+// Delegated, because the wizard moves the real inputs in and out of the DOM
+// between steps — listeners bound to the fields themselves would not survive.
+['input', 'change'].forEach(evt => {
+  document.getElementById('form-area').addEventListener(evt, e => {
+    if (!e.target || EX_FIELDS.indexOf(e.target.id) === -1) return;
+    clearTimeout(exTimer);
+    exTimer = setTimeout(() => renderExamples(document), 150);
+  });
+});
+
 const WARMTH_COLORS = ['#5b8bb0', '#7a9e8e', '#e0b24f', '#ff5c38', '#ff2d78'];
 
 function updateWarmthSlider(el) {
@@ -885,6 +925,7 @@ function renderForm(slug, cfg) {
           </div>
           </div>
           <input type="hidden" id="f-avatar" value="${esc(cfg.avatar || '')}">
+          <span class="hint" style="margin-top:6px;">Uses the first photo below unless you upload one here.</span>
         </div>
         <div class="field">
           <label>Location</label>
@@ -918,6 +959,7 @@ function renderForm(slug, cfg) {
         <div class="field">
           <label>Personality Archetype</label>
           <select id="f-archetype">${opt(['Deadpan / Dry', 'Bubbly / Sweet', 'Dominant / Edgy', 'Girl-Next-Door', 'Mysterious / Dark', 'Playful / Teasing', 'Intellectual / Witty'], cfg.archetype)}</select>
+          <div class="ex-panel" data-ex="archetype"></div>
         </div>
         </div>
       </div>
@@ -979,6 +1021,7 @@ function renderForm(slug, cfg) {
         <select id="f-qfreq">${opt(['rarely', 'sometimes', 'often', 'very often'], cfg.question_freq)}</select>
         <span class="hint">How often the persona asks the fan a question to keep them engaged.</span>
       </div>
+      <div class="ex-panel" data-ex="voice"></div>
     </div>
 
     <div class="form-section">
@@ -995,6 +1038,7 @@ function renderForm(slug, cfg) {
         <span class="hint" id="interests-gen-status"></span>
         <span class="hint" style="margin-top:2px;">Comma-separated. These appear in conversation naturally.</span>
       </div>
+      <div class="ex-panel" data-ex="interests"></div>
     </div>
 
     <div class="form-section">
@@ -1016,6 +1060,7 @@ function renderForm(slug, cfg) {
         <label>NSFW Level</label>
         <select id="f-nsfw-level">${opt(['suggestive', 'moderate', 'explicit'], cfg.nsfw_level)}</select>
       </div>
+      <div class="ex-panel" data-ex="flirt"></div>
     </div>
 
     <div class="form-section">
@@ -1029,6 +1074,7 @@ function renderForm(slug, cfg) {
         <span class="hint" id="triggers-gen-status"></span>
         <span class="hint" style="margin-top:2px;">When and how to introduce PPV offers. Editable — tweak to match your style.</span>
       </div>
+      <div class="ex-panel" data-ex="funnel"></div>
     </div>
 
     <div class="form-section">
@@ -1084,7 +1130,10 @@ function renderForm(slug, cfg) {
       </div>
     </div>
   `;
+  // A hand-uploaded avatar keeps ownership across reloads; anything else follows photo 1.
+  avatarFromPhoto = !cfg.avatar || !!cfg.avatar_from_photo;
   updateWarmthSlider(document.getElementById('f-warmth'));
+  renderExamples(document);
   if (window.Onboarding) Onboarding.onFormRendered(slug, cfg);
 }
 
@@ -1389,16 +1438,16 @@ function handleAvatarUpload(input) {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = e => {
-    const dataUrl = e.target.result;
-    document.getElementById('f-avatar').value = dataUrl;
-    document.getElementById('avatar-preview').innerHTML = '<img src="' + dataUrl + '" style="width:100%;height:100%;object-fit:cover;">';
+    avatarFromPhoto = false;
+    setAvatar(e.target.result);
   };
   reader.readAsDataURL(file);
 }
 
 function clearAvatar() {
-  document.getElementById('f-avatar').value = '';
-  document.getElementById('avatar-preview').innerHTML = '<span style="font-size:28px;color:var(--text-muted);">+</span>';
+  // Deliberately empty beats being refilled from photo 1 on the next render.
+  avatarFromPhoto = false;
+  setAvatar('');
 }
 
 function collectConfig() {
@@ -1412,7 +1461,7 @@ function collectConfig() {
     interests: v('f-interests'), flirt_pace: v('f-flirt'),
     nsfw_enabled: document.getElementById('f-nsfw')?.checked || false,
     nsfw_level: v('f-nsfw-level'), conversion_triggers: v('f-triggers'),
-    avatar: v('f-avatar'), platforms: collectPlatforms(),
+    avatar: v('f-avatar'), avatar_from_photo: avatarFromPhoto, platforms: collectPlatforms(),
   };
 }
 
@@ -1513,6 +1562,8 @@ async function savePersona() {
 // ── Persona photo gallery (max 5, same person) ──
 let galleryImages = [];   // array of data URLs
 const MAX_PHOTOS = 5;
+// The avatar mirrors photo 1 until someone uploads or clears one by hand.
+let avatarFromPhoto = true;
 
 function renderGallery() {
   const grid = document.getElementById('photo-grid');
@@ -1534,6 +1585,22 @@ function renderGallery() {
     add.onclick = () => document.getElementById('photo-file-input').click();
     grid.appendChild(add);
   }
+  syncAvatarFromGallery();
+}
+
+function setAvatar(dataUrl) {
+  const field = document.getElementById('f-avatar');
+  const prev  = document.getElementById('avatar-preview');
+  if (!field || !prev) return;
+  field.value = dataUrl;
+  prev.innerHTML = dataUrl
+    ? '<img src="' + dataUrl + '" style="width:100%;height:100%;object-fit:cover;">'
+    : '<span style="font-size:28px;color:var(--text-muted);">+</span>';
+}
+
+function syncAvatarFromGallery() {
+  if (!avatarFromPhoto || !galleryImages.length) return;
+  setAvatar(galleryImages[0]);
 }
 
 async function loadGallery(slug) {
