@@ -600,6 +600,21 @@ if (hasName()) {
 } else {
   showNameGate();
 }
+// Keep the chat inside the visible viewport when the on-screen keyboard opens,
+// so the header stays put instead of scrolling away above it.
+(function trackViewport() {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const apply = () => {
+    document.documentElement.style.setProperty('--vvh', vv.height + 'px');
+    if (window.scrollY) window.scrollTo(0, 0);
+    chatEl.scrollTop = chatEl.scrollHeight;
+  };
+  vv.addEventListener('resize', apply);
+  vv.addEventListener('scroll', apply);
+  apply();
+})();
+
 ss(false); ck(); setInterval(ck, 10000);
 if (location.hash === '#profile') setTimeout(openProfile, 1200);
 </script>

@@ -588,11 +588,16 @@ body.page-chat .conn-dot.err { background: var(--err); }
     align-items: stretch;
     justify-content: stretch;
   }
-  .chat-container {
+  body.page-chat, body.page-chat .chat-shell {
+    /* --vvh tracks the visual viewport, so the keyboard shrinks the chat
+       instead of pushing its header off the top of the screen. */
+    height: var(--vvh, 100dvh);
+    min-height: 0;
+  }
+  body.page-chat .chat-container {
     max-width: 100%;
     width: 100%;
     height: 100%;
-    height: 100dvh;
     border-radius: 0;
     border: none;
     box-shadow: none;
@@ -609,7 +614,7 @@ body.page-chat.embed {
   justify-content: stretch;
   /* A definite height, so the shell's height:100% has something to resolve
      against — min-height alone leaves it sized to its content. */
-  height: 100dvh;
+  height: var(--vvh, 100dvh);
   min-height: 0;
   overflow: hidden;
 }
