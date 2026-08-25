@@ -406,7 +406,10 @@ body.page-chat .conn-dot.err { background: var(--err); }
 }
 .msg-row.user .bubble {
   background: var(--bubble-user);
-  color: #e9d5ff;
+  /* Token, not a fixed light tint: the bubble is a translucent accent, so on
+     the light theme (and inside the builder's preview rail) fixed pale text
+     disappears into the page. */
+  color: var(--text);
   border-radius: var(--radius-bubble) var(--radius-bubble) 6px var(--radius-bubble);
 }
 .msg-row.bot.cont .bubble  { border-top-left-radius: 6px; }
@@ -809,9 +812,6 @@ body.page-dashboard .badge {
    flashes for a normal user, then revealed only for admins. */
 body.auth-pending .admin-only,
 body:not(.is-admin) .admin-only { display: none !important; }
-
-/* Without the preview panel the editor should take the freed column. */
-body:not(.is-admin) .layout { grid-template-columns: 280px 1fr; }
 
 
 
@@ -2481,7 +2481,7 @@ body.ob-running .form-area {
   border-radius: 50%;
   background: linear-gradient(135deg, var(--accent), var(--accent-2));
   color: #fff;
-  display: none;
+  display: flex;
   align-items: center;
   justify-content: center;
   font-size: 0.7rem;
@@ -2533,8 +2533,7 @@ body.browsing .layout,
 body.embedding .layout { grid-template-columns: 280px 1fr; }
 body.sidebar-off .layout { grid-template-columns: 1fr 340px; }
 body.browsing.sidebar-off .layout,
-body.embedding.sidebar-off .layout,
-body:not(.is-admin).sidebar-off .layout { grid-template-columns: 1fr; }
+body.embedding.sidebar-off .layout { grid-template-columns: 1fr; }
 body.browsing .form-area { padding: 24px 28px; }
 body.embedding .form-area { padding: 0; overflow: hidden; }
 .sb-frame { width: 100%; height: 100%; border: none; display: block; }

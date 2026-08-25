@@ -24,7 +24,7 @@
     <span class="badge">Dashboard</span>
   </div>
   <div style="display:flex; align-items:center; gap:16px;">
-    <button class="icon-btn mobile-only admin-only" onclick="openPreview()" title="Preview" aria-label="Open preview">
+    <button class="icon-btn mobile-only" onclick="openPreview()" title="Preview" aria-label="Open preview">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="20" height="20"><path d="M2.5 12s3.5-7 9.5-7 9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7Z" stroke-linejoin="round"/><circle cx="12" cy="12" r="2.5"/></svg>
     </button>
     <div id="gemini-status" class="conn-badge admin-only" onclick="openSettings()" title="Gemini connection — click to configure">
@@ -245,7 +245,7 @@
     </div>
   </div>
 
-  <aside class="preview-panel admin-only" aria-label="Preview">
+  <aside class="preview-panel" aria-label="Preview">
     <div class="preview-header"><span>Preview</span></div>
     <div class="preview-tabs">
       <div class="preview-tab active" onclick="switchTab('chat', this)">Live Chat</div>
@@ -256,7 +256,7 @@
       <div class="header">
         <div class="header-avatar-wrap">
           <img id="pc-avatar" src="" alt="" style="display:none;">
-          <div id="pc-avatar-fallback" class="pc-av-fallback">AI</div>
+          <div id="pc-avatar-fallback" class="pc-av-fallback" style="display:none;">AI</div>
           <div class="online-dot"></div>
         </div>
         <div class="header-info">
@@ -339,7 +339,7 @@ function filterSbNav() {
     label.style.display = anyVisible ? '' : 'none';
   });
 }
-let currentTab = 'prompt';
+let currentTab = 'chat';
 const personas = {};
 
 function _overlay() { return document.getElementById('mobile-overlay'); }
@@ -2137,8 +2137,10 @@ async function previewPrompt() {
       body: JSON.stringify(config)
     });
     const data = await res.json();
-    showPromptPreview(data.prompt);
+    // Tab first: showPromptPreview only writes while the prompt tab is showing,
+    // and Live Chat is now the tab the panel opens on.
     switchTabByName('prompt');
+    showPromptPreview(data.prompt);
   } catch(e) { console.error(e); }
 }
 
