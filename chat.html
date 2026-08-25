@@ -600,6 +600,17 @@ if (hasName()) {
 } else {
   showNameGate();
 }
+// The header floats over the message list, so the list needs to know how much
+// room to leave for it.
+(function trackHeader() {
+  const hdr = document.querySelector('.header');
+  if (!hdr) return;
+  const apply = () => document.documentElement.style.setProperty('--hdr-h', hdr.offsetHeight + 'px');
+  if (window.ResizeObserver) new ResizeObserver(apply).observe(hdr);
+  window.addEventListener('resize', apply);
+  apply();
+})();
+
 // Keep the chat inside the visible viewport when the on-screen keyboard opens,
 // so the header stays put instead of scrolling away above it.
 (function trackViewport() {
