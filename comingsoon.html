@@ -87,6 +87,9 @@ p.sub{font-size:17px;color:var(--text-soft);line-height:1.65;margin-bottom:36px;
 .rsub{font-size:14.5px;color:#ffffffcc;line-height:1.55;margin-top:8px}
 .demo{position:relative;z-index:2;width:100%;max-width:880px;margin:0 auto;height:min(700px,78vh);border-radius:20px;overflow:hidden;background:var(--bg);border:1px solid #ffffff33;box-shadow:0 24px 60px #00000055}
 .demo iframe{width:100%;height:100%;border:0;display:block}
+/* The chat asks for the full viewport when its profile card opens, which needs
+   more room than the demo panel has. */
+.demo.expanded{position:fixed;inset:0;z-index:60;max-width:none;width:100%;height:100%;border-radius:0;border:0;box-shadow:none}
 @media(max-width:900px){
   .split{grid-template-columns:1fr}
   .left{min-height:auto;padding:40px 26px}
@@ -146,6 +149,15 @@ p.sub{font-size:17px;color:var(--text-soft);line-height:1.65;margin-bottom:36px;
 </div>
 
 <script>
+window.addEventListener('message',function(e){
+  var d=e.data;
+  if(!d||typeof d!=='object'||!d.vf) return;
+  var demo=document.querySelector('.demo');
+  if(!demo) return;
+  if(d.vf==='profile-open') demo.classList.add('expanded');
+  if(d.vf==='profile-close') demo.classList.remove('expanded');
+});
+
 function subscribe(e){
   e.preventDefault();
   var email=document.getElementById('email').value.trim();

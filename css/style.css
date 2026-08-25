@@ -761,6 +761,7 @@ body.page-chat.embed.demo .persona-rail { display: flex; }
   width: 100%;
   max-width: 980px;
   max-height: calc(100dvh - 40px);
+  min-height: min(600px, calc(100dvh - 40px));
   background: var(--panel);
   border-radius: var(--r-xl);
   border: 1px solid var(--border);

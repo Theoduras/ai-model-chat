@@ -185,6 +185,7 @@ function openProfile() {
     interests.map(t => '<span class="interest-chip">' + t.replace(/</g, '&lt;') + '</span>').join('');
   profileIdx = 0;
   renderProfileGallery();
+  tellParent('profile-open');
   document.getElementById('profile-modal').classList.add('open');
 }
 
@@ -212,6 +213,14 @@ function profileStep(dir) { profileIdx += dir; renderProfileGallery(); }
 function closeProfile() {
   document.getElementById('profile-modal').classList.remove('open');
   document.querySelector('.profile-card').classList.remove('fs');
+  tellParent('profile-close');
+}
+
+// Embedded, the modal is trapped in an iframe far narrower than the layout it
+// was designed for. Ask the host page to give the frame the whole viewport.
+function tellParent(type) {
+  if (window.self === window.top) return;
+  try { window.parent.postMessage({ vf: type }, '*'); } catch (e) {}
 }
 function toggleProfileFullscreen() { document.querySelector('.profile-card').classList.toggle('fs'); }
 
