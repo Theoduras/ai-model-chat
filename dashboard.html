@@ -1301,6 +1301,7 @@ function renderChatPreview() {
 }
 
 const EX_FIELDS = ['f-name', 'f-age', 'f-location', 'f-avatar', 'f-archetype', 'f-warmth', 'f-qfreq', 'f-speech', 'f-interests',
+  'f-reply-length', 'f-emoji-use', 'f-lowercase',
                    'f-flirt', 'f-nsfw', 'f-nsfw-level', 'f-triggers', 'f-cta-label'];
 let exTimer = null;
 
@@ -1518,7 +1519,27 @@ function renderForm(slug, cfg) {
         </label>
         <textarea id="f-speech" placeholder="Click ✨ Generate to auto-fill based on your persona, or write your own rules here.">${esc(cfg.speech_style || '')}</textarea>
         <span class="hint" id="speech-gen-status"></span>
-        <span class="hint" style="margin-top:2px;">Controls sentence length, punctuation, slang, emoji use, and personality quirks in every reply.</span>
+        <span class="hint" style="margin-top:2px;">Slang, punctuation and personality quirks. The three settings below are applied on top of this.</span>
+      </div>
+      <div class="field">
+        <label>Reply Length</label>
+        <select id="f-reply-length">${opt(['short', 'medium', 'long'], cfg.reply_length || 'short')}</select>
+        <span class="hint">Short is 1–2 sentences and reads most like a real text.</span>
+      </div>
+      <div class="field">
+        <label>Emoji Use</label>
+        <select id="f-emoji-use">${opt(['none', 'rare', 'some', 'lots'], cfg.emoji_use || 'none')}</select>
+        <span class="hint">None keeps her sounding like a person rather than a brand account.</span>
+      </div>
+      <div class="field">
+        <div class="toggle-row">
+          <label class="toggle">
+            <input type="checkbox" id="f-lowercase" ${(cfg.lowercase === undefined ? true : cfg.lowercase) ? 'checked' : ''}>
+            <span class="toggle-track"></span>
+          </label>
+          <span class="toggle-label">Write in lowercase</span>
+        </div>
+        <span class="hint">Off gives her ordinary sentence capitalisation.</span>
       </div>
       <div class="field">
         <label>Warmth Level</label>
@@ -1605,7 +1626,7 @@ function renderForm(slug, cfg) {
         Chat Phases &amp; CTA
         <button type="button" class="btn-section-save" onclick="savePhases(this)">Save</button>
       </div>
-      <span class="hint">Control the conversation arc. Each phase sets interest level and photo frequency. The CTA link is sent once the fan reaches the final phase.</span>
+      <span class="hint">Control the conversation arc. Each phase sets how long it lasts and how often she sends photos. The CTA link is sent once the fan reaches the final phase.</span>
       <span class="hint" id="phases-status"></span>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px;">
         <div class="field">
@@ -1799,6 +1820,8 @@ function collectConfig() {
     location: locVal, mirror_location: mirror,
     archetype: v('f-archetype'), backstory: v('f-backstory'), speech_style: v('f-speech'),
     warmth: parseInt(v('f-warmth')) || 3, question_freq: v('f-qfreq'),
+    reply_length: v('f-reply-length'), emoji_use: v('f-emoji-use'),
+    lowercase: document.getElementById('f-lowercase')?.checked ?? true,
     reply_speed: v('f-reply-speed'), typing_speed: v('f-typing-speed'),
     spicy_cta: v('f-spicy-cta'),
     interests: v('f-interests'), flirt_pace: v('f-flirt'),
@@ -2203,14 +2226,13 @@ function renderPhases() {
 
 function phaseBlock(ph, i) {
   const dtOpts = [['exchanges','Exchanges'],['days','Days'],['exchanges_and_days','Exchanges and Days']];
-  const intOpts = ['low','medium','high'];
   const isLast = i === chatPhases.length - 1;
   return `
     <div class="outfit" style="margin-bottom:6px;">
       <div class="outfit-head" onclick="this.parentElement.classList.toggle('is-open')">
         <span class="outfit-num">${i + 1}</span>
         <span class="outfit-name">${esc(ph.name || 'Phase ' + (i+1))}</span>
-        <span class="outfit-meta">${esc(ph.interest || 'low')} interest · ${ph.photo_rate || 0}% photos</span>
+        <span class="outfit-meta">${ph.photo_rate || 0}% photos</span>
         <span class="outfit-caret">▶</span>
       </div>
       <div class="outfit-body">
@@ -2218,12 +2240,6 @@ function phaseBlock(ph, i) {
           <div class="field">
             <label>Phase Name</label>
             <input type="text" value="${esc(ph.name)}" onchange="chatPhases[${i}].name=this.value;renderPhases()">
-          </div>
-          <div class="field">
-            <label>Interest Level</label>
-            <select onchange="chatPhases[${i}].interest=this.value">
-              ${intOpts.map(o => '<option value="'+o+'"'+(ph.interest===o?' selected':'')+'>'+o+'</option>').join('')}
-            </select>
           </div>
           <div class="field">
             <label>Duration Type</label>
@@ -2260,7 +2276,7 @@ function addPhase() {
   chatPhases.splice(chatPhases.length - 1, 0, {
     name: 'Phase ' + chatPhases.length,
     duration_type: 'exchanges', duration_value: 20, duration_days: 0,
-    interest: 'medium', photo_rate: Math.min(100, (last?.photo_rate || 20) + 10)
+    photo_rate: Math.min(100, (last?.photo_rate || 20) + 10)
   });
   renderPhases();
 }

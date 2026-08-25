@@ -43,7 +43,7 @@
     { stage: 'talks', key: 'speech', nav: 'Speech style',
       title: 'How does she write?',
       sub: 'Sentence length, punctuation, slang and emoji. Generate it from her personality, or write your own rules.',
-      pick: function () { return fields(['f-speech']); },
+      pick: function () { return fields(['f-speech', 'f-reply-length', 'f-emoji-use', 'f-lowercase']); },
       done: function (c) { return (c.speech_style || '').trim().length > 10; } },
 
     { stage: 'talks', key: 'warmth', nav: 'Warmth',

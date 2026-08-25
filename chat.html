@@ -352,7 +352,9 @@ function insertMsg(text, isUser, photo) {
 function addMsg(text, isUser, photo) {
   const r = isUser ? 'user' : 'bot';
   if (h.length && h[h.length - 1].role === r && h[h.length - 1].content.trim() === text.trim() && !photo) return;
-  h.push({ role: r, content: text, photo: photo || null });
+  // Timestamped so the server can work out how long this fan has been talking
+  // to her — days-based funnel phases have no other clock in the browser chat.
+  h.push({ role: r, content: text, photo: photo || null, ts: Math.floor(Date.now() / 1000) });
   insertMsg(text, isUser, photo);
   sc();
   if (!isUser && window.parent !== window) {
