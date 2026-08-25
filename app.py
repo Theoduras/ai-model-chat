@@ -2634,6 +2634,35 @@ def api_persona_save(slug):
     return jsonify({'ok': True, 'slug': slug, 'prompt': prompt})
 
 
+@app.route('/api/personas/<slug>/favorite', methods=['POST'])
+def api_persona_favorite(slug):
+    """Toggle (or set) the favorite flag used to build the sidebar quick-list."""
+    if not re.match(r'^[a-z0-9_-]+$', slug):
+        return jsonify({'error': 'Invalid slug'}), 400
+    data = request.json or {}
+
+    saved = db_get_persona(slug)
+    if saved:
+        config = dict(saved['config'])
+    else:
+        config_path = _persona_path(slug, '.config.json')
+        config = {}
+        if os.path.exists(config_path):
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+
+    config['favorite'] = bool(data.get('favorite')) if 'favorite' in data else not bool(config.get('favorite'))
+    try:
+        prompt = build_system_prompt(config)
+        name = config.get('name') or slug.capitalize()
+        me = _current_user()
+        db_save_persona(slug, name, config, prompt, owner_id=(me or {}).get('id'))
+    except Exception as e:
+        logging.exception('favorite toggle failed for %s', slug)
+        return jsonify({'error': f'Could not save: {e}'}), 500
+    return jsonify({'ok': True, 'slug': slug, 'favorite': config['favorite']})
+
+
 @app.route('/api/personas/copy', methods=['POST'])
 def api_persona_copy():
     """Copy any persona (premade or saved) into a new, renamed saved persona."""
