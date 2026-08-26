@@ -185,7 +185,7 @@
       <label class="soon" style="display:flex;align-items:center;gap:8px;cursor:pointer;background:none;color:var(--text-2);font-size:.85rem;padding:0"><input type="checkbox" id="fv-humanize" checked style="width:auto" onchange="document.getElementById('fv-typing-wrap').style.display=this.checked?'':'none'"> Type like a human <span style="color:var(--text-muted)">(pause to read, then type at a believable speed instead of replying instantly)</span></label>
     </div>
     <div class="field full" id="fv-typing-wrap" style="margin-top:12px;">
-      <label>Typing speed</label>
+      <label>Typing speed <span style="font-weight:400;color:var(--text-muted);">(Fanvue paces its own replies &mdash; the Reply Speed and Typing Speed in the persona builder apply to the chat on your website only)</span></label>
       <select id="fv-typing-speed" style="max-width:260px;">
         <option value="8">Slow — thumbs on a phone</option>
         <option value="14" selected>Natural</option>
@@ -740,7 +740,7 @@ async function saveAuto(){
     ppv_first_after:parseInt(document.getElementById('fv-ppv-first-after').value||'6',10),
     ppv_gap:parseInt(document.getElementById('fv-ppv-gap').value||'8',10),
     ppv_retry_after:parseInt(document.getElementById('fv-ppv-retry-after').value||'0',10),
-    ppv_retry_max:parseInt(document.getElementById('fv-ppv-retry-max').value||'0',10),
+    ppv_retry_max:parseInt(document.getElementById('fv-ppv-retry-max').value||'1',10),
     include_lists:pickedLists('include'),
     exclude_lists:pickedLists('exclude')});
   if(!data.ok){err(box,data.error||'Failed');return;}

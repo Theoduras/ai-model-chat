@@ -1573,12 +1573,12 @@ function renderForm(slug, cfg) {
       <div class="field">
         <label>Reply Speed</label>
         <select id="f-reply-speed">${opt(['instant', 'fast', 'natural', 'slow'], cfg.reply_speed || 'natural')}</select>
-        <span class="hint">How long she waits before she starts typing. Slower reads as a real person with a life; instant reads as a bot.</span>
+        <span class="hint">How long she waits before she starts typing, in the chat on your website. Slower reads as a real person with a life; instant reads as a bot. Fanvue and Telegram pace their own replies &mdash; set those on their own pages.</span>
       </div>
       <div class="field">
         <label>Typing Speed</label>
         <select id="f-typing-speed">${opt(['fast', 'natural', 'slow'], cfg.typing_speed || 'natural')}</select>
-        <span class="hint">How long the typing bubble runs, scaled by how long the message is.</span>
+        <span class="hint">How long the typing bubble runs in the chat on your website, scaled by how long the message is. Fanvue and Telegram have their own typing speed.</span>
       </div>
     </div>
 
