@@ -23,6 +23,10 @@
     .conn-pill { font-size: 0.75rem; padding: 3px 10px; border-radius: 9999px; background: var(--surface); color: var(--text-3); }
     .conn-pill.ok { background: #14532d; color: #4ade80; }
     .conn-pill.err { background: #4c0519; color: #fb7185; }
+    :root[data-theme="light"] .tag.ok, :root[data-theme="light"] .conn-pill.ok { background: #e8f6ed; color: #0f7038; }
+    :root[data-theme="light"] .tag.no, :root[data-theme="light"] .conn-pill.err { background: #fdecec; color: #c81e1e; }
+    :root[data-theme="light"] .auto-log .ln.act { color: #0f7038; border-left-color: #a8ddbd; }
+    :root[data-theme="light"] .auto-log .ln.er { color: #c81e1e; border-left-color: #f0b4b4; }
     .auto-toggles { display: flex; flex-wrap: wrap; gap: 10px 20px; margin-top: 14px; }
     .auto-chk { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--text-2); cursor: pointer; }
     .auto-chk input { width: auto; }
@@ -40,6 +44,14 @@
       .row-inline .field { min-width: 130px; }
       .reply-card .tag { float: none; display: inline-block; margin-bottom: 6px; }
     }
+
+    @media (max-width: 640px) {
+      body.page-dashboard header { padding: 10px 12px; gap: 8px; }
+      body.page-dashboard header h1 { font-size: 0.9rem; }
+      body.page-dashboard header .badge { display: none; }
+      body.page-dashboard header > div { gap: 10px; }
+      body.page-dashboard header a { white-space: nowrap; }
+    }
   </style>
 </head>
 <body class="page-dashboard">
@@ -50,7 +62,7 @@
     <span class="badge">𝕏</span>
   </div>
   <div style="display:flex; align-items:center; gap:16px;">
-    <a href="/admin/xchats" style="color:#7cc7ff; font-size:0.8rem; text-decoration:none;">💬 Chat log</a>
+    <a href="/admin/xchats" style="color:var(--accent); font-size:0.8rem; text-decoration:none;">💬 Chat log</a>
     <button class="icon-btn theme-toggle" onclick="toggleTheme()" title="Light mode" aria-label="Switch to light mode">
       <svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke-linecap="round"/></svg>
       <svg class="ico-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" stroke-linejoin="round"/></svg>

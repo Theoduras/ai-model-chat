@@ -68,6 +68,17 @@
         <button class="btn btn-ghost" onclick="closeSettings()">Cancel</button>
         <button class="btn btn-primary" id="key-save-btn" onclick="saveGeminiKey()">Save &amp; Verify</button>
       </div>
+
+      <div class="section-title" style="margin:26px 0 14px;">Landing page</div>
+      <div class="field full">
+        <label for="landing-persona">Model that answers the landing page chat</label>
+        <select id="landing-persona"><option value="">Loading…</option></select>
+        <span class="hint">Fans who open the chat on <a href="/landing" target="_blank" style="color:var(--accent);">the landing page</a> talk to this persona.</span>
+      </div>
+      <div class="modal-footer">
+        <span class="save-status" id="landing-save-status"></span>
+        <button class="btn btn-primary" id="landing-save-btn" onclick="saveLandingPersona()">Save</button>
+      </div>
     </div>
   </div>
 </div>
@@ -126,6 +137,7 @@
 <div class="layout">
 
   <aside class="sidebar" aria-label="Navigation">
+    <button class="panel-close mobile-only" type="button" onclick="closeMobilePanels()" aria-label="Close personas">&times;</button>
     <div class="sb-scroll">
       <div class="sb-ws">
         <div class="sb-ws-avatar" id="sb-ws-avatar">·</div>
@@ -249,6 +261,7 @@
   </div>
 
   <aside class="preview-panel" aria-label="Preview">
+   <button class="panel-close mobile-only" type="button" onclick="closeMobilePanels()" aria-label="Close preview">&times;</button>
    <div class="preview-card">
     <div class="preview-header"><span>Preview</span></div>
     <div class="preview-tabs">
@@ -565,10 +578,73 @@ async function loadConfig() {
   }
 }
 
-function openSettings()  { document.getElementById('settings-modal').classList.add('open'); loadConfig(); }
+function openSettings()  {
+  document.getElementById('settings-modal').classList.add('open');
+  loadConfig();
+  loadLandingPersona();
+}
+
+async function loadLandingPersona() {
+  const sel = document.getElementById('landing-persona');
+  const status = document.getElementById('landing-save-status');
+  status.textContent = '';
+  status.className = 'save-status';
+  try {
+    const landing = await fetch('/api/landing').then(r => r.ok ? r.json() : {});
+    let list = landing.options;
+    if (!Array.isArray(list)) {
+      list = await fetch('/api/personas').then(r => r.ok ? r.json() : []);
+    }
+    sel.innerHTML = '';
+    (Array.isArray(list) ? list : []).forEach(p => {
+      const o = document.createElement('option');
+      o.value = p.slug;
+      o.textContent = (p.name || p.slug) + ' (' + p.slug + ')';
+      if (p.slug === landing.persona) o.selected = true;
+      sel.appendChild(o);
+    });
+    if (!sel.options.length) {
+      sel.innerHTML = '<option value="">No personas yet</option>';
+    } else if (landing.persona && !landing.configured) {
+      status.textContent = 'Currently defaulting to ' + landing.persona;
+    }
+  } catch (e) {
+    sel.innerHTML = '<option value="">Could not load personas</option>';
+  }
+}
+
+async function saveLandingPersona() {
+  const sel = document.getElementById('landing-persona');
+  const status = document.getElementById('landing-save-status');
+  const btn = document.getElementById('landing-save-btn');
+  const slug = sel.value;
+  if (!slug) { status.textContent = 'Pick a persona first'; status.className = 'save-status err'; return; }
+  btn.disabled = true;
+  status.textContent = 'Saving…';
+  status.className = 'save-status';
+  try {
+    const res = await fetch('/api/landing', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ persona: slug })
+    });
+    const data = await res.json();
+    if (res.ok && data.ok) {
+      status.textContent = 'Landing page now opens with ' + slug;
+      status.className = 'save-status ok';
+    } else {
+      status.textContent = data.error || 'Could not save';
+      status.className = 'save-status err';
+    }
+  } catch (e) {
+    status.textContent = 'Could not reach the server';
+    status.className = 'save-status err';
+  }
+  btn.disabled = false;
+}
 function closeSettings() {
   document.getElementById('settings-modal').classList.remove('open');
   document.getElementById('key-save-status').textContent = '';
+  document.getElementById('landing-save-status').textContent = '';
   document.getElementById('gemini-key-input').value = '';
 }
 

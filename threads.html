@@ -23,6 +23,10 @@
     .conn-pill { font-size: 0.75rem; padding: 3px 10px; border-radius: 9999px; background: var(--surface); color: var(--text-3); }
     .conn-pill.ok { background: #14532d; color: #4ade80; }
     .conn-pill.err { background: #4c0519; color: #fb7185; }
+    :root[data-theme="light"] .tag.ok, :root[data-theme="light"] .conn-pill.ok { background: #e8f6ed; color: #0f7038; }
+    :root[data-theme="light"] .tag.no, :root[data-theme="light"] .conn-pill.err { background: #fdecec; color: #c81e1e; }
+    :root[data-theme="light"] .auto-log .ln.act { color: #0f7038; border-left-color: #a8ddbd; }
+    :root[data-theme="light"] .auto-log .ln.er { color: #c81e1e; border-left-color: #f0b4b4; }
     .conn-pill.run { background: #312e81; color: #c7d2fe; }
     .auto-toggles { display: flex; flex-wrap: wrap; gap: 10px 20px; margin-top: 14px; }
     .auto-chk { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--text-2); cursor: pointer; }
@@ -41,6 +45,14 @@
     @media (max-width: 640px) {
       .xbot-wrap { padding: 18px 14px 70px; gap: 16px; }
       .reply-card .tag { float: none; display: inline-block; margin-bottom: 6px; }
+    }
+
+    @media (max-width: 640px) {
+      body.page-dashboard header { padding: 10px 12px; gap: 8px; }
+      body.page-dashboard header h1 { font-size: 0.9rem; }
+      body.page-dashboard header .badge { display: none; }
+      body.page-dashboard header > div { gap: 10px; }
+      body.page-dashboard header a { white-space: nowrap; }
     }
   </style>
 </head>
