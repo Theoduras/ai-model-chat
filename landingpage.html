@@ -89,7 +89,7 @@
     <button class="drawer-close" onclick="closeChat()" aria-label="Close chat">
       <i class="fa-solid fa-xmark"></i>
     </button>
-    <iframe id="chat-iframe" src="/chat?embed=1" title="Chat" allow="autoplay"></iframe>
+    <iframe id="chat-iframe" title="Chat" allow="autoplay"></iframe>
   </div>
 
   <!-- Floating chat button -->
@@ -101,6 +101,18 @@
   <script>
     let chatOpen = false;
     let unread = 0;
+
+    // Which model answers here is set in the dashboard (Settings -> Landing page).
+    fetch('/api/landing')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => loadChat(d && d.persona))
+      .catch(() => loadChat(null));
+
+    function loadChat(persona) {
+      const frame = document.getElementById('chat-iframe');
+      if (frame.src) return;
+      frame.src = '/chat?embed=1&only=1&theme=dark' + (persona ? '&persona=' + encodeURIComponent(persona) : '');
+    }
 
     function openChat() {
       chatOpen = true;

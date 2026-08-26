@@ -8,6 +8,14 @@
   <!-- Not deferred: theme.js sets data-theme before first paint, otherwise the
        page flashes dark for a user who chose light. -->
   <script src="/js/theme.js"></script>
+  <script>
+  // An embedding page (the landing page is always dark) can pin the theme, so
+  // the frame does not sit in the host's opposite palette.
+  (function () {
+    var t = new URLSearchParams(location.search).get('theme');
+    if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+  })();
+  </script>
   <script src="/js/devnav.js" defer></script>
   <script>
   // Keeps the chat container sized to the visible viewport so the on-screen
@@ -129,6 +137,8 @@ let persona = params.get('persona') || 'lilly';
 // Demo mode (the coming-soon page): always opens on the name screen and keeps
 // nothing, so every visitor gets the same first-run experience.
 const DEMO = params.get('demo') === '1';
+// The landing page embeds one model, so it hides the model picker.
+const ONLY = params.get('only') === '1';
 let PFX = 'persona_' + persona + '_';
 
 if (window.self !== window.top) { document.body.classList.add('embed'); }
@@ -264,7 +274,7 @@ function renderRail(list) {
 function loadPersonaList() {
   return fetch('/api/personas').then(r => r.ok ? r.json() : []).then(list => {
     let items = Array.isArray(list) ? list : [];
-    if (DEMO) {   // the demo shows one model, unless that slug is missing
+    if (DEMO || ONLY) {   // one model only, unless that slug is missing
       const only = items.filter(p => p.slug === persona);
       if (only.length) items = only;
     }
