@@ -5532,10 +5532,7 @@ def _x_dm_reply_round(persona, max_results=20):
                 "introduce yourself again, do NOT re-state your name/age/location, "
                 "do NOT re-ask anything they already told you. Continue naturally "
                 "from where you left off. ") if has_history else ''
-            ask_rule = (
-                'End with ONE question that follows from what they just said — never '
-                'a generic "how are you", never a question you have already asked, '
-                'and never more than one. ')
+            ask_rule = question_rule_for(load_persona_config(persona), db_hist)
             if cta_asked and cta_due:
                 instruction = (
                     f'Reply in-character to this fan\'s X DM: "{text}". {continuity}'
@@ -5559,9 +5556,12 @@ def _x_dm_reply_round(persona, max_results=20):
                     'build slowly — no selling, no hinting at paid content yet. '
                     + ask_rule)
             _fan_memory_update(persona, f'x:{sender}', text)
-            instruction = _fan_memory_block(_fan_memory(persona, f'x:{sender}'), persona) + instruction
-            reply = _persona_text(persona, instruction, history=db_hist,
-                                  max_tokens=1024, temperature=0.9)
+            lim = reply_length_limits(load_persona_config(persona))
+            instruction = _fan_memory_block(_fan_memory(persona, f'x:{sender}'), persona) + \
+                instruction + ' ' + lim['note']
+            reply = _fv_trim(_persona_text(persona, instruction, history=db_hist,
+                                           max_tokens=lim['tokens'], temperature=0.9),
+                             max_sentences=lim['sentences'], hard_cap=lim['cap'])
             if not reply:
                 continue
             if cta_due:
@@ -5632,8 +5632,10 @@ def _x_followup_round(persona):
                 'mentioned before if you can, and ask them something easy to answer.')
         try:
             hist = _x_history(persona, uid)
+            lim = persona_length_limits(persona)
             text = _fv_trim(_persona_text(persona, instruction, history=hist,
-                                          max_tokens=400, temperature=0.9), hard_cap=420)
+                                          max_tokens=lim['tokens'], temperature=0.9),
+                            max_sentences=lim['sentences'], hard_cap=lim['cap'])
             if not text:
                 continue
             _x_send_human(persona, conv_id, text, cfg=cfg)
@@ -7567,12 +7569,20 @@ def api_fanvue_draft():
     if not persona or not message:
         return jsonify({'ok': False, 'error': 'persona and message are required'}), 400
     try:
+        pcfg = load_persona_config(persona)
+        lim = reply_length_limits(pcfg)
         instruction = ("Reply to this Fanvue fan message in-character, warm and "
                        "engaging, move the conversation along the rapport → tease → "
-                       "offer funnel naturally (never hard-sell), and end with a "
-                       f"question to keep them talking. Their message: \"{message}\"")
-        reply = _persona_text(persona, instruction, history=history,
-                              max_tokens=1024, temperature=0.9)
+                       "offer funnel naturally (never hard-sell). "
+                       + question_rule_for(pcfg, history)
+                       + lim['note'] + ' ' + NO_PLACEHOLDER_RULE
+                       + f" Their message: \"{message}\"")
+        reply = _fv_trim(_persona_text(persona, instruction, history=history,
+                                       max_tokens=lim['tokens'], temperature=0.9),
+                         max_sentences=lim['sentences'], hard_cap=lim['cap'])
+        # Same strip as the live path, or the preview would show a placeholder
+        # where auto-reply refuses to send one.
+        reply = _strip_placeholders(trim_extra_questions(reply, question_allowed(pcfg, history)))
         if not reply:
             return jsonify({'ok': False, 'error': 'Could not generate a reply.'}), 400
         return jsonify({'ok': True, 'reply': reply})
@@ -7685,6 +7695,53 @@ def _sentences(text):
             else:
                 out.append(part)
     return out
+
+
+REPLY_LENGTH_LIMITS = {
+    'short': {
+        'sentences': 2, 'cap': 320, 'tokens': 300,
+        'note': ("CRITICAL: Keep it VERY short — one or two sentences MAX, like a "
+                 "real text message. No paragraphs, no lists, no walls of text."),
+    },
+    'medium': {
+        'sentences': 4, 'cap': 560, 'tokens': 420,
+        'note': ("Keep it to two to four sentences — conversational, the length of "
+                 "a real text, never a wall of text."),
+    },
+    'long': {
+        'sentences': 6, 'cap': 900, 'tokens': 600,
+        'note': ("A longer reply is fine — up to a short paragraph when you have "
+                 "something to say. Never lecture and never write a list."),
+    },
+}
+
+
+def reply_length_limits(config):
+    """How long a reply may run on the bot channels, from the creator's Reply
+    Length setting. The same setting shapes the baked system prompt; repeating it
+    per request keeps the channel instruction from contradicting it, and gives
+    _fv_trim a cap that matches instead of always cutting at two sentences."""
+    key = (config or {}).get('reply_length') or 'short'
+    return REPLY_LENGTH_LIMITS.get(key, REPLY_LENGTH_LIMITS['short'])
+
+
+def persona_length_limits(slug):
+    return reply_length_limits(load_persona_config(slug))
+
+
+NO_QUESTION_RULE = (
+    "You have just asked the fan a question — do not ask another one in this "
+    "reply. React to what they said and share something of your own instead. "
+    "No question mark at the end. ")
+
+
+def question_rule_for(config, history):
+    """The per-request question instruction for a bot channel: ask, or hold off,
+    according to the creator's Question Frequency setting."""
+    return ('End with ONE question that follows from what they just said — never '
+            'a generic "how are you", never a question you have already asked, and '
+            'never more than one. ' if question_allowed(config, history)
+            else NO_QUESTION_RULE)
 
 
 def _fv_trim(text, max_sentences=2, hard_cap=320):
@@ -8428,14 +8485,17 @@ def _fanvue_auto_round(persona):
                 continue
             hist = [{'role': 'model' if d == 'out' else 'user', 'content': t}
                     for (d, t) in _fanvue_saved_history(persona, fan_key, limit=40)]
+            fu_lim = persona_length_limits(persona)
             fu_instr = (
                 "This fan went quiet and hasn't replied to your last message. Send "
-                "ONE short, warm, natural follow-up like a real person double-texting "
+                "ONE warm, natural follow-up like a real person double-texting "
                 "— playful and low-pressure, NOT needy or salesy. Reference something "
-                "from earlier if it fits. Do NOT repeat your previous message. Max 1-2 "
-                "sentences. " + NO_PLACEHOLDER_RULE)
-            fu = _strip_placeholders(_fv_trim(_persona_text(
-                persona, fu_instr, history=hist, max_tokens=200, temperature=0.95)))
+                "from earlier if it fits. Do NOT repeat your previous message. "
+                + fu_lim['note'] + ' ' + NO_PLACEHOLDER_RULE)
+            fu = _strip_placeholders(
+                _fv_trim(_persona_text(persona, fu_instr, history=hist,
+                                       max_tokens=fu_lim['tokens'], temperature=0.95),
+                         max_sentences=fu_lim['sentences'], hard_cap=fu_lim['cap']))
             if not fu:
                 continue
             followups[fan_uuid] = {'n': sent_n + 1}
@@ -8492,20 +8552,24 @@ def _fanvue_auto_round(persona):
             "greet them like it's the first message — just continue naturally. "
             if has_history else
             "This is an early message — a short friendly opener is fine. ")
+        pcfg = load_persona_config(persona)
+        lim = reply_length_limits(pcfg)
+        may_ask = question_allowed(pcfg, history)
         instruction = (
             "Reply to this Fanvue fan in-character. You have the full earlier "
             "conversation above — USE it: do not re-ask anything they already told "
             "you (their name, where they're from, their interests, what they like). "
             + intro_rule +
             "Be warm and engaging, move the rapport → tease → offer funnel naturally "
-            "(never hard-sell), and end with a question. "
-            "CRITICAL: Keep it VERY short — one or two sentences MAX, like a real "
-            "text message. No paragraphs, no lists, no walls of text. Ask at most "
-            "one quick question. " + NO_PLACEHOLDER_RULE + "Their latest message: "
+            "(never hard-sell). "
+            + question_rule_for(pcfg, history)
+            + lim['note'] + ' ' + NO_PLACEHOLDER_RULE + "Their latest message: "
             f"\"{text}\"")
         instruction = _fan_memory_block(_fan_memory(persona, fan_key), persona) + instruction
-        reply = _persona_text(persona, instruction, history=history, max_tokens=300, temperature=0.9)
-        reply = _strip_placeholders(_fv_trim(reply))
+        reply = _persona_text(persona, instruction, history=history,
+                              max_tokens=lim['tokens'], temperature=0.9)
+        reply = _fv_trim(reply, max_sentences=lim['sentences'], hard_cap=lim['cap'])
+        reply = _strip_placeholders(trim_extra_questions(reply, may_ask))
         if not reply:
             _fv_trace(persona, 'error', f'{who}: the model returned nothing — no reply sent')
             continue
@@ -9061,10 +9125,13 @@ def _threads_auto_round(persona, reply_comments=True, reply_mentions=True,
         if who and who.lower() == my_username:
             seen.add(rid)
             continue
+        th_lim = persona_length_limits(persona)
         instr = (f'A fan {("replied to your post" if kind=="comment" else "mentioned you")} '
-                 f'on Threads: "{text}". Write ONE short, warm, in-character public reply '
-                 f'— playful, natural, 1-2 sentences, no hashtags, not salesy.')
-        reply = _fv_trim(_persona_text(persona, instr, max_tokens=180, temperature=0.9))
+                 f'on Threads: "{text}". Write ONE warm, in-character public reply '
+                 f'— playful, natural, no hashtags, not salesy. ' + th_lim['note'])
+        reply = _fv_trim(_persona_text(persona, instr, max_tokens=th_lim['tokens'],
+                                       temperature=0.9),
+                         max_sentences=th_lim['sentences'], hard_cap=th_lim['cap'])
         if not reply:
             continue
         posted = False
@@ -9644,9 +9711,11 @@ def _tg_generate(persona, chat_id, instruction):
         return local_fallback_reply(instruction)
     history = _tg_history(persona, chat_id)
     instruction = _fan_memory_block(_fan_memory(persona, _tg_fan_key(chat_id)), persona) + instruction
+    lim = persona_length_limits(persona)
     return _strip_placeholders(
         _fv_trim(_persona_text(persona, instruction, history=history,
-                               max_tokens=400, temperature=0.9), hard_cap=420))
+                               max_tokens=lim['tokens'], temperature=0.9),
+                 max_sentences=lim['sentences'], hard_cap=lim['cap']))
 
 
 def _tg_media_catalog(persona):
@@ -9762,10 +9831,8 @@ def _tg_handle_update(persona, update):
             'the tag [SEND_PHOTO:outfit=N,purpose=X] at the very end of your '
             'message. Never mention the tag to the fan.')
 
-    ask_rule = (
-        'End with ONE question that follows from what they just said — never a '
-        'generic "how are you", never a question you have already asked, and never '
-        'more than one. ')
+    ask_rule = question_rule_for(load_persona_config(persona),
+                                 _tg_history(persona, chat_id))
     if text == '/start':
         instruction = (
             f'A new fan just opened a chat with you on Telegram (they go by "{who}"). '
@@ -10623,8 +10690,10 @@ def _tgu_plan(persona, chat_id, name, text):
             'the tag [SEND_PHOTO:outfit=N,purpose=X] at the very end of your '
             'message. Never mention the tag to the fan.')
 
-    ask_rule = ('End with ONE question that follows from what they just said — never '
-                'generic, never one you have already asked. ')
+    ask_rule = question_rule_for(
+        load_persona_config(persona),
+        [{'role': 'model' if d == 'out' else 'user', 'content': t}
+         for d, t in _fanvue_saved_history(persona, _tgu_fan_key(chat_id), limit=30)])
     # The model has been caught sending a literal "[fan's name]" to a fan.
     no_placeholder = NO_PLACEHOLDER_RULE
     if cta_asked and cta_due:
@@ -10655,9 +10724,11 @@ def _tgu_plan(persona, chat_id, name, text):
     if client is None:
         reply = local_fallback_reply(text)
     else:
+        lim = persona_length_limits(persona)
         reply = _strip_placeholders(
             _fv_trim(_persona_text(persona, instruction, history=history,
-                                   max_tokens=400, temperature=0.9), hard_cap=420))
+                                   max_tokens=lim['tokens'], temperature=0.9),
+                     max_sentences=lim['sentences'], hard_cap=lim['cap']))
     if not reply:
         return None
 
@@ -10948,10 +11019,14 @@ def api_tguser_send():
     if not (acct.get('session') and peer):
         return jsonify({'ok': False, 'error': 'Connect an account and give a @username or phone.'}), 400
     if not text:
-        instr = (f'Write ONE short, warm, in-character opening message to {peer} on '
-                 'Telegram. Natural, curious about them, no hard sell. End with a question.')
+        lim = persona_length_limits(persona)
+        instr = (f'Write ONE warm, in-character opening message to {peer} on '
+                 'Telegram. Natural, curious about them, no hard sell. End with a '
+                 'question. ' + lim['note'])
         try:
-            text = _fv_trim(_persona_text(persona, instr, max_tokens=200, temperature=0.95))
+            text = _fv_trim(_persona_text(persona, instr, max_tokens=lim['tokens'],
+                                          temperature=0.95),
+                            max_sentences=lim['sentences'], hard_cap=lim['cap'])
         except Exception as e:
             return jsonify({'ok': False, 'error': str(e)[:250]}), 400
     try:
