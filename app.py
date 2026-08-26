@@ -1184,6 +1184,7 @@ button:hover{transform:translateY(-2px);box-shadow:0 8px 26px #ff2d7855;animatio
 button:disabled{opacity:.6;cursor:not-allowed;transform:none;animation:none}
 .err{background:#3f1515;border:1px solid #7f1d1d;border-radius:10px;padding:10px 14px;font-size:.85rem;color:#fca5a5;margin-bottom:16px}
 .ok{background:#14321f;border:1px solid #166534;border-radius:10px;padding:10px 14px;font-size:.85rem;color:#86efac;margin-bottom:16px}
+.ok a,.err a{color:inherit;font-weight:600;text-decoration:underline}
 .alt{text-align:center;margin-top:18px;font-size:.85rem;color:var(--text-muted)}
 .alt a{color:var(--accent);text-decoration:none}
 .tiers{display:grid;gap:16px;margin-top:8px}
