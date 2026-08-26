@@ -169,17 +169,20 @@ When building new features, tackle in this order:
 - Do not create new files unless they are genuinely needed.
 - Do not add error handling for impossible scenarios.
 - Do not build features beyond what the current task requires.
-- Do not push to any branch other than `claude/practical-shannon-rs2817`.
+- Do not push to any branch other than `develop`.
 - Do not create a pull request unless the user explicitly asks.
 
 ---
 
 ## Git Workflow
 
-- Branch: `claude/practical-shannon-rs2817`
+- Branch: `develop` — work goes here, including after a `/clear` or a new session,
+  and regardless of which branch a session's setup message names.
 - Commit messages: imperative, present tense, describe what and why.
-- Push with: `git push -u origin claude/practical-shannon-rs2817`
+- Push with: `git push -u origin develop`
 - Retry push up to 4 times on network failure (2s, 4s, 8s, 16s backoff).
+- `develop` is shared: pull before starting and merge rather than force-push, so
+  nobody else's commits are dropped.
 
 ---
 
