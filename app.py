@@ -1117,10 +1117,11 @@ def _check_admin():
 
 
 LOGIN_HTML = """<!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
 <title>Admin Login</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -1160,6 +1161,13 @@ ACCOUNT_CSS = """
 --accent:#ff5c38;--accent-2:#ff2d78;--accent-3:#7c3aed;
 --grad:linear-gradient(120deg,#ff5c38,#ff2d78 30%,#7c3aed 60%,#ff2d78 80%,#ff5c38);
 --font:'Inter',system-ui,sans-serif;--display:'Sora','Inter',system-ui,sans-serif}
+/* Light theme — same token names and values as css/style.css, so these pages
+   follow the theme js/theme.js stored from the dashboard. */
+:root[data-theme="light"]{--bg:#faf9f8;--panel:#ffffff;--surface:#f3f1ef;--border:#d9d5d0;
+--text:#1a1614;--text-2:#3b3532;--text-3:#57504b;--text-muted:#6e6762;--accent:#c53c20}
+:root[data-theme="light"] .err{background:#fdecec;border-color:#f0b4b4;color:#9b1c1c}
+:root[data-theme="light"] .ok{background:#e8f6ed;border-color:#a8ddbd;color:#0f7038}
+:root[data-theme="light"] .tier:hover{border-color:#bdb7b1}
 @keyframes sweep{0%{background-position:0% 50%}100%{background-position:150% 50%}}
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--text);font-family:var(--font);display:flex;align-items:center;justify-content:center;min-height:100vh;padding:32px 16px}
@@ -1196,7 +1204,8 @@ button:disabled{opacity:.6;cursor:not-allowed;transform:none;animation:none}
 """
 
 REGISTER_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>Create account</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><title>Create account</title>
 <style>""" + ACCOUNT_CSS + """</style></head><body><div class="wrap"><div class="card">
 <h1>Create your account</h1><p class="sub">Start building your AI persona.</p>
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
@@ -1209,7 +1218,8 @@ REGISTER_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 </div></div></body></html>"""
 
 SIGNIN_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign in</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><title>Sign in</title>
 <style>""" + ACCOUNT_CSS + """</style></head><body><div class="wrap"><div class="card">
 <h1>Sign in</h1><p class="sub">Welcome back.</p>
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
@@ -1224,7 +1234,8 @@ SIGNIN_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 </div></div></body></html>"""
 
 BILLING_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>Choose a plan</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><title>Choose a plan</title>
 <style>""" + ACCOUNT_CSS + """</style></head><body><div class="wrap wide">
 <div class="bar"><span>Signed in as {{ user.email }}</span><a href="/logout">Sign out</a></div>
 {% if user.status == 'active' %}
@@ -1246,7 +1257,7 @@ plan is active{% if user.expires_at %} until {{ user.expires_at[:10] }}{% endif 
 <ul>{% for f in t.features %}<li>{{ f }}</li>{% endfor %}</ul>
 <button data-tier="{{ key }}">{{ 'Start free' if t.price == 0 else ('Renew' if user.status == 'expired' else 'Pay with crypto') }}</button>
 {% if dev_mode %}<button class="dev" data-dev-tier="{{ key }}"
- style="background:#27272a;color:#fbbf24;margin-top:8px">Activate free (dev)</button>{% endif %}
+ style="background:var(--surface);color:var(--star);margin-top:8px">Activate free (dev)</button>{% endif %}
 </div>{% endfor %}
 </div>
 {% if dev_mode %}<p style="text-align:center;color:#fbbf24;font-size:.8rem;margin-top:18px">
@@ -1287,16 +1298,19 @@ document.querySelectorAll('button[data-tier]').forEach(function(b){
 
 
 ACCOUNT_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>My account</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><title>My account</title>
 <style>""" + ACCOUNT_CSS + """
 table{width:100%;border-collapse:collapse;margin-top:8px;font-size:.85rem}
-th{text-align:left;color:#71717a;font-weight:500;padding:6px 0;border-bottom:1px solid #2a2a2d}
-td{padding:8px 0;border-bottom:1px solid #1f1f22;color:#d4d4d8}
-.row{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid #1f1f22;font-size:.9rem}
-.row span:first-child{color:#71717a}
+th{text-align:left;color:var(--text-muted);font-weight:500;padding:6px 0;border-bottom:1px solid var(--border)}
+td{padding:8px 0;border-bottom:1px solid var(--border);color:var(--text-2)}
+.row{display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--border);font-size:.9rem}
+.row span:first-child{color:var(--text-muted)}
 .pill{display:inline-block;padding:2px 10px;border-radius:999px;font-size:.75rem;font-weight:600}
 .pill.active{background:#14321f;color:#86efac}.pill.unpaid,.pill.expired{background:#3f1515;color:#fca5a5}
-.btn{display:block;text-align:center;background:#7c3aed;color:#fff;border-radius:10px;padding:12px;margin-top:18px;text-decoration:none;font-weight:600;font-size:.9rem}
+:root[data-theme="light"] .pill.active{background:#e8f6ed;color:#0f7038}
+:root[data-theme="light"] .pill.unpaid,:root[data-theme="light"] .pill.expired{background:#fdecec;color:#9b1c1c}
+.btn{display:block;text-align:center;background:var(--grad);background-size:300% 100%;color:#fff;border-radius:10px;padding:12px;margin-top:18px;text-decoration:none;font-weight:600;font-size:.9rem}
 </style></head><body><div class="wrap">
 <div class="bar"><span>My account</span><a href="/logout">Sign out</a></div>
 <div class="card">
@@ -1306,9 +1320,9 @@ td{padding:8px 0;border-bottom:1px solid #1f1f22;color:#d4d4d8}
 <div class="row"><span>{{ 'Renews' if user.status == 'active' else 'Expired' }}</span>
 <span>{{ user.expires_at[:10] if user.expires_at else '—' }}</span></div>
 {% if user.is_admin %}<a class="btn" style="background:#2e1065;color:#c4b5fd" href="/admin/users">Admin · manage users</a>{% endif %}
-<a class="btn" style="background:#27272a" href="/account/profile">Edit profile</a>
+<a class="btn" style="background:var(--surface);color:var(--text)" href="/account/profile">Edit profile</a>
 {% if user.status == 'active' %}<a class="btn" href="/dashboard">Go to dashboard</a>
-<a class="btn" style="background:#27272a" href="/billing">Change plan</a>
+<a class="btn" style="background:var(--surface);color:var(--text)" href="/billing">Change plan</a>
 {% else %}<a class="btn" href="/billing">Choose a plan</a>{% endif %}
 </div>
 {% if payments %}<div class="card" style="margin-top:16px">
@@ -1321,9 +1335,10 @@ td{padding:8px 0;border-bottom:1px solid #1f1f22;color:#d4d4d8}
 
 
 PROFILE_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>Your profile</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><title>Your profile</title>
 <style>""" + ACCOUNT_CSS + """
-textarea{width:100%;background:#27272a;border:1px solid #3f3f46;border-radius:10px;padding:11px 14px;color:#f4f4f5;font-size:.95rem;outline:none;margin-bottom:16px;font-family:inherit;resize:vertical;min-height:88px}
+textarea{width:100%;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:11px 14px;color:var(--text);font-size:.95rem;outline:none;margin-bottom:16px;font-family:inherit;resize:vertical;min-height:88px}
 textarea:focus{border-color:#7c3aed}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
 .ghost{display:block;text-align:center;margin-top:12px;color:#71717a;font-size:.85rem;text-decoration:none}
@@ -1349,11 +1364,12 @@ textarea:focus{border-color:#7c3aed}
 
 
 ADMIN_USERS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>Users</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><title>Users</title>
 <style>""" + ACCOUNT_CSS + """
 table{width:100%;border-collapse:collapse;font-size:.85rem}
-th{text-align:left;color:#71717a;font-weight:500;padding:8px 10px;border-bottom:1px solid #2a2a2d;white-space:nowrap}
-td{padding:10px;border-bottom:1px solid #1f1f22;color:#d4d4d8}
+th{text-align:left;color:var(--text-muted);font-weight:500;padding:8px 10px;border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:10px;border-bottom:1px solid var(--border);color:var(--text-2)}
 tr:hover td{background:#1c1c20}
 a.email{color:#a78bfa;text-decoration:none;font-weight:500}
 .pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:.72rem;font-weight:600}
@@ -1377,10 +1393,11 @@ a.email{color:#a78bfa;text-decoration:none;font-weight:500}
 </table></div></div></div></body></html>"""
 
 ADMIN_USER_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>{{ u.email }}</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><title>{{ u.email }}</title>
 <style>""" + ACCOUNT_CSS + """
-textarea{width:100%;background:#27272a;border:1px solid #3f3f46;border-radius:10px;padding:11px 14px;color:#f4f4f5;font-size:.95rem;outline:none;margin-bottom:16px;font-family:inherit;resize:vertical;min-height:80px}
-select{width:100%;background:#27272a;border:1px solid #3f3f46;border-radius:10px;padding:11px 14px;color:#f4f4f5;font-size:.95rem;margin-bottom:16px}
+textarea{width:100%;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:11px 14px;color:var(--text);font-size:.95rem;outline:none;margin-bottom:16px;font-family:inherit;resize:vertical;min-height:80px}
+select{width:100%;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:11px 14px;color:var(--text);font-size:.95rem;margin-bottom:16px}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
 h2{font-size:1rem;margin-bottom:14px}
 .danger{background:#7f1d1d}.danger:hover{background:#991b1b}
@@ -2129,8 +2146,9 @@ def _visitors_rows(limit=1000):
 
 
 VISITORS_HTML = """<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8">
+<html lang="en" data-theme="dark"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
 <meta http-equiv="refresh" content="30">
 <title>Visitor log</title>
 <style>
@@ -2408,8 +2426,9 @@ def _xchat_thread_rows(persona, uid):
 
 
 XLOG_HTML = """<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8">
+<html lang="en" data-theme="dark"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
 <meta http-equiv="refresh" content="30">
 <title>X access log</title>
 <style>
@@ -2483,8 +2502,9 @@ def admin_xlog():
 
 
 XCHATS_HTML = """<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8">
+<html lang="en" data-theme="dark"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
 <meta http-equiv="refresh" content="30">
 <title>X conversations</title>
 <style>
@@ -2533,8 +2553,9 @@ a.row{color:inherit;text-decoration:none}
 
 
 XTHREAD_HTML = """<!DOCTYPE html>
-<html lang="en"><head><meta charset="UTF-8">
+<html lang="en" data-theme="dark"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
 <title>Conversation — {{ persona }}</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}

@@ -973,6 +973,7 @@ body.page-dashboard {
   background: var(--bg);
   color: var(--text);
   height: 100vh;
+  height: 100dvh; /* the mobile URL bar eats the difference */
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -1706,7 +1707,9 @@ body.page-dashboard .conn-dot.err { background: var(--err); }
 
 .btn-ai {
   background: var(--grad); background-size: 300% 100%;
-  color: var(--text);
+  /* --text flips to near-black in light mode, which is unreadable on the
+     gradient; --accent-ink is the colour that sits on the accent in both. */
+  color: var(--accent-ink);
   border: none;
   border-radius: 9999px;
   padding: 6px 14px;
@@ -2102,6 +2105,19 @@ body.page-dashboard code {
   .preview-panel { right: 0; width: 340px; border-left: 1px solid var(--border-soft); transform: translateX(101%); }
   .sidebar.open, .preview-panel.open { transform: translateX(0); box-shadow: var(--shadow-lg); }
   .preview-panel { padding: 0; }
+
+  /* The dim strip left over next to a 340px drawer is a thin close target, so
+     each drawer carries its own button. */
+  .panel-close {
+    position: absolute; top: 8px; right: 8px; z-index: 5;
+    width: 36px; height: 36px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    border: 1px solid var(--border); background: var(--panel);
+    color: var(--text-2); font-size: 1.15rem; line-height: 1; cursor: pointer;
+  }
+  /* Each button sits on the drawer's own free edge, clear of the content. */
+  .sidebar .panel-close { right: 8px; }
+  .preview-panel .panel-close { right: auto; left: 8px; }
   .preview-card { border-radius: var(--r-lg) 0 0 var(--r-lg); border-right: none; box-shadow: none; }
 
   body.page-dashboard header { padding: 11px 14px; }
@@ -2641,6 +2657,21 @@ body.ob-running .form-area {
 }
 .ob-skip-icon { font-size: 0.9rem; line-height: 1; }
 
+@media (max-width: 900px) {
+  /* The 268px rail plus the step column does not fit a phone. The crumb line
+     already says which step you are on, so the rail goes and the step column
+     takes the full width. */
+  .ob-split { flex-direction: column; }
+  .ob-rail { display: none; }
+  .ob-stepwrap { padding: 20px 16px 40px; }
+  .ob-step-h { font-size: 1.25rem; }
+  .ob-step-s { margin-bottom: 18px; }
+  .ob-card { padding: 16px 14px; }
+  .ob-foot { margin-top: 20px; }
+  .ob-foot .btn { flex: 1 1 auto; justify-content: center; }
+  .ob-done { padding: 40px 20px; }
+}
+
 @media (max-width: 760px) {
   .ob-alt { margin-left: 0; width: 100%; }
   .ob-skip { flex: 1; justify-content: center; }
@@ -2901,12 +2932,17 @@ body.obt-open { overflow: hidden; }
    same full-width shape, so both classes drive the same column rules. */
 body.browsing:not(.ob-running) .preview-panel,
 body.embedding:not(.ob-running) .preview-panel { display: none; }
-body.sidebar-off .sidebar { display: none; }
-body.browsing:not(.ob-running) .layout,
-body.embedding:not(.ob-running) .layout { grid-template-columns: 280px 1fr; }
-body.sidebar-off .layout { grid-template-columns: 1fr 340px; }
-body.browsing.sidebar-off:not(.ob-running) .layout,
-body.embedding.sidebar-off:not(.ob-running) .layout { grid-template-columns: 1fr; }
+/* Desktop-only: below 901px the sidebar and preview are off-canvas drawers, so
+   hiding the sidebar would kill the hamburger, and these column templates would
+   leave the form a sliver of the viewport. */
+@media (min-width: 901px) {
+  body.sidebar-off .sidebar { display: none; }
+  body.browsing:not(.ob-running) .layout,
+  body.embedding:not(.ob-running) .layout { grid-template-columns: 280px 1fr; }
+  body.sidebar-off .layout { grid-template-columns: 1fr 340px; }
+  body.browsing.sidebar-off:not(.ob-running) .layout,
+  body.embedding.sidebar-off:not(.ob-running) .layout { grid-template-columns: 1fr; }
+}
 body.browsing:not(.ob-running) .form-area { padding: 24px 28px; }
 body.embedding .form-area { padding: 0; overflow: hidden; }
 .sb-frame { width: 100%; height: 100%; border: none; display: block; }
