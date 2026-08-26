@@ -5059,16 +5059,33 @@ def _fan_mem_key(persona, fan_key):
     return f'fan_mem_{persona}_{fan_key}'
 
 
+def _persona_identity(persona):
+    """The creator's own name/age/location, so they can never be filed as the
+    fan's."""
+    cfg = load_persona_config(persona) or {}
+    return {k: str(cfg.get(k) or '').strip() for k in ('name', 'age', 'location')}
+
+
 def _fan_memory(persona, fan_key):
     try:
         m = json.loads(_get_setting(_fan_mem_key(persona, fan_key)) or '{}')
-        return m if isinstance(m, dict) else {}
     except Exception:
         return {}
+    if not isinstance(m, dict):
+        return {}
+    # Profiles written before the guard below could hold her own name as his.
+    # Heal on read so an already-poisoned fan does not need a manual reset.
+    return _fan_mem_clean(m, _persona_identity(persona))
 
 
-def _fan_mem_clean(mem):
-    """Keep the known shape and drop anything empty or oversized."""
+def _fan_mem_clean(mem, mine=None):
+    """Keep the known shape and drop anything empty or oversized.
+
+    Also drop any value that is really the creator's own — a profile saying the
+    fan is called Lilly is how she ends up greeting him by her own name, and it
+    persists until something rewrites it, so it must not be storable at all.
+    """
+    mine = mine or {}
     out = {}
     for k in FAN_MEM_KEYS:
         v = mem.get(k)
@@ -5077,7 +5094,10 @@ def _fan_mem_clean(mem):
             if v:
                 out[k] = v
         elif v not in (None, '', [], {}):
-            out[k] = str(v).strip()[:200]
+            v = str(v).strip()[:200]
+            if mine.get(k) and v.casefold() == mine[k].casefold():
+                continue
+            out[k] = v
     return out
 
 
@@ -5087,8 +5107,16 @@ def _fan_memory_update(persona, fan_key, incoming, reply=''):
     if not (incoming or '').strip():
         return _fan_memory(persona, fan_key)
     old = _fan_memory(persona, fan_key)
+    mine = _persona_identity(persona)
+    # The creator's own details are in the transcript too — she introduces
+    # herself. Without naming her here the model files "I'm Lilly, 22" as the
+    # FAN's name and age, and she spends the rest of the chat calling him Lilly.
+    hers = ', '.join(f'{k} {v}' for k, v in mine.items() if v) or 'not configured'
     system = (
-        "You maintain a short factual profile of one person from a chat. "
+        "You maintain a short factual profile of THE FAN — the person the "
+        "creator is chatting with. Never record the creator's own details as "
+        f"the fan's. The creator is: {hers}. Anything she says about herself is "
+        "not about him. "
         "Return ONLY JSON with these keys: name, job, schedule, location, partner, "
         "age, doing_now, plans, interests, notes. `interests`, `plans` and `notes` "
         "are arrays of short strings; the rest are short strings. "
@@ -5097,10 +5125,11 @@ def _fan_memory_update(persona, fan_key, incoming, reply=''):
         "their working hours or shift pattern, including when they finish. "
         "`doing_now` is what they are doing right now and when they said it. "
         "Add nothing that was not said or clearly implied. Use \"\" for unknown.")
-    user = (f"Existing profile:\n{json.dumps(old, ensure_ascii=False)}\n\n"
-            f"They just said:\n{incoming[:1500]}")
+    user = (f"Existing profile of the fan:\n{json.dumps(old, ensure_ascii=False)}\n\n"
+            f"The fan just said:\n{incoming[:1500]}")
     if reply:
-        user += f"\n\nShe replied:\n{reply[:500]}"
+        user += ("\n\nThe creator replied (this is about HER, never about him):\n"
+                 + reply[:500])
     try:
         resp = client.models.generate_content(
             model=MODEL_NAME,
@@ -5115,7 +5144,7 @@ def _fan_memory_update(persona, fan_key, incoming, reply=''):
     except Exception as e:
         logger.info('fan memory update failed for %s: %s', fan_key, str(e)[:120])
         return old
-    merged = _fan_mem_clean({**old, **mem})
+    merged = _fan_mem_clean({**old, **mem}, mine)
     if merged != old:
         _set_setting(_fan_mem_key(persona, fan_key), json.dumps(merged))
     return merged
@@ -5127,18 +5156,28 @@ LABELS = {'name': 'Name', 'job': 'Work', 'schedule': 'Their hours',
           'interests': 'Into', 'notes': 'Other things they told you'}
 
 
-def _fan_memory_block(mem):
+def _fan_memory_block(mem, persona=None):
     """The prompt fragment that stops her asking what she already knows."""
-    mem = _fan_mem_clean(mem or {})
+    mine = _persona_identity(persona) if persona else {}
+    mem = _fan_mem_clean(mem or {}, mine)
+    # Say plainly whose name is whose. When the transcript is ambiguous about
+    # who said what, this is the only thing standing between her and greeting
+    # the fan by her own name.
+    whose = ''
+    if mine.get('name'):
+        whose = (f"YOU are {mine['name']}. The fan is a different person: "
+                 + (f"his name is {mem['name']}." if mem.get('name') else
+                    "you have not been told his name yet, so do not use one.")
+                 + f" Never address him as {mine['name']} — that is you.\n\n")
     if not mem:
-        return ''
+        return whose
     lines = []
     for k in FAN_MEM_KEYS:
         v = mem.get(k)
         if not v:
             continue
         lines.append(f"- {LABELS[k]}: " + ('; '.join(v) if isinstance(v, list) else v))
-    return (
+    return whose + (
         "WHAT YOU ALREADY KNOW ABOUT THIS FAN — treat it as remembered, never ask "
         "for it again:\n" + '\n'.join(lines) +
         "\nBuild on it instead: if you know they are at work, ask about that job, "
@@ -5392,7 +5431,7 @@ def _x_send_human(persona, conv_id, text, incoming='', cfg=None):
     if not cfg.get('humanize', True):
         _x_send_dm(persona, conv_id, text)
         return
-    cps = max(2, int(cfg.get('typing_speed') or 14) // 4)
+    cps = max(2, int(cfg.get('typing_speed') or 14) // 2)
     time.sleep(random.uniform(15, 120))
     time.sleep(min(0.8 + len(incoming) / 90.0, X_READ_CAP) * random.uniform(0.7, 1.3))
     for i, chunk in enumerate(_tg_bursts(text)):
@@ -5520,7 +5559,7 @@ def _x_dm_reply_round(persona, max_results=20):
                     'build slowly — no selling, no hinting at paid content yet. '
                     + ask_rule)
             _fan_memory_update(persona, f'x:{sender}', text)
-            instruction = _fan_memory_block(_fan_memory(persona, f'x:{sender}')) + instruction
+            instruction = _fan_memory_block(_fan_memory(persona, f'x:{sender}'), persona) + instruction
             reply = _persona_text(persona, instruction, history=db_hist,
                                   max_tokens=1024, temperature=0.9)
             if not reply:
@@ -7583,6 +7622,34 @@ def _fv_sender(msg):
     return ''
 
 
+def _fv_direction_of(msg, fan_uuid, me_uuid, recent_out=()):
+    """Who sent this message: 'out' (us), 'in' (the fan), or '' when nothing in
+    it settles the question.
+
+    Guessing here is what made the persona greet a fan by her own name: one
+    unrecognised message shape used to make her whole self-introduction read
+    back as something *he* had said. Callers decide what an unknown means —
+    the live round can fall back on its own context, the bulk import cannot.
+    """
+    if not isinstance(msg, dict):
+        return ''
+    sender = _fv_sender(msg)
+    if sender:
+        if fan_uuid and sender == fan_uuid:
+            return 'in'
+        if me_uuid and sender == me_uuid:
+            return 'out'
+        return ''
+    if (msg.get('fromMe') or msg.get('isOwn') or msg.get('isMine')
+            or msg.get('isAuthor') or msg.get('direction') == 'out'
+            or msg.get('type') == 'sent'):
+        return 'out'
+    text = _fv_first(msg, 'text', 'content', 'message', 'body', default='').strip()
+    if text and text in recent_out:
+        return 'out'
+    return ''
+
+
 # A sentence ends at . ! ? — but NOT at an ellipsis, which she uses mid-thought
 # ("that's certainly a… specific preference"). Splitting there would cut the
 # sentence in half. A following lower-case word means the thought runs on too.
@@ -7639,6 +7706,39 @@ def _fv_trim(text, max_sentences=2, hard_cap=320):
             kept.append(p)
         t = ' '.join(kept).strip() or parts[0]
     return t
+
+
+# A bracketed placeholder reaching a fan reads as a broken mail-merge, so the
+# net is deliberately wide: in a DM a bracketed run of words is never something
+# a real person typed. Lives here rather than beside the Telegram sender that
+# first needed it — being defined a thousand lines below the Fanvue code is why
+# that path never picked it up.
+_PLACEHOLDER_RE = re.compile(
+    r"[ \t]*,?[ \t]*\["
+    r"(?:[^\]]{0,40}(?:name|fan|user|city|town|location|age|job|work|hobby|"
+    r"topic|interest|detail|insert|placeholder|here|something)[^\]]{0,40}"
+    r"|[a-z][a-z' ]{0,38})"
+    r"\]", re.I)
+
+NO_PLACEHOLDER_RULE = (
+    'Write the message exactly as it should be sent. Never emit a placeholder '
+    "in brackets such as [fan's name] or [name] — if you do not know something, "
+    'leave it out entirely rather than marking a gap. ')
+
+
+def _strip_placeholders(text):
+    """Remove a bracketed placeholder the model left in, e.g. "[fan's name]",
+    along with the comma that introduced it. A prompt rule reduces these but
+    does not eliminate them."""
+    if not text or '[' not in text:
+        return text
+    cleaned = _PLACEHOLDER_RE.sub('', text)
+    cleaned = re.sub(r'\s+([?!.,])', r'\1', cleaned)
+    return re.sub(r'[ \t]{2,}', ' ', cleaned).strip()
+
+
+def _has_placeholder(text):
+    return bool(text) and '[' in text and bool(_PLACEHOLDER_RE.search(text))
 
 
 def _fanvue_me_uuid(persona):
@@ -7709,9 +7809,19 @@ def _fv_msg_age_minutes(msg):
 
 
 FV_READ_CAP = 12.0
-FV_TYPE_CAP = 25.0
+FV_TYPE_CAP = 12.0
+# How long she takes to answer. A flat random pause meant a fan mid-conversation
+# could wait two minutes for "haha yeah" — so the wait follows the conversation
+# instead: quick when he is clearly sat there with his phone, unhurried when the
+# chat has gone cold. FV_REPLY_CAP bounds the whole thing for an active fan.
+FV_PAUSE_ACTIVE = (12, 40)
+FV_PAUSE_COLD = (45, 120)
+FV_ACTIVE_MIN = 15
+FV_REPLY_CAP = 90.0
 _fv_ppv_locks = {}
 _fv_reply_pool = [None]
+_fv_inflight = [0]
+_fv_inflight_lock = threading.Lock()
 
 
 def _fv_humanize_cfg(persona):
@@ -7845,35 +7955,52 @@ def _fv_trace(persona, stage, detail=''):
 
 
 def _fv_send_text(persona, scope, fan_uuid, text):
+    # Everything is stripped upstream; if one still got through, a visible gap
+    # beats a broken mail-merge landing in a fan's inbox.
+    if _has_placeholder(text):
+        _fv_trace(persona, 'error',
+                  f'refused to send a message with a placeholder in it: {text[:120]}')
+        raise RuntimeError('reply still contained a bracketed placeholder')
     _fanvue_call(persona, 'POST', f'{scope}/chats/{fan_uuid}/message',
                  body={'text': text[:2000]})
 
 
-def _fv_send_human(persona, scope, fan_uuid, text, incoming='', cfg=None):
+def _fv_send_human(persona, scope, fan_uuid, text, incoming='', cfg=None, active=True):
     """Send a Fanvue reply the way a person would: a pause to read, then a delay
     scaled to how long the reply takes to type, split across a burst or two.
     Same pacing as Telegram — Fanvue has no typing indicator, so the delay is
-    the only signal that someone is on the other end."""
+    the only signal that someone is on the other end.
+
+    `active` says the fan is sat in the conversation right now, which buys a
+    much shorter wait and a hard ceiling on the whole exchange."""
     cfg = cfg or _fv_humanize_cfg(persona)
     if not cfg['humanize']:
         _fv_send_text(persona, scope, fan_uuid, text)
         return
-    cps = max(2, int(cfg['typing_speed']) // 4)
-    time.sleep(random.uniform(15, 120))
-    time.sleep(min(0.8 + len(incoming) / 90.0, FV_READ_CAP) * random.uniform(0.7, 1.3))
+    cps = max(2, int(cfg['typing_speed']) // 2)
+    budget = [FV_REPLY_CAP if active else None]
+
+    def pause(seconds):
+        if budget[0] is not None:
+            seconds = min(seconds, max(0.0, budget[0]))
+            budget[0] -= seconds
+        time.sleep(seconds)
+
+    pause(random.uniform(*(FV_PAUSE_ACTIVE if active else FV_PAUSE_COLD)))
+    pause(min(0.8 + len(incoming) / 90.0, FV_READ_CAP) * random.uniform(0.7, 1.3))
     # React first, the way someone taps a heart before they start typing.
     if incoming and random.randint(1, 100) <= cfg.get('react_rate', 0):
         try:
             _fv_send_text(persona, scope, fan_uuid, _fv_reaction_for(incoming))
-            time.sleep(random.uniform(1.0, 3.0))
+            pause(random.uniform(1.0, 3.0))
         except Exception as e:
             logger.info('Fanvue reaction failed: %s', str(e)[:120])
     for i, chunk in enumerate(_tg_bursts(text)):
         if not chunk:
             continue
         if i:
-            time.sleep(random.uniform(0.6, 1.6))
-        time.sleep(min(max(len(chunk) / float(cps), 1.2), FV_TYPE_CAP) * random.uniform(0.85, 1.2))
+            pause(random.uniform(0.6, 1.6))
+        pause(min(max(len(chunk) / float(cps), 1.2), FV_TYPE_CAP) * random.uniform(0.85, 1.2))
         _fv_send_text(persona, scope, fan_uuid, chunk)
 
 
@@ -8007,7 +8134,8 @@ def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx, context
                   f"{again} \u2192 {handle or fan_uuid} at ${tier['price'] / 100:g}: {cap}")
 
 
-def _fv_deliver(persona, scope, fan_uuid, fan_key, handle, reply, incoming, cfg, ppv_ctx):
+def _fv_deliver(persona, scope, fan_uuid, fan_key, handle, reply, incoming, cfg,
+                ppv_ctx, active=True):
     """Pace out one reply, then consider the next PPV tier so the paid drop
     always lands after the message it belongs to."""
     # The unlock is minted by _fv_maybe_ppv below, not by the model writing a
@@ -8015,7 +8143,8 @@ def _fv_deliver(persona, scope, fan_uuid, fan_key, handle, reply, incoming, cfg,
     reply = strip_ppv_marker(reply)
     with app.app_context():
         try:
-            _fv_send_human(persona, scope, fan_uuid, reply, incoming=incoming, cfg=cfg)
+            _fv_send_human(persona, scope, fan_uuid, reply, incoming=incoming,
+                           cfg=cfg, active=active)
         except Exception as e:
             logger.warning('Fanvue send to %s failed: %s', handle or fan_uuid, str(e)[:120])
             _fv_trace(persona, 'error', f'send to {handle or fan_uuid} failed: {str(e)[:200]}')
@@ -8027,13 +8156,57 @@ def _fv_deliver(persona, scope, fan_uuid, fan_key, handle, reply, incoming, cfg,
                           context=incoming)
 
 
+def _fv_workers():
+    return max(1, int(os.getenv('FANVUE_REPLY_WORKERS', '24')))
+
+
 def _fv_pool():
     if _fv_reply_pool[0] is None:
         from concurrent.futures import ThreadPoolExecutor
         _fv_reply_pool[0] = ThreadPoolExecutor(
-            max_workers=max(1, int(os.getenv('FANVUE_REPLY_WORKERS', '12'))),
-            thread_name_prefix='fvreply')
+            max_workers=_fv_workers(), thread_name_prefix='fvreply')
     return _fv_reply_pool[0]
+
+
+def _fv_submit(persona, *args):
+    """Queue one paced reply and report how deep the queue is.
+
+    Each reply holds its worker for the whole of its pause, so the pool is the
+    real ceiling on throughput. When it saturates, replies do not just run late,
+    they run later and later — and nothing in the log used to say so.
+    """
+    def run():
+        try:
+            _fv_deliver(*args)
+        finally:
+            with _fv_inflight_lock:
+                _fv_inflight[0] = max(0, _fv_inflight[0] - 1)
+
+    with _fv_inflight_lock:
+        _fv_inflight[0] += 1
+        depth = _fv_inflight[0]
+    _fv_pool().submit(run)
+    _fv_note_backlog(persona, depth)
+    return depth
+
+
+def _fv_note_backlog(persona, depth):
+    """Trace the moment the queue starts running late, and nothing after.
+
+    Deduping on the message would log again on every new depth — which is every
+    submit — so the flag is the *state*, not the number.
+    """
+    key = f'fanvue_backlogged_{persona}'
+    backlogged = depth > _fv_workers()
+    if backlogged == (_get_setting(key) == '1'):
+        return
+    _set_setting(key, '1' if backlogged else '')
+    if backlogged:
+        _fv_trace(persona, 'delayed',
+                  f'{depth} replies queued but only {_fv_workers()} can be paced at '
+                  'once — replies are running late. Raise FANVUE_REPLY_WORKERS.')
+    else:
+        _fv_trace(persona, 'delayed', 'the reply queue has caught up')
 
 
 def _fanvue_auto_settings(persona):
@@ -8078,23 +8251,42 @@ def _fanvue_saved_history(persona, fan_key, limit=40):
 
 def _fanvue_import_history(persona, fan_uuid, handle, me_uuid, cap=200):
     """Pull the full chat history from Fanvue and store it permanently, so the
-    persona remembers everything already discussed. Returns count imported."""
+    persona remembers everything already discussed.
+
+    Every line is classified before any of it is written. A history that
+    attributes our own messages to the fan is worse than no history at all — it
+    is what makes her greet him by her own name — so one unresolvable message
+    aborts the whole import and leaves the chat to start clean.
+
+    Returns (count imported, [what the fan said]).
+    """
+    if not me_uuid:
+        _fv_trace(persona, 'error',
+                  f'skipped importing history for {handle or fan_uuid}: '
+                  'this account\'s own Fanvue uuid could not be resolved')
+        return 0, []
     try:
         msgs = _fv_list(_fanvue_call(persona, 'GET', f'{_fanvue_scope(persona)}/chats/{fan_uuid}/messages?limit={cap}'))
     except Exception:
-        return 0
+        return 0, []
     msgs = sorted(msgs, key=lambda m: _fv_first(m, 'createdAt', 'sentAt', 'timestamp', default=''))
-    fan_key = 'fv:' + fan_uuid
-    n = 0
+    rows = []
     for m in msgs:
         mt = _fv_first(m, 'text', 'content', 'message', 'body', default='')
         if not mt:
             continue
-        sender = _fv_sender(m)
-        direction = 'out' if sender == me_uuid else 'in'
+        direction = _fv_direction_of(m, fan_uuid, me_uuid)
+        if not direction:
+            _fv_trace(persona, 'error',
+                      f'skipped importing history for {handle or fan_uuid}: could not '
+                      f'tell who sent one message (keys={sorted(m.keys())[:8]}). Starting '
+                      'this chat without history rather than mixing up who said what.')
+            return 0, []
+        rows.append((direction, mt))
+    fan_key = 'fv:' + fan_uuid
+    for direction, mt in rows:
         _log_x_message(persona, fan_key, handle, direction, mt)
-        n += 1
-    return n
+    return len(rows), [t for d, t in rows if d == 'in']
 
 
 def _fanvue_auto_round(persona):
@@ -8197,26 +8389,32 @@ def _fanvue_auto_round(persona):
         # permanently, so the bot remembers everything already said.
         did_import = False
         if _fanvue_msg_count(persona, fan_key) == 0:
-            n = _fanvue_import_history(persona, fan_uuid, handle, me_uuid)
+            n, said = _fanvue_import_history(persona, fan_uuid, handle, me_uuid)
             if n:
                 did_import = True
                 log.append(f'Imported {n} past msgs from {handle or fan_uuid}')
+                # Everything he told us before the account was connected only
+                # reached the transcript, never the profile — so she would ask
+                # his name again on the first message she ever sent him.
+                if said:
+                    _fan_memory_update(persona, fan_key, '\n'.join(said[-40:])[-1500:])
 
         # Order oldest→newest; the API may return newest first.
         newest = msgs[-1] if len(msgs) > 1 and _fv_first(msgs[0], 'createdAt', 'sentAt', default='') <= _fv_first(msgs[-1], 'createdAt', 'sentAt', default='') else msgs[0]
-        sender = _fv_sender(newest)
         text = _fv_first(newest, 'text', 'content', 'message', 'body', default='')
         msg_id = _fv_first(newest, 'uuid', 'id', default='')
-        is_own = bool(newest.get('fromMe') or newest.get('isOwn') or newest.get('isMine') or newest.get('isAuthor') or newest.get('direction') == 'out' or newest.get('type') == 'sent')
         if not text:
             log.append(f'{who}: newest has no text (keys={list(newest.keys())})')
             continue
-        # Durable rule: ONLY reply when the newest message provably came from the
-        # fan. Our own outbound (sender == the creator/me) never equals fan_uuid,
-        # so this can't loop on itself. When the sender can't be resolved, fall
-        # back to explicit "mine" flags and matching our recently-sent text.
+        # Durable rule: ONLY reply when the newest message came from the fan.
+        # Our own outbound never resolves to fan_uuid, so this can't loop on
+        # itself.
         recent_out = {t.strip() for (d, t) in _fanvue_saved_history(persona, fan_key, limit=12) if d == 'out'}
-        from_fan = (sender == fan_uuid) if sender else (not is_own and text.strip() not in recent_out)
+        direction = _fv_direction_of(newest, fan_uuid, me_uuid, recent_out)
+        # An unresolved direction here is not fatal the way it is in the import:
+        # this is the newest message in a chat we are already polling, so
+        # "nothing says it was ours" is good enough to answer it.
+        from_fan = direction == 'in' or (not direction and text.strip() not in recent_out)
         if not from_fan:
             # Fan is quiet (our message is newest). Send a spaced, capped
             # follow-up so chats feel alive without spamming or self-looping.
@@ -8235,21 +8433,23 @@ def _fanvue_auto_round(persona):
                 "ONE short, warm, natural follow-up like a real person double-texting "
                 "— playful and low-pressure, NOT needy or salesy. Reference something "
                 "from earlier if it fits. Do NOT repeat your previous message. Max 1-2 "
-                "sentences.")
-            fu = _fv_trim(_persona_text(persona, fu_instr, history=hist, max_tokens=200, temperature=0.95))
+                "sentences. " + NO_PLACEHOLDER_RULE)
+            fu = _strip_placeholders(_fv_trim(_persona_text(
+                persona, fu_instr, history=hist, max_tokens=200, temperature=0.95)))
             if not fu:
                 continue
             followups[fan_uuid] = {'n': sent_n + 1}
             _set_setting(followup_key, json.dumps(followups))
             actions['replies'] += 1
             if hcfg['humanize']:
-                _fv_pool().submit(_fv_deliver, persona, scope, fan_uuid, fan_key,
-                                  handle, fu, '', hcfg, None)
+                _fv_submit(persona, persona, scope, fan_uuid, fan_key,
+                           handle, fu, '', hcfg, None, False)
                 log.append(f'↩ follow-up {sent_n + 1}/{FOLLOWUP_MAX} → {who} (typing…): {fu[:40]}')
                 _fv_trace(persona, 'follow-up',
                           f'{who} went quiet — nudge {sent_n + 1}/{FOLLOWUP_MAX} on the way')
             else:
-                _fv_deliver(persona, scope, fan_uuid, fan_key, handle, fu, '', hcfg, None)
+                _fv_deliver(persona, scope, fan_uuid, fan_key, handle, fu, '', hcfg,
+                            None, False)
                 log.append(f'↩ follow-up {sent_n + 1}/{FOLLOWUP_MAX} → {who}: {fu[:40]}')
             continue
         # Fan replied — clear any pending follow-up state for them.
@@ -8301,11 +8501,11 @@ def _fanvue_auto_round(persona):
             "(never hard-sell), and end with a question. "
             "CRITICAL: Keep it VERY short — one or two sentences MAX, like a real "
             "text message. No paragraphs, no lists, no walls of text. Ask at most "
-            "one quick question. Their latest message: "
+            "one quick question. " + NO_PLACEHOLDER_RULE + "Their latest message: "
             f"\"{text}\"")
-        instruction = _fan_memory_block(_fan_memory(persona, fan_key)) + instruction
+        instruction = _fan_memory_block(_fan_memory(persona, fan_key), persona) + instruction
         reply = _persona_text(persona, instruction, history=history, max_tokens=300, temperature=0.9)
-        reply = _fv_trim(reply)
+        reply = _strip_placeholders(_fv_trim(reply))
         if not reply:
             _fv_trace(persona, 'error', f'{who}: the model returned nothing — no reply sent')
             continue
@@ -8321,11 +8521,14 @@ def _fanvue_auto_round(persona):
                    'at_key': ppv_at_key, 'paid_key': ppv_paid_key,
                    'last_key': f'fanvue_ppv_last_{persona}', 'tz_offset': ppv_tz,
                    'require_payment': ppv_require_payment} if ppv_on else None
-        args = (persona, scope, fan_uuid, fan_key, handle, reply.strip(), text, hcfg, ppv_ctx)
+        age = _fv_msg_age_minutes(newest)
+        active = age is None or age < FV_ACTIVE_MIN
+        args = (persona, scope, fan_uuid, fan_key, handle, reply.strip(), text, hcfg,
+                ppv_ctx, active)
         actions['replies'] += 1
         if hcfg['humanize']:
             # Pace it on a worker so one fan's pause never delays the next fan.
-            _fv_pool().submit(_fv_deliver, *args)
+            _fv_submit(persona, *args)
             log.append(f'Replying → {handle or fan_uuid} (typing…): {reply[:50]}')
             _fv_trace(persona, 'typing', f'{who}: writing a reply…')
         else:
@@ -8528,6 +8731,7 @@ def api_fanvue_trace():
     return jsonify({'persona': persona, 'connected': connected,
                     'enabled': bool(opts.get('enabled')),
                     'running': bool(lock and lock.locked()),
+                    'queued': _fv_inflight[0], 'workers': _fv_workers(),
                     'problems': problems, 'rows': rows[-FV_TRACE_MAX:]})
 
 
@@ -9311,7 +9515,7 @@ def _tg_send_human(persona, chat_id, text, incoming='', photo_data=None):
         if photo_data:
             _tg_send_photo(persona, chat_id, photo_data)
         return
-    cps = max(2, cfg['typing_speed'] // 4)
+    cps = max(2, cfg['typing_speed'] // 2)
     time.sleep(random.uniform(15, 120))
     time.sleep(min(0.8 + len(incoming) / 90.0, TG_READ_CAP) * random.uniform(0.7, 1.3))
     for i, chunk in enumerate(_tg_bursts(text)):
@@ -9435,28 +9639,11 @@ def _tg_history(persona, chat_id, limit=30):
             for d, t in _fanvue_saved_history(persona, _tg_fan_key(chat_id), limit=limit)]
 
 
-_PLACEHOLDER_RE = re.compile(
-    r"[ \t]*,?[ \t]*\[[^\]]{0,40}(name|fan|user|city|topic|interest|here)[^\]]{0,40}\]",
-    re.I)
-
-
-def _strip_placeholders(text):
-    """Remove a bracketed placeholder the model left in, e.g. "[fan's name]",
-    along with the comma that introduced it. A prompt rule reduces these but
-    does not eliminate them, and one reaching a fan reads as a broken
-    mail-merge."""
-    if not text or '[' not in text:
-        return text
-    cleaned = _PLACEHOLDER_RE.sub('', text)
-    cleaned = re.sub(r'\s+([?!.,])', r'\1', cleaned)
-    return re.sub(r'[ \t]{2,}', ' ', cleaned).strip()
-
-
 def _tg_generate(persona, chat_id, instruction):
     if client is None:
         return local_fallback_reply(instruction)
     history = _tg_history(persona, chat_id)
-    instruction = _fan_memory_block(_fan_memory(persona, _tg_fan_key(chat_id))) + instruction
+    instruction = _fan_memory_block(_fan_memory(persona, _tg_fan_key(chat_id)), persona) + instruction
     return _strip_placeholders(
         _fv_trim(_persona_text(persona, instruction, history=history,
                                max_tokens=400, temperature=0.9), hard_cap=420))
@@ -10439,9 +10626,7 @@ def _tgu_plan(persona, chat_id, name, text):
     ask_rule = ('End with ONE question that follows from what they just said — never '
                 'generic, never one you have already asked. ')
     # The model has been caught sending a literal "[fan's name]" to a fan.
-    no_placeholder = ('Write the message exactly as it should be sent. Never emit a '
-                      'placeholder in brackets such as [fan\'s name] or [name] — if you '
-                      'do not know something, leave it out entirely. ')
+    no_placeholder = NO_PLACEHOLDER_RULE
     if cta_asked and cta_due:
         instruction = (
             f'Reply in-character to this fan on Telegram: "{text}". They are asking '
@@ -10466,7 +10651,7 @@ def _tgu_plan(persona, chat_id, name, text):
     history = [{'role': 'model' if d == 'out' else 'user', 'content': t}
                for d, t in _fanvue_saved_history(persona, _tgu_fan_key(chat_id), limit=30)]
     _fan_memory_update(persona, _tgu_fan_key(chat_id), text)
-    instruction = _fan_memory_block(_fan_memory(persona, _tgu_fan_key(chat_id))) + instruction
+    instruction = _fan_memory_block(_fan_memory(persona, _tgu_fan_key(chat_id)), persona) + instruction
     if client is None:
         reply = local_fallback_reply(text)
     else:
@@ -10525,7 +10710,7 @@ def _tgu_plan(persona, chat_id, name, text):
     _tg_save_fans(persona, fans)
     initial_delay = random.uniform(15, 120) if cfg['humanize'] else 0
     read = min(0.8 + len(text) / 90.0, TG_READ_CAP) if cfg['humanize'] else 0
-    cps = max(2, int(cfg['typing_speed'] // 4)) if cfg['humanize'] else 999
+    cps = max(2, int(cfg['typing_speed'] // 2)) if cfg['humanize'] else 999
     return {'read': read, 'cps': cps, 'initial_delay': initial_delay,
             'chunks': chunks, 'photo_data': photo_data}
 

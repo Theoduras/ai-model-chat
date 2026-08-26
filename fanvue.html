@@ -319,12 +319,13 @@ async function loadTrace(){
   try{
     const d=await (await fetch('/api/fanvue/trace?persona='+encodeURIComponent(persona()))).json();
     const bad=(d.problems||[]).length;
-    const live=d.connected?(d.enabled?(d.running?'● replying now':'● auto-reply on'):'○ auto-reply off'):'○ not connected';
+    const q=(d.queued||0)>(d.workers||0)?' — '+d.queued+' queued, running late':((d.queued||0)?' ('+d.queued+' queued)':'');
+    const live=(d.connected?(d.enabled?(d.running?'● replying now':'● auto-reply on'):'○ auto-reply off'):'○ not connected')+q;
     pb.innerHTML='<div class="note" style="border-color:'+(bad?'#3f3f46':'#14532d')+';color:'+(bad?'var(--text-2)':'#4ade80')+';margin-bottom:8px;">'+
       (bad?'':'✓ ')+esc(d.persona||'')+' · '+live+'</div>'+
       (d.problems||[]).map(p=>'<div class="note" style="border-color:#7f1d1d;color:#fca5a5;margin-bottom:8px;">⚠ '+esc(p)+'</div>').join('');
     const rows=(d.rows||[]).slice().reverse();
-    const col={received:'#c7d2fe',sent:'#4ade80',ppv:'#f0abfc',typing:'var(--text-muted)','follow-up':'#fbbf24',error:'#fb7185',idle:'var(--text-muted)'};
+    const col={received:'#c7d2fe',sent:'#4ade80',ppv:'#f0abfc',typing:'var(--text-muted)','follow-up':'#fbbf24',error:'#fb7185',idle:'var(--text-muted)',delayed:'#fbbf24'};
     box.innerHTML = rows.length ?
       '<table class="fans"><tr><th>Time</th><th>What</th><th>Message</th></tr>'+
       rows.map(r=>'<tr><td style="white-space:nowrap;">'+new Date((r.at||0)*1000).toLocaleTimeString()+
