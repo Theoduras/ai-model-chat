@@ -943,15 +943,28 @@ _CRAWL_DISALLOW = ['/dashboard', '/admin', '/account', '/billing', '/api/',
 
 def _site_origin():
     """Canonical origin for absolute URLs. SITE_URL wins so the canonical stays
-    the marketing domain even when the app answers on a *.vercel.app host."""
+    the marketing domain even when the app answers on a *.run.app host."""
     explicit = (os.getenv('SITE_URL') or '').strip().rstrip('/')
     if explicit:
         return explicit
-    return request.url_root.rstrip('/')
+    # Cloud Run terminates TLS at its proxy, so request.url_root reports http.
+    proto = (request.headers.get('X-Forwarded-Proto') or '').split(',')[0].strip()
+    origin = request.url_root.rstrip('/')
+    if proto == 'https' and origin.startswith('http://'):
+        origin = 'https://' + origin[len('http://'):]
+    return origin
+
+
+def _seo_noindex_all():
+    """Whole-environment opt-out. The dev service is a public copy of the live
+    site, and an indexed copy competes with the real one in search."""
+    return (os.getenv('SEO_NOINDEX_ALL') or '').strip() == '1'
 
 
 @app.route('/robots.txt')
 def robots_txt():
+    if _seo_noindex_all():
+        return Response('User-agent: *\nDisallow: /\n', mimetype='text/plain')
     lines = ['User-agent: *']
     lines += ['Disallow: ' + p for p in _CRAWL_DISALLOW]
     lines += ['', 'Sitemap: ' + _site_origin() + '/sitemap.xml', '']
@@ -960,6 +973,8 @@ def robots_txt():
 
 @app.route('/sitemap.xml')
 def sitemap_xml():
+    if _seo_noindex_all():
+        return ('Not found', 404)
     origin = _site_origin()
     today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
     urls = ''.join(
@@ -1028,7 +1043,7 @@ _NOINDEX_PATHS = ('/landing', '/landingpage.html', '/profile', '/chat')
 
 @app.after_request
 def _noindex_fan_pages(resp):
-    if (request.path or '/').lower().startswith(_NOINDEX_PATHS):
+    if _seo_noindex_all() or (request.path or '/').lower().startswith(_NOINDEX_PATHS):
         resp.headers['X-Robots-Tag'] = 'noindex, nofollow'
     return resp
 

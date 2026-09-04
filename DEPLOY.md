@@ -272,15 +272,31 @@ crawling, and a page Google cannot crawl is a page whose `noindex` Google never
 reads — a URL already in the index would stay there indefinitely. Letting the
 crawler in is what gets these pages dropped.
 
-To clear anything already indexed: Search Console → **Removals** → *New
-request* → **Remove all URLs with this prefix**, one request per fan path. That
-hides them within a day; the `noindex` tags make it permanent once recrawled.
+To clear anything already indexed: Search Console → **Removals** → **Temporary
+Removals** tab → **New Request** → **Remove all URLs with this prefix**, one
+request per fan path. Google's removals are temporary — roughly six months —
+and only hide a URL from results without stopping the crawl. The `noindex`
+tags are what makes it permanent, once Google recrawls during that window.
+
+### Environments
+
+Only the live service should be in Search Console. The dev service at
+`ai-model-chat-dev-...run.app` serves the same pages, so an indexed copy
+competes with the real site for its own keywords. Set `SEO_NOINDEX_ALL=1`
+there.
+
+`run.app` is on the [Public Suffix List](https://publicsuffix.org/list/), so a
+Search Console **Domain** property is impossible for a `*.run.app` host —
+DNS verification would require control of `run.app` itself. Only a URL-prefix
+property with HTML-file or meta-tag verification works. That is one more reason
+to map a real domain before doing any SEO work.
 
 ### Environment variables
 
 | Variable | Why |
 |---|---|
-| `SITE_URL` | Canonical origin, e.g. `https://velvetfunnel.app`. Without it the canonical follows whatever host answered, so `*.vercel.app` preview URLs compete with the real domain in search. |
+| `SITE_URL` | Canonical origin, e.g. `https://velvetfunnel.app`. Without it the canonical follows whatever host answered, so a `run.app` or preview URL competes with the real domain in search. |
+| `SEO_NOINDEX_ALL` | Set to `1` on every non-production service. `robots.txt` becomes `Disallow: /`, the sitemap 404s and every response carries `X-Robots-Tag: noindex`. **Set this on `ai-model-chat-dev`.** |
 | `GOOGLE_SITE_VERIFICATION` | The `googleXXXX.html` filename Search Console hands out (with or without the extension). |
 | `GA_MEASUREMENT_ID` | GA4 measurement ID, `G-XXXXXXX`. |
 | `GOOGLE_ADS_ID` | Google Ads conversion ID, `AW-XXXXXXXXX`. |
