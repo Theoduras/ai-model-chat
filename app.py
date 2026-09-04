@@ -1280,6 +1280,7 @@ LOGIN_HTML = """<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark">
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png">
 <title>Admin Login</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -1369,7 +1370,8 @@ button:disabled{opacity:.6;cursor:not-allowed;transform:none;animation:none}
 
 REGISTER_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><title>Create account</title>
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Create account</title>
 <script src="/js/analytics.js" defer></script>
 <script src="/js/page-editor.js" defer></script>
 <style>""" + ACCOUNT_CSS + """</style></head><body data-page="register"><div class="wrap"><div class="card">
@@ -1387,7 +1389,8 @@ REGISTER_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 
 SIGNIN_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><title>Sign in</title>
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Sign in</title>
 <script src="/js/analytics.js" defer></script>
 <script src="/js/page-editor.js" defer></script>
 <style>""" + ACCOUNT_CSS + """</style></head><body data-page="login"><div class="wrap"><div class="card">
@@ -1407,7 +1410,8 @@ SIGNIN_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 
 BILLING_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><title>Choose a plan</title>
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Choose a plan</title>
 <script src="/js/analytics.js" defer></script>
 <script src="/js/page-editor.js" defer></script>
 <style>""" + ACCOUNT_CSS + """</style></head><body data-page="pricing"><div class="wrap wide">
@@ -1473,7 +1477,8 @@ document.querySelectorAll('button[data-tier]').forEach(function(b){
 
 ACCOUNT_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><title>My account</title>
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>My account</title>
 <style>""" + ACCOUNT_CSS + """
 table{width:100%;border-collapse:collapse;margin-top:8px;font-size:.85rem}
 th{text-align:left;color:var(--text-muted);font-weight:500;padding:6px 0;border-bottom:1px solid var(--border)}
@@ -1510,7 +1515,8 @@ td{padding:8px 0;border-bottom:1px solid var(--border);color:var(--text-2)}
 
 PROFILE_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><title>Your profile</title>
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Your profile</title>
 <style>""" + ACCOUNT_CSS + """
 textarea{width:100%;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:11px 14px;color:var(--text);font-size:.95rem;outline:none;margin-bottom:16px;font-family:inherit;resize:vertical;min-height:88px}
 textarea:focus{border-color:#7c3aed}
@@ -1539,7 +1545,8 @@ textarea:focus{border-color:#7c3aed}
 
 ADMIN_USERS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><title>Users</title>
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Users</title>
 <style>""" + ACCOUNT_CSS + """
 table{width:100%;border-collapse:collapse;font-size:.85rem}
 th{text-align:left;color:var(--text-muted);font-weight:500;padding:8px 10px;border-bottom:1px solid var(--border);white-space:nowrap}
@@ -1568,7 +1575,8 @@ a.email{color:#a78bfa;text-decoration:none;font-weight:500}
 
 ADMIN_USER_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><title>{{ u.email }}</title>
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>{{ u.email }}</title>
 <style>""" + ACCOUNT_CSS + """
 textarea{width:100%;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:11px 14px;color:var(--text);font-size:.95rem;outline:none;margin-bottom:16px;font-family:inherit;resize:vertical;min-height:80px}
 select{width:100%;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:11px 14px;color:var(--text);font-size:.95rem;margin-bottom:16px}
