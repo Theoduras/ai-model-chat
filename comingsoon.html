@@ -64,8 +64,9 @@ html{scroll-behavior:smooth}
 html,body{min-height:100%}
 body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text)}
 /* ── Fixed nav ── */
-.site-nav{position:fixed;top:32px;left:60px;right:60px;z-index:1000;display:flex;align-items:center;justify-content:space-between;gap:20px;
-  padding:16px 24px;border-radius:9999px;background:transparent;box-shadow:none;
+.site-nav{position:fixed;top:32px;left:60px;right:auto;z-index:1000;display:inline-flex;align-items:center;justify-content:flex-start;gap:32px;
+  padding:14px 20px;border-radius:9999px;background:transparent;box-shadow:none;max-width:calc(100vw - 120px)}
+.site-nav{
   transition:background-color .5s cubic-bezier(.16,1,.3,1),box-shadow .5s cubic-bezier(.16,1,.3,1),
              padding .4s cubic-bezier(.16,1,.3,1),backdrop-filter .5s ease,transform .5s cubic-bezier(.34,1.56,.64,1);
   animation:navIn .9s cubic-bezier(.16,1,.3,1) both}
