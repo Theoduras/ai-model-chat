@@ -2046,6 +2046,13 @@ def logout():
     return redirect('/login')
 
 
+@app.route('/api/pricing')
+def api_pricing():
+    """Public: tier cards for the homepage pricing section (and anywhere else
+    that wants the same data without the full /pricing page)."""
+    return jsonify({'order': DEFAULT_TIER_ORDER, 'tiers': TIERS})
+
+
 @app.route('/pricing')
 def pricing():
     user = _current_user() or {'email': '', 'status': 'unpaid', 'tier': '',

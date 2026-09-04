@@ -144,6 +144,32 @@ body.kbd .demo{height:100%;flex:none;max-width:none;margin:0}
   .demo{max-width:none;flex:none;height:calc(100dvh - 16px);border:0;border-radius:14px;box-shadow:none}
   .auth a{padding:7px 12px;font-size:12.5px}
 }
+/* ── Pricing ── */
+.pricing{padding:100px 60px 110px;background:var(--bg)}
+.pricing-head{text-align:center;max-width:640px;margin:0 auto 56px}
+.pricing-head h2{font-family:'Sora';font-weight:800;font-size:38px;letter-spacing:-.02em;margin-bottom:14px}
+.pricing-head p{color:var(--text-soft);font-size:16px;line-height:1.6}
+.tier-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;max-width:1180px;margin:0 auto}
+.tier-card{background:var(--panel);border:1px solid var(--hair);border-radius:16px;padding:26px 22px;display:flex;flex-direction:column}
+.tier-card.featured{border-color:#ff2d78;box-shadow:0 0 0 1px #ff2d78 inset}
+.tier-card h3{font-family:'Sora';font-weight:700;font-size:19px;margin-bottom:6px}
+.tier-card .blurb{color:var(--text-soft);font-size:13px;line-height:1.5;margin-bottom:18px;min-height:38px}
+.tier-card .price{font-family:'Sora';font-weight:800;font-size:30px;margin-bottom:18px}
+.tier-card .price span{font-family:'Inter';font-weight:500;font-size:13px;color:var(--text-dim)}
+.tier-card ul{list-style:none;margin:0 0 22px;padding:0;flex:1}
+.tier-card li{font-size:13px;color:var(--text-soft);padding:6px 0;border-top:1px solid var(--hair);display:flex;gap:8px}
+.tier-card li:first-child{border-top:0}
+.tier-card li::before{content:"✓";color:#22c55e;font-weight:700}
+.tier-card a{display:block;text-align:center;text-decoration:none;font-weight:600;font-size:14px;padding:12px;border-radius:10px;color:#fff;background:var(--field);color:var(--text);border:1px solid var(--field-border)}
+.tier-card.featured a{background:linear-gradient(120deg,#ff5c38,#ff2d78 30%,#7c3aed 60%,#ff2d78 80%,#ff5c38);background-size:300% 100%;border:0}
+@media(max-width:900px){
+  .pricing{padding:70px 24px 80px}
+  .pricing-head h2{font-size:28px}
+  .tier-grid{grid-template-columns:1fr 1fr;gap:14px}
+}
+@media(max-width:600px){
+  .tier-grid{grid-template-columns:1fr}
+}
 </style>
 </head>
 <body data-page="home">
@@ -157,6 +183,7 @@ body.kbd .demo{height:100%;flex:none;max-width:none;margin:0}
           <svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke-linecap="round"/></svg>
           <svg class="ico-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" stroke-linejoin="round"/></svg>
         </button>
+        <a href="#pricing" class="auth-ghost">Pricing</a>
         <a href="/login" class="auth-ghost">Log in</a>
         <a href="/register" class="auth-btn">Register</a>
       </nav>
@@ -191,6 +218,41 @@ body.kbd .demo{height:100%;flex:none;max-width:none;margin:0}
   </div>
 
 </div>
+
+<section class="pricing" id="pricing">
+  <div class="pricing-head">
+    <h2 data-edit-id="pricing-title">Simple, transparent pricing</h2>
+    <p data-edit-id="pricing-subtitle">Start free, upgrade when your funnel needs more personas and platforms.</p>
+  </div>
+  <div class="tier-grid" id="tier-grid">Loading plans…</div>
+</section>
+
+<script>
+fetch('/api/pricing')
+  .then(function(r){ return r.ok ? r.json() : null; })
+  .then(function(d){
+    if (!d) return;
+    var grid = document.getElementById('tier-grid');
+    grid.innerHTML = '';
+    d.order.forEach(function(key){
+      var t = d.tiers[key];
+      if (!t) return;
+      var card = document.createElement('div');
+      card.className = 'tier-card' + (key === 'pro' ? ' featured' : '');
+      var price = t.price === 0
+        ? 'Free<span> forever</span>'
+        : '$' + t.price + '<span>/' + t.days + ' days</span>';
+      card.innerHTML =
+        '<h3>' + t.name + '</h3>' +
+        '<div class="blurb">' + t.blurb + '</div>' +
+        '<div class="price">' + price + '</div>' +
+        '<ul>' + t.features.map(function(f){ return '<li>' + f + '</li>'; }).join('') + '</ul>' +
+        '<a href="/register">' + (t.price === 0 ? 'Start free' : 'Get started') + '</a>';
+      grid.appendChild(card);
+    });
+  })
+  .catch(function(){});
+</script>
 
 <script>
 var vv=window.visualViewport;
