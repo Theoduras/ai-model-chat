@@ -1075,7 +1075,8 @@ def healthz():
         'db': backend,
         'secret_key_set': bool((os.getenv('SECRET_KEY') or '').strip()),
         'google_login': bool(_google_oauth_config()[0]),
-        'payments': bool(_oxapay_key()),
+        'payments_oxapay': bool(_oxapay_key()),
+        'payments_stripe': bool(_stripe_key()),
         'accounts_persist': not warns,
         'warnings': warns,
     }), 200
@@ -1126,10 +1127,19 @@ TIERS = {
 DEFAULT_TIER_ORDER = ['free', 'starter', 'pro', 'agency']
 
 OXAPAY_API = 'https://api.oxapay.com/v1/payment/invoice'
+STRIPE_API = 'https://api.stripe.com/v1'
 
 
 def _oxapay_key():
     return (os.getenv('OXAPAY_MERCHANT_KEY') or '').strip()
+
+
+def _stripe_key():
+    return (os.getenv('STRIPE_SECRET_KEY') or '').strip()
+
+
+def _stripe_webhook_secret():
+    return (os.getenv('STRIPE_WEBHOOK_SECRET') or '').strip()
 
 
 def _dev_payments_enabled():
@@ -1414,7 +1424,7 @@ plan is active{% if user.expires_at %} until {{ user.expires_at[:10] }}{% endif 
 <div class="err">Your plan has expired. Renew below to regain access.</div>
 {% else %}
 <h1 style="margin-bottom:6px">Choose a plan</h1>
-<p class="sub">Payment is in crypto via Oxapay. Access unlocks as soon as it confirms.</p>
+<p class="sub">Pay by card or crypto. Access unlocks as soon as it confirms.</p>
 {% endif %}
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
 <div class="tiers">
@@ -1423,7 +1433,15 @@ plan is active{% if user.expires_at %} until {{ user.expires_at[:10] }}{% endif 
 <h2>{{ t.name }}</h2><div class="blurb">{{ t.blurb }}</div>
 <div class="price">{% if t.price == 0 %}Free<span> forever</span>{% else %}${{ t.price }}<span>/{{ t.days }} days</span>{% endif %}</div>
 <ul>{% for f in t.features %}<li>{{ f }}</li>{% endfor %}</ul>
-<button data-tier="{{ key }}">{{ 'Start free' if t.price == 0 else ('Renew' if user.status == 'expired' else 'Pay with crypto') }}</button>
+{% if t.price == 0 %}
+<button data-tier="{{ key }}" data-provider="">Start free</button>
+{% else %}
+{% set verb = 'Renew' if user.status == 'expired' else 'Pay' %}
+{% if stripe_enabled %}<button data-tier="{{ key }}" data-provider="stripe">{{ verb }} with card</button>{% endif %}
+{% if oxapay_enabled %}<button data-tier="{{ key }}" data-provider="oxapay"
+ style="{{ 'margin-top:8px;' if stripe_enabled }}background:var(--surface);color:var(--text)">{{ verb }} with crypto</button>{% endif %}
+{% if not stripe_enabled and not oxapay_enabled %}<button disabled>Payments not configured</button>{% endif %}
+{% endif %}
 {% if dev_mode %}<button class="dev" data-dev-tier="{{ key }}"
  style="background:var(--surface);color:var(--star);margin-top:8px">Activate free (dev)</button>{% endif %}
 </div>{% endfor %}
@@ -1449,11 +1467,11 @@ document.querySelectorAll('button[data-dev-tier]').forEach(function(b){
 });
 document.querySelectorAll('button[data-tier]').forEach(function(b){
   b.addEventListener('click', async function(){
-    b.disabled = true; var old = b.textContent; b.textContent = 'Creating invoice...';
+    b.disabled = true; var old = b.textContent; b.textContent = 'Redirecting...';
     try {
       var r = await fetch('/api/billing/checkout', {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({tier: b.dataset.tier})});
+        body: JSON.stringify({tier: b.dataset.tier, provider: b.dataset.provider})});
       var d = await r.json();
       if (d.payment_url) { window.location = d.payment_url; return; }
       if (d.redirect) { window.location = d.redirect; return; }
@@ -1495,9 +1513,9 @@ td{padding:8px 0;border-bottom:1px solid var(--border);color:var(--text-2)}
 </div>
 {% if payments %}<div class="card" style="margin-top:16px">
 <h1 style="font-size:1rem">Payment history</h1>
-<table><tr><th>Date</th><th>Plan</th><th>Amount</th><th>Status</th></tr>
+<table><tr><th>Date</th><th>Plan</th><th>Amount</th><th>Method</th><th>Status</th></tr>
 {% for p in payments %}<tr><td>{{ p.date }}</td><td>{{ p.tier }}</td>
-<td>${{ p.amount }}</td><td>{{ p.status }}</td></tr>{% endfor %}</table>
+<td>${{ p.amount }}</td><td>{{ p.provider }}</td><td>{{ p.status }}</td></tr>{% endfor %}</table>
 </div>{% endif %}
 </div></body></html>"""
 
@@ -1838,7 +1856,8 @@ def account():
                 .order_by(Payment.created_at.desc()).limit(25).all())
         payments = [{'date': p.created_at.strftime('%Y-%m-%d') if p.created_at else '',
                      'tier': (TIERS.get(p.tier) or {}).get('name', p.tier),
-                     'amount': p.amount, 'status': p.status} for p in rows]
+                     'amount': p.amount, 'status': p.status,
+                     'provider': p.provider or 'oxapay'} for p in rows]
     finally:
         s.close()
     return render_template_string(ACCOUNT_HTML, user=user, tiers=TIERS,
@@ -2037,7 +2056,9 @@ def pricing():
                                'expires_at': None}
     return render_template_string(BILLING_HTML, user=user, tiers=TIERS,
                                   order=DEFAULT_TIER_ORDER,
-                                  dev_mode=_dev_payments_enabled())
+                                  dev_mode=_dev_payments_enabled(),
+                                  oxapay_enabled=bool(_oxapay_key()),
+                                  stripe_enabled=bool(_stripe_key()))
 
 
 @app.route('/billing')
@@ -2047,7 +2068,9 @@ def billing():
         return redirect('/login?next=/billing')
     return render_template_string(BILLING_HTML, user=user, tiers=TIERS,
                                   order=DEFAULT_TIER_ORDER,
-                                  dev_mode=_dev_payments_enabled())
+                                  dev_mode=_dev_payments_enabled(),
+                                  oxapay_enabled=bool(_oxapay_key()),
+                                  stripe_enabled=bool(_stripe_key()))
 
 
 @app.route('/billing/return')
@@ -2058,39 +2081,7 @@ def billing_return():
     return redirect('/dashboard' if _user_is_active(user) else '/billing')
 
 
-@app.route('/api/billing/checkout', methods=['POST'])
-def api_billing_checkout():
-    user = _current_user()
-    if not user:
-        return jsonify({'error': 'Sign in required'}), 401
-    tier_key = (request.get_json(silent=True) or {}).get('tier', '')
-    tier = TIERS.get(tier_key)
-    if not tier:
-        return jsonify({'error': 'Unknown plan'}), 400
-
-    # Free plans need no invoice — activate and send them to fill in the profile.
-    if not float(tier.get('price') or 0):
-        from db import User, Payment
-        s = _db_session()
-        try:
-            u = s.get(User, user['id'])
-            expires = _activate_plan(s, u, tier_key)
-            s.add(Payment(user_id=u.id, tier=tier_key, amount='0', currency='USD',
-                          order_id=f'free-{secrets.token_hex(6)}', status='free',
-                          paid_at=datetime.now(timezone.utc).replace(tzinfo=None)))
-            s.commit()
-        finally:
-            s.close()
-        logger.info('FREE PLAN ACTIVATED user=%s until=%s', user['email'], expires)
-        return jsonify({'ok': True, 'tier': tier_key, 'redirect': '/account/profile'})
-
-    if not _oxapay_key():
-        logger.error('Checkout attempted with no OXAPAY_MERCHANT_KEY set')
-        return jsonify({'error': 'Payments are not configured yet.'}), 503
-
-    from db import Payment
-    order_id = f'{user["id"]}-{secrets.token_hex(6)}'
-    base = _callback_origin()
+def _checkout_oxapay(user, tier_key, tier, order_id, base):
     body = json.dumps({
         'amount': tier['price'],
         'currency': 'USD',
@@ -2110,24 +2101,113 @@ def api_billing_checkout():
             payload = json.loads(resp.read().decode())
     except Exception:
         error_logger.error('Oxapay invoice creation failed', exc_info=True)
-        return jsonify({'error': 'Could not reach the payment provider.'}), 502
-
+        return None, None
     data = payload.get('data') or {}
     pay_url, track_id = data.get('payment_url'), data.get('track_id')
     if not pay_url:
         logger.error('Oxapay returned no payment_url: %s', str(payload)[:300])
-        return jsonify({'error': 'Payment provider rejected the request.'}), 502
+        return None, None
+    return pay_url, str(track_id or '')
+
+
+def _checkout_stripe(user, tier_key, tier, order_id, base):
+    """Stripe Checkout Session, single payment (not a subscription — the plan's
+    own `days` field controls how long it lasts, same as Oxapay)."""
+    form = {
+        'mode': 'payment',
+        'success_url': f'{base}/billing/return?session_id={{CHECKOUT_SESSION_ID}}',
+        'cancel_url': f'{base}/billing',
+        'customer_email': user['email'],
+        'client_reference_id': order_id,
+        'payment_method_types[0]': 'card',
+        'line_items[0][quantity]': '1',
+        'line_items[0][price_data][currency]': 'usd',
+        'line_items[0][price_data][unit_amount]': str(int(round(tier['price'] * 100))),
+        'line_items[0][price_data][product_data][name]': f'{tier["name"]} plan',
+        'line_items[0][price_data][product_data][description]':
+            f'{tier["days"]} days of access',
+        'metadata[order_id]': order_id,
+        'metadata[tier]': tier_key,
+        'metadata[user_id]': user['id'],
+    }
+    req = urllib.request.Request(
+        f'{STRIPE_API}/checkout/sessions',
+        data=urllib.parse.urlencode(form).encode(),
+        headers={'Content-Type': 'application/x-www-form-urlencoded',
+                 'Authorization': 'Bearer ' + _stripe_key()})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            payload = json.loads(resp.read().decode())
+    except url_error.HTTPError as e:
+        error_logger.error('Stripe session creation failed: %s', e.read()[:300])
+        return None, None
+    except Exception:
+        error_logger.error('Stripe session creation failed', exc_info=True)
+        return None, None
+    pay_url, session_id = payload.get('url'), payload.get('id')
+    if not pay_url:
+        logger.error('Stripe returned no url: %s', str(payload)[:300])
+        return None, None
+    return pay_url, str(session_id or '')
+
+
+_CHECKOUT_PROVIDERS = {'oxapay': (_checkout_oxapay, _oxapay_key),
+                       'stripe': (_checkout_stripe, _stripe_key)}
+
+
+@app.route('/api/billing/checkout', methods=['POST'])
+def api_billing_checkout():
+    user = _current_user()
+    if not user:
+        return jsonify({'error': 'Sign in required'}), 401
+    body = request.get_json(silent=True) or {}
+    tier_key = body.get('tier', '')
+    tier = TIERS.get(tier_key)
+    if not tier:
+        return jsonify({'error': 'Unknown plan'}), 400
+
+    # Free plans need no invoice — activate and send them to fill in the profile.
+    if not float(tier.get('price') or 0):
+        from db import User, Payment
+        s = _db_session()
+        try:
+            u = s.get(User, user['id'])
+            expires = _activate_plan(s, u, tier_key)
+            s.add(Payment(user_id=u.id, tier=tier_key, provider='free', amount='0',
+                          currency='USD', order_id=f'free-{secrets.token_hex(6)}',
+                          status='free',
+                          paid_at=datetime.now(timezone.utc).replace(tzinfo=None)))
+            s.commit()
+        finally:
+            s.close()
+        logger.info('FREE PLAN ACTIVATED user=%s until=%s', user['email'], expires)
+        return jsonify({'ok': True, 'tier': tier_key, 'redirect': '/account/profile'})
+
+    provider = (body.get('provider') or '').strip().lower()
+    if provider not in _CHECKOUT_PROVIDERS:
+        return jsonify({'error': 'Unknown payment method'}), 400
+    checkout_fn, key_fn = _CHECKOUT_PROVIDERS[provider]
+    if not key_fn():
+        logger.error('Checkout attempted via %s with no key configured', provider)
+        return jsonify({'error': 'Payments are not configured yet.'}), 503
+
+    from db import Payment
+    order_id = f'{user["id"]}-{secrets.token_hex(6)}'
+    base = _callback_origin()
+    pay_url, track_id = checkout_fn(user, tier_key, tier, order_id, base)
+    if not pay_url:
+        return jsonify({'error': 'Could not reach the payment provider.'}), 502
 
     s = _db_session()
     try:
-        s.add(Payment(user_id=user['id'], tier=tier_key, amount=str(tier['price']),
-                      currency='USD', order_id=order_id, track_id=str(track_id or ''),
-                      status='pending'))
+        s.add(Payment(user_id=user['id'], tier=tier_key, provider=provider,
+                      amount=str(tier['price']), currency='USD', order_id=order_id,
+                      track_id=track_id, status='pending'))
         s.commit()
     finally:
         s.close()
     logger.info('CHECKOUT [%s] user=%s tier=%s order=%s track=%s',
-                'oxapay', user['email'], tier_key, order_id, track_id)
+                provider, user['email'], tier_key, order_id, track_id)
     return jsonify({'payment_url': pay_url, 'track_id': track_id})
 
 
@@ -2150,7 +2230,8 @@ def api_billing_dev_activate():
     try:
         u = s.get(User, user['id'])
         _activate_plan(s, u, tier_key)
-        s.add(Payment(user_id=u.id, tier=tier_key, amount=str(tier['price']),
+        s.add(Payment(user_id=u.id, tier=tier_key, provider='dev',
+                      amount=str(tier['price']),
                       currency='USD', order_id=f'dev-{secrets.token_hex(6)}',
                       status='dev', paid_at=now))
         expires = u.expires_at
@@ -2196,6 +2277,76 @@ def api_billing_webhook():
             return ('ok', 200)
         pay.status = status
         if status.lower() == 'paid' and not pay.paid_at:
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            pay.paid_at = now
+            u = s.get(User, pay.user_id)
+            if u:
+                expires = _activate_plan(s, u, pay.tier)
+                logger.info('PLAN ACTIVATED user=%s tier=%s until=%s order=%s',
+                            u.email, pay.tier, expires, order_id)
+        s.commit()
+    finally:
+        s.close()
+    return ('ok', 200)
+
+
+def _stripe_signature_ok(raw, sig_header, secret, tolerance=300):
+    """Verifies Stripe's `Stripe-Signature` header: t=<timestamp>,v1=<hmac>.
+    See https://stripe.com/docs/webhooks#verify-manually."""
+    parts = dict(p.split('=', 1) for p in sig_header.split(',') if '=' in p)
+    t, v1 = parts.get('t'), parts.get('v1')
+    if not t or not v1:
+        return False
+    try:
+        if abs(time.time() - int(t)) > tolerance:
+            return False
+    except ValueError:
+        return False
+    expected = hmac.new(secret.encode(), f'{t}.'.encode() + raw,
+                        hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, v1)
+
+
+@app.route('/api/billing/webhook/stripe', methods=['POST'])
+def api_billing_webhook_stripe():
+    """Stripe payment callback. Signed per Stripe's own scheme (not Oxapay's),
+    so it gets a separate endpoint and secret."""
+    raw = request.get_data()
+    secret = _stripe_webhook_secret()
+    sig = request.headers.get('Stripe-Signature', '')
+    if not secret:
+        error_logger.error('Stripe webhook received but no webhook secret configured')
+        return ('ok', 200)
+    if not _stripe_signature_ok(raw, sig, secret):
+        logger.warning('Stripe webhook rejected: bad signature')
+        return ('ok', 200)
+
+    try:
+        event = json.loads(raw.decode() or '{}')
+    except Exception:
+        return ('ok', 200)
+    event_type = event.get('type') or ''
+    obj = (event.get('data') or {}).get('object') or {}
+    order_id = str((obj.get('metadata') or {}).get('order_id') or
+                   obj.get('client_reference_id') or '')
+    logger.info('STRIPE WEBHOOK type=%s order=%s payment_status=%s',
+                event_type, order_id, obj.get('payment_status'))
+    if event_type not in ('checkout.session.completed',
+                          'checkout.session.async_payment_succeeded'):
+        return ('ok', 200)
+    if not order_id:
+        return ('ok', 200)
+
+    from db import User, get_payment_by_order
+    s = _db_session()
+    try:
+        pay = get_payment_by_order(s, order_id)
+        if not pay:
+            logger.warning('Stripe webhook for unknown order %s', order_id)
+            return ('ok', 200)
+        paid = obj.get('payment_status') == 'paid'
+        pay.status = 'paid' if paid else (obj.get('payment_status') or pay.status)
+        if paid and not pay.paid_at:
             now = datetime.now(timezone.utc).replace(tzinfo=None)
             pay.paid_at = now
             u = s.get(User, pay.user_id)

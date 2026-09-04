@@ -430,12 +430,14 @@ class User(Base):
 
 
 class Payment(Base):
-    """One row per Oxapay invoice, created at checkout and updated by webhook."""
+    """One row per checkout attempt (Oxapay invoice or Stripe session), created
+    at checkout and updated by that provider's webhook."""
     __tablename__ = 'payments'
 
     id = Column(String(32), primary_key=True, default=_uid)
     user_id = Column(String(32), ForeignKey('users.id'), nullable=False, index=True)
     tier = Column(String(32), nullable=False)
+    provider = Column(String(16), default='oxapay')  # oxapay | stripe
     amount = Column(String(32), default='')
     currency = Column(String(16), default='USD')
     order_id = Column(String(64), unique=True, index=True)
@@ -494,7 +496,8 @@ def _add_missing_columns(table_name, model):
 
 def init_db():
     Base.metadata.create_all(engine)
-    for table, model in (('users', User), ('saved_personas', SavedPersona)):
+    for table, model in (('users', User), ('saved_personas', SavedPersona),
+                         ('payments', Payment)):
         try:
             _add_missing_columns(table, model)
         except Exception:

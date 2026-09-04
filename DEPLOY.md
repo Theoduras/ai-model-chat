@@ -251,50 +251,100 @@ for character.
 `GET /healthz` reports `"google_login": true` once the client ID and secret
 are both readable by the running instance.
 
-## Payments (Oxapay)
+## Payments (Oxapay + Stripe)
 
-Plans are billed in crypto through [Oxapay](https://oxapay.com). Free plans
-activate without an invoice; every paid tier in `TIERS` creates one.
+Plans can be paid in crypto through [Oxapay](https://oxapay.com) or by card
+through [Stripe](https://stripe.com). Both can be on at once — the billing
+page shows "Pay with card" and "Pay with crypto" side by side, whichever
+providers have keys set; with neither set it shows "Payments not configured".
+Free plans always activate without either provider. Every paid tier in
+`TIERS` creates one invoice/session per attempt, recorded as a `payments` row
+with a `provider` column (`oxapay` | `stripe` | `free` | `dev`).
 
-### Set up the merchant account
+For **velvetfunneler.com**, `PUBLIC_BASE_URL` below should be
+`https://velvetfunneler.com` — it is the one setting both providers share, so
+set it once.
+
+### Set up Oxapay
 
 1. Sign up at <https://oxapay.com> and verify the account.
-2. **Merchant → Payment → Add new business**: give it a name and the site URL.
+2. **Merchant → Payment → Add new business**: give it a name and the site URL
+   (`https://velvetfunneler.com`).
 3. Copy the **Merchant API key** from that business.
-4. Set the callback (IPN) URL to `https://your-domain.com/api/billing/webhook`.
+4. Set the callback (IPN) URL to `https://velvetfunneler.com/api/billing/webhook`.
    Oxapay also receives it per invoice from `callback_url`, so this is only a
    fallback for the dashboard's own tests.
 5. Choose which coins to accept and where to auto-convert or settle. The app
    prices everything in USD and lets Oxapay pick the coin at checkout.
 
-### Environment variables
+| Variable | Why |
+|---|---|
+| `OXAPAY_MERCHANT_KEY` | Merchant API key. The "Pay with crypto" button stays hidden until it is set. |
+
+### Set up Stripe
+
+1. Sign up at <https://dashboard.stripe.com/register> and complete business
+   verification (payouts need it; test-mode checkout works before that).
+2. **Developers → API keys**: copy the **Secret key** (`sk_live_...` in live
+   mode, `sk_test_...` in test mode) → `STRIPE_SECRET_KEY`.
+3. **Developers → Webhooks → Add endpoint**:
+   - Endpoint URL: `https://velvetfunneler.com/api/billing/webhook/stripe`
+   - Events to send: `checkout.session.completed` and
+     `checkout.session.async_payment_succeeded` (covers delayed methods like
+     bank debits).
+4. Copy that endpoint's **Signing secret** (`whsec_...`) → `STRIPE_WEBHOOK_SECRET`.
+5. Test end to end in **test mode** first (Stripe's test card `4242 4242 4242
+   4242`, any future expiry/CVC) before switching the keys to live mode.
 
 | Variable | Why |
 |---|---|
-| `OXAPAY_MERCHANT_KEY` | Merchant API key. Checkout returns "Payments are not configured yet." (503) until it is set. |
-| `PUBLIC_BASE_URL` | Origin used for `callback_url` and `return_url` on each invoice. Same variable as Google above. |
+| `STRIPE_SECRET_KEY` | Secret API key. The "Pay with card" button stays hidden until this and the webhook secret are both set. |
+| `STRIPE_WEBHOOK_SECRET` | Signing secret for the `/api/billing/webhook/stripe` endpoint specifically — Stripe issues a different secret per endpoint, so copy the one for that exact URL, not any other webhook you may have. |
+
+Stripe Checkout is used in one-off `mode: payment`, not a subscription — the
+plan's own `days` field controls how long access lasts, matching Oxapay's
+model, so a lapsed plan is renewed the same way it was bought rather than
+auto-billed.
+
+### Shared environment variables
+
+| Variable | Why |
+|---|---|
+| `PUBLIC_BASE_URL` | Origin used for both providers' callback/webhook/return URLs, e.g. `https://velvetfunneler.com`. Same variable Google OAuth uses above. |
 | `DEV_FAKE_PAYMENTS` | Set to `1` **only** on a dev deployment to activate plans without paying. Leave unset in production — the endpoint 404s without it. |
 
 ### How a payment flows
 
-1. `POST /api/billing/checkout` creates an Oxapay invoice, writes a `pending`
-   row to `payments`, and returns `payment_url`; the browser is sent there.
-2. The creator pays; Oxapay POSTs to `/api/billing/webhook`.
-3. The webhook verifies an HMAC-SHA512 of the raw body against the merchant
-   key, then on `status: paid` stamps `paid_at` and extends the plan.
+1. `POST /api/billing/checkout` with `{tier, provider}` creates an Oxapay
+   invoice or a Stripe Checkout Session, writes a `pending` row to
+   `payments`, and returns `payment_url`; the browser is sent there.
+2. The creator pays; the provider calls back:
+   - Oxapay POSTs to `/api/billing/webhook`, signed with HMAC-SHA512 over the
+     raw body against the merchant key.
+   - Stripe POSTs to `/api/billing/webhook/stripe`, signed with its own
+     `Stripe-Signature` header (`t=<timestamp>,v1=<hmac-sha256>`), verified
+     against `STRIPE_WEBHOOK_SECRET` with a 5-minute timestamp tolerance.
+3. On a paid event, the matching webhook stamps `paid_at` and extends the
+   plan via `_activate_plan`, which is provider-agnostic.
 4. The creator lands back on `/billing/return`, which forwards to `/dashboard`
    once the account is active.
 
-Because the plan is activated by the webhook, the callback URL must be
+Because the plan is activated by the webhook, both callback URLs must be
 reachable from the public internet — a private Cloud Run service or a
-localhost tunnel that is down means paid invoices never activate.
+localhost tunnel that is down means paid invoices/sessions never activate.
 
 ### Verifying
 
-- `GET /healthz` reports `"payments": true` once the key is set.
-- A bad signature is logged as `Oxapay webhook rejected: bad HMAC signature`
-  and answered `200`, so Oxapay does not retry a forged call forever.
-- Successful activation logs `PLAN ACTIVATED user=... tier=... until=...`.
+- `GET /healthz` reports `"payments_oxapay"` and `"payments_stripe"` once
+  each provider's keys are set.
+- A bad Oxapay signature is logged as `Oxapay webhook rejected: bad HMAC
+  signature`; a bad Stripe one as `Stripe webhook rejected: bad signature`.
+  Both are answered `200` so the provider does not retry a forged call
+  forever.
+- Successful activation on either provider logs
+  `PLAN ACTIVATED user=... tier=... until=... order=...`.
+- The account page's payment history table has a **Method** column showing
+  which provider was used per row.
 
 ## SEO and Google Ads (SEA)
 
