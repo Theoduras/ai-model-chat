@@ -7200,7 +7200,10 @@ FANVUE_API_BASE = 'https://api.fanvue.com'
 FANVUE_AUTH_URL = 'https://auth.fanvue.com/oauth2/auth'
 FANVUE_TOKEN_URL = 'https://auth.fanvue.com/oauth2/token'
 FANVUE_API_VERSION = '2025-06-26'
-FANVUE_SCOPES = 'openid offline offline_access read:self read:chat write:chat read:fan read:media write:media read:creator read:agency'
+FANVUE_SCOPES = ('openid offline offline_access read:self read:chat write:chat '
+                 'read:fan read:media write:media read:creator read:agency '
+                 # /earnings backs the purchase reconciler.
+                 'read:insights')
 
 
 def _fanvue_app():
@@ -8213,6 +8216,305 @@ def api_fanvue_ppv():
                     'warnings': _fv_set_warnings(sets)})
 
 
+# --- Purchase signals -------------------------------------------------------
+#
+# Fanvue has no endpoint that answers "did this fan buy that item", so a sale is
+# only ever known from a signal we caught and wrote down. Webhooks are the fast
+# signal but never a memory: delivery is six attempts over ~2.5 minutes with no
+# replay, and 20 consecutive failures disables the endpoint with no backfill.
+# So everything a webhook tells us is also derivable from the API, and the
+# reconciler below re-derives it.
+
+FV_WEBHOOK_TOLERANCE = 300      # seconds either side of the signed timestamp
+FV_SEEN_EVENTS_MAX = 1000
+
+
+def _fv_webhook_secret():
+    return (os.getenv('FANVUE_WEBHOOK_SECRET') or '').strip()
+
+
+def _fv_storage_is_ephemeral():
+    """True when the store is a temp SQLite file rather than a real database.
+
+    db.py falls back to one silently, so on such a deployment every purchase is
+    lost on the next cold start and nothing about the app looks wrong. Worth
+    saying out loud wherever a creator might read it."""
+    try:
+        from db import DATABASE_URL
+        return str(DATABASE_URL).startswith('sqlite')
+    except Exception:
+        return False
+
+
+def _fv_verify_signature(raw_body, header, secret):
+    """Fanvue signs 'X-Fanvue-Signature: t=<unix>,v0=<hex>' as an HMAC-SHA256
+    over the exact bytes of "{t}.{body}". Returns (ok, reason)."""
+    if not secret:
+        return False, 'no signing secret configured'
+    parts = {}
+    for chunk in (header or '').split(','):
+        k, _, v = chunk.strip().partition('=')
+        if k:
+            parts[k] = v
+    ts, sig = parts.get('t'), parts.get('v0')
+    if not ts or not sig:
+        return False, 'malformed signature header'
+    try:
+        age = abs(time.time() - int(ts))
+    except (TypeError, ValueError):
+        return False, 'bad timestamp'
+    if age > FV_WEBHOOK_TOLERANCE:
+        return False, f'timestamp {int(age)}s outside the {FV_WEBHOOK_TOLERANCE}s window'
+    expected = hmac.new(secret.encode('utf-8'),
+                        ts.encode('utf-8') + b'.' + raw_body,
+                        hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, sig):
+        return False, 'signature mismatch'
+    return True, ''
+
+
+def _fv_event_seen(event_id):
+    """True if this event was already applied. Fanvue guarantees at-least-once
+    delivery, so the same payment can arrive more than once."""
+    if not event_id:
+        return False
+    key = 'fanvue_seen_events'
+    try:
+        seen = json.loads(_get_setting(key) or '[]')
+        if not isinstance(seen, list):
+            seen = []
+    except Exception:
+        seen = []
+    if event_id in seen:
+        return True
+    seen.append(event_id)
+    _set_setting(key, json.dumps(seen[-FV_SEEN_EVENTS_MAX:]))
+    return False
+
+
+def _fv_persona_for_creator(creator_uuid):
+    """Which connected persona a webhook belongs to. Webhooks arrive on one
+    endpoint for every creator the app is authorised on."""
+    if not creator_uuid:
+        return ''
+    for slug in sorted({p.get('slug') for p in db_list_personas()} |
+                       set(_fanvue_enabled_list())):
+        if not slug:
+            continue
+        if _fanvue_creator(slug).get('uuid') == creator_uuid:
+            return slug
+    return ''
+
+
+def _fv_settle_drop(persona, fan_uuid, amount_cents=None, invoice_id=None,
+                    message_uuid=None, source='webhook', when=None):
+    """Mark the fan's matching unbought drop as paid.
+
+    Matched by message uuid when we have one, else by the fan's most recent
+    unbought drop at that price — Fanvue's payment events name the fan and the
+    amount but not the message that generated the charge."""
+    try:
+        from db import SessionLocal, PpvDrop, mark_ppv_paid
+        s = SessionLocal()
+    except Exception as e:
+        logger.warning('PPV settle failed to open the ledger: %s', str(e)[:120])
+        return None
+    try:
+        q = s.query(PpvDrop).filter(PpvDrop.persona == persona,
+                                    PpvDrop.paid_at.is_(None))
+        if message_uuid:
+            row = q.filter(PpvDrop.message_uuid == str(message_uuid)).first()
+        else:
+            q = q.filter(PpvDrop.fan_uuid == str(fan_uuid or ''))
+            if amount_cents:
+                q = q.filter(PpvDrop.price_cents == int(amount_cents))
+            row = q.order_by(PpvDrop.created_at.desc()).first()
+        if row is None:
+            return None
+        mark_ppv_paid(s, row.id, invoice_id=invoice_id, source=source, when=when)
+        s.commit()
+        logger.info('PPV PAID [%s] %s tier %d via %s ($%g)', persona, row.set_name,
+                    (row.tier_index or 0) + 1, source, (row.price_cents or 0) / 100)
+        _fv_trace(persona, 'ppv',
+                  f'\U0001F4B0 bought: {row.set_name} tier {(row.tier_index or 0) + 1} '
+                  f'(${(row.price_cents or 0) / 100:g}, via {source})')
+        return row.id
+    except Exception as e:
+        logger.warning('PPV settle failed for %s/%s: %s', persona, fan_uuid, str(e)[:140])
+        return None
+    finally:
+        try:
+            s.close()
+        except Exception:
+            pass
+
+
+def _fv_mark_read(persona, fan_uuid):
+    """Note that the fan opened their last unlock without buying it. That is a
+    price objection rather than inattention, so the retry goes out cheaper."""
+    try:
+        from db import SessionLocal, PpvDrop, mark_ppv_read
+        s = SessionLocal()
+    except Exception:
+        return
+    try:
+        row = (s.query(PpvDrop)
+               .filter(PpvDrop.persona == persona, PpvDrop.fan_uuid == str(fan_uuid),
+                       PpvDrop.paid_at.is_(None))
+               .order_by(PpvDrop.created_at.desc()).first())
+        if row is not None:
+            mark_ppv_read(s, row.id)
+            s.commit()
+    except Exception:
+        pass
+    finally:
+        try:
+            s.close()
+        except Exception:
+            pass
+
+
+@app.route('/webhooks/fanvue', methods=['POST'])
+def fanvue_webhook():
+    """Fanvue event receiver. Signature-verified and idempotent; anything it
+    misses is recovered by the reconciler, because Fanvue never replays."""
+    raw = request.get_data()          # before any JSON parsing — the signature
+    secret = _fv_webhook_secret()     # covers the exact bytes
+    ok, why = _fv_verify_signature(raw, request.headers.get('X-Fanvue-Signature'), secret)
+    if not ok:
+        logger.warning('Fanvue webhook rejected: %s', why)
+        return jsonify({'error': 'invalid signature'}), 401
+    try:
+        ev = json.loads(raw.decode('utf-8'))
+    except Exception:
+        return jsonify({'error': 'invalid payload'}), 400
+
+    kind = str(ev.get('type') or '')
+    data = ev.get('data') if isinstance(ev.get('data'), dict) else {}
+    # message.read is explicitly not idempotent on its event id, so it is the
+    # one topic not deduped.
+    if kind != 'creator.message.read' and _fv_event_seen(str(ev.get('id') or '')):
+        return jsonify({'ok': True, 'duplicate': True})
+
+    creator = (data.get('creator') or {}).get('uuid') if isinstance(data.get('creator'), dict) else None
+    fan = (data.get('fan') or {}).get('uuid') if isinstance(data.get('fan'), dict) else None
+    persona = _fv_persona_for_creator(creator)
+    if not persona:
+        logger.info('Fanvue webhook %s for an unknown creator %s', kind, creator)
+        return jsonify({'ok': True, 'ignored': 'unknown creator'})
+
+    if kind == 'creator.payment.succeeded':
+        amount = _fv_first(data, 'amount', 'gross', 'total', default=None)
+        _fv_settle_drop(persona, fan,
+                        amount_cents=int(amount) if amount else None,
+                        invoice_id=str(_fv_first(data, 'id', 'invoice_id', default='') or '') or None,
+                        source='webhook')
+    elif kind == 'creator.message.read':
+        _fv_mark_read(persona, fan)
+    return jsonify({'ok': True})
+
+
+def _fv_reconcile_purchases(persona, days=45, limit_pages=20):
+    """Re-derive purchases from Fanvue's own ledger.
+
+    This is what makes a sale knowable after downtime: webhook deliveries are
+    gone for good once their retries are spent, but the invoices are not. Walks
+    /earnings newest-first and settles any unbought drop it can match, then
+    falls back to reading purchasedAt on the messages of fans still unsettled."""
+    sets = _fanvue_ppv_sets(persona)
+    if not sets:
+        return {'settled': 0, 'checked': 0}
+    since = datetime.now(timezone.utc) - timedelta(days=int(days))
+    try:
+        from db import SessionLocal, open_ppv_drops
+        s = SessionLocal()
+        try:
+            open_rows = [(d.id, d.fan_uuid, d.price_cents, d.message_uuid)
+                         for d in open_ppv_drops(s, persona, since=since)]
+        finally:
+            s.close()
+    except Exception as e:
+        logger.warning('Reconcile [%s]: ledger unreadable: %s', persona, str(e)[:120])
+        return {'settled': 0, 'checked': 0, 'error': str(e)[:120]}
+    if not open_rows:
+        return {'settled': 0, 'checked': 0}
+
+    settled, cursor = 0, ''
+    scope = _fanvue_scope(persona)
+    for _ in range(limit_pages):
+        try:
+            path = f'{scope}/earnings?size=50' + (f'&cursor={urllib.parse.quote(cursor)}' if cursor else '')
+            res = _fanvue_call(persona, 'GET', path)
+        except Exception as e:
+            logger.warning('Reconcile [%s]: /earnings failed: %s', persona, str(e)[:140])
+            break
+        rows = _fv_list(res)
+        if not rows:
+            break
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            fan_u = r.get('fan') if isinstance(r.get('fan'), str) else \
+                (r.get('fan') or {}).get('uuid') if isinstance(r.get('fan'), dict) else None
+            fan_u = fan_u or _fv_first(r, 'userUuid', 'fanUuid', 'purchaserUuid', default=None)
+            amount = _fv_first(r, 'amount', 'gross', 'net', 'total', default=None)
+            try:
+                amount = int(amount)
+            except (TypeError, ValueError):
+                amount = None
+            if amount is not None and amount <= 0:
+                continue          # refunds and chargebacks are negative rows
+            if _fv_settle_drop(persona, fan_u, amount_cents=amount,
+                               invoice_id=str(_fv_first(r, 'id', 'invoiceNumber',
+                                                        default='') or '') or None,
+                               source='earnings'):
+                settled += 1
+        cursor = str(_fv_first(res if isinstance(res, dict) else {},
+                               'nextCursor', 'next_cursor', default='') or '')
+        if not cursor:
+            break
+
+    # Anything /earnings couldn't place, ask the message itself about.
+    still_open = {r[1] for r in open_rows}
+    for fan_u in list(still_open)[:25]:
+        for page in (1, 2):
+            try:
+                msgs = _fv_list(_fanvue_call(
+                    persona, 'GET',
+                    f'{scope}/chats/{fan_u}/messages?page={page}&size=50'))
+            except Exception:
+                break
+            if not msgs:
+                break
+            for m in msgs:
+                if not isinstance(m, dict) or not m.get('purchasedAt'):
+                    continue
+                mu = str(_fv_first(m, 'uuid', 'id', default='') or '')
+                if mu and _fv_settle_drop(persona, fan_u, message_uuid=mu,
+                                          source='poll'):
+                    settled += 1
+    logger.info('Reconcile [%s]: %d of %d open drops settled', persona, settled,
+                len(open_rows))
+    if settled:
+        _fv_trace(persona, 'ppv', f'reconciled {settled} purchase(s) from Fanvue')
+    return {'settled': settled, 'checked': len(open_rows)}
+
+
+@app.route('/api/fanvue/reconcile', methods=['POST'])
+def api_fanvue_reconcile():
+    """Rebuild purchase state from Fanvue's ledger — run after downtime, after
+    a redeploy, or any time the funnel looks stuck."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    d = request.json or {}
+    persona = (d.get('persona') or '').strip()
+    if not persona:
+        return jsonify({'ok': False, 'error': 'Missing persona'}), 400
+    days = max(1, min(int(d.get('days') or 45), 365))
+    out = _fv_reconcile_purchases(persona, days=days)
+    return jsonify({'ok': True, **out})
+
+
 @app.route('/api/fanvue/draft', methods=['POST'])
 def api_fanvue_draft():
     """Draft an in-persona, funnel-aware reply to a fan message. Works with no
@@ -9149,7 +9451,12 @@ def _fanvue_auto_round(persona):
     ppv_paid_key = f'fanvue_ppv_testpaid_{persona}'
     if ppv_on:
         _fv_migrate_ppv_state(persona, ppv_sets)
+    # A fan typing this marks their own unlock paid, so it must never be live
+    # in production — the env flag is the guard, not the empty string.
     ppv_test_phrase = (opts.get('ppv_test_phrase') or '').strip().lower()
+    if ppv_test_phrase and (os.getenv('FANVUE_PPV_TEST_PHRASE_ENABLED') or '').strip().lower() \
+            not in ('1', 'true', 'yes'):
+        ppv_test_phrase = ''
     hcfg = _fv_humanize_cfg(persona)
     # Messages that must pass before the first drop, and between later ones.
     ppv_first_after = max(1, min(int(opts.get('ppv_first_after', 6) or 6), 200))
@@ -9483,8 +9790,12 @@ def api_fanvue_auto():
 
 @app.route('/api/fanvue/ppv-reset', methods=['POST'])
 def api_fanvue_ppv_reset():
-    """Forget what has already been sent, so the sets start from the top again.
-    With a fan_uuid it resets that one fan; without, everyone on this persona."""
+    """Forget what has already been *sent*, so the sets start from the top again.
+
+    Purchases are a different fact and are never touched: the ppv_drops ledger
+    is what later confirms a fan paid, and it has to outlive any number of
+    progress resets. Resetting everyone needs confirm:true — it used to be one
+    unconfirmed POST away."""
     if not _check_admin():
         return jsonify({'error': 'Unauthorized'}), 401
     d = request.json or {}
@@ -9492,9 +9803,13 @@ def api_fanvue_ppv_reset():
     if not persona:
         return jsonify({'ok': False, 'error': 'Missing persona'}), 400
     fan = (d.get('fan_uuid') or '').strip()
-    keys = [f'fanvue_ppv_sent_{persona}', f'fanvue_ppv_at_{persona}',
-            f'fanvue_ppv_last_{persona}', f'fanvue_ppv_testpaid_{persona}',
-            f'fanvue_ppv_retry_{persona}']
+    if not fan and not d.get('confirm'):
+        return jsonify({'ok': False, 'needs_confirm': True, 'error':
+                        'This restarts the sets for every fan on this persona. '
+                        'Send confirm:true to go ahead.'}), 400
+    keys = [f'fanvue_ppv_state_{persona}', f'fanvue_ppv_sent_{persona}',
+            f'fanvue_ppv_at_{persona}', f'fanvue_ppv_last_{persona}',
+            f'fanvue_ppv_testpaid_{persona}', f'fanvue_ppv_retry_{persona}']
     cleared = 0
     for k in keys:
         if fan:
@@ -9508,8 +9823,10 @@ def api_fanvue_ppv_reset():
         else:
             _set_setting(k, '{}')
     who = fan or 'every fan'
-    _fv_trace(persona, 'ppv', f'PPV progress reset for {who} — the sets start again')
-    return jsonify({'ok': True, 'fan_uuid': fan, 'cleared': cleared if fan else len(keys)})
+    _fv_trace(persona, 'ppv', f'PPV send progress reset for {who} — the sets '
+                              'start again (purchase history kept)')
+    return jsonify({'ok': True, 'fan_uuid': fan, 'purchases_kept': True,
+                    'cleared': cleared if fan else len(keys)})
 
 
 @app.route('/api/fanvue/lists')
@@ -9568,12 +9885,30 @@ def api_fanvue_trace():
         problems.append('Never replying to fans in: ' + ', '.join(
             l['name'] for l in _fv_clean_lists(opts['exclude_lists'])))
     if opts.get('ppv_test_phrase'):
-        problems.append('PPV test phrase is active: "%s" — a fan saying it counts '
-                        'as a paid unlock.' % opts['ppv_test_phrase'])
+        if (os.getenv('FANVUE_PPV_TEST_PHRASE_ENABLED') or '').strip().lower() \
+                in ('1', 'true', 'yes'):
+            problems.append('PPV test phrase is active: "%s" — a fan saying it '
+                            'counts as a paid unlock.' % opts['ppv_test_phrase'])
+        else:
+            problems.append('PPV test phrase is set but ignored — set '
+                            'FANVUE_PPV_TEST_PHRASE_ENABLED=1 to use it in testing.')
+    # The single failure that silently loses every purchase: without a real
+    # Postgres the store is a temp file, wiped on the next cold start.
+    ephemeral = _fv_storage_is_ephemeral()
+    if ephemeral:
+        problems.append('Purchases will be forgotten on the next redeploy — the '
+                        'database is an ephemeral file. Set DATABASE_URL (or the '
+                        'Cloud SQL env vars) to keep them.')
+    if not _fv_webhook_secret():
+        problems.append('No FANVUE_WEBHOOK_SECRET, so payment webhooks are '
+                        'rejected. Purchases are still picked up by Reconcile, '
+                        'just later.')
     return jsonify({'persona': persona, 'connected': connected,
                     'enabled': bool(opts.get('enabled')),
                     'running': bool(lock and lock.locked()),
                     'queued': _fv_inflight[0], 'workers': _fv_workers(),
+                    'storage_ephemeral': ephemeral,
+                    'webhook_ready': bool(_fv_webhook_secret()),
                     'problems': problems, 'rows': rows[-FV_TRACE_MAX:]})
 
 
