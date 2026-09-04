@@ -229,6 +229,33 @@ class XMessage(Base):
 Index('ix_xmsg_thread', XMessage.persona, XMessage.x_user_id, XMessage.created_at)
 
 
+class PpvDrop(Base):
+    """One paid unlock sent to one fan: what went out, and whether it was ever
+    bought. The settings blobs track what was *sent*; this is the only record of
+    what was *paid for*, so it is never pruned and never cleared by a progress
+    reset. read_at/paid_at only ever go from null to a timestamp, except when a
+    refund reverses one."""
+    __tablename__ = 'ppv_drops'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    created_at = Column(DateTime, default=_now, index=True)
+    persona = Column(String(64), index=True)
+    fan_uuid = Column(String(64), index=True)
+    set_id = Column(String(64))
+    set_name = Column(String(64))
+    tier_index = Column(Integer)
+    price_cents = Column(Integer)
+    media_uuids = Column(Text)                   # JSON array
+    message_uuid = Column(String(64), index=True)  # returned by the send call
+    read_at = Column(DateTime)
+    paid_at = Column(DateTime)
+    invoice_id = Column(String(64), index=True)  # Fanvue's FV-nnnnn join key
+    paid_source = Column(String(16))             # webhook | poll | earnings | manual
+
+
+Index('ix_ppv_drops_fan', PpvDrop.persona, PpvDrop.fan_uuid, PpvDrop.created_at)
+
+
 class AppSetting(Base):
     """Small persistent key/value store (e.g. the X app Client ID + redirect URI
     so connecting/refreshing doesn't need them re-entered each time)."""
@@ -622,9 +649,14 @@ def add_x_message(session, persona, x_user_id, x_username, direction, text):
 
 
 def list_x_messages(session, persona, x_user_id, limit=500):
-    return (session.query(XMessage)
+    """The most recent `limit` messages of a thread, oldest first. Ordered
+    descending before the limit so a thread longer than the window keeps moving
+    — ascending would pin it to the first `limit` messages it ever had."""
+    rows = (session.query(XMessage)
             .filter(XMessage.persona == persona, XMessage.x_user_id == str(x_user_id))
-            .order_by(XMessage.created_at).limit(limit).all())
+            .order_by(XMessage.created_at.desc()).limit(limit).all())
+    rows.reverse()
+    return rows
 
 
 def list_x_conversations(session, limit=200):
@@ -686,6 +718,75 @@ def prune_x_data(session, days=14):
         deleted += session.query(model).filter(model.created_at < cutoff).delete(
             synchronize_session=False)
     return deleted
+
+
+def record_ppv_drop(session, persona, fan_uuid, set_id, set_name, tier_index,
+                    price_cents, media_uuids, message_uuid=None):
+    """Log a paid unlock at the moment it is sent, so the sale has a record even
+    if every later signal about it is lost."""
+    import json as _json
+    d = PpvDrop(persona=persona, fan_uuid=str(fan_uuid or ''), set_id=str(set_id or ''),
+                set_name=(set_name or '')[:64], tier_index=int(tier_index or 0),
+                price_cents=int(price_cents or 0),
+                media_uuids=_json.dumps(list(media_uuids or [])),
+                message_uuid=str(message_uuid or '') or None)
+    session.add(d)
+    return d
+
+
+def list_ppv_drops(session, persona, fan_uuid=None, limit=200):
+    """Drops newest first, for one fan or the whole persona."""
+    q = session.query(PpvDrop).filter(PpvDrop.persona == persona)
+    if fan_uuid:
+        q = q.filter(PpvDrop.fan_uuid == str(fan_uuid))
+    return q.order_by(PpvDrop.created_at.desc()).limit(limit).all()
+
+
+def open_ppv_drops(session, persona, since=None, limit=500):
+    """Drops still awaiting payment — what a reconciliation sweep tries to
+    settle against Fanvue's own ledger."""
+    q = session.query(PpvDrop).filter(PpvDrop.persona == persona,
+                                      PpvDrop.paid_at.is_(None))
+    if since:
+        q = q.filter(PpvDrop.created_at >= since)
+    return q.order_by(PpvDrop.created_at.desc()).limit(limit).all()
+
+
+def mark_ppv_paid(session, drop_id, invoice_id=None, source='webhook', when=None):
+    d = session.get(PpvDrop, drop_id)
+    if d is None or d.paid_at:
+        return d
+    d.paid_at = when or _now()
+    d.invoice_id = (invoice_id or None)
+    d.paid_source = (source or '')[:16]
+    return d
+
+
+def mark_ppv_read(session, drop_id, when=None):
+    d = session.get(PpvDrop, drop_id)
+    if d is not None and not d.read_at:
+        d.read_at = when or _now()
+    return d
+
+
+def ppv_set_stats(session, persona):
+    """Per (set, tier): how many went out and how many were bought — what the
+    builder shows on each tier pill."""
+    rows = (session.query(PpvDrop.set_id, PpvDrop.tier_index,
+                          func.count(PpvDrop.id),
+                          func.count(PpvDrop.paid_at))
+            .filter(PpvDrop.persona == persona)
+            .group_by(PpvDrop.set_id, PpvDrop.tier_index).all())
+    return {f'{r[0]}:{r[1]}': {'sent': int(r[2] or 0), 'bought': int(r[3] or 0)}
+            for r in rows}
+
+
+def fan_ppv_spend(session, persona, fan_uuid):
+    """Total cents this fan has actually paid for unlocks."""
+    v = (session.query(func.sum(PpvDrop.price_cents))
+         .filter(PpvDrop.persona == persona, PpvDrop.fan_uuid == str(fan_uuid),
+                 PpvDrop.paid_at.isnot(None)).scalar())
+    return int(v or 0)
 
 
 def count_x_messages(session, persona, x_user_id):

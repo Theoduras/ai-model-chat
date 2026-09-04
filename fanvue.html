@@ -4,6 +4,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Fanvue Chatbot</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" href="/favicon.png">
   <script src="/js/theme.js"></script>
   <link rel="stylesheet" href="/css/style.css">
   <script src="/js/devnav.js" defer></script>
@@ -115,7 +117,11 @@
         </div>
         <div class="field" style="margin:0;">
           <label style="font-size:.72rem;">Trigger words <span style="color:var(--text-muted);">(comma separated)</span></label>
-          <input type="text" id="ppv-set-keywords" placeholder="e.g. bed, sleepy, goodnight" onchange="stashSet()">
+          <input type="text" id="ppv-set-keywords" placeholder="e.g. stocking*, green dress, bed^5, !broke" onchange="stashSet()">
+          <span class="hint" style="display:block;margin-top:3px;font-size:.68rem;color:var(--text-muted);">
+            <code>word</code> exact · <code>word*</code> also matches longer forms · <code>two words</code> a phrase ·
+            <code>word^5</code> counts more · <code>!word</code> holds back every set when it comes up
+          </span>
         </div>
         <div class="field" style="margin:0;">
           <label style="font-size:.72rem;">Hours it suits <span style="color:var(--text-muted);">(0–23, blank = any)</span></label>
@@ -139,13 +145,30 @@
           <label style="font-size:.72rem;">This tier's unlock price in $ (min $3)</label>
           <input type="number" id="ppv-price" placeholder="e.g. 10" min="3" step="1" onchange="stashTier()">
         </div>
+        <button class="btn-ai" style="background:var(--border);" onclick="ladderPrices()" title="Fill this set's tiers from tier 1, climbing by $5">Ladder ＋$5</button>
         <button class="btn-ai" onclick="savePpv()">Save all sets</button>
       </div>
       <div class="field full" style="margin-top:10px;">
         <input type="text" id="ppv-caption" placeholder="Caption for this tier (optional) — e.g. made something just for you 🙈" onchange="stashTier()">
       </div>
       <span class="hint" id="ppv-hint" style="display:block;margin-top:6px;"></span>
-      <span class="hint" style="display:block;margin-top:4px;color:var(--text-muted);">Each set is one theme — like an outfit. She picks the set that matches what was just said in chat and the time of day, then sends that set's tiers in order as the chat deepens.</span>
+      <div class="hint" id="ppv-warnings" style="display:block;margin-top:6px;font-size:.74rem;"></div>
+      <div class="hint" id="ppv-storage-warn" style="display:block;margin-top:6px;font-size:.74rem;color:#fbbf24;"></div>
+      <span class="hint" style="display:block;margin-top:4px;color:var(--text-muted);">Each set is one theme — like an outfit. She stays on the set a fan is working through, sending its tiers in order, and only moves to another when it clearly fits better or the set is used up.</span>
+
+      <div style="margin-top:14px;border-top:1px solid var(--border-soft);padding-top:12px;">
+        <label style="display:block;margin-bottom:6px;">🔍 Try a message <span style="font-weight:400;color:var(--text-muted);">(see which set would go out, and why — nothing is sent)</span></label>
+        <div class="row-inline" style="margin-bottom:8px;">
+          <div class="field" style="margin:0;flex:1;min-width:220px;">
+            <input type="text" id="ppv-sim-text" placeholder="e.g. you look unreal in those stockings">
+          </div>
+          <div class="field" style="margin:0;max-width:110px;">
+            <input type="number" id="ppv-sim-hour" min="0" max="23" placeholder="hour">
+          </div>
+          <button class="btn-ai" onclick="simulatePpv()">Simulate</button>
+        </div>
+        <div id="ppv-sim-out" style="font-size:.78rem;"></div>
+      </div>
     </div>
     <div id="connect-panel" style="display:none; margin-top:4px; border-top:1px solid var(--border-soft); padding-top:16px;">
       <div class="field full">
@@ -243,7 +266,16 @@
         <label>How many times <span style="font-weight:400;color:var(--text-muted);">(re-offers before she moves on and stops asking)</span></label>
         <input type="number" id="fv-ppv-retry-max" min="0" max="10" step="1" value="1" style="max-width:120px;">
       </div>
+      <div class="field full" style="margin-top:4px;">
+        <label>Stop waiting after <span style="font-weight:400;color:var(--text-muted);">(days — an unbought unlock stops blocking the ladder, so one photo can't end the funnel for a fan)</span></label>
+        <input type="number" id="fv-ppv-stale-days" min="0" max="365" step="1" value="14" style="max-width:120px;">
+      </div>
+      <div class="field full" style="margin-top:4px;">
+        <label>Discount a re-offer by <span style="font-weight:400;color:var(--text-muted);">(% — used only when they opened it and didn't buy, which reads as a price objection)</span></label>
+        <input type="number" id="fv-ppv-retry-discount" min="0" max="80" step="5" value="0" style="max-width:120px;">
+      </div>
       <button class="btn-ai" style="background:var(--border);" onclick="resetPpvProgress()">Reset PPV progress</button>
+      <button class="btn-ai" style="background:var(--border);" onclick="reconcilePpv()" title="Re-read Fanvue's own records and fill in any purchases we missed">Reconcile purchases</button>
       <span class="hint" id="fv-ppv-reset-state"></span>
     </div>
     <div class="field full" style="margin-top:12px;">
@@ -311,19 +343,35 @@ async function loadConfig(){
   loadCreators();
   window._ppvTiersLoaded=false;
   loadPpv();
+  loadPpvStats();
   loadAuto();
   loadAccounts();
   loadTrace();
   startTraceLoop();
 }
 
+async function reconcilePpv(){
+  // Fanvue never replays a webhook, so after any downtime this is how a
+  // purchase we missed gets found again.
+  const st=document.getElementById('fv-ppv-reset-state');
+  st.textContent='Checking Fanvue…'; st.style.color='var(--text-muted)';
+  const d=await post('/api/fanvue/reconcile',{persona:persona(),days:45});
+  if(!d.ok){ st.textContent='✗ '+(d.error||'Failed'); st.style.color='#fb7185'; return; }
+  st.textContent=d.settled
+    ? ('✓ Found '+d.settled+' purchase(s) we had missed')
+    : ('✓ Nothing missing — '+d.checked+' unbought unlock(s) still unpaid');
+  st.style.color='#4ade80';
+  loadPpvStats();
+}
+
 async function resetPpvProgress(){
   const st=document.getElementById('fv-ppv-reset-state');
-  if(!confirm('Forget every PPV already sent for this model? Her sets start from tier 1 again for all fans.')) return;
+  if(!confirm('Forget every PPV already sent for this model? Her sets start from tier 1 '
+             +'again for all fans.\n\nWhat fans have already bought is kept.')) return;
   st.textContent='Resetting…'; st.style.color='var(--text-muted)';
-  const d=await post('/api/fanvue/ppv-reset',{persona:persona()});
+  const d=await post('/api/fanvue/ppv-reset',{persona:persona(),confirm:true});
   if(!d.ok){ st.textContent='✗ '+(d.error||'Failed'); st.style.color='#fb7185'; return; }
-  st.textContent='✓ PPV progress cleared — the sets start again'; st.style.color='#4ade80';
+  st.textContent='✓ Send progress cleared — purchase history kept'; st.style.color='#4ade80';
 }
 
 async function loadTrace(){
@@ -365,7 +413,14 @@ function startTraceLoop(){
 let ppvSel=new Set();
 // Sets are themed bundles, like outfits; each holds its own ordered tiers.
 function blankTier(){ return {media_uuids:[],price:'',caption:''}; }
-function blankSet(n){ return {id:'set'+n,name:'Set '+n,scene:'',keywords:'',
+// Ids must never come from a set's position: deleting one used to renumber the
+// rest, and every rename orphaned that set's progress, dropping every fan back
+// to tier 1.
+function newSetId(){
+  return (window.crypto&&crypto.randomUUID) ? 'set_'+crypto.randomUUID().slice(0,8)
+    : 'set_'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);
+}
+function blankSet(n){ return {id:newSetId(),name:'Set '+n,scene:'',keywords:'',
                               hour_from:'',hour_to:'',tiers:[blankTier()]}; }
 let ppvSets=[blankSet(1)];
 let curSet=0, curTier=0;
@@ -458,12 +513,23 @@ function renderSetBar(){
   pill('＋ set',false,'addSet()','background:var(--panel);border:1px dashed var(--border);color:var(--text-2);')+
   (ppvSets.length>1?pill('🗑 set',false,'removeSet()','background:var(--panel);color:#fb7185;'):'');
 }
+let ppvStats={};
+function tierLabel(t,i){
+  const n=(t.media_uuids||[]).length;
+  const st=ppvStats[theSet().id+':'+i];
+  let lab='Tier '+(i+1)+(n?(' ('+n+')'):'');
+  if(t.price) lab+=' · $'+t.price;
+  if(st&&st.sent) lab+=' · '+st.sent+' sent, '+st.bought+' bought';
+  return lab;
+}
 function renderTierBar(){
   const bar=document.getElementById('ppv-tier-bar');
   const tiers=theSet().tiers||[];
   bar.innerHTML=tiers.map((t,i)=>{
-    const n=(t.media_uuids||[]).length;
-    return pill('Tier '+(i+1)+(n?(' ('+n+')'):''),i===curTier,'switchTier('+i+')');
+    // A tier that can't be saved is called out here rather than dropped on save.
+    const bad=!(t.media_uuids||[]).length||dollarsToCents(t.price)<300;
+    return pill(tierLabel(t,i),i===curTier,'switchTier('+i+')',
+      bad?'background:rgba(251,113,133,.12);border:1px solid #fb7185;color:#fb7185;':null);
   }).join('')+
   pill('＋ tier',false,'addTier()','background:var(--panel);border:1px dashed var(--border);color:var(--text-2);')+
   (tiers.length>1?pill('🗑 tier '+(curTier+1),false,'removeTier()','background:var(--panel);color:#fb7185;'):'');
@@ -556,7 +622,7 @@ async function loadPpv(){
     try{saved=await fetch('/api/fanvue/ppv?persona='+encodeURIComponent(persona())).then(r=>r.json());}catch(e){}
     const st=saved.sets||[];
     ppvSets=st.length?st.map((s,i)=>({
-      id:s.id||('set'+(i+1)), name:s.name||('Set '+(i+1)), scene:s.scene||'',
+      id:s.id||newSetId(), name:s.name||('Set '+(i+1)), scene:s.scene||'',
       keywords:(s.keywords||[]).join(', '),
       hour_from:(s.hour_from===0||s.hour_from)?s.hour_from:'',
       hour_to:(s.hour_to===0||s.hour_to)?s.hour_to:'',
@@ -626,16 +692,24 @@ async function savePpv(){
   const sets=[];
   for(let i=0;i<ppvSets.length;i++){
     const s=ppvSets[i];
-    const tiers=(s.tiers||[]).filter(t=>(t.media_uuids||[]).length)
-      .map(t=>({media_uuids:t.media_uuids,price:dollarsToCents(t.price),caption:t.caption||''}));
-    if(!tiers.length) continue;
+    const label=s.name||('Set '+(i+1));
+    // A tier with no media used to vanish here without a word, so a set that
+    // read "3 tiers" could be one tier at runtime. Say so instead.
+    const tiers=(s.tiers||[]).map(t=>({media_uuids:t.media_uuids||[],
+      price:dollarsToCents(t.price),caption:t.caption||''}));
+    const real=tiers.filter(t=>t.media_uuids.length||t.price);
+    if(!real.length) continue;
     for(let j=0;j<tiers.length;j++){
+      if(!tiers[j].media_uuids.length){
+        hint.textContent='✗ '+label+' tier '+(j+1)+' has no media. Add a file, or remove the tier.';
+        hint.style.color='#fb7185'; curSet=i; curTier=j; applySet(); return;
+      }
       if(tiers[j].price<300){
-        hint.textContent='✗ '+(s.name||('Set '+(i+1)))+' tier '+(j+1)+' needs a price of at least $3';
-        hint.style.color='#fb7185'; return;
+        hint.textContent='✗ '+label+' tier '+(j+1)+' needs a price of at least $3';
+        hint.style.color='#fb7185'; curSet=i; curTier=j; applySet(); return;
       }
     }
-    sets.push({id:s.id||('set'+(i+1)), name:s.name||('Set '+(i+1)), scene:s.scene||'',
+    sets.push({id:s.id||newSetId(), name:label, scene:s.scene||'',
                keywords:(s.keywords||'').split(',').map(w=>w.trim()).filter(Boolean),
                hour_from:s.hour_from===''?null:parseInt(s.hour_from,10),
                hour_to:s.hour_to===''?null:parseInt(s.hour_to,10),
@@ -648,6 +722,63 @@ async function savePpv(){
     ?('✓ Saved '+data.sets.length+' set(s) — she picks the one that fits the chat and the hour')
     :'✓ Saved (PPV off — add media + a price ≥$3 to a set)';
   hint.style.color='#4ade80';
+  const warn=document.getElementById('ppv-warnings');
+  const ws=data.warnings||[];
+  warn.innerHTML=ws.length?('<span style="color:#fbbf24;">Worth a look:</span><ul style="margin:4px 0 0;padding-left:18px;">'
+    +ws.map(w=>'<li>'+esc(w)+'</li>').join('')+'</ul>'):'';
+  loadPpvStats();
+}
+
+function ladderPrices(){
+  // Tier 1 is the trial; each one after should ask a little more.
+  stashTier();
+  const s=theSet(), base=parseFloat(s.tiers[0]&&s.tiers[0].price)||0;
+  if(!base){ const h=document.getElementById('ppv-hint');
+    h.textContent='Set a price on tier 1 first, then this fills the rest.';
+    h.style.color='#fbbf24'; return; }
+  s.tiers.forEach((t,i)=>{ t.price=String(base+5*i); });
+  applyTier();
+}
+
+async function loadPpvStats(){
+  try{
+    const d=await fetch('/api/fanvue/ppv-stats?persona='+encodeURIComponent(persona())).then(r=>r.json());
+    if(!d.ok) return;
+    ppvStats=d.stats||{};
+    renderTierBar();
+    const box=document.getElementById('ppv-storage-warn');
+    box.innerHTML=d.storage_ephemeral
+      ? '⚠️ This deployment stores data in a temporary file, so which tiers fans have bought '
+        +'will be forgotten on the next redeploy. Set DATABASE_URL to a real Postgres.'
+      : '';
+  }catch(e){}
+}
+
+async function simulatePpv(){
+  const out=document.getElementById('ppv-sim-out');
+  const text=document.getElementById('ppv-sim-text').value;
+  const hour=document.getElementById('ppv-sim-hour').value;
+  out.innerHTML='<span style="color:var(--text-muted);">Scoring…</span>';
+  const d=await post('/api/fanvue/ppv-simulate',{persona:persona(),text:text,
+    hour:hour===''?undefined:parseInt(hour,10),
+    active_set:(ppvSets[curSet]||{}).id||''});
+  if(!d.ok){out.textContent='✗ '+(d.error||'Failed');return;}
+  if(!(d.rows||[]).length){out.textContent=d.note||'No sets saved yet.';return;}
+  const rows=d.rows.map(r=>{
+    const why=(r.why||[]).map(w=>esc(w.reason)+' '+(w.points>0?'+':'')+w.points).join(' · ')||'no cues matched';
+    return '<tr><td style="padding:3px 10px 3px 0;'+(r.eligible?'':'opacity:.45;')+'">'+esc(r.name)
+      +(r.eligible?'':' <span style="font-size:.7rem;">(all tiers sent)</span>')
+      +'</td><td style="padding:3px 10px 3px 0;text-align:right;font-variant-numeric:tabular-nums;">'
+      +r.score+'</td><td style="padding:3px 0;color:var(--text-muted);font-size:.72rem;">'+why+'</td></tr>';
+  }).join('');
+  const c=d.chosen;
+  out.innerHTML='<table style="width:100%;border-collapse:collapse;font-size:.78rem;">'+rows+'</table>'
+    +'<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border-soft);">'
+    +(c?('<b>Would send:</b> '+esc(c.set)+' · tier '+c.tier+' of '+c.of+' · $'+(c.price/100)
+        +' · '+c.media+' item'+(c.media===1?'':'s')
+        +'<div style="color:var(--text-muted);font-size:.72rem;margin-top:2px;">Caption: '+esc(c.caption)+'</div>')
+       :'<b>Would send nothing</b> — every set is used up.')
+    +'</div>';
 }
 async function loadCreators(){
   const row=document.getElementById('creator-row');
@@ -696,6 +827,8 @@ async function loadAuto(){
   document.getElementById('fv-ppv-gap').value=a.ppv_gap||8;
   document.getElementById('fv-ppv-retry-after').value=a.ppv_retry_after||0;
   document.getElementById('fv-ppv-retry-max').value=(a.ppv_retry_max!==undefined?a.ppv_retry_max:1);
+  document.getElementById('fv-ppv-stale-days').value=(a.ppv_stale_days!==undefined?a.ppv_stale_days:14);
+  document.getElementById('fv-ppv-retry-discount').value=Math.round((a.ppv_retry_discount||0)*100);
   listPick={};
   (a.include_lists||[]).forEach(l=>{listPick[l.kind+':'+l.id]='include';});
   (a.exclude_lists||[]).forEach(l=>{listPick[l.kind+':'+l.id]='exclude';});
@@ -754,6 +887,8 @@ async function saveAuto(){
     ppv_gap:parseInt(document.getElementById('fv-ppv-gap').value||'8',10),
     ppv_retry_after:parseInt(document.getElementById('fv-ppv-retry-after').value||'0',10),
     ppv_retry_max:parseInt(document.getElementById('fv-ppv-retry-max').value||'1',10),
+    ppv_stale_days:parseInt(document.getElementById('fv-ppv-stale-days').value||'14',10),
+    ppv_retry_discount:(parseFloat(document.getElementById('fv-ppv-retry-discount').value||'0')||0)/100,
     include_lists:pickedLists('include'),
     exclude_lists:pickedLists('exclude')});
   if(!data.ok){err(box,data.error||'Failed');return;}

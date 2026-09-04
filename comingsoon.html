@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" href="/favicon.png">
 <title>Velvetfunnel.app · One stop shop</title>
 <meta name="description" content="Fully automated chat, posting and engagement funnels from social media into your own platform. One persona, one API.">
 <link rel="canonical" href="https://velvetfunnel.app/">
@@ -27,6 +29,7 @@
 <!-- Not deferred: theme.js sets data-theme before first paint, otherwise the
      page flashes dark for a user who chose light. -->
 <script src="/js/theme.js"></script>
+<script src="/js/page-editor.js" defer></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Inter:wght@400;500;600&display=swap');
 *{margin:0;padding:0;box-sizing:border-box}
@@ -54,15 +57,33 @@
   --hair:#12100f1f;
   --hair-strong:#12100f4d;
   --hover:#12100f0a;
+  --nav-bg:rgba(255,255,255,.72);
 }
+:root{--nav-bg:rgba(17,17,17,.6)}
+html{scroll-behavior:smooth}
 html,body{min-height:100%}
 body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text)}
+/* ── Fixed nav ── */
+.site-nav{position:fixed;top:32px;left:60px;right:auto;z-index:1000;display:inline-flex;align-items:center;justify-content:flex-start;gap:32px;
+  padding:14px 20px;border-radius:9999px;background:transparent;box-shadow:none;max-width:calc(100vw - 120px)}
+.site-nav{
+  transition:background-color .5s cubic-bezier(.16,1,.3,1),box-shadow .5s cubic-bezier(.16,1,.3,1),
+             padding .4s cubic-bezier(.16,1,.3,1),backdrop-filter .5s ease,transform .5s cubic-bezier(.34,1.56,.64,1);
+  animation:navIn .9s cubic-bezier(.16,1,.3,1) both}
+.site-nav.scrolled{padding:12px 22px;background:var(--nav-bg);backdrop-filter:blur(18px) saturate(180%);-webkit-backdrop-filter:blur(18px) saturate(180%);
+  box-shadow:0 14px 38px rgba(0,0,0,.18),0 1px 0 var(--hair);transform:translateY(-4px) scale(.99)}
+@keyframes navIn{
+  0%{opacity:0;transform:translateY(-30px) scale(.92)}
+  60%{opacity:1;transform:translateY(5px) scale(1.015)}
+  100%{opacity:1;transform:translateY(0) scale(1)}
+}
+.site-nav .auth a{transition:all .2s cubic-bezier(.34,1.56,.64,1)}
+.site-nav .auth a:hover{transform:translateY(-2px)}
 .split{display:grid;grid-template-columns:1.05fr .95fr;min-height:100vh}
 /* ── Left ── */
-.left{background:var(--panel);padding:56px 60px;display:flex;flex-direction:column;justify-content:space-between;min-height:100vh}
-.brand{font-family:'Sora';font-weight:800;font-size:22px;letter-spacing:-.01em}
+.left{background:var(--panel);padding:136px 60px 56px;display:flex;flex-direction:column;justify-content:space-between;min-height:100vh;transition:padding .35s ease}
+.brand{font-family:'Sora';font-weight:800;font-size:22px;letter-spacing:-.01em;transition:font-size .35s ease}
 .brand i{color:var(--accent);font-style:normal}
-.topbar{display:flex;align-items:center;justify-content:space-between;gap:20px}
 .auth{display:flex;align-items:center;gap:10px}
 .auth a{font-size:13.5px;font-weight:600;text-decoration:none;padding:9px 18px;border-radius:9999px;transition:all .2s;white-space:nowrap}
 .auth-ghost{color:var(--text-soft);border:1px solid var(--hair)}
@@ -114,10 +135,12 @@ p.sub{font-size:17px;color:var(--text-soft);line-height:1.65;margin-bottom:36px;
    can be scrolled away. */
 body.kbd .right{position:fixed;left:0;right:0;top:0;z-index:60;padding:8px;overflow:hidden}
 body.kbd .demo{height:100%;flex:none;max-width:none;margin:0}
+body.kbd .site-nav{display:none}
 @media(max-width:900px){
   .split{grid-template-columns:1fr}
-  .left{min-height:auto;padding:40px 26px}
-  .topbar{flex-wrap:wrap;gap:14px}
+  .left{min-height:auto;padding:160px 26px 40px}
+  .site-nav{top:20px;left:20px;right:20px;flex-wrap:wrap;gap:14px;padding:14px 20px;border-radius:24px}
+  .site-nav.scrolled{padding:11px 18px}
   .auth a{padding:8px 15px;font-size:13px}
   h1{font-size:46px}
   /* Stacked, the demo still gets a screen of its own rather than a slice. */
@@ -125,7 +148,9 @@ body.kbd .demo{height:100%;flex:none;max-width:none;margin:0}
   .ring.a{width:240px;height:240px}
 }
 @media(max-width:600px){
-  .left{padding:28px 18px}
+  .left{padding:180px 18px 28px}
+  .site-nav{top:14px;left:14px;right:14px;padding:12px 16px}
+  .site-nav.scrolled{padding:10px 14px}
   .brand{font-size:19px}
   .pill{font-size:11px;margin-bottom:20px}
   h1{font-size:32px;margin-bottom:16px}
@@ -141,46 +166,73 @@ body.kbd .demo{height:100%;flex:none;max-width:none;margin:0}
   .demo{max-width:none;flex:none;height:calc(100dvh - 16px);border:0;border-radius:14px;box-shadow:none}
   .auth a{padding:7px 12px;font-size:12.5px}
 }
+/* ── Pricing ── */
+.pricing{padding:100px 60px 110px;background:var(--bg);scroll-margin-top:96px}
+.pricing-head{text-align:center;max-width:640px;margin:0 auto 56px}
+.pricing-head h2{font-family:'Sora';font-weight:800;font-size:38px;letter-spacing:-.02em;margin-bottom:14px}
+.pricing-head p{color:var(--text-soft);font-size:16px;line-height:1.6}
+.tier-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;max-width:1180px;margin:0 auto}
+.tier-card{background:var(--panel);border:1px solid var(--hair);border-radius:16px;padding:26px 22px;display:flex;flex-direction:column}
+.tier-card.featured{border-color:#ff2d78;box-shadow:0 0 0 1px #ff2d78 inset}
+.tier-card h3{font-family:'Sora';font-weight:700;font-size:19px;margin-bottom:6px}
+.tier-card .blurb{color:var(--text-soft);font-size:13px;line-height:1.5;margin-bottom:18px;min-height:38px}
+.tier-card .price{font-family:'Sora';font-weight:800;font-size:30px;margin-bottom:18px}
+.tier-card .price span{font-family:'Inter';font-weight:500;font-size:13px;color:var(--text-dim)}
+.tier-card ul{list-style:none;margin:0 0 22px;padding:0;flex:1}
+.tier-card li{font-size:13px;color:var(--text-soft);padding:6px 0;border-top:1px solid var(--hair);display:flex;gap:8px}
+.tier-card li:first-child{border-top:0}
+.tier-card li::before{content:"✓";color:#22c55e;font-weight:700}
+.tier-card a{display:block;text-align:center;text-decoration:none;font-weight:600;font-size:14px;padding:12px;border-radius:10px;color:#fff;background:var(--field);color:var(--text);border:1px solid var(--field-border)}
+.tier-card.featured a{background:linear-gradient(120deg,#ff5c38,#ff2d78 30%,#7c3aed 60%,#ff2d78 80%,#ff5c38);background-size:300% 100%;border:0}
+@media(max-width:900px){
+  .pricing{padding:70px 24px 80px}
+  .pricing-head h2{font-size:28px}
+  .tier-grid{grid-template-columns:1fr 1fr;gap:14px}
+}
+@media(max-width:600px){
+  .tier-grid{grid-template-columns:1fr}
+}
 </style>
 </head>
-<body>
+<body data-page="home">
+<header class="site-nav" id="site-nav">
+  <div class="brand"><span data-edit-id="brand-name">Velvetfunnel</span><i data-edit-id="brand-suffix">.app</i></div>
+  <nav class="auth">
+    <button class="theme-toggle" onclick="toggleTheme()" title="Light mode" aria-label="Switch to light mode">
+      <svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke-linecap="round"/></svg>
+      <svg class="ico-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" stroke-linejoin="round"/></svg>
+    </button>
+    <a href="#pricing" class="auth-ghost">Pricing</a>
+    <a href="/login" class="auth-ghost">Log in</a>
+    <a href="/register" class="auth-btn">Register</a>
+  </nav>
+</header>
 <div class="split">
 
   <div class="left">
-    <div class="topbar">
-      <div class="brand">Velvetfunnel<i>.app</i></div>
-      <nav class="auth">
-        <button class="theme-toggle" onclick="toggleTheme()" title="Light mode" aria-label="Switch to light mode">
-          <svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke-linecap="round"/></svg>
-          <svg class="ico-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" stroke-linejoin="round"/></svg>
-        </button>
-        <a href="/login" class="auth-ghost">Log in</a>
-        <a href="/register" class="auth-btn">Register</a>
-      </nav>
-    </div>
     <div class="lc">
-      <div class="pill"><span class="d"></span>One stop shop</div>
-      <h1>Your persona,<br><u>fully automated.</u></h1>
-      <p class="sub">A fully automated chat, posting and engagement funnel that turns social media followers into fans on your own platform, running around the clock, in your voice.</p>
+      <div class="pill"><span class="d"></span><span data-edit-id="pill-text">One stop shop</span></div>
+      <h1><span data-edit-id="h1-line1">Your persona,</span><br><u><span data-edit-id="h1-highlight">fully automated.</span></u></h1>
+      <p class="sub" data-edit-id="sub-text">A fully automated chat, posting and engagement funnel that turns social media followers into fans on your own platform, running around the clock, in your voice.</p>
       <form class="cta" onsubmit="return subscribe(event)">
         <input id="email" type="email" placeholder="Enter your email" required>
-        <button type="submit">Sign up for news</button>
+        <button type="submit"><span data-edit-id="cta-btn-text">Sign up for news</span></button>
       </form>
-      <div class="note" id="note">Product news, new features and tips, straight to your inbox.</div>
+      <div class="note" id="note" data-edit-id="note-text">Product news, new features and tips, straight to your inbox.</div>
     </div>
     <div class="meta">
-      <span>© 2026 velvetfunnel.app</span>
-      <a href="#">Twitter</a>
-      <a href="#">Instagram</a>
+      <span data-edit-id="meta-copyright">© 2026 velvetfunnel.app</span>
+      <a href="#" data-edit-id="meta-link1">Twitter</a>
+      <a href="#" data-edit-id="meta-link2">Instagram</a>
     </div>
   </div>
 
   <div class="right">
     <div class="ring a"></div><div class="ring b"></div>
     <div class="rhead">
-      <div class="rlabel">Live demo</div>
-      <div class="rtitle">Try it out yourself</div>
-      <div class="rsub">Say hi and see how the persona replies. This is the same engine that runs your funnel.</div>
+      <div class="rlabel" data-edit-id="rlabel-text">Live demo</div>
+      <div class="rtitle" data-edit-id="rtitle-text">Try it out yourself</div>
+      <div class="rsub" data-edit-id="rsub-text">Say hi and see how the persona replies. This is the same engine that runs your funnel.</div>
     </div>
     <div class="demo">
       <iframe src="/chat?persona=nova&amp;demo=1" title="Live persona chat demo" loading="lazy"></iframe>
@@ -188,6 +240,56 @@ body.kbd .demo{height:100%;flex:none;max-width:none;margin:0}
   </div>
 
 </div>
+
+<section class="pricing" id="pricing">
+  <div class="pricing-head">
+    <h2 data-edit-id="pricing-title">Simple, transparent pricing</h2>
+    <p data-edit-id="pricing-subtitle">Start free, upgrade when your funnel needs more personas and platforms.</p>
+  </div>
+  <div class="tier-grid" id="tier-grid">Loading plans…</div>
+</section>
+
+<script>
+fetch('/api/pricing')
+  .then(function(r){ return r.ok ? r.json() : null; })
+  .then(function(d){
+    if (!d) return;
+    var grid = document.getElementById('tier-grid');
+    grid.innerHTML = '';
+    d.order.forEach(function(key){
+      var t = d.tiers[key];
+      if (!t) return;
+      var card = document.createElement('div');
+      card.className = 'tier-card' + (key === 'pro' ? ' featured' : '');
+      var price = t.price === 0
+        ? 'Free<span> forever</span>'
+        : '$' + t.price + '<span>/' + t.days + ' days</span>';
+      card.innerHTML =
+        '<h3>' + t.name + '</h3>' +
+        '<div class="blurb">' + t.blurb + '</div>' +
+        '<div class="price">' + price + '</div>' +
+        '<ul>' + t.features.map(function(f){ return '<li>' + f + '</li>'; }).join('') + '</ul>' +
+        '<a href="/register">' + (t.price === 0 ? 'Start free' : 'Get started') + '</a>';
+      grid.appendChild(card);
+    });
+  })
+  .catch(function(){});
+</script>
+
+<script>
+(function(){
+  var nav = document.getElementById('site-nav');
+  var ticking = false;
+  function update(){
+    nav.classList.toggle('scrolled', window.scrollY > 8);
+    ticking = false;
+  }
+  window.addEventListener('scroll', function(){
+    if (!ticking) { requestAnimationFrame(update); ticking = true; }
+  }, { passive: true });
+  update();
+})();
+</script>
 
 <script>
 var vv=window.visualViewport;

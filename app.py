@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify, send_from_directory, session, redirect, url_for, render_template_string, Response
 import os
 import sys
+import copy
 import json
 import re
 import logging
@@ -1215,10 +1216,12 @@ _PAID_PAGES = ('/dashboard', '/xbot', '/fanvue', '/threads', '/telegram', '/admi
 _PAID_API = ('/api/telegram', '/api/tguser', '/api/x', '/api/xlog', '/api/threads',
              '/api/fanvue', '/api/platforms', '/api/visitors', '/api/generate',
              '/api/backstory', '/api/config', '/api/whatsapp')
-# Fan-facing and auth/billing routes stay open.
+# Fan-facing and auth/billing routes stay open. So are inbound webhooks: they
+# arrive from the platform, not a signed-in creator, and carry their own signed
+# proof of origin — a sign-in redirect would just look like a failure to Fanvue.
 _OPEN_PATHS = ('/login', '/register', '/logout', '/pricing', '/billing',
                '/auth/google',
-               '/account', '/api/billing', '/healthz', '/go/',
+               '/account', '/api/billing', '/healthz', '/go/', '/webhooks/',
                '/dashboard/logout', '/admin/logout')
 
 
@@ -1287,6 +1290,7 @@ LOGIN_HTML = """<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark">
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png">
 <title>Admin Login</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
@@ -1376,10 +1380,12 @@ button:disabled{opacity:.6;cursor:not-allowed;transform:none;animation:none}
 
 REGISTER_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><title>Create account</title>
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Create account</title>
 <script src="/js/analytics.js" defer></script>
-<style>""" + ACCOUNT_CSS + """</style></head><body><div class="wrap"><div class="card">
-<h1>Create your account</h1><p class="sub">Start building your AI persona.</p>
+<script src="/js/page-editor.js" defer></script>
+<style>""" + ACCOUNT_CSS + """</style></head><body data-page="register"><div class="wrap"><div class="card">
+<h1 data-edit-id="h1">Create your account</h1><p class="sub" data-edit-id="sub">Start building your AI persona.</p>
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
 {% if google_enabled %}<a class="gbtn" href="/auth/google{{ google_next }}"><svg viewBox="0 0 48 48"><path fill="#4285F4" d="M45.1 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h11.8c-.5 2.8-2 5.1-4.4 6.7v5.5h7.1c4.2-3.8 6.6-9.5 6.6-16.2z"/><path fill="#34A853" d="M24 46c6 0 11-2 14.5-5.3l-7.1-5.5c-2 1.3-4.5 2.1-7.4 2.1-5.7 0-10.6-3.9-12.3-9.1H4.3v5.7C7.8 41 15.3 46 24 46z"/><path fill="#FBBC05" d="M11.7 28.2c-.4-1.3-.7-2.7-.7-4.2s.2-2.9.7-4.2v-5.7H4.3C2.8 17.1 2 20.4 2 24s.8 6.9 2.3 9.9l7.4-5.7z"/><path fill="#EA4335" d="M24 10.7c3.2 0 6.1 1.1 8.4 3.3l6.3-6.3C35 4.1 30 2 24 2 15.3 2 7.8 7 4.3 14.1l7.4 5.7c1.7-5.2 6.6-9.1 12.3-9.1z"/></svg>Continue with Google</a>
 <div class="orsep">or</div>{% endif %}
@@ -1387,16 +1393,18 @@ REGISTER_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <label>Name</label><input type="text" name="name" autocomplete="name" value="{{ name or '' }}">
 <label>Email</label><input type="email" name="email" required autocomplete="email" value="{{ email or '' }}">
 <label>Password</label><input type="password" name="password" required autocomplete="new-password" placeholder="At least 8 characters">
-<button type="submit">Create account</button></form>
-<div class="alt">Already have an account? <a href="/login">Sign in</a></div>
+<button type="submit"><span data-edit-id="submit-text">Create account</span></button></form>
+<div class="alt"><span data-edit-id="alt-text">Already have an account?</span> <a href="/login">Sign in</a></div>
 </div></div></body></html>"""
 
 SIGNIN_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><title>Sign in</title>
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Sign in</title>
 <script src="/js/analytics.js" defer></script>
-<style>""" + ACCOUNT_CSS + """</style></head><body><div class="wrap"><div class="card">
-<h1>Sign in</h1><p class="sub">Welcome back.</p>
+<script src="/js/page-editor.js" defer></script>
+<style>""" + ACCOUNT_CSS + """</style></head><body data-page="login"><div class="wrap"><div class="card">
+<h1 data-edit-id="h1">Sign in</h1><p class="sub" data-edit-id="sub">Welcome back.</p>
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
 {% if google_enabled %}<a class="gbtn" href="/auth/google{{ google_next }}"><svg viewBox="0 0 48 48"><path fill="#4285F4" d="M45.1 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h11.8c-.5 2.8-2 5.1-4.4 6.7v5.5h7.1c4.2-3.8 6.6-9.5 6.6-16.2z"/><path fill="#34A853" d="M24 46c6 0 11-2 14.5-5.3l-7.1-5.5c-2 1.3-4.5 2.1-7.4 2.1-5.7 0-10.6-3.9-12.3-9.1H4.3v5.7C7.8 41 15.3 46 24 46z"/><path fill="#FBBC05" d="M11.7 28.2c-.4-1.3-.7-2.7-.7-4.2s.2-2.9.7-4.2v-5.7H4.3C2.8 17.1 2 20.4 2 24s.8 6.9 2.3 9.9l7.4-5.7z"/><path fill="#EA4335" d="M24 10.7c3.2 0 6.1 1.1 8.4 3.3l6.3-6.3C35 4.1 30 2 24 2 15.3 2 7.8 7 4.3 14.1l7.4 5.7c1.7-5.2 6.6-9.1 12.3-9.1z"/></svg>Continue with Google</a>
 <div class="orsep">or</div>{% endif %}
@@ -1406,15 +1414,17 @@ SIGNIN_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <label style="display:flex;align-items:center;gap:8px;margin:-4px 0 18px;color:#a1a1aa;cursor:pointer">
 <input type="checkbox" name="remember" value="1" checked
  style="width:auto;margin:0;accent-color:#7c3aed;cursor:pointer">Keep me signed in for 30 days</label>
-<button type="submit">Sign in</button></form>
-<div class="alt">No account yet? <a href="/register">Create one</a></div>
+<button type="submit"><span data-edit-id="submit-text">Sign in</span></button></form>
+<div class="alt"><span data-edit-id="alt-text">No account yet?</span> <a href="/register">Create one</a></div>
 </div></div></body></html>"""
 
 BILLING_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><title>Choose a plan</title>
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Choose a plan</title>
 <script src="/js/analytics.js" defer></script>
-<style>""" + ACCOUNT_CSS + """</style></head><body><div class="wrap wide">
+<script src="/js/page-editor.js" defer></script>
+<style>""" + ACCOUNT_CSS + """</style></head><body data-page="pricing"><div class="wrap wide">
 <div class="bar"><span>Signed in as {{ user.email }}</span><a href="/logout">Sign out</a></div>
 {% if user.status == 'active' %}
 <div class="ok">Your <strong>{{ tiers[user.tier].name if user.tier in tiers else user.tier }}</strong>
@@ -1423,8 +1433,8 @@ plan is active{% if user.expires_at %} until {{ user.expires_at[:10] }}{% endif 
 {% elif user.status == 'expired' %}
 <div class="err">Your plan has expired. Renew below to regain access.</div>
 {% else %}
-<h1 style="margin-bottom:6px">Choose a plan</h1>
-<p class="sub">Pay by card or crypto. Access unlocks as soon as it confirms.</p>
+<h1 style="margin-bottom:6px" data-edit-id="h1">Choose a plan</h1>
+<p class="sub" data-edit-id="sub">Pay by card or crypto. Access unlocks as soon as it confirms.</p>
 {% endif %}
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
 <div class="tiers">
@@ -1485,7 +1495,8 @@ document.querySelectorAll('button[data-tier]').forEach(function(b){
 
 ACCOUNT_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><title>My account</title>
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>My account</title>
 <style>""" + ACCOUNT_CSS + """
 table{width:100%;border-collapse:collapse;margin-top:8px;font-size:.85rem}
 th{text-align:left;color:var(--text-muted);font-weight:500;padding:6px 0;border-bottom:1px solid var(--border)}
@@ -1522,7 +1533,8 @@ td{padding:8px 0;border-bottom:1px solid var(--border);color:var(--text-2)}
 
 PROFILE_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><title>Your profile</title>
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Your profile</title>
 <style>""" + ACCOUNT_CSS + """
 textarea{width:100%;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:11px 14px;color:var(--text);font-size:.95rem;outline:none;margin-bottom:16px;font-family:inherit;resize:vertical;min-height:88px}
 textarea:focus{border-color:#7c3aed}
@@ -1551,7 +1563,8 @@ textarea:focus{border-color:#7c3aed}
 
 ADMIN_USERS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><title>Users</title>
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Users</title>
 <style>""" + ACCOUNT_CSS + """
 table{width:100%;border-collapse:collapse;font-size:.85rem}
 th{text-align:left;color:var(--text-muted);font-weight:500;padding:8px 10px;border-bottom:1px solid var(--border);white-space:nowrap}
@@ -1580,7 +1593,8 @@ a.email{color:#a78bfa;text-decoration:none;font-weight:500}
 
 ADMIN_USER_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><title>{{ u.email }}</title>
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>{{ u.email }}</title>
 <style>""" + ACCOUNT_CSS + """
 textarea{width:100%;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:11px 14px;color:var(--text);font-size:.95rem;outline:none;margin-bottom:16px;font-family:inherit;resize:vertical;min-height:80px}
 select{width:100%;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:11px 14px;color:var(--text);font-size:.95rem;margin-bottom:16px}
@@ -1783,11 +1797,12 @@ def api_me():
     a signed-out caller could not already infer."""
     user = _current_user()
     if not user:
-        return jsonify({'signed_in': False}), 200
+        return jsonify({'signed_in': False, 'is_operator': _is_operator()}), 200
     return jsonify({'signed_in': True, 'id': user['id'], 'email': user['email'],
                     'name': user.get('name', ''), 'tier': user.get('tier', ''),
                     'status': user.get('status'),
                     'is_admin': bool(user.get('is_admin')),
+                    'is_operator': _is_operator(),
                     'setup': _get_setup(user['id'])}), 200
 
 
@@ -2048,6 +2063,13 @@ def logout():
     session.pop('user_id', None)
     session.pop('admin_authed', None)
     return redirect('/login')
+
+
+@app.route('/api/pricing')
+def api_pricing():
+    """Public: tier cards for the homepage pricing section (and anywhere else
+    that wants the same data without the full /pricing page)."""
+    return jsonify({'order': DEFAULT_TIER_ORDER, 'tiers': TIERS})
 
 
 @app.route('/pricing')
@@ -2457,6 +2479,40 @@ def api_landing_set():
 def landing():
     return send_from_directory(BASE_DIR, 'landingpage.html')
 
+
+# Inline text/image editing for the plain marketing pages (not the persona
+# landing page, not the dashboard) — see js/page-editor.js. One JSON blob per
+# page, keyed by the data-edit-id an operator clicked on.
+SITE_CONTENT_PAGES = {'home', 'login', 'register', 'pricing'}
+
+
+@app.route('/api/site-content/<page>')
+def api_site_content_get(page):
+    if page not in SITE_CONTENT_PAGES:
+        return jsonify({'error': 'Unknown page'}), 404
+    raw = _get_setting(f'site_content_{page}')
+    try:
+        content = json.loads(raw) if raw else {}
+    except Exception:
+        content = {}
+    return jsonify({'content': content if isinstance(content, dict) else {}})
+
+
+@app.route('/api/site-content/<page>', methods=['POST'])
+@operator_only
+def api_site_content_set(page):
+    if page not in SITE_CONTENT_PAGES:
+        return jsonify({'error': 'Unknown page'}), 404
+    content = (request.get_json(silent=True) or {}).get('content')
+    if not isinstance(content, dict):
+        return jsonify({'error': 'content must be an object'}), 400
+    clean = {k: v for k, v in content.items()
+             if re.match(r'^[a-zA-Z0-9_-]+$', k) and isinstance(v, str)}
+    if len(json.dumps(clean)) > 3_000_000:
+        return jsonify({'error': 'Content too large'}), 413
+    _set_setting(f'site_content_{page}', json.dumps(clean))
+    return jsonify({'ok': True})
+
 # Operator consoles. _is_operator() rather than _check_admin() on purpose: with
 # ADMIN_PASSWORD unset the latter is true for everyone, which would hand every
 # paying creator the shared-bot registration and trace panels.
@@ -2803,10 +2859,11 @@ def _ensure_x_tables():
     """Create the x_messages / x_openers / app_settings tables if missing
     (self-heal when a model was added after the DB was first initialized)."""
     try:
-        from db import XMessage, XOpener, AppSetting, engine
+        from db import XMessage, XOpener, AppSetting, PpvDrop, engine
         XMessage.__table__.create(bind=engine, checkfirst=True)
         XOpener.__table__.create(bind=engine, checkfirst=True)
         AppSetting.__table__.create(bind=engine, checkfirst=True)
+        PpvDrop.__table__.create(bind=engine, checkfirst=True)
         return True
     except Exception as e:
         _last_x_log_error[0] = f'ensure tables: {str(e)[:140]}'
@@ -2823,6 +2880,50 @@ def _get_setting(key, default=None):
             s.close()
     except Exception:
         return default
+
+
+class SettingUnreadable(Exception):
+    """The store could not be reached — which is not the same as an empty value.
+    Callers that would otherwise treat a missing row as 'nothing has happened
+    yet' must not act on a read that raised this."""
+
+
+def _get_setting_strict(key, default=None):
+    """Like _get_setting, but a database failure raises instead of looking like
+    an unset key. Used on paths where 'no row' and 'could not read' would
+    otherwise both mean 'this fan is brand new' — and cost the fan a repeat of
+    every unlock they already bought."""
+    try:
+        from db import SessionLocal, get_app_setting
+    except Exception as e:
+        raise SettingUnreadable(str(e)[:200])
+    try:
+        s = SessionLocal()
+    except Exception as e:
+        raise SettingUnreadable(str(e)[:200])
+    try:
+        return get_app_setting(s, key, default)
+    except Exception as e:
+        raise SettingUnreadable(str(e)[:200])
+    finally:
+        try:
+            s.close()
+        except Exception:
+            pass
+
+
+def _json_setting_strict(key, fallback):
+    """A JSON-valued setting, distinguishing 'unset' (fallback) from
+    'unreadable' (raises). Malformed JSON is treated as unset — it is a value we
+    wrote, so re-deriving it is safe; an unreachable database is not."""
+    raw = _get_setting_strict(key, None)
+    if raw is None:
+        return copy.deepcopy(fallback)
+    try:
+        v = json.loads(raw)
+    except Exception:
+        return copy.deepcopy(fallback)
+    return v if isinstance(v, type(fallback)) else copy.deepcopy(fallback)
 
 
 def _set_setting(key, value):
@@ -7305,7 +7406,10 @@ FANVUE_API_BASE = 'https://api.fanvue.com'
 FANVUE_AUTH_URL = 'https://auth.fanvue.com/oauth2/auth'
 FANVUE_TOKEN_URL = 'https://auth.fanvue.com/oauth2/token'
 FANVUE_API_VERSION = '2025-06-26'
-FANVUE_SCOPES = 'openid offline offline_access read:self read:chat write:chat read:fan read:media write:media read:creator read:agency'
+FANVUE_SCOPES = ('openid offline offline_access read:self read:chat write:chat '
+                 'read:fan read:media write:media read:creator read:agency '
+                 # /earnings backs the purchase reconciler.
+                 'read:insights')
 
 
 def _fanvue_app():
@@ -7730,29 +7834,58 @@ def _fanvue_ppv(persona):
         return {}
 
 
-def _fanvue_fan_purchased(persona, fan_uuid, media_uuids):
-    """True if the fan has purchased at least one of the given media items —
-    used to gate advancing to the next PPV tier until they've paid."""
-    if not media_uuids:
-        return False
-    want = set(media_uuids)
+# Three answers, not two. Fanvue has no endpoint that reports whether a given
+# fan bought a given item, so payment is known only from what we recorded when
+# the webhook, the message poll or a reconciliation sweep told us. That makes
+# "we could not find out" a real state, and conflating it with "they did not
+# pay" is what silently freezes a fan's ladder forever.
+PPV_PAID, PPV_UNPAID, PPV_UNKNOWN = 'paid', 'unpaid', 'unknown'
+
+
+def _fv_drop_state(persona, drop_id):
+    """Whether the recorded drop was paid, and the drop row itself.
+
+    Returns (state, drop). UNKNOWN means the ledger could not be read — hold,
+    never advance and never reset on it."""
+    if not drop_id:
+        return PPV_UNPAID, None
     try:
-        rows = _fv_list(_fanvue_call(persona, 'GET', f'/media?purchasedBy={fan_uuid}&size=50'))
-        for m in rows:
-            if m.get('purchasedByFan') and _fv_first(m, 'uuid', 'id', default='') in want:
-                return True
-    except Exception:
-        pass
-    # Fallback: check each wanted item directly.
-    for u in list(want)[:5]:
+        from db import SessionLocal, PpvDrop
+    except Exception as e:
+        logger.warning('PPV ledger unavailable for %s: %s', persona, str(e)[:120])
+        return PPV_UNKNOWN, None
+    try:
+        s = SessionLocal()
+    except Exception as e:
+        logger.warning('PPV ledger unreachable for %s: %s', persona, str(e)[:120])
+        return PPV_UNKNOWN, None
+    try:
+        d = s.get(PpvDrop, drop_id)
+        if d is None:
+            return PPV_UNPAID, None
+        return (PPV_PAID if d.paid_at else PPV_UNPAID), d
+    except Exception as e:
+        logger.warning('PPV ledger read failed for %s: %s', persona, str(e)[:120])
+        return PPV_UNKNOWN, None
+    finally:
         try:
-            m = _fanvue_call(persona, 'GET', f'/media/{u}?purchasedBy={fan_uuid}')
-            m = m.get('data', m) if isinstance(m, dict) else {}
-            if m.get('purchasedByFan'):
-                return True
+            s.close()
         except Exception:
-            continue
-    return False
+            pass
+
+
+def _fv_drop_is_stale(drop, stale_days):
+    """An unbought drop stops blocking the ladder after the creator's window, so
+    one unappealing photo can't end the funnel for a fan permanently. The row
+    stays on file — this changes behaviour, it never forgets the drop."""
+    if not drop or not stale_days or drop.paid_at:
+        return False
+    sent = drop.created_at
+    if not sent:
+        return False
+    if sent.tzinfo is None:
+        sent = sent.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - sent) >= timedelta(days=int(stale_days))
 
 
 def _fv_clean_tier(t):
@@ -7845,32 +7978,274 @@ def _fv_hour_fits(s, hour):
     return a <= hour <= b if a <= b else (hour >= a or hour <= b)
 
 
-def _fv_pick_set(sets, progress, context, hour):
-    """Choose the set that fits the moment: what has just been said in chat and
-    the time of day. `progress` is {set_id: tiers already sent to this fan};
-    a set drops out once its tiers are exhausted. Falls back to creator order so
-    a set with no cues at all still goes out. None when nothing is left."""
-    left = [s for s in sets
-            if int(progress.get(s['id'], 0) or 0) < len(s['tiers'])]
+def _fv_hour_score(s, hour):
+    """How well the hour suits this set. Tapered at the edges rather than a
+    cliff: a "just got in from a night out" set shouldn't die at 05:59."""
+    a, b = s.get('hour_from'), s.get('hour_to')
+    if a is None or b is None:
+        return 0.0
+    if _fv_hour_fits(s, hour):
+        edge = hour in (a, b)
+        return 1.0 if edge else 2.0
+    # An hour either side of the window still beats one on the far side.
+    for near in ((a - 1) % 24, (b + 1) % 24):
+        if hour == near:
+            return -1.0
+    return -5.0
+
+
+FV_SYNONYMS = {
+    'lingerie': ('lingerie', 'underwear', 'bra', 'panties', 'thong', 'stockings'),
+    'bed': ('bed', 'bedroom', 'sheets', 'pillow', 'duvet'),
+    'shower': ('shower', 'bath', 'wet', 'soapy', 'towel'),
+    'gym': ('gym', 'workout', 'leggings', 'sweaty', 'training'),
+    'night': ('night', 'tonight', 'midnight', 'late', 'bedtime'),
+}
+
+
+def _fv_parse_keyword(raw):
+    """One trigger word and how it should be matched.
+
+    Plain words still mean what they always did; the extra forms let a creator
+    say what they actually mean:
+      stockings    whole word              +3
+      green dress  phrase, substring       +3
+      stocking*    stem                    +3
+      bed^5        explicit weight         +5
+      !broke       suppress this set      -20
+      ~lingerie    synonym group           +2 per member
+    """
+    k = (raw or '').strip().lower()
+    if not k:
+        return None
+    negative = k.startswith('!')
+    if negative:
+        k = k[1:].strip()
+    syn = k.startswith('~')
+    if syn:
+        k = k[1:].strip()
+    weight = 3.0
+    m = re.match(r'^(.*?)\^(\d+(?:\.\d+)?)$', k)
+    if m:
+        k, weight = m.group(1).strip(), float(m.group(2))
+    stem = k.endswith('*')
+    if stem:
+        k = k[:-1].strip()
+    if not k:
+        return None
+    if negative:
+        weight = -20.0
+    elif syn:
+        weight = 2.0
+    return {'word': k, 'weight': weight, 'stem': stem, 'syn': syn,
+            'phrase': ' ' in k, 'negative': negative}
+
+
+def _fv_words(text):
+    """Message words. \\w keeps digits and accents, which the old [a-z']+ threw
+    away — so a trigger word like 24/7 or café could never once match."""
+    return set(re.findall(r"[\w']+", (text or '').casefold(), re.UNICODE))
+
+
+def _fv_keyword_score(kw, words, lowered):
+    if kw['phrase']:
+        return kw['weight'] if kw['word'] in lowered else 0.0
+    if kw['syn']:
+        group = FV_SYNONYMS.get(kw['word'], (kw['word'],))
+        hits = sum(1 for g in group if g in words)
+        return kw['weight'] * min(hits, 2)
+    if kw['stem']:
+        return kw['weight'] if any(w.startswith(kw['word']) for w in words) else 0.0
+    return kw['weight'] if kw['word'] in words else 0.0
+
+
+# How much better a rival set must score before it takes a fan off the set they
+# are already climbing. Roughly "one real trigger word" — enough that a shared
+# scene word or the clock alone can't restart the ladder at tier 1.
+FV_SWITCH_MARGIN = 4.0
+
+
+def _fv_score_set(s, context, hour, active=False):
+    """Score one set against the moment, and say why — the 'why' is what the
+    builder's simulator shows the creator."""
+    lowered = (context or '').casefold()
+    words = _fv_words(context)
+    parts, score = [], 0.0
+    for raw in s['keywords']:
+        kw = _fv_parse_keyword(raw)
+        if not kw:
+            continue
+        v = _fv_keyword_score(kw, words, lowered)
+        if v:
+            score += v
+            parts.append((raw, v))
+    scene_words = {w for w in _fv_words(s['scene']) if len(w) > 3}
+    scene_hits = scene_words & words
+    if scene_hits:
+        score += 1.5 * len(scene_hits)
+        parts.append((f"scene:{'/'.join(sorted(scene_hits)[:3])}", 1.5 * len(scene_hits)))
+    h = _fv_hour_score(s, hour)
+    if active:
+        # A set the fan is already climbing has earned its place; the clock
+        # alone shouldn't restart them on a different ladder.
+        h = max(h, -1.0)
+    if h:
+        score += h
+        parts.append((f'hour {s.get("hour_from")}-{s.get("hour_to")}', h))
+    if active:
+        score += FV_SWITCH_MARGIN
+        parts.append(('already on this set', FV_SWITCH_MARGIN))
+    return score, parts
+
+
+def _fv_suppressed(sets, context):
+    """A negative trigger word says something about the fan right now — broke,
+    tired, wanting a refund — not about one set. So it holds back every drop,
+    not just the set it was written on."""
+    words = _fv_words(context)
+    lowered = (context or '').casefold()
+    for s in sets:
+        for raw in s['keywords']:
+            kw = _fv_parse_keyword(raw)
+            if kw and kw['negative'] and _fv_keyword_score(
+                    dict(kw, weight=1.0), words, lowered):
+                return kw['word']
+    return ''
+
+
+def _fv_pick_set(sets, state, context, hour):
+    """Choose the set to drop from. The set the fan is already climbing keeps
+    winning unless another beats it by a clear margin, so a three-tier set is
+    actually delivered as three tiers instead of restarting at tier 1 whenever
+    the topic or the clock moves. None when every set is exhausted."""
+    left = [s for s in sets if _fv_tiers_left(s, state) > 0]
     if not left:
         return None
-    words = set(re.findall(r"[a-z']+", (context or '').lower()))
+    active_id = (state or {}).get('active_set') or ''
     best, best_score = None, float('-inf')
     for i, s in enumerate(left):
-        score = 0.0
-        for k in s['keywords']:
-            # Multi-word keywords are matched as a phrase, single words on the
-            # word set so "bedroom" never counts as "bed".
-            if (' ' in k and k in (context or '').lower()) or (' ' not in k and k in words):
-                score += 3
-        scene_words = {w for w in re.findall(r"[a-z']+", s['scene'].lower()) if len(w) > 3}
-        score += 1.5 * len(scene_words & words)
-        if s.get('hour_from') is not None and s.get('hour_to') is not None:
-            score += 2 if _fv_hour_fits(s, hour) else -5
+        score, _ = _fv_score_set(s, context, hour, active=(s['id'] == active_id))
         score -= i * 0.01          # keep creator order as the tie-break
         if score > best_score:
             best, best_score = s, score
     return best
+
+
+def _fv_repeat_tier(sets, state):
+    """The tier to offer again: the last one actually sent, per the fan's own
+    record rather than creator order."""
+    by_id = {s['id']: s for s in sets}
+    s = by_id.get((state or {}).get('active_set') or '')
+    if s is None:
+        return None, 0
+    n = int((state.get('sets') or {}).get(s['id'], 0) or 0)
+    if not n:
+        return None, 0
+    return s, min(n - 1, len(s['tiers']) - 1)
+
+
+def _fv_fan_hour(persona, fan_key, creator_offset=0):
+    """The hour of day where the fan is, so "at night on bed" fires at their
+    night rather than the creator's. Learned from when they actually message;
+    the creator's own offset is the fallback until there's enough to go on."""
+    off = _fv_fan_tz_offset(persona, fan_key)
+    if off is None:
+        off = int(creator_offset or 0)
+    now = datetime.now(timezone.utc) + timedelta(minutes=off)
+    return now.hour
+
+
+def _fv_fan_tz_offset(persona, fan_key, min_msgs=12):
+    """Minutes from UTC, guessed from the fan's own activity: people message
+    across their waking day, so the middle of that window sits near their
+    mid-afternoon. None until there is enough signal to beat the fallback."""
+    try:
+        from db import SessionLocal, XMessage
+        s = SessionLocal()
+        try:
+            rows = (s.query(XMessage.created_at)
+                    .filter(XMessage.persona == persona,
+                            XMessage.x_user_id == str(fan_key),
+                            XMessage.direction == 'in')
+                    .order_by(XMessage.created_at.desc()).limit(300).all())
+        finally:
+            s.close()
+    except Exception:
+        return None
+    hours = [r[0].hour for r in rows if r[0]]
+    if len(hours) < min_msgs:
+        return None
+    # Circular mean of the hours they write, in UTC.
+    import math
+    xs = sum(math.cos(h * math.pi / 12) for h in hours)
+    ys = sum(math.sin(h * math.pi / 12) for h in hours)
+    if not xs and not ys:
+        return None
+    mean_utc = (math.atan2(ys, xs) * 12 / math.pi) % 24
+    # Put the middle of their activity at ~16:00 local, a fair centre for an
+    # evening-weighted chat app.
+    return int(round(((16 - mean_utc) % 24) * 60)) - (1440 if ((16 - mean_utc) % 24) > 12 else 0)
+
+
+# Fanvue rejects anything under $3, so a discounted retry stops here.
+FV_PRICE_FLOOR = 300
+
+
+def _fv_caption(persona, chosen, tier, reply):
+    """The line on the paywall. A creator-written caption wins; {scene} and
+    {name} are filled in so one caption can serve a whole set.
+
+    When there is none, write one for the content rather than reusing the chat
+    reply — a reply is written to continue a conversation, and shipping it as
+    the sales line is how a $20 unlock ends up captioned "anyway, what are you
+    up to tonight?"."""
+    raw = (tier.get('caption') or '').strip()
+    if raw:
+        try:
+            raw = raw.format(scene=chosen.get('scene') or '',
+                             name=chosen.get('name') or '')
+        except (KeyError, IndexError, ValueError):
+            pass
+        return raw[:2000]
+    scene = (chosen.get('scene') or chosen.get('name') or '').strip()
+    if scene:
+        try:
+            gen = _persona_text(
+                persona,
+                'Write ONE short caption, in character, for a locked photo set '
+                f'you are about to send a fan. The set is: {scene}. Tease what '
+                'is inside so they have to see it — hint at one specific thing '
+                'without describing it. Do not mention price, buying or '
+                'unlocking. One or two sentences, no quotes, no emoji unless '
+                'your voice normally uses them.',
+                max_tokens=80, temperature=1.0)
+            gen = _strip_placeholders(strip_ppv_marker(gen or '')).strip().strip('"')
+            if gen:
+                return gen[:2000]
+        except Exception as e:
+            logger.warning('PPV caption generation failed for %s: %s', persona, str(e)[:120])
+    return (reply or '').strip()[:2000]
+
+
+def _fv_record_drop(persona, fan_uuid, chosen, idx, price, media_uuids, message_uuid):
+    """Write the sale to the ledger. Returns the row id, or '' if it could not
+    be written — the drop still went out, so that is logged loudly rather than
+    swallowed: without a row nothing can later confirm the fan paid."""
+    try:
+        from db import SessionLocal, record_ppv_drop
+        s = SessionLocal()
+        try:
+            d = record_ppv_drop(s, persona, fan_uuid, chosen['id'], chosen['name'],
+                                idx, price, media_uuids, message_uuid)
+            s.commit()
+            return d.id
+        finally:
+            s.close()
+    except Exception as e:
+        logger.warning('PPV ledger write failed for %s/%s: %s', persona, fan_uuid, str(e)[:160])
+        _fv_trace(persona, 'error',
+                  f'PPV sent but not recorded ({str(e)[:120]}) — payment cannot be verified')
+        return ''
 
 
 # Fanvue serves media only through variant URLs, and only when the request asks
@@ -8059,19 +8434,30 @@ def api_fanvue_ppv():
     for i, s in enumerate(raw):
         if not isinstance(s, dict):
             continue
-        for t in (s.get('tiers') or []):
-            if isinstance(t, dict) and (t.get('media_uuids') or t.get('media')):
-                try:
-                    price = int(t.get('price') or 0)
-                except (TypeError, ValueError):
-                    price = 0
-                if price < 300:
-                    return jsonify({'ok': False, 'error':
-                                    f"\"{s.get('name') or ('Set ' + str(i + 1))}\" "
-                                    'has a tier priced under $3'}), 400
+        label = s.get('name') or ('Set ' + str(i + 1))
+        # Refuse rather than drop. A tier with media but no price used to error,
+        # while a tier with a price but no media vanished silently — so a set
+        # that read "3 tiers" in the builder could be one tier at runtime.
+        for j, t in enumerate(s.get('tiers') or []):
+            if not isinstance(t, dict):
+                continue
+            media = t.get('media_uuids') or t.get('media') or []
+            try:
+                price = int(t.get('price') or 0)
+            except (TypeError, ValueError):
+                price = 0
+            if not media:
+                return jsonify({'ok': False, 'error':
+                                f'"{label}" tier {j + 1} has no media. Add a file '
+                                'or remove the tier.'}), 400
+            if price < 300:
+                return jsonify({'ok': False, 'error':
+                                f'"{label}" tier {j + 1} needs a price of at '
+                                'least $3'}), 400
         c = _fv_clean_set(s, i)
         if not c:
-            continue
+            return jsonify({'ok': False, 'error':
+                            f'"{label}" has no usable tiers'}), 400
         while c['id'] in seen:
             c['id'] += '_'
         seen.add(c['id'])
@@ -8083,7 +8469,388 @@ def api_fanvue_ppv():
     cfg = {'sets': sets, 'tz_offset': max(-840, min(tz, 840)),
            'enabled': bool(d.get('enabled', True)) and bool(sets)}
     _set_setting(f'fanvue_ppv_{persona}', json.dumps(cfg))
-    return jsonify({'ok': True, 'sets': sets, 'enabled': cfg['enabled']})
+    return jsonify({'ok': True, 'sets': sets, 'enabled': cfg['enabled'],
+                    'warnings': _fv_set_warnings(sets)})
+
+
+# --- Purchase signals -------------------------------------------------------
+#
+# Fanvue has no endpoint that answers "did this fan buy that item", so a sale is
+# only ever known from a signal we caught and wrote down. Webhooks are the fast
+# signal but never a memory: delivery is six attempts over ~2.5 minutes with no
+# replay, and 20 consecutive failures disables the endpoint with no backfill.
+# So everything a webhook tells us is also derivable from the API, and the
+# reconciler below re-derives it.
+
+FV_WEBHOOK_TOLERANCE = 300      # seconds either side of the signed timestamp
+FV_SEEN_EVENTS_MAX = 1000
+
+
+def _fv_webhook_secret():
+    return (os.getenv('FANVUE_WEBHOOK_SECRET') or '').strip()
+
+
+def _fv_storage_is_ephemeral():
+    """True when the store is a temp SQLite file rather than a real database.
+
+    db.py falls back to one silently, so on such a deployment every purchase is
+    lost on the next cold start and nothing about the app looks wrong. Worth
+    saying out loud wherever a creator might read it."""
+    try:
+        from db import DATABASE_URL
+        return str(DATABASE_URL).startswith('sqlite')
+    except Exception:
+        return False
+
+
+def _fv_verify_signature(raw_body, header, secret):
+    """Fanvue signs 'X-Fanvue-Signature: t=<unix>,v0=<hex>' as an HMAC-SHA256
+    over the exact bytes of "{t}.{body}". Returns (ok, reason)."""
+    if not secret:
+        return False, 'no signing secret configured'
+    parts = {}
+    for chunk in (header or '').split(','):
+        k, _, v = chunk.strip().partition('=')
+        if k:
+            parts[k] = v
+    ts, sig = parts.get('t'), parts.get('v0')
+    if not ts or not sig:
+        return False, 'malformed signature header'
+    try:
+        age = abs(time.time() - int(ts))
+    except (TypeError, ValueError):
+        return False, 'bad timestamp'
+    if age > FV_WEBHOOK_TOLERANCE:
+        return False, f'timestamp {int(age)}s outside the {FV_WEBHOOK_TOLERANCE}s window'
+    expected = hmac.new(secret.encode('utf-8'),
+                        ts.encode('utf-8') + b'.' + raw_body,
+                        hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, sig):
+        return False, 'signature mismatch'
+    return True, ''
+
+
+def _fv_event_seen(event_id):
+    """True if this event was already applied. Fanvue guarantees at-least-once
+    delivery, so the same payment can arrive more than once."""
+    if not event_id:
+        return False
+    key = 'fanvue_seen_events'
+    try:
+        seen = json.loads(_get_setting(key) or '[]')
+        if not isinstance(seen, list):
+            seen = []
+    except Exception:
+        seen = []
+    if event_id in seen:
+        return True
+    seen.append(event_id)
+    _set_setting(key, json.dumps(seen[-FV_SEEN_EVENTS_MAX:]))
+    return False
+
+
+def _fv_persona_for_creator(creator_uuid):
+    """Which connected persona a webhook belongs to. Webhooks arrive on one
+    endpoint for every creator the app is authorised on."""
+    if not creator_uuid:
+        return ''
+    for slug in sorted({p.get('slug') for p in db_list_personas()} |
+                       set(_fanvue_enabled_list())):
+        if not slug:
+            continue
+        if _fanvue_creator(slug).get('uuid') == creator_uuid:
+            return slug
+    return ''
+
+
+def _fv_settle_drop(persona, fan_uuid, amount_cents=None, invoice_id=None,
+                    message_uuid=None, source='webhook', when=None):
+    """Mark the fan's matching unbought drop as paid.
+
+    Matched by message uuid when we have one, else by the fan's most recent
+    unbought drop at that price — Fanvue's payment events name the fan and the
+    amount but not the message that generated the charge."""
+    try:
+        from db import SessionLocal, PpvDrop, mark_ppv_paid
+        s = SessionLocal()
+    except Exception as e:
+        logger.warning('PPV settle failed to open the ledger: %s', str(e)[:120])
+        return None
+    try:
+        q = s.query(PpvDrop).filter(PpvDrop.persona == persona,
+                                    PpvDrop.paid_at.is_(None))
+        if message_uuid:
+            row = q.filter(PpvDrop.message_uuid == str(message_uuid)).first()
+        else:
+            q = q.filter(PpvDrop.fan_uuid == str(fan_uuid or ''))
+            if amount_cents:
+                q = q.filter(PpvDrop.price_cents == int(amount_cents))
+            row = q.order_by(PpvDrop.created_at.desc()).first()
+        if row is None:
+            return None
+        mark_ppv_paid(s, row.id, invoice_id=invoice_id, source=source, when=when)
+        s.commit()
+        logger.info('PPV PAID [%s] %s tier %d via %s ($%g)', persona, row.set_name,
+                    (row.tier_index or 0) + 1, source, (row.price_cents or 0) / 100)
+        _fv_trace(persona, 'ppv',
+                  f'\U0001F4B0 bought: {row.set_name} tier {(row.tier_index or 0) + 1} '
+                  f'(${(row.price_cents or 0) / 100:g}, via {source})')
+        return row.id
+    except Exception as e:
+        logger.warning('PPV settle failed for %s/%s: %s', persona, fan_uuid, str(e)[:140])
+        return None
+    finally:
+        try:
+            s.close()
+        except Exception:
+            pass
+
+
+def _fv_mark_read(persona, fan_uuid):
+    """Note that the fan opened their last unlock without buying it. That is a
+    price objection rather than inattention, so the retry goes out cheaper."""
+    try:
+        from db import SessionLocal, PpvDrop, mark_ppv_read
+        s = SessionLocal()
+    except Exception:
+        return
+    try:
+        row = (s.query(PpvDrop)
+               .filter(PpvDrop.persona == persona, PpvDrop.fan_uuid == str(fan_uuid),
+                       PpvDrop.paid_at.is_(None))
+               .order_by(PpvDrop.created_at.desc()).first())
+        if row is not None:
+            mark_ppv_read(s, row.id)
+            s.commit()
+    except Exception:
+        pass
+    finally:
+        try:
+            s.close()
+        except Exception:
+            pass
+
+
+@app.route('/webhooks/fanvue', methods=['POST'])
+def fanvue_webhook():
+    """Fanvue event receiver. Signature-verified and idempotent; anything it
+    misses is recovered by the reconciler, because Fanvue never replays."""
+    raw = request.get_data()          # before any JSON parsing — the signature
+    secret = _fv_webhook_secret()     # covers the exact bytes
+    ok, why = _fv_verify_signature(raw, request.headers.get('X-Fanvue-Signature'), secret)
+    if not ok:
+        logger.warning('Fanvue webhook rejected: %s', why)
+        return jsonify({'error': 'invalid signature'}), 401
+    try:
+        ev = json.loads(raw.decode('utf-8'))
+    except Exception:
+        return jsonify({'error': 'invalid payload'}), 400
+
+    kind = str(ev.get('type') or '')
+    data = ev.get('data') if isinstance(ev.get('data'), dict) else {}
+    # message.read is explicitly not idempotent on its event id, so it is the
+    # one topic not deduped.
+    if kind != 'creator.message.read' and _fv_event_seen(str(ev.get('id') or '')):
+        return jsonify({'ok': True, 'duplicate': True})
+
+    creator = (data.get('creator') or {}).get('uuid') if isinstance(data.get('creator'), dict) else None
+    fan = (data.get('fan') or {}).get('uuid') if isinstance(data.get('fan'), dict) else None
+    persona = _fv_persona_for_creator(creator)
+    if not persona:
+        logger.info('Fanvue webhook %s for an unknown creator %s', kind, creator)
+        return jsonify({'ok': True, 'ignored': 'unknown creator'})
+
+    if kind == 'creator.payment.succeeded':
+        amount = _fv_first(data, 'amount', 'gross', 'total', default=None)
+        _fv_settle_drop(persona, fan,
+                        amount_cents=int(amount) if amount else None,
+                        invoice_id=str(_fv_first(data, 'id', 'invoice_id', default='') or '') or None,
+                        source='webhook')
+    elif kind == 'creator.message.read':
+        _fv_mark_read(persona, fan)
+    return jsonify({'ok': True})
+
+
+def _fv_reconcile_purchases(persona, days=45, limit_pages=20):
+    """Re-derive purchases from Fanvue's own ledger.
+
+    This is what makes a sale knowable after downtime: webhook deliveries are
+    gone for good once their retries are spent, but the invoices are not. Walks
+    /earnings newest-first and settles any unbought drop it can match, then
+    falls back to reading purchasedAt on the messages of fans still unsettled."""
+    sets = _fanvue_ppv_sets(persona)
+    if not sets:
+        return {'settled': 0, 'checked': 0}
+    since = datetime.now(timezone.utc) - timedelta(days=int(days))
+    try:
+        from db import SessionLocal, open_ppv_drops
+        s = SessionLocal()
+        try:
+            open_rows = [(d.id, d.fan_uuid, d.price_cents, d.message_uuid)
+                         for d in open_ppv_drops(s, persona, since=since)]
+        finally:
+            s.close()
+    except Exception as e:
+        logger.warning('Reconcile [%s]: ledger unreadable: %s', persona, str(e)[:120])
+        return {'settled': 0, 'checked': 0, 'error': str(e)[:120]}
+    if not open_rows:
+        return {'settled': 0, 'checked': 0}
+
+    settled, cursor = 0, ''
+    scope = _fanvue_scope(persona)
+    for _ in range(limit_pages):
+        try:
+            path = f'{scope}/earnings?size=50' + (f'&cursor={urllib.parse.quote(cursor)}' if cursor else '')
+            res = _fanvue_call(persona, 'GET', path)
+        except Exception as e:
+            logger.warning('Reconcile [%s]: /earnings failed: %s', persona, str(e)[:140])
+            break
+        rows = _fv_list(res)
+        if not rows:
+            break
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            fan_u = r.get('fan') if isinstance(r.get('fan'), str) else \
+                (r.get('fan') or {}).get('uuid') if isinstance(r.get('fan'), dict) else None
+            fan_u = fan_u or _fv_first(r, 'userUuid', 'fanUuid', 'purchaserUuid', default=None)
+            amount = _fv_first(r, 'amount', 'gross', 'net', 'total', default=None)
+            try:
+                amount = int(amount)
+            except (TypeError, ValueError):
+                amount = None
+            if amount is not None and amount <= 0:
+                continue          # refunds and chargebacks are negative rows
+            if _fv_settle_drop(persona, fan_u, amount_cents=amount,
+                               invoice_id=str(_fv_first(r, 'id', 'invoiceNumber',
+                                                        default='') or '') or None,
+                               source='earnings'):
+                settled += 1
+        cursor = str(_fv_first(res if isinstance(res, dict) else {},
+                               'nextCursor', 'next_cursor', default='') or '')
+        if not cursor:
+            break
+
+    # Anything /earnings couldn't place, ask the message itself about.
+    still_open = {r[1] for r in open_rows}
+    for fan_u in list(still_open)[:25]:
+        for page in (1, 2):
+            try:
+                msgs = _fv_list(_fanvue_call(
+                    persona, 'GET',
+                    f'{scope}/chats/{fan_u}/messages?page={page}&size=50'))
+            except Exception:
+                break
+            if not msgs:
+                break
+            for m in msgs:
+                if not isinstance(m, dict) or not m.get('purchasedAt'):
+                    continue
+                mu = str(_fv_first(m, 'uuid', 'id', default='') or '')
+                if mu and _fv_settle_drop(persona, fan_u, message_uuid=mu,
+                                          source='poll'):
+                    settled += 1
+    logger.info('Reconcile [%s]: %d of %d open drops settled', persona, settled,
+                len(open_rows))
+    if settled:
+        _fv_trace(persona, 'ppv', f'reconciled {settled} purchase(s) from Fanvue')
+    return {'settled': settled, 'checked': len(open_rows)}
+
+
+@app.route('/api/fanvue/ppv-stats')
+def api_fanvue_ppv_stats():
+    """How each tier is actually performing: how many went out, how many were
+    bought. Read from the ledger, so it survives everything the settings blobs
+    don't."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    persona = (request.args.get('persona') or '').strip()
+    if not persona:
+        return jsonify({'ok': False, 'error': 'Missing persona'}), 400
+    try:
+        from db import SessionLocal, ppv_set_stats, list_ppv_drops
+        s = SessionLocal()
+        try:
+            stats = ppv_set_stats(s, persona)
+            recent = [{'fan': d.fan_uuid, 'set': d.set_name,
+                       'tier': (d.tier_index or 0) + 1,
+                       'price': d.price_cents, 'paid': bool(d.paid_at),
+                       'read': bool(d.read_at),
+                       'at': d.created_at.isoformat() if d.created_at else '',
+                       'via': d.paid_source or ''}
+                      for d in list_ppv_drops(s, persona, limit=40)]
+        finally:
+            s.close()
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]}), 500
+    return jsonify({'ok': True, 'stats': stats, 'recent': recent,
+                    'storage_ephemeral': _fv_storage_is_ephemeral()})
+
+
+@app.route('/api/fanvue/ppv-simulate', methods=['POST'])
+def api_fanvue_ppv_simulate():
+    """Score a sample message against the saved sets and say exactly what would
+    fire, and why. The answer to "why did it pick that one" without having to
+    send anything to a real fan."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    d = request.json or {}
+    persona = (d.get('persona') or '').strip()
+    if not persona:
+        return jsonify({'ok': False, 'error': 'Missing persona'}), 400
+    sets = _fanvue_ppv_sets(persona)
+    if not sets:
+        return jsonify({'ok': True, 'rows': [], 'chosen': None,
+                        'note': 'No PPV sets are saved yet.'})
+    text = (d.get('text') or '').strip()
+    try:
+        hour = int(d.get('hour'))
+    except (TypeError, ValueError):
+        hour = _fv_fan_hour(persona, '', _fanvue_ppv(persona).get('tz_offset') or 0)
+    hour = max(0, min(hour, 23))
+    active = (d.get('active_set') or '').strip()
+    progress = d.get('progress') if isinstance(d.get('progress'), dict) else {}
+    state = {'active_set': active,
+             'sets': {str(k): int(v or 0) for k, v in progress.items()}}
+
+    rows = []
+    for i, s in enumerate(sets):
+        left = _fv_tiers_left(s, state)
+        score, parts = _fv_score_set(s, text, hour, active=(s['id'] == active))
+        rows.append({'id': s['id'], 'name': s['name'],
+                     'score': round(score - i * 0.01, 2),
+                     'why': [{'reason': r, 'points': round(p, 2)} for r, p in parts],
+                     'tiers_left': left,
+                     'eligible': left > 0})
+    rows.sort(key=lambda r: (-r['eligible'], -r['score']))
+
+    chosen = _fv_pick_set(sets, state, text, hour)
+    out = None
+    if chosen:
+        idx = int(state['sets'].get(chosen['id'], 0) or 0)
+        tier = chosen['tiers'][idx]
+        out = {'set': chosen['name'], 'set_id': chosen['id'],
+               'tier': idx + 1, 'of': len(chosen['tiers']),
+               'price': tier['price'],
+               'media': len(tier['media_uuids']),
+               'caption': tier.get('caption') or '(one will be written for it)'}
+    return jsonify({'ok': True, 'hour': hour, 'rows': rows, 'chosen': out,
+                    'warnings': _fv_set_warnings(sets)})
+
+
+@app.route('/api/fanvue/reconcile', methods=['POST'])
+def api_fanvue_reconcile():
+    """Rebuild purchase state from Fanvue's ledger — run after downtime, after
+    a redeploy, or any time the funnel looks stuck."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    d = request.json or {}
+    persona = (d.get('persona') or '').strip()
+    if not persona:
+        return jsonify({'ok': False, 'error': 'Missing persona'}), 400
+    days = max(1, min(int(d.get('days') or 45), 365))
+    out = _fv_reconcile_purchases(persona, days=days)
+    return jsonify({'ok': True, **out})
 
 
 @app.route('/api/fanvue/draft', methods=['POST'])
@@ -8610,115 +9377,267 @@ def _ppv_progress(value, sets):
     return {sets[0]['id']: n} if n and sets else {}
 
 
-def _fv_last_tier(sets, progress):
-    """The tier most recently sent to this fan: (set, index). The one they did
-    not buy, which is what a retry repeats."""
-    for s in reversed(sets):
-        n = int(progress.get(s['id'], 0) or 0)
-        if n:
-            return s, min(n - 1, len(s['tiers']) - 1)
-    return None, 0
+def _fv_fan_state(raw, fan_uuid, sets):
+    """One fan's PPV record, migrated forward from every earlier shape.
+
+    The ledger table is the authority on what was bought; this is the hot-path
+    summary of where the fan is in the ladder, and can be rebuilt from it."""
+    st = raw.get(fan_uuid) if isinstance(raw, dict) else None
+    if isinstance(st, dict) and 'sets' in st:
+        st.setdefault('active_set', '')
+        st.setdefault('retries', 0)
+        st.setdefault('msgs_at_last_drop', 0)
+        st.setdefault('last_drop_id', '')
+        st['sets'] = {str(k): int(v or 0) for k, v in (st.get('sets') or {}).items()}
+        return st
+    # Legacy: {set_id: tiers_sent}, or an int/bool counting one flat list.
+    progress = _ppv_progress(st, sets)
+    active = ''
+    if progress:
+        # Whichever set got furthest is the one this fan was climbing.
+        active = max(progress.items(), key=lambda kv: kv[1])[0]
+    return {'active_set': active, 'sets': progress, 'last_drop_id': '',
+            'retries': 0, 'msgs_at_last_drop': 0}
+
+
+def _fv_tiers_left(s, state):
+    return len(s['tiers']) - int((state.get('sets') or {}).get(s['id'], 0) or 0)
+
+
+def _fv_queued_hint(persona, fan_uuid, fan_key, sets, state_key, context, tz_offset):
+    """A line telling the model what unlock is about to follow its reply.
+
+    The set is scored here as well as in _fv_maybe_ppv. That is deliberate: the
+    reply has to be written before the drop is sent, and a reply that lands on
+    the content converts far better than one written blind. The two can disagree
+    if the pick shifts in between, which costs a slightly off tease, not a wrong
+    send — _fv_maybe_ppv remains the only thing that decides what goes out."""
+    if not sets:
+        return ''
+    try:
+        state_all = json.loads(_get_setting(state_key) or '{}')
+    except Exception:
+        return ''
+    state = _fv_fan_state(state_all, fan_uuid, sets)
+    hour = _fv_fan_hour(persona, fan_key, tz_offset)
+    chosen = _fv_pick_set(sets, state, context or '', hour)
+    if not chosen:
+        return ''
+    scene = (chosen.get('scene') or chosen.get('name') or '').strip()
+    if not scene:
+        return ''
+    return ('A paid unlock may follow this message: ' + scene + '. '
+            'Write your reply so it leads there — build to it and make them '
+            'curious. Do NOT name a price, do NOT mention buying, unlocking or '
+            'sending anything, and do not describe the content directly. ')
+
+
+def _fv_set_warnings(sets):
+    """Configuration that will quietly misbehave: things worth telling the
+    creator about at save time, none of which are worth refusing the save."""
+    out = []
+    # A trigger word on two sets makes them compete for the same moments, which
+    # is what pulls a fan off one ladder onto another's tier 1.
+    owners = {}
+    for s in sets:
+        for raw in s['keywords']:
+            kw = _fv_parse_keyword(raw)
+            if kw and not kw['negative']:
+                owners.setdefault(kw['word'], []).append(s['name'])
+    for word, names in owners.items():
+        if len(names) > 1:
+            out.append(f'"{word}" is a trigger word on {" and ".join(names)} — '
+                       'those sets will compete for the same messages')
+    # Hours nothing covers: a fan chatting then gets whichever set is least bad.
+    windowed = [s for s in sets if s.get('hour_from') is not None
+                and s.get('hour_to') is not None]
+    if windowed and len(windowed) == len(sets):
+        gaps = [h for h in range(24) if not any(_fv_hour_fits(s, h) for s in sets)]
+        if gaps:
+            spans, start = [], gaps[0]
+            for prev, h in zip(gaps, gaps[1:] + [None]):
+                if h != prev + 1:
+                    spans.append(f'{start:02d}:00–{(prev + 1) % 24:02d}:00')
+                    start = h
+            out.append(f'No set covers {len(gaps)}h of the day '
+                       f'({", ".join(spans)}) — leave one set without hours '
+                       'as a fallback')
+    for s in sets:
+        prices = [t['price'] for t in s['tiers']]
+        if len(prices) > 1 and any(b <= a for a, b in zip(prices, prices[1:])):
+            out.append(f'"{s["name"]}" prices do not climb '
+                       f'({" → ".join("$%g" % (p / 100) for p in prices)})')
+        blank = [i + 1 for i, t in enumerate(s['tiers']) if not t.get('caption')]
+        if blank:
+            many = len(blank) > 1
+            out.append(f'"{s["name"]}" tier{"s" if many else ""} '
+                       f'{", ".join(map(str, blank))} '
+                       f'{"have" if many else "has"} no caption — one will be '
+                       f'written {"for them" if many else "for it"}')
+    return out
+
+
+def _fv_migrate_ppv_state(persona, sets):
+    """Fold the old parallel dicts into the single per-fan record, once.
+
+    Runs before the new gating goes live so nobody who was already halfway up a
+    ladder is knocked back to tier 1 by the upgrade itself. The old keys are
+    left in place — this only ever writes the new one."""
+    state_key = f'fanvue_ppv_state_{persona}'
+    if _get_setting(state_key):
+        return
+    try:
+        old_sent = json.loads(_get_setting(f'fanvue_ppv_sent_{persona}') or '{}')
+        old_at = json.loads(_get_setting(f'fanvue_ppv_at_{persona}') or '{}')
+        old_retry = json.loads(_get_setting(f'fanvue_ppv_retry_{persona}') or '{}')
+    except Exception:
+        return
+    if not isinstance(old_sent, dict) or not old_sent:
+        return
+    out = {}
+    for fan, progress in old_sent.items():
+        st = _fv_fan_state({fan: progress}, fan, sets)
+        st['msgs_at_last_drop'] = int((old_at or {}).get(fan, 0) or 0)
+        st['retries'] = int((old_retry or {}).get(fan, 0) or 0)
+        out[fan] = st
+    _set_setting(state_key, json.dumps(out))
+    logger.info('Fanvue [%s]: migrated %d fans to the new PPV state', persona, len(out))
 
 
 def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx, context=''):
-    """Consider the next PPV drop for this fan: pick the set that fits what was
-    just said and the hour, then send its next tier in order. Serialised per
-    persona because paced replies land from several worker threads at once and
-    the counters are a read-modify-write on one shared setting."""
+    """Consider the next PPV drop for this fan: hold the set they are already
+    climbing unless another clearly fits better, then send its next tier.
+
+    Serialised per persona because paced replies land from several worker
+    threads at once and the summary is a read-modify-write on one setting. Every
+    send is written to the ppv_drops ledger before the counters move, so the sale
+    survives anything that happens to the summary afterwards."""
     sets = ctx['sets']
     if not sets:
         return
     with _fanvue_persona_lock(_fv_ppv_locks, persona):
         try:
-            ppv_sent = json.loads(_get_setting(ctx['sent_key']) or '{}')
-        except Exception:
-            ppv_sent = {}
-        try:
-            ppv_at = json.loads(_get_setting(ctx['at_key']) or '{}')
-        except Exception:
-            ppv_at = {}
-        try:
-            last_sent = json.loads(_get_setting(ctx['last_key']) or '{}')
-        except Exception:
-            last_sent = {}
-        try:
-            test_paid = json.loads(_get_setting(ctx['paid_key']) or '{}')
-        except Exception:
-            test_paid = {}
-        try:
-            retries = json.loads(_get_setting(ctx['retry_key']) or '{}')
-        except Exception:
-            retries = {}
-        resend = False
+            state_all = _json_setting_strict(ctx['state_key'], {})
+            test_paid = _json_setting_strict(ctx['paid_key'], {})
+        except SettingUnreadable as e:
+            # An unreadable store looks exactly like "this fan is brand new",
+            # which would re-send every unlock they already bought. Hold.
+            logger.warning('Fanvue [%s] PPV state unreadable, holding: %s', persona, e)
+            _fv_trace(persona, 'error', f'PPV state unreadable, no drop sent: {str(e)[:120]}')
+            return
 
-        progress = _ppv_progress(ppv_sent.get(fan_uuid), sets)
-        total_done = sum(progress.values())
-        exchanged = len(_fanvue_saved_history(persona, fan_key, limit=200))
+        state = _fv_fan_state(state_all, fan_uuid, sets)
+        total_done = sum(state['sets'].values())
+        exchanged = _fanvue_msg_count(persona, fan_key)
+        resend = False
+        discount = 0.0
+
         if total_done == 0:
             send_ppv = exchanged >= ctx.get('first_after', 6)
         else:
-            enough_chat = (exchanged - int(ppv_at.get(fan_uuid, 0))) >= ctx['gap']
-            paid = (not ctx['require_payment']) \
-                or int(test_paid.get(fan_uuid, 0) or 0) >= total_done \
-                or _fanvue_fan_purchased(persona, fan_uuid,
-                                         last_sent.get(fan_uuid) or [])
+            enough_chat = (exchanged - int(state.get('msgs_at_last_drop', 0) or 0)) >= ctx['gap']
+            drop = None
+            if not ctx['require_payment']:
+                paid = True
+            elif int(test_paid.get(fan_uuid, 0) or 0) >= total_done:
+                paid = True
+            elif not state.get('last_drop_id'):
+                # A fan carried over from before the ledger existed. Their past
+                # drops can't be verified either way, so don't punish them for
+                # the upgrade — let them carry on and gate from here on.
+                paid = True
+            else:
+                pstate, drop = _fv_drop_state(persona, state.get('last_drop_id'))
+                if pstate == PPV_UNKNOWN:
+                    _fv_trace(persona, 'error',
+                              f'could not read payment state for {handle or fan_uuid} — holding')
+                    return
+                paid = pstate == PPV_PAID
+                if not paid and _fv_drop_is_stale(drop, ctx.get('stale_days')):
+                    # Long past unbought: stop letting one photo end the funnel.
+                    logger.info('Fanvue [%s] %s: last PPV unbought past the stale '
+                                'window — moving to another set', persona, handle or fan_uuid)
+                    _fv_trace(persona, 'ppv',
+                              f'{handle or fan_uuid}: unbought drop expired, trying another set')
+                    state['active_set'] = ''
+                    state['retries'] = 0
+                    paid = True
             send_ppv = paid and enough_chat
             if not paid:
                 logger.info('Fanvue [%s] %s: waiting on payment of the last PPV',
                             persona, handle or fan_uuid)
                 # An unbought drop otherwise blocks this fan for good. After
-                # enough more chat, offer the same one again a few times.
-                tries = int(retries.get(fan_uuid, 0) or 0)
-                waited = exchanged - int(ppv_at.get(fan_uuid, 0))
+                # enough more chat, offer the same one again a few times — and
+                # cheaper if they opened it, since that is a price objection.
+                tries = int(state.get('retries', 0) or 0)
+                waited = exchanged - int(state.get('msgs_at_last_drop', 0) or 0)
                 if (ctx.get('retry_after') and tries < ctx.get('retry_max', 0)
                         and waited >= ctx['retry_after']):
                     resend = True
+                    if drop is not None and drop.read_at:
+                        discount = float(ctx.get('retry_discount') or 0)
         if not (send_ppv or resend):
             return
 
-        hour = int(time.strftime('%H', time.localtime(time.time() + 60 * int(
-            ctx.get('tz_offset') or 0))))
+        hour = _fv_fan_hour(persona, fan_key, ctx.get('tz_offset'))
+        blocked = _fv_suppressed(sets, (context or '') + ' ' + (reply or ''))
+        if blocked:
+            logger.info('Fanvue [%s] %s: holding the drop, "%s" came up',
+                        persona, handle or fan_uuid, blocked)
+            _fv_trace(persona, 'ppv',
+                      f'held back from {handle or fan_uuid} — "{blocked}" came up')
+            return
         if resend:
             # Repeat the tier they did not buy, not the next one.
-            chosen, idx = _fv_last_tier(sets, progress)
+            chosen, idx = _fv_repeat_tier(sets, state)
             if not chosen:
                 return
         else:
-            chosen = _fv_pick_set(sets, progress,
-                                  (context or '') + ' ' + (reply or ''), hour)
+            chosen = _fv_pick_set(sets, state, (context or '') + ' ' + (reply or ''), hour)
             if not chosen:
                 return
-            idx = int(progress.get(chosen['id'], 0) or 0)
+            idx = int(state['sets'].get(chosen['id'], 0) or 0)
         tier = chosen['tiers'][idx]
-        cap = (tier.get('caption') or reply).strip()[:2000]
+        price = int(tier['price'])
+        if discount:
+            price = max(FV_PRICE_FLOOR, int(round(price * (1 - discount))))
+        cap = _fv_caption(persona, chosen, tier, reply)
         try:
-            _fanvue_call(persona, 'POST', f'{scope}/chats/{fan_uuid}/message',
-                         body={'text': cap, 'mediaUuids': tier['media_uuids'],
-                               'price': int(tier['price'])})
+            sent = _fanvue_call(persona, 'POST', f'{scope}/chats/{fan_uuid}/message',
+                                body={'text': cap, 'mediaUuids': tier['media_uuids'],
+                                      'price': price})
         except Exception as e:
             logger.warning('Fanvue PPV to %s failed: %s', handle or fan_uuid, str(e)[:120])
             _fv_trace(persona, 'error', f'PPV to {handle or fan_uuid} failed: {str(e)[:200]}')
             return
+
+        msg_uuid = ''
+        if isinstance(sent, dict):
+            body = sent.get('data') if isinstance(sent.get('data'), dict) else sent
+            msg_uuid = str(_fv_first(body, 'uuid', 'id', default='') or '')
+        drop_id = _fv_record_drop(persona, fan_uuid, chosen, idx, price,
+                                  tier['media_uuids'], msg_uuid)
+
         if resend:
-            retries[fan_uuid] = int(retries.get(fan_uuid, 0) or 0) + 1
-            _set_setting(ctx['retry_key'], json.dumps(retries))
+            state['retries'] = int(state.get('retries', 0) or 0) + 1
         else:
-            progress[chosen['id']] = idx + 1
-            ppv_sent[fan_uuid] = progress
-            retries.pop(fan_uuid, None)
-            _set_setting(ctx['sent_key'], json.dumps(ppv_sent))
-            _set_setting(ctx['retry_key'], json.dumps(retries))
-        ppv_at[fan_uuid] = exchanged
-        last_sent[fan_uuid] = tier['media_uuids']
-        _set_setting(ctx['at_key'], json.dumps(ppv_at))
-        _set_setting(ctx['last_key'], json.dumps(last_sent))
+            state['sets'][chosen['id']] = idx + 1
+            state['active_set'] = chosen['id']
+            state['retries'] = 0
+        if drop_id:
+            state['last_drop_id'] = drop_id
+        state['msgs_at_last_drop'] = exchanged
+        state_all[fan_uuid] = state
+        _set_setting(ctx['state_key'], json.dumps(state_all))
+
         again = ' again' if resend else ''
-        logger.info('PPV SENT%s [%s] %s tier %d/%d -> %s at %s', again, persona,
+        off = f' (-{int(discount * 100)}%)' if discount else ''
+        logger.info('PPV SENT%s [%s] %s tier %d/%d -> %s at %s%s', again, persona,
                     chosen['name'], idx + 1, len(chosen['tiers']),
-                    handle or fan_uuid, tier['price'])
+                    handle or fan_uuid, price, off)
         _fv_trace(persona, 'ppv',
                   f"\U0001F48E {chosen['name']} tier {idx + 1}/{len(chosen['tiers'])}"
-                  f"{again} \u2192 {handle or fan_uuid} at ${tier['price'] / 100:g}: {cap}")
+                  f"{again} → {handle or fan_uuid} at ${price / 100:g}{off}: {cap}")
 
 
 def _fv_deliver(persona, scope, fan_uuid, fan_key, handle, reply, incoming, cfg,
@@ -8903,10 +9822,16 @@ def _fanvue_auto_round(persona):
     ppv_sets = _fanvue_ppv_sets(persona)
     ppv_on = bool(_fanvue_ppv(persona).get('enabled', True)) and bool(ppv_sets)
     ppv_tz = _fanvue_ppv(persona).get('tz_offset') or 0
-    ppv_sent_key = f'fanvue_ppv_sent_{persona}'
-    ppv_at_key = f'fanvue_ppv_at_{persona}'
+    ppv_state_key = f'fanvue_ppv_state_{persona}'
     ppv_paid_key = f'fanvue_ppv_testpaid_{persona}'
+    if ppv_on:
+        _fv_migrate_ppv_state(persona, ppv_sets)
+    # A fan typing this marks their own unlock paid, so it must never be live
+    # in production — the env flag is the guard, not the empty string.
     ppv_test_phrase = (opts.get('ppv_test_phrase') or '').strip().lower()
+    if ppv_test_phrase and (os.getenv('FANVUE_PPV_TEST_PHRASE_ENABLED') or '').strip().lower() \
+            not in ('1', 'true', 'yes'):
+        ppv_test_phrase = ''
     hcfg = _fv_humanize_cfg(persona)
     # Messages that must pass before the first drop, and between later ones.
     ppv_first_after = max(1, min(int(opts.get('ppv_first_after', 6) or 6), 200))
@@ -8914,6 +9839,11 @@ def _fanvue_auto_round(persona):
     # Offer an unbought drop again after this much more chat, at most this often.
     ppv_retry_after = max(0, min(int(opts.get('ppv_retry_after', 0) or 0), 500))
     ppv_retry_max = max(0, min(int(opts.get('ppv_retry_max', 1) or 0), 10))
+    # A drop they opened but didn't buy is a price objection, so the retry goes
+    # out cheaper. And after this many days an unbought drop stops blocking the
+    # ladder — one photo shouldn't end the funnel for a fan permanently.
+    ppv_retry_discount = max(0.0, min(float(opts.get('ppv_retry_discount', 0) or 0), 0.8))
+    ppv_stale_days = max(0, min(int(opts.get('ppv_stale_days', 14) or 0), 365))
     # When off, tiers advance on chatting alone (payment can't be verified for
     # agency-agent testers). When on, each later tier waits for the prior payment.
     ppv_require_payment = (_get_setting(f'fanvue_ppv_require_payment_{persona}') or '0') == '1'
@@ -9062,10 +9992,11 @@ def _fanvue_auto_round(persona):
             except Exception:
                 paid_map = {}
             try:
-                sent_map = json.loads(_get_setting(ppv_sent_key) or '{}')
+                state_map = json.loads(_get_setting(ppv_state_key) or '{}')
             except Exception:
-                sent_map = {}
-            paid_map[fan_uuid] = sum(_ppv_progress(sent_map.get(fan_uuid), ppv_sets).values())
+                state_map = {}
+            paid_map[fan_uuid] = sum(
+                _fv_fan_state(state_map, fan_uuid, ppv_sets)['sets'].values())
             _set_setting(ppv_paid_key, json.dumps(paid_map))
             _fv_trace(persona, 'ppv', f'{who} said the test phrase — tier '
                                       f'{paid_map[fan_uuid]} counted as paid')
@@ -9093,7 +10024,13 @@ def _fanvue_auto_round(persona):
             "Be warm and engaging, move the rapport → tease → offer funnel naturally "
             "(never hard-sell). "
             + question_rule_for(pcfg, history)
-            + lim['note'] + ' ' + NO_PLACEHOLDER_RULE + "Their latest message: "
+            + lim['note'] + ' ' + NO_PLACEHOLDER_RULE
+            # Say what is about to go out, so the reply lands on it. Without
+            # this the model writes blind and a caption-less tier ships the
+            # conversational reply as the sales line on a paid unlock.
+            + _fv_queued_hint(persona, fan_uuid, fan_key, ppv_sets if ppv_on else [],
+                              ppv_state_key, text, ppv_tz)
+            + "Their latest message: "
             f"\"{text}\"")
         instruction = _fan_memory_block(_fan_memory(persona, fan_key), persona) + instruction
         reply = _persona_text(persona, instruction, history=history,
@@ -9110,10 +10047,9 @@ def _fanvue_auto_round(persona):
 
         ppv_ctx = {'sets': ppv_sets, 'gap': ppv_gap, 'first_after': ppv_first_after,
                    'retry_after': ppv_retry_after, 'retry_max': ppv_retry_max,
-                   'retry_key': f'fanvue_ppv_retry_{persona}',
-                   'sent_key': ppv_sent_key,
-                   'at_key': ppv_at_key, 'paid_key': ppv_paid_key,
-                   'last_key': f'fanvue_ppv_last_{persona}', 'tz_offset': ppv_tz,
+                   'retry_discount': ppv_retry_discount, 'stale_days': ppv_stale_days,
+                   'state_key': ppv_state_key, 'paid_key': ppv_paid_key,
+                   'tz_offset': ppv_tz,
                    'require_payment': ppv_require_payment} if ppv_on else None
         age = _fv_msg_age_minutes(newest)
         active = age is None or age < FV_ACTIVE_MIN
@@ -9200,6 +10136,11 @@ def api_fanvue_auto():
             opts['ppv_retry_after'] = max(0, min(int(data['ppv_retry_after'] or 0), 500))
         if 'ppv_retry_max' in data:
             opts['ppv_retry_max'] = max(0, min(int(data['ppv_retry_max'] or 0), 10))
+        if 'ppv_stale_days' in data:
+            opts['ppv_stale_days'] = max(0, min(int(data['ppv_stale_days'] or 0), 365))
+        if 'ppv_retry_discount' in data:
+            opts['ppv_retry_discount'] = max(0.0, min(
+                float(data['ppv_retry_discount'] or 0), 0.8))
         if 'ppv_test_phrase' in data:
             opts['ppv_test_phrase'] = (data.get('ppv_test_phrase') or '').strip()[:80]
         if 'ppv_require_payment' in data:
@@ -9229,14 +10170,20 @@ def api_fanvue_auto():
                     'ppv_gap': int(opts.get('ppv_gap', 8) or 8),
                     'ppv_retry_after': int(opts.get('ppv_retry_after', 0) or 0),
                     'ppv_retry_max': int(opts.get('ppv_retry_max', 1) or 0),
+                    'ppv_stale_days': int(opts.get('ppv_stale_days', 14) or 0),
+                    'ppv_retry_discount': float(opts.get('ppv_retry_discount', 0) or 0),
                     'followup_min': int(_get_setting(f'fanvue_followup_min_{persona}') or 30),
                     'ppv_require_payment': (_get_setting(f'fanvue_ppv_require_payment_{persona}') or '0') == '1'})
 
 
 @app.route('/api/fanvue/ppv-reset', methods=['POST'])
 def api_fanvue_ppv_reset():
-    """Forget what has already been sent, so the sets start from the top again.
-    With a fan_uuid it resets that one fan; without, everyone on this persona."""
+    """Forget what has already been *sent*, so the sets start from the top again.
+
+    Purchases are a different fact and are never touched: the ppv_drops ledger
+    is what later confirms a fan paid, and it has to outlive any number of
+    progress resets. Resetting everyone needs confirm:true — it used to be one
+    unconfirmed POST away."""
     if not _check_admin():
         return jsonify({'error': 'Unauthorized'}), 401
     d = request.json or {}
@@ -9244,9 +10191,13 @@ def api_fanvue_ppv_reset():
     if not persona:
         return jsonify({'ok': False, 'error': 'Missing persona'}), 400
     fan = (d.get('fan_uuid') or '').strip()
-    keys = [f'fanvue_ppv_sent_{persona}', f'fanvue_ppv_at_{persona}',
-            f'fanvue_ppv_last_{persona}', f'fanvue_ppv_testpaid_{persona}',
-            f'fanvue_ppv_retry_{persona}']
+    if not fan and not d.get('confirm'):
+        return jsonify({'ok': False, 'needs_confirm': True, 'error':
+                        'This restarts the sets for every fan on this persona. '
+                        'Send confirm:true to go ahead.'}), 400
+    keys = [f'fanvue_ppv_state_{persona}', f'fanvue_ppv_sent_{persona}',
+            f'fanvue_ppv_at_{persona}', f'fanvue_ppv_last_{persona}',
+            f'fanvue_ppv_testpaid_{persona}', f'fanvue_ppv_retry_{persona}']
     cleared = 0
     for k in keys:
         if fan:
@@ -9260,8 +10211,10 @@ def api_fanvue_ppv_reset():
         else:
             _set_setting(k, '{}')
     who = fan or 'every fan'
-    _fv_trace(persona, 'ppv', f'PPV progress reset for {who} — the sets start again')
-    return jsonify({'ok': True, 'fan_uuid': fan, 'cleared': cleared if fan else len(keys)})
+    _fv_trace(persona, 'ppv', f'PPV send progress reset for {who} — the sets '
+                              'start again (purchase history kept)')
+    return jsonify({'ok': True, 'fan_uuid': fan, 'purchases_kept': True,
+                    'cleared': cleared if fan else len(keys)})
 
 
 @app.route('/api/fanvue/lists')
@@ -9320,12 +10273,30 @@ def api_fanvue_trace():
         problems.append('Never replying to fans in: ' + ', '.join(
             l['name'] for l in _fv_clean_lists(opts['exclude_lists'])))
     if opts.get('ppv_test_phrase'):
-        problems.append('PPV test phrase is active: "%s" — a fan saying it counts '
-                        'as a paid unlock.' % opts['ppv_test_phrase'])
+        if (os.getenv('FANVUE_PPV_TEST_PHRASE_ENABLED') or '').strip().lower() \
+                in ('1', 'true', 'yes'):
+            problems.append('PPV test phrase is active: "%s" — a fan saying it '
+                            'counts as a paid unlock.' % opts['ppv_test_phrase'])
+        else:
+            problems.append('PPV test phrase is set but ignored — set '
+                            'FANVUE_PPV_TEST_PHRASE_ENABLED=1 to use it in testing.')
+    # The single failure that silently loses every purchase: without a real
+    # Postgres the store is a temp file, wiped on the next cold start.
+    ephemeral = _fv_storage_is_ephemeral()
+    if ephemeral:
+        problems.append('Purchases will be forgotten on the next redeploy — the '
+                        'database is an ephemeral file. Set DATABASE_URL (or the '
+                        'Cloud SQL env vars) to keep them.')
+    if not _fv_webhook_secret():
+        problems.append('No FANVUE_WEBHOOK_SECRET, so payment webhooks are '
+                        'rejected. Purchases are still picked up by Reconcile, '
+                        'just later.')
     return jsonify({'persona': persona, 'connected': connected,
                     'enabled': bool(opts.get('enabled')),
                     'running': bool(lock and lock.locked()),
                     'queued': _fv_inflight[0], 'workers': _fv_workers(),
+                    'storage_ephemeral': ephemeral,
+                    'webhook_ready': bool(_fv_webhook_secret()),
                     'problems': problems, 'rows': rows[-FV_TRACE_MAX:]})
 
 
