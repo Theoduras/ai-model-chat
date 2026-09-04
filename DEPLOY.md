@@ -237,10 +237,64 @@ handled by Oxapay — Google supplies the identity only.
 | `GOOGLE_OAUTH_CLIENT_ID` | Web client ID. The Google button stays hidden until this and the secret are both set. |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | Web client secret. |
 | `GOOGLE_OAUTH_REDIRECT_URI` | Optional. Only needed when the app sits behind a proxy that rewrites the host, so the callback URL it builds no longer matches what Google has registered. |
+| `PUBLIC_BASE_URL` | The origin Google should call back on, e.g. `https://velvetfunnel.app`. Set it whenever the public domain differs from the host the container sees. |
+
+The app reads `X-Forwarded-Proto`, so behind Cloud Run's or Vercel's TLS
+proxy the redirect URI it builds is `https://` even though the container is
+handed a plain-http request. `PUBLIC_BASE_URL` overrides the host,
+`GOOGLE_OAUTH_REDIRECT_URI` overrides the whole URL.
 
 A `redirect_uri_mismatch` error from Google means the URI in step 4 differs
 from what the app sent — scheme, host and trailing path must match character
 for character.
+
+`GET /healthz` reports `"google_login": true` once the client ID and secret
+are both readable by the running instance.
+
+## Payments (Oxapay)
+
+Plans are billed in crypto through [Oxapay](https://oxapay.com). Free plans
+activate without an invoice; every paid tier in `TIERS` creates one.
+
+### Set up the merchant account
+
+1. Sign up at <https://oxapay.com> and verify the account.
+2. **Merchant → Payment → Add new business**: give it a name and the site URL.
+3. Copy the **Merchant API key** from that business.
+4. Set the callback (IPN) URL to `https://your-domain.com/api/billing/webhook`.
+   Oxapay also receives it per invoice from `callback_url`, so this is only a
+   fallback for the dashboard's own tests.
+5. Choose which coins to accept and where to auto-convert or settle. The app
+   prices everything in USD and lets Oxapay pick the coin at checkout.
+
+### Environment variables
+
+| Variable | Why |
+|---|---|
+| `OXAPAY_MERCHANT_KEY` | Merchant API key. Checkout returns "Payments are not configured yet." (503) until it is set. |
+| `PUBLIC_BASE_URL` | Origin used for `callback_url` and `return_url` on each invoice. Same variable as Google above. |
+| `DEV_FAKE_PAYMENTS` | Set to `1` **only** on a dev deployment to activate plans without paying. Leave unset in production — the endpoint 404s without it. |
+
+### How a payment flows
+
+1. `POST /api/billing/checkout` creates an Oxapay invoice, writes a `pending`
+   row to `payments`, and returns `payment_url`; the browser is sent there.
+2. The creator pays; Oxapay POSTs to `/api/billing/webhook`.
+3. The webhook verifies an HMAC-SHA512 of the raw body against the merchant
+   key, then on `status: paid` stamps `paid_at` and extends the plan.
+4. The creator lands back on `/billing/return`, which forwards to `/dashboard`
+   once the account is active.
+
+Because the plan is activated by the webhook, the callback URL must be
+reachable from the public internet — a private Cloud Run service or a
+localhost tunnel that is down means paid invoices never activate.
+
+### Verifying
+
+- `GET /healthz` reports `"payments": true` once the key is set.
+- A bad signature is logged as `Oxapay webhook rejected: bad HMAC signature`
+  and answered `200`, so Oxapay does not retry a forged call forever.
+- Successful activation logs `PLAN ACTIVATED user=... tier=... until=...`.
 
 ## SEO and Google Ads (SEA)
 

@@ -941,18 +941,30 @@ _CRAWL_DISALLOW = ['/dashboard', '/admin', '/account', '/billing', '/api/',
                    '/logout', '/go/']
 
 
-def _site_origin():
-    """Canonical origin for absolute URLs. SITE_URL wins so the canonical stays
-    the marketing domain even when the app answers on a *.run.app host."""
-    explicit = (os.getenv('SITE_URL') or '').strip().rstrip('/')
-    if explicit:
-        return explicit
-    # Cloud Run terminates TLS at its proxy, so request.url_root reports http.
+def _request_origin():
+    """The origin this request actually arrived on. Cloud Run and Vercel
+    terminate TLS at their proxy, so request.url_root reports http even on an
+    https request; anything handed to an external service (an OAuth redirect
+    URI, a payment callback) has to carry the real scheme."""
     proto = (request.headers.get('X-Forwarded-Proto') or '').split(',')[0].strip()
     origin = request.url_root.rstrip('/')
     if proto == 'https' and origin.startswith('http://'):
         origin = 'https://' + origin[len('http://'):]
     return origin
+
+
+def _callback_origin():
+    """Origin for URLs a third party calls back on. PUBLIC_BASE_URL wins so a
+    custom domain stays stable even when the app answers on *.run.app."""
+    explicit = (os.getenv('PUBLIC_BASE_URL') or '').strip().rstrip('/')
+    return explicit or _request_origin()
+
+
+def _site_origin():
+    """Canonical origin for absolute URLs. SITE_URL wins so the canonical stays
+    the marketing domain even when the app answers on a *.run.app host."""
+    explicit = (os.getenv('SITE_URL') or '').strip().rstrip('/')
+    return explicit or _request_origin()
 
 
 def _seo_noindex_all():
@@ -1062,6 +1074,8 @@ def healthz():
         'status': 'ok',
         'db': backend,
         'secret_key_set': bool((os.getenv('SECRET_KEY') or '').strip()),
+        'google_login': bool(_google_oauth_config()[0]),
+        'payments': bool(_oxapay_key()),
         'accounts_persist': not warns,
         'warnings': warns,
     }), 200
@@ -1850,7 +1864,7 @@ def _google_redirect_uri():
     explicit = (os.getenv('GOOGLE_OAUTH_REDIRECT_URI') or '').strip()
     if explicit:
         return explicit
-    return urllib.parse.urljoin(request.url_root, 'auth/google/callback')
+    return _callback_origin() + '/auth/google/callback'
 
 
 @app.context_processor
@@ -1987,6 +2001,12 @@ def login():
     s = _db_session()
     try:
         u = get_user_by_email(s, email)
+        # A Google-only account has no password, so the generic error would send
+        # the creator round in circles resetting one that never existed.
+        if u and u.google_sub and not u.password_hash:
+            return render_template_string(
+                SIGNIN_HTML, email=email,
+                error='That account uses Google. Use "Continue with Google".')
         if not u or not check_password_hash(u.password_hash, password):
             return render_template_string(SIGNIN_HTML, error='Wrong email or password.',
                                           email=email)
@@ -2070,7 +2090,7 @@ def api_billing_checkout():
 
     from db import Payment
     order_id = f'{user["id"]}-{secrets.token_hex(6)}'
-    base = (os.getenv('PUBLIC_BASE_URL') or request.url_root).rstrip('/')
+    base = _callback_origin()
     body = json.dumps({
         'amount': tier['price'],
         'currency': 'USD',
