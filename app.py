@@ -7892,6 +7892,21 @@ def _fv_score_set(s, context, hour, active=False):
     return score, parts
 
 
+def _fv_suppressed(sets, context):
+    """A negative trigger word says something about the fan right now — broke,
+    tired, wanting a refund — not about one set. So it holds back every drop,
+    not just the set it was written on."""
+    words = _fv_words(context)
+    lowered = (context or '').casefold()
+    for s in sets:
+        for raw in s['keywords']:
+            kw = _fv_parse_keyword(raw)
+            if kw and kw['negative'] and _fv_keyword_score(
+                    dict(kw, weight=1.0), words, lowered):
+                return kw['word']
+    return ''
+
+
 def _fv_pick_set(sets, state, context, hour):
     """Choose the set to drop from. The set the fan is already climbing keeps
     winning unless another beats it by a clear margin, so a three-tier set is
@@ -7968,6 +7983,42 @@ def _fv_fan_tz_offset(persona, fan_key, min_msgs=12):
 
 # Fanvue rejects anything under $3, so a discounted retry stops here.
 FV_PRICE_FLOOR = 300
+
+
+def _fv_caption(persona, chosen, tier, reply):
+    """The line on the paywall. A creator-written caption wins; {scene} and
+    {name} are filled in so one caption can serve a whole set.
+
+    When there is none, write one for the content rather than reusing the chat
+    reply — a reply is written to continue a conversation, and shipping it as
+    the sales line is how a $20 unlock ends up captioned "anyway, what are you
+    up to tonight?"."""
+    raw = (tier.get('caption') or '').strip()
+    if raw:
+        try:
+            raw = raw.format(scene=chosen.get('scene') or '',
+                             name=chosen.get('name') or '')
+        except (KeyError, IndexError, ValueError):
+            pass
+        return raw[:2000]
+    scene = (chosen.get('scene') or chosen.get('name') or '').strip()
+    if scene:
+        try:
+            gen = _persona_text(
+                persona,
+                'Write ONE short caption, in character, for a locked photo set '
+                f'you are about to send a fan. The set is: {scene}. Tease what '
+                'is inside so they have to see it — hint at one specific thing '
+                'without describing it. Do not mention price, buying or '
+                'unlocking. One or two sentences, no quotes, no emoji unless '
+                'your voice normally uses them.',
+                max_tokens=80, temperature=1.0)
+            gen = _strip_placeholders(strip_ppv_marker(gen or '')).strip().strip('"')
+            if gen:
+                return gen[:2000]
+        except Exception as e:
+            logger.warning('PPV caption generation failed for %s: %s', persona, str(e)[:120])
+    return (reply or '').strip()[:2000]
 
 
 def _fv_record_drop(persona, fan_uuid, chosen, idx, price, media_uuids, message_uuid):
@@ -8498,6 +8549,87 @@ def _fv_reconcile_purchases(persona, days=45, limit_pages=20):
     if settled:
         _fv_trace(persona, 'ppv', f'reconciled {settled} purchase(s) from Fanvue')
     return {'settled': settled, 'checked': len(open_rows)}
+
+
+@app.route('/api/fanvue/ppv-stats')
+def api_fanvue_ppv_stats():
+    """How each tier is actually performing: how many went out, how many were
+    bought. Read from the ledger, so it survives everything the settings blobs
+    don't."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    persona = (request.args.get('persona') or '').strip()
+    if not persona:
+        return jsonify({'ok': False, 'error': 'Missing persona'}), 400
+    try:
+        from db import SessionLocal, ppv_set_stats, list_ppv_drops
+        s = SessionLocal()
+        try:
+            stats = ppv_set_stats(s, persona)
+            recent = [{'fan': d.fan_uuid, 'set': d.set_name,
+                       'tier': (d.tier_index or 0) + 1,
+                       'price': d.price_cents, 'paid': bool(d.paid_at),
+                       'read': bool(d.read_at),
+                       'at': d.created_at.isoformat() if d.created_at else '',
+                       'via': d.paid_source or ''}
+                      for d in list_ppv_drops(s, persona, limit=40)]
+        finally:
+            s.close()
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]}), 500
+    return jsonify({'ok': True, 'stats': stats, 'recent': recent,
+                    'storage_ephemeral': _fv_storage_is_ephemeral()})
+
+
+@app.route('/api/fanvue/ppv-simulate', methods=['POST'])
+def api_fanvue_ppv_simulate():
+    """Score a sample message against the saved sets and say exactly what would
+    fire, and why. The answer to "why did it pick that one" without having to
+    send anything to a real fan."""
+    if not _check_admin():
+        return jsonify({'error': 'Unauthorized'}), 401
+    d = request.json or {}
+    persona = (d.get('persona') or '').strip()
+    if not persona:
+        return jsonify({'ok': False, 'error': 'Missing persona'}), 400
+    sets = _fanvue_ppv_sets(persona)
+    if not sets:
+        return jsonify({'ok': True, 'rows': [], 'chosen': None,
+                        'note': 'No PPV sets are saved yet.'})
+    text = (d.get('text') or '').strip()
+    try:
+        hour = int(d.get('hour'))
+    except (TypeError, ValueError):
+        hour = _fv_fan_hour(persona, '', _fanvue_ppv(persona).get('tz_offset') or 0)
+    hour = max(0, min(hour, 23))
+    active = (d.get('active_set') or '').strip()
+    progress = d.get('progress') if isinstance(d.get('progress'), dict) else {}
+    state = {'active_set': active,
+             'sets': {str(k): int(v or 0) for k, v in progress.items()}}
+
+    rows = []
+    for i, s in enumerate(sets):
+        left = _fv_tiers_left(s, state)
+        score, parts = _fv_score_set(s, text, hour, active=(s['id'] == active))
+        rows.append({'id': s['id'], 'name': s['name'],
+                     'score': round(score - i * 0.01, 2),
+                     'why': [{'reason': r, 'points': round(p, 2)} for r, p in parts],
+                     'tiers_left': left,
+                     'eligible': left > 0})
+    rows.sort(key=lambda r: (-r['eligible'], -r['score']))
+
+    chosen = _fv_pick_set(sets, state, text, hour)
+    out = None
+    if chosen:
+        idx = int(state['sets'].get(chosen['id'], 0) or 0)
+        tier = chosen['tiers'][idx]
+        out = {'set': chosen['name'], 'set_id': chosen['id'],
+               'tier': idx + 1, 'of': len(chosen['tiers']),
+               'price': tier['price'],
+               'media': len(tier['media_uuids']),
+               'caption': tier.get('caption') or '(one will be written for it)'}
+    return jsonify({'ok': True, 'hour': hour, 'rows': rows, 'chosen': out,
+                    'warnings': _fv_set_warnings(sets)})
 
 
 @app.route('/api/fanvue/reconcile', methods=['POST'])
@@ -9066,6 +9198,34 @@ def _fv_tiers_left(s, state):
     return len(s['tiers']) - int((state.get('sets') or {}).get(s['id'], 0) or 0)
 
 
+def _fv_queued_hint(persona, fan_uuid, fan_key, sets, state_key, context, tz_offset):
+    """A line telling the model what unlock is about to follow its reply.
+
+    The set is scored here as well as in _fv_maybe_ppv. That is deliberate: the
+    reply has to be written before the drop is sent, and a reply that lands on
+    the content converts far better than one written blind. The two can disagree
+    if the pick shifts in between, which costs a slightly off tease, not a wrong
+    send — _fv_maybe_ppv remains the only thing that decides what goes out."""
+    if not sets:
+        return ''
+    try:
+        state_all = json.loads(_get_setting(state_key) or '{}')
+    except Exception:
+        return ''
+    state = _fv_fan_state(state_all, fan_uuid, sets)
+    hour = _fv_fan_hour(persona, fan_key, tz_offset)
+    chosen = _fv_pick_set(sets, state, context or '', hour)
+    if not chosen:
+        return ''
+    scene = (chosen.get('scene') or chosen.get('name') or '').strip()
+    if not scene:
+        return ''
+    return ('A paid unlock may follow this message: ' + scene + '. '
+            'Write your reply so it leads there — build to it and make them '
+            'curious. Do NOT name a price, do NOT mention buying, unlocking or '
+            'sending anything, and do not describe the content directly. ')
+
+
 def _fv_set_warnings(sets):
     """Configuration that will quietly misbehave: things worth telling the
     creator about at save time, none of which are worth refusing the save."""
@@ -9103,9 +9263,11 @@ def _fv_set_warnings(sets):
                        f'({" → ".join("$%g" % (p / 100) for p in prices)})')
         blank = [i + 1 for i, t in enumerate(s['tiers']) if not t.get('caption')]
         if blank:
-            out.append(f'"{s["name"]}" tier{"s" if len(blank) > 1 else ""} '
+            many = len(blank) > 1
+            out.append(f'"{s["name"]}" tier{"s" if many else ""} '
                        f'{", ".join(map(str, blank))} '
-                       'have no caption — one will be written for them')
+                       f'{"have" if many else "has"} no caption — one will be '
+                       f'written {"for them" if many else "for it"}')
     return out
 
 
@@ -9212,6 +9374,13 @@ def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx, context
             return
 
         hour = _fv_fan_hour(persona, fan_key, ctx.get('tz_offset'))
+        blocked = _fv_suppressed(sets, (context or '') + ' ' + (reply or ''))
+        if blocked:
+            logger.info('Fanvue [%s] %s: holding the drop, "%s" came up',
+                        persona, handle or fan_uuid, blocked)
+            _fv_trace(persona, 'ppv',
+                      f'held back from {handle or fan_uuid} — "{blocked}" came up')
+            return
         if resend:
             # Repeat the tier they did not buy, not the next one.
             chosen, idx = _fv_repeat_tier(sets, state)
@@ -9226,7 +9395,7 @@ def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx, context
         price = int(tier['price'])
         if discount:
             price = max(FV_PRICE_FLOOR, int(round(price * (1 - discount))))
-        cap = (tier.get('caption') or reply).strip()[:2000]
+        cap = _fv_caption(persona, chosen, tier, reply)
         try:
             sent = _fanvue_call(persona, 'POST', f'{scope}/chats/{fan_uuid}/message',
                                 body={'text': cap, 'mediaUuids': tier['media_uuids'],
@@ -9649,7 +9818,13 @@ def _fanvue_auto_round(persona):
             "Be warm and engaging, move the rapport → tease → offer funnel naturally "
             "(never hard-sell). "
             + question_rule_for(pcfg, history)
-            + lim['note'] + ' ' + NO_PLACEHOLDER_RULE + "Their latest message: "
+            + lim['note'] + ' ' + NO_PLACEHOLDER_RULE
+            # Say what is about to go out, so the reply lands on it. Without
+            # this the model writes blind and a caption-less tier ships the
+            # conversational reply as the sales line on a paid unlock.
+            + _fv_queued_hint(persona, fan_uuid, fan_key, ppv_sets if ppv_on else [],
+                              ppv_state_key, text, ppv_tz)
+            + "Their latest message: "
             f"\"{text}\"")
         instruction = _fan_memory_block(_fan_memory(persona, fan_key), persona) + instruction
         reply = _persona_text(persona, instruction, history=history,
