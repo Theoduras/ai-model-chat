@@ -903,7 +903,7 @@ _BLOCKED_SUFFIXES = ('.py', '.pyc', '.pyo', '.db', '.sqlite', '.sqlite3', '.db-j
                      '.log', '.env', '.pem', '.key', '.cfg', '.ini', '.toml', '.lock',
                      '.txt', '.md', '.yml', '.yaml')
 _BLOCKED_DIRS = ('personas/', 'logs/', '__pycache__/', 'templates/', '.git/')
-_ALLOWED_FILES = {'/robots.txt'}
+_ALLOWED_FILES = {'/robots.txt', '/sitemap.xml'}
 
 
 @app.before_request
@@ -920,6 +920,102 @@ def _block_source_files():
     if path.endswith(_BLOCKED_SUFFIXES):
         return ('Not found', 404)
     return None
+
+
+# ── SEO: robots, sitemap, Search Console verification ───────────────────────
+# Everything routes through Flask (vercel.json rewrites "/(.*)"), so these are
+# routes rather than files on disk.
+
+# Public, crawlable pages. Everything else is app surface behind the paywall.
+_PUBLIC_PAGES = [('/', '1.0', 'weekly'),
+                 ('/pricing', '0.9', 'weekly'),
+                 ('/register', '0.6', 'monthly'),
+                 ('/login', '0.3', 'monthly')]
+
+# Crawling these wastes budget and can leak a creator's funnel into search.
+_CRAWL_DISALLOW = ['/dashboard', '/admin', '/account', '/billing', '/api/',
+                   '/xbot', '/fanvue', '/threads', '/telegram', '/auth/',
+                   '/logout', '/go/', '/landing', '/profile', '/chat.html']
+
+
+def _site_origin():
+    """Canonical origin for absolute URLs. SITE_URL wins so the canonical stays
+    the marketing domain even when the app answers on a *.vercel.app host."""
+    explicit = (os.getenv('SITE_URL') or '').strip().rstrip('/')
+    if explicit:
+        return explicit
+    return request.url_root.rstrip('/')
+
+
+@app.route('/robots.txt')
+def robots_txt():
+    lines = ['User-agent: *']
+    lines += ['Disallow: ' + p for p in _CRAWL_DISALLOW]
+    lines += ['', 'Sitemap: ' + _site_origin() + '/sitemap.xml', '']
+    return Response('\n'.join(lines), mimetype='text/plain')
+
+
+@app.route('/sitemap.xml')
+def sitemap_xml():
+    origin = _site_origin()
+    today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    urls = ''.join(
+        f'<url><loc>{origin}{path}</loc><lastmod>{today}</lastmod>'
+        f'<changefreq>{freq}</changefreq><priority>{prio}</priority></url>'
+        for path, prio, freq in _PUBLIC_PAGES)
+    xml = ('<?xml version="1.0" encoding="UTF-8"?>'
+           '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+           + urls + '</urlset>')
+    return Response(xml, mimetype='application/xml')
+
+
+@app.route('/google<token>.html')
+def google_site_verification(token):
+    """Search Console's HTML-file verification. Set GOOGLE_SITE_VERIFICATION to
+    the googleXXXX part of the filename Google hands out."""
+    want = (os.getenv('GOOGLE_SITE_VERIFICATION') or '').strip()
+    want = want[:-5] if want.endswith('.html') else want
+    want = want[len('google'):] if want.startswith('google') else want
+    if not want or token != want:
+        return ('Not found', 404)
+    return Response('google-site-verification: google%s.html' % want,
+                    mimetype='text/html')
+
+
+# ── SEA: Google Analytics 4 + Google Ads tag ────────────────────────────────
+# Served as JS rather than inlined in the static pages so the measurement IDs
+# stay in env vars and the tag stays absent until they are set.
+@app.route('/js/analytics.js')
+def analytics_js():
+    ga = (os.getenv('GA_MEASUREMENT_ID') or '').strip()
+    ads = (os.getenv('GOOGLE_ADS_ID') or '').strip()
+    label = (os.getenv('GOOGLE_ADS_SIGNUP_LABEL') or '').strip()
+    resp = Response(mimetype='application/javascript')
+    if not (ga or ads):
+        resp.set_data('/* analytics off: GA_MEASUREMENT_ID / GOOGLE_ADS_ID unset */')
+        return resp
+    primary = ga or ads
+    configs = ''.join("gtag('config', %s);" % json.dumps(i)
+                      for i in (ga, ads) if i)
+    conversion = ''
+    if ads and label:
+        # /billing?signup=1 is where register() lands a brand-new account, so it
+        # is the one place a signup is known to have just happened.
+        conversion = ("""
+if (location.pathname === '/billing' &&
+    new URLSearchParams(location.search).get('signup') === '1') {
+  gtag('event', 'conversion', {send_to: %s});
+}""" % json.dumps(ads + '/' + label))
+    resp.set_data("""(function(){
+var s=document.createElement('script');
+s.async=true;s.src='https://www.googletagmanager.com/gtag/js?id=%s';
+document.head.appendChild(s);
+window.dataLayer=window.dataLayer||[];
+window.gtag=function(){dataLayer.push(arguments);};
+gtag('js', new Date());
+%s%s
+})();""" % (primary, configs, conversion))
+    return resp
 
 
 @app.route('/healthz')
@@ -1227,6 +1323,7 @@ button:disabled{opacity:.6;cursor:not-allowed;transform:none;animation:none}
 REGISTER_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><title>Create account</title>
+<script src="/js/analytics.js" defer></script>
 <style>""" + ACCOUNT_CSS + """</style></head><body><div class="wrap"><div class="card">
 <h1>Create your account</h1><p class="sub">Start building your AI persona.</p>
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
@@ -1243,6 +1340,7 @@ REGISTER_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 SIGNIN_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><title>Sign in</title>
+<script src="/js/analytics.js" defer></script>
 <style>""" + ACCOUNT_CSS + """</style></head><body><div class="wrap"><div class="card">
 <h1>Sign in</h1><p class="sub">Welcome back.</p>
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
@@ -1261,6 +1359,7 @@ SIGNIN_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 BILLING_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><title>Choose a plan</title>
+<script src="/js/analytics.js" defer></script>
 <style>""" + ACCOUNT_CSS + """</style></head><body><div class="wrap wide">
 <div class="bar"><span>Signed in as {{ user.email }}</span><a href="/logout">Sign out</a></div>
 {% if user.status == 'active' %}
@@ -1841,7 +1940,7 @@ def register():
         session.permanent = True
     finally:
         s.close()
-    return redirect('/billing')
+    return redirect('/billing?signup=1')
 
 
 @app.route('/login', methods=['GET', 'POST'])

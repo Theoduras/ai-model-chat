@@ -241,3 +241,56 @@ handled by Oxapay — Google supplies the identity only.
 A `redirect_uri_mismatch` error from Google means the URI in step 4 differs
 from what the app sent — scheme, host and trailing path must match character
 for character.
+
+## SEO and Google Ads (SEA)
+
+Neither lives in Google Cloud Console. SEO is page markup plus
+[Google Search Console](https://search.google.com/search-console); SEA is
+[Google Ads](https://ads.google.com). Cloud Console is only involved if the
+Search Console or Google Ads *APIs* are ever wired up for reporting.
+
+### What the app now serves
+
+| Route | Purpose |
+|---|---|
+| `/robots.txt` | Allows the marketing pages, blocks `/dashboard`, `/api/`, the operator consoles and the fan-facing `/landing` funnel. Points at the sitemap. |
+| `/sitemap.xml` | `/`, `/pricing`, `/register`, `/login`. Add new public pages to `_PUBLIC_PAGES` in `app.py`. |
+| `/google<token>.html` | Search Console HTML-file verification, served from env. |
+| `/js/analytics.js` | Loads gtag.js for GA4 and/or Google Ads. Emits nothing until an ID is set. |
+
+The homepage carries a canonical URL, Open Graph and Twitter cards, and
+`SoftwareApplication` JSON-LD.
+
+### Environment variables
+
+| Variable | Why |
+|---|---|
+| `SITE_URL` | Canonical origin, e.g. `https://velvetfunnel.app`. Without it the canonical follows whatever host answered, so `*.vercel.app` preview URLs compete with the real domain in search. |
+| `GOOGLE_SITE_VERIFICATION` | The `googleXXXX.html` filename Search Console hands out (with or without the extension). |
+| `GA_MEASUREMENT_ID` | GA4 measurement ID, `G-XXXXXXX`. |
+| `GOOGLE_ADS_ID` | Google Ads conversion ID, `AW-XXXXXXXXX`. |
+| `GOOGLE_ADS_SIGNUP_LABEL` | Conversion label for the signup action. Google gives it as `AW-123/AbC-D_efG`; use only the part after the slash. |
+
+### Search Console
+
+1. Add the property (Domain type if you control DNS, otherwise URL prefix).
+2. Verify: set `GOOGLE_SITE_VERIFICATION`, redeploy, then click Verify.
+3. **Sitemaps** → submit `sitemap.xml`.
+4. **URL Inspection** → request indexing for `/` and `/pricing`.
+
+### Google Ads
+
+1. Create the account, then **Tools → Conversions → New conversion action →
+   Website**, event name `signup`.
+2. Take the conversion ID and label into `GOOGLE_ADS_ID` and
+   `GOOGLE_ADS_SIGNUP_LABEL`. The tag fires on `/billing?signup=1`, which is
+   where a newly registered account lands — once per signup.
+3. Verify with the Google Tag Assistant before spending anything.
+
+**Policy warning.** Google Ads prohibits ads for sexually explicit content and
+restricts adult themes. Ad copy and every landing page an ad points at must
+stay non-explicit — target the creator-tool angle (persona automation, chat
+funnels) and never send Ads traffic to `/landing` or a fan chat page. Those
+pages are already blocked from crawling in `robots.txt`. An account suspension
+for adult content is difficult to reverse, so read the Google Ads adult content
+policy before the first campaign.
