@@ -1206,10 +1206,12 @@ _PAID_PAGES = ('/dashboard', '/xbot', '/fanvue', '/threads', '/telegram', '/admi
 _PAID_API = ('/api/telegram', '/api/tguser', '/api/x', '/api/xlog', '/api/threads',
              '/api/fanvue', '/api/platforms', '/api/visitors', '/api/generate',
              '/api/backstory', '/api/config', '/api/whatsapp')
-# Fan-facing and auth/billing routes stay open.
+# Fan-facing and auth/billing routes stay open. So are inbound webhooks: they
+# arrive from the platform, not a signed-in creator, and carry their own signed
+# proof of origin — a sign-in redirect would just look like a failure to Fanvue.
 _OPEN_PATHS = ('/login', '/register', '/logout', '/pricing', '/billing',
                '/auth/google',
-               '/account', '/api/billing', '/healthz', '/go/',
+               '/account', '/api/billing', '/healthz', '/go/', '/webhooks/',
                '/dashboard/logout', '/admin/logout')
 
 
@@ -9930,6 +9932,11 @@ def api_fanvue_auto():
             opts['ppv_retry_after'] = max(0, min(int(data['ppv_retry_after'] or 0), 500))
         if 'ppv_retry_max' in data:
             opts['ppv_retry_max'] = max(0, min(int(data['ppv_retry_max'] or 0), 10))
+        if 'ppv_stale_days' in data:
+            opts['ppv_stale_days'] = max(0, min(int(data['ppv_stale_days'] or 0), 365))
+        if 'ppv_retry_discount' in data:
+            opts['ppv_retry_discount'] = max(0.0, min(
+                float(data['ppv_retry_discount'] or 0), 0.8))
         if 'ppv_test_phrase' in data:
             opts['ppv_test_phrase'] = (data.get('ppv_test_phrase') or '').strip()[:80]
         if 'ppv_require_payment' in data:
@@ -9959,6 +9966,8 @@ def api_fanvue_auto():
                     'ppv_gap': int(opts.get('ppv_gap', 8) or 8),
                     'ppv_retry_after': int(opts.get('ppv_retry_after', 0) or 0),
                     'ppv_retry_max': int(opts.get('ppv_retry_max', 1) or 0),
+                    'ppv_stale_days': int(opts.get('ppv_stale_days', 14) or 0),
+                    'ppv_retry_discount': float(opts.get('ppv_retry_discount', 0) or 0),
                     'followup_min': int(_get_setting(f'fanvue_followup_min_{persona}') or 30),
                     'ppv_require_payment': (_get_setting(f'fanvue_ppv_require_payment_{persona}') or '0') == '1'})
 
