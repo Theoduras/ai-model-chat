@@ -27,6 +27,7 @@
 <!-- Not deferred: theme.js sets data-theme before first paint, otherwise the
      page flashes dark for a user who chose light. -->
 <script src="/js/theme.js"></script>
+<script src="/js/page-editor.js" defer></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Inter:wght@400;500;600&display=swap');
 *{margin:0;padding:0;box-sizing:border-box}
@@ -143,12 +144,12 @@ body.kbd .demo{height:100%;flex:none;max-width:none;margin:0}
 }
 </style>
 </head>
-<body>
+<body data-page="home">
 <div class="split">
 
   <div class="left">
     <div class="topbar">
-      <div class="brand">Velvetfunnel<i>.app</i></div>
+      <div class="brand"><span data-edit-id="brand-name">Velvetfunnel</span><i data-edit-id="brand-suffix">.app</i></div>
       <nav class="auth">
         <button class="theme-toggle" onclick="toggleTheme()" title="Light mode" aria-label="Switch to light mode">
           <svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke-linecap="round"/></svg>
@@ -159,28 +160,28 @@ body.kbd .demo{height:100%;flex:none;max-width:none;margin:0}
       </nav>
     </div>
     <div class="lc">
-      <div class="pill"><span class="d"></span>One stop shop</div>
-      <h1>Your persona,<br><u>fully automated.</u></h1>
-      <p class="sub">A fully automated chat, posting and engagement funnel that turns social media followers into fans on your own platform, running around the clock, in your voice.</p>
+      <div class="pill"><span class="d"></span><span data-edit-id="pill-text">One stop shop</span></div>
+      <h1><span data-edit-id="h1-line1">Your persona,</span><br><u><span data-edit-id="h1-highlight">fully automated.</span></u></h1>
+      <p class="sub" data-edit-id="sub-text">A fully automated chat, posting and engagement funnel that turns social media followers into fans on your own platform, running around the clock, in your voice.</p>
       <form class="cta" onsubmit="return subscribe(event)">
         <input id="email" type="email" placeholder="Enter your email" required>
-        <button type="submit">Sign up for news</button>
+        <button type="submit"><span data-edit-id="cta-btn-text">Sign up for news</span></button>
       </form>
-      <div class="note" id="note">Product news, new features and tips, straight to your inbox.</div>
+      <div class="note" id="note" data-edit-id="note-text">Product news, new features and tips, straight to your inbox.</div>
     </div>
     <div class="meta">
-      <span>© 2026 velvetfunnel.app</span>
-      <a href="#">Twitter</a>
-      <a href="#">Instagram</a>
+      <span data-edit-id="meta-copyright">© 2026 velvetfunnel.app</span>
+      <a href="#" data-edit-id="meta-link1">Twitter</a>
+      <a href="#" data-edit-id="meta-link2">Instagram</a>
     </div>
   </div>
 
   <div class="right">
     <div class="ring a"></div><div class="ring b"></div>
     <div class="rhead">
-      <div class="rlabel">Live demo</div>
-      <div class="rtitle">Try it out yourself</div>
-      <div class="rsub">Say hi and see how the persona replies. This is the same engine that runs your funnel.</div>
+      <div class="rlabel" data-edit-id="rlabel-text">Live demo</div>
+      <div class="rtitle" data-edit-id="rtitle-text">Try it out yourself</div>
+      <div class="rsub" data-edit-id="rsub-text">Say hi and see how the persona replies. This is the same engine that runs your funnel.</div>
     </div>
     <div class="demo">
       <iframe src="/chat?persona=nova&amp;demo=1" title="Live persona chat demo" loading="lazy"></iframe>

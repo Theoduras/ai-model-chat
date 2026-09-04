@@ -1768,11 +1768,12 @@ def api_me():
     a signed-out caller could not already infer."""
     user = _current_user()
     if not user:
-        return jsonify({'signed_in': False}), 200
+        return jsonify({'signed_in': False, 'is_operator': _is_operator()}), 200
     return jsonify({'signed_in': True, 'id': user['id'], 'email': user['email'],
                     'name': user.get('name', ''), 'tier': user.get('tier', ''),
                     'status': user.get('status'),
                     'is_admin': bool(user.get('is_admin')),
+                    'is_operator': _is_operator(),
                     'setup': _get_setup(user['id'])}), 200
 
 
@@ -2308,6 +2309,40 @@ def api_landing_set():
 @app.route('/landing')
 def landing():
     return send_from_directory(BASE_DIR, 'landingpage.html')
+
+
+# Inline text/image editing for the plain marketing pages (not the persona
+# landing page, not the dashboard) — see js/page-editor.js. One JSON blob per
+# page, keyed by the data-edit-id an operator clicked on.
+SITE_CONTENT_PAGES = {'home'}
+
+
+@app.route('/api/site-content/<page>')
+def api_site_content_get(page):
+    if page not in SITE_CONTENT_PAGES:
+        return jsonify({'error': 'Unknown page'}), 404
+    raw = _get_setting(f'site_content_{page}')
+    try:
+        content = json.loads(raw) if raw else {}
+    except Exception:
+        content = {}
+    return jsonify({'content': content if isinstance(content, dict) else {}})
+
+
+@app.route('/api/site-content/<page>', methods=['POST'])
+@operator_only
+def api_site_content_set(page):
+    if page not in SITE_CONTENT_PAGES:
+        return jsonify({'error': 'Unknown page'}), 404
+    content = (request.get_json(silent=True) or {}).get('content')
+    if not isinstance(content, dict):
+        return jsonify({'error': 'content must be an object'}), 400
+    clean = {k: v for k, v in content.items()
+             if re.match(r'^[a-zA-Z0-9_-]+$', k) and isinstance(v, str)}
+    if len(json.dumps(clean)) > 3_000_000:
+        return jsonify({'error': 'Content too large'}), 413
+    _set_setting(f'site_content_{page}', json.dumps(clean))
+    return jsonify({'ok': True})
 
 # Operator consoles. _is_operator() rather than _check_admin() on purpose: with
 # ADMIN_PASSWORD unset the latter is true for everyone, which would hand every
