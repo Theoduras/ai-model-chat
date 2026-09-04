@@ -1,4 +1,5 @@
 {
+  "framework": null,
   "functions": {
     "api/index.py": {
       "memory": 1024,
@@ -7,6 +8,9 @@
     }
   },
   "rewrites": [
-    { "source": "/(.*)", "destination": "/api/index.py" }
+    {
+      "source": "/(.*)",
+      "destination": "/api/index.py"
+    }
   ]
 }
