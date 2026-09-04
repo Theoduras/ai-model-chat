@@ -1,0 +1,1302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Telegram Bot</title>
+  <script src="/js/theme.js"></script>
+  <link rel="stylesheet" href="/css/style.css">
+  <script src="/js/devnav.js" defer></script>
+  <style>
+    .xbot-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+    .xbot-wrap { max-width: 760px; margin: 0 auto; padding: 28px 24px 80px; display: flex; flex-direction: column; gap: 20px; }
+    .result-box { margin-top: 12px; font-size: 0.82rem; display: flex; flex-direction: column; gap: 8px; }
+    .conn-pill { font-size: 0.75rem; padding: 3px 10px; border-radius: 9999px; background: var(--surface); color: var(--text-3); }
+    .conn-pill.ok { background: #14532d; color: #4ade80; }
+    .conn-pill.err { background: #4c0519; color: #fb7185; }
+    :root[data-theme="light"] .tag.ok, :root[data-theme="light"] .conn-pill.ok { background: #e8f6ed; color: #0f7038; }
+    :root[data-theme="light"] .tag.no, :root[data-theme="light"] .conn-pill.err { background: #fdecec; color: #c81e1e; }
+    :root[data-theme="light"] .auto-log .ln.act { color: #0f7038; border-left-color: #a8ddbd; }
+    :root[data-theme="light"] .auto-log .ln.er { color: #c81e1e; border-left-color: #f0b4b4; }
+    .conn-pill.run { background: #312e81; color: #c7d2fe; }
+    .auto-chk { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--text-2); cursor: pointer; margin-top: 12px; }
+    .auto-chk input { width: auto; }
+    .row-inline { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+    .row-inline .field { flex: 1; min-width: 160px; }
+    .steps { font-size: 0.8rem; color: var(--text-3); line-height: 1.55; padding-left: 18px; }
+    .steps li { margin-bottom: 6px; }
+    .steps code { background:var(--panel); padding:1px 6px; border-radius:5px; color:#c7d2fe; }
+    .note { background:var(--bg); border:1px solid #2a2a30; color:var(--text-3); border-radius:8px; padding:10px 12px; font-size:0.8rem; }
+    .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+    .stat { background:var(--bg); border:1px solid #2a2a30; border-radius:10px; padding:14px; text-align:center; }
+    .stat b { display:block; font-size:1.4rem; color:var(--text); }
+    .stat span { font-size:0.72rem; color:var(--text-muted); text-transform:uppercase; letter-spacing:.06em; }
+    table.fans { width:100%; border-collapse:collapse; margin-top:14px; font-size:0.78rem; }
+    table.fans th { text-align:left; color:var(--text-muted); font-weight:500; padding:6px 8px; border-bottom:1px solid var(--surface); }
+    table.fans td { padding:6px 8px; border-bottom:1px solid var(--panel-2); color:var(--text-2); }
+    .dot { font-size:0.9rem; }
+    .dot.y { color:#4ade80; } .dot.n { color:var(--border); }
+    .mode-tabs { display:flex; gap:8px; }
+    .mode-tab { background:var(--panel); border:1px solid #2a2a30; color:var(--text-3); border-radius:9px; padding:9px 14px; font-size:0.82rem; cursor:pointer; }
+    .mode-tab.active { background:#312e81; border-color:#4338ca; color:#e0e7ff; }
+    .mode-tab span { font-size:0.66rem; background:#4338ca; color:#e0e7ff; border-radius:9999px; padding:1px 7px; margin-left:6px; }
+    @media (max-width: 640px) {
+      .xbot-wrap { padding: 18px 14px 70px; gap: 16px; }
+      .stats { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    @media (max-width: 640px) {
+      body.page-dashboard header { padding: 10px 12px; gap: 8px; }
+      body.page-dashboard header h1 { font-size: 0.9rem; }
+      body.page-dashboard header .badge { display: none; }
+      body.page-dashboard header > div { gap: 10px; }
+      body.page-dashboard header a { white-space: nowrap; }
+    }
+  </style>
+</head>
+<body class="page-dashboard">
+
+<header>
+  <div style="display:flex; align-items:center; gap:10px;">
+    <h1>Telegram Bot</h1>
+    <span class="badge">✈</span>
+  </div>
+  <div style="display:flex; align-items:center; gap:16px;">
+    <button class="icon-btn theme-toggle" onclick="toggleTheme()" title="Light mode" aria-label="Switch to light mode">
+      <svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke-linecap="round"/></svg>
+      <svg class="ico-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" stroke-linejoin="round"/></svg>
+    </button>
+    <a href="/dashboard" style="color:var(--text-muted); font-size:0.8rem; text-decoration:none;">← Dashboard</a>
+  </div>
+</header>
+
+<div class="xbot-scroll">
+<div class="xbot-wrap">
+
+  <div class="form-section">
+    <div class="section-title">Persona &amp; Bot</div>
+    <div class="field full">
+      <label>Choose a model (persona)</label>
+      <div class="row-inline">
+        <div class="field" style="margin:0;">
+          <select id="persona" onchange="updateConn()"></select>
+        </div>
+        <span class="conn-pill" id="conn-pill">—</span>
+        <button class="btn-ai" id="connect-btn" onclick="togglePanel()">Connect bot</button>
+        <button class="btn-ai" id="disconnect-btn" style="background:var(--border); display:none;" onclick="disconnectBot()">Disconnect</button>
+      </div>
+      <span class="hint">Each persona gets its own Telegram bot. Fans DM the bot directly — full private chat, unlike Threads.</span>
+    </div>
+
+    <div id="connect-panel" style="display:none; margin-top:4px; border-top:1px solid var(--border-soft); padding-top:16px;">
+      <div class="mode-tabs">
+        <button class="mode-tab active" id="tab-hosted" onclick="setMode('hosted')">Use our bot <span>recommended</span></button>
+        <button class="mode-tab" id="tab-own" onclick="setMode('own')">Use my own bot</button>
+      </div>
+
+      <div id="mode-hosted" style="margin-top:16px;">
+        <p class="hint" style="display:block; margin-bottom:12px;">One click. You get a personal link on <b id="plat-handle">our bot</b> — put it in your bio, and anyone who opens it lands in a private chat with your persona. Nothing to install, no token to manage.</p>
+        <div id="plat-missing" class="note" style="display:none; border-color:#7f1d1d; color:#fca5a5;">The platform bot isn't set up on this server yet — see <b>Platform bot</b> at the bottom of this page.</div>
+        <button class="btn-ai" id="hosted-btn" onclick="connectHosted()">Connect with our bot →</button>
+        <div id="hosted-out" style="display:none; margin-top:16px;">
+          <div class="field full">
+            <label>Your connect code</label>
+            <input type="text" id="my-code" readonly onclick="this.select()">
+          </div>
+          <div class="field full" style="margin-top:12px;">
+            <label>Your link <span style="font-weight:400;color:var(--text-muted);">(share this — bio, link tree, X, anywhere)</span></label>
+            <input type="text" id="share-link" readonly onclick="this.select()">
+          </div>
+          <button class="btn-ai" style="background:var(--border); margin-top:12px;" onclick="copyShare()">Copy link</button>
+          <a class="btn-ai" id="open-tg" style="background:var(--border); margin-top:12px; text-decoration:none; display:inline-flex;" target="_blank">Open in Telegram</a>
+        </div>
+      </div>
+
+      <div id="mode-own" style="display:none; margin-top:16px;">
+        <ol class="steps">
+          <li>In Telegram, open <a href="https://t.me/BotFather" target="_blank" style="color:var(--accent);">@BotFather</a> and send <code>/newbot</code>.</li>
+          <li>Give it a display name, then a username ending in <code>bot</code>.</li>
+          <li>BotFather replies with a token like <code>7123456789:AAH…</code> — paste it below.</li>
+          <li>Optional: send <code>/setuserpic</code> and <code>/setdescription</code> to BotFather to brand the bot as the persona.</li>
+          <li>Click <b>Connect</b> — the webhook is registered for you automatically.</li>
+        </ol>
+        <div class="field full" style="margin-top:12px;">
+          <label>Bot token</label>
+          <input type="password" id="bot-token" placeholder="1234567890:AA…" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="field full" style="margin-top:12px;">
+          <label>Public base URL <span style="font-weight:400;color:var(--text-muted);">(must be HTTPS for webhooks)</span></label>
+          <input type="text" id="base-url" autocomplete="off" spellcheck="false">
+        </div>
+        <button class="btn-ai" style="margin-top:14px;" onclick="connectBot()">Connect →</button>
+      </div>
+      <div class="result-box" id="connect-status"></div>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">⚙️ How she replies</div>
+    <span class="hint" style="display:block; margin-bottom:14px;">Applies to both the bot and the personal account below.</span>
+    <div class="auto-toggles" style="display:flex; flex-wrap:wrap; gap:10px 22px;">
+      <label class="auto-chk" style="margin-top:0;"><input type="checkbox" id="f-tg-enabled" checked> <b>Bot active</b> <span style="color:var(--text-muted)">— reply to incoming messages</span></label>
+      <label class="auto-chk" style="margin-top:0;"><input type="checkbox" id="f-tg-humanize" checked> Type like a human <span style="color:var(--text-muted)">— pause to read, show “typing…”, send in bursts</span></label>
+      <label class="auto-chk" style="margin-top:0;"><input type="checkbox" id="f-tg-followups" checked> Follow up on quiet fans <span style="color:var(--text-muted)">— max 2 nudges each</span></label>
+    </div>
+    <div class="xbot-grid" style="margin-top:14px;">
+      <div class="field">
+        <label>Typing speed</label>
+        <select id="f-tg-typing-speed">
+          <option value="8">Slow — thumbs on a phone</option>
+          <option value="14" selected>Natural</option>
+          <option value="22">Fast texter</option>
+          <option value="34">Very fast</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Follow-up delay (minutes)</label>
+        <input type="number" id="f-tg-followup-min" min="5" max="1440" value="45">
+      </div>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center; margin-top:14px;">
+      <button class="btn-ai" onclick="saveBehaviour(this)">Save</button>
+      <span class="hint" id="behaviour-status"></span>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">👤 Real account <span style="font-weight:400;font-size:0.75rem;color:var(--text-muted);">— no “bot” label, no /start</span></div>
+    <span class="hint" style="display:block; margin-bottom:10px;">Signs in as an actual Telegram account instead of a bot. It shows up as a person, fans can message it without pressing START, and it can open conversations itself. Needs its own phone number.</span>
+    <div class="note" style="border-color:#7f1d1d; color:#fca5a5; margin-bottom:14px;">⚠ Automating a user account is against the spirit of Telegram’s terms. Accounts that message people who haven’t written first get rate-limited or banned — use a number you can afford to lose, and keep the volume low.</div>
+
+    <div class="row-inline">
+      <div class="field">
+        <label>api_id <span style="font-weight:400;color:var(--text-muted);">(my.telegram.org)</span></label>
+        <input type="text" id="tgu-api-id" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="field">
+        <label>api_hash</label>
+        <input type="password" id="tgu-api-hash" placeholder="••••••••" autocomplete="off" spellcheck="false">
+      </div>
+    </div>
+    <button class="btn-ai" style="background:var(--border); margin-top:12px;" onclick="saveTguConfig()">Save API credentials</button>
+
+    <div class="field full" style="margin-top:16px;">
+      <label>Phone number <span style="font-weight:400;color:var(--text-muted);">(with country code)</span></label>
+      <input type="text" id="tgu-phone" placeholder="+31600000000" autocomplete="off" spellcheck="false">
+    </div>
+    <div style="display:flex; gap:8px; align-items:center; margin-top:12px; flex-wrap:wrap;">
+      <button class="btn-ai" onclick="tguSendCode()">Send login code →</button>
+      <span class="conn-pill" id="tgu-pill">—</span>
+      <button class="btn-ai" id="tgu-start" style="background:var(--border); display:none;" onclick="tguControl('start')">▶ Go online</button>
+      <button class="btn-ai" id="tgu-stop" style="background:#4c0519; display:none;" onclick="tguControl('stop')">■ Stop</button>
+      <button class="btn-ai" id="tgu-disc" style="background:var(--border); display:none;" onclick="tguDisconnect()">Disconnect</button>
+    </div>
+
+    <div id="tgu-code-panel" style="display:none; margin-top:14px;">
+      <div class="row-inline">
+        <div class="field">
+          <label>Login code from Telegram</label>
+          <input type="text" id="tgu-code" placeholder="12345" autocomplete="off">
+        </div>
+        <div class="field">
+          <label>2FA password <span style="font-weight:400;color:var(--text-muted);">(only if enabled)</span></label>
+          <input type="password" id="tgu-password" placeholder="••••••••" autocomplete="off">
+        </div>
+      </div>
+      <button class="btn-ai" style="margin-top:12px;" onclick="tguSignIn()">Sign in ✓</button>
+    </div>
+    <div class="result-box" id="tgu-status"></div>
+
+    <div style="margin-top:18px; border-top:1px solid var(--border-soft); padding-top:14px;">
+      <div class="section-title" style="font-size:0.85rem;">Message someone first</div>
+      <span class="hint" style="display:block; margin-bottom:10px;">The thing a bot account can’t do. Leave the message blank and she’ll write her own opener.</span>
+      <div class="row-inline">
+        <div class="field">
+          <label>@username or phone</label>
+          <input type="text" id="tgu-peer" placeholder="@someone" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="field">
+          <label>Message <span style="font-weight:400;color:var(--text-muted);">(optional)</span></label>
+          <input type="text" id="tgu-text" placeholder="leave blank to generate" autocomplete="off">
+        </div>
+      </div>
+      <button class="btn-ai" style="margin-top:12px;" onclick="tguSend()">Send opener</button>
+      <div class="result-box" id="tgu-send-result"></div>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">📊 Conversion</div>
+    <div id="cta-warning" class="note" style="display:none; border-color:#7f1d1d; color:#fca5a5; margin-bottom:14px;"></div>
+    <div class="stats">
+      <div class="stat"><b id="s-fans">0</b><span>Fans</span></div>
+      <div class="stat"><b id="s-sent">0</b><span>CTAs sent</span></div>
+      <div class="stat"><b id="s-clicked">0</b><span>Clicks</span></div>
+      <div class="stat"><b id="s-rate">0%</b><span>Click rate</span></div>
+    </div>
+    <div id="fans-table"></div>
+    <div style="display:flex; gap:8px; align-items:center; margin-top:14px; flex-wrap:wrap;">
+      <button class="btn-ai" style="background:var(--border);" onclick="loadStats()">Refresh</button>
+      <button class="btn-ai" onclick="saveOnlyFans()">Save who she talks to</button>
+      <button class="btn-ai" style="background:var(--border);" onclick="selectAllFans(false)">Talk to everyone</button>
+      <span class="hint" id="only-fans-state"></span>
+    </div>
+    <span class="hint" style="display:block; margin-top:8px;">Tick <b>Talk to</b> for the fans she should reply to — with none ticked she talks to <b>everyone</b>, which is the default. Tick <b>Block</b> to shut a fan out entirely; a block always wins, even over a Talk-to tick. Skipped fans get no replies and no follow-ups; their messages are simply ignored.</span>
+  </div>
+
+    <div class="form-section">
+      <div class="section-title">
+        Outfits &amp; Media
+        <button type="button" class="btn-section-save" onclick="saveOutfits(this)">Save</button>
+      </div>
+      <span class="hint">Six outfits, each one consistent look — same clothing, same place, same setting. Open an outfit to describe it and add its photos.</span>
+      <span class="hint" id="media-status"></span>
+      <div class="vault" id="vault"
+           ondragover="onVaultDragOver(event)" ondragleave="onVaultDragLeave(event)"
+           ondrop="onVaultDrop(event)">
+        <div class="vault-head">
+          <span class="vault-title">Media Vault <span id="vault-count"></span></span>
+          <div class="vault-tools">
+            <select id="vault-filter" onchange="setVaultFilter(this.value)">
+              <option value="all">All photos</option>
+              <option value="unassigned">Unassigned</option>
+              <option value="assigned">In an outfit</option>
+            </select>
+            <button type="button" class="btn-ai" onclick="addPhotosTo('')">+ Upload</button>
+            <span class="vault-sel" id="vault-sel"></span>
+            <select id="vault-add-target" class="vault-add-target"></select>
+            <button type="button" class="btn-ai" id="vault-add-btn" onclick="vaultAddToOutfit()" disabled>Add to outfit</button>
+            <button type="button" class="btn-ai vault-danger" id="vault-del-btn" onclick="vaultDeleteSelected()" disabled>Delete</button>
+          </div>
+        </div>
+        <div class="vault-grid" id="vault-grid"></div>
+        <span class="hint">Every photo you upload or generate lands here. Select some and add them to an outfit — the same photo can be used in more than one. Drop files anywhere on the vault to upload.</span>
+      </div>
+
+      <div id="outfit-list" style="display:flex;flex-direction:column;gap:8px;"></div>
+      <input type="file" id="outfit-file-input" accept="image/*" multiple style="display:none;" onchange="onMediaFiles(event)">
+      <span class="hint">
+        <b>Purpose</b> marks what a shot is for: Main (profile), Tease (flirty preview),
+        Behind-the-scenes, Custom. Lighting and place come from the outfit, so every
+        photo in a set stays consistent.
+      </span>
+
+  <div class="form-section">
+    <div class="section-title">🩺 Activity log</div>
+    <span class="hint" style="display:block; margin-bottom:10px;">Every incoming message and what the bot did with it. If she has gone quiet, the reason is here.</span>
+    <div id="trace-problems"></div>
+    <div id="trace-rows"><span class="hint">Loading…</span></div>
+    <div style="display:flex; gap:8px; align-items:center; margin-top:12px;">
+      <button class="btn-ai" style="background:var(--border);" onclick="loadTrace()">Refresh</button>
+      <button class="btn-ai" style="background:var(--border);" onclick="clearTrace()">Clear</button>
+      <label style="font-size:.75rem;color:var(--text-muted);display:flex;align-items:center;gap:6px;">
+        <input type="checkbox" id="tg-trace-live" checked style="width:auto;"> live
+      </label>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">🤖 Telegram bot plumbing <span style="font-weight:400;font-size:0.75rem;color:var(--text-muted);">— only needed if you use a bot rather than the account above</span></div>
+    <span class="hint" style="display:block;">Connect a bot at the top of this page. The settings below are the wiring behind it.</span>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">🔗 Webhook</div>
+    <span class="hint" style="display:block; margin-bottom:8px;">Registered automatically on connect. The path is unguessable and every request is checked against a per-bot secret header, so nobody else can puppet your persona.</span>
+    <div class="field full">
+      <label>Callback URL</label>
+      <input type="text" id="wh-url" readonly placeholder="connect a bot first">
+    </div>
+    <div class="note" style="margin-top:12px;">Local development has no public HTTPS URL, so the webhook is skipped — deploy, or point the base URL at a tunnel, to receive messages.</div>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">⚙️ Platform bot <span style="font-weight:400;font-size:0.75rem;color:var(--text-muted);">— operator only, set once</span></div>
+    <span class="hint" style="display:block; margin-bottom:10px;">The shared bot every subscriber connects to. Create it once in <a href="https://t.me/BotFather" target="_blank" style="color:var(--accent);">@BotFather</a> (<code>/newbot</code>), paste the token here, and from then on creators connect with one click.</span>
+    <div class="row-inline">
+      <div class="field">
+        <label>Platform bot token</label>
+        <input type="password" id="plat-token" placeholder="1234567890:AA…" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="field">
+        <label>Public base URL</label>
+        <input type="text" id="plat-base" autocomplete="off" spellcheck="false">
+      </div>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center; margin-top:14px; flex-wrap:wrap;">
+      <button class="btn-ai" onclick="savePlatform()">Save platform bot</button>
+      <span class="conn-pill" id="plat-pill">—</span>
+    </div>
+    <div class="result-box" id="plat-status"></div>
+  </div>
+
+</div>
+</div>
+
+<script>
+let connStatus = {}, platform = {};
+function esc(s){ return (s||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function persona(){ return document.getElementById('persona').value; }
+function busy(box,msg){ box.innerHTML='<span class="hint">'+esc(msg)+'</span>'; }
+function err(box,msg){ box.innerHTML='<span class="hint" style="color:#fb7185;">✗ '+esc(msg)+'</span>'; }
+function ok(box,msg){ box.innerHTML='<span class="hint" style="color:#4ade80;">✓ '+esc(msg)+'</span>'; }
+async function post(url,body){
+  const res=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  return res.json();
+}
+
+async function getJSON(url){
+  const r=await fetch(url,{headers:{'Accept':'application/json'}});
+  const t=await r.text();
+  try{ return JSON.parse(t); }
+  catch(e){ throw new Error(r.status===200?'unexpected response':'HTTP '+r.status); }
+}
+
+async function init(){
+  document.getElementById('base-url').value=location.origin;
+  document.getElementById('plat-base').value=location.origin;
+  // Each call is independent — one failure must not blank the whole page.
+  try{
+    const list=await getJSON('/api/personas');
+    const sel=document.getElementById('persona');
+    if(Array.isArray(list) && list.length){
+      sel.innerHTML=list.map(p=>'<option value="'+p.slug+'">'+esc(p.name||p.slug)+'</option>').join('');
+    } else {
+      sel.innerHTML='<option value="">No personas found</option>';
+    }
+  }catch(e){
+    document.getElementById('persona').innerHTML='<option value="">Could not load personas ('+esc(e.message)+')</option>';
+  }
+  try{ connStatus=await getJSON('/api/telegram/status'); }catch(e){ connStatus={}; }
+  try{
+    platform=await getJSON('/api/telegram/platform');
+    if(platform.base_url) document.getElementById('plat-base').value=platform.base_url;
+  }catch(e){ platform={}; }
+  renderPlatform();
+  updateConn();
+}
+
+function renderPlatform(){
+  const pill=document.getElementById('plat-pill');
+  if(platform.configured){
+    pill.className='conn-pill ok';
+    pill.textContent='✓ @'+(platform.username||'bot')+(platform.webhook_set?'':' · webhook pending');
+  } else { pill.className='conn-pill err'; pill.textContent='Not configured'; }
+  document.getElementById('plat-handle').textContent =
+    platform.username ? '@'+platform.username : 'our bot';
+  document.getElementById('plat-missing').style.display = platform.configured?'none':'block';
+  document.getElementById('hosted-btn').disabled = !platform.configured;
+}
+
+async function savePlatform(){
+  const box=document.getElementById('plat-status');
+  busy(box,'Registering the platform bot…');
+  const data=await post('/api/telegram/platform',{
+    bot_token:document.getElementById('plat-token').value.trim(),
+    base_url:document.getElementById('plat-base').value.trim()});
+  if(!data.ok){ err(box,data.error); return; }
+  document.getElementById('plat-token').value='';
+  ok(box,'Platform bot is @'+data.username+(data.webhook_set?' — webhook registered.':' — webhook skipped (needs HTTPS).'));
+  platform=await (await fetch('/api/telegram/platform')).json();
+  renderPlatform();
+}
+
+function setMode(m){
+  document.getElementById('tab-hosted').classList.toggle('active',m==='hosted');
+  document.getElementById('tab-own').classList.toggle('active',m==='own');
+  document.getElementById('mode-hosted').style.display=m==='hosted'?'block':'none';
+  document.getElementById('mode-own').style.display=m==='own'?'block':'none';
+  document.getElementById('connect-status').innerHTML='';
+}
+
+function showShare(info){
+  const out=document.getElementById('hosted-out');
+  if(!info || !info.share_link){ out.style.display='none'; return; }
+  out.style.display='block';
+  document.getElementById('my-code').value=info.code||'';
+  document.getElementById('share-link').value=info.share_link;
+  document.getElementById('open-tg').href=info.share_link;
+}
+
+async function connectHosted(){
+  const box=document.getElementById('connect-status');
+  if(!persona()){ err(box,'Pick a persona first — the list above is empty.'); return; }
+  busy(box,'Setting up your link…');
+  const data=await post('/api/telegram/hosted',{persona:persona()});
+  if(!data.ok){ err(box,data.error); return; }
+  ok(box,'Connected to @'+data.username+' — share the link below.');
+  showShare(data);
+  connStatus=await (await fetch('/api/telegram/status')).json();
+  const pill=document.getElementById('conn-pill');
+  pill.className='conn-pill ok'; pill.textContent='✓ @'+data.username;
+}
+
+function copyShare(){
+  const el=document.getElementById('share-link');
+  el.select(); document.execCommand('copy');
+  ok(document.getElementById('connect-status'),'Link copied.');
+}
+
+function updateConn(){
+  const pill=document.getElementById('conn-pill'), info=connStatus[persona()]||{};
+  if(info.connected){
+    pill.className='conn-pill ok';
+    pill.textContent='✓ @'+(info.username||'bot')+(info.mode==='hosted'?' · shared':'');
+  } else {
+    pill.className='conn-pill err'; pill.textContent='Not connected';
+  }
+  document.getElementById('connect-btn').textContent=info.connected?'Connection settings':'Connect bot';
+  document.getElementById('disconnect-btn').style.display=info.connected?'inline-flex':'none';
+  document.getElementById('connect-panel').style.display='none';
+  document.getElementById('connect-status').innerHTML='';
+  setMode(info.mode==='own'?'own':'hosted');
+  showShare(info.share_link?info:null);
+  loadStats();
+  loadTrace();
+  startTraceLoop();
+  loadBehaviour();
+  loadMedia();
+}
+
+let traceTimer=null;
+function startTraceLoop(){
+  if(traceTimer) return;
+  traceTimer=setInterval(()=>{
+    if(document.hidden) return;
+    const live=document.getElementById('tg-trace-live');
+    if(!live||!live.checked) return;
+    loadTrace();
+  },5000);
+}
+
+function togglePanel(){
+  const p=document.getElementById('connect-panel');
+  p.style.display=p.style.display==='none'?'block':'none';
+}
+
+async function connectBot(){
+  const box=document.getElementById('connect-status');
+  const token=document.getElementById('bot-token').value.trim();
+  if(!token){ err(box,'Paste the token BotFather gave you.'); return; }
+  busy(box,'Talking to Telegram…');
+  const data=await post('/api/telegram/connect',{
+    persona:persona(), bot_token:token,
+    base_url:document.getElementById('base-url').value.trim()});
+  if(!data.ok){ err(box,data.error); return; }
+  document.getElementById('bot-token').value='';
+  document.getElementById('wh-url').value=data.webhook_url||'';
+  ok(box,'Connected as @'+data.username+(data.webhook_set?' — webhook registered.':' — webhook skipped (needs HTTPS).'));
+  connStatus=await (await fetch('/api/telegram/status')).json();
+  setTimeout(()=>{ const s=document.getElementById('connect-status').innerHTML; updateConn(); document.getElementById('connect-status').innerHTML=s; },900);
+}
+
+async function disconnectBot(){
+  if(!confirm('Disconnect this persona’s Telegram bot?')) return;
+  await post('/api/telegram/disconnect',{persona:persona()});
+  delete connStatus[persona()]; updateConn();
+}
+
+async function loadStats(){
+  try{
+    const s=await (await fetch('/api/telegram/stats?persona='+encodeURIComponent(persona()))).json();
+    document.getElementById('s-fans').textContent=s.fans||0;
+    document.getElementById('s-sent').textContent=s.cta_sent||0;
+    document.getElementById('s-clicked').textContent=s.cta_clicked||0;
+    document.getElementById('s-rate').textContent=(s.click_rate||0)+'%';
+    const warn=document.getElementById('cta-warning');
+    if(s.warning){ warn.style.display='block'; warn.textContent='⚠ '+s.warning; }
+    else { warn.style.display='none'; }
+    const rows=s.rows||[];
+    const only=s.only_fans||[];
+    const picked=new Set(only.map(v=>String(v).toLowerCase()));
+    const isOn=r=>picked.has(String(r.chat_id).toLowerCase())||picked.has(String(r.name||'').toLowerCase());
+    const blocked=new Set((s.exclude_fans||[]).map(v=>String(v).toLowerCase()));
+    const isOff=r=>blocked.has(String(r.chat_id).toLowerCase())||blocked.has(String(r.name||'').toLowerCase());
+    document.getElementById('fans-table').innerHTML = rows.length ?
+      '<table class="fans"><tr><th>Talk to</th><th>Block</th><th>Fan</th><th>Msgs</th><th>CTA</th><th>Clicked</th><th>Nudges</th></tr>'+
+      rows.map(r=>'<tr><td><input type="checkbox" class="fan-pick" data-id="'+esc(r.chat_id)+'"'+
+        (only.length&&isOn(r)?' checked':'')+' style="width:auto;"></td>'+
+        '<td><input type="checkbox" class="fan-block" data-id="'+esc(r.chat_id)+'"'+
+        (isOff(r)?' checked':'')+' style="width:auto;"></td><td>'+esc(r.name)+'</td><td>'+r.messages+'</td><td><span class="dot '+(r.cta_sent?'y':'n')+'">●</span></td><td><span class="dot '+(r.cta_clicked?'y':'n')+'">●</span></td><td>'+r.followups+'</td></tr>').join('')+
+      '</table>'
+      : '<span class="hint" style="display:block;margin-top:12px;">No fans yet — message the bot on Telegram to start a conversation.</span>';
+    const st=document.getElementById('only-fans-state');
+    const ex=(s.exclude_fans||[]).length;
+    st.textContent = (only.length ? ('Replying to '+only.length+' selected fan(s) only.')
+                                  : 'Replying to everyone.')
+                   + (ex?(' Blocking '+ex+' fan(s).'):'');
+    st.style.color = (only.length||ex) ? '#4ade80' : 'var(--text-muted)';
+  }catch(e){}
+}
+
+async function loadBehaviour(){
+  if(!persona()) return;
+  let s={};
+  try{ s=await (await fetch('/api/telegram/settings?persona='+encodeURIComponent(persona()))).json(); }catch(e){ return; }
+  document.getElementById('f-tg-enabled').checked = !!s.enabled;
+  document.getElementById('f-tg-humanize').checked = s.humanize !== false;
+  document.getElementById('f-tg-followups').checked = s.followups !== false;
+  document.getElementById('f-tg-followup-min').value = s.followup_min || 45;
+  if(s.typing_speed) document.getElementById('f-tg-typing-speed').value = String(s.typing_speed);
+}
+
+async function saveBehaviour(btn){
+  const st=document.getElementById('behaviour-status');
+  st.textContent='Saving…'; st.style.color='var(--text-muted)';
+  try{
+    const r=await fetch('/api/telegram/settings',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({persona:persona(),
+        enabled:document.getElementById('f-tg-enabled').checked,
+        humanize:document.getElementById('f-tg-humanize').checked,
+        followups:document.getElementById('f-tg-followups').checked,
+        typing_speed:parseInt(document.getElementById('f-tg-typing-speed').value||'14',10),
+        followup_min:parseInt(document.getElementById('f-tg-followup-min').value||'45',10)})});
+    const d=await r.json();
+    if(!d.ok) throw new Error(d.error||'failed');
+    st.textContent='✓ Saved'; st.style.color='#4ade80';
+    loadTrace();
+  }catch(e){ st.textContent='✗ '+e; st.style.color='#fb7185'; }
+}
+
+async function loadTrace(){
+  const box=document.getElementById('trace-rows'), pb=document.getElementById('trace-problems');
+  try{
+    const d=await (await fetch('/api/telegram/trace?persona='+encodeURIComponent(persona()))).json();
+    // Always show what it is and whether it is live — that is the first thing
+    // you need when nothing is arriving, problems or not.
+    var live = d.personal ? (d.personal.running?'● running':'○ stopped')
+                          : (d.webhook&&d.webhook.url?'● webhook registered':'○ no webhook');
+    var head='<div class="note" style="border-color:'+((d.problems||[]).length?'#3f3f46':'#14532d')+
+      ';color:'+((d.problems||[]).length?'var(--text-2)':'#4ade80')+';margin-bottom:8px;">'+
+      ((d.problems||[]).length?'':'✓ ')+esc(d.mode||'bot')+
+      (d.username?(' @'+esc(d.username)):'')+' · '+live+
+      (d.bound_chats!=null?(' · '+d.bound_chats+' chat(s) bound'):'')+'</div>';
+    pb.innerHTML=head+(d.problems||[]).map(p=>'<div class="note" style="border-color:#7f1d1d;color:#fca5a5;margin-bottom:8px;">⚠ '+esc(p)+'</div>').join('');
+    const rows=(d.rows||[]).slice().reverse();
+    const col={received:'#c7d2fe',sent:'#4ade80',error:'#fb7185',skipped:'#fbbf24',
+               planning:'var(--text-muted)',webhook:'var(--text-muted)',routed:'#c7d2fe'};
+    box.innerHTML = rows.length ?
+      '<table class="fans"><tr><th>Time</th><th>What</th><th>Detail</th></tr>'+
+      rows.map(r=>'<tr><td style="white-space:nowrap;">'+new Date((r.at||0)*1000).toLocaleTimeString()+
+        '</td><td style="color:'+(col[r.stage]||'var(--text-2)')+'">'+esc(r.stage)+
+        '</td><td style="white-space:pre-wrap;">'+esc(r.detail||'')+'</td></tr>').join('')+'</table>'
+      : '<span class="hint">Nothing recorded yet. Send the bot a message on Telegram, then hit Refresh.</span>';
+  }catch(e){ box.innerHTML='<span class="hint" style="color:#fb7185;">Could not load the log: '+esc(String(e))+'</span>'; }
+}
+
+async function clearTrace(){
+  await fetch('/api/telegram/trace?persona='+encodeURIComponent(persona()),{method:'DELETE'});
+  loadTrace();
+}
+
+function selectAllFans(on){
+  document.querySelectorAll('.fan-pick').forEach(c=>{c.checked=on;});
+  saveOnlyFans();
+}
+
+async function saveOnlyFans(){
+  const ids=[...document.querySelectorAll('.fan-pick')].filter(c=>c.checked).map(c=>c.dataset.id);
+  const blocked=[...document.querySelectorAll('.fan-block')].filter(c=>c.checked).map(c=>c.dataset.id);
+  const st=document.getElementById('only-fans-state');
+  st.textContent='Saving…'; st.style.color='var(--text-muted)';
+  try{
+    const r=await fetch('/api/telegram/settings',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({persona:persona(), only_fans:ids, exclude_fans:blocked})});
+    const d=await r.json();
+    if(!d.ok) throw new Error(d.error||'failed');
+    loadStats();
+  }catch(e){ st.textContent='✗ '+e; st.style.color='#fb7185'; }
+}
+
+// ── Real account (MTProto) ──
+let tguStatus = {};
+
+async function loadTgu(){
+  try{
+    const cfg=await getJSON('/api/tguser/config');
+    if(cfg.api_id && !document.getElementById('tgu-api-id').value)
+      document.getElementById('tgu-api-id').value=cfg.api_id;
+    tguStatus=await getJSON('/api/tguser/status');
+  }catch(e){ tguStatus={}; }
+  renderTgu();
+}
+
+function renderTgu(){
+  const a=tguStatus[persona()]||{}, pill=document.getElementById('tgu-pill');
+  if(a.connected){
+    const who=a.username?('@'+a.username):(a.first_name||a.phone||'account');
+    pill.className='conn-pill '+(a.running?'ok':'run');
+    pill.textContent=(a.running?'● live as ':'○ offline · ')+who;
+  } else { pill.className='conn-pill'; pill.textContent='Not signed in'; }
+  document.getElementById('tgu-start').style.display=(a.connected&&!a.running)?'inline-flex':'none';
+  document.getElementById('tgu-stop').style.display=(a.connected&&a.running)?'inline-flex':'none';
+  document.getElementById('tgu-disc').style.display=a.connected?'inline-flex':'none';
+  if(a.error) err(document.getElementById('tgu-status'), a.error);
+}
+
+async function saveTguConfig(){
+  const box=document.getElementById('tgu-status');
+  busy(box,'Saving…');
+  const d=await post('/api/tguser/config',{
+    api_id:document.getElementById('tgu-api-id').value.trim(),
+    api_hash:document.getElementById('tgu-api-hash').value.trim()});
+  if(!d.ok){ err(box,d.error||'failed'); return; }
+  document.getElementById('tgu-api-hash').value='';
+  ok(box,'API credentials saved.');
+}
+
+async function tguSendCode(){
+  const box=document.getElementById('tgu-status');
+  const phone=document.getElementById('tgu-phone').value.trim();
+  if(!phone){ err(box,'Enter the phone number first.'); return; }
+  busy(box,'Asking Telegram for a code…');
+  const d=await post('/api/tguser/send-code',{persona:persona(), phone});
+  if(!d.ok){ err(box,d.error); return; }
+  document.getElementById('tgu-code-panel').style.display='block';
+  ok(box,'Code sent to '+d.sent_to+' — look for a message from "Telegram" inside the Telegram app (not SMS). If nothing arrives within 60 s, try sending again.');
+}
+
+async function tguSignIn(){
+  const box=document.getElementById('tgu-status');
+  busy(box,'Signing in…');
+  const d=await post('/api/tguser/sign-in',{persona:persona(),
+    code:document.getElementById('tgu-code').value.trim(),
+    password:document.getElementById('tgu-password').value.trim(),
+    base_url:location.origin});
+  if(!d.ok){ err(box,d.error); return; }
+  if(d.needs_password){ err(box,'Two-step verification is on — enter the password and sign in again.'); return; }
+  document.getElementById('tgu-code-panel').style.display='none';
+  document.getElementById('tgu-code').value=''; document.getElementById('tgu-password').value='';
+  ok(box,'Signed in as '+(d.account.username?('@'+d.account.username):d.account.first_name)+' — now live.');
+  loadTgu();
+}
+
+async function tguControl(action){
+  const box=document.getElementById('tgu-status');
+  busy(box, action==='stop'?'Stopping…':'Connecting…');
+  const d=await post('/api/tguser/control',{persona:persona(), action});
+  if(!d.ok){ err(box, d.error||d.hint||'failed'); }
+  else ok(box, action==='stop'?'Stopped.':'Online — answering DMs.');
+  loadTgu();
+}
+
+async function tguDisconnect(){
+  if(!confirm('Disconnect this account? The stored session is deleted.')) return;
+  await post('/api/tguser/control',{persona:persona(), action:'disconnect'});
+  loadTgu();
+}
+
+async function tguSend(){
+  const box=document.getElementById('tgu-send-result');
+  const peer=document.getElementById('tgu-peer').value.trim();
+  if(!peer){ err(box,'Enter a @username or phone number.'); return; }
+  busy(box,'Sending…');
+  const d=await post('/api/tguser/send',{persona:persona(), peer,
+    text:document.getElementById('tgu-text').value.trim()});
+  if(!d.ok){ err(box,d.error); return; }
+  box.innerHTML='<div class="reply-card"><span class="tag ok">sent</span><div class="rep">'+esc(d.text)+'</div></div>';
+}
+
+const _updateConn=updateConn;
+updateConn=function(){ _updateConn(); loadTgu(); };
+
+init();
+
+// ── Outfits & Media ─────────────────────────────────────────────────────────
+// Ported from the dashboard so the photos she sends live next to the chat that
+// sends them. `currentSlug` is what that code calls the persona; the generator
+// seeds from an outfit photo here, since there is no upload gallery on this tab.
+let galleryImages = [];
+Object.defineProperty(window, 'currentSlug', { get: () => persona() });
+
+// ── Tagged media library ─────────────────────────────────────────────────────
+
+const MEDIA_PURPOSES = ['', 'Main', 'Tease', 'Behind-the-scenes', 'Custom'];
+const MEDIA_LIGHTING = ['', 'Day time', 'Night time', 'Golden hour', 'Studio', 'Indoor', 'Outdoor'];
+let mediaVault = [];        // every uploaded/generated photo
+let mediaLinks = [];        // {media_id, outfit, position} placements
+let vaultSelected = new Set();
+let vaultFilter = 'all';
+let mediaOutfits = [];
+let mediaItems = [];
+let openOutfit = null;      // which outfit is expanded
+let uploadTarget = null;    // outfit the file picker is adding to
+
+function setMediaStatus(msg, ok) {
+  const el = document.getElementById('media-status');
+  if (!el) return;
+  el.textContent = msg || '';
+  el.style.color = ok === true ? 'var(--ok)' : ok === false ? 'var(--err)' : '#5a5a63';
+}
+
+async function loadMedia() {
+  if (!currentSlug) return;
+  if (!document.getElementById('outfit-list')) return;
+  try {
+    const res = await fetch('/api/personas/' + currentSlug + '/media');
+    const data = await res.json();
+    mediaOutfits = data.outfits || [];
+    mediaItems = data.items || [];
+    mediaVault = data.vault || data.items || [];
+    mediaLinks = data.links || [];
+    renderVault();
+    renderOutfits();
+  } catch(e) { setMediaStatus('Could not load media', false); }
+}
+
+// An outfit's photos come from its links, in link order — one vault photo can
+// appear in several outfits.
+function photosOf(n) {
+  const byId = {};
+  mediaVault.forEach(v => { byId[v.id] = v; });
+  return mediaLinks
+    .filter(l => String(l.outfit) === String(n))
+    .sort((a, b) => (a.position || 0) - (b.position || 0))
+    .map(l => byId[l.media_id])
+    .filter(Boolean);
+}
+
+function outfitLabel(o) {
+  const bits = [o.clothing, o.location, o.lighting].filter(Boolean);
+  return 'Outfit ' + o.n + (o.name ? ' — ' + o.name : '') +
+         (bits.length ? ' · ' + bits.join(', ') : '');
+}
+
+function renderOutfits() {
+  const box = document.getElementById('outfit-list');
+  if (!box) return;
+  // Unassigned photos live in the vault now, badged "–", so no separate block.
+  box.innerHTML = mediaOutfits.map(o => outfitBlock(o)).join('');
+}
+
+function outfitBlock(o) {
+  const photos = photosOf(o.n);
+  const meta = [o.clothing, o.location, o.lighting].filter(Boolean).join(' · ');
+  const open = openOutfit === o.n;
+  const named = !!o.name;
+  return `
+    <div class="outfit${open ? ' is-open' : ''}">
+      <div class="outfit-head" onclick="toggleOutfit(${o.n})">
+        <span class="outfit-num${named ? '' : ' empty'}">${o.n}</span>
+        <span class="outfit-name${named ? '' : ' empty'}">${named ? esc(o.name) : 'Untitled outfit'}</span>
+        <span class="outfit-meta">${esc(meta)}</span>
+        <span class="outfit-count${photos.length ? '' : ' zero'}">${photos.length} photo${photos.length === 1 ? '' : 's'}</span>
+        <span class="outfit-caret">▶</span>
+      </div>
+      <div class="outfit-body">
+        <div class="outfit-fields">
+          <div class="field">
+            <label>Name</label>
+            <input type="text" value="${esc(o.name)}" placeholder="e.g. In bed"
+              onchange="editOutfit(${o.n},'name',this.value)">
+          </div>
+          <div class="field">
+            <label>Clothing</label>
+            <input type="text" value="${esc(o.clothing)}" placeholder="e.g. black shirt"
+              onchange="editOutfit(${o.n},'clothing',this.value)">
+          </div>
+          <div class="field">
+            <label>Place / setting</label>
+            <input type="text" value="${esc(o.location)}" placeholder="e.g. home in bed"
+              onchange="editOutfit(${o.n},'location',this.value)">
+          </div>
+          <div class="field">
+            <label>Lighting</label>
+            <select onchange="editOutfit(${o.n},'lighting',this.value)">
+              ${MEDIA_LIGHTING.map(l => `<option${l === o.lighting ? ' selected' : ''}>${l}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div class="outfit-photos" data-outfit="${o.n}"
+             ondragover="onOutfitDragOver(event,${o.n})"
+             ondragleave="onOutfitDragLeave(event)"
+             ondrop="onOutfitDrop(event,${o.n})">
+          ${photos.map(it => photoTile(it, o.n)).join('')}
+          <div class="outfit-drop" onclick="addPhotosTo(${o.n})">+ Add photos<small>or drop files here</small></div>
+        </div>
+        <div class="outfit-gen">
+          ${galleryImages.length ? `<div class="outfit-seed">
+            <span class="outfit-seed-label">From Photos tab:</span>
+            ${galleryImages.map((src, i) => `
+              <img src="${src}" class="outfit-seed-img" title="Add this photo to the outfit"
+                   onclick="useGalleryPhoto(${o.n}, ${i})">`).join('')}
+          </div>` : `<span class="hint">Add a photo in the Photos tab, or upload one here, to generate a matching set.</span>`}
+          <div class="outfit-gen-row">
+            <button type="button" class="btn-ai" onclick="generateOutfitSet(${o.n}, this)"
+              title="Generate matching shots from the first photo in this outfit">
+              ✨ Generate matching set</button>
+            <select id="outfit-gen-count-${o.n}" class="outfit-gen-count" title="How many to generate">
+              ${[1,2,3,4,5].map(n => `<option value="${n}"${n === 4 ? ' selected' : ''}>${n} photo${n === 1 ? '' : 's'}</option>`).join('')}
+            </select>
+            <span class="outfit-gen-status" id="outfit-gen-status-${o.n}"></span>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+
+function photoTile(it, outfitN) {
+  const n = outfitN === undefined ? '' : outfitN;
+  return `
+    <div class="outfit-photo" draggable="true" data-mid="${it.id}"
+         ondragstart="onPhotoDragStart(event,'${it.id}','${n}')"
+         ondragend="onPhotoDragEnd(event)"
+         ondragover="onPhotoDragOver(event,'${it.id}','${n}')"
+         ondragleave="onPhotoDragLeave(event)"
+         ondrop="onPhotoDrop(event,'${it.id}','${n}')">
+      <img src="${it.thumb}" alt="" draggable="false">
+      <button type="button" class="rm" title="Remove from this outfit (stays in the vault)"
+        onclick="event.stopPropagation();unlinkFromOutfit('${it.id}','${n}')">×</button>
+      <select title="Purpose" onchange="updateMedia('${it.id}','purpose',this.value)">
+        ${MEDIA_PURPOSES.map(p => `<option${p === it.purpose ? ' selected' : ''}>${p || '— purpose —'}</option>`).join('')}
+      </select>
+    </div>`;
+}
+
+function toggleOutfit(n) {
+  openOutfit = openOutfit === n ? null : n;
+  renderOutfits();
+}
+
+// Held in memory until Save, so a half-typed outfit never reaches the AI.
+function editOutfit(n, field, value) {
+  const o = mediaOutfits[n - 1];
+  if (!o) return;
+  o[field] = value;
+  setMediaStatus('Unsaved changes — press Save', null);
+  const head = document.querySelectorAll('.outfit')[n - 1];
+  if (head) {
+    const meta = [o.clothing, o.location, o.lighting].filter(Boolean).join(' · ');
+    head.querySelector('.outfit-meta').textContent = meta;
+    const nameEl = head.querySelector('.outfit-name');
+    nameEl.textContent = o.name || 'Untitled outfit';
+    nameEl.classList.toggle('empty', !o.name);
+    head.querySelector('.outfit-num').classList.toggle('empty', !o.name);
+  }
+}
+
+async function saveOutfits(btn) {
+  if (!currentSlug) { setMediaStatus('Save the persona first.', false); return; }
+  try {
+    const res = await fetch('/api/personas/' + currentSlug + '/outfits', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ outfits: mediaOutfits })
+    });
+    if (!res.ok) throw new Error('save failed');
+    flashSaved(btn);
+    setMediaStatus('', null);
+    loadMedia();
+  } catch(e) { flashSaved(btn, false); setMediaStatus('Could not save outfits', false); }
+}
+
+function addPhotosTo(n) {
+  uploadTarget = n;
+  document.getElementById('outfit-file-input').click();
+}
+
+// ── Media Vault ──────────────────────────────────────────────────────────────
+function vaultVisible() {
+  if (vaultFilter === 'unassigned') return mediaVault.filter(v => !(v.outfits || []).length);
+  if (vaultFilter === 'assigned') return mediaVault.filter(v => (v.outfits || []).length);
+  return mediaVault;
+}
+
+function setVaultFilter(v) { vaultFilter = v; renderVault(); }
+
+function renderVault() {
+  const grid = document.getElementById('vault-grid');
+  if (!grid) return;
+  const items = vaultVisible();
+  // Drop selections for photos that no longer exist.
+  vaultSelected.forEach(id => { if (!mediaVault.some(v => v.id === id)) vaultSelected.delete(id); });
+
+  grid.innerHTML = items.length ? items.map(v => {
+    const inOutfits = (v.outfits || []);
+    const badge = inOutfits.length
+      ? `<span class="vault-badge" title="In outfit ${inOutfits.join(', ')}">${inOutfits.join(',')}</span>`
+      : '<span class="vault-badge none" title="Not in any outfit">–</span>';
+    return `
+      <div class="vault-item${vaultSelected.has(v.id) ? ' selected' : ''}"
+           onclick="toggleVaultSelect('${v.id}')"
+           draggable="true" ondragstart="onVaultItemDragStart(event,'${v.id}')"
+           ondragend="onPhotoDragEnd(event)">
+        <img src="${v.thumb}" alt="" draggable="false">
+        ${badge}
+        <button type="button" class="rm" title="Delete from vault"
+          onclick="event.stopPropagation();vaultDeleteOne('${v.id}')">×</button>
+      </div>`;
+  }).join('') : `<div class="vault-empty">No photos yet — upload some, or generate them in an outfit.</div>`;
+
+  const count = document.getElementById('vault-count');
+  if (count) count.textContent = mediaVault.length ? `(${mediaVault.length})` : '';
+  const target = document.getElementById('vault-add-target');
+  if (target) {
+    const keep = target.value;
+    target.innerHTML = mediaOutfits.map(o =>
+      `<option value="${o.n}">Outfit ${o.n}${o.name ? ' — ' + esc(o.name) : ''}</option>`).join('');
+    if (keep) target.value = keep;
+  }
+  updateVaultSelectionUI();
+}
+
+function toggleVaultSelect(id) {
+  if (vaultSelected.has(id)) vaultSelected.delete(id); else vaultSelected.add(id);
+  const el = document.querySelector(`.vault-item[onclick*="${id}"]`);
+  if (el) el.classList.toggle('selected', vaultSelected.has(id));
+  updateVaultSelectionUI();
+}
+
+function updateVaultSelectionUI() {
+  const n = vaultSelected.size;
+  const sel = document.getElementById('vault-sel');
+  if (sel) sel.textContent = n ? `${n} selected` : '';
+  const add = document.getElementById('vault-add-btn');
+  const del = document.getElementById('vault-del-btn');
+  if (add) add.disabled = !n;
+  if (del) del.disabled = !n;
+}
+
+async function vaultAddToOutfit() {
+  if (!currentSlug || !vaultSelected.size) return;
+  const outfit = (document.getElementById('vault-add-target') || {}).value;
+  if (!outfit) return;
+  setMediaStatus('Adding to outfit ' + outfit + '…', null);
+  try {
+    const res = await fetch('/api/personas/' + currentSlug + '/media/link', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ media_ids: Array.from(vaultSelected), outfit: String(outfit) })
+    });
+    const d = await res.json();
+    vaultSelected.clear();
+    openOutfit = parseInt(outfit, 10);
+    await loadMedia();
+    setMediaStatus('✓ Added ' + (d.linked || 0) + ' photo(s) to outfit ' + outfit, true);
+  } catch (e) { setMediaStatus('Could not add to outfit.', false); }
+}
+
+async function vaultDeleteSelected() {
+  if (!currentSlug || !vaultSelected.size) return;
+  const n = vaultSelected.size;
+  if (!confirm('Delete ' + n + ' photo(s) from the vault? They are removed from every outfit too.')) return;
+  setMediaStatus('Deleting…', null);
+  for (const id of Array.from(vaultSelected)) {
+    try { await fetch('/api/personas/' + currentSlug + '/media/' + id, { method: 'DELETE' }); } catch (e) {}
+  }
+  vaultSelected.clear();
+  await loadMedia();
+  setMediaStatus('✓ Deleted ' + n + ' photo(s)', true);
+}
+
+async function vaultDeleteOne(id) {
+  if (!currentSlug) return;
+  if (!confirm('Delete this photo? It is removed from every outfit too.')) return;
+  try { await fetch('/api/personas/' + currentSlug + '/media/' + id, { method: 'DELETE' }); } catch (e) {}
+  vaultSelected.delete(id);
+  await loadMedia();
+  setMediaStatus('✓ Photo deleted', true);
+}
+
+function onVaultItemDragStart(ev, id) {
+  dragMediaId = id;
+  dragFromOutfit = null;          // from the vault, so it is a copy into an outfit
+  ev.dataTransfer.effectAllowed = 'copy';
+  try { ev.dataTransfer.setData('text/plain', id); } catch (e) {}
+}
+
+function onVaultDragOver(ev) {
+  if (!(ev.dataTransfer && Array.from(ev.dataTransfer.types || []).includes('Files'))) return;
+  ev.preventDefault();
+  ev.dataTransfer.dropEffect = 'copy';
+  ev.currentTarget.classList.add('drop-active');
+}
+
+function onVaultDragLeave(ev) { ev.currentTarget.classList.remove('drop-active'); }
+
+async function onVaultDrop(ev) {
+  const files = Array.from((ev.dataTransfer && ev.dataTransfer.files) || [])
+    .filter(f => f.type.startsWith('image/'));
+  if (!files.length) return;
+  ev.preventDefault();
+  ev.currentTarget.classList.remove('drop-active');
+  await uploadMediaFiles(files, '');     // straight into the vault, unassigned
+}
+
+// ── Drag to rearrange, and drop files to upload ──────────────────────────────
+let dragMediaId = null;
+let dragFromOutfit = null;
+
+function onPhotoDragStart(ev, id, fromOutfit) {
+  dragMediaId = id;
+  dragFromOutfit = fromOutfit === '' ? null : String(fromOutfit);
+  ev.dataTransfer.effectAllowed = 'move';
+  // Firefox needs data set for the drag to start at all.
+  try { ev.dataTransfer.setData('text/plain', id); } catch (e) {}
+  const tile = ev.currentTarget;
+  if (tile) setTimeout(() => tile.classList.add('dragging'), 0);
+}
+
+// Rebuild the flat link list from what is on screen, then save it.
+function linksInDisplayOrder() {
+  const out = [];
+  mediaOutfits.forEach(o => {
+    photosOf(o.n).forEach(p => out.push({ media_id: p.id, outfit: String(o.n) }));
+  });
+  return out;
+}
+
+function moveLink(mediaId, fromOutfit, toOutfit, beforeMediaId, after) {
+  // Drop within the same outfit reorders; across outfits moves the placement.
+  mediaLinks = mediaLinks.filter(l =>
+    !(l.media_id === mediaId && String(l.outfit) === String(fromOutfit)));
+  const already = mediaLinks.some(l =>
+    l.media_id === mediaId && String(l.outfit) === String(toOutfit));
+  if (!already) mediaLinks.push({ media_id: mediaId, outfit: String(toOutfit), position: 0 });
+
+  const inOutfit = mediaLinks.filter(l => String(l.outfit) === String(toOutfit));
+  const moved = inOutfit.find(l => l.media_id === mediaId);
+  const rest = inOutfit.filter(l => l.media_id !== mediaId);
+  let at = rest.length;
+  if (beforeMediaId) {
+    const i = rest.findIndex(l => l.media_id === beforeMediaId);
+    if (i !== -1) at = after ? i + 1 : i;
+  }
+  rest.splice(at, 0, moved);
+  rest.forEach((l, i) => { l.position = i; });
+  mediaLinks = mediaLinks.filter(l => String(l.outfit) !== String(toOutfit)).concat(rest);
+}
+
+function onPhotoDragEnd(ev) {
+  dragMediaId = null;
+  document.querySelectorAll('.outfit-photo').forEach(el =>
+    el.classList.remove('dragging', 'drop-before', 'drop-after'));
+  document.querySelectorAll('.outfit-photos').forEach(el =>
+    el.classList.remove('drop-active'));
+}
+
+function onPhotoDragOver(ev, id, outfitN) {
+  if (!dragMediaId || dragMediaId === id) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  ev.dataTransfer.dropEffect = 'move';
+  const tile = ev.currentTarget;
+  const r = tile.getBoundingClientRect();
+  const after = (ev.clientX - r.left) > r.width / 2;
+  tile.classList.toggle('drop-before', !after);
+  tile.classList.toggle('drop-after', after);
+}
+
+function onPhotoDragLeave(ev) {
+  ev.currentTarget.classList.remove('drop-before', 'drop-after');
+}
+
+async function onPhotoDrop(ev, targetId, outfitN) {
+  if (!dragMediaId || dragMediaId === targetId) return;
+  ev.preventDefault();
+  ev.stopPropagation();
+  const tile = ev.currentTarget;
+  const r = tile.getBoundingClientRect();
+  const after = (ev.clientX - r.left) > r.width / 2;
+  const mid = dragMediaId;
+  moveLink(mid, dragFromOutfit, outfitN, targetId, after);
+  onPhotoDragEnd(ev);
+  renderVault();
+  renderOutfits();
+  await persistMediaOrder();
+}
+
+function onOutfitDragOver(ev, n) {
+  if (dragMediaId) { ev.preventDefault(); ev.dataTransfer.dropEffect = 'move'; }
+  else if (ev.dataTransfer && Array.from(ev.dataTransfer.types || []).includes('Files')) {
+    ev.preventDefault();
+    ev.dataTransfer.dropEffect = 'copy';
+  } else return;
+  ev.currentTarget.classList.add('drop-active');
+}
+
+function onOutfitDragLeave(ev) {
+  ev.currentTarget.classList.remove('drop-active');
+}
+
+async function onOutfitDrop(ev, n) {
+  const files = Array.from((ev.dataTransfer && ev.dataTransfer.files) || [])
+    .filter(f => f.type.startsWith('image/'));
+  ev.preventDefault();
+  ev.currentTarget.classList.remove('drop-active');
+
+  if (files.length) { await uploadMediaFiles(files, n); return; }
+
+  // A tile dropped on empty space in the outfit goes to the end of it.
+  if (!dragMediaId) return;
+  moveLink(dragMediaId, dragFromOutfit, n, null, false);
+  onPhotoDragEnd(ev);
+  renderVault();
+  renderOutfits();
+  await persistMediaOrder();
+}
+
+async function unlinkFromOutfit(mediaId, outfitN) {
+  if (!currentSlug || !outfitN) return;
+  try {
+    await fetch('/api/personas/' + currentSlug + '/media/unlink', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ media_id: mediaId, outfit: String(outfitN) })
+    });
+    openOutfit = parseInt(outfitN, 10);
+    await loadMedia();
+    setMediaStatus('✓ Removed from outfit — still in the vault', true);
+  } catch (e) { setMediaStatus('Could not remove from outfit.', false); }
+}
+
+async function persistMediaOrder() {
+  if (!currentSlug) return;
+  try {
+    await fetch('/api/personas/' + currentSlug + '/media/reorder', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order: linksInDisplayOrder() })
+    });
+    setMediaStatus('✓ Order saved', true);
+  } catch (e) {
+    setMediaStatus('Could not save the new order.', false);
+  }
+}
+
+// Shared by the file picker and by dropping files onto an outfit.
+async function uploadMediaFiles(files, outfitN) {
+  if (!currentSlug) { setMediaStatus('Save the persona first.', false); return; }
+  setMediaStatus('Uploading ' + files.length + ' photo(s)…', null);
+  const readAsDataURL = f => new Promise(res => {
+    const r = new FileReader(); r.onload = e => res(e.target.result); r.readAsDataURL(f);
+  });
+  let added = 0;
+  for (const file of files) {
+    try {
+      const image = await readAsDataURL(file);
+      await fetch('/api/personas/' + currentSlug + '/media', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image, outfit: outfitN ? String(outfitN) : '' })
+      });
+      added++;
+    } catch (e) {}
+  }
+  openOutfit = outfitN;
+  await loadMedia();
+  setMediaStatus(added ? '✓ Added ' + added + ' photo(s)' : 'Upload failed.', !!added);
+}
+
+// Copy a photo from the Photos tab into an outfit, so the face set and the
+// media library share the same person.
+async function useGalleryPhoto(n, idx) {
+  if (!currentSlug) { setMediaStatus('Save the persona first.', false); return; }
+  const src = galleryImages[idx];
+  if (!src) return;
+  setMediaStatus('Adding photo…', null);
+  try {
+    await fetch('/api/personas/' + currentSlug + '/media', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: src, outfit: String(n) })
+    });
+    openOutfit = n;
+    await loadMedia();
+    setMediaStatus('✓ Photo added to outfit ' + n, true);
+  } catch (e) {
+    setMediaStatus('Could not add photo.', false);
+  }
+}
+
+// Generate a set of shots that keep the same person, clothing and setting.
+// Seeds from the outfit's own first photo, falling back to the Photos tab.
+const OUTFIT_SHOTS = ['half', 'full', 'candid', 'mirror', 'portrait'];
+
+async function generateOutfitSet(n, btn) {
+  if (!currentSlug) { setMediaStatus('Save the persona first.', false); return; }
+  const status = document.getElementById('outfit-gen-status-' + n);
+  const existing = photosOf(n);
+  // An outfit photo is referenced by id: the browser holds only its URL, and
+  // the generator needs the actual bytes to keep the same person.
+  const seedId = existing[0] && existing[0].id;
+  const seedData = seedId ? null : galleryImages[0];
+  if (!seedId && !seedData) {
+    if (status) status.textContent = 'Add one photo first — it sets the look to match.';
+    return;
+  }
+  const count = parseInt((document.getElementById('outfit-gen-count-' + n) || {}).value || '4', 10);
+  const outfit = mediaOutfits.find(o => String(o.n) === String(n)) || {};
+  const spec = { clothing: outfit.clothing || '', location: outfit.location || '',
+                 lighting: outfit.lighting || '' };
+
+  btn.disabled = true;
+  const label = btn.textContent;
+  let made = 0;
+  for (let i = 0; i < count; i++) {
+    btn.textContent = `Generating ${i + 1}/${count}…`;
+    if (status) status.textContent = '';
+    try {
+      const res = await fetch('/api/generate/image', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reference: seedData, reference_media: seedId,
+                               reference_slug: currentSlug, outfit: spec,
+                               shot: OUTFIT_SHOTS[i % OUTFIT_SHOTS.length],
+                               config: collectConfig() })
+      });
+      const data = await res.json();
+      // A result generated without the reference is a different person, so it
+      // is discarded rather than quietly added to the outfit.
+      if (data.ok && data.image && data.used_reference === false) {
+        if (status) status.textContent =
+          'Server ignored the reference photo — reload the page (hard refresh) and try again.';
+        break;
+      }
+      if (data.ok && data.image) {
+        await fetch('/api/personas/' + currentSlug + '/media', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: data.image, outfit: String(n),
+                                 location: spec.location, lighting: spec.lighting })
+        });
+        made++;
+      } else if (status) {
+        status.textContent = data.error || 'Generation failed.';
+      }
+    } catch (e) {
+      if (status) status.textContent = 'Generation failed.';
+    }
+  }
+  btn.disabled = false;
+  btn.textContent = label;
+  openOutfit = n;
+  await loadMedia();
+  const el = document.getElementById('outfit-gen-status-' + n);
+  if (el) el.textContent = made ? `✓ Added ${made} photo${made === 1 ? '' : 's'}` : '';
+}
+
+function onMediaFiles(ev) {
+  const files = Array.from(ev.target.files || []);
+  const target = uploadTarget;
+  ev.target.value = '';
+  uploadTarget = null;
+  if (files.length) uploadMediaFiles(files, target);
+}
+
+async function updateMedia(id, field, value) {
+  try {
+    const body = {}; body[field] = value;
+    await fetch('/api/personas/' + currentSlug + '/media/' + id, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    setMediaStatus('✓ Saved', true);
+  } catch(e) { setMediaStatus('✗ Save failed', false); }
+}
+
+async function deleteMedia(id) {
+  try {
+    await fetch('/api/personas/' + currentSlug + '/media/' + id, { method: 'DELETE' });
+    loadMedia();
+  } catch(e) {}
+}
+
+</script>
+</body>
+</html>

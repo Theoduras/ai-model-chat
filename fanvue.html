@@ -1,0 +1,912 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fanvue Chatbot</title>
+  <script src="/js/theme.js"></script>
+  <link rel="stylesheet" href="/css/style.css">
+  <script src="/js/devnav.js" defer></script>
+  <style>
+    .fv-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+    .fv-wrap { max-width: 760px; margin: 0 auto; padding: 28px 24px 80px; display: flex; flex-direction: column; gap: 20px; }
+    .result-box { margin-top: 12px; font-size: 0.85rem; display: flex; flex-direction: column; gap: 8px; }
+    .reply-card { background: var(--bg); border: 1px solid #2a2a30; border-radius: 10px; padding: 12px 14px; }
+    .reply-card .rep { color: var(--text); white-space: pre-wrap; }
+    .conn-pill { font-size: 0.75rem; padding: 3px 10px; border-radius: 9999px; background: var(--surface); color: var(--text-3); }
+    .conn-pill.ok { background: #14532d; color: #4ade80; }
+    .conn-pill.err { background: #4c0519; color: #fb7185; }
+    :root[data-theme="light"] .tag.ok, :root[data-theme="light"] .conn-pill.ok { background: #e8f6ed; color: #0f7038; }
+    :root[data-theme="light"] .tag.no, :root[data-theme="light"] .conn-pill.err { background: #fdecec; color: #c81e1e; }
+    :root[data-theme="light"] .auto-log .ln.act { color: #0f7038; border-left-color: #a8ddbd; }
+    :root[data-theme="light"] .auto-log .ln.er { color: #c81e1e; border-left-color: #f0b4b4; }
+    .conn-pill.running { background: #14532d; color: #4ade80; animation: pulse-glow 2s ease-in-out infinite; }
+    @keyframes pulse-glow { 0%,100%{ opacity:1; } 50%{ opacity:.5; } }
+    .row-inline { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+    .row-inline .field { flex: 1; min-width: 160px; }
+    .soon { font-size: 0.72rem; padding: 2px 8px; border-radius: 9999px; background: var(--border); color: var(--text-2); margin-left: 8px; }
+    textarea { width: 100%; min-height: 90px; resize: vertical; }
+    table.fans { width:100%; border-collapse:collapse; margin-top:14px; font-size:0.78rem; }
+    table.fans th { text-align:left; color:var(--text-muted); font-weight:500; padding:6px 8px; border-bottom:1px solid var(--surface); }
+    table.fans td { padding:6px 8px; border-bottom:1px solid var(--panel-2); color:var(--text-2); vertical-align:top; }
+    @media (max-width: 640px) { .fv-wrap { padding: 18px 14px 70px; gap: 16px; } }
+
+    @media (max-width: 640px) {
+      body.page-dashboard header { padding: 10px 12px; gap: 8px; }
+      body.page-dashboard header h1 { font-size: 0.9rem; }
+      body.page-dashboard header .badge { display: none; }
+      body.page-dashboard header > div { gap: 10px; }
+      body.page-dashboard header a { white-space: nowrap; }
+    }
+  </style>
+</head>
+<body class="page-dashboard">
+
+<header>
+  <div style="display:flex; align-items:center; gap:10px;">
+    <h1>Fanvue Chatbot</h1>
+    <span class="badge">Fanvue</span>
+  </div>
+  <div style="display:flex; align-items:center; gap:16px;">
+    <a href="/xbot" style="color:var(--accent); font-size:0.8rem; text-decoration:none;">𝕏 Bot</a>
+    <button class="icon-btn theme-toggle" onclick="toggleTheme()" title="Light mode" aria-label="Switch to light mode">
+      <svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke-linecap="round"/></svg>
+      <svg class="ico-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" stroke-linejoin="round"/></svg>
+    </button>
+    <a href="/dashboard" style="color:var(--text-muted); font-size:0.8rem; text-decoration:none;">← Dashboard</a>
+  </div>
+</header>
+
+<div class="fv-scroll">
+<div class="fv-wrap">
+
+  <div class="form-section">
+    <div class="section-title">Persona &amp; Fanvue account</div>
+    <div class="field full">
+      <label>Choose a model (persona)</label>
+      <div class="row-inline">
+        <div class="field" style="margin:0;">
+          <select id="persona" onchange="loadConfig()"></select>
+        </div>
+        <span class="conn-pill" id="conn-pill">—</span>
+        <button class="btn-ai" id="connect-btn" onclick="toggleConnect()">Connect Fanvue</button>
+        <button class="btn-ai" id="disconnect-btn" style="background:var(--border); display:none;" onclick="disconnectFanvue()">Disconnect</button>
+      </div>
+    </div>
+    <div class="field full" id="creator-row" style="display:none; margin-top:12px;">
+      <label>Acting as <span style="font-weight:400;color:var(--text-muted);">(this login manages more than one profile — pick which one replies)</span></label>
+      <div class="row-inline">
+        <div class="field" style="margin:0;">
+          <select id="creator-select" onchange="selectCreator()"></select>
+        </div>
+        <span class="hint" id="creator-hint"></span>
+      </div>
+    </div>
+    <div id="ppv-row" style="display:none; margin-top:12px; border-top:1px solid var(--border-soft); padding-top:16px;">
+      <label style="display:block;margin-bottom:6px;">💎 PPV content <span style="font-weight:400;color:var(--text-muted);">(pick the Fanvue media this model sends locked, once rapport is built)</span></label>
+      <div class="row-inline" style="margin-bottom:10px;">
+        <div class="field" style="margin:0;min-width:180px;flex:1;">
+          <label style="font-size:.72rem;">Folder</label>
+          <select id="ppv-folder-filter" onchange="loadPpv()"><option value="">All folders</option></select>
+        </div>
+        <div class="field" style="margin:0;min-width:160px;flex:1;">
+          <label style="font-size:.72rem;">Search <span style="color:var(--text-muted);">(name or description)</span></label>
+          <input type="text" id="ppv-search" placeholder="e.g. bikini" oninput="renderGrid()">
+        </div>
+        <div class="field" style="margin:0;min-width:120px;">
+          <label style="font-size:.72rem;">Type</label>
+          <select id="ppv-type-filter" onchange="loadPpv()">
+            <option value="">All</option>
+            <option value="image">Images</option>
+            <option value="video">Videos</option>
+            <option value="audio">Audio</option>
+          </select>
+        </div>
+      </div>
+      <div id="ppv-set-bar" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px;"></div>
+      <div id="ppv-set-fields" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px 14px;margin-bottom:12px;">
+        <div class="field" style="margin:0;">
+          <label style="font-size:.72rem;">Set name</label>
+          <input type="text" id="ppv-set-name" placeholder="e.g. In bed" onchange="stashSet()">
+        </div>
+        <div class="field" style="margin:0;grid-column:1/-1;">
+          <label style="font-size:.72rem;">What she's doing in it <span style="color:var(--text-muted);">— matched against what's said in the chat</span></label>
+          <input type="text" id="ppv-set-scene" placeholder="e.g. lying in bed in the morning" onchange="stashSet()">
+        </div>
+        <div class="field" style="margin:0;">
+          <label style="font-size:.72rem;">Trigger words <span style="color:var(--text-muted);">(comma separated)</span></label>
+          <input type="text" id="ppv-set-keywords" placeholder="e.g. bed, sleepy, goodnight" onchange="stashSet()">
+        </div>
+        <div class="field" style="margin:0;">
+          <label style="font-size:.72rem;">Hours it suits <span style="color:var(--text-muted);">(0–23, blank = any)</span></label>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <input type="number" id="ppv-set-from" min="0" max="23" placeholder="from" onchange="stashSet()" style="max-width:80px;">
+            <span style="color:var(--text-muted);">→</span>
+            <input type="number" id="ppv-set-to" min="0" max="23" placeholder="to" onchange="stashSet()" style="max-width:80px;">
+          </div>
+        </div>
+      </div>
+      <div id="ppv-tier-bar" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:10px;"></div>
+      <div id="ppv-tier-contents" style="margin-bottom:12px;"></div>
+      <label style="font-size:.72rem;display:block;margin-bottom:4px;">Add from your Fanvue media</label>
+      <div id="ppv-media-grid" style="display:grid; grid-template-columns:repeat(auto-fill,minmax(100px,1fr)); gap:8px; max-height:320px; overflow-y:auto; padding:4px 0;" onscroll="onGridScroll()"></div>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:6px;">
+        <button class="btn-ai" id="ppv-more-btn" style="background:var(--border);display:none;" onclick="loadMoreMedia()">Load more</button>
+        <span class="hint" id="ppv-count"></span>
+      </div>
+      <div class="row-inline" style="margin-top:10px;">
+        <div class="field" style="margin:0; min-width:130px;">
+          <label style="font-size:.72rem;">This tier's unlock price in $ (min $3)</label>
+          <input type="number" id="ppv-price" placeholder="e.g. 10" min="3" step="1" onchange="stashTier()">
+        </div>
+        <button class="btn-ai" onclick="savePpv()">Save all sets</button>
+      </div>
+      <div class="field full" style="margin-top:10px;">
+        <input type="text" id="ppv-caption" placeholder="Caption for this tier (optional) — e.g. made something just for you 🙈" onchange="stashTier()">
+      </div>
+      <span class="hint" id="ppv-hint" style="display:block;margin-top:6px;"></span>
+      <span class="hint" style="display:block;margin-top:4px;color:var(--text-muted);">Each set is one theme — like an outfit. She picks the set that matches what was just said in chat and the time of day, then sends that set's tiers in order as the chat deepens.</span>
+    </div>
+    <div id="connect-panel" style="display:none; margin-top:4px; border-top:1px solid var(--border-soft); padding-top:16px;">
+      <div class="field full">
+        <label>Fanvue app Client ID</label>
+        <input type="text" id="fv-client-id" placeholder="client id from the Fanvue Builder" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="field full" style="margin-top:12px;">
+        <label>Client Secret</label>
+        <input type="password" id="fv-client-secret" placeholder="client secret" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="field full" style="margin-top:12px;">
+        <label>Redirect URI <span style="font-weight:400;color:var(--text-muted);">(register this exact URL in your Fanvue app)</span></label>
+        <input type="text" id="fv-redirect" placeholder="https://your-domain/api/fanvue/oauth-redirect" autocomplete="off" spellcheck="false">
+      </div>
+      <button class="btn-ai" style="margin-top:14px;" onclick="startConnect()">Authorize on Fanvue →</button>
+      <div id="connect-step2" style="display:none; margin-top:14px;">
+        <div class="field full">
+          <label>Paste the full callback URL after authorizing</label>
+          <input type="text" id="fv-callback" placeholder="https://…/api/fanvue/oauth-redirect?code=…&state=…" autocomplete="off" spellcheck="false">
+        </div>
+        <button class="btn-ai" style="margin-top:12px;" onclick="completeConnect()">Finish connection ✓</button>
+      </div>
+      <div class="result-box" id="config-status"></div>
+      <span class="hint" style="margin-top:8px;">Create an app in the <b>Fanvue Builder</b> (developer settings) to get the Client ID + Secret, enable scopes <code>read:self read:chat write:chat read:fan</code> (plus openid/offline), and register the Redirect URI above. Credentials are stored server-side per persona.</span>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">💬 Draft a reply</div>
+    <span class="hint" style="display:block; margin-bottom:14px;">Generates an in-persona, funnel-aware reply to a fan's message. Works with no connection — copy it into Fanvue, or preview the voice before going live.</span>
+    <div class="field full">
+      <label>Fan's message</label>
+      <textarea id="fan-msg" placeholder="Paste what the fan said…"></textarea>
+    </div>
+    <button class="btn-ai" onclick="draftReply()">Draft reply</button>
+    <div class="result-box" id="draft-result"></div>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">🤖 Auto-reply to DMs</div>
+    <span class="hint" style="display:block; margin-bottom:14px;">Reads incoming Fanvue DMs and replies in-persona (with the funnel + conversation logging). Runs <b>server-side</b> — stays on across redeploys and needs no open tab. Turn it on per persona.</span>
+    <div class="auto-toggles" style="display:flex; flex-wrap:wrap; gap:10px 20px;">
+      <label class="soon" style="display:flex;align-items:center;gap:8px;cursor:pointer;background:none;color:var(--text-2);font-size:.85rem;padding:0"><input type="checkbox" id="fv-auto-enabled" style="width:auto"> <b>Auto-reply enabled</b></label>
+      <label class="soon" style="display:flex;align-items:center;gap:8px;cursor:pointer;background:none;color:var(--text-2);font-size:.85rem;padding:0"><input type="checkbox" id="fv-exclude-creators" checked style="width:auto"> Exclude other creators (only reply to fans)</label>
+      <label class="soon" style="display:flex;align-items:center;gap:8px;cursor:pointer;background:none;color:var(--text-2);font-size:.85rem;padding:0"><input type="checkbox" id="fv-ppv-require-payment" style="width:auto"> Require payment before next PPV tier <span style="color:var(--text-muted)">(off = tiers flow on chatting; use off for testing)</span></label>
+      <label class="soon" style="display:flex;align-items:center;gap:8px;cursor:pointer;background:none;color:var(--text-2);font-size:.85rem;padding:0"><input type="checkbox" id="fv-online-only" style="width:auto" onchange="document.getElementById('fv-online-grace-wrap').style.display=this.checked?'':'none'"> Only reply to fans who are online <span style="color:var(--text-muted)">(skip everyone else this round)</span></label>
+    </div>
+    <div class="auto-toggles" style="display:flex; flex-wrap:wrap; gap:10px 20px; margin-top:10px;">
+      <label class="soon" style="display:flex;align-items:center;gap:8px;cursor:pointer;background:none;color:var(--text-2);font-size:.85rem;padding:0"><input type="checkbox" id="fv-humanize" checked style="width:auto" onchange="document.getElementById('fv-typing-wrap').style.display=this.checked?'':'none'"> Type like a human <span style="color:var(--text-muted)">(pause to read, then type at a believable speed instead of replying instantly)</span></label>
+    </div>
+    <div class="field full" id="fv-typing-wrap" style="margin-top:12px;">
+      <label>Typing speed <span style="font-weight:400;color:var(--text-muted);">(Fanvue paces its own replies &mdash; the Reply Speed and Typing Speed in the persona builder apply to the chat on your website only)</span></label>
+      <select id="fv-typing-speed" style="max-width:260px;">
+        <option value="8">Slow — thumbs on a phone</option>
+        <option value="14" selected>Natural</option>
+        <option value="22">Fast texter</option>
+        <option value="34">Very fast</option>
+      </select>
+    </div>
+    <div class="row-inline" id="fv-react-wrap" style="margin-top:12px;">
+      <div class="field" style="margin:0;">
+        <label>React with an emoji <span style="font-weight:400;color:var(--text-muted);">(% of replies — Fanvue has no reaction button, so she sends the emoji as its own message just before she answers. 0 = never)</span></label>
+        <input type="number" id="fv-react-rate" min="0" max="100" step="5" value="25" style="max-width:120px;">
+      </div>
+    </div>
+    <div class="field full" id="fv-online-grace-wrap" style="margin-top:12px;display:none;">
+      <label>Count as online for <span style="font-weight:400;color:var(--text-muted);">(minutes since last seen — presence flickers when a fan backgrounds the app, so a small window avoids missing them. 0 = only while the flag says online.)</span></label>
+      <input type="number" id="fv-online-grace" min="0" max="120" step="1" value="5" style="max-width:160px;">
+    </div>
+    <div class="field full" style="margin-top:12px;">
+      <label>Only reply to these fans <span style="font-weight:400;color:var(--text-muted);">(comma-separated handles — leave blank for everyone; use for testing)</span></label>
+      <input type="text" id="fv-only-handles" placeholder="e.g. girlforfun">
+    </div>
+    <div class="field full" style="margin-top:12px;">
+      <label>Fanvue lists <span style="font-weight:400;color:var(--text-muted);">(her smart segments and custom lists — set each one to include or exclude. Any list on "include" means she only talks to fans in those lists.)</span></label>
+      <div id="fv-lists"><span class="hint">Loading…</span></div>
+      <button class="btn-ai" style="background:var(--border);margin-top:8px;" onclick="loadLists(true)">Refresh lists</button>
+    </div>
+    <div class="row-inline" style="margin-top:12px;">
+      <div class="field" style="margin:0;">
+        <label>First PPV after <span style="font-weight:400;color:var(--text-muted);">(messages in the chat, both directions, before the first locked drop)</span></label>
+        <input type="number" id="fv-ppv-first-after" min="1" max="200" step="1" value="6" style="max-width:120px;">
+      </div>
+      <div class="field" style="margin:0;">
+        <label>Messages between PPVs <span style="font-weight:400;color:var(--text-muted);">(how much more chat before the next tier can go out)</span></label>
+        <input type="number" id="fv-ppv-gap" min="1" max="200" step="1" value="8" style="max-width:120px;">
+      </div>
+    </div>
+    <div class="row-inline" style="margin-top:12px;">
+      <div class="field" style="margin:0;">
+        <label>Offer it again after <span style="font-weight:400;color:var(--text-muted);">(messages — if the drop goes unbought, she offers the same one again after this much more chat. 0 = never re-offer)</span></label>
+        <input type="number" id="fv-ppv-retry-after" min="0" max="500" step="1" value="0" style="max-width:120px;">
+      </div>
+      <div class="field" style="margin:0;">
+        <label>How many times <span style="font-weight:400;color:var(--text-muted);">(re-offers before she moves on and stops asking)</span></label>
+        <input type="number" id="fv-ppv-retry-max" min="0" max="10" step="1" value="1" style="max-width:120px;">
+      </div>
+      <button class="btn-ai" style="background:var(--border);" onclick="resetPpvProgress()">Reset PPV progress</button>
+      <span class="hint" id="fv-ppv-reset-state"></span>
+    </div>
+    <div class="field full" style="margin-top:12px;">
+      <label>PPV test phrase <span style="font-weight:400;color:var(--text-muted);">(for testing only — when a fan sends a message containing this, the last PPV she sent them counts as paid, so the next tier can go out without a real purchase. Leave blank to switch off.)</span></label>
+      <input type="text" id="fv-ppv-test-phrase" placeholder="e.g. unlocked" style="max-width:260px;">
+    </div>
+    <div class="field full" style="margin-top:12px;">
+      <label>Follow-up after silence <span style="font-weight:400;color:var(--text-muted);">(minutes before nudging a quiet fan — first nudge at this value, second at 2×; max 2. Set low e.g. 5 to test)</span></label>
+      <input type="number" id="fv-followup-min" min="1" step="1" placeholder="30">
+    </div>
+    <div style="display:flex; gap:8px; align-items:center; margin-top:14px;">
+      <button class="btn-ai" onclick="saveAuto()">Save &amp; Run</button>
+      <span class="conn-pill" id="fv-auto-state">off</span>
+    </div>
+    <div class="result-box" id="fv-auto-result"></div>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">🩺 Activity log</div>
+    <span class="hint" style="display:block; margin-bottom:10px;">Everything that has been said — each fan message that came in and every reply, PPV drop and error that went out. Updates by itself every few seconds.</span>
+    <div id="fv-trace-problems"></div>
+    <div id="fv-trace-rows"><span class="hint">Loading…</span></div>
+    <div style="display:flex; gap:8px; align-items:center; margin-top:12px;">
+      <button class="btn-ai" style="background:var(--border);" onclick="loadTrace()">Refresh</button>
+      <button class="btn-ai" style="background:var(--border);" onclick="clearTrace()">Clear</button>
+      <label style="font-size:.75rem;color:var(--text-muted);display:flex;align-items:center;gap:6px;">
+        <input type="checkbox" id="fv-trace-live" checked style="width:auto;"> live
+      </label>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">👥 Connected accounts</div>
+    <span class="hint" style="display:block; margin-bottom:14px;">Every persona with a Fanvue connection. Accounts with auto-reply on all run <b>at the same time</b> — one worker per account, so a busy inbox never holds up the others.</span>
+    <div id="fv-accounts"><span class="hint">Loading…</span></div>
+  </div>
+
+</div>
+</div>
+
+<script>
+let connState = {};
+function esc(s){return (s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function persona(){return document.getElementById('persona').value;}
+function busy(box,m){box.innerHTML='<span class="hint">'+esc(m)+'</span>';}
+function err(box,m){box.innerHTML='<span class="hint" style="color:#fb7185;">✗ '+esc(m)+'</span>';}
+async function post(url,body){const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});return r.json();}
+
+let appCfg={};
+async function init(){
+  try{
+    const [pRes,aRes]=await Promise.all([fetch('/api/personas'),fetch('/api/fanvue/config')]);
+    const list=await pRes.json();
+    appCfg=await aRes.json().catch(()=>({}));
+    document.getElementById('persona').innerHTML=list.map(p=>'<option value="'+p.slug+'">'+esc(p.name||p.slug)+'</option>').join('');
+    await loadConfig();
+  }catch(e){}
+}
+async function loadConfig(){
+  connState=await fetch('/api/fanvue/status?persona='+encodeURIComponent(persona())).then(r=>r.json()).catch(()=>({}));
+  document.getElementById('connect-panel').style.display='none';
+  document.getElementById('connect-step2').style.display='none';
+  document.getElementById('config-status').innerHTML='';
+  updateConn();
+  loadCreators();
+  window._ppvTiersLoaded=false;
+  loadPpv();
+  loadAuto();
+  loadAccounts();
+  loadTrace();
+  startTraceLoop();
+}
+
+async function resetPpvProgress(){
+  const st=document.getElementById('fv-ppv-reset-state');
+  if(!confirm('Forget every PPV already sent for this model? Her sets start from tier 1 again for all fans.')) return;
+  st.textContent='Resetting…'; st.style.color='var(--text-muted)';
+  const d=await post('/api/fanvue/ppv-reset',{persona:persona()});
+  if(!d.ok){ st.textContent='✗ '+(d.error||'Failed'); st.style.color='#fb7185'; return; }
+  st.textContent='✓ PPV progress cleared — the sets start again'; st.style.color='#4ade80';
+}
+
+async function loadTrace(){
+  const box=document.getElementById('fv-trace-rows'), pb=document.getElementById('fv-trace-problems');
+  try{
+    const d=await (await fetch('/api/fanvue/trace?persona='+encodeURIComponent(persona()))).json();
+    const bad=(d.problems||[]).length;
+    const q=(d.queued||0)>(d.workers||0)?' — '+d.queued+' queued, running late':((d.queued||0)?' ('+d.queued+' queued)':'');
+    const live=(d.connected?(d.enabled?(d.running?'● replying now':'● auto-reply on'):'○ auto-reply off'):'○ not connected')+q;
+    pb.innerHTML='<div class="note" style="border-color:'+(bad?'#3f3f46':'#14532d')+';color:'+(bad?'var(--text-2)':'#4ade80')+';margin-bottom:8px;">'+
+      (bad?'':'✓ ')+esc(d.persona||'')+' · '+live+'</div>'+
+      (d.problems||[]).map(p=>'<div class="note" style="border-color:#7f1d1d;color:#fca5a5;margin-bottom:8px;">⚠ '+esc(p)+'</div>').join('');
+    const rows=(d.rows||[]).slice().reverse();
+    const col={received:'#c7d2fe',sent:'#4ade80',ppv:'#f0abfc',typing:'var(--text-muted)','follow-up':'#fbbf24',error:'#fb7185',idle:'var(--text-muted)',delayed:'#fbbf24'};
+    box.innerHTML = rows.length ?
+      '<table class="fans"><tr><th>Time</th><th>What</th><th>Message</th></tr>'+
+      rows.map(r=>'<tr><td style="white-space:nowrap;">'+new Date((r.at||0)*1000).toLocaleTimeString()+
+        '</td><td style="color:'+(col[r.stage]||'var(--text-2)')+'">'+esc(r.stage)+
+        '</td><td style="white-space:pre-wrap;">'+esc(r.detail||'')+'</td></tr>').join('')+'</table>'
+      : '<span class="hint">Nothing recorded yet — the first line appears as soon as a fan writes.</span>';
+  }catch(e){ box.innerHTML='<span class="hint" style="color:#fb7185;">Could not load the log: '+esc(String(e))+'</span>'; }
+}
+
+async function clearTrace(){
+  await fetch('/api/fanvue/trace?persona='+encodeURIComponent(persona()),{method:'DELETE'});
+  loadTrace();
+}
+
+let traceTimer=null;
+function startTraceLoop(){
+  if(traceTimer) return;
+  traceTimer=setInterval(()=>{
+    if(document.hidden) return;
+    if(!document.getElementById('fv-trace-live').checked) return;
+    loadTrace();
+  },5000);
+}
+
+let ppvSel=new Set();
+// Sets are themed bundles, like outfits; each holds its own ordered tiers.
+function blankTier(){ return {media_uuids:[],price:'',caption:''}; }
+function blankSet(n){ return {id:'set'+n,name:'Set '+n,scene:'',keywords:'',
+                              hour_from:'',hour_to:'',tiers:[blankTier()]}; }
+let ppvSets=[blankSet(1)];
+let curSet=0, curTier=0;
+// Fanvue prices in cents; the creator types dollars.
+function centsToDollars(c){ c=parseInt(c||'0',10); return c?String(c/100):''; }
+function dollarsToCents(d){ d=parseFloat(d||'0'); return isNaN(d)?0:Math.round(d*100); }
+function theSet(){ return ppvSets[curSet]||(ppvSets[curSet]=blankSet(curSet+1)); }
+// Every item seen in any folder view, so a tier can still show its own media
+// after the folder filter moves away from it.
+const mediaSeen={};
+function rememberMedia(list){ (list||[]).forEach(m=>{ if(m.uuid) mediaSeen[m.uuid]=m; }); }
+function mediaIcon(m){ return m&&m.mediaType==='video'?'🎬':m&&m.mediaType==='audio'?'🎵':'🖼️'; }
+let lookupPending=false;
+const lookupTried=new Set();
+// The list view leaves some items without a variant URL. Ask for those by uuid,
+// once each, and redraw when they come back.
+async function fillMissingThumbs(ids,after){
+  const missing=ids.filter(u=>!lookupTried.has(u)&&(!mediaSeen[u]||!mediaSeen[u].thumb)).slice(0,60);
+  if(!missing.length||lookupPending) return;
+  lookupPending=true;
+  missing.forEach(u=>lookupTried.add(u));
+  try{
+    const d=await post('/api/fanvue/media-lookup',{persona:persona(),uuids:missing});
+    rememberMedia(d.media||[]);
+    (d.media||[]).forEach(m=>{
+      const cur=(window._ppvMedia||[]).find(x=>x.uuid===m.uuid);
+      if(cur&&!cur.thumb&&m.thumb) cur.thumb=m.thumb;
+    });
+    (after||renderTierContents)();
+  }catch(e){}
+  lookupPending=false;
+}
+function renderTierContents(){
+  const box=document.getElementById('ppv-tier-contents');
+  const ids=[...ppvSel];
+  const where=(theSet().name||('Set '+(curSet+1)))+' · tier '+(curTier+1);
+  if(!ids.length){
+    box.innerHTML='<div class="note" style="margin:0;color:var(--text-muted);">'+esc(where)+
+      ' is empty — tap media below to put it in this tier.</div>';
+    return;
+  }
+  box.innerHTML='<div style="border:1px solid var(--border);border-radius:10px;padding:10px;background:var(--panel);">'+
+    '<div style="font-size:.72rem;color:var(--text-muted);margin-bottom:8px;">In '+esc(where)+
+    ' — '+ids.length+' item'+(ids.length===1?'':'s')+' the fan unlocks together</div>'+
+    '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:8px;">'+
+    ids.map(u=>{
+      const m=mediaSeen[u]||{uuid:u,name:'loading…'};
+      const thumb=m.thumb?('background-image:url(\''+esc(m.thumb)+'\');background-size:cover;background-position:center;')
+                         :'background:linear-gradient(135deg,var(--surface),var(--panel-2));';
+      return '<div style="position:relative;aspect-ratio:1;border-radius:8px;overflow:hidden;'+thumb+'">'+
+        (m.thumb?'':'<span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:1.5rem;opacity:.5;">'+mediaIcon(m)+'</span>')+
+        '<span onclick="previewMedia(\''+esc(u)+'\')" title="Preview" style="position:absolute;top:2px;left:2px;background:rgba(0,0,0,.6);border-radius:6px;padding:1px 5px;font-size:.7rem;cursor:zoom-in;">👁</span>'+
+        '<span onclick="dropFromTier(\''+esc(u)+'\')" title="Remove from this tier" style="position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);border-radius:6px;padding:1px 5px;font-size:.7rem;cursor:pointer;color:#fb7185;">✕</span>'+
+        '<span style="position:absolute;bottom:0;left:0;right:0;font-size:.6rem;padding:2px 4px;background:rgba(0,0,0,.65);color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+
+        esc(m.name||'')+'</span></div>';
+    }).join('')+'</div></div>';
+  fillMissingThumbs(ids,renderTierContents);
+}
+function dropFromTier(u){
+  ppvSel.delete(u); stashTier(); renderSetBar(); renderTierBar();
+  renderTierContents(); renderGrid();
+}
+function stashTier(){
+  theSet().tiers[curTier]={
+    media_uuids:[...ppvSel],
+    price:document.getElementById('ppv-price').value,
+    caption:document.getElementById('ppv-caption').value
+  };
+}
+function stashSet(){
+  const s=theSet();
+  s.name=document.getElementById('ppv-set-name').value;
+  s.scene=document.getElementById('ppv-set-scene').value;
+  s.keywords=document.getElementById('ppv-set-keywords').value;
+  s.hour_from=document.getElementById('ppv-set-from').value;
+  s.hour_to=document.getElementById('ppv-set-to').value;
+  renderSetBar();
+}
+function pill(label,on,onclick,extra){
+  return '<span onclick="'+onclick+'" style="cursor:pointer;padding:4px 12px;border-radius:9999px;font-size:.78rem;'+
+    (on?'background:var(--accent);color:#fff;':(extra||'background:var(--surface);color:var(--text-3);'))+'">'+label+'</span>';
+}
+function renderSetBar(){
+  const bar=document.getElementById('ppv-set-bar');
+  bar.innerHTML=ppvSets.map((s,i)=>{
+    const n=(s.tiers||[]).filter(t=>(t.media_uuids||[]).length).length;
+    return pill(esc(s.name||('Set '+(i+1)))+(n?(' · '+n+' tier'+(n===1?'':'s')):''),
+                i===curSet,'switchSet('+i+')');
+  }).join('')+
+  pill('＋ set',false,'addSet()','background:var(--panel);border:1px dashed var(--border);color:var(--text-2);')+
+  (ppvSets.length>1?pill('🗑 set',false,'removeSet()','background:var(--panel);color:#fb7185;'):'');
+}
+function renderTierBar(){
+  const bar=document.getElementById('ppv-tier-bar');
+  const tiers=theSet().tiers||[];
+  bar.innerHTML=tiers.map((t,i)=>{
+    const n=(t.media_uuids||[]).length;
+    return pill('Tier '+(i+1)+(n?(' ('+n+')'):''),i===curTier,'switchTier('+i+')');
+  }).join('')+
+  pill('＋ tier',false,'addTier()','background:var(--panel);border:1px dashed var(--border);color:var(--text-2);')+
+  (tiers.length>1?pill('🗑 tier '+(curTier+1),false,'removeTier()','background:var(--panel);color:#fb7185;'):'');
+}
+function switchSet(i){ stashTier(); stashSet(); curSet=i; curTier=0; applySet(); }
+function addSet(){ stashTier(); stashSet(); ppvSets.push(blankSet(ppvSets.length+1));
+                   curSet=ppvSets.length-1; curTier=0; applySet(); }
+function removeSet(){ ppvSets.splice(curSet,1); if(!ppvSets.length)ppvSets=[blankSet(1)];
+                      curSet=Math.max(0,curSet-1); curTier=0; applySet(); }
+function switchTier(i){ stashTier(); curTier=i; applyTier(); }
+function addTier(){ stashTier(); theSet().tiers.push(blankTier());
+                    curTier=theSet().tiers.length-1; applyTier(); }
+function removeTier(){ const t=theSet().tiers; t.splice(curTier,1);
+                       if(!t.length)t.push(blankTier()); curTier=Math.max(0,curTier-1); applyTier(); }
+function applySet(){
+  const s=theSet();
+  document.getElementById('ppv-set-name').value=s.name||'';
+  document.getElementById('ppv-set-scene').value=s.scene||'';
+  document.getElementById('ppv-set-keywords').value=s.keywords||'';
+  document.getElementById('ppv-set-from').value=(s.hour_from===0||s.hour_from)?s.hour_from:'';
+  document.getElementById('ppv-set-to').value=(s.hour_to===0||s.hour_to)?s.hour_to:'';
+  renderSetBar();
+  applyTier();
+}
+function applyTier(){
+  const t=theSet().tiers[curTier]||blankTier();
+  ppvSel=new Set(t.media_uuids||[]);
+  document.getElementById('ppv-price').value=t.price||'';
+  document.getElementById('ppv-caption').value=t.caption||'';
+  renderTierBar();
+  renderTierContents();
+  renderGrid();
+}
+let mediaPage=1, mediaHasMore=false, mediaLoading=false;
+async function fetchMediaPage(page){
+  const folder=document.getElementById('ppv-folder-filter').value||'';
+  const type=document.getElementById('ppv-type-filter').value||'';
+  return fetch('/api/fanvue/media?persona='+encodeURIComponent(persona())+
+    '&folder='+encodeURIComponent(folder)+'&type='+encodeURIComponent(type)+
+    '&page='+page).then(r=>r.json());
+}
+async function loadFolders(){
+  const sel=document.getElementById('ppv-folder-filter');
+  const keep=sel.value;
+  try{
+    const d=await fetch('/api/fanvue/folders?persona='+encodeURIComponent(persona())).then(r=>r.json());
+    sel.innerHTML='<option value="">All folders</option>'+
+      (d.folders||[]).map(f=>'<option value="'+esc(f.name)+'">'+esc(f.name)+
+        (f.count!=null?(' ('+f.count+')'):'')+'</option>').join('');
+    sel.value=keep;
+  }catch(e){}
+}
+async function loadMoreMedia(){
+  if(mediaLoading||!mediaHasMore) return;
+  mediaLoading=true;
+  const btn=document.getElementById('ppv-more-btn');
+  btn.textContent='Loading…';
+  try{
+    const d=await fetchMediaPage(mediaPage+1);
+    mediaPage=d.page||(mediaPage+1);
+    mediaHasMore=!!d.has_more;
+    const have=new Set((window._ppvMedia||[]).map(m=>m.uuid));
+    window._ppvMedia=(window._ppvMedia||[]).concat((d.media||[]).filter(m=>!have.has(m.uuid)));
+    rememberMedia(d.media||[]);
+    renderGrid();
+  }catch(e){}
+  btn.textContent='Load more';
+  mediaLoading=false;
+}
+// Pull the next page a little before the bottom, so scrolling feels endless.
+function onGridScroll(){
+  const g=document.getElementById('ppv-media-grid');
+  if(mediaHasMore&&!mediaLoading&&g.scrollTop+g.clientHeight>=g.scrollHeight-120) loadMoreMedia();
+}
+async function loadPpv(){
+  const row=document.getElementById('ppv-row');
+  if(!connState.connected){row.style.display='none';return;}
+  row.style.display='block';
+  const grid=document.getElementById('ppv-media-grid');
+  grid.innerHTML='<span class="hint">Loading media…</span>';
+  if(!window._ppvFoldersLoaded){ window._ppvFoldersLoaded=true; loadFolders(); }
+  let data={};
+  try{data=await fetchMediaPage(1);}catch(e){}
+  mediaPage=1; mediaHasMore=!!data.has_more;
+  window._ppvMedia=data.media||[];
+  rememberMedia(window._ppvMedia);
+  // Load saved sets only once (first load), so switching filters keeps edits.
+  if(!window._ppvTiersLoaded){
+    let saved={};
+    try{saved=await fetch('/api/fanvue/ppv?persona='+encodeURIComponent(persona())).then(r=>r.json());}catch(e){}
+    const st=saved.sets||[];
+    ppvSets=st.length?st.map((s,i)=>({
+      id:s.id||('set'+(i+1)), name:s.name||('Set '+(i+1)), scene:s.scene||'',
+      keywords:(s.keywords||[]).join(', '),
+      hour_from:(s.hour_from===0||s.hour_from)?s.hour_from:'',
+      hour_to:(s.hour_to===0||s.hour_to)?s.hour_to:'',
+      tiers:(s.tiers||[]).map(t=>({media_uuids:t.media_uuids||[],
+                                   price:centsToDollars(t.price),caption:t.caption||''}))
+    })):[blankSet(1)];
+    ppvSets.forEach(s=>{ if(!s.tiers.length) s.tiers=[blankTier()]; });
+    curSet=0; curTier=0;
+    window._ppvTiersLoaded=true;
+    applySet();
+  }
+  const hint=document.getElementById('ppv-hint');
+  if(data.error){grid.innerHTML='';hint.textContent='⚠ Could not load media: '+data.error;hint.style.color='var(--warn)';renderSetBar();renderTierBar();renderTierContents();return;}
+  renderSetBar();
+  renderTierBar();
+  renderTierContents();
+  renderGrid();
+}
+function renderGrid(){
+  const grid=document.getElementById('ppv-media-grid');
+  const all=window._ppvMedia||[];
+  const q=(document.getElementById('ppv-search').value||'').trim().toLowerCase();
+  // Search filters what has been loaded; Fanvue's media list has no search of
+  // its own, so keep scrolling to pull in more pages first.
+  const media=q?all.filter(m=>((m.name||'')+' '+(m.description||'')).toLowerCase().includes(q)):all;
+  const hint=document.getElementById('ppv-hint');
+  const where=(theSet().name||('Set '+(curSet+1)))+' · tier '+(curTier+1);
+  const count=document.getElementById('ppv-count');
+  const btn=document.getElementById('ppv-more-btn');
+  btn.style.display=mediaHasMore?'':'none';
+  count.textContent=(q?(media.length+' of '+all.length+' loaded match “'+q+'”')
+                      :(all.length+' loaded'))+(mediaHasMore?' · scroll for more':'');
+  if(!media.length){grid.innerHTML='';hint.textContent=q?'Nothing loaded matches that search.':'No media in this view.';hint.style.color='var(--text-muted)';return;}
+  grid.innerHTML=media.map(m=>{
+    const on=ppvSel.has(m.uuid);
+    const thumb=m.thumb?('background-image:url(\''+esc(m.thumb)+'\');background-size:cover;background-position:center;'):'background:linear-gradient(135deg,var(--surface),var(--panel));';
+    const icon=m.mediaType==='video'?'🎬':m.mediaType==='audio'?'🎵':m.mediaType==='image'?'🖼️':'📄';
+    return '<div class="ppv-item" data-uuid="'+esc(m.uuid)+'" onclick="togglePpv(this)" '+
+      'style="position:relative;aspect-ratio:1;border-radius:8px;cursor:pointer;'+thumb+
+      'border:2px solid '+(on?'#4ade80':'transparent')+';overflow:hidden;">'+
+      (m.thumb?'':'<span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:1.8rem;opacity:.5;">'+icon+'</span>')+
+      '<span onclick="event.stopPropagation();previewMedia(\''+esc(m.uuid)+'\')" title="Preview" '+
+      'style="position:absolute;top:2px;left:2px;background:rgba(0,0,0,.6);border-radius:6px;padding:1px 5px;font-size:.7rem;cursor:zoom-in;">👁</span>'+
+      '<span style="position:absolute;bottom:0;left:0;right:0;font-size:.6rem;padding:2px 4px;background:rgba(0,0,0,.65);color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+
+      esc(m.name)+'</span>'+
+      (on?'<span class="ppv-chk" style="position:absolute;top:2px;right:4px;color:#4ade80;font-weight:700;">✓</span>':'')+'</div>';
+  }).join('');
+  hint.textContent=ppvSel.size?(where+': '+ppvSel.size+' item(s) selected'):(where+': tap media to select · 👁 to preview');
+  hint.style.color='var(--text-muted)';
+  fillMissingThumbs(media.filter(m=>!m.thumb).map(m=>m.uuid),renderGrid);
+}
+function togglePpv(el){
+  const u=el.dataset.uuid;
+  if(ppvSel.has(u))ppvSel.delete(u);else ppvSel.add(u);
+  const on=ppvSel.has(u);
+  el.style.border='2px solid '+(on?'#4ade80':'transparent');
+  let chk=el.querySelector('.ppv-chk');
+  if(on&&!chk){chk=document.createElement('span');chk.className='ppv-chk';chk.textContent='✓';chk.style.cssText='position:absolute;top:2px;right:4px;color:#4ade80;font-weight:700;';el.appendChild(chk);}
+  if(!on&&chk)chk.remove();
+  stashTier(); renderSetBar(); renderTierBar(); renderTierContents();
+  document.getElementById('ppv-hint').textContent=
+    (theSet().name||('Set '+(curSet+1)))+' · tier '+(curTier+1)+': '+ppvSel.size+' item(s) selected';
+}
+async function savePpv(){
+  stashTier(); stashSet();
+  const hint=document.getElementById('ppv-hint');
+  const sets=[];
+  for(let i=0;i<ppvSets.length;i++){
+    const s=ppvSets[i];
+    const tiers=(s.tiers||[]).filter(t=>(t.media_uuids||[]).length)
+      .map(t=>({media_uuids:t.media_uuids,price:dollarsToCents(t.price),caption:t.caption||''}));
+    if(!tiers.length) continue;
+    for(let j=0;j<tiers.length;j++){
+      if(tiers[j].price<300){
+        hint.textContent='✗ '+(s.name||('Set '+(i+1)))+' tier '+(j+1)+' needs a price of at least $3';
+        hint.style.color='#fb7185'; return;
+      }
+    }
+    sets.push({id:s.id||('set'+(i+1)), name:s.name||('Set '+(i+1)), scene:s.scene||'',
+               keywords:(s.keywords||'').split(',').map(w=>w.trim()).filter(Boolean),
+               hour_from:s.hour_from===''?null:parseInt(s.hour_from,10),
+               hour_to:s.hour_to===''?null:parseInt(s.hour_to,10),
+               tiers:tiers});
+  }
+  const data=await post('/api/fanvue/ppv',{persona:persona(),sets:sets,
+    tz_offset:-new Date().getTimezoneOffset()});
+  if(!data.ok){hint.textContent='✗ '+(data.error||'Failed');hint.style.color='#fb7185';return;}
+  hint.textContent=data.enabled
+    ?('✓ Saved '+data.sets.length+' set(s) — she picks the one that fits the chat and the hour')
+    :'✓ Saved (PPV off — add media + a price ≥$3 to a set)';
+  hint.style.color='#4ade80';
+}
+async function loadCreators(){
+  const row=document.getElementById('creator-row');
+  if(!connState.connected){row.style.display='none';return;}
+  let data={};
+  try{data=await fetch('/api/fanvue/creators?persona='+encodeURIComponent(persona())).then(r=>r.json());}catch(e){}
+  const list=data.creators||[];
+  const sel=(data.selected||{}).uuid||'';
+  document.getElementById('creator-select').innerHTML=
+    '<option value="">— primary account —</option>'+
+    list.map(c=>'<option value="'+esc(c.uuid)+'"'+(c.uuid===sel?' selected':'')+'>@'+esc(c.handle||c.uuid)+'</option>').join('')+
+    '<option value="__manual__">＋ enter another profile by UUID…</option>';
+  const hint=document.getElementById('creator-hint');
+  if(list.length<2 && data.agency_error){hint.textContent='only this profile is listed ('+data.agency_error+') — use “enter by UUID” for another';hint.style.color='var(--warn)';}
+  else{hint.textContent=sel?'':'pick the profile that should reply';hint.style.color='var(--text-muted)';}
+  row.style.display='block';
+}
+async function selectCreator(){
+  const s=document.getElementById('creator-select');
+  let uuid=s.value, handle=(s.options[s.selectedIndex]||{}).text||'';
+  if(uuid==='__manual__'){
+    uuid=(prompt('Paste the Fanvue creator UUID this model should act as:')||'').trim();
+    if(!uuid){loadCreators();return;}
+    handle=(prompt('Handle for this profile (optional, e.g. lillyforfun_):')||'').trim();
+  }
+  await post('/api/fanvue/creator',{persona:persona(),uuid,handle:handle.replace(/^@/,'').replace(/^＋.*/,'')});
+  loadCreators();
+  loadPpv();
+}
+async function loadAuto(){
+  const a=await fetch('/api/fanvue/auto?persona='+encodeURIComponent(persona())).then(r=>r.json()).catch(()=>({}));
+  document.getElementById('fv-auto-enabled').checked=!!a.enabled;
+  document.getElementById('fv-exclude-creators').checked=a.exclude_creators!==false;
+  document.getElementById('fv-only-handles').value=a.only_handles||'';
+  document.getElementById('fv-online-only').checked=!!a.online_only;
+  document.getElementById('fv-online-grace').value=(a.online_grace!==undefined?a.online_grace:5);
+  document.getElementById('fv-online-grace-wrap').style.display=a.online_only?'':'none';
+  document.getElementById('fv-humanize').checked=a.humanize!==false;
+  document.getElementById('fv-typing-speed').value=String(a.typing_speed||14);
+  document.getElementById('fv-react-rate').value=(a.react_rate!==undefined?a.react_rate:25);
+  document.getElementById('fv-typing-wrap').style.display=(a.humanize!==false)?'':'none';
+  document.getElementById('fv-followup-min').value=a.followup_min||30;
+  document.getElementById('fv-ppv-require-payment').checked=!!a.ppv_require_payment;
+  document.getElementById('fv-ppv-test-phrase').value=a.ppv_test_phrase||'';
+  document.getElementById('fv-ppv-first-after').value=a.ppv_first_after||6;
+  document.getElementById('fv-ppv-gap').value=a.ppv_gap||8;
+  document.getElementById('fv-ppv-retry-after').value=a.ppv_retry_after||0;
+  document.getElementById('fv-ppv-retry-max').value=(a.ppv_retry_max!==undefined?a.ppv_retry_max:1);
+  listPick={};
+  (a.include_lists||[]).forEach(l=>{listPick[l.kind+':'+l.id]='include';});
+  (a.exclude_lists||[]).forEach(l=>{listPick[l.kind+':'+l.id]='exclude';});
+  loadLists();
+  const st=document.getElementById('fv-auto-state');
+  if(a.enabled){st.textContent='● Running';st.className='conn-pill running';}
+  else{st.textContent='off';st.className='conn-pill';}
+}
+let listPick={};      // "kind:id" → 'include' | 'exclude'
+let listsCache=[];
+async function loadLists(refresh){
+  const box=document.getElementById('fv-lists');
+  if(!connState.connected){box.innerHTML='<span class="hint">Connect Fanvue to load her lists.</span>';return;}
+  if(refresh) box.innerHTML='<span class="hint">Loading…</span>';
+  try{
+    const d=await fetch('/api/fanvue/lists?persona='+encodeURIComponent(persona())+(refresh?'&refresh=1':'')).then(r=>r.json());
+    listsCache=d.lists||[];
+    if(d.error){box.innerHTML='<span class="hint">'+esc(d.error)+'</span>';return;}
+    if(!listsCache.length){box.innerHTML='<span class="hint">No lists on this Fanvue account yet.</span>';return;}
+    box.innerHTML='<table class="fans"><tr><th>List</th><th>Type</th><th>Fans</th><th>Use</th></tr>'+
+      listsCache.map(l=>{
+        const k=l.kind+':'+l.id, v=listPick[k]||'';
+        return '<tr><td>'+esc(l.name)+'</td><td style="color:var(--text-muted)">'+esc(l.kind)+
+          '</td><td>'+(l.count!=null?l.count:'—')+'</td><td>'+
+          '<select data-key="'+esc(k)+'" class="fv-list-pick" style="max-width:130px;padding:2px 6px;font-size:.75rem;">'+
+          ['','include','exclude'].map(o=>'<option value="'+o+'"'+(v===o?' selected':'')+'>'+
+            (o===''?'—':(o==='include'?'Include':'Exclude'))+'</option>').join('')+
+          '</select></td></tr>';
+      }).join('')+'</table>';
+    box.querySelectorAll('.fv-list-pick').forEach(s=>{
+      s.onchange=()=>{ if(s.value) listPick[s.dataset.key]=s.value; else delete listPick[s.dataset.key]; };
+    });
+  }catch(e){ box.innerHTML='<span class="hint" style="color:#fb7185;">Could not load lists: '+esc(String(e))+'</span>'; }
+}
+function pickedLists(kind){
+  return listsCache.filter(l=>listPick[l.kind+':'+l.id]===kind)
+                   .map(l=>({kind:l.kind,id:l.id,name:l.name}));
+}
+
+async function saveAuto(){
+  const box=document.getElementById('fv-auto-result');
+  busy(box,'Saving…');
+  const data=await post('/api/fanvue/auto',{persona:persona(),
+    enabled:document.getElementById('fv-auto-enabled').checked,
+    exclude_creators:document.getElementById('fv-exclude-creators').checked,
+    only_handles:document.getElementById('fv-only-handles').value,
+    online_only:document.getElementById('fv-online-only').checked,
+    online_grace:parseInt(document.getElementById('fv-online-grace').value||'5',10),
+    humanize:document.getElementById('fv-humanize').checked,
+    typing_speed:parseInt(document.getElementById('fv-typing-speed').value||'14',10),
+    react_rate:parseInt(document.getElementById('fv-react-rate').value||'0',10),
+    followup_min:document.getElementById('fv-followup-min').value,
+    ppv_require_payment:document.getElementById('fv-ppv-require-payment').checked,
+    ppv_test_phrase:document.getElementById('fv-ppv-test-phrase').value,
+    ppv_first_after:parseInt(document.getElementById('fv-ppv-first-after').value||'6',10),
+    ppv_gap:parseInt(document.getElementById('fv-ppv-gap').value||'8',10),
+    ppv_retry_after:parseInt(document.getElementById('fv-ppv-retry-after').value||'0',10),
+    ppv_retry_max:parseInt(document.getElementById('fv-ppv-retry-max').value||'1',10),
+    include_lists:pickedLists('include'),
+    exclude_lists:pickedLists('exclude')});
+  if(!data.ok){err(box,data.error||'Failed');return;}
+  loadAuto();
+  loadAccounts();
+  if(data.enabled){
+    busy(box,'Running first round…');
+    const run=await post('/api/fanvue/auto-run',{persona:persona()});
+    if(!run.ok){err(box,run.error);return;}
+    const a=run.actions||{};
+    let html='<span class="hint" style="color:#4ade80;">✓ Saved &amp; running — '+(a.replies||0)+' replies</span>';
+    (run.log||[]).forEach(l=>{html+='<div class="reply-card"><div class="rep">'+esc(l)+'</div></div>';});
+    box.innerHTML=html;
+  } else {
+    box.innerHTML='<span class="hint">Auto-reply is off.</span>';
+  }
+}
+async function loadAccounts(){
+  const box=document.getElementById('fv-accounts');
+  let d={};
+  try{d=await fetch('/api/fanvue/accounts').then(r=>r.json());}catch(e){}
+  const list=d.accounts||[];
+  if(!list.length){box.innerHTML='<span class="hint">No Fanvue accounts connected yet.</span>';return;}
+  box.innerHTML=list.map(a=>{
+    const state=a.running?'● running now':(a.auto&&a.connected?'● auto-reply on':(a.connected?'connected — auto off':'not connected'));
+    const col=a.running?'#4ade80':(a.auto&&a.connected?'#4ade80':'var(--text-muted)');
+    return '<div class="reply-card"><div class="rep"><b>'+esc(a.name)+'</b>'
+      +(a.creator?' <span style="color:var(--text-muted)">@'+esc(a.creator)+'</span>':'')
+      +' <span style="color:'+col+'">'+state+'</span></div></div>';
+  }).join('')+'<span class="hint">'+(d.active||0)+' running concurrently.</span>';
+}
+async function runAutoOnce(){
+  const box=document.getElementById('fv-auto-result');
+  busy(box,'Running one round…');
+  const data=await post('/api/fanvue/auto-run',{persona:persona()});
+  if(!data.ok){err(box,data.error);return;}
+  const a=data.actions||{};
+  let html='<span class="hint">'+(a.replies||0)+' replies, '+(a.skipped_creators||0)+' creators skipped.</span>';
+  (data.log||[]).forEach(l=>{html+='<div class="reply-card"><div class="rep">'+esc(l)+'</div></div>';});
+  box.innerHTML=html;
+}
+function updateConn(){
+  const pill=document.getElementById('conn-pill');
+  if(connState.connected){pill.className='conn-pill ok';pill.textContent='✓ '+(connState.username?('@'+connState.username):'connected');}
+  else{pill.className='conn-pill err';pill.textContent='Not connected';}
+  document.getElementById('connect-btn').textContent=connState.connected?'Reconnect':'Connect Fanvue';
+  document.getElementById('disconnect-btn').style.display=connState.connected?'inline-flex':'none';
+}
+function prefill(){
+  const id=document.getElementById('fv-client-id'), sec=document.getElementById('fv-client-secret'), rd=document.getElementById('fv-redirect');
+  if(!id.value&&appCfg.client_id){id.value=appCfg.client_id;id.type='password';}
+  if(!sec.value&&appCfg.has_secret){sec.value='••••••••••••••••';sec.dataset.masked='1';sec.onfocus=function(){if(this.dataset.masked){this.value='';delete this.dataset.masked;}};}
+  if(!id.value)return;id.onfocus=function(){if(this.type==='password'){this.value='';this.type='text';}};
+  if(!rd.value)rd.value=appCfg.redirect_uri||(location.origin+'/api/fanvue/oauth-redirect');
+}
+function toggleConnect(){
+  const p=document.getElementById('connect-panel');
+  p.style.display=p.style.display==='none'?'block':'none';
+  if(p.style.display==='block')prefill();
+}
+async function startConnect(){
+  const box=document.getElementById('config-status');
+  const idEl=document.getElementById('fv-client-id'), secEl=document.getElementById('fv-client-secret');
+  const client_id=(idEl.type==='password')?'':idEl.value.trim();
+  const client_secret=secEl.dataset.masked==='1'?'':secEl.value.trim();
+  const redirect_uri=document.getElementById('fv-redirect').value.trim();
+  if(!client_id&&!appCfg.client_id&&!appCfg.has_secret){err(box,'Enter Client ID and Secret first (they\'ll be saved for next time).');return;}
+  busy(box,'Opening Fanvue authorization…');
+  const data=await post('/api/fanvue/auth-url',{persona:persona(),client_id,client_secret,redirect_uri});
+  if(!data.ok){err(box,data.error);return;}
+  window.open(data.url,'fanvue-oauth','width=600,height=760');
+  document.getElementById('connect-step2').style.display='block';
+  box.innerHTML='<span class="hint" style="color:var(--warn);">Authorize in the popup. It finishes automatically, or paste the URL it lands on below.</span>';
+}
+async function finishWith(code,state){
+  const box=document.getElementById('config-status');
+  if(!code||!state){err(box,'Missing code/state.');return;}
+  busy(box,'Finishing connection…');
+  const data=await post('/api/fanvue/callback',{persona:persona(),code,state});
+  if(!data.ok){err(box,data.error);return;}
+  box.innerHTML='<span class="hint" style="color:#4ade80;">✓ Connected'+(data.username?(' as @'+esc(data.username)):'')+'</span>';
+  setTimeout(loadConfig,900);
+}
+window.addEventListener('message',e=>{
+  const d=e.data||{};
+  if(d.type!=='fanvue_oauth')return;
+  if(d.error){err(document.getElementById('config-status'),'Fanvue returned: '+d.error);return;}
+  finishWith(d.code,d.state);
+});
+async function completeConnect(){
+  const box=document.getElementById('config-status');
+  const cb=document.getElementById('fv-callback').value.trim();
+  if(!cb){err(box,'Paste the callback URL first.');return;}
+  let code,state;
+  try{const u=new URL(cb);code=u.searchParams.get('code');state=u.searchParams.get('state');}
+  catch(e){err(box,'That is not a valid URL.');return;}
+  finishWith(code,state);
+}
+async function disconnectFanvue(){
+  if(!confirm('Disconnect this persona\'s Fanvue account?'))return;
+  await post('/api/fanvue/disconnect',{persona:persona()});
+  await loadConfig();
+}
+async function draftReply(){
+  const box=document.getElementById('draft-result');
+  const msg=document.getElementById('fan-msg').value.trim();
+  if(!msg){err(box,'Paste the fan\'s message first.');return;}
+  busy(box,'Writing reply…');
+  const data=await post('/api/fanvue/draft',{persona:persona(),message:msg});
+  if(!data.ok){err(box,data.error);return;}
+  box.innerHTML='<div class="reply-card"><div class="rep">'+esc(data.reply)+'</div></div>';
+}
+init();
+</script>
+
+<div id="ppv-preview" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:1000;align-items:center;justify-content:center;padding:24px;" onclick="closePreview(event)">
+  <div style="max-width:90vw;max-height:90vh;">
+    <div id="ppv-preview-body" style="display:flex;align-items:center;justify-content:center;"></div>
+    <div id="ppv-preview-name" style="text-align:center;color:var(--text);margin-top:10px;font-size:.85rem;"></div>
+  </div>
+</div>
+<script>
+async function previewMedia(uuid){
+  const m=(window._ppvMedia||[]).find(x=>x.uuid===uuid)||mediaSeen[uuid];
+  if(!m)return;
+  const body=document.getElementById('ppv-preview-body');
+  document.getElementById('ppv-preview-name').textContent=m.name;
+  document.getElementById('ppv-preview').style.display='flex';
+  body.innerHTML='<div style="padding:40px;color:var(--text-3);">Loading…</div>';
+  let d={url:m.url,mediaType:m.mediaType};
+  if(!d.url){
+    try{d=await fetch('/api/fanvue/media-item?persona='+encodeURIComponent(persona())+'&uuid='+encodeURIComponent(uuid)).then(r=>r.json());}catch(e){}
+  }
+  const url=d.url||'', type=d.mediaType||m.mediaType;
+  if(type==='image'&&url){body.innerHTML='<img src="'+esc(url)+'" style="max-width:90vw;max-height:80vh;border-radius:10px;">';}
+  else if(type==='video'&&url){body.innerHTML='<video src="'+esc(url)+'" controls autoplay style="max-width:90vw;max-height:80vh;border-radius:10px;"></video>';}
+  else if(type==='audio'&&url){body.innerHTML='<div style="padding:40px;text-align:center;"><div style="font-size:3rem;">🎵</div><audio src="'+esc(url)+'" controls autoplay style="margin-top:16px;"></audio></div>';}
+  else{
+    const desc=d.description||m.description||'';
+    const tags=(d.tags||[]).map(t=>'<span style="display:inline-block;background:var(--surface);border-radius:6px;padding:2px 8px;margin:2px;font-size:.72rem;">'+esc(t)+'</span>').join('');
+    body.innerHTML='<div style="max-width:480px;padding:28px;background:var(--panel);border-radius:12px;color:var(--text);">'+
+      '<div style="font-size:2rem;text-align:center;margin-bottom:12px;">'+(type==='video'?'🎬':type==='audio'?'🎵':'🖼️')+'</div>'+
+      (desc?'<div style="font-size:.9rem;line-height:1.5;color:var(--text-2);">'+esc(desc)+'</div>':'<div style="color:var(--text-3);">No description.</div>')+
+      (tags?'<div style="margin-top:14px;">'+tags+'</div>':'')+
+      '<div style="margin-top:16px;font-size:.72rem;color:var(--text-muted);">Fanvue’s API doesn’t expose the raw file to apps — this is the AI description of the content. The fan still receives the real media when unlocked.</div>'+
+      '</div>';
+  }
+}
+function closePreview(e){
+  if(e&&e.target&&e.target.closest('#ppv-preview-body'))return;
+  document.getElementById('ppv-preview-body').innerHTML='';
+  document.getElementById('ppv-preview').style.display='none';
+}
+</script>
+</body>
+</html>

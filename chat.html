@@ -1,91 +1,649 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>Chat with Lilith</title>
-<style>
-  body { font-family: system-ui, sans-serif; background: #0f0f0f; color: #fff; margin: 0; padding: 20px; }
-  .chat-container { max-width: 600px; margin: 40px auto; background: #1a1a1a; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
-  .header { background: #111; padding: 16px 20px; display: flex; align-items: center; gap: 12px; }
-  .header img { width: 48px; height: 48px; border-radius: 50%; }
-  .header .info { flex: 1; }
-  .header .name { font-weight: 600; font-size: 18px; }
-  .header .status { color: #22c55e; font-size: 13px; }
-  .chat-window { height: 500px; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; background: #111; }
-  .message { max-width: 80%; padding: 12px 16px; border-radius: 18px; font-size: 15.5px; line-height: 1.45; }
-  .user { align-self: flex-end; background: #4a2c2c; border-bottom-right-radius: 4px; }
-  .user-id { font-size: 11px; opacity: 0.6; margin-top: 2px; }
-  .bot { align-self: flex-start; background: #27272a; border-bottom-left-radius: 4px; }
-  .typing { align-self: flex-start; background: #27272a; padding: 12px 16px; border-radius: 18px; font-style: italic; display: none; }
-  .input-area { display: flex; padding: 16px; background: #1a1a1a; gap: 10px; }
-  input { flex: 1; padding: 14px 18px; border: none; border-radius: 9999px; background: #111; color: #fff; font-size: 16px; }
-  button { padding: 0 28px; background: #4a2c2c; color: white; border: none; border-radius: 9999px; font-weight: 600; cursor: pointer; }
-
-  @media (max-width: 768px) {
-    body { padding: 0; }
-    .chat-container {
-      max-width: 100%;
-      margin: 0;
-      height: 100vh;
-      border-radius: 0;
-      box-shadow: none;
-      display: flex;
-      flex-direction: column;
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Chat</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <!-- Not deferred: theme.js sets data-theme before first paint, otherwise the
+       page flashes dark for a user who chose light. -->
+  <script src="/js/theme.js"></script>
+  <script>
+  // An embedding page (the landing page is always dark) can pin the theme, so
+  // the frame does not sit in the host's opposite palette.
+  (function () {
+    var t = new URLSearchParams(location.search).get('theme');
+    if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+  })();
+  </script>
+  <script src="/js/devnav.js" defer></script>
+  <script>
+  // Keeps the chat container sized to the visible viewport so the on-screen
+  // keyboard pushes the input bar up instead of covering it.
+  (function () {
+    function setAppHeight() {
+      var h = (window.visualViewport ? window.visualViewport.height : window.innerHeight);
+      document.documentElement.style.setProperty('--app-height', h + 'px');
     }
-    .chat-window {
-      flex: 1;
-      height: auto;
-      min-height: 0;
-      overflow-y: auto;
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', setAppHeight);
+      window.visualViewport.addEventListener('scroll', setAppHeight);
     }
-    .input-area { flex-shrink: 0; }
-    .header { padding: 12px 16px; }
-  }
-</style>
+    window.addEventListener('resize', setAppHeight);
+    setAppHeight();
+  })();
+  </script>
 </head>
-<body>
+<body class="page-chat">
+
+<div class="chat-shell">
+
+<aside class="persona-rail" id="persona-rail" aria-label="Choose a model">
+  <div class="persona-rail-header">Models</div>
+  <div class="persona-rail-list" id="rail-list"></div>
+</aside>
+
 <div class="chat-container">
-  <div class="header">
-    <img src="https://picsum.photos/id/1011/48/48" alt="Lilith">
-    <div class="info">
-      <div class="name">Lilith</div>
-      <div class="status">● Bristol • Barmaid &amp; Tank Main</div>
-      <div class="user-id">chatting with <span id="user-name" style="cursor: pointer; text-decoration: underline;">...</span></div>
+
+  <header class="header">
+    <div class="header-avatar-wrap" onclick="openProfile()" style="cursor:pointer;" title="View profile">
+      <img id="header-avatar" src="https://picsum.photos/id/1011/48/48" alt="">
+      <div class="online-dot"></div>
+    </div>
+    <div class="header-info">
+      <div class="header-name" id="header-name">…</div>
+      <div class="header-meta" id="header-status"></div>
+    </div>
+    <div class="header-right">
+      <div class="conn-indicator">
+        <div class="conn-dot" id="conn-dot"></div>
+        <span id="conn-text">…</span>
+      </div>
+      <div class="user-chip" id="user-name" title="Click to switch user">…</div>
+    </div>
+  </header>
+
+  <main class="chat-window" id="chat" role="log" aria-live="polite" aria-label="Chat messages">
+    <div class="typing-row" id="typing-row" aria-hidden="true">
+      <img class="msg-av" id="typing-av" src="https://picsum.photos/id/1011/48/48" alt="">
+      <div class="typing-bubble">
+        <div class="typing-dot"></div>
+        <div class="typing-dot"></div>
+        <div class="typing-dot"></div>
+      </div>
+    </div>
+  </main>
+
+  <div class="input-area">
+    <div class="input-wrap">
+      <input type="text" id="input" placeholder="Send a message…" autocomplete="off" enterkeyhint="send" aria-label="Message input">
+    </div>
+    <button class="send-btn" onclick="se()" onmousedown="event.preventDefault()" aria-label="Send message">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <line x1="22" y1="2" x2="11" y2="13"></line>
+        <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+      </svg>
+    </button>
+  </div>
+
+  <div class="name-gate hidden" id="name-gate">
+    <div class="name-gate-card">
+      <img class="name-gate-avatar" id="gate-avatar" src="https://picsum.photos/id/1011/96/96" alt="">
+      <div class="name-gate-title" id="gate-title">Before we start…</div>
+      <div class="name-gate-sub" id="gate-sub">What should I call you?</div>
+      <input type="text" id="name-input" placeholder="Your name or nickname" maxlength="40" autocomplete="off" enterkeyhint="go" aria-label="Your name">
+      <button class="name-gate-btn" id="gate-btn" onclick="submitName()">Continue</button>
     </div>
   </div>
-  <div class="chat-window" id="chat"></div>
-  <div class="typing" id="typing">Lilith is typing...</div>
-  <div class="input-area">
-    <input type="text" id="input" placeholder="Message Lilith..." autocomplete="off">
-    <button onclick="sendMessage()">Send</button>
-  </div>
 
-  <div id="status" style="font-size: 11px; color: #666; text-align: center; margin-top: 6px; min-height: 14px;"></div>
+</div>
+
+</div>
+
+<div class="profile-modal" id="profile-modal" onclick="if(event.target===this)closeProfile()">
+  <div class="profile-card">
+    <button class="profile-close" onclick="closeProfile()" aria-label="Close">✕</button>
+    <div class="profile-info">
+      <span class="profile-eyebrow">Profile</span>
+      <div class="profile-name-row">
+        <span class="profile-name" id="profile-name"></span>
+        <span class="profile-age" id="profile-age"></span>
+        <span class="profile-verified" title="Verified">✓</span>
+      </div>
+      <div class="profile-loc" id="profile-loc"></div>
+      <div class="profile-bio" id="profile-bio"></div>
+      <div class="profile-interests" id="profile-interests"></div>
+      <div class="profile-actions">
+        <button class="pf-btn primary" onclick="closeProfile()">Message me</button>
+        <button class="pf-btn" onclick="toggleProfileFullscreen()">View photos</button>
+      </div>
+    </div>
+    <div class="profile-gallery" id="profile-gallery">
+      <img id="profile-photo" src="" alt="" onclick="toggleProfileFullscreen()">
+      <button class="pg-nav prev" id="pg-prev" onclick="profileStep(-1)" aria-label="Previous">‹</button>
+      <button class="pg-nav next" id="pg-next" onclick="profileStep(1)" aria-label="Next">›</button>
+      <div class="pg-thumbs" id="pg-dots"></div>
+    </div>
+  </div>
 </div>
 
 <script>
-const c=document.getElementById('chat'),i=document.getElementById('input'),t=document.getElementById('typing');
-let u=null,m={recentTopics:[],lastTopic:null},h=[],s=3.5,l=Date.now(),autoCount=0;
-if (window.self !== window.top) { u = 'EmbedUser'; localStorage.setItem('lilith_current_user', u); document.body.style.padding='0'; var cont=document.querySelector('.chat-container'); if(cont){cont.style.maxWidth='100%';cont.style.margin='0';cont.style.height='100%';cont.style.borderRadius='0';cont.style.boxShadow='none';cont.style.display='flex';cont.style.flexDirection='column';} var win=document.getElementById('chat'); if(win){win.style.flex='1';win.style.height='auto';win.style.minHeight='0';} var inp=document.querySelector('.input-area'); if(inp){inp.style.flexShrink='0';} }
-function sc(){if(u)localStorage.setItem('lilith_chat_'+u,JSON.stringify(h))}
-function ht(dropLast){var a=dropLast?h.slice(0,-1):h.slice(0);return a.length>40?a.slice(-40):a}
+const chatEl = document.getElementById('chat');
+const inp = document.getElementById('input');
+const typingRow = document.getElementById('typing-row');
+let u = null, m = { recentTopics: [], lastTopic: null }, h = [], s = 3.5, l = Date.now(), avatarUrl = null, personaName = '…';
+const params = new URLSearchParams(location.search);
+let persona = params.get('persona') || 'lilly';
+// Demo mode (the coming-soon page): always opens on the name screen and keeps
+// nothing, so every visitor gets the same first-run experience.
+const DEMO = params.get('demo') === '1';
+// The landing page embeds one model, so it hides the model picker.
+const ONLY = params.get('only') === '1';
+let PFX = 'persona_' + persona + '_';
 
-function ld(){
-  u=localStorage.getItem('lilith_current_user');
-  if(!u){u=prompt("Lilith remembers each person separately.\nWhat's your name (or nickname)?")||"Guest-"+Math.floor(Math.random()*9000+1000);localStorage.setItem('lilith_current_user',u)}
-  m={recentTopics:[],lastTopic:null};
-  let sv=localStorage.getItem('lilith_memory_'+u);if(sv)try{m={...m,...JSON.parse(sv)}}catch(e){}
-  h=[];let ch=localStorage.getItem('lilith_chat_'+u);if(ch)try{h=JSON.parse(ch)}catch(e){}
-  let el=document.getElementById('user-name');if(el){el.textContent=u||'Guest';el.onclick=cu;el.title='Click to switch user / start new memory'}
-  if(c){c.innerHTML='';h.forEach(x=>{let d=document.createElement('div');d.className='message '+(x.role==='user'?'user':'bot');d.innerHTML=x.content+'<div style="font-size:11px;opacity:0.5;margin-top:4px;">'+new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})+'</div>';c.appendChild(d)});c.scrollTop=c.scrollHeight}
+if (window.self !== window.top) { document.body.classList.add('embed'); }
+if (DEMO) document.body.classList.add('demo');
+
+function applyPersonaConfig(cfg) {
+  avatarUrl = null;
+  personaName = cfg.name || persona;
+  document.title = 'Chat with ' + personaName;
+  document.getElementById('header-name').textContent = personaName;
+  document.getElementById('header-avatar').alt = personaName;
+  if (cfg.avatar) {
+    avatarUrl = '/api/personas/' + persona + '/avatar';
+    document.getElementById('header-avatar').src = avatarUrl;
+    document.getElementById('typing-av').src = avatarUrl;
+  } else {
+    document.getElementById('header-avatar').src = 'https://picsum.photos/id/1011/48/48';
+    document.getElementById('typing-av').src = 'https://picsum.photos/id/1011/48/48';
+  }
+  const parts = [];
+  if (cfg.location && !cfg.mirror_location) parts.push(cfg.location);
+  if (cfg.age) parts.push(cfg.age);
+  document.getElementById('header-status').textContent = parts.join(' · ');
+  inp.placeholder = 'Message ' + personaName + '…';
 }
-function sm(){if(u)localStorage.setItem('lilith_memory_'+u,JSON.stringify(m))}
-function cu(){let n=prompt("Switch to a different person (new unique memory):",u||"");if(n&&n.trim()&&n!==u){sm();sc();u=n.trim();localStorage.setItem('lilith_current_user',u);ld();setTimeout(()=>ad(pb("back again? my arrow found u again <3"),!1),400)}}
-function gt(x){let r=x.toLowerCase(),t=[];if(/jizzle|gnome|wow|classic|raid|zug|warrior|tank/.test(r))t.push('jizzle');if(/bar|shift|pub|venue|work|pint/.test(r))t.push('bar');if(/music|show|band|gig|rave|metal/.test(r))t.push('music');if(/bristol/.test(r))t.push('bristol');if(/sister|deb|family|mum|dad|parents/.test(r))t.push('family');if(/freckle|makeup|liner|hair|look/.test(r))t.push('look');if(/friend|guild|crew/.test(r))t.push('friends');return t}
-function um(x){let n=gt(x);if(n.length){m.recentTopics=[...m.recentTopics,...n].slice(-4);m.lastTopic=n[n.length-1]}}
-function ad(x,y){let r=y?'user':'lilith';if(h.length&&h[h.length-1].role===r&&h[h.length-1].content.trim()===x.trim())return;h.push({role:r,content:x});let d=document.createElement('div');d.className='message '+(y?'user':'bot');d.innerHTML=x+'<div style="font-size:11px;opacity:0.5;margin-top:4px;">'+new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})+'</div>';c.appendChild(d);c.scrollTop=c.scrollHeight;sc()}
-function pb(t){t=t.toLowerCase();if(Math.random()<.4){t=t.replace(/ the /g,' teh ').replace(/ you /g,' u ').replace(/ are /g,' r ').replace(/hey/g,'heey').replace(/stranger/g,'strangr').replace(/what/g,'wat').replace(/like/g,'lke').replace(/love/g,'luv').replace(/heart/g,'<3').replace(/cupid/g,'cupid');let a=t.split('');for(let i=0;i<a.length-1;i++)if(Math.random()<.15)[a[i],a[i+1]]=[a[i+1],a[i]];t=a.join('')}return t}
-function cs(t,cb){t=pb(t);let y=document.getElementById('typing'),p=(t.match(/[^.!?]+[.!?]+/g)||[t]).map(x=>x.trim()).filter(Boolean),g=[];for(let i=0;i<p.length;i+=2)g.push(p.slice(i,i+2).join(' '));g=g.slice(0,1);let d=0;g.forEach((m,i)=>{let l=m.length,td=Math.max(260,(l/s)*550);setTimeout(()=>{y.style.display='none';ad(m,!1);ss(!0);if(i<g.length-1){y.style.display='block';c.scrollTop=c.scrollHeight}else if(cb)cb()},d+td);d+=td+480})}
-let it=null,st=null,ot=null;function ri(){clearTimeout(it);clearTimeout(st);clearTimeout(ot);ss(!0)}function si(){ri();autoCount=0;it=setTimeout(()=>{sc();let y=document.getElementById('typing');y.style.display='block';c.scrollTop=c.scrollHeight;fetch('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:'',history:ht(0),continue:!0,user:u})}).then(r=>r.json()).then(d=>{if(d.reply){let y=document.getElementById('typing');y.style.display='block';c.scrollTop=c.scrollHeight;let last=h[h.length-1];if(last&&last.role==='lilith'&&last.content.trim()===d.reply.trim()){y.style.display='none';ss(!0);return;}let delay=2500+Math.random()*5000;setTimeout(()=>{cs(d.reply,null)},delay);autoCount++;}else if(d.error){y.style.display='none';ad("something went weird on my end. try again?",!1);ss(!1)}}).catch(e=>{y.style.display='none';ad("something went wrong. please try again.",!1);console.error(e);ss(!1)})},8000);st=setTimeout(()=>{sc();let y=document.getElementById('typing');y.style.display='block';c.scrollTop=c.scrollHeight;setTimeout(()=>{y.style.display='none';ad(pb("heeyyy u still there? my arrow's ready <3"),!1);ss(!0)},650)},180000);ot=setTimeout(()=>{sc();ad(pb("i'll float back when u respond, cutie <3"),!1);ss(!1)},60000)}function se(){let x=i.value.trim();if(!x)return;ri();autoCount=0;ad(x,!0);um(x);sm();let f=i;f.value='';let n=Date.now(),d=(n-l)/1000;if(d>.7&&x.length>2){let v=x.length/d;s=Math.max(3.5,Math.min(18,s*.6+v*.4))}l=n;let y=document.getElementById('typing');y.style.display='block';c.scrollTop=c.scrollHeight;fetch('/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:x,history:ht(1),user:u})}).then(r=>r.json()).then(d=>{if(d.reply){let y=document.getElementById('typing');y.style.display='block';c.scrollTop=c.scrollHeight;let last=h[h.length-1];if(last&&last.role==='lilith'&&last.content.trim()===d.reply.trim()){y.style.display='none';ss(!0);return;}let delay=2500+Math.random()*5000;setTimeout(()=>{cs(d.reply,si)},delay)}else if(d.error){y.style.display='none';ad("something went weird on my end. try again?",!1);ss(!1)}}).catch(e=>{y.style.display='none';ad("something went wrong. please try again.",!1);console.error(e);ss(!1)})}function ss(o){let e=document.getElementById('status');if(e){let c=o?'#22c55e':'#ef4444',t=o?'Chat is Online':'Chat is Offline';e.innerHTML=`<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${c};margin-right:4px;"></span>${t}`}}function ck(){fetch('/').then(()=>ss(!0)).catch(()=>ss(!1))}input.addEventListener('keypress',e=>{if(e.key==='Enter')se()});ld();if(h.length===0)setTimeout(()=>{ad("heeyyy stranger",!1);si()},600);ss(!1);ck();setInterval(ck,10000)</script>
+
+let personaCfg = {}, profileImages = [], profileIdx = 0;
+
+// Delivery pacing, sent back by /chat from the creator's settings. These are
+// the fallbacks used before the first reply lands.
+let pacing = { reply: { base: 1100, jitter: 1600, per_char: 18 },
+               typing: { base: 700, per_char: 30, max: 5000 } };
+// Floored: she never starts typing the instant the message lands, she reads it first.
+function replyDelay(text) {
+  const r = pacing.reply || {};
+  return Math.max(800, (r.base || 0) + Math.random() * (r.jitter || 0)
+       + Math.min((text || '').length * (r.per_char || 0), 3500));
+}
+function typingDelay(text) {
+  const t = pacing.typing || {};
+  return Math.min((t.base || 0) + (text || '').length * (t.per_char || 0), t.max || 9000);
+}
+// Beat between finishing one bubble and starting to type the next one.
+function interChunkPause() { return 700 + Math.random() * 1300; }
+
+function loadPersonaConfig() {
+  return fetch('/api/personas/' + persona).then(r => r.ok ? r.json() : null).then(d => {
+    personaCfg = (d && d.config) || {};
+    if (d && d.pacing) pacing = d.pacing;
+    applyPersonaConfig(personaCfg);
+    return fetch('/api/personas/' + persona + '/images').then(r => r.ok ? r.json() : { images: [] }).then(g => {
+      profileImages = Array.isArray(g.images) ? g.images : [];
+      if (profileImages.length) {
+        avatarUrl = profileImages[0];
+        document.getElementById('header-avatar').src = avatarUrl;
+        document.getElementById('typing-av').src = avatarUrl;
+      }
+    }).catch(() => {});
+  }).catch(() => {});
+}
+
+function openProfile() {
+  document.getElementById('profile-name').textContent = personaName || personaCfg.name || '';
+  document.getElementById('profile-age').textContent = personaCfg.age ? ', ' + personaCfg.age : '';
+  document.getElementById('profile-loc').textContent =
+    (personaCfg.location && !personaCfg.mirror_location) ? '📍 ' + personaCfg.location : '';
+  document.getElementById('profile-bio').textContent = personaCfg.backstory || '';
+  const interests = (personaCfg.interests || '').split(',').map(s => s.trim()).filter(Boolean);
+  document.getElementById('profile-interests').innerHTML =
+    interests.map(t => '<span class="interest-chip">' + t.replace(/</g, '&lt;') + '</span>').join('');
+  profileIdx = 0;
+  renderProfileGallery();
+  tellParent('profile-open');
+  document.getElementById('profile-modal').classList.add('open');
+}
+
+function profileGalleryImgs() {
+  return profileImages.length ? profileImages : [avatarUrl || 'https://picsum.photos/id/1011/600/800'];
+}
+
+function renderProfileGallery() {
+  const imgs = profileGalleryImgs();
+  if (profileIdx >= imgs.length) profileIdx = 0;
+  if (profileIdx < 0) profileIdx = imgs.length - 1;
+  document.getElementById('profile-photo').src = imgs[profileIdx];
+  const multi = imgs.length > 1;
+  document.getElementById('pg-prev').style.display = multi ? 'flex' : 'none';
+  document.getElementById('pg-next').style.display = multi ? 'flex' : 'none';
+  document.getElementById('pg-dots').innerHTML = multi
+    ? imgs.map((src, i) => '<button type="button" class="pg-thumb' + (i === profileIdx ? ' active' : '') +
+        '" onclick="profileGo(' + i + ')"><img src="' + src.replace(/"/g, '&quot;') + '" alt=""></button>').join('')
+    : '';
+}
+
+function profileGo(i) { profileIdx = i; renderProfileGallery(); }
+
+function profileStep(dir) { profileIdx += dir; renderProfileGallery(); }
+function closeProfile() {
+  document.getElementById('profile-modal').classList.remove('open');
+  document.querySelector('.profile-card').classList.remove('fs');
+  tellParent('profile-close');
+}
+
+// Embedded, the modal is trapped in an iframe far narrower than the layout it
+// was designed for. Ask the host page to give the frame the whole viewport.
+function tellParent(type) {
+  if (window.self === window.top) return;
+  try { window.parent.postMessage({ vf: type }, '*'); } catch (e) {}
+}
+function toggleProfileFullscreen() { document.querySelector('.profile-card').classList.toggle('fs'); }
+
+function renderRail(list) {
+  const railList = document.getElementById('rail-list');
+  railList.innerHTML = '';
+  list.forEach(p => {
+    const cfg = p.config || {};
+    const item = document.createElement('div');
+    item.className = 'rail-item' + (p.slug === persona ? ' active' : '');
+    item.id = 'rail-' + p.slug;
+    item.onclick = () => switchPersona(p.slug);
+    const name = cfg.name || p.name || p.slug;
+    const av = p.avatar
+      ? '<img class="rail-avatar" src="/api/personas/' + p.slug + '/avatar" alt="">'
+      : '<div class="rail-avatar">' + name.slice(0,2).toUpperCase() + '</div>';
+    const meta = [cfg.location, cfg.age].filter(Boolean).join(' · ');
+    item.innerHTML = av +
+      '<div class="rail-info"><div class="rail-name">' + name + '</div>' +
+      (meta ? '<div class="rail-meta">' + meta + '</div>' : '') + '</div>';
+    railList.appendChild(item);
+  });
+}
+
+function loadPersonaList() {
+  return fetch('/api/personas').then(r => r.ok ? r.json() : []).then(list => {
+    let items = Array.isArray(list) ? list : [];
+    if (DEMO || ONLY) {   // one model only, unless that slug is missing
+      const only = items.filter(p => p.slug === persona);
+      if (only.length) items = only;
+    }
+    renderRail(items);
+  }).catch(() => {});
+}
+
+async function switchPersona(slug) {
+  if (slug === persona) return;
+  ri();
+  cancelGreet();
+  sm(); sc();
+  const prevU = u;
+  persona = slug;
+  PFX = 'persona_' + persona + '_';
+  document.querySelectorAll('.rail-item').forEach(el => el.classList.remove('active'));
+  const active = document.getElementById('rail-' + slug);
+  if (active) active.classList.add('active');
+  await loadPersonaConfig();
+  ld();
+  if (!u && prevU) { u = prevU; localStorage.setItem(PFX + 'user', u); ld(); }
+  if (!u) { showNameGate(); return; }
+  greet();
+}
+
+loadPersonaConfig();
+loadPersonaList();
+
+function chatBody(extra) {
+  const sp = localStorage.getItem('persona_prompt_' + persona);
+  return JSON.stringify({ ...extra, user: u, persona, ...(sp ? { system_prompt: sp } : {}) });
+}
+
+function sc() { if (u && !DEMO) localStorage.setItem(PFX + 'chat_' + u, JSON.stringify(h)); }
+function sm() { if (u && !DEMO) localStorage.setItem(PFX + 'mem_' + u, JSON.stringify(m)); }
+
+function ld() {
+  if (!DEMO) u = localStorage.getItem(PFX + 'user');
+  if (!isRealName(u)) u = null;   // ignore legacy / auto-generated placeholders
+  m = { recentTopics: [], lastTopic: null };
+  const sv = DEMO ? null : localStorage.getItem(PFX + 'mem_' + u);
+  if (sv) try { m = { ...m, ...JSON.parse(sv) }; } catch (e) {}
+  h = [];
+  const ch = DEMO ? null : localStorage.getItem(PFX + 'chat_' + u);
+  if (ch) try { h = JSON.parse(ch); } catch (e) {}
+  const el = document.getElementById('user-name');
+  if (el) { el.textContent = u || 'Guest'; el.onclick = cu; el.title = 'Switch user'; }
+  chatEl.innerHTML = '';
+  chatEl.appendChild(typingRow);
+  h.forEach(x => { insertMsg(x.content, x.role === 'user', x.photo); });
+  chatEl.scrollTop = chatEl.scrollHeight;
+}
+
+function showNameGate(opts) {
+  opts = opts || {};
+  const gate = document.getElementById('name-gate');
+  const input = document.getElementById('name-input');
+  document.getElementById('gate-avatar').src = avatarUrl || 'https://picsum.photos/id/1011/96/96';
+  document.getElementById('gate-title').textContent = opts.title || 'Before we start…';
+  document.getElementById('gate-sub').textContent = opts.sub ||
+    (personaName && personaName !== '…' ? "What should " + personaName + " call you?" : 'What should I call you?');
+  document.getElementById('gate-btn').textContent = opts.btn || 'Continue';
+  input.value = opts.prefill || '';
+  gate.classList.remove('hidden');
+  setTimeout(() => input.focus(), 60);
+}
+
+function submitName() {
+  const input = document.getElementById('name-input');
+  const name = input.value.trim();
+  if (!name) { input.focus(); return; }
+  const prev = u;
+  cancelGreet();
+  document.getElementById('name-gate').classList.add('hidden');
+  if (prev && name !== prev) { sm(); sc(); }
+  u = name;
+  if (!DEMO) localStorage.setItem(PFX + 'user', u);
+  ld();
+  // "you're back" only when this name actually has a conversation stored.
+  if (h.length === 0) {
+    greet();
+  } else if (prev && prev !== name) {
+    setTimeout(() => addMsg("hey, you're back", false), 400);
+  }
+}
+
+function cu() { showNameGate({ prefill: u || '', title: 'Switch user', sub: 'Enter a different name', btn: 'Switch' }); }
+
+function ts() { return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
+
+// Bubble text is model output, so it goes in escaped. Line breaks become <br>
+// and a bare URL becomes a link — the CTA arrives as "label → https://…".
+function bubbleHTML(text) {
+  const esc = (text || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return esc.replace(/https?:\/\/[^\s<]+/g,
+      u => '<a class="bubble-link" href="' + u + '" target="_blank" rel="noopener noreferrer">' + u + '</a>')
+    .replace(/\n/g, '<br>');
+}
+
+function insertMsg(text, isUser, photo) {
+  const prev = chatEl.lastElementChild;
+  const prevIsUser = prev && prev.classList.contains('user');
+  const prevIsBot  = prev && prev.classList.contains('bot');
+  const cont = (isUser && prevIsUser) || (!isUser && prevIsBot);
+  const row = document.createElement('div');
+  row.className = 'msg-row ' + (isUser ? 'user' : 'bot') + (cont ? ' cont' : '');
+  if (!isUser) {
+    if (avatarUrl && !cont) {
+      const av = document.createElement('img');
+      av.className = 'msg-av'; av.src = avatarUrl; av.alt = personaName;
+      row.appendChild(av);
+    } else {
+      const sp = document.createElement('div');
+      sp.className = 'msg-av-spacer';
+      row.appendChild(sp);
+    }
+  }
+  const bub = document.createElement('div');
+  bub.className = 'bubble';
+  bub.innerHTML = (photo ? '<img class="bubble-photo" src="' + photo + '" alt="">' : '')
+    + bubbleHTML(text) + '<span class="bubble-time">' + ts() + '</span>';
+  row.appendChild(bub);
+  chatEl.insertBefore(row, typingRow);
+  chatEl.scrollTop = chatEl.scrollHeight;
+  return row;
+}
+
+function addMsg(text, isUser, photo) {
+  const r = isUser ? 'user' : 'bot';
+  if (h.length && h[h.length - 1].role === r && h[h.length - 1].content.trim() === text.trim() && !photo) return;
+  // Timestamped so the server can work out how long this fan has been talking
+  // to her — days-based funnel phases have no other clock in the browser chat.
+  h.push({ role: r, content: text, photo: photo || null, ts: Math.floor(Date.now() / 1000) });
+  insertMsg(text, isUser, photo);
+  sc();
+  if (!isUser && window.parent !== window) {
+    try { window.parent.postMessage({ type: 'new_message' }, '*'); } catch(e) {}
+  }
+}
+
+function showTyping(on) {
+  typingRow.style.display = on ? 'flex' : 'none';
+  if (on) chatEl.scrollTop = chatEl.scrollHeight;
+}
+
+function um(x) {
+  const r = x.toLowerCase();
+  const t = [];
+  if (/jizzle|gnome|wow|classic|raid|zug|warrior|tank/.test(r)) t.push('gaming');
+  if (/bar|shift|pub|venue|work|pint/.test(r)) t.push('work');
+  if (/music|show|band|gig|rave|metal/.test(r)) t.push('music');
+  if (t.length) { m.recentTopics = [...m.recentTopics, ...t].slice(-4); m.lastTopic = t[t.length - 1]; }
+}
+
+// Split a long reply into two bubbles at a sentence boundary. Both halves are
+// slices of the original string, so nothing can be dropped and the blank line
+// before the CTA survives. A dot inside a URL is not a sentence boundary —
+// "onlyfans.com/miss.andrea" is one link, not three sentences.
+function splitChunks(text) {
+  if (text.length < 120) return [text];
+  const urls = [];
+  const re = /https?:\/\/\S+/g;
+  let m;
+  while ((m = re.exec(text))) urls.push([m.index, m.index + m[0].length]);
+  const inUrl = i => urls.some(u => i >= u[0] && i < u[1]);
+  const bounds = [];
+  for (let i = 0; i < text.length; i++) {
+    if ('.!?\u2026'.indexOf(text[i]) < 0 || inUrl(i)) continue;
+    let j = i;
+    while (j + 1 < text.length && '.!?\u2026'.indexOf(text[j + 1]) >= 0) j++;
+    if (j + 1 < text.length && /\s/.test(text[j + 1])) bounds.push(j + 1);
+    i = j;
+  }
+  if (bounds.length < 2) return [text];
+  const cut = bounds[Math.ceil((bounds.length + 1) / 2) - 1];
+  return [text.slice(0, cut).trim(), text.slice(cut).trim()].filter(Boolean);
+}
+
+function deliverChunks(chunks, idx, onDone, photo) {
+  if (idx >= chunks.length) { if (onDone) onDone(); return; }
+  showTyping(false);
+  const last = idx + 1 >= chunks.length;
+  addMsg(chunks[idx], false, last ? photo : null);
+  if (!last) {
+    const next = chunks[idx + 1];
+    setTimeout(() => {
+      showTyping(true);
+      setTimeout(() => deliverChunks(chunks, idx + 1, onDone, photo), typingDelay(next));
+    }, interChunkPause());
+  } else {
+    if (onDone) onDone();
+  }
+}
+
+// The bubble may already have been running while the reply was in flight; only
+// hold it for whatever is left of the time that first chunk should take to type.
+function cs(text, cb, photo, typingSince) {
+  ss(true);
+  const chunks = splitChunks(text);
+  const elapsed = typingSince ? Date.now() - typingSince : 0;
+  const hold = Math.max(0, typingDelay(chunks[0]) - elapsed);
+  setTimeout(() => deliverChunks(chunks, 0, cb, photo), hold);
+}
+
+let st = null, ot = null;
+function ri() { clearTimeout(st); clearTimeout(ot); }
+
+function si() {
+  ri();
+  st = setTimeout(() => {
+    const delay = 2000 + Math.random() * 2000;
+    showTyping(true);
+    setTimeout(() => { showTyping(false); addMsg('still there?', false); ss(true); }, delay);
+  }, 300000);
+  ot = setTimeout(() => { addMsg("i'll catch you later", false); ss(false); }, 480000);
+}
+
+// Queue of user messages awaiting a reply. Anything that arrives while she is
+// still reading gets folded into the same reply — a person catching up on four
+// quick lines answers once, not four times. Replying to each in turn meant a
+// burst took minutes to clear and left her answering a message back.
+let msgQueue = [], processing = false;
+
+function se() {
+  const x = inp.value.trim();
+  if (!x) return;
+  cancelGreet();
+  insertMsg(x, true);   // show immediately; committed to history when processed
+  inp.value = '';
+  inp.focus();
+  const n = Date.now(), d = (n - l) / 1000;
+  if (d > 0.7 && x.length > 2) { const v = x.length / d; s = Math.max(3.5, Math.min(18, s * 0.6 + v * 0.4)); }
+  l = n;
+  msgQueue.push(x);
+  if (!processing) processQueue();
+}
+
+function processQueue() {
+  if (!msgQueue.length) { processing = false; si(); return; }
+  processing = true;
+  ri();
+  let x = msgQueue.shift();
+  um(x);
+  const histSnapshot = h.slice();   // only turns answered so far — not later queued messages
+  const initialDelay = replyDelay(x);
+  let typingSince = 0;
+  setTimeout(() => {
+    // Everything that landed while she was reading is part of the same turn.
+    while (msgQueue.length) { const nx = msgQueue.shift(); um(nx); x += '\n' + nx; }
+    showTyping(true);
+    typingSince = Date.now();
+    fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: chatBody({ message: x, history: histSnapshot }) })
+      .then(r => r.json()).then(d => {
+        if (d.pacing) pacing = d.pacing;
+        h.push({ role: 'user', content: x, ts: Math.floor(Date.now() / 1000) }); sm();
+        if (d.reply) {
+          const recentBot = h.slice(-6).filter(m => m.role === 'bot').map(m => m.content.trim().toLowerCase());
+          if (recentBot.includes(d.reply.trim().toLowerCase())) { showTyping(false); sc(); ss(true); processQueue(); return; }
+          cs(d.reply, () => { sc(); processQueue(); }, d.photo, typingSince);
+        } else {
+          showTyping(false); addMsg('something went weird on my end. try again?', false); sc(); ss(false); processQueue();
+        }
+      }).catch(() => {
+        showTyping(false); h.push({ role: 'user', content: x, ts: Math.floor(Date.now() / 1000) }); addMsg('something went wrong. please try again.', false); sc(); ss(false); processQueue();
+      });
+  }, initialDelay);
+}
+
+function ss(ok) {
+  const dot = document.getElementById('conn-dot');
+  const txt = document.getElementById('conn-text');
+  if (dot) dot.className = 'conn-dot ' + (ok ? 'ok' : 'err');
+  if (txt) txt.textContent = ok ? 'Online' : 'Offline';
+}
+
+function ck() { fetch('/chat', { method: 'HEAD' }).then(() => ss(true)).catch(() => ss(false)); }
+
+// The opening message is only ever in flight once, and it is dropped outright
+// if the fan speaks first — she would not follow their message with an
+// unprompted introduction.
+let greetSeq = 0, greetTimer = null, greetPending = false;
+
+function cancelGreet() {
+  if (!greetPending) return;
+  greetSeq++;
+  clearTimeout(greetTimer);
+  greetTimer = null;
+  greetPending = false;
+  showTyping(false);
+}
+
+function greet() {
+  if (h.length !== 0 || greetPending) return;
+  const token = ++greetSeq;
+  const stale = () => token !== greetSeq;
+  greetPending = true;
+  const greetDelay = replyDelay('');
+  let typingSince = 0;
+  greetTimer = setTimeout(() => {
+    showTyping(true);
+    typingSince = Date.now();
+    fetch('/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: chatBody({ message: '__greeting__', history: [] }) })
+      .then(r => r.json()).then(d => {
+        if (stale()) return;
+        greetPending = false;
+        if (d.pacing) pacing = d.pacing;
+        if (d.reply) { cs(d.reply, si, d.photo, typingSince); }
+        else { showTyping(false); addMsg('hey', false); si(); }
+      })
+      .catch(() => {
+        if (stale()) return;
+        greetPending = false;
+        showTyping(false); addMsg('hey', false); si();
+      });
+  }, greetDelay);
+}
+
+inp.addEventListener('keypress', e => { if (e.key === 'Enter') se(); });
+
+// Embedded, the keyboard shrinks the host page's viewport, not this frame's —
+// only the host can resize us to what is still visible.
+inp.addEventListener('focus', () => tellParent('input-focus'));
+inp.addEventListener('blur', () => tellParent('input-blur'));
+document.getElementById('name-input').addEventListener('keypress', e => { if (e.key === 'Enter') submitName(); });
+
+function isRealName(n) {
+  // Ignore legacy auto-set placeholders so the name screen still appears.
+  return !!(n && n.trim() && n !== 'EmbedUser' && !/^Guest-\d+$/i.test(n.trim()));
+}
+
+function hasName() {
+  return !DEMO && isRealName(localStorage.getItem(PFX + 'user'));
+}
+
+if (hasName()) {
+  ld();
+  greet();
+} else {
+  showNameGate();
+}
+// The header floats over the message list, so the list needs to know how much
+// room to leave for it.
+(function trackHeader() {
+  const hdr = document.querySelector('.header');
+  if (!hdr) return;
+  const apply = () => document.documentElement.style.setProperty('--hdr-h', hdr.offsetHeight + 'px');
+  if (window.ResizeObserver) new ResizeObserver(apply).observe(hdr);
+  window.addEventListener('resize', apply);
+  apply();
+})();
+
+// Keep the chat inside the visible viewport when the on-screen keyboard opens,
+// so the header stays put instead of scrolling away above it.
+(function trackViewport() {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const apply = () => {
+    document.documentElement.style.setProperty('--vvh', vv.height + 'px');
+    if (window.scrollY) window.scrollTo(0, 0);
+    chatEl.scrollTop = chatEl.scrollHeight;
+  };
+  vv.addEventListener('resize', apply);
+  vv.addEventListener('scroll', apply);
+  apply();
+})();
+
+ss(false); ck(); setInterval(ck, 10000);
+if (location.hash === '#profile') setTimeout(openProfile, 1200);
+</script>
+
 </body>
 </html>

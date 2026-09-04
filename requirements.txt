@@ -2,3 +2,7 @@ flask
 google-genai
 python-dotenv
 google-auth
+gunicorn
+sqlalchemy
+psycopg2-binary
+telethon

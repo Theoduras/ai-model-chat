@@ -1,0 +1,2557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Persona Builder — Dashboard</title>
+  <script src="/js/theme.js"></script>
+  <link rel="stylesheet" href="/css/style.css">
+  <script src="/js/devnav.js" defer></script>
+  <script src="/js/examples.js" defer></script>
+<script src="/js/onboarding.js" defer></script>
+<script src="/js/platform-setup.js" defer></script>
+</head>
+<body class="page-dashboard auth-pending">
+
+<header>
+  <div style="display:flex; align-items:center; gap:10px;">
+    <button class="icon-btn mobile-only" onclick="openSidebar()" title="Personas" aria-label="Open personas">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="20" height="20"><path d="M4 6h16M4 12h16M4 18h16" stroke-linecap="round"/></svg>
+    </button>
+    <button class="icon-btn desk-only" onclick="toggleSidebar()" title="Show or hide the persona list" aria-label="Toggle persona list">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="20" height="20"><path d="M4 6h16M4 12h16M4 18h16" stroke-linecap="round"/></svg>
+    </button>
+    <h1>Persona Builder</h1>
+    <span class="badge">Dashboard</span>
+  </div>
+  <div style="display:flex; align-items:center; gap:16px;">
+    <button class="icon-btn mobile-only" onclick="openPreview()" title="Preview" aria-label="Open preview">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="20" height="20"><path d="M2.5 12s3.5-7 9.5-7 9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7Z" stroke-linejoin="round"/><circle cx="12" cy="12" r="2.5"/></svg>
+    </button>
+    <div id="gemini-status" class="conn-badge admin-only" onclick="openSettings()" title="Gemini connection — click to configure">
+      <span class="conn-dot"></span><span id="conn-text">Checking…</span>
+    </div>
+    <a href="/xbot" title="X engagement bot" class="admin-only" style="display:inline-flex; align-items:center; gap:6px; font-size:0.78rem; font-weight:600; color:#fff; text-decoration:none; background:var(--grad); background-size:300% 100%; padding:6px 13px; border-radius:9999px; box-shadow:0 2px 8px var(--accent-soft);">𝕏<span class="xbot-label"> Engagement Bot</span></a>
+    <button class="icon-btn theme-toggle" onclick="toggleTheme()" title="Light mode" aria-label="Switch to light mode">
+      <svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke-linecap="round"/></svg>
+      <svg class="ico-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" stroke-linejoin="round"/></svg>
+    </button>
+  </div>
+</header>
+
+<div class="mobile-overlay" id="mobile-overlay" onclick="closeMobilePanels()"></div>
+
+<!-- Settings Modal -->
+<div class="modal-overlay" id="settings-modal" onclick="if(event.target===this)closeSettings()">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>Settings</h2>
+      <button class="modal-close" onclick="closeSettings()" aria-label="Close">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="section-title" style="margin-bottom:14px;">Gemini API</div>
+      <div class="conn-row" id="modal-conn-row">
+        <span class="conn-dot"></span>
+        <span id="modal-conn-text">Checking connection…</span>
+      </div>
+      <div class="field full" style="margin-top:18px;">
+        <label>Gemini API Key</label>
+        <div style="display:flex; gap:8px;">
+          <input type="password" id="gemini-key-input" placeholder="AIza… or AQ.…" autocomplete="off" spellcheck="false" style="flex:1;">
+          <button class="btn btn-secondary" type="button" onclick="toggleKeyVisibility()" id="key-toggle-btn" style="padding:9px 14px;">Show</button>
+        </div>
+        <span class="hint">Saved to the <code>.env</code> file as <code>GEMINI_API_KEY</code> and applied immediately — no restart needed.</span>
+        <span class="hint">Get a free key at <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:var(--accent);">aistudio.google.com/app/apikey</a></span>
+      </div>
+      <div class="modal-footer">
+        <span class="save-status" id="key-save-status"></span>
+        <button class="btn btn-ghost" onclick="closeSettings()">Cancel</button>
+        <button class="btn btn-primary" id="key-save-btn" onclick="saveGeminiKey()">Save &amp; Verify</button>
+      </div>
+
+      <div class="section-title" style="margin:26px 0 14px;">Landing page</div>
+      <div class="field full">
+        <label for="landing-persona">Model that answers the landing page chat</label>
+        <select id="landing-persona"><option value="">Loading…</option></select>
+        <span class="hint">Fans who open the chat on <a href="/landing" target="_blank" style="color:var(--accent);">the landing page</a> talk to this persona.</span>
+      </div>
+      <div class="modal-footer">
+        <span class="save-status" id="landing-save-status"></span>
+        <button class="btn btn-primary" id="landing-save-btn" onclick="saveLandingPersona()">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Name prompt -->
+<div class="modal-overlay" id="name-modal" onclick="if(event.target===this)nameCancel()">
+  <div class="modal" style="max-width:420px;">
+    <div class="modal-header">
+      <h2 id="name-title">Name your persona</h2>
+      <button class="modal-close" onclick="nameCancel()" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p class="hint" id="name-hint" style="margin-bottom:12px;"></p>
+      <input type="text" id="name-input" autocomplete="off" spellcheck="false" style="width:100%;">
+      <div class="name-slug" id="name-slug"></div>
+      <div class="modal-footer" style="margin-top:18px;">
+        <button class="btn btn-ghost" onclick="nameCancel()">Cancel</button>
+        <button class="btn btn-primary" id="name-ok" onclick="nameConfirm()">Create</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Backstory AI Interview Modal -->
+<div class="modal-overlay" id="backstory-modal" onclick="if(event.target===this)closeBackstoryAI()">
+  <div class="modal" style="max-width:580px; display:flex; flex-direction:column; max-height:90vh;">
+    <div class="modal-header">
+      <h2>Build Backstory with AI</h2>
+      <button class="modal-close" onclick="closeBackstoryAI()" aria-label="Close">×</button>
+    </div>
+    <div class="modal-body" style="display:flex; flex-direction:column; min-height:0; overflow-y:auto;">
+      <p class="hint" style="margin-bottom:12px;">Pick an answer for each question — or skip. Finalize when ready.</p>
+      <div id="bs-transcript" class="chat-preview" style="flex:1; overflow-y:auto; min-height:120px; max-height:36vh; padding:4px; margin-bottom:12px;"></div>
+      <div id="bs-question-area" style="display:none;">
+        <div id="bs-question-text" style="font-weight:600; margin-bottom:10px; line-height:1.4;"></div>
+        <div id="bs-options" style="display:flex; flex-direction:column; gap:7px;"></div>
+        <div style="display:flex; gap:6px; margin-top:10px; align-items:center;">
+          <input type="text" id="bs-custom" placeholder="Or write your own answer…" autocomplete="off"
+                 onkeypress="if(event.key==='Enter')bsSubmitCustom()" style="flex:1; font-size:13px;">
+          <button class="btn btn-secondary" id="bs-custom-btn" onclick="bsSubmitCustom()" style="flex-shrink:0;">→</button>
+        </div>
+        <div style="display:flex; gap:8px; margin-top:8px;">
+          <button class="btn btn-ghost" id="bs-regen-btn" onclick="bsRegenerate()" style="font-size:13px;">↻ New options</button>
+          <button class="btn btn-ghost" id="bs-skip-btn" onclick="bsSkip()" style="font-size:13px;">Skip →</button>
+        </div>
+      </div>
+      <div class="modal-footer" style="margin-top:14px;">
+        <span class="save-status" id="bs-status"></span>
+        <button class="btn btn-ghost" onclick="closeBackstoryAI()">Cancel</button>
+        <button class="btn btn-primary" id="bs-finalize-btn" onclick="bsFinalize()">Generate backstory ✓</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="layout">
+
+  <aside class="sidebar" aria-label="Navigation">
+    <button class="panel-close mobile-only" type="button" onclick="closeMobilePanels()" aria-label="Close personas">&times;</button>
+    <div class="sb-scroll">
+      <div class="sb-ws">
+        <div class="sb-ws-avatar" id="sb-ws-avatar">·</div>
+        <div class="sb-ws-info">
+          <div class="sb-ws-name" id="sb-ws-name">&nbsp;</div>
+          <div class="sb-ws-tier" id="sb-ws-tier">&nbsp;</div>
+        </div>
+      </div>
+
+      <div class="sb-search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="15" height="15" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3" stroke-linecap="round"/></svg>
+        <input type="text" id="sb-search-input" placeholder="Search everything…" autocomplete="off" oninput="setSbQuery(this.value)">
+        <kbd class="sb-kbd">⌘K</kbd>
+      </div>
+
+      <nav class="sb-nav">
+        <a href="#" class="sb-item" id="sb-nav-personas" data-search="personas" onclick="event.preventDefault();showPersonaBrowser();">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+          <span>Personas</span>
+          <span class="sb-badge" id="persona-count"></span>
+        </a>
+        <div class="sb-quick" id="sb-quick"></div>
+        <button class="btn-new" onclick="newPersona()">+ New Persona</button>
+
+        <div class="sb-label">Workspace</div>
+        <button type="button" class="sb-item" data-search="chat" onclick="openEmbedded('/', this)">
+          <svg class="sb-ic-chat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" width="16" height="16" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8A2.5 2.5 0 0 1 17.5 16H10l-4.5 4v-4H6.5A2.5 2.5 0 0 1 4 13.5v-8Z" stroke-linejoin="round"/></svg>
+          <span>Chat</span>
+        </button>
+        <button type="button" class="sb-item admin-only" data-search="landing page" onclick="openEmbedded('/landing', this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18" stroke-linecap="round"/></svg>
+          <span>Landing page</span>
+        </button>
+        <button type="button" class="sb-item" data-search="profile" onclick="openEmbedded('/account/profile', this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><path d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.5 20.1a7.5 7.5 0 0 1 15 0A17.9 17.9 0 0 1 12 21.75c-2.68 0-5.22-.58-7.5-1.63Z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span>Profile</span>
+        </button>
+
+        <button type="button" class="sb-item" data-search="connect a platform accounts" onclick="openPlatformHub(this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><path d="M9 12h6M12 9v6" stroke-linecap="round"/><circle cx="12" cy="12" r="9"/></svg>
+          <span>Connect a platform</span>
+        </button>
+
+        <div class="sb-group" id="sb-group-platforms">
+          <button type="button" class="sb-item sb-item-toggle" data-search="platforms telegram fanvue threads x bot" onclick="toggleSbGroup('platforms')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><rect x="3" y="4" width="7" height="7" rx="1.3"/><rect x="14" y="4" width="7" height="7" rx="1.3"/><rect x="3" y="14" width="7" height="7" rx="1.3"/><rect x="14" y="14" width="7" height="7" rx="1.3"/></svg>
+            <span>Platforms</span>
+            <svg class="sb-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12" aria-hidden="true"><path d="M9 6l6 6-6 6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <div class="sb-children">
+            <button type="button" class="sb-item" data-search="telegram" onclick="openPlatform('telegram', this)">
+              <svg class="sb-ic-telegram" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/></svg>
+              <span>Telegram</span>
+            </button>
+            <button type="button" class="sb-item" data-search="x bot twitter" onclick="openPlatform('x', this)">
+              <svg class="sb-ic-x" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M14.234 10.162 22.977 0h-2.072l-7.591 8.824L7.251 0H.258l9.168 13.343L.258 24H2.33l8.016-9.318L16.749 24h6.993zm-2.837 3.299-.929-1.329L3.076 1.56h3.182l5.965 8.532.929 1.329 7.754 11.09h-3.182z"/></svg>
+              <span>𝕏 Bot</span>
+            </button>
+            <button type="button" class="sb-item" data-search="fanvue" onclick="openPlatform('fanvue', this)">
+              <svg class="sb-ic-fanvue" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect width="24" height="24" rx="6" fill="#FF2D6B"/><text x="12" y="16.5" font-family="Arial, sans-serif" font-size="12" font-weight="700" fill="#fff" text-anchor="middle">F</text></svg>
+              <span>Fanvue</span>
+            </button>
+            <button type="button" class="sb-item" data-search="threads" onclick="openPlatform('threads', this)">
+              <svg class="sb-ic-threads" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M18.263 11.097c-.03-3.486-1.92-5.586-5.111-5.586-2.13 0-3.922.963-4.863 2.499l2.062 1.438c.535-.843 1.272-1.543 2.628-1.543 1.528 0 2.318.85 2.544 2.431a15 15 0 0 0-2.236-.173c-4.125 0-6.068 1.867-6.068 4.336s1.943 3.99 4.804 3.99c3.139 0 5.013-2.115 5.781-4.735.798.361 1.348 1.204 1.348 2.47 0 3.387-3.907 5.232-7.22 5.232-4.885 0-8.077-3.207-8.077-8.424 0-6.392 4.223-10.487 9.9-10.487 3.808 0 5.69 1.671 6.97 3.914l2.108-1.475C21.44 2.078 18.331 0 13.663 0 6.227 0 1.168 5.277 1.168 12.934c0 7 4.953 11.066 10.856 11.066 4.878 0 9.809-2.846 9.809-7.716 0-2.545-1.46-4.231-3.569-5.187m-6.33 4.855c-1.077 0-2.026-.512-2.026-1.453 0-1.483 1.822-1.934 3.606-1.934.678 0 1.34.045 1.927.173-.422 1.927-1.671 3.215-3.508 3.214Z"/></svg>
+              <span>Threads</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="sb-label admin-only">Developers</div>
+        <a href="#" class="sb-item admin-only" data-search="gemini settings" onclick="event.preventDefault();openSettings();">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" width="16" height="16" aria-hidden="true"><path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z" stroke-linecap="round" stroke-linejoin="round"/><path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span>Gemini settings</span>
+        </a>
+        <button type="button" class="sb-item admin-only" data-search="manage users admin" onclick="openEmbedded('/admin/users', this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><circle cx="9" cy="8" r="3.25"/><path d="M2.5 19a6.5 6.5 0 0 1 13 0" stroke-linecap="round"/><path d="M16.5 5.5a3.25 3.25 0 0 1 0 6.5M20 19a6 6 0 0 0-4-5.65" stroke-linecap="round"/></svg>
+          <span>Manage users</span>
+        </button>
+
+      </nav>
+    </div>
+
+    <div class="sb-foot">
+      <a href="/account" class="sb-item" data-search="account billing">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2.5 2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Account</span>
+      </a>
+      <a href="/dashboard/logout" class="sb-item" data-search="log out sign out">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 17l5-5-5-5M21 12H9" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span>Log out</span>
+      </a>
+    </div>
+  </aside>
+
+  <div style="display:flex; flex-direction:column; overflow:hidden;">
+    <div class="form-area" id="form-area">
+      <div class="empty-state">
+        <div class="es-card">
+          <div class="es-eyebrow">Getting started</div>
+          <h2 class="es-title">Create your first persona</h2>
+          <p class="es-sub">A persona is the character your fans talk to &mdash; her voice, her story, and the way she turns a chat into a sale. We&rsquo;ll walk you through it one question at a time.</p>
+          <ol class="es-steps">
+            <li><span class="es-num">1</span><div><strong>Who she is</strong><span>Name, age, looks and backstory.</span></div></li>
+            <li><span class="es-num">2</span><div><strong>How she talks</strong><span>Tone, warmth and how fast she flirts.</span></div></li>
+            <li><span class="es-num">3</span><div><strong>How she earns</strong><span>What you sell and when she offers it.</span></div></li>
+            <li><span class="es-num">4</span><div><strong>Go live</strong><span>Test the chat, then connect a platform.</span></div></li>
+          </ol>
+          <button class="btn btn-primary es-cta" onclick="newPersona()">+ Create a persona</button>
+          <p class="es-foot">About 3 minutes. Nothing is published until you hit Save &amp; Deploy.</p>
+        </div>
+      </div>
+    </div>
+    <div class="action-bar" id="action-bar" style="display:none;">
+      <button class="btn btn-secondary" id="fillall-btn" onclick="fillAllInfo()" title="Auto-generate a complete, coherent persona">✨ Fill all information</button>
+      <button class="btn btn-secondary" onclick="previewPrompt()">Preview Prompt</button>
+      <button class="btn btn-ghost" onclick="testChat()">Test Chat</button>
+      <button class="btn btn-ghost" onclick="copyPersona()" title="Save a renamed copy with all settings">⧉ Copy</button>
+      <button class="btn btn-primary" onclick="savePersona()">Save &amp; Deploy</button>
+      <span class="save-status" id="save-status"></span>
+    </div>
+  </div>
+
+  <aside class="preview-panel" aria-label="Preview">
+   <button class="panel-close mobile-only" type="button" onclick="closeMobilePanels()" aria-label="Close preview">&times;</button>
+   <div class="preview-card">
+    <div class="preview-header"><span>Preview</span></div>
+    <div class="preview-tabs">
+      <div class="preview-tab active" onclick="switchTab('chat', this)">Live Chat</div>
+      <div class="preview-tab" onclick="switchTab('prompt', this)">System Prompt</div>
+      <div class="preview-tab" onclick="switchTab('funnel', this)">Funnel</div>
+    </div>
+    <div class="preview-chat" id="preview-chat">
+      <div class="header">
+        <div class="header-avatar-wrap">
+          <img id="pc-avatar" src="" alt="" style="display:none;">
+          <div id="pc-avatar-fallback" class="pc-av-fallback" style="display:none;">AI</div>
+          <div class="online-dot"></div>
+        </div>
+        <div class="header-info">
+          <div class="header-name" id="pc-name">Persona</div>
+          <div class="header-meta" id="pc-meta">Fill in the form to preview her</div>
+        </div>
+      </div>
+      <div class="chat-window" id="pc-window"></div>
+      <div class="input-area">
+        <div class="input-wrap"><input type="text" placeholder="Message…" disabled aria-label="Live preview — not sendable"></div>
+        <button class="send-btn" type="button" disabled aria-label="Preview only">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+        </button>
+      </div>
+    </div>
+    <div class="preview-content" id="preview-content" style="display:none;">
+      <div class="empty-state" style="padding:20px; min-height:auto;">
+        <p style="font-size:0.75rem;">Configure a persona and click Preview Prompt.</p>
+      </div>
+    </div>
+   </div>
+  </aside>
+
+</div>
+
+<script>
+let currentSlug = null;
+const EMPTY_HTML = document.getElementById('form-area').innerHTML;
+
+let sbQuery = '';
+let pgQuery = '';
+let pgFocusPending = null;
+function setPgQuery(v) {
+  pgQuery = (v || '').trim();
+  const input = document.querySelector('.pg-search input');
+  pgFocusPending = input ? input.selectionStart : null;
+  renderPersonaBrowser();
+}
+function matchesQuery(p, query) {
+  const q = (query !== undefined ? query : sbQuery);
+  if (!q) return true;
+  const lq = q.toLowerCase();
+  return (p.name || '').toLowerCase().includes(lq) || (p.slug || '').toLowerCase().includes(lq);
+}
+
+function setSbQuery(v) {
+  sbQuery = (v || '').trim();
+  filterSbNav();
+  renderSidebar();
+}
+
+// Filters the always-present nav items/groups by their data-search text. Persona
+// filtering runs separately inside renderSidebar()/renderPersonaBrowser().
+function filterSbNav() {
+  const q = sbQuery.toLowerCase();
+  document.querySelectorAll('.sb-nav > [data-search]').forEach(el => {
+    el.style.display = (!q || (el.dataset.search || '').includes(q)) ? '' : 'none';
+  });
+  document.querySelectorAll('.sb-group').forEach(group => {
+    const toggle = group.querySelector('.sb-item-toggle');
+    const ownMatch = !q || (toggle && (toggle.dataset.search || '').includes(q));
+    const children = Array.from(group.querySelectorAll('.sb-children [data-search]'));
+    let anyChild = false;
+    children.forEach(child => {
+      const hit = !q || (child.dataset.search || '').includes(q);
+      child.style.display = hit ? '' : 'none';
+      if (hit) anyChild = true;
+    });
+    const groupVisible = !q || ownMatch || anyChild;
+    group.style.display = groupVisible ? '' : 'none';
+    if (q && anyChild) group.classList.add('open');
+  });
+  document.querySelectorAll('.sb-label').forEach(label => {
+    if (!q || label.classList.contains('sb-label-personas')) { label.style.display = ''; return; }
+    let sib = label.nextElementSibling;
+    let anyVisible = false;
+    while (sib && !sib.classList.contains('sb-label')) {
+      if (sib.id !== 'persona-list' && sib.style.display !== 'none') anyVisible = true;
+      sib = sib.nextElementSibling;
+    }
+    label.style.display = anyVisible ? '' : 'none';
+  });
+}
+let currentTab = 'chat';
+const personas = {};
+
+function _overlay() { return document.getElementById('mobile-overlay'); }
+function sidebarKey() { return 'admin_sidebar' + lsNs(); }
+
+function toggleSidebar() {
+  const off = document.body.classList.toggle('sidebar-off');
+  try { localStorage.setItem(sidebarKey(), off ? 'off' : 'on'); } catch(e) {}
+}
+
+// Default: visible while there is nothing to browse, out of the way once there is.
+// An explicit toggle is remembered and outranks that.
+function applySidebarDefault() {
+  let saved = null;
+  try { saved = localStorage.getItem(sidebarKey()); } catch(e) {}
+  const off = saved ? saved === 'off' : Object.keys(personas).length > 0;
+  document.body.classList.toggle('sidebar-off', off);
+}
+
+function openSidebar() {
+  document.querySelector('.sidebar').classList.add('open');
+  _overlay().classList.add('open');
+}
+function openPreview() {
+  document.querySelector('.preview-panel').classList.add('open');
+  _overlay().classList.add('open');
+}
+function closeMobilePanels() {
+  document.querySelector('.sidebar').classList.remove('open');
+  document.querySelector('.preview-panel').classList.remove('open');
+  _overlay().classList.remove('open');
+}
+
+// The persona cache is per signed-in user. Without this suffix a new account
+// on a shared browser would inherit whatever the previous user had cached.
+let CURRENT_UID = 'anon';
+function lsNs() { return '_u' + CURRENT_UID; }
+
+function lsPersonaKey(slug) { return 'admin_persona_cfg_' + slug + lsNs(); }
+function lsSlugsKey() { return 'admin_persona_slugs' + lsNs(); }
+function lsPromptKey(slug) { return 'persona_prompt_' + slug + lsNs(); }
+
+// Drop the pre-namespacing keys, which were shared across accounts. The server
+// holds the real personas, so this only clears a cache.
+function lsPurgeLegacy() {
+  try {
+    const stale = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k) continue;
+      const legacy = (k.startsWith('admin_persona_cfg_') || k === 'admin_persona_slugs' ||
+                      k === 'admin_folders' || k.startsWith('admin_folder_assign_') ||
+                      k.startsWith('admin_folder_open_') || k.startsWith('persona_prompt_'));
+      // Namespaced keys end in _u<uid>; anything else is pre-namespacing.
+      if (legacy && !/_u([0-9a-f]{32}|anon)$/.test(k)) stale.push(k);
+    }
+    stale.forEach(k => localStorage.removeItem(k));
+  } catch (e) {}
+}
+
+function lsSavePersona(slug, config) {
+  try {
+    localStorage.setItem(lsPersonaKey(slug), JSON.stringify(config));
+    const slugs = JSON.parse(localStorage.getItem(lsSlugsKey()) || '[]');
+    if (!slugs.includes(slug)) slugs.push(slug);
+    localStorage.setItem(lsSlugsKey(), JSON.stringify(slugs));
+  } catch(e) {}
+}
+
+function lsLoadPersona(slug) {
+  try {
+    const raw = localStorage.getItem(lsPersonaKey(slug));
+    return raw ? JSON.parse(raw) : null;
+  } catch(e) { return null; }
+}
+
+function lsLoadSlugs() {
+  try { return JSON.parse(localStorage.getItem(lsSlugsKey()) || '[]'); } catch(e) { return []; }
+}
+
+function lsDeletePersona(slug) {
+  try {
+    localStorage.removeItem(lsPersonaKey(slug));
+    localStorage.removeItem(lsPromptKey(slug));
+    const slugs = JSON.parse(localStorage.getItem(lsSlugsKey()) || '[]').filter(s => s !== slug);
+    localStorage.setItem(lsSlugsKey(), JSON.stringify(slugs));
+  } catch(e) {}
+}
+
+
+
+
+
+
+
+// Must run before any ls* call, so the cache is read under the right user.
+// Body starts as .auth-pending, which hides .admin-only, so admin controls
+// never flash for a normal user while this request is in flight.
+async function identifyUser() {
+  try {
+    const me = await (await fetch('/api/me')).json();
+    CURRENT_UID = me.signed_in ? me.id : 'anon';
+    window.USER_SETUP = me.setup || {};
+    if (me.is_admin) document.body.classList.add('is-admin');
+    const nameEl = document.getElementById('sb-ws-name');
+    const tierEl = document.getElementById('sb-ws-tier');
+    const avEl   = document.getElementById('sb-ws-avatar');
+    const label  = me.name || me.email || 'Account';
+    if (nameEl) nameEl.textContent = label;
+    if (tierEl) tierEl.textContent = me.is_admin ? 'Admin' : (me.tier ? me.tier + ' Plan' : 'Creator');
+    if (avEl) avEl.textContent = label.slice(0, 2).toUpperCase();
+  } catch (e) {
+    CURRENT_UID = 'anon';
+  }
+  document.body.classList.remove('auth-pending');
+  lsPurgeLegacy();
+}
+
+// Expandable sidebar groups (Platforms, …), persisted per the usual namespaced pattern.
+function sbGroupKey(name) { return 'admin_sbgroup_' + name + lsNs(); }
+function toggleSbGroup(name) {
+  const el = document.getElementById('sb-group-' + name);
+  const open = el.classList.toggle('open');
+  try { localStorage.setItem(sbGroupKey(name), open ? '1' : '0'); } catch(e) {}
+}
+function restoreSbGroups() {
+  document.querySelectorAll('.sb-group').forEach(el => {
+    const name = el.id.replace('sb-group-', '');
+    let open = true;
+    try {
+      const saved = localStorage.getItem(sbGroupKey(name));
+      if (saved !== null) open = saved === '1';
+    } catch(e) {}
+    el.classList.toggle('open', open);
+  });
+}
+
+// Marks the sidebar item matching the current page. In-app states (Personas / an open
+// persona) are set directly by showPersonaBrowser() / loadPersona() instead.
+function markActiveNavByPath() {
+  const path = location.pathname;
+  document.querySelectorAll('.sb-item[href]').forEach(a => {
+    const href = a.getAttribute('href');
+    a.classList.toggle('active', !!href && href !== '#' && href === path);
+  });
+}
+
+document.addEventListener('keydown', e => {
+  const input = document.getElementById('sb-search-input');
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+    e.preventDefault();
+    if (input) { input.focus(); input.select(); }
+    return;
+  }
+  if (e.key === 'Escape' && input && document.activeElement === input && input.value) {
+    input.value = '';
+    setSbQuery('');
+    input.blur();
+  }
+});
+
+async function init() {
+  await identifyUser();
+  restoreSbGroups();
+  markActiveNavByPath();
+  loadConfig();
+  const seen = new Set();
+  try {
+    const res = await fetch('/api/personas');
+    const list = await res.json();
+    list.forEach(p => {
+      personas[p.slug] = p;
+      seen.add(p.slug);
+    });
+  } catch(e) {
+    console.error('Could not load personas', e);
+  }
+  lsLoadSlugs().forEach(slug => {
+    if (seen.has(slug)) return;
+    const cfg = lsLoadPersona(slug);
+    if (!cfg) return;
+    personas[slug] = { slug, name: cfg.name || slug, config: cfg };
+    seen.add(slug);
+  });
+
+  applySidebarDefault();
+  renderSidebar();
+  document.getElementById('persona-count').textContent = seen.size;
+}
+
+function applyConnState(configured, authMode, masked) {
+  const headDot  = document.querySelector('#gemini-status .conn-dot');
+  const headText = document.getElementById('conn-text');
+  const modalDot  = document.querySelector('#modal-conn-row .conn-dot');
+  const modalText = document.getElementById('modal-conn-text');
+  if (configured) {
+    headDot.className = 'conn-dot ok';
+    headText.textContent = 'Gemini connected';
+    modalDot.className = 'conn-dot ok';
+    modalText.textContent = 'Connected via ' + (authMode || 'api-key') + (masked ? ' · ' + masked : '');
+    const input = document.getElementById('gemini-key-input');
+    if (input && masked) input.placeholder = masked + '  (saved — paste a new key to replace)';
+  } else {
+    headDot.className = 'conn-dot err';
+    headText.textContent = 'No API key';
+    modalDot.className = 'conn-dot err';
+    modalText.textContent = 'Not configured — add a Gemini API key below.';
+  }
+}
+
+async function loadConfig() {
+  try {
+    const res = await fetch('/api/config');
+    const c = await res.json();
+    applyConnState(c.gemini_configured, c.auth_mode, c.key_masked);
+  } catch(e) {
+    document.getElementById('conn-text').textContent = 'Status unknown';
+  }
+}
+
+function openSettings()  {
+  document.getElementById('settings-modal').classList.add('open');
+  loadConfig();
+  loadLandingPersona();
+}
+
+async function loadLandingPersona() {
+  const sel = document.getElementById('landing-persona');
+  const status = document.getElementById('landing-save-status');
+  status.textContent = '';
+  status.className = 'save-status';
+  try {
+    const landing = await fetch('/api/landing').then(r => r.ok ? r.json() : {});
+    let list = landing.options;
+    if (!Array.isArray(list)) {
+      list = await fetch('/api/personas').then(r => r.ok ? r.json() : []);
+    }
+    sel.innerHTML = '';
+    (Array.isArray(list) ? list : []).forEach(p => {
+      const o = document.createElement('option');
+      o.value = p.slug;
+      o.textContent = (p.name || p.slug) + ' (' + p.slug + ')';
+      if (p.slug === landing.persona) o.selected = true;
+      sel.appendChild(o);
+    });
+    if (!sel.options.length) {
+      sel.innerHTML = '<option value="">No personas yet</option>';
+    } else if (landing.persona && !landing.configured) {
+      status.textContent = 'Currently defaulting to ' + landing.persona;
+    }
+  } catch (e) {
+    sel.innerHTML = '<option value="">Could not load personas</option>';
+  }
+}
+
+async function saveLandingPersona() {
+  const sel = document.getElementById('landing-persona');
+  const status = document.getElementById('landing-save-status');
+  const btn = document.getElementById('landing-save-btn');
+  const slug = sel.value;
+  if (!slug) { status.textContent = 'Pick a persona first'; status.className = 'save-status err'; return; }
+  btn.disabled = true;
+  status.textContent = 'Saving…';
+  status.className = 'save-status';
+  try {
+    const res = await fetch('/api/landing', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ persona: slug })
+    });
+    const data = await res.json();
+    if (res.ok && data.ok) {
+      status.textContent = 'Landing page now opens with ' + slug;
+      status.className = 'save-status ok';
+    } else {
+      status.textContent = data.error || 'Could not save';
+      status.className = 'save-status err';
+    }
+  } catch (e) {
+    status.textContent = 'Could not reach the server';
+    status.className = 'save-status err';
+  }
+  btn.disabled = false;
+}
+function closeSettings() {
+  document.getElementById('settings-modal').classList.remove('open');
+  document.getElementById('key-save-status').textContent = '';
+  document.getElementById('landing-save-status').textContent = '';
+  document.getElementById('gemini-key-input').value = '';
+}
+
+function toggleKeyVisibility() {
+  const input = document.getElementById('gemini-key-input');
+  const btn = document.getElementById('key-toggle-btn');
+  if (input.type === 'password') { input.type = 'text'; btn.textContent = 'Hide'; }
+  else { input.type = 'password'; btn.textContent = 'Show'; }
+}
+
+async function saveGeminiKey() {
+  const input  = document.getElementById('gemini-key-input');
+  const status = document.getElementById('key-save-status');
+  const btn    = document.getElementById('key-save-btn');
+  const key    = input.value.trim();
+  if (!key) { status.textContent = 'Enter a key first'; status.className = 'save-status err'; return; }
+  btn.disabled = true;
+  status.textContent = 'Saving & verifying…';
+  status.className = 'save-status';
+  try {
+    const res = await fetch('/api/config/gemini-key', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ api_key: key })
+    });
+    const data = await res.json();
+    if (data.ok && data.verified) {
+      status.textContent = '✓ Saved & verified'; status.className = 'save-status ok';
+      applyConnState(true, data.auth_mode, data.key_masked);
+      input.value = '';
+      setTimeout(closeSettings, 1100);
+    } else if (data.ok && !data.verified) {
+      status.textContent = '⚠ Saved, but key failed: ' + (data.verify_error || 'verification error');
+      status.className = 'save-status err';
+      applyConnState(true, data.auth_mode, data.key_masked);
+    } else {
+      status.textContent = '✗ ' + (data.error || 'Failed to save');
+      status.className = 'save-status err';
+    }
+  } catch(e) {
+    status.textContent = '✗ ' + e.message; status.className = 'save-status err';
+  } finally { btn.disabled = false; }
+}
+
+let bsMessages = [];
+let bsCurrentQuestion = '';
+
+function bsBasics() {
+  const mirrorChecked = document.getElementById('f-mirror-location')?.checked;
+  const location = mirrorChecked ? "the fan's city (mirrors fan location)" : v('f-location');
+  return { name: v('f-name'), age: v('f-age'), archetype: v('f-archetype'), location };
+}
+
+function bsRender() {
+  const t = document.getElementById('bs-transcript');
+  t.innerHTML = bsMessages.map(m =>
+    '<div class="chat-bubble ' + (m.role === 'user' ? 'user' : 'bot') + '">' + esc(m.content) + '</div>'
+  ).join('');
+  t.scrollTop = t.scrollHeight;
+}
+
+function bsSetBusy(busy, msg) {
+  ['bs-regen-btn','bs-skip-btn','bs-finalize-btn','bs-custom-btn'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = busy;
+  });
+  const custom = document.getElementById('bs-custom');
+  if (custom) custom.disabled = busy;
+  document.querySelectorAll('#bs-options button').forEach(b => b.disabled = busy);
+  const st = document.getElementById('bs-status');
+  st.className = 'save-status';
+  if (busy) {
+    st.innerHTML = '<span class="busy-label"><span class="loader-dots" role="status" aria-live="polite">'
+      + '<i></i><i></i><i></i></span>' + esc(msg || 'Thinking…') + '</span>';
+  } else {
+    st.textContent = msg || '';
+  }
+}
+
+function bsShowQuestion(question, options) {
+  bsCurrentQuestion = question;
+  document.getElementById('bs-question-text').textContent = question;
+  const optEl = document.getElementById('bs-options');
+  optEl.innerHTML = options.map((opt, i) =>
+    '<button class="btn btn-secondary" style="text-align:left; white-space:normal; line-height:1.35;" onclick="bsPickOption(' + i + ')">' + esc(opt) + '</button>'
+  ).join('');
+  document.getElementById('bs-custom').value = '';
+  document.getElementById('bs-question-area').style.display = 'block';
+  document.getElementById('bs-custom').focus();
+}
+
+async function bsPickOption(idx) {
+  const btn = document.querySelectorAll('#bs-options button')[idx];
+  const answer = btn ? btn.textContent.trim() : '';
+  if (!answer) return;
+  await bsSubmitAnswer(answer);
+}
+
+async function bsSubmitCustom() {
+  const input = document.getElementById('bs-custom');
+  const answer = input.value.trim();
+  if (!answer) return;
+  input.value = '';
+  await bsSubmitAnswer(answer);
+}
+
+async function bsSubmitAnswer(answer) {
+  bsMessages.push({ role: 'assistant', content: bsCurrentQuestion });
+  bsMessages.push({ role: 'user', content: answer });
+  document.getElementById('bs-question-area').style.display = 'none';
+  bsRender();
+  await bsAsk();
+}
+
+async function bsCall(action) {
+  const res = await fetch('/api/backstory/interview', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ basics: bsBasics(), messages: bsMessages, action })
+  });
+  return res.json();
+}
+
+async function bsAsk() {
+  bsSetBusy(true, 'Thinking…');
+  try {
+    const data = await bsCall('ask');
+    if (!data.ok) throw new Error(data.error || 'error');
+    bsShowQuestion(data.question, data.options || []);
+    document.getElementById('bs-status').textContent = '';
+  } catch(e) {
+    document.getElementById('bs-status').textContent = '✗ ' + e.message;
+    document.getElementById('bs-status').className = 'save-status err';
+  }
+  bsSetBusy(false);
+}
+
+async function openBackstoryAI() {
+  const missing = [];
+  if (!v('f-name').trim()) missing.push('Name');
+  const ageVal = parseInt(v('f-age'));
+  if (!v('f-age').trim() || isNaN(ageVal) || ageVal < 18) missing.push('Age (must be 18+)');
+  if (!v('f-archetype').trim()) missing.push('Archetype');
+  if (missing.length) { alert('Please fill in the following fields first: ' + missing.join(', ')); return; }
+  bsMessages = [];
+  bsCurrentQuestion = '';
+  bsRender();
+  document.getElementById('bs-question-area').style.display = 'none';
+  document.getElementById('bs-custom').value = '';
+  document.getElementById('backstory-modal').classList.add('open');
+  await bsAsk();
+}
+
+function closeBackstoryAI() { document.getElementById('backstory-modal').classList.remove('open'); }
+
+async function bsRegenerate() {
+  bsSetBusy(true, 'Generating new options…');
+  try {
+    const data = await bsCall('randomize');
+    if (!data.ok) throw new Error(data.error || 'error');
+    bsShowQuestion(data.question, data.options || []);
+    document.getElementById('bs-status').textContent = '';
+  } catch(e) {
+    document.getElementById('bs-status').textContent = '✗ ' + e.message;
+    document.getElementById('bs-status').className = 'save-status err';
+  }
+  bsSetBusy(false);
+}
+
+async function bsSkip() {
+  bsMessages.push({ role: 'assistant', content: bsCurrentQuestion });
+  bsMessages.push({ role: 'user', content: '(skipped)' });
+  document.getElementById('bs-question-area').style.display = 'none';
+  bsRender();
+  await bsAsk();
+}
+
+async function bsFinalize() {
+  bsSetBusy(true, 'Writing backstory…');
+  try {
+    const data = await bsCall('finalize');
+    if (!data.ok) throw new Error(data.error || 'error');
+    const ta = document.getElementById('f-backstory');
+    if (ta) ta.value = data.text;
+    closeBackstoryAI();
+  } catch(e) {
+    document.getElementById('bs-status').textContent = '✗ ' + e.message;
+    document.getElementById('bs-status').className = 'save-status err';
+    bsSetBusy(false);
+  }
+}
+
+function starBtn(slug, favorite, cls) {
+  return '<button type="button" class="' + cls + (favorite ? ' active' : '') +
+    '" title="' + (favorite ? 'Unfavorite' : 'Favorite') + '" ' +
+    'onclick="event.stopPropagation();toggleFavorite(\'' + slug + '\', event)">' +
+    (favorite ? '★' : '☆') + '</button>';
+}
+
+function buildPersonaItem(p) {
+  const el = document.createElement('div');
+  el.className = 'persona-item';
+  el.id = 'item-' + p.slug;
+  el.onclick = () => loadPersona(p.slug);
+  const initials = (p.name || p.slug).slice(0,2).toUpperCase();
+  const avatarHtml = p.avatar
+    ? '<img src="' + p.avatar + '?t=' + Date.now() + '" style="width:36px;height:36px;border-radius:50%;object-fit:cover;">'
+    : '<div class="persona-avatar">' + initials + '</div>';
+  const tag = p.premade ? '<span class="persona-tag">original</span>' : '';
+  const delBtn = p.premade ? ''
+    : '<button class="persona-del" title="Delete copy" onclick="event.stopPropagation();deletePersona(\'' + p.slug + '\')">✕</button>';
+  el.innerHTML = avatarHtml +
+    '<div style="flex:1;min-width:0;"><div class="persona-name">' + esc(p.name || p.slug) + tag + '</div>' +
+    '<div class="persona-slug">' + p.slug + '</div></div>' +
+    starBtn(p.slug, !!(p.config || {}).favorite, 'persona-star') + delBtn;
+  return el;
+}
+
+async function deletePersona(slug) {
+  if (!confirm('Delete this copy? This cannot be undone.')) return;
+  try {
+    const res = await fetch('/api/personas/' + slug, { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok || data.error) { alert(data.error || 'Could not delete'); return; }
+    delete personas[slug];
+    lsDeletePersona(slug);
+    if (currentSlug === slug) {
+      currentSlug = null;
+      document.getElementById('action-bar').style.display = 'none';
+    }
+    document.getElementById('persona-count').textContent = Object.keys(personas).length;
+    renderSidebar();
+  } catch(e) { alert('Could not delete: ' + e.message); }
+}
+
+async function toggleFavorite(slug, ev) {
+  if (ev) ev.stopPropagation();
+  const p = personas[slug];
+  if (!p) return;
+  p.config = p.config || {};
+  const next = !p.config.favorite;
+  p.config.favorite = next; // optimistic
+  renderSidebar();
+  if (!currentSlug) renderPersonaBrowser();
+  try {
+    const res = await fetch('/api/personas/' + slug + '/favorite', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ favorite: next })
+    });
+    const data = await res.json();
+    if (!res.ok || data.error) throw new Error(data.error || 'failed');
+  } catch (e) {
+    p.config.favorite = !next; // revert on failure
+    renderSidebar();
+    if (!currentSlug) renderPersonaBrowser();
+  }
+}
+
+// Favourites first, then whatever else fits — capped at 3, with "Show all"
+// covering the rest. Returning favourites *only* meant one starred persona
+// collapsed the whole sidebar list to a single row.
+function quickPersonas() {
+  const all = Object.values(personas);
+  const fav = p => !!(p.config || {}).favorite;
+  return all.filter(fav).concat(all.filter(p => !fav(p))).slice(0, 3);
+}
+
+function renderQuickList() {
+  const host = document.getElementById('sb-quick');
+  if (!host) return;
+  host.innerHTML = '';
+  quickPersonas().forEach(p => host.appendChild(buildPersonaItem(p)));
+
+  // The list is capped, so without a way out a creator with four unfavourited
+  // personas would see none of them here.
+  const total = Object.keys(personas).length;
+  if (total > host.children.length) {
+    const more = document.createElement('button');
+    more.type = 'button';
+    more.className = 'sb-showall';
+    more.textContent = 'Show all (' + total + ')';
+    more.onclick = showPersonaBrowser;
+    host.appendChild(more);
+  }
+
+  if (currentSlug) {
+    const active = document.getElementById('item-' + currentSlug);
+    if (active) active.classList.add('active');
+  }
+}
+
+const PROGRESS_FIELDS = {
+  name: 'name', age: 'age', archetype: 'personality', backstory: 'backstory',
+  speech_style: 'speech style', interests: 'interests', avatar: 'photo',
+  cta_url: 'your link',
+};
+
+function progressFilled(cfg) {
+  return Object.keys(PROGRESS_FIELDS).filter(k => String((cfg || {})[k] || '').trim().length > 0);
+}
+
+function personaProgress(cfg) {
+  const keys = Object.keys(PROGRESS_FIELDS);
+  return Math.round((progressFilled(cfg).length / keys.length) * 100);
+}
+
+// Names what is still blank, so the bar says what to do next rather than just
+// how far along you are. Separate from personaProgress, whose integer return is
+// concatenated into markup in several places.
+function personaMissing(cfg) {
+  const filled = new Set(progressFilled(cfg));
+  return Object.keys(PROGRESS_FIELDS).filter(k => !filled.has(k)).map(k => PROGRESS_FIELDS[k]);
+}
+
+function progressTitle(pct, cfg) {
+  const missing = personaMissing(cfg);
+  return missing.length ? pct + '% complete — still needs ' + missing.join(', ')
+                        : 'Complete — every field is filled in';
+}
+
+function progressBarHtml(pct, cfg) {
+  return '<div class="pg-bar" role="progressbar" aria-valuenow="' + pct + '" aria-valuemin="0" ' +
+    'aria-valuemax="100" aria-label="Persona completeness" title="' + esc(progressTitle(pct, cfg)) + '">' +
+    '<i style="width:' + pct + '%;background:' + progressBand(pct) + ';"></i></div>' +
+    '<span class="pg-pct" style="color:' + progressBand(pct) + ';">' + pct + '%</span>';
+}
+
+function progressBand(pct) {
+  if (pct >= 75) return 'var(--ok)';
+  if (pct >= 40) return 'var(--warn)';
+  return 'var(--err)';
+}
+
+function pgViewKey() { return 'admin_pg_view' + lsNs(); }
+function pgView() { try { return localStorage.getItem(pgViewKey()) || 'cards'; } catch(e) { return 'cards'; } }
+function setPgView(v) { try { localStorage.setItem(pgViewKey(), v); } catch(e) {} renderPersonaBrowser(); }
+
+// ── Gallery filter & sort ────────────────────────────────────────────────────
+// Persisted like the view toggle so a creator's shortlist survives a reload.
+function pgFilterKey() { return 'admin_pg_filter' + lsNs(); }
+function pgSortKey()   { return 'admin_pg_sort' + lsNs(); }
+
+function pgFilter() {
+  try { return JSON.parse(localStorage.getItem(pgFilterKey()) || '{}') || {}; }
+  catch(e) { return {}; }
+}
+function pgSort() { try { return localStorage.getItem(pgSortKey()) || 'name'; } catch(e) { return 'name'; } }
+
+function savePgFilter(f) { try { localStorage.setItem(pgFilterKey(), JSON.stringify(f)); } catch(e) {} }
+
+// Which dropdown is open survives the full re-render that every keystroke and
+// every toggle triggers — same reason pgQuery is kept out here.
+let pgMenu = null;
+function togglePgMenu(name) { pgMenu = (pgMenu === name) ? null : name; renderPersonaBrowser(); }
+function closePgMenu() { if (pgMenu) { pgMenu = null; renderPersonaBrowser(); } }
+
+function setPgSort(v) { try { localStorage.setItem(pgSortKey(), v); } catch(e) {} pgMenu = null; renderPersonaBrowser(); }
+
+// Values inside one category are OR'd; the categories AND together.
+function togglePgFilter(cat, value) {
+  const f = pgFilter();
+  const list = f[cat] || [];
+  f[cat] = list.includes(value) ? list.filter(x => x !== value) : list.concat([value]);
+  if (!f[cat].length) delete f[cat];
+  savePgFilter(f);
+  renderPersonaBrowser();
+}
+function clearPgFilter() { savePgFilter({}); pgMenu = null; renderPersonaBrowser(); }
+function pgFilterCount() { return Object.values(pgFilter()).reduce((n, v) => n + v.length, 0); }
+
+function completionBand(pct) {
+  if (pct >= 100) return 'complete';
+  return pct > 0 ? 'partial' : 'empty';
+}
+
+const COMPLETION_LABELS = { complete: 'Complete', partial: 'In progress', empty: 'Not started' };
+const NSFW_LABELS = { off: 'Off', suggestive: 'Suggestive', moderate: 'Moderate', explicit: 'Explicit' };
+
+function personaNsfw(cfg) {
+  if (!cfg.nsfw) return 'off';
+  return String(cfg.nsfw_level || 'suggestive').toLowerCase();
+}
+
+// Archetypes come from the personas present rather than a hardcoded list, so a
+// custom archetype is filterable the moment it exists.
+function pgArchetypes() {
+  const seen = new Set();
+  Object.values(personas).forEach(p => {
+    const a = ((p.config || {}).archetype || '').trim();
+    if (a) seen.add(a);
+  });
+  return [...seen].sort();
+}
+
+function matchesPgFilter(p) {
+  const f = pgFilter();
+  const cfg = p.config || {};
+  const pct = personaProgress(Object.assign({ name: p.name, avatar: p.avatar }, cfg));
+  if (f.favorite && f.favorite.length && !cfg.favorite) return false;
+  if (f.archetype && f.archetype.length && !f.archetype.includes((cfg.archetype || '').trim())) return false;
+  if (f.completion && f.completion.length && !f.completion.includes(completionBand(pct))) return false;
+  if (f.nsfw && f.nsfw.length && !f.nsfw.includes(personaNsfw(cfg))) return false;
+  return true;
+}
+
+function sortPgSlugs(slugs) {
+  const sort = pgSort();
+  const pctOf = p => personaProgress(Object.assign({ name: p.name, avatar: p.avatar }, p.config || {}));
+  const nameOf = p => (p.name || p.slug || '').toLowerCase();
+  return slugs.slice().sort((a, b) => {
+    const pa = personas[a], pb = personas[b];
+    if (sort === 'completion') return pctOf(pb) - pctOf(pa) || nameOf(pa).localeCompare(nameOf(pb));
+    if (sort === 'recent') {
+      // Personas from the repo have no timestamp; keep them after saved ones
+      // rather than letting an empty string sort them to the top.
+      const ta = pa.updated_at || pa.created_at || '';
+      const tb = pb.updated_at || pb.created_at || '';
+      if (ta && tb) return tb.localeCompare(ta);
+      if (ta !== tb) return ta ? -1 : 1;
+      return nameOf(pa).localeCompare(nameOf(pb));
+    }
+    if (sort === 'favorite') {
+      const fa = (pa.config || {}).favorite ? 0 : 1;
+      const fb = (pb.config || {}).favorite ? 0 : 1;
+      if (fa !== fb) return fa - fb;
+      return nameOf(pa).localeCompare(nameOf(pb));
+    }
+    return nameOf(pa).localeCompare(nameOf(pb));
+  });
+}
+
+function clearSbActive() {
+  document.querySelectorAll('.sb-item.active').forEach(el => el.classList.remove('active'));
+}
+
+function showPersonaBrowser() {
+  currentSlug = null;
+  if (window.PlatformSetup && PlatformSetup.running()) PlatformSetup.close();
+  document.body.classList.remove('embedding');
+  document.querySelectorAll('.persona-item').forEach(el => el.classList.remove('active'));
+  document.getElementById('action-bar').style.display = 'none';
+  clearSbActive();
+  const nav = document.getElementById('sb-nav-personas');
+  if (nav) nav.classList.add('active');
+  renderPersonaBrowser();
+}
+
+// Chat / Landing / Profile / Platforms / Manage users all load right here instead of
+// navigating away — same-origin pages, no frame-blocking headers, session cookie carries
+// over automatically.
+// Platform links: the operator gets the full console page, a creator gets the
+// guided connect wizard — the console pages are admin-only server-side.
+function openPlatform(platform, navEl) {
+  if (document.body.classList.contains('is-admin')) {
+    return openEmbedded('/' + (platform === 'x' ? 'xbot' : platform), navEl);
+  }
+  currentSlug = null;
+  document.querySelectorAll('.persona-item').forEach(el => el.classList.remove('active'));
+  clearSbActive();
+  if (navEl) navEl.classList.add('active');
+  document.body.classList.remove('browsing');
+  document.body.classList.remove('embedding');
+  PlatformSetup.open(platform, null);
+}
+
+function openPlatformHub(navEl) {
+  if (document.body.classList.contains('is-admin')) {
+    return openEmbedded('/telegram', navEl);
+  }
+  currentSlug = null;
+  document.querySelectorAll('.persona-item').forEach(el => el.classList.remove('active'));
+  clearSbActive();
+  if (navEl) navEl.classList.add('active');
+  document.body.classList.remove('browsing');
+  document.body.classList.remove('embedding');
+  PlatformSetup.hub();
+}
+
+function openEmbedded(url, navEl) {
+  if (window.PlatformSetup && PlatformSetup.running()) PlatformSetup.close();
+  currentSlug = null;
+  document.querySelectorAll('.persona-item').forEach(el => el.classList.remove('active'));
+  clearSbActive();
+  if (navEl) navEl.classList.add('active');
+  document.getElementById('action-bar').style.display = 'none';
+  document.body.classList.remove('browsing');
+  document.body.classList.add('embedding');
+  document.getElementById('form-area').innerHTML =
+    '<iframe class="sb-frame" src="' + url + '" title="Embedded page"></iframe>';
+}
+
+function personaThumb(p, size) {
+  return p.avatar
+    ? '<img src="' + p.avatar + '?t=' + Date.now() + '" style="width:100%;height:100%;object-fit:cover;">'
+    : '<div class="pg-initials" style="font-size:' + Math.round(size * 0.32) + 'px;">' + esc((p.name || p.slug).slice(0,2).toUpperCase()) + '</div>';
+}
+
+function pgCheckRow(cat, value, label) {
+  const on = (pgFilter()[cat] || []).includes(value);
+  return '<button type="button" class="pg-opt' + (on ? ' on' : '') + '" role="menuitemcheckbox" ' +
+    'aria-checked="' + on + '" onclick="event.stopPropagation();togglePgFilter(\'' + cat + '\',' +
+    JSON.stringify(value).replace(/"/g, '&quot;') + ')">' +
+    '<span class="pg-tick" aria-hidden="true">' + (on ? '✓' : '') + '</span>' + esc(label) + '</button>';
+}
+
+function pgFilterMenuHtml() {
+  const n = pgFilterCount();
+  const arche = pgArchetypes();
+  const groups =
+    '<div class="pg-opt-h">Status</div>' +
+    Object.keys(COMPLETION_LABELS).map(k => pgCheckRow('completion', k, COMPLETION_LABELS[k])).join('') +
+    (arche.length ? '<div class="pg-opt-h">Personality</div>' +
+      arche.map(a => pgCheckRow('archetype', a, a)).join('') : '') +
+    '<div class="pg-opt-h">Content level</div>' +
+    Object.keys(NSFW_LABELS).map(k => pgCheckRow('nsfw', k, NSFW_LABELS[k])).join('') +
+    '<div class="pg-opt-h">Other</div>' +
+    pgCheckRow('favorite', 'yes', 'Favourites only') +
+    (n ? '<button type="button" class="pg-opt pg-opt-clear" onclick="event.stopPropagation();clearPgFilter()">Clear all filters</button>' : '');
+
+  return '<div class="pg-menu' + (pgMenu === 'filter' ? ' open' : '') + '">' +
+    '<button type="button" class="pg-ctl' + (n ? ' active' : '') + '" aria-haspopup="true" ' +
+    'aria-expanded="' + (pgMenu === 'filter') + '" onclick="event.stopPropagation();togglePgMenu(\'filter\')">' +
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" width="14" height="14" aria-hidden="true">' +
+      '<path d="M3 5h18M6 12h12M10 19h4" stroke-linecap="round"/></svg>Filter' +
+      (n ? '<span class="pg-ctl-n">' + n + '</span>' : '') +
+    '</button>' +
+    '<div class="pg-pop" role="menu">' + groups + '</div></div>';
+}
+
+const SORT_LABELS = { name: 'Name (A–Z)', completion: 'Most complete', recent: 'Recently updated', favorite: 'Favourites first' };
+
+function pgSortMenuHtml() {
+  const cur = pgSort();
+  return '<div class="pg-menu' + (pgMenu === 'sort' ? ' open' : '') + '">' +
+    '<button type="button" class="pg-ctl" aria-haspopup="true" aria-expanded="' + (pgMenu === 'sort') + '" ' +
+    'onclick="event.stopPropagation();togglePgMenu(\'sort\')">' +
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" width="14" height="14" aria-hidden="true">' +
+      '<path d="M7 4v16M7 20l-3-3M17 20V4M17 4l3 3" stroke-linecap="round" stroke-linejoin="round"/></svg>' +
+      esc(SORT_LABELS[cur] || SORT_LABELS.name) +
+    '</button>' +
+    '<div class="pg-pop" role="menu">' +
+      Object.keys(SORT_LABELS).map(k =>
+        '<button type="button" class="pg-opt' + (k === cur ? ' on' : '') + '" role="menuitemradio" ' +
+        'aria-checked="' + (k === cur) + '" onclick="event.stopPropagation();setPgSort(\'' + k + '\')">' +
+        '<span class="pg-tick" aria-hidden="true">' + (k === cur ? '✓' : '') + '</span>' +
+        esc(SORT_LABELS[k]) + '</button>').join('') +
+    '</div></div>';
+}
+
+function pgStatusHtml(shown, total) {
+  if (shown === total && !pgQuery) return '';
+  return '<div class="pg-status">Showing <strong>' + shown + '</strong> of ' + total +
+    (pgFilterCount() ? ' <button type="button" class="pg-clear" onclick="clearPgFilter()">Clear filters</button>' : '') +
+    '</div>';
+}
+
+// A filtered-away grid is not the same as owning no personas — say which.
+function pgEmptyHtml() {
+  const bits = [];
+  if (pgQuery) bits.push('the search “' + esc(pgQuery) + '”');
+  if (pgFilterCount()) bits.push('the filters you picked');
+  return '<div class="pg-none">' +
+    '<div class="pg-none-t">Nothing matches ' + (bits.join(' and ') || 'that') + '</div>' +
+    '<button type="button" class="btn btn-secondary" onclick="clearPgFilter();setPgQuery(\'\')">Reset</button></div>';
+}
+
+function renderPersonaBrowser() {
+  const allSlugs = Object.keys(personas);
+  const fa = document.getElementById('form-area');
+  if (!allSlugs.length) {
+    document.body.classList.remove('browsing');
+    fa.innerHTML = EMPTY_HTML;
+    return;
+  }
+  document.body.classList.add('browsing');
+  const view = pgView();
+  const slugs = sortPgSlugs(allSlugs.filter(slug =>
+    matchesQuery(personas[slug], pgQuery) && matchesPgFilter(personas[slug])));
+  const cards = slugs.map(slug => {
+    const p = personas[slug];
+    const cfg = p.config || {};
+    const pct = personaProgress(Object.assign({ name: p.name, avatar: p.avatar }, cfg));
+    const sub = esc(cfg.archetype || p.slug);
+    const delBtn = p.premade ? '' :
+      '<button type="button" class="pg-del" title="Delete" onclick="event.stopPropagation();deletePersona(\'' + slug + '\')">✕</button>';
+    const star = starBtn(slug, !!cfg.favorite, 'pg-star');
+    if (view === 'list') {
+      return '<div class="pg-row" onclick="loadPersona(\'' + slug + '\')">' +
+        '<div class="pg-row-thumb">' + personaThumb(p, 48) + '</div>' +
+        '<div class="pg-row-info"><div class="pg-row-name">' + esc(p.name || slug) + '</div>' +
+        '<div class="pg-row-sub">' + sub + '</div></div>' +
+        '<div class="pg-row-bar">' + progressBarHtml(pct, cfg) + '</div>' +
+        star +
+        '<button type="button" class="btn btn-ghost pg-open" onclick="event.stopPropagation();loadPersona(\'' + slug + '\')">Open</button>' +
+        delBtn + '</div>';
+    }
+    return '<div class="pg-card" onclick="loadPersona(\'' + slug + '\')">' +
+      '<div class="pg-card-img">' + personaThumb(p, 220) +
+        '<div class="pg-scrim"></div>' + star + delBtn +
+        '<div class="pg-card-text"><div class="pg-card-name">' + esc(p.name || slug) + '</div>' +
+        '<div class="pg-card-sub">' + sub + '</div></div></div>' +
+      '<div class="pg-card-foot">' +
+        progressBarHtml(pct, cfg) +
+        '<button type="button" class="btn btn-primary pg-open" onclick="event.stopPropagation();loadPersona(\'' + slug + '\')">Open</button>' +
+      '</div></div>';
+  }).join('');
+
+  fa.innerHTML =
+    '<div class="pg-head">' +
+      '<div class="pg-head-l">' +
+        '<h2 style="font-size:1.1rem;font-weight:600;">Your personas</h2>' +
+        '<button type="button" class="btn btn-primary" onclick="newPersona()">+ New persona</button>' +
+      '</div>' +
+      '<div class="pg-search">' +
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="14" height="14" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3" stroke-linecap="round"/></svg>' +
+        '<input type="text" placeholder="Search personas…" value="' + esc(pgQuery) + '" oninput="setPgQuery(this.value)">' +
+      '</div>' +
+      pgFilterMenuHtml() +
+      pgSortMenuHtml() +
+      '<div class="pg-toggle">' +
+        '<button type="button" class="' + (view === 'cards' ? 'active' : '') + '" onclick="setPgView(\'cards\')">▦ Cards</button>' +
+        '<button type="button" class="' + (view === 'list' ? 'active' : '') + '" onclick="setPgView(\'list\')">☰ List</button>' +
+      '</div></div>' +
+    pgStatusHtml(slugs.length, allSlugs.length) +
+    (slugs.length
+      ? '<div class="' + (view === 'list' ? 'pg-list' : 'pg-grid') + '">' + cards + '</div>'
+      : pgEmptyHtml());
+  // The search box's own oninput re-renders this whole block, which would
+  // otherwise steal focus and the cursor position on every keystroke.
+  if (pgFocusPending !== null) {
+    const input = fa.querySelector('.pg-search input');
+    if (input) {
+      input.focus();
+      input.setSelectionRange(pgFocusPending, pgFocusPending);
+    }
+    pgFocusPending = null;
+  }
+}
+
+function renderSidebar() {
+  if (!currentSlug) renderPersonaBrowser();
+  renderQuickList();
+}
+
+async function loadPersona(slug) {
+  currentSlug = slug;
+  if (window.PlatformSetup && PlatformSetup.running()) PlatformSetup.close();
+  document.body.classList.remove('embedding');
+  if (window.innerWidth <= 900) closeMobilePanels();
+  document.querySelectorAll('.persona-item').forEach(el => el.classList.remove('active'));
+  clearSbActive();
+  const item = document.getElementById('item-' + slug);
+  if (item) item.classList.add('active');
+  let config = {};
+  try {
+    const res = await fetch('/api/personas/' + slug);
+    const data = await res.json();
+    config = data.config || {};
+  } catch(e) {}
+  if (!config.name) {
+    const cached = lsLoadPersona(slug);
+    if (cached) config = cached;
+  }
+  renderForm(slug, config);
+  showActionBar();
+  loadGallery(slug);
+  loadNsfwGallery(slug);
+  loadPhases();
+  if (!config.speech_style) generateSpeechStyle(false);
+  if (!config.conversion_triggers) generateTriggers();
+}
+
+
+// Live chat preview (right-hand panel). Consolidates what used to be several
+// small "How she'd sound" widgets scattered through the form into one
+// persistent panel styled like the real fan-facing chat window.
+const EX_SECTIONS = [
+  ['archetype', 'Archetype'],
+  ['voice', 'Voice & warmth'],
+  ['interests', 'Interests'],
+  ['flirt', 'Flirt pace'],
+  ['funnel', 'Conversion funnel'],
+];
+
+function pcAvatarHtml(cfg) {
+  const src = (cfg.avatar || '').trim();
+  if (src) return '<img class="msg-av" src="' + esc(src) + '" alt="">';
+  const initials = esc((cfg.name || 'AI').slice(0, 2).toUpperCase());
+  return '<div class="msg-av pc-av-fallback">' + initials + '</div>';
+}
+
+function renderChatPreview() {
+  const panel = document.getElementById('preview-chat');
+  if (!panel || !window.PersonaExamples) return;
+  const cfg = collectConfig();
+  const name = cfg.name || 'Persona';
+  document.getElementById('pc-name').textContent = name;
+  const metaParts = [];
+  if (cfg.location && !cfg.mirror_location) metaParts.push(cfg.location);
+  if (cfg.age) metaParts.push(cfg.age);
+  document.getElementById('pc-meta').textContent = metaParts.join(' · ') || 'Fill in the form to preview her';
+
+  const avatarSrc = (cfg.avatar || '').trim();
+  const avatarImg = document.getElementById('pc-avatar');
+  const avatarFallback = document.getElementById('pc-avatar-fallback');
+  if (avatarSrc) {
+    avatarImg.src = avatarSrc; avatarImg.style.display = '';
+    avatarFallback.style.display = 'none';
+  } else {
+    avatarImg.style.display = 'none';
+    avatarFallback.textContent = name.slice(0, 2).toUpperCase();
+    avatarFallback.style.display = 'flex';
+  }
+
+  const win = document.getElementById('pc-window');
+  let html = '';
+  EX_SECTIONS.forEach(([key, label]) => {
+    const build = window.PersonaExamples[key];
+    if (!build) return;
+    let ex;
+    try { ex = build(cfg); } catch (e) { return; }
+    if (!ex.turns || !ex.turns.length) return;
+    html += '<div class="pc-section-label">' + esc(label) + (ex.caption ? ' — ' + esc(ex.caption) : '') + '</div>';
+    ex.turns.forEach(t => {
+      const isUser = t.who === 'fan';
+      html += '<div class="msg-row ' + (isUser ? 'user' : 'bot') + '">' +
+        (!isUser ? pcAvatarHtml(cfg) : '') +
+        '<div class="bubble">' + esc(t.text) + '</div></div>';
+    });
+    if (ex.note) html += '<div class="pc-section-note">' + esc(ex.note) + '</div>';
+  });
+  win.innerHTML = html || '<div class="pc-empty">Fill in the form to see a live preview.</div>';
+}
+
+const EX_FIELDS = ['f-name', 'f-age', 'f-location', 'f-avatar', 'f-archetype', 'f-warmth', 'f-qfreq', 'f-speech', 'f-interests',
+  'f-reply-length', 'f-emoji-use', 'f-lowercase',
+                   'f-flirt', 'f-nsfw', 'f-nsfw-level', 'f-triggers', 'f-cta-label'];
+let exTimer = null;
+
+// Delegated, because the wizard moves the real inputs in and out of the DOM
+// between steps — listeners bound to the fields themselves would not survive.
+['input', 'change'].forEach(evt => {
+  document.getElementById('form-area').addEventListener(evt, e => {
+    if (!e.target || EX_FIELDS.indexOf(e.target.id) === -1) return;
+    clearTimeout(exTimer);
+    exTimer = setTimeout(renderChatPreview, 150);
+  });
+});
+
+const WARMTH_COLORS = ['#5b8bb0', '#7a9e8e', '#e0b24f', '#ff5c38', '#ff2d78'];
+
+function updateWarmthSlider(el) {
+  const v = parseInt(el.value, 10) || 1;
+  document.getElementById('warmth-val').textContent = v;
+  const color = WARMTH_COLORS[v - 1];
+  const pct = ((v - 1) / 4) * 100;
+  el.style.setProperty('--warmth-color', color);
+  el.style.background =
+    'linear-gradient(90deg, ' + WARMTH_COLORS.slice(0, v).join(', ') +
+    (v > 1 ? ' ' + pct + '%' : '') + ', var(--surface-2) ' + pct + '%)';
+  document.getElementById('warmth-val').style.color = color;
+  document.getElementById('warmth-val').style.borderColor = color;
+}
+
+function slugify(name) {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+}
+
+let nameResolve = null;
+
+function askName(opts) {
+  const modal = document.getElementById('name-modal');
+  const input = document.getElementById('name-input');
+  document.getElementById('name-title').textContent = opts.title;
+  document.getElementById('name-hint').textContent = opts.hint || '';
+  document.getElementById('name-ok').textContent = opts.confirm || 'Create';
+  input.placeholder = opts.placeholder || '';
+  input.value = opts.value || '';
+  modal.classList.add('open');
+  nameSlugPreview();
+  setTimeout(function () { input.focus(); input.select(); }, 30);
+  return new Promise(function (resolve) { nameResolve = resolve; });
+}
+
+function nameSlugPreview() {
+  const slug = slugify(document.getElementById('name-input').value.trim());
+  const el = document.getElementById('name-slug');
+  el.textContent = slug ? 'Saved as ' + slug : '';
+  document.getElementById('name-ok').disabled = !slug;
+}
+
+function nameClose(value) {
+  document.getElementById('name-modal').classList.remove('open');
+  const resolve = nameResolve;
+  nameResolve = null;
+  if (resolve) resolve(value);
+}
+
+function nameConfirm() {
+  const name = document.getElementById('name-input').value.trim();
+  if (!slugify(name)) return;
+  nameClose(name);
+}
+
+function nameCancel() { nameClose(null); }
+
+document.getElementById('name-input').addEventListener('input', nameSlugPreview);
+document.getElementById('name-input').addEventListener('keydown', function (e) {
+  if (e.key === 'Enter') nameConfirm();
+  if (e.key === 'Escape') nameCancel();
+});
+
+async function newPersona() {
+  const name = await askName({
+    title: 'Name your persona',
+    hint: 'This is what fans see at the top of the chat. You can change it later.',
+    placeholder: 'e.g. Nova'
+  });
+  if (!name) return;
+  const slug = slugify(name);
+  currentSlug = slug;
+  if (!personas[slug]) {
+    personas[slug] = { slug, name, config: {}, premade: false };
+    document.getElementById('persona-count').textContent = Object.keys(personas).length;
+  }
+  renderSidebar();
+  renderForm(slug, { name });
+  galleryImages = [];
+  renderGallery();
+
+  showActionBar();
+}
+
+// The guided setup supplies its own footer, so the builder's action bar stays
+// hidden until the creator finishes or skips it.
+function showActionBar() {
+  if (document.body.classList.contains('ob-running')) return;
+  document.getElementById('action-bar').style.display = 'flex';
+}
+
+
+
+
+
+
+function renderForm(slug, cfg) {
+  document.body.classList.remove('browsing');
+  loadedConfig = cfg || {};
+  const fa = document.getElementById('form-area');
+  fa.innerHTML = `
+    <div style="display:flex; align-items:baseline; gap:10px;">
+      <button type="button" class="btn-back-gallery" onclick="showPersonaBrowser()">&larr; All personas</button>
+      <h2 style="font-size:1.1rem; font-weight:600;">${cfg.name || slug}</h2>
+      <span style="font-size:0.75rem; color:var(--text-muted);">/${slug}</span>
+    </div>
+
+    <div class="form-section">
+      <div class="section-title">Identity<button type="button" class="btn-section-save" onclick="saveSection(this)">Save</button></div>
+      <div class="field-row">
+        <div class="field-col">
+        <div class="field identity-avatar">
+          <label>Profile Picture</label>
+          <div class="avatar-block">
+          <div id="avatar-preview" style="width:88px;height:88px;border-radius:50%;background:var(--surface);border:2px dashed var(--text-muted);display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;flex:0 0 auto;" onclick="document.getElementById('f-avatar-input').click()">
+            ${cfg.avatar ? '<img src="' + esc(cfg.avatar) + '" style="width:100%;height:100%;object-fit:cover;">' : '<span style="font-size:28px;color:var(--text-muted);">+</span>'}
+          </div>
+          <input type="file" id="f-avatar-input" accept="image/*" style="display:none;" onchange="handleAvatarUpload(this)">
+          <div class="avatar-actions">
+            <button type="button" class="btn btn-ghost" onclick="document.getElementById('f-avatar-input').click()">Upload</button>
+            ${cfg.avatar ? '<button type="button" class="btn btn-ghost" onclick="clearAvatar()">Remove</button>' : ''}
+          </div>
+          </div>
+          <input type="hidden" id="f-avatar" value="${esc(cfg.avatar || '')}">
+          <span class="hint" style="margin-top:6px;">Uses the first photo below unless you upload one here.</span>
+        </div>
+        <div class="field">
+          <label>Location</label>
+          <div style="position:relative;">
+            <input type="text" id="f-location" value="${esc(cfg.location || '')}" placeholder="Start typing a city or country…" autocomplete="off" oninput="onLocationInput()" onblur="autoMirrorIfBlank()" ${cfg.mirror_location ? 'disabled' : ''} style="${cfg.mirror_location ? 'opacity:0.45;' : ''}">
+            <div class="geo-suggest" id="geo-suggest" style="display:none;"></div>
+          </div>
+          <div class="toggle-row" style="margin-top:8px;">
+            <label class="toggle">
+              <input type="checkbox" id="f-mirror-location" ${cfg.mirror_location ? 'checked' : ''} onchange="toggleMirrorLocation(this.checked)">
+              <span class="toggle-track"></span>
+            </label>
+            <span class="toggle-label" style="font-size:0.8rem;">Always match the fan's location</span>
+          </div>
+          <span class="hint" id="mirror-hint" style="display:${cfg.mirror_location ? 'block' : 'none'}">Persona claims to be from wherever the fan is — asks naturally if unknown, then mirrors it.</span>
+        </div>
+        </div>
+        <div class="field-col">
+          <div class="field">
+            <label>Display Name</label>
+            <input type="text" id="f-name" value="${esc(cfg.name || '')}" placeholder="e.g. Aria">
+          </div>
+          <div class="field">
+            <label>Age</label>
+            <input type="number" id="f-age" value="${esc(cfg.age || '')}" placeholder="e.g. 23" min="18" step="1">
+          </div>
+          <div class="field">
+            <label>Gender</label>
+            <select id="f-gender">${opt(['Female', 'Male', 'Trans Female to Male', 'Trans Male to Female'], cfg.gender || 'Female')}</select>
+          </div>
+        <div class="field">
+          <label>Personality Archetype</label>
+          <select id="f-archetype">${opt(['Deadpan / Dry', 'Bubbly / Sweet', 'Dominant / Edgy', 'Girl-Next-Door', 'Mysterious / Dark', 'Playful / Teasing', 'Intellectual / Witty'], cfg.archetype)}</select>
+        </div>
+        </div>
+      </div>
+
+      <div class="field full">
+        <label style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px;">
+          <span>Backstory</span>
+          <span style="display:flex; gap:6px;">
+            <button type="button" class="btn-ai" style="background:var(--border);" id="backstory-rand-btn" onclick="randomizeBackstory()">🎲 Randomize</button>
+            <button type="button" class="btn-ai" onclick="openBackstoryAI()">✨ Build with AI</button>
+          </span>
+        </label>
+        <textarea id="f-backstory" placeholder="Write 2-3 sentences yourself, or click 'Build with AI' to be interviewed and have one generated.">${esc(cfg.backstory || '')}</textarea>
+        <span class="hint" id="backstory-rand-status"></span>
+        <span class="hint">Either type a short origin story, or let Gemini interview you and write it.</span>
+      </div>
+    </div>
+
+    <div class="form-section">
+      <div class="section-title" style="flex-wrap:wrap;">
+        <span style="margin-right:auto;">Photos <span style="font-weight:400; color:var(--text-muted); font-size:0.8rem;">(up to 5 — same person)</span></span>
+        <span style="display:flex; gap:6px;">
+          <button type="button" class="btn-ai" id="gen-face-btn" onclick="generateFirstPhoto()" title="Generate a new fictional face">✨ New face</button>
+          <button type="button" class="btn-ai" style="background:var(--border);" id="gen-more-btn" onclick="generateMorePhotos()" title="Add more shots of the same person">＋ More of her</button>
+          <button type="button" class="btn-section-save" style="margin-left:0;" onclick="savePhotosSection(this)">Save</button>
+        </span>
+      </div>
+      <div class="photo-grid" id="photo-grid"></div>
+      <input type="file" id="photo-file-input" accept="image/*" multiple style="display:none;" onchange="onPhotoFiles(event)">
+      <span class="hint" id="photo-status"></span>
+      <span class="hint" style="margin-top:2px;">First photo creates a fictional face; "More of her" keeps the same person in new shots. Photos save to the database on Save.</span>
+    </div>
+
+    <div class="form-section">
+      <div class="section-title" style="flex-wrap:wrap;">
+        <span style="margin-right:auto;">NSFW Photos <span style="font-weight:400; color:var(--text-muted); font-size:0.8rem;">(up to 5 — held back until the CTA)</span></span>
+        <span style="display:flex; gap:6px;">
+          <button type="button" class="btn-ai" id="gen-nsfw-face-btn" onclick="generateNsfwFirstPhoto()" title="Generate a new suggestive shot">✨ New face</button>
+          <button type="button" class="btn-ai" style="background:var(--border);" id="gen-nsfw-more-btn" onclick="generateNsfwMorePhotos()" title="Add more shots of the same person">＋ More of her</button>
+          <button type="button" class="btn-section-save" style="margin-left:0;" onclick="saveNsfwPhotosSection(this)">Save</button>
+        </span>
+      </div>
+      <div class="photo-grid" id="nsfw-photo-grid"></div>
+      <input type="file" id="nsfw-photo-file-input" accept="image/*" multiple style="display:none;" onchange="onNsfwPhotoFiles(event)">
+      <span class="hint" id="nsfw-photo-status"></span>
+      <span class="hint" style="margin-top:2px;">These never go out in a normal reply — only alongside the CTA link, once a fan has asked enough times (set below). Generated shots are the most suggestive the model will allow; for anything more explicit, upload your own.</span>
+    </div>
+
+
+    <div class="form-section">
+      <div class="section-title">Voice &amp; Speech Style<button type="button" class="btn-section-save" onclick="saveSection(this)">Save</button></div>
+      <div class="field full">
+        <label style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px;">
+          <span>Speech Style Rules</span>
+          <span style="display:flex; gap:6px;">
+            <button type="button" class="btn-ai" id="speech-gen-btn" onclick="generateSpeechStyle(false)">✨ Generate</button>
+            <button type="button" class="btn-ai" style="background:var(--border);" id="speech-rand-btn" onclick="generateSpeechStyle(true)">🎲 Randomize</button>
+          </span>
+        </label>
+        <textarea id="f-speech" placeholder="Click ✨ Generate to auto-fill based on your persona, or write your own rules here.">${esc(cfg.speech_style || '')}</textarea>
+        <span class="hint" id="speech-gen-status"></span>
+        <span class="hint" style="margin-top:2px;">Slang, punctuation and personality quirks. The three settings below are applied on top of this.</span>
+      </div>
+      <div class="field">
+        <label>Reply Length</label>
+        <select id="f-reply-length">${opt(['short', 'medium', 'long'], cfg.reply_length || 'short')}</select>
+        <span class="hint">Short is 1–2 sentences and reads most like a real text.</span>
+      </div>
+      <div class="field">
+        <label>Emoji Use</label>
+        <select id="f-emoji-use">${opt(['none', 'rare', 'some', 'lots'], cfg.emoji_use || 'none')}</select>
+        <span class="hint">None keeps her sounding like a person rather than a brand account.</span>
+      </div>
+      <div class="field">
+        <div class="toggle-row">
+          <label class="toggle">
+            <input type="checkbox" id="f-lowercase" ${(cfg.lowercase === undefined ? true : cfg.lowercase) ? 'checked' : ''}>
+            <span class="toggle-track"></span>
+          </label>
+          <span class="toggle-label">Write in lowercase</span>
+        </div>
+        <span class="hint">Off gives her ordinary sentence capitalisation.</span>
+      </div>
+      <div class="field">
+        <label>Warmth Level</label>
+        <div class="slider-row">
+          <input type="range" class="warmth-slider" id="f-warmth" min="1" max="5" value="${cfg.warmth || 3}" oninput="updateWarmthSlider(this)">
+          <span class="slider-val" id="warmth-val">${cfg.warmth || 3}</span>
+        </div>
+        <div class="slider-labels"><span>Cold</span><span>Distant</span><span>Friendly</span><span>Warm</span><span>Affectionate</span></div>
+      </div>
+      <div class="field">
+        <label>Question Frequency</label>
+        <select id="f-qfreq">${opt(['rarely', 'sometimes', 'often', 'very often'], cfg.question_freq)}</select>
+        <span class="hint">How often the persona asks the fan a question to keep them engaged.</span>
+      </div>
+      <div class="field">
+        <label>Reply Speed</label>
+        <select id="f-reply-speed">${opt(['instant', 'fast', 'natural', 'slow'], cfg.reply_speed || 'natural')}</select>
+        <span class="hint">How long she waits before she starts typing, in the chat on your website. Slower reads as a real person with a life; instant reads as a bot. Fanvue and Telegram pace their own replies &mdash; set those on their own pages.</span>
+      </div>
+      <div class="field">
+        <label>Typing Speed</label>
+        <select id="f-typing-speed">${opt(['fast', 'natural', 'slow'], cfg.typing_speed || 'natural')}</select>
+        <span class="hint">How long the typing bubble runs in the chat on your website, scaled by how long the message is. Fanvue and Telegram have their own typing speed.</span>
+      </div>
+    </div>
+
+    <div class="form-section">
+      <div class="section-title">Interests &amp; Hooks<button type="button" class="btn-section-save" onclick="saveSection(this)">Save</button></div>
+      <div class="field full">
+        <label style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px;">
+          <span>Topics the persona naturally returns to</span>
+          <span style="display:flex; gap:6px;">
+            <button type="button" class="btn-ai" id="interests-gen-btn" onclick="generateInterests(false)">✨ Generate</button>
+            <button type="button" class="btn-ai" style="background:var(--border);" id="interests-rand-btn" onclick="generateInterests(true)">🎲 Randomize</button>
+          </span>
+        </label>
+        <input type="text" id="f-interests" value="${esc(cfg.interests || '')}" placeholder="gaming, fitness, tattoos, music, cooking…">
+        <span class="hint" id="interests-gen-status"></span>
+        <span class="hint" style="margin-top:2px;">Comma-separated. These appear in conversation naturally.</span>
+      </div>
+    </div>
+
+    <div class="form-section">
+      <div class="section-title">Flirt &amp; Content Rules<button type="button" class="btn-section-save" onclick="saveSection(this)">Save</button></div>
+      <div class="field">
+        <label>Flirt Escalation Pace</label>
+        <select id="f-flirt">${opt(['slow', 'moderate', 'fast', 'instant'], cfg.flirt_pace)}</select>
+      </div>
+      <div class="field">
+        <div class="toggle-row">
+          <label class="toggle">
+            <input type="checkbox" id="f-nsfw" ${cfg.nsfw_enabled ? 'checked' : ''} onchange="toggleNsfw(this.checked)">
+            <span class="toggle-track"></span>
+          </label>
+          <span class="toggle-label">Enable NSFW / Adult Content</span>
+        </div>
+      </div>
+      <div class="field" id="nsfw-level-field" style="display:${cfg.nsfw_enabled ? 'flex' : 'none'}">
+        <label>NSFW Level</label>
+        <select id="f-nsfw-level">${opt(['suggestive', 'moderate', 'explicit'], cfg.nsfw_level)}</select>
+      </div>
+    </div>
+
+    <div class="form-section">
+      <div class="section-title">Conversion Funnel<button type="button" class="btn-section-save" onclick="saveSection(this)">Save</button></div>
+      <div class="field full">
+        <label style="display:flex; align-items:center; justify-content:space-between;">
+          <span>Conversion Triggers</span>
+          <button type="button" class="btn-ai" id="triggers-gen-btn" onclick="generateTriggers()">↻ Regenerate</button>
+        </label>
+        <textarea id="f-triggers" placeholder="Auto-fills when you save — or click Regenerate.">${esc(cfg.conversion_triggers || '')}</textarea>
+        <span class="hint" id="triggers-gen-status"></span>
+        <span class="hint" style="margin-top:2px;">When and how to introduce your offer. Editable — tweak to match your style.</span>
+      </div>
+      <div class="field">
+        <label>When a fan asks for spicy content</label>
+        <select id="f-spicy-cta">${opt(['off', 'normal', 'fast', 'instant'], cfg.spicy_cta || 'normal')}</select>
+        <span class="hint">A fan asking to see more is a buying signal. "Fast" brings your CTA link forward to the next reply or two; "instant" sends it in that same reply, every time they ask.</span>
+      </div>
+      <div class="field">
+        <label>Release an explicit preview after</label>
+        <input type="number" id="f-spicy-release" min="0" max="10" step="1" value="${cfg.spicy_release_after === undefined ? 3 : cfg.spicy_release_after}">
+        <span class="hint">Once a fan has asked this many times, the CTA fires with a photo from NSFW Photos above attached — a preview, not just a link. 0 turns this off. Needs at least one photo in that section.</span>
+      </div>
+    </div>
+
+    <div class="form-section">
+      <div class="section-title">
+        Chat Phases &amp; CTA
+        <button type="button" class="btn-section-save" onclick="savePhases(this)">Save</button>
+      </div>
+      <span class="hint">Control the conversation arc. Each phase sets how long it lasts and how often she sends photos. The CTA link is sent once the fan reaches the final phase.</span>
+      <span class="hint" id="phases-status"></span>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px;">
+        <div class="field">
+          <label>CTA Destination URL</label>
+          <input type="text" id="f-cta-url" placeholder="https://onlyfans.com/yourname">
+          <span class="hint">OnlyFans, Fanvue, your own page…</span>
+        </div>
+        <div class="field">
+          <label>CTA Link Label</label>
+          <input type="text" id="f-cta-label" placeholder="come find me here">
+          <span class="hint">Shown before the link, in her voice.</span>
+        </div>
+      </div>
+      <div id="phases-list"></div>
+      <div style="margin-top:8px;">
+        <button type="button" class="btn btn-ghost" onclick="addPhase()" style="font-size:0.78rem;">+ Add Phase</button>
+      </div>
+    </div>
+
+
+    </div>
+
+  `;
+  // A hand-uploaded avatar keeps ownership across reloads; anything else follows photo 1.
+  loadedPlatforms = cfg.platforms || {};
+  avatarFromPhoto = !cfg.avatar || !!cfg.avatar_from_photo;
+  updateWarmthSlider(document.getElementById('f-warmth'));
+  renderChatPreview();
+  if (window.Onboarding) Onboarding.onFormRendered(slug, cfg);
+}
+
+function toggleNsfw(on) { document.getElementById('nsfw-level-field').style.display = on ? 'flex' : 'none'; }
+
+function toggleMirrorLocation(on) {
+  const input = document.getElementById('f-location');
+  const hint  = document.getElementById('mirror-hint');
+  if (input) { input.disabled = on; input.style.opacity = on ? '0.45' : '1'; }
+  if (hint)  hint.style.display = on ? 'block' : 'none';
+}
+
+// ── Location autocomplete (city, country — country mandatory) ──
+let geoTimer = null;
+function onLocationInput() {
+  const input = document.getElementById('f-location');
+  const box = document.getElementById('geo-suggest');
+  if (!input || !box) return;
+  const q = input.value.trim();
+  clearTimeout(geoTimer);
+  if (q.length < 2) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  geoTimer = setTimeout(async () => {
+    try {
+      const res = await fetch('/api/geo/suggest?q=' + encodeURIComponent(q));
+      const data = await res.json();
+      const items = data.suggestions || [];
+      if (!items.length) { box.style.display = 'none'; return; }
+      box.innerHTML = items.map(s => '<div class="geo-item" onclick="pickLocation(\'' +
+        s.label.replace(/'/g, "\\'") + '\')">' + esc(s.label) + '</div>').join('');
+      box.style.display = 'block';
+    } catch(e) { box.style.display = 'none'; }
+  }, 250);
+}
+function pickLocation(label) {
+  const input = document.getElementById('f-location');
+  if (input) input.value = label;
+  const box = document.getElementById('geo-suggest');
+  if (box) { box.style.display = 'none'; box.innerHTML = ''; }
+}
+document.addEventListener('click', e => {
+  const box = document.getElementById('geo-suggest');
+  if (box && !e.target.closest('#f-location') && !e.target.closest('#geo-suggest')) box.style.display = 'none';
+  if (pgMenu && !e.target.closest('.pg-menu')) closePgMenu();
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && pgMenu) closePgMenu();
+});
+
+// Leaving location blank automatically means "match the fan's location".
+function autoMirrorIfBlank() {
+  const input = document.getElementById('f-location');
+  const box = document.getElementById('f-mirror-location');
+  if (!input || !box || box.checked) return;
+  if (!input.value.trim()) { box.checked = true; toggleMirrorLocation(true); }
+}
+
+// The per-persona platform credential form is gone (platform connections now
+// live in the platform wizard), but the saved value is carried through so
+// saving the builder does not wipe an older persona's stored block.
+function collectPlatforms() {
+  return loadedPlatforms;
+}
+
+// Every generate/randomize action shares one in-flight shape: disable the
+// button, show dots plus what is being made, then report the outcome. Kept in
+// one place so a new AI action cannot quietly ship without a loading state.
+function setBusy(btnId, statusId, label) {
+  const btn = document.getElementById(btnId);
+  const st  = document.getElementById(statusId);
+  if (btn) btn.disabled = true;
+  if (st) {
+    st.className = 'save-status';
+    st.innerHTML = '<span class="busy-label"><span class="loader-dots" role="status" aria-live="polite">'
+      + '<i></i><i></i><i></i></span>' + esc(label) + '</span>';
+  }
+}
+
+function clearBusy(btnId, statusId, msg, ok) {
+  const btn = document.getElementById(btnId);
+  const st  = document.getElementById(statusId);
+  if (btn) btn.disabled = false;
+  if (!st) return;
+  st.className = 'save-status ' + (ok ? 'ok' : 'err');
+  st.textContent = msg;
+  if (ok) setTimeout(() => { if (st.textContent === msg) { st.textContent = ''; st.className = 'save-status'; } }, 2000);
+}
+
+
+async function randomizeBackstory() {
+  if (!document.getElementById('backstory-rand-btn')) return;
+  setBusy('backstory-rand-btn', 'backstory-rand-status', 'Writing her backstory…');
+  try {
+    const res  = await fetch('/api/generate/backstory', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ name: v('f-name'), age: v('f-age'), location: v('f-location'),
+        archetype: v('f-archetype'), interests: v('f-interests') })
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'error');
+    document.getElementById('f-backstory').value = data.text;
+    clearBusy('backstory-rand-btn', 'backstory-rand-status', '✓ Done', true);
+  } catch(e) { clearBusy('backstory-rand-btn', 'backstory-rand-status', '✗ ' + e.message, false); }
+}
+
+async function generateSpeechStyle(randomize) {
+  const sBtnId = randomize ? 'speech-rand-btn' : 'speech-gen-btn';
+  setBusy(sBtnId, 'speech-gen-status', randomize ? 'Finding a new voice…' : 'Writing her voice…');
+  try {
+    const res  = await fetch('/api/generate/speech-style', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ name: v('f-name'), age: v('f-age'), archetype: v('f-archetype'),
+        backstory: v('f-backstory'), interests: v('f-interests'), randomize })
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'error');
+    document.getElementById('f-speech').value = data.text;
+    clearBusy(sBtnId, 'speech-gen-status', '✓ Done', true);
+  } catch(e) { clearBusy(sBtnId, 'speech-gen-status', '✗ ' + e.message, false); }
+}
+
+async function generateTriggers() {
+  setBusy('triggers-gen-btn', 'triggers-gen-status', 'Finding her openings…');
+  try {
+    const res  = await fetch('/api/generate/conversion-triggers', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ name: v('f-name'), archetype: v('f-archetype'),
+        flirt_pace: v('f-flirt'), nsfw_level: v('f-nsfw-level') })
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'error');
+    document.getElementById('f-triggers').value = data.text;
+    clearBusy('triggers-gen-btn', 'triggers-gen-status', '✓ Done', true);
+  } catch(e) { clearBusy('triggers-gen-btn', 'triggers-gen-status', '✗ ' + e.message, false); }
+}
+
+function handleAvatarUpload(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    avatarFromPhoto = false;
+    setAvatar(e.target.result);
+  };
+  reader.readAsDataURL(file);
+}
+
+function clearAvatar() {
+  // Deliberately empty beats being refilled from photo 1 on the next render.
+  avatarFromPhoto = false;
+  setAvatar('');
+}
+
+// Keys the form has no field for (favorite, anything added later) would be
+// dropped by a save if the config were rebuilt from the inputs alone.
+let loadedConfig = {};
+
+function collectConfig() {
+  const locVal = v('f-location').trim();
+  const mirror = (document.getElementById('f-mirror-location')?.checked || false) || !locVal;
+  return {
+    ...loadedConfig,
+    name: v('f-name'), age: v('f-age'), gender: v('f-gender'),
+    location: locVal, mirror_location: mirror,
+    archetype: v('f-archetype'), backstory: v('f-backstory'), speech_style: v('f-speech'),
+    warmth: parseInt(v('f-warmth')) || 3, question_freq: v('f-qfreq'),
+    reply_length: v('f-reply-length'), emoji_use: v('f-emoji-use'),
+    lowercase: document.getElementById('f-lowercase')?.checked ?? true,
+    reply_speed: v('f-reply-speed'), typing_speed: v('f-typing-speed'),
+    spicy_cta: v('f-spicy-cta'),
+    spicy_release_after: parseInt(v('f-spicy-release')) || 0,
+    interests: v('f-interests'), flirt_pace: v('f-flirt'),
+    nsfw_enabled: document.getElementById('f-nsfw')?.checked || false,
+    nsfw_level: v('f-nsfw-level'), conversion_triggers: v('f-triggers'),
+    avatar: v('f-avatar'), avatar_from_photo: avatarFromPhoto, platforms: collectPlatforms(),
+  };
+}
+
+function flashSaved(btn, ok = true) {
+  if (!btn) return;
+  const original = btn.dataset.label || btn.textContent;
+  btn.dataset.label = original;
+  btn.textContent = ok ? '✓ Saved' : '✗ Failed';
+  btn.classList.add(ok ? 'saved' : 'failed');
+  setTimeout(() => {
+    btn.textContent = original;
+    btn.classList.remove('saved', 'failed');
+  }, 1600);
+}
+
+async function savePhotosSection(btn) {
+  if (!currentSlug) return;
+  try {
+    await saveGallery(currentSlug);
+    flashSaved(btn);
+  } catch(e) { flashSaved(btn, false); }
+}
+
+// Every section edits one shared config object, so a section Save writes the
+// whole config — it just reports back where the user is looking.
+async function saveSection(btn) {
+  if (!currentSlug) return;
+  const config = collectConfig();
+  const ageNum = parseInt(config.age);
+  if (!config.age || isNaN(ageNum) || ageNum < 18) {
+    alert('Age must be 18 or older.');
+    document.getElementById('f-age').focus();
+    return;
+  }
+  try {
+    const res = await fetch('/api/personas/' + currentSlug, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config)
+    });
+    const data = await res.json();
+    if (res.status === 409 && data.error === 'premade_readonly') {
+      // Originals are read-only; fall back to the full save, which forks a copy.
+      flashSaved(btn);
+      return savePersona();
+    }
+    if (!data.ok) throw new Error(data.error || 'save failed');
+    lsSavePersona(currentSlug, config);
+    if (data.prompt) localStorage.setItem(lsPromptKey(currentSlug), data.prompt);
+    flashSaved(btn);
+  } catch(e) {
+    flashSaved(btn, false);
+  }
+}
+
+async function savePersona() {
+  if (!currentSlug) return;
+  const config = collectConfig();
+  const ageNum = parseInt(config.age);
+  if (!config.age || isNaN(ageNum) || ageNum < 18) { alert('Age must be 18 or older.'); document.getElementById('f-age').focus(); return; }
+  const status = document.getElementById('save-status');
+  status.textContent = 'Saving…'; status.className = 'save-status';
+  try {
+    // Photos and phases always save to the current persona (originals included).
+    await saveGallery(currentSlug);
+    await saveNsfwGallery(currentSlug);
+    await postPhases(currentSlug);
+
+    // Originals can now be overridden in place — the edit is saved to the DB
+    // and shadows the repo file.
+    const res = await fetch('/api/personas/' + currentSlug, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config)
+    });
+    const data = await res.json();
+    if (res.status === 409 && data.error === 'premade_readonly') {
+      status.textContent = 'Original models are read-only — saving as a copy…';
+      status.className = 'save-status';
+      await copyPersona(config);
+      return;
+    }
+    if (data.ok) {
+      lsSavePersona(currentSlug, config);
+      if (data.prompt) localStorage.setItem(lsPromptKey(currentSlug), data.prompt);
+      status.textContent = '✓ Saved & deployed'; status.className = 'save-status ok';
+      if (personas[currentSlug]) {
+        personas[currentSlug].name = config.name || currentSlug;
+        personas[currentSlug].avatar = config.avatar || '';
+      }
+      renderSidebar();
+      showPromptPreview(data.prompt);
+    } else { throw new Error(data.error || 'Unknown error'); }
+  } catch(e) { status.textContent = '✗ ' + e.message; status.className = 'save-status err'; }
+}
+
+// ── Persona photo gallery (max 5, same person) ──
+let galleryImages = [];   // array of data URLs
+const MAX_PHOTOS = 5;
+// The avatar mirrors photo 1 until someone uploads or clears one by hand.
+let loadedPlatforms = {};
+let avatarFromPhoto = true;
+
+function renderGallery() {
+  const grid = document.getElementById('photo-grid');
+  if (!grid) return;
+  grid.innerHTML = '';
+  galleryImages.forEach((src, i) => {
+    const cell = document.createElement('div');
+    cell.className = 'photo-cell';
+    cell.innerHTML = '<img src="' + src + '" alt="photo ' + (i+1) + '">' +
+      '<button type="button" class="photo-del" title="Remove" onclick="removePhoto(' + i + ')">✕</button>' +
+      (i === 0 ? '<span class="photo-badge">profile</span>' : '');
+    grid.appendChild(cell);
+  });
+  if (galleryImages.length < MAX_PHOTOS) {
+    const add = document.createElement('div');
+    add.className = 'photo-cell photo-add';
+    add.title = 'Upload a photo';
+    add.innerHTML = '<span>＋</span>';
+    add.onclick = () => document.getElementById('photo-file-input').click();
+    grid.appendChild(add);
+  }
+  syncAvatarFromGallery();
+}
+
+function setAvatar(dataUrl) {
+  const field = document.getElementById('f-avatar');
+  const prev  = document.getElementById('avatar-preview');
+  if (!field || !prev) return;
+  field.value = dataUrl;
+  prev.innerHTML = dataUrl
+    ? '<img src="' + dataUrl + '" style="width:100%;height:100%;object-fit:cover;">'
+    : '<span style="font-size:28px;color:var(--text-muted);">+</span>';
+}
+
+function syncAvatarFromGallery() {
+  if (!avatarFromPhoto || !galleryImages.length) return;
+  setAvatar(galleryImages[0]);
+}
+
+async function loadGallery(slug) {
+  galleryImages = [];
+  renderGallery();
+  try {
+    const res = await fetch('/api/personas/' + slug + '/images?full=1');
+    const data = await res.json();
+    if (Array.isArray(data.images)) galleryImages = data.images.slice(0, MAX_PHOTOS);
+  } catch(e) {}
+  renderGallery();
+
+}
+
+function removePhoto(i) { galleryImages.splice(i, 1); renderGallery(); }
+
+function onPhotoFiles(ev) {
+  const files = Array.from(ev.target.files || []);
+  let remaining = MAX_PHOTOS - galleryImages.length;
+  files.slice(0, remaining).forEach(file => {
+    const reader = new FileReader();
+    reader.onload = e => { if (galleryImages.length < MAX_PHOTOS) { galleryImages.push(e.target.result); renderGallery(); } };
+    reader.readAsDataURL(file);
+  });
+  ev.target.value = '';
+}
+
+async function generateFirstPhoto() {
+  if (galleryImages.length >= MAX_PHOTOS) { setPhotoStatus('Max 5 photos.', false); return; }
+  const btn = document.getElementById('gen-face-btn');
+  if (btn) btn.disabled = true;
+  setPhotoBusy(true, 'Generating a new face…');
+  setPhotoStatus('Generating a new face…', null);
+  try {
+    const res = await fetch('/api/generate/image', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config: collectConfig(), shot: 'portrait' })
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Generation failed');
+    galleryImages.push(data.image); renderGallery();
+    setPhotoStatus('✓ Face added — use "More of her" for matching shots', true);
+  } catch(e) { setPhotoStatus('✗ ' + e.message, false); }
+  finally { setPhotoBusy(false); if (btn) btn.disabled = false; }
+}
+
+async function generateMorePhotos() {
+  if (!galleryImages.length) { setPhotoStatus('Make a face first with "New face".', false); return; }
+  if (galleryImages.length >= MAX_PHOTOS) { setPhotoStatus('Max 5 photos.', false); return; }
+  const btn = document.getElementById('gen-more-btn');
+  if (btn) btn.disabled = true;
+  const shots = ['half', 'full', 'candid', 'mirror'];
+  const reference = galleryImages[0];
+  try {
+    while (galleryImages.length < MAX_PHOTOS) {
+      const shot = shots[(galleryImages.length - 1) % shots.length];
+      setPhotoBusy(true, 'Generating photo ' + (galleryImages.length + 1) + ' of the same person…');
+      setPhotoStatus('Generating photo ' + (galleryImages.length + 1) + ' of the same person…', null);
+      const res = await fetch('/api/generate/image', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reference, shot, config: collectConfig() })
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Generation failed');
+      galleryImages.push(data.image); renderGallery();
+    }
+    setPhotoStatus('✓ Photo set complete', true);
+  } catch(e) { setPhotoStatus('✗ ' + e.message, false); }
+  finally { setPhotoBusy(false); if (btn) btn.disabled = false; }
+}
+
+function setPhotoStatus(msg, ok) {
+  const el = document.getElementById('photo-status');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = ok === true ? 'var(--ok)' : ok === false ? 'var(--err)' : 'var(--text-3)';
+}
+
+// Image generation is the longest wait in the builder, so it scrims the grid
+// it is about to change rather than only tinting a button somewhere else.
+function setPhotoBusy(on, label) {
+  const grid = document.getElementById('photo-grid');
+  if (!grid) return;
+  grid.classList.add('loader-host');
+  let ov = grid.querySelector('.loader-overlay');
+  if (!on) { if (ov) ov.remove(); return; }
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.className = 'loader-overlay';
+    grid.appendChild(ov);
+  }
+  ov.innerHTML = '<span class="loader-dots lg" role="status" aria-live="polite"><i></i><i></i><i></i></span>'
+    + '<span>' + esc(label) + '</span>';
+}
+
+async function saveGallery(slug) {
+  try {
+    await fetch('/api/personas/' + slug + '/images', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ images: galleryImages })
+    });
+  } catch(e) {}
+}
+
+// ── NSFW photo pool (max 5, held out of every normal send) ──
+// Same shape as the gallery above, entirely separate storage and endpoints —
+// these never reach a normal reply, only the CTA moment (app.py _chat_nsfw_photo).
+let nsfwGalleryImages = [];   // array of data URLs
+
+function renderNsfwGallery() {
+  const grid = document.getElementById('nsfw-photo-grid');
+  if (!grid) return;
+  grid.innerHTML = '';
+  nsfwGalleryImages.forEach((src, i) => {
+    const cell = document.createElement('div');
+    cell.className = 'photo-cell';
+    cell.innerHTML = '<img src="' + src + '" alt="nsfw photo ' + (i+1) + '">' +
+      '<button type="button" class="photo-del" title="Remove" onclick="removeNsfwPhoto(' + i + ')">✕</button>' +
+      (i === 0 ? '<span class="photo-badge">18+</span>' : '');
+    grid.appendChild(cell);
+  });
+  if (nsfwGalleryImages.length < MAX_PHOTOS) {
+    const add = document.createElement('div');
+    add.className = 'photo-cell photo-add';
+    add.title = 'Upload a photo';
+    add.innerHTML = '<span>＋</span>';
+    add.onclick = () => document.getElementById('nsfw-photo-file-input').click();
+    grid.appendChild(add);
+  }
+}
+
+async function loadNsfwGallery(slug) {
+  nsfwGalleryImages = [];
+  renderNsfwGallery();
+  try {
+    const res = await fetch('/api/personas/' + slug + '/nsfw-images?full=1');
+    const data = await res.json();
+    if (Array.isArray(data.images)) nsfwGalleryImages = data.images.slice(0, MAX_PHOTOS);
+  } catch(e) {}
+  renderNsfwGallery();
+}
+
+function removeNsfwPhoto(i) { nsfwGalleryImages.splice(i, 1); renderNsfwGallery(); }
+
+function onNsfwPhotoFiles(ev) {
+  const files = Array.from(ev.target.files || []);
+  let remaining = MAX_PHOTOS - nsfwGalleryImages.length;
+  files.slice(0, remaining).forEach(file => {
+    const reader = new FileReader();
+    reader.onload = e => { if (nsfwGalleryImages.length < MAX_PHOTOS) { nsfwGalleryImages.push(e.target.result); renderNsfwGallery(); } };
+    reader.readAsDataURL(file);
+  });
+  ev.target.value = '';
+}
+
+async function generateNsfwFirstPhoto() {
+  if (nsfwGalleryImages.length >= MAX_PHOTOS) { setNsfwPhotoStatus('Max 5 photos.', false); return; }
+  const btn = document.getElementById('gen-nsfw-face-btn');
+  if (btn) btn.disabled = true;
+  setNsfwPhotoBusy(true, 'Generating a new shot…');
+  setNsfwPhotoStatus('Generating a new shot…', null);
+  try {
+    const res = await fetch('/api/generate/image', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config: collectConfig(), shot: 'lingerie' })
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Generation failed');
+    nsfwGalleryImages.push(data.image); renderNsfwGallery();
+    setNsfwPhotoStatus('✓ Shot added — use "More of her" for matching shots', true);
+  } catch(e) { setNsfwPhotoStatus('✗ ' + e.message, false); }
+  finally { setNsfwPhotoBusy(false); if (btn) btn.disabled = false; }
+}
+
+async function generateNsfwMorePhotos() {
+  if (!nsfwGalleryImages.length) { setNsfwPhotoStatus('Make a face first with "New face".', false); return; }
+  if (nsfwGalleryImages.length >= MAX_PHOTOS) { setNsfwPhotoStatus('Max 5 photos.', false); return; }
+  const btn = document.getElementById('gen-nsfw-more-btn');
+  if (btn) btn.disabled = true;
+  const shots = ['implied', 'sheer', 'bedroom', 'lingerie'];
+  const reference = nsfwGalleryImages[0];
+  try {
+    while (nsfwGalleryImages.length < MAX_PHOTOS) {
+      const shot = shots[(nsfwGalleryImages.length - 1) % shots.length];
+      setNsfwPhotoBusy(true, 'Generating photo ' + (nsfwGalleryImages.length + 1) + ' of the same person…');
+      setNsfwPhotoStatus('Generating photo ' + (nsfwGalleryImages.length + 1) + ' of the same person…', null);
+      const res = await fetch('/api/generate/image', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reference, shot, config: collectConfig() })
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || 'Generation failed');
+      nsfwGalleryImages.push(data.image); renderNsfwGallery();
+    }
+    setNsfwPhotoStatus('✓ Photo set complete', true);
+  } catch(e) { setNsfwPhotoStatus('✗ ' + e.message, false); }
+  finally { setNsfwPhotoBusy(false); if (btn) btn.disabled = false; }
+}
+
+function setNsfwPhotoStatus(msg, ok) {
+  const el = document.getElementById('nsfw-photo-status');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.color = ok === true ? 'var(--ok)' : ok === false ? 'var(--err)' : 'var(--text-3)';
+}
+
+function setNsfwPhotoBusy(on, label) {
+  const grid = document.getElementById('nsfw-photo-grid');
+  if (!grid) return;
+  grid.classList.add('loader-host');
+  let ov = grid.querySelector('.loader-overlay');
+  if (!on) { if (ov) ov.remove(); return; }
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.className = 'loader-overlay';
+    grid.appendChild(ov);
+  }
+  ov.innerHTML = '<span class="loader-dots lg" role="status" aria-live="polite"><i></i><i></i><i></i></span>'
+    + '<span>' + esc(label) + '</span>';
+}
+
+async function saveNsfwGallery(slug) {
+  try {
+    await fetch('/api/personas/' + slug + '/nsfw-images', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ images: nsfwGalleryImages })
+    });
+  } catch(e) {}
+}
+
+async function saveNsfwPhotosSection(btn) {
+  if (!currentSlug) return;
+  try {
+    await saveNsfwGallery(currentSlug);
+    flashSaved(btn);
+  } catch(e) { flashSaved(btn, false); }
+}
+
+
+async function fillAllInfo() {
+  if (!currentSlug) return;
+  setBusy('fillall-btn', 'save-status', 'Generating a complete persona…');
+  try {
+    const res = await fetch('/api/generate/persona', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hint: v('f-name') || '' })
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Generation failed');
+    const cfg = data.config;
+    cfg.avatar = v('f-avatar') || cfg.avatar || '';   // keep any uploaded avatar
+    renderForm(currentSlug, cfg);                       // repopulate every field at once
+    if (personas[currentSlug]) personas[currentSlug].name = cfg.name || currentSlug;
+    renderSidebar();
+    clearBusy('fillall-btn', 'save-status', '✓ Filled — review, then Save & Deploy', true);
+  } catch(e) {
+    clearBusy('fillall-btn', 'save-status', '✗ ' + e.message, false);
+  }
+}
+
+async function copyPersona(presetConfig) {
+  if (!currentSlug) return;
+  const config = presetConfig || collectConfig();
+  const suggested = (config.name || personas[currentSlug]?.name || '') + ' copy';
+  const newName = prompt('Name this copy (it saves as a new model, leaving the original unchanged):', suggested.trim());
+  if (!newName || !newName.trim()) return;
+  const status = document.getElementById('save-status');
+  status.textContent = 'Creating copy…'; status.className = 'save-status';
+  try {
+    // Persist the current edits onto the copy by sending the live config as the source.
+    const res = await fetch('/api/personas/copy', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: currentSlug, name: newName.trim(), config })
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'Could not copy');
+    await saveGallery(data.slug);   // carry the current photos onto the copy
+    await saveNsfwGallery(data.slug);
+    personas[data.slug] = { slug: data.slug, name: data.name, config: { ...config, name: data.name }, premade: false };
+    document.getElementById('persona-count').textContent = Object.keys(personas).length;
+    status.textContent = '✓ Copied as "' + data.name + '"'; status.className = 'save-status ok';
+    renderSidebar();
+    loadPersona(data.slug);
+  } catch(e) { status.textContent = '✗ ' + e.message; status.className = 'save-status err'; }
+}
+
+async function previewPrompt() {
+  if (!currentSlug) return;
+  const config = collectConfig();
+  try {
+    const res = await fetch('/api/personas/' + currentSlug + '/preview', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config)
+    });
+    const data = await res.json();
+    // Tab first: showPromptPreview only writes while the prompt tab is showing,
+    // and Live Chat is now the tab the panel opens on.
+    switchTabByName('prompt');
+    showPromptPreview(data.prompt);
+  } catch(e) { console.error(e); }
+}
+
+function showPromptPreview(prompt) {
+  if (currentTab === 'prompt') {
+    document.getElementById('preview-content').innerHTML = '<div class="prompt-box">' + esc(prompt) + '</div>';
+  }
+}
+
+async function testChat() {
+  if (!currentSlug) return;
+  const config = collectConfig();
+  const res = await fetch('/api/personas/' + currentSlug, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(config)
+  });
+  const data = await res.json().catch(() => ({}));
+  if (data.prompt) localStorage.setItem(lsPromptKey(currentSlug), data.prompt);
+  window.open('/chat?persona=' + currentSlug, '_blank');
+}
+
+function switchTab(name, el) {
+  currentTab = name;
+  document.querySelectorAll('.preview-tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('preview-chat').style.display = name === 'chat' ? 'flex' : 'none';
+  document.getElementById('preview-content').style.display = name === 'chat' ? 'none' : 'block';
+  if (name === 'funnel') renderFunnelPreview();
+}
+
+function switchTabByName(name) {
+  document.querySelectorAll('.preview-tab').forEach((t, i) => {
+    if ((i === 0 && name === 'chat') || (i === 1 && name === 'prompt') || (i === 2 && name === 'funnel')) {
+      t.classList.add('active'); currentTab = name;
+    } else { t.classList.remove('active'); }
+  });
+  document.getElementById('preview-chat').style.display = name === 'chat' ? 'flex' : 'none';
+  document.getElementById('preview-content').style.display = name === 'chat' ? 'none' : 'block';
+}
+
+function renderFunnelPreview() {
+  const stages = [
+    { name: 'Warm',    desc: 'Friendly opener, build rapport, ask about the fan.',              color: 'var(--ok)' },
+    { name: 'Engage',  desc: 'Reference what the fan shared. Create a sense of being known.',   color: '#84cc16' },
+    { name: 'Intrigue',desc: 'Drop hints about exclusive content without hard-selling.',         color: '#eab308' },
+    { name: 'Tease',   desc: 'Light flirt or behind-the-scenes reference implying more exists.',color: '#f97316' },
+    { name: 'Offer',   desc: 'Natural, in-character mention of paid post / PPV / subscription perk.', color: 'var(--err)' },
+    { name: 'Close',   desc: 'Reinforce value. Make the fan feel special for buying.',           color: '#a855f7' },
+  ];
+  const config = collectConfig();
+  const paceNote = { slow: 'Slow burn — funnel progresses over many sessions.', moderate: 'Moderate — funnel completes over a few conversations.', fast: 'Fast — funnel progresses within a single conversation.', instant: 'Instant — moves to tease/offer very quickly.' }[config.flirt_pace] || '';
+  document.getElementById('preview-content').innerHTML =
+    '<div style="margin-bottom:12px; font-size:0.78rem; color:var(--text-muted);">' + paceNote + '</div>' +
+    stages.map(s =>
+      '<div class="funnel-stage"><div class="funnel-dot" style="background:' + s.color + ';"></div><div><div class="funnel-stage-name">' + s.name + '</div><div class="funnel-stage-desc">' + s.desc + '</div></div></div>'
+    ).join('') +
+    (config.conversion_triggers ? '<div style="margin-top:14px; font-size:0.75rem; color:var(--text-muted);"><strong style="color:var(--text-3);">Custom triggers:</strong><br>' + esc(config.conversion_triggers) + '</div>' : '');
+}
+
+async function generateInterests(randomize) {
+  const iBtnId = randomize ? 'interests-rand-btn' : 'interests-gen-btn';
+  setBusy(iBtnId, 'interests-gen-status', randomize ? 'Finding new interests…' : 'Picking her interests…');
+  try {
+    const res  = await fetch('/api/generate/interests', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ name: v('f-name'), age: v('f-age'), archetype: v('f-archetype'),
+        backstory: v('f-backstory'), randomize })
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || 'error');
+    document.getElementById('f-interests').value = data.text;
+    clearBusy(iBtnId, 'interests-gen-status', '✓ Done', true);
+  } catch(e) { clearBusy(iBtnId, 'interests-gen-status', '✗ ' + e.message, false); }
+}
+
+// ── Chat phases ─────────────────────────────────────────────────────────────
+let chatPhases = [];
+
+async function loadPhases() {
+  if (!currentSlug) return;
+  try {
+    const res = await fetch('/api/personas/' + currentSlug + '/phases');
+    const data = await res.json();
+    chatPhases = data.phases || [];
+    document.getElementById('f-cta-url').value = data.cta_url || '';
+    document.getElementById('f-cta-label').value = data.cta_label || '';
+  } catch(e) { chatPhases = []; }
+  renderPhases();
+}
+
+function renderPhases() {
+  const box = document.getElementById('phases-list');
+  if (!box) return;
+  box.innerHTML = chatPhases.map((ph, i) => phaseBlock(ph, i)).join('');
+}
+
+function phaseBlock(ph, i) {
+  const dtOpts = [['exchanges','Exchanges'],['days','Days'],['exchanges_and_days','Exchanges and Days']];
+  const isLast = i === chatPhases.length - 1;
+  return `
+    <div class="outfit" style="margin-bottom:6px;">
+      <div class="outfit-head" onclick="this.parentElement.classList.toggle('is-open')">
+        <span class="outfit-num">${i + 1}</span>
+        <span class="outfit-name">${esc(ph.name || 'Phase ' + (i+1))}</span>
+        <span class="outfit-meta">${ph.photo_rate || 0}% photos</span>
+        <span class="outfit-caret">▶</span>
+      </div>
+      <div class="outfit-body">
+        <div class="outfit-fields">
+          <div class="field">
+            <label>Phase Name</label>
+            <input type="text" value="${esc(ph.name)}" onchange="chatPhases[${i}].name=this.value;renderPhases()">
+          </div>
+          <div class="field">
+            <label>Duration Type</label>
+            <select onchange="chatPhases[${i}].duration_type=this.value;renderPhases()">
+              ${dtOpts.map(([v,l]) => '<option value="'+v+'"'+(ph.duration_type===v?' selected':'')+'>'+l+'</option>').join('')}
+            </select>
+          </div>
+          ${ph.duration_type === 'exchanges' || ph.duration_type === 'exchanges_and_days' ? `
+          <div class="field">
+            <label>Exchanges${isLast ? ' (ignored — last phase)' : ''}</label>
+            <input type="number" min="0" value="${ph.duration_value || 0}" onchange="chatPhases[${i}].duration_value=+this.value"${isLast ? ' disabled' : ''}>
+          </div>` : ''}
+          ${ph.duration_type === 'days' || ph.duration_type === 'exchanges_and_days' ? `
+          <div class="field">
+            <label>Days${isLast ? ' (ignored — last phase)' : ''}</label>
+            <input type="number" min="0" value="${ph.duration_days || 0}" onchange="chatPhases[${i}].duration_days=+this.value"${isLast ? ' disabled' : ''}>
+          </div>` : ''}
+          <div class="field full">
+            <label>Photo Sending Rate: <strong>${ph.photo_rate || 0}%</strong></label>
+            <div class="slider-row">
+              <input type="range" min="0" max="100" value="${ph.photo_rate || 0}" oninput="chatPhases[${i}].photo_rate=+this.value;this.closest('.field').querySelector('strong').textContent=this.value+'%'">
+            </div>
+            <div class="slider-labels"><span>0% text only</span><span>50%</span><span>100% every msg</span></div>
+            <span class="hint">Recommended: increase with each phase.</span>
+          </div>
+        </div>
+        ${chatPhases.length > 2 ? '<button type="button" class="btn btn-ghost" style="color:var(--err);border-color:var(--err);font-size:0.75rem;margin-top:6px;" onclick="removePhase('+i+')">Remove phase</button>' : ''}
+      </div>
+    </div>`;
+}
+
+function addPhase() {
+  const last = chatPhases[chatPhases.length - 1];
+  chatPhases.splice(chatPhases.length - 1, 0, {
+    name: 'Phase ' + chatPhases.length,
+    duration_type: 'exchanges', duration_value: 20, duration_days: 0,
+    photo_rate: Math.min(100, (last?.photo_rate || 20) + 10)
+  });
+  renderPhases();
+}
+
+function removePhase(i) {
+  if (chatPhases.length <= 2) return;
+  chatPhases.splice(i, 1);
+  renderPhases();
+}
+
+// Phases and the CTA live in their own store, not in the persona config, so
+// every save path has to write them explicitly.
+async function postPhases(slug) {
+  if (!document.getElementById('f-cta-url')) return;   // form not rendered
+  const res = await fetch('/api/personas/' + slug + '/phases', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      phases: chatPhases,
+      cta_url: v('f-cta-url'),
+      cta_label: v('f-cta-label')
+    })
+  });
+  if (!res.ok) throw new Error('phases save failed');
+}
+
+async function savePhases(btn) {
+  if (!currentSlug) return;
+  try {
+    await postPhases(currentSlug);
+    flashSaved(btn);
+  } catch(e) { flashSaved(btn, false); }
+}
+
+function v(id) { const el = document.getElementById(id); return el ? el.value.trim() : ''; }
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function opt(options, selected) {
+  return options.map(o => '<option value="' + esc(o) + '" ' + (o === selected ? 'selected' : '') + '>' + o + '</option>').join('');
+}
+
+init();
+</script>
+
+</body>
+</html>

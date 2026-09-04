@@ -1,0 +1,15 @@
+.git
+__pycache__/
+*.pyc
+logs/
+*.log
+*.db
+*.db-journal
+.env
+*.md
+grok.ps1
+chat_cli.py
+test_*.py
+Dockerfile
+.dockerignore
+cloudbuild.yaml

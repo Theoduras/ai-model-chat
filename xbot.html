@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>X Engagement Bot</title>
+  <script src="/js/theme.js"></script>
+  <link rel="stylesheet" href="/css/style.css">
+  <script src="/js/devnav.js" defer></script>
+  <style>
+    .xbot-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+    .xbot-wrap { max-width: 760px; margin: 0 auto; padding: 28px 24px 80px; display: flex; flex-direction: column; gap: 20px; }
+    .xbot-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    @media (max-width: 640px) { .xbot-grid { grid-template-columns: 1fr; } }
+    .result-box { margin-top: 12px; font-size: 0.82rem; display: flex; flex-direction: column; gap: 8px; }
+    .reply-card { background: var(--bg); border: 1px solid #2a2a30; border-radius: 10px; padding: 12px 14px; }
+    .reply-card .from { color: var(--accent); font-weight: 600; font-size: 0.78rem; }
+    .reply-card .cmt { color: var(--text-3); margin: 4px 0 8px; font-style: italic; }
+    .reply-card .rep { color: var(--text); }
+    .reply-card .tag { float: right; font-size: 0.7rem; padding: 1px 8px; border-radius: 9999px; }
+    .tag.ok { background: #14532d; color: #4ade80; }
+    .tag.no { background: #4c0519; color: #fb7185; }
+    .conn-pill { font-size: 0.75rem; padding: 3px 10px; border-radius: 9999px; background: var(--surface); color: var(--text-3); }
+    .conn-pill.ok { background: #14532d; color: #4ade80; }
+    .conn-pill.err { background: #4c0519; color: #fb7185; }
+    :root[data-theme="light"] .tag.ok, :root[data-theme="light"] .conn-pill.ok { background: #e8f6ed; color: #0f7038; }
+    :root[data-theme="light"] .tag.no, :root[data-theme="light"] .conn-pill.err { background: #fdecec; color: #c81e1e; }
+    :root[data-theme="light"] .auto-log .ln.act { color: #0f7038; border-left-color: #a8ddbd; }
+    :root[data-theme="light"] .auto-log .ln.er { color: #c81e1e; border-left-color: #f0b4b4; }
+    .auto-toggles { display: flex; flex-wrap: wrap; gap: 10px 20px; margin-top: 14px; }
+    .auto-chk { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--text-2); cursor: pointer; }
+    .auto-chk input { width: auto; }
+    .auto-log { margin-top: 14px; max-height: 240px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; font-size: 0.78rem; font-family: ui-monospace, monospace; }
+    .auto-log .ln { color: var(--text-3); border-left: 2px solid var(--surface); padding: 2px 0 2px 10px; }
+    .auto-log .ln.act { color: #4ade80; border-left-color: #14532d; }
+    .auto-log .ln.hd { color: var(--accent); border-left-color: #312e81; }
+    .auto-log .ln.er { color: #fb7185; border-left-color: #4c0519; }
+    .conn-pill.run { background: #312e81; color: #c7d2fe; }
+    .row-inline { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+    .row-inline .field { flex: 1; min-width: 160px; }
+    @media (max-width: 640px) {
+      .xbot-wrap { padding: 18px 14px 70px; gap: 16px; }
+      .row-inline { gap: 8px; }
+      .row-inline .field { min-width: 130px; }
+      .reply-card .tag { float: none; display: inline-block; margin-bottom: 6px; }
+    }
+
+    @media (max-width: 640px) {
+      body.page-dashboard header { padding: 10px 12px; gap: 8px; }
+      body.page-dashboard header h1 { font-size: 0.9rem; }
+      body.page-dashboard header .badge { display: none; }
+      body.page-dashboard header > div { gap: 10px; }
+      body.page-dashboard header a { white-space: nowrap; }
+    }
+  </style>
+</head>
+<body class="page-dashboard">
+
+<header>
+  <div style="display:flex; align-items:center; gap:10px;">
+    <h1>X Engagement Bot</h1>
+    <span class="badge">𝕏</span>
+  </div>
+  <div style="display:flex; align-items:center; gap:16px;">
+    <a href="/admin/xchats" style="color:var(--accent); font-size:0.8rem; text-decoration:none;">💬 Chat log</a>
+    <button class="icon-btn theme-toggle" onclick="toggleTheme()" title="Light mode" aria-label="Switch to light mode">
+      <svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke-linecap="round"/></svg>
+      <svg class="ico-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" stroke-linejoin="round"/></svg>
+    </button>
+    <a href="/dashboard" style="color:var(--text-muted); font-size:0.8rem; text-decoration:none;">← Dashboard</a>
+  </div>
+</header>
+
+<div class="xbot-scroll">
+<div class="xbot-wrap">
+
+  <div class="form-section">
+    <div class="section-title">Persona &amp; Account</div>
+    <div class="field full">
+      <label>Choose a model (persona)</label>
+      <div class="row-inline">
+        <div class="field" style="margin:0;">
+          <select id="persona" onchange="updateConn()"></select>
+        </div>
+        <span class="conn-pill" id="conn-pill">—</span>
+        <button class="btn-ai" id="connect-btn" onclick="toggleConnect()">Connect X</button>
+        <button class="btn-ai" id="disconnect-btn" style="background:var(--border); display:none;" onclick="disconnectX()">Disconnect</button>
+      </div>
+      <span class="hint">Only personas with a connected X account can act on X.</span>
+    </div>
+
+    <div id="connect-panel" style="display:none; margin-top:4px; border-top:1px solid var(--border-soft); padding-top:16px;">
+      <div class="field full">
+        <label>X app OAuth 2.0 Client ID</label>
+        <input type="text" id="x-client-id" placeholder="your-app-client-id" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="field full" style="margin-top:12px;">
+        <label>Redirect URI <span style="font-weight:400;color:var(--text-muted);">(must match your X app's callback URL exactly)</span></label>
+        <input type="text" id="x-redirect-uri" placeholder="https://your-domain/api/x/oauth-redirect" autocomplete="off" spellcheck="false">
+      </div>
+      <div style="display:flex; gap:8px; margin-top:14px;">
+        <button class="btn-ai" onclick="startConnect()">Authorize on X →</button>
+      </div>
+      <div id="connect-step2" style="display:none; margin-top:14px;">
+        <div class="field full">
+          <label>Paste the full callback URL after authorizing</label>
+          <input type="text" id="x-callback-url" placeholder="https://…/api/x/oauth-redirect?code=…&state=…" autocomplete="off" spellcheck="false">
+        </div>
+        <button class="btn-ai" style="margin-top:12px;" onclick="completeConnect()">Finish connection ✓</button>
+      </div>
+      <div class="result-box" id="connect-status"></div>
+      <span class="hint" style="margin-top:8px;">Need an X app? Create one at <a href="https://developer.x.com" target="_blank" style="color:var(--accent);">developer.x.com</a> with OAuth 2.0 enabled and scopes for tweet, follows, dm, and users. Set the Redirect URI above as a Callback URL in the app's user-authentication settings.</span>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">⚙️ How she replies</div>
+    <span class="hint" style="display:block; margin-bottom:14px;">Governs every DM this account sends — the rounds below and the server-side worker both obey it.</span>
+    <div class="auto-toggles" style="display:flex; flex-wrap:wrap; gap:10px 22px;">
+      <label class="auto-chk" style="margin-top:0;"><input type="checkbox" id="f-x-enabled" checked> <b>Bot active</b> <span style="color:var(--text-muted)">— reply to incoming DMs</span></label>
+      <label class="auto-chk" style="margin-top:0;"><input type="checkbox" id="f-x-humanize" checked> Type like a human <span style="color:var(--text-muted)">— pause to read, then type at a believable speed</span></label>
+      <label class="auto-chk" style="margin-top:0;"><input type="checkbox" id="f-x-followups" checked> Follow up on quiet fans <span style="color:var(--text-muted)">— max 2 nudges each</span></label>
+    </div>
+    <div class="xbot-grid" style="margin-top:14px;">
+      <div class="field">
+        <label>Typing speed</label>
+        <select id="f-x-typing-speed">
+          <option value="8">Slow — thumbs on a phone</option>
+          <option value="14" selected>Natural</option>
+          <option value="22">Fast texter</option>
+          <option value="34">Very fast</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Follow-up delay (minutes)</label>
+        <input type="number" id="f-x-followup-min" min="5" max="1440" value="45">
+      </div>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center; margin-top:14px;">
+      <button class="btn-ai" onclick="saveBehaviour(this)">Save</button>
+      <span class="hint" id="behaviour-status"></span>
+    </div>
+  </div>
+
+  <div class="form-section" id="chat-section">
+    <div class="section-title">💬 Auto-chat — keep conversations going</div>
+    <span class="hint" style="display:block; margin-bottom:14px;">Engages your existing audience on a loop: replies to incoming DMs, and (optionally) replies to comments on your posts and posts new content. Does NOT start new chats — that's the section below.</span>
+    <div class="auto-toggles">
+      <label class="auto-chk"><input type="checkbox" id="auto-dm" checked> Reply to incoming DMs</label>
+      <label class="auto-chk"><input type="checkbox" id="auto-respond-own"> Reply to comments on my own posts</label>
+      <label class="auto-chk"><input type="checkbox" id="auto-comments"> Reply to comments on the post below</label>
+      <label class="auto-chk"><input type="checkbox" id="auto-post"> Post new content</label>
+      <label class="auto-chk"><input type="checkbox" id="auto-feed-engage" checked> Work the feed <span style="color:var(--text-muted)">— comment on fresh posts, then like and answer the newest people replying</span></label>
+    </div>
+    <div class="xbot-grid" style="margin-top:12px;">
+      <div class="field">
+        <label>Seconds between rounds</label>
+        <select id="chat-interval">
+          <option value="45">45s</option><option value="90" selected>90s</option><option value="180">3 min</option><option value="300">5 min</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Comments per round <span style="font-weight:400;color:var(--text-muted);">(on other people's posts)</span></label>
+        <input type="number" id="feed-post-limit" min="0" max="15" value="4">
+      </div>
+      <div class="field">
+        <label>Answers per round <span style="font-weight:400;color:var(--text-muted);">(to people replying)</span></label>
+        <input type="number" id="feed-reply-limit" min="0" max="25" value="8">
+      </div>
+      <div class="field">
+        <label>Post a new tweet every</label>
+        <select id="auto-post-every">
+          <option value="0">1 round</option><option value="5" selected>5 rounds</option><option value="10">10 rounds</option><option value="20">20 rounds</option>
+        </select>
+      </div>
+    </div>
+    <div class="hint" id="x-behavior-summary" style="display:block; margin-top:12px;"></div>
+    <div style="display:flex; gap:8px; align-items:center; margin-top:14px;">
+      <button class="btn-ai" id="chat-start" onclick="startChat()">▶ Start auto-chat</button>
+      <button class="btn-ai" id="chat-stop" style="background:#4c0519; display:none;" onclick="stopChat()">■ Stop</button>
+      <span class="conn-pill" id="chat-state">idle</span>
+    </div>
+  </div>
+
+  <div class="form-section" id="gather-section">
+    <div class="section-title">🧲 Gather new chats — find &amp; message new people</div>
+    <span class="hint" style="display:block; margin-bottom:14px;">Finds fresh people from your own audience (recent followers and people who replied to your posts) and opens new in-character chats with them — skipping anyone you already have a conversation with. Runs on its own loop, independent of auto-chat.</span>
+    <div class="xbot-grid">
+      <div class="field">
+        <label>New chats per round</label>
+        <select id="auto-new-limit">
+          <option>1</option><option selected>2</option><option>3</option><option>5</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Only posts newer than <span style="font-weight:400;color:var(--text-muted);">(minutes)</span></label>
+        <input type="number" id="gather-post-age" min="5" max="180" value="30">
+      </div>
+      <div class="field">
+        <label>Only people who replied within <span style="font-weight:400;color:var(--text-muted);">(minutes)</span></label>
+        <input type="number" id="gather-reply-age" min="1" max="120" value="15">
+      </div>
+      <div class="field">
+        <label>Seconds between rounds</label>
+        <select id="gather-interval">
+          <option value="90">90s</option><option value="180" selected>3 min</option><option value="300">5 min</option><option value="600">10 min</option>
+        </select>
+      </div>
+    </div>
+    <div class="auto-toggles">
+      <label class="auto-chk"><input type="checkbox" id="auto-follow"> Follow new people first</label>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center; margin-top:14px;">
+      <button class="btn-ai" id="gather-start" onclick="startGather()">▶ Start gathering</button>
+      <button class="btn-ai" id="gather-stop" style="background:#4c0519; display:none;" onclick="stopGather()">■ Stop</button>
+      <span class="conn-pill" id="gather-state">idle</span>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">📜 Activity log</div>
+    <div class="auto-log" id="auto-log"><span class="hint">Auto-chat and gathering activity appears here.</span></div>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">📝 Post new content</div>
+    <span class="hint" style="display:block; margin-bottom:14px;">Writes an original tweet in the chosen persona's voice and posts it to their X account.</span>
+    <div class="field full">
+      <label>Topic / vibe <span style="font-weight:400;color:var(--text-muted);">(optional — leave blank to let the persona pick)</span></label>
+      <input type="text" id="post-topic" placeholder="e.g. lazy Sunday, new photoset teaser, gym day…">
+    </div>
+    <div style="display:flex; gap:8px;">
+      <button class="btn-ai" style="background:var(--border);" onclick="runPostNew(true)">Preview draft</button>
+      <button class="btn-ai" onclick="runPostNew(false)">Post now</button>
+    </div>
+    <div class="result-box" id="postnew-result"></div>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">💬 Reply to comments on a post</div>
+    <div class="field full">
+      <label>Post URL or tweet ID</label>
+      <input type="text" id="post" placeholder="https://x.com/yourhandle/status/1234567890…">
+    </div>
+    <div class="row-inline">
+      <div class="field" style="flex:0 0 120px;">
+        <label>How many</label>
+        <select id="comment-limit">
+          <option>3</option><option>5</option><option>8</option><option>10</option>
+        </select>
+      </div>
+      <div style="display:flex; gap:8px; padding-bottom:1px; flex-wrap:wrap;">
+        <button class="btn-ai" style="background:var(--border);" onclick="runComment(true)">Preview drafts</button>
+        <button class="btn-ai" onclick="runComment(false)">Reply for real</button>
+        <button class="btn-ai" onclick="runRespondOwn()" title="Reply to comments across this persona's own recent posts">Reply on my recent posts</button>
+      </div>
+    </div>
+    <span class="hint" style="margin-top:8px;">“Reply on my recent posts” ignores the field above and answers new comments on the connected account's latest posts.</span>
+    <div class="result-box" id="comment-result"></div>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">👋 Start a chat (DM)</div>
+    <div class="field full">
+      <label>Target @handle or profile URL</label>
+      <input type="text" id="dm-target" placeholder="@username">
+    </div>
+    <div class="field full">
+      <label>Context / note <span style="font-weight:400;color:var(--text-muted);">(optional — helps tailor the opener)</span></label>
+      <input type="text" id="dm-note" placeholder="e.g. liked 3 of my posts, into gaming…">
+    </div>
+    <div style="display:flex; gap:8px;">
+      <button class="btn-ai" style="background:var(--border);" onclick="runChatUp(true)">Preview opener</button>
+      <button class="btn-ai" onclick="runChatUp(false)">Send DM</button>
+    </div>
+    <div class="result-box" id="dm-result"></div>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">➕ Follow / Unfollow</div>
+    <div class="field full">
+      <label>Target @handle or profile URL</label>
+      <input type="text" id="follow-target" placeholder="@username">
+    </div>
+    <div style="display:flex; gap:8px;">
+      <button class="btn-ai" onclick="runFollow('follow')">Follow</button>
+      <button class="btn-ai" style="background:var(--border);" onclick="runFollow('unfollow')">Unfollow</button>
+    </div>
+    <div class="result-box" id="follow-result"></div>
+  </div>
+
+</div>
+</div>
+
+<script>
+let connStatus = {};
+
+function esc(s) { return (s || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function persona() { return document.getElementById('persona').value; }
+
+let appConfig = {};
+
+async function init() {
+  try {
+    const [pRes, sRes, cRes] = await Promise.all([
+      fetch('/api/personas'), fetch('/api/x/status'), fetch('/api/x/app-config')]);
+    const list = await pRes.json();
+    connStatus = await sRes.json();
+    appConfig = await cRes.json().catch(() => ({}));
+    const sel = document.getElementById('persona');
+    sel.innerHTML = list.map(p => '<option value="' + p.slug + '">' + esc(p.name || p.slug) + '</option>').join('');
+    prefillConnect();
+    updateConn();
+  } catch(e) {}
+}
+
+function prefillConnect() {
+  const idEl = document.getElementById('x-client-id');
+  const uriEl = document.getElementById('x-redirect-uri');
+  if (!idEl.value && appConfig.client_id) idEl.value = appConfig.client_id;
+  if (!uriEl.value) uriEl.value = appConfig.redirect_uri || (location.origin + '/api/x/oauth-redirect');
+}
+
+function updateConn() {
+  const pill = document.getElementById('conn-pill');
+  const info = connStatus[persona()];
+  const connected = !!(info && info.connected);
+  if (connected) {
+    pill.className = 'conn-pill ok';
+    pill.textContent = '✓ @' + info.username;
+  } else {
+    pill.className = 'conn-pill err';
+    pill.textContent = 'Not connected';
+  }
+  document.getElementById('connect-btn').textContent = connected ? 'Reconnect' : 'Connect X';
+  document.getElementById('disconnect-btn').style.display = connected ? 'inline-flex' : 'none';
+  // collapse the connect panel when switching persona
+  document.getElementById('connect-panel').style.display = 'none';
+  document.getElementById('connect-step2').style.display = 'none';
+  document.getElementById('connect-status').innerHTML = '';
+  loadBehaviorSummary();
+  loadBehaviour();
+}
+
+async function loadBehaviour(){
+  if(!persona()) return;
+  let s={};
+  try{ s=await (await fetch('/api/x/settings?persona='+encodeURIComponent(persona()))).json(); }catch(e){ return; }
+  document.getElementById('f-x-enabled').checked = s.enabled !== false;
+  document.getElementById('f-x-humanize').checked = s.humanize !== false;
+  document.getElementById('f-x-followups').checked = s.followups !== false;
+  document.getElementById('f-x-followup-min').value = s.followup_min || 45;
+  if(s.typing_speed) document.getElementById('f-x-typing-speed').value = String(s.typing_speed);
+}
+
+async function saveBehaviour(btn){
+  const st=document.getElementById('behaviour-status');
+  st.textContent='Saving…'; st.style.color='var(--text-muted)';
+  try{
+    const r=await fetch('/api/x/settings',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({persona:persona(),
+        enabled:document.getElementById('f-x-enabled').checked,
+        humanize:document.getElementById('f-x-humanize').checked,
+        followups:document.getElementById('f-x-followups').checked,
+        typing_speed:parseInt(document.getElementById('f-x-typing-speed').value||'14',10),
+        followup_min:parseInt(document.getElementById('f-x-followup-min').value||'45',10)})});
+    const d=await r.json();
+    if(!d.ok) throw new Error(d.error||'failed');
+    st.textContent='✓ Saved'; st.style.color='#4ade80';
+    loadBehaviorSummary();
+  }catch(e){ st.textContent='✗ '+e; st.style.color='#fb7185'; }
+}
+
+// This tab now owns the behaviour settings, so the summary just reflects them
+// Reflect the saved behaviour and the funnel link next to the controls, so the
+// effect of a change is visible without leaving the section.
+async function loadBehaviorSummary() {
+  const el = document.getElementById('x-behavior-summary');
+  if (!el || !persona()) return;
+  let s = {}, f = {};
+  try {
+    [s, f] = await Promise.all([
+      fetch('/api/x/settings?persona=' + encodeURIComponent(persona())).then(r => r.json()),
+      fetch('/api/personas/' + encodeURIComponent(persona()) + '/phases').then(r => r.json())
+    ]);
+  } catch (e) { return; }
+  const speed = { 8: 'slow', 14: 'natural', 22: 'fast', 34: 'very fast' }[s.typing_speed] || s.typing_speed;
+  const bits = [
+    s.enabled ? 'bot <b>active</b>' : 'bot <b>off</b> — DM rounds will do nothing',
+    s.humanize ? 'human typing (' + speed + ')' : 'instant sending',
+    s.followups ? 'follow-ups after ' + s.followup_min + ' min' : 'no follow-ups',
+    (f.cta_url ? 'funnel link → <b>' + esc(f.cta_url) + '</b>' : 'no funnel link set')
+  ];
+  el.innerHTML = 'Live: ' + bits.join(' · ') + '.';
+}
+
+function toggleConnect() {
+  const panel = document.getElementById('connect-panel');
+  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+  if (panel.style.display === 'block') prefillConnect();
+}
+
+async function startConnect() {
+  const box = document.getElementById('connect-status');
+  const clientId = document.getElementById('x-client-id').value.trim();
+  const redirectUri = document.getElementById('x-redirect-uri').value.trim();
+  if (!clientId) { err(box, 'Enter your X app Client ID.'); return; }
+  if (!redirectUri) { err(box, 'Enter the Redirect URI.'); return; }
+  busy(box, 'Opening X authorization…');
+  const data = await post('/api/x/auth-url', { client_id: clientId, redirect_uri: redirectUri, persona: persona() });
+  if (!data.ok) { err(box, data.error); return; }
+  window.open(data.url, 'x-oauth', 'width=600,height=720');
+  document.getElementById('connect-step2').style.display = 'block';
+  box.innerHTML = '<span class="hint" style="color:var(--warn);">Authorize in the popup, then paste the URL it lands on below.</span>';
+}
+
+async function finishWith(code, state) {
+  const box = document.getElementById('connect-status');
+  if (!code || !state) { err(box, 'Could not find code/state in that URL.'); return; }
+  busy(box, 'Finishing connection…');
+  const data = await post('/api/x/callback', { code, state });
+  if (!data.ok) { err(box, data.error); return; }
+  box.innerHTML = '<span class="hint" style="color:#4ade80;">✓ Connected as @' + esc(data.username) + '</span>';
+  const sRes = await fetch('/api/x/status');
+  connStatus = await sRes.json();
+  setTimeout(updateConn, 1100);
+}
+
+// Auto-complete when the OAuth popup hands back code/state.
+window.addEventListener('message', (e) => {
+  const d = e.data || {};
+  if (d.type !== 'x_oauth') return;
+  if (d.error) { err(document.getElementById('connect-status'), 'X returned: ' + d.error); return; }
+  finishWith(d.code, d.state);
+});
+
+async function completeConnect() {
+  const box = document.getElementById('connect-status');
+  const cb = document.getElementById('x-callback-url').value.trim();
+  if (!cb) { err(box, 'Paste the callback URL first.'); return; }
+  let code, state;
+  try {
+    const u = new URL(cb);
+    code = u.searchParams.get('code');
+    state = u.searchParams.get('state');
+  } catch(e) { err(box, 'That is not a valid URL.'); return; }
+  await finishWith(code, state);
+}
+
+async function disconnectX() {
+  if (!confirm('Disconnect this persona’s X account?')) return;
+  await post('/api/x/disconnect', { persona: persona() });
+  delete connStatus[persona()];
+  updateConn();
+}
+
+function busy(box, msg) { box.innerHTML = '<span class="hint">' + esc(msg) + '</span>'; }
+function err(box, msg) { box.innerHTML = '<span class="hint" style="color:#fb7185;">✗ ' + esc(msg) + '</span>'; }
+
+async function post(url, body) {
+  const res = await fetch(url, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+  return res.json();
+}
+
+async function runComment(preview) {
+  const box = document.getElementById('comment-result');
+  const postUrl = document.getElementById('post').value.trim();
+  if (!postUrl) { err(box, 'Enter a post URL or tweet ID.'); return; }
+  busy(box, preview ? 'Drafting replies…' : 'Posting replies…');
+  const data = await post('/api/x/comment', {
+    persona: persona(), post: postUrl,
+    limit: parseInt(document.getElementById('comment-limit').value), preview });
+  if (!data.ok) { err(box, data.error); return; }
+  if (!data.replies.length) { box.innerHTML = '<span class="hint">No comments found to reply to.</span>'; return; }
+  box.innerHTML = data.replies.map(r => {
+    let tag = '';
+    if (!preview) tag = r.posted ? '<span class="tag ok">posted</span>' : '<span class="tag no">failed</span>';
+    return '<div class="reply-card">' + tag +
+      '<div class="from">↪ ' + esc(r.to) + '</div>' +
+      '<div class="cmt">“' + esc(r.comment) + '”</div>' +
+      '<div class="rep">' + esc(r.reply) + '</div></div>';
+  }).join('');
+}
+
+async function runPostNew(preview) {
+  const box = document.getElementById('postnew-result');
+  busy(box, preview ? 'Drafting tweet…' : 'Posting…');
+  const data = await post('/api/x/post', {
+    persona: persona(), topic: document.getElementById('post-topic').value.trim(), preview });
+  if (!data.ok) { err(box, data.error); return; }
+  const tag = data.posted ? '<span class="tag ok">posted</span>' : '<span class="tag" style="background:var(--border);color:var(--text-3);">draft</span>';
+  box.innerHTML = '<div class="reply-card">' + tag +
+    '<div class="rep">' + esc(data.text) + '</div></div>';
+}
+
+async function runRespondOwn() {
+  const box = document.getElementById('comment-result');
+  busy(box, 'Finding comments on your recent posts…');
+  const data = await post('/api/x/respond-own', {
+    persona: persona(), limit: parseInt(document.getElementById('comment-limit').value), preview: false });
+  if (!data.ok) { err(box, data.error); return; }
+  if (!data.replies.length) { box.innerHTML = '<span class="hint">No new comments found on your recent posts.</span>'; return; }
+  box.innerHTML = data.replies.map(r => {
+    const tag = r.posted ? '<span class="tag ok">posted</span>' : '<span class="tag no">failed</span>';
+    return '<div class="reply-card">' + tag +
+      '<div class="from">↪ ' + esc(r.to) + '</div>' +
+      '<div class="cmt">“' + esc(r.comment) + '”</div>' +
+      '<div class="rep">' + esc(r.reply) + '</div></div>';
+  }).join('');
+}
+
+async function runChatUp(preview) {
+  const box = document.getElementById('dm-result');
+  const target = document.getElementById('dm-target').value.trim();
+  if (!target) { err(box, 'Enter a target @handle.'); return; }
+  busy(box, preview ? 'Writing opener…' : 'Sending DM…');
+  const data = await post('/api/x/chat-up', {
+    persona: persona(), target,
+    note: document.getElementById('dm-note').value.trim(), preview });
+  if (!data.ok) { err(box, data.error); return; }
+  const tag = data.sent ? '<span class="tag ok">sent</span>' : '<span class="tag" style="background:var(--border);color:var(--text-3);">draft</span>';
+  box.innerHTML = '<div class="reply-card">' + tag +
+    '<div class="from">→ @' + esc(data.username) + '</div>' +
+    '<div class="rep">' + esc(data.opener) + '</div></div>';
+}
+
+async function runFollow(action) {
+  const box = document.getElementById('follow-result');
+  const target = document.getElementById('follow-target').value.trim();
+  if (!target) { err(box, 'Enter a target @handle.'); return; }
+  busy(box, action === 'follow' ? 'Following…' : 'Unfollowing…');
+  const data = await post('/api/x/' + action, { persona: persona(), target });
+  if (!data.ok) { err(box, data.error); return; }
+  box.innerHTML = '<span class="hint" style="color:#4ade80;">✓ ' +
+    (action === 'follow' ? 'Now following @' : 'Unfollowed @') + esc(data.username) + '</span>';
+}
+
+// ── Auto loops (chatting + gathering, independent) ───────────────────────────
+function logLine(text, cls) {
+  const box = document.getElementById('auto-log');
+  if (box.querySelector('.hint')) box.innerHTML = '';
+  const div = document.createElement('div');
+  div.className = 'ln' + (cls ? ' ' + cls : '');
+  const t = new Date().toLocaleTimeString();
+  div.textContent = '[' + t + '] ' + text;
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+  while (box.children.length > 200) box.removeChild(box.firstChild);
+}
+
+function setState(id, txt, cls) {
+  const p = document.getElementById(id);
+  p.textContent = txt;
+  p.className = 'conn-pill' + (cls ? ' ' + cls : '');
+}
+
+function logActions(label, n, a, data) {
+  logLine(label + ' round ' + n + ' · ' + (a.new_chats || 0) + ' new chats, ' +
+    (a.dm_replies || 0) + ' DM replies, ' + (a.followups || 0) + ' follow-ups, ' +
+    (a.post_comments || 0) + ' post comments, ' + (a.reply_answers || 0) + ' answers, ' +
+    (a.likes || 0) + ' likes, ' + (a.comments || 0) + ' comment replies, ' +
+    (a.follows || 0) + ' follows, ' + (a.posts || 0) + ' posts', 'hd');
+  (data.log || []).forEach(l => logLine(l, 'act'));
+  if (!(data.log || []).length && !Object.values(a).some(Boolean)) {
+    logLine(label + ': nothing new this round — will retry.', null);
+  }
+}
+
+function connectedOrWarn() {
+  const info = connStatus[persona()];
+  if (info && info.connected) return true;
+  logLine('Connect an X account for this persona first.', 'er');
+  return false;
+}
+
+// Auto-chat loop — engage existing audience, never starts new chats.
+let chatTimer = null, chatRunning = false, chatBusy = false, chatRounds = 0;
+
+function startChat() {
+  if (!connectedOrWarn()) return;
+  chatRunning = true; chatRounds = 0;
+  document.getElementById('chat-start').style.display = 'none';
+  document.getElementById('chat-stop').style.display = 'inline-flex';
+  logLine('Auto-chat started as ' + persona() + '.', 'hd');
+  runChatRound();
+  chatTimer = setInterval(runChatRound, parseInt(document.getElementById('chat-interval').value) * 1000);
+}
+
+function stopChat() {
+  chatRunning = false;
+  if (chatTimer) clearInterval(chatTimer);
+  chatTimer = null;
+  document.getElementById('chat-start').style.display = 'inline-flex';
+  document.getElementById('chat-stop').style.display = 'none';
+  setState('chat-state', 'idle');
+  logLine('Auto-chat stopped after ' + chatRounds + ' round(s).', 'hd');
+}
+
+async function runChatRound() {
+  if (!chatRunning || chatBusy) return;
+  chatBusy = true; chatRounds++;
+  setState('chat-state', 'running · round ' + chatRounds, 'run');
+  try {
+    const postEvery = parseInt(document.getElementById('auto-post-every').value);
+    const wantPost = document.getElementById('auto-post').checked &&
+      (chatRounds === 1 || postEvery <= 0 || (chatRounds - 1) % postEvery === 0);
+    const data = await post('/api/x/auto-run', {
+      persona: persona(),
+      post: document.getElementById('post').value.trim(),
+      post_topic: document.getElementById('post-topic').value.trim(),
+      comment_limit: parseInt(document.getElementById('comment-limit').value),
+      dm_replies: document.getElementById('auto-dm').checked,
+      new_chats: false,
+      comments: document.getElementById('auto-comments').checked,
+      respond_own: document.getElementById('auto-respond-own').checked,
+      post_content: wantPost,
+      follow: false,
+      feed_engage: document.getElementById('auto-feed-engage').checked,
+      feed_post_limit: parseInt(document.getElementById('feed-post-limit').value||'4',10),
+      feed_reply_limit: parseInt(document.getElementById('feed-reply-limit').value||'8',10),
+      post_age_min: parseInt(document.getElementById('gather-post-age').value||'30',10),
+      reply_age_min: parseInt(document.getElementById('gather-reply-age').value||'15',10),
+    });
+    if (!data.ok) {
+      logLine('Auto-chat error: ' + data.error, 'er');
+      if (/token expired|No X account/i.test(data.error || '')) stopChat();
+    } else {
+      logActions('Auto-chat', chatRounds, data.actions || {}, data);
+    }
+  } catch (e) {
+    logLine('Auto-chat round failed: ' + e, 'er');
+  } finally {
+    chatBusy = false;
+    if (chatRunning) setState('chat-state', 'waiting for next round', 'run');
+  }
+}
+
+// Gathering loop — find & open new chats only.
+let gatherTimer = null, gatherRunning = false, gatherBusy = false, gatherRounds = 0;
+
+function startGather() {
+  if (!connectedOrWarn()) return;
+  gatherRunning = true; gatherRounds = 0;
+  document.getElementById('gather-start').style.display = 'none';
+  document.getElementById('gather-stop').style.display = 'inline-flex';
+  logLine('Gathering new chats started as ' + persona() + '.', 'hd');
+  runGatherRound();
+  gatherTimer = setInterval(runGatherRound, parseInt(document.getElementById('gather-interval').value) * 1000);
+}
+
+function stopGather() {
+  gatherRunning = false;
+  if (gatherTimer) clearInterval(gatherTimer);
+  gatherTimer = null;
+  document.getElementById('gather-start').style.display = 'inline-flex';
+  document.getElementById('gather-stop').style.display = 'none';
+  setState('gather-state', 'idle');
+  logLine('Gathering stopped after ' + gatherRounds + ' round(s).', 'hd');
+}
+
+async function runGatherRound() {
+  if (!gatherRunning || gatherBusy) return;
+  gatherBusy = true; gatherRounds++;
+  setState('gather-state', 'running · round ' + gatherRounds, 'run');
+  try {
+    const data = await post('/api/x/auto-run', {
+      persona: persona(),
+      new_chat_limit: parseInt(document.getElementById('auto-new-limit').value),
+      post_age_min: parseInt(document.getElementById('gather-post-age').value||'30',10),
+      reply_age_min: parseInt(document.getElementById('gather-reply-age').value||'15',10),
+      dm_replies: false,
+      new_chats: true,
+      comments: false,
+      respond_own: false,
+      post_content: false,
+      follow: document.getElementById('auto-follow').checked,
+    });
+    if (!data.ok) {
+      logLine('Gathering error: ' + data.error, 'er');
+      if (/token expired|No X account/i.test(data.error || '')) stopGather();
+    } else {
+      logActions('Gathering', gatherRounds, data.actions || {}, data);
+    }
+  } catch (e) {
+    logLine('Gathering round failed: ' + e, 'er');
+  } finally {
+    gatherBusy = false;
+    if (gatherRunning) setState('gather-state', 'waiting for next round', 'run');
+  }
+}
+
+window.addEventListener('beforeunload', () => { if (chatRunning) stopChat(); if (gatherRunning) stopGather(); });
+
+init();
+</script>
+</body>
+</html>

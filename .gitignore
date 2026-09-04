@@ -8,3 +8,16 @@ __pycache__/
 *.pyc
 .env*
 
+
+# Local SQLite database
+data.db
+*.db
+
+# X.com OAuth + DM bot runtime state (local only)
+x_tokens.json
+.x_oauth_state.json
+.x_dm_cursor_*.json
+.x_hist_*.json
+
+data.db
+data.db-journal
