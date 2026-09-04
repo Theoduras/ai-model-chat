@@ -173,3 +173,39 @@ Cloud Run pings `GET /healthz`, which returns `{"status":"ok"}`.
 - **Persistence:** the container filesystem is ephemeral. Persona/chat writes
   currently go to local files or `/tmp` — moving them to a managed database
   (Cloud SQL) is the next step before running multiple instances in production.
+
+---
+
+## Deploying to Vercel
+
+`vercel.json` routes every request to `api/index.py`, which imports the Flask
+app from the repository root. `includeFiles` ships the HTML pages, `css/`,
+`js/`, `personas/` and `templates/` into the function bundle — without it the
+function only gets `api/`, and every page 404s.
+
+```bash
+vercel --prod
+```
+
+### Required environment variables
+
+Set these in **Project → Settings → Environment Variables**:
+
+| Variable | Why |
+|---|---|
+| `GEMINI_API_KEY` | AI replies; without it the app serves canned fallbacks. |
+| `DATABASE_URL` | Postgres connection string. The SQLite default lives in `/tmp`, which Vercel wipes on every cold start — accounts and payments would vanish. |
+| `SECRET_KEY` | Signs session cookies. Without it each instance generates its own and sign-ins break across instances. |
+
+### Background workers
+
+The Fanvue, X and Telegram poll loops do not start on Vercel: a serverless
+invocation is frozen once the response is sent, so a loop would stall mid-round
+and restart on every cold start. Run those channels on Cloud Run (see above), or
+force them on with `FANVUE_WORKER=1`, `X_WORKER=1`, `TELEGRAM_WORKER=1`,
+`TGUSER_AUTOSTART=1` if you understand the trade-off.
+
+### Limits
+
+`maxDuration` is 60s — the ceiling on Hobby plans. A long Gemini call that
+exceeds it returns a 504.

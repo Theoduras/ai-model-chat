@@ -35,6 +35,20 @@ try:
 except Exception:
     LOG_DIR = None
 
+def _worker_enabled(var):
+    """Whether a long-lived background poll loop should start.
+
+    These loops only make sense on an always-on host. On Vercel every
+    invocation is frozen once the response is sent, so a worker thread stalls
+    mid-round, restarts on each cold start, and duplicates outbound messages
+    across concurrent instances. Setting the variable explicitly still wins.
+    """
+    val = (os.getenv(var) or '').strip()
+    if val:
+        return val != '0'
+    return not IS_VERCEL
+
+
 logger = logging.getLogger('app')
 logger.setLevel(logging.INFO)
 # Needs its own stdout handler: with no handler anywhere, logging falls back to
@@ -9053,7 +9067,7 @@ def _start_fanvue_worker():
     threading.Thread(target=_fanvue_worker, daemon=True).start()
 
 
-if os.getenv('FANVUE_WORKER', '1') != '0':
+if _worker_enabled('FANVUE_WORKER'):
     _start_fanvue_worker()
 
 
@@ -11143,7 +11157,7 @@ def _tgu_boot():
                 _tgu_errors[persona] = str(e)[:300]
 
 
-if os.getenv('TGUSER_AUTOSTART', '1') != '0':
+if _worker_enabled('TGUSER_AUTOSTART'):
     threading.Thread(target=_tgu_boot, daemon=True).start()
 
 
@@ -11215,12 +11229,12 @@ def _x_worker():
             logger.exception('x worker tick failed')
 
 
-if os.getenv('X_WORKER', '1') != '0' and not _x_worker_started[0]:
+if _worker_enabled('X_WORKER') and not _x_worker_started[0]:
     _x_worker_started[0] = True
     threading.Thread(target=_x_worker, daemon=True).start()
 
 
-if os.getenv('TELEGRAM_WORKER', '1') != '0' and not _tg_worker_started[0]:
+if _worker_enabled('TELEGRAM_WORKER') and not _tg_worker_started[0]:
     _tg_worker_started[0] = True
     threading.Thread(target=_tg_worker, daemon=True).start()
 
