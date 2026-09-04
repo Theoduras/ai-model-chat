@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify, send_from_directory, session, redirect, url_for, render_template_string, Response
 import os
 import sys
+import copy
 import json
 import re
 import logging
@@ -2652,10 +2653,11 @@ def _ensure_x_tables():
     """Create the x_messages / x_openers / app_settings tables if missing
     (self-heal when a model was added after the DB was first initialized)."""
     try:
-        from db import XMessage, XOpener, AppSetting, engine
+        from db import XMessage, XOpener, AppSetting, PpvDrop, engine
         XMessage.__table__.create(bind=engine, checkfirst=True)
         XOpener.__table__.create(bind=engine, checkfirst=True)
         AppSetting.__table__.create(bind=engine, checkfirst=True)
+        PpvDrop.__table__.create(bind=engine, checkfirst=True)
         return True
     except Exception as e:
         _last_x_log_error[0] = f'ensure tables: {str(e)[:140]}'
@@ -2672,6 +2674,50 @@ def _get_setting(key, default=None):
             s.close()
     except Exception:
         return default
+
+
+class SettingUnreadable(Exception):
+    """The store could not be reached — which is not the same as an empty value.
+    Callers that would otherwise treat a missing row as 'nothing has happened
+    yet' must not act on a read that raised this."""
+
+
+def _get_setting_strict(key, default=None):
+    """Like _get_setting, but a database failure raises instead of looking like
+    an unset key. Used on paths where 'no row' and 'could not read' would
+    otherwise both mean 'this fan is brand new' — and cost the fan a repeat of
+    every unlock they already bought."""
+    try:
+        from db import SessionLocal, get_app_setting
+    except Exception as e:
+        raise SettingUnreadable(str(e)[:200])
+    try:
+        s = SessionLocal()
+    except Exception as e:
+        raise SettingUnreadable(str(e)[:200])
+    try:
+        return get_app_setting(s, key, default)
+    except Exception as e:
+        raise SettingUnreadable(str(e)[:200])
+    finally:
+        try:
+            s.close()
+        except Exception:
+            pass
+
+
+def _json_setting_strict(key, fallback):
+    """A JSON-valued setting, distinguishing 'unset' (fallback) from
+    'unreadable' (raises). Malformed JSON is treated as unset — it is a value we
+    wrote, so re-deriving it is safe; an unreachable database is not."""
+    raw = _get_setting_strict(key, None)
+    if raw is None:
+        return copy.deepcopy(fallback)
+    try:
+        v = json.loads(raw)
+    except Exception:
+        return copy.deepcopy(fallback)
+    return v if isinstance(v, type(fallback)) else copy.deepcopy(fallback)
 
 
 def _set_setting(key, value):
@@ -7579,29 +7625,58 @@ def _fanvue_ppv(persona):
         return {}
 
 
-def _fanvue_fan_purchased(persona, fan_uuid, media_uuids):
-    """True if the fan has purchased at least one of the given media items —
-    used to gate advancing to the next PPV tier until they've paid."""
-    if not media_uuids:
-        return False
-    want = set(media_uuids)
+# Three answers, not two. Fanvue has no endpoint that reports whether a given
+# fan bought a given item, so payment is known only from what we recorded when
+# the webhook, the message poll or a reconciliation sweep told us. That makes
+# "we could not find out" a real state, and conflating it with "they did not
+# pay" is what silently freezes a fan's ladder forever.
+PPV_PAID, PPV_UNPAID, PPV_UNKNOWN = 'paid', 'unpaid', 'unknown'
+
+
+def _fv_drop_state(persona, drop_id):
+    """Whether the recorded drop was paid, and the drop row itself.
+
+    Returns (state, drop). UNKNOWN means the ledger could not be read — hold,
+    never advance and never reset on it."""
+    if not drop_id:
+        return PPV_UNPAID, None
     try:
-        rows = _fv_list(_fanvue_call(persona, 'GET', f'/media?purchasedBy={fan_uuid}&size=50'))
-        for m in rows:
-            if m.get('purchasedByFan') and _fv_first(m, 'uuid', 'id', default='') in want:
-                return True
-    except Exception:
-        pass
-    # Fallback: check each wanted item directly.
-    for u in list(want)[:5]:
+        from db import SessionLocal, PpvDrop
+    except Exception as e:
+        logger.warning('PPV ledger unavailable for %s: %s', persona, str(e)[:120])
+        return PPV_UNKNOWN, None
+    try:
+        s = SessionLocal()
+    except Exception as e:
+        logger.warning('PPV ledger unreachable for %s: %s', persona, str(e)[:120])
+        return PPV_UNKNOWN, None
+    try:
+        d = s.get(PpvDrop, drop_id)
+        if d is None:
+            return PPV_UNPAID, None
+        return (PPV_PAID if d.paid_at else PPV_UNPAID), d
+    except Exception as e:
+        logger.warning('PPV ledger read failed for %s: %s', persona, str(e)[:120])
+        return PPV_UNKNOWN, None
+    finally:
         try:
-            m = _fanvue_call(persona, 'GET', f'/media/{u}?purchasedBy={fan_uuid}')
-            m = m.get('data', m) if isinstance(m, dict) else {}
-            if m.get('purchasedByFan'):
-                return True
+            s.close()
         except Exception:
-            continue
-    return False
+            pass
+
+
+def _fv_drop_is_stale(drop, stale_days):
+    """An unbought drop stops blocking the ladder after the creator's window, so
+    one unappealing photo can't end the funnel for a fan permanently. The row
+    stays on file — this changes behaviour, it never forgets the drop."""
+    if not drop or not stale_days or drop.paid_at:
+        return False
+    sent = drop.created_at
+    if not sent:
+        return False
+    if sent.tzinfo is None:
+        sent = sent.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - sent) >= timedelta(days=int(stale_days))
 
 
 def _fv_clean_tier(t):
@@ -7694,32 +7769,223 @@ def _fv_hour_fits(s, hour):
     return a <= hour <= b if a <= b else (hour >= a or hour <= b)
 
 
-def _fv_pick_set(sets, progress, context, hour):
-    """Choose the set that fits the moment: what has just been said in chat and
-    the time of day. `progress` is {set_id: tiers already sent to this fan};
-    a set drops out once its tiers are exhausted. Falls back to creator order so
-    a set with no cues at all still goes out. None when nothing is left."""
-    left = [s for s in sets
-            if int(progress.get(s['id'], 0) or 0) < len(s['tiers'])]
+def _fv_hour_score(s, hour):
+    """How well the hour suits this set. Tapered at the edges rather than a
+    cliff: a "just got in from a night out" set shouldn't die at 05:59."""
+    a, b = s.get('hour_from'), s.get('hour_to')
+    if a is None or b is None:
+        return 0.0
+    if _fv_hour_fits(s, hour):
+        edge = hour in (a, b)
+        return 1.0 if edge else 2.0
+    # An hour either side of the window still beats one on the far side.
+    for near in ((a - 1) % 24, (b + 1) % 24):
+        if hour == near:
+            return -1.0
+    return -5.0
+
+
+FV_SYNONYMS = {
+    'lingerie': ('lingerie', 'underwear', 'bra', 'panties', 'thong', 'stockings'),
+    'bed': ('bed', 'bedroom', 'sheets', 'pillow', 'duvet'),
+    'shower': ('shower', 'bath', 'wet', 'soapy', 'towel'),
+    'gym': ('gym', 'workout', 'leggings', 'sweaty', 'training'),
+    'night': ('night', 'tonight', 'midnight', 'late', 'bedtime'),
+}
+
+
+def _fv_parse_keyword(raw):
+    """One trigger word and how it should be matched.
+
+    Plain words still mean what they always did; the extra forms let a creator
+    say what they actually mean:
+      stockings    whole word              +3
+      green dress  phrase, substring       +3
+      stocking*    stem                    +3
+      bed^5        explicit weight         +5
+      !broke       suppress this set      -20
+      ~lingerie    synonym group           +2 per member
+    """
+    k = (raw or '').strip().lower()
+    if not k:
+        return None
+    negative = k.startswith('!')
+    if negative:
+        k = k[1:].strip()
+    syn = k.startswith('~')
+    if syn:
+        k = k[1:].strip()
+    weight = 3.0
+    m = re.match(r'^(.*?)\^(\d+(?:\.\d+)?)$', k)
+    if m:
+        k, weight = m.group(1).strip(), float(m.group(2))
+    stem = k.endswith('*')
+    if stem:
+        k = k[:-1].strip()
+    if not k:
+        return None
+    if negative:
+        weight = -20.0
+    elif syn:
+        weight = 2.0
+    return {'word': k, 'weight': weight, 'stem': stem, 'syn': syn,
+            'phrase': ' ' in k, 'negative': negative}
+
+
+def _fv_words(text):
+    """Message words. \\w keeps digits and accents, which the old [a-z']+ threw
+    away — so a trigger word like 24/7 or café could never once match."""
+    return set(re.findall(r"[\w']+", (text or '').casefold(), re.UNICODE))
+
+
+def _fv_keyword_score(kw, words, lowered):
+    if kw['phrase']:
+        return kw['weight'] if kw['word'] in lowered else 0.0
+    if kw['syn']:
+        group = FV_SYNONYMS.get(kw['word'], (kw['word'],))
+        hits = sum(1 for g in group if g in words)
+        return kw['weight'] * min(hits, 2)
+    if kw['stem']:
+        return kw['weight'] if any(w.startswith(kw['word']) for w in words) else 0.0
+    return kw['weight'] if kw['word'] in words else 0.0
+
+
+# How much better a rival set must score before it takes a fan off the set they
+# are already climbing. Roughly "one real trigger word" — enough that a shared
+# scene word or the clock alone can't restart the ladder at tier 1.
+FV_SWITCH_MARGIN = 4.0
+
+
+def _fv_score_set(s, context, hour, active=False):
+    """Score one set against the moment, and say why — the 'why' is what the
+    builder's simulator shows the creator."""
+    lowered = (context or '').casefold()
+    words = _fv_words(context)
+    parts, score = [], 0.0
+    for raw in s['keywords']:
+        kw = _fv_parse_keyword(raw)
+        if not kw:
+            continue
+        v = _fv_keyword_score(kw, words, lowered)
+        if v:
+            score += v
+            parts.append((raw, v))
+    scene_words = {w for w in _fv_words(s['scene']) if len(w) > 3}
+    scene_hits = scene_words & words
+    if scene_hits:
+        score += 1.5 * len(scene_hits)
+        parts.append((f"scene:{'/'.join(sorted(scene_hits)[:3])}", 1.5 * len(scene_hits)))
+    h = _fv_hour_score(s, hour)
+    if active:
+        # A set the fan is already climbing has earned its place; the clock
+        # alone shouldn't restart them on a different ladder.
+        h = max(h, -1.0)
+    if h:
+        score += h
+        parts.append((f'hour {s.get("hour_from")}-{s.get("hour_to")}', h))
+    if active:
+        score += FV_SWITCH_MARGIN
+        parts.append(('already on this set', FV_SWITCH_MARGIN))
+    return score, parts
+
+
+def _fv_pick_set(sets, state, context, hour):
+    """Choose the set to drop from. The set the fan is already climbing keeps
+    winning unless another beats it by a clear margin, so a three-tier set is
+    actually delivered as three tiers instead of restarting at tier 1 whenever
+    the topic or the clock moves. None when every set is exhausted."""
+    left = [s for s in sets if _fv_tiers_left(s, state) > 0]
     if not left:
         return None
-    words = set(re.findall(r"[a-z']+", (context or '').lower()))
+    active_id = (state or {}).get('active_set') or ''
     best, best_score = None, float('-inf')
     for i, s in enumerate(left):
-        score = 0.0
-        for k in s['keywords']:
-            # Multi-word keywords are matched as a phrase, single words on the
-            # word set so "bedroom" never counts as "bed".
-            if (' ' in k and k in (context or '').lower()) or (' ' not in k and k in words):
-                score += 3
-        scene_words = {w for w in re.findall(r"[a-z']+", s['scene'].lower()) if len(w) > 3}
-        score += 1.5 * len(scene_words & words)
-        if s.get('hour_from') is not None and s.get('hour_to') is not None:
-            score += 2 if _fv_hour_fits(s, hour) else -5
+        score, _ = _fv_score_set(s, context, hour, active=(s['id'] == active_id))
         score -= i * 0.01          # keep creator order as the tie-break
         if score > best_score:
             best, best_score = s, score
     return best
+
+
+def _fv_repeat_tier(sets, state):
+    """The tier to offer again: the last one actually sent, per the fan's own
+    record rather than creator order."""
+    by_id = {s['id']: s for s in sets}
+    s = by_id.get((state or {}).get('active_set') or '')
+    if s is None:
+        return None, 0
+    n = int((state.get('sets') or {}).get(s['id'], 0) or 0)
+    if not n:
+        return None, 0
+    return s, min(n - 1, len(s['tiers']) - 1)
+
+
+def _fv_fan_hour(persona, fan_key, creator_offset=0):
+    """The hour of day where the fan is, so "at night on bed" fires at their
+    night rather than the creator's. Learned from when they actually message;
+    the creator's own offset is the fallback until there's enough to go on."""
+    off = _fv_fan_tz_offset(persona, fan_key)
+    if off is None:
+        off = int(creator_offset or 0)
+    now = datetime.now(timezone.utc) + timedelta(minutes=off)
+    return now.hour
+
+
+def _fv_fan_tz_offset(persona, fan_key, min_msgs=12):
+    """Minutes from UTC, guessed from the fan's own activity: people message
+    across their waking day, so the middle of that window sits near their
+    mid-afternoon. None until there is enough signal to beat the fallback."""
+    try:
+        from db import SessionLocal, XMessage
+        s = SessionLocal()
+        try:
+            rows = (s.query(XMessage.created_at)
+                    .filter(XMessage.persona == persona,
+                            XMessage.x_user_id == str(fan_key),
+                            XMessage.direction == 'in')
+                    .order_by(XMessage.created_at.desc()).limit(300).all())
+        finally:
+            s.close()
+    except Exception:
+        return None
+    hours = [r[0].hour for r in rows if r[0]]
+    if len(hours) < min_msgs:
+        return None
+    # Circular mean of the hours they write, in UTC.
+    import math
+    xs = sum(math.cos(h * math.pi / 12) for h in hours)
+    ys = sum(math.sin(h * math.pi / 12) for h in hours)
+    if not xs and not ys:
+        return None
+    mean_utc = (math.atan2(ys, xs) * 12 / math.pi) % 24
+    # Put the middle of their activity at ~16:00 local, a fair centre for an
+    # evening-weighted chat app.
+    return int(round(((16 - mean_utc) % 24) * 60)) - (1440 if ((16 - mean_utc) % 24) > 12 else 0)
+
+
+# Fanvue rejects anything under $3, so a discounted retry stops here.
+FV_PRICE_FLOOR = 300
+
+
+def _fv_record_drop(persona, fan_uuid, chosen, idx, price, media_uuids, message_uuid):
+    """Write the sale to the ledger. Returns the row id, or '' if it could not
+    be written — the drop still went out, so that is logged loudly rather than
+    swallowed: without a row nothing can later confirm the fan paid."""
+    try:
+        from db import SessionLocal, record_ppv_drop
+        s = SessionLocal()
+        try:
+            d = record_ppv_drop(s, persona, fan_uuid, chosen['id'], chosen['name'],
+                                idx, price, media_uuids, message_uuid)
+            s.commit()
+            return d.id
+        finally:
+            s.close()
+    except Exception as e:
+        logger.warning('PPV ledger write failed for %s/%s: %s', persona, fan_uuid, str(e)[:160])
+        _fv_trace(persona, 'error',
+                  f'PPV sent but not recorded ({str(e)[:120]}) — payment cannot be verified')
+        return ''
 
 
 # Fanvue serves media only through variant URLs, and only when the request asks
@@ -7908,19 +8174,30 @@ def api_fanvue_ppv():
     for i, s in enumerate(raw):
         if not isinstance(s, dict):
             continue
-        for t in (s.get('tiers') or []):
-            if isinstance(t, dict) and (t.get('media_uuids') or t.get('media')):
-                try:
-                    price = int(t.get('price') or 0)
-                except (TypeError, ValueError):
-                    price = 0
-                if price < 300:
-                    return jsonify({'ok': False, 'error':
-                                    f"\"{s.get('name') or ('Set ' + str(i + 1))}\" "
-                                    'has a tier priced under $3'}), 400
+        label = s.get('name') or ('Set ' + str(i + 1))
+        # Refuse rather than drop. A tier with media but no price used to error,
+        # while a tier with a price but no media vanished silently — so a set
+        # that read "3 tiers" in the builder could be one tier at runtime.
+        for j, t in enumerate(s.get('tiers') or []):
+            if not isinstance(t, dict):
+                continue
+            media = t.get('media_uuids') or t.get('media') or []
+            try:
+                price = int(t.get('price') or 0)
+            except (TypeError, ValueError):
+                price = 0
+            if not media:
+                return jsonify({'ok': False, 'error':
+                                f'"{label}" tier {j + 1} has no media. Add a file '
+                                'or remove the tier.'}), 400
+            if price < 300:
+                return jsonify({'ok': False, 'error':
+                                f'"{label}" tier {j + 1} needs a price of at '
+                                'least $3'}), 400
         c = _fv_clean_set(s, i)
         if not c:
-            continue
+            return jsonify({'ok': False, 'error':
+                            f'"{label}" has no usable tiers'}), 400
         while c['id'] in seen:
             c['id'] += '_'
         seen.add(c['id'])
@@ -7932,7 +8209,8 @@ def api_fanvue_ppv():
     cfg = {'sets': sets, 'tz_offset': max(-840, min(tz, 840)),
            'enabled': bool(d.get('enabled', True)) and bool(sets)}
     _set_setting(f'fanvue_ppv_{persona}', json.dumps(cfg))
-    return jsonify({'ok': True, 'sets': sets, 'enabled': cfg['enabled']})
+    return jsonify({'ok': True, 'sets': sets, 'enabled': cfg['enabled'],
+                    'warnings': _fv_set_warnings(sets)})
 
 
 @app.route('/api/fanvue/draft', methods=['POST'])
@@ -8459,115 +8737,230 @@ def _ppv_progress(value, sets):
     return {sets[0]['id']: n} if n and sets else {}
 
 
-def _fv_last_tier(sets, progress):
-    """The tier most recently sent to this fan: (set, index). The one they did
-    not buy, which is what a retry repeats."""
-    for s in reversed(sets):
-        n = int(progress.get(s['id'], 0) or 0)
-        if n:
-            return s, min(n - 1, len(s['tiers']) - 1)
-    return None, 0
+def _fv_fan_state(raw, fan_uuid, sets):
+    """One fan's PPV record, migrated forward from every earlier shape.
+
+    The ledger table is the authority on what was bought; this is the hot-path
+    summary of where the fan is in the ladder, and can be rebuilt from it."""
+    st = raw.get(fan_uuid) if isinstance(raw, dict) else None
+    if isinstance(st, dict) and 'sets' in st:
+        st.setdefault('active_set', '')
+        st.setdefault('retries', 0)
+        st.setdefault('msgs_at_last_drop', 0)
+        st.setdefault('last_drop_id', '')
+        st['sets'] = {str(k): int(v or 0) for k, v in (st.get('sets') or {}).items()}
+        return st
+    # Legacy: {set_id: tiers_sent}, or an int/bool counting one flat list.
+    progress = _ppv_progress(st, sets)
+    active = ''
+    if progress:
+        # Whichever set got furthest is the one this fan was climbing.
+        active = max(progress.items(), key=lambda kv: kv[1])[0]
+    return {'active_set': active, 'sets': progress, 'last_drop_id': '',
+            'retries': 0, 'msgs_at_last_drop': 0}
+
+
+def _fv_tiers_left(s, state):
+    return len(s['tiers']) - int((state.get('sets') or {}).get(s['id'], 0) or 0)
+
+
+def _fv_set_warnings(sets):
+    """Configuration that will quietly misbehave: things worth telling the
+    creator about at save time, none of which are worth refusing the save."""
+    out = []
+    # A trigger word on two sets makes them compete for the same moments, which
+    # is what pulls a fan off one ladder onto another's tier 1.
+    owners = {}
+    for s in sets:
+        for raw in s['keywords']:
+            kw = _fv_parse_keyword(raw)
+            if kw and not kw['negative']:
+                owners.setdefault(kw['word'], []).append(s['name'])
+    for word, names in owners.items():
+        if len(names) > 1:
+            out.append(f'"{word}" is a trigger word on {" and ".join(names)} — '
+                       'those sets will compete for the same messages')
+    # Hours nothing covers: a fan chatting then gets whichever set is least bad.
+    windowed = [s for s in sets if s.get('hour_from') is not None
+                and s.get('hour_to') is not None]
+    if windowed and len(windowed) == len(sets):
+        gaps = [h for h in range(24) if not any(_fv_hour_fits(s, h) for s in sets)]
+        if gaps:
+            spans, start = [], gaps[0]
+            for prev, h in zip(gaps, gaps[1:] + [None]):
+                if h != prev + 1:
+                    spans.append(f'{start:02d}:00–{(prev + 1) % 24:02d}:00')
+                    start = h
+            out.append(f'No set covers {len(gaps)}h of the day '
+                       f'({", ".join(spans)}) — leave one set without hours '
+                       'as a fallback')
+    for s in sets:
+        prices = [t['price'] for t in s['tiers']]
+        if len(prices) > 1 and any(b <= a for a, b in zip(prices, prices[1:])):
+            out.append(f'"{s["name"]}" prices do not climb '
+                       f'({" → ".join("$%g" % (p / 100) for p in prices)})')
+        blank = [i + 1 for i, t in enumerate(s['tiers']) if not t.get('caption')]
+        if blank:
+            out.append(f'"{s["name"]}" tier{"s" if len(blank) > 1 else ""} '
+                       f'{", ".join(map(str, blank))} '
+                       'have no caption — one will be written for them')
+    return out
+
+
+def _fv_migrate_ppv_state(persona, sets):
+    """Fold the old parallel dicts into the single per-fan record, once.
+
+    Runs before the new gating goes live so nobody who was already halfway up a
+    ladder is knocked back to tier 1 by the upgrade itself. The old keys are
+    left in place — this only ever writes the new one."""
+    state_key = f'fanvue_ppv_state_{persona}'
+    if _get_setting(state_key):
+        return
+    try:
+        old_sent = json.loads(_get_setting(f'fanvue_ppv_sent_{persona}') or '{}')
+        old_at = json.loads(_get_setting(f'fanvue_ppv_at_{persona}') or '{}')
+        old_retry = json.loads(_get_setting(f'fanvue_ppv_retry_{persona}') or '{}')
+    except Exception:
+        return
+    if not isinstance(old_sent, dict) or not old_sent:
+        return
+    out = {}
+    for fan, progress in old_sent.items():
+        st = _fv_fan_state({fan: progress}, fan, sets)
+        st['msgs_at_last_drop'] = int((old_at or {}).get(fan, 0) or 0)
+        st['retries'] = int((old_retry or {}).get(fan, 0) or 0)
+        out[fan] = st
+    _set_setting(state_key, json.dumps(out))
+    logger.info('Fanvue [%s]: migrated %d fans to the new PPV state', persona, len(out))
 
 
 def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx, context=''):
-    """Consider the next PPV drop for this fan: pick the set that fits what was
-    just said and the hour, then send its next tier in order. Serialised per
-    persona because paced replies land from several worker threads at once and
-    the counters are a read-modify-write on one shared setting."""
+    """Consider the next PPV drop for this fan: hold the set they are already
+    climbing unless another clearly fits better, then send its next tier.
+
+    Serialised per persona because paced replies land from several worker
+    threads at once and the summary is a read-modify-write on one setting. Every
+    send is written to the ppv_drops ledger before the counters move, so the sale
+    survives anything that happens to the summary afterwards."""
     sets = ctx['sets']
     if not sets:
         return
     with _fanvue_persona_lock(_fv_ppv_locks, persona):
         try:
-            ppv_sent = json.loads(_get_setting(ctx['sent_key']) or '{}')
-        except Exception:
-            ppv_sent = {}
-        try:
-            ppv_at = json.loads(_get_setting(ctx['at_key']) or '{}')
-        except Exception:
-            ppv_at = {}
-        try:
-            last_sent = json.loads(_get_setting(ctx['last_key']) or '{}')
-        except Exception:
-            last_sent = {}
-        try:
-            test_paid = json.loads(_get_setting(ctx['paid_key']) or '{}')
-        except Exception:
-            test_paid = {}
-        try:
-            retries = json.loads(_get_setting(ctx['retry_key']) or '{}')
-        except Exception:
-            retries = {}
-        resend = False
+            state_all = _json_setting_strict(ctx['state_key'], {})
+            test_paid = _json_setting_strict(ctx['paid_key'], {})
+        except SettingUnreadable as e:
+            # An unreadable store looks exactly like "this fan is brand new",
+            # which would re-send every unlock they already bought. Hold.
+            logger.warning('Fanvue [%s] PPV state unreadable, holding: %s', persona, e)
+            _fv_trace(persona, 'error', f'PPV state unreadable, no drop sent: {str(e)[:120]}')
+            return
 
-        progress = _ppv_progress(ppv_sent.get(fan_uuid), sets)
-        total_done = sum(progress.values())
-        exchanged = len(_fanvue_saved_history(persona, fan_key, limit=200))
+        state = _fv_fan_state(state_all, fan_uuid, sets)
+        total_done = sum(state['sets'].values())
+        exchanged = _fanvue_msg_count(persona, fan_key)
+        resend = False
+        discount = 0.0
+
         if total_done == 0:
             send_ppv = exchanged >= ctx.get('first_after', 6)
         else:
-            enough_chat = (exchanged - int(ppv_at.get(fan_uuid, 0))) >= ctx['gap']
-            paid = (not ctx['require_payment']) \
-                or int(test_paid.get(fan_uuid, 0) or 0) >= total_done \
-                or _fanvue_fan_purchased(persona, fan_uuid,
-                                         last_sent.get(fan_uuid) or [])
+            enough_chat = (exchanged - int(state.get('msgs_at_last_drop', 0) or 0)) >= ctx['gap']
+            drop = None
+            if not ctx['require_payment']:
+                paid = True
+            elif int(test_paid.get(fan_uuid, 0) or 0) >= total_done:
+                paid = True
+            elif not state.get('last_drop_id'):
+                # A fan carried over from before the ledger existed. Their past
+                # drops can't be verified either way, so don't punish them for
+                # the upgrade — let them carry on and gate from here on.
+                paid = True
+            else:
+                pstate, drop = _fv_drop_state(persona, state.get('last_drop_id'))
+                if pstate == PPV_UNKNOWN:
+                    _fv_trace(persona, 'error',
+                              f'could not read payment state for {handle or fan_uuid} — holding')
+                    return
+                paid = pstate == PPV_PAID
+                if not paid and _fv_drop_is_stale(drop, ctx.get('stale_days')):
+                    # Long past unbought: stop letting one photo end the funnel.
+                    logger.info('Fanvue [%s] %s: last PPV unbought past the stale '
+                                'window — moving to another set', persona, handle or fan_uuid)
+                    _fv_trace(persona, 'ppv',
+                              f'{handle or fan_uuid}: unbought drop expired, trying another set')
+                    state['active_set'] = ''
+                    state['retries'] = 0
+                    paid = True
             send_ppv = paid and enough_chat
             if not paid:
                 logger.info('Fanvue [%s] %s: waiting on payment of the last PPV',
                             persona, handle or fan_uuid)
                 # An unbought drop otherwise blocks this fan for good. After
-                # enough more chat, offer the same one again a few times.
-                tries = int(retries.get(fan_uuid, 0) or 0)
-                waited = exchanged - int(ppv_at.get(fan_uuid, 0))
+                # enough more chat, offer the same one again a few times — and
+                # cheaper if they opened it, since that is a price objection.
+                tries = int(state.get('retries', 0) or 0)
+                waited = exchanged - int(state.get('msgs_at_last_drop', 0) or 0)
                 if (ctx.get('retry_after') and tries < ctx.get('retry_max', 0)
                         and waited >= ctx['retry_after']):
                     resend = True
+                    if drop is not None and drop.read_at:
+                        discount = float(ctx.get('retry_discount') or 0)
         if not (send_ppv or resend):
             return
 
-        hour = int(time.strftime('%H', time.localtime(time.time() + 60 * int(
-            ctx.get('tz_offset') or 0))))
+        hour = _fv_fan_hour(persona, fan_key, ctx.get('tz_offset'))
         if resend:
             # Repeat the tier they did not buy, not the next one.
-            chosen, idx = _fv_last_tier(sets, progress)
+            chosen, idx = _fv_repeat_tier(sets, state)
             if not chosen:
                 return
         else:
-            chosen = _fv_pick_set(sets, progress,
-                                  (context or '') + ' ' + (reply or ''), hour)
+            chosen = _fv_pick_set(sets, state, (context or '') + ' ' + (reply or ''), hour)
             if not chosen:
                 return
-            idx = int(progress.get(chosen['id'], 0) or 0)
+            idx = int(state['sets'].get(chosen['id'], 0) or 0)
         tier = chosen['tiers'][idx]
+        price = int(tier['price'])
+        if discount:
+            price = max(FV_PRICE_FLOOR, int(round(price * (1 - discount))))
         cap = (tier.get('caption') or reply).strip()[:2000]
         try:
-            _fanvue_call(persona, 'POST', f'{scope}/chats/{fan_uuid}/message',
-                         body={'text': cap, 'mediaUuids': tier['media_uuids'],
-                               'price': int(tier['price'])})
+            sent = _fanvue_call(persona, 'POST', f'{scope}/chats/{fan_uuid}/message',
+                                body={'text': cap, 'mediaUuids': tier['media_uuids'],
+                                      'price': price})
         except Exception as e:
             logger.warning('Fanvue PPV to %s failed: %s', handle or fan_uuid, str(e)[:120])
             _fv_trace(persona, 'error', f'PPV to {handle or fan_uuid} failed: {str(e)[:200]}')
             return
+
+        msg_uuid = ''
+        if isinstance(sent, dict):
+            body = sent.get('data') if isinstance(sent.get('data'), dict) else sent
+            msg_uuid = str(_fv_first(body, 'uuid', 'id', default='') or '')
+        drop_id = _fv_record_drop(persona, fan_uuid, chosen, idx, price,
+                                  tier['media_uuids'], msg_uuid)
+
         if resend:
-            retries[fan_uuid] = int(retries.get(fan_uuid, 0) or 0) + 1
-            _set_setting(ctx['retry_key'], json.dumps(retries))
+            state['retries'] = int(state.get('retries', 0) or 0) + 1
         else:
-            progress[chosen['id']] = idx + 1
-            ppv_sent[fan_uuid] = progress
-            retries.pop(fan_uuid, None)
-            _set_setting(ctx['sent_key'], json.dumps(ppv_sent))
-            _set_setting(ctx['retry_key'], json.dumps(retries))
-        ppv_at[fan_uuid] = exchanged
-        last_sent[fan_uuid] = tier['media_uuids']
-        _set_setting(ctx['at_key'], json.dumps(ppv_at))
-        _set_setting(ctx['last_key'], json.dumps(last_sent))
+            state['sets'][chosen['id']] = idx + 1
+            state['active_set'] = chosen['id']
+            state['retries'] = 0
+        if drop_id:
+            state['last_drop_id'] = drop_id
+        state['msgs_at_last_drop'] = exchanged
+        state_all[fan_uuid] = state
+        _set_setting(ctx['state_key'], json.dumps(state_all))
+
         again = ' again' if resend else ''
-        logger.info('PPV SENT%s [%s] %s tier %d/%d -> %s at %s', again, persona,
+        off = f' (-{int(discount * 100)}%)' if discount else ''
+        logger.info('PPV SENT%s [%s] %s tier %d/%d -> %s at %s%s', again, persona,
                     chosen['name'], idx + 1, len(chosen['tiers']),
-                    handle or fan_uuid, tier['price'])
+                    handle or fan_uuid, price, off)
         _fv_trace(persona, 'ppv',
                   f"\U0001F48E {chosen['name']} tier {idx + 1}/{len(chosen['tiers'])}"
-                  f"{again} \u2192 {handle or fan_uuid} at ${tier['price'] / 100:g}: {cap}")
+                  f"{again} → {handle or fan_uuid} at ${price / 100:g}{off}: {cap}")
 
 
 def _fv_deliver(persona, scope, fan_uuid, fan_key, handle, reply, incoming, cfg,
@@ -8752,9 +9145,10 @@ def _fanvue_auto_round(persona):
     ppv_sets = _fanvue_ppv_sets(persona)
     ppv_on = bool(_fanvue_ppv(persona).get('enabled', True)) and bool(ppv_sets)
     ppv_tz = _fanvue_ppv(persona).get('tz_offset') or 0
-    ppv_sent_key = f'fanvue_ppv_sent_{persona}'
-    ppv_at_key = f'fanvue_ppv_at_{persona}'
+    ppv_state_key = f'fanvue_ppv_state_{persona}'
     ppv_paid_key = f'fanvue_ppv_testpaid_{persona}'
+    if ppv_on:
+        _fv_migrate_ppv_state(persona, ppv_sets)
     ppv_test_phrase = (opts.get('ppv_test_phrase') or '').strip().lower()
     hcfg = _fv_humanize_cfg(persona)
     # Messages that must pass before the first drop, and between later ones.
@@ -8763,6 +9157,11 @@ def _fanvue_auto_round(persona):
     # Offer an unbought drop again after this much more chat, at most this often.
     ppv_retry_after = max(0, min(int(opts.get('ppv_retry_after', 0) or 0), 500))
     ppv_retry_max = max(0, min(int(opts.get('ppv_retry_max', 1) or 0), 10))
+    # A drop they opened but didn't buy is a price objection, so the retry goes
+    # out cheaper. And after this many days an unbought drop stops blocking the
+    # ladder — one photo shouldn't end the funnel for a fan permanently.
+    ppv_retry_discount = max(0.0, min(float(opts.get('ppv_retry_discount', 0) or 0), 0.8))
+    ppv_stale_days = max(0, min(int(opts.get('ppv_stale_days', 14) or 0), 365))
     # When off, tiers advance on chatting alone (payment can't be verified for
     # agency-agent testers). When on, each later tier waits for the prior payment.
     ppv_require_payment = (_get_setting(f'fanvue_ppv_require_payment_{persona}') or '0') == '1'
@@ -8911,10 +9310,11 @@ def _fanvue_auto_round(persona):
             except Exception:
                 paid_map = {}
             try:
-                sent_map = json.loads(_get_setting(ppv_sent_key) or '{}')
+                state_map = json.loads(_get_setting(ppv_state_key) or '{}')
             except Exception:
-                sent_map = {}
-            paid_map[fan_uuid] = sum(_ppv_progress(sent_map.get(fan_uuid), ppv_sets).values())
+                state_map = {}
+            paid_map[fan_uuid] = sum(
+                _fv_fan_state(state_map, fan_uuid, ppv_sets)['sets'].values())
             _set_setting(ppv_paid_key, json.dumps(paid_map))
             _fv_trace(persona, 'ppv', f'{who} said the test phrase — tier '
                                       f'{paid_map[fan_uuid]} counted as paid')
@@ -8959,10 +9359,9 @@ def _fanvue_auto_round(persona):
 
         ppv_ctx = {'sets': ppv_sets, 'gap': ppv_gap, 'first_after': ppv_first_after,
                    'retry_after': ppv_retry_after, 'retry_max': ppv_retry_max,
-                   'retry_key': f'fanvue_ppv_retry_{persona}',
-                   'sent_key': ppv_sent_key,
-                   'at_key': ppv_at_key, 'paid_key': ppv_paid_key,
-                   'last_key': f'fanvue_ppv_last_{persona}', 'tz_offset': ppv_tz,
+                   'retry_discount': ppv_retry_discount, 'stale_days': ppv_stale_days,
+                   'state_key': ppv_state_key, 'paid_key': ppv_paid_key,
+                   'tz_offset': ppv_tz,
                    'require_payment': ppv_require_payment} if ppv_on else None
         age = _fv_msg_age_minutes(newest)
         active = age is None or age < FV_ACTIVE_MIN
