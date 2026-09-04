@@ -1067,6 +1067,7 @@ _PAID_API = ('/api/telegram', '/api/tguser', '/api/x', '/api/xlog', '/api/thread
              '/api/backstory', '/api/config', '/api/whatsapp')
 # Fan-facing and auth/billing routes stay open.
 _OPEN_PATHS = ('/login', '/register', '/logout', '/pricing', '/billing',
+               '/auth/google',
                '/account', '/api/billing', '/healthz', '/go/',
                '/dashboard/logout', '/admin/logout')
 
@@ -1201,6 +1202,11 @@ button:disabled{opacity:.6;cursor:not-allowed;transform:none;animation:none}
 .ok a,.err a{color:inherit;font-weight:600;text-decoration:underline}
 .alt{text-align:center;margin-top:18px;font-size:.85rem;color:var(--text-muted)}
 .alt a{color:var(--accent);text-decoration:none}
+.gbtn{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;background:#fff;color:#1f1f1f;border:1px solid #dadce0;border-radius:12px;padding:13px;font-size:.95rem;font-weight:600;font-family:var(--font);cursor:pointer;text-decoration:none;transition:box-shadow .2s}
+.gbtn:hover{box-shadow:0 2px 10px #0003}
+.gbtn svg{width:18px;height:18px}
+.orsep{display:flex;align-items:center;gap:12px;color:var(--text-muted);font-size:.78rem;margin:18px 0}
+.orsep:before,.orsep:after{content:'';flex:1;height:1px;background:var(--border)}
 .tiers{display:grid;gap:16px;margin-top:8px}
 .tier{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:22px;transition:border-color .2s}
 .tier:hover{border-color:#3d3d3d}
@@ -1224,6 +1230,8 @@ REGISTER_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <style>""" + ACCOUNT_CSS + """</style></head><body><div class="wrap"><div class="card">
 <h1>Create your account</h1><p class="sub">Start building your AI persona.</p>
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
+{% if google_enabled %}<a class="gbtn" href="/auth/google{{ google_next }}"><svg viewBox="0 0 48 48"><path fill="#4285F4" d="M45.1 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h11.8c-.5 2.8-2 5.1-4.4 6.7v5.5h7.1c4.2-3.8 6.6-9.5 6.6-16.2z"/><path fill="#34A853" d="M24 46c6 0 11-2 14.5-5.3l-7.1-5.5c-2 1.3-4.5 2.1-7.4 2.1-5.7 0-10.6-3.9-12.3-9.1H4.3v5.7C7.8 41 15.3 46 24 46z"/><path fill="#FBBC05" d="M11.7 28.2c-.4-1.3-.7-2.7-.7-4.2s.2-2.9.7-4.2v-5.7H4.3C2.8 17.1 2 20.4 2 24s.8 6.9 2.3 9.9l7.4-5.7z"/><path fill="#EA4335" d="M24 10.7c3.2 0 6.1 1.1 8.4 3.3l6.3-6.3C35 4.1 30 2 24 2 15.3 2 7.8 7 4.3 14.1l7.4 5.7c1.7-5.2 6.6-9.1 12.3-9.1z"/></svg>Continue with Google</a>
+<div class="orsep">or</div>{% endif %}
 <form method="post">
 <label>Name</label><input type="text" name="name" autocomplete="name" value="{{ name or '' }}">
 <label>Email</label><input type="email" name="email" required autocomplete="email" value="{{ email or '' }}">
@@ -1238,6 +1246,8 @@ SIGNIN_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <style>""" + ACCOUNT_CSS + """</style></head><body><div class="wrap"><div class="card">
 <h1>Sign in</h1><p class="sub">Welcome back.</p>
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
+{% if google_enabled %}<a class="gbtn" href="/auth/google{{ google_next }}"><svg viewBox="0 0 48 48"><path fill="#4285F4" d="M45.1 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h11.8c-.5 2.8-2 5.1-4.4 6.7v5.5h7.1c4.2-3.8 6.6-9.5 6.6-16.2z"/><path fill="#34A853" d="M24 46c6 0 11-2 14.5-5.3l-7.1-5.5c-2 1.3-4.5 2.1-7.4 2.1-5.7 0-10.6-3.9-12.3-9.1H4.3v5.7C7.8 41 15.3 46 24 46z"/><path fill="#FBBC05" d="M11.7 28.2c-.4-1.3-.7-2.7-.7-4.2s.2-2.9.7-4.2v-5.7H4.3C2.8 17.1 2 20.4 2 24s.8 6.9 2.3 9.9l7.4-5.7z"/><path fill="#EA4335" d="M24 10.7c3.2 0 6.1 1.1 8.4 3.3l6.3-6.3C35 4.1 30 2 24 2 15.3 2 7.8 7 4.3 14.1l7.4 5.7c1.7-5.2 6.6-9.1 12.3-9.1z"/></svg>Continue with Google</a>
+<div class="orsep">or</div>{% endif %}
 <form method="post">
 <label>Email</label><input type="email" name="email" required autocomplete="email" value="{{ email or '' }}">
 <label>Password</label><input type="password" name="password" required autocomplete="current-password">
@@ -1690,6 +1700,115 @@ def account():
         s.close()
     return render_template_string(ACCOUNT_HTML, user=user, tiers=TIERS,
                                   payments=payments)
+
+
+# ── Sign in with Google (OAuth 2.0, credentials from Google Cloud Console) ───
+# Set GOOGLE_OAUTH_CLIENT_ID / GOOGLE_OAUTH_CLIENT_SECRET to switch it on; the
+# button stays hidden while they are unset, so the app runs without them.
+GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
+GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
+GOOGLE_USERINFO_URL = 'https://openidconnect.googleapis.com/v1/userinfo'
+
+
+def _google_oauth_config():
+    cid = (os.getenv('GOOGLE_OAUTH_CLIENT_ID') or '').strip()
+    secret = (os.getenv('GOOGLE_OAUTH_CLIENT_SECRET') or '').strip()
+    return (cid, secret) if (cid and secret) else (None, None)
+
+
+def _google_redirect_uri():
+    """Must match a redirect URI registered on the OAuth client exactly."""
+    explicit = (os.getenv('GOOGLE_OAUTH_REDIRECT_URI') or '').strip()
+    if explicit:
+        return explicit
+    return urllib.parse.urljoin(request.url_root, 'auth/google/callback')
+
+
+@app.context_processor
+def _inject_google_oauth():
+    cid, _ = _google_oauth_config()
+    nxt = request.args.get('next') or ''
+    return {'google_enabled': bool(cid),
+            'google_next': ('?next=' + urllib.parse.quote(nxt)) if nxt.startswith('/') else ''}
+
+
+@app.route('/auth/google')
+def auth_google():
+    cid, _ = _google_oauth_config()
+    if not cid:
+        return render_template_string(
+            SIGNIN_HTML, error='Google sign-in is not configured yet.'), 503
+    state = secrets.token_urlsafe(24)
+    session['google_oauth_state'] = state
+    nxt = request.args.get('next') or ''
+    session['google_oauth_next'] = nxt if nxt.startswith('/') else ''
+    params = {'client_id': cid, 'redirect_uri': _google_redirect_uri(),
+              'response_type': 'code', 'scope': 'openid email profile',
+              'state': state, 'prompt': 'select_account'}
+    return redirect(GOOGLE_AUTH_URL + '?' + urllib.parse.urlencode(params))
+
+
+def _google_post(url, data):
+    req = urllib.request.Request(
+        url, data=urllib.parse.urlencode(data).encode(),
+        headers={'Content-Type': 'application/x-www-form-urlencoded'})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        return json.loads(r.read().decode())
+
+
+def _google_userinfo(access_token):
+    req = urllib.request.Request(
+        GOOGLE_USERINFO_URL, headers={'Authorization': 'Bearer ' + access_token})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        return json.loads(r.read().decode())
+
+
+@app.route('/auth/google/callback')
+def auth_google_callback():
+    from db import create_user, get_user_by_email, get_user_by_google_sub
+    cid, secret = _google_oauth_config()
+    if not cid:
+        return redirect('/login')
+    state = session.pop('google_oauth_state', None)
+    nxt = session.pop('google_oauth_next', '') or ''
+    if not state or request.args.get('state') != state:
+        return render_template_string(SIGNIN_HTML,
+                                      error='Sign-in expired. Please try again.'), 400
+    if request.args.get('error') or not request.args.get('code'):
+        return render_template_string(SIGNIN_HTML, error='Google sign-in was cancelled.')
+    try:
+        tok = _google_post(GOOGLE_TOKEN_URL, {
+            'code': request.args['code'], 'client_id': cid,
+            'client_secret': secret, 'redirect_uri': _google_redirect_uri(),
+            'grant_type': 'authorization_code'})
+        info = _google_userinfo(tok['access_token'])
+    except Exception as e:
+        logger.warning('GOOGLE OAUTH failed: %s', e)
+        return render_template_string(
+            SIGNIN_HTML, error='Could not complete Google sign-in. Try again.'), 502
+    sub = info.get('sub')
+    email = (info.get('email') or '').strip().lower()
+    if not sub or not email or not info.get('email_verified'):
+        return render_template_string(
+            SIGNIN_HTML, error='Google did not return a verified email address.'), 400
+    s = _db_session()
+    try:
+        u = get_user_by_google_sub(s, sub) or get_user_by_email(s, email)
+        if u is None:
+            u = create_user(s, email, '', info.get('name') or '', google_sub=sub)
+        # Links an existing password account to the Google account on first use.
+        if not u.google_sub:
+            u.google_sub = sub
+        u.last_login = datetime.now(timezone.utc).replace(tzinfo=None)
+        s.commit()
+        session['user_id'] = u.id
+        session.permanent = True
+        active = u.status == 'active' or (u.role or 'user') == 'admin'
+    finally:
+        s.close()
+    if nxt and active:
+        return redirect(nxt)
+    return redirect('/dashboard' if active else '/billing')
 
 
 @app.route('/register', methods=['GET', 'POST'])

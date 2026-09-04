@@ -402,6 +402,9 @@ class User(Base):
     id = Column(String(32), primary_key=True, default=_uid)
     email = Column(String(255), unique=True, nullable=False, index=True)
     password_hash = Column(String(255), nullable=False)
+    # Google account id (the OAuth "sub"). Set for users who signed in with
+    # Google; they have no usable password_hash.
+    google_sub = Column(String(64), index=True)
     name = Column(String(120), default='')
     role = Column(String(16), default='user')      # user | admin
     tier = Column(String(32), default='')          # '' until a plan is chosen
@@ -450,12 +453,19 @@ def get_user_by_email(session, email):
         User.email == (email or '').strip().lower()).first()
 
 
-def create_user(session, email, password_hash, name=''):
+def create_user(session, email, password_hash, name='', google_sub=None):
     u = User(email=(email or '').strip().lower(),
-             password_hash=password_hash, name=name or '')
+             password_hash=password_hash or '', name=name or '',
+             google_sub=google_sub)
     session.add(u)
     session.flush()
     return u
+
+
+def get_user_by_google_sub(session, sub):
+    if not sub:
+        return None
+    return session.query(User).filter(User.google_sub == sub).first()
 
 
 def get_payment_by_order(session, order_id):

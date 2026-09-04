@@ -209,3 +209,35 @@ force them on with `FANVUE_WORKER=1`, `X_WORKER=1`, `TELEGRAM_WORKER=1`,
 
 `maxDuration` is 60s — the ceiling on Hobby plans. A long Gemini call that
 exceeds it returns a 504.
+
+## Sign in with Google (Google Cloud Console)
+
+Creators can sign up and sign in with their Google account. Payment is still
+handled by Oxapay — Google supplies the identity only.
+
+### Create the OAuth client
+
+1. <https://console.cloud.google.com> → pick the project (the same one as
+   `GOOGLE_CLOUD_PROJECT`, `793708886252` by default).
+2. **APIs & Services → OAuth consent screen**: External, fill in app name,
+   support email and developer email. Scopes: `openid`, `email`, `profile`.
+   While the app is in *Testing* only listed test users can sign in — hit
+   **Publish app** to open it to everyone.
+3. **APIs & Services → Credentials → Create credentials → OAuth client ID →
+   Web application**.
+4. Authorised redirect URIs — add one line per deployment, exactly:
+   - `https://your-domain.com/auth/google/callback`
+   - `http://localhost:5000/auth/google/callback` (local testing)
+5. Copy the client ID and client secret.
+
+### Environment variables
+
+| Variable | Why |
+|---|---|
+| `GOOGLE_OAUTH_CLIENT_ID` | Web client ID. The Google button stays hidden until this and the secret are both set. |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | Web client secret. |
+| `GOOGLE_OAUTH_REDIRECT_URI` | Optional. Only needed when the app sits behind a proxy that rewrites the host, so the callback URL it builds no longer matches what Google has registered. |
+
+A `redirect_uri_mismatch` error from Google means the URI in step 4 differs
+from what the app sent — scheme, host and trailing path must match character
+for character.
