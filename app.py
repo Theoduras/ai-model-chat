@@ -1371,8 +1371,9 @@ REGISTER_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><title>Create account</title>
 <script src="/js/analytics.js" defer></script>
-<style>""" + ACCOUNT_CSS + """</style></head><body><div class="wrap"><div class="card">
-<h1>Create your account</h1><p class="sub">Start building your AI persona.</p>
+<script src="/js/page-editor.js" defer></script>
+<style>""" + ACCOUNT_CSS + """</style></head><body data-page="register"><div class="wrap"><div class="card">
+<h1 data-edit-id="h1">Create your account</h1><p class="sub" data-edit-id="sub">Start building your AI persona.</p>
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
 {% if google_enabled %}<a class="gbtn" href="/auth/google{{ google_next }}"><svg viewBox="0 0 48 48"><path fill="#4285F4" d="M45.1 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h11.8c-.5 2.8-2 5.1-4.4 6.7v5.5h7.1c4.2-3.8 6.6-9.5 6.6-16.2z"/><path fill="#34A853" d="M24 46c6 0 11-2 14.5-5.3l-7.1-5.5c-2 1.3-4.5 2.1-7.4 2.1-5.7 0-10.6-3.9-12.3-9.1H4.3v5.7C7.8 41 15.3 46 24 46z"/><path fill="#FBBC05" d="M11.7 28.2c-.4-1.3-.7-2.7-.7-4.2s.2-2.9.7-4.2v-5.7H4.3C2.8 17.1 2 20.4 2 24s.8 6.9 2.3 9.9l7.4-5.7z"/><path fill="#EA4335" d="M24 10.7c3.2 0 6.1 1.1 8.4 3.3l6.3-6.3C35 4.1 30 2 24 2 15.3 2 7.8 7 4.3 14.1l7.4 5.7c1.7-5.2 6.6-9.1 12.3-9.1z"/></svg>Continue with Google</a>
 <div class="orsep">or</div>{% endif %}
@@ -1380,16 +1381,17 @@ REGISTER_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <label>Name</label><input type="text" name="name" autocomplete="name" value="{{ name or '' }}">
 <label>Email</label><input type="email" name="email" required autocomplete="email" value="{{ email or '' }}">
 <label>Password</label><input type="password" name="password" required autocomplete="new-password" placeholder="At least 8 characters">
-<button type="submit">Create account</button></form>
-<div class="alt">Already have an account? <a href="/login">Sign in</a></div>
+<button type="submit"><span data-edit-id="submit-text">Create account</span></button></form>
+<div class="alt"><span data-edit-id="alt-text">Already have an account?</span> <a href="/login">Sign in</a></div>
 </div></div></body></html>"""
 
 SIGNIN_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><title>Sign in</title>
 <script src="/js/analytics.js" defer></script>
-<style>""" + ACCOUNT_CSS + """</style></head><body><div class="wrap"><div class="card">
-<h1>Sign in</h1><p class="sub">Welcome back.</p>
+<script src="/js/page-editor.js" defer></script>
+<style>""" + ACCOUNT_CSS + """</style></head><body data-page="login"><div class="wrap"><div class="card">
+<h1 data-edit-id="h1">Sign in</h1><p class="sub" data-edit-id="sub">Welcome back.</p>
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
 {% if google_enabled %}<a class="gbtn" href="/auth/google{{ google_next }}"><svg viewBox="0 0 48 48"><path fill="#4285F4" d="M45.1 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h11.8c-.5 2.8-2 5.1-4.4 6.7v5.5h7.1c4.2-3.8 6.6-9.5 6.6-16.2z"/><path fill="#34A853" d="M24 46c6 0 11-2 14.5-5.3l-7.1-5.5c-2 1.3-4.5 2.1-7.4 2.1-5.7 0-10.6-3.9-12.3-9.1H4.3v5.7C7.8 41 15.3 46 24 46z"/><path fill="#FBBC05" d="M11.7 28.2c-.4-1.3-.7-2.7-.7-4.2s.2-2.9.7-4.2v-5.7H4.3C2.8 17.1 2 20.4 2 24s.8 6.9 2.3 9.9l7.4-5.7z"/><path fill="#EA4335" d="M24 10.7c3.2 0 6.1 1.1 8.4 3.3l6.3-6.3C35 4.1 30 2 24 2 15.3 2 7.8 7 4.3 14.1l7.4 5.7c1.7-5.2 6.6-9.1 12.3-9.1z"/></svg>Continue with Google</a>
 <div class="orsep">or</div>{% endif %}
@@ -1399,15 +1401,16 @@ SIGNIN_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <label style="display:flex;align-items:center;gap:8px;margin:-4px 0 18px;color:#a1a1aa;cursor:pointer">
 <input type="checkbox" name="remember" value="1" checked
  style="width:auto;margin:0;accent-color:#7c3aed;cursor:pointer">Keep me signed in for 30 days</label>
-<button type="submit">Sign in</button></form>
-<div class="alt">No account yet? <a href="/register">Create one</a></div>
+<button type="submit"><span data-edit-id="submit-text">Sign in</span></button></form>
+<div class="alt"><span data-edit-id="alt-text">No account yet?</span> <a href="/register">Create one</a></div>
 </div></div></body></html>"""
 
 BILLING_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><title>Choose a plan</title>
 <script src="/js/analytics.js" defer></script>
-<style>""" + ACCOUNT_CSS + """</style></head><body><div class="wrap wide">
+<script src="/js/page-editor.js" defer></script>
+<style>""" + ACCOUNT_CSS + """</style></head><body data-page="pricing"><div class="wrap wide">
 <div class="bar"><span>Signed in as {{ user.email }}</span><a href="/logout">Sign out</a></div>
 {% if user.status == 'active' %}
 <div class="ok">Your <strong>{{ tiers[user.tier].name if user.tier in tiers else user.tier }}</strong>
@@ -1416,8 +1419,8 @@ plan is active{% if user.expires_at %} until {{ user.expires_at[:10] }}{% endif 
 {% elif user.status == 'expired' %}
 <div class="err">Your plan has expired. Renew below to regain access.</div>
 {% else %}
-<h1 style="margin-bottom:6px">Choose a plan</h1>
-<p class="sub">Payment is in crypto via Oxapay. Access unlocks as soon as it confirms.</p>
+<h1 style="margin-bottom:6px" data-edit-id="h1">Choose a plan</h1>
+<p class="sub" data-edit-id="sub">Payment is in crypto via Oxapay. Access unlocks as soon as it confirms.</p>
 {% endif %}
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
 <div class="tiers">
@@ -2314,7 +2317,7 @@ def landing():
 # Inline text/image editing for the plain marketing pages (not the persona
 # landing page, not the dashboard) — see js/page-editor.js. One JSON blob per
 # page, keyed by the data-edit-id an operator clicked on.
-SITE_CONTENT_PAGES = {'home'}
+SITE_CONTENT_PAGES = {'home', 'login', 'register', 'pricing'}
 
 
 @app.route('/api/site-content/<page>')
