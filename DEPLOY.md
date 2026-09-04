@@ -253,13 +253,28 @@ Search Console or Google Ads *APIs* are ever wired up for reporting.
 
 | Route | Purpose |
 |---|---|
-| `/robots.txt` | Allows the marketing pages, blocks `/dashboard`, `/api/`, the operator consoles and the fan-facing `/landing` funnel. Points at the sitemap. |
+| `/robots.txt` | Allows the marketing pages, blocks `/dashboard`, `/api/` and the operator consoles. Points at the sitemap. |
 | `/sitemap.xml` | `/`, `/pricing`, `/register`, `/login`. Add new public pages to `_PUBLIC_PAGES` in `app.py`. |
 | `/google<token>.html` | Search Console HTML-file verification, served from env. |
 | `/js/analytics.js` | Loads gtag.js for GA4 and/or Google Ads. Emits nothing until an ID is set. |
 
 The homepage carries a canonical URL, Open Graph and Twitter cards, and
 `SoftwareApplication` JSON-LD.
+
+### Keeping fan pages out of search
+
+`/landing`, `/profile` and the fan chat carry `<meta name="robots"
+content="noindex,nofollow">` plus an `X-Robots-Tag` response header, so a
+creator's funnel never surfaces in search results.
+
+They are deliberately **not** in the `robots.txt` disallow list. Disallow blocks
+crawling, and a page Google cannot crawl is a page whose `noindex` Google never
+reads — a URL already in the index would stay there indefinitely. Letting the
+crawler in is what gets these pages dropped.
+
+To clear anything already indexed: Search Console → **Removals** → *New
+request* → **Remove all URLs with this prefix**, one request per fan path. That
+hides them within a day; the `noindex` tags make it permanent once recrawled.
 
 ### Environment variables
 

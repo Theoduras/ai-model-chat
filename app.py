@@ -933,9 +933,12 @@ _PUBLIC_PAGES = [('/', '1.0', 'weekly'),
                  ('/login', '0.3', 'monthly')]
 
 # Crawling these wastes budget and can leak a creator's funnel into search.
+# The fan pages (/landing, /profile, /chat.html) are deliberately absent: they
+# carry <meta name="robots" content="noindex">, and a crawler blocked here would
+# never fetch the page to read that tag, leaving anything already indexed stuck.
 _CRAWL_DISALLOW = ['/dashboard', '/admin', '/account', '/billing', '/api/',
                    '/xbot', '/fanvue', '/threads', '/telegram', '/auth/',
-                   '/logout', '/go/', '/landing', '/profile', '/chat.html']
+                   '/logout', '/go/']
 
 
 def _site_origin():
@@ -1015,6 +1018,18 @@ window.gtag=function(){dataLayer.push(arguments);};
 gtag('js', new Date());
 %s%s
 })();""" % (primary, configs, conversion))
+    return resp
+
+
+# Fan-facing funnel pages. The meta tag covers the HTML; this header covers the
+# same pages served as static files and any non-HTML response under them.
+_NOINDEX_PATHS = ('/landing', '/landingpage.html', '/profile', '/chat')
+
+
+@app.after_request
+def _noindex_fan_pages(resp):
+    if (request.path or '/').lower().startswith(_NOINDEX_PATHS):
+        resp.headers['X-Robots-Tag'] = 'noindex, nofollow'
     return resp
 
 
