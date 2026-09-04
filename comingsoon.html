@@ -57,15 +57,24 @@
   --hair:#12100f1f;
   --hair-strong:#12100f4d;
   --hover:#12100f0a;
+  --nav-bg:rgba(255,255,255,.72);
 }
+:root{--nav-bg:rgba(17,17,17,.6)}
+html{scroll-behavior:smooth}
 html,body{min-height:100%}
 body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text)}
+/* ── Fixed nav ── */
+.site-nav{position:fixed;top:0;left:0;right:0;z-index:1000;display:flex;align-items:center;justify-content:space-between;gap:20px;
+  padding:22px 60px;background:transparent;box-shadow:none;
+  transition:background-color .4s ease,box-shadow .4s ease,padding .35s ease,backdrop-filter .4s ease;
+  animation:navIn .7s cubic-bezier(.16,1,.3,1) both}
+.site-nav.scrolled{padding:14px 60px;background:var(--nav-bg);backdrop-filter:blur(16px) saturate(180%);-webkit-backdrop-filter:blur(16px) saturate(180%);box-shadow:0 10px 30px rgba(0,0,0,.14),0 1px 0 var(--hair)}
+@keyframes navIn{from{opacity:0;transform:translateY(-14px)}to{opacity:1;transform:translateY(0)}}
 .split{display:grid;grid-template-columns:1.05fr .95fr;min-height:100vh}
 /* ── Left ── */
-.left{background:var(--panel);padding:56px 60px;display:flex;flex-direction:column;justify-content:space-between;min-height:100vh}
-.brand{font-family:'Sora';font-weight:800;font-size:22px;letter-spacing:-.01em}
+.left{background:var(--panel);padding:126px 60px 56px;display:flex;flex-direction:column;justify-content:space-between;min-height:100vh;transition:padding .35s ease}
+.brand{font-family:'Sora';font-weight:800;font-size:22px;letter-spacing:-.01em;transition:font-size .35s ease}
 .brand i{color:var(--accent);font-style:normal}
-.topbar{display:flex;align-items:center;justify-content:space-between;gap:20px}
 .auth{display:flex;align-items:center;gap:10px}
 .auth a{font-size:13.5px;font-weight:600;text-decoration:none;padding:9px 18px;border-radius:9999px;transition:all .2s;white-space:nowrap}
 .auth-ghost{color:var(--text-soft);border:1px solid var(--hair)}
@@ -117,10 +126,12 @@ p.sub{font-size:17px;color:var(--text-soft);line-height:1.65;margin-bottom:36px;
    can be scrolled away. */
 body.kbd .right{position:fixed;left:0;right:0;top:0;z-index:60;padding:8px;overflow:hidden}
 body.kbd .demo{height:100%;flex:none;max-width:none;margin:0}
+body.kbd .site-nav{display:none}
 @media(max-width:900px){
   .split{grid-template-columns:1fr}
-  .left{min-height:auto;padding:40px 26px}
-  .topbar{flex-wrap:wrap;gap:14px}
+  .left{min-height:auto;padding:150px 26px 40px}
+  .site-nav{flex-wrap:wrap;gap:14px;padding:16px 26px}
+  .site-nav.scrolled{padding:12px 26px}
   .auth a{padding:8px 15px;font-size:13px}
   h1{font-size:46px}
   /* Stacked, the demo still gets a screen of its own rather than a slice. */
@@ -128,7 +139,9 @@ body.kbd .demo{height:100%;flex:none;max-width:none;margin:0}
   .ring.a{width:240px;height:240px}
 }
 @media(max-width:600px){
-  .left{padding:28px 18px}
+  .left{padding:170px 18px 28px}
+  .site-nav{padding:14px 18px}
+  .site-nav.scrolled{padding:10px 18px}
   .brand{font-size:19px}
   .pill{font-size:11px;margin-bottom:20px}
   h1{font-size:32px;margin-bottom:16px}
@@ -145,7 +158,7 @@ body.kbd .demo{height:100%;flex:none;max-width:none;margin:0}
   .auth a{padding:7px 12px;font-size:12.5px}
 }
 /* ── Pricing ── */
-.pricing{padding:100px 60px 110px;background:var(--bg)}
+.pricing{padding:100px 60px 110px;background:var(--bg);scroll-margin-top:96px}
 .pricing-head{text-align:center;max-width:640px;margin:0 auto 56px}
 .pricing-head h2{font-family:'Sora';font-weight:800;font-size:38px;letter-spacing:-.02em;margin-bottom:14px}
 .pricing-head p{color:var(--text-soft);font-size:16px;line-height:1.6}
@@ -173,21 +186,21 @@ body.kbd .demo{height:100%;flex:none;max-width:none;margin:0}
 </style>
 </head>
 <body data-page="home">
+<header class="site-nav" id="site-nav">
+  <div class="brand"><span data-edit-id="brand-name">Velvetfunnel</span><i data-edit-id="brand-suffix">.app</i></div>
+  <nav class="auth">
+    <button class="theme-toggle" onclick="toggleTheme()" title="Light mode" aria-label="Switch to light mode">
+      <svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke-linecap="round"/></svg>
+      <svg class="ico-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" stroke-linejoin="round"/></svg>
+    </button>
+    <a href="#pricing" class="auth-ghost">Pricing</a>
+    <a href="/login" class="auth-ghost">Log in</a>
+    <a href="/register" class="auth-btn">Register</a>
+  </nav>
+</header>
 <div class="split">
 
   <div class="left">
-    <div class="topbar">
-      <div class="brand"><span data-edit-id="brand-name">Velvetfunnel</span><i data-edit-id="brand-suffix">.app</i></div>
-      <nav class="auth">
-        <button class="theme-toggle" onclick="toggleTheme()" title="Light mode" aria-label="Switch to light mode">
-          <svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke-linecap="round"/></svg>
-          <svg class="ico-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" stroke-linejoin="round"/></svg>
-        </button>
-        <a href="#pricing" class="auth-ghost">Pricing</a>
-        <a href="/login" class="auth-ghost">Log in</a>
-        <a href="/register" class="auth-btn">Register</a>
-      </nav>
-    </div>
     <div class="lc">
       <div class="pill"><span class="d"></span><span data-edit-id="pill-text">One stop shop</span></div>
       <h1><span data-edit-id="h1-line1">Your persona,</span><br><u><span data-edit-id="h1-highlight">fully automated.</span></u></h1>
@@ -252,6 +265,21 @@ fetch('/api/pricing')
     });
   })
   .catch(function(){});
+</script>
+
+<script>
+(function(){
+  var nav = document.getElementById('site-nav');
+  var ticking = false;
+  function update(){
+    nav.classList.toggle('scrolled', window.scrollY > 8);
+    ticking = false;
+  }
+  window.addEventListener('scroll', function(){
+    if (!ticking) { requestAnimationFrame(update); ticking = true; }
+  }, { passive: true });
+  update();
+})();
 </script>
 
 <script>
