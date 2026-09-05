@@ -1283,6 +1283,31 @@ function openEmbedded(url, navEl) {
     '<iframe class="sb-frame" src="' + url + '" title="Embedded page"></iframe>';
 }
 
+// An embedded console (the Fanvue setup wizard) runs its own coach-marks, but
+// an iframe can only dim itself — so it asks us to dim the chrome around it and
+// the whole window goes dark, exactly as it does when Onboarding's tour runs.
+window.addEventListener('message', function (e) {
+  if (e.origin !== location.origin || !e.data || e.data.type !== 'fv-tour') return;
+  var el = document.getElementById('fv-frame-dim');
+  if (!e.data.on) { if (el) el.remove(); return; }
+  var frame = document.querySelector('.sb-frame');
+  if (!frame) return;
+  var r = frame.getBoundingClientRect();
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'fv-frame-dim';
+    document.body.appendChild(el);
+  }
+  el.innerHTML = ['top:0;left:0;right:0;height:' + r.top + 'px',
+                  'top:' + r.bottom + 'px;left:0;right:0;bottom:0',
+                  'top:' + r.top + 'px;left:0;width:' + r.left + 'px;height:' + r.height + 'px',
+                  'top:' + r.top + 'px;left:' + r.right + 'px;right:0;height:' + r.height + 'px']
+    .map(function (css) {
+      return '<div style="position:fixed;' + css +
+        ';background:rgba(8,7,7,0.72);backdrop-filter:blur(2px);"></div>';
+    }).join('');
+});
+
 function personaThumb(p, size) {
   return p.avatar
     ? '<img src="' + p.avatar + '?t=' + Date.now() + '" style="width:100%;height:100%;object-fit:cover;">'

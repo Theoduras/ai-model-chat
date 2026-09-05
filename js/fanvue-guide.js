@@ -271,27 +271,40 @@
   // The intro tour explains the frame the wizard puts people inside, exactly as
   // Onboarding's does. It runs once per creator, not once per visit.
   var TOUR = [
-    { anchor: '.ob-stepwrap', placement: 'left',
+    { anchor: '.ob-stepwrap', placement: 'right',
       title: 'One thing at a time',
-      body: 'Setup is split into a handful of short steps. Each one explains a single part of the Fanvue console and hands you the real controls for it — what you change here is changed for real.' },
+      body: 'Setup is split into a handful of short steps. Each one covers a single part of the Fanvue console and hands you the real controls for it — what you change here is changed for real.' },
 
-    { anchor: '.ob-card', placement: 'left',
-      title: 'These are the actual settings',
-      body: 'Whatever sits in this box is the console\'s own field, moved here for the step. Fill it in and save it with the button in the step — the same button you would press on the full page.' },
+    { anchor: '#fg-step-body', placement: 'right',
+      title: 'This is the actual setting',
+      body: 'Whatever appears in this box is the console\'s own field, moved here for this step. Fill it in and save it with the button in the step — the same button you would press on the full page.' },
 
     { anchor: '.ob-rail', placement: 'right',
       title: 'Where you are',
-      body: 'Four stages: connect her account, load the content she sells, set how she replies, then go live. The bar shows how far along you are, and you can jump back to any step by clicking it.' },
+      body: 'Four stages. The bar shows how far along you are, and you can jump back to any step you have already passed by clicking it.' },
 
     { anchor: '.ob-foot', placement: 'top',
       title: 'Continue, or skip ahead',
-      body: 'Continue moves to the next step. "Skip guide" hands you the whole console at once — nothing is lost, and the Setup guide button in the header brings this back.' }
+      body: 'Continue moves on to the next step. If you would rather see every setting at once, "Skip guide" hands you the full console — and you can come back to this guide any time.' }
   ];
 
   var state = { idx: 0, on: false, seen: {}, finished: false, toured: false };
   var tour = { on: false, items: [], i: 0, el: null };
 
   function byId(id) { return document.getElementById(id); }
+
+  function embedded() {
+    try { return window.self !== window.top; } catch (e) { return true; }
+  }
+  // A coach-mark inside an iframe can only dim the iframe. Ask the dashboard to
+  // dim its own chrome for the duration so the whole window goes dark, the way
+  // it does when the persona wizard runs.
+  function tellParent(on) {
+    if (!embedded()) return;
+    try { window.parent.postMessage({ type: 'fv-tour', on: !!on }, location.origin); }
+    catch (e) {}
+  }
+
   function esc(s) {
     return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
       .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -483,7 +496,11 @@
           '<h2 class="ob-step-h">' + esc(step.title) + '</h2>' +
           (step.sub ? '<p class="ob-step-s">' + esc(step.sub) + '</p>' : '') +
           '<div class="ob-card" id="fg-step-body"></div>' +
-          '<div class="fg-explain">' + step.body + '</div>' +
+          // The per-element explanation is folded away by default: the step has
+          // to read like the persona wizard's — heading, the fields, the
+          // footer, no scrolling to reach Continue.
+          '<details class="fg-more"><summary>What every field here does</summary>' +
+            '<div class="fg-explain">' + step.body + '</div></details>' +
           '<div class="ob-foot">' +
             (state.idx > 0 ? '<button class="btn btn-ghost" onclick="FanvueGuide.back()">← Back</button>' : '') +
             '<button class="btn btn-primary" onclick="FanvueGuide.next()">' +
@@ -576,6 +593,9 @@
       state.on = true;
       if (state.idx >= STEPS.length && !state.finished) state.idx = 0;
       document.body.classList.add('fg-open');
+      // Inside the dashboard the page's own header is a second copy of chrome
+      // the dashboard already draws, so the wizard runs without it.
+      if (embedded()) document.body.classList.add('fg-embedded');
       byId('fg-shell').classList.add('on');
       state.idx = state.finished ? state.idx : api.firstUnfinished();
       markSeen(Math.min(state.idx, STEPS.length - 1));
@@ -597,7 +617,7 @@
       unmount();
       byId('fg-shell').classList.remove('on');
       byId('fg-shell').innerHTML = '';
-      document.body.classList.remove('fg-open');
+      document.body.classList.remove('fg-open', 'fg-embedded');
       state.on = false;
       try { localStorage.setItem('fvGuideOpened', '1'); } catch (e) {}
     },
@@ -630,6 +650,7 @@
       if (!items.length) return;
       tour.items = items;
       tour.on = true;
+      tellParent(true);
       byId('fg-tour').classList.add('on');
       api.tourGo(0);
     },
@@ -641,6 +662,7 @@
     tourEnd: function () {
       if (!tour.on) return;
       tour.on = false;
+      tellParent(false);
       byId('fg-tour').classList.remove('on');
     }
   };
@@ -660,7 +682,16 @@
       // step they are the only thing in the card.
       '#fg-step-body > *{margin-top:0;}',
       '#fg-step-body:empty{display:none;}',
-      '.fg-explain{font-size:.86rem;line-height:1.62;color:var(--text-2);max-width:64ch;margin-top:20px;}',
+      'body.fg-embedded > header{display:none;}',
+      '.fg-more{max-width:64ch;margin-top:18px;}',
+      '.fg-more > summary{cursor:pointer;font-size:.78rem;color:var(--text-muted);list-style:none;',
+      'display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:var(--r);',
+      'border:1px solid var(--border);background:var(--panel);}',
+      '.fg-more > summary::-webkit-details-marker{display:none;}',
+      '.fg-more > summary::before{content:"▸";font-size:.7rem;}',
+      '.fg-more[open] > summary::before{content:"▾";}',
+      '.fg-more > summary:hover{color:var(--text-2);border-color:var(--accent-line);}',
+      '.fg-explain{font-size:.86rem;line-height:1.62;color:var(--text-2);max-width:64ch;margin-top:14px;}',
       '.fg-explain p{margin:0 0 10px;}',
       '.fg-explain code{background:var(--surface);padding:1px 5px;border-radius:var(--r-sm);font-size:.8rem;}',
       '.fg-note{border-left:2px solid var(--accent);padding-left:10px;margin-top:14px;color:var(--text-muted);}',
