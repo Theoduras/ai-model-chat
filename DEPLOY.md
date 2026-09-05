@@ -384,7 +384,7 @@ Search Console or Google Ads *APIs* are ever wired up for reporting.
 | Route | Purpose |
 |---|---|
 | `/robots.txt` | Allows the marketing pages, blocks `/dashboard`, `/api/` and the operator consoles. Points at the sitemap. |
-| `/sitemap.xml` | `/`, `/pricing`, `/register`, `/login`. Add new public pages to `_PUBLIC_PAGES` in `app.py`. |
+| `/sitemap.xml` | `/`, `/pricing`, `/register`, `/login`, `/blog` and its posts. Add new public pages to `_PUBLIC_PAGES` in `app.py`; new blog posts also need their slug added to `_BLOG_SLUGS`. |
 | `/google<token>.html` | Search Console HTML-file verification, served from env. |
 | `/js/analytics.js` | Loads gtag.js for GA4 and/or Google Ads. Emits nothing until an ID is set. |
 
