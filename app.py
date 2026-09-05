@@ -1267,11 +1267,13 @@ def _current_user():
         # A seat draws its plan from the workspace owner: only the owner is
         # billed, so a chatter's access has to follow the owner's subscription.
         tier, status, expires_at = u.tier, u.status, u.expires_at
+        grandfathered = u.grandfathered_until
         owner_id = u.team_owner_id or ''
         if owner_id:
             owner = s.get(User, owner_id)
             if owner is not None:
                 tier, status, expires_at = owner.tier, owner.status, owner.expires_at
+                grandfathered = owner.grandfathered_until
                 if (status == 'active' and expires_at
                         and expires_at < datetime.now(timezone.utc).replace(tzinfo=None)):
                     status = 'expired'
@@ -1283,6 +1285,8 @@ def _current_user():
                 'is_admin': role == 'admin',
                 'stripe_customer_id': u.stripe_customer_id or '',
                 'stripe_subscription_id': u.stripe_subscription_id or '',
+                'grandfathered_until': (grandfathered.isoformat()
+                                        if grandfathered else None),
                 'expires_at': expires_at.isoformat() if expires_at else None}
     finally:
         s.close()
@@ -1326,10 +1330,28 @@ def tier_capabilities(tier_key):
     return {**DENIED_CAPS, **base.get('capabilities', {})}
 
 
+def _is_grandfathered(user):
+    """Accounts that were already paying when per-tier limits arrived keep the
+    old unlimited entitlements until the date they have paid through, so
+    enforcement is not a retroactive downgrade mid-subscription."""
+    raw = (user or {}).get('grandfathered_until')
+    if not raw:
+        return False
+    try:
+        until = datetime.fromisoformat(raw)
+    except (TypeError, ValueError):
+        return False
+    if until.tzinfo is not None:
+        until = until.astimezone(timezone.utc).replace(tzinfo=None)
+    return until > datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 def user_capabilities(user):
     if not user:
         return dict(DENIED_CAPS)
     if user.get('is_admin'):
+        return dict(UNLIMITED_CAPS)
+    if user.get('status') == 'active' and _is_grandfathered(user):
         return dict(UNLIMITED_CAPS)
     if user.get('status') != 'active':
         return dict(DENIED_CAPS)
@@ -1908,6 +1930,7 @@ a.email{color:#a78bfa;text-decoration:none;font-weight:500}
 .pill.role.support{background:#0c4a6e;color:#bae6fd}
 .pill.role.manager{background:#1e3a2f;color:#a7f3d0}
 .pill.role.chatter{background:#3b2f14;color:#fcd34d}
+.pill.legacy{background:#3b2f14;color:#fcd34d}
 .scroll{overflow-x:auto}
 </style></head><body><div class="wrap wide" style="max-width:1100px">
 <div class="bar"><span>Admin · {{ users|length }} user{{ '' if users|length == 1 else 's' }}</span>
@@ -1919,7 +1942,7 @@ a.email{color:#a78bfa;text-decoration:none;font-weight:500}
 <td>{{ u.name or '—' }}</td>
 <td><span class="pill role {{ u.role }}">{{ u.role }}</span></td>
 <td>{% if u.team %}seat of {{ u.team }}{% elif u.seats %}{{ u.seats }} / {{ u.seat_cap }} seats{% else %}—{% endif %}</td>
-<td>{{ u.tier or '—' }}</td>
+<td>{{ u.tier or '—' }}{% if u.grandfathered %} <span class="pill legacy" title="No plan limits until {{ u.grandfathered }}">legacy</span>{% endif %}</td>
 <td><span class="pill {{ u.status }}">{{ u.status }}</span></td>
 <td>{{ u.expires or '—' }}</td><td>{{ u.created or '—' }}</td>
 </tr>{% endfor %}
@@ -1958,6 +1981,8 @@ h2{font-size:1rem;margin-bottom:14px}
 </select></div>
 <div><label>Renews (YYYY-MM-DD)</label><input type="text" name="expires" value="{{ u.expires }}" placeholder="blank = none"></div>
 </div>
+<label>Legacy access until (YYYY-MM-DD)</label><input type="text" name="grandfathered" value="{{ u.grandfathered }}" placeholder="blank = plan limits apply now">
+<p class="sub" style="margin:-8px 0 16px">While this date is in the future the account ignores its plan's limits — no persona, phase, platform or image caps. Set automatically for everyone who was already paying when limits were introduced; extend it here to give someone more time.</p>
 <label>Team owner (email)</label><input type="email" name="team_owner" value="{{ u.team_owner }}" placeholder="blank = owns their own workspace">
 <p class="sub" style="margin:-8px 0 16px">Set this to make the account a seat inside that owner's workspace: it shares their personas and their plan, and only the owner is billed. Manager and chatter only mean anything on a seat.</p>
 <button type="submit">Save account</button></form></div>
@@ -2056,6 +2081,7 @@ def admin_users():
                          (u.team_owner_id if u.team_owner_id else '')),
                 'seats': (n + 1) if n else 0,
                 'seat_cap': tier_capabilities(u.tier).get('seats') or 1,
+                'grandfathered': _fmt_date(u.grandfathered_until),
                 'expires': _fmt_date(u.expires_at),
                 'created': _fmt_date(u.created_at)})
     finally:
@@ -2120,10 +2146,13 @@ def admin_user_detail(uid):
                     u.status = request.form.get('status', u.status)
                     u.tier = request.form.get('tier', '') or ''
                     raw = (request.form.get('expires') or '').strip()
+                    gf = (request.form.get('grandfathered') or '').strip()
                     try:
                         u.expires_at = datetime.strptime(raw, '%Y-%m-%d') if raw else None
+                        u.grandfathered_until = (datetime.strptime(gf, '%Y-%m-%d')
+                                                 if gf else None)
                     except ValueError:
-                        error = 'Renews must look like 2026-12-31.'
+                        error = 'Dates must look like 2026-12-31.'
                     if not error:
                         s.commit()
                         saved = 'Account updated.'
@@ -2137,6 +2166,7 @@ def admin_user_detail(uid):
         owner = s.get(User, u.team_owner_id) if u.team_owner_id else None
         view = {'id': u.id, 'email': u.email, 'role': u.role or 'user',
                 'team_owner': owner.email if owner else '',
+                'grandfathered': _fmt_date(u.grandfathered_until),
                 'status': u.status, 'tier': u.tier, 'expires': _fmt_date(u.expires_at)}
         p = {f: (getattr(u, f) or '') for f in pfields}
     finally:
@@ -2200,6 +2230,7 @@ def api_me():
                     'is_operator': _is_operator(),
                     'seat_role': user.get('seat_role') or 'owner',
                     'capabilities': caps,
+                    'grandfathered': _is_grandfathered(user),
                     'usage': {'personas': {'used': _persona_count(user),
                                            'limit': caps.get('personas')},
                               'seats': {'used': seats, 'limit': caps.get('seats')},

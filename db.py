@@ -266,6 +266,9 @@ class AppSetting(Base):
     updated_at = Column(DateTime, default=_now, onupdate=_now)
 
 
+GRANDFATHER_FLAG = 'entitlements_grandfather_backfill'
+
+
 def get_app_setting(session, key, default=None):
     row = session.get(AppSetting, key)
     return row.value if row else default
@@ -436,6 +439,10 @@ class User(Base):
     # user | manager | chatter | support | admin. 'user' is a workspace owner;
     # manager and chatter are seats inside someone else's workspace.
     role = Column(String(16), default='user')
+    # Set for accounts that were active when per-tier limits were introduced:
+    # until this date they keep the old unlimited entitlements, so enforcement
+    # is not a retroactive downgrade mid-subscription. Admin-editable.
+    grandfathered_until = Column(DateTime)
     # NULL means this account is its own workspace. Set means it is a seat in
     # that owner's workspace: personas, plan and billing all come from there.
     team_owner_id = Column(String(32), index=True)
@@ -608,6 +615,23 @@ def _sync_columns(table_name, model):
             pass
 
 
+def grandfather_existing_users(session):
+    """One-off at the cutover: everyone already paying keeps the old unlimited
+    entitlements until the period they have already paid for runs out. Guarded
+    by a setting so a later cleared date is not silently restored."""
+    if get_app_setting(session, GRANDFATHER_FLAG):
+        return 0
+    n = 0
+    for u in session.query(User).filter(User.status == 'active',
+                                        User.expires_at.isnot(None),
+                                        User.grandfathered_until.is_(None)).all():
+        u.grandfathered_until = u.expires_at
+        n += 1
+    set_app_setting(session, GRANDFATHER_FLAG, _now().isoformat())
+    session.commit()
+    return n
+
+
 def init_db():
     Base.metadata.create_all(engine)
     for table, model in (('users', User), ('saved_personas', SavedPersona),
@@ -616,6 +640,14 @@ def init_db():
             _sync_columns(table, model)
         except Exception:
             pass
+    try:
+        s = SessionLocal()
+        try:
+            grandfather_existing_users(s)
+        finally:
+            s.close()
+    except Exception:
+        pass
     # Existing photos carry their outfit in a column; give each one a link so
     # the vault sees the same layout the outfits already show.
     try:
