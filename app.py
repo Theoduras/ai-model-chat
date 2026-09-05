@@ -1300,12 +1300,37 @@ def _oxapay_key():
     return (os.getenv('OXAPAY_MERCHANT_KEY') or '').strip()
 
 
+def _stripe_credential(var):
+    """A Stripe credential, or '' when it is unusable.
+
+    Non-ASCII means the value was pasted from somewhere that masked it (a
+    terminal rendering the key as bullets, say). urllib encodes headers as
+    latin-1, so such a key raises UnicodeEncodeError deep inside the checkout
+    call and surfaces to the creator as "could not reach the payment
+    provider". Treating it as unset instead hides the card button and shows up
+    in /healthz, which points at the real problem.
+    """
+    value = (os.getenv(var) or '').strip()
+    return value if value.isascii() else ''
+
+
 def _stripe_key():
-    return (os.getenv('STRIPE_SECRET_KEY') or '').strip()
+    return _stripe_credential('STRIPE_SECRET_KEY')
 
 
 def _stripe_webhook_secret():
-    return (os.getenv('STRIPE_WEBHOOK_SECRET') or '').strip()
+    return _stripe_credential('STRIPE_WEBHOOK_SECRET')
+
+
+def _stripe_credential_warnings():
+    return [f'{var} contains non-ASCII characters and is being ignored — '
+            're-set it from the Stripe dashboard, not from a masked copy.'
+            for var in ('STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET')
+            if (os.getenv(var) or '').strip() and not _stripe_credential(var)]
+
+
+for _w in _stripe_credential_warnings():
+    print(f'CONFIG WARNING: {_w}')
 
 
 def _dev_payments_enabled():
