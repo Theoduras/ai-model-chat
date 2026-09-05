@@ -489,11 +489,12 @@ async function identifyUser() {
 // _ROLE_DENY in app.py, which is the half that actually enforces it.
 const ROLE_HIDDEN = { chatter: ['personas', 'platforms', 'generate', 'config'] };
 
-// Greys a nav item out in place and sends its click to the pricing page.
-function lockNavItem(el, tier) {
+// Greys a nav item out in place and sends its click somewhere that explains
+// what it costs — the demo has its own page for that, everyone else gets pricing.
+function lockNavItem(el, tier, href) {
   el.classList.add('locked');
   el.dataset.search = (el.dataset.search || '') + ' upgrade ' + tier.toLowerCase();
-  el.onclick = () => { window.location = '/pricing'; };
+  el.onclick = () => { window.location = href || '/pricing'; };
   const lock = document.createElement('span');
   lock.className = 'sb-lock';
   lock.textContent = tier;
@@ -532,12 +533,24 @@ function applyEntitlements(me) {
   // so the creator can see what upgrading buys them — but after the ones they
   // can actually use.
   const allowed = caps.platforms;
+  const demo = tier === 'demo';
   document.querySelectorAll('[data-platform]').forEach(el => {
     const key = el.dataset.platform;
     if (allowed === null || allowed === undefined || allowed.indexOf(key) !== -1) return;
-    lockNavItem(el, 'Pro');
+    lockNavItem(el, demo ? 'Demo' : 'Pro',
+                demo ? '/demo-ends?from=' + encodeURIComponent(key) : '/pricing');
     el.parentNode.appendChild(el);
   });
+
+  // The demo's whole point is the wall it puts in front of Fanvue, so the
+  // sidebar says so rather than leaving the greyed-out row to explain itself.
+  if (demo) {
+    const hub = document.querySelector('[data-role-area="platforms"]');
+    if (hub) {
+      hub.onclick = () => { window.location = '/demo-ends?from=fanvue'; };
+      hub.classList.add('locked');
+    }
+  }
 
   renderPlanPanel(me);
 }

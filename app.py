@@ -1118,13 +1118,39 @@ ANNUAL_SUFFIX = '_annual'
 ANNUAL_MONTHS_CHARGED = 9
 ANNUAL_SAVE_PCT = round((12 - ANNUAL_MONTHS_CHARGED) / 12 * 100)
 
-# No free tier — every account picks a paid plan. `days` is how long one
-# payment keeps the account active; the *_annual twin below is generated from
-# the same features so the two never drift apart.
+# Every account picks a plan; the only free one is the time-boxed demo below.
+# `days` is how long one payment keeps the account active; the *_annual twin
+# below is generated from the same features so the two never drift apart.
 # `capabilities` is the machine-readable half and the one enforcement reads;
 # `features` is the marketing copy shown on the cards. They describe the same
 # plan, so a change to one wants a matching change to the other.
+# The free trial of the product. Everything Starter has except the one thing
+# that makes it earn money — the Fanvue connection — so the demo shows the
+# persona and the funnel working and stops at the paywall.
+DEMO_TIER_KEY = 'demo'
+DEMO_DAYS = 14
+
 _BASE_TIERS = {
+    DEMO_TIER_KEY: {'name': 'Demo', 'price': 0,
+                    'blurb': 'The whole builder, free for %d days. No Fanvue.' % DEMO_DAYS,
+                    'features': ['1 AI persona',
+                                 'The full persona builder and funnel editor',
+                                 'Chat with her yourself to test the persona',
+                                 'Up to 3 funnel phases + CTA',
+                                 '5 AI image generations',
+                                 'Unlimited photo uploads',
+                                 'No platform connection \u2014 Fanvue needs a paid plan'],
+                    'capabilities': {
+                        'personas': 1,
+                        'seats': 1,
+                        'platforms': [],
+                        'phases_max': 3,
+                        'outfit_lock': False,
+                        'scheduled_followups': False,
+                        'analytics': False,
+                        'ppv_reconcile': False,
+                        'image_generations_month': 5,
+                    }},
     'starter': {'name': 'Starter', 'price': 49,
                 'blurb': 'One persona on Fanvue, fully monetised.',
                 'features': ['1 AI persona', 'Fanvue chat',
@@ -1206,6 +1232,10 @@ CUSTOM_TIER = {
 
 TIERS = {}
 for _key, _base in _BASE_TIERS.items():
+    if _key == DEMO_TIER_KEY:
+        # Free and time-boxed, so it has no annual twin and nothing to charge.
+        TIERS[_key] = {**_base, 'days': DEMO_DAYS, 'period': 'demo'}
+        continue
     TIERS[_key] = {**_base, 'days': 30, 'period': 'month'}
     _annual_price = _base['price'] * ANNUAL_MONTHS_CHARGED
     TIERS[_key + ANNUAL_SUFFIX] = {**_base, 'price': _annual_price, 'days': 365,
@@ -1338,16 +1368,40 @@ def _user_is_active(user):
     return bool(user) and (user.get('is_admin') or user.get('status') == 'active')
 
 
+def _log_demo_event(session_db, user_row, kind, detail='', with_client=True):
+    """One line in the demo trail. Never raises: losing a tracking row must not
+    fail the activation or the request it is attached to. `with_client` is off
+    for anything a payment webhook triggers, where the caller is the provider
+    and its IP would only look like the creator's."""
+    from flask import has_request_context
+    from db import record_demo_event
+    ip = ua = ''
+    if with_client and has_request_context():
+        ip = _client_ip()
+        ua = request.headers.get('User-Agent', '')
+    try:
+        record_demo_event(session_db, user_row.id, user_row.email, kind,
+                          detail=detail, ip=ip, user_agent=ua)
+    except Exception:
+        error_logger.error('Demo event not recorded', exc_info=True)
+
+
 def _activate_plan(session_db, user_row, tier_key):
     """Put a user on a plan. Renewals extend unexpired time rather than
     truncating it. Returns the new expiry."""
     tier = TIERS.get(tier_key) or {}
     now = datetime.now(timezone.utc).replace(tzinfo=None)
-    start = (user_row.expires_at
-             if (user_row.expires_at and user_row.expires_at > now) else now)
+    converting = (user_row.tier or '') == DEMO_TIER_KEY and tier_key != DEMO_TIER_KEY
+    # Demo days are a trial, not credit, so a plan bought during one starts now
+    # instead of stacking on top of the trial's remaining time.
+    unexpired = user_row.expires_at and user_row.expires_at > now
+    start = user_row.expires_at if (unexpired and not converting) else now
     user_row.tier = tier_key
     user_row.status = 'active'
     user_row.expires_at = start + timedelta(days=int(tier.get('days', 30)))
+    if converting:
+        _log_demo_event(session_db, user_row, 'converted', tier_key,
+                        with_client=False)
     return user_row.expires_at
 
 
@@ -1397,6 +1451,29 @@ def user_capabilities(user):
     if user.get('status') != 'active':
         return dict(DENIED_CAPS)
     return tier_capabilities(user.get('tier'))
+
+
+def _is_demo(user):
+    """On the free demo — the plan that stops at every platform connection."""
+    return (user or {}).get('tier') == DEMO_TIER_KEY and not (user or {}).get('is_admin')
+
+
+def _record_demo_block(user, platform):
+    """A demo account reaching for a platform it cannot have. This is the
+    signal that the demo did its job, so it is the one worth counting."""
+    from db import User
+    s = _db_session()
+    try:
+        u = s.get(User, user['id'])
+        if u is None:
+            return
+        _log_demo_event(s, u, 'blocked', platform)
+        s.commit()
+    except Exception:
+        s.rollback()
+        error_logger.error('Demo block not recorded', exc_info=True)
+    finally:
+        s.close()
 
 
 def _workspace_id(user):
@@ -1468,6 +1545,7 @@ _PAID_API = ('/api/telegram', '/api/tguser', '/api/x', '/api/xlog', '/api/thread
 # arrive from the platform, not a signed-in creator, and carry their own signed
 # proof of origin — a sign-in redirect would just look like a failure to Fanvue.
 _OPEN_PATHS = ('/login', '/register', '/logout', '/pricing', '/billing',
+               '/demo-ends',
                '/auth/google', '/join/', '/api/workspaces',
                '/account', '/api/billing', '/healthz', '/go/', '/webhooks/',
                '/dashboard/logout', '/admin/logout',
@@ -1577,6 +1655,13 @@ def _require_entitlement(path, method, user, wants_json):
         if platform is None:
             platform = _PLATFORM_PAGES.get(path)
         if platform and platform not in allowed:
+            if _is_demo(user):
+                if not wants_json:
+                    return redirect('/demo-ends?from=' + urllib.parse.quote(platform))
+                _record_demo_block(user, platform)
+                return _cap_denied('platform', user,
+                                   {'platform': platform, 'demo': True,
+                                    'demo_ends_url': '/demo-ends?from=' + platform})
             if not wants_json:
                 return redirect('/pricing')
             return _cap_denied('platform', user, {'platform': platform})
@@ -1812,7 +1897,13 @@ BILLING_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Choose a plan</title>
 <script src="/js/analytics.js" defer></script>
 <script src="/js/page-editor.js" defer></script>
-<style>""" + ACCOUNT_CSS + """</style></head><body data-page="pricing">
+<style>""" + ACCOUNT_CSS + """
+.demobar{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;
+  background:var(--surface);border:1px solid var(--border);border-radius:12px;
+  padding:14px 18px;margin-bottom:16px;font-size:.9rem;color:var(--text-2);line-height:1.5}
+.demobar strong{color:var(--text)}
+.demobar button{width:auto;flex:none;margin:0;padding:11px 20px;font-size:.88rem;border-radius:10px}
+</style></head><body data-page="pricing">
 <header class="site-nav">
 <a class="brand" href="/">Velvetfunnel<i>.app</i></a>
 <div class="links">
@@ -1838,6 +1929,20 @@ plan is active{% if user.expires_at %} until {{ user.expires_at[:10] }}{% endif 
 <p class="sub" data-edit-id="sub">Pay by card or crypto. Access unlocks as soon as it confirms.</p>
 {% endif %}
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
+{% if demo_state == 'running' %}
+<div class="demobar"><div><strong>You are on the free demo.</strong>
+It runs the whole builder but cannot connect Fanvue &mdash; pick a plan below to
+switch her on for real. Everything you have built carries over.</div></div>
+{% elif demo_state == 'available' %}
+<div class="demobar"><div><strong>Not ready to pay?</strong>
+Take the {{ demo_days }}-day demo: the persona builder, the funnel and the chat,
+free. It stops at the Fanvue connection &mdash; that is the paid part.</div>
+<button type="button" id="start-demo">Start the free demo</button></div>
+{% elif demo_state == 'used' %}
+<div class="demobar"><div><strong>Your demo has run out.</strong>
+Your persona and funnel are still here &mdash; a plan connects her to Fanvue and
+picks up where the demo stopped.</div></div>
+{% endif %}
 <div class="ptoggle">
 <button type="button" class="active" data-set-period="month">Monthly</button>
 <button type="button" data-set-period="year">Annual <span class="save">Save {{ annual_save_pct }}%</span></button>
@@ -1931,6 +2036,19 @@ if (cards.length) {
   cards.forEach(function(c){ if (c.dataset.select === active) start = c; });
   selectCard(start || document.querySelector('.tier.featured[data-select]') || cards[0]);
 }
+var demoBtn = document.getElementById('start-demo');
+if (demoBtn) demoBtn.addEventListener('click', async function(){
+  demoBtn.disabled = true; demoBtn.textContent = 'Starting...';
+  try {
+    var r = await fetch('/api/billing/start-demo', {method:'POST'});
+    // Signed out: the demo needs an account, so send them to make one.
+    if (r.status === 401) { window.location = '/register'; return; }
+    var d = await r.json();
+    if (d.ok) { window.location = d.redirect || '/dashboard'; return; }
+    alert(d.error || 'Could not start the demo.');
+  } catch (e) { alert('Could not start the demo.'); }
+  demoBtn.disabled = false; demoBtn.textContent = 'Start the free demo';
+});
 document.querySelectorAll('button[data-dev-tier]').forEach(function(b){
   b.addEventListener('click', async function(){
     b.disabled = true; b.textContent = 'Activating...';
@@ -1961,6 +2079,44 @@ document.querySelectorAll('button[data-tier]').forEach(function(b){
   });
 });
 </script></body></html>"""
+
+
+DEMO_ENDS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png">
+<title>This is where the demo ends</title>
+<script src="/js/analytics.js" defer></script>
+<style>""" + ACCOUNT_CSS + """
+.lockart{width:64px;height:64px;border-radius:18px;display:flex;align-items:center;justify-content:center;
+  background:var(--grad);background-size:300% 100%;margin:0 auto 18px}
+.lockart svg{width:30px;height:30px;stroke:#fff;fill:none;stroke-width:1.8}
+.steps{list-style:none;padding:0;margin:20px 0 4px;text-align:left}
+.steps li{position:relative;padding:9px 0 9px 30px;border-bottom:1px solid var(--border);color:var(--text-2);font-size:.92rem}
+.steps li:last-child{border-bottom:0}
+.steps li::before{content:"";position:absolute;left:6px;top:15px;width:7px;height:7px;border-radius:50%;background:#a78bfa}
+.btn{display:block;text-align:center;background:var(--grad);background-size:300% 100%;color:#fff;
+  border-radius:10px;padding:13px;margin-top:20px;text-decoration:none;font-weight:600;font-size:.95rem}
+.ghostbtn{display:block;text-align:center;border:1px solid var(--border);color:var(--text-2);
+  border-radius:10px;padding:12px;margin-top:10px;text-decoration:none;font-size:.9rem}
+.kept{font-size:.85rem;color:var(--text-muted);margin-top:18px;text-align:center}
+</style></head><body data-page="demo-ends"><div class="wrap"><div class="card" style="text-align:center">
+<div class="lockart"><svg viewBox="0 0 24 24" aria-hidden="true">
+<rect x="4" y="10.5" width="16" height="10" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></svg></div>
+<h1 style="margin-bottom:6px">This is where the demo ends</h1>
+<p class="sub">Connecting {{ platform_name }} is the paid half of Velvetfunnel. The demo
+gives you the persona, the funnel and the whole builder &mdash; it stops at the moment
+she would start talking to your real fans and taking their money.</p>
+<ul class="steps">
+<li>Your persona, funnel phases and photos stay exactly as you built them.</li>
+<li>Starter connects her to Fanvue and turns on the full PPV engine.</li>
+<li>{{ currency }}{{ starter_price }}/month, excl. VAT. Cancel any time.</li>
+</ul>
+<a class="btn" href="/pricing">Pick a plan and connect {{ platform_name }}</a>
+<a class="ghostbtn" href="/dashboard">Keep looking around the demo</a>
+{% if expires %}<p class="kept">Your demo runs until {{ expires[:10] }}. Everything you
+build in it carries over to a paid plan.</p>{% endif %}
+</div></div></body></html>"""
 
 
 ACCOUNT_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
@@ -2081,7 +2237,7 @@ a.email{color:#a78bfa;text-decoration:none;font-weight:500}
 .scroll{overflow-x:auto}
 </style></head><body><div class="wrap wide" style="max-width:1100px">
 <div class="bar"><span>Admin · {{ users|length }} user{{ '' if users|length == 1 else 's' }}</span>
-<span><a href="/dashboard">Dashboard</a> &nbsp; <a href="/logout">Sign out</a></span></div>
+<span><a href="/admin/demos">Demo accounts</a> &nbsp; <a href="/dashboard">Dashboard</a> &nbsp; <a href="/logout">Sign out</a></span></div>
 <div class="card"><div class="scroll"><table>
 <tr><th>Email</th><th>Name</th><th>Role</th><th>Team</th><th>Plan</th><th>Status</th><th>Renews</th><th>Joined</th></tr>
 {% for u in users %}<tr>
@@ -2094,6 +2250,70 @@ a.email{color:#a78bfa;text-decoration:none;font-weight:500}
 <td>{{ u.expires or '—' }}</td><td>{{ u.created or '—' }}</td>
 </tr>{% endfor %}
 </table></div></div></div></body></html>"""
+
+ADMIN_DEMOS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Demo accounts</title>
+<style>""" + ACCOUNT_CSS + """
+table{width:100%;border-collapse:collapse;font-size:.85rem}
+th{text-align:left;color:var(--text-muted);font-weight:500;padding:8px 10px;border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:10px;border-bottom:1px solid var(--border);color:var(--text-2);white-space:nowrap}
+tr:hover td{background:#1c1c20}
+a.email{color:#a78bfa;text-decoration:none;font-weight:500}
+h2{font-size:1rem;margin-bottom:12px}
+.pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:.72rem;font-weight:600}
+.pill.running{background:#14321f;color:#86efac}
+.pill.expired{background:#3f1515;color:#fca5a5}
+.pill.converted{background:#2e1065;color:#c4b5fd}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px}
+.stat{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px}
+.stat b{display:block;font-size:1.5rem;color:var(--text);font-weight:700;line-height:1.3}
+.stat span{font-size:.78rem;color:var(--text-muted)}
+.hot{color:#fbbf24;font-weight:600}
+.scroll{overflow-x:auto}
+.muted{color:var(--text-muted)}
+.ua{max-width:280px;overflow:hidden;text-overflow:ellipsis;display:inline-block;vertical-align:bottom}
+</style></head><body><div class="wrap wide" style="max-width:1200px">
+<div class="bar"><span>Admin \u00b7 demo accounts</span>
+<span><a href="/admin/users">All users</a> &nbsp; <a href="/dashboard">Dashboard</a> &nbsp; <a href="/logout">Sign out</a></span></div>
+
+<div class="stats">
+<div class="stat"><b>{{ stats.total }}</b><span>demos started</span></div>
+<div class="stat"><b>{{ stats.running }}</b><span>running now</span></div>
+<div class="stat"><b>{{ stats.blocked }}</b><span>hit the Fanvue wall</span></div>
+<div class="stat"><b>{{ stats.converted }}</b><span>converted to a paid plan</span></div>
+<div class="stat"><b>{{ stats.rate }}%</b><span>conversion rate</span></div>
+</div>
+
+<div class="card"><h2>Who is on the demo</h2>
+{% if not rows %}<p class="sub">Nobody has started a demo yet.</p>{% else %}
+<div class="scroll"><table>
+<tr><th>Email</th><th>Name</th><th>State</th><th>Started</th><th>Ends</th>
+<th>Personas</th><th>Paywall hits</th><th>Last seen</th><th>Signed up from</th></tr>
+{% for r in rows %}<tr>
+<td><a class="email" href="/admin/users/{{ r.id }}">{{ r.email }}</a></td>
+<td>{{ r.name or '\u2014' }}</td>
+<td><span class="pill {{ r.state }}">{{ r.state }}</span>{% if r.now_tier %} <span class="muted">{{ r.now_tier }}</span>{% endif %}</td>
+<td>{{ r.started or '\u2014' }}</td><td>{{ r.expires or '\u2014' }}</td>
+<td>{{ r.personas }}</td>
+<td{% if r.blocked %} class="hot"{% endif %}>{{ r.blocked }}</td>
+<td>{{ r.last_seen or '\u2014' }}</td>
+<td class="muted">{{ r.ip or '\u2014' }}</td>
+</tr>{% endfor %}
+</table></div>{% endif %}</div>
+
+<div class="card" style="margin-top:16px"><h2>Latest demo activity</h2>
+{% if not events %}<p class="sub">Nothing recorded yet.</p>{% else %}
+<div class="scroll"><table>
+<tr><th>When</th><th>Who</th><th>What</th><th>Detail</th><th>IP</th><th>Browser</th></tr>
+{% for e in events %}<tr>
+<td>{{ e.when }}</td><td>{{ e.email or e.user_id }}</td><td>{{ e.kind }}</td>
+<td>{{ e.detail or '\u2014' }}</td><td class="muted">{{ e.ip or '\u2014' }}</td>
+<td class="muted"><span class="ua">{{ e.user_agent or '\u2014' }}</span></td>
+</tr>{% endfor %}
+</table></div>{% endif %}</div>
+</div></body></html>"""
 
 ADMIN_USER_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -2247,6 +2467,76 @@ def admin_users():
     finally:
         s.close()
     return render_template_string(ADMIN_USERS_HTML, users=rows)
+
+
+@app.route('/admin/demos')
+def admin_demos():
+    """Who took the demo, what they tried to reach, and who paid afterwards."""
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    from db import User, list_demo_events
+    s = _db_session()
+    try:
+        events = list_demo_events(s, limit=400)
+        per_user = {}
+        for e in reversed(list_demo_events(s, limit=5000)):
+            r = per_user.setdefault(e.user_id, {'started': None, 'blocked': 0,
+                                                'converted': '', 'last': None,
+                                                'ip': '', 'email': e.email})
+            if e.kind == 'started':
+                r['started'] = r['started'] or e.created_at
+                r['ip'] = r['ip'] or e.ip
+            elif e.kind == 'blocked':
+                r['blocked'] += 1
+            elif e.kind == 'converted':
+                r['converted'] = e.detail
+            r['last'] = e.created_at
+            r['email'] = e.email or r['email']
+
+        users = {u.id: u for u in s.query(User).filter(
+            User.id.in_(list(per_user) or [''])).all()}
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        rows = []
+        for uid, r in per_user.items():
+            u = users.get(uid)
+            on_demo = u is not None and u.tier == DEMO_TIER_KEY
+            if r['converted']:
+                state = 'converted'
+            elif on_demo and u.status == 'active' and (u.expires_at or now) > now:
+                state = 'running'
+            else:
+                state = 'expired'
+            rows.append({
+                'id': uid,
+                'email': (u.email if u else '') or r['email'] or uid,
+                'name': (u.name if u else ''),
+                'state': state,
+                'now_tier': (r['converted'] if state == 'converted' else ''),
+                'started': _fmt_date(r['started']),
+                'expires': _fmt_date(u.expires_at) if on_demo and u else '',
+                'personas': len(db_list_personas(owner_id=uid)),
+                'blocked': r['blocked'],
+                'last_seen': _fmt_date(r['last']),
+                'ip': r['ip'],
+                'sort': r['started'] or r['last'] or now})
+        rows.sort(key=lambda r: r['sort'], reverse=True)
+
+        view_events = [{'when': e.created_at.strftime('%Y-%m-%d %H:%M') if e.created_at else '',
+                        'user_id': e.user_id, 'email': e.email, 'kind': e.kind,
+                        'detail': e.detail, 'ip': e.ip, 'user_agent': e.user_agent}
+                       for e in events]
+    finally:
+        s.close()
+    total = len(rows)
+    converted = sum(1 for r in rows if r['state'] == 'converted')
+    stats = {'total': total,
+             'running': sum(1 for r in rows if r['state'] == 'running'),
+             'blocked': sum(r['blocked'] for r in rows),
+             'converted': converted,
+             'rate': round(converted / total * 100) if total else 0}
+    return render_template_string(ADMIN_DEMOS_HTML, rows=rows,
+                                  events=view_events, stats=stats)
 
 
 @app.route('/admin/users/<uid>', methods=['GET', 'POST'])
@@ -2986,7 +3276,8 @@ def api_pricing():
     """Public: tier cards for the homepage pricing section (and anywhere else
     that wants the same data without the full /pricing page)."""
     return jsonify({'order': DEFAULT_TIER_ORDER, 'tiers': TIERS,
-                    'custom': CUSTOM_TIER, 'currency': CURRENCY_SYMBOL})
+                    'custom': CUSTOM_TIER, 'currency': CURRENCY_SYMBOL,
+                    'demo': TIERS[DEMO_TIER_KEY], 'demo_days': DEMO_DAYS})
 
 
 @app.route('/pricing')
@@ -3001,7 +3292,82 @@ def pricing():
                                   currency=CURRENCY_SYMBOL,
                                   annual_suffix=ANNUAL_SUFFIX,
                                   annual_save_pct=ANNUAL_SAVE_PCT,
-                                  custom=CUSTOM_TIER)
+                                  custom=CUSTOM_TIER,
+                                  demo=TIERS[DEMO_TIER_KEY], demo_days=DEMO_DAYS,
+                                  demo_state=_demo_state(user))
+
+
+def _demo_state(user):
+    """What the pricing page should say about the demo for this visitor:
+    'running', 'used', 'available', or '' when a paid plan makes it moot."""
+    if not user or not user.get('email'):
+        return 'available'
+    if user.get('is_admin'):
+        return ''
+    if user.get('status') == 'active' and user.get('tier') != DEMO_TIER_KEY:
+        return ''
+    if user.get('tier') == DEMO_TIER_KEY and user.get('status') == 'active':
+        return 'running'
+    from db import list_demo_events
+    s = _db_session()
+    try:
+        used = any(e.kind == 'started'
+                   for e in list_demo_events(s, user_id=user['id']))
+    finally:
+        s.close()
+    return 'used' if used else 'available'
+
+
+PLATFORM_NAMES = {'fanvue': 'Fanvue', 'telegram': 'Telegram', 'x': 'X',
+                  'threads': 'Threads'}
+
+
+@app.route('/demo-ends')
+def demo_ends():
+    """Where a demo account lands when it reaches for a platform. Every visit
+    is one line in the demo trail, so /admin/demos shows what they tried."""
+    user = _current_user()
+    platform = (request.args.get('from') or 'fanvue').strip().lower()
+    if platform not in PLATFORM_NAMES:
+        platform = 'fanvue'
+    if user and _is_demo(user):
+        _record_demo_block(user, platform)
+    return render_template_string(
+        DEMO_ENDS_HTML, platform=platform,
+        platform_name=PLATFORM_NAMES[platform], currency=CURRENCY_SYMBOL,
+        starter_price=TIERS['starter']['price'],
+        expires=(user or {}).get('expires_at'))
+
+
+@app.route('/api/billing/start-demo', methods=['POST'])
+def api_billing_start_demo():
+    """Put a signed-in account on the free demo. One per account, ever: the
+    demo is a trial, not a plan somebody can keep renewing."""
+    user = _current_user()
+    if not user:
+        return jsonify({'error': 'Sign in required'}), 401
+    if user.get('status') == 'active' and user.get('tier') != DEMO_TIER_KEY:
+        return jsonify({'error': 'You already have a plan.'}), 400
+
+    from db import User, list_demo_events
+    s = _db_session()
+    try:
+        u = s.get(User, user['id'])
+        if u is None:
+            return jsonify({'error': 'Sign in required'}), 401
+        if any(e.kind == 'started' for e in list_demo_events(s, user_id=u.id)):
+            return jsonify({'error': 'Your demo has already been used. '
+                                     'Pick a plan to carry on.',
+                            'redirect': '/pricing'}), 400
+        _activate_plan(s, u, DEMO_TIER_KEY)
+        _log_demo_event(s, u, 'started', request.referrer or '')
+        expires = u.expires_at
+        s.commit()
+    finally:
+        s.close()
+    logger.info('DEMO STARTED user=%s until=%s', user['email'], expires)
+    return jsonify({'ok': True, 'redirect': '/dashboard',
+                    'expires_at': expires.isoformat() if expires else ''})
 
 
 @app.route('/billing')
@@ -3017,7 +3383,9 @@ def billing():
                                   currency=CURRENCY_SYMBOL,
                                   annual_suffix=ANNUAL_SUFFIX,
                                   annual_save_pct=ANNUAL_SAVE_PCT,
-                                  custom=CUSTOM_TIER)
+                                  custom=CUSTOM_TIER,
+                                  demo=TIERS[DEMO_TIER_KEY], demo_days=DEMO_DAYS,
+                                  demo_state=_demo_state(user))
 
 
 @app.route('/billing/return')
@@ -3153,7 +3521,7 @@ def api_billing_checkout():
     body = request.get_json(silent=True) or {}
     tier_key = body.get('tier', '')
     tier = TIERS.get(tier_key)
-    if not tier:
+    if not tier or tier_key == DEMO_TIER_KEY:
         return jsonify({'error': 'Unknown plan'}), 400
 
     provider = (body.get('provider') or '').strip().lower()
@@ -3194,7 +3562,7 @@ def api_billing_dev_activate():
         return jsonify({'error': 'Sign in required'}), 401
     tier_key = (request.get_json(silent=True) or {}).get('tier', '')
     tier = TIERS.get(tier_key)
-    if not tier:
+    if not tier or tier_key == DEMO_TIER_KEY:
         return jsonify({'error': 'Unknown plan'}), 400
 
     from db import User, Payment

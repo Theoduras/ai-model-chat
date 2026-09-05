@@ -655,6 +655,53 @@ Index('ix_usage_unique', UsageCounter.workspace_id, UsageCounter.metric,
       UsageCounter.period, unique=True)
 
 
+class DemoEvent(Base):
+    """What a demo account did: when it started, every time it hit the paywall
+    the demo puts in front of Fanvue, and the moment it turned into a paying
+    plan. Kept separate from the user row so a demo that converts still leaves
+    the trail that shows how it got there."""
+    __tablename__ = 'demo_events'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    user_id = Column(String(32), nullable=False, index=True)
+    email = Column(String(255), default='')
+    kind = Column(String(24), nullable=False, index=True)  # started|blocked|converted
+    detail = Column(String(120), default='')
+    ip = Column(String(64), default='')
+    user_agent = Column(String(300), default='')
+    created_at = Column(DateTime, default=_now, index=True)
+
+
+def record_demo_event(session, user_id, email, kind, detail='', ip='',
+                      user_agent=''):
+    e = DemoEvent(user_id=user_id, email=(email or '')[:255], kind=kind,
+                  detail=(detail or '')[:120], ip=(ip or '')[:64],
+                  user_agent=(user_agent or '')[:300])
+    session.add(e)
+    return e
+
+
+def list_demo_events(session, user_id=None, limit=500):
+    q = session.query(DemoEvent)
+    if user_id:
+        q = q.filter(DemoEvent.user_id == user_id)
+    return q.order_by(DemoEvent.created_at.desc()).limit(limit).all()
+
+
+def demo_event_summary(session):
+    """Per demo user: how many of each kind, and when they were last seen."""
+    out = {}
+    for e in session.query(DemoEvent).order_by(DemoEvent.created_at.asc()).all():
+        row = out.setdefault(e.user_id, {'email': e.email, 'counts': {},
+                                         'first': None, 'last': None})
+        row['counts'][e.kind] = row['counts'].get(e.kind, 0) + 1
+        row['first'] = row['first'] or e.created_at
+        row['last'] = e.created_at
+        if e.email:
+            row['email'] = e.email
+    return out
+
+
 def get_user_by_email(session, email):
     return session.query(User).filter(
         User.email == (email or '').strip().lower()).first()
