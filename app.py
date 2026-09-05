@@ -8583,8 +8583,57 @@ def _fanvue_refresh(persona):
         t['access_token'] = td.get('access_token', t.get('access_token'))
         if td.get('refresh_token'):
             t['refresh_token'] = td['refresh_token']
+        if td.get('scope'):
+            t['scope'] = td['scope']
         _fanvue_save_tokens(persona, t)
         return t['access_token']
+
+
+class FanvueApiError(url_error.HTTPError):
+    """HTTPError carrying Fanvue's own explanation. The body of an error can
+    only be read once, and it was already consumed for the log line — callers
+    that reported e.read() were printing "Fanvue API 403:" with nothing after
+    it, which is the least useful half of what Fanvue said."""
+
+    def __init__(self, e, detail, raw=b''):
+        super().__init__(e.url, e.code, e.reason, e.headers, None)
+        self.detail = detail
+        self.path = ''
+        self._raw = raw
+
+    def read(self, *_a):
+        return self._raw
+
+    def __str__(self):
+        return f'Fanvue API {self.code}: {self.detail}' if self.detail \
+            else f'Fanvue API {self.code}: {self.reason}'
+
+
+# Which permission each family of endpoints needs. A 403 from Fanvue is usually
+# a scope the app registration was never granted, and the bare status code
+# cannot say which — this can.
+_FV_PATH_SCOPES = (
+    ('/agency', 'read:agency'),
+    ('/media', 'read:media'),
+    ('/chats', 'read:chat'),
+    ('/fans', 'read:fan'),
+    ('/insights', 'read:insights'),
+    ('/earnings', 'read:insights'),
+    ('/users/me', 'read:self'),
+    ('/creators', 'read:creator'),
+)
+
+
+def _fv_scope_for_path(path):
+    p = (path or '').split('?')[0]
+    # A creator-scoped call carries the real endpoint after the uuid.
+    if p.startswith('/creators/'):
+        rest = p.split('/', 3)
+        p = '/' + rest[3] if len(rest) > 3 else p
+    for prefix, scope in _FV_PATH_SCOPES:
+        if p.startswith(prefix):
+            return scope
+    return ''
 
 
 def _fanvue_api(method, path, access_token, body=None):
@@ -8599,13 +8648,24 @@ def _fanvue_api(method, path, access_token, body=None):
             raw = r.read()
             return json.loads(raw) if raw else {}
     except url_error.HTTPError as e:
-        resp_body = ''
+        raw = b''
         try:
-            resp_body = e.read().decode()[:500]
+            raw = e.read()
         except Exception:
             pass
-        logging.warning('Fanvue API %s %s → %s: %s', method, url, e.code, resp_body)
-        raise
+        text = raw.decode(errors='ignore')[:500] if raw else ''
+        detail = text
+        try:
+            d = json.loads(text)
+            if isinstance(d, dict):
+                detail = str(d.get('message') or d.get('error_description')
+                             or d.get('error') or d.get('detail') or text)[:300]
+        except Exception:
+            pass
+        logging.warning('Fanvue API %s %s → %s: %s', method, url, e.code, text)
+        err = FanvueApiError(e, detail, raw)
+        err.path = path
+        raise err from None
 
 
 def _fanvue_call(persona, method, path, body=None):
@@ -8621,7 +8681,26 @@ def _fanvue_call(persona, method, path, body=None):
             new = _fanvue_refresh(persona)
             if new:
                 return _fanvue_api(method, path, new, body=body)
+        if e.code == 403:
+            raise _fanvue_scope_hint(e, t, path)
         raise
+
+
+def _fanvue_scope_hint(e, tokens, path):
+    """Say which permission a 403 is probably about. The connection can succeed
+    with fewer scopes than we asked for — every call needing a missing one then
+    fails identically, and nothing on screen connects that to the scope."""
+    granted = (tokens.get('scope') or '').split()
+    need = _fv_scope_for_path(path)
+    if need and granted and need not in granted:
+        detail = (getattr(e, 'detail', '') or 'Forbidden').rstrip('.')
+        e.detail = (f'{detail} — this connection was not granted "{need}" '
+                    f'(it has: {" ".join(granted)}). Reconnect the Fanvue account '
+                    f'once Fanvue grants that permission to the app.')
+    elif not getattr(e, 'detail', ''):
+        e.detail = ('Forbidden — Fanvue gave no reason. Usually the account is not '
+                    'API-enabled yet, or the connection is missing a permission.')
+    return e
 
 
 @app.route('/api/fanvue/dbinfo')
@@ -8900,8 +8979,12 @@ def api_fanvue_callback():
 def api_fanvue_status():
     persona = (request.args.get('persona') or '').strip()
     t = _fanvue_tokens(persona)
+    granted = (t.get('scope') or '').split()
+    wanted = FANVUE_SCOPES.split()
+    missing = [s for s in wanted if granted and s not in granted]
     return jsonify({'connected': bool(t.get('access_token')), 'username': t.get('username', ''),
-                    'creator': _fanvue_creator(persona)})
+                    'creator': _fanvue_creator(persona),
+                    'scope': t.get('scope', ''), 'missing_scopes': missing})
 
 
 @app.route('/api/fanvue/disconnect', methods=['POST'])

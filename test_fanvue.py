@@ -15,6 +15,17 @@ import app
 
 FAILURES = []
 
+# Tests stub app functions in place and do not all put them back. Snapshotting
+# once and restoring before each test keeps a later test from quietly running
+# against an earlier one's stubs — which is how a real 403 came back as "no
+# error" from a test that never reached the code it was checking.
+_PRISTINE = {k: v for k, v in vars(app).items() if callable(v)}
+
+
+def restore_app():
+    for k, v in _PRISTINE.items():
+        setattr(app, k, v)
+
 
 def check(name, ok, detail=''):
     print(('PASS ' if ok else 'FAIL ') + name + (('  ' + str(detail)) if not ok else ''))
@@ -239,11 +250,57 @@ def test_scopes():
         app._get_setting, app._set_setting = orig_get, orig_set
 
 
+def test_api_errors():
+    """A 403 used to reach the screen as "Fanvue API 403:" and nothing else —
+    the body had already been consumed to write the log line."""
+    import io
+    import urllib.error as url_error
+
+    def raising(code, body, headers=None):
+        def _open(req, timeout=None):
+            raise url_error.HTTPError(req.full_url, code, 'Forbidden', headers or {},
+                                      io.BytesIO(body.encode()))
+        return _open
+
+    orig_open = app.urllib.request.urlopen
+    orig_tokens = app._fanvue_tokens
+    try:
+        app.urllib.request.urlopen = raising(403, '{"message":"Insufficient permissions"}')
+        app._fanvue_tokens = lambda p: {'access_token': 'x', 'scope': app.FANVUE_CORE_SCOPES}
+        try:
+            app._fanvue_call('lilly', 'GET', '/media?page=1')
+            check('a 403 raises', False, 'no error')
+        except url_error.HTTPError as e:
+            text = str(e)
+            check("Fanvue's own words survive", 'Insufficient permissions' in text, text)
+            check('the error body can still be read', b'Insufficient' in e.read(), e.read())
+            check('the missing scope is named', 'read:media' in text, text)
+            check('and what was granted is shown', 'read:chat' in text, text)
+
+        app.urllib.request.urlopen = raising(403, '')
+        try:
+            app._fanvue_call('lilly', 'GET', '/chats?limit=30')
+            check('an empty 403 raises', False, 'no error')
+        except url_error.HTTPError as e:
+            text = str(e)
+            check('a bodyless 403 still says something', len(text) > 30, text)
+            check('and does not blame a granted scope', 'read:chat"' not in text, text)
+
+        check('creator-scoped paths map to the real endpoint',
+              app._fv_scope_for_path('/creators/abc-123/chats/x/messages') == 'read:chat',
+              app._fv_scope_for_path('/creators/abc-123/chats/x/messages'))
+        check('media maps to read:media', app._fv_scope_for_path('/media?size=50') == 'read:media')
+    finally:
+        app.urllib.request.urlopen = orig_open
+        app._fanvue_tokens = orig_tokens
+
+
 if __name__ == '__main__':
     for fn in (test_direction, test_import, test_identity_never_crosses,
                test_placeholders, test_pacing, test_backlog,
-               test_scopes):
+               test_scopes, test_api_errors):
         print('\n--- %s ---' % fn.__name__)
+        restore_app()
         fn()
     print('\n' + ('FAILED: ' + ', '.join(FAILURES) if FAILURES else 'All checks passed.'))
     raise SystemExit(1 if FAILURES else 0)

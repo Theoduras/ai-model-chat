@@ -77,6 +77,7 @@
         <button class="btn-ai" id="disconnect-btn" style="background:var(--border); display:none;" onclick="disconnectFanvue()">Disconnect</button>
       </div>
     </div>
+    <div id="scope-warn" style="display:none;"></div>
     <div class="field full" id="creator-row" style="display:none; margin-top:12px;">
       <label>Acting as <span style="font-weight:400;color:var(--text-muted);">(this login manages more than one profile — pick which one replies)</span></label>
       <div class="row-inline">
@@ -934,6 +935,23 @@ function updateConn(){
   else{pill.className='conn-pill err';pill.textContent='Not connected';}
   document.getElementById('connect-btn').textContent=connState.connected?'Reconnect':'Connect Fanvue';
   document.getElementById('disconnect-btn').style.display=connState.connected?'inline-flex':'none';
+  const warn=document.getElementById('scope-warn'),miss=connState.missing_scopes||[];
+  if(connState.connected&&miss.length){
+    warn.style.display='block';
+    warn.innerHTML='<span class="hint" style="color:var(--warn);display:block;margin-top:10px;">'
+      +'⚠ Fanvue granted this connection only <code>'+esc(connState.scope||'')+'</code>. '
+      +'Anything needing '+esc(miss.join(', '))+' will come back 403 — that is why lists stay empty. '
+      +'Once Fanvue grants those to the app, reconnect for the full set.</span>'
+      +'<button class="btn-ai" style="background:var(--border);margin-top:8px;" onclick="reconnectFull()">Retry full permissions</button>';
+  } else { warn.style.display='none'; warn.innerHTML=''; }
+}
+// The learned refusals are what keep a narrowed connection narrow; clearing
+// them is the only way back to the full set once Fanvue grants it.
+async function reconnectFull(){
+  await post('/api/fanvue/scope-reset',{persona:persona()});
+  window._fvScopeTries=0;
+  document.getElementById('connect-panel').style.display='block';
+  startConnect();
 }
 function toggleConnect(){
   document.getElementById('connect-panel').style.display='block';
