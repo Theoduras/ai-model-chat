@@ -1039,7 +1039,7 @@ function progressTitle(pct, cfg) {
                         : 'Complete — every field is filled in';
 }
 
-function progressBarHtml(pct, pcfg) {
+function progressBarHtml(pct, cfg) {
   return '<div class="pg-bar" role="progressbar" aria-valuenow="' + pct + '" aria-valuemin="0" ' +
     'aria-valuemax="100" aria-label="Persona completeness" title="' + esc(progressTitle(pct, cfg)) + '">' +
     '<i style="width:' + pct + '%;background:' + progressBand(pct) + ';"></i></div>' +
