@@ -264,6 +264,21 @@ def _is_premade(slug):
         or os.path.exists(os.path.join(PERSONAS_DIR, f'{slug}.txt'))
 
 
+# The model the marketing pages put their chat on. It has no repo file to fall
+# back on, so unlike a premade it lives only in the database.
+LANDING_PERSONA = 'nova'
+
+# House personas belong to the business, not to a customer: the landing chat
+# runs on one, and a shared demo login has people in it who must not be able to
+# take the homepage down. Only an admin may touch them, and nobody may delete
+# them through the API.
+HOUSE_PERSONAS = {LANDING_PERSONA}
+
+
+def _is_house_persona(slug):
+    return slug in HOUSE_PERSONAS
+
+
 def db_get_persona(slug):
     """Return a saved persona from the DB as a dict, or None. A DB entry for a
     premade slug is treated as an in-place OVERRIDE that shadows the repo file,
@@ -356,6 +371,8 @@ def _can_edit_persona(slug, user):
         return False
     if user.get('is_admin'):
         return True
+    if _is_house_persona(slug):
+        return False
     owner = _persona_owner(slug)
     if owner:
         # Strictly the workspace in view: a creator's own personas must not
@@ -865,6 +882,36 @@ try:
 except Exception as _db_err:
     print(f'DB init skipped: {_db_err}')
 
+
+def _claim_house_personas():
+    """Put the landing model in the admin's own workspace, so it is not sitting
+    in a customer's list — the shared demo login's least of all. Best effort:
+    the guards above are what actually protect it, this only files it in the
+    right place. An owner's workspace id is their user id."""
+    try:
+        from db import SessionLocal, first_admin, reassign_persona_owner
+    except Exception:
+        return
+    try:
+        s = SessionLocal()
+    except Exception:
+        return
+    try:
+        admin = first_admin(s)
+        if admin is None:
+            return
+        for slug in HOUSE_PERSONAS:
+            if reassign_persona_owner(s, slug, admin.id):
+                logger.info('HOUSE PERSONA %s moved to admin %s', slug, admin.email)
+        s.commit()
+    except Exception:
+        error_logger.error('House personas not claimed', exc_info=True)
+    finally:
+        s.close()
+
+
+_claim_house_personas()
+
 # After init_db, so the settings table exists to read the stored key from.
 app.secret_key = _session_secret()
 app.permanent_session_lifetime = timedelta(days=30)   # "keep me signed in"
@@ -1303,6 +1350,9 @@ def _current_user():
             u.role = 'admin'
             s.commit()
             logger.info('ADMIN BOOTSTRAPPED from ADMIN_EMAILS: %s', u.email)
+            # The first admin may not have existed when the process booted, so
+            # the house personas have nowhere to go until now.
+            _claim_house_personas()
         role = u.role or 'user'
         ws, seat_role = _active_workspace(s, u)
         # A seat draws its plan from the workspace owner: only the owner is
@@ -3862,9 +3912,6 @@ def dashboard():
 def chat_page():
     return send_from_directory(BASE_DIR, 'chat.html')
 
-LANDING_PERSONA = 'nova'
-
-
 def _all_persona_slugs():
     """Every slug the chat can open: repo files, /tmp writes on Vercel, and
     saved DB personas."""
@@ -5368,6 +5415,10 @@ def api_persona_delete(slug):
         return jsonify({'error': 'Invalid slug'}), 400
     if _is_premade(slug) and not db_get_persona(slug):
         return jsonify({'error': 'Premade models cannot be deleted'}), 403
+    if _is_house_persona(slug):
+        # Deleting this one takes the chat on the marketing pages with it.
+        return jsonify({'error': 'This model runs the public demo chat and '
+                                 'cannot be deleted'}), 403
     from db import SessionLocal, delete_saved_persona
     s = SessionLocal()
     try:

@@ -924,6 +924,22 @@ def upsert_saved_persona(session, slug, name, config_json, prompt, owner_id=None
     return sp
 
 
+def reassign_persona_owner(session, slug, owner_id):
+    """Point a saved persona at a different owner. Returns True when it moved."""
+    sp = session.get(SavedPersona, slug)
+    if sp is None or (sp.owner_id or '') == (owner_id or ''):
+        return False
+    sp.owner_id = owner_id
+    return True
+
+
+def first_admin(session):
+    """The account house personas belong to. The oldest admin, so the answer
+    does not change as more admins are promoted."""
+    return (session.query(User).filter(User.role == 'admin')
+            .order_by(User.created_at.asc()).first())
+
+
 def list_saved_personas_for_owner(session, owner_id):
     return (session.query(SavedPersona)
             .filter(SavedPersona.owner_id == owner_id)
