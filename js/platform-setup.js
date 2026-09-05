@@ -378,6 +378,10 @@
     open: async function (platform, slug) {
       state.platform = platform || 'telegram';
       state.err = '';
+      // Every step and its copy ("How should she appear on Telegram?", etc.) is
+      // Telegram-specific — the only platform with a real connect flow so far.
+      // Anything else falls back to the same "Coming soon" state the hub shows.
+      if (!(PLATFORMS[state.platform] || {}).ready) return this.comingSoon();
       takeOver();
       byId('form-area').innerHTML = '<p class="hint" style="padding:24px;">Loading…</p>';
       await loadOverview();
@@ -388,6 +392,17 @@
       // means connected, and a creator reopens it to change or disconnect.
       state.idx = this.firstUnfinished();
       render();
+    },
+
+    comingSoon: function () {
+      takeOver();
+      var meta = PLATFORMS[state.platform] || { label: state.platform, icon: '' };
+      byId('form-area').innerHTML =
+        '<div class="ps-hub">' +
+          '<h2 class="ob-step-h">' + esc(meta.icon) + ' ' + esc(meta.label) + '</h2>' +
+          '<p class="ob-step-s">This platform is not connected yet — coming soon.</p>' +
+          '<button type="button" class="btn btn-primary" onclick="PlatformSetup.hub()">See all platforms</button>' +
+        '</div>';
     },
 
     firstUnfinished: function () {
