@@ -3224,7 +3224,9 @@ def _post_signin_redirect(active, nxt=''):
     pending = session.pop('pending_invite', '')
     if pending:
         return redirect('/join/' + pending)
-    return _post_signin_redirect(active, nxt)
+    if nxt.startswith('/') and active:
+        return redirect(nxt)
+    return redirect('/dashboard' if active else '/billing')
 
 
 @app.route('/login', methods=['GET', 'POST'])
