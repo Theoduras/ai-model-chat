@@ -138,8 +138,11 @@ let u = null, m = { recentTopics: [], lastTopic: null }, h = [], s = 3.5, l = Da
 const params = new URLSearchParams(location.search);
 let persona = params.get('persona') || 'lilly';
 // Demo mode (the coming-soon page): always opens on the name screen and keeps
-// nothing, so every visitor gets the same first-run experience.
+// nothing, so every visitor gets the same first-run experience. It is fixed to
+// the one demo model — no picker, no switching.
 const DEMO = params.get('demo') === '1';
+const DEMO_PERSONA = 'nova';
+if (DEMO) persona = DEMO_PERSONA;
 // The landing page embeds one model, so it hides the model picker.
 const ONLY = params.get('only') === '1';
 let PFX = 'persona_' + persona + '_';
@@ -275,9 +278,10 @@ function renderRail(list) {
 }
 
 function loadPersonaList() {
+  if (DEMO) return Promise.resolve();
   return fetch('/api/personas').then(r => r.ok ? r.json() : []).then(list => {
     let items = Array.isArray(list) ? list : [];
-    if (DEMO || ONLY) {   // one model only, unless that slug is missing
+    if (ONLY) {   // one model only, unless that slug is missing
       const only = items.filter(p => p.slug === persona);
       if (only.length) items = only;
     }
@@ -286,7 +290,7 @@ function loadPersonaList() {
 }
 
 async function switchPersona(slug) {
-  if (slug === persona) return;
+  if (DEMO || slug === persona) return;
   ri();
   cancelGreet();
   sm(); sc();

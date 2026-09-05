@@ -3463,8 +3463,7 @@ def dashboard():
 def chat_page():
     return send_from_directory(BASE_DIR, 'chat.html')
 
-LANDING_PERSONA_KEY = 'landing_persona'
-LANDING_PERSONA_DEFAULT = 'nova'
+LANDING_PERSONA = 'nova'
 
 
 def _all_persona_slugs():
@@ -3484,58 +3483,11 @@ def _all_persona_slugs():
     return sorted(slugs)
 
 
-def _landing_persona():
-    """Persona the landing page's chat opens with. Falls back rather than
-    breaking the page: the chosen persona can be deleted after the fact."""
-    slugs = _all_persona_slugs()
-    for candidate in (_get_setting(LANDING_PERSONA_KEY), LANDING_PERSONA_DEFAULT):
-        if candidate and candidate in slugs:
-            return candidate
-    return slugs[0] if slugs else LANDING_PERSONA_DEFAULT
-
-
-def _persona_display_name(slug):
-    saved = db_get_persona(slug)
-    if saved and isinstance(saved.get('config'), dict) and saved['config'].get('name'):
-        return saved['config']['name']
-    config_path = _persona_path(slug, '.config.json')
-    if os.path.exists(config_path):
-        try:
-            with open(config_path, 'r', encoding='utf-8') as f:
-                name = json.load(f).get('name')
-            if name:
-                return name
-        except Exception:
-            pass
-    return slug.capitalize()
-
-
 @app.route('/api/landing')
 def api_landing_get():
-    """Public: the landing page reads this to point its chat at the right model.
-    Operators also get the pickable list, which is exactly what the POST below
-    accepts — /api/personas is scoped to the caller's own personas and would
-    hide the premades."""
-    out = {
-        'persona': _landing_persona(),
-        'configured': _get_setting(LANDING_PERSONA_KEY) or '',
-    }
-    if _is_operator():
-        out['options'] = [{'slug': s, 'name': _persona_display_name(s)}
-                          for s in _all_persona_slugs()]
-    return jsonify(out)
-
-
-@app.route('/api/landing', methods=['POST'])
-@operator_only
-def api_landing_set():
-    slug = ((request.get_json(silent=True) or {}).get('persona') or '').strip()
-    if not re.match(r'^[a-z0-9_-]+$', slug):
-        return jsonify({'error': 'Invalid slug'}), 400
-    if slug not in _all_persona_slugs():
-        return jsonify({'error': 'No persona with that name'}), 404
-    _set_setting(LANDING_PERSONA_KEY, slug)
-    return jsonify({'ok': True, 'persona': slug})
+    """Public: the marketing pages read this to point their chat at the live
+    demo model. Fixed to Nova — the demo is not a persona picker."""
+    return jsonify({'persona': LANDING_PERSONA})
 
 
 @app.route('/landing')
