@@ -5758,6 +5758,11 @@ def _phases(slug):
     try:
         saved = json.loads(_get_setting(f'phases_{slug}') or '[]')
         if isinstance(saved, list) and saved:
+            # Saves require at least 2 phases, but personas persisted before that
+            # rule (or edited directly) can still carry just one. Pad rather than
+            # serve a state the save endpoint would itself reject.
+            if len(saved) < 2:
+                saved = saved + DEFAULT_PHASES[len(saved):2]
             return saved
     except Exception:
         pass

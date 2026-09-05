@@ -2656,11 +2656,15 @@ function phaseBlock(ph, i) {
 
 function addPhase() {
   const last = chatPhases[chatPhases.length - 1];
-  chatPhases.splice(chatPhases.length - 1, 0, {
+  const newPhase = {
     name: 'Phase ' + chatPhases.length,
     duration_type: 'exchanges', duration_value: 20, duration_days: 0,
     photo_rate: Math.min(100, (last?.photo_rate || 20) + 10)
-  });
+  };
+  // With fewer than 2 phases there is no "last" (CTA) phase to insert before —
+  // splice(-1, 0, …) on a short array silently no-ops or misplaces the phase.
+  if (chatPhases.length < 2) chatPhases.push(newPhase);
+  else chatPhases.splice(chatPhases.length - 1, 0, newPhase);
   renderPhases();
 }
 
@@ -2674,6 +2678,12 @@ function removePhase(i) {
 // every save path has to write them explicitly.
 async function postPhases(slug) {
   if (!document.getElementById('f-cta-url')) return;   // form not rendered
+  // The server rejects fewer than 2 phases; pad here instead of failing the
+  // whole save (and the photos/config that ride along with it in savePersona()).
+  while (chatPhases.length < 2) {
+    chatPhases.push({ name: 'Phase ' + chatPhases.length, duration_type: 'exchanges',
+      duration_value: 20, duration_days: 0, photo_rate: 40 });
+  }
   const res = await fetch('/api/personas/' + slug + '/phases', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
