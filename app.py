@@ -1481,10 +1481,11 @@ _CAP_PATHS = {
     '/api/telegram/stats': 'analytics',
     '/api/visitors': 'analytics',
     '/api/xlog': 'analytics',
-    '/api/fanvue/auto': 'scheduled_followups',
-    '/api/x/auto-run': 'scheduled_followups',
-    '/api/threads/auto': 'scheduled_followups',
 }
+# Auto-reply is the product itself — every tier's plan says the persona chats —
+# so /api/{fanvue,x,threads}/auto is not gated here. Only the proactive
+# follow-up interval inside it is paid; those handlers check the capability.
+
 _PLATFORM_PATHS = {
     '/api/telegram': 'telegram', '/api/tguser': 'telegram',
     '/api/x': 'x', '/api/xlog': 'x',
@@ -11132,7 +11133,8 @@ def api_fanvue_auto():
             opts['typing_speed'] = max(4, min(int(data['typing_speed'] or 14), 40))
         if 'react_rate' in data:
             opts['react_rate'] = max(0, min(int(data['react_rate'] or 0), 100))
-        if 'followup_min' in data:
+        followups = bool(user_capabilities(_current_user()).get('scheduled_followups'))
+        if 'followup_min' in data and followups:
             try:
                 _set_setting(f'fanvue_followup_min_{persona}', str(int(float(data['followup_min']))))
             except (ValueError, TypeError):
@@ -11164,7 +11166,8 @@ def api_fanvue_auto():
         lst = set(_fanvue_enabled_list())
         lst.add(persona) if enabled else lst.discard(persona)
         _set_setting('fanvue_auto_personas', json.dumps(sorted(lst)))
-        return jsonify({'ok': True, 'enabled': enabled, 'options': opts})
+        return jsonify({'ok': True, 'enabled': enabled, 'options': opts,
+                        'scheduled_followups': followups})
     persona = (request.args.get('persona') or '').strip()
     opts = _fanvue_auto_settings(persona)
     return jsonify({'enabled': bool(opts.get('enabled')),
@@ -11186,6 +11189,7 @@ def api_fanvue_auto():
                     'ppv_stale_days': int(opts.get('ppv_stale_days', 14) or 0),
                     'ppv_retry_discount': float(opts.get('ppv_retry_discount', 0) or 0),
                     'followup_min': int(_get_setting(f'fanvue_followup_min_{persona}') or 30),
+                    'scheduled_followups': bool(user_capabilities(_current_user()).get('scheduled_followups')),
                     'ppv_require_payment': (_get_setting(f'fanvue_ppv_require_payment_{persona}') or '0') == '1'})
 
 

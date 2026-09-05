@@ -272,6 +272,7 @@
     <div class="field full" style="margin-top:12px;">
       <label>Follow-up after silence <span style="font-weight:400;color:var(--text-muted);">(minutes before nudging a quiet fan — first nudge at this value, second at 2×; max 2. Set low e.g. 5 to test)</span></label>
       <input type="number" id="fv-followup-min" min="1" step="1" placeholder="30">
+      <span class="hint" id="fv-followup-lock" style="display:none;">Scheduled follow-ups are a Pro feature — replies to fans work on every plan.</span>
     </div>
     <div style="display:flex; gap:8px; align-items:center; margin-top:14px;">
       <button class="btn-ai" onclick="saveAuto()">Save &amp; Run</button>
@@ -809,6 +810,9 @@ async function loadAuto(){
   document.getElementById('fv-react-rate').value=(a.react_rate!==undefined?a.react_rate:25);
   document.getElementById('fv-typing-wrap').style.display=(a.humanize!==false)?'':'none';
   document.getElementById('fv-followup-min').value=a.followup_min||30;
+  const fuLocked=a.scheduled_followups===false;
+  document.getElementById('fv-followup-min').disabled=fuLocked;
+  document.getElementById('fv-followup-lock').style.display=fuLocked?'block':'none';
   document.getElementById('fv-ppv-require-payment').checked=!!a.ppv_require_payment;
   document.getElementById('fv-ppv-test-phrase').value=a.ppv_test_phrase||'';
   document.getElementById('fv-ppv-first-after').value=a.ppv_first_after||6;
