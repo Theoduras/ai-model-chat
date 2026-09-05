@@ -4752,6 +4752,7 @@ def api_personas():
                 'name': sp.get('name') or config.get('name') or sp['slug'].capitalize(),
                 'avatar': f"/api/personas/{sp['slug']}/avatar" if has_img else None,
                 'config': config,
+                'cta_url': _phases_cta(sp['slug']).get('cta_url', ''),
                 'premade': False,
                 'created_at': sp.get('created_at'),
                 'updated_at': sp.get('updated_at'),
@@ -4790,6 +4791,7 @@ def api_personas():
             'name': config.get('name') or meta.get('cover_label') or slug.capitalize(),
             'avatar': f'/api/personas/{slug}/avatar' if has_img else None,
             'config': config,
+            'cta_url': _phases_cta(slug).get('cta_url', ''),
             'premade': True
         })
 
@@ -4804,6 +4806,7 @@ def api_personas():
             'name': sp.get('name') or config.get('name') or sp['slug'].capitalize(),
             'avatar': f"/api/personas/{sp['slug']}/avatar" if has_img else None,
             'config': config,
+            'cta_url': _phases_cta(sp['slug']).get('cta_url', ''),
             'premade': False,
             'created_at': sp.get('created_at'),
             'updated_at': sp.get('updated_at'),

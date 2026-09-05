@@ -1039,7 +1039,7 @@ function progressTitle(pct, cfg) {
                         : 'Complete — every field is filled in';
 }
 
-function progressBarHtml(pct, cfg) {
+function progressBarHtml(pct, pcfg) {
   return '<div class="pg-bar" role="progressbar" aria-valuenow="' + pct + '" aria-valuemin="0" ' +
     'aria-valuemax="100" aria-label="Persona completeness" title="' + esc(progressTitle(pct, cfg)) + '">' +
     '<i style="width:' + pct + '%;background:' + progressBand(pct) + ';"></i></div>' +
@@ -1113,10 +1113,18 @@ function pgArchetypes() {
   return [...seen].sort();
 }
 
+// The CTA lives in the phases store rather than the persona config, so it has
+// to be folded back in or a persona with a CTA set never reads as complete.
+function progressCfg(p) {
+  const m = Object.assign({ name: p.name, avatar: p.avatar }, p.config || {});
+  if (!String(m.cta_url || '').trim()) m.cta_url = p.cta_url || '';
+  return m;
+}
+
 function matchesPgFilter(p) {
   const f = pgFilter();
   const cfg = p.config || {};
-  const pct = personaProgress(Object.assign({ name: p.name, avatar: p.avatar }, cfg));
+  const pct = personaProgress(progressCfg(p));
   if (f.favorite && f.favorite.length && !cfg.favorite) return false;
   if (f.archetype && f.archetype.length && !f.archetype.includes((cfg.archetype || '').trim())) return false;
   if (f.completion && f.completion.length && !f.completion.includes(completionBand(pct))) return false;
@@ -1126,7 +1134,7 @@ function matchesPgFilter(p) {
 
 function sortPgSlugs(slugs) {
   const sort = pgSort();
-  const pctOf = p => personaProgress(Object.assign({ name: p.name, avatar: p.avatar }, p.config || {}));
+  const pctOf = p => personaProgress(progressCfg(p));
   const nameOf = p => (p.name || p.slug || '').toLowerCase();
   return slugs.slice().sort((a, b) => {
     const pa = personas[a], pb = personas[b];
@@ -1329,7 +1337,8 @@ function renderPersonaBrowser() {
   const cards = slugs.map(slug => {
     const p = personas[slug];
     const cfg = p.config || {};
-    const pct = personaProgress(Object.assign({ name: p.name, avatar: p.avatar }, cfg));
+    const pcfg = progressCfg(p);
+    const pct = personaProgress(pcfg);
     const sub = esc(cfg.archetype || p.slug);
     const delBtn = p.premade ? '' :
       '<button type="button" class="pg-del" title="Delete" onclick="event.stopPropagation();deletePersona(\'' + slug + '\')">✕</button>';
@@ -1339,7 +1348,7 @@ function renderPersonaBrowser() {
         '<div class="pg-row-thumb">' + personaThumb(p, 48) + '</div>' +
         '<div class="pg-row-info"><div class="pg-row-name">' + esc(p.name || slug) + '</div>' +
         '<div class="pg-row-sub">' + sub + '</div></div>' +
-        '<div class="pg-row-bar">' + progressBarHtml(pct, cfg) + '</div>' +
+        '<div class="pg-row-bar">' + progressBarHtml(pct, pcfg) + '</div>' +
         star +
         '<button type="button" class="btn btn-ghost pg-open" onclick="event.stopPropagation();loadPersona(\'' + slug + '\')">Open</button>' +
         delBtn + '</div>';
@@ -1350,7 +1359,7 @@ function renderPersonaBrowser() {
         '<div class="pg-card-text"><div class="pg-card-name">' + esc(p.name || slug) + '</div>' +
         '<div class="pg-card-sub">' + sub + '</div></div></div>' +
       '<div class="pg-card-foot">' +
-        progressBarHtml(pct, cfg) +
+        progressBarHtml(pct, pcfg) +
         '<button type="button" class="btn btn-primary pg-open" onclick="event.stopPropagation();loadPersona(\'' + slug + '\')">Open</button>' +
       '</div></div>';
   }).join('');
@@ -2653,6 +2662,7 @@ async function postPhases(slug) {
     })
   });
   if (!res.ok) throw new Error('phases save failed');
+  if (personas[slug]) personas[slug].cta_url = v('f-cta-url');
 }
 
 async function savePhases(btn) {
