@@ -443,8 +443,10 @@ class User(Base):
     # until this date they keep the old unlimited entitlements, so enforcement
     # is not a retroactive downgrade mid-subscription. Admin-editable.
     grandfathered_until = Column(DateTime)
-    # NULL means this account is its own workspace. Set means it is a seat in
-    # that owner's workspace: personas, plan and billing all come from there.
+    # Superseded by the memberships table, which lets one account belong to
+    # several workspaces. Kept only as the input to backfill_workspaces, which
+    # runs once; nothing reads it at request time. Safe to drop a release after
+    # every deployment has run the backfill.
     team_owner_id = Column(String(32), index=True)
     tier = Column(String(32), default='')          # '' until a plan is chosen
     status = Column(String(16), default='unpaid')  # unpaid | active | expired
@@ -495,6 +497,110 @@ class Payment(Base):
 
 
 Index('ix_payments_user_created', Payment.user_id, Payment.created_at)
+
+
+class Workspace(Base):
+    """A billing tenant: the personas, platform connections and plan one team
+    works out of. A user can belong to several.
+
+    The plan itself still lives on the owner's User row — tier, status,
+    expires_at and Stripe ids — so one account is billed once no matter how
+    many workspaces it is a member of.
+    """
+    __tablename__ = 'workspaces'
+
+    # For every workspace that existed before this table, the id IS the owner's
+    # user id. SavedPersona.owner_id already held that value, so the backfill
+    # needs no data migration and no downtime.
+    id = Column(String(32), primary_key=True, default=_uid)
+    name = Column(String(120), default='')
+    owner_id = Column(String(32), nullable=False, index=True)
+    created_at = Column(DateTime, default=_now)
+
+
+class Membership(Base):
+    """A user's seat in a workspace, and what they may do in it."""
+    __tablename__ = 'memberships'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    workspace_id = Column(String(32), nullable=False, index=True)
+    user_id = Column(String(32), nullable=False, index=True)
+    role = Column(String(16), default='chatter')   # owner | manager | chatter
+    created_at = Column(DateTime, default=_now)
+
+
+Index('ix_membership_unique', Membership.workspace_id, Membership.user_id,
+      unique=True)
+
+
+def list_memberships(session, user_id):
+    """Every workspace this user can open, owned ones first then by age."""
+    rows = (session.query(Membership, Workspace)
+            .filter(Membership.user_id == user_id,
+                    Workspace.id == Membership.workspace_id)
+            .all())
+    rows.sort(key=lambda r: (r[0].role != 'owner', r[1].created_at or _now()))
+    return rows
+
+
+def get_membership(session, workspace_id, user_id):
+    return session.query(Membership).filter(
+        Membership.workspace_id == workspace_id,
+        Membership.user_id == user_id).first()
+
+
+def list_workspace_members(session, workspace_id):
+    rows = (session.query(Membership, User)
+            .filter(Membership.workspace_id == workspace_id,
+                    User.id == Membership.user_id).all())
+    rows.sort(key=lambda r: (r[0].role != 'owner', r[0].created_at or _now()))
+    return rows
+
+
+def count_workspace_members(session, workspace_id):
+    return session.query(Membership).filter(
+        Membership.workspace_id == workspace_id).count()
+
+
+def create_workspace(session, owner_id, name, workspace_id=None):
+    ws = Workspace(owner_id=owner_id, name=(name or '')[:120])
+    if workspace_id:
+        ws.id = workspace_id
+    session.add(ws)
+    session.add(Membership(workspace_id=ws.id, user_id=owner_id, role='owner'))
+    return ws
+
+
+WORKSPACE_FLAG = 'workspaces_backfill'
+
+
+def backfill_workspaces(session):
+    """One-off: give every existing account a workspace whose id is its own user
+    id, so the owner_id already on saved personas keeps resolving, and turn the
+    old single-team column into memberships."""
+    if get_app_setting(session, WORKSPACE_FLAG):
+        return 0
+    n = 0
+    # Everyone gets their own workspace, including someone who was a seat in
+    # another team: they may hold a plan and personas of their own, and can
+    # now be in both places at once.
+    for u in session.query(User).all():
+        if session.get(Workspace, u.id) is None:
+            create_workspace(session, u.id, u.brand or u.name or u.email, u.id)
+            n += 1
+    # The sessionmaker has autoflush off, so the workspaces just added are not
+    # findable by get() until they are flushed — and the next loop looks them up.
+    session.flush()
+    for u in session.query(User).filter(User.team_owner_id.isnot(None)).all():
+        if session.get(Workspace, u.team_owner_id) is None:
+            continue
+        if get_membership(session, u.team_owner_id, u.id) is None:
+            session.add(Membership(workspace_id=u.team_owner_id, user_id=u.id,
+                                   role=(u.role if u.role in ('manager', 'chatter')
+                                         else 'chatter')))
+    set_app_setting(session, WORKSPACE_FLAG, _now().isoformat())
+    session.commit()
+    return n
 
 
 class Invite(Base):
@@ -679,6 +785,7 @@ def init_db():
         s = SessionLocal()
         try:
             grandfather_existing_users(s)
+            backfill_workspaces(s)
         finally:
             s.close()
     except Exception:

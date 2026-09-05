@@ -69,4 +69,5 @@ def owned_slugs():
     user = app._current_user()
     if not user:
         return set()
-    return {p['slug'] for p in app.db_list_personas(owner_id=user['id'])}
+    return {p['slug'] for p in
+            app.db_list_personas(owner_id=user.get('workspace_id') or user['id'])}

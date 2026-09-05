@@ -358,7 +358,9 @@ def _can_edit_persona(slug, user):
         return True
     owner = _persona_owner(slug)
     if owner:
-        return owner in (user['id'], user.get('workspace_id') or user['id'])
+        # Strictly the workspace in view: a creator's own personas must not
+        # follow them into a workspace they merely have a seat in.
+        return owner == (user.get('workspace_id') or user['id'])
     # No DB row: free to create unless a premade repo persona holds the slug.
     return not _is_premade(slug)
 
@@ -1264,24 +1266,22 @@ def _current_user():
             s.commit()
             logger.info('ADMIN BOOTSTRAPPED from ADMIN_EMAILS: %s', u.email)
         role = u.role or 'user'
+        ws, seat_role = _active_workspace(s, u)
         # A seat draws its plan from the workspace owner: only the owner is
-        # billed, so a chatter's access has to follow the owner's subscription.
-        tier, status, expires_at = u.tier, u.status, u.expires_at
-        grandfathered = u.grandfathered_until
-        owner_id = u.team_owner_id or ''
-        if owner_id:
-            owner = s.get(User, owner_id)
-            if owner is not None:
-                tier, status, expires_at = owner.tier, owner.status, owner.expires_at
-                grandfathered = owner.grandfathered_until
-                if (status == 'active' and expires_at
-                        and expires_at < datetime.now(timezone.utc).replace(tzinfo=None)):
-                    status = 'expired'
+        # billed, so a member's access has to follow the owner's subscription.
+        owner = u if (ws is None or ws.owner_id == u.id) else s.get(User, ws.owner_id)
+        owner = owner or u
+        tier, status = owner.tier, owner.status
+        expires_at, grandfathered = owner.expires_at, owner.grandfathered_until
+        if (owner.id != u.id and status == 'active' and expires_at
+                and expires_at < datetime.now(timezone.utc).replace(tzinfo=None)):
+            status = 'expired'
         return {'id': u.id, 'email': u.email, 'name': u.name, 'tier': tier,
                 'status': status, 'role': role,
-                'team_owner_id': owner_id,
-                'workspace_id': owner_id or u.id,
-                'seat_role': 'owner' if not owner_id else role,
+                'workspace_id': ws.id if ws is not None else u.id,
+                'workspace_name': (ws.name if ws is not None else '') or owner.email,
+                'workspace_owner_id': owner.id,
+                'seat_role': seat_role,
                 'is_admin': role == 'admin',
                 'stripe_customer_id': u.stripe_customer_id or '',
                 'stripe_subscription_id': u.stripe_subscription_id or '',
@@ -1290,6 +1290,39 @@ def _current_user():
                 'expires_at': expires_at.isoformat() if expires_at else None}
     finally:
         s.close()
+
+
+def _active_workspace(s, u):
+    """(workspace, seat_role) for this request. The chosen workspace is held in
+    the session so a switch survives navigation; an invalid or stale choice
+    falls back to one the user is actually a member of rather than erroring."""
+    from db import User, Workspace, Membership, list_memberships, create_workspace
+    rows = list_memberships(s, u.id)
+    if not any(m.role == 'owner' for m, _ in rows):
+        # Sign-up, Google sign-in and the admin console all create users, so the
+        # own-workspace guarantee lives here rather than in each of them. A user
+        # who only holds seats still needs somewhere of their own to come back to.
+        ws = s.get(Workspace, u.id)
+        if ws is None:
+            ws = create_workspace(s, u.id, u.brand or u.name or u.email, u.id)
+        elif s.query(Membership).filter(Membership.workspace_id == ws.id,
+                                        Membership.user_id == u.id).first() is None:
+            s.add(Membership(workspace_id=ws.id, user_id=u.id, role='owner'))
+        s.commit()
+        rows = list_memberships(s, u.id)
+    chosen = session.get('workspace_id') or ''
+    for m, ws in rows:
+        if ws.id == chosen:
+            return ws, (m.role or 'chatter')
+    # No choice made yet. Prefer a workspace that can actually be used: someone
+    # invited purely as a chatter has an empty, unpaid workspace of their own,
+    # and landing them there would greet them with the paywall.
+    for m, ws in rows:
+        owner = s.get(User, ws.owner_id)
+        if owner is not None and owner.status == 'active':
+            return ws, (m.role or 'chatter')
+    m, ws = rows[0]
+    return ws, (m.role or 'chatter')
 
 
 def _user_is_active(user):
@@ -1427,7 +1460,7 @@ _PAID_API = ('/api/telegram', '/api/tguser', '/api/x', '/api/xlog', '/api/thread
 # arrive from the platform, not a signed-in creator, and carry their own signed
 # proof of origin — a sign-in redirect would just look like a failure to Fanvue.
 _OPEN_PATHS = ('/login', '/register', '/logout', '/pricing', '/billing',
-               '/auth/google', '/join/',
+               '/auth/google', '/join/', '/api/workspaces',
                '/account', '/api/billing', '/healthz', '/go/', '/webhooks/',
                '/dashboard/logout', '/admin/logout')
 
@@ -2030,26 +2063,36 @@ ADMIN_ROLES = ('user', 'manager', 'chatter', 'support', 'admin')
 
 
 def _apply_team_owner(s, u, owner_email):
-    """Move a user into (or out of) a workspace. Returns an error string, or
-    '' on success. Seats are one level deep by design: an owner is identified
-    by having no owner of their own, so a chain would make the workspace of a
-    persona ambiguous."""
-    from db import get_user_by_email, count_team_members
+    """Add or remove a seat in another account's workspace, from the console.
+
+    Only the memberships this grants are touched; a user's own workspace is
+    never removed, so revoking a seat cannot orphan them."""
+    from db import (get_user_by_email, Workspace, Membership, get_membership,
+                    count_workspace_members)
+    guest = [m for m in s.query(Membership).filter(Membership.user_id == u.id).all()
+             if m.role != 'owner']
     if not owner_email:
-        u.team_owner_id = None
+        for m in guest:
+            s.delete(m)
         return ''
     owner = get_user_by_email(s, owner_email)
     if owner is None:
         return 'No account with that owner email.'
     if owner.id == u.id:
         return 'An account cannot be a seat in its own workspace.'
-    if owner.team_owner_id:
-        return 'That account is itself a seat. Pick the workspace owner instead.'
-    if u.team_owner_id != owner.id:
+    ws = s.query(Workspace).filter(Workspace.owner_id == owner.id).order_by(
+        Workspace.created_at.asc()).first()
+    if ws is None:
+        return f'{owner.email} has no workspace yet.'
+    if get_membership(s, ws.id, u.id) is None:
         cap = tier_capabilities(owner.tier).get('seats')
-        if cap is not None and count_team_members(s, owner.id) >= int(cap):
+        if cap is not None and count_workspace_members(s, ws.id) >= int(cap):
             return f'{owner.email} is using all {cap} seats on their plan.'
-    u.team_owner_id = owner.id
+        s.add(Membership(workspace_id=ws.id, user_id=u.id,
+                         role=(u.role if u.role in ('manager', 'chatter') else 'chatter')))
+    for m in guest:
+        if m.workspace_id != ws.id:
+            s.delete(m)
     return ''
 
 
@@ -2065,22 +2108,25 @@ def admin_users():
     from db import list_users
     s = _db_session()
     try:
+        from db import Workspace, Membership
         users = list_users(s)
         by_id = {u.id: u for u in users}
-        seats = {}
-        for u in users:
-            if u.team_owner_id:
-                seats[u.team_owner_id] = seats.get(u.team_owner_id, 0) + 1
+        ws_owner = {w.id: w.owner_id for w in s.query(Workspace).all()}
+        seats, guest_of = {}, {}
+        for m in s.query(Membership).all():
+            seats[m.workspace_id] = seats.get(m.workspace_id, 0) + 1
+            if m.role != 'owner':
+                guest_of.setdefault(m.user_id, []).append(m.workspace_id)
         rows = []
         for u in users:
-            owner = by_id.get(u.team_owner_id) if u.team_owner_id else None
-            n = seats.get(u.id, 0)
+            guests = [by_id.get(ws_owner.get(w)) for w in guest_of.get(u.id, [])]
+            owner = next((g for g in guests if g is not None), None)
+            n = seats.get(u.id, 0) - 1
             rows.append({
                 'id': u.id, 'email': u.email, 'name': u.name,
                 'role': u.role or 'user', 'tier': u.tier, 'status': u.status,
-                'team': (owner.email if owner else
-                         (u.team_owner_id if u.team_owner_id else '')),
-                'seats': (n + 1) if n else 0,
+                'team': (owner.email if owner else ''),
+                'seats': (n + 1) if n > 0 else 0,
                 'seat_cap': tier_capabilities(u.tier).get('seats') or 1,
                 'grandfathered': _fmt_date(u.grandfathered_until),
                 'expires': _fmt_date(u.expires_at),
@@ -2160,11 +2206,15 @@ def admin_user_detail(uid):
                         logger.info('ADMIN EDIT account by=%s target=%s role=%s '
                                     'status=%s tier=%s team=%s', me['email'],
                                     u.email, u.role, u.status, u.tier,
-                                    u.team_owner_id or '-')
+                                    request.form.get('team_owner') or '-')
             if error:
                 s.rollback()
 
-        owner = s.get(User, u.team_owner_id) if u.team_owner_id else None
+        from db import Workspace, Membership
+        guest = s.query(Membership).filter(Membership.user_id == u.id,
+                                           Membership.role != 'owner').first()
+        gws = s.get(Workspace, guest.workspace_id) if guest else None
+        owner = s.get(User, gws.owner_id) if gws else None
         view = {'id': u.id, 'email': u.email, 'role': u.role or 'user',
                 'team_owner': owner.email if owner else '',
                 'grandfathered': _fmt_date(u.grandfathered_until),
@@ -2205,7 +2255,8 @@ h2{font-size:1rem;margin-bottom:6px}
 
 <div class="card"><h2>Team</h2>
 <p class="sub">{{ used }} of {{ cap }} seat{{ '' if cap == 1 else 's' }} on {{ tier_name }}.
-Everyone here shares your personas, and only you are billed.</p>
+Everyone here shares this workspace's personas, and only you are billed. They keep their own
+workspace too, and switch between them.</p>
 <table>
 <tr><th>Member</th><th>Role</th><th></th></tr>
 {% for m in members %}<tr>
@@ -2266,30 +2317,27 @@ JOIN_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <a class="ghost" href="/dashboard">Go to your dashboard</a>
 {% else %}<h2>Join {{ owner }}\u2019s team</h2>
 <p class="sub">You will join as <strong>{{ role }}</strong> and share their personas. You will not be
-billed \u2014 the workspace owner pays for the plan.</p>
+billed \u2014 the workspace owner pays for the plan. Your own workspace, plan and personas stay
+exactly as they are; you switch between them from the sidebar.</p>
 <form method="post"><button type="submit">Accept invite</button></form>
 <a class="ghost" href="/dashboard">No thanks</a>{% endif %}
 </div></div></body></html>"""
 
 
 def _seat_view(s, user):
-    """Members, pending invites and the seat count for a workspace owner."""
-    from db import User, list_team_members, count_team_members, list_invites
+    """Members, pending invites and the seat count for the active workspace."""
+    from db import list_workspace_members, count_workspace_members, list_invites
     wid = _workspace_id(user)
-    owner = s.get(User, wid)
-    members = [{'id': owner.id, 'email': owner.email, 'name': owner.name or '',
-                'role': 'owner', 'is_owner': True}]
-    for m in list_team_members(s, wid):
-        members.append({'id': m.id, 'email': m.email, 'name': m.name or '',
-                        'role': m.role or 'chatter', 'is_owner': False})
+    members = [{'id': u.id, 'email': u.email, 'name': u.name or '',
+                'role': m.role or 'chatter', 'is_owner': (m.role == 'owner')}
+               for m, u in list_workspace_members(s, wid)]
     invites = [{'token': i.token, 'email': i.email or '', 'role': i.role,
                 'expires': _fmt_date(i.expires_at),
                 'url': request.url_root.rstrip('/') + '/join/' + i.token}
                for i in list_invites(s, wid)
                if i.expires_at and i.expires_at > datetime.now(timezone.utc).replace(tzinfo=None)]
     cap = user_capabilities(user).get('seats')
-    used = count_team_members(s, wid)
-    return members, invites, cap, used
+    return members, invites, cap, count_workspace_members(s, wid)
 
 
 @app.route('/team', methods=['GET', 'POST'])
@@ -2300,7 +2348,8 @@ def team():
     # Seats belong to whoever pays for them, so only the owner manages them.
     if user.get('seat_role') != 'owner' and not user.get('is_admin'):
         return ('Not found', 404)
-    from db import User, Invite, count_pending_invites, count_team_members
+    from db import (User, Invite, Membership, count_pending_invites,
+                    count_workspace_members, get_membership)
     s = _db_session()
     try:
         wid = _workspace_id(user)
@@ -2311,7 +2360,7 @@ def team():
 
             if action == 'invite':
                 pending = count_pending_invites(s, wid)
-                if cap is not None and count_team_members(s, wid) + pending >= int(cap):
+                if cap is not None and count_workspace_members(s, wid) + pending >= int(cap):
                     error = ('Every seat on your plan is taken or already invited. '
                              'Revoke an invite or remove a member first.')
                 else:
@@ -2339,20 +2388,23 @@ def team():
 
             elif action in ('role', 'remove'):
                 target = s.get(User, request.form.get('uid', ''))
-                if target is None or target.team_owner_id != wid:
+                mem = get_membership(s, wid, target.id) if target else None
+                if mem is None:
                     error = 'That person is not on your team.'
+                elif mem.role == 'owner':
+                    error = 'The owner cannot be removed or demoted.'
                 elif action == 'remove':
-                    target.team_owner_id = None
-                    target.role = 'user'
+                    s.delete(mem)
                     s.commit()
-                    saved = f'{target.email} removed from your team.'
-                    logger.info('SEAT REMOVED by=%s target=%s', user['email'], target.email)
+                    saved = f'{target.email} removed from this workspace.'
+                    logger.info('SEAT REMOVED by=%s target=%s workspace=%s',
+                                user['email'], target.email, wid)
                 else:
                     role = request.form.get('role', '')
                     if role not in SEAT_ROLES:
                         error = 'Pick a valid role.'
                     else:
-                        target.role = role
+                        mem.role = role
                         s.commit()
                         saved = f'{target.email} is now a {role}.'
 
@@ -2369,8 +2421,13 @@ def team():
 
 
 def _invite_problem(s, inv, user):
-    """Why this invite cannot be accepted by this user, or '' if it can."""
-    from db import User, count_team_members
+    """Why this invite cannot be accepted by this user, or '' if it can.
+
+    Joining no longer costs the invitee anything — their own workspace, plan
+    and personas stay put and they switch between them — so the old refusals
+    for "you already have a plan" and "you already own personas" are gone.
+    """
+    from db import User
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     if inv is None or inv.accepted_at:
         return 'This invite has already been used.'
@@ -2378,27 +2435,61 @@ def _invite_problem(s, inv, user):
         return 'This invite has expired. Ask for a new one.'
     if inv.email and inv.email != (user.get('email') or '').lower():
         return f'This invite was issued to {inv.email}. Sign in as that account to accept it.'
-    if user['id'] == inv.workspace_id:
-        return 'This is your own workspace.'
-    if user.get('team_owner_id'):
-        return ('You are already a member of another team. Leave it before joining '
-                'a new one.')
-    if user.get('status') == 'active' or user.get('stripe_subscription_id'):
-        # Covers a crypto customer with paid-through time as well as a live
-        # Stripe subscription: joining a team abandons whichever they hold.
-        return ('This account has its own plan. Cancel it first, or accept the '
-                'invite with a different account \u2014 joining a team would leave you '
-                'paying for a plan you no longer use.')
-    if db_list_personas(owner_id=user['id']):
-        return ('This account has its own personas, which would become unreachable '
-                'once it joins a team. Accept with a different account.')
-    owner = s.get(User, inv.workspace_id)
+    from db import Workspace, get_membership, count_workspace_members
+    ws = s.get(Workspace, inv.workspace_id)
+    if ws is None:
+        return 'That workspace no longer exists.'
+    if get_membership(s, ws.id, user['id']) is not None:
+        return 'You are already in this workspace.'
+    owner = s.get(User, ws.owner_id)
     if owner is None:
         return 'That workspace no longer exists.'
     cap = tier_capabilities(owner.tier).get('seats')
-    if cap is not None and count_team_members(s, inv.workspace_id) >= int(cap):
+    if cap is not None and count_workspace_members(s, ws.id) >= int(cap):
         return 'That team has no seats left. Ask the owner to free one up.'
     return ''
+
+
+@app.route('/api/workspaces')
+def api_workspaces():
+    """Every workspace the caller can open, and which one is in view."""
+    user = _current_user()
+    if not user:
+        return jsonify({'error': 'Sign in required'}), 401
+    from db import list_memberships, User
+    s = _db_session()
+    try:
+        out = []
+        for m, ws in list_memberships(s, user['id']):
+            owner = s.get(User, ws.owner_id)
+            out.append({'id': ws.id,
+                        'name': ws.name or (owner.email if owner else ws.id),
+                        'role': m.role or 'chatter',
+                        'plan': (owner.tier or '') if owner else '',
+                        'active': ws.id == user['workspace_id']})
+    finally:
+        s.close()
+    return jsonify({'workspaces': out, 'active': user['workspace_id']})
+
+
+@app.route('/api/workspaces/switch', methods=['POST'])
+def api_workspace_switch():
+    """Put a different workspace in view. Membership is re-checked here rather
+    than trusted from the session, which is why _active_workspace can fall back
+    quietly instead of failing when a seat is later revoked."""
+    user = _current_user()
+    if not user:
+        return jsonify({'error': 'Sign in required'}), 401
+    wid = (request.json or {}).get('workspace_id', '')
+    from db import get_membership
+    s = _db_session()
+    try:
+        if get_membership(s, wid, user['id']) is None:
+            return jsonify({'error': 'Not found'}), 404
+    finally:
+        s.close()
+    session['workspace_id'] = wid
+    return jsonify({'ok': True, 'workspace_id': wid})
 
 
 @app.route('/join/<token>', methods=['GET', 'POST'])
@@ -2420,9 +2511,12 @@ def join_team(token):
             return render_template_string(JOIN_HTML, error='',
                                           owner=owner.name or owner.email,
                                           role=inv.role)
+        from db import Membership
         me = s.get(User, user['id'])
-        me.team_owner_id = inv.workspace_id
-        me.role = inv.role
+        s.add(Membership(workspace_id=inv.workspace_id, user_id=me.id,
+                         role=inv.role))
+        # Land them in the workspace they just joined, not whichever they had open.
+        session['workspace_id'] = inv.workspace_id
         inv.accepted_at = datetime.now(timezone.utc).replace(tzinfo=None)
         inv.accepted_by = me.id
         s.commit()
@@ -2486,6 +2580,8 @@ def api_me():
                     'is_admin': bool(user.get('is_admin')),
                     'is_operator': _is_operator(),
                     'seat_role': user.get('seat_role') or 'owner',
+                    'workspace_id': user.get('workspace_id') or '',
+                    'workspace_name': user.get('workspace_name') or '',
                     'capabilities': caps,
                     'grandfathered': _is_grandfathered(user),
                     'usage': {'personas': {'used': _persona_count(user),
@@ -2564,10 +2660,10 @@ def account():
                      'provider': p.provider or 'oxapay'} for p in rows]
     finally:
         s.close()
-    from db import count_team_members
+    from db import count_workspace_members
     s = _db_session()
     try:
-        seats_used = count_team_members(s, _workspace_id(user))
+        seats_used = count_workspace_members(s, _workspace_id(user))
     finally:
         s.close()
     cap = user_capabilities(user).get('seats')

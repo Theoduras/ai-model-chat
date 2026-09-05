@@ -141,12 +141,14 @@
   <aside class="sidebar" aria-label="Navigation">
     <button class="panel-close mobile-only" type="button" onclick="closeMobilePanels()" aria-label="Close personas">&times;</button>
     <div class="sb-scroll">
-      <div class="sb-ws">
+      <div class="sb-ws" id="sb-ws" hidden onclick="toggleWsMenu(event)">
         <div class="sb-ws-avatar" id="sb-ws-avatar">·</div>
         <div class="sb-ws-info">
           <div class="sb-ws-name" id="sb-ws-name">&nbsp;</div>
           <div class="sb-ws-tier" id="sb-ws-tier">&nbsp;</div>
         </div>
+        <svg class="sb-ws-chevron" id="sb-ws-chevron" hidden viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12" aria-hidden="true"><path d="M6 9l6 6 6-6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <div class="sb-ws-menu" id="sb-ws-menu" hidden></div>
       </div>
 
       <div class="sb-search">
@@ -473,12 +475,15 @@ async function identifyUser() {
     window.USER_SETUP = me.setup || {};
     if (me.is_admin) document.body.classList.add('is-admin');
     applyEntitlements(me);
+    loadWorkspaces();
     const nameEl = document.getElementById('sb-ws-name');
     const tierEl = document.getElementById('sb-ws-tier');
     const avEl   = document.getElementById('sb-ws-avatar');
     const label  = me.name || me.email || 'Account';
     if (nameEl) nameEl.textContent = label;
-    if (tierEl) tierEl.textContent = me.is_admin ? 'Admin' : (me.tier ? me.tier + ' Plan' : 'Creator');
+    if (tierEl) tierEl.textContent = me.is_admin ? 'Admin'
+      : (me.seat_role && me.seat_role !== 'owner') ? (me.workspace_name + ' \u00b7 ' + me.seat_role)
+      : (me.tier ? me.tier + ' Plan' : 'Creator');
     if (avEl) avEl.textContent = label.slice(0, 2).toUpperCase();
   } catch (e) {
     CURRENT_UID = 'anon';
@@ -561,6 +566,59 @@ function renderPlanPanel(me) {
     + (me.is_admin ? '' : '<div style="margin-top:6px"><a href="/pricing">Change plan</a></div>');
   el.querySelector('.sb-plan-tier').textContent = name.charAt(0).toUpperCase() + name.slice(1);
   el.hidden = false;
+}
+
+// A creator can hold a seat in other people's workspaces as well as their own.
+// The picker only appears when there is somewhere else to go.
+async function loadWorkspaces() {
+  let data;
+  try { data = await (await fetch('/api/workspaces')).json(); } catch (e) { return; }
+  const list = (data && data.workspaces) || [];
+  const host = document.getElementById('sb-ws');
+  const menu = document.getElementById('sb-ws-menu');
+  if (!host || !menu) return;
+  host.hidden = false;
+  if (list.length < 2) return;
+  document.getElementById('sb-ws-chevron').hidden = false;
+  host.classList.add('switchable');
+  menu.innerHTML = '';
+  list.forEach(w => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'sb-ws-opt' + (w.active ? ' active' : '');
+    b.innerHTML = '<span></span><span class="sb-ws-role"></span>';
+    b.children[0].textContent = w.name;
+    b.children[1].textContent = w.role;
+    b.onclick = ev => { ev.stopPropagation(); switchWorkspace(w.id); };
+    menu.appendChild(b);
+  });
+}
+
+function toggleWsMenu(ev) {
+  const menu = document.getElementById('sb-ws-menu');
+  const host = document.getElementById('sb-ws');
+  if (!menu || !host || !host.classList.contains('switchable')) return;
+  ev.stopPropagation();
+  menu.hidden = !menu.hidden;
+  if (!menu.hidden) {
+    document.addEventListener('click', function close() {
+      menu.hidden = true;
+      document.removeEventListener('click', close);
+    });
+  }
+}
+
+async function switchWorkspace(id) {
+  try {
+    const r = await fetch('/api/workspaces/switch', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({workspace_id: id})
+    });
+    if (!r.ok) return;
+  } catch (e) { return; }
+  // Personas, platform state and cached lists are all per-workspace, so the
+  // cheapest correct thing is to start the page again.
+  window.location.reload();
 }
 
 // Expandable sidebar groups (Platforms, …), persisted per the usual namespaced pattern.

@@ -3146,3 +3146,25 @@ body.embedding .form-area { padding: 0; overflow: hidden; }
   font-size: 0.8rem; color: var(--text); font-family: var(--font);
 }
 .pg-search input::placeholder { color: var(--text-muted); }
+
+/* Workspace picker. Only rendered as a menu when the creator holds a seat in
+   more than one workspace. */
+.sb-ws { position: relative; }
+.sb-ws.switchable { cursor: pointer; }
+.sb-ws-chevron { margin-left: auto; opacity: .6; flex: none; }
+.sb-ws-menu {
+  position: absolute; left: 8px; right: 8px; top: calc(100% - 2px); z-index: 40;
+  background: var(--panel, #111113); border: 1px solid var(--border, #2e2e2e);
+  border-radius: 10px; padding: 5px; box-shadow: 0 12px 28px rgba(0,0,0,.45);
+}
+.sb-ws-opt {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  background: none; border: 0; color: var(--text-2, #bdb8b4); cursor: pointer;
+  font: inherit; font-size: .82rem; padding: 8px 10px; border-radius: 7px;
+}
+.sb-ws-opt:hover { background: var(--surface, #1c1c1c); color: var(--text, #f0ece9); }
+.sb-ws-opt.active { color: var(--text, #f0ece9); font-weight: 600; }
+.sb-ws-role {
+  margin-left: auto; font-size: .68rem; text-transform: uppercase;
+  letter-spacing: .04em; color: var(--text-muted, #6b6663);
+}
