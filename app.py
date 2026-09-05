@@ -930,10 +930,18 @@ def _block_source_files():
 # routes rather than files on disk.
 
 # Public, crawlable pages. Everything else is app surface behind the paywall.
+# Blog post slugs are duplicated from js/blog-posts.js (the client-side source
+# of truth) since the sitemap is generated server-side; keep the two in sync
+# when adding a post.
+_BLOG_SLUGS = ['from-fan-to-buyer', 'writing-a-voice', 'phases-that-convert',
+               'photos-that-earn']
+
 _PUBLIC_PAGES = [('/', '1.0', 'weekly'),
                  ('/pricing', '0.9', 'weekly'),
                  ('/register', '0.6', 'monthly'),
-                 ('/login', '0.3', 'monthly')]
+                 ('/login', '0.3', 'monthly'),
+                 ('/blog', '0.7', 'weekly')]
+_PUBLIC_PAGES += [(f'/blog/{slug}', '0.5', 'monthly') for slug in _BLOG_SLUGS]
 
 # Crawling these wastes budget and can leak a creator's funnel into search.
 # The fan pages (/landing, /profile, /chat.html) are deliberately absent: they
