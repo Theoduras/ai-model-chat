@@ -1687,14 +1687,32 @@ button:disabled{opacity:.6;cursor:not-allowed;transform:none;animation:none}
 .gbtn svg{width:18px;height:18px}
 .orsep{display:flex;align-items:center;gap:12px;color:var(--text-muted);font-size:.78rem;margin:18px 0}
 .orsep:before,.orsep:after{content:'';flex:1;height:1px;background:var(--border)}
-.tiers{display:grid;gap:16px;margin-top:8px}
-.tier{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:22px;transition:border-color .2s}
+.tiers{display:grid;gap:16px;margin-top:8px;align-items:stretch}
+.tier{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:22px;transition:border-color .2s,box-shadow .2s;display:flex;flex-direction:column;height:100%}
 .tier:hover{border-color:#3d3d3d}
 .tier.featured{border-color:var(--accent)}
+/* The card is the plan picker; the buttons inside it are the payment step. */
+.tier[data-select]{cursor:pointer}
+.tier[data-select]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.tier.selected{border-color:var(--accent-2);box-shadow:0 0 0 1px var(--accent-2) inset,0 10px 30px #ff2d7822}
+.tier .pick{display:flex;align-items:center;gap:8px;font-size:.72rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);margin-bottom:10px}
+.tier .pick:before{content:'';width:14px;height:14px;border-radius:50%;border:1.5px solid var(--border);flex:none}
+.tier.selected .pick{color:var(--accent-2)}
+.tier .pick .on{display:none}
+.tier.selected .pick .off{display:none}
+.tier.selected .pick .on{display:inline}
+.tier.selected .pick:before{border-color:var(--accent-2);background:var(--accent-2);box-shadow:inset 0 0 0 3px var(--panel)}
+/* Every card is a column of the same height, and the feature list absorbs the
+   slack — so the pay buttons line up across the row. */
+.tier>[data-period]{display:flex;flex-direction:column;flex:1}
+.tier>[data-period][hidden]{display:none}
+.tier ul{flex:1}
+.tier .cta{margin-top:auto;padding-top:4px}
+.tier .cta .spacer{visibility:hidden;margin-top:8px}
 .tier h2{font-size:1.05rem;font-weight:700;margin-bottom:4px}
 .price{font-family:var(--display);font-size:1.95rem;font-weight:800;margin:10px 0 2px;letter-spacing:-.02em}
 .price span{font-family:var(--font);font-size:.85rem;font-weight:400;color:var(--text-muted)}
-.blurb{color:var(--text-3);font-size:.85rem;margin-bottom:12px}
+.blurb{color:var(--text-3);font-size:.85rem;margin-bottom:12px;min-height:2.6em}
 .tier ul{list-style:none;margin-bottom:16px}
 .tier li{font-size:.85rem;color:var(--text-2);padding:4px 0}
 .tier li:before{content:'✓';color:var(--accent);margin-right:8px}
@@ -1706,7 +1724,34 @@ button:disabled{opacity:.6;cursor:not-allowed;transform:none;animation:none}
 .ptoggle button.active{background:var(--grad);background-size:300% 100%;color:#fff}
 .ptoggle .save{font-size:.7rem;opacity:.85;margin-left:4px}
 .permo{font-size:.75rem;color:var(--text-muted);margin-bottom:10px}
+.vat{font-family:var(--font);font-size:.7rem;font-weight:500;color:var(--text-muted);letter-spacing:0}
 .tier.soon{opacity:.85}
+/* Site header — same links and theme switch as the marketing pages. */
+.site-nav{position:fixed;top:0;left:0;right:0;z-index:60;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 24px;background:var(--panel);border-bottom:1px solid var(--border)}
+.site-nav .brand{font-family:var(--display);font-weight:800;font-size:1.05rem;color:var(--text);text-decoration:none;letter-spacing:-.01em}
+.site-nav .brand i{color:var(--accent);font-style:normal}
+.site-nav .links{display:flex;align-items:center;gap:8px}
+.site-nav a{font-size:.82rem;font-weight:600;text-decoration:none;padding:8px 15px;border-radius:999px;white-space:nowrap;transition:background .2s,color .2s,border-color .2s}
+.site-nav .nav-ghost{color:var(--text-2);border:1px solid var(--border)}
+.site-nav .nav-ghost:hover{color:var(--text);background:var(--surface)}
+.site-nav .nav-btn{color:#fff;background:var(--accent);border:1px solid var(--accent)}
+.site-nav .nav-btn:hover{background:var(--accent-2);border-color:var(--accent-2)}
+.theme-toggle{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;flex:none;padding:0;border-radius:999px;border:1px solid var(--border);background:none;color:var(--text-2);cursor:pointer}
+.theme-toggle:hover{color:var(--accent);background:var(--surface);transform:none;box-shadow:none;animation:none}
+.theme-toggle svg{width:17px;height:17px}
+.theme-toggle .ico-moon{display:none}
+:root[data-theme="light"] .theme-toggle .ico-sun{display:none}
+:root[data-theme="light"] .theme-toggle .ico-moon{display:block}
+body[data-page="pricing"]{display:block;padding:92px 16px 48px}
+body[data-page="pricing"] .wrap{margin:0 auto}
+@media(max-width:700px){.site-nav{padding:10px 14px;gap:8px}
+.site-nav .brand{font-size:.95rem}
+.site-nav .links{gap:6px}
+.site-nav a{padding:7px 11px;font-size:.75rem}
+/* On a phone the header only has room for the brand, the theme switch and
+   where to go next — and this page is already Pricing. */
+.site-nav .nav-pricing{display:none}
+body[data-page="pricing"]{padding-top:80px}}
 @media(min-width:700px){.wrap.wide{max-width:760px}.tiers{grid-template-columns:repeat(2,1fr)}}
 @media(min-width:1180px){.wrap.wide{max-width:1240px}.tiers{grid-template-columns:repeat(4,1fr)}}
 """
@@ -1757,8 +1802,21 @@ BILLING_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Choose a plan</title>
 <script src="/js/analytics.js" defer></script>
 <script src="/js/page-editor.js" defer></script>
-<style>""" + ACCOUNT_CSS + """</style></head><body data-page="pricing"><div class="wrap wide">
-<div class="bar"><span>Signed in as {{ user.email }}</span><a href="/logout">Sign out</a></div>
+<style>""" + ACCOUNT_CSS + """</style></head><body data-page="pricing">
+<header class="site-nav">
+<a class="brand" href="/">Velvetfunnel<i>.app</i></a>
+<div class="links">
+<button type="button" class="theme-toggle" onclick="toggleTheme()" title="Light mode" aria-label="Switch to light mode">
+<svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke-linecap="round"/></svg>
+<svg class="ico-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" stroke-linejoin="round"/></svg>
+</button>
+<a class="nav-ghost nav-pricing" href="/pricing">Pricing</a>
+{% if user.email %}<a class="nav-ghost" href="/account">Account</a><a class="nav-btn" href="/dashboard">Dashboard</a>
+{% else %}<a class="nav-ghost" href="/login">Log in</a><a class="nav-btn" href="/register">Register</a>{% endif %}
+</div>
+</header>
+<div class="wrap wide">
+{% if user.email %}<div class="bar"><span>Signed in as {{ user.email }}</span><a href="/logout">Sign out</a></div>{% endif %}
 {% if user.status == 'active' %}
 <div class="ok">Your <strong>{{ tiers[user.tier].name if user.tier in tiers else user.tier }}</strong>
 plan is active{% if user.expires_at %} until {{ user.expires_at[:10] }}{% endif %}.
@@ -1774,15 +1832,20 @@ plan is active{% if user.expires_at %} until {{ user.expires_at[:10] }}{% endif 
 <button type="button" class="active" data-set-period="month">Monthly</button>
 <button type="button" data-set-period="year">Annual <span class="save">Save {{ annual_save_pct }}%</span></button>
 </div>
-<p class="permo" style="margin:2px 0 10px">Card plans renew automatically and can be cancelled any time from your account. Crypto payments are one-off — you re-pay when the plan runs out.</p>
-<div class="tiers">
+<p class="permo" style="margin:2px 0 10px">All prices exclude VAT — any VAT due is added at checkout. Card plans renew automatically and can be cancelled any time from your account. Crypto payments are one-off — you re-pay when the plan runs out.</p>
+{% set pay_slots = [(1 if stripe_enabled else 0) + (1 if oxapay_enabled else 0)
+                    + (1 if dev_mode else 0), 1]|max %}
+<div class="tiers" role="radiogroup" aria-label="Plans">
 {% for key in order %}{% set t = tiers[key] %}{% set ta = tiers[key + annual_suffix] %}
-<div class="tier {{ 'featured' if key == 'pro' else '' }}">
+<div class="tier {{ 'featured' if key == 'pro' else '' }}" data-select="{{ key }}"
+ role="radio" aria-checked="false" tabindex="0" aria-label="{{ t.name }} plan">
+<div class="pick"><span class="off">Select</span><span class="on">Selected</span></div>
 <h2>{{ t.name }}</h2><div class="blurb">{{ t.blurb }}</div>
-<div data-period="month">
-<div class="price">{{ currency }}{{ t.price }}<span>/month</span></div>
-<ul>{% for f in t.features %}<li>{{ f }}</li>{% endfor %}</ul>
 {% set verb = 'Renew' if user.status == 'expired' else 'Pay' %}{% set card_verb = 'Resubscribe' if user.status == 'expired' else 'Subscribe' %}
+<div data-period="month">
+<div class="price">{{ currency }}{{ t.price }}<span>/month</span> <span class="vat">excl. VAT</span></div>
+<ul>{% for f in t.features %}<li>{{ f }}</li>{% endfor %}</ul>
+<div class="cta">
 {% if stripe_enabled %}<button data-tier="{{ key }}" data-provider="stripe">{{ card_verb }} with card</button>{% endif %}
 {% if oxapay_enabled %}<button data-tier="{{ key }}" data-provider="oxapay"
  style="{{ 'margin-top:8px;' if stripe_enabled }}background:var(--surface);color:var(--text)">{{ verb }} with crypto</button>{% endif %}
@@ -1790,11 +1853,12 @@ plan is active{% if user.expires_at %} until {{ user.expires_at[:10] }}{% endif 
 {% if dev_mode %}<button class="dev" data-dev-tier="{{ key }}"
  style="background:var(--surface);color:var(--star);margin-top:8px">Activate free (dev)</button>{% endif %}
 </div>
+</div>
 <div data-period="year" hidden>
-<div class="price">{{ currency }}{{ ta.price }}<span>/year</span></div>
+<div class="price">{{ currency }}{{ ta.price }}<span>/year</span> <span class="vat">excl. VAT</span></div>
 <div class="permo">{{ currency }}{{ ta.monthly_equiv }}/mo billed annually</div>
 <ul>{% for f in t.features %}<li>{{ f }}</li>{% endfor %}</ul>
-{% set verb = 'Renew' if user.status == 'expired' else 'Pay' %}{% set card_verb = 'Resubscribe' if user.status == 'expired' else 'Subscribe' %}
+<div class="cta">
 {% if stripe_enabled %}<button data-tier="{{ key }}{{ annual_suffix }}" data-provider="stripe">{{ card_verb }} with card</button>{% endif %}
 {% if oxapay_enabled %}<button data-tier="{{ key }}{{ annual_suffix }}" data-provider="oxapay"
  style="{{ 'margin-top:8px;' if stripe_enabled }}background:var(--surface);color:var(--text)">{{ verb }} with crypto</button>{% endif %}
@@ -1802,13 +1866,18 @@ plan is active{% if user.expires_at %} until {{ user.expires_at[:10] }}{% endif 
 {% if dev_mode %}<button class="dev" data-dev-tier="{{ key }}{{ annual_suffix }}"
  style="background:var(--surface);color:var(--star);margin-top:8px">Activate free (dev)</button>{% endif %}
 </div>
+</div>
 </div>{% endfor %}
 <div class="tier{{ ' soon' if custom.coming_soon }}">
+<div class="pick" style="visibility:hidden"><span class="off">Select</span></div>
 <h2>{{ custom.name }}</h2><div class="blurb">{{ custom.blurb }}</div>
 <div class="price">{{ custom.price_label }}</div>
 <div class="permo">{{ custom.note }}</div>
 <ul>{% for f in custom.features %}<li>{{ f }}</li>{% endfor %}</ul>
-<button disabled>{{ custom.cta }}</button>
+<div class="cta"><button disabled>{{ custom.cta }}</button>
+{# This card has one button where the paid cards have several, so it gets the
+   missing rows back as spacers and its button stays on their top line. #}
+{% for _ in range(pay_slots - 1) %}<button class="spacer" disabled tabindex="-1" aria-hidden="true">&nbsp;</button>{% endfor %}</div>
 </div>
 </div>
 {% if dev_mode %}<p style="text-align:center;color:#fbbf24;font-size:.8rem;margin-top:18px">
@@ -1827,6 +1896,30 @@ document.querySelectorAll('.ptoggle button').forEach(function(tab){
     });
   });
 });
+var cards = document.querySelectorAll('.tier[data-select]');
+function selectCard(card){
+  cards.forEach(function(c){
+    var on = c === card;
+    c.classList.toggle('selected', on);
+    c.setAttribute('aria-checked', on ? 'true' : 'false');
+    c.tabIndex = on ? 0 : -1;
+  });
+}
+cards.forEach(function(card){
+  card.addEventListener('click', function(){ selectCard(card); });
+  card.addEventListener('keydown', function(e){
+    if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+      // Space would scroll the page, and a card is not a submit target.
+      if (e.target === card) { e.preventDefault(); selectCard(card); }
+    }
+  });
+});
+if (cards.length) {
+  var active = {{ (user.tier or '').split(annual_suffix)[0]|tojson }};
+  var start = null;
+  cards.forEach(function(c){ if (c.dataset.select === active) start = c; });
+  selectCard(start || document.querySelector('.tier.featured[data-select]') || cards[0]);
+}
 document.querySelectorAll('button[data-dev-tier]').forEach(function(b){
   b.addEventListener('click', async function(){
     b.disabled = true; b.textContent = 'Activating...';
