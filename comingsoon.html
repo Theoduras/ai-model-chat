@@ -179,6 +179,7 @@ body.kbd .site-nav{display:none}
 .tier-card .blurb{color:var(--text-soft);font-size:13px;line-height:1.5;margin-bottom:18px;min-height:38px}
 .tier-card .price{font-family:'Sora';font-weight:800;font-size:30px;margin-bottom:18px}
 .tier-card .price span{font-family:'Inter';font-weight:500;font-size:13px;color:var(--text-dim)}
+.tier-card .price .vat{font-size:12px;color:var(--text-dim)}
 .tier-card ul{list-style:none;margin:0 0 22px;padding:0;flex:1}
 .tier-card li{font-size:13px;color:var(--text-soft);padding:6px 0;border-top:1px solid var(--hair);display:flex;gap:8px}
 .tier-card li:first-child{border-top:0}
@@ -246,7 +247,7 @@ body.kbd .site-nav{display:none}
 <section class="pricing" id="pricing">
   <div class="pricing-head">
     <h2 data-edit-id="pricing-title">Simple, transparent pricing</h2>
-    <p data-edit-id="pricing-subtitle">Start free, upgrade when your funnel needs more personas and platforms. All prices exclude VAT.</p>
+    <p data-edit-id="pricing-subtitle">Pick the plan your roster needs, and upgrade when it needs more personas and platforms. All prices exclude VAT.</p>
   </div>
   <div class="tier-grid" id="tier-grid">Loading plans…</div>
 </section>
@@ -263,15 +264,14 @@ fetch('/api/pricing')
       if (!t) return;
       var card = document.createElement('div');
       card.className = 'tier-card' + (key === 'pro' ? ' featured' : '');
-      var price = t.price === 0
-        ? 'Free<span> forever</span>'
-        : '$' + t.price + '<span>/' + t.days + ' days</span>';
+      var price = (d.currency || '\u20ac') + t.price +
+        '<span>/' + (t.period || 'month') + '</span> <span class="vat">excl. VAT</span>';
       card.innerHTML =
         '<h3>' + t.name + '</h3>' +
         '<div class="blurb">' + t.blurb + '</div>' +
         '<div class="price">' + price + '</div>' +
         '<ul>' + t.features.map(function(f){ return '<li>' + f + '</li>'; }).join('') + '</ul>' +
-        '<a href="/register">' + (t.price === 0 ? 'Start free' : 'Get started') + '</a>';
+        '<a href="/register">Get started</a>';
       grid.appendChild(card);
     });
     if (d.custom) {

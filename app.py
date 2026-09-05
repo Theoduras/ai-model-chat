@@ -1690,12 +1690,14 @@ button:disabled{opacity:.6;cursor:not-allowed;transform:none;animation:none}
 .tiers{display:grid;gap:16px;margin-top:8px;align-items:stretch}
 .tier{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:22px;transition:border-color .2s,box-shadow .2s;display:flex;flex-direction:column;height:100%}
 .tier:hover{border-color:#3d3d3d}
-.tier.featured{border-color:var(--accent)}
+.tier .tag{margin-left:auto;font-size:.62rem;font-weight:700;letter-spacing:.08em;padding:3px 9px;border-radius:999px;background:var(--surface);border:1px solid var(--border);color:var(--text-2)}
+.tier.selected .tag{border-color:var(--accent-2);color:var(--accent-2)}
 /* The card is the plan picker; the buttons inside it are the payment step. */
 .tier[data-select]{cursor:pointer}
 .tier[data-select]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.tier.selected{border-color:var(--accent-2);box-shadow:0 0 0 1px var(--accent-2) inset,0 10px 30px #ff2d7822}
-.tier .pick{display:flex;align-items:center;gap:8px;font-size:.72rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);margin-bottom:10px}
+.tier.selected,:root[data-theme="light"] .tier.selected:hover{border-color:var(--accent-2)}
+.tier.selected{box-shadow:0 0 0 1px var(--accent-2) inset,0 10px 30px #ff2d7822}
+.tier .pick{display:flex;align-items:center;gap:8px;min-height:22px;font-size:.72rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);margin-bottom:10px}
 .tier .pick:before{content:'';width:14px;height:14px;border-radius:50%;border:1.5px solid var(--border);flex:none}
 .tier.selected .pick{color:var(--accent-2)}
 .tier .pick .on{display:none}
@@ -1839,7 +1841,8 @@ plan is active{% if user.expires_at %} until {{ user.expires_at[:10] }}{% endif 
 {% for key in order %}{% set t = tiers[key] %}{% set ta = tiers[key + annual_suffix] %}
 <div class="tier {{ 'featured' if key == 'pro' else '' }}" data-select="{{ key }}"
  role="radio" aria-checked="false" tabindex="0" aria-label="{{ t.name }} plan">
-<div class="pick"><span class="off">Select</span><span class="on">Selected</span></div>
+<div class="pick"><span class="off">Select</span><span class="on">Selected</span>
+{% if key == 'pro' %}<span class="tag">Most popular</span>{% endif %}</div>
 <h2>{{ t.name }}</h2><div class="blurb">{{ t.blurb }}</div>
 {% set verb = 'Renew' if user.status == 'expired' else 'Pay' %}{% set card_verb = 'Resubscribe' if user.status == 'expired' else 'Subscribe' %}
 <div data-period="month">
@@ -2975,7 +2978,7 @@ def api_pricing():
     """Public: tier cards for the homepage pricing section (and anywhere else
     that wants the same data without the full /pricing page)."""
     return jsonify({'order': DEFAULT_TIER_ORDER, 'tiers': TIERS,
-                    'custom': CUSTOM_TIER})
+                    'custom': CUSTOM_TIER, 'currency': CURRENCY_SYMBOL})
 
 
 @app.route('/pricing')
