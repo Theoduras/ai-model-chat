@@ -8393,25 +8393,50 @@ def api_x_auto_run():
 # Fanvue is an OnlyFans-style platform. This mirrors the X bot: connect an
 # account via OAuth 2.0 + PKCE, reply to fan DMs in the persona's voice, run the
 # conversion funnel, log conversations, and open new-fan chats. One Fanvue app
-# (client_id + secret) is registered in the Fanvue Builder; each persona connects
-# its own creator account and gets its own tokens.
+# (client_id + optional secret) is the platform's own, registered once in the
+# Fanvue Builder and supplied through the server environment; a creator only
+# picks a persona and authorizes. Each persona then connects its own creator
+# account and gets its own tokens.
 
 FANVUE_API_BASE = 'https://api.fanvue.com'
 FANVUE_AUTH_URL = 'https://auth.fanvue.com/oauth2/auth'
 FANVUE_TOKEN_URL = 'https://auth.fanvue.com/oauth2/token'
 FANVUE_API_VERSION = '2025-06-26'
-FANVUE_SCOPES = ('openid offline offline_access read:self read:chat write:chat '
-                 'read:fan read:media write:media read:creator read:agency '
+# Everything the bot itself needs; Fanvue rejects the whole authorization with
+# invalid_scope if the app registration is not granted one of them, so the
+# connect flow can retry with the core set alone.
+FANVUE_CORE_SCOPES = 'openid offline offline_access read:self read:chat write:chat'
+FANVUE_SCOPES = (FANVUE_CORE_SCOPES + ' read:fan read:media write:media '
+                 'read:creator read:agency '
                  # /earnings backs the purchase reconciler.
                  'read:insights')
 
 
 def _fanvue_app():
+    """The platform-level OAuth app. The environment wins over the legacy
+    settings rows an operator once typed into the connect form, and the redirect
+    URI falls back to this deployment's own callback so nothing has to be
+    registered per install beyond the Fanvue app itself."""
+    redirect = (os.environ.get('FANVUE_REDIRECT_URI', '')
+                or _get_setting('fanvue_redirect_uri') or '')
+    if not redirect:
+        try:
+            redirect = _callback_origin() + '/api/fanvue/oauth-redirect'
+        except Exception:
+            redirect = ''
     return {
-        'client_id': _get_setting('fanvue_client_id') or os.environ.get('FANVUE_CLIENT_ID', ''),
-        'client_secret': _get_setting('fanvue_client_secret') or os.environ.get('FANVUE_CLIENT_SECRET', ''),
-        'redirect_uri': _get_setting('fanvue_redirect_uri') or os.environ.get('FANVUE_REDIRECT_URI', ''),
+        'client_id': os.environ.get('FANVUE_CLIENT_ID', '') or _get_setting('fanvue_client_id') or '',
+        'client_secret': os.environ.get('FANVUE_CLIENT_SECRET', '') or _get_setting('fanvue_client_secret') or '',
+        'redirect_uri': redirect,
     }
+
+
+def _fanvue_scopes(minimal=False):
+    if minimal:
+        return FANVUE_CORE_SCOPES
+    return (os.environ.get('FANVUE_SCOPES', '').strip()
+            or (_get_setting('fanvue_scopes') or '').strip()
+            or FANVUE_SCOPES)
 
 
 _fanvue_lock_guard = threading.Lock()
@@ -8455,16 +8480,22 @@ def _fanvue_scope(persona):
 
 
 def _fanvue_token_post(params):
-    """POST to the Fanvue token endpoint using HTTP Basic client authentication
-    (client_secret_basic), which the OAuth client requires."""
+    """POST to the Fanvue token endpoint. A confidential app authenticates with
+    HTTP Basic (client_secret_basic, the only method Fanvue accepts); an app
+    registered with auth method "none" carries no secret at all and is
+    authenticated by the PKCE code_verifier, with client_id in the body."""
     a = _fanvue_app()
-    creds = f"{a['client_id']}:{a['client_secret']}"
-    basic = __import__('base64').b64encode(creds.encode()).decode()
-    data = urllib.parse.urlencode(params).encode()
+    headers = {'Content-Type': 'application/x-www-form-urlencoded',
+               'Accept': 'application/json'}
+    body = dict(params)
+    if a['client_secret']:
+        creds = f"{a['client_id']}:{a['client_secret']}"
+        headers['Authorization'] = 'Basic ' + __import__('base64').b64encode(creds.encode()).decode()
+    else:
+        body['client_id'] = a['client_id']
+    data = urllib.parse.urlencode(body).encode()
     req = urllib.request.Request(
-        FANVUE_TOKEN_URL, data=data, method='POST',
-        headers={'Content-Type': 'application/x-www-form-urlencoded',
-                 'Authorization': f'Basic {basic}', 'Accept': 'application/json'})
+        FANVUE_TOKEN_URL, data=data, method='POST', headers=headers)
     with urllib.request.urlopen(req, timeout=15) as r:
         return json.loads(r.read())
 
@@ -8641,32 +8672,35 @@ def api_fanvue_vault_debug():
 
 @app.route('/api/fanvue/config')
 def api_fanvue_config():
-    """App-level OAuth credentials for pre-filling the connect form (never returns
-    the client secret value, only whether one is saved). Not operator_only: a
-    creator's connect flow needs this same prefill to use the shared app
-    registration, and it carries nothing more sensitive than has_secret."""
+    """Whether this deployment has a Fanvue app registered, plus the redirect URI
+    to register for it. Never returns the client secret value. Not operator_only:
+    a creator's connect flow reads this to know it can start, and it carries
+    nothing more sensitive than has_secret."""
     if not _current_user():
         return jsonify({'error': 'Unauthorized'}), 401
     a = _fanvue_app()
-    return jsonify({'client_id': a['client_id'], 'redirect_uri': a['redirect_uri'],
+    return jsonify({'configured': bool(a['client_id']), 'redirect_uri': a['redirect_uri'],
                     'has_secret': bool(a['client_secret'])})
 
 
 @app.route('/api/fanvue/auth-url', methods=['POST'])
 @platform_scoped
 def api_fanvue_auth_url():
-    """Build the Fanvue OAuth 2.0 + PKCE authorization URL for a persona."""
+    """Build the Fanvue OAuth 2.0 + PKCE authorization URL for a persona. The
+    app credentials come from the server, so the caller sends only a persona."""
     data = request.json or {}
     persona = (data.get('persona') or '').strip()
-    client_id = (data.get('client_id') or '').strip() or (_get_setting('fanvue_client_id') or '')
-    client_secret = (data.get('client_secret') or '').strip() or (_get_setting('fanvue_client_secret') or '')
-    redirect_uri = (data.get('redirect_uri') or '').strip() or (_get_setting('fanvue_redirect_uri') or '')
-    if not (persona and client_id and client_secret and redirect_uri):
-        return jsonify({'ok': False, 'error': 'persona, client_id, client_secret and redirect_uri are required'}), 400
-
-    _set_setting('fanvue_client_id', client_id)
-    _set_setting('fanvue_client_secret', client_secret)
-    _set_setting('fanvue_redirect_uri', redirect_uri)
+    if not persona:
+        return jsonify({'ok': False, 'error': 'persona is required'}), 400
+    a = _fanvue_app()
+    if not a['client_id']:
+        return jsonify({'ok': False, 'error': 'No Fanvue app is configured on this server. '
+                        'Set FANVUE_CLIENT_ID (and FANVUE_CLIENT_SECRET) in the environment.'}), 400
+    redirect_uri = a['redirect_uri']
+    if not redirect_uri:
+        return jsonify({'ok': False, 'error': 'No redirect URI could be determined. '
+                        'Set PUBLIC_BASE_URL or FANVUE_REDIRECT_URI in the environment.'}), 400
+    scope = _fanvue_scopes(minimal=bool(data.get('minimal')))
 
     code_verifier = secrets.token_urlsafe(64)
     code_challenge = __import__('base64').urlsafe_b64encode(
@@ -8676,12 +8710,13 @@ def api_fanvue_auth_url():
                  json.dumps({'v': code_verifier, 'state': state, 'redirect_uri': redirect_uri}))
 
     params = urllib.parse.urlencode({
-        'response_type': 'code', 'client_id': client_id, 'redirect_uri': redirect_uri,
-        'scope': FANVUE_SCOPES, 'state': state,
+        'response_type': 'code', 'client_id': a['client_id'], 'redirect_uri': redirect_uri,
+        'scope': scope, 'state': state,
         'code_challenge': code_challenge, 'code_challenge_method': 'S256',
         'prompt': 'login',
     })
-    return jsonify({'ok': True, 'url': f'{FANVUE_AUTH_URL}?{params}'})
+    return jsonify({'ok': True, 'url': f'{FANVUE_AUTH_URL}?{params}',
+                    'redirect_uri': redirect_uri, 'scope': scope})
 
 
 @app.route('/api/fanvue/oauth-redirect')
