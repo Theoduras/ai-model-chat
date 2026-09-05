@@ -252,14 +252,6 @@ body.page-chat {
   text-align: center;
   gap: 14px;
 }
-.name-gate-avatar {
-  width: 96px;
-  height: 96px;
-  border-radius: 50%;
-  object-fit: cover;
-  background: var(--surface2);
-  border: 2px solid var(--border);
-}
 .name-gate-title { font-size: 20px; font-weight: 600; color: var(--text); }
 .name-gate-sub { font-size: 14px; color: var(--text-muted); margin-top: -8px; }
 .name-gate input {
