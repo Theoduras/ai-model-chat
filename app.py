@@ -2957,7 +2957,7 @@ def login():
             return render_template_string(
                 SIGNIN_HTML, email=email,
                 error='That account uses Google. Use "Continue with Google".')
-        if not u or not check_password_hash(u.password_hash, password):
+        if not u or not u.password_hash or not check_password_hash(u.password_hash, password):
             return render_template_string(SIGNIN_HTML, error='Wrong email or password.',
                                           email=email)
         u.last_login = datetime.now(timezone.utc).replace(tzinfo=None)
