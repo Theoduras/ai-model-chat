@@ -1141,6 +1141,8 @@ del _key, _base, _annual_price
 
 OXAPAY_API = 'https://api.oxapay.com/v1/payment/invoice'
 STRIPE_API = 'https://api.stripe.com/v1'
+# Software as a service (SaaS) — business use. Required by Managed Payments.
+STRIPE_TAX_CODE = 'txcd_10103001'
 
 
 def _oxapay_key():
@@ -2190,13 +2192,16 @@ def _checkout_stripe(user, tier_key, tier, order_id, base):
         'cancel_url': f'{base}/billing',
         'customer_email': user['email'],
         'client_reference_id': order_id,
-        'payment_method_types[0]': 'card',
+        # No payment_method_types: Managed Payments rejects it and picks the
+        # methods itself, which also gets EU customers iDEAL/SEPA for free.
         'line_items[0][quantity]': '1',
         'line_items[0][price_data][currency]': CURRENCY.lower(),
         'line_items[0][price_data][unit_amount]': str(int(round(tier['price'] * 100))),
         'line_items[0][price_data][product_data][name]': f'{tier["name"]} plan',
         'line_items[0][price_data][product_data][description]':
             f'{tier["days"]} days of access',
+        # Managed Payments requires a tax code on an inline price.
+        'line_items[0][price_data][product_data][tax_code]': STRIPE_TAX_CODE,
         'metadata[order_id]': order_id,
         'metadata[tier]': tier_key,
         'metadata[user_id]': user['id'],
