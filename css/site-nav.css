@@ -1,0 +1,41 @@
+/* The site menu, shared by the marketing pages and the app pages. Colours are
+   derived from currentColor rather than the palette variables: the two halves of
+   the app name their tokens differently (--text-soft/--hair here,
+   --text-2/--border in css/style.css), and this way one stylesheet is correct in
+   both, in light and dark. */
+
+.site-nav{position:fixed;top:24px;left:50%;transform:translateX(-50%);z-index:1000;
+  display:inline-flex;align-items:center;gap:32px;padding:12px 22px;border-radius:9999px;
+  width:min(1100px,calc(100vw - 48px));justify-content:space-between;
+  transition:background-color .4s ease,box-shadow .4s ease,backdrop-filter .4s ease}
+.site-nav.scrolled{background:var(--nav-bg,rgba(127,127,127,.12));
+  backdrop-filter:blur(18px) saturate(180%);-webkit-backdrop-filter:blur(18px) saturate(180%);
+  box-shadow:0 14px 38px rgba(0,0,0,.18),0 1px 0 currentColor}
+.site-nav .brand{font-family:'Sora','Inter',system-ui,sans-serif;font-weight:800;font-size:20px;
+  letter-spacing:-.01em;color:inherit;text-decoration:none}
+.site-nav .brand i{color:var(--accent,#ff5c38);font-style:normal}
+
+.sn-links{display:flex;align-items:center;gap:10px}
+.sn-links a{font-size:13.5px;font-weight:600;text-decoration:none;padding:9px 18px;
+  border-radius:9999px;white-space:nowrap;transition:all .2s;
+  color:inherit;opacity:.72;border:1px solid rgba(128,128,128,.38)}
+.sn-links a:hover{opacity:1;border-color:rgba(128,128,128,.7);
+  background:color-mix(in srgb, currentColor 8%, transparent)}
+.sn-links a[aria-current="page"]{opacity:1;border-color:rgba(128,128,128,.7)}
+.sn-links a.sn-cta{opacity:1;color:#fff;background:var(--accent,#ff5c38);
+  border-color:var(--accent,#ff5c38)}
+.sn-links a.sn-cta:hover{filter:brightness(1.08);background:var(--accent,#ff5c38)}
+
+/* Inline mode: the links sit inside a page's own header, so they carry no
+   positioning of their own. */
+.sn-inline .sn-links a{padding:7px 14px;font-size:13px}
+
+@media(max-width:600px){
+  .site-nav{gap:12px;padding:10px 14px;top:16px}
+  .site-nav .brand{font-size:18px}
+  .sn-links{gap:7px}
+  .sn-links a{padding:8px 13px;font-size:13px}
+  /* Everything but the primary action would push a phone's nav past the
+     viewport; the brand still links home and the blog is one tap from there. */
+  .sn-links a:not(.sn-cta):not([data-keep]){display:none}
+}

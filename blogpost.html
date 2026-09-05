@@ -7,7 +7,9 @@
 <link rel="icon" href="/favicon.png">
 <!-- Not deferred: theme.js sets data-theme before first paint, otherwise the
      page flashes dark for a user who chose light. -->
+<link rel="stylesheet" href="/css/site-nav.css">
 <script src="/js/theme.js"></script>
+<script src="/js/site-nav.js" defer></script>
 <script src="/js/blog-posts.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Inter:wght@400;500;600&display=swap');
@@ -50,24 +52,7 @@ html,body{min-height:100%}
 body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);
   -webkit-font-smoothing:antialiased}
 
-/* ── Nav (matches comingsoon.html) ── */
-.site-nav{position:fixed;top:24px;left:50%;transform:translateX(-50%);z-index:1000;
-  display:inline-flex;align-items:center;gap:32px;padding:12px 22px;border-radius:9999px;
-  width:min(1100px,calc(100vw - 48px));justify-content:space-between;
-  transition:background-color .4s ease,box-shadow .4s ease,backdrop-filter .4s ease}
-.site-nav.scrolled{background:var(--nav-bg);backdrop-filter:blur(18px) saturate(180%);
-  -webkit-backdrop-filter:blur(18px) saturate(180%);
-  box-shadow:0 14px 38px rgba(0,0,0,.18),0 1px 0 var(--hair)}
-.brand{font-family:'Sora';font-weight:800;font-size:20px;letter-spacing:-.01em;
-  color:var(--text);text-decoration:none}
-.brand i{color:var(--accent);font-style:normal}
-.auth{display:flex;align-items:center;gap:10px}
-.auth a{font-size:13.5px;font-weight:600;text-decoration:none;padding:9px 18px;
-  border-radius:9999px;transition:all .2s;white-space:nowrap}
-.auth-ghost{color:var(--text-soft);border:1px solid var(--hair)}
-.auth-ghost:hover{color:var(--text);border-color:var(--hair-strong);background:var(--hover)}
-.auth-btn{color:#fff;background:var(--accent);border:1px solid var(--accent)}
-.auth-btn:hover{filter:brightness(1.08)}
+/* ── Nav (the pill styles live in css/site-nav.css) ── */
 .theme-toggle{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;
   border-radius:9999px;border:1px solid var(--hair);background:transparent;color:var(--text-soft);
   cursor:pointer;transition:all .2s}
@@ -136,12 +121,6 @@ footer{border-top:1px solid var(--hair);padding:28px 24px;text-align:center;
 }
 @media(max-width:600px){
   .grid{grid-template-columns:1fr}
-  .site-nav{gap:12px;padding:10px 14px;top:16px}
-  .auth a{padding:8px 13px;font-size:13px}
-  /* The nav's links are wider than a phone: dropping the secondary ones keeps
-     the bar inside the viewport instead of scrolling the whole page sideways. */
-  .auth-ghost{display:none}
-  .brand{font-size:18px}
 }
 
 /* ── Article ── */
@@ -173,14 +152,11 @@ article blockquote{margin:28px 0;padding:16px 22px;border-left:3px solid var(--a
 <body>
 <header class="site-nav" id="site-nav">
   <a href="/" class="brand">Velvetfunnel<i>.app</i></a>
-  <nav class="auth">
+  <nav class="auth sn-links">
     <button class="theme-toggle" onclick="toggleTheme()" title="Light mode" aria-label="Switch to light mode">
       <svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke-linecap="round"/></svg>
       <svg class="ico-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" stroke-linejoin="round"/></svg>
     </button>
-    <a href="/blog" class="auth-ghost">Blog</a>
-    <a href="/login" class="auth-ghost">Log in</a>
-    <a href="/register" class="auth-btn">Register</a>
   </nav>
 </header>
 
@@ -237,9 +213,6 @@ function render() {
 
 render();
 document.getElementById('yr').textContent = new Date().getFullYear();
-addEventListener('scroll', () => {
-  document.getElementById('site-nav').classList.toggle('scrolled', scrollY > 10);
-}, { passive: true });
 </script>
 </body>
 </html>
