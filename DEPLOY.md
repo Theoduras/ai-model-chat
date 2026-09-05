@@ -133,8 +133,9 @@ Tables are created automatically on startup.
 `POST /api/v1/chat` — drives a conversation with server-side memory.
 
 **Auth:** set `API_KEYS` (comma-separated) as an env var. Callers pass it as
-`Authorization: Bearer <key>` or `X-API-Key: <key>`. If unset, the endpoint is
-open (dev only — always set keys in production).
+`Authorization: Bearer <key>` or `X-API-Key: <key>`. **If unset, the endpoint
+refuses every request** — it sits outside the paywall, so the key is the only
+thing guarding it.
 
 Request:
 ```json

@@ -4211,15 +4211,26 @@ def chat():
 # can drive a client's chat without holding the history itself.
 
 def _valid_api_key():
-    """True if request carries a valid key, or no keys are configured (open)."""
+    """True only if the request carries a key from API_KEYS.
+
+    An unset API_KEYS closes this API rather than opening it. The route sits
+    outside the paywall, so the key is the only thing in front of it: treating
+    "no keys configured" as "everyone may call it" published a Gemini-backed
+    endpoint to the internet on every deployment that had not set the var.
+    """
     configured = [k.strip() for k in os.getenv('API_KEYS', '').split(',') if k.strip()]
     if not configured:
-        return True
+        logger.warning('API v1 refused: API_KEYS is unset, so the endpoint is closed')
+        return False
     provided = request.headers.get('Authorization', '')
     if provided.startswith('Bearer '):
         provided = provided[7:]
     provided = provided or request.headers.get('X-API-Key', '')
-    return provided in configured
+    if not provided:
+        return False
+    # compare_digest against each key: a plain `in` leaks key length and prefix
+    # through timing, and this endpoint is reachable without a session.
+    return any(hmac.compare_digest(provided, k) for k in configured)
 
 
 @app.route('/api/v1/chat', methods=['POST'])
