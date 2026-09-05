@@ -37,7 +37,10 @@ def request_persona():
     """The persona slug this request is about, from the body or the query."""
     if request.method in ('GET', 'HEAD', 'OPTIONS'):
         return (request.args.get('persona') or '').strip()
-    return ((request.get_json(silent=True) or {}).get('persona') or '').strip()
+    # DELETE carries no body by convention, so a slug in the query counts too —
+    # without this the log's Clear button 400s for everyone but an operator.
+    return (((request.get_json(silent=True) or {}).get('persona') or '').strip()
+            or (request.args.get('persona') or '').strip())
 
 
 def platform_scoped(fn):

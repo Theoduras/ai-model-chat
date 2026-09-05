@@ -17,7 +17,7 @@ import urllib.error as url_error
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 from utils import (platform_scoped, operator_only, _is_operator,
-                   owned_slugs)
+                   owned_slugs, request_persona)
 from google import genai
 from google.genai import types
 
@@ -11255,7 +11255,9 @@ def api_fanvue_lists():
 def api_fanvue_trace():
     """Recent Fanvue chat activity for a persona — what came in, what went out,
     PPV drops and errors — plus a verdict when nothing is happening."""
-    persona = (request.args.get('persona') or '').strip()
+    # The same resolution the ownership guard used, so the two can never
+    # disagree about which persona this request is for.
+    persona = request_persona()
     if request.method == 'DELETE':
         _set_setting(f'fanvue_trace_{persona}', '[]')
         return jsonify({'ok': True})
