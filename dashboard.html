@@ -492,7 +492,6 @@ const CAP_LABELS = {
   analytics:          ['Conversation and revenue analytics', 'Agency'],
   ppv_reconcile:      ['PPV reconciliation', 'Agency'],
 };
-const PLATFORM_LABELS = { telegram: 'Telegram', x: '\uD835\uDD4F Bot', fanvue: 'Fanvue', threads: 'Threads' };
 // Seat roles that may not open the persona editor or platform settings. Mirrors
 // _ROLE_DENY in app.py, which is the half that actually enforces it.
 const ROLE_HIDDEN = { chatter: ['personas', 'platforms', 'generate', 'config'] };
@@ -507,6 +506,17 @@ function upgradeRow(label, tier) {
   b.children[0].textContent = label;
   b.children[1].textContent = tier;
   return b;
+}
+
+// Greys a nav item out in place and sends its click to the pricing page.
+function lockNavItem(el, tier) {
+  el.classList.add('locked');
+  el.dataset.search = (el.dataset.search || '') + ' upgrade ' + tier.toLowerCase();
+  el.onclick = () => { window.location = '/pricing'; };
+  const lock = document.createElement('span');
+  lock.className = 'sb-lock';
+  lock.textContent = tier;
+  el.appendChild(lock);
 }
 
 // Renders the dashboard for this plan and seat: the tier keeps only the nav it
@@ -529,13 +539,14 @@ function applyEntitlements(me) {
   const list = document.getElementById('sb-upgrade-items');
   if (!box || !list || me.is_admin) return;
 
-  // null means every platform; a list means only those.
+  // null means every platform; a list means only those. A platform the plan
+  // does not cover stays in the Platforms group, greyed out behind its tier,
+  // so the creator can see what upgrading buys them.
   const allowed = caps.platforms;
   document.querySelectorAll('[data-platform]').forEach(el => {
     const key = el.dataset.platform;
     if (allowed === null || allowed === undefined || allowed.indexOf(key) !== -1) return;
-    el.remove();
-    list.appendChild(upgradeRow(PLATFORM_LABELS[key] || key, 'Pro'));
+    lockNavItem(el, 'Pro');
   });
   Object.keys(CAP_LABELS).forEach(k => {
     if (caps[k]) return;
