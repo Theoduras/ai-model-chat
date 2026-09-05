@@ -64,8 +64,9 @@
         'Approve the request — there are no keys or developer settings to fill in.',
         'If an <b>Acting as</b> dropdown appears, pick the profile whose DMs she answers.'
       ],
-      check: 'The pill next to the dropdown reads <b>connected</b>. If the box turns red it ' +
-        'names what Fanvue refused — fix that and connect again.',
+      check: 'The pill next to the dropdown reads <b>connected</b>. If Fanvue refuses one of the ' +
+        'permissions the box says so and asks again without it — you only need to act if it ' +
+        'turns red and stops.',
       done: function () {
         var p = document.getElementById('conn-pill');
         return !!(p && p.classList.contains('ok'));
@@ -83,7 +84,9 @@
           ['Acting as', 'Only appears when that login manages more than one profile. Pick the one ' +
             'whose DMs she should answer, or she will reply from the wrong account.'],
           ['Popup blocked?', 'If the window never opened, copy the URL Fanvue landed on — the one ' +
-            'with <code>?code=…&amp;state=…</code> — into the box and press Finish connection.']
+            'with <code>?code=…&amp;state=…</code> — into the box and press Finish connection. ' +
+            'A URL carrying <code>error=invalid_scope</code> works here too: it is retried ' +
+            'without the permission Fanvue named.']
         ])
     },
     {
