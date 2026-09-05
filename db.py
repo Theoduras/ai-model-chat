@@ -468,7 +468,8 @@ class Payment(Base):
     amount = Column(String(32), default='')
     currency = Column(String(16), default='USD')
     order_id = Column(String(64), unique=True, index=True)
-    track_id = Column(String(64), index=True)
+    # Stripe checkout session ids run past 64 characters.
+    track_id = Column(String(128), index=True)
     status = Column(String(24), default='pending')  # pending | Paying | Paid | expired
     created_at = Column(DateTime, default=_now)
     paid_at = Column(DateTime)
@@ -505,20 +506,32 @@ def list_users(session, limit=500):
     return session.query(User).order_by(User.created_at.desc()).limit(limit).all()
 
 
-def _add_missing_columns(table_name, model):
-    """create_all() only creates whole tables, so columns added to a model after
-    a table already exists need an explicit ALTER."""
+def _sync_columns(table_name, model):
+    """create_all() only creates whole tables, so a model column added — or
+    widened — after the table exists needs an explicit ALTER. Postgres enforces
+    VARCHAR limits where SQLite silently ignores them, so a too-narrow column
+    only fails in production."""
     from sqlalchemy import inspect, text
     insp = inspect(engine)
     if table_name not in insp.get_table_names():
         return
-    have = {c['name'] for c in insp.get_columns(table_name)}
-    with engine.begin() as conn:
-        for col in model.__table__.columns:
-            if col.name in have:
+    have = {c['name']: c for c in insp.get_columns(table_name)}
+    for col in model.__table__.columns:
+        ddl = col.type.compile(engine.dialect)
+        existing = have.get(col.name)
+        if existing is None:
+            stmt = f'ALTER TABLE {table_name} ADD COLUMN {col.name} {ddl}'
+        else:
+            want = getattr(col.type, 'length', None)
+            got = getattr(existing['type'], 'length', None)
+            if not (want and got and got < want):
                 continue
-            ddl = col.type.compile(engine.dialect)
-            conn.execute(text(f'ALTER TABLE {table_name} ADD COLUMN {col.name} {ddl}'))
+            stmt = f'ALTER TABLE {table_name} ALTER COLUMN {col.name} TYPE {ddl}'
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(stmt))
+        except Exception:
+            pass
 
 
 def init_db():
@@ -526,7 +539,7 @@ def init_db():
     for table, model in (('users', User), ('saved_personas', SavedPersona),
                          ('payments', Payment)):
         try:
-            _add_missing_columns(table, model)
+            _sync_columns(table, model)
         except Exception:
             pass
     # Existing photos carry their outfit in a column; give each one a link so
