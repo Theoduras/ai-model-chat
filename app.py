@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_from_directory, session, redirect, url_for, render_template_string, Response, after_this_request
+from flask import Flask, request, jsonify, send_from_directory, session, redirect, url_for, render_template_string, Response, after_this_request, g
 import os
 import sys
 import copy
@@ -1124,32 +1124,32 @@ ANNUAL_SAVE_PCT = round((12 - ANNUAL_MONTHS_CHARGED) / 12 * 100)
 # `capabilities` is the machine-readable half and the one enforcement reads;
 # `features` is the marketing copy shown on the cards. They describe the same
 # plan, so a change to one wants a matching change to the other.
-# The free trial of the product. Everything Starter has except the one thing
-# that makes it earn money — the Fanvue connection — so the demo shows the
-# persona and the funnel working and stops at the paywall.
+# One shared account, circulated to prospects — not a per-signup trial. So it
+# has no expiry and no allowances to run out mid-pitch: the only thing it
+# cannot do is connect a platform, which is where the demo ends and the sale
+# starts. Assigned from the admin console; never sold or self-served.
 DEMO_TIER_KEY = 'demo'
-DEMO_DAYS = 14
 
 _BASE_TIERS = {
     DEMO_TIER_KEY: {'name': 'Demo', 'price': 0,
-                    'blurb': 'The whole builder, free for %d days. No Fanvue.' % DEMO_DAYS,
-                    'features': ['1 AI persona',
+                    'blurb': 'The whole product, minus the platform connection.',
+                    'features': ['Unlimited AI personas',
                                  'The full persona builder and funnel editor',
                                  'Chat with her yourself to test the persona',
-                                 'Up to 3 funnel phases + CTA',
-                                 '5 AI image generations',
-                                 'Unlimited photo uploads',
+                                 'All 10 funnel phases with photo rates',
+                                 'Outfit locking + media tagging',
+                                 'Unlimited AI image generations',
                                  'No platform connection \u2014 Fanvue needs a paid plan'],
                     'capabilities': {
-                        'personas': 1,
+                        'personas': None,
                         'seats': 1,
                         'platforms': [],
-                        'phases_max': 3,
-                        'outfit_lock': False,
-                        'scheduled_followups': False,
+                        'phases_max': 10,
+                        'outfit_lock': True,
+                        'scheduled_followups': True,
                         'analytics': False,
                         'ppv_reconcile': False,
-                        'image_generations_month': 5,
+                        'image_generations_month': None,
                     }},
     'starter': {'name': 'Starter', 'price': 49,
                 'blurb': 'One persona on Fanvue, fully monetised.',
@@ -1233,8 +1233,8 @@ CUSTOM_TIER = {
 TIERS = {}
 for _key, _base in _BASE_TIERS.items():
     if _key == DEMO_TIER_KEY:
-        # Free and time-boxed, so it has no annual twin and nothing to charge.
-        TIERS[_key] = {**_base, 'days': DEMO_DAYS, 'period': 'demo'}
+        # Free and never expires, so it has no annual twin and nothing to charge.
+        TIERS[_key] = {**_base, 'days': 0, 'period': 'demo'}
         continue
     TIERS[_key] = {**_base, 'days': 30, 'period': 'month'}
     _annual_price = _base['price'] * ANNUAL_MONTHS_CHARGED
@@ -1368,22 +1368,92 @@ def _user_is_active(user):
     return bool(user) and (user.get('is_admin') or user.get('status') == 'active')
 
 
+DEMO_VISITOR_COOKIE = 'demo_vid'
+
+
+def _demo_visitor():
+    """A stable id for the browser looking at the shared demo account, set on
+    first sight. It is how two prospects on one login are told apart."""
+    vid = request.cookies.get(DEMO_VISITOR_COOKIE, '')
+    if not vid:
+        vid = getattr(g, 'demo_vid', '') or secrets.token_hex(8)
+        g.demo_vid = vid
+
+        @after_this_request
+        def _set(resp):
+            resp.set_cookie(DEMO_VISITOR_COOKIE, vid, max_age=60 * 60 * 24 * 365,
+                            samesite='Lax', httponly=True,
+                            secure=request.is_secure)
+            return resp
+    return vid
+
+
+def _demo_ref():
+    """The tag on the link this person was sent (/login?ref=jane), remembered
+    for the rest of their session so it lands on every event they generate."""
+    raw = (request.args.get('ref') or '').strip()[:64]
+    if raw:
+        session['demo_ref'] = raw
+    return session.get('demo_ref', '')
+
+
+def _finalize_demo_event(event_id, ip):
+    """Background: put a country on the event, so the admin table reads as
+    places rather than as IPs."""
+    try:
+        from db import SessionLocal, set_demo_event_geo
+        country = (_geo_lookup(ip) or {}).get('country') or ''
+        if not country:
+            return
+        # The row is written by the request that spawned this thread, which may
+        # not have committed yet, so give it a moment rather than dropping the
+        # country on the floor.
+        for attempt in range(3):
+            s = SessionLocal()
+            try:
+                if set_demo_event_geo(s, event_id, country) is not None:
+                    s.commit()
+                    return
+            finally:
+                s.close()
+            time.sleep(1 + attempt)
+    except Exception:
+        pass
+
+
 def _log_demo_event(session_db, user_row, kind, detail='', with_client=True):
     """One line in the demo trail. Never raises: losing a tracking row must not
     fail the activation or the request it is attached to. `with_client` is off
     for anything a payment webhook triggers, where the caller is the provider
     and its IP would only look like the creator's."""
     from flask import has_request_context
-    from db import record_demo_event
-    ip = ua = ''
+    from db import record_demo_event, demo_country_for_ip
+    ip = ua = vid = ref = ''
     if with_client and has_request_context():
         ip = _client_ip()
         ua = request.headers.get('User-Agent', '')
+        vid = _demo_visitor()
+        ref = _demo_ref()
     try:
-        record_demo_event(session_db, user_row.id, user_row.email, kind,
-                          detail=detail, ip=ip, user_agent=ua)
+        e = record_demo_event(session_db, user_row.id, user_row.email, kind,
+                              detail=detail, ip=ip, user_agent=ua,
+                              visitor_id=vid, ref=ref)
+        e.country = demo_country_for_ip(session_db, ip)
+        session_db.flush()
+        if ip and not e.country:
+            threading.Thread(target=_finalize_demo_event, args=(e.id, ip),
+                             daemon=True).start()
     except Exception:
         error_logger.error('Demo event not recorded', exc_info=True)
+
+
+def _note_demo_signin(session_db, user_row, detail=''):
+    """One shared demo login means the user row cannot say who just arrived, so
+    each sign-in to it is its own line in the trail."""
+    if (user_row.tier or '') != DEMO_TIER_KEY:
+        return
+    _demo_ref()
+    _log_demo_event(session_db, user_row, 'signin', detail)
 
 
 def _activate_plan(session_db, user_row, tier_key):
@@ -1392,12 +1462,17 @@ def _activate_plan(session_db, user_row, tier_key):
     tier = TIERS.get(tier_key) or {}
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     converting = (user_row.tier or '') == DEMO_TIER_KEY and tier_key != DEMO_TIER_KEY
-    # Demo days are a trial, not credit, so a plan bought during one starts now
-    # instead of stacking on top of the trial's remaining time.
-    unexpired = user_row.expires_at and user_row.expires_at > now
-    start = user_row.expires_at if (unexpired and not converting) else now
     user_row.tier = tier_key
     user_row.status = 'active'
+    if tier_key == DEMO_TIER_KEY:
+        # The demo account is handed out, not sold, so nothing should switch it
+        # off in the middle of somebody's look around.
+        user_row.expires_at = None
+        return None
+    # Demo time is not credit, so a plan bought from the demo starts now instead
+    # of stacking on top of whatever the demo had left.
+    unexpired = user_row.expires_at and user_row.expires_at > now
+    start = user_row.expires_at if (unexpired and not converting) else now
     user_row.expires_at = start + timedelta(days=int(tier.get('days', 30)))
     if converting:
         _log_demo_event(session_db, user_row, 'converted', tier_key,
@@ -1898,11 +1973,6 @@ BILLING_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <script src="/js/analytics.js" defer></script>
 <script src="/js/page-editor.js" defer></script>
 <style>""" + ACCOUNT_CSS + """
-.demobar{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;
-  background:var(--surface);border:1px solid var(--border);border-radius:12px;
-  padding:14px 18px;margin-bottom:16px;font-size:.9rem;color:var(--text-2);line-height:1.5}
-.demobar strong{color:var(--text)}
-.demobar button{width:auto;flex:none;margin:0;padding:11px 20px;font-size:.88rem;border-radius:10px}
 </style></head><body data-page="pricing">
 <header class="site-nav">
 <a class="brand" href="/">Velvetfunnel<i>.app</i></a>
@@ -1929,20 +1999,6 @@ plan is active{% if user.expires_at %} until {{ user.expires_at[:10] }}{% endif 
 <p class="sub" data-edit-id="sub">Pay by card or crypto. Access unlocks as soon as it confirms.</p>
 {% endif %}
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
-{% if demo_state == 'running' %}
-<div class="demobar"><div><strong>You are on the free demo.</strong>
-It runs the whole builder but cannot connect Fanvue &mdash; pick a plan below to
-switch her on for real. Everything you have built carries over.</div></div>
-{% elif demo_state == 'available' %}
-<div class="demobar"><div><strong>Not ready to pay?</strong>
-Take the {{ demo_days }}-day demo: the persona builder, the funnel and the chat,
-free. It stops at the Fanvue connection &mdash; that is the paid part.</div>
-<button type="button" id="start-demo">Start the free demo</button></div>
-{% elif demo_state == 'used' %}
-<div class="demobar"><div><strong>Your demo has run out.</strong>
-Your persona and funnel are still here &mdash; a plan connects her to Fanvue and
-picks up where the demo stopped.</div></div>
-{% endif %}
 <div class="ptoggle">
 <button type="button" class="active" data-set-period="month">Monthly</button>
 <button type="button" data-set-period="year">Annual <span class="save">Save {{ annual_save_pct }}%</span></button>
@@ -2036,19 +2092,6 @@ if (cards.length) {
   cards.forEach(function(c){ if (c.dataset.select === active) start = c; });
   selectCard(start || document.querySelector('.tier.featured[data-select]') || cards[0]);
 }
-var demoBtn = document.getElementById('start-demo');
-if (demoBtn) demoBtn.addEventListener('click', async function(){
-  demoBtn.disabled = true; demoBtn.textContent = 'Starting...';
-  try {
-    var r = await fetch('/api/billing/start-demo', {method:'POST'});
-    // Signed out: the demo needs an account, so send them to make one.
-    if (r.status === 401) { window.location = '/register'; return; }
-    var d = await r.json();
-    if (d.ok) { window.location = d.redirect || '/dashboard'; return; }
-    alert(d.error || 'Could not start the demo.');
-  } catch (e) { alert('Could not start the demo.'); }
-  demoBtn.disabled = false; demoBtn.textContent = 'Start the free demo';
-});
 document.querySelectorAll('button[data-dev-tier]').forEach(function(b){
   b.addEventListener('click', async function(){
     b.disabled = true; b.textContent = 'Activating...';
@@ -2105,17 +2148,16 @@ DEMO_ENDS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <rect x="4" y="10.5" width="16" height="10" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></svg></div>
 <h1 style="margin-bottom:6px">This is where the demo ends</h1>
 <p class="sub">Connecting {{ platform_name }} is the paid half of Velvetfunnel. The demo
-gives you the persona, the funnel and the whole builder &mdash; it stops at the moment
-she would start talking to your real fans and taking their money.</p>
+gives you the persona, the funnel and the whole builder, with nothing capped &mdash; it
+stops at the moment she would start talking to your real fans and taking their money.</p>
 <ul class="steps">
-<li>Your persona, funnel phases and photos stay exactly as you built them.</li>
+<li>Build as many personas as you like in here. Nothing runs out.</li>
 <li>Starter connects her to Fanvue and turns on the full PPV engine.</li>
 <li>{{ currency }}{{ starter_price }}/month, excl. VAT. Cancel any time.</li>
 </ul>
-<a class="btn" href="/pricing">Pick a plan and connect {{ platform_name }}</a>
-<a class="ghostbtn" href="/dashboard">Keep looking around the demo</a>
-{% if expires %}<p class="kept">Your demo runs until {{ expires[:10] }}. Everything you
-build in it carries over to a paid plan.</p>{% endif %}
+<a class="btn" href="/register">Create your own account</a>
+<a class="ghostbtn" href="/pricing">See what the plans cost</a>
+<p class="kept">The demo is a shared account, so build in your own to keep your work.</p>
 </div></div></body></html>"""
 
 
@@ -2254,63 +2296,72 @@ a.email{color:#a78bfa;text-decoration:none;font-weight:500}
 ADMIN_DEMOS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
-<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Demo accounts</title>
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Demo use</title>
 <style>""" + ACCOUNT_CSS + """
 table{width:100%;border-collapse:collapse;font-size:.85rem}
 th{text-align:left;color:var(--text-muted);font-weight:500;padding:8px 10px;border-bottom:1px solid var(--border);white-space:nowrap}
 td{padding:10px;border-bottom:1px solid var(--border);color:var(--text-2);white-space:nowrap}
 tr:hover td{background:#1c1c20}
 a.email{color:#a78bfa;text-decoration:none;font-weight:500}
-h2{font-size:1rem;margin-bottom:12px}
-.pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:.72rem;font-weight:600}
-.pill.running{background:#14321f;color:#86efac}
-.pill.expired{background:#3f1515;color:#fca5a5}
-.pill.converted{background:#2e1065;color:#c4b5fd}
+h2{font-size:1rem;margin-bottom:4px}
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px}
 .stat{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 16px}
 .stat b{display:block;font-size:1.5rem;color:var(--text);font-weight:700;line-height:1.3}
 .stat span{font-size:.78rem;color:var(--text-muted)}
+.tag{display:inline-block;padding:2px 9px;border-radius:999px;font-size:.72rem;font-weight:600;background:#2e1065;color:#c4b5fd}
+.untagged{color:var(--text-muted)}
 .hot{color:#fbbf24;font-weight:600}
-.scroll{overflow-x:auto}
 .muted{color:var(--text-muted)}
-.ua{max-width:280px;overflow:hidden;text-overflow:ellipsis;display:inline-block;vertical-align:bottom}
-</style></head><body><div class="wrap wide" style="max-width:1200px">
-<div class="bar"><span>Admin \u00b7 demo accounts</span>
+.scroll{overflow-x:auto}
+.how{font-size:.85rem;color:var(--text-muted);line-height:1.6;margin-bottom:14px}
+.how code{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:1px 6px;color:var(--text-2)}
+</style></head><body><div class="wrap wide" style="max-width:1150px">
+<div class="bar"><span>Admin \u00b7 demo use</span>
 <span><a href="/admin/users">All users</a> &nbsp; <a href="/dashboard">Dashboard</a> &nbsp; <a href="/logout">Sign out</a></span></div>
 
 <div class="stats">
-<div class="stat"><b>{{ stats.total }}</b><span>demos started</span></div>
-<div class="stat"><b>{{ stats.running }}</b><span>running now</span></div>
+<div class="stat"><b>{{ stats.people }}</b><span>people in the demo</span></div>
+<div class="stat"><b>{{ stats.signins }}</b><span>sign-ins</span></div>
 <div class="stat"><b>{{ stats.blocked }}</b><span>hit the Fanvue wall</span></div>
-<div class="stat"><b>{{ stats.converted }}</b><span>converted to a paid plan</span></div>
-<div class="stat"><b>{{ stats.rate }}%</b><span>conversion rate</span></div>
+<div class="stat"><b>{{ stats.tagged }}</b><span>arrived on a tagged link</span></div>
 </div>
 
-<div class="card"><h2>Who is on the demo</h2>
-{% if not rows %}<p class="sub">Nobody has started a demo yet.</p>{% else %}
+<div class="card"><h2>How to tell them apart</h2>
+<p class="how">The demo is one shared login, so everyone in it looks like the same
+account. Send each prospect a tagged link &mdash; <code>/login?ref=jane</code> &mdash;
+and their name shows up in the table below instead of a browser id. Untagged
+visitors are still counted and separated per browser.
+{% if accounts %}<br>Demo {{ 'accounts' if accounts|length > 1 else 'account' }}:
+{% for a in accounts %}<a class="email" href="/admin/users/{{ a.id }}">{{ a.email }}</a>
+({{ a.personas }} persona{{ '' if a.personas == 1 else 's' }}){{ ', ' if not loop.last }}{% endfor %}
+{% else %}<br>No account is on the demo plan yet &mdash; set one from
+<a class="email" href="/admin/users">All users</a>.{% endif %}</p></div>
+
+<div class="card" style="margin-top:16px"><h2>Who has been in it</h2>
+{% if not rows %}<p class="sub">Nobody has signed in to the demo yet.</p>{% else %}
 <div class="scroll"><table>
-<tr><th>Email</th><th>Name</th><th>State</th><th>Started</th><th>Ends</th>
-<th>Personas</th><th>Paywall hits</th><th>Last seen</th><th>Signed up from</th></tr>
+<tr><th>Who</th><th>Sign-ins</th><th>Fanvue wall</th><th>Tried</th>
+<th>First seen</th><th>Last seen</th><th>Where</th><th>Browser</th></tr>
 {% for r in rows %}<tr>
-<td><a class="email" href="/admin/users/{{ r.id }}">{{ r.email }}</a></td>
-<td>{{ r.name or '\u2014' }}</td>
-<td><span class="pill {{ r.state }}">{{ r.state }}</span>{% if r.now_tier %} <span class="muted">{{ r.now_tier }}</span>{% endif %}</td>
-<td>{{ r.started or '\u2014' }}</td><td>{{ r.expires or '\u2014' }}</td>
-<td>{{ r.personas }}</td>
+<td>{% if r.tagged %}<span class="tag">{{ r.who }}</span>{% else %}<span class="untagged">{{ r.who }}</span>{% endif %}</td>
+<td>{{ r.signins }}</td>
 <td{% if r.blocked %} class="hot"{% endif %}>{{ r.blocked }}</td>
-<td>{{ r.last_seen or '\u2014' }}</td>
-<td class="muted">{{ r.ip or '\u2014' }}</td>
+<td class="muted">{{ r.tried or '\u2014' }}</td>
+<td>{{ r.first or '\u2014' }}</td><td>{{ r.last or '\u2014' }}</td>
+<td class="muted">{{ r.country or '' }}{% if r.ip %} \u00b7 {{ r.ip }}{% endif %}</td>
+<td class="muted">{{ r.browser or '\u2014' }}</td>
 </tr>{% endfor %}
 </table></div>{% endif %}</div>
 
-<div class="card" style="margin-top:16px"><h2>Latest demo activity</h2>
+<div class="card" style="margin-top:16px"><h2>Latest activity</h2>
 {% if not events %}<p class="sub">Nothing recorded yet.</p>{% else %}
 <div class="scroll"><table>
-<tr><th>When</th><th>Who</th><th>What</th><th>Detail</th><th>IP</th><th>Browser</th></tr>
+<tr><th>When</th><th>Who</th><th>What</th><th>Detail</th><th>Where</th><th>Browser</th></tr>
 {% for e in events %}<tr>
-<td>{{ e.when }}</td><td>{{ e.email or e.user_id }}</td><td>{{ e.kind }}</td>
-<td>{{ e.detail or '\u2014' }}</td><td class="muted">{{ e.ip or '\u2014' }}</td>
-<td class="muted"><span class="ua">{{ e.user_agent or '\u2014' }}</span></td>
+<td>{{ e.when }}</td><td>{{ e.who or '\u2014' }}</td><td>{{ e.kind }}</td>
+<td class="muted">{{ e.detail or '\u2014' }}</td>
+<td class="muted">{{ e.country or '' }}{% if e.ip %} \u00b7 {{ e.ip }}{% endif %}</td>
+<td class="muted">{{ e.browser or '\u2014' }}</td>
 </tr>{% endfor %}
 </table></div>{% endif %}</div>
 </div></body></html>"""
@@ -2344,6 +2395,7 @@ h2{font-size:1rem;margin-bottom:14px}
 <div class="two">
 <div><label>Plan</label><select name="tier">
 <option value="">— none —</option>
+<option value="{{ demo_key }}" {{ 'selected' if u.tier == demo_key }}>{{ tiers[demo_key].name }} (free, shared, no platforms)</option>
 {% for k in order %}<option value="{{ k }}" {{ 'selected' if u.tier == k }}>{{ tiers[k].name }}</option>{% endfor %}
 </select></div>
 <div><label>Renews (YYYY-MM-DD)</label><input type="text" name="expires" value="{{ u.expires }}" placeholder="blank = none"></div>
@@ -2433,6 +2485,10 @@ def _fmt_date(dt):
     return dt.strftime('%Y-%m-%d') if dt else ''
 
 
+def _fmt_datetime(dt):
+    return dt.strftime('%Y-%m-%d %H:%M') if dt else ''
+
+
 @app.route('/admin/users')
 def admin_users():
     blocked = _require_admin()
@@ -2469,74 +2525,90 @@ def admin_users():
     return render_template_string(ADMIN_USERS_HTML, users=rows)
 
 
+def _ua_label(ua):
+    """A user agent as something an admin can read at a glance."""
+    ua = ua or ''
+    browser = next((n for n in ('Edg', 'OPR', 'Chrome', 'Firefox', 'Safari')
+                    if n in ua), '')
+    browser = {'Edg': 'Edge', 'OPR': 'Opera'}.get(browser, browser)
+    if browser == 'Safari' and 'Chrome' in ua:
+        browser = 'Chrome'
+    os_name = next((label for token, label in (
+        ('iPhone', 'iPhone'), ('iPad', 'iPad'), ('Android', 'Android'),
+        ('Windows', 'Windows'), ('Mac OS X', 'Mac'), ('Linux', 'Linux'))
+        if token in ua), '')
+    return ' on '.join(p for p in (browser, os_name) if p) or (ua[:40] or '')
+
+
 @app.route('/admin/demos')
 def admin_demos():
-    """Who took the demo, what they tried to reach, and who paid afterwards."""
+    """Who has been in the demo account. It is one shared login, so a row is a
+    person (a browser, tagged with the link they were sent) rather than an
+    account, and the counts say how far each of them got."""
     blocked = _require_admin()
     if blocked:
         return blocked
     from db import User, list_demo_events
     s = _db_session()
     try:
-        events = list_demo_events(s, limit=400)
-        per_user = {}
-        for e in reversed(list_demo_events(s, limit=5000)):
-            r = per_user.setdefault(e.user_id, {'started': None, 'blocked': 0,
-                                                'converted': '', 'last': None,
-                                                'ip': '', 'email': e.email})
-            if e.kind == 'started':
-                r['started'] = r['started'] or e.created_at
-                r['ip'] = r['ip'] or e.ip
+        accounts = [u for u in s.query(User).filter(
+            User.tier == DEMO_TIER_KEY).all()]
+        events = list_demo_events(s, limit=5000)
+        people = {}
+        for e in reversed(events):
+            key = e.visitor_id or ('ip:' + (e.ip or '?'))
+            p = people.setdefault(key, {
+                'key': key, 'ref': '', 'signins': 0, 'blocked': 0,
+                'first': e.created_at, 'last': e.created_at, 'ip': '',
+                'country': '', 'ua': '', 'tried': set()})
+            if e.kind == 'signin':
+                p['signins'] += 1
             elif e.kind == 'blocked':
-                r['blocked'] += 1
-            elif e.kind == 'converted':
-                r['converted'] = e.detail
-            r['last'] = e.created_at
-            r['email'] = e.email or r['email']
+                p['blocked'] += 1
+                if e.detail:
+                    p['tried'].add(e.detail)
+            p['ref'] = e.ref or p['ref']
+            p['ip'] = e.ip or p['ip']
+            p['country'] = e.country or p['country']
+            p['ua'] = e.user_agent or p['ua']
+            p['first'] = p['first'] or e.created_at
+            p['last'] = e.created_at
 
-        users = {u.id: u for u in s.query(User).filter(
-            User.id.in_(list(per_user) or [''])).all()}
-        now = datetime.now(timezone.utc).replace(tzinfo=None)
         rows = []
-        for uid, r in per_user.items():
-            u = users.get(uid)
-            on_demo = u is not None and u.tier == DEMO_TIER_KEY
-            if r['converted']:
-                state = 'converted'
-            elif on_demo and u.status == 'active' and (u.expires_at or now) > now:
-                state = 'running'
-            else:
-                state = 'expired'
+        for p in people.values():
             rows.append({
-                'id': uid,
-                'email': (u.email if u else '') or r['email'] or uid,
-                'name': (u.name if u else ''),
-                'state': state,
-                'now_tier': (r['converted'] if state == 'converted' else ''),
-                'started': _fmt_date(r['started']),
-                'expires': _fmt_date(u.expires_at) if on_demo and u else '',
-                'personas': len(db_list_personas(owner_id=uid)),
-                'blocked': r['blocked'],
-                'last_seen': _fmt_date(r['last']),
-                'ip': r['ip'],
-                'sort': r['started'] or r['last'] or now})
-        rows.sort(key=lambda r: r['sort'], reverse=True)
+                'who': p['ref'] or ('Untagged \u00b7 ' + p['key'][:8]),
+                'tagged': bool(p['ref']),
+                'signins': p['signins'],
+                'blocked': p['blocked'],
+                'tried': ', '.join(sorted(PLATFORM_NAMES.get(t, t)
+                                          for t in p['tried'])),
+                'first': _fmt_datetime(p['first']),
+                'last': _fmt_datetime(p['last']),
+                'ip': p['ip'], 'country': p['country'],
+                'browser': _ua_label(p['ua']),
+                'sort': p['last'] or p['first']})
+        rows.sort(key=lambda r: r['sort'] or datetime.min, reverse=True)
 
-        view_events = [{'when': e.created_at.strftime('%Y-%m-%d %H:%M') if e.created_at else '',
-                        'user_id': e.user_id, 'email': e.email, 'kind': e.kind,
-                        'detail': e.detail, 'ip': e.ip, 'user_agent': e.user_agent}
-                       for e in events]
+        view_events = [{
+            'when': _fmt_datetime(e.created_at),
+            'who': e.ref or (e.visitor_id or '')[:8] or (e.ip or ''),
+            'kind': e.kind, 'detail': e.detail, 'ip': e.ip,
+            'country': e.country, 'browser': _ua_label(e.user_agent)}
+            for e in events[:300]]
+
+        demo_accounts = [{'id': u.id, 'email': u.email,
+                          'personas': len(db_list_personas(owner_id=u.id))}
+                         for u in accounts]
     finally:
         s.close()
-    total = len(rows)
-    converted = sum(1 for r in rows if r['state'] == 'converted')
-    stats = {'total': total,
-             'running': sum(1 for r in rows if r['state'] == 'running'),
+    stats = {'people': len(rows),
+             'signins': sum(r['signins'] for r in rows),
              'blocked': sum(r['blocked'] for r in rows),
-             'converted': converted,
-             'rate': round(converted / total * 100) if total else 0}
+             'tagged': sum(1 for r in rows if r['tagged'])}
     return render_template_string(ADMIN_DEMOS_HTML, rows=rows,
-                                  events=view_events, stats=stats)
+                                  events=view_events, stats=stats,
+                                  accounts=demo_accounts)
 
 
 @app.route('/admin/users/<uid>', methods=['GET', 'POST'])
@@ -2596,6 +2668,10 @@ def admin_user_detail(uid):
                     u.status = request.form.get('status', u.status)
                     u.tier = request.form.get('tier', '') or ''
                     raw = (request.form.get('expires') or '').strip()
+                    if u.tier == DEMO_TIER_KEY:
+                        # The shared demo never expires; a date here would only
+                        # switch it off mid-pitch.
+                        raw = ''
                     gf = (request.form.get('grandfathered') or '').strip()
                     try:
                         u.expires_at = datetime.strptime(raw, '%Y-%m-%d') if raw else None
@@ -2627,7 +2703,7 @@ def admin_user_detail(uid):
         s.close()
     return render_template_string(ADMIN_USER_HTML, u=view, p=p, saved=saved,
                                   error=error, tiers=TIERS, order=DEFAULT_TIER_ORDER,
-                                  roles=ADMIN_ROLES)
+                                  roles=ADMIN_ROLES, demo_key=DEMO_TIER_KEY)
 
 
 SEAT_ROLES = ('manager', 'chatter')
@@ -3173,6 +3249,7 @@ def auth_google_callback():
         if not u.google_sub:
             u.google_sub = sub
         u.last_login = datetime.now(timezone.utc).replace(tzinfo=None)
+        _note_demo_signin(s, u, 'google')
         s.commit()
         session['user_id'] = u.id
         session.permanent = True
@@ -3253,6 +3330,7 @@ def login():
             return render_template_string(SIGNIN_HTML, error='Wrong email or password.',
                                           email=email)
         u.last_login = datetime.now(timezone.utc).replace(tzinfo=None)
+        _note_demo_signin(s, u, nxt or '')
         s.commit()
         session['user_id'] = u.id
         # Permanent sessions last PERMANENT_SESSION_LIFETIME; otherwise the
@@ -3278,8 +3356,7 @@ def api_pricing():
     """Public: tier cards for the homepage pricing section (and anywhere else
     that wants the same data without the full /pricing page)."""
     return jsonify({'order': DEFAULT_TIER_ORDER, 'tiers': TIERS,
-                    'custom': CUSTOM_TIER, 'currency': CURRENCY_SYMBOL,
-                    'demo': TIERS[DEMO_TIER_KEY], 'demo_days': DEMO_DAYS})
+                    'custom': CUSTOM_TIER, 'currency': CURRENCY_SYMBOL})
 
 
 @app.route('/pricing')
@@ -3294,30 +3371,7 @@ def pricing():
                                   currency=CURRENCY_SYMBOL,
                                   annual_suffix=ANNUAL_SUFFIX,
                                   annual_save_pct=ANNUAL_SAVE_PCT,
-                                  custom=CUSTOM_TIER,
-                                  demo=TIERS[DEMO_TIER_KEY], demo_days=DEMO_DAYS,
-                                  demo_state=_demo_state(user))
-
-
-def _demo_state(user):
-    """What the pricing page should say about the demo for this visitor:
-    'running', 'used', 'available', or '' when a paid plan makes it moot."""
-    if not user or not user.get('email'):
-        return 'available'
-    if user.get('is_admin'):
-        return ''
-    if user.get('status') == 'active' and user.get('tier') != DEMO_TIER_KEY:
-        return ''
-    if user.get('tier') == DEMO_TIER_KEY and user.get('status') == 'active':
-        return 'running'
-    from db import list_demo_events
-    s = _db_session()
-    try:
-        used = any(e.kind == 'started'
-                   for e in list_demo_events(s, user_id=user['id']))
-    finally:
-        s.close()
-    return 'used' if used else 'available'
+                                  custom=CUSTOM_TIER)
 
 
 PLATFORM_NAMES = {'fanvue': 'Fanvue', 'telegram': 'Telegram', 'x': 'X',
@@ -3337,39 +3391,7 @@ def demo_ends():
     return render_template_string(
         DEMO_ENDS_HTML, platform=platform,
         platform_name=PLATFORM_NAMES[platform], currency=CURRENCY_SYMBOL,
-        starter_price=TIERS['starter']['price'],
-        expires=(user or {}).get('expires_at'))
-
-
-@app.route('/api/billing/start-demo', methods=['POST'])
-def api_billing_start_demo():
-    """Put a signed-in account on the free demo. One per account, ever: the
-    demo is a trial, not a plan somebody can keep renewing."""
-    user = _current_user()
-    if not user:
-        return jsonify({'error': 'Sign in required'}), 401
-    if user.get('status') == 'active' and user.get('tier') != DEMO_TIER_KEY:
-        return jsonify({'error': 'You already have a plan.'}), 400
-
-    from db import User, list_demo_events
-    s = _db_session()
-    try:
-        u = s.get(User, user['id'])
-        if u is None:
-            return jsonify({'error': 'Sign in required'}), 401
-        if any(e.kind == 'started' for e in list_demo_events(s, user_id=u.id)):
-            return jsonify({'error': 'Your demo has already been used. '
-                                     'Pick a plan to carry on.',
-                            'redirect': '/pricing'}), 400
-        _activate_plan(s, u, DEMO_TIER_KEY)
-        _log_demo_event(s, u, 'started', request.referrer or '')
-        expires = u.expires_at
-        s.commit()
-    finally:
-        s.close()
-    logger.info('DEMO STARTED user=%s until=%s', user['email'], expires)
-    return jsonify({'ok': True, 'redirect': '/dashboard',
-                    'expires_at': expires.isoformat() if expires else ''})
+        starter_price=TIERS['starter']['price'])
 
 
 @app.route('/billing')
@@ -3385,9 +3407,7 @@ def billing():
                                   currency=CURRENCY_SYMBOL,
                                   annual_suffix=ANNUAL_SUFFIX,
                                   annual_save_pct=ANNUAL_SAVE_PCT,
-                                  custom=CUSTOM_TIER,
-                                  demo=TIERS[DEMO_TIER_KEY], demo_days=DEMO_DAYS,
-                                  demo_state=_demo_state(user))
+                                  custom=CUSTOM_TIER)
 
 
 @app.route('/billing/return')

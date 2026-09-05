@@ -665,19 +665,33 @@ class DemoEvent(Base):
     id = Column(String(32), primary_key=True, default=_uid)
     user_id = Column(String(32), nullable=False, index=True)
     email = Column(String(255), default='')
-    kind = Column(String(24), nullable=False, index=True)  # started|blocked|converted
+    kind = Column(String(24), nullable=False, index=True)  # signin|blocked|converted
     detail = Column(String(120), default='')
+    # The demo is one shared login, so the user row cannot tell two prospects
+    # apart. visitor_id is a per-browser cookie and ref is the tag on the link
+    # they were sent (/login?ref=jane) — together they answer "who was this".
+    visitor_id = Column(String(32), default='', index=True)
+    ref = Column(String(64), default='')
     ip = Column(String(64), default='')
+    country = Column(String(80), default='')
     user_agent = Column(String(300), default='')
     created_at = Column(DateTime, default=_now, index=True)
 
 
 def record_demo_event(session, user_id, email, kind, detail='', ip='',
-                      user_agent=''):
+                      user_agent='', visitor_id='', ref=''):
     e = DemoEvent(user_id=user_id, email=(email or '')[:255], kind=kind,
                   detail=(detail or '')[:120], ip=(ip or '')[:64],
-                  user_agent=(user_agent or '')[:300])
+                  user_agent=(user_agent or '')[:300],
+                  visitor_id=(visitor_id or '')[:32], ref=(ref or '')[:64])
     session.add(e)
+    return e
+
+
+def set_demo_event_geo(session, event_id, country):
+    e = session.get(DemoEvent, event_id)
+    if e is not None:
+        e.country = (country or '')[:80]
     return e
 
 
@@ -686,6 +700,17 @@ def list_demo_events(session, user_id=None, limit=500):
     if user_id:
         q = q.filter(DemoEvent.user_id == user_id)
     return q.order_by(DemoEvent.created_at.desc()).limit(limit).all()
+
+
+def demo_country_for_ip(session, ip):
+    """A country already resolved for this IP, so a repeat visitor costs no
+    second lookup."""
+    if not ip:
+        return ''
+    row = (session.query(DemoEvent)
+           .filter(DemoEvent.ip == ip, DemoEvent.country != '')
+           .order_by(DemoEvent.created_at.desc()).first())
+    return (row.country if row else '') or ''
 
 
 def demo_event_summary(session):
@@ -823,7 +848,8 @@ def grandfather_existing_users(session):
 def init_db():
     Base.metadata.create_all(engine)
     for table, model in (('users', User), ('saved_personas', SavedPersona),
-                         ('payments', Payment), ('invites', Invite)):
+                         ('payments', Payment), ('invites', Invite),
+                         ('demo_events', DemoEvent)):
         try:
             _sync_columns(table, model)
         except Exception:

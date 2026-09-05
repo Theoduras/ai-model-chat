@@ -173,8 +173,6 @@ body.kbd .site-nav{display:none}
 .pricing-head{text-align:center;max-width:640px;margin:0 auto 56px}
 .pricing-head h2{font-family:'Sora';font-weight:800;font-size:38px;letter-spacing:-.02em;margin-bottom:14px}
 .pricing-head p{color:var(--text-soft);font-size:16px;line-height:1.6}
-.pricing-demo{text-align:center;color:var(--text-soft);font-size:15px;margin-top:34px}
-.pricing-demo a{color:inherit;font-weight:600;text-decoration:underline}
 .tier-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;max-width:1180px;margin:0 auto}
 .tier-card.soon{opacity:.85}
 .tier-card{background:var(--panel);border:1px solid var(--hair);border-radius:16px;padding:26px 22px;display:flex;flex-direction:column}
@@ -259,7 +257,6 @@ body.kbd .site-nav{display:none}
     <p data-edit-id="pricing-subtitle">Pick the plan your roster needs, and upgrade when it needs more personas and platforms. All prices exclude VAT.</p>
   </div>
   <div class="tier-grid" id="tier-grid">Loading plans…</div>
-  <p class="pricing-demo" id="pricing-demo" hidden></p>
 </section>
 
 <script>
@@ -284,13 +281,6 @@ fetch('/api/pricing')
         '<a href="/register">Get started</a>';
       grid.appendChild(card);
     });
-    if (d.demo) {
-      var note = document.getElementById('pricing-demo');
-      note.innerHTML = 'Not ready to pay? <a href="/pricing">Take the '
-        + (d.demo_days || 14) + '-day demo</a> \u2014 the persona builder, the '
-        + 'funnel and the chat, free. It stops where Fanvue starts.';
-      note.hidden = false;
-    }
     if (d.custom) {
       var c = document.createElement('div');
       c.className = 'tier-card' + (d.custom.coming_soon ? ' soon' : '');
