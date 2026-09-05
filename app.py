@@ -3349,9 +3349,8 @@ tr:hover td{background:#16161a}
 
 
 @app.route('/api/visitors')
+@operator_only
 def api_visitors():
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     try:
         limit = min(int(request.args.get('limit', 1000)), 5000)
     except (ValueError, TypeError):
@@ -3360,9 +3359,8 @@ def api_visitors():
 
 
 @app.route('/admin/visitors.log')
+@operator_only
 def admin_visitors_logfile():
-    if not _check_admin():
-        return redirect('/dashboard')
     lines = ['time\tip\tlocation\tpath\tuser_agent']
     for r in _visitors_rows(limit=5000):
         loc = ' / '.join(p for p in (r['city'], r['region'], r['country']) if p) or '?'
@@ -3373,14 +3371,8 @@ def admin_visitors_logfile():
 
 
 @app.route('/admin/visitors', methods=['GET', 'POST'])
+@operator_only
 def admin_visitors():
-    if not _check_admin():
-        if request.method == 'POST':
-            if request.form.get('password', '') == _admin_password():
-                session['admin_authed'] = True
-                return redirect('/admin/visitors')
-            return render_template_string(LOGIN_HTML, error='Incorrect password.')
-        return render_template_string(LOGIN_HTML, error=None)
     return render_template_string(VISITORS_HTML, rows=_visitors_rows(limit=1000))
 
 
@@ -3679,9 +3671,8 @@ tr:hover td{background:#16161a}
 
 
 @app.route('/api/xlog')
+@operator_only
 def api_xlog():
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     try:
         limit = min(int(request.args.get('limit', 1000)), 5000)
     except (ValueError, TypeError):
@@ -3690,14 +3681,8 @@ def api_xlog():
 
 
 @app.route('/admin/xlog', methods=['GET', 'POST'])
+@operator_only
 def admin_xlog():
-    if not _check_admin():
-        if request.method == 'POST':
-            if request.form.get('password', '') == _admin_password():
-                session['admin_authed'] = True
-                return redirect('/admin/xlog')
-            return render_template_string(LOGIN_HTML, error='Incorrect password.')
-        return render_template_string(LOGIN_HTML, error=None)
     return render_template_string(XLOG_HTML, rows=_xevents_rows(limit=1000))
 
 
@@ -3787,22 +3772,15 @@ a.btn{background:#26262b;color:#fff;text-decoration:none;padding:8px 14px;border
 
 
 @app.route('/admin/xchats', methods=['GET', 'POST'])
+@operator_only
 def admin_xchats():
-    if not _check_admin():
-        if request.method == 'POST':
-            if request.form.get('password', '') == _admin_password():
-                session['admin_authed'] = True
-                return redirect('/admin/xchats')
-            return render_template_string(LOGIN_HTML, error='Incorrect password.')
-        return render_template_string(LOGIN_HTML, error=None)
     return render_template_string(XCHATS_HTML, rows=_xchat_list_rows(limit=300),
                                   days=X_LOG_RETENTION_DAYS)
 
 
 @app.route('/admin/xchat')
+@operator_only
 def admin_xchat():
-    if not _check_admin():
-        return redirect('/admin/xchats')
     persona = request.args.get('persona', '')
     uid = request.args.get('uid', '')
     msgs, username = _xchat_thread_rows(persona, uid)
@@ -7342,10 +7320,9 @@ def _x_audience_candidates(persona, limit, contacted,
 
 
 @app.route('/api/x/auth-url', methods=['POST'])
+@platform_scoped
 def api_x_auth_url():
     """Generate X OAuth 2.0 PKCE authorization URL."""
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     data = request.json or {}
     client_id = data.get('client_id', '').strip() or (_get_setting('x_client_id') or '')
     redirect_uri = data.get('redirect_uri', '').strip() or (_get_setting('x_redirect_uri') or '')
@@ -7383,11 +7360,10 @@ def api_x_auth_url():
 
 
 @app.route('/api/x/app-config')
+@operator_only
 def api_x_app_config():
     """Return the saved X app Client ID + redirect URI so the connect form can
     pre-fill them (so they don't need re-entering each connect/reconnect)."""
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     return jsonify({
         'client_id': _get_setting('x_client_id') or '',
         'redirect_uri': _get_setting('x_redirect_uri') or '',
@@ -7395,10 +7371,9 @@ def api_x_app_config():
 
 
 @app.route('/api/x/callback', methods=['POST'])
+@platform_scoped
 def api_x_callback():
     """Exchange authorization code for access token."""
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     data = request.json or {}
     code = data.get('code', '').strip()
     state = data.get('state', '').strip()
@@ -7485,19 +7460,18 @@ catch(e){}
 
 @app.route('/api/x/status', methods=['GET'])
 def api_x_status():
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
-    tokens = _load_x_tokens()
-    result = {}
-    for persona, t in tokens.items():
-        result[persona] = {'username': t.get('username', ''), 'connected': bool(t.get('access_token'))}
-    return jsonify(result)
+    # Connection state for every persona at once, so it carries no slug of its
+    # own to scope on: filter the answer instead of guarding the route.
+    mine = owned_slugs()
+    return jsonify({p: {'username': t.get('username', ''),
+                        'connected': bool(t.get('access_token'))}
+                    for p, t in _load_x_tokens().items()
+                    if mine is None or p in mine})
 
 
 @app.route('/api/x/disconnect', methods=['POST'])
+@platform_scoped
 def api_x_disconnect():
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     persona = (request.json or {}).get('persona', '')
     _log_x_event('disconnect', persona=persona)
     tokens = _load_x_tokens()
@@ -7507,11 +7481,10 @@ def api_x_disconnect():
 
 
 @app.route('/api/x/dm-debug')
+@operator_only
 def api_x_dm_debug():
     """Why a DM did or didn't get answered: what X returned, which events count
     as new, and the per-fan state the funnel runs on."""
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     persona = (request.args.get('persona') or '').strip()
     t = (_load_x_tokens() or {}).get(persona) or {}
     out = {'persona': persona,
@@ -7557,10 +7530,9 @@ def api_x_dm_debug():
 
 
 @app.route('/api/x/poll', methods=['POST'])
+@platform_scoped
 def api_x_poll():
     """Read new DMs for a persona's connected X account and reply via Gemini."""
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     data = request.json or {}
     persona = data.get('persona', 'lilly')
     _log_x_event('poll_dm', persona=persona)
@@ -7679,9 +7651,8 @@ def _x_me_id(persona):
 
 
 @app.route('/api/x/follow', methods=['POST'])
+@platform_scoped
 def api_x_follow():
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     data = request.json or {}
     persona = data.get('persona', '')
     target = (data.get('target') or '').strip()
@@ -7700,9 +7671,8 @@ def api_x_follow():
 
 
 @app.route('/api/x/unfollow', methods=['POST'])
+@platform_scoped
 def api_x_unfollow():
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     data = request.json or {}
     persona = data.get('persona', '')
     target = (data.get('target') or '').strip()
@@ -7721,12 +7691,11 @@ def api_x_unfollow():
 
 
 @app.route('/api/x/comment', methods=['POST'])
+@platform_scoped
 def api_x_comment():
     """Reply in-character to the comments (replies) under a given post.
     Body: {persona, post (url or id), limit, preview}. If preview is true,
     drafts replies without posting them."""
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     data = request.json or {}
     persona = data.get('persona', '')
     post = (data.get('post') or '').strip()
@@ -7746,12 +7715,11 @@ def api_x_comment():
 
 
 @app.route('/api/x/post', methods=['POST'])
+@platform_scoped
 def api_x_post():
     """Generate and post an original in-character tweet for a persona.
     Body: {persona, topic (optional), text (override), preview}. With preview,
     returns the drafted tweet without posting."""
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     data = request.json or {}
     persona = data.get('persona', '')
     topic = (data.get('topic') or '').strip()
@@ -7777,11 +7745,10 @@ def api_x_post():
 
 
 @app.route('/api/x/respond-own', methods=['POST'])
+@platform_scoped
 def api_x_respond_own():
     """Reply in-character to new comments across the persona's own recent posts.
     Body: {persona, limit, preview}."""
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     data = request.json or {}
     persona = data.get('persona', '')
     limit = max(1, min(int(data.get('limit', 5)), 10))
@@ -7806,12 +7773,11 @@ def api_x_respond_own():
 
 
 @app.route('/api/x/chat-up', methods=['POST'])
+@platform_scoped
 def api_x_chat_up():
     """Open a DM with a target user using an in-character opener.
     Body: {persona, target, note (optional context), opener (optional override),
     preview}. Returns the opener; sends it unless preview is true."""
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     data = request.json or {}
     persona = data.get('persona', '')
     target = (data.get('target') or '').strip()
@@ -7857,6 +7823,7 @@ def api_x_chat_up():
 
 
 @app.route('/api/x/auto-run', methods=['POST'])
+@platform_scoped
 def api_x_auto_run():
     """Run one autonomous engagement round as a persona, mirroring the manual
     flow: keep existing DMs going, reply to a post's comments, then find new
@@ -7864,8 +7831,6 @@ def api_x_auto_run():
     calls this on a loop so the bot keeps finding new chats.
     Body: {persona, query, post, new_chat_limit, comment_limit, post_topic,
            follow, dm_replies, new_chats, comments, respond_own, post_content}."""
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     data = request.json or {}
     persona = data.get('persona', '')
     query = (data.get('query') or '').strip()
@@ -8170,11 +8135,10 @@ def _fanvue_call(persona, method, path, body=None):
 
 
 @app.route('/api/fanvue/dbinfo')
+@operator_only
 def api_fanvue_dbinfo():
     """Report which DB backend is in use so persistence can be verified: an
     external Postgres survives redeploys; the SQLite fallback does not."""
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     # Report the URL the app is ACTUALLY using (db.py may build it from the
     # Cloud SQL env vars), not just a raw DATABASE_URL env read.
     try:
@@ -8217,12 +8181,11 @@ def api_fanvue_dbinfo():
 
 
 @app.route('/api/fanvue/vault-debug')
+@operator_only
 def api_fanvue_vault_debug():
     """Probe a wide set of Fanvue media/vault endpoints and record the exact
     status + response body of each, so we can pin the working path/scope. Also
     writes the result to a log file for later inspection."""
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     persona = (request.args.get('persona') or '').strip()
     scope = _fanvue_scope(persona)
     paths = [
@@ -8278,21 +8241,19 @@ def api_fanvue_vault_debug():
 
 
 @app.route('/api/fanvue/config')
+@operator_only
 def api_fanvue_config():
     """App-level OAuth credentials for pre-filling the connect form (never returns
     the client secret value, only whether one is saved)."""
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     a = _fanvue_app()
     return jsonify({'client_id': a['client_id'], 'redirect_uri': a['redirect_uri'],
                     'has_secret': bool(a['client_secret'])})
 
 
 @app.route('/api/fanvue/auth-url', methods=['POST'])
+@platform_scoped
 def api_fanvue_auth_url():
     """Build the Fanvue OAuth 2.0 + PKCE authorization URL for a persona."""
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     data = request.json or {}
     persona = (data.get('persona') or '').strip()
     client_id = (data.get('client_id') or '').strip() or (_get_setting('fanvue_client_id') or '')
@@ -8337,9 +8298,8 @@ def api_fanvue_oauth_redirect():
 
 
 @app.route('/api/fanvue/callback', methods=['POST'])
+@platform_scoped
 def api_fanvue_callback():
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     data = request.json or {}
     persona = (data.get('persona') or '').strip()
     code = (data.get('code') or '').strip()
@@ -8381,9 +8341,8 @@ def api_fanvue_callback():
 
 
 @app.route('/api/fanvue/status')
+@platform_scoped
 def api_fanvue_status():
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     persona = (request.args.get('persona') or '').strip()
     t = _fanvue_tokens(persona)
     return jsonify({'connected': bool(t.get('access_token')), 'username': t.get('username', ''),
@@ -8391,9 +8350,8 @@ def api_fanvue_status():
 
 
 @app.route('/api/fanvue/disconnect', methods=['POST'])
+@platform_scoped
 def api_fanvue_disconnect():
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     persona = (request.json or {}).get('persona', '').strip()
     if persona:
         _set_setting(f'fanvue_tokens_{persona}', '{}')
@@ -8403,11 +8361,10 @@ def api_fanvue_disconnect():
 
 
 @app.route('/api/fanvue/creators')
+@platform_scoped
 def api_fanvue_creators():
     """List creator profiles this login can act as. For a single-profile login
     the agency endpoint 404s, so we fall back to the primary /users/me."""
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     persona = (request.args.get('persona') or '').strip()
     creators = []
     agency_err = ''
@@ -8441,11 +8398,10 @@ def api_fanvue_creators():
 
 
 @app.route('/api/fanvue/creator', methods=['POST'])
+@platform_scoped
 def api_fanvue_set_creator():
     """Select which creator profile the persona acts as; resets the poll cursor
     so the new account starts clean."""
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     d = request.json or {}
     persona = (d.get('persona') or '').strip()
     if not persona:
@@ -8897,11 +8853,10 @@ def _fv_media_thumb(m):
 
 
 @app.route('/api/fanvue/folders')
+@platform_scoped
 def api_fanvue_folders():
     """The creator's vault folders, so the picker can filter by folder without
     the name having to be typed exactly."""
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     persona = (request.args.get('persona') or '').strip()
     folders, page = [], 1
     try:
@@ -8919,12 +8874,11 @@ def api_fanvue_folders():
 
 
 @app.route('/api/fanvue/media')
+@platform_scoped
 def api_fanvue_media():
     """One page of the connected creator's Fanvue media, so the picker can load
     lazily instead of pulling the whole vault. Optional ?type=image|video|audio
     and ?folder= filters; ?page= walks the pages."""
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     persona = (request.args.get('persona') or '').strip()
     mtype = (request.args.get('type') or '').strip()
     folder = (request.args.get('folder') or '').strip()
@@ -8967,12 +8921,11 @@ def api_fanvue_media():
 
 
 @app.route('/api/fanvue/media-item')
+@platform_scoped
 def api_fanvue_media_item():
     """Fetch a single media item for previewing. The owner /media/{uuid} returns
     metadata only (no signed URL); the consumer endpoint returns signed variant
     URLs, so try that too. Falls back to the AI description + tags."""
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     persona = (request.args.get('persona') or '').strip()
     uuid = (request.args.get('uuid') or '').strip()
     if not uuid:
@@ -9004,11 +8957,10 @@ def api_fanvue_media_item():
 
 
 @app.route('/api/fanvue/media-lookup', methods=['POST'])
+@platform_scoped
 def api_fanvue_media_lookup():
     """Thumbnails for specific media uuids, so a tier can show its own items
     even when the folder filter is pointing somewhere else."""
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     d = request.json or {}
     persona = (d.get('persona') or '').strip()
     uuids = [str(u).strip() for u in (d.get('uuids') or []) if str(u).strip()][:60]
@@ -9040,12 +8992,11 @@ def api_fanvue_media_lookup():
 
 
 @app.route('/api/fanvue/ppv', methods=['GET', 'POST'])
+@platform_scoped
 def api_fanvue_ppv():
     """Get or set a persona's PPV content sets. A set is a themed bundle with
     its own ordered tiers plus the cues that pick it: scene, keywords and an
     hour window. Stored per connected Fanvue account (persona)."""
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     if request.method == 'GET':
         persona = (request.args.get('persona') or '').strip()
         cfg = _fanvue_ppv(persona)
@@ -9388,12 +9339,11 @@ def _fv_reconcile_purchases(persona, days=45, limit_pages=20):
 
 
 @app.route('/api/fanvue/ppv-stats')
+@platform_scoped
 def api_fanvue_ppv_stats():
     """How each tier is actually performing: how many went out, how many were
     bought. Read from the ledger, so it survives everything the settings blobs
     don't."""
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     persona = (request.args.get('persona') or '').strip()
     if not persona:
         return jsonify({'ok': False, 'error': 'Missing persona'}), 400
@@ -9418,12 +9368,11 @@ def api_fanvue_ppv_stats():
 
 
 @app.route('/api/fanvue/ppv-simulate', methods=['POST'])
+@platform_scoped
 def api_fanvue_ppv_simulate():
     """Score a sample message against the saved sets and say exactly what would
     fire, and why. The answer to "why did it pick that one" without having to
     send anything to a real fan."""
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     d = request.json or {}
     persona = (d.get('persona') or '').strip()
     if not persona:
@@ -9469,11 +9418,10 @@ def api_fanvue_ppv_simulate():
 
 
 @app.route('/api/fanvue/reconcile', methods=['POST'])
+@platform_scoped
 def api_fanvue_reconcile():
     """Rebuild purchase state from Fanvue's ledger — run after downtime, after
     a redeploy, or any time the funnel looks stuck."""
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     d = request.json or {}
     persona = (d.get('persona') or '').strip()
     if not persona:
@@ -9484,11 +9432,10 @@ def api_fanvue_reconcile():
 
 
 @app.route('/api/fanvue/draft', methods=['POST'])
+@platform_scoped
 def api_fanvue_draft():
     """Draft an in-persona, funnel-aware reply to a fan message. Works with no
     Fanvue connection — for copy/paste or previewing before wiring live send."""
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     data = request.json or {}
     persona = data.get('persona', '')
     message = (data.get('message') or '').strip()
@@ -10723,10 +10670,9 @@ def _fanvue_auto_round(persona):
 
 
 @app.route('/api/fanvue/auto', methods=['GET', 'POST'])
+@platform_scoped
 def api_fanvue_auto():
     """Get or set the persistent auto-reply toggle + options for a persona."""
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     if request.method == 'POST':
         data = request.json or {}
         persona = (data.get('persona') or '').strip()
@@ -10807,6 +10753,7 @@ def api_fanvue_auto():
 
 
 @app.route('/api/fanvue/ppv-reset', methods=['POST'])
+@platform_scoped
 def api_fanvue_ppv_reset():
     """Forget what has already been *sent*, so the sets start from the top again.
 
@@ -10814,8 +10761,6 @@ def api_fanvue_ppv_reset():
     is what later confirms a fan paid, and it has to outlive any number of
     progress resets. Resetting everyone needs confirm:true — it used to be one
     unconfirmed POST away."""
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     d = request.json or {}
     persona = (d.get('persona') or '').strip()
     if not persona:
@@ -10848,11 +10793,10 @@ def api_fanvue_ppv_reset():
 
 
 @app.route('/api/fanvue/lists')
+@platform_scoped
 def api_fanvue_lists():
     """The persona's Fanvue chat lists — smart segments and custom lists — for
     the include/exclude picker."""
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     persona = (request.args.get('persona') or '').strip()
     if not _fanvue_tokens(persona).get('access_token'):
         return jsonify({'lists': [], 'error': 'Fanvue not connected for this persona.'})
@@ -10866,11 +10810,10 @@ def api_fanvue_lists():
 
 
 @app.route('/api/fanvue/trace', methods=['GET', 'DELETE'])
+@platform_scoped
 def api_fanvue_trace():
     """Recent Fanvue chat activity for a persona — what came in, what went out,
     PPV drops and errors — plus a verdict when nothing is happening."""
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     persona = (request.args.get('persona') or '').strip()
     if request.method == 'DELETE':
         _set_setting(f'fanvue_trace_{persona}', '[]')
@@ -10934,11 +10877,12 @@ def api_fanvue_trace():
 def api_fanvue_accounts():
     """Every persona's Fanvue connection at a glance, so several accounts can be
     watched running side by side."""
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
+    mine = owned_slugs()
     enabled = set(_fanvue_enabled_list())
     out = []
     slugs = {p.get('slug') for p in db_list_personas()} | enabled
+    if mine is not None:
+        slugs &= mine
     for slug in sorted(s for s in slugs if s):
         tok = _fanvue_tokens(slug)
         if not tok.get('access_token') and slug not in enabled:
@@ -10956,10 +10900,9 @@ def api_fanvue_accounts():
 
 
 @app.route('/api/fanvue/auto-run', methods=['POST'])
+@platform_scoped
 def api_fanvue_auto_run():
     """Run one auto-reply round now (also used by the background worker)."""
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     persona = (request.json or {}).get('persona', '').strip()
     if not persona:
         return jsonify({'ok': False, 'error': 'persona required'}), 400
@@ -10976,11 +10919,10 @@ def api_fanvue_auto_run():
 
 
 @app.route('/api/fanvue/debug')
+@operator_only
 def api_fanvue_debug():
     """Dump raw Fanvue JSON (me / chats / first chat's messages) so the exact
     field names can be confirmed. Admin-gated; used to fix parsing quickly."""
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     persona = (request.args.get('persona') or '').strip()
     out = {}
     try:
@@ -11284,9 +11226,8 @@ def _threads_auto_round(persona, reply_comments=True, reply_mentions=True,
 
 
 @app.route('/api/threads/app-config')
+@operator_only
 def api_threads_app_config():
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     return jsonify({
         'client_id': _get_setting('threads_client_id') or '',
         'redirect_uri': _get_setting('threads_redirect_uri') or '',
@@ -11295,9 +11236,8 @@ def api_threads_app_config():
 
 
 @app.route('/api/threads/auth-url', methods=['POST'])
+@platform_scoped
 def api_threads_auth_url():
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     data = request.json or {}
     client_id = (data.get('client_id') or '').strip() or (_get_setting('threads_client_id') or '')
     client_secret = (data.get('client_secret') or '').strip() or (_get_setting('threads_client_secret') or '')
@@ -11339,9 +11279,8 @@ setTimeout(function(){window.close();},1200);}}catch(e){}</script></body></html>
 
 
 @app.route('/api/threads/callback', methods=['POST'])
+@platform_scoped
 def api_threads_callback():
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     data = request.json or {}
     code = (data.get('code') or '').strip()
     state = (data.get('state') or '').strip()
@@ -11404,17 +11343,16 @@ def api_threads_callback():
 
 @app.route('/api/threads/status', methods=['GET'])
 def api_threads_status():
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
-    tokens = _threads_load_tokens()
-    return jsonify({p: {'username': t.get('username', ''), 'connected': bool(t.get('access_token'))}
-                    for p, t in tokens.items()})
+    mine = owned_slugs()
+    return jsonify({p: {'username': t.get('username', ''),
+                        'connected': bool(t.get('access_token'))}
+                    for p, t in _threads_load_tokens().items()
+                    if mine is None or p in mine})
 
 
 @app.route('/api/threads/disconnect', methods=['POST'])
+@platform_scoped
 def api_threads_disconnect():
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     persona = (request.json or {}).get('persona', '').strip()
     tokens = _threads_load_tokens()
     tokens.pop(persona, None)
@@ -11423,9 +11361,8 @@ def api_threads_disconnect():
 
 
 @app.route('/api/threads/publish', methods=['POST'])
+@platform_scoped
 def api_threads_publish():
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     data = request.json or {}
     persona = (data.get('persona') or '').strip()
     topic = (data.get('topic') or '').strip()
@@ -11448,9 +11385,8 @@ def api_threads_publish():
 
 
 @app.route('/api/threads/auto', methods=['GET', 'POST'])
+@platform_scoped
 def api_threads_auto():
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     if request.method == 'POST':
         data = request.json or {}
         persona = (data.get('persona') or '').strip()
@@ -11480,9 +11416,8 @@ def api_threads_auto():
 
 
 @app.route('/api/threads/auto-run', methods=['POST'])
+@platform_scoped
 def api_threads_auto_run():
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     data = request.json or {}
     persona = (data.get('persona') or '').strip()
     if not persona:
@@ -12486,9 +12421,8 @@ def _x_behavior(persona):
 
 
 @app.route('/api/x/settings', methods=['GET', 'POST'])
+@platform_scoped
 def api_x_settings():
-    if not _check_admin():
-        return jsonify({'error': 'Unauthorized'}), 401
     if request.method == 'GET':
         persona = (request.args.get('persona') or '').strip()
         return jsonify(_x_behavior(persona))
