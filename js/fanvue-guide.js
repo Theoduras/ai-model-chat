@@ -1,11 +1,12 @@
-// Step-by-step setup guide for the Fanvue console — the in-page counterpart to
-// the dashboard's PlatformSetup wizard. That one *drives* the connection; this
-// one sits on top of the real console and explains every control on it, because
-// the Fanvue page is the one creators use directly (see openPlatform() in
-// dashboard.html) and it has far more knobs than a wizard can own.
+// Step-by-step setup guide for the Fanvue console.
 //
-// Every step points at live elements by id: "Show me" scrolls the console to
-// the real field and flashes it, so the guide never drifts from the page.
+// Same wizard as "New Persona" (js/onboarding.js): the .ob-* shell from
+// style.css — rail, stage numbers, crumb, card, footer, finish screen — and
+// the same .obt-* spotlight for "show me on the page". The difference is what
+// it holds: onboarding *moves the builder's real fields* into the frame, while
+// this one teaches a console that already exists, so each step is copy plus a
+// spotlight that points at the live control.
+//
 (function () {
 
   var STAGES = [
@@ -45,7 +46,8 @@
       stage: 'connect', nav: 'Pick the model',
       title: 'Choose which model this is for',
       sub: 'Each persona holds its own Fanvue account, its own PPV sets and its own settings.',
-      spots: [['persona', 'the model picker'], ['conn-pill', 'the status pill']],
+      spots: [['persona', 'the model picker', 'Everything else on this page belongs to the persona selected here. Switching it reloads the connection, the PPV sets and every auto-reply setting.'],
+                ['conn-pill', 'the status pill', 'Green and reading <b>connected</b> means we hold a working Fanvue authorization. Anything else and nothing will send.']],
       body:
         dl([
           ['Choose a model (persona)', 'The dropdown lists every persona you have built. Everything ' +
@@ -65,7 +67,8 @@
       stage: 'connect', nav: 'Authorize',
       title: 'Authorize her Fanvue account',
       sub: 'A normal OAuth sign-in, with a fallback for blocked popups.',
-      spots: [['connect-btn', 'the Connect button'], ['fv-callback', 'the callback box']],
+      spots: [['connect-btn', 'the Connect button', 'Opens Fanvue in a new window. Sign in as the creator whose inbox this model should answer, and approve.'],
+                ['fv-callback', 'the callback box', 'Only needed if the popup was blocked. Paste the whole URL Fanvue landed on — the one containing <code>?code=…&amp;state=…</code> — then press Finish connection.']],
       body:
         '<p>Click <b>Connect Fanvue</b>. A Fanvue window opens; sign in as the creator whose ' +
         'inbox this model should answer and approve the access request. When it closes, the ' +
@@ -84,7 +87,8 @@
       stage: 'content', nav: 'Your media',
       title: 'Find the media she can send',
       sub: 'The grid is your real Fanvue vault, read live. Nothing is uploaded or copied.',
-      spots: [['ppv-folder-filter', 'the filters'], ['ppv-media-grid', 'the media grid']],
+      spots: [['ppv-folder-filter', 'the filters', 'Folder, search and type narrow the grid below. They only filter — nothing here changes what is in your vault.'],
+                ['ppv-media-grid', 'the media grid', 'Your live Fanvue vault. Click a thumbnail to put it in the tier you are editing, click again to take it out.']],
       body:
         dl([
           ['Folder', 'Narrows the grid to one Fanvue folder. "All folders" shows everything.'],
@@ -102,7 +106,8 @@
       stage: 'content', nav: 'Build a set',
       title: 'Group the media into sets',
       sub: 'A set is one theme — one outfit, one location, one mood.',
-      spots: [['ppv-set-bar', 'the set tabs'], ['ppv-set-fields', 'the set fields']],
+      spots: [['ppv-set-bar', 'the set tabs', 'One button per set, plus ＋ to add one. The highlighted tab is the set every field below edits.'],
+                ['ppv-set-fields', 'the set fields', 'Name, scene, trigger words and hours — together these decide when this set is the one she reaches for.']],
       body:
         '<p>She stays on whichever set a fan is working through and sends its tiers in order, ' +
         'only switching to another set when it clearly fits the conversation better or the ' +
@@ -129,7 +134,9 @@
       stage: 'content', nav: 'Tiers & prices',
       title: 'Price the ladder inside each set',
       sub: 'Tier 1 is the cheap opener; every tier after it goes further and costs more.',
-      spots: [['ppv-tier-bar', 'the tier tabs'], ['ppv-price', 'the price field'], ['ppv-caption', 'the caption']],
+      spots: [['ppv-tier-bar', 'the tier tabs', 'The ladder inside the current set. Tier 1 sends first; each one after it goes further and costs more.'],
+                ['ppv-price', 'the price field', 'What the fan pays to unlock this tier. Fanvue will not accept less than $3.'],
+                ['ppv-caption', 'the caption', 'The message that rides along with the locked drop. Keep it in her voice — low pressure sells better than a sales line.']],
       body:
         dl([
           ['Tier tabs', 'One per step of the ladder inside the current set, plus <b>＋</b> to add ' +
@@ -150,7 +157,7 @@
       stage: 'content', nav: 'Test the match',
       title: 'Try a message before any fan sees it',
       sub: 'Nothing is sent — this only shows what the matcher would pick.',
-      spots: [['ppv-sim-text', 'the simulator']],
+      spots: [['ppv-sim-text', 'the simulator', 'Type what a fan might say, optionally set an hour, and Simulate shows which set and tier would go out and why. Nothing is sent.']],
       body:
         dl([
           ['Message box', 'Type something a fan might realistically say.'],
@@ -166,7 +173,7 @@
       stage: 'auto', nav: 'Master switches',
       title: 'Turn her on, and pick who counts',
       sub: 'The four checkboxes at the top of Auto-reply.',
-      spots: [['fv-auto-enabled', 'the switches']],
+      spots: [['fv-auto-enabled', 'the switches', 'The master switch and the three guards next to it: exclude other creators, require payment before the next tier, and only reply to fans who are online.']],
       body:
         dl([
           ['Auto-reply enabled', 'The master switch. Off, this page still drafts replies for you by ' +
@@ -188,7 +195,9 @@
       stage: 'auto', nav: 'Sounding human',
       title: 'Make the timing believable',
       sub: 'Instant, perfectly-typed replies are the fastest way to get spotted.',
-      spots: [['fv-humanize', 'the humanize switch'], ['fv-typing-speed', 'typing speed'], ['fv-react-rate', 'reaction rate']],
+      spots: [['fv-humanize', 'the humanize switch', 'Adds a pause to read, then types at a believable speed instead of answering the instant a message lands.'],
+                ['fv-typing-speed', 'typing speed', 'How fast she types on Fanvue. The Reply Speed in the persona builder is a different setting — that one drives the chat on your own website.'],
+                ['fv-react-rate', 'reaction rate', 'Percentage of replies she opens with a single emoji sent as its own short message, because Fanvue has no reaction button.']],
       body:
         dl([
           ['Type like a human', 'Adds a pause to "read" the message, then types at a believable ' +
@@ -206,7 +215,8 @@
       stage: 'auto', nav: 'Who she talks to',
       title: 'Limit the audience',
       sub: 'Use these hard while testing, then open them up.',
-      spots: [['fv-only-handles', 'the handle allowlist'], ['fv-lists', 'the Fanvue lists']],
+      spots: [['fv-only-handles', 'the handle allowlist', 'The safest switch on the page. Put your own test handle here for the first run and she talks to nobody else.'],
+                ['fv-lists', 'the Fanvue lists', 'Her smart segments and custom lists. Any list set to include means she talks only to fans in those lists; exclude is for refunders and expired subs.']],
       body:
         dl([
           ['Only reply to these fans', 'Comma-separated Fanvue handles. Blank means everyone. Put ' +
@@ -221,7 +231,8 @@
       stage: 'auto', nav: 'Selling pace',
       title: 'Decide how fast the offers come',
       sub: 'This is the part that decides whether she feels like a person or a vending machine.',
-      spots: [['fv-ppv-first-after', 'the pacing fields'], ['fv-ppv-test-phrase', 'the test phrase']],
+      spots: [['fv-ppv-first-after', 'the pacing fields', 'When the first drop lands, how much chat sits between drops, and how a drop that went unbought is re-offered, discounted or finally dropped.'],
+                ['fv-ppv-test-phrase', 'the test phrase', 'Testing only — it marks the last PPV as paid so you can walk the whole ladder for free. Clear it before going live.']],
       body:
         dl([
           ['First PPV after', 'Messages in the chat, counting both directions, before the very first ' +
@@ -247,7 +258,7 @@
     {
       stage: 'auto', nav: 'Follow-ups',
       title: 'Nudge the fans who go quiet',
-      spots: [['fv-followup-min', 'the follow-up field']],
+      spots: [['fv-followup-min', 'the follow-up field', 'Minutes of silence before she nudges. The second nudge lands at double this, and there is never a third.']],
       body:
         dl([
           ['Follow-up after silence', 'Minutes of silence before she nudges. The first nudge lands ' +
@@ -262,7 +273,7 @@
       stage: 'watch', nav: 'Go live',
       title: 'Save & Run',
       sub: 'One button starts the server-side loop.',
-      spots: [['fv-auto-state', 'the run state']],
+      spots: [['fv-auto-state', 'the run state', 'Reads <b>off</b>, or <b>running</b> with a pulse once the worker is polling her inbox on our server.']],
       body:
         dl([
           ['Save &amp; Run', 'Stores every setting in this section and starts (or restarts) her ' +
@@ -279,7 +290,9 @@
       stage: 'watch', nav: 'Watch & check',
       title: 'Draft, log and accounts',
       sub: 'The three panels you will live in after launch.',
-      spots: [['fan-msg', 'the drafter'], ['fv-trace-rows', 'the activity log'], ['fv-accounts', 'connected accounts']],
+      spots: [['fan-msg', 'the drafter', 'Paste a fan message, get one in-persona reply. Works with no connection at all.'],
+                ['fv-trace-rows', 'the activity log', 'Every message in and every reply, drop and error out, refreshed by itself while <b>live</b> is ticked.'],
+                ['fv-accounts', 'connected accounts', 'Every persona with a Fanvue connection. All the ones with auto-reply on run at the same time, one worker each.']],
       body:
         dl([
           ['Draft a reply', 'Paste a fan message and get one in-persona, funnel-aware reply. Works ' +
@@ -298,29 +311,42 @@
     }
   ];
 
-  var idx = 0, open = false, seen = {};
+  var state = { idx: 0, on: false, seen: {}, done: false };
+  var tour = { on: false, spots: [], i: 0 };
 
+  function byId(id) { return document.getElementById(id); }
   function esc(s) {
     return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
       .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
-  function byId(id) { return document.getElementById(id); }
 
+  // Progress lives in localStorage, not /api/me/setup: the console is one page
+  // per creator and the guide teaches it rather than writing anything.
   function loadSeen() {
-    try { seen = JSON.parse(localStorage.getItem('fvGuideSeen') || '{}') || {}; }
-    catch (e) { seen = {}; }
+    try {
+      var raw = JSON.parse(localStorage.getItem('fvGuide') || '{}') || {};
+      state.seen = raw.seen || {};
+      state.done = !!raw.done;
+    } catch (e) { state.seen = {}; }
   }
-  function markSeen(i) {
-    seen[STEPS[i].nav] = 1;
-    try { localStorage.setItem('fvGuideSeen', JSON.stringify(seen)); } catch (e) {}
+  function save() {
+    try {
+      localStorage.setItem('fvGuide', JSON.stringify({ seen: state.seen, done: state.done }));
+    } catch (e) {}
   }
-  function done(i) { return !!seen[STEPS[i].nav]; }
+  function markSeen(i) { state.seen[STEPS[i].nav] = 1; save(); }
+  function isDone(i) { return !!state.seen[STEPS[i].nav]; }
 
+  function progress() {
+    var n = 0;
+    STEPS.forEach(function (s, i) { if (isDone(i)) n++; });
+    return Math.round(n / STEPS.length * 100);
+  }
   function stageState(key) {
-    var ids = [];
-    STEPS.forEach(function (s, i) { if (s.stage === key) ids.push(i); });
-    if (STEPS[idx] && STEPS[idx].stage === key) return 'now';
-    return ids.every(done) ? 'done' : 'todo';
+    var mine = [];
+    STEPS.forEach(function (s, i) { if (s.stage === key) mine.push(i); });
+    if (STEPS[state.idx].stage === key) return 'now';
+    return mine.every(isDone) ? 'done' : 'todo';
   }
 
   function railHtml() {
@@ -328,15 +354,16 @@
       var stt = stageState(st.key);
       var mine = [];
       STEPS.forEach(function (s, i) { if (s.stage === st.key) mine.push(i); });
-      var openStage = STEPS[idx].stage === st.key;
-      return '<div class="fg-stage">' +
-        '<div class="fg-stage-t' + (openStage ? ' on' : '') + '">' +
-          '<span class="fg-num ' + stt + '">' + (stt === 'done' ? '✓' : (n + 1)) + '</span>' +
+      var open = STEPS[state.idx].stage === st.key;
+      return '<div class="ob-rstage">' +
+        '<div class="ob-rstage-t' + (open ? ' on' : '') + '">' +
+          '<span class="ob-rnum ' + stt + '">' + (stt === 'done' ? '✓' : (n + 1)) + '</span>' +
           esc(st.label) + '</div>' +
-        (openStage ? '<div class="fg-substeps">' + mine.map(function (i) {
-          var cls = i === idx ? 'on' : (done(i) ? 'done' : '');
-          return '<div class="fg-substep ' + cls + '" onclick="FanvueGuide.goto(' + i + ')">' +
-            '<span class="fg-dot">' + (done(i) && i !== idx ? '✓' : '') + '</span>' +
+        (open ? '<div class="ob-rsteps">' + mine.map(function (i) {
+          var cls = i === state.idx ? 'on' : (isDone(i) ? 'done' : '');
+          return '<div class="ob-rstep ' + cls + '" onclick="FanvueGuide.goto(' + i + ')">' +
+            (isDone(i) && i !== state.idx ? '<span class="ob-rcheck">✓</span>'
+                                          : '<span class="ob-rdot"></span>') +
             esc(STEPS[i].nav) + '</div>';
         }).join('') + '</div>' : '') +
       '</div>';
@@ -345,153 +372,263 @@
 
   function spotsHtml(step) {
     if (!step.spots || !step.spots.length) return '';
-    return '<div class="fg-spots">' + step.spots.map(function (sp) {
-      return '<button type="button" class="fg-spot-btn" onclick="FanvueGuide.spot(\'' + sp[0] + '\')">' +
-        '◎ Show me ' + esc(sp[1]) + '</button>';
+    return '<div class="fg-spots">' + step.spots.map(function (sp, i) {
+      return '<button type="button" class="ob-skip" onclick="FanvueGuide.tour(' + i + ')">' +
+        '<span class="ob-skip-icon" aria-hidden="true">◎</span>Show me ' + esc(sp[1]) + '</button>';
     }).join('') + '</div>';
   }
 
+  function doneHtml() {
+    return '<div class="ob-done">' +
+      '<div class="ob-seal">✓</div>' +
+      '<h2 class="ob-done-h">That\'s the whole console.</h2>' +
+      '<p class="ob-done-s">Connect her account, fill one PPV set, allowlist your own handle and ' +
+      'press Save &amp; Run. Watch a single ladder end to end in the activity log before you open ' +
+      'her up to everyone.</p>' +
+      '<div class="ob-nxt">' +
+        '<a class="ob-nxt-c" href="#" onclick="FanvueGuide.jump(\'connect-btn\');return false;">' +
+          '<div class="ob-nxt-i">💎</div><div class="ob-nxt-t">Connect Fanvue</div>' +
+          '<div class="ob-nxt-d">Authorize her account so she can read the inbox and send.</div></a>' +
+        '<a class="ob-nxt-c" href="#" onclick="FanvueGuide.jump(\'fv-auto-enabled\');return false;">' +
+          '<div class="ob-nxt-i">🤖</div><div class="ob-nxt-t">Set up auto-reply</div>' +
+          '<div class="ob-nxt-d">Pick who she answers, how human she sounds and how fast she sells.</div></a>' +
+        '<a class="ob-nxt-c" href="#" onclick="FanvueGuide.replay();return false;">' +
+          '<div class="ob-nxt-i">📘</div><div class="ob-nxt-t">Read it again</div>' +
+          '<div class="ob-nxt-d">Start the guide from the top — it is always in the header.</div></a>' +
+      '</div></div>';
+  }
+
   function render() {
-    var el = byId('fg-panel');
-    if (!el) return;
-    var step = STEPS[idx];
-    var pct = Math.round(STEPS.filter(function (s, i) { return done(i); }).length / STEPS.length * 100);
-    el.innerHTML =
-      '<div class="fg-head">' +
-        '<div><div class="fg-title">Fanvue setup guide</div>' +
-        '<div class="fg-progress"><span style="width:' + pct + '%"></span></div></div>' +
-        '<button type="button" class="fg-x" onclick="FanvueGuide.close()" aria-label="Close guide">✕</button>' +
-      '</div>' +
-      '<div class="fg-body">' +
-        '<div class="fg-rail">' + railHtml() + '</div>' +
-        '<div class="fg-card">' +
-          '<div class="fg-step-t">' + esc(step.title) + '</div>' +
-          (step.sub ? '<div class="fg-step-s">' + esc(step.sub) + '</div>' : '') +
-          spotsHtml(step) +
-          '<div class="fg-text">' + step.body + '</div>' +
+    var shell = byId('fg-shell');
+    if (!shell) return;
+    if (state.done && state.idx >= STEPS.length) {
+      shell.innerHTML = '<div class="ob-split">' + doneHtml() + '</div>';
+      return;
+    }
+    var step = STEPS[state.idx];
+    var stage = STAGES.filter(function (s) { return s.key === step.stage; })[0];
+    var inStage = STEPS.filter(function (s) { return s.stage === step.stage; });
+    var pos = inStage.indexOf(step) + 1;
+    var pct = progress();
+
+    shell.innerHTML =
+      '<div class="ob-split">' +
+        '<div class="ob-rail">' +
+          '<div class="ob-rail-h">Fanvue setup</div>' +
+          '<div class="ob-rail-p">' + pct + '% read</div>' +
+          '<div class="ob-mini"><i style="width:' + pct + '%"></i></div>' +
+          railHtml() +
         '</div>' +
-      '</div>' +
-      '<div class="fg-foot">' +
-        '<button type="button" class="fg-btn ghost" onclick="FanvueGuide.prev()"' +
-          (idx === 0 ? ' disabled' : '') + '>← Back</button>' +
-        '<span class="fg-count">Step ' + (idx + 1) + ' of ' + STEPS.length + '</span>' +
-        (idx === STEPS.length - 1
-          ? '<button type="button" class="fg-btn" onclick="FanvueGuide.close()">Done ✓</button>'
-          : '<button type="button" class="fg-btn" onclick="FanvueGuide.next()">Next →</button>') +
+        '<div class="ob-stepwrap">' +
+          '<div class="ob-crumb">Stage ' + (STAGES.indexOf(stage) + 1) + ' · Step ' + pos +
+            ' of ' + inStage.length + '</div>' +
+          '<h2 class="ob-step-h">' + esc(step.title) + '</h2>' +
+          (step.sub ? '<p class="ob-step-s">' + esc(step.sub) + '</p>' : '') +
+          '<div class="ob-card"><div class="fg-text">' + step.body + '</div>' +
+            spotsHtml(step) + '</div>' +
+          '<div class="ob-foot">' +
+            (state.idx > 0 ? '<button class="btn btn-ghost" onclick="FanvueGuide.back()">← Back</button>' : '') +
+            '<button class="btn btn-primary" onclick="FanvueGuide.next()">' +
+              (state.idx === STEPS.length - 1 ? 'Finish ✓' : 'Continue →') + '</button>' +
+            '<span class="ob-saved">Step ' + (state.idx + 1) + ' of ' + STEPS.length + '</span>' +
+            '<div class="ob-alt">' +
+              (step.spots && step.spots.length
+                ? '<button class="ob-skip" type="button" onclick="FanvueGuide.tour(0)">' +
+                  '<span class="ob-skip-icon" aria-hidden="true">◎</span>Show me around</button>' : '') +
+              '<button class="ob-skip" type="button" onclick="FanvueGuide.close()">' +
+                '<span class="ob-skip-icon" aria-hidden="true">⚙</span>Skip guide</button>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    var w = shell.querySelector('.ob-stepwrap');
+    if (w) w.scrollTop = 0;
+  }
+
+  // ---- spotlight ---------------------------------------------------------
+  // Same coach-mark as Onboarding's tour: four masks fitted around the target
+  // leave a real hole, so the control stays readable while it is explained.
+  // The wizard covers the page, so it hides for the duration and comes back
+  // when the tour ends.
+
+  function tourEls() {
+    var r = byId('fg-tour');
+    return {
+      root: r,
+      t: r.querySelector('.obt-t'), rr: r.querySelector('.obt-r'),
+      b: r.querySelector('.obt-b'), l: r.querySelector('.obt-l'),
+      ring: r.querySelector('.obt-ring'), dlg: r.querySelector('.obt-dialog')
+    };
+  }
+
+  function target(id) {
+    var t = byId(id);
+    if (!t) return null;
+    return t.closest('.field, .row-inline, .auto-toggles, #ppv-set-fields, #ppv-media-grid') || t;
+  }
+
+  function place() {
+    var sp = tour.spots[tour.i];
+    var el = tour.el;
+    var e = tourEls();
+    var pad = 8;
+    var r = el ? el.getBoundingClientRect() : null;
+    var vw = window.innerWidth, vh = window.innerHeight;
+    if (!r || !r.width) {
+      e.root.classList.add('obt-nospot');
+      e.t.style.cssText = 'position:fixed;inset:0;';
+    } else {
+      e.root.classList.remove('obt-nospot');
+      var top = Math.max(0, r.top - pad), left = Math.max(0, r.left - pad);
+      var right = Math.min(vw, r.right + pad), bot = Math.min(vh, r.bottom + pad);
+      e.t.style.cssText = 'position:fixed;top:0;left:0;right:0;height:' + top + 'px;';
+      e.b.style.cssText = 'position:fixed;top:' + bot + 'px;left:0;right:0;bottom:0;';
+      e.l.style.cssText = 'position:fixed;top:' + top + 'px;left:0;width:' + left +
+        'px;height:' + (bot - top) + 'px;';
+      e.rr.style.cssText = 'position:fixed;top:' + top + 'px;left:' + right + 'px;width:' +
+        (vw - right) + 'px;height:' + (bot - top) + 'px;';
+      e.ring.style.cssText = 'position:fixed;top:' + top + 'px;left:' + left + 'px;width:' +
+        (right - left) + 'px;height:' + (bot - top) + 'px;';
+    }
+    var dw = Math.min(380, vw - 24);
+    var below = r ? vh - r.bottom : vh;
+    var dtop = r ? (below > 260 ? r.bottom + 14 : Math.max(12, r.top - 260)) : vh / 2 - 120;
+    var dleft = r ? Math.min(Math.max(12, r.left), vw - dw - 12) : (vw - dw) / 2;
+    e.dlg.style.top = dtop + 'px';
+    e.dlg.style.left = dleft + 'px';
+    e.dlg.innerHTML =
+      '<button class="obt-close" type="button" onclick="FanvueGuide.tourEnd()" aria-label="Close">✕</button>' +
+      '<div class="obt-title">' + esc(sp[1].charAt(0).toUpperCase() + sp[1].slice(1)) + '</div>' +
+      '<div class="obt-body">' + (sp[2] || '') + '</div>' +
+      '<div class="obt-foot">' +
+        '<span class="obt-count">' + (tour.i + 1) + ' / ' + tour.spots.length + '</span>' +
+        (tour.i > 0 ? '<button class="btn btn-ghost" type="button" onclick="FanvueGuide.tourGo(' +
+          (tour.i - 1) + ')">Back</button>' : '') +
+        (tour.i < tour.spots.length - 1
+          ? '<button class="btn btn-primary" type="button" onclick="FanvueGuide.tourGo(' +
+            (tour.i + 1) + ')">Next</button>'
+          : '<button class="btn btn-primary" type="button" onclick="FanvueGuide.tourEnd()">Back to guide</button>') +
       '</div>';
   }
 
   var api = {
     open: function () {
-      open = true;
+      state.on = true;
+      if (state.idx >= STEPS.length) state.idx = STEPS.length - 1;
       byId('fg-shell').classList.add('on');
-      markSeen(idx);
+      document.body.classList.add('fg-open');
+      markSeen(state.idx);
       render();
     },
     close: function () {
-      open = false;
+      state.on = false;
+      api.tourEnd(true);
       byId('fg-shell').classList.remove('on');
+      document.body.classList.remove('fg-open');
       try { localStorage.setItem('fvGuideOpened', '1'); } catch (e) {}
     },
-    toggle: function () { open ? api.close() : api.open(); },
+    replay: function () { state.idx = 0; state.done = false; save(); render(); },
     goto: function (i) {
-      idx = Math.max(0, Math.min(STEPS.length - 1, i));
-      markSeen(idx);
+      state.idx = Math.max(0, Math.min(STEPS.length - 1, i));
+      markSeen(state.idx);
       render();
-      var c = document.querySelector('.fg-card');
-      if (c) c.scrollTop = 0;
     },
-    next: function () { api.goto(idx + 1); },
-    prev: function () { api.goto(idx - 1); },
-    // The console scrolls inside .fv-scroll, not the window, so scrollIntoView
-    // is the only reliable way to reach a field from the fixed panel.
-    spot: function (id) {
-      var t = byId(id);
-      if (!t) return;
-      var box = t.closest('.field, .form-section') || t;
-      box.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      box.classList.remove('fg-flash');
-      void box.offsetWidth;
-      box.classList.add('fg-flash');
-      setTimeout(function () { box.classList.remove('fg-flash'); }, 2400);
+    next: function () {
+      markSeen(state.idx);
+      if (state.idx === STEPS.length - 1) {
+        state.done = true;
+        state.idx = STEPS.length;
+        save();
+        render();
+        return;
+      }
+      api.goto(state.idx + 1);
+    },
+    back: function () { api.goto(state.idx - 1); },
+    // Close the wizard and land on a control — used by the finish screen.
+    jump: function (id) {
+      api.close();
+      var el = target(id);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    },
+    tour: function (i) {
+      var step = STEPS[state.idx];
+      if (!step || !step.spots || !step.spots.length) return;
+      tour.spots = step.spots;
+      tour.on = true;
+      byId('fg-shell').classList.remove('on');
+      byId('fg-tour').classList.add('on');
+      api.tourGo(i || 0);
+    },
+    tourGo: function (i) {
+      tour.i = Math.max(0, Math.min(tour.spots.length - 1, i));
+      var el = target(tour.spots[tour.i][0]);
+      tour.el = el;
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // Let the smooth scroll land before the hole is cut, or the mask sits
+        // where the element used to be.
+        setTimeout(place, 320);
+        place();
+      } else {
+        place();
+      }
+    },
+    tourEnd: function (silent) {
+      if (!tour.on) return;
+      tour.on = false;
+      byId('fg-tour').classList.remove('on');
+      if (!silent && state.on) byId('fg-shell').classList.add('on');
     }
   };
 
   function mount() {
     loadSeen();
+
     var css = document.createElement('style');
     css.textContent = [
-      '#fg-shell{position:fixed;inset:0;z-index:900;display:none;}',
-      '#fg-shell.on{display:block;}',
-      '#fg-scrim{position:absolute;inset:0;background:rgba(0,0,0,.5);}',
-      '#fg-panel{position:absolute;top:0;right:0;bottom:0;width:min(560px,100%);',
-      'background:var(--panel);border-left:1px solid var(--border);display:flex;',
-      'flex-direction:column;box-shadow:-18px 0 40px rgba(0,0,0,.35);}',
-      '.fg-head{display:flex;align-items:flex-start;gap:12px;padding:16px 18px 12px;',
-      'border-bottom:1px solid var(--border-soft);}',
-      '.fg-head>div:first-child{flex:1;}',
-      '.fg-title{font-size:.95rem;font-weight:600;color:var(--text);}',
-      '.fg-progress{margin-top:8px;height:4px;border-radius:9999px;background:var(--border);overflow:hidden;}',
-      '.fg-progress span{display:block;height:100%;background:var(--accent);transition:width .25s;}',
-      '.fg-x{background:none;border:0;color:var(--text-muted);font-size:1rem;cursor:pointer;padding:2px 4px;}',
-      '.fg-body{flex:1;min-height:0;display:flex;}',
-      '.fg-rail{width:172px;flex:none;padding:14px 10px;border-right:1px solid var(--border-soft);',
-      'overflow-y:auto;font-size:.78rem;}',
-      '.fg-stage{margin-bottom:10px;}',
-      '.fg-stage-t{display:flex;align-items:center;gap:8px;color:var(--text-3);}',
-      '.fg-stage-t.on{color:var(--text);font-weight:600;}',
-      '.fg-num{width:19px;height:19px;flex:none;border-radius:50%;display:flex;align-items:center;',
-      'justify-content:center;font-size:.66rem;background:var(--border);color:var(--text-2);}',
-      '.fg-num.now{background:var(--accent);color:#fff;}',
-      '.fg-num.done{background:#14532d;color:#4ade80;}',
-      '.fg-substeps{margin:6px 0 0 27px;display:flex;flex-direction:column;gap:2px;}',
-      '.fg-substep{display:flex;align-items:center;gap:6px;padding:3px 6px;border-radius:6px;',
-      'color:var(--text-muted);cursor:pointer;}',
-      '.fg-substep:hover{background:var(--surface);}',
-      '.fg-substep.on{background:var(--surface);color:var(--text);}',
-      '.fg-substep.done{color:var(--text-2);}',
-      '.fg-dot{width:12px;flex:none;font-size:.65rem;color:#4ade80;}',
-      '.fg-card{flex:1;min-width:0;overflow-y:auto;padding:18px 20px 24px;}',
-      '.fg-step-t{font-size:1.02rem;font-weight:600;color:var(--text);}',
-      '.fg-step-s{margin-top:5px;font-size:.8rem;color:var(--text-muted);}',
-      '.fg-spots{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;}',
-      '.fg-spot-btn{font-size:.72rem;padding:4px 10px;border-radius:9999px;cursor:pointer;',
-      'background:var(--surface);border:1px solid var(--border);color:var(--text-2);}',
-      '.fg-spot-btn:hover{color:var(--text);border-color:var(--accent);}',
-      '.fg-text{margin-top:14px;font-size:.84rem;line-height:1.62;color:var(--text-2);}',
+      /* The wizard takes the viewport, so the ob-* shell can use its normal
+         full-height flex layout exactly as it does inside the dashboard. */
+      '#fg-shell{position:fixed;inset:0;z-index:900;display:none;background:var(--bg);}',
+      '#fg-shell.on{display:flex;flex-direction:column;}',
+      '#fg-shell .ob-split{flex:1;min-height:0;}',
+      'body.fg-open{overflow:hidden;}',
+      '.fg-text{font-size:.86rem;line-height:1.62;color:var(--text-2);}',
       '.fg-text p{margin:0 0 10px;}',
-      '.fg-text code{background:var(--surface);padding:1px 5px;border-radius:5px;font-size:.78rem;}',
-      '.fg-note{border-left:2px solid var(--accent);padding-left:10px;color:var(--text-muted);}',
-      '.fg-dl{margin:0 0 10px;}',
-      '.fg-dl dt{font-weight:600;color:var(--text);margin-top:10px;}',
+      '.fg-text p:last-child{margin-bottom:0;}',
+      '.fg-text code{background:var(--surface);padding:1px 5px;border-radius:var(--r-sm);font-size:.8rem;}',
+      '.fg-note{border-left:2px solid var(--accent);padding-left:10px;margin-top:14px;color:var(--text-muted);}',
+      '.fg-dl{margin:0 0 4px;}',
+      '.fg-dl dt{font-weight:600;color:var(--text);margin-top:12px;}',
+      '.fg-dl dt:first-child{margin-top:0;}',
       '.fg-dl dd{margin:2px 0 0;color:var(--text-2);}',
-      '.fg-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;',
-      'padding:12px 18px;border-top:1px solid var(--border-soft);}',
-      '.fg-count{font-size:.75rem;color:var(--text-muted);}',
-      '.fg-btn{padding:7px 16px;border-radius:8px;border:0;cursor:pointer;font-size:.8rem;',
-      'background:var(--accent);color:#fff;}',
-      '.fg-btn.ghost{background:var(--border);color:var(--text-2);}',
-      '.fg-btn[disabled]{opacity:.45;cursor:default;}',
-      '.fg-flash{outline:2px solid var(--accent);outline-offset:4px;border-radius:8px;',
-      'animation:fg-pulse 1.2s ease-in-out 2;}',
-      '@keyframes fg-pulse{0%,100%{outline-color:var(--accent);}50%{outline-color:transparent;}}',
-      '@media (max-width:720px){.fg-rail{display:none;}}'
+      '.fg-spots{display:flex;flex-wrap:wrap;gap:8px;}',
+      '.obt-body code{background:var(--surface);padding:1px 5px;border-radius:var(--r-sm);}'
     ].join('');
     document.head.appendChild(css);
 
     var shell = document.createElement('div');
     shell.id = 'fg-shell';
-    shell.innerHTML = '<div id="fg-scrim" onclick="FanvueGuide.close()"></div><div id="fg-panel"></div>';
     document.body.appendChild(shell);
 
-    document.addEventListener('keydown', function (e) {
-      if (e.key === 'Escape' && open) api.close();
-    });
+    var t = document.createElement('div');
+    t.id = 'fg-tour';
+    t.className = 'obt-root';
+    t.innerHTML = '<div class="obt-mask obt-t"></div><div class="obt-mask obt-r"></div>' +
+      '<div class="obt-mask obt-b"></div><div class="obt-mask obt-l"></div>' +
+      '<div class="obt-ring"></div><div class="obt-dialog"></div>';
+    document.body.appendChild(t);
 
-    render();
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape') return;
+      if (tour.on) api.tourEnd();
+      else if (state.on) api.close();
+    });
+    window.addEventListener('resize', function () { if (tour.on) place(); });
+
     var first = false;
     try { first = !localStorage.getItem('fvGuideOpened'); } catch (e) {}
-    if (first) api.open();
+    if (first) api.open(); else render();
   }
 
   window.FanvueGuide = api;
