@@ -156,13 +156,13 @@
       </div>
 
       <nav class="sb-nav">
-        <a href="#" class="sb-item" id="sb-nav-personas" data-search="personas" onclick="event.preventDefault();showPersonaBrowser();">
+        <a href="#" class="sb-item" id="sb-nav-personas" data-role-area="personas" data-search="personas" onclick="event.preventDefault();showPersonaBrowser();">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
           <span>Personas</span>
           <span class="sb-badge" id="persona-count"></span>
         </a>
         <div class="sb-quick" id="sb-quick"></div>
-        <button class="btn-new" onclick="newPersona()">+ New Persona</button>
+        <button class="btn-new" data-role-area="personas" onclick="newPersona()">+ New Persona</button>
 
         <div class="sb-label">Workspace</div>
         <button type="button" class="sb-item" data-search="chat" onclick="openEmbedded('/', this)">
@@ -178,7 +178,7 @@
           <span>Profile</span>
         </button>
 
-        <button type="button" class="sb-item" data-search="connect a platform accounts" onclick="openPlatformHub(this)">
+        <button type="button" class="sb-item" data-role-area="platforms" data-search="connect a platform accounts" onclick="openPlatformHub(this)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><path d="M9 12h6M12 9v6" stroke-linecap="round"/><circle cx="12" cy="12" r="9"/></svg>
           <span>Connect a platform</span>
         </button>
@@ -190,23 +190,28 @@
             <svg class="sb-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12" aria-hidden="true"><path d="M9 6l6 6-6 6" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
           <div class="sb-children">
-            <button type="button" class="sb-item" data-search="telegram" onclick="openPlatform('telegram', this)">
+            <button type="button" class="sb-item" data-platform="telegram" data-search="telegram" onclick="openPlatform('telegram', this)">
               <svg class="sb-ic-telegram" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/></svg>
               <span>Telegram</span>
             </button>
-            <button type="button" class="sb-item" data-search="x bot twitter" onclick="openPlatform('x', this)">
+            <button type="button" class="sb-item" data-platform="x" data-search="x bot twitter" onclick="openPlatform('x', this)">
               <svg class="sb-ic-x" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M14.234 10.162 22.977 0h-2.072l-7.591 8.824L7.251 0H.258l9.168 13.343L.258 24H2.33l8.016-9.318L16.749 24h6.993zm-2.837 3.299-.929-1.329L3.076 1.56h3.182l5.965 8.532.929 1.329 7.754 11.09h-3.182z"/></svg>
               <span>𝕏 Bot</span>
             </button>
-            <button type="button" class="sb-item" data-search="fanvue" onclick="openPlatform('fanvue', this)">
+            <button type="button" class="sb-item" data-platform="fanvue" data-search="fanvue" onclick="openPlatform('fanvue', this)">
               <svg class="sb-ic-fanvue" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect width="24" height="24" rx="6" fill="#FF2D6B"/><text x="12" y="16.5" font-family="Arial, sans-serif" font-size="12" font-weight="700" fill="#fff" text-anchor="middle">F</text></svg>
               <span>Fanvue</span>
             </button>
-            <button type="button" class="sb-item" data-search="threads" onclick="openPlatform('threads', this)">
+            <button type="button" class="sb-item" data-platform="threads" data-search="threads" onclick="openPlatform('threads', this)">
               <svg class="sb-ic-threads" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M18.263 11.097c-.03-3.486-1.92-5.586-5.111-5.586-2.13 0-3.922.963-4.863 2.499l2.062 1.438c.535-.843 1.272-1.543 2.628-1.543 1.528 0 2.318.85 2.544 2.431a15 15 0 0 0-2.236-.173c-4.125 0-6.068 1.867-6.068 4.336s1.943 3.99 4.804 3.99c3.139 0 5.013-2.115 5.781-4.735.798.361 1.348 1.204 1.348 2.47 0 3.387-3.907 5.232-7.22 5.232-4.885 0-8.077-3.207-8.077-8.424 0-6.392 4.223-10.487 9.9-10.487 3.808 0 5.69 1.671 6.97 3.914l2.108-1.475C21.44 2.078 18.331 0 13.663 0 6.227 0 1.168 5.277 1.168 12.934c0 7 4.953 11.066 10.856 11.066 4.878 0 9.809-2.846 9.809-7.716 0-2.545-1.46-4.231-3.569-5.187m-6.33 4.855c-1.077 0-2.026-.512-2.026-1.453 0-1.483 1.822-1.934 3.606-1.934.678 0 1.34.045 1.927.173-.422 1.927-1.671 3.215-3.508 3.214Z"/></svg>
               <span>Threads</span>
             </button>
           </div>
+        </div>
+
+        <div class="sb-upgrade" id="sb-upgrade" hidden>
+          <div class="sb-label">Not in your plan</div>
+          <div id="sb-upgrade-items"></div>
         </div>
 
         <div class="sb-label admin-only">Developers</div>
@@ -223,6 +228,7 @@
     </div>
 
     <div class="sb-foot">
+      <div class="sb-plan" id="sb-plan" hidden></div>
       <a href="/account" class="sb-item" data-search="account billing">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2.5 2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
         <span>Account</span>
@@ -464,6 +470,7 @@ async function identifyUser() {
     CURRENT_UID = me.signed_in ? me.id : 'anon';
     window.USER_SETUP = me.setup || {};
     if (me.is_admin) document.body.classList.add('is-admin');
+    applyEntitlements(me);
     const nameEl = document.getElementById('sb-ws-name');
     const tierEl = document.getElementById('sb-ws-tier');
     const avEl   = document.getElementById('sb-ws-avatar');
@@ -476,6 +483,84 @@ async function identifyUser() {
   }
   document.body.classList.remove('auth-pending');
   lsPurgeLegacy();
+}
+
+// Which plan first includes each capability, for the "Not in your plan" list.
+const CAP_LABELS = {
+  outfit_lock:        ['Outfit locking + media tagging', 'Pro'],
+  scheduled_followups:['Scheduled follow-ups and auto-run', 'Pro'],
+  analytics:          ['Conversation and revenue analytics', 'Agency'],
+  ppv_reconcile:      ['PPV reconciliation', 'Agency'],
+};
+const PLATFORM_LABELS = { telegram: 'Telegram', x: '\uD835\uDD4F Bot', fanvue: 'Fanvue', threads: 'Threads' };
+// Seat roles that may not open the persona editor or platform settings. Mirrors
+// _ROLE_DENY in app.py, which is the half that actually enforces it.
+const ROLE_HIDDEN = { chatter: ['personas', 'platforms', 'generate', 'config'] };
+
+function upgradeRow(label, tier) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'sb-item';
+  b.dataset.search = label.toLowerCase() + ' upgrade ' + tier.toLowerCase();
+  b.onclick = () => { window.location = '/pricing'; };
+  b.innerHTML = '<span></span><span class="sb-lock"></span>';
+  b.children[0].textContent = label;
+  b.children[1].textContent = tier;
+  return b;
+}
+
+// Renders the dashboard for this plan and seat: the tier keeps only the nav it
+// pays for, and everything above it is collected into one upgrade list rather
+// than hidden, so the next tier stays legible.
+function applyEntitlements(me) {
+  const caps = me.capabilities || {};
+  const seat = me.seat_role || 'owner';
+  const tier = (me.tier || '').replace('_annual', '');
+  document.body.classList.add('role-' + seat);
+  if (tier) document.body.classList.add('tier-' + tier);
+  Object.keys(caps).forEach(k => { if (caps[k]) document.body.classList.add('cap-' + k); });
+
+  const hidden = ROLE_HIDDEN[seat] || [];
+  hidden.forEach(area => {
+    document.querySelectorAll('[data-role-area="' + area + '"]').forEach(el => el.remove());
+  });
+
+  const box = document.getElementById('sb-upgrade');
+  const list = document.getElementById('sb-upgrade-items');
+  if (!box || !list || me.is_admin) return;
+
+  // null means every platform; a list means only those.
+  const allowed = caps.platforms;
+  document.querySelectorAll('[data-platform]').forEach(el => {
+    const key = el.dataset.platform;
+    if (allowed === null || allowed === undefined || allowed.indexOf(key) !== -1) return;
+    el.remove();
+    list.appendChild(upgradeRow(PLATFORM_LABELS[key] || key, 'Pro'));
+  });
+  Object.keys(CAP_LABELS).forEach(k => {
+    if (caps[k]) return;
+    list.appendChild(upgradeRow(CAP_LABELS[k][0], CAP_LABELS[k][1]));
+  });
+  box.hidden = list.children.length === 0;
+
+  renderPlanPanel(me);
+}
+
+function renderPlanPanel(me) {
+  const el = document.getElementById('sb-plan');
+  if (!el) return;
+  const u = me.usage || {};
+  const cap = v => (v === null || v === undefined) ? '\u221e' : v;
+  const row = (label, o) => o
+    ? '<div class="sb-plan-row"><span>' + label + '</span><span>' + o.used + ' / ' + cap(o.limit) + '</span></div>'
+    : '';
+  const name = me.is_admin ? 'Admin' : ((me.tier || 'No plan').replace('_annual', ' (annual)'));
+  el.innerHTML = '<div class="sb-plan-tier"></div>'
+    + row('Personas', u.personas) + row('Seats', u.seats)
+    + row('Images this month', u.images)
+    + (me.is_admin ? '' : '<div style="margin-top:6px"><a href="/pricing">Change plan</a></div>');
+  el.querySelector('.sb-plan-tier').textContent = name.charAt(0).toUpperCase() + name.slice(1);
+  el.hidden = false;
 }
 
 // Expandable sidebar groups (Platforms, …), persisted per the usual namespaced pattern.

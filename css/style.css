@@ -1007,6 +1007,26 @@ body.page-dashboard .badge {
 body.auth-pending .admin-only,
 body:not(.is-admin) .admin-only { display: none !important; }
 
+/* Tier and seat-role gating. Cosmetic only — the server refuses the routes
+   regardless; this just stops a plan being shown controls it cannot use. */
+body.auth-pending .sb-upgrade,
+body.auth-pending .sb-plan { display: none !important; }
+.sb-upgrade .sb-item { opacity: .55; cursor: pointer; }
+.sb-upgrade .sb-lock {
+  margin-left: auto; font-size: .66rem; font-weight: 700; letter-spacing: .04em;
+  text-transform: uppercase; padding: 2px 7px; border-radius: 999px;
+  background: var(--accent-soft, rgba(255,92,56,.18)); color: var(--accent, #ff5c38);
+}
+.sb-plan {
+  margin: 0 8px 8px; padding: 10px 12px; border-radius: 10px;
+  background: var(--surface-2, rgba(255,255,255,.04));
+  border: 1px solid var(--border, #2e2e2e); font-size: .74rem; line-height: 1.55;
+}
+.sb-plan .sb-plan-tier { font-weight: 700; font-size: .8rem; margin-bottom: 4px; }
+.sb-plan .sb-plan-row { display: flex; justify-content: space-between; gap: 10px;
+  color: var(--text-muted, #8b8b8b); }
+.sb-plan a { color: var(--accent, #ff5c38); text-decoration: none; font-weight: 600; }
+
 
 
 .layout {

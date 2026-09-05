@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, send_from_directory, session, redirect, url_for, render_template_string, Response
+from flask import Flask, request, jsonify, send_from_directory, session, redirect, url_for, render_template_string, Response, after_this_request
 import os
 import sys
 import copy
@@ -358,7 +358,7 @@ def _can_edit_persona(slug, user):
         return True
     owner = _persona_owner(slug)
     if owner:
-        return owner == user['id']
+        return owner in (user['id'], user.get('workspace_id') or user['id'])
     # No DB row: free to create unless a premade repo persona holds the slug.
     return not _is_premade(slug)
 
@@ -1263,12 +1263,27 @@ def _current_user():
             u.role = 'admin'
             s.commit()
             logger.info('ADMIN BOOTSTRAPPED from ADMIN_EMAILS: %s', u.email)
-        return {'id': u.id, 'email': u.email, 'name': u.name, 'tier': u.tier,
-                'status': u.status, 'role': u.role or 'user',
-                'is_admin': (u.role or 'user') == 'admin',
+        role = u.role or 'user'
+        # A seat draws its plan from the workspace owner: only the owner is
+        # billed, so a chatter's access has to follow the owner's subscription.
+        tier, status, expires_at = u.tier, u.status, u.expires_at
+        owner_id = u.team_owner_id or ''
+        if owner_id:
+            owner = s.get(User, owner_id)
+            if owner is not None:
+                tier, status, expires_at = owner.tier, owner.status, owner.expires_at
+                if (status == 'active' and expires_at
+                        and expires_at < datetime.now(timezone.utc).replace(tzinfo=None)):
+                    status = 'expired'
+        return {'id': u.id, 'email': u.email, 'name': u.name, 'tier': tier,
+                'status': status, 'role': role,
+                'team_owner_id': owner_id,
+                'workspace_id': owner_id or u.id,
+                'seat_role': 'owner' if not owner_id else role,
+                'is_admin': role == 'admin',
                 'stripe_customer_id': u.stripe_customer_id or '',
                 'stripe_subscription_id': u.stripe_subscription_id or '',
-                'expires_at': u.expires_at.isoformat() if u.expires_at else None}
+                'expires_at': expires_at.isoformat() if expires_at else None}
     finally:
         s.close()
 
@@ -1291,8 +1306,98 @@ def _activate_plan(session_db, user_row, tier_key):
     return user_row.expires_at
 
 
+DENIED_CAPS = {'personas': 0, 'seats': 0, 'platforms': [], 'phases_max': 0,
+               'outfit_lock': False, 'scheduled_followups': False,
+               'analytics': False, 'ppv_reconcile': False,
+               'image_generations_month': 0}
+# None means "no limit" throughout, for both counts and the platform allow-list.
+UNLIMITED_CAPS = {k: (None if not isinstance(v, bool) else True)
+                  for k, v in DENIED_CAPS.items()}
+
+
+def tier_capabilities(tier_key):
+    """What a plan may do. The annual twins are generated from the same base,
+    so they must resolve to the same capabilities as their monthly sibling."""
+    key = (tier_key or '').strip()
+    base = _BASE_TIERS.get(key) or _BASE_TIERS.get(
+        key[:-len(ANNUAL_SUFFIX)] if key.endswith(ANNUAL_SUFFIX) else key)
+    if not base:
+        return dict(DENIED_CAPS)
+    return {**DENIED_CAPS, **base.get('capabilities', {})}
+
+
+def user_capabilities(user):
+    if not user:
+        return dict(DENIED_CAPS)
+    if user.get('is_admin'):
+        return dict(UNLIMITED_CAPS)
+    if user.get('status') != 'active':
+        return dict(DENIED_CAPS)
+    return tier_capabilities(user.get('tier'))
+
+
+def _workspace_id(user):
+    return (user or {}).get('workspace_id') or (user or {}).get('id') or ''
+
+
+def _cap_denied(name, user, extra=None):
+    """The 402 body for a capability the plan does not include. Names the
+    capability and the cheapest tier that has it, so the UI can offer the
+    right upgrade instead of a generic paywall bounce."""
+    have = user_capabilities(user).get(name)
+    upgrade = ''
+    for key in DEFAULT_TIER_ORDER:
+        val = tier_capabilities(key).get(name)
+        # For a graded cap the next plan up is the first one that raises the
+        # number, not the first one that has it at all.
+        if val is None or (isinstance(have, int) and not isinstance(have, bool)
+                           and isinstance(val, int) and val > have) or (
+                val is True and not have):
+            upgrade = key
+            break
+    body = {'error': 'Not included in your plan', 'capability': name,
+            'current_tier': (user or {}).get('tier') or '',
+            'upgrade_to': upgrade}
+    body.update(extra or {})
+    return jsonify(body), 402
+
+
+def _persona_count(user):
+    return len(db_list_personas(owner_id=_workspace_id(user)))
+
+
+def _persona_cap_blocked(user):
+    """The 402 response when this plan is already at its persona limit, or
+    None when there is room. Called only when a *new* slug is being created."""
+    limit = user_capabilities(user).get('personas')
+    if limit is None:
+        return None
+    used = _persona_count(user)
+    if used < int(limit):
+        return None
+    return _cap_denied('personas', user, {'used': used, 'limit': int(limit)})
+
+
+def _usage_period():
+    return datetime.now(timezone.utc).strftime('%Y-%m')
+
+
+def _image_quota(user):
+    """(used, limit) for this month. limit None means unlimited."""
+    limit = user_capabilities(user).get('image_generations_month')
+    if limit is None:
+        return 0, None
+    from db import get_usage
+    s = _db_session()
+    try:
+        return get_usage(s, _workspace_id(user), 'image_generations',
+                         _usage_period()), int(limit)
+    finally:
+        s.close()
+
+
 # Creator-facing surface: needs a logged-in customer on an active plan.
-_PAID_PAGES = ('/dashboard', '/xbot', '/fanvue', '/threads', '/telegram', '/admin')
+_PAID_PAGES =('/dashboard', '/xbot', '/fanvue', '/threads', '/telegram', '/admin')
 _PAID_API = ('/api/telegram', '/api/tguser', '/api/x', '/api/xlog', '/api/threads',
              '/api/fanvue', '/api/platforms', '/api/visitors', '/api/generate',
              '/api/backstory', '/api/config', '/api/whatsapp')
@@ -1303,6 +1408,43 @@ _OPEN_PATHS = ('/login', '/register', '/logout', '/pricing', '/billing',
                '/auth/google',
                '/account', '/api/billing', '/healthz', '/go/', '/webhooks/',
                '/dashboard/logout', '/admin/logout')
+
+
+# Longest prefix wins in every map below, so a specific path can carry a
+# stricter rule than the platform prefix it sits under.
+_CAP_PATHS = {
+    '/api/fanvue/ppv-stats': 'analytics',
+    '/api/fanvue/reconcile': 'ppv_reconcile',
+    '/api/telegram/stats': 'analytics',
+    '/api/visitors': 'analytics',
+    '/api/xlog': 'analytics',
+    '/api/fanvue/auto': 'scheduled_followups',
+    '/api/x/auto-run': 'scheduled_followups',
+    '/api/threads/auto': 'scheduled_followups',
+}
+_PLATFORM_PATHS = {
+    '/api/telegram': 'telegram', '/api/tguser': 'telegram',
+    '/api/x': 'x', '/api/xlog': 'x',
+    '/api/fanvue': 'fanvue', '/api/threads': 'threads',
+}
+_PLATFORM_PAGES = {'/telegram': 'telegram', '/xbot': 'x',
+                   '/fanvue': 'fanvue', '/threads': 'threads'}
+# Seat roles that may not reach a path at all. Owners and admins never appear
+# here; they are filtered out before the map is consulted.
+_ROLE_DENY = {
+    '/api/personas': ('chatter',),
+    '/api/platforms': ('chatter',),
+    '/api/generate': ('chatter',),
+    '/api/config': ('chatter', 'manager'),
+}
+
+
+def _longest_prefix(mapping, path):
+    best = None
+    for prefix, val in mapping.items():
+        if path.startswith(prefix) and (best is None or len(prefix) > len(best[0])):
+            best = (prefix, val)
+    return best[1] if best else None
 
 
 def _path_needs_plan(path, method):
@@ -1332,6 +1474,46 @@ def _require_paid_account():
             return jsonify({'error': 'Subscription required',
                             'status': user['status']}), 402
         return redirect('/billing')
+    return _require_entitlement(path, request.method, user, wants_json)
+
+
+def _require_entitlement(path, method, user, wants_json):
+    """Tier gates the capability, seat role gates the action, and both must
+    pass. Admins skip both, matching _user_is_active."""
+    if user.get('is_admin'):
+        return None
+
+    seat = user.get('seat_role') or 'owner'
+    if seat not in ('owner', 'admin', 'support'):
+        denied = _longest_prefix(_ROLE_DENY, path) or ()
+        if seat in denied:
+            logger.warning('ROLE DENIED user=%s role=%s path=%s',
+                           user['email'], seat, path)
+            return (jsonify({'error': 'Your role cannot do this',
+                             'role': seat}), 403) if wants_json else ('Not found', 404)
+    if seat == 'support' and method not in ('GET', 'HEAD', 'OPTIONS'):
+        return (jsonify({'error': 'Read-only role'}), 403) if wants_json else ('Not found', 404)
+
+    caps = user_capabilities(user)
+
+    # Reads on a locked platform stay open so the dashboard can render the tile
+    # greyed out with an upgrade prompt; only writes are refused.
+    allowed = caps.get('platforms')
+    if allowed is not None:
+        platform = (_longest_prefix(_PLATFORM_PATHS, path)
+                    if method not in ('GET', 'HEAD', 'OPTIONS') else None)
+        if platform is None:
+            platform = _PLATFORM_PAGES.get(path)
+        if platform and platform not in allowed:
+            if not wants_json:
+                return redirect('/pricing')
+            return _cap_denied('platform', user, {'platform': platform})
+
+    cap = _longest_prefix(_CAP_PATHS, path)
+    if cap and not caps.get(cap):
+        if not wants_json:
+            return redirect('/pricing')
+        return _cap_denied(cap, user)
     return None
 
 
@@ -1721,16 +1903,22 @@ a.email{color:#a78bfa;text-decoration:none;font-weight:500}
 .pill.active{background:#14321f;color:#86efac}
 .pill.unpaid,.pill.expired{background:#3f1515;color:#fca5a5}
 .pill.admin{background:#2e1065;color:#c4b5fd}
+.pill.role{background:#1f2937;color:#cbd5e1}
+.pill.role.admin{background:#2e1065;color:#c4b5fd}
+.pill.role.support{background:#0c4a6e;color:#bae6fd}
+.pill.role.manager{background:#1e3a2f;color:#a7f3d0}
+.pill.role.chatter{background:#3b2f14;color:#fcd34d}
 .scroll{overflow-x:auto}
 </style></head><body><div class="wrap wide" style="max-width:1100px">
 <div class="bar"><span>Admin · {{ users|length }} user{{ '' if users|length == 1 else 's' }}</span>
 <span><a href="/dashboard">Dashboard</a> &nbsp; <a href="/logout">Sign out</a></span></div>
 <div class="card"><div class="scroll"><table>
-<tr><th>Email</th><th>Name</th><th>Role</th><th>Plan</th><th>Status</th><th>Renews</th><th>Joined</th></tr>
+<tr><th>Email</th><th>Name</th><th>Role</th><th>Team</th><th>Plan</th><th>Status</th><th>Renews</th><th>Joined</th></tr>
 {% for u in users %}<tr>
 <td><a class="email" href="/admin/users/{{ u.id }}">{{ u.email }}</a></td>
 <td>{{ u.name or '—' }}</td>
-<td>{% if u.role == 'admin' %}<span class="pill admin">admin</span>{% else %}user{% endif %}</td>
+<td><span class="pill role {{ u.role }}">{{ u.role }}</span></td>
+<td>{% if u.team %}seat of {{ u.team }}{% elif u.seats %}{{ u.seats }} / {{ u.seat_cap }} seats{% else %}—{% endif %}</td>
 <td>{{ u.tier or '—' }}</td>
 <td><span class="pill {{ u.status }}">{{ u.status }}</span></td>
 <td>{{ u.expires or '—' }}</td><td>{{ u.created or '—' }}</td>
@@ -1758,8 +1946,7 @@ h2{font-size:1rem;margin-bottom:14px}
 <label>Email</label><input type="email" name="email" value="{{ u.email }}" required>
 <div class="two">
 <div><label>Role</label><select name="role">
-<option value="user" {{ 'selected' if u.role != 'admin' }}>user</option>
-<option value="admin" {{ 'selected' if u.role == 'admin' }}>admin</option>
+{% for r in roles %}<option value="{{ r }}" {{ 'selected' if u.role == r }}>{{ r }}</option>{% endfor %}
 </select></div>
 <div><label>Status</label><select name="status">
 {% for s in ['unpaid','active','expired'] %}<option value="{{ s }}" {{ 'selected' if u.status == s }}>{{ s }}</option>{% endfor %}
@@ -1771,6 +1958,8 @@ h2{font-size:1rem;margin-bottom:14px}
 </select></div>
 <div><label>Renews (YYYY-MM-DD)</label><input type="text" name="expires" value="{{ u.expires }}" placeholder="blank = none"></div>
 </div>
+<label>Team owner (email)</label><input type="email" name="team_owner" value="{{ u.team_owner }}" placeholder="blank = owns their own workspace">
+<p class="sub" style="margin:-8px 0 16px">Set this to make the account a seat inside that owner's workspace: it shares their personas and their plan, and only the owner is billed. Manager and chatter only mean anything on a seat.</p>
 <button type="submit">Save account</button></form></div>
 
 <div class="card" style="margin-top:16px"><h2>Profile</h2>
@@ -1811,6 +2000,33 @@ def _require_admin():
     return None
 
 
+ADMIN_ROLES = ('user', 'manager', 'chatter', 'support', 'admin')
+
+
+def _apply_team_owner(s, u, owner_email):
+    """Move a user into (or out of) a workspace. Returns an error string, or
+    '' on success. Seats are one level deep by design: an owner is identified
+    by having no owner of their own, so a chain would make the workspace of a
+    persona ambiguous."""
+    from db import get_user_by_email, count_team_members
+    if not owner_email:
+        u.team_owner_id = None
+        return ''
+    owner = get_user_by_email(s, owner_email)
+    if owner is None:
+        return 'No account with that owner email.'
+    if owner.id == u.id:
+        return 'An account cannot be a seat in its own workspace.'
+    if owner.team_owner_id:
+        return 'That account is itself a seat. Pick the workspace owner instead.'
+    if u.team_owner_id != owner.id:
+        cap = tier_capabilities(owner.tier).get('seats')
+        if cap is not None and count_team_members(s, owner.id) >= int(cap):
+            return f'{owner.email} is using all {cap} seats on their plan.'
+    u.team_owner_id = owner.id
+    return ''
+
+
 def _fmt_date(dt):
     return dt.strftime('%Y-%m-%d') if dt else ''
 
@@ -1823,10 +2039,25 @@ def admin_users():
     from db import list_users
     s = _db_session()
     try:
-        rows = [{'id': u.id, 'email': u.email, 'name': u.name,
-                 'role': u.role or 'user', 'tier': u.tier, 'status': u.status,
-                 'expires': _fmt_date(u.expires_at), 'created': _fmt_date(u.created_at)}
-                for u in list_users(s)]
+        users = list_users(s)
+        by_id = {u.id: u for u in users}
+        seats = {}
+        for u in users:
+            if u.team_owner_id:
+                seats[u.team_owner_id] = seats.get(u.team_owner_id, 0) + 1
+        rows = []
+        for u in users:
+            owner = by_id.get(u.team_owner_id) if u.team_owner_id else None
+            n = seats.get(u.id, 0)
+            rows.append({
+                'id': u.id, 'email': u.email, 'name': u.name,
+                'role': u.role or 'user', 'tier': u.tier, 'status': u.status,
+                'team': (owner.email if owner else
+                         (u.team_owner_id if u.team_owner_id else '')),
+                'seats': (n + 1) if n else 0,
+                'seat_cap': tier_capabilities(u.tier).get('seats') or 1,
+                'expires': _fmt_date(u.expires_at),
+                'created': _fmt_date(u.created_at)})
     finally:
         s.close()
     return render_template_string(ADMIN_USERS_HTML, users=rows)
@@ -1878,9 +2109,14 @@ def admin_user_detail(uid):
                 elif u.id == me['id'] and role != 'admin':
                     # Otherwise an admin can lock themselves out of this page.
                     error = 'You cannot remove your own admin role.'
+                elif role not in ADMIN_ROLES:
+                    error = 'Unknown role.'
                 else:
+                    error = _apply_team_owner(
+                        s, u, (request.form.get('team_owner') or '').strip().lower())
+                if not error:
                     u.email = email
-                    u.role = 'admin' if role == 'admin' else 'user'
+                    u.role = role
                     u.status = request.form.get('status', u.status)
                     u.tier = request.form.get('tier', '') or ''
                     raw = (request.form.get('expires') or '').strip()
@@ -1892,18 +2128,22 @@ def admin_user_detail(uid):
                         s.commit()
                         saved = 'Account updated.'
                         logger.info('ADMIN EDIT account by=%s target=%s role=%s '
-                                    'status=%s tier=%s', me['email'], u.email,
-                                    u.role, u.status, u.tier)
+                                    'status=%s tier=%s team=%s', me['email'],
+                                    u.email, u.role, u.status, u.tier,
+                                    u.team_owner_id or '-')
             if error:
                 s.rollback()
 
+        owner = s.get(User, u.team_owner_id) if u.team_owner_id else None
         view = {'id': u.id, 'email': u.email, 'role': u.role or 'user',
+                'team_owner': owner.email if owner else '',
                 'status': u.status, 'tier': u.tier, 'expires': _fmt_date(u.expires_at)}
         p = {f: (getattr(u, f) or '') for f in pfields}
     finally:
         s.close()
     return render_template_string(ADMIN_USER_HTML, u=view, p=p, saved=saved,
-                                  error=error, tiers=TIERS, order=DEFAULT_TIER_ORDER)
+                                  error=error, tiers=TIERS, order=DEFAULT_TIER_ORDER,
+                                  roles=ADMIN_ROLES)
 
 
 @app.route('/account/profile', methods=['GET', 'POST'])
@@ -1943,12 +2183,27 @@ def api_me():
     a signed-out caller could not already infer."""
     user = _current_user()
     if not user:
-        return jsonify({'signed_in': False, 'is_operator': _is_operator()}), 200
+        return jsonify({'signed_in': False, 'is_operator': _is_operator(),
+                        'capabilities': dict(DENIED_CAPS)}), 200
+    caps = user_capabilities(user)
+    used, limit = _image_quota(user)
+    from db import count_team_members
+    sdb = _db_session()
+    try:
+        seats = count_team_members(sdb, _workspace_id(user))
+    finally:
+        sdb.close()
     return jsonify({'signed_in': True, 'id': user['id'], 'email': user['email'],
                     'name': user.get('name', ''), 'tier': user.get('tier', ''),
                     'status': user.get('status'),
                     'is_admin': bool(user.get('is_admin')),
                     'is_operator': _is_operator(),
+                    'seat_role': user.get('seat_role') or 'owner',
+                    'capabilities': caps,
+                    'usage': {'personas': {'used': _persona_count(user),
+                                           'limit': caps.get('personas')},
+                              'seats': {'used': seats, 'limit': caps.get('seats')},
+                              'images': {'used': used, 'limit': limit}},
                     'setup': _get_setup(user['id'])}), 200
 
 
@@ -4141,14 +4396,19 @@ def api_persona_save(slug):
     if not _validate_age(config):
         return jsonify({'error': 'Age must be 18 or older'}), 400
 
+    me = _current_user()
+    if _persona_owner(slug) is None:
+        blocked = _persona_cap_blocked(me)
+        if blocked:
+            return blocked
+
     # Premade originals can be overridden in place: the edit is saved to the DB
     # and shadows the repo file (durable in Postgres).
     try:
         prompt = build_system_prompt(config)
         name = config.get('name') or slug.capitalize()
-        me = _current_user()
         db_save_persona(slug, name, config, prompt,
-                        owner_id=(me or {}).get('id'))
+                        owner_id=_workspace_id(me) or None)
     except Exception as e:
         logging.exception('persona save failed for %s', slug)
         return jsonify({'error': f'Save failed: {e}'}), 500
@@ -4177,7 +4437,7 @@ def api_persona_favorite(slug):
         prompt = build_system_prompt(config)
         name = config.get('name') or slug.capitalize()
         me = _current_user()
-        db_save_persona(slug, name, config, prompt, owner_id=(me or {}).get('id'))
+        db_save_persona(slug, name, config, prompt, owner_id=_workspace_id(me) or None)
     except Exception as e:
         logging.exception('favorite toggle failed for %s', slug)
         return jsonify({'error': f'Could not save: {e}'}), 500
@@ -4198,8 +4458,11 @@ def api_persona_copy():
     me = _current_user()
     if not me:
         return jsonify({'error': 'Sign in required'}), 401
-    if not me.get('is_admin') and _persona_owner(source) != me['id']:
+    if not me.get('is_admin') and _persona_owner(source) != _workspace_id(me):
         return jsonify({'error': 'Not found'}), 404
+    blocked = _persona_cap_blocked(me)
+    if blocked:
+        return blocked
 
     # Prefer a live config sent from the editor (carries unsaved edits); else
     # pull the source config from the DB or repo files.
@@ -4226,7 +4489,7 @@ def api_persona_copy():
         prompt = build_system_prompt(config)
         me = _current_user()
         db_save_persona(slug, new_name, config, prompt,
-                        owner_id=(me or {}).get('id'))
+                        owner_id=_workspace_id(me) or None)
     except Exception as e:
         logging.exception('persona copy failed for %s', new_name)
         return jsonify({'error': f'Copy failed: {e}'}), 500
@@ -4566,8 +4829,34 @@ def _gemini_block_reason(resp):
 def api_generate_image():
     """Generate a photorealistic image of a fictional person via Google Imagen.
     Reuse the same `appearance` text across shots to keep the same person."""
+    me = _current_user()
+    used, limit = _image_quota(me)
+    if limit is not None and used >= limit:
+        return _cap_denied('image_generations_month', me,
+                           {'used': used, 'limit': limit})
+
+    # The route has several success returns and a failed generation should not
+    # cost the creator an allowance, so the meter runs on the way out and only
+    # when an image actually came back.
+    if limit is not None:
+        @after_this_request
+        def _meter(response):
+            try:
+                if (response.get_json(silent=True) or {}).get('ok') is True:
+                    from db import bump_usage
+                    sdb = _db_session()
+                    try:
+                        bump_usage(sdb, _workspace_id(me), 'image_generations',
+                                   _usage_period())
+                    finally:
+                        sdb.close()
+            except Exception:
+                logger.exception('image usage metering failed')
+            return response
+
     if client is None:
         return jsonify({'ok': False, 'error': 'Gemini not configured.'}), 200
+
     data = request.json or {}
     cfg = data.get('config') or {}
     appearance = (data.get('appearance') or _appearance_from_config(cfg)).strip()
@@ -4847,7 +5136,7 @@ def api_platforms_overview():
     if _is_operator():
         personas = db_list_personas()
     elif user:
-        personas = db_list_personas(owner_id=user['id'])
+        personas = db_list_personas(owner_id=_workspace_id(user))
     else:
         personas = []
     tg_bots = _tg_load_bots()
@@ -5044,6 +5333,9 @@ def api_persona_outfits(slug):
 def api_persona_outfits_save(slug):
     if not re.match(r'^[a-z0-9_-]+$', slug):
         return jsonify({'error': 'Invalid slug'}), 400
+    me = _current_user()
+    if not user_capabilities(me).get('outfit_lock'):
+        return _cap_denied('outfit_lock', me)
     data = request.json or {}
     items = data.get('outfits', [])
     if not isinstance(items, list):
@@ -5185,7 +5477,9 @@ def api_persona_phases_save(slug):
     items = data.get('phases', [])
     if not isinstance(items, list) or len(items) < 2:
         return jsonify({'error': 'At least 2 phases required'}), 400
-    clean = [_clean_phase(p) for p in items[:10]]
+    cap = user_capabilities(_current_user()).get('phases_max')
+    limit = 10 if cap is None else min(10, int(cap))
+    clean = [_clean_phase(p) for p in items[:limit]]
     _set_setting(f'phases_{slug}', json.dumps(clean))
     cta = {
         'cta_url': str(data.get('cta_url', ''))[:500].strip(),
@@ -5812,6 +6106,7 @@ def api_config_get():
 
 
 @app.route('/api/config/gemini-key', methods=['POST'])
+@operator_only
 def api_config_set_key():
     """Save a Gemini API key to .env, reload the client, and verify it works."""
     data = request.json or {}

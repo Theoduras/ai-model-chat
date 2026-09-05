@@ -433,7 +433,12 @@ class User(Base):
     # Google; they have no usable password_hash.
     google_sub = Column(String(64), index=True)
     name = Column(String(120), default='')
-    role = Column(String(16), default='user')      # user | admin
+    # user | manager | chatter | support | admin. 'user' is a workspace owner;
+    # manager and chatter are seats inside someone else's workspace.
+    role = Column(String(16), default='user')
+    # NULL means this account is its own workspace. Set means it is a seat in
+    # that owner's workspace: personas, plan and billing all come from there.
+    team_owner_id = Column(String(32), index=True)
     tier = Column(String(32), default='')          # '' until a plan is chosen
     status = Column(String(16), default='unpaid')  # unpaid | active | expired
     expires_at = Column(DateTime)
@@ -485,6 +490,23 @@ class Payment(Base):
 Index('ix_payments_user_created', Payment.user_id, Payment.created_at)
 
 
+class UsageCounter(Base):
+    """Metered usage per workspace per calendar month, so a plan's allowance
+    (AI image generations) can be enforced and shown back to the creator."""
+    __tablename__ = 'usage_counters'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    workspace_id = Column(String(32), nullable=False, index=True)
+    metric = Column(String(48), nullable=False)
+    period = Column(String(7), nullable=False)     # 'YYYY-MM'
+    count = Column(Integer, default=0)
+    updated_at = Column(DateTime, default=_now)
+
+
+Index('ix_usage_unique', UsageCounter.workspace_id, UsageCounter.metric,
+      UsageCounter.period, unique=True)
+
+
 def get_user_by_email(session, email):
     return session.query(User).filter(
         User.email == (email or '').strip().lower()).first()
@@ -520,6 +542,42 @@ def get_payment_by_order(session, order_id):
 
 def list_users(session, limit=500):
     return session.query(User).order_by(User.created_at.desc()).limit(limit).all()
+
+
+def list_team_members(session, owner_id):
+    return session.query(User).filter(User.team_owner_id == owner_id).order_by(
+        User.created_at.asc()).all()
+
+
+def count_team_members(session, owner_id):
+    """Seats in use, counting the owner."""
+    return 1 + session.query(User).filter(User.team_owner_id == owner_id).count()
+
+
+def get_usage(session, workspace_id, metric, period):
+    row = session.query(UsageCounter).filter(
+        UsageCounter.workspace_id == workspace_id,
+        UsageCounter.metric == metric,
+        UsageCounter.period == period).first()
+    return int(row.count or 0) if row else 0
+
+
+def bump_usage(session, workspace_id, metric, period, by=1):
+    """Increment and return the new count. Two requests racing here can both
+    read the same row; the overcount is at most the number of in-flight calls,
+    which is cheaper than locking a row on every image generation."""
+    row = session.query(UsageCounter).filter(
+        UsageCounter.workspace_id == workspace_id,
+        UsageCounter.metric == metric,
+        UsageCounter.period == period).first()
+    if row is None:
+        row = UsageCounter(workspace_id=workspace_id, metric=metric,
+                           period=period, count=0)
+        session.add(row)
+    row.count = int(row.count or 0) + by
+    row.updated_at = _now()
+    session.commit()
+    return int(row.count)
 
 
 def _sync_columns(table_name, model):
