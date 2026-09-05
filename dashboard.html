@@ -1703,7 +1703,7 @@ function renderForm(slug, cfg) {
         <label style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px;">
           <span>Backstory</span>
           <span style="display:flex; gap:6px;">
-            <button type="button" class="btn-ai" style="background:var(--border);" id="backstory-rand-btn" onclick="randomizeBackstory()">🎲 Randomize</button>
+            <button type="button" class="btn-ai btn-ai-secondary" id="backstory-rand-btn" onclick="randomizeBackstory()">🎲 Randomize</button>
             <button type="button" class="btn-ai" onclick="openBackstoryAI()">✨ Build with AI</button>
           </span>
         </label>
@@ -1718,7 +1718,7 @@ function renderForm(slug, cfg) {
         <span style="margin-right:auto;">Photos <span style="font-weight:400; color:var(--text-muted); font-size:0.8rem;">(up to 5 — same person)</span></span>
         <span style="display:flex; gap:6px;">
           <button type="button" class="btn-ai" id="gen-face-btn" onclick="generateFirstPhoto()" title="Generate a new fictional face">✨ New face</button>
-          <button type="button" class="btn-ai" style="background:var(--border);" id="gen-more-btn" onclick="generateMorePhotos()" title="Add more shots of the same person">＋ More of her</button>
+          <button type="button" class="btn-ai btn-ai-secondary" id="gen-more-btn" onclick="generateMorePhotos()" title="Add more shots of the same person">＋ More of her</button>
           <button type="button" class="btn btn-ghost" onclick="document.getElementById('photo-file-input').click()" title="Upload your own photo">Upload</button>
           <button type="button" class="btn-section-save" style="margin-left:0;" onclick="savePhotosSection(this)">Save</button>
         </span>
@@ -1734,7 +1734,7 @@ function renderForm(slug, cfg) {
         <span style="margin-right:auto;">NSFW Photos <span style="font-weight:400; color:var(--text-muted); font-size:0.8rem;">(up to 5 — held back until the CTA)</span></span>
         <span style="display:flex; gap:6px;">
           <button type="button" class="btn-ai" id="gen-nsfw-face-btn" onclick="generateNsfwFirstPhoto()" title="Generate a new suggestive shot">✨ New face</button>
-          <button type="button" class="btn-ai" style="background:var(--border);" id="gen-nsfw-more-btn" onclick="generateNsfwMorePhotos()" title="Add more shots of the same person">＋ More of her</button>
+          <button type="button" class="btn-ai btn-ai-secondary" id="gen-nsfw-more-btn" onclick="generateNsfwMorePhotos()" title="Add more shots of the same person">＋ More of her</button>
           <button type="button" class="btn btn-ghost" onclick="document.getElementById('nsfw-photo-file-input').click()" title="Upload your own photo">Upload</button>
           <button type="button" class="btn-section-save" style="margin-left:0;" onclick="saveNsfwPhotosSection(this)">Save</button>
         </span>
@@ -1753,7 +1753,7 @@ function renderForm(slug, cfg) {
           <span>Speech Style Rules</span>
           <span style="display:flex; gap:6px;">
             <button type="button" class="btn-ai" id="speech-gen-btn" onclick="generateSpeechStyle(false)">✨ Generate</button>
-            <button type="button" class="btn-ai" style="background:var(--border);" id="speech-rand-btn" onclick="generateSpeechStyle(true)">🎲 Randomize</button>
+            <button type="button" class="btn-ai btn-ai-secondary" id="speech-rand-btn" onclick="generateSpeechStyle(true)">🎲 Randomize</button>
           </span>
         </label>
         <textarea id="f-speech" placeholder="Click ✨ Generate to auto-fill based on your persona, or write your own rules here.">${esc(cfg.speech_style || '')}</textarea>
@@ -1812,7 +1812,7 @@ function renderForm(slug, cfg) {
           <span>Topics the persona naturally returns to</span>
           <span style="display:flex; gap:6px;">
             <button type="button" class="btn-ai" id="interests-gen-btn" onclick="generateInterests(false)">✨ Generate</button>
-            <button type="button" class="btn-ai" style="background:var(--border);" id="interests-rand-btn" onclick="generateInterests(true)">🎲 Randomize</button>
+            <button type="button" class="btn-ai btn-ai-secondary" id="interests-rand-btn" onclick="generateInterests(true)">🎲 Randomize</button>
           </span>
         </label>
         <input type="text" id="f-interests" value="${esc(cfg.interests || '')}" placeholder="gaming, fitness, tattoos, music, cooking…">

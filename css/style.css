@@ -1739,6 +1739,14 @@ body.page-dashboard .conn-dot.err { background: var(--err); }
   transition: transform 0.12s, box-shadow 0.15s, filter 0.15s;
 }
 .btn-ai:hover { transform: translateY(-1px); box-shadow: 0 4px 14px #ff2d7855; filter: brightness(1.06); }
+/* Secondary AI actions (Randomize, More of her) sit next to the gradient
+   primary — flat gray read as disabled/off-brand, so tint them with the
+   same accent instead of neutral chrome. */
+.btn-ai-secondary {
+  background: var(--accent-soft); color: var(--accent);
+  border: 1px solid var(--accent-line); box-shadow: none;
+}
+.btn-ai-secondary:hover { box-shadow: none; filter: none; background: var(--accent-line); }
 .btn-ai:active { transform: translateY(0); }
 .btn-ai:disabled { opacity: 0.55; cursor: wait; filter: saturate(0.6); transform: none; box-shadow: none; }
 
