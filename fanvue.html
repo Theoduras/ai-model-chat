@@ -891,9 +891,7 @@ async function saveAuto(){
     const run=await post('/api/fanvue/auto-run',{persona:persona()});
     if(!run.ok){err(box,run.error);return;}
     const a=run.actions||{};
-    let html='<span class="hint" style="color:#4ade80;">✓ Saved &amp; running — '+(a.replies||0)+' replies</span>';
-    (run.log||[]).forEach(l=>{html+='<div class="reply-card"><div class="rep">'+esc(l)+'</div></div>';});
-    box.innerHTML=html;
+    box.innerHTML='<span class="hint" style="color:#4ade80;">✓ Saved &amp; running — '+(a.replies||0)+' replies. See the activity log for the detail.</span>';
   } else {
     box.innerHTML='<span class="hint">Auto-reply is off.</span>';
   }
@@ -918,9 +916,7 @@ async function runAutoOnce(){
   const data=await post('/api/fanvue/auto-run',{persona:persona()});
   if(!data.ok){err(box,data.error);return;}
   const a=data.actions||{};
-  let html='<span class="hint">'+(a.replies||0)+' replies, '+(a.skipped_creators||0)+' creators skipped.</span>';
-  (data.log||[]).forEach(l=>{html+='<div class="reply-card"><div class="rep">'+esc(l)+'</div></div>';});
-  box.innerHTML=html;
+  box.innerHTML='<span class="hint">'+(a.replies||0)+' replies, '+(a.skipped_creators||0)+' creators skipped. See the activity log for the detail.</span>';
 }
 function updateConn(){
   const pill=document.getElementById('conn-pill');
