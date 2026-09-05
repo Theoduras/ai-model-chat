@@ -264,6 +264,17 @@
     if (typeof renderChatPreview === 'function') renderChatPreview();
   }
 
+  // Abandon the wizard without touching progress or the form it is holding —
+  // used when the creator moves on to another persona mid-flow.
+  function teardown() {
+    Onboarding.tourEnd(true);
+    unmount();
+    var hold = stash();
+    if (hold) hold.remove();
+    document.body.classList.remove('ob-running');
+    state.on = false;
+  }
+
   // Park the current step's nodes back in the stash so they survive navigation.
   function unmount() {
     var body = byId('ob-step-body');
@@ -479,7 +490,12 @@
     // Called at the end of renderForm(). Everything the wizard shows is already
     // in the DOM at this point.
     onFormRendered: function (slug, cfg) {
-      if (state.on) { state.cfg = cfg || state.cfg; return; }
+      if (state.on) {
+        if (slug === state.slug) { state.cfg = cfg || state.cfg; return; }
+        // A different persona is being opened while the previous wizard (or its
+        // done card) is still mounted — drop it so the new one gets the guide.
+        teardown();
+      }
       if (!this.active() || this.isComplete(slug)) return;
       if (document.body.classList.contains('ps-running')) return;
       state.slug = slug;
