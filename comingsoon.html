@@ -172,6 +172,7 @@ body.kbd .site-nav{display:none}
 .pricing-head h2{font-family:'Sora';font-weight:800;font-size:38px;letter-spacing:-.02em;margin-bottom:14px}
 .pricing-head p{color:var(--text-soft);font-size:16px;line-height:1.6}
 .tier-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;max-width:1180px;margin:0 auto}
+.tier-card.soon{opacity:.85}
 .tier-card{background:var(--panel);border:1px solid var(--hair);border-radius:16px;padding:26px 22px;display:flex;flex-direction:column}
 .tier-card.featured{border-color:#ff2d78;box-shadow:0 0 0 1px #ff2d78 inset}
 .tier-card h3{font-family:'Sora';font-weight:700;font-size:19px;margin-bottom:6px}
@@ -274,14 +275,14 @@ fetch('/api/pricing')
     });
     if (d.custom) {
       var c = document.createElement('div');
-      c.className = 'tier-card';
+      c.className = 'tier-card' + (d.custom.coming_soon ? ' soon' : '');
       c.innerHTML =
         '<h3>' + d.custom.name + '</h3>' +
         '<div class="blurb">' + d.custom.blurb + '</div>' +
         '<div class="price">' + d.custom.price_label + '</div>' +
         '<ul>' + d.custom.features.map(function(f){ return '<li>' + f + '</li>'; }).join('') + '</ul>' +
         '<a href="mailto:' + d.custom.email + '?subject=Custom%20plan%20enquiry">' +
-        d.custom.cta + '</a>';
+        (d.custom.coming_soon ? 'Coming soon' : d.custom.cta) + '</a>';
       grid.appendChild(c);
     }
   })

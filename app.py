@@ -1148,8 +1148,10 @@ CUSTOM_TIER = {
                  'Custom funnel phases + integrations',
                  'Onboarding and roster migration',
                  'Named contact on our team'],
-    'cta': 'Talk to us',
+    'cta': 'Coming soon',
+    'note': 'Not open yet — email us and we will let you know.',
     'email': SUPPORT_EMAIL,
+    'coming_soon': True,
 }
 
 TIERS = {}
@@ -1418,6 +1420,9 @@ button:disabled{opacity:.6;cursor:not-allowed;transform:none;animation:none}
 .permo{font-size:.75rem;color:var(--text-muted);margin-bottom:10px}
 .ctalink{display:block;text-align:center;width:100%;background:var(--grad);background-size:300% 100%;color:#fff;border-radius:12px;padding:14px;font-size:.95rem;font-weight:600;text-decoration:none;transition:transform .1s,box-shadow .2s}
 .ctalink:hover{transform:translateY(-2px);box-shadow:0 8px 26px #ff2d7855;animation:sweep .55s linear infinite}
+.tier.soon{opacity:.85}
+.soonlink{display:block;text-align:center;margin-top:10px;font-size:.82rem;color:var(--accent);text-decoration:none}
+.soonlink:hover{text-decoration:underline}
 @media(min-width:700px){.wrap.wide{max-width:760px}.tiers{grid-template-columns:repeat(2,1fr)}}
 @media(min-width:1180px){.wrap.wide{max-width:1240px}.tiers{grid-template-columns:repeat(4,1fr)}}
 """
@@ -1513,12 +1518,14 @@ plan is active{% if user.expires_at %} until {{ user.expires_at[:10] }}{% endif 
  style="background:var(--surface);color:var(--star);margin-top:8px">Activate free (dev)</button>{% endif %}
 </div>
 </div>{% endfor %}
-<div class="tier">
+<div class="tier{{ ' soon' if custom.coming_soon }}">
 <h2>{{ custom.name }}</h2><div class="blurb">{{ custom.blurb }}</div>
 <div class="price">{{ custom.price_label }}</div>
-<div class="permo">Quoted on what you need</div>
+<div class="permo">{{ custom.note }}</div>
 <ul>{% for f in custom.features %}<li>{{ f }}</li>{% endfor %}</ul>
-<a class="ctalink" href="mailto:{{ custom.email }}?subject=Custom%20plan%20enquiry">{{ custom.cta }}</a>
+{% if custom.coming_soon %}<button disabled>{{ custom.cta }}</button>
+<a class="soonlink" href="mailto:{{ custom.email }}?subject=Custom%20plan%20enquiry">Ask us about it</a>
+{% else %}<a class="ctalink" href="mailto:{{ custom.email }}?subject=Custom%20plan%20enquiry">{{ custom.cta }}</a>{% endif %}
 </div>
 </div>
 {% if dev_mode %}<p style="text-align:center;color:#fbbf24;font-size:.8rem;margin-top:18px">
