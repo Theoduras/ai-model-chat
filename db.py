@@ -440,6 +440,13 @@ class User(Base):
     created_at = Column(DateTime, default=_now)
     last_login = Column(DateTime)
 
+    # Stripe recurring billing. The customer id outlives any one subscription,
+    # so it is kept even after a cancellation to reuse the saved card and to
+    # open the billing portal. subscription_id is cleared when Stripe reports
+    # the subscription gone; expires_at still runs to the end of the paid period.
+    stripe_customer_id = Column(String(64), index=True)
+    stripe_subscription_id = Column(String(64), index=True)
+
     # Creator profile, filled in after signup.
     brand = Column(String(120), default='')
     country = Column(String(80), default='')
@@ -490,6 +497,15 @@ def create_user(session, email, password_hash, name='', google_sub=None):
     session.add(u)
     session.flush()
     return u
+
+
+def get_user_by_stripe_customer(session, customer_id):
+    """The user a Stripe webhook is about. Renewal invoices carry the customer
+    id but not our metadata, so this is the join key for them."""
+    if not customer_id:
+        return None
+    return (session.query(User)
+            .filter(User.stripe_customer_id == customer_id).first())
 
 
 def get_user_by_google_sub(session, sub):

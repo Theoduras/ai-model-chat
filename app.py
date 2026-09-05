@@ -1111,27 +1111,69 @@ ANNUAL_SAVE_PCT = round((12 - ANNUAL_MONTHS_CHARGED) / 12 * 100)
 # No free tier — every account picks a paid plan. `days` is how long one
 # payment keeps the account active; the *_annual twin below is generated from
 # the same features so the two never drift apart.
+# `capabilities` is the machine-readable half and the one enforcement reads;
+# `features` is the marketing copy shown on the cards. They describe the same
+# plan, so a change to one wants a matching change to the other.
 _BASE_TIERS = {
     'starter': {'name': 'Starter', 'price': 49,
-                'blurb': 'One persona, Fanvue only.',
-                'features': ['1 AI persona', 'Fanvue chat', 'Photo sending',
-                             'PPV content selling', 'Funnel phases + CTA',
-                             'Email support']},
+                'blurb': 'One persona on Fanvue, fully monetised.',
+                'features': ['1 AI persona', 'Fanvue chat',
+                             'Full PPV engine — ladders, per-fan pricing, '
+                             'timed re-offers',
+                             'Up to 3 funnel phases + CTA',
+                             '15 AI image generations a month',
+                             'Unlimited photo uploads', 'Email support'],
+                'capabilities': {
+                    'personas': 1,
+                    'seats': 1,
+                    'platforms': ['fanvue'],
+                    'phases_max': 3,
+                    'outfit_lock': False,
+                    'scheduled_followups': False,
+                    'analytics': False,
+                    'ppv_reconcile': False,
+                    'image_generations_month': 15,
+                }},
     'pro': {'name': 'Pro', 'price': 149,
             'blurb': 'Five personas, every platform.',
-            'features': ['5 AI personas', 'Telegram, X and Fanvue',
-                         'Photo sending + outfit locking',
-                         'PPV selling with per-fan pricing',
-                         'Funnel phases + CTA',
-                         'Scheduled follow-ups', 'Priority support']},
+            'features': ['5 AI personas', '2 team seats',
+                         'Telegram, X, Fanvue and Threads',
+                         'Outfit locking + media tagging',
+                         'Up to 10 funnel phases with photo rates',
+                         'Scheduled follow-ups',
+                         '75 AI image generations a month',
+                         'Priority support'],
+            'capabilities': {
+                'personas': 5,
+                'seats': 2,
+                'platforms': None,
+                'phases_max': 10,
+                'outfit_lock': True,
+                'scheduled_followups': True,
+                'analytics': False,
+                'ppv_reconcile': False,
+                'image_generations_month': 75,
+            }},
     'agency': {'name': 'Agency', 'price': 349,
-               'blurb': 'Up to 15 personas for a roster.',
-               'features': ['Up to 15 AI personas', 'Every platform',
-                            'Photo sending + outfit locking',
-                            'PPV selling with per-fan pricing',
-                            'Funnel phases + CTA',
-                            'Scheduled follow-ups', 'Conversation analytics',
-                            'Dedicated support']},
+               'blurb': 'Fifteen personas and a team to run them.',
+               'features': ['15 AI personas', '6 team seats with roles',
+                            'Every platform',
+                            'Outfit locking + media tagging',
+                            'Conversation and revenue analytics',
+                            'PPV reconciliation against Fanvue earnings',
+                            '225 AI image generations a month',
+                            'Dedicated support'],
+               'capabilities': {
+                   'personas': 15,
+                   'seats': 6,
+                   'platforms': None,
+                   'phases_max': 10,
+                   'outfit_lock': True,
+                   'scheduled_followups': True,
+                   'analytics': True,
+                   'ppv_reconcile': True,
+                   'image_generations_month': 225,
+               }},
 }
 DEFAULT_TIER_ORDER = ['starter', 'pro', 'agency']
 
@@ -1224,6 +1266,8 @@ def _current_user():
         return {'id': u.id, 'email': u.email, 'name': u.name, 'tier': u.tier,
                 'status': u.status, 'role': u.role or 'user',
                 'is_admin': (u.role or 'user') == 'admin',
+                'stripe_customer_id': u.stripe_customer_id or '',
+                'stripe_subscription_id': u.stripe_subscription_id or '',
                 'expires_at': u.expires_at.isoformat() if u.expires_at else None}
     finally:
         s.close()
@@ -1484,6 +1528,7 @@ plan is active{% if user.expires_at %} until {{ user.expires_at[:10] }}{% endif 
 <button type="button" class="active" data-set-period="month">Monthly</button>
 <button type="button" data-set-period="year">Annual <span class="save">Save {{ annual_save_pct }}%</span></button>
 </div>
+<p class="permo" style="margin:2px 0 10px">Card plans renew automatically and can be cancelled any time from your account. Crypto payments are one-off — you re-pay when the plan runs out.</p>
 <div class="tiers">
 {% for key in order %}{% set t = tiers[key] %}{% set ta = tiers[key + annual_suffix] %}
 <div class="tier {{ 'featured' if key == 'pro' else '' }}">
@@ -1491,8 +1536,8 @@ plan is active{% if user.expires_at %} until {{ user.expires_at[:10] }}{% endif 
 <div data-period="month">
 <div class="price">{{ currency }}{{ t.price }}<span>/month</span></div>
 <ul>{% for f in t.features %}<li>{{ f }}</li>{% endfor %}</ul>
-{% set verb = 'Renew' if user.status == 'expired' else 'Pay' %}
-{% if stripe_enabled %}<button data-tier="{{ key }}" data-provider="stripe">{{ verb }} with card</button>{% endif %}
+{% set verb = 'Renew' if user.status == 'expired' else 'Pay' %}{% set card_verb = 'Resubscribe' if user.status == 'expired' else 'Subscribe' %}
+{% if stripe_enabled %}<button data-tier="{{ key }}" data-provider="stripe">{{ card_verb }} with card</button>{% endif %}
 {% if oxapay_enabled %}<button data-tier="{{ key }}" data-provider="oxapay"
  style="{{ 'margin-top:8px;' if stripe_enabled }}background:var(--surface);color:var(--text)">{{ verb }} with crypto</button>{% endif %}
 {% if not stripe_enabled and not oxapay_enabled %}<button disabled>Payments not configured</button>{% endif %}
@@ -1503,8 +1548,8 @@ plan is active{% if user.expires_at %} until {{ user.expires_at[:10] }}{% endif 
 <div class="price">{{ currency }}{{ ta.price }}<span>/year</span></div>
 <div class="permo">{{ currency }}{{ ta.monthly_equiv }}/mo billed annually</div>
 <ul>{% for f in t.features %}<li>{{ f }}</li>{% endfor %}</ul>
-{% set verb = 'Renew' if user.status == 'expired' else 'Pay' %}
-{% if stripe_enabled %}<button data-tier="{{ key }}{{ annual_suffix }}" data-provider="stripe">{{ verb }} with card</button>{% endif %}
+{% set verb = 'Renew' if user.status == 'expired' else 'Pay' %}{% set card_verb = 'Resubscribe' if user.status == 'expired' else 'Subscribe' %}
+{% if stripe_enabled %}<button data-tier="{{ key }}{{ annual_suffix }}" data-provider="stripe">{{ card_verb }} with card</button>{% endif %}
 {% if oxapay_enabled %}<button data-tier="{{ key }}{{ annual_suffix }}" data-provider="oxapay"
  style="{{ 'margin-top:8px;' if stripe_enabled }}background:var(--surface);color:var(--text)">{{ verb }} with crypto</button>{% endif %}
 {% if not stripe_enabled and not oxapay_enabled %}<button disabled>Payments not configured</button>{% endif %}
@@ -1591,12 +1636,38 @@ td{padding:8px 0;border-bottom:1px solid var(--border);color:var(--text-2)}
 <div class="row"><span>Status</span><span class="pill {{ user.status }}">{{ user.status }}</span></div>
 <div class="row"><span>{{ 'Renews' if user.status == 'active' else 'Expired' }}</span>
 <span>{{ user.expires_at[:10] if user.expires_at else '—' }}</span></div>
+<div class="row"><span>Billing</span><span>
+{% if user.stripe_subscription_id %}Card · renews automatically
+{% elif user.stripe_customer_id %}Card · cancelled, access runs to the date above
+{% elif user.status == 'active' %}One-off payment · no automatic renewal
+{% else %}—{% endif %}</span></div>
 {% if user.is_admin %}<a class="btn" style="background:#2e1065;color:#c4b5fd" href="/admin/users">Admin · manage users</a>{% endif %}
 <a class="btn" style="background:var(--surface);color:var(--text)" href="/account/profile">Edit profile</a>
 {% if user.status == 'active' %}<a class="btn" href="/dashboard">Go to dashboard</a>
 <a class="btn" style="background:var(--surface);color:var(--text)" href="/billing">Change plan</a>
 {% else %}<a class="btn" href="/billing">Choose a plan</a>{% endif %}
+{% if user.stripe_customer_id %}
+<a class="btn" style="background:var(--surface);color:var(--text)" href="#" id="portal">Manage billing · card, invoices, cancel</a>
+<div class="err" id="portal-err" style="display:none"></div>{% endif %}
 </div>
+{% if user.stripe_customer_id %}<script>
+document.getElementById('portal').addEventListener('click', async function(e){
+  e.preventDefault();
+  var err = document.getElementById('portal-err');
+  err.style.display = 'none';
+  this.textContent = 'Opening…';
+  try {
+    var r = await fetch('/api/billing/portal', {method: 'POST'});
+    var d = await r.json();
+    if (d.url) { location.href = d.url; return; }
+    err.textContent = d.error || 'Could not open the billing portal.';
+  } catch (_) {
+    err.textContent = 'Could not open the billing portal.';
+  }
+  err.style.display = 'block';
+  this.textContent = 'Manage billing · card, invoices, cancel';
+});
+</script>{% endif %}
 {% if payments %}<div class="card" style="margin-top:16px">
 <h1 style="font-size:1rem">Payment history</h1>
 <table><tr><th>Date</th><th>Plan</th><th>Amount</th><th>Method</th><th>Status</th></tr>
@@ -2216,42 +2287,82 @@ def _checkout_oxapay(user, tier_key, tier, order_id, base):
     return pay_url, str(track_id or '')
 
 
-def _checkout_stripe(user, tier_key, tier, order_id, base):
-    """Stripe Checkout Session, single payment (not a subscription — the plan's
-    own `days` field controls how long it lasts, same as Oxapay)."""
-    form = {
-        'mode': 'payment',
-        'success_url': f'{base}/billing/return?session_id={{CHECKOUT_SESSION_ID}}',
-        'cancel_url': f'{base}/billing',
-        'customer_email': user['email'],
-        'client_reference_id': order_id,
-        # No payment_method_types: Managed Payments rejects it and picks the
-        # methods itself, which also gets EU customers iDEAL/SEPA for free.
-        'line_items[0][quantity]': '1',
-        'line_items[0][price_data][currency]': CURRENCY.lower(),
-        'line_items[0][price_data][unit_amount]': str(int(round(tier['price'] * 100))),
-        'line_items[0][price_data][product_data][name]': f'{tier["name"]} plan',
-        'line_items[0][price_data][product_data][description]':
-            f'{tier["days"]} days of access',
-        # Managed Payments requires a tax code on an inline price.
-        'line_items[0][price_data][product_data][tax_code]': STRIPE_TAX_CODE,
-        'metadata[order_id]': order_id,
-        'metadata[tier]': tier_key,
-        'metadata[user_id]': user['id'],
-    }
+def _stripe_price_id(tier_key):
+    """A price id from the Stripe catalogue for this plan, if one is configured
+    (STRIPE_PRICE_STARTER, STRIPE_PRICE_PRO_ANNUAL, ...). Optional: with none
+    set, checkout sends an inline recurring price instead, which keeps the same
+    code working against a sandbox and a live account without an id per tier."""
+    return (os.getenv('STRIPE_PRICE_' + tier_key.upper()) or '').strip()
+
+
+def _stripe_post(path, form, timeout=20):
+    """POST to the Stripe API and return the parsed body, or None on failure."""
     req = urllib.request.Request(
-        f'{STRIPE_API}/checkout/sessions',
+        f'{STRIPE_API}{path}',
         data=urllib.parse.urlencode(form).encode(),
         headers={'Content-Type': 'application/x-www-form-urlencoded',
                  'Authorization': 'Bearer ' + _stripe_key()})
     try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            payload = json.loads(resp.read().decode())
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode())
     except url_error.HTTPError as e:
-        error_logger.error('Stripe session creation failed: %s', e.read()[:300])
-        return None, None
+        error_logger.error('Stripe POST %s failed: %s', path, e.read()[:300])
     except Exception:
-        error_logger.error('Stripe session creation failed', exc_info=True)
+        error_logger.error('Stripe POST %s failed', path, exc_info=True)
+    return None
+
+
+def _checkout_stripe(user, tier_key, tier, order_id, base):
+    """Stripe Checkout Session in subscription mode, so the plan renews itself.
+
+    The tier's own `period` ('month'/'year') is Stripe's billing interval, and
+    `days` stays the local grace window the webhook extends on each paid
+    invoice — Oxapay cannot recur, so expires_at remains the single source of
+    truth for access across both providers.
+    """
+    form = {
+        'mode': 'subscription',
+        'success_url': f'{base}/billing/return?session_id={{CHECKOUT_SESSION_ID}}',
+        'cancel_url': f'{base}/billing',
+        'client_reference_id': order_id,
+        # No payment_method_types: Managed Payments rejects it and picks the
+        # methods itself, which also gets EU customers iDEAL/SEPA for free.
+        'line_items[0][quantity]': '1',
+        'metadata[order_id]': order_id,
+        'metadata[tier]': tier_key,
+        'metadata[user_id]': user['id'],
+        # Copied onto the subscription so renewal invoices, which carry none of
+        # the session's metadata, can still be matched back to a plan.
+        'subscription_data[metadata][order_id]': order_id,
+        'subscription_data[metadata][tier]': tier_key,
+        'subscription_data[metadata][user_id]': user['id'],
+    }
+    # Reuse the saved card and keep one Stripe customer per account; without
+    # this Stripe makes a fresh customer per checkout and the billing portal
+    # would only ever show the newest subscription.
+    if user.get('stripe_customer_id'):
+        form['customer'] = user['stripe_customer_id']
+    else:
+        form['customer_email'] = user['email']
+
+    price_id = _stripe_price_id(tier_key)
+    if price_id:
+        form['line_items[0][price]'] = price_id
+    else:
+        form.update({
+            'line_items[0][price_data][currency]': CURRENCY.lower(),
+            'line_items[0][price_data][unit_amount]':
+                str(int(round(tier['price'] * 100))),
+            'line_items[0][price_data][recurring][interval]':
+                tier.get('period', 'month'),
+            'line_items[0][price_data][product_data][name]':
+                f'{tier["name"]} plan',
+            # Managed Payments requires a tax code on an inline price.
+            'line_items[0][price_data][product_data][tax_code]': STRIPE_TAX_CODE,
+        })
+
+    payload = _stripe_post('/checkout/sessions', form)
+    if not payload:
         return None, None
     pay_url, session_id = payload.get('url'), payload.get('id')
     if not pay_url:
@@ -2402,7 +2513,13 @@ def _stripe_signature_ok(raw, sig_header, secret, tolerance=300):
 @app.route('/api/billing/webhook/stripe', methods=['POST'])
 def api_billing_webhook_stripe():
     """Stripe payment callback. Signed per Stripe's own scheme (not Oxapay's),
-    so it gets a separate endpoint and secret."""
+    so it gets a separate endpoint and secret.
+
+    Three events matter, and they are deliberately not interchangeable:
+      checkout.session.completed          — first payment, links the subscription
+      invoice.paid (subscription_cycle)   — a renewal, extends the plan
+      customer.subscription.deleted       — cancelled; the paid period still runs
+    """
     raw = request.get_data()
     secret = _stripe_webhook_secret()
     sig = request.headers.get('Stripe-Signature', '')
@@ -2419,13 +2536,34 @@ def api_billing_webhook_stripe():
         return ('ok', 200)
     event_type = event.get('type') or ''
     obj = (event.get('data') or {}).get('object') or {}
+
+    if event_type in ('checkout.session.completed',
+                      'checkout.session.async_payment_succeeded'):
+        return _stripe_checkout_completed(obj)
+    if event_type == 'invoice.paid':
+        return _stripe_invoice_paid(obj)
+    if event_type == 'customer.subscription.deleted':
+        return _stripe_subscription_deleted(obj)
+    logger.info('STRIPE WEBHOOK ignored type=%s', event_type)
+    return ('ok', 200)
+
+
+def _stripe_sub_id(obj):
+    """The subscription id off an invoice or session, which Stripe sends either
+    as a bare id or as an expanded object depending on the event."""
+    sub = obj.get('subscription')
+    if isinstance(sub, dict):
+        return str(sub.get('id') or '')
+    return str(sub or '')
+
+
+def _stripe_checkout_completed(obj):
+    """First payment. Activates the plan and records the Stripe ids so renewals
+    and the billing portal can find this account again."""
     order_id = str((obj.get('metadata') or {}).get('order_id') or
                    obj.get('client_reference_id') or '')
-    logger.info('STRIPE WEBHOOK type=%s order=%s payment_status=%s',
-                event_type, order_id, obj.get('payment_status'))
-    if event_type not in ('checkout.session.completed',
-                          'checkout.session.async_payment_succeeded'):
-        return ('ok', 200)
+    logger.info('STRIPE WEBHOOK checkout.completed order=%s payment_status=%s',
+                order_id, obj.get('payment_status'))
     if not order_id:
         return ('ok', 200)
 
@@ -2436,20 +2574,116 @@ def api_billing_webhook_stripe():
         if not pay:
             logger.warning('Stripe webhook for unknown order %s', order_id)
             return ('ok', 200)
-        paid = obj.get('payment_status') == 'paid'
+        # Subscription checkouts report 'paid'; 'no_payment_required' covers a
+        # 100%-off coupon, which is still a live subscription.
+        paid = obj.get('payment_status') in ('paid', 'no_payment_required')
         pay.status = 'paid' if paid else (obj.get('payment_status') or pay.status)
         if paid and not pay.paid_at:
             now = datetime.now(timezone.utc).replace(tzinfo=None)
             pay.paid_at = now
             u = s.get(User, pay.user_id)
             if u:
+                customer = obj.get('customer')
+                if isinstance(customer, dict):
+                    customer = customer.get('id')
+                if customer:
+                    u.stripe_customer_id = str(customer)
+                sub_id = _stripe_sub_id(obj)
+                if sub_id:
+                    u.stripe_subscription_id = sub_id
                 expires = _activate_plan(s, u, pay.tier)
-                logger.info('PLAN ACTIVATED user=%s tier=%s until=%s order=%s',
-                            u.email, pay.tier, expires, order_id)
+                logger.info('PLAN ACTIVATED user=%s tier=%s until=%s order=%s sub=%s',
+                            u.email, pay.tier, expires, order_id, sub_id)
         s.commit()
     finally:
         s.close()
     return ('ok', 200)
+
+
+def _stripe_invoice_paid(obj):
+    """A renewal. Only 'subscription_cycle' invoices are handled here: the very
+    first invoice of a subscription arrives as 'subscription_create' alongside
+    checkout.session.completed, and acting on both would extend twice."""
+    if obj.get('billing_reason') != 'subscription_cycle':
+        return ('ok', 200)
+    customer = obj.get('customer')
+    if isinstance(customer, dict):
+        customer = customer.get('id')
+    customer = str(customer or '')
+    invoice_id = str(obj.get('id') or '')
+
+    from db import User, Payment, get_payment_by_order, get_user_by_stripe_customer
+    s = _db_session()
+    try:
+        # The invoice id is the order_id for renewals, so a redelivered webhook
+        # finds the existing row and extends nothing a second time.
+        if invoice_id and get_payment_by_order(s, invoice_id):
+            logger.info('STRIPE renewal %s already recorded', invoice_id)
+            return ('ok', 200)
+        u = get_user_by_stripe_customer(s, customer)
+        if not u:
+            logger.warning('Stripe renewal for unknown customer %s', customer)
+            return ('ok', 200)
+        tier_key = (obj.get('subscription_details') or {}).get('metadata', {}).get('tier') \
+            or (obj.get('metadata') or {}).get('tier') or u.tier
+        if tier_key not in TIERS:
+            logger.warning('Stripe renewal for unknown tier %s user=%s', tier_key, u.email)
+            return ('ok', 200)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        sub_id = _stripe_sub_id(obj)
+        if sub_id:
+            u.stripe_subscription_id = sub_id
+        expires = _activate_plan(s, u, tier_key)
+        s.add(Payment(user_id=u.id, tier=tier_key, provider='stripe',
+                      amount=str(TIERS[tier_key]['price']), currency=CURRENCY,
+                      order_id=invoice_id or f'stripe-{secrets.token_hex(6)}',
+                      track_id=sub_id, status='paid', paid_at=now))
+        s.commit()
+        logger.info('PLAN RENEWED user=%s tier=%s until=%s invoice=%s',
+                    u.email, tier_key, expires, invoice_id)
+    finally:
+        s.close()
+    return ('ok', 200)
+
+
+def _stripe_subscription_deleted(obj):
+    """Cancellation. Access is not revoked here — expires_at already covers the
+    period the customer paid for, and _current_user expires it when it lapses."""
+    from db import get_user_by_stripe_customer
+    customer = obj.get('customer')
+    if isinstance(customer, dict):
+        customer = customer.get('id')
+    s = _db_session()
+    try:
+        u = get_user_by_stripe_customer(s, str(customer or ''))
+        if u:
+            u.stripe_subscription_id = None
+            s.commit()
+            logger.info('STRIPE subscription cancelled user=%s access until=%s',
+                        u.email, u.expires_at)
+    finally:
+        s.close()
+    return ('ok', 200)
+
+
+@app.route('/api/billing/portal', methods=['POST'])
+def api_billing_portal():
+    """Stripe billing portal: update the card, see invoices, cancel. Stripe
+    hosts it, so cancellation never needs a route of our own."""
+    user = _current_user()
+    if not user:
+        return jsonify({'error': 'Sign in required'}), 401
+    if not _stripe_key():
+        return jsonify({'error': 'Payments are not configured yet.'}), 503
+    if not user.get('stripe_customer_id'):
+        return jsonify({'error': 'No card subscription on this account.'}), 400
+    payload = _stripe_post('/billing_portal/sessions', {
+        'customer': user['stripe_customer_id'],
+        'return_url': f'{_callback_origin()}/account',
+    })
+    if not payload or not payload.get('url'):
+        return jsonify({'error': 'Could not open the billing portal.'}), 502
+    return jsonify({'url': payload['url']})
 
 
 # ── Static pages ─────────────────────────────────────────────────────────────
