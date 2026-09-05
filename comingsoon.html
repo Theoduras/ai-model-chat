@@ -272,6 +272,18 @@ fetch('/api/pricing')
         '<a href="/register">' + (t.price === 0 ? 'Start free' : 'Get started') + '</a>';
       grid.appendChild(card);
     });
+    if (d.custom) {
+      var c = document.createElement('div');
+      c.className = 'tier-card';
+      c.innerHTML =
+        '<h3>' + d.custom.name + '</h3>' +
+        '<div class="blurb">' + d.custom.blurb + '</div>' +
+        '<div class="price">' + d.custom.price_label + '</div>' +
+        '<ul>' + d.custom.features.map(function(f){ return '<li>' + f + '</li>'; }).join('') + '</ul>' +
+        '<a href="mailto:' + d.custom.email + '?subject=Custom%20plan%20enquiry">' +
+        d.custom.cta + '</a>';
+      grid.appendChild(c);
+    }
   })
   .catch(function(){});
 </script>

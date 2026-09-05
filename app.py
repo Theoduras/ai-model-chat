@@ -1113,22 +1113,44 @@ ANNUAL_SAVE_PCT = round((12 - ANNUAL_MONTHS_CHARGED) / 12 * 100)
 # the same features so the two never drift apart.
 _BASE_TIERS = {
     'starter': {'name': 'Starter', 'price': 49,
-                'blurb': 'One persona, Telegram only.',
-                'features': ['1 AI persona', 'Telegram chat', 'Photo sending',
-                             'Funnel phases + CTA', 'Email support']},
+                'blurb': 'One persona, Fanvue only.',
+                'features': ['1 AI persona', 'Fanvue chat', 'Photo sending',
+                             'PPV content selling', 'Funnel phases + CTA',
+                             'Email support']},
     'pro': {'name': 'Pro', 'price': 149,
             'blurb': 'Five personas, every platform.',
             'features': ['5 AI personas', 'Telegram, X and Fanvue',
-                         'Photo sending + outfit locking', 'Funnel phases + CTA',
+                         'Photo sending + outfit locking',
+                         'PPV selling with per-fan pricing',
+                         'Funnel phases + CTA',
                          'Scheduled follow-ups', 'Priority support']},
     'agency': {'name': 'Agency', 'price': 349,
-               'blurb': 'Unlimited personas for a roster.',
-               'features': ['Unlimited AI personas', 'Every platform',
-                            'Photo sending + outfit locking', 'Funnel phases + CTA',
+               'blurb': 'Up to 15 personas for a roster.',
+               'features': ['Up to 15 AI personas', 'Every platform',
+                            'Photo sending + outfit locking',
+                            'PPV selling with per-fan pricing',
+                            'Funnel phases + CTA',
                             'Scheduled follow-ups', 'Conversation analytics',
                             'Dedicated support']},
 }
 DEFAULT_TIER_ORDER = ['starter', 'pro', 'agency']
+
+# Quote-only plan: never sold self-serve, so it stays out of TIERS (nothing can
+# activate or charge for it) and is rendered as a fourth card that routes to us.
+SUPPORT_EMAIL = os.getenv('SUPPORT_EMAIL', 'support@velvetfunnel.app')
+CUSTOM_TIER = {
+    'name': 'Custom',
+    'blurb': 'More than 15 personas, or something built to fit.',
+    'price_label': "Let's talk",
+    'features': ['Unlimited AI personas', 'Every platform',
+                 'Photo sending + outfit locking',
+                 'PPV selling tuned to your catalogue',
+                 'Custom funnel phases + integrations',
+                 'Onboarding and roster migration',
+                 'Named contact on our team'],
+    'cta': 'Talk to us',
+    'email': SUPPORT_EMAIL,
+}
 
 TIERS = {}
 for _key, _base in _BASE_TIERS.items():
@@ -1394,6 +1416,8 @@ button:disabled{opacity:.6;cursor:not-allowed;transform:none;animation:none}
 .ptoggle button.active{background:var(--grad);background-size:300% 100%;color:#fff}
 .ptoggle .save{font-size:.7rem;opacity:.85;margin-left:4px}
 .permo{font-size:.75rem;color:var(--text-muted);margin-bottom:10px}
+.ctalink{display:block;text-align:center;width:100%;background:var(--grad);background-size:300% 100%;color:#fff;border-radius:12px;padding:14px;font-size:.95rem;font-weight:600;text-decoration:none;transition:transform .1s,box-shadow .2s}
+.ctalink:hover{transform:translateY(-2px);box-shadow:0 8px 26px #ff2d7855;animation:sweep .55s linear infinite}
 @media(min-width:700px){.wrap.wide{max-width:760px}.tiers{grid-template-columns:repeat(2,1fr)}}
 @media(min-width:1180px){.wrap.wide{max-width:1240px}.tiers{grid-template-columns:repeat(4,1fr)}}
 """
@@ -1489,6 +1513,13 @@ plan is active{% if user.expires_at %} until {{ user.expires_at[:10] }}{% endif 
  style="background:var(--surface);color:var(--star);margin-top:8px">Activate free (dev)</button>{% endif %}
 </div>
 </div>{% endfor %}
+<div class="tier">
+<h2>{{ custom.name }}</h2><div class="blurb">{{ custom.blurb }}</div>
+<div class="price">{{ custom.price_label }}</div>
+<div class="permo">Quoted on what you need</div>
+<ul>{% for f in custom.features %}<li>{{ f }}</li>{% endfor %}</ul>
+<a class="ctalink" href="mailto:{{ custom.email }}?subject=Custom%20plan%20enquiry">{{ custom.cta }}</a>
+</div>
 </div>
 {% if dev_mode %}<p style="text-align:center;color:#fbbf24;font-size:.8rem;margin-top:18px">
 Dev mode: DEV_FAKE_PAYMENTS=1 is set, so plans can be activated without paying.
@@ -2114,7 +2145,8 @@ def logout():
 def api_pricing():
     """Public: tier cards for the homepage pricing section (and anywhere else
     that wants the same data without the full /pricing page)."""
-    return jsonify({'order': DEFAULT_TIER_ORDER, 'tiers': TIERS})
+    return jsonify({'order': DEFAULT_TIER_ORDER, 'tiers': TIERS,
+                    'custom': CUSTOM_TIER})
 
 
 @app.route('/pricing')
@@ -2128,7 +2160,8 @@ def pricing():
                                   stripe_enabled=bool(_stripe_key()),
                                   currency=CURRENCY_SYMBOL,
                                   annual_suffix=ANNUAL_SUFFIX,
-                                  annual_save_pct=ANNUAL_SAVE_PCT)
+                                  annual_save_pct=ANNUAL_SAVE_PCT,
+                                  custom=CUSTOM_TIER)
 
 
 @app.route('/billing')
@@ -2143,7 +2176,8 @@ def billing():
                                   stripe_enabled=bool(_stripe_key()),
                                   currency=CURRENCY_SYMBOL,
                                   annual_suffix=ANNUAL_SUFFIX,
-                                  annual_save_pct=ANNUAL_SAVE_PCT)
+                                  annual_save_pct=ANNUAL_SAVE_PCT,
+                                  custom=CUSTOM_TIER)
 
 
 @app.route('/billing/return')
