@@ -209,6 +209,13 @@
           </div>
         </div>
 
+        <button type="button" class="sb-item" id="sb-team" hidden data-role-area="team" data-search="team seats invite members"
+                onclick="openEmbedded('/team', this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><circle cx="9" cy="8" r="3.25"/><path d="M2.5 19a6.5 6.5 0 0 1 13 0" stroke-linecap="round"/><path d="M16.5 5.5a3.25 3.25 0 0 1 0 6.5M20 19a6 6 0 0 0-4-5.65" stroke-linecap="round"/></svg>
+          <span>Team</span>
+          <span class="sb-badge" id="sb-team-count"></span>
+        </button>
+
         <div class="sb-upgrade" id="sb-upgrade" hidden>
           <div class="sb-label">Not in your plan</div>
           <div id="sb-upgrade-items"></div>
@@ -524,6 +531,15 @@ function applyEntitlements(me) {
   hidden.forEach(area => {
     document.querySelectorAll('[data-role-area="' + area + '"]').forEach(el => el.remove());
   });
+
+  // Seats are the owner's to manage, and a one-seat plan has nothing to show.
+  const team = document.getElementById('sb-team');
+  const seats = (me.usage || {}).seats;
+  if (team && seat === 'owner' && seats && seats.limit !== 1) {
+    team.hidden = false;
+    const n = document.getElementById('sb-team-count');
+    if (n) n.textContent = seats.used + ' / ' + (seats.limit === null ? '\u221e' : seats.limit);
+  }
 
   const box = document.getElementById('sb-upgrade');
   const list = document.getElementById('sb-upgrade-items');

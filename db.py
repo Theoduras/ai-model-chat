@@ -497,6 +497,41 @@ class Payment(Base):
 Index('ix_payments_user_created', Payment.user_id, Payment.created_at)
 
 
+class Invite(Base):
+    """A pending seat in a workspace. There is no mail sender in this app, so
+    the token is handed to the owner as a link to pass on however they like —
+    which also means it is a bearer credential and expires."""
+    __tablename__ = 'invites'
+
+    token = Column(String(64), primary_key=True)
+    workspace_id = Column(String(32), nullable=False, index=True)
+    # Optional: when set, only this address may accept, so a forwarded link is
+    # useless to anyone else.
+    email = Column(String(255), default='')
+    role = Column(String(16), default='chatter')
+    created_by = Column(String(32))
+    created_at = Column(DateTime, default=_now)
+    expires_at = Column(DateTime)
+    accepted_at = Column(DateTime)
+    accepted_by = Column(String(32))
+
+
+def list_invites(session, workspace_id, pending_only=True):
+    q = session.query(Invite).filter(Invite.workspace_id == workspace_id)
+    if pending_only:
+        q = q.filter(Invite.accepted_at.is_(None))
+    return q.order_by(Invite.created_at.desc()).all()
+
+
+def count_pending_invites(session, workspace_id):
+    """Outstanding invites hold a seat each: without this two invites could be
+    sent for one free seat and both accepted."""
+    return session.query(Invite).filter(
+        Invite.workspace_id == workspace_id,
+        Invite.accepted_at.is_(None),
+        Invite.expires_at > _now()).count()
+
+
 class UsageCounter(Base):
     """Metered usage per workspace per calendar month, so a plan's allowance
     (AI image generations) can be enforced and shown back to the creator."""
@@ -635,7 +670,7 @@ def grandfather_existing_users(session):
 def init_db():
     Base.metadata.create_all(engine)
     for table, model in (('users', User), ('saved_personas', SavedPersona),
-                         ('payments', Payment)):
+                         ('payments', Payment), ('invites', Invite)):
         try:
             _sync_columns(table, model)
         except Exception:

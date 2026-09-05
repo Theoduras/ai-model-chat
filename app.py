@@ -1427,7 +1427,7 @@ _PAID_API = ('/api/telegram', '/api/tguser', '/api/x', '/api/xlog', '/api/thread
 # arrive from the platform, not a signed-in creator, and carry their own signed
 # proof of origin — a sign-in redirect would just look like a failure to Fanvue.
 _OPEN_PATHS = ('/login', '/register', '/logout', '/pricing', '/billing',
-               '/auth/google',
+               '/auth/google', '/join/',
                '/account', '/api/billing', '/healthz', '/go/', '/webhooks/',
                '/dashboard/logout', '/admin/logout')
 
@@ -1847,6 +1847,7 @@ td{padding:8px 0;border-bottom:1px solid var(--border);color:var(--text-2)}
 {% else %}—{% endif %}</span></div>
 {% if user.is_admin %}<a class="btn" style="background:#2e1065;color:#c4b5fd" href="/admin/users">Admin · manage users</a>{% endif %}
 <a class="btn" style="background:var(--surface);color:var(--text)" href="/account/profile">Edit profile</a>
+{% if seats_cap != 1 and user.seat_role == 'owner' %}<a class="btn" style="background:var(--surface);color:var(--text)" href="/team">Team &middot; {{ seats_used }} of {{ seats_cap }} seats</a>{% endif %}
 {% if user.status == 'active' %}<a class="btn" href="/dashboard">Go to dashboard</a>
 <a class="btn" style="background:var(--surface);color:var(--text)" href="/billing">Change plan</a>
 {% else %}<a class="btn" href="/billing">Choose a plan</a>{% endif %}
@@ -2176,6 +2177,262 @@ def admin_user_detail(uid):
                                   roles=ADMIN_ROLES)
 
 
+SEAT_ROLES = ('manager', 'chatter')
+INVITE_DAYS = 14
+
+TEAM_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Team</title>
+<style>""" + ACCOUNT_CSS + """
+table{width:100%;border-collapse:collapse;font-size:.88rem}
+th{text-align:left;color:var(--text-muted);font-weight:500;padding:8px 10px;border-bottom:1px solid var(--border)}
+td{padding:10px;border-bottom:1px solid var(--border);color:var(--text-2);vertical-align:middle}
+select{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:7px 10px;color:var(--text);font-size:.85rem}
+.row-actions{display:flex;gap:8px;align-items:center}
+.row-actions button{padding:7px 12px;font-size:.82rem;width:auto}
+.danger{background:#7f1d1d}.danger:hover{background:#991b1b}
+.two{display:grid;grid-template-columns:1fr auto auto;gap:0 10px;align-items:end}
+.pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:.72rem;font-weight:600;background:#1f2937;color:#cbd5e1}
+.pill.owner{background:#2e1065;color:#c4b5fd}
+.link{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:9px 11px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.78rem;word-break:break-all;margin:6px 0 10px}
+h2{font-size:1rem;margin-bottom:6px}
+</style></head><body><div class="wrap" style="max-width:780px">
+<div class="bar"><a href="/account">\u2190 My account</a><a href="/dashboard">Dashboard</a></div>
+{% if saved %}<div class="ok">{{ saved }}</div>{% endif %}
+{% if error %}<div class="err">{{ error }}</div>{% endif %}
+
+<div class="card"><h2>Team</h2>
+<p class="sub">{{ used }} of {{ cap }} seat{{ '' if cap == 1 else 's' }} on {{ tier_name }}.
+Everyone here shares your personas, and only you are billed.</p>
+<table>
+<tr><th>Member</th><th>Role</th><th></th></tr>
+{% for m in members %}<tr>
+<td>{{ m.email }}{% if m.name %}<br><span class="sub">{{ m.name }}</span>{% endif %}</td>
+{% if m.is_owner %}
+<td colspan="2"><span class="pill owner">owner \u00b7 you</span></td>
+{% else %}
+<td colspan="2"><form method="post" class="row-actions">
+<input type="hidden" name="action" value="role"><input type="hidden" name="uid" value="{{ m.id }}">
+<select name="role">{% for r in seat_roles %}<option value="{{ r }}" {{ 'selected' if m.role == r }}>{{ r }}</option>{% endfor %}</select>
+<button type="submit">Save</button>
+<button type="submit" name="action" value="remove" class="danger"
+  onclick="return confirm('Remove {{ m.email }} from your team?')">Remove</button>
+</form></td>
+{% endif %}
+</tr>{% endfor %}
+</table>
+<p class="sub" style="margin-top:14px"><strong>Manager</strong> can do everything except billing and
+managing seats. <strong>Chatter</strong> can reply to fans but cannot edit personas, connect
+platforms or generate images.</p>
+</div>
+
+{% if invites %}<div class="card" style="margin-top:16px"><h2>Pending invites</h2>
+{% for i in invites %}
+<p class="sub" style="margin-bottom:2px">{{ i.email or 'anyone with the link' }} \u00b7 {{ i.role }} \u00b7 expires {{ i.expires }}</p>
+<div class="link">{{ i.url }}</div>
+<form method="post" style="margin-bottom:18px"><input type="hidden" name="action" value="revoke">
+<input type="hidden" name="token" value="{{ i.token }}">
+<button type="submit" class="danger" style="width:auto;padding:7px 12px;font-size:.82rem">Revoke</button></form>
+{% endfor %}
+</div>{% endif %}
+
+<div class="card" style="margin-top:16px"><h2>Invite someone</h2>
+{% if seats_left > 0 %}
+<p class="sub">We do not send the email for you \u2014 you get a link to pass on. It works once and
+expires after {{ invite_days }} days.</p>
+<form method="post"><input type="hidden" name="action" value="invite">
+<div class="two">
+<div><label>Their email (optional, but it locks the link to them)</label>
+<input type="email" name="email" placeholder="them@example.com"></div>
+<div><label>Role</label><select name="role">{% for r in seat_roles %}<option value="{{ r }}">{{ r }}</option>{% endfor %}</select></div>
+<div><button type="submit" style="width:auto;padding:11px 18px">Create link</button></div>
+</div></form>
+{% else %}
+<p class="sub">{{ 'Your plan has a single seat' if cap == 1 else 'All ' ~ cap ~ ' seats on your plan are in use' }}. Remove someone,
+or <a href="/pricing">move to a bigger plan</a>.</p>
+{% endif %}
+</div>
+</div></body></html>"""
+
+JOIN_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<link rel="icon" href="/favicon.ico" sizes="any"><title>Join a team</title>
+<style>""" + ACCOUNT_CSS + """h2{font-size:1.05rem;margin-bottom:8px}</style>
+</head><body><div class="wrap"><div class="card">
+{% if error %}<h2>This invite cannot be used</h2><div class="err">{{ error }}</div>
+<a class="ghost" href="/dashboard">Go to your dashboard</a>
+{% else %}<h2>Join {{ owner }}\u2019s team</h2>
+<p class="sub">You will join as <strong>{{ role }}</strong> and share their personas. You will not be
+billed \u2014 the workspace owner pays for the plan.</p>
+<form method="post"><button type="submit">Accept invite</button></form>
+<a class="ghost" href="/dashboard">No thanks</a>{% endif %}
+</div></div></body></html>"""
+
+
+def _seat_view(s, user):
+    """Members, pending invites and the seat count for a workspace owner."""
+    from db import User, list_team_members, count_team_members, list_invites
+    wid = _workspace_id(user)
+    owner = s.get(User, wid)
+    members = [{'id': owner.id, 'email': owner.email, 'name': owner.name or '',
+                'role': 'owner', 'is_owner': True}]
+    for m in list_team_members(s, wid):
+        members.append({'id': m.id, 'email': m.email, 'name': m.name or '',
+                        'role': m.role or 'chatter', 'is_owner': False})
+    invites = [{'token': i.token, 'email': i.email or '', 'role': i.role,
+                'expires': _fmt_date(i.expires_at),
+                'url': request.url_root.rstrip('/') + '/join/' + i.token}
+               for i in list_invites(s, wid)
+               if i.expires_at and i.expires_at > datetime.now(timezone.utc).replace(tzinfo=None)]
+    cap = user_capabilities(user).get('seats')
+    used = count_team_members(s, wid)
+    return members, invites, cap, used
+
+
+@app.route('/team', methods=['GET', 'POST'])
+def team():
+    user = _current_user()
+    if not user:
+        return redirect('/login?next=/team')
+    # Seats belong to whoever pays for them, so only the owner manages them.
+    if user.get('seat_role') != 'owner' and not user.get('is_admin'):
+        return ('Not found', 404)
+    from db import User, Invite, count_pending_invites, count_team_members
+    s = _db_session()
+    try:
+        wid = _workspace_id(user)
+        saved = error = ''
+        if request.method == 'POST':
+            action = request.form.get('action', '')
+            cap = user_capabilities(user).get('seats')
+
+            if action == 'invite':
+                pending = count_pending_invites(s, wid)
+                if cap is not None and count_team_members(s, wid) + pending >= int(cap):
+                    error = ('Every seat on your plan is taken or already invited. '
+                             'Revoke an invite or remove a member first.')
+                else:
+                    role = request.form.get('role', 'chatter')
+                    inv = Invite(
+                        token=secrets.token_urlsafe(24),
+                        workspace_id=wid,
+                        email=(request.form.get('email') or '').strip().lower()[:255],
+                        role=role if role in SEAT_ROLES else 'chatter',
+                        created_by=user['id'],
+                        expires_at=(datetime.now(timezone.utc).replace(tzinfo=None)
+                                    + timedelta(days=INVITE_DAYS)))
+                    s.add(inv)
+                    s.commit()
+                    saved = 'Invite link created. Copy it below and send it to them.'
+                    logger.info('SEAT INVITE by=%s workspace=%s role=%s',
+                                user['email'], wid, inv.role)
+
+            elif action == 'revoke':
+                inv = s.get(Invite, request.form.get('token', ''))
+                if inv is not None and inv.workspace_id == wid and not inv.accepted_at:
+                    s.delete(inv)
+                    s.commit()
+                    saved = 'Invite revoked.'
+
+            elif action in ('role', 'remove'):
+                target = s.get(User, request.form.get('uid', ''))
+                if target is None or target.team_owner_id != wid:
+                    error = 'That person is not on your team.'
+                elif action == 'remove':
+                    target.team_owner_id = None
+                    target.role = 'user'
+                    s.commit()
+                    saved = f'{target.email} removed from your team.'
+                    logger.info('SEAT REMOVED by=%s target=%s', user['email'], target.email)
+                else:
+                    role = request.form.get('role', '')
+                    if role not in SEAT_ROLES:
+                        error = 'Pick a valid role.'
+                    else:
+                        target.role = role
+                        s.commit()
+                        saved = f'{target.email} is now a {role}.'
+
+        members, invites, cap, used = _seat_view(s, user)
+    finally:
+        s.close()
+    tier = TIERS.get(user.get('tier') or '') or {}
+    return render_template_string(
+        TEAM_HTML, members=members, invites=invites, saved=saved, error=error,
+        cap=('unlimited' if cap is None else cap), used=used,
+        seats_left=(1 if cap is None else int(cap) - used),
+        seat_roles=SEAT_ROLES, invite_days=INVITE_DAYS,
+        tier_name=tier.get('name') or 'your plan')
+
+
+def _invite_problem(s, inv, user):
+    """Why this invite cannot be accepted by this user, or '' if it can."""
+    from db import User, count_team_members
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    if inv is None or inv.accepted_at:
+        return 'This invite has already been used.'
+    if not inv.expires_at or inv.expires_at <= now:
+        return 'This invite has expired. Ask for a new one.'
+    if inv.email and inv.email != (user.get('email') or '').lower():
+        return f'This invite was issued to {inv.email}. Sign in as that account to accept it.'
+    if user['id'] == inv.workspace_id:
+        return 'This is your own workspace.'
+    if user.get('team_owner_id'):
+        return ('You are already a member of another team. Leave it before joining '
+                'a new one.')
+    if user.get('status') == 'active' or user.get('stripe_subscription_id'):
+        # Covers a crypto customer with paid-through time as well as a live
+        # Stripe subscription: joining a team abandons whichever they hold.
+        return ('This account has its own plan. Cancel it first, or accept the '
+                'invite with a different account \u2014 joining a team would leave you '
+                'paying for a plan you no longer use.')
+    if db_list_personas(owner_id=user['id']):
+        return ('This account has its own personas, which would become unreachable '
+                'once it joins a team. Accept with a different account.')
+    owner = s.get(User, inv.workspace_id)
+    if owner is None:
+        return 'That workspace no longer exists.'
+    cap = tier_capabilities(owner.tier).get('seats')
+    if cap is not None and count_team_members(s, inv.workspace_id) >= int(cap):
+        return 'That team has no seats left. Ask the owner to free one up.'
+    return ''
+
+
+@app.route('/join/<token>', methods=['GET', 'POST'])
+def join_team(token):
+    from db import User, Invite
+    user = _current_user()
+    if not user:
+        # Survive the round trip through sign-up, which otherwise lands on billing.
+        session['pending_invite'] = token
+        return redirect('/register?invite=1')
+    s = _db_session()
+    try:
+        inv = s.get(Invite, token)
+        problem = _invite_problem(s, inv, user)
+        if problem:
+            return render_template_string(JOIN_HTML, error=problem)
+        owner = s.get(User, inv.workspace_id)
+        if request.method == 'GET':
+            return render_template_string(JOIN_HTML, error='',
+                                          owner=owner.name or owner.email,
+                                          role=inv.role)
+        me = s.get(User, user['id'])
+        me.team_owner_id = inv.workspace_id
+        me.role = inv.role
+        inv.accepted_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        inv.accepted_by = me.id
+        s.commit()
+        logger.info('SEAT ACCEPTED user=%s workspace=%s role=%s',
+                    me.email, inv.workspace_id, inv.role)
+    finally:
+        s.close()
+    return redirect('/dashboard')
+
+
 @app.route('/account/profile', methods=['GET', 'POST'])
 def account_profile():
     user = _current_user()
@@ -2307,8 +2564,16 @@ def account():
                      'provider': p.provider or 'oxapay'} for p in rows]
     finally:
         s.close()
+    from db import count_team_members
+    s = _db_session()
+    try:
+        seats_used = count_team_members(s, _workspace_id(user))
+    finally:
+        s.close()
+    cap = user_capabilities(user).get('seats')
     return render_template_string(ACCOUNT_HTML, user=user, tiers=TIERS,
-                                  payments=payments)
+                                  payments=payments, seats_used=seats_used,
+                                  seats_cap=('unlimited' if cap is None else cap))
 
 
 # ── Sign in with Google (OAuth 2.0, credentials from Google Cloud Console) ───
@@ -2417,7 +2682,7 @@ def auth_google_callback():
         s.close()
     if nxt and active:
         return redirect(nxt)
-    return redirect('/dashboard' if active else '/billing')
+    return _post_signin_redirect(active)
 
 
 @app.route('/register', methods=['GET', 'POST'])
@@ -2450,7 +2715,17 @@ def register():
         session.permanent = True
     finally:
         s.close()
-    return redirect('/billing?signup=1')
+    pending = session.pop('pending_invite', '')
+    return redirect('/join/' + pending if pending else '/billing?signup=1')
+
+
+def _post_signin_redirect(active, nxt=''):
+    """Where a sign-in lands. A pending seat invite wins over the billing
+    bounce: an invitee has no plan of their own and never will."""
+    pending = session.pop('pending_invite', '')
+    if pending:
+        return redirect('/join/' + pending)
+    return _post_signin_redirect(active, nxt)
 
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -2487,7 +2762,7 @@ def login():
         s.close()
     if nxt.startswith('/') and active:
         return redirect(nxt)
-    return redirect('/dashboard' if active else '/billing')
+    return _post_signin_redirect(active)
 
 
 @app.route('/logout')
