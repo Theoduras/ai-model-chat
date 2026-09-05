@@ -1462,7 +1462,15 @@ _PAID_API = ('/api/telegram', '/api/tguser', '/api/x', '/api/xlog', '/api/thread
 _OPEN_PATHS = ('/login', '/register', '/logout', '/pricing', '/billing',
                '/auth/google', '/join/', '/api/workspaces',
                '/account', '/api/billing', '/healthz', '/go/', '/webhooks/',
-               '/dashboard/logout', '/admin/logout')
+               '/dashboard/logout', '/admin/logout',
+               # OAuth landing pages: the platform's auth server redirects the
+               # browser here directly, in a popup that may not even be on the
+               # app's own domain (e.g. a raw Cloud Run URL configured as the
+               # redirect_uri). They carry only a code/state to relay back to
+               # the opener via postMessage — no session to require, same as
+               # a webhook.
+               '/api/fanvue/oauth-redirect', '/api/x/oauth-redirect',
+               '/api/threads/oauth-redirect')
 
 
 # Longest prefix wins in every map below, so a specific path can carry a
