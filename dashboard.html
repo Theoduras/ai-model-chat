@@ -1244,6 +1244,10 @@ function openPlatform(platform, navEl) {
   if (document.body.classList.contains('is-admin')) {
     return openEmbedded('/' + (platform === 'x' ? 'xbot' : platform), navEl);
   }
+  // Fanvue's console (/fanvue) already scopes every call to the caller's own
+  // personas, unlike the raw xbot/threads consoles — so creators get the same
+  // page admins use instead of a "coming soon" placeholder.
+  if (platform === 'fanvue') return openEmbedded('/fanvue', navEl);
   currentSlug = null;
   document.querySelectorAll('.persona-item').forEach(el => el.classList.remove('active'));
   clearSbActive();

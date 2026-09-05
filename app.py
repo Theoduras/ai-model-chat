@@ -3485,7 +3485,11 @@ def xbot_page():
 
 @app.route('/fanvue')
 def fanvue_page():
-    if not _is_operator():
+    # Unlike xbot/threads, every /api/fanvue/* call a creator can reach is
+    # already scoped to their own personas (platform_scoped, owned_slugs), so
+    # this console is safe to open past the operator check — the entitlement
+    # before_request (subscription + platforms capability) has already run.
+    if not (_is_operator() or _current_user()):
         return redirect('/dashboard')
     return send_from_directory(BASE_DIR, 'fanvue.html')
 
@@ -8628,10 +8632,13 @@ def api_fanvue_vault_debug():
 
 
 @app.route('/api/fanvue/config')
-@operator_only
 def api_fanvue_config():
     """App-level OAuth credentials for pre-filling the connect form (never returns
-    the client secret value, only whether one is saved)."""
+    the client secret value, only whether one is saved). Not operator_only: a
+    creator's connect flow needs this same prefill to use the shared app
+    registration, and it carries nothing more sensitive than has_secret."""
+    if not _current_user():
+        return jsonify({'error': 'Unauthorized'}), 401
     a = _fanvue_app()
     return jsonify({'client_id': a['client_id'], 'redirect_uri': a['redirect_uri'],
                     'has_secret': bool(a['client_secret'])})
