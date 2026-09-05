@@ -311,8 +311,33 @@
     }
   ];
 
-  var state = { idx: 0, on: false, seen: {}, done: false };
-  var tour = { on: false, spots: [], i: 0 };
+  // The intro tour explains the frame, exactly as Onboarding's does for the
+  // persona wizard: what the step panel is, where progress lives, and what the
+  // footer does. It runs once per creator, not once per visit.
+  var TOUR = [
+    { anchor: '.ob-stepwrap', placement: 'left',
+      title: 'One thing at a time',
+      body: 'Setup is split into a handful of short steps. Each one explains a single part of the Fanvue console — read it and continue. Nothing here changes your settings; the guide only teaches the page underneath it.' },
+
+    { anchor: '.ob-card', placement: 'left',
+      title: 'What this box covers',
+      body: 'Every field, button and pill in that part of the console, in the order you meet them — including the ones that quietly break a setup if you leave them wrong.' },
+
+    { anchor: '.ob-rail', placement: 'right',
+      title: 'Where you are',
+      body: 'Four stages: connect her account, load the content she sells, set how she replies, then go live. The bar shows how much you have read, and you can jump back to any step by clicking it.' },
+
+    { anchor: '.fg-spots', placement: 'top',
+      title: 'See it on the real page',
+      body: 'These point at the live control. The guide steps aside, the console lights up the exact field being explained, and Next walks you through the rest of that step\'s controls.' },
+
+    { anchor: '.ob-foot', placement: 'top',
+      title: 'Continue, or skip ahead',
+      body: 'Continue moves on and ticks the step off. "Skip guide" hands you the console — and the Setup guide button in the header brings this back whenever you want it.' },
+  ];
+
+  var state = { idx: 0, on: false, seen: {}, done: false, toured: false };
+  var tour = { on: false, items: [], i: 0, el: null, intro: false };
 
   function byId(id) { return document.getElementById(id); }
   function esc(s) {
@@ -322,16 +347,18 @@
 
   // Progress lives in localStorage, not /api/me/setup: the console is one page
   // per creator and the guide teaches it rather than writing anything.
-  function loadSeen() {
+  function load() {
     try {
       var raw = JSON.parse(localStorage.getItem('fvGuide') || '{}') || {};
       state.seen = raw.seen || {};
       state.done = !!raw.done;
+      state.toured = !!raw.toured;
     } catch (e) { state.seen = {}; }
   }
   function save() {
     try {
-      localStorage.setItem('fvGuide', JSON.stringify({ seen: state.seen, done: state.done }));
+      localStorage.setItem('fvGuide', JSON.stringify(
+        { seen: state.seen, done: state.done, toured: state.toured }));
     } catch (e) {}
   }
   function markSeen(i) { state.seen[STEPS[i].nav] = 1; save(); }
@@ -345,7 +372,7 @@
   function stageState(key) {
     var mine = [];
     STEPS.forEach(function (s, i) { if (s.stage === key) mine.push(i); });
-    if (STEPS[state.idx].stage === key) return 'now';
+    if (STEPS[state.idx] && STEPS[state.idx].stage === key) return 'now';
     return mine.every(isDone) ? 'done' : 'todo';
   }
 
@@ -373,7 +400,7 @@
   function spotsHtml(step) {
     if (!step.spots || !step.spots.length) return '';
     return '<div class="fg-spots">' + step.spots.map(function (sp, i) {
-      return '<button type="button" class="ob-skip" onclick="FanvueGuide.tour(' + i + ')">' +
+      return '<button type="button" class="ob-skip" onclick="FanvueGuide.spot(' + i + ')">' +
         '<span class="ob-skip-icon" aria-hidden="true">◎</span>Show me ' + esc(sp[1]) + '</button>';
     }).join('') + '</div>';
   }
@@ -432,9 +459,8 @@
               (state.idx === STEPS.length - 1 ? 'Finish ✓' : 'Continue →') + '</button>' +
             '<span class="ob-saved">Step ' + (state.idx + 1) + ' of ' + STEPS.length + '</span>' +
             '<div class="ob-alt">' +
-              (step.spots && step.spots.length
-                ? '<button class="ob-skip" type="button" onclick="FanvueGuide.tour(0)">' +
-                  '<span class="ob-skip-icon" aria-hidden="true">◎</span>Show me around</button>' : '') +
+              '<button class="ob-skip" type="button" onclick="FanvueGuide.tourReplay()">' +
+                '<span class="ob-skip-icon" aria-hidden="true">◎</span>Show me around</button>' +
               '<button class="ob-skip" type="button" onclick="FanvueGuide.close()">' +
                 '<span class="ob-skip-icon" aria-hidden="true">⚙</span>Skip guide</button>' +
             '</div>' +
@@ -445,35 +471,34 @@
     if (w) w.scrollTop = 0;
   }
 
-  // ---- spotlight ---------------------------------------------------------
-  // Same coach-mark as Onboarding's tour: four masks fitted around the target
-  // leave a real hole, so the control stays readable while it is explained.
-  // The wizard covers the page, so it hides for the duration and comes back
-  // when the tour ends.
+  // ---- coach-marks -------------------------------------------------------
+  // Same overlay as Onboarding's tour: four masks fitted around the anchor
+  // leave a real hole, so what is being explained stays readable and clickable.
+  // Two flavours share it — the intro tour, which points at the guide's own
+  // frame, and the per-step spotlights, which point at controls on the console
+  // behind it (so the guide hides for the duration and comes back after).
 
   function tourEls() {
     var r = byId('fg-tour');
-    return {
-      root: r,
+    return { root: r,
       t: r.querySelector('.obt-t'), rr: r.querySelector('.obt-r'),
       b: r.querySelector('.obt-b'), l: r.querySelector('.obt-l'),
-      ring: r.querySelector('.obt-ring'), dlg: r.querySelector('.obt-dialog')
-    };
+      ring: r.querySelector('.obt-ring'), dlg: r.querySelector('.obt-dialog') };
   }
 
-  function target(id) {
-    var t = byId(id);
+  function anchorEl(item) {
+    if (item.anchor) return document.querySelector(item.anchor);
+    var t = byId(item.id);
     if (!t) return null;
     return t.closest('.field, .row-inline, .auto-toggles, #ppv-set-fields, #ppv-media-grid') || t;
   }
 
   function place() {
-    var sp = tour.spots[tour.i];
-    var el = tour.el;
+    var item = tour.items[tour.i];
     var e = tourEls();
-    var pad = 8;
+    var el = tour.el;
+    var pad = 8, vw = window.innerWidth, vh = window.innerHeight;
     var r = el ? el.getBoundingClientRect() : null;
-    var vw = window.innerWidth, vh = window.innerHeight;
     if (!r || !r.width) {
       e.root.classList.add('obt-nospot');
       e.t.style.cssText = 'position:fixed;inset:0;';
@@ -490,35 +515,73 @@
       e.ring.style.cssText = 'position:fixed;top:' + top + 'px;left:' + left + 'px;width:' +
         (right - left) + 'px;height:' + (bot - top) + 'px;';
     }
-    var dw = Math.min(380, vw - 24);
-    var below = r ? vh - r.bottom : vh;
-    var dtop = r ? (below > 260 ? r.bottom + 14 : Math.max(12, r.top - 260)) : vh / 2 - 120;
-    var dleft = r ? Math.min(Math.max(12, r.left), vw - dw - 12) : (vw - dw) / 2;
-    e.dlg.style.top = dtop + 'px';
-    e.dlg.style.left = dleft + 'px';
+
     e.dlg.innerHTML =
       '<button class="obt-close" type="button" onclick="FanvueGuide.tourEnd()" aria-label="Close">✕</button>' +
-      '<div class="obt-title">' + esc(sp[1].charAt(0).toUpperCase() + sp[1].slice(1)) + '</div>' +
-      '<div class="obt-body">' + (sp[2] || '') + '</div>' +
+      '<div class="obt-title">' + esc(item.title) + '</div>' +
+      '<div class="obt-body">' + item.body + '</div>' +
       '<div class="obt-foot">' +
-        '<span class="obt-count">' + (tour.i + 1) + ' / ' + tour.spots.length + '</span>' +
+        '<span class="obt-count">' + (tour.i + 1) + ' of ' + tour.items.length + '</span>' +
         (tour.i > 0 ? '<button class="btn btn-ghost" type="button" onclick="FanvueGuide.tourGo(' +
           (tour.i - 1) + ')">Back</button>' : '') +
-        (tour.i < tour.spots.length - 1
-          ? '<button class="btn btn-primary" type="button" onclick="FanvueGuide.tourGo(' +
-            (tour.i + 1) + ')">Next</button>'
-          : '<button class="btn btn-primary" type="button" onclick="FanvueGuide.tourEnd()">Back to guide</button>') +
+        '<button class="btn btn-primary" type="button" onclick="FanvueGuide.' +
+          (tour.i < tour.items.length - 1 ? 'tourGo(' + (tour.i + 1) + ')">Next' : 'tourEnd()">Got it') +
+        '</button>' +
       '</div>';
+
+    // Measure the dialog before placing it: the copy varies enough that a
+    // fixed height would push it off-screen on the short steps.
+    var dw = e.dlg.offsetWidth || Math.min(380, vw - 24);
+    var dh = e.dlg.offsetHeight || 200;
+    var gap = 14, top2, left2;
+    var pl = item.placement || 'bottom';
+    if (!r || !r.width) { pl = 'center'; }
+    if (pl === 'right' && r.right + gap + dw > vw) pl = r.left - gap - dw > 0 ? 'left' : 'bottom';
+    if (pl === 'top' && r.top - gap - dh < 0) pl = 'bottom';
+    if (pl === 'bottom' && r && r.bottom + gap + dh > vh) pl = r.top - gap - dh > 0 ? 'top' : 'bottom';
+
+    if (pl === 'center') { top2 = (vh - dh) / 2; left2 = (vw - dw) / 2; }
+    else if (pl === 'right') { top2 = r.top; left2 = r.right + gap; }
+    else if (pl === 'left') { top2 = r.top; left2 = r.left - gap - dw; }
+    else if (pl === 'top') { top2 = r.top - gap - dh; left2 = r.left; }
+    else { top2 = r.bottom + gap; left2 = r.left; }
+    e.dlg.style.top = Math.max(12, Math.min(top2, vh - dh - 12)) + 'px';
+    e.dlg.style.left = Math.max(12, Math.min(left2, vw - dw - 12)) + 'px';
+  }
+
+  function startTour(items, intro) {
+    // A coach-mark with no anchor on screen would dim the whole page and point
+    // at nothing — the spots line, for one, only exists on steps that have one.
+    items = items.filter(function (it) {
+      return it.anchor ? !!document.querySelector(it.anchor) : !!byId(it.id);
+    });
+    if (!items.length) return;
+    tour.items = items;
+    tour.intro = !!intro;
+    tour.on = true;
+    // A spotlight points at the console, which body.fg-open hides — so step
+    // the whole guide aside, frame included, for the duration.
+    if (!intro) {
+      byId('fg-shell').classList.remove('on');
+      document.body.classList.remove('fg-open');
+    }
+    byId('fg-tour').classList.add('on');
+    api.tourGo(0);
   }
 
   var api = {
     open: function () {
       state.on = true;
       if (state.idx >= STEPS.length) state.idx = STEPS.length - 1;
-      byId('fg-shell').classList.add('on');
       document.body.classList.add('fg-open');
+      byId('fg-shell').classList.add('on');
       markSeen(state.idx);
       render();
+      if (!state.toured) {
+        state.toured = true;
+        save();
+        setTimeout(function () { startTour(TOUR, true); }, 260);
+      }
     },
     close: function () {
       state.on = false;
@@ -548,51 +611,53 @@
     // Close the wizard and land on a control — used by the finish screen.
     jump: function (id) {
       api.close();
-      var el = target(id);
+      var el = anchorEl({ id: id });
       if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     },
-    tour: function (i) {
+    tourReplay: function () { startTour(TOUR, true); },
+    spot: function (i) {
       var step = STEPS[state.idx];
       if (!step || !step.spots || !step.spots.length) return;
-      tour.spots = step.spots;
-      tour.on = true;
-      byId('fg-shell').classList.remove('on');
-      byId('fg-tour').classList.add('on');
+      startTour(step.spots.map(function (sp) {
+        return { id: sp[0], title: sp[1].charAt(0).toUpperCase() + sp[1].slice(1),
+                 body: sp[2] || '', placement: 'bottom' };
+      }), false);
       api.tourGo(i || 0);
     },
     tourGo: function (i) {
-      tour.i = Math.max(0, Math.min(tour.spots.length - 1, i));
-      var el = target(tour.spots[tour.i][0]);
-      tour.el = el;
-      if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      tour.i = Math.max(0, Math.min(tour.items.length - 1, i));
+      tour.el = anchorEl(tour.items[tour.i]);
+      if (tour.el && !tour.intro) {
+        tour.el.scrollIntoView({ behavior: 'smooth', block: 'center' });
         // Let the smooth scroll land before the hole is cut, or the mask sits
         // where the element used to be.
         setTimeout(place, 320);
-        place();
-      } else {
-        place();
       }
+      place();
     },
     tourEnd: function (silent) {
       if (!tour.on) return;
       tour.on = false;
       byId('fg-tour').classList.remove('on');
-      if (!silent && state.on) byId('fg-shell').classList.add('on');
+      if (!silent && state.on) {
+        document.body.classList.add('fg-open');
+        byId('fg-shell').classList.add('on');
+      }
     }
   };
 
   function mount() {
-    loadSeen();
+    load();
 
     var css = document.createElement('style');
     css.textContent = [
-      /* The wizard takes the viewport, so the ob-* shell can use its normal
-         full-height flex layout exactly as it does inside the dashboard. */
-      '#fg-shell{position:fixed;inset:0;z-index:900;display:none;background:var(--bg);}',
+      // The guide takes the console's slot under the page header, not the whole
+      // viewport — same as the persona wizard, which leaves the dashboard chrome
+      // standing around it.
+      '#fg-shell{flex:1;min-height:0;display:none;background:var(--bg);}',
       '#fg-shell.on{display:flex;flex-direction:column;}',
+      'body.fg-open .fv-scroll{display:none;}',
       '#fg-shell .ob-split{flex:1;min-height:0;}',
-      'body.fg-open{overflow:hidden;}',
       '.fg-text{font-size:.86rem;line-height:1.62;color:var(--text-2);}',
       '.fg-text p{margin:0 0 10px;}',
       '.fg-text p:last-child{margin-bottom:0;}',
@@ -609,7 +674,9 @@
 
     var shell = document.createElement('div');
     shell.id = 'fg-shell';
-    document.body.appendChild(shell);
+    var scroll = document.querySelector('.fv-scroll');
+    if (scroll && scroll.parentNode) scroll.parentNode.insertBefore(shell, scroll.nextSibling);
+    else document.body.appendChild(shell);
 
     var t = document.createElement('div');
     t.id = 'fg-tour';
@@ -628,7 +695,7 @@
 
     var first = false;
     try { first = !localStorage.getItem('fvGuideOpened'); } catch (e) {}
-    if (first) api.open(); else render();
+    if (first) api.open();
   }
 
   window.FanvueGuide = api;
