@@ -41,7 +41,7 @@ Deploy the app straight from GitHub using only your browser. ~10 minutes.
    | Name | Value |
    |---|---|
    | `GEMINI_API_KEY` | your Gemini key |
-   | `API_KEYS` | any secret string you invent (for your app's API calls) |
+   | `API_KEYS` | a long random string, only if your own app calls `/api/v1/chat`. Leave it out otherwise: unset closes that endpoint, which is what you want when nothing uses it |
    | `ADMIN_PASSWORD` | a password to lock the `/dashboard` builder |
 
    *(For stronger security you can store these as Secrets instead of plain

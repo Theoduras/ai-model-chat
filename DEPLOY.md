@@ -29,8 +29,15 @@ gcloud run deploy ai-model-chat \
   --source . \
   --region europe-west4 \
   --allow-unauthenticated \
-  --set-env-vars "GEMINI_API_KEY=YOUR_KEY,ADMIN_PASSWORD=YOUR_PASSWORD"
+  --update-env-vars "GEMINI_API_KEY=YOUR_KEY,ADMIN_PASSWORD=YOUR_PASSWORD"
 ```
+
+> **Always `--update-env-vars`, never `--set-env-vars`.** `--set-` replaces the
+> service's whole environment with what you typed, so a command naming one
+> variable silently drops `DATABASE_URL`, the Stripe keys and everything else —
+> the service comes back up on a fresh SQLite file with billing broken.
+> `--update-` adds and overwrites only the variables you name. The same applies
+> to `--set-secrets` vs `--update-secrets`.
 
 Cloud Run builds the `Dockerfile`, deploys it, and prints a live HTTPS URL like:
 
@@ -40,7 +47,7 @@ https://ai-model-chat-xxxxxxxxx.europe-west4.run.app
 
 That URL works immediately — no domain required.
 
-> **Secrets:** for production, prefer Secret Manager over `--set-env-vars`:
+> **Secrets:** for production, prefer Secret Manager over env vars:
 > ```bash
 > echo -n "YOUR_KEY" | gcloud secrets create gemini-api-key --data-file=-
 > gcloud run deploy ai-model-chat --source . --region europe-west4 \
@@ -78,7 +85,18 @@ never run a deploy command by hand. One-time setup:
 3. Set secrets once on the Cloud Run service (they persist across deploys):
    ```bash
    gcloud run services update ai-model-chat --region europe-west4 \
-     --set-env-vars "GEMINI_API_KEY=...,API_KEYS=...,ADMIN_PASSWORD=..."
+     --update-env-vars "GEMINI_API_KEY=...,ADMIN_PASSWORD=..."
+   ```
+   Generate `API_KEYS` in the same command so the key never lands in your shell
+   history, and use a different one per environment:
+   ```bash
+   gcloud run services update ai-model-chat --region europe-west4 \
+     --update-env-vars "API_KEYS=$(python3 -c 'import secrets;print(secrets.token_urlsafe(32))')"
+   ```
+   Read it back when you need to hand it to a caller:
+   ```bash
+   gcloud run services describe ai-model-chat --region europe-west4 \
+     --format="value(spec.template.spec.containers[0].env)"
    ```
 
 After that, every push builds a new image and rolls it out automatically.
@@ -123,7 +141,7 @@ chat without holding the history itself.
 # Create a Cloud SQL Postgres instance, then deploy with:
 gcloud run deploy ai-model-chat --source . --region europe-west4 \
   --add-cloudsql-instances YOUR_PROJECT:europe-west4:YOUR_INSTANCE \
-  --set-env-vars "DATABASE_URL=postgresql+psycopg2://USER:PASS@/DBNAME?host=/cloudsql/YOUR_PROJECT:europe-west4:YOUR_INSTANCE"
+  --update-env-vars "DATABASE_URL=postgresql+psycopg2://USER:PASS@/DBNAME?host=/cloudsql/YOUR_PROJECT:europe-west4:YOUR_INSTANCE"
 ```
 
 Tables are created automatically on startup.
@@ -135,7 +153,8 @@ Tables are created automatically on startup.
 **Auth:** set `API_KEYS` (comma-separated) as an env var. Callers pass it as
 `Authorization: Bearer <key>` or `X-API-Key: <key>`. **If unset, the endpoint
 refuses every request** — it sits outside the paywall, so the key is the only
-thing guarding it.
+thing guarding it. Use a different key per environment, so a leaked dev key
+cannot reach live.
 
 Request:
 ```json
