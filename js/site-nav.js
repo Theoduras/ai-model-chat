@@ -13,17 +13,39 @@
   if (window.self !== window.top) return;
 
   var SIGNED_OUT = [
+    { href: '/#pricing', label: 'Pricing' },
     { href: '/blog', label: 'Blog', keep: true },
     { href: '/login', label: 'Log in' },
     { href: '/register', label: 'Register', cta: true },
   ];
   var SIGNED_IN = [
+    { href: '/#pricing', label: 'Pricing' },
     { href: '/blog', label: 'Blog', keep: true },
     { href: '/dashboard', label: 'Dashboard', cta: true },
     { href: '/logout', label: 'Log out' },
   ];
 
+  var BRAND_HTML = '<a href="/" class="brand">' +
+    '<span data-sn-brand>Velvetfunnel</span><i data-sn-suffix>.app</i></a>';
+
+  // The homepage's brand wording is operator-editable and stored under the
+  // "home" page content; every page reads it so the name never diverges.
+  function paintBrand() {
+    var name = document.querySelector('[data-sn-brand]');
+    var suffix = document.querySelector('[data-sn-suffix]');
+    if (!name && !suffix) return;
+    fetch('/api/site-content/home', { credentials: 'same-origin' })
+      .then(function (r) { return r.ok ? r.json() : { content: {} }; })
+      .then(function (d) {
+        var c = (d && d.content) || {};
+        if (name && c['brand-name']) name.textContent = c['brand-name'];
+        if (suffix && c['brand-suffix']) suffix.textContent = c['brand-suffix'];
+      })
+      .catch(function () {});
+  }
+
   function isCurrent(href) {
+    if (href.indexOf('#') !== -1) return false;
     var path = location.pathname;
     return path === href || (href !== '/' && path.indexOf(href) === 0);
   }
@@ -69,10 +91,11 @@
       var bar = document.createElement('header');
       bar.className = 'site-nav';
       bar.id = bar.id || 'site-nav';
-      bar.innerHTML = '<a href="/" class="brand">Velvetfunnel<i>.app</i></a>' +
-                      '<nav class="sn-links"></nav>';
+      bar.innerHTML = BRAND_HTML + '<nav class="sn-links"></nav>';
       document.body.insertBefore(bar, document.body.firstChild);
     }
+
+    paintBrand();
 
     // Signed-out links go up straight away; a slow /api/me would otherwise leave
     // the bar empty on first paint.
