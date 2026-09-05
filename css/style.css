@@ -1009,9 +1009,7 @@ body:not(.is-admin) .admin-only { display: none !important; }
 
 /* Tier and seat-role gating. Cosmetic only — the server refuses the routes
    regardless; this just stops a plan being shown controls it cannot use. */
-body.auth-pending .sb-upgrade,
 body.auth-pending .sb-plan { display: none !important; }
-.sb-upgrade .sb-item,
 .sb-item.locked { opacity: .55; cursor: pointer; }
 .sb-lock {
   margin-left: auto; font-size: .66rem; font-weight: 700; letter-spacing: .04em;
