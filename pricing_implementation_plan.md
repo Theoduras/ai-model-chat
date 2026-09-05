@@ -51,7 +51,7 @@ to *measure* — only to *check*:
 | # | Axis | Existing hook |
 |---|---|---|
 | 1 | Persona count | `db_list_personas(owner_id=...)` |
-| 2 | Platform access | `_PAID_API` prefixes; `api_platforms_overview`; per-platform `ready` flag in `js/platform-setup.js` |
+| 2 | Platform access (allow-list) | `_PAID_API` prefixes map 1:1 to platforms; `api_platforms_overview`; per-platform `ready` flag in `js/platform-setup.js` |
 | 3 | Funnel phase count | `api_persona_phases_save` already clamps to `items[:10]`, min 2 |
 | 4 | Outfit locking | `_fan_outfit_lock`, `outfits_{slug}` setting |
 | 5 | Scheduled follow-ups / auto-run loops | `/api/fanvue/auto`, `/api/x/auto-run`, `/api/threads/auto` — real server cost |
@@ -83,10 +83,10 @@ a persona that earns. Pro buys a roster across every platform. Agency buys a
 team and the numbers to manage it.**
 
 ### Starter — €49/mo (€441/yr)
-*"One persona, one platform, fully monetised."*
+*"One persona on Fanvue, fully monetised."*
 
 - **1 persona**, 1 seat
-- **1 platform connection** of your choice (Telegram hosted bot, X, Fanvue or Threads)
+- **Fanvue only** — the platform the PPV engine is built against
 - Full persona builder: every voice field, AI backstory interview, archetypes
 - **Up to 3 funnel phases** + CTA link
 - Photo sending from the media library
@@ -139,14 +139,30 @@ migration, named contact. Stays out of `TIERS` so nothing can charge for it.
 - **Starter can actually make money.** Full PPV at €49 means the entry tier pays
   for itself, which is what drives the upgrade — a creator who is earning wants
   more personas and more platforms, and that is exactly what Pro sells.
-- **Pro is the scale unlock.** 1->5 personas and one->all platforms is a single
-  coherent story: you outgrew one girl on one site.
+- **Pro is the scale unlock.** 1->5 personas and Fanvue->every platform is a
+  single coherent story: you outgrew one girl on one site. It is also the
+  cleanest gate in the ladder, because the platform consoles and their
+  `_PAID_API` prefixes already separate along exactly this line.
 - **Agency is seats.** With the API and BYO-key bullets removed (section 5),
   seats, analytics and reconciliation are what justify €200 over Pro. That makes
   P4 load-bearing rather than optional: **Agency should not be marketed on seats
   until seats exist.** Until then Agency is honestly "15 personas + analytics +
   225 generations", which is thinner — consider holding the Agency re-cut until
   P4 ships.
+
+### Launch blocker — Fanvue onboarding is not finished
+
+Starter sells Fanvue as its *only* platform, but `js/platform-setup.js` marks
+`fanvue: { ready: false }`, so the guided connect wizard renders **"Coming
+soon"** for it. Telegram is the one platform with `ready: true`, and under this
+re-cut Telegram is Pro-only. That means the entry tier's single platform is the
+one a new customer cannot self-serve onto.
+
+Fanvue is the right choice for Starter — it is what the PPV engine, the media
+vault browser, the webhook ledger and `ppv_drops` are all built against, and
+none of that has an equivalent on Telegram. But **finishing the Fanvue setup
+flow is a prerequisite for shipping this tier**, not a follow-up. Until then,
+Starter cannot be sold as written.
 
 ### Migration note — resolve before enforcing
 
@@ -166,7 +182,7 @@ old (unlimited) set until their next renewal.
 'capabilities': {
     'personas': 1,                  # int, or None for unlimited
     'seats': 1,
-    'platforms': 1,                 # count of connectable platforms, or None
+    'platforms': ['fanvue'],        # allow-list, or None for every platform
     'phases_max': 3,
     'outfit_lock': False,
     'scheduled_followups': False,
