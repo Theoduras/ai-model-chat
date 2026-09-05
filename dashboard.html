@@ -1569,7 +1569,31 @@ document.getElementById('name-input').addEventListener('keydown', function (e) {
   if (e.key === 'Escape') nameCancel();
 });
 
+// The server enforces the plan's persona limit on save. Checking it here too
+// means a creator at the limit hears about it before filling in a whole
+// persona, rather than at Save & Deploy with the work already done. A failed
+// check never blocks: the server is still the one that decides.
+async function personaCapReached() {
+  try {
+    const me = await (await fetch('/api/me')).json();
+    const u = (me.usage || {}).personas;
+    if (!u || u.limit === null || u.limit === undefined) return null;
+    return u.used >= u.limit ? u : null;
+  } catch (e) { return null; }
+}
+
+function offerUpgrade(cap) {
+  const plural = cap.limit === 1 ? 'persona' : 'personas';
+  if (confirm('Your plan includes ' + cap.limit + ' ' + plural + ', and you are using ' +
+              cap.used + '. Delete one to make room, or upgrade for more.\n\n' +
+              'Go to plans now?')) {
+    window.location = '/pricing';
+  }
+}
+
 async function newPersona() {
+  const cap = await personaCapReached();
+  if (cap) { offerUpgrade(cap); return; }
   const name = await askName({
     title: 'Name your persona',
     hint: 'This is what fans see at the top of the chat. You can change it later.',
@@ -2443,6 +2467,8 @@ async function fillAllInfo() {
 
 async function copyPersona(presetConfig) {
   if (!currentSlug) return;
+  const cap = await personaCapReached();
+  if (cap) { offerUpgrade(cap); return; }
   const config = presetConfig || collectConfig();
   const suggested = (config.name || personas[currentSlug]?.name || '') + ' copy';
   const newName = prompt('Name this copy (it saves as a new model, leaving the original unchanged):', suggested.trim());
