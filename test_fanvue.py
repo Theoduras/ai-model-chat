@@ -341,10 +341,29 @@ def test_chat_lists():
           any('403' in e for e in errs), errs)
 
 
+def test_scope_reporting():
+    """A missing optional scope was reported as the reason lists were empty. It
+    is not: read:agency and read:insights touch no chat endpoint."""
+    for s in app.FANVUE_OPTIONAL_SCOPES:
+        check('%s is described by what it costs' % s,
+              bool(app.FANVUE_SCOPE_FEATURES.get(s)), s)
+    for s in ('read:chat', 'write:chat', 'read:self', 'openid'):
+        check('%s is never merely optional' % s, s not in app.FANVUE_OPTIONAL_SCOPES)
+    check('lists do not depend on read:agency',
+          app._fv_scope_for_path('/chats/lists/smart') == 'read:chat')
+    check('nor on read:insights',
+          app._fv_scope_for_path('/creators/c-1/chats/lists/custom?page=1') == 'read:chat')
+    check('the agency picker is what read:agency is for',
+          app._fv_scope_for_path('/agency/creators?limit=50') == 'read:agency')
+    check('and earnings is what read:insights is for',
+          app._fv_scope_for_path('/creators/c-1/earnings?size=50') == 'read:insights')
+
+
 if __name__ == '__main__':
     for fn in (test_direction, test_import, test_identity_never_crosses,
                test_placeholders, test_pacing, test_backlog,
-               test_scopes, test_api_errors, test_chat_lists):
+               test_scopes, test_api_errors, test_chat_lists,
+               test_scope_reporting):
         print('\n--- %s ---' % fn.__name__)
         restore_app()
         fn()

@@ -8419,6 +8419,25 @@ FANVUE_SCOPES = (FANVUE_CORE_SCOPES + ' read:fan read:media write:media '
                  'read:insights')
 
 
+# What each optional permission actually buys, so a refusal can be described by
+# the feature it costs instead of by its scope name.
+FANVUE_SCOPE_FEATURES = {
+    'read:agency': 'switching between creator profiles on an agency login '
+                   '(a single-account login does not need it)',
+    'read:insights': 'reconciling PPV purchases from Fanvue earnings — '
+                     '"Reconcile purchases" will not work',
+    'read:media': 'the PPV media picker',
+    'write:media': 'uploading media to the vault',
+    'read:fan': "reading a fan's profile details",
+    'read:creator': 'reading the creator profile',
+    'offline': 'staying connected without reauthorizing',
+    'offline_access': 'staying connected without reauthorizing',
+}
+# Missing these costs a side feature; anything else missing degrades the chat
+# itself and is worth shouting about.
+FANVUE_OPTIONAL_SCOPES = {'read:agency', 'read:insights', 'write:media', 'read:creator'}
+
+
 def _fanvue_app():
     """The platform-level OAuth app. The environment wins over the legacy
     settings rows an operator once typed into the connect form, and the redirect
@@ -8984,11 +9003,13 @@ def api_fanvue_status():
     persona = (request.args.get('persona') or '').strip()
     t = _fanvue_tokens(persona)
     granted = (t.get('scope') or '').split()
-    wanted = FANVUE_SCOPES.split()
-    missing = [s for s in wanted if granted and s not in granted]
+    missing = [{'scope': s, 'feature': FANVUE_SCOPE_FEATURES.get(s, ''),
+                'optional': s in FANVUE_OPTIONAL_SCOPES}
+               for s in FANVUE_SCOPES.split() if granted and s not in granted]
     return jsonify({'connected': bool(t.get('access_token')), 'username': t.get('username', ''),
                     'creator': _fanvue_creator(persona),
-                    'scope': t.get('scope', ''), 'missing_scopes': missing})
+                    'scope': t.get('scope', ''), 'missing_scopes': missing,
+                    'degraded': any(not m['optional'] for m in missing)})
 
 
 @app.route('/api/fanvue/disconnect', methods=['POST'])

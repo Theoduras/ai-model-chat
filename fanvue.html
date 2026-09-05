@@ -938,11 +938,16 @@ function updateConn(){
   document.getElementById('disconnect-btn').style.display=connState.connected?'inline-flex':'none';
   const warn=document.getElementById('scope-warn'),miss=connState.missing_scopes||[];
   if(connState.connected&&miss.length){
+    const bad=connState.degraded;
     warn.style.display='block';
-    warn.innerHTML='<span class="hint" style="color:var(--warn);display:block;margin-top:10px;">'
-      +'⚠ Fanvue granted this connection only <code>'+esc(connState.scope||'')+'</code>. '
-      +'Anything needing '+esc(miss.join(', '))+' will come back 403 — that is why lists stay empty. '
-      +'Once Fanvue grants those to the app, reconnect for the full set.</span>'
+    warn.innerHTML='<span class="hint" style="display:block;margin-top:10px;'
+      +(bad?'color:var(--warn);':'')+'">'
+      +(bad?'⚠ ':'')+'Fanvue did not grant '+miss.length+' of the permissions this app asks for. '
+      +(bad?'Chat features below may fail with a 403.':'Chatting, lists and PPV are unaffected — '
+        +'these only switch off the extras listed:')
+      +'<ul style="margin:6px 0 0 18px;padding:0;">'
+      +miss.map(m=>'<li><code>'+esc(m.scope)+'</code> — '+esc(m.feature||'an unused endpoint')+'</li>').join('')
+      +'</ul></span>'
       +'<button class="btn-ai" style="background:var(--border);margin-top:8px;" onclick="reconnectFull()">Retry full permissions</button>';
   } else { warn.style.display='none'; warn.innerHTML=''; }
 }
