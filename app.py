@@ -1101,31 +1101,43 @@ def _save_x_tokens(data):
 
 # ── Customer accounts, tiers and the paywall ─────────────────────────────────
 
-# PLACEHOLDER PRICING — swap `price` for the real numbers when they're decided.
-# `days` is how long one payment keeps the account active.
-TIERS = {
-    'free': {'name': 'Free', 'price': 0, 'days': 3650,
-             'blurb': 'Try the builder, no card needed.',
-             'features': ['1 AI persona', 'Persona builder + preview',
-                          'Telegram chat', 'No photo sending',
-                          'Community support']},
-    'starter': {'name': 'Starter', 'price': 29, 'days': 30,
+CURRENCY = 'EUR'
+CURRENCY_SYMBOL = '€'
+# 3 months free when billed annually (~25% off): a year costs 9x the month.
+ANNUAL_SUFFIX = '_annual'
+ANNUAL_MONTHS_CHARGED = 9
+ANNUAL_SAVE_PCT = round((12 - ANNUAL_MONTHS_CHARGED) / 12 * 100)
+
+# No free tier — every account picks a paid plan. `days` is how long one
+# payment keeps the account active; the *_annual twin below is generated from
+# the same features so the two never drift apart.
+_BASE_TIERS = {
+    'starter': {'name': 'Starter', 'price': 49,
                 'blurb': 'One persona, Telegram only.',
                 'features': ['1 AI persona', 'Telegram chat', 'Photo sending',
                              'Funnel phases + CTA', 'Email support']},
-    'pro': {'name': 'Pro', 'price': 79, 'days': 30,
+    'pro': {'name': 'Pro', 'price': 149,
             'blurb': 'Five personas, every platform.',
             'features': ['5 AI personas', 'Telegram, X and Fanvue',
                          'Photo sending + outfit locking', 'Funnel phases + CTA',
                          'Scheduled follow-ups', 'Priority support']},
-    'agency': {'name': 'Agency', 'price': 199, 'days': 30,
+    'agency': {'name': 'Agency', 'price': 349,
                'blurb': 'Unlimited personas for a roster.',
                'features': ['Unlimited AI personas', 'Every platform',
                             'Photo sending + outfit locking', 'Funnel phases + CTA',
                             'Scheduled follow-ups', 'Conversation analytics',
                             'Dedicated support']},
 }
-DEFAULT_TIER_ORDER = ['free', 'starter', 'pro', 'agency']
+DEFAULT_TIER_ORDER = ['starter', 'pro', 'agency']
+
+TIERS = {}
+for _key, _base in _BASE_TIERS.items():
+    TIERS[_key] = {**_base, 'days': 30, 'period': 'month'}
+    _annual_price = _base['price'] * ANNUAL_MONTHS_CHARGED
+    TIERS[_key + ANNUAL_SUFFIX] = {**_base, 'price': _annual_price, 'days': 365,
+                                   'period': 'year', 'monthly_of': _key,
+                                   'monthly_equiv': round(_annual_price / 12, 2)}
+del _key, _base, _annual_price
 
 OXAPAY_API = 'https://api.oxapay.com/v1/payment/invoice'
 STRIPE_API = 'https://api.stripe.com/v1'
@@ -1374,6 +1386,12 @@ button:disabled{opacity:.6;cursor:not-allowed;transform:none;animation:none}
 .tier li:before{content:'✓';color:var(--accent);margin-right:8px}
 .bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;font-size:.85rem;color:var(--text-3)}
 .bar a{color:var(--accent);text-decoration:none}
+.ptoggle{display:flex;justify-content:center;gap:4px;background:var(--surface);border:1px solid var(--border);border-radius:999px;padding:4px;width:fit-content;margin:0 auto 22px}
+.ptoggle button{width:auto;background:none;color:var(--text-2);border-radius:999px;padding:8px 18px;font-size:.85rem;box-shadow:none;animation:none}
+.ptoggle button:hover{transform:none;box-shadow:none;animation:none}
+.ptoggle button.active{background:var(--grad);background-size:300% 100%;color:#fff}
+.ptoggle .save{font-size:.7rem;opacity:.85;margin-left:4px}
+.permo{font-size:.75rem;color:var(--text-muted);margin-bottom:10px}
 @media(min-width:700px){.wrap.wide{max-width:760px}.tiers{grid-template-columns:repeat(2,1fr)}}
 @media(min-width:1180px){.wrap.wide{max-width:1240px}.tiers{grid-template-columns:repeat(4,1fr)}}
 """
@@ -1437,23 +1455,37 @@ plan is active{% if user.expires_at %} until {{ user.expires_at[:10] }}{% endif 
 <p class="sub" data-edit-id="sub">Pay by card or crypto. Access unlocks as soon as it confirms.</p>
 {% endif %}
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
+<div class="ptoggle">
+<button type="button" class="active" data-set-period="month">Monthly</button>
+<button type="button" data-set-period="year">Annual <span class="save">Save {{ annual_save_pct }}%</span></button>
+</div>
 <div class="tiers">
-{% for key in order %}{% set t = tiers[key] %}
+{% for key in order %}{% set t = tiers[key] %}{% set ta = tiers[key + annual_suffix] %}
 <div class="tier {{ 'featured' if key == 'pro' else '' }}">
 <h2>{{ t.name }}</h2><div class="blurb">{{ t.blurb }}</div>
-<div class="price">{% if t.price == 0 %}Free<span> forever</span>{% else %}${{ t.price }}<span>/{{ t.days }} days</span>{% endif %}</div>
+<div data-period="month">
+<div class="price">{{ currency }}{{ t.price }}<span>/month</span></div>
 <ul>{% for f in t.features %}<li>{{ f }}</li>{% endfor %}</ul>
-{% if t.price == 0 %}
-<button data-tier="{{ key }}" data-provider="">Start free</button>
-{% else %}
 {% set verb = 'Renew' if user.status == 'expired' else 'Pay' %}
 {% if stripe_enabled %}<button data-tier="{{ key }}" data-provider="stripe">{{ verb }} with card</button>{% endif %}
 {% if oxapay_enabled %}<button data-tier="{{ key }}" data-provider="oxapay"
  style="{{ 'margin-top:8px;' if stripe_enabled }}background:var(--surface);color:var(--text)">{{ verb }} with crypto</button>{% endif %}
 {% if not stripe_enabled and not oxapay_enabled %}<button disabled>Payments not configured</button>{% endif %}
-{% endif %}
 {% if dev_mode %}<button class="dev" data-dev-tier="{{ key }}"
  style="background:var(--surface);color:var(--star);margin-top:8px">Activate free (dev)</button>{% endif %}
+</div>
+<div data-period="year" hidden>
+<div class="price">{{ currency }}{{ ta.price }}<span>/year</span></div>
+<div class="permo">{{ currency }}{{ ta.monthly_equiv }}/mo billed annually</div>
+<ul>{% for f in t.features %}<li>{{ f }}</li>{% endfor %}</ul>
+{% set verb = 'Renew' if user.status == 'expired' else 'Pay' %}
+{% if stripe_enabled %}<button data-tier="{{ key }}{{ annual_suffix }}" data-provider="stripe">{{ verb }} with card</button>{% endif %}
+{% if oxapay_enabled %}<button data-tier="{{ key }}{{ annual_suffix }}" data-provider="oxapay"
+ style="{{ 'margin-top:8px;' if stripe_enabled }}background:var(--surface);color:var(--text)">{{ verb }} with crypto</button>{% endif %}
+{% if not stripe_enabled and not oxapay_enabled %}<button disabled>Payments not configured</button>{% endif %}
+{% if dev_mode %}<button class="dev" data-dev-tier="{{ key }}{{ annual_suffix }}"
+ style="background:var(--surface);color:var(--star);margin-top:8px">Activate free (dev)</button>{% endif %}
+</div>
 </div>{% endfor %}
 </div>
 {% if dev_mode %}<p style="text-align:center;color:#fbbf24;font-size:.8rem;margin-top:18px">
@@ -1461,6 +1493,17 @@ Dev mode: DEV_FAKE_PAYMENTS=1 is set, so plans can be activated without paying.
 Unset it before going live.</p>{% endif %}
 </div>
 <script>
+document.querySelectorAll('.ptoggle button').forEach(function(tab){
+  tab.addEventListener('click', function(){
+    var period = tab.dataset.setPeriod;
+    document.querySelectorAll('.ptoggle button').forEach(function(t){
+      t.classList.toggle('active', t === tab);
+    });
+    document.querySelectorAll('[data-period]').forEach(function(el){
+      el.hidden = el.dataset.period !== period;
+    });
+  });
+});
 document.querySelectorAll('button[data-dev-tier]').forEach(function(b){
   b.addEventListener('click', async function(){
     b.disabled = true; b.textContent = 'Activating...';
@@ -1526,7 +1569,7 @@ td{padding:8px 0;border-bottom:1px solid var(--border);color:var(--text-2)}
 <h1 style="font-size:1rem">Payment history</h1>
 <table><tr><th>Date</th><th>Plan</th><th>Amount</th><th>Method</th><th>Status</th></tr>
 {% for p in payments %}<tr><td>{{ p.date }}</td><td>{{ p.tier }}</td>
-<td>${{ p.amount }}</td><td>{{ p.provider }}</td><td>{{ p.status }}</td></tr>{% endfor %}</table>
+<td>€{{ p.amount }}</td><td>{{ p.provider }}</td><td>{{ p.status }}</td></tr>{% endfor %}</table>
 </div>{% endif %}
 </div></body></html>"""
 
@@ -2080,7 +2123,10 @@ def pricing():
                                   order=DEFAULT_TIER_ORDER,
                                   dev_mode=_dev_payments_enabled(),
                                   oxapay_enabled=bool(_oxapay_key()),
-                                  stripe_enabled=bool(_stripe_key()))
+                                  stripe_enabled=bool(_stripe_key()),
+                                  currency=CURRENCY_SYMBOL,
+                                  annual_suffix=ANNUAL_SUFFIX,
+                                  annual_save_pct=ANNUAL_SAVE_PCT)
 
 
 @app.route('/billing')
@@ -2092,7 +2138,10 @@ def billing():
                                   order=DEFAULT_TIER_ORDER,
                                   dev_mode=_dev_payments_enabled(),
                                   oxapay_enabled=bool(_oxapay_key()),
-                                  stripe_enabled=bool(_stripe_key()))
+                                  stripe_enabled=bool(_stripe_key()),
+                                  currency=CURRENCY_SYMBOL,
+                                  annual_suffix=ANNUAL_SUFFIX,
+                                  annual_save_pct=ANNUAL_SAVE_PCT)
 
 
 @app.route('/billing/return')
@@ -2106,7 +2155,7 @@ def billing_return():
 def _checkout_oxapay(user, tier_key, tier, order_id, base):
     body = json.dumps({
         'amount': tier['price'],
-        'currency': 'USD',
+        'currency': CURRENCY,
         'lifetime': 60,
         'order_id': order_id,
         'email': user['email'],
@@ -2143,7 +2192,7 @@ def _checkout_stripe(user, tier_key, tier, order_id, base):
         'client_reference_id': order_id,
         'payment_method_types[0]': 'card',
         'line_items[0][quantity]': '1',
-        'line_items[0][price_data][currency]': 'usd',
+        'line_items[0][price_data][currency]': CURRENCY.lower(),
         'line_items[0][price_data][unit_amount]': str(int(round(tier['price'] * 100))),
         'line_items[0][price_data][product_data][name]': f'{tier["name"]} plan',
         'line_items[0][price_data][product_data][description]':
@@ -2188,23 +2237,6 @@ def api_billing_checkout():
     if not tier:
         return jsonify({'error': 'Unknown plan'}), 400
 
-    # Free plans need no invoice — activate and send them to fill in the profile.
-    if not float(tier.get('price') or 0):
-        from db import User, Payment
-        s = _db_session()
-        try:
-            u = s.get(User, user['id'])
-            expires = _activate_plan(s, u, tier_key)
-            s.add(Payment(user_id=u.id, tier=tier_key, provider='free', amount='0',
-                          currency='USD', order_id=f'free-{secrets.token_hex(6)}',
-                          status='free',
-                          paid_at=datetime.now(timezone.utc).replace(tzinfo=None)))
-            s.commit()
-        finally:
-            s.close()
-        logger.info('FREE PLAN ACTIVATED user=%s until=%s', user['email'], expires)
-        return jsonify({'ok': True, 'tier': tier_key, 'redirect': '/account/profile'})
-
     provider = (body.get('provider') or '').strip().lower()
     if provider not in _CHECKOUT_PROVIDERS:
         return jsonify({'error': 'Unknown payment method'}), 400
@@ -2223,7 +2255,7 @@ def api_billing_checkout():
     s = _db_session()
     try:
         s.add(Payment(user_id=user['id'], tier=tier_key, provider=provider,
-                      amount=str(tier['price']), currency='USD', order_id=order_id,
+                      amount=str(tier['price']), currency=CURRENCY, order_id=order_id,
                       track_id=track_id, status='pending'))
         s.commit()
     finally:
@@ -2254,7 +2286,7 @@ def api_billing_dev_activate():
         _activate_plan(s, u, tier_key)
         s.add(Payment(user_id=u.id, tier=tier_key, provider='dev',
                       amount=str(tier['price']),
-                      currency='USD', order_id=f'dev-{secrets.token_hex(6)}',
+                      currency=CURRENCY, order_id=f'dev-{secrets.token_hex(6)}',
                       status='dev', paid_at=now))
         expires = u.expires_at
         s.commit()

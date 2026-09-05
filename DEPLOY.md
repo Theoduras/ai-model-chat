@@ -257,9 +257,15 @@ Plans can be paid in crypto through [Oxapay](https://oxapay.com) or by card
 through [Stripe](https://stripe.com). Both can be on at once — the billing
 page shows "Pay with card" and "Pay with crypto" side by side, whichever
 providers have keys set; with neither set it shows "Payments not configured".
-Free plans always activate without either provider. Every paid tier in
+There is no free tier — every account picks a paid plan. Every tier in
 `TIERS` creates one invoice/session per attempt, recorded as a `payments` row
-with a `provider` column (`oxapay` | `stripe` | `free` | `dev`).
+with a `provider` column (`oxapay` | `stripe` | `dev`).
+
+Prices are in EUR (`CURRENCY` in `app.py`). Each plan (`starter`, `pro`,
+`agency`) has a monthly price and an auto-derived annual twin
+(`starter_annual`, etc. — 9x the monthly price, i.e. 3 months free) generated
+from the same feature list so the two can't drift apart; the billing page's
+Monthly/Annual toggle just switches which tier key the buttons submit.
 
 For **velvetfunneler.com**, `PUBLIC_BASE_URL` below should be
 `https://velvetfunneler.com` — it is the one setting both providers share, so
@@ -275,7 +281,7 @@ set it once.
    Oxapay also receives it per invoice from `callback_url`, so this is only a
    fallback for the dashboard's own tests.
 5. Choose which coins to accept and where to auto-convert or settle. The app
-   prices everything in USD and lets Oxapay pick the coin at checkout.
+   prices everything in EUR and lets Oxapay pick the coin at checkout.
 
 | Variable | Why |
 |---|---|
