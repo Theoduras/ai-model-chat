@@ -8763,6 +8763,10 @@ def api_fanvue_vault_debug():
         '/media/folders',
         '/media?size=1',
         '/users/me',
+        '/chats/lists/smart',
+        f'{scope}/chats/lists/smart',
+        '/chats/lists/custom?page=1&size=50',
+        f'{scope}/chats/lists/custom?page=1&size=50',
     ]
     results = []
     first_uuid = ''
@@ -10118,7 +10122,7 @@ def _fv_list(res):
     if isinstance(res, list):
         return res
     if isinstance(res, dict):
-        for k in ('data', 'items', 'chats', 'results', 'messages'):
+        for k in ('data', 'items', 'chats', 'results', 'messages', 'lists'):
             if isinstance(res.get(k), list):
                 return res[k]
     return []
@@ -10427,31 +10431,82 @@ _fv_list_cache = {}
 FV_LIST_CACHE_SEC = 600
 
 
-def _fanvue_chat_lists(persona):
-    """Fanvue's two kinds of chat list: smart ones (fixed string ids, computed by
-    Fanvue) and the creator's own custom ones (UUIDs)."""
-    out = []
-    try:
-        for l in _fv_list(_fanvue_call(persona, 'GET', '/chats/lists/smart')):
-            out.append({'kind': 'smart', 'id': l.get('uuid') or '',
-                        'name': l.get('name') or l.get('uuid') or '',
-                        'count': l.get('count')})
-    except Exception as e:
-        logger.info('Fanvue smart lists failed for %s: %s', persona, str(e)[:120])
-    page = 1
-    while page <= 10:
+# Which /chats prefix this login answers on. A single-profile login is served
+# the bare path; a login that manages profiles is served /creators/{uuid}/... —
+# and the wrong one is an empty page, not an error, so it is worth remembering.
+_fv_chat_prefix = {}
+
+
+def _fanvue_chat_get(persona, suffix):
+    """GET a /chats path, trying the creator-scoped form and the bare one."""
+    scope = _fanvue_scope(persona)
+    order = [scope, ''] if scope else ['']
+    pref = _fv_chat_prefix.get(persona)
+    if pref is not None and pref in order:
+        order = [pref] + [o for o in order if o != pref]
+    last = None
+    for p in order:
         try:
-            res = _fanvue_call(persona, 'GET', f'/chats/lists/custom?page={page}&size=50')
+            res = _fanvue_call(persona, 'GET', p + suffix)
+            _fv_chat_prefix[persona] = p
+            return res
         except Exception as e:
-            logger.info('Fanvue custom lists failed for %s: %s', persona, str(e)[:120])
-            break
-        for l in _fv_list(res):
-            out.append({'kind': 'custom', 'id': l.get('uuid') or '',
-                        'name': l.get('name') or '', 'count': l.get('membersCount')})
-        if not ((res or {}).get('pagination') or {}).get('hasMore'):
-            break
-        page += 1
-    return [l for l in out if l['id']]
+            last = e
+    raise last
+
+
+def _fv_list_row(row, kind):
+    """One chat list, however Fanvue spells it. Smart lists carry a fixed string
+    id, custom ones a uuid, and reading only `uuid` silently dropped every smart
+    list on the floor — which reads on screen as "no lists on this account"."""
+    lid = _fv_first(row, 'uuid', 'id', 'key', 'slug', 'listId', 'type', default='')
+    name = _fv_first(row, 'name', 'title', 'label', 'displayName', default='')
+    count = _fv_first(row, 'count', 'membersCount', 'memberCount', 'fansCount',
+                      'totalCount', 'total', default=None)
+    return {'kind': kind, 'id': str(lid), 'name': str(name or lid), 'count': count}
+
+
+def _fanvue_chat_lists(persona, errors=None):
+    """Fanvue's two kinds of chat list: smart ones (fixed string ids, computed by
+    Fanvue) and the creator's own custom ones (UUIDs).
+
+    Both prefixes are asked and the results merged: the scoped path is right for
+    a login that manages profiles, the bare one for a single-profile login, and
+    the wrong choice comes back as an empty list rather than an error."""
+    errs = errors if errors is not None else []
+    scope = _fanvue_scope(persona)
+    prefixes = [scope, ''] if scope else ['']
+    out, seen = [], set()
+
+    def add(row, kind):
+        l = _fv_list_row(row, kind)
+        key = (kind, l['id'])
+        if l['id'] and key not in seen:
+            seen.add(key)
+            out.append(l)
+
+    for pref in prefixes:
+        try:
+            for l in _fv_list(_fanvue_call(persona, 'GET', pref + '/chats/lists/smart')):
+                add(l, 'smart')
+        except Exception as e:
+            logger.info('Fanvue smart lists failed for %s: %s', persona, str(e)[:200])
+            errs.append(f'smart lists ({pref or "unscoped"}): {str(e)[:160]}')
+        page = 1
+        while page <= 10:
+            try:
+                res = _fanvue_call(persona, 'GET',
+                                   f'{pref}/chats/lists/custom?page={page}&size=50')
+            except Exception as e:
+                logger.info('Fanvue custom lists failed for %s: %s', persona, str(e)[:200])
+                errs.append(f'custom lists ({pref or "unscoped"}): {str(e)[:160]}')
+                break
+            for l in _fv_list(res):
+                add(l, 'custom')
+            if not ((res or {}).get('pagination') or {}).get('hasMore'):
+                break
+            page += 1
+    return out
 
 
 def _fanvue_list_members(persona, kind, list_id):
@@ -10464,8 +10519,8 @@ def _fanvue_list_members(persona, kind, list_id):
     members, page = set(), 1
     while page <= 20:
         try:
-            res = _fanvue_call(persona, 'GET',
-                               f'/chats/lists/{kind}/{list_id}?page={page}&size=50')
+            res = _fanvue_chat_get(persona,
+                                   f'/chats/lists/{kind}/{list_id}?page={page}&size=50')
         except Exception as e:
             logger.info('Fanvue list %s/%s failed: %s', kind, list_id, str(e)[:120])
             break
@@ -11445,7 +11500,15 @@ def api_fanvue_lists():
         for k in [k for k in _fv_list_cache if k[0] == persona]:
             _fv_list_cache.pop(k, None)
     opts = _fanvue_auto_settings(persona)
-    return jsonify({'lists': _fanvue_chat_lists(persona),
+    errors = []
+    lists = _fanvue_chat_lists(persona, errors)
+    return jsonify({'lists': lists,
+                    # An empty picker used to look identical whether the account
+                    # has no lists or every call was refused. Only say "none"
+                    # when Fanvue actually answered.
+                    'error': ('Fanvue would not return the lists — ' + errors[0])
+                             if (errors and not lists) else '',
+                    'errors': errors,
                     'include_lists': _fv_clean_lists(opts.get('include_lists')),
                     'exclude_lists': _fv_clean_lists(opts.get('exclude_lists'))})
 

@@ -295,10 +295,56 @@ def test_api_errors():
         app._fanvue_tokens = orig_tokens
 
 
+def test_chat_lists():
+    """The picker said "no lists on this account" for an account full of them:
+    smart lists carry a string id, and only `uuid` was ever read."""
+    row = app._fv_list_row({'id': 'unread', 'name': 'Unread', 'count': 12}, 'smart')
+    check('a smart list keyed by id is kept', row['id'] == 'unread', row)
+    check('and keeps its name and size', (row['name'], row['count']) == ('Unread', 12), row)
+    check('a uuid list still works',
+          app._fv_list_row({'uuid': 'u-1', 'name': 'VIP', 'membersCount': 3}, 'custom')['count'] == 3)
+    check('a list with no id at all is dropped later',
+          app._fv_list_row({'name': 'nameless'}, 'smart')['id'] == '')
+    check('an unnamed list falls back to its id',
+          app._fv_list_row({'id': 'tippers'}, 'smart')['name'] == 'tippers')
+    check('a lists-keyed envelope is unwrapped',
+          app._fv_list({'lists': [{'id': 'a'}]}) == [{'id': 'a'}], app._fv_list({'lists': []}))
+
+    calls = []
+
+    def fake(persona, method, path, body=None):
+        calls.append(path)
+        if path.startswith('/creators/'):
+            raise RuntimeError('403 wrong shape for this login')
+        if path.startswith('/chats/lists/smart'):
+            return {'data': [{'id': 'unread', 'name': 'Unread'}]}
+        return {'data': [{'uuid': 'u-1', 'name': 'VIP'}], 'pagination': {'hasMore': False}}
+
+    app._fanvue_call = fake
+    app._fanvue_scope = lambda p: '/creators/c-1'
+    errs = []
+    lists = app._fanvue_chat_lists('lilly', errs)
+    ids = sorted(l['id'] for l in lists)
+    check('both prefixes are tried', any(p.startswith('/creators/') for p in calls), calls)
+    check('and the working one still returns the lists', ids == ['u-1', 'unread'], lists)
+    check('a failing prefix is reported, not hidden', len(errs) >= 1, errs)
+    check('no list is listed twice', len(lists) == len(set((l['kind'], l['id']) for l in lists)))
+
+    def all_fail(persona, method, path, body=None):
+        raise RuntimeError('Fanvue API 403: Insufficient permissions')
+
+    app._fanvue_call = all_fail
+    errs = []
+    check('nothing is invented when every call fails',
+          app._fanvue_chat_lists('lilly', errs) == [], 'x')
+    check('and the refusal is carried back for the screen',
+          any('403' in e for e in errs), errs)
+
+
 if __name__ == '__main__':
     for fn in (test_direction, test_import, test_identity_never_crosses,
                test_placeholders, test_pacing, test_backlog,
-               test_scopes, test_api_errors):
+               test_scopes, test_api_errors, test_chat_lists):
         print('\n--- %s ---' % fn.__name__)
         restore_app()
         fn()

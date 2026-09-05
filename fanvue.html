@@ -849,8 +849,9 @@ async function loadLists(refresh){
   try{
     const d=await fetch('/api/fanvue/lists?persona='+encodeURIComponent(persona())+(refresh?'&refresh=1':'')).then(r=>r.json());
     listsCache=d.lists||[];
-    if(d.error){box.innerHTML='<span class="hint">'+esc(d.error)+'</span>';return;}
+    if(d.error){box.innerHTML='<span class="hint" style="color:#fb7185;">'+esc(d.error)+'</span>';return;}
     if(!listsCache.length){box.innerHTML='<span class="hint">No lists on this Fanvue account yet.</span>';return;}
+    const warn=(d.errors||[]).length?'<span class="hint" style="color:var(--warn);display:block;margin-top:6px;">Some lists could not be read: '+esc(d.errors.join(' · '))+'</span>':'';
     box.innerHTML='<table class="fans"><tr><th>List</th><th>Type</th><th>Fans</th><th>Use</th></tr>'+
       listsCache.map(l=>{
         const k=l.kind+':'+l.id, v=listPick[k]||'';
@@ -860,7 +861,7 @@ async function loadLists(refresh){
           ['','include','exclude'].map(o=>'<option value="'+o+'"'+(v===o?' selected':'')+'>'+
             (o===''?'—':(o==='include'?'Include':'Exclude'))+'</option>').join('')+
           '</select></td></tr>';
-      }).join('')+'</table>';
+      }).join('')+'</table>'+warn;
     box.querySelectorAll('.fv-list-pick').forEach(s=>{
       s.onchange=()=>{ if(s.value) listPick[s.dataset.key]=s.value; else delete listPick[s.dataset.key]; };
     });
