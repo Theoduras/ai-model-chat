@@ -337,7 +337,7 @@ async function loadConfig(){
   document.getElementById('connect-panel').style.display='none';
   document.getElementById('connect-step2').style.display='none';
   document.getElementById('config-status').innerHTML='';
-  window._fvMinimalTried=false;
+  window._fvScopeTries=0;
   updateConn();
   loadCreators();
   window._ppvTiersLoaded=false;
@@ -943,11 +943,14 @@ function toggleConnect(){
     'Redirect URI registered for it: <code>'+esc(rd)+'</code>';
   startConnect();
 }
-async function startConnect(minimal){
+async function startConnect(opts){
+  opts=opts||{};
   const box=document.getElementById('config-status');
   busy(box,'Opening Fanvue authorization…');
-  const data=await post('/api/fanvue/auth-url',{persona:persona(),minimal:!!minimal});
+  const data=await post('/api/fanvue/auth-url',
+    {persona:persona(),minimal:!!opts.minimal,drop:opts.drop||[]});
   if(!data.ok){err(box,data.error);return;}
+  window._fvScope=data.scope||'';
   window.open(data.url,'fanvue-oauth','width=600,height=760');
   document.getElementById('connect-step2').style.display='block';
   box.innerHTML='<span class="hint" style="color:var(--warn);">Authorize in the popup. It finishes automatically, or paste the URL it lands on below.</span>';
@@ -965,23 +968,40 @@ window.addEventListener('message',e=>{
   const d=e.data||{};
   if(d.type!=='fanvue_oauth')return;
   const box=document.getElementById('config-status');
-  // Fanvue answers invalid_scope when our app registration lacks one of the
-  // optional scopes; the core chat scopes are enough to run the bot.
-  if(d.error==='invalid_scope'&&!window._fvMinimalTried){
-    window._fvMinimalTried=true;
-    err(box,'Fanvue refused some optional permissions — retrying with the core chat permissions…');
-    startConnect(true);return;
-  }
-  if(d.error){err(box,'Fanvue returned: '+d.error);return;}
+  if(d.error==='invalid_scope'){retryWithoutRefusedScopes(d);return;}
+  if(d.error){err(box,'Fanvue returned: '+d.error+(d.error_description?(' — '+d.error_description):''));return;}
   finishWith(d.code,d.state);
 });
+// Fanvue rejects the whole authorization when our app registration lacks one
+// optional scope. The server names it from the error description, forgets it for
+// good, and hands back the next set to ask for; each refusal narrows the request,
+// so this converges instead of bouncing the creator back to the same wall.
+async function retryWithoutRefusedScopes(d){
+  const box=document.getElementById('config-status');
+  window._fvScopeTries=(window._fvScopeTries||0)+1;
+  if(window._fvScopeTries>4){
+    err(box,'Fanvue kept refusing the requested permissions: '+(d.error_description||'invalid_scope'));
+    return;
+  }
+  const r=await post('/api/fanvue/scope-error',{persona:persona(),
+    requested:window._fvScope||'',error_description:d.error_description||''});
+  if(!r.retry){err(box,r.error||('Fanvue returned: invalid_scope'+(d.error_description?(' — '+d.error_description):'')));return;}
+  const lost=(r.dropped||[]).join(', ');
+  busy(box,'Fanvue refused '+(lost||'some optional permissions')+' — retrying without '+(lost?'them':'it')+'…');
+  startConnect({drop:r.drop||[]});
+}
 async function completeConnect(){
   const box=document.getElementById('config-status');
   const cb=document.getElementById('fv-callback').value.trim();
   if(!cb){err(box,'Paste the callback URL first.');return;}
   let code,state;
-  try{const u=new URL(cb);code=u.searchParams.get('code');state=u.searchParams.get('state');}
+  let error='',detail='';
+  try{const u=new URL(cb);code=u.searchParams.get('code');state=u.searchParams.get('state');
+      error=u.searchParams.get('error')||'';
+      detail=[u.searchParams.get('error_description'),u.searchParams.get('error_hint')].filter(Boolean).join(' ');}
   catch(e){err(box,'That is not a valid URL.');return;}
+  if(error==='invalid_scope'){retryWithoutRefusedScopes({error:error,error_description:detail});return;}
+  if(error){err(box,'Fanvue returned: '+error+(detail?(' — '+detail):''));return;}
   finishWith(code,state);
 }
 async function disconnectFanvue(){

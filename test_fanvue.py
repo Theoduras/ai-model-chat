@@ -193,9 +193,56 @@ def test_backlog():
         os.environ.pop('FANVUE_REPLY_WORKERS', None)
 
 
+def test_scopes():
+    """One optional scope Fanvue will not grant used to kill the whole connect
+    flow with a bare invalid_scope."""
+    store = {}
+    orig_get, orig_set = app._get_setting, app._set_setting
+    app._get_setting = lambda k, d=None: store.get(k, d)
+    app._set_setting = lambda k, v: store.__setitem__(k, v)
+    os.environ.pop('FANVUE_SCOPES', None)
+    try:
+        full = app._fanvue_scopes()
+        check('the full set is asked for first', 'read:agency' in full.split(), full)
+
+        bad = app._fanvue_parse_bad_scopes(
+            "The OAuth 2.0 Client is not allowed to request scope 'read:agency'.", full)
+        check('names the refused scope', bad == ['read:agency'], bad)
+        check('prose is never mistaken for a scope',
+              app._fanvue_parse_bad_scopes('The requested scope is invalid.', full) == [], 'x')
+        check('an unrequested scope is ignored',
+              app._fanvue_parse_bad_scopes("scope 'read:payouts'", full) == [], 'x')
+
+        app._fanvue_remember_denied(bad)
+        after = app._fanvue_scopes().split()
+        check('the refused scope is dropped', 'read:agency' not in after, after)
+        check('and stays dropped on the next connect',
+              'read:agency' not in app._fanvue_scopes().split(), store)
+        check('everything else is still asked for', 'read:media' in after, after)
+
+        app._fanvue_remember_denied(['read:chat', 'write:chat', 'openid', 'read:self'])
+        floor = app._fanvue_scopes().split()
+        for s in app.FANVUE_REQUIRED_SCOPES.split():
+            check('%s can never be dropped' % s, s in floor, floor)
+
+        tiers = app._fanvue_scope_tiers()
+        sets = [set(t.split()) for t in tiers]
+        check('each tier is strictly narrower',
+              all(sets[i + 1] < sets[i] for i in range(len(sets) - 1)), tiers)
+        check('the last tier is the bare minimum',
+              sets[-1] == set(app.FANVUE_REQUIRED_SCOPES.split()), tiers)
+
+        store['fanvue_denied_scopes'] = '[]'
+        check('a reset asks for everything again',
+              set(app._fanvue_scopes().split()) == set(full.split()), app._fanvue_scopes())
+    finally:
+        app._get_setting, app._set_setting = orig_get, orig_set
+
+
 if __name__ == '__main__':
     for fn in (test_direction, test_import, test_identity_never_crosses,
-               test_placeholders, test_pacing, test_backlog):
+               test_placeholders, test_pacing, test_backlog,
+               test_scopes):
         print('\n--- %s ---' % fn.__name__)
         fn()
     print('\n' + ('FAILED: ' + ', '.join(FAILURES) if FAILURES else 'All checks passed.'))
