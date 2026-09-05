@@ -3562,6 +3562,18 @@ def telegram_page():
         return redirect('/dashboard')
     return send_from_directory(BASE_DIR, 'telegram.html')
 
+@app.route('/blog', methods=['GET'])
+def blog_page():
+    return send_from_directory(BASE_DIR, 'blog.html')
+
+
+@app.route('/blog/<slug>', methods=['GET'])
+def blog_post_page(slug):
+    # The post is picked from the path client-side, so every slug serves the
+    # same file rather than needing a route per article.
+    return send_from_directory(BASE_DIR, 'blogpost.html')
+
+
 @app.route('/', methods=['GET'])
 def home_page():
     return send_from_directory(BASE_DIR, 'comingsoon.html')
