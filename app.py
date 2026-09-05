@@ -4744,7 +4744,9 @@ def api_personas():
     viewer = _current_user()
     if viewer and not viewer.get('is_admin'):
         own = []
-        for sp in db_list_personas(owner_id=viewer['id']):
+        # Personas are saved and counted against the active workspace, so
+        # listing them by user id hides everything the moment the two differ.
+        for sp in db_list_personas(owner_id=_workspace_id(viewer)):
             config = sp.get('config', {})
             has_img = bool(config.get('avatar')) or len(db_get_images(sp['slug'])) > 0
             own.append({
