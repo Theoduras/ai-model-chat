@@ -8406,7 +8406,13 @@ FANVUE_API_VERSION = '2025-06-26'
 # Everything the bot itself needs; Fanvue rejects the whole authorization with
 # invalid_scope if the app registration is not granted one of them, so the
 # connect flow can retry with the core set alone.
-FANVUE_CORE_SCOPES = 'openid offline offline_access read:self read:chat write:chat'
+# Without these the bot cannot read or answer a DM at all, so they are never
+# dropped to get past an invalid_scope — a refusal there is reported, not
+# retried around.
+FANVUE_REQUIRED_SCOPES = 'openid read:self read:chat write:chat'
+# Refresh tokens need offline/offline_access, but a login that lasts one access
+# token is still better than no connection, so they sit above the floor.
+FANVUE_CORE_SCOPES = FANVUE_REQUIRED_SCOPES + ' offline offline_access'
 FANVUE_SCOPES = (FANVUE_CORE_SCOPES + ' read:fan read:media write:media '
                  'read:creator read:agency '
                  # /earnings backs the purchase reconciler.
@@ -8432,12 +8438,65 @@ def _fanvue_app():
     }
 
 
-def _fanvue_scopes(minimal=False):
-    if minimal:
-        return FANVUE_CORE_SCOPES
-    return (os.environ.get('FANVUE_SCOPES', '').strip()
-            or (_get_setting('fanvue_scopes') or '').strip()
-            or FANVUE_SCOPES)
+def _fanvue_denied_scopes():
+    """Scopes this deployment's Fanvue app registration has been refused. Fanvue
+    answers invalid_scope for the whole authorization when one optional scope is
+    not granted, so once we learn a name we stop asking for it — otherwise every
+    creator pays for the same discovery again."""
+    try:
+        v = json.loads(_get_setting('fanvue_denied_scopes') or '[]')
+    except Exception:
+        return []
+    return [s for s in v if isinstance(s, str) and s]
+
+
+def _fanvue_remember_denied(scopes):
+    cur = _fanvue_denied_scopes()
+    required = set(FANVUE_REQUIRED_SCOPES.split())
+    add = [s for s in scopes if s and s not in cur and s not in required]
+    if add:
+        cur = cur + add
+        _set_setting('fanvue_denied_scopes', json.dumps(cur))
+    return cur
+
+
+def _fanvue_scopes(minimal=False, drop=()):
+    base = FANVUE_CORE_SCOPES if minimal else (
+        os.environ.get('FANVUE_SCOPES', '').strip()
+        or (_get_setting('fanvue_scopes') or '').strip()
+        or FANVUE_SCOPES)
+    skip = set(_fanvue_denied_scopes()) | {s for s in (drop or []) if s}
+    skip -= set(FANVUE_REQUIRED_SCOPES.split())
+    out = []
+    for s in FANVUE_REQUIRED_SCOPES.split() + base.split():
+        if s not in out and s not in skip:
+            out.append(s)
+    return ' '.join(out)
+
+
+def _fanvue_scope_tiers():
+    """Widest first. Each step gives up something the bot can live without:
+    the optional read scopes, then refresh tokens."""
+    tiers = [_fanvue_scopes(), _fanvue_scopes(minimal=True),
+             _fanvue_scopes(minimal=True, drop=['offline', 'offline_access'])]
+    seen, out = set(), []
+    for t in tiers:
+        key = frozenset(t.split())
+        if key not in seen:
+            seen.add(key)
+            out.append(t)
+    return out
+
+
+def _fanvue_parse_bad_scopes(description, requested):
+    """The scope names Fanvue's invalid_scope message blames. Only words that we
+    actually asked for count, so nothing in the prose can be mistaken for one."""
+    req = [s for s in (requested or '').split() if s]
+    out = []
+    for tok in re.findall(r'[A-Za-z0-9:._*-]+', description or ''):
+        if tok in req and tok not in out:
+            out.append(tok)
+    return out
 
 
 _fanvue_lock_guard = threading.Lock()
@@ -8681,7 +8740,8 @@ def api_fanvue_config():
         return jsonify({'error': 'Unauthorized'}), 401
     a = _fanvue_app()
     return jsonify({'configured': bool(a['client_id']), 'redirect_uri': a['redirect_uri'],
-                    'has_secret': bool(a['client_secret'])})
+                    'has_secret': bool(a['client_secret']),
+                    'scopes': _fanvue_scopes(), 'denied_scopes': _fanvue_denied_scopes()})
 
 
 @app.route('/api/fanvue/auth-url', methods=['POST'])
@@ -8701,7 +8761,10 @@ def api_fanvue_auth_url():
     if not redirect_uri:
         return jsonify({'ok': False, 'error': 'No redirect URI could be determined. '
                         'Set PUBLIC_BASE_URL or FANVUE_REDIRECT_URI in the environment.'}), 400
-    scope = _fanvue_scopes(minimal=bool(data.get('minimal')))
+    drop = data.get('drop') or []
+    if isinstance(drop, str):
+        drop = drop.split()
+    scope = _fanvue_scopes(minimal=bool(data.get('minimal')), drop=drop)
 
     code_verifier = secrets.token_urlsafe(64)
     code_challenge = __import__('base64').urlsafe_b64encode(
@@ -8720,12 +8783,65 @@ def api_fanvue_auth_url():
                     'redirect_uri': redirect_uri, 'scope': scope})
 
 
+@app.route('/api/fanvue/scope-error', methods=['POST'])
+@platform_scoped
+def api_fanvue_scope_error():
+    """Turn an invalid_scope refusal into the next authorization to try.
+
+    Fanvue rejects the whole authorization when the app registration is not
+    granted one optional scope, and names it in error_description. We drop the
+    named scope for good, or — when nothing is named — step down to the next
+    narrower tier. A refusal naming a scope the bot cannot work without is
+    reported instead, because retrying it would just loop."""
+    data = request.json or {}
+    requested = (data.get('requested') or '').strip() or _fanvue_scopes()
+    detail = ' '.join(str(data.get(k) or '') for k in
+                      ('error_description', 'error_hint', 'error_debug'))
+    bad = _fanvue_parse_bad_scopes(detail, requested)
+    required = set(FANVUE_REQUIRED_SCOPES.split())
+    blocked = [s for s in bad if s in required]
+    if blocked:
+        return jsonify({'ok': False, 'retry': False, 'blocked': blocked,
+                        'error': 'Fanvue refused permissions the bot cannot work without ('
+                                 + ', '.join(blocked) + '). Ask Fanvue to grant them to this '
+                                 'app registration.'}), 400
+    if bad:
+        _fanvue_remember_denied(bad)
+        nxt = _fanvue_scopes()
+        return jsonify({'ok': True, 'retry': set(nxt.split()) != set(requested.split()),
+                        'dropped': bad, 'scope': nxt})
+
+    asked = set(requested.split())
+    for tier in _fanvue_scope_tiers():
+        got = set(tier.split())
+        if got < asked:
+            return jsonify({'ok': True, 'retry': True, 'scope': tier,
+                            'dropped': sorted(asked - got),
+                            'drop': sorted(asked - got)})
+    return jsonify({'ok': True, 'retry': False, 'scope': requested, 'dropped': [],
+                    'error': 'Fanvue refused the minimum set of permissions this bot needs.'})
+
+
+@app.route('/api/fanvue/scope-reset', methods=['POST'])
+@platform_scoped
+def api_fanvue_scope_reset():
+    """Forget the learned refusals, so a registration that has since been
+    granted more scopes is asked for the full set again."""
+    _set_setting('fanvue_denied_scopes', '[]')
+    return jsonify({'ok': True, 'scope': _fanvue_scopes()})
+
+
 @app.route('/api/fanvue/oauth-redirect')
 def api_fanvue_oauth_redirect():
     code = request.args.get('code', '')
     state = request.args.get('state', '')
     error = request.args.get('error', '')
-    payload = json.dumps({'type': 'fanvue_oauth', 'code': code, 'state': state, 'error': error})
+    # invalid_scope only says which scope it means in the description, and the
+    # connect flow needs that name to drop it and retry.
+    detail = ' '.join(request.args.get(k, '') for k in
+                      ('error_description', 'error_hint', 'error_debug')).strip()
+    payload = json.dumps({'type': 'fanvue_oauth', 'code': code, 'state': state,
+                          'error': error, 'error_description': detail})
     return Response(
         '<!DOCTYPE html><html><body style="background:#0d0d0f;color:#e7e9ee;'
         'font-family:system-ui;padding:40px;text-align:center">'
@@ -8763,7 +8879,8 @@ def api_fanvue_callback():
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)[:200]}), 400
 
-    tokens = {'access_token': td.get('access_token', ''), 'refresh_token': td.get('refresh_token', '')}
+    tokens = {'access_token': td.get('access_token', ''), 'refresh_token': td.get('refresh_token', ''),
+              'scope': td.get('scope', '')}
     _fanvue_save_tokens(persona, tokens)
     username = ''
     try:
