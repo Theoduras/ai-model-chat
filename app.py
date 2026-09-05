@@ -3295,14 +3295,12 @@ def register():
     return redirect('/join/' + pending if pending else '/billing?signup=1')
 
 
-def _post_signin_redirect(active, nxt=''):
+def _post_signin_redirect(active):
     """Where a sign-in lands. A pending seat invite wins over the billing
     bounce: an invitee has no plan of their own and never will."""
     pending = session.pop('pending_invite', '')
     if pending:
         return redirect('/join/' + pending)
-    if nxt.startswith('/') and active:
-        return redirect(nxt)
     return redirect('/dashboard' if active else '/billing')
 
 
