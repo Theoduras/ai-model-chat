@@ -358,7 +358,9 @@ def _can_edit_persona(slug, user):
         return True
     owner = _persona_owner(slug)
     if owner:
-        return owner in (user['id'], user.get('workspace_id') or user['id'])
+        # Strictly the workspace in view: a creator's own personas must not
+        # follow them into a workspace they merely have a seat in.
+        return owner == (user.get('workspace_id') or user['id'])
     # No DB row: free to create unless a premade repo persona holds the slug.
     return not _is_premade(slug)
 
@@ -1264,24 +1266,22 @@ def _current_user():
             s.commit()
             logger.info('ADMIN BOOTSTRAPPED from ADMIN_EMAILS: %s', u.email)
         role = u.role or 'user'
+        ws, seat_role = _active_workspace(s, u)
         # A seat draws its plan from the workspace owner: only the owner is
-        # billed, so a chatter's access has to follow the owner's subscription.
-        tier, status, expires_at = u.tier, u.status, u.expires_at
-        grandfathered = u.grandfathered_until
-        owner_id = u.team_owner_id or ''
-        if owner_id:
-            owner = s.get(User, owner_id)
-            if owner is not None:
-                tier, status, expires_at = owner.tier, owner.status, owner.expires_at
-                grandfathered = owner.grandfathered_until
-                if (status == 'active' and expires_at
-                        and expires_at < datetime.now(timezone.utc).replace(tzinfo=None)):
-                    status = 'expired'
+        # billed, so a member's access has to follow the owner's subscription.
+        owner = u if (ws is None or ws.owner_id == u.id) else s.get(User, ws.owner_id)
+        owner = owner or u
+        tier, status = owner.tier, owner.status
+        expires_at, grandfathered = owner.expires_at, owner.grandfathered_until
+        if (owner.id != u.id and status == 'active' and expires_at
+                and expires_at < datetime.now(timezone.utc).replace(tzinfo=None)):
+            status = 'expired'
         return {'id': u.id, 'email': u.email, 'name': u.name, 'tier': tier,
                 'status': status, 'role': role,
-                'team_owner_id': owner_id,
-                'workspace_id': owner_id or u.id,
-                'seat_role': 'owner' if not owner_id else role,
+                'workspace_id': ws.id if ws is not None else u.id,
+                'workspace_name': (ws.name if ws is not None else '') or owner.email,
+                'workspace_owner_id': owner.id,
+                'seat_role': seat_role,
                 'is_admin': role == 'admin',
                 'stripe_customer_id': u.stripe_customer_id or '',
                 'stripe_subscription_id': u.stripe_subscription_id or '',
@@ -1290,6 +1290,39 @@ def _current_user():
                 'expires_at': expires_at.isoformat() if expires_at else None}
     finally:
         s.close()
+
+
+def _active_workspace(s, u):
+    """(workspace, seat_role) for this request. The chosen workspace is held in
+    the session so a switch survives navigation; an invalid or stale choice
+    falls back to one the user is actually a member of rather than erroring."""
+    from db import User, Workspace, Membership, list_memberships, create_workspace
+    rows = list_memberships(s, u.id)
+    if not any(m.role == 'owner' for m, _ in rows):
+        # Sign-up, Google sign-in and the admin console all create users, so the
+        # own-workspace guarantee lives here rather than in each of them. A user
+        # who only holds seats still needs somewhere of their own to come back to.
+        ws = s.get(Workspace, u.id)
+        if ws is None:
+            ws = create_workspace(s, u.id, u.brand or u.name or u.email, u.id)
+        elif s.query(Membership).filter(Membership.workspace_id == ws.id,
+                                        Membership.user_id == u.id).first() is None:
+            s.add(Membership(workspace_id=ws.id, user_id=u.id, role='owner'))
+        s.commit()
+        rows = list_memberships(s, u.id)
+    chosen = session.get('workspace_id') or ''
+    for m, ws in rows:
+        if ws.id == chosen:
+            return ws, (m.role or 'chatter')
+    # No choice made yet. Prefer a workspace that can actually be used: someone
+    # invited purely as a chatter has an empty, unpaid workspace of their own,
+    # and landing them there would greet them with the paywall.
+    for m, ws in rows:
+        owner = s.get(User, ws.owner_id)
+        if owner is not None and owner.status == 'active':
+            return ws, (m.role or 'chatter')
+    m, ws = rows[0]
+    return ws, (m.role or 'chatter')
 
 
 def _user_is_active(user):
@@ -1427,7 +1460,7 @@ _PAID_API = ('/api/telegram', '/api/tguser', '/api/x', '/api/xlog', '/api/thread
 # arrive from the platform, not a signed-in creator, and carry their own signed
 # proof of origin — a sign-in redirect would just look like a failure to Fanvue.
 _OPEN_PATHS = ('/login', '/register', '/logout', '/pricing', '/billing',
-               '/auth/google',
+               '/auth/google', '/join/', '/api/workspaces',
                '/account', '/api/billing', '/healthz', '/go/', '/webhooks/',
                '/dashboard/logout', '/admin/logout')
 
@@ -1847,6 +1880,7 @@ td{padding:8px 0;border-bottom:1px solid var(--border);color:var(--text-2)}
 {% else %}—{% endif %}</span></div>
 {% if user.is_admin %}<a class="btn" style="background:#2e1065;color:#c4b5fd" href="/admin/users">Admin · manage users</a>{% endif %}
 <a class="btn" style="background:var(--surface);color:var(--text)" href="/account/profile">Edit profile</a>
+{% if seats_cap != 1 and user.seat_role == 'owner' %}<a class="btn" style="background:var(--surface);color:var(--text)" href="/team">Team &middot; {{ seats_used }} of {{ seats_cap }} seats</a>{% endif %}
 {% if user.status == 'active' %}<a class="btn" href="/dashboard">Go to dashboard</a>
 <a class="btn" style="background:var(--surface);color:var(--text)" href="/billing">Change plan</a>
 {% else %}<a class="btn" href="/billing">Choose a plan</a>{% endif %}
@@ -2029,26 +2063,36 @@ ADMIN_ROLES = ('user', 'manager', 'chatter', 'support', 'admin')
 
 
 def _apply_team_owner(s, u, owner_email):
-    """Move a user into (or out of) a workspace. Returns an error string, or
-    '' on success. Seats are one level deep by design: an owner is identified
-    by having no owner of their own, so a chain would make the workspace of a
-    persona ambiguous."""
-    from db import get_user_by_email, count_team_members
+    """Add or remove a seat in another account's workspace, from the console.
+
+    Only the memberships this grants are touched; a user's own workspace is
+    never removed, so revoking a seat cannot orphan them."""
+    from db import (get_user_by_email, Workspace, Membership, get_membership,
+                    count_workspace_members)
+    guest = [m for m in s.query(Membership).filter(Membership.user_id == u.id).all()
+             if m.role != 'owner']
     if not owner_email:
-        u.team_owner_id = None
+        for m in guest:
+            s.delete(m)
         return ''
     owner = get_user_by_email(s, owner_email)
     if owner is None:
         return 'No account with that owner email.'
     if owner.id == u.id:
         return 'An account cannot be a seat in its own workspace.'
-    if owner.team_owner_id:
-        return 'That account is itself a seat. Pick the workspace owner instead.'
-    if u.team_owner_id != owner.id:
+    ws = s.query(Workspace).filter(Workspace.owner_id == owner.id).order_by(
+        Workspace.created_at.asc()).first()
+    if ws is None:
+        return f'{owner.email} has no workspace yet.'
+    if get_membership(s, ws.id, u.id) is None:
         cap = tier_capabilities(owner.tier).get('seats')
-        if cap is not None and count_team_members(s, owner.id) >= int(cap):
+        if cap is not None and count_workspace_members(s, ws.id) >= int(cap):
             return f'{owner.email} is using all {cap} seats on their plan.'
-    u.team_owner_id = owner.id
+        s.add(Membership(workspace_id=ws.id, user_id=u.id,
+                         role=(u.role if u.role in ('manager', 'chatter') else 'chatter')))
+    for m in guest:
+        if m.workspace_id != ws.id:
+            s.delete(m)
     return ''
 
 
@@ -2064,22 +2108,25 @@ def admin_users():
     from db import list_users
     s = _db_session()
     try:
+        from db import Workspace, Membership
         users = list_users(s)
         by_id = {u.id: u for u in users}
-        seats = {}
-        for u in users:
-            if u.team_owner_id:
-                seats[u.team_owner_id] = seats.get(u.team_owner_id, 0) + 1
+        ws_owner = {w.id: w.owner_id for w in s.query(Workspace).all()}
+        seats, guest_of = {}, {}
+        for m in s.query(Membership).all():
+            seats[m.workspace_id] = seats.get(m.workspace_id, 0) + 1
+            if m.role != 'owner':
+                guest_of.setdefault(m.user_id, []).append(m.workspace_id)
         rows = []
         for u in users:
-            owner = by_id.get(u.team_owner_id) if u.team_owner_id else None
-            n = seats.get(u.id, 0)
+            guests = [by_id.get(ws_owner.get(w)) for w in guest_of.get(u.id, [])]
+            owner = next((g for g in guests if g is not None), None)
+            n = seats.get(u.id, 0) - 1
             rows.append({
                 'id': u.id, 'email': u.email, 'name': u.name,
                 'role': u.role or 'user', 'tier': u.tier, 'status': u.status,
-                'team': (owner.email if owner else
-                         (u.team_owner_id if u.team_owner_id else '')),
-                'seats': (n + 1) if n else 0,
+                'team': (owner.email if owner else ''),
+                'seats': (n + 1) if n > 0 else 0,
                 'seat_cap': tier_capabilities(u.tier).get('seats') or 1,
                 'grandfathered': _fmt_date(u.grandfathered_until),
                 'expires': _fmt_date(u.expires_at),
@@ -2159,11 +2206,15 @@ def admin_user_detail(uid):
                         logger.info('ADMIN EDIT account by=%s target=%s role=%s '
                                     'status=%s tier=%s team=%s', me['email'],
                                     u.email, u.role, u.status, u.tier,
-                                    u.team_owner_id or '-')
+                                    request.form.get('team_owner') or '-')
             if error:
                 s.rollback()
 
-        owner = s.get(User, u.team_owner_id) if u.team_owner_id else None
+        from db import Workspace, Membership
+        guest = s.query(Membership).filter(Membership.user_id == u.id,
+                                           Membership.role != 'owner').first()
+        gws = s.get(Workspace, guest.workspace_id) if guest else None
+        owner = s.get(User, gws.owner_id) if gws else None
         view = {'id': u.id, 'email': u.email, 'role': u.role or 'user',
                 'team_owner': owner.email if owner else '',
                 'grandfathered': _fmt_date(u.grandfathered_until),
@@ -2174,6 +2225,306 @@ def admin_user_detail(uid):
     return render_template_string(ADMIN_USER_HTML, u=view, p=p, saved=saved,
                                   error=error, tiers=TIERS, order=DEFAULT_TIER_ORDER,
                                   roles=ADMIN_ROLES)
+
+
+SEAT_ROLES = ('manager', 'chatter')
+INVITE_DAYS = 14
+
+TEAM_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Team</title>
+<style>""" + ACCOUNT_CSS + """
+table{width:100%;border-collapse:collapse;font-size:.88rem}
+th{text-align:left;color:var(--text-muted);font-weight:500;padding:8px 10px;border-bottom:1px solid var(--border)}
+td{padding:10px;border-bottom:1px solid var(--border);color:var(--text-2);vertical-align:middle}
+select{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:7px 10px;color:var(--text);font-size:.85rem}
+.row-actions{display:flex;gap:8px;align-items:center}
+.row-actions button{padding:7px 12px;font-size:.82rem;width:auto}
+.danger{background:#7f1d1d}.danger:hover{background:#991b1b}
+.two{display:grid;grid-template-columns:1fr auto auto;gap:0 10px;align-items:end}
+.pill{display:inline-block;padding:2px 9px;border-radius:999px;font-size:.72rem;font-weight:600;background:#1f2937;color:#cbd5e1}
+.pill.owner{background:#2e1065;color:#c4b5fd}
+.link{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:9px 11px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.78rem;word-break:break-all;margin:6px 0 10px}
+h2{font-size:1rem;margin-bottom:6px}
+</style></head><body><div class="wrap" style="max-width:780px">
+<div class="bar"><a href="/account">\u2190 My account</a><a href="/dashboard">Dashboard</a></div>
+{% if saved %}<div class="ok">{{ saved }}</div>{% endif %}
+{% if error %}<div class="err">{{ error }}</div>{% endif %}
+
+<div class="card"><h2>Team</h2>
+<p class="sub">{{ used }} of {{ cap }} seat{{ '' if cap == 1 else 's' }} on {{ tier_name }}.
+Everyone here shares this workspace's personas, and only you are billed. They keep their own
+workspace too, and switch between them.</p>
+<table>
+<tr><th>Member</th><th>Role</th><th></th></tr>
+{% for m in members %}<tr>
+<td>{{ m.email }}{% if m.name %}<br><span class="sub">{{ m.name }}</span>{% endif %}</td>
+{% if m.is_owner %}
+<td colspan="2"><span class="pill owner">owner \u00b7 you</span></td>
+{% else %}
+<td colspan="2"><form method="post" class="row-actions">
+<input type="hidden" name="action" value="role"><input type="hidden" name="uid" value="{{ m.id }}">
+<select name="role">{% for r in seat_roles %}<option value="{{ r }}" {{ 'selected' if m.role == r }}>{{ r }}</option>{% endfor %}</select>
+<button type="submit">Save</button>
+<button type="submit" name="action" value="remove" class="danger"
+  onclick="return confirm('Remove {{ m.email }} from your team?')">Remove</button>
+</form></td>
+{% endif %}
+</tr>{% endfor %}
+</table>
+<p class="sub" style="margin-top:14px"><strong>Manager</strong> can do everything except billing and
+managing seats. <strong>Chatter</strong> can reply to fans but cannot edit personas, connect
+platforms or generate images.</p>
+</div>
+
+{% if invites %}<div class="card" style="margin-top:16px"><h2>Pending invites</h2>
+{% for i in invites %}
+<p class="sub" style="margin-bottom:2px">{{ i.email or 'anyone with the link' }} \u00b7 {{ i.role }} \u00b7 expires {{ i.expires }}</p>
+<div class="link">{{ i.url }}</div>
+<form method="post" style="margin-bottom:18px"><input type="hidden" name="action" value="revoke">
+<input type="hidden" name="token" value="{{ i.token }}">
+<button type="submit" class="danger" style="width:auto;padding:7px 12px;font-size:.82rem">Revoke</button></form>
+{% endfor %}
+</div>{% endif %}
+
+<div class="card" style="margin-top:16px"><h2>Invite someone</h2>
+{% if seats_left > 0 %}
+<p class="sub">We do not send the email for you \u2014 you get a link to pass on. It works once and
+expires after {{ invite_days }} days.</p>
+<form method="post"><input type="hidden" name="action" value="invite">
+<div class="two">
+<div><label>Their email (optional, but it locks the link to them)</label>
+<input type="email" name="email" placeholder="them@example.com"></div>
+<div><label>Role</label><select name="role">{% for r in seat_roles %}<option value="{{ r }}">{{ r }}</option>{% endfor %}</select></div>
+<div><button type="submit" style="width:auto;padding:11px 18px">Create link</button></div>
+</div></form>
+{% else %}
+<p class="sub">{{ 'Your plan has a single seat' if cap == 1 else 'All ' ~ cap ~ ' seats on your plan are in use' }}. Remove someone,
+or <a href="/pricing">move to a bigger plan</a>.</p>
+{% endif %}
+</div>
+</div></body></html>"""
+
+JOIN_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<link rel="icon" href="/favicon.ico" sizes="any"><title>Join a team</title>
+<style>""" + ACCOUNT_CSS + """h2{font-size:1.05rem;margin-bottom:8px}</style>
+</head><body><div class="wrap"><div class="card">
+{% if error %}<h2>This invite cannot be used</h2><div class="err">{{ error }}</div>
+<a class="ghost" href="/dashboard">Go to your dashboard</a>
+{% else %}<h2>Join {{ owner }}\u2019s team</h2>
+<p class="sub">You will join as <strong>{{ role }}</strong> and share their personas. You will not be
+billed \u2014 the workspace owner pays for the plan. Your own workspace, plan and personas stay
+exactly as they are; you switch between them from the sidebar.</p>
+<form method="post"><button type="submit">Accept invite</button></form>
+<a class="ghost" href="/dashboard">No thanks</a>{% endif %}
+</div></div></body></html>"""
+
+
+def _seat_view(s, user):
+    """Members, pending invites and the seat count for the active workspace."""
+    from db import list_workspace_members, count_workspace_members, list_invites
+    wid = _workspace_id(user)
+    members = [{'id': u.id, 'email': u.email, 'name': u.name or '',
+                'role': m.role or 'chatter', 'is_owner': (m.role == 'owner')}
+               for m, u in list_workspace_members(s, wid)]
+    invites = [{'token': i.token, 'email': i.email or '', 'role': i.role,
+                'expires': _fmt_date(i.expires_at),
+                'url': request.url_root.rstrip('/') + '/join/' + i.token}
+               for i in list_invites(s, wid)
+               if i.expires_at and i.expires_at > datetime.now(timezone.utc).replace(tzinfo=None)]
+    cap = user_capabilities(user).get('seats')
+    return members, invites, cap, count_workspace_members(s, wid)
+
+
+@app.route('/team', methods=['GET', 'POST'])
+def team():
+    user = _current_user()
+    if not user:
+        return redirect('/login?next=/team')
+    # Seats belong to whoever pays for them, so only the owner manages them.
+    if user.get('seat_role') != 'owner' and not user.get('is_admin'):
+        return ('Not found', 404)
+    from db import (User, Invite, Membership, count_pending_invites,
+                    count_workspace_members, get_membership)
+    s = _db_session()
+    try:
+        wid = _workspace_id(user)
+        saved = error = ''
+        if request.method == 'POST':
+            action = request.form.get('action', '')
+            cap = user_capabilities(user).get('seats')
+
+            if action == 'invite':
+                pending = count_pending_invites(s, wid)
+                if cap is not None and count_workspace_members(s, wid) + pending >= int(cap):
+                    error = ('Every seat on your plan is taken or already invited. '
+                             'Revoke an invite or remove a member first.')
+                else:
+                    role = request.form.get('role', 'chatter')
+                    inv = Invite(
+                        token=secrets.token_urlsafe(24),
+                        workspace_id=wid,
+                        email=(request.form.get('email') or '').strip().lower()[:255],
+                        role=role if role in SEAT_ROLES else 'chatter',
+                        created_by=user['id'],
+                        expires_at=(datetime.now(timezone.utc).replace(tzinfo=None)
+                                    + timedelta(days=INVITE_DAYS)))
+                    s.add(inv)
+                    s.commit()
+                    saved = 'Invite link created. Copy it below and send it to them.'
+                    logger.info('SEAT INVITE by=%s workspace=%s role=%s',
+                                user['email'], wid, inv.role)
+
+            elif action == 'revoke':
+                inv = s.get(Invite, request.form.get('token', ''))
+                if inv is not None and inv.workspace_id == wid and not inv.accepted_at:
+                    s.delete(inv)
+                    s.commit()
+                    saved = 'Invite revoked.'
+
+            elif action in ('role', 'remove'):
+                target = s.get(User, request.form.get('uid', ''))
+                mem = get_membership(s, wid, target.id) if target else None
+                if mem is None:
+                    error = 'That person is not on your team.'
+                elif mem.role == 'owner':
+                    error = 'The owner cannot be removed or demoted.'
+                elif action == 'remove':
+                    s.delete(mem)
+                    s.commit()
+                    saved = f'{target.email} removed from this workspace.'
+                    logger.info('SEAT REMOVED by=%s target=%s workspace=%s',
+                                user['email'], target.email, wid)
+                else:
+                    role = request.form.get('role', '')
+                    if role not in SEAT_ROLES:
+                        error = 'Pick a valid role.'
+                    else:
+                        mem.role = role
+                        s.commit()
+                        saved = f'{target.email} is now a {role}.'
+
+        members, invites, cap, used = _seat_view(s, user)
+    finally:
+        s.close()
+    tier = TIERS.get(user.get('tier') or '') or {}
+    return render_template_string(
+        TEAM_HTML, members=members, invites=invites, saved=saved, error=error,
+        cap=('unlimited' if cap is None else cap), used=used,
+        seats_left=(1 if cap is None else int(cap) - used),
+        seat_roles=SEAT_ROLES, invite_days=INVITE_DAYS,
+        tier_name=tier.get('name') or 'your plan')
+
+
+def _invite_problem(s, inv, user):
+    """Why this invite cannot be accepted by this user, or '' if it can.
+
+    Joining no longer costs the invitee anything — their own workspace, plan
+    and personas stay put and they switch between them — so the old refusals
+    for "you already have a plan" and "you already own personas" are gone.
+    """
+    from db import User
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    if inv is None or inv.accepted_at:
+        return 'This invite has already been used.'
+    if not inv.expires_at or inv.expires_at <= now:
+        return 'This invite has expired. Ask for a new one.'
+    if inv.email and inv.email != (user.get('email') or '').lower():
+        return f'This invite was issued to {inv.email}. Sign in as that account to accept it.'
+    from db import Workspace, get_membership, count_workspace_members
+    ws = s.get(Workspace, inv.workspace_id)
+    if ws is None:
+        return 'That workspace no longer exists.'
+    if get_membership(s, ws.id, user['id']) is not None:
+        return 'You are already in this workspace.'
+    owner = s.get(User, ws.owner_id)
+    if owner is None:
+        return 'That workspace no longer exists.'
+    cap = tier_capabilities(owner.tier).get('seats')
+    if cap is not None and count_workspace_members(s, ws.id) >= int(cap):
+        return 'That team has no seats left. Ask the owner to free one up.'
+    return ''
+
+
+@app.route('/api/workspaces')
+def api_workspaces():
+    """Every workspace the caller can open, and which one is in view."""
+    user = _current_user()
+    if not user:
+        return jsonify({'error': 'Sign in required'}), 401
+    from db import list_memberships, User
+    s = _db_session()
+    try:
+        out = []
+        for m, ws in list_memberships(s, user['id']):
+            owner = s.get(User, ws.owner_id)
+            out.append({'id': ws.id,
+                        'name': ws.name or (owner.email if owner else ws.id),
+                        'role': m.role or 'chatter',
+                        'plan': (owner.tier or '') if owner else '',
+                        'active': ws.id == user['workspace_id']})
+    finally:
+        s.close()
+    return jsonify({'workspaces': out, 'active': user['workspace_id']})
+
+
+@app.route('/api/workspaces/switch', methods=['POST'])
+def api_workspace_switch():
+    """Put a different workspace in view. Membership is re-checked here rather
+    than trusted from the session, which is why _active_workspace can fall back
+    quietly instead of failing when a seat is later revoked."""
+    user = _current_user()
+    if not user:
+        return jsonify({'error': 'Sign in required'}), 401
+    wid = (request.json or {}).get('workspace_id', '')
+    from db import get_membership
+    s = _db_session()
+    try:
+        if get_membership(s, wid, user['id']) is None:
+            return jsonify({'error': 'Not found'}), 404
+    finally:
+        s.close()
+    session['workspace_id'] = wid
+    return jsonify({'ok': True, 'workspace_id': wid})
+
+
+@app.route('/join/<token>', methods=['GET', 'POST'])
+def join_team(token):
+    from db import User, Invite
+    user = _current_user()
+    if not user:
+        # Survive the round trip through sign-up, which otherwise lands on billing.
+        session['pending_invite'] = token
+        return redirect('/register?invite=1')
+    s = _db_session()
+    try:
+        inv = s.get(Invite, token)
+        problem = _invite_problem(s, inv, user)
+        if problem:
+            return render_template_string(JOIN_HTML, error=problem)
+        owner = s.get(User, inv.workspace_id)
+        if request.method == 'GET':
+            return render_template_string(JOIN_HTML, error='',
+                                          owner=owner.name or owner.email,
+                                          role=inv.role)
+        from db import Membership
+        me = s.get(User, user['id'])
+        s.add(Membership(workspace_id=inv.workspace_id, user_id=me.id,
+                         role=inv.role))
+        # Land them in the workspace they just joined, not whichever they had open.
+        session['workspace_id'] = inv.workspace_id
+        inv.accepted_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        inv.accepted_by = me.id
+        s.commit()
+        logger.info('SEAT ACCEPTED user=%s workspace=%s role=%s',
+                    me.email, inv.workspace_id, inv.role)
+    finally:
+        s.close()
+    return redirect('/dashboard')
 
 
 @app.route('/account/profile', methods=['GET', 'POST'])
@@ -2229,6 +2580,8 @@ def api_me():
                     'is_admin': bool(user.get('is_admin')),
                     'is_operator': _is_operator(),
                     'seat_role': user.get('seat_role') or 'owner',
+                    'workspace_id': user.get('workspace_id') or '',
+                    'workspace_name': user.get('workspace_name') or '',
                     'capabilities': caps,
                     'grandfathered': _is_grandfathered(user),
                     'usage': {'personas': {'used': _persona_count(user),
@@ -2307,8 +2660,16 @@ def account():
                      'provider': p.provider or 'oxapay'} for p in rows]
     finally:
         s.close()
+    from db import count_workspace_members
+    s = _db_session()
+    try:
+        seats_used = count_workspace_members(s, _workspace_id(user))
+    finally:
+        s.close()
+    cap = user_capabilities(user).get('seats')
     return render_template_string(ACCOUNT_HTML, user=user, tiers=TIERS,
-                                  payments=payments)
+                                  payments=payments, seats_used=seats_used,
+                                  seats_cap=('unlimited' if cap is None else cap))
 
 
 # ── Sign in with Google (OAuth 2.0, credentials from Google Cloud Console) ───
@@ -2417,7 +2778,7 @@ def auth_google_callback():
         s.close()
     if nxt and active:
         return redirect(nxt)
-    return redirect('/dashboard' if active else '/billing')
+    return _post_signin_redirect(active)
 
 
 @app.route('/register', methods=['GET', 'POST'])
@@ -2450,7 +2811,17 @@ def register():
         session.permanent = True
     finally:
         s.close()
-    return redirect('/billing?signup=1')
+    pending = session.pop('pending_invite', '')
+    return redirect('/join/' + pending if pending else '/billing?signup=1')
+
+
+def _post_signin_redirect(active, nxt=''):
+    """Where a sign-in lands. A pending seat invite wins over the billing
+    bounce: an invitee has no plan of their own and never will."""
+    pending = session.pop('pending_invite', '')
+    if pending:
+        return redirect('/join/' + pending)
+    return _post_signin_redirect(active, nxt)
 
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -2487,7 +2858,7 @@ def login():
         s.close()
     if nxt.startswith('/') and active:
         return redirect(nxt)
-    return redirect('/dashboard' if active else '/billing')
+    return _post_signin_redirect(active)
 
 
 @app.route('/logout')
