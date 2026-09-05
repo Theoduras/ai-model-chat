@@ -216,11 +216,6 @@
           <span class="sb-badge" id="sb-team-count"></span>
         </button>
 
-        <div class="sb-upgrade" id="sb-upgrade" hidden>
-          <div class="sb-label">Not in your plan</div>
-          <div id="sb-upgrade-items"></div>
-        </div>
-
         <div class="sb-label admin-only">Developers</div>
         <a href="#" class="sb-item admin-only" data-search="gemini settings" onclick="event.preventDefault();openSettings();">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" width="16" height="16" aria-hidden="true"><path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z" stroke-linecap="round" stroke-linejoin="round"/><path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -492,33 +487,24 @@ async function identifyUser() {
   lsPurgeLegacy();
 }
 
-// Which plan first includes each capability, for the "Not in your plan" list.
-const CAP_LABELS = {
-  outfit_lock:        ['Outfit locking + media tagging', 'Pro'],
-  scheduled_followups:['Scheduled follow-ups and auto-run', 'Pro'],
-  analytics:          ['Conversation and revenue analytics', 'Agency'],
-  ppv_reconcile:      ['PPV reconciliation', 'Agency'],
-};
-const PLATFORM_LABELS = { telegram: 'Telegram', x: '\uD835\uDD4F Bot', fanvue: 'Fanvue', threads: 'Threads' };
 // Seat roles that may not open the persona editor or platform settings. Mirrors
 // _ROLE_DENY in app.py, which is the half that actually enforces it.
 const ROLE_HIDDEN = { chatter: ['personas', 'platforms', 'generate', 'config'] };
 
-function upgradeRow(label, tier) {
-  const b = document.createElement('button');
-  b.type = 'button';
-  b.className = 'sb-item';
-  b.dataset.search = label.toLowerCase() + ' upgrade ' + tier.toLowerCase();
-  b.onclick = () => { window.location = '/pricing'; };
-  b.innerHTML = '<span></span><span class="sb-lock"></span>';
-  b.children[0].textContent = label;
-  b.children[1].textContent = tier;
-  return b;
+// Greys a nav item out in place and sends its click to the pricing page.
+function lockNavItem(el, tier) {
+  el.classList.add('locked');
+  el.dataset.search = (el.dataset.search || '') + ' upgrade ' + tier.toLowerCase();
+  el.onclick = () => { window.location = '/pricing'; };
+  const lock = document.createElement('span');
+  lock.className = 'sb-lock';
+  lock.textContent = tier;
+  el.appendChild(lock);
 }
 
 // Renders the dashboard for this plan and seat: the tier keeps only the nav it
-// pays for, and everything above it is collected into one upgrade list rather
-// than hidden, so the next tier stays legible.
+// pays for, and anything above it stays visible but locked, so the next tier
+// stays legible without a separate list of things the creator cannot use.
 function applyEntitlements(me) {
   const caps = me.capabilities || {};
   const seat = me.seat_role || 'owner';
@@ -541,23 +527,19 @@ function applyEntitlements(me) {
     if (n) n.textContent = seats.used + ' / ' + (seats.limit === null ? '\u221e' : seats.limit);
   }
 
-  const box = document.getElementById('sb-upgrade');
-  const list = document.getElementById('sb-upgrade-items');
-  if (!box || !list || me.is_admin) return;
+  if (me.is_admin) return;
 
-  // null means every platform; a list means only those.
+  // null means every platform; a list means only those. A platform the plan
+  // does not cover stays in the Platforms group, greyed out behind its tier,
+  // so the creator can see what upgrading buys them — but after the ones they
+  // can actually use.
   const allowed = caps.platforms;
   document.querySelectorAll('[data-platform]').forEach(el => {
     const key = el.dataset.platform;
     if (allowed === null || allowed === undefined || allowed.indexOf(key) !== -1) return;
-    el.remove();
-    list.appendChild(upgradeRow(PLATFORM_LABELS[key] || key, 'Pro'));
+    lockNavItem(el, 'Pro');
+    el.parentNode.appendChild(el);
   });
-  Object.keys(CAP_LABELS).forEach(k => {
-    if (caps[k]) return;
-    list.appendChild(upgradeRow(CAP_LABELS[k][0], CAP_LABELS[k][1]));
-  });
-  box.hidden = list.children.length === 0;
 
   renderPlanPanel(me);
 }
