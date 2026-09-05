@@ -2462,6 +2462,8 @@ async function fillAllInfo() {
     const cfg = data.config;
     cfg.avatar = v('f-avatar') || cfg.avatar || '';   // keep any uploaded avatar
     renderForm(currentSlug, cfg);                       // repopulate every field at once
+    renderGallery();                                     // renderForm rebuilds #photo-grid from
+    renderNsfwGallery();                                 // scratch, so the existing photos need redrawing
     if (personas[currentSlug]) personas[currentSlug].name = cfg.name || currentSlug;
     renderSidebar();
     clearBusy('fillall-btn', 'save-status', '✓ Filled — review, then Save & Deploy', true);
