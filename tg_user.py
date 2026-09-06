@@ -126,7 +126,7 @@ class AccountRunner:
     # A burst closes this long after the fan's last message, and is never held
     # open longer than MAX_HOLD_SECONDS by someone who keeps typing.
     BURST_SECONDS = 8
-    MAX_HOLD_SECONDS = 240
+    MAX_HOLD_SECONDS = 90
 
     def __init__(self, persona, api_id, api_hash, session_str, plan, on_sent=None,
                  on_error=None, on_trace=None, pre_delay=None):

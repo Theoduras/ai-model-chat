@@ -14278,6 +14278,7 @@ TG_FOLLOWUP_MIN_DEFAULT = 45    # minutes of silence before a nudge
 TG_FOLLOWUP_MAX = 2
 TG_TYPING_CPS = 14              # characters "typed" per second
 TG_READ_CAP = 4.5               # longest pause before she starts typing
+TG_NOTICE = (5, 40)             # how long before she notices a message at all
 TG_TYPE_CAP = 22.0              # longest single typing burst
 
 
@@ -14454,7 +14455,7 @@ def _tg_send_human(persona, chat_id, text, incoming='', photo_data=None):
             _tg_send_photo(persona, chat_id, photo_data)
         return
     cps = max(2, cfg['typing_speed'] // 2)
-    time.sleep(random.uniform(15, 120))
+    time.sleep(random.uniform(*TG_NOTICE))
     time.sleep(min(0.8 + len(incoming) / 90.0, TG_READ_CAP) * random.uniform(0.7, 1.3))
     for i, chunk in enumerate(_tg_bursts(text)):
         if not chunk:
@@ -15516,7 +15517,7 @@ def _tgu_pre_delay(persona):
     """How long she takes to notice a message at all. The runner waits this out
     before asking for a reply, so anything else the fan sends meanwhile is
     answered in the same message rather than starting a second reply."""
-    return random.uniform(15, 120) if _tg_settings(persona)['humanize'] else 0
+    return random.uniform(*TG_NOTICE) if _tg_settings(persona)['humanize'] else 0
 
 
 def _tgu_plan(persona, chat_id, name, text, texts=None):
