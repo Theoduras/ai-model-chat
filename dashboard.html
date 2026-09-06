@@ -927,6 +927,29 @@ async function bsFinalize() {
   }
 }
 
+// The persona list serves pictures from /api/personas/{slug}/avatar, while a
+// freshly saved config holds a data URL. Anything cached locally after a save
+// has to be mapped back to that URL, and busted per persona, or the sidebar
+// drops the picture (or renders a data URL with a query string glued on).
+const avatarBust = {};
+
+function personaAvatarUrl(slug, hasImage) {
+  return hasImage ? '/api/personas/' + slug + '/avatar' : '';
+}
+
+function avatarSrc(p) {
+  const src = p.avatar || '';
+  if (!src || src.startsWith('data:')) return src;
+  const v = avatarBust[p.slug];
+  return v ? src + '?t=' + v : src;
+}
+
+function noteAvatarChange(slug, hasImage) {
+  if (!personas[slug]) return;
+  personas[slug].avatar = personaAvatarUrl(slug, hasImage);
+  avatarBust[slug] = Date.now();
+}
+
 function starBtn(slug, favorite, cls) {
   return '<button type="button" class="' + cls + (favorite ? ' active' : '') +
     '" title="' + (favorite ? 'Unfavorite' : 'Favorite') + '" ' +
@@ -941,7 +964,7 @@ function buildPersonaItem(p) {
   el.onclick = () => loadPersona(p.slug);
   const initials = (p.name || p.slug).slice(0,2).toUpperCase();
   const avatarHtml = p.avatar
-    ? '<img src="' + p.avatar + '?t=' + Date.now() + '" style="width:36px;height:36px;border-radius:50%;object-fit:cover;">'
+    ? '<img src="' + avatarSrc(p) + '" style="width:36px;height:36px;border-radius:50%;object-fit:cover;">'
     : '<div class="persona-avatar">' + initials + '</div>';
   const tag = p.premade ? '<span class="persona-tag">original</span>' : '';
   const delBtn = p.premade ? ''
@@ -1265,7 +1288,7 @@ window.addEventListener('message', function (e) {
 
 function personaThumb(p, size) {
   return p.avatar
-    ? '<img src="' + p.avatar + '?t=' + Date.now() + '" style="width:100%;height:100%;object-fit:cover;">'
+    ? '<img src="' + avatarSrc(p) + '" style="width:100%;height:100%;object-fit:cover;">'
     : '<div class="pg-initials" style="font-size:' + Math.round(size * 0.32) + 'px;">' + esc((p.name || p.slug).slice(0,2).toUpperCase()) + '</div>';
 }
 
@@ -1475,11 +1498,11 @@ function renderChatPreview() {
   if (cfg.age) metaParts.push(cfg.age);
   document.getElementById('pc-meta').textContent = metaParts.join(' · ') || 'Fill in the form to preview her';
 
-  const avatarSrc = (cfg.avatar || '').trim();
+  const pcSrc = (cfg.avatar || '').trim();
   const avatarImg = document.getElementById('pc-avatar');
   const avatarFallback = document.getElementById('pc-avatar-fallback');
-  if (avatarSrc) {
-    avatarImg.src = avatarSrc; avatarImg.style.display = '';
+  if (pcSrc) {
+    avatarImg.src = pcSrc; avatarImg.style.display = '';
     avatarFallback.style.display = 'none';
   } else {
     avatarImg.style.display = 'none';
@@ -2101,6 +2124,8 @@ async function savePhotosSection(btn) {
   if (!currentSlug) return;
   try {
     await saveGallery(currentSlug);
+    noteAvatarChange(currentSlug, !!(v('f-avatar') || galleryImages.length));
+    renderSidebar();
     flashSaved(btn);
   } catch(e) { flashSaved(btn, false); }
 }
@@ -2130,6 +2155,9 @@ async function saveSection(btn) {
     if (!data.ok) throw new Error(data.error || 'save failed');
     lsSavePersona(currentSlug, config);
     if (data.prompt) localStorage.setItem(lsPromptKey(currentSlug), data.prompt);
+    if (personas[currentSlug]) personas[currentSlug].name = config.name || currentSlug;
+    noteAvatarChange(currentSlug, !!(config.avatar || galleryImages.length));
+    renderSidebar();
     flashSaved(btn);
   } catch(e) {
     flashSaved(btn, false);
@@ -2168,7 +2196,7 @@ async function savePersona() {
       status.textContent = '✓ Saved & deployed'; status.className = 'save-status ok';
       if (personas[currentSlug]) {
         personas[currentSlug].name = config.name || currentSlug;
-        personas[currentSlug].avatar = config.avatar || '';
+        noteAvatarChange(currentSlug, !!(config.avatar || galleryImages.length));
       }
       renderSidebar();
       showPromptPreview(data.prompt);
@@ -2502,6 +2530,7 @@ async function copyPersona(presetConfig) {
     await saveGallery(data.slug);   // carry the current photos onto the copy
     await saveNsfwGallery(data.slug);
     personas[data.slug] = { slug: data.slug, name: data.name, config: { ...config, name: data.name }, premade: false };
+    noteAvatarChange(data.slug, !!(config.avatar || galleryImages.length));
     document.getElementById('persona-count').textContent = Object.keys(personas).length;
     status.textContent = '✓ Copied as "' + data.name + '"'; status.className = 'save-status ok';
     renderSidebar();
