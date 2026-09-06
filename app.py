@@ -15617,9 +15617,6 @@ def _tgu_fan_key(chat_id):
     return f'tgu:{chat_id}'
 
 
-TGU_HISTORY_LIMIT = 200
-
-
 def _tgu_sync_chats(persona, limit=200):
     """Fold the account's existing Telegram conversations into the fan list.
 

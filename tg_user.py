@@ -162,7 +162,7 @@ class AccountRunner:
     # open longer than MAX_HOLD_SECONDS by someone who keeps typing.
     BURST_SECONDS = 8
     MAX_HOLD_SECONDS = 90
-    HISTORY_LIMIT = 200
+    HISTORY_LIMIT = 500
 
     def __init__(self, persona, api_id, api_hash, session_str, plan, on_sent=None,
                  on_error=None, on_trace=None, pre_delay=None,
