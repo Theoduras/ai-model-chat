@@ -97,13 +97,48 @@ def whoami(api_id, api_hash, session_str):
 
 
 def send_message(api_id, api_hash, session_str, peer, text):
-    """Message someone directly — no prior contact needed, unlike a bot."""
+    """Message someone directly — no prior contact needed, unlike a bot.
+
+    Returns {'chat_id', 'name'} so the caller can file the conversation it just
+    started; without it an opener she sends never appears in the fan list.
+    """
     async def go():
         client = _client(api_id, api_hash, session_str)
         await client.connect()
         try:
-            await client.send_message(peer, text)
-            return True
+            entity = await client.get_entity(peer)
+            msg = await client.send_message(entity, text)
+            return {'chat_id': getattr(msg, 'chat_id', None) or entity.id,
+                    'name': (getattr(entity, 'username', '') or
+                             getattr(entity, 'first_name', '') or str(entity.id))}
+        finally:
+            await client.disconnect()
+    return _run(go())
+
+
+def list_chats(api_id, api_hash, session_str, limit=200):
+    """Every private conversation on the account, newest first.
+
+    The fan list is otherwise built from people who happened to write since the
+    account was connected, which leaves her existing chats invisible.
+    """
+    async def go():
+        client = _client(api_id, api_hash, session_str)
+        await client.connect()
+        try:
+            me = await client.get_me()
+            out = []
+            for d in await client.get_dialogs(limit=limit):
+                ent = d.entity
+                if not d.is_user or getattr(ent, 'bot', False) or ent.id == me.id:
+                    continue
+                out.append({
+                    'chat_id': d.id,
+                    'name': (getattr(ent, 'username', '') or
+                             getattr(ent, 'first_name', '') or str(d.id)),
+                    'last_at': int(d.date.timestamp()) if d.date else 0,
+                })
+            return out
         finally:
             await client.disconnect()
     return _run(go())

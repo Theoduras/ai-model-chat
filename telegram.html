@@ -242,6 +242,7 @@
     <div id="fans-table"></div>
     <div style="display:flex; gap:8px; align-items:center; margin-top:14px; flex-wrap:wrap;">
       <button class="btn-ai" style="background:var(--border);" onclick="loadStats()">Refresh</button>
+      <button class="btn-ai" style="background:var(--border);" onclick="loadTgChats(this)">Load chats from Telegram</button>
       <button class="btn-ai" onclick="saveOnlyFans()">Save who she talks to</button>
       <button class="btn-ai" style="background:var(--border);" onclick="selectAllFans(false)">Talk to everyone</button>
       <span class="hint" id="only-fans-state"></span>
@@ -524,7 +525,7 @@ async function loadStats(){
         '<td><input type="checkbox" class="fan-block" data-id="'+esc(r.chat_id)+'"'+
         (isOff(r)?' checked':'')+' style="width:auto;"></td><td>'+esc(r.name)+'</td><td>'+r.messages+'</td><td><span class="dot '+(r.cta_sent?'y':'n')+'">●</span></td><td><span class="dot '+(r.cta_clicked?'y':'n')+'">●</span></td><td>'+r.followups+'</td></tr>').join('')+
       '</table>'
-      : '<span class="hint" style="display:block;margin-top:12px;">No fans yet — message the bot on Telegram to start a conversation.</span>';
+      : '<span class="hint" style="display:block;margin-top:12px;">No fans yet — message the bot on Telegram to start a conversation, or press <b>Load chats from Telegram</b> to pull in the connected account\'s existing ones.</span>';
     const st=document.getElementById('only-fans-state');
     const ex=(s.exclude_fans||[]).length;
     st.textContent = (only.length ? ('Replying to '+only.length+' selected fan(s) only.')
@@ -532,6 +533,19 @@ async function loadStats(){
                    + (ex?(' Blocking '+ex+' fan(s).'):'');
     st.style.color = (only.length||ex) ? '#4ade80' : 'var(--text-muted)';
   }catch(e){}
+}
+
+async function loadTgChats(btn){
+  const was=btn.textContent; btn.textContent='Loading…'; btn.disabled=true;
+  const st=document.getElementById('only-fans-state');
+  try{
+    const r=await (await fetch('/api/tguser/chats',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({persona:persona()})})).json();
+    if(r.ok){ await loadStats(); st.textContent=r.found+' conversation(s) on the account, '+r.added+' new.'; st.style.color='#4ade80'; }
+    else { st.textContent=r.error||'Could not read the account.'; st.style.color='#fb7185'; }
+  }catch(e){ st.textContent='Could not read the account.'; st.style.color='#fb7185'; }
+  btn.textContent=was; btn.disabled=false;
 }
 
 async function loadBehaviour(){

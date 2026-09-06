@@ -15469,7 +15469,7 @@ def api_telegram_stats():
     clicked = sum(1 for f in fans.values() if f.get('cta_clicked'))
     rows = []
     for chat_id, f in sorted(fans.items(),
-                             key=lambda kv: kv[1].get('last_in', 0), reverse=True)[:50]:
+                             key=lambda kv: kv[1].get('last_in', 0), reverse=True)[:200]:
         rows.append({
             'chat_id': chat_id, 'name': f.get('name', ''),
             'messages': f.get('in_count', 0), 'last_in': f.get('last_in', 0),
@@ -15585,6 +15585,35 @@ def _tgu_fan_key(chat_id):
 
 
 TGU_HISTORY_LIMIT = 200
+
+
+def _tgu_sync_chats(persona, limit=200):
+    """Fold the account's existing Telegram conversations into the fan list.
+
+    The list is otherwise only ever written when a fan sends something, so
+    chats that predate the connection — and anyone she messaged first — are
+    invisible until they happen to write again.
+    """
+    acct = _tgu_accounts().get(persona) or {}
+    api_id, api_hash = _tgu_app_creds()
+    if not (acct.get('session') and api_id and api_hash):
+        raise RuntimeError('No connected account for this persona.')
+    chats = _tgu_import().list_chats(api_id, api_hash, acct['session'], limit=limit)
+    fans = _tg_fans(persona)
+    added = 0
+    for c in chats:
+        key = str(c['chat_id'])
+        fan = fans.get(key)
+        if fan is None:
+            fan = {'first_in': c['last_at'], 'in_count': 0, 'followups': 0}
+            added += 1
+        fan['name'] = c['name'] or fan.get('name', '')
+        fan['last_in'] = max(int(fan.get('last_in', 0) or 0), int(c['last_at'] or 0))
+        fans[key] = fan
+    _tg_save_fans(persona, fans)
+    _tg_trace(persona, 'chats',
+              f'{len(chats)} conversation(s) on the account, {added} new to the fan list')
+    return len(chats), added
 
 
 def _tgu_needs_history(persona, chat_id):
@@ -16059,10 +16088,32 @@ def api_tguser_send():
         except Exception as e:
             return jsonify({'ok': False, 'error': str(e)[:250]}), 400
     try:
-        _tgu_import().send_message(api_id, api_hash, acct['session'], peer, text)
+        to = _tgu_import().send_message(api_id, api_hash, acct['session'], peer, text)
     except Exception as e:
         return jsonify({'ok': False, 'error': f'{e.__class__.__name__}: {str(e)[:250]}'}), 400
+    chat_id = (to or {}).get('chat_id')
+    if chat_id:
+        name = (to.get('name') or peer)
+        _tgu_on_sent(persona, chat_id, name, text)
+        fans = _tg_fans(persona)
+        fan = fans.get(str(chat_id)) or {'in_count': 0, 'followups': 0,
+                                         'first_in': int(time.time())}
+        fan['name'] = name
+        fans[str(chat_id)] = fan
+        _tg_save_fans(persona, fans)
     return jsonify({'ok': True, 'text': text})
+
+
+@app.route('/api/tguser/chats', methods=['POST'])
+@platform_scoped
+def api_tguser_chats():
+    """Pull the account's conversations into the fan list on demand."""
+    persona = ((request.json or {}).get('persona') or '').strip()
+    try:
+        found, added = _tgu_sync_chats(persona)
+    except Exception as e:
+        return jsonify({'ok': False, 'error': f'{e.__class__.__name__}: {str(e)[:250]}'}), 400
+    return jsonify({'ok': True, 'found': found, 'added': added})
 
 
 def _tgu_boot():
