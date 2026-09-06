@@ -982,7 +982,17 @@ def get_fan_profile(session, persona, fan_uuid, handle=None, create=True):
     if row is None and create:
         row = FanProfile(persona=persona, fan_uuid=fan_uuid, handle=handle or '')
         session.add(row)
-        session.flush()
+        try:
+            session.flush()
+        except Exception:
+            # Two reply workers can reach the same new fan at once; the unique
+            # index settles it and the loser re-reads the winner's row.
+            session.rollback()
+            row = (session.query(FanProfile)
+                   .filter(FanProfile.persona == persona,
+                           FanProfile.fan_uuid == fan_uuid).first())
+            if row is None:
+                return None
     if row is not None and handle and row.handle != handle:
         row.handle = handle
     return row

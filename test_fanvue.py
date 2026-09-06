@@ -485,6 +485,34 @@ def test_distress_pause_is_written_once():
     check('expired entries are swept', 'old' not in kept and 'fan-2' in kept, kept)
 
 
+def test_funnel_exits():
+    """Every funnel has an exit. Without one a fan who ignores everything stays
+    in the same approach forever."""
+    import datetime
+    ex = app._fv_check_exit
+    led = lambda **k: dict({'ignored': 0, 'bought': 0, 'spent_today': 0,
+                            'spend_30d': 0, 'sent': 0, 'opens_no_buy': 0,
+                            'lifetime': 0}, **k)
+    a = {'id': 'a1', 'funnel': 'F1', 'assigned_at': datetime.datetime.now(
+        datetime.timezone.utc), 'pitches_sent': 1}
+    check('stays while things are fine', ex('p', 'f', 'j', a, led(), 'hey') == '')
+    check('two ignored ends it', 'ignored' in ex('p', 'f', 'j', a, led(ignored=2), ''))
+    check('one ignored does not', ex('p', 'f', 'j', a, led(ignored=1), '') == '')
+    check('hostility ends it',
+          ex('p', 'f', 'j', a, led(), 'this is a scam') == 'fan turned hostile')
+    old = dict(a, funnel='F2', assigned_at=datetime.datetime.now(
+        datetime.timezone.utc) - datetime.timedelta(hours=60))
+    check('the 48h window closes', 'window closed' in ex('p', 'f', 'j', old, led()))
+    check('but not once they have bought',
+          ex('p', 'f', 'j', old, led(bought=1)) == '')
+    check('F9 gives up after three',
+          ex('p', 'f', 'j', dict(a, funnel='F9'), led(ignored=3)) != '')
+    check('no assignment, nothing to exit', ex('p', 'f', 'j', None, led()) == '')
+    for fid, f in app.FN.FUNNELS.items():
+        nxt = f.get('exit_to') or ''
+        check('%s exits somewhere real' % fid, not nxt or nxt in app.FN.FUNNELS, nxt)
+
+
 if __name__ == '__main__':
     for fn in (test_direction, test_import, test_identity_never_crosses,
                test_placeholders, test_pacing, test_backlog,
@@ -493,7 +521,8 @@ if __name__ == '__main__':
                test_guardrails_can_stop_a_drop,
                test_price_cap_holds_rather_than_discounts,
                test_guardrail_failure_does_not_cost_a_sale,
-               test_funnel_config_roundtrip, test_distress_pause_is_written_once):
+               test_funnel_config_roundtrip, test_distress_pause_is_written_once,
+               test_funnel_exits):
         print('\n--- %s ---' % fn.__name__)
         restore_app()
         fn()

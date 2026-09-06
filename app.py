@@ -11816,7 +11816,7 @@ def _fv_posteriors_for(persona, fan_type):
         _fv_close(s)
 
 
-def _fv_assignment(persona, fan_uuid, handle, fan_type, cfg):
+def _fv_assignment(persona, fan_uuid, handle, fan_type, cfg, force_funnel=''):
     """The fan's open funnel, assigning one if they have none.
 
     Re-sampling only happens at exit (§4.1) — switching funnel mid-thread reads
@@ -11836,11 +11836,15 @@ def _fv_assignment(persona, fan_uuid, handle, fan_type, cfg):
                     'pitches_sent': cur.pitches_sent or 0,
                     'pitches_ignored': cur.pitches_ignored or 0}
         unlocked = cfg['unlocked']
-        if cfg.get('mode') == 'thompson':
+        if force_funnel:
+            funnel = force_funnel
+        elif cfg.get('mode') == 'thompson':
             funnel = FN.assign_by_thompson(fan_type, _fv_posteriors_for(persona, fan_type),
                                            unlocked=unlocked)
         else:
             funnel = FN.assign_by_matrix(fan_type, unlocked=unlocked)
+        if funnel not in FN.FUNNELS:
+            return None
         if not funnel:
             return None
         variant = FN.pick_variant('opener')
@@ -12008,12 +12012,13 @@ def _fv_score_fan(persona, fan_uuid, fan_key, handle, cfg, force=False):
     led = _fv_ledger_stats(persona, fan_uuid)
     ins = _fv_fan_insights(persona, fan_uuid)
     msgs = _fv_msg_stats(persona, fan_key)
-    lifetime = max(int(ins.get('lifetime') or 0), led['lifetime'])
+    lifetime = max(int(ins.get('lifetime') or 0), led['lifetime'],
+                   int(prof.get('lifetime_spend') or 0))
     tips = int(ins.get('tips') or 0)
 
     hist_last = _fv_last_inbound_age_days(persona, fan_key)
     frs = FN.fan_rank_score(
-        spend_30d=max(led['spend_30d'], int(prof.get('spend_30d') or 0)),
+        spend_30d=led['spend_30d'],
         lifetime_spend=lifetime, tips=tips, msgs_7d=msgs['msgs_7d'],
         avg_msg_len=msgs['avg_len'], days_since_msg=hist_last,
         ppv_sent=led['sent'], ppv_bought=led['bought'],
@@ -12033,6 +12038,7 @@ def _fv_score_fan(persona, fan_uuid, fan_key, handle, cfg, force=False):
                                _fv_days_below(persona, fan_uuid, tier))
     _fv_set_profile(persona, fan_uuid, frs=frs, crs=crs, tier=tier,
                     lifetime_spend=lifetime, tips_total=tips,
+                    spend_30d=led['spend_30d'],
                     scores_updated_at=datetime.now(timezone.utc))
     prof.update({'frs': frs, 'crs': crs, 'tier': tier, 'lifetime_spend': lifetime})
     return prof
@@ -12116,7 +12122,11 @@ def _fv_pitch_gate(persona, fan_uuid, handle, fan_key, cfg, assignment):
 
     Returns (allowed, reason, max_price_cents). Called from _fv_maybe_ppv, so
     every guardrail applies to every drop no matter which funnel asked for it."""
-    prof = _fv_score_fan(persona, fan_uuid, fan_key, handle, cfg)
+    # Read the stored scores rather than recomputing: this runs inside the
+    # per-persona PPV lock, and the insights call behind a rescore would hold
+    # every other fan's drop behind one slow Fanvue response. The round
+    # refreshes the scores outside the lock.
+    prof = _fv_profile(persona, fan_uuid, handle)
     led = _fv_ledger_stats(persona, fan_uuid)
     funnel_id = (assignment or {}).get('funnel', '')
     first_session = int((assignment or {}).get('pitches_sent', 0) or 0) == 0 \
@@ -12133,6 +12143,52 @@ def _fv_pitch_gate(persona, fan_uuid, handle, fan_key, cfg, assignment):
     if max_tier:
         cap_cents = int((cfg.get('tier_cents') or {}).get(max_tier) or 0)
     return allowed, reason, cap_cents
+
+
+def _fv_check_exit(persona, fan_uuid, handle, assignment, led, text=''):
+    """Decide whether this fan's funnel is finished. Returns the exit reason, or
+    '' to stay. Every funnel has an exit (§2) — without one a fan who ignores
+    everything sits in the same approach forever."""
+    if not assignment:
+        return ''
+    fid = assignment.get('funnel') or ''
+    f = FN.FUNNELS.get(fid) or {}
+    if FN.detect_hostile(text):
+        return 'fan turned hostile'
+    if led['ignored'] >= FN.IGNORED_PITCH_LIMIT:
+        return f"{led['ignored']} pitches ignored"
+    window = f.get('window_h')
+    if window and assignment.get('assigned_at'):
+        try:
+            age_h = (datetime.now(timezone.utc)
+                     - _as_utc(assignment['assigned_at'])).total_seconds() / 3600
+            if age_h > window and not led['bought']:
+                return f'{fid} window closed with no purchase'
+        except Exception:
+            pass
+    if fid == 'F9' and led['ignored'] >= 3:
+        return 'three unopened low-asks'
+    return ''
+
+
+def _fv_funnel_step(persona, fan_uuid, handle, fan_type, cfg, text=''):
+    """This fan's funnel for this message: exit the current one if it is done,
+    then hand back whatever they are in now."""
+    assignment = _fv_assignment(persona, fan_uuid, handle, fan_type, cfg)
+    if not assignment:
+        return None
+    led = _fv_ledger_stats(persona, fan_uuid)
+    reason = _fv_check_exit(persona, fan_uuid, handle, assignment, led, text)
+    if not reason:
+        return assignment
+    nxt = (FN.FUNNELS.get(assignment['funnel']) or {}).get('exit_to') or ''
+    _fv_exit_funnel(persona, fan_uuid, handle, assignment['id'], reason, nxt)
+    if not nxt or nxt not in cfg['unlocked']:
+        # Nowhere to go: the fan stays in conversation with no funnel, which
+        # means rapport only until something changes.
+        return None
+    return _fv_assignment(persona, fan_uuid, handle, fan_type, cfg,
+                          force_funnel=nxt)
 
 
 def _fv_funnel_steer(persona, fan_uuid, handle, fan_type, assignment, prof):
@@ -12193,8 +12249,10 @@ def _fv_record_purchase(persona, fan_uuid, amount_cents, drop_id=''):
         log_fan_event(s, persona, fan_uuid, 'ppv_bought', amount=amount_cents,
                       assignment_id=aid, content_id=drop_id)
         p = get_fan_profile(s, persona, fan_uuid)
-        p.lifetime_spend = (p.lifetime_spend or 0) + int(amount_cents or 0)
-        p.spend_30d = (p.spend_30d or 0) + int(amount_cents or 0)
+        if p is not None:
+            # lifetime only: spend_30d is re-derived from the ledger when the
+            # scores are recomputed, so incrementing it here would double-count.
+            p.lifetime_spend = (p.lifetime_spend or 0) + int(amount_cents or 0)
         s.commit()
     except Exception as e:
         logger.debug('purchase record failed: %s', str(e)[:100])
@@ -12856,7 +12914,10 @@ def _fanvue_auto_round(persona):
                 else:
                     fprof = _fv_profile(persona, fan_uuid, handle)
                     fan_type = fprof.get('fan_type') or ''
-                assignment = _fv_assignment(persona, fan_uuid, handle, fan_type, fcfg)
+                assignment = _fv_funnel_step(persona, fan_uuid, handle, fan_type,
+                                             fcfg, text)
+                # Outside the PPV lock, and throttled to every few hours.
+                fprof = _fv_score_fan(persona, fan_uuid, fan_key, handle, fcfg) or fprof
             except Exception as e:
                 logger.warning('Funnel step failed for %s/%s: %s',
                                persona, handle or fan_uuid, str(e)[:120])
