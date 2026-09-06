@@ -127,9 +127,11 @@ class AccountRunner:
     # open longer than MAX_HOLD_SECONDS by someone who keeps typing.
     BURST_SECONDS = 8
     MAX_HOLD_SECONDS = 90
+    HISTORY_LIMIT = 200
 
     def __init__(self, persona, api_id, api_hash, session_str, plan, on_sent=None,
-                 on_error=None, on_trace=None, pre_delay=None):
+                 on_error=None, on_trace=None, pre_delay=None,
+                 needs_history=None, on_history=None):
         self.persona = persona
         self.api_id = api_id
         self.api_hash = api_hash
@@ -139,6 +141,9 @@ class AccountRunner:
         self.on_error = on_error
         self.on_trace = on_trace
         self.pre_delay = pre_delay
+        self.needs_history = needs_history
+        self.on_history = on_history
+        self._read_back = set()
         self._bursts = {}
         self._thread = None
         self._loop = None
@@ -197,6 +202,31 @@ class AccountRunner:
             await client.run_until_disconnected()
         finally:
             keepalive.cancel()
+
+    async def _read_history(self, client, chat_id, name, first_id):
+        """Pull the conversation so far the first time a fan is answered.
+
+        The account can have months of chat that this platform never saw, and
+        without it she reintroduces herself to someone she already knows. Only
+        messages older than the burst are read, so nothing is stored twice.
+        """
+        if not (self.needs_history and self.on_history) or chat_id in self._read_back:
+            return
+        self._read_back.add(chat_id)
+        try:
+            if not await asyncio.to_thread(self.needs_history, chat_id):
+                return
+            kw = {'limit': self.HISTORY_LIMIT}
+            if first_id:
+                kw['offset_id'] = first_id
+            rows = [('out' if m.out else 'in', (m.raw_text or '').strip())
+                    for m in reversed(await client.get_messages(chat_id, **kw))]
+            rows = [r for r in rows if r[1]]
+            if rows:
+                await asyncio.to_thread(self.on_history, chat_id, name, rows)
+        except Exception as e:
+            self._read_back.discard(chat_id)
+            self._trace('error', f'reading the chat with {name} back failed: {str(e)[:160]}')
 
     async def _keepalive(self, client):
         """Poke the connection on a timer and drop it when it stops answering.
@@ -269,7 +299,8 @@ class AccountRunner:
         # Registered before the first await, so a second message arriving while
         # the delay is being read joins this burst instead of opening its own.
         burst = {'texts': [text], 'name': name, 'opened': now,
-                 'due': now + self.BURST_SECONDS}
+                 'due': now + self.BURST_SECONDS,
+                 'first_id': getattr(event.message, 'id', 0)}
         self._bursts[chat_id] = burst
         if self.pre_delay:
             initial = max(0.0, float(await asyncio.to_thread(self.pre_delay, chat_id)))
@@ -310,6 +341,7 @@ class AccountRunner:
     async def _reply(self, client, chat_id, burst):
         name = burst['name']
         texts = burst['texts']
+        await self._read_history(client, chat_id, name, burst.get('first_id') or 0)
         if len(texts) > 1:
             self._trace('burst', f'{name}: answering {len(texts)} messages as one')
 

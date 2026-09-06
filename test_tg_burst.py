@@ -1,7 +1,9 @@
-"""Tests for burst handling in the Telegram user-account runner.
+"""Tests for the Telegram user-account runner.
 
 A fan firing off several messages in a row must get one reply, not one per
-message. Telethon is stubbed out, so this needs no credentials and no network.
+message, and a chat that started before the account was connected must be read
+back before she answers it. Telethon is stubbed out, so this needs no
+credentials and no network.
 Run with: python test_tg_burst.py
 """
 import asyncio
@@ -43,8 +45,10 @@ class FakeAction:
 
 
 class FakeClient:
-    def __init__(self):
+    def __init__(self, history=None):
         self.sent = []
+        self.history = history or []      # newest first, as Telegram returns it
+        self.history_calls = []
 
     def action(self, *a, **kw):
         return FakeAction()
@@ -52,29 +56,37 @@ class FakeClient:
     async def send_message(self, chat_id, text):
         self.sent.append((chat_id, text))
 
+    async def get_messages(self, chat_id, limit=None, offset_id=None):
+        self.history_calls.append((chat_id, limit, offset_id))
+        return list(self.history)
+
 
 class FakeEvent:
     out = False
     is_private = True
 
-    def __init__(self, text, chat_id=7, name='twippa'):
+    def __init__(self, text, chat_id=7, name='twippa', msg_id=100):
         self.raw_text = text
         self.chat_id = chat_id
-        self.message = types.SimpleNamespace(date=None)
+        self.message = types.SimpleNamespace(date=None, id=msg_id)
         self._name = name
 
     async def get_sender(self):
         return types.SimpleNamespace(username=self._name, first_name='', bot=False)
 
 
-def _runner(calls, traces, pre_delay=1.0):
+def _msg(text, out=False, msg_id=1):
+    return types.SimpleNamespace(out=out, raw_text=text, id=msg_id)
+
+
+def _runner(calls, traces, pre_delay=1.0, **kw):
     def plan(chat_id, name, text, texts=None):
         calls.append((chat_id, texts))
         return {'read': 0, 'cps': 999, 'chunks': [f'answer to {len(texts)}']}
 
     r = AccountRunner('p', 1, 'h', 's', plan,
                       on_trace=lambda p, stage, detail: traces.append((stage, detail)),
-                      pre_delay=lambda chat_id: pre_delay)
+                      pre_delay=lambda chat_id: pre_delay, **kw)
     r.BURST_SECONDS = 0.5
     return r
 
@@ -102,6 +114,32 @@ async def run():
     await asyncio.sleep(3.5)
     check('separate fans are never merged',
           len(calls) == 4 and {calls[2][0], calls[3][0]} == {8, 9}, calls)
+
+    imported = []
+    seen = {'n': 0}
+
+    def needs_history(chat_id):
+        seen['n'] += 1
+        return not imported
+
+    h = _runner(calls, traces, needs_history=needs_history,
+                on_history=lambda cid, name, rows: imported.append((cid, rows)))
+    hc = FakeClient(history=[_msg('nice talking to you', out=True, msg_id=3),
+                            _msg('im in berlin', msg_id=2),
+                            _msg('', msg_id=1)])
+    await h._handle(hc, FakeEvent('hey again', chat_id=21, name='old'))
+    await asyncio.sleep(3.5)
+    check('the chat is read back before the first reply', len(imported) == 1, imported)
+    check('read-back is oldest first, with directions and empties dropped',
+          imported and imported[0][1] == [('in', 'im in berlin'), ('out', 'nice talking to you')],
+          imported)
+    check('the read-back stops at the new message',
+          hc.history_calls and hc.history_calls[0][2] == 100, hc.history_calls)
+
+    await h._handle(hc, FakeEvent('and you?', chat_id=21, name='old'))
+    await asyncio.sleep(3.5)
+    check('an already-read chat is not imported twice',
+          len(imported) == 1 and len(hc.history_calls) == 1, hc.history_calls)
 
     r.MAX_HOLD_SECONDS = 2
     for _ in range(12):

@@ -6796,16 +6796,21 @@ def api_persona_media_pick(slug):
         s.close()
 
 
-def _pick_media(rows, outfits=None, purpose='', lighting='', location='', outfit='', **_ignored):
+def _pick_media(rows, outfits=None, purpose='', lighting='', location='', outfit='',
+                exclude=None, **_ignored):
     """Score media items against requested tags; highest match wins.
 
     Lighting and location live on the outfit, not the photo, so a photo inherits
     whatever its outfit defines. Unknown tag keys are ignored rather than raising —
-    the tags come from the model, so a stray key must not break the send."""
+    the tags come from the model, so a stray key must not break the send.
+    `exclude` is the set of media IDs this fan has already been sent."""
     outfits = outfits or []
+    exclude = exclude or set()
     want_outfit = str(outfit).strip().lower().replace('outfit ', '')
     best, best_score = None, -1
     for r in rows:
+        if r.id in exclude:
+            continue
         o = _outfit_of(r, outfits) or {}
         score = 0
         if purpose and r.purpose and r.purpose.lower() == purpose.lower():
@@ -14751,11 +14756,13 @@ def _tg_handle_update(persona, update):
                 if k in ('purpose', 'lighting', 'location', 'outfit')}
         if locked_outfit is not None:
             safe['outfit'] = str(locked_outfit)
-        picked = _pick_media(media_rows, outfits=media_outfits, **safe)
-        if picked and picked.id not in sent_ids:
+        picked = _pick_media(media_rows, outfits=media_outfits, exclude=sent_ids, **safe)
+        if picked:
             photo_data = picked.image_data
             picked_media_id = picked.id
-    if not photo_data and roll_hit:
+    # She asked for a photo, so send one even when every match is spent —
+    # answering a "send me a pic" with nothing at all reads as ignoring it.
+    if not photo_data and (roll_hit or (photo_tags and media_rows)):
         picked = _pick_phase_photo(media_rows, media_outfits, sent_ids, locked_outfit=locked_outfit)
         if picked:
             photo_data = picked.image_data
@@ -15513,6 +15520,37 @@ def _tgu_fan_key(chat_id):
     return f'tgu:{chat_id}'
 
 
+TGU_HISTORY_LIMIT = 200
+
+
+def _tgu_needs_history(persona, chat_id):
+    """True while nothing is saved for this chat, so the runner reads the
+    conversation back off Telegram before answering for the first time."""
+    return _fanvue_msg_count(persona, _tgu_fan_key(chat_id)) == 0
+
+
+def _tgu_import_history(persona, chat_id, name, rows):
+    """Store a conversation that happened before the account was connected.
+
+    Telegram states who sent each message, so unlike the Fanvue import there is
+    nothing to infer — her own lines can never be filed as the fan's.
+    """
+    key = _tgu_fan_key(chat_id)
+    said, n = [], 0
+    for direction, text in rows:
+        if not text:
+            continue
+        _log_x_message(persona, key, name, direction, text)
+        n += 1
+        if direction == 'in':
+            said.append(text)
+    if said:
+        _fan_memory_update(persona, key, '\n'.join(said[-40:])[-1500:])
+    if n:
+        _tg_trace(persona, 'history', f'read back {n} earlier message(s) with {name}')
+    return n
+
+
 def _tgu_pre_delay(persona):
     """How long she takes to notice a message at all. The runner waits this out
     before asking for a reply, so anything else the fan sends meanwhile is
@@ -15572,10 +15610,17 @@ def _tgu_plan(persona, chat_id, name, text, texts=None):
             'the tag [SEND_PHOTO:outfit=N,purpose=X] at the very end of your '
             'message. Never mention the tag to the fan.')
 
-    ask_rule = question_rule_for(
-        load_persona_config(persona),
-        [{'role': 'model' if d == 'out' else 'user', 'content': t}
-         for d, t in _fanvue_saved_history(persona, _tgu_fan_key(chat_id), limit=30)])
+    history = [{'role': 'model' if d == 'out' else 'user', 'content': t}
+               for d, t in _fanvue_saved_history(persona, _tgu_fan_key(chat_id), limit=40)]
+    ask_rule = question_rule_for(load_persona_config(persona), history)
+    # The transcript is in the prompt, but she still introduces herself on
+    # message fifty and asks his name a third time unless told not to.
+    recall_rule = (
+        'You are already mid-conversation: the earlier messages are above and '
+        'what you know about him is listed. Use it. Do not re-ask anything he '
+        'has told you, and do not introduce yourself or greet him as if this '
+        'were the first message. '
+        if any(h['role'] == 'model' for h in history) else '')
     # The model has been caught sending a literal "[fan's name]" to a fan.
     no_placeholder = NO_PLACEHOLDER_RULE
     if cta_asked and cta_due:
@@ -15584,23 +15629,22 @@ def _tgu_plan(persona, chat_id, name, text, texts=None):
             'where else to find you — answer them directly and warmly, say yes, that '
             'is where you post the rest. Do NOT deflect, do NOT answer with a question, '
             'and do NOT paste a link yourself; a link is appended after your message. '
-            'Keep it to one or two short sentences. ' + no_placeholder + photo_rule)
+            'Keep it to one or two short sentences. '
+            + recall_rule + no_placeholder + photo_rule)
     elif cta_due:
         instruction = (
             f'Reply in-character to this fan on Telegram: "{text}". Answer what they '
             'actually said first, then tease — in one natural sentence — that you post '
             'more somewhere more private. Do NOT paste a link or a URL and do not name '
             'the site; a link is appended after your message. '
-            + ask_rule + no_placeholder + photo_rule)
+            + recall_rule + ask_rule + no_placeholder + photo_rule)
     else:
         instruction = (
             f'Reply in-character to this fan on Telegram: "{text}". Warm and engaging, '
             'react to what they just said before anything else, reference what they '
             'have told you before, and let interest build slowly — no selling yet. '
-            + ask_rule + no_placeholder + photo_rule)
+            + recall_rule + ask_rule + no_placeholder + photo_rule)
 
-    history = [{'role': 'model' if d == 'out' else 'user', 'content': t}
-               for d, t in _fanvue_saved_history(persona, _tgu_fan_key(chat_id), limit=30)]
     _fan_memory_update(persona, _tgu_fan_key(chat_id), text)
     instruction = _fan_memory_block(_fan_memory(persona, _tgu_fan_key(chat_id)), persona) + instruction
     if client is None:
@@ -15629,11 +15673,13 @@ def _tgu_plan(persona, chat_id, name, text, texts=None):
                 if k in ('purpose', 'lighting', 'location', 'outfit')}
         if locked_outfit is not None:
             safe['outfit'] = str(locked_outfit)
-        picked = _pick_media(media_rows, outfits=media_outfits, **safe)
-        if picked and picked.id not in sent_ids:
+        picked = _pick_media(media_rows, outfits=media_outfits, exclude=sent_ids, **safe)
+        if picked:
             photo_data = picked.image_data
             picked_media_id = picked.id
-    if not photo_data and roll_hit:
+    # She asked for a photo, so send one even when every match is spent —
+    # answering a "send me a pic" with nothing at all reads as ignoring it.
+    if not photo_data and (roll_hit or (photo_tags and media_rows)):
         picked = _pick_phase_photo(media_rows, media_outfits, sent_ids, locked_outfit=locked_outfit)
         if picked:
             photo_data = picked.image_data
@@ -15744,9 +15790,24 @@ def _tgu_start(persona):
             except Exception:
                 return 0
 
+    def needs_history(chat_id):
+        with app.app_context():
+            try:
+                return _tgu_needs_history(persona, chat_id)
+            except Exception:
+                return False
+
+    def on_history(chat_id, name, rows):
+        with app.app_context():
+            try:
+                _tgu_import_history(persona, chat_id, name, rows)
+            except Exception:
+                logger.exception('tgu history import failed for %s', persona)
+
     runner = AccountRunner(persona, api_id, api_hash, acct['session'],
                            plan, on_sent=sent, on_error=err, on_trace=trace,
-                           pre_delay=pre_delay)
+                           pre_delay=pre_delay, needs_history=needs_history,
+                           on_history=on_history)
     _tgu_runners[persona] = runner
     _tgu_errors.pop(persona, None)
     runner.start()
