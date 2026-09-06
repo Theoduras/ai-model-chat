@@ -257,7 +257,7 @@ handled by Oxapay — Google supplies the identity only.
 | `GOOGLE_OAUTH_CLIENT_ID` | Web client ID. The Google button stays hidden until this and the secret are both set. |
 | `GOOGLE_OAUTH_CLIENT_SECRET` | Web client secret. |
 | `GOOGLE_OAUTH_REDIRECT_URI` | Optional. Only needed when the app sits behind a proxy that rewrites the host, so the callback URL it builds no longer matches what Google has registered. |
-| `PUBLIC_BASE_URL` | The origin Google should call back on, e.g. `https://velvetfunnel.app`. Set it whenever the public domain differs from the host the container sees. |
+| `PUBLIC_BASE_URL` | The origin Google should call back on, e.g. `https://velvetfunnel.app`. Set it whenever the public domain differs from the host the container sees. Fanvue webhook subscriptions use it too — see ENVIRONMENTS.md. |
 
 The app reads `X-Forwarded-Proto`, so behind Cloud Run's or Vercel's TLS
 proxy the redirect URI it builds is `https://` even though the container is

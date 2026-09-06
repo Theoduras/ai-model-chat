@@ -7,6 +7,33 @@ Two separate Cloud Run services, each auto-deploying from its own git branch.
 | **LIVE** 🟢 | `deploy/cloud-run-online` | `ai-model-chat` | `europe-west4` | (your live URL) | Fans / clients |
 | **DEV** 🛠️ | `develop` | `ai-model-chat-dev` | `europe-west4` | https://ai-model-chat-dev-793708886252.europe-west4.run.app | Internal testing only |
 
+## Each service needs its own `PUBLIC_BASE_URL`
+
+Set as an environment variable **on the Cloud Run service**, not in
+`cloudbuild.yaml` — the value differs per environment, and a shared default
+would point dev's callbacks at live.
+
+```
+# dev
+gcloud run services update ai-model-chat-dev --region europe-west4 \
+  --update-env-vars PUBLIC_BASE_URL=https://ai-model-chat-dev-793708886252.europe-west4.run.app
+
+# live (owner only)
+gcloud run services update ai-model-chat --region europe-west4 \
+  --update-env-vars PUBLIC_BASE_URL=https://velvetfunneler.com
+```
+
+`--update-env-vars` merges; `--set-env-vars` would wipe every other variable
+on the service, secrets included.
+
+Without it the app builds callback and webhook URLs from whichever host served
+the request. That matters most for **Fanvue webhooks**: the subscription is
+created on connect for the origin it sees at that moment, so a creator who
+connects through the bare `*.run.app` host has their purchases and unsubscribes
+delivered there rather than to the custom domain. The app prints a
+`CONFIG WARNING` at startup while it is unset, and the Fanvue page shows the
+URL each subscription actually points at.
+
 ## Cloud Build triggers — the substitutions matter
 
 Both environments build from the **same** `cloudbuild.yaml`. Which service a

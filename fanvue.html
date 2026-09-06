@@ -839,7 +839,7 @@ async function saveFunnels(){
   fnCfg=d.config; st.textContent='✓ Saved'; st.style.color='#4ade80';
   if(d.webhook&&Object.keys(d.webhook).length) renderHook(
     {subscribed:d.webhook.ok,events:d.webhook.events||[],missing:d.webhook.missing||[],
-     reason:d.webhook.reason});
+     url:d.webhook.url||'',reason:d.webhook.reason});
   setTimeout(()=>{st.textContent='';},2500);
   loadFunnelStats();
 }
@@ -852,7 +852,7 @@ function renderHook(h){
   if(!h){box.innerHTML='';return;}
   if(h.subscribed){
     let msg='<span style="color:#4ade80;">✓</span> Fanvue is sending '+(h.events||[]).length
-      +' event'+((h.events||[]).length===1?'':'s')+' to this app.';
+      +' event'+((h.events||[]).length===1?'':'s')+' to <code>'+esc(h.url||'')+'</code>.';
     if((h.missing||[]).length) msg+=' <span style="color:#fbbf24;">'+h.missing.length
       +' more need the read:creator permission — without them a fan who unsubscribes '
       +'is never counted against the funnel that lost them.</span>';

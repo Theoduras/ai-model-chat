@@ -938,6 +938,14 @@ def _persistence_warnings():
         warns.append(
             'SECRET_KEY is unset and there is no durable database to keep a '
             'generated one in, so sign-in will not survive a restart.')
+    if not (os.getenv('PUBLIC_BASE_URL') or '').strip():
+        # Webhook subscriptions are created for whichever host served the
+        # request that made them, so on a service reachable by more than one
+        # name they can end up pointing at the wrong one.
+        warns.append(
+            'PUBLIC_BASE_URL is unset, so callback and webhook URLs are built '
+            'from whichever host serves the request. Set it to this '
+            "environment's own public origin.")
     return warns
 
 
@@ -10451,7 +10459,7 @@ def _fv_ensure_webhook(persona, force=False):
             _set_setting(_fv_hook_key(persona), json.dumps(
                 {'id': mine.get('id') or '', 'url': url, 'events': sorted(have),
                  'secret': stored.get('secret') or ''}))
-            return {'ok': True, 'reason': 'already subscribed',
+            return {'ok': True, 'reason': 'already subscribed', 'url': url,
                     'events': sorted(have), 'created': False}
 
     if mine:
@@ -10477,7 +10485,7 @@ def _fv_ensure_webhook(persona, force=False):
               'subscribed to ' + ', '.join(e.split('.', 1)[1] for e in wanted)
               + (f" — {len(missing)} more need read:creator" if missing else ''))
     logger.info('Fanvue [%s] webhook subscribed: %s → %s', persona, url, wanted)
-    return {'ok': True, 'reason': 'subscribed', 'events': wanted,
+    return {'ok': True, 'reason': 'subscribed', 'url': url, 'events': wanted,
             'missing': missing, 'created': True}
 
 
