@@ -1381,6 +1381,16 @@ def count_x_messages(session, persona, x_user_id):
             .count())
 
 
+def count_x_messages_by_fan(session, persona, direction=''):
+    """Message counts per fan for one persona, in one query — the per-fan count
+    is wanted for a whole list at a time, and one query per row does not scale."""
+    q = (session.query(XMessage.x_user_id, func.count(XMessage.id))
+         .filter(XMessage.persona == persona))
+    if direction:
+        q = q.filter(XMessage.direction == direction)
+    return {row[0]: row[1] for row in q.group_by(XMessage.x_user_id).all()}
+
+
 def delete_saved_persona(session, slug):
     sp = session.get(SavedPersona, slug)
     if sp:

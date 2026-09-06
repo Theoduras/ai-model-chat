@@ -13059,6 +13059,20 @@ def _fanvue_msg_count(persona, fan_key):
         return 0
 
 
+def _saved_msg_counts(persona, direction='in'):
+    """{fan_key: messages} for every fan of one persona. Empty when there is no
+    database, so a caller can fall back to whatever it counted itself."""
+    try:
+        from db import SessionLocal, count_x_messages_by_fan
+        s = SessionLocal()
+        try:
+            return count_x_messages_by_fan(s, persona, direction=direction)
+        finally:
+            s.close()
+    except Exception:
+        return {}
+
+
 def _fanvue_saved_history(persona, fan_key, limit=40):
     """Return the saved conversation as [(direction, text), ...], oldest first."""
     try:
@@ -15468,11 +15482,16 @@ def api_telegram_stats():
     sent = sum(1 for f in fans.values() if f.get('cta_sent'))
     clicked = sum(1 for f in fans.values() if f.get('cta_clicked'))
     rows = []
+    # The transcript is the truth once a chat has been read back off Telegram:
+    # in_count only ever counted what arrived since the account was connected.
+    counts = _saved_msg_counts(persona)
     for chat_id, f in sorted(fans.items(),
                              key=lambda kv: kv[1].get('last_in', 0), reverse=True)[:200]:
+        stored = (counts.get(_tgu_fan_key(chat_id), 0)
+                  + counts.get(_tg_fan_key(chat_id), 0))
         rows.append({
             'chat_id': chat_id, 'name': f.get('name', ''),
-            'messages': f.get('in_count', 0), 'last_in': f.get('last_in', 0),
+            'messages': stored or f.get('in_count', 0), 'last_in': f.get('last_in', 0),
             'cta_sent': bool(f.get('cta_sent')), 'cta_clicked': bool(f.get('cta_clicked')),
             'followups': f.get('followups', 0),
             'selected': _tg_fan_allowed(_tg_settings(persona), chat_id, f.get('name', '')),
