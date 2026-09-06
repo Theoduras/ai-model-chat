@@ -9170,6 +9170,7 @@ class FanvueApiError(url_error.HTTPError):
 # cannot say which — this can.
 _FV_PATH_SCOPES = (
     ('/agency', 'read:agency'),
+    ('/media/uploads', 'write:media'),
     ('/media', 'read:media'),
     ('/chats', 'read:chat'),
     ('/fans', 'read:fan'),
@@ -11151,6 +11152,106 @@ def _fv_send_text(persona, scope, fan_uuid, text):
         raise RuntimeError('reply still contained a bracketed placeholder')
     _fanvue_call(persona, 'POST', f'{scope}/chats/{fan_uuid}/message',
                  body={'text': text[:2000]})
+
+
+# ── Fanvue media upload ───────────────────────────────────────────────────────
+# Fanvue takes media as an S3 multipart upload: open a session, PUT each part to
+# a signed URL, then complete it and wait for processing. Audio is a first-class
+# mediaType, so a voice note is an audio upload attached to an ordinary message.
+FV_UPLOAD_PART_TIMEOUT = 120
+FV_MEDIA_READY_TRIES = 20
+
+
+def _fv_part_url(persona, scope, upload_id, part_number):
+    """Signed URL for one part. Fanvue documents no response shape for this, so
+    accept the bare string as well as the usual wrappers."""
+    res = _fanvue_call(persona, 'GET',
+                       f'{scope}/media/uploads/{upload_id}/parts/{part_number}/url')
+    if isinstance(res, str):
+        return res
+    if isinstance(res, dict):
+        for k in ('url', 'signedUrl', 'uploadUrl', 'presignedUrl'):
+            if res.get(k):
+                return str(res[k])
+        data = res.get('data')
+        if isinstance(data, dict):
+            for k in ('url', 'signedUrl', 'uploadUrl', 'presignedUrl'):
+                if data.get(k):
+                    return str(data[k])
+        if isinstance(data, str) and data:
+            return data
+    raise RuntimeError('Fanvue returned no signed upload URL')
+
+
+def _fv_put_part(url, chunk, content_type):
+    """PUT one part straight to S3 and return its ETag, which completing the
+    upload has to quote back."""
+    req = urllib.request.Request(url, data=chunk, method='PUT',
+                                 headers={'Content-Type': content_type})
+    with urllib.request.urlopen(req, timeout=FV_UPLOAD_PART_TIMEOUT) as r:
+        return (r.headers.get('ETag') or '').strip('"')
+
+
+def _fv_upload_media(persona, data, media_type, filename, name=None,
+                     content_type='application/octet-stream', scope=None):
+    """Upload bytes into the connected creator's Fanvue vault, returning the
+    media uuid once Fanvue reports it ready. Raises on anything else — a media
+    uuid that is still processing cannot be attached to a message."""
+    if not data:
+        raise RuntimeError('nothing to upload')
+    if scope is None:
+        scope = _fanvue_scope(persona)
+    sess = _fanvue_call(persona, 'POST', f'{scope}/media/uploads',
+                        body={'name': name or filename, 'filename': filename,
+                              'mediaType': media_type, 'sizeBytes': len(data)})
+    if not isinstance(sess, dict):
+        raise RuntimeError('Fanvue returned no upload session')
+    media_uuid = str(sess.get('mediaUuid') or '')
+    upload_id = str(sess.get('uploadId') or '')
+    part_size = int(sess.get('partSize') or 0)
+    if not media_uuid or not upload_id or part_size <= 0:
+        raise RuntimeError('Fanvue upload session was incomplete')
+    total = sess.get('totalParts')
+    total = int(total) if total else (len(data) + part_size - 1) // part_size
+    max_parts = int(sess.get('maxParts') or 0)
+    if max_parts and total > max_parts:
+        raise RuntimeError('file is too large for Fanvue')
+
+    parts = []
+    for i in range(total):
+        chunk = data[i * part_size:(i + 1) * part_size]
+        if not chunk:
+            break
+        etag = _fv_put_part(_fv_part_url(persona, scope, upload_id, i + 1),
+                            chunk, content_type)
+        parts.append({'PartNumber': i + 1, 'ETag': etag})
+    _fanvue_call(persona, 'PATCH', f'{scope}/media/uploads/{upload_id}',
+                 body={'parts': parts})
+
+    # Fanvue transcodes before the media can be sent, so poll until it is ready.
+    for _ in range(FV_MEDIA_READY_TRIES):
+        try:
+            m = _fanvue_call(persona, 'GET', f'{scope}/media/{media_uuid}')
+        except Exception:
+            m = {}
+        status = str((m or {}).get('status') or '')
+        if status == 'ready':
+            return media_uuid
+        if status == 'error':
+            raise RuntimeError('Fanvue could not process the upload')
+        time.sleep(1.5)
+    raise RuntimeError('Fanvue is still processing the upload')
+
+
+def _fv_send_voice_note(persona, scope, fan_uuid, media_uuid, text='', price=0):
+    """Send an already-uploaded audio clip as a voice note. Fanvue renders an
+    audio attachment as its VoiceNote player; a caption rides along as text."""
+    body = {'mediaUuids': [media_uuid]}
+    if text:
+        body['text'] = text[:2000]
+    if price:
+        body['price'] = int(price)
+    return _fanvue_call(persona, 'POST', f'{scope}/chats/{fan_uuid}/message', body=body)
 
 
 def _fv_send_human(persona, scope, fan_uuid, text, incoming='', cfg=None, active=True):
