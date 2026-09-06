@@ -12,6 +12,7 @@ Sessions are strings, handed back to the caller to persist wherever it likes.
 
 import asyncio
 import threading
+import time
 from datetime import datetime, timezone
 
 from telethon import TelegramClient, events
@@ -111,17 +112,24 @@ def send_message(api_id, api_hash, session_str, peer, text):
 class AccountRunner:
     """Holds one persona's account online and answers incoming DMs.
 
-    `plan(chat_id, name, text)` is supplied by the caller and returns
+    `plan(chat_id, name, text, texts)` is supplied by the caller and returns
     {'read': seconds, 'cps': chars_per_second, 'chunks': [str, ...]}, or None to
-    stay silent. Timing lives here so the typing indicator is genuinely held
-    while the reply is "being written".
+    stay silent — `texts` is every message of the burst being answered, `text`
+    the same thing joined. `pre_delay(chat_id)` returns how long she takes to
+    notice a message at all. Timing lives here so the typing indicator is
+    genuinely held while the reply is "being written", and so messages that
+    land while she is "getting to her phone" join the same reply.
     """
 
     KEEPALIVE_SECONDS = 45
     KEEPALIVE_MISSES = 3
+    # A burst closes this long after the fan's last message, and is never held
+    # open longer than MAX_HOLD_SECONDS by someone who keeps typing.
+    BURST_SECONDS = 8
+    MAX_HOLD_SECONDS = 240
 
     def __init__(self, persona, api_id, api_hash, session_str, plan, on_sent=None,
-                 on_error=None, on_trace=None):
+                 on_error=None, on_trace=None, pre_delay=None):
         self.persona = persona
         self.api_id = api_id
         self.api_hash = api_hash
@@ -130,6 +138,8 @@ class AccountRunner:
         self.on_sent = on_sent
         self.on_error = on_error
         self.on_trace = on_trace
+        self.pre_delay = pre_delay
+        self._bursts = {}
         self._thread = None
         self._loop = None
         self._stop = threading.Event()
@@ -248,20 +258,71 @@ class AccountRunner:
         self._trace('received', f'{name} ({chat_id}): {text[:80]}'
                     + (f' — arrived {lag}s after it was sent' if lag >= 15 else ''))
 
+        burst = self._bursts.get(chat_id)
+        now = time.monotonic()
+        if burst is not None:
+            burst['name'] = name
+            burst['texts'].append(text)
+            burst['due'] = min(max(burst['due'], now + self.BURST_SECONDS),
+                               burst['opened'] + self.MAX_HOLD_SECONDS)
+            return
+        # Registered before the first await, so a second message arriving while
+        # the delay is being read joins this burst instead of opening its own.
+        burst = {'texts': [text], 'name': name, 'opened': now,
+                 'due': now + self.BURST_SECONDS}
+        self._bursts[chat_id] = burst
+        if self.pre_delay:
+            initial = max(0.0, float(await asyncio.to_thread(self.pre_delay, chat_id)))
+            burst['due'] = max(burst['due'], now + self.BURST_SECONDS + initial)
+            # Otherwise the log looks stalled for a couple of minutes between
+            # 'received' and anything else happening.
+            if initial >= 5:
+                self._trace('waiting', f'{name}: gets to her phone in about '
+                                       f'{int(initial)}s — anything else they send '
+                                       'goes into the same reply')
+        burst['task'] = asyncio.ensure_future(self._burst_task(client, chat_id, burst))
+
+    async def _burst_task(self, client, chat_id, burst):
+        """Answer everything the fan sent in one go.
+
+        Each message pushes the deadline back, so a fan firing off four lines
+        gets one reply rather than four overlapping ones. Planning only starts
+        once the burst has closed — it has side effects (logging, CTA and photo
+        bookkeeping), so a plan is never built and then thrown away.
+        """
+        try:
+            try:
+                while True:
+                    wait = burst['due'] - time.monotonic()
+                    if wait <= 0:
+                        break
+                    await asyncio.sleep(wait)
+            finally:
+                if self._bursts.get(chat_id) is burst:
+                    del self._bursts[chat_id]
+            await self._reply(client, chat_id, burst)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            if self.on_error:
+                self.on_error(self.persona, str(e)[:300])
+
+    async def _reply(self, client, chat_id, burst):
+        name = burst['name']
+        texts = burst['texts']
+        if len(texts) > 1:
+            self._trace('burst', f'{name}: answering {len(texts)} messages as one')
+
         # Gemini is blocking, so keep it off the event loop.
-        plan = await asyncio.to_thread(self.plan, chat_id, name, text)
+        plan = await asyncio.to_thread(self.plan, chat_id, name, '\n'.join(texts), texts)
         if not plan or not plan.get('chunks'):
             self._trace('no-reply', f'{name}: nothing to send back')
             return
 
-        initial = max(0.0, float(plan.get('initial_delay', 0)))
-        # She waits before answering like a person would, so without this line
-        # the log looks stalled for a couple of minutes after 'received'.
+        read = max(0.0, float(plan.get('read', 0)))
         self._trace('planning', f"{name}: {len(plan['chunks'])} message(s), "
-                                f"first one in about {int(initial + plan.get('read', 0))}s")
-        if initial > 0:
-            await asyncio.sleep(initial)
-        await asyncio.sleep(max(0.0, float(plan.get('read', 0))))
+                                f"first one in about {int(read)}s")
+        await asyncio.sleep(read)
         cps = max(2, int(plan.get('cps', 14)))
         for i, chunk in enumerate(plan['chunks']):
             if not chunk:
@@ -269,10 +330,10 @@ class AccountRunner:
             if i:
                 await asyncio.sleep(1.0)
             dur = min(max(len(chunk) / float(cps), 1.2), 22.0)
-            async with client.action(event.chat_id, 'typing'):
+            async with client.action(chat_id, 'typing'):
                 await asyncio.sleep(dur)
             try:
-                await client.send_message(event.chat_id, chunk)
+                await client.send_message(chat_id, chunk)
             except Exception as e:
                 self._trace('error', f'send to {name} failed: {str(e)[:180]}')
                 raise
@@ -288,4 +349,4 @@ class AccountRunner:
                 raw = raw.split(',', 1)[1]
             buf = io.BytesIO(base64.b64decode(raw))
             buf.name = 'photo.jpg'
-            await client.send_file(event.chat_id, buf)
+            await client.send_file(chat_id, buf)

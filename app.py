@@ -15512,10 +15512,19 @@ def _tgu_fan_key(chat_id):
     return f'tgu:{chat_id}'
 
 
-def _tgu_plan(persona, chat_id, name, text):
-    """Build the reply for one incoming DM: same persona voice, memory, funnel,
-    CTA and photo sending as the bot path. Returns the timing plan the runner
-    acts on, including optional photo_data for the runner to send."""
+def _tgu_pre_delay(persona):
+    """How long she takes to notice a message at all. The runner waits this out
+    before asking for a reply, so anything else the fan sends meanwhile is
+    answered in the same message rather than starting a second reply."""
+    return random.uniform(15, 120) if _tg_settings(persona)['humanize'] else 0
+
+
+def _tgu_plan(persona, chat_id, name, text, texts=None):
+    """Build the reply for one burst of incoming DMs: same persona voice,
+    memory, funnel, CTA and photo sending as the bot path. `text` is the burst
+    joined for the prompt, `texts` its messages. Returns the timing plan the
+    runner acts on, including optional photo_data for the runner to send."""
+    msgs = [t for t in (texts or [text]) if t]
     cfg = _tg_settings(persona)
     # Deliberately no `enabled` check here: that toggle has only ever gated the
     # bot path, and the personal account replies independently of it.
@@ -15533,9 +15542,10 @@ def _tgu_plan(persona, chat_id, name, text):
     if not fan.get('first_in'):
         fan['first_in'] = int(time.time())
     fan['followups'] = 0
-    fan['in_count'] = int(fan.get('in_count', 0)) + 1
+    fan['in_count'] = int(fan.get('in_count', 0)) + len(msgs)
 
-    _log_x_message(persona, _tgu_fan_key(chat_id), name, 'in', text)
+    for m in msgs:
+        _log_x_message(persona, _tgu_fan_key(chat_id), name, 'in', m)
 
     phases = _phases(persona)
     phase_idx = _fan_phase(phases, fan)
@@ -15650,11 +15660,9 @@ def _tgu_plan(persona, chat_id, name, text):
 
     fans[key] = fan
     _tg_save_fans(persona, fans)
-    initial_delay = random.uniform(15, 120) if cfg['humanize'] else 0
     read = min(0.8 + len(text) / 90.0, TG_READ_CAP) if cfg['humanize'] else 0
     cps = max(2, int(cfg['typing_speed'] // 2)) if cfg['humanize'] else 999
-    return {'read': read, 'cps': cps, 'initial_delay': initial_delay,
-            'chunks': chunks, 'photo_data': photo_data}
+    return {'read': read, 'cps': cps, 'chunks': chunks, 'photo_data': photo_data}
 
 
 def _tgu_on_sent(persona, chat_id, name, text):
@@ -15690,10 +15698,10 @@ def _tgu_start(persona):
     if r and r.alive():
         return True
 
-    def plan(chat_id, name, text):
+    def plan(chat_id, name, text, texts=None):
         with app.app_context():
             try:
-                return _tgu_plan(persona, chat_id, name, text)
+                return _tgu_plan(persona, chat_id, name, text, texts)
             except Exception as e:
                 _tgu_errors[persona] = str(e)[:300]
                 # Without this the failure only lived in memory, and the log
@@ -15728,8 +15736,16 @@ def _tgu_start(persona):
             except Exception:
                 pass
 
+    def pre_delay(chat_id):
+        with app.app_context():
+            try:
+                return _tgu_pre_delay(persona)
+            except Exception:
+                return 0
+
     runner = AccountRunner(persona, api_id, api_hash, acct['session'],
-                           plan, on_sent=sent, on_error=err, on_trace=trace)
+                           plan, on_sent=sent, on_error=err, on_trace=trace,
+                           pre_delay=pre_delay)
     _tgu_runners[persona] = runner
     _tgu_errors.pop(persona, None)
     runner.start()
