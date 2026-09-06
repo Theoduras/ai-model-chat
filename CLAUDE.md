@@ -16,7 +16,9 @@ This is an **OnlyFans-style AI chatbot platform** where content creators (models
 2. Define the persona's voice, tone, backstory, and escalation strategy.
 3. Deploy that persona to convert fans → engaged chatters → content buyers.
 
-The backend is Python/Flask + Google Gemini. The frontend is plain HTML/JS. Hosted on Vercel.
+The backend is Python/Flask + Google Gemini. The frontend is plain HTML/JS. It runs as a
+Docker container on **Google Cloud Run** (see Deployment Rules below). A Vercel config is
+kept as a secondary target and still works, but is not where the app is deployed.
 
 ---
 
@@ -38,7 +40,10 @@ personas/
 grok-lilith-prompt.txt          — Legacy location (still loaded as fallback)
 templates/profile.html          — Jinja2 template variant (unused currently)
 .env                            — API keys (never commit)
-vercel.json                     — Vercel routing config
+Dockerfile                      — Cloud Run image (the real deployment)
+cloudbuild.yaml                 — Cloud Build steps, run by the push triggers
+api/index.py                    — Vercel entrypoint (secondary host)
+vercel.json                     — Vercel routing config (secondary host)
 requirements.txt                — Python deps: flask, google-genai, python-dotenv, google-auth
 ```
 
@@ -142,12 +147,20 @@ Stay completely in character. Never mention being an AI.
 
 ---
 
-## Vercel Deployment Rules
+## Host Rules
 
-- `vercel.json` controls routing — update it if new routes are added.
-- All file writes at runtime must use `/tmp/` (Vercel filesystem is read-only except `/tmp`).
+- All file writes at runtime must use `/tmp/`. Nothing written to disk survives:
+  Cloud Run's filesystem is in-memory and gone on restart, Vercel's is read-only
+  outside `/tmp` and wiped on every cold start. Anything that must persist goes in
+  the database.
 - Static assets served directly from root via Flask `static_folder=BASE_DIR`.
 - Test locally with `python app.py` before pushing.
+- Cloud Run builds from the `Dockerfile`; `vercel.json` and `api/index.py` only
+  matter if deploying to Vercel. Keep both working when adding routes — everything
+  already routes through Flask, so a new `@app.route` needs no config change on
+  either host. See `DEPLOY.md`.
+- The Fanvue, X and Telegram poll loops need an always-on host, so they run on
+  Cloud Run and stay off on Vercel (`IS_VERCEL` in `app.py`).
 
 ---
 
@@ -211,4 +224,4 @@ When building new features, tackle in this order:
 - [ ] Chat sends a message and gets a Gemini response
 - [ ] Persona prompt loads correctly from file
 - [ ] No API keys or secrets in committed files
-- [ ] `vercel.json` routes are valid if changed
+- [ ] `Dockerfile` still builds if deps or entrypoint changed
