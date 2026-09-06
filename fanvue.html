@@ -194,6 +194,51 @@
   </div>
 
   <div class="form-section">
+    <div class="section-title">🎯 Sales funnels &amp; fan scoring</div>
+    <span class="hint" style="display:block; margin-bottom:14px;">Classifies each fan, puts them in the funnel that suits them, and learns which funnel works for which kind of fan. Off by default &mdash; with it off the PPV ladder above behaves exactly as it does today.</span>
+    <div class="auto-toggles" style="display:flex; flex-wrap:wrap; gap:10px 20px;">
+      <label class="soon" style="display:flex;align-items:center;gap:8px;cursor:pointer;background:none;color:var(--text-2);font-size:.85rem;padding:0"><input type="checkbox" id="fn-enabled" style="width:auto"> <b>Funnel system enabled</b></label>
+      <label class="soon" style="display:flex;align-items:center;gap:8px;cursor:pointer;background:none;color:var(--text-2);font-size:.85rem;padding:0"><input type="checkbox" id="fn-classify" checked style="width:auto"> Classify fans <span style="color:var(--text-muted)">(one short model call every 10 messages)</span></label>
+      <label class="soon" style="display:flex;align-items:center;gap:8px;cursor:pointer;background:none;color:var(--text-2);font-size:.85rem;padding:0"><input type="checkbox" id="fn-guardrails" checked style="width:auto"> Guardrails <span style="color:var(--text-muted)">(spend cap, distress pause, two ignored pitches)</span></label>
+    </div>
+    <div class="row-inline" style="margin-top:12px;">
+      <div class="field" style="margin:0;">
+        <label>Assignment</label>
+        <select id="fn-mode" style="max-width:280px;">
+          <option value="matrix">Fixed &mdash; best funnel per fan type</option>
+          <option value="thompson">Adaptive &mdash; learn what actually converts</option>
+        </select>
+      </div>
+      <div class="field" style="margin:0;">
+        <label>Spend cap per fan per day <span style="font-weight:400;color:var(--text-muted);">(0 = none)</span></label>
+        <input type="number" id="fn-cap" min="0" step="5" style="max-width:140px;">
+      </div>
+      <div class="field" style="margin:0;">
+        <label>Your sub price <span style="font-weight:400;color:var(--text-muted);">(what a lost fan costs the score)</span></label>
+        <input type="number" id="fn-sub" min="0" step="1" style="max-width:120px;">
+      </div>
+    </div>
+    <div class="field full" style="margin-top:12px;">
+      <label>Funnels in play <span style="font-weight:400;color:var(--text-muted);">(start with a few &mdash; add one at a time so you can tell what changed)</span></label>
+      <div id="fn-list" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:6px 14px;"></div>
+    </div>
+    <div class="field full" style="margin-top:10px;">
+      <label>Price tiers <span style="font-weight:400;color:var(--text-muted);">(the ceiling for each rung, in your currency &mdash; used when a guardrail caps an ask)</span></label>
+      <div class="row-inline" id="fn-tiers"></div>
+    </div>
+    <button class="btn-ai" style="margin-top:12px;" onclick="saveFunnels()">Save funnel settings</button>
+    <span class="hint" id="fn-status" style="margin-left:10px;"></span>
+
+    <div id="fn-stats" style="margin-top:18px;border-top:1px solid var(--border-soft);padding-top:14px;">
+      <div style="font-size:.82rem;color:var(--text-2);margin-bottom:8px;"><b>What is working</b> <span class="hint">&mdash; revenue per fan assigned, by fan type and funnel. Cells go solid once there is enough data to trust them.</span></div>
+      <div id="fn-heatmap" style="overflow-x:auto;"></div>
+      <div id="fn-burn" style="margin-top:10px;font-size:.76rem;"></div>
+      <div style="font-size:.82rem;color:var(--text-2);margin:16px 0 8px;"><b>Fans by rank</b> <span class="hint">&mdash; score, tier, churn risk, and anyone waiting on you.</span></div>
+      <div id="fn-fans" style="overflow-x:auto;font-size:.76rem;"></div>
+    </div>
+  </div>
+
+  <div class="form-section">
     <div class="section-title">💬 Draft a reply</div>
     <span class="hint" style="display:block; margin-bottom:14px;">Generates an in-persona, funnel-aware reply to a fan's message. Works with no connection — copy it into Fanvue, or preview the voice before going live.</span>
     <div class="field full">
@@ -347,6 +392,7 @@ async function loadConfig(){
   window._ppvTiersLoaded=false;
   loadPpv();
   loadPpvStats();
+  loadFunnels();
   loadAuto();
   loadAccounts();
   loadTrace();
@@ -741,6 +787,113 @@ function ladderPrices(){
     h.style.color='#fbbf24'; return; }
   s.tiers.forEach((t,i)=>{ t.price=String(base+5*i); });
   applyTier();
+}
+
+// ── Sales funnels ─────────────────────────────────────────────────────────────
+let fnCfg={}, fnMeta={};
+async function loadFunnels(){
+  try{
+    const d=await fetch('/api/fanvue/funnels?persona='+encodeURIComponent(persona())).then(r=>r.json());
+    if(!d.ok) return;
+    fnCfg=d.config||{}; fnMeta=d;
+    document.getElementById('fn-enabled').checked=!!fnCfg.enabled;
+    document.getElementById('fn-classify').checked=fnCfg.classify!==false;
+    document.getElementById('fn-guardrails').checked=fnCfg.guardrails!==false;
+    document.getElementById('fn-mode').value=fnCfg.mode||'matrix';
+    document.getElementById('fn-cap').value=Math.round((fnCfg.daily_cap_cents||0)/100);
+    document.getElementById('fn-sub').value=Math.round((fnCfg.avg_sub_cents||0)/100);
+    document.getElementById('fn-list').innerHTML=(d.funnels||[]).map(f=>
+      '<label class="soon" style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;background:none;color:var(--text-2);font-size:.8rem;padding:0">'
+      +'<input type="checkbox" class="fn-pick" value="'+f.id+'"'+(f.unlocked?' checked':'')+' style="width:auto;margin-top:3px;">'
+      +'<span><b>'+f.id+' '+esc(f.name)+'</b>'+(f.arm?'':' <span style="color:var(--text-muted)">(state, not an arm)</span>')
+      +'<br><span style="color:var(--text-muted);font-size:.72rem;">'+esc(f.trigger)+'</span></span></label>').join('');
+    const tiers=fnCfg.tier_cents||{};
+    document.getElementById('fn-tiers').innerHTML=Object.keys(tiers).map(t=>
+      '<div class="field" style="margin:0;"><label>'+t+'</label>'
+      +'<input type="number" class="fn-tier" data-tier="'+t+'" min="0" step="1" value="'
+      +Math.round(tiers[t]/100)+'" style="max-width:100px;"></div>').join('');
+    loadFunnelStats();
+  }catch(e){}
+}
+
+async function saveFunnels(){
+  const st=document.getElementById('fn-status');
+  st.textContent='Saving…'; st.style.color='var(--text-muted)';
+  const tier_cents={};
+  document.querySelectorAll('.fn-tier').forEach(i=>{
+    tier_cents[i.dataset.tier]=Math.max(0,Math.round(parseFloat(i.value||'0')*100));
+  });
+  const d=await post('/api/fanvue/funnels',{
+    persona:persona(),
+    enabled:document.getElementById('fn-enabled').checked,
+    classify:document.getElementById('fn-classify').checked,
+    guardrails:document.getElementById('fn-guardrails').checked,
+    mode:document.getElementById('fn-mode').value,
+    daily_cap_cents:Math.max(0,Math.round(parseFloat(document.getElementById('fn-cap').value||'0')*100)),
+    avg_sub_cents:Math.max(0,Math.round(parseFloat(document.getElementById('fn-sub').value||'0')*100)),
+    unlocked:[...document.querySelectorAll('.fn-pick:checked')].map(i=>i.value),
+    tier_cents:tier_cents});
+  if(!d.ok){st.textContent='✗ '+(d.error||'Failed'); st.style.color='#fb7185'; return;}
+  fnCfg=d.config; st.textContent='✓ Saved'; st.style.color='#4ade80';
+  setTimeout(()=>{st.textContent='';},2500);
+  loadFunnelStats();
+}
+
+function fnCell(c){
+  // Untrusted cells are dimmed rather than hidden: an early read is still worth
+  // seeing, it just should not be acted on yet.
+  const money='€'+((c.revenue_per_fan||0)/100).toFixed(2);
+  const bg=c.revenue_per_fan>0?'rgba(74,222,128,'+Math.min(.5,c.revenue_per_fan/8000)+')':'transparent';
+  return '<td title="'+c.n+' fans, win rate '+c.win_rate+', churn '+Math.round(c.churn_rate*100)+'%'
+    +'" style="padding:4px 8px;text-align:right;font-variant-numeric:tabular-nums;background:'+bg
+    +';opacity:'+(c.trusted?1:.45)+';'+(c.burning?'outline:1px solid #fb7185;':'')+'">'
+    +money+'<br><span style="font-size:.66rem;color:var(--text-muted);">n='+c.n+'</span></td>';
+}
+
+async function loadFunnelStats(){
+  const host=document.getElementById('fn-heatmap');
+  try{
+    const d=await fetch('/api/fanvue/funnel-stats?persona='+encodeURIComponent(persona())).then(r=>r.json());
+    if(!d.ok){host.innerHTML='<span class="hint">'+esc(d.error||'No data yet.')+'</span>';return;}
+    const cells=(d.cells||[]).filter(c=>!c.variant);
+    if(!cells.length){
+      host.innerHTML='<span class="hint">Nothing to show yet — a cell appears once a fan\'s '
+        +'7-day window closes.'+(d.enabled?'':' The funnel system is currently off.')+'</span>';
+    }else{
+      const groups=[...new Set(cells.map(c=>c.fan_type))].sort();
+      const funnels=[...new Set(cells.map(c=>c.funnel))].sort();
+      const by={}; cells.forEach(c=>{by[c.fan_type+'/'+c.funnel]=c;});
+      host.innerHTML='<table style="border-collapse:collapse;font-size:.75rem;"><tr><th></th>'
+        +funnels.map(f=>'<th style="padding:4px 8px;text-align:right;color:var(--text-muted);font-weight:500;">'
+          +f+'<br><span style="font-size:.66rem;">'+esc((d.names||{})[f]||'')+'</span></th>').join('')+'</tr>'
+        +groups.map(g=>'<tr><td style="padding:4px 10px 4px 0;color:var(--text-2);">'+esc(g)+'</td>'
+          +funnels.map(f=>by[g+'/'+f]?fnCell(by[g+'/'+f])
+            :'<td style="padding:4px 8px;text-align:right;color:var(--text-muted);">·</td>').join('')
+          +'</tr>').join('')+'</table>';
+    }
+    const burn=cells.filter(c=>c.burning);
+    document.getElementById('fn-burn').innerHTML=burn.length
+      ? '<span style="color:#fb7185;">Burn list:</span> '+burn.map(c=>esc(c.fan_type+' × '+c.funnel)).join(', ')
+        +' <span class="hint">— earning, but losing more in fans than it brings in.</span>'
+      : '';
+    const live=Object.entries(d.live||{}).map(([f,n])=>f+' ('+n+')').join(', ');
+    if(live) document.getElementById('fn-burn').innerHTML+=
+      '<div class="hint" style="margin-top:6px;">In progress now: '+esc(live)+'</div>';
+    const fans=d.fans||[];
+    document.getElementById('fn-fans').innerHTML=fans.length
+      ? '<table style="border-collapse:collapse;width:100%;"><tr>'
+        +['Fan','Type','Tier','Rank','Churn','Spent','']
+          .map(h=>'<th style="text-align:left;padding:3px 10px 3px 0;color:var(--text-muted);font-weight:500;">'+h+'</th>').join('')
+        +'</tr>'+fans.slice(0,25).map(f=>'<tr>'
+          +'<td style="padding:3px 10px 3px 0;">'+esc(f.handle||f.fan.slice(0,8))+'</td>'
+          +'<td style="padding:3px 10px 3px 0;">'+esc(f.type||'—')+'</td>'
+          +'<td style="padding:3px 10px 3px 0;">'+esc(f.tier)+'</td>'
+          +'<td style="padding:3px 10px 3px 0;font-variant-numeric:tabular-nums;">'+f.frs+'</td>'
+          +'<td style="padding:3px 10px 3px 0;color:'+(f.mode==='save'?'#fb7185':f.mode==='watch'?'#fbbf24':'var(--text-muted)')+';">'+f.crs+'</td>'
+          +'<td style="padding:3px 10px 3px 0;font-variant-numeric:tabular-nums;">€'+((f.lifetime_cents||0)/100).toFixed(0)+'</td>'
+          +'<td style="padding:3px 0;color:#fbbf24;">'+esc(f.review||'')+'</td></tr>').join('')+'</table>'
+      : '<span class="hint">No fans scored yet.</span>';
+  }catch(e){ host.innerHTML='<span class="hint">Could not load funnel stats.</span>'; }
 }
 
 async function loadPpvStats(){

@@ -359,11 +359,141 @@ def test_scope_reporting():
           app._fv_scope_for_path('/creators/c-1/earnings?size=50') == 'read:insights')
 
 
+def _ppv_ctx(**over):
+    """The context _fv_maybe_ppv is called with, with one set of two tiers."""
+    ctx = {'sets': [{'id': 's1', 'name': 'Bar shift',
+                     'tiers': [{'media_uuids': ['m1'], 'price': 1000, 'caption': 'one'},
+                               {'media_uuids': ['m2'], 'price': 5000, 'caption': 'two'}],
+                     'scene': '', 'keywords': [], 'hour_from': None, 'hour_to': None}],
+           'gap': 1, 'first_after': 1, 'retry_after': 0, 'retry_max': 0,
+           'retry_discount': 0, 'stale_days': 14, 'state_key': 'k_state',
+           'paid_key': 'k_paid', 'tz_offset': 0, 'require_payment': False,
+           'funnels': None, 'assignment': None}
+    ctx.update(over)
+    return ctx
+
+
+def _stub_drop_path(sent, traced, store):
+    """Enough of the world for _fv_maybe_ppv to run without a database."""
+    app._fanvue_call = lambda p, m, path, body=None: (
+        sent.append((path, body)) or {'uuid': 'msg-1'})
+    app._fv_trace = lambda p, st, dt='': traced.append((st, dt))
+    app._fv_record_drop = lambda *a, **k: 'drop-1'
+    app._fv_record_pitch = lambda *a, **k: None
+    app._fanvue_msg_count = lambda p, k: 20
+    app._fv_fan_hour = lambda *a, **k: 12
+    app._get_setting = lambda k, d=None: store.get(k, d)
+    app._set_setting = lambda k, v: store.__setitem__(k, v)
+    app._json_setting_strict = lambda k, d: json.loads(store.get(k) or json.dumps(d))
+
+
+def test_funnels_off_changes_nothing():
+    """The whole system is behind a flag. With it off, not one funnel function
+    is reachable from the drop path."""
+    sent, traced, store = [], [], {}
+    _stub_drop_path(sent, traced, store)
+    called = []
+    app._fv_pitch_gate = lambda *a, **k: called.append(a) or (False, 'should not run', 0)
+    app._fv_maybe_ppv('lilly', '', 'fan-1', 'fv:fan-1', 'joe', 'hey', _ppv_ctx())
+    check('the drop still goes out', len(sent) == 1, sent)
+    check('the guardrails were never consulted', not called)
+    check('and it is the configured price', sent and sent[0][1].get('price') == 1000)
+
+
+def test_guardrails_can_stop_a_drop():
+    sent, traced, store = [], [], {}
+    _stub_drop_path(sent, traced, store)
+    cfg = dict(app.FV_FUNNEL_DEFAULTS, enabled=True)
+    app._fv_pitch_gate = lambda *a, **k: (False, 'distress signal — paused', 0)
+    app._fv_maybe_ppv('lilly', '', 'fan-1', 'fv:fan-1', 'joe', 'hey',
+                      _ppv_ctx(funnels=cfg))
+    check('nothing was sent', not sent, sent)
+    check('and the reason is on the record',
+          any(st == 'guardrail' and 'distress' in dt for st, dt in traced), traced)
+
+
+def test_price_cap_holds_rather_than_discounts():
+    """A churn-risk cap must never quietly sell the creator\'s content cheap."""
+    sent, traced, store = [], [], {}
+    _stub_drop_path(sent, traced, store)
+    store['k_state'] = json.dumps({'fan-1': {'sets': {'s1': 1}, 'active_set': 's1',
+                                             'retries': 0, 'msgs_at_last_drop': 0,
+                                             'last_drop_id': ''}})
+    cfg = dict(app.FV_FUNNEL_DEFAULTS, enabled=True)
+    app._fv_pitch_gate = lambda *a, **k: (True, 'watch mode', 1000)
+    app._fv_maybe_ppv('lilly', '', 'fan-1', 'fv:fan-1', 'joe', 'hey',
+                      _ppv_ctx(funnels=cfg))
+    check('the dearer tier is held, not marked down', not sent, sent)
+    check('and it says why',
+          any('over the' in dt for st, dt in traced), traced)
+    # Under the cap the same drop goes out untouched.
+    sent2, traced2, store2 = [], [], {}
+    _stub_drop_path(sent2, traced2, store2)
+    app._fv_pitch_gate = lambda *a, **k: (True, '', 1000)
+    app._fv_maybe_ppv('lilly', '', 'fan-1', 'fv:fan-1', 'joe', 'hey',
+                      _ppv_ctx(funnels=cfg))
+    check('a tier inside the cap is unaffected',
+          len(sent2) == 1 and sent2[0][1]['price'] == 1000, sent2)
+
+
+def test_guardrail_failure_does_not_cost_a_sale():
+    """If the new code throws, the old behaviour has to survive it."""
+    sent, traced, store = [], [], {}
+    _stub_drop_path(sent, traced, store)
+    def boom(*a, **k):
+        raise RuntimeError('scores table is gone')
+    app._fv_pitch_gate = boom
+    app._fv_maybe_ppv('lilly', '', 'fan-1', 'fv:fan-1', 'joe', 'hey',
+                      _ppv_ctx(funnels=dict(app.FV_FUNNEL_DEFAULTS, enabled=True)))
+    check('the drop still went out', len(sent) == 1, sent)
+
+
+def test_funnel_config_roundtrip():
+    store = {}
+    app._get_setting = lambda k, d=None: store.get(k, d)
+    app._set_setting = lambda k, v: store.__setitem__(k, v)
+    check('off by default', not app._fv_funnels_on('lilly'))
+    store['fanvue_funnels_lilly'] = json.dumps({'enabled': True, 'mode': 'thompson',
+                                                'unlocked': ['F1', 'F9', 'nope'],
+                                                'daily_cap_cents': 5000})
+    cfg = app._fv_funnel_cfg('lilly')
+    check('reads back on', cfg['enabled'] and app._fv_funnels_on('lilly'))
+    check('mode kept', cfg['mode'] == 'thompson')
+    check('unknown funnels dropped', cfg['unlocked'] == ['F1', 'F9'], cfg['unlocked'])
+    check('cap kept', cfg['daily_cap_cents'] == 5000)
+    check('defaults fill the rest', cfg['tier_cents']['T1'] > 0)
+    store['fanvue_funnels_lilly'] = 'not json at all'
+    check('junk settings fall back to the defaults',
+          app._fv_funnel_cfg('lilly')['enabled'] is False)
+
+
+def test_distress_pause_is_written_once():
+    store, traced = {}, []
+    app._get_setting = lambda k, d=None: store.get(k, d)
+    app._set_setting = lambda k, v: store.__setitem__(k, v)
+    app._fv_trace = lambda p, s, d='': traced.append((s, d))
+    app._fv_note_event = lambda *a, **k: None
+    app._fv_flag_distress('lilly', 'fan-1', 'joe')
+    first = store.get('fanvue_distress_lilly')
+    check('the pause is stored', first and 'fan-1' in first)
+    check('it is in the future', app._fv_distress_until('lilly', 'fan-1') > time.time())
+    app._fv_flag_distress('lilly', 'fan-1', 'joe')
+    check('a second signal does not re-trace it', len(traced) == 1, traced)
+    store['fanvue_distress_lilly'] = json.dumps({'old': 1, 'fan-2': time.time() + 999})
+    app._fv_flag_distress('lilly', 'fan-3', '')
+    kept = json.loads(store['fanvue_distress_lilly'])
+    check('expired entries are swept', 'old' not in kept and 'fan-2' in kept, kept)
+
+
 if __name__ == '__main__':
     for fn in (test_direction, test_import, test_identity_never_crosses,
                test_placeholders, test_pacing, test_backlog,
                test_scopes, test_api_errors, test_chat_lists,
-               test_scope_reporting):
+               test_scope_reporting, test_funnels_off_changes_nothing,
+               test_guardrails_can_stop_a_drop,
+               test_price_cap_holds_rather_than_discounts,
+               test_guardrail_failure_does_not_cost_a_sale,
+               test_funnel_config_roundtrip, test_distress_pause_is_written_once):
         print('\n--- %s ---' % fn.__name__)
         restore_app()
         fn()

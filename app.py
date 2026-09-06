@@ -10372,12 +10372,18 @@ def _fv_settle_drop(persona, fan_uuid, amount_cents=None, invoice_id=None,
             return None
         mark_ppv_paid(s, row.id, invoice_id=invoice_id, source=source, when=when)
         s.commit()
+        paid_cents = int(amount_cents or row.price_cents or 0)
+        row_id, row_fan = row.id, row.fan_uuid
         logger.info('PPV PAID [%s] %s tier %d via %s ($%g)', persona, row.set_name,
                     (row.tier_index or 0) + 1, source, (row.price_cents or 0) / 100)
         _fv_trace(persona, 'ppv',
                   f'\U0001F4B0 bought: {row.set_name} tier {(row.tier_index or 0) + 1} '
                   f'(${(row.price_cents or 0) / 100:g}, via {source})')
-        return row.id
+        if _fv_funnels_on(persona):
+            # Outside the ledger session: the reward signal is bookkeeping and
+            # must never be able to roll back a recorded sale.
+            _fv_record_purchase(persona, row_fan, paid_cents, row_id)
+        return row_id
     except Exception as e:
         logger.warning('PPV settle failed for %s/%s: %s', persona, fan_uuid, str(e)[:140])
         return None
@@ -10668,6 +10674,145 @@ def api_fanvue_draft():
 # ── Fanvue live auto-reply (persistent, survives redeploys) ───────────────────
 # Response shapes vary; parsing is defensive (tries several field names) so it's
 # easy to adjust once we see a real payload.
+
+@app.route('/api/fanvue/funnels', methods=['GET', 'POST'])
+@platform_scoped
+def api_fanvue_funnels():
+    """Read or change the funnel system's settings for one persona.
+
+    Off by default. Turning it on starts classifying fans, assigning funnels and
+    enforcing the guardrails; turning it off stops all of it immediately and
+    leaves the plain PPV ladder exactly as it was."""
+    if request.method == 'GET':
+        persona = (request.args.get('persona') or '').strip()
+        if not persona:
+            return jsonify({'ok': False, 'error': 'Missing persona'}), 400
+        cfg = _fv_funnel_cfg(persona)
+        return jsonify({'ok': True, 'config': cfg, 'funnels': [
+            {'id': fid, 'name': f['name'], 'trigger': f['trigger'],
+             'ladder': f['ladder'], 'best': f['best'], 'worst': f['worst'],
+             'exit': f['exit'], 'unlocked': fid in cfg['unlocked'],
+             'arm': fid in FN.ARMS}
+            for fid, f in FN.FUNNELS.items()],
+            'types': {k: {'name': v[0], 'signals': v[1], 'wants': v[2]}
+                      for k, v in FN.FAN_TYPES.items()},
+            'priors': FN.PRIORS})
+
+    d = request.json or {}
+    persona = (d.get('persona') or '').strip()
+    if not persona:
+        return jsonify({'ok': False, 'error': 'Missing persona'}), 400
+    cfg = _fv_funnel_cfg(persona)
+    if 'enabled' in d:
+        cfg['enabled'] = bool(d['enabled'])
+    if d.get('mode') in ('matrix', 'thompson'):
+        cfg['mode'] = d['mode']
+    if isinstance(d.get('unlocked'), list):
+        picked = [f for f in d['unlocked'] if f in FN.FUNNELS]
+        cfg['unlocked'] = picked or ['F1']
+    for key in ('classify', 'guardrails'):
+        if key in d:
+            cfg[key] = bool(d[key])
+    if str(d.get('daily_cap_cents', '')).lstrip('-').isdigit():
+        cfg['daily_cap_cents'] = max(0, int(d['daily_cap_cents']))
+    if str(d.get('avg_sub_cents', '')).lstrip('-').isdigit():
+        cfg['avg_sub_cents'] = max(0, int(d['avg_sub_cents']))
+    if isinstance(d.get('tier_cents'), dict):
+        for k, v in d['tier_cents'].items():
+            if k in cfg['tier_cents'] and str(v).lstrip('-').isdigit():
+                cfg['tier_cents'][k] = max(0, int(v))
+    _set_setting(f'fanvue_funnels_{persona}', json.dumps(cfg))
+    _fv_trace(persona, 'funnel',
+              ('funnel system on — ' + cfg['mode'] + ', funnels ' +
+               ', '.join(cfg['unlocked'])) if cfg['enabled'] else 'funnel system off')
+    return jsonify({'ok': True, 'config': cfg})
+
+
+@app.route('/api/fanvue/funnel-stats')
+@platform_scoped
+def api_fanvue_funnel_stats():
+    """The four views from the spec: the type × funnel heatmap, the burn list,
+    the fan ranking and whoever is waiting on a human."""
+    persona = (request.args.get('persona') or '').strip()
+    if not persona:
+        return jsonify({'ok': False, 'error': 'Missing persona'}), 400
+    cfg = _fv_funnel_cfg(persona)
+    s = _fv_db()
+    if s is None:
+        return jsonify({'ok': False, 'error': 'No database configured.'}), 200
+    try:
+        from db import FanProfile, FunnelAssignment, FunnelPosterior
+        cells = []
+        for row in s.query(FunnelPosterior).filter(
+                FunnelPosterior.persona == persona).all():
+            n = row.n or 0
+            churn_rate = (row.churn_n or 0) / n if n else 0.0
+            revenue = row.revenue_cents or 0
+            penalty = (row.churn_n or 0) * int(cfg.get('avg_sub_cents') or 0)
+            cells.append({
+                'fan_type': row.fan_type, 'funnel': row.funnel_id,
+                'variant': row.variant_key, 'n': n,
+                'revenue_cents': revenue,
+                'revenue_per_fan': int(revenue / n) if n else 0,
+                'win_rate': round((row.alpha or 1) / ((row.alpha or 1) + (row.beta or 1)), 3),
+                'churn_rate': round(churn_rate, 3),
+                'trusted': FN.cell_is_trusted(n),
+                # §4.5 burn list: earns well, but the churn it causes eats it.
+                'burning': bool(revenue and penalty > 0.3 * revenue),
+            })
+        cells.sort(key=lambda c: (-c['revenue_per_fan'], c['funnel']))
+
+        live = {}
+        for a in (s.query(FunnelAssignment)
+                  .filter(FunnelAssignment.persona == persona,
+                          FunnelAssignment.exited_at.is_(None)).all()):
+            live[a.funnel_id] = live.get(a.funnel_id, 0) + 1
+
+        fans = []
+        for p in (s.query(FanProfile).filter(FanProfile.persona == persona)
+                  .order_by(FanProfile.frs.desc()).limit(100).all()):
+            fans.append({'fan': p.fan_uuid, 'handle': p.handle or '',
+                         'type': p.fan_type or '', 'confidence': p.type_confidence or 0,
+                         'frs': p.frs or 0, 'crs': p.crs or 0,
+                         'mode': FN.churn_mode(p.crs or 0),
+                         'tier': p.tier or 'C',
+                         'sla_minutes': FN.TIER_SLA_MINUTES.get(p.tier or 'C', 0),
+                         'lifetime_cents': p.lifetime_spend or 0,
+                         'review': p.review_reason or ''})
+        review = [f for f in fans if f['review']]
+        return jsonify({'ok': True, 'enabled': bool(cfg.get('enabled')),
+                        'mode': cfg.get('mode'), 'cells': cells, 'live': live,
+                        'fans': fans, 'review': review,
+                        'min_cell_n': FN.MIN_CELL_N,
+                        'names': {fid: f['name'] for fid, f in FN.FUNNELS.items()}})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]}), 500
+    finally:
+        _fv_close(s)
+
+
+@app.route('/api/fanvue/fan-score', methods=['POST'])
+@platform_scoped
+def api_fanvue_fan_score():
+    """Recompute one fan's scores now, ignoring the refresh throttle. Used by
+    the dashboard when a creator opens a fan, and to sanity-check the inputs."""
+    d = request.json or {}
+    persona = (d.get('persona') or '').strip()
+    fan_uuid = (d.get('fan') or '').strip()
+    if not persona or not fan_uuid:
+        return jsonify({'ok': False, 'error': 'Missing persona or fan'}), 400
+    cfg = _fv_funnel_cfg(persona)
+    try:
+        prof = _fv_score_fan(persona, fan_uuid, 'fv:' + fan_uuid,
+                             (d.get('handle') or ''), cfg, force=True)
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]}), 500
+    led = _fv_ledger_stats(persona, fan_uuid)
+    return jsonify({'ok': True, 'profile': {
+        'type': prof.get('fan_type', ''), 'frs': prof.get('frs', 0),
+        'crs': prof.get('crs', 0), 'mode': FN.churn_mode(prof.get('crs', 0)),
+        'tier': prof.get('tier', 'C'),
+        'lifetime_cents': prof.get('lifetime_spend', 0)}, 'ledger': led})
 
 def _fv_first(d, *keys, default=None):
     for k in keys:
@@ -11439,6 +11584,673 @@ def _fv_migrate_ppv_state(persona, sets):
     logger.info('Fanvue [%s]: migrated %d fans to the new PPV state', persona, len(out))
 
 
+# ── PPV funnel system ─────────────────────────────────────────────────────────
+# Fan classification, funnel assignment, scoring and the guardrails, wired into
+# the live loop. Everything here is behind a per-persona flag that defaults off:
+# with it off not one of these functions is called, and the engine behaves
+# exactly as it did before. With it on, every call is wrapped so a failure
+# degrades to the old behaviour rather than costing a reply.
+import funnels as FN
+
+FV_FUNNEL_DEFAULTS = {
+    'enabled': False,
+    'mode': 'matrix',              # matrix → thompson once cells have volume
+    'unlocked': ['F1', 'F2', 'F7'],   # §6 step 2: these cover ~80% of fans
+    'daily_cap_cents': FN.DEFAULT_DAILY_CAP_CENTS,
+    'classify': True,
+    'guardrails': True,
+    'tier_cents': {'T1': 1000, 'T2': 2500, 'T3': 6000, 'T4': 100000},
+    'avg_sub_cents': 1000,
+}
+FV_SCORE_REFRESH_HOURS = 6
+FV_REWARD_WINDOW_DAYS = 7
+
+
+def _fv_funnel_cfg(persona):
+    cfg = dict(FV_FUNNEL_DEFAULTS)
+    try:
+        saved = json.loads(_get_setting(f'fanvue_funnels_{persona}') or '{}')
+    except Exception:
+        saved = {}
+    if isinstance(saved, dict):
+        tiers = dict(cfg['tier_cents'])
+        tiers.update({k: int(v) for k, v in (saved.get('tier_cents') or {}).items()
+                      if str(k) in tiers and str(v).lstrip('-').isdigit()})
+        cfg.update({k: v for k, v in saved.items() if k in cfg})
+        cfg['tier_cents'] = tiers
+    unlocked = [f for f in (cfg.get('unlocked') or []) if f in FN.FUNNELS]
+    cfg['unlocked'] = unlocked or list(FN.ARMS)
+    return cfg
+
+
+def _fv_funnels_on(persona):
+    return bool(_fv_funnel_cfg(persona).get('enabled'))
+
+
+def _fv_db():
+    """A session, or None. Every caller treats None as "skip the extras"."""
+    try:
+        from db import SessionLocal
+        return SessionLocal()
+    except Exception:
+        return None
+
+
+def _fv_close(s):
+    try:
+        if s is not None:
+            s.close()
+    except Exception:
+        pass
+
+
+def _fv_note_event(persona, fan_uuid, kind, amount=0, assignment_id=None,
+                   content_id=None, detail=''):
+    """Append to the fan event log. Never raises: a lost event costs accuracy in
+    the bandit, not a reply."""
+    s = _fv_db()
+    if s is None:
+        return
+    try:
+        from db import log_fan_event
+        log_fan_event(s, persona, fan_uuid, kind, amount=amount,
+                      assignment_id=assignment_id, content_id=content_id,
+                      detail=detail)
+        s.commit()
+    except Exception as e:
+        logger.debug('fan event %s/%s dropped: %s', persona, kind, str(e)[:100])
+    finally:
+        _fv_close(s)
+
+
+def _fv_distress_key(persona):
+    return f'fanvue_distress_{persona}'
+
+
+def _fv_distress_until(persona, fan_uuid):
+    try:
+        raw = json.loads(_get_setting(_fv_distress_key(persona)) or '{}')
+        return int(raw.get(fan_uuid, 0) or 0)
+    except Exception:
+        return 0
+
+
+def _fv_flag_distress(persona, fan_uuid, handle=''):
+    """Pause every paid ask to this fan for 24h. The single most important rule
+    in the spec for long-term account health, so it is set from the inbound
+    message before anything else looks at the fan."""
+    until = int(time.time() + FN.DISTRESS_PAUSE_HOURS * 3600)
+    try:
+        raw = json.loads(_get_setting(_fv_distress_key(persona)) or '{}')
+    except Exception:
+        raw = {}
+    if int(raw.get(fan_uuid, 0) or 0) >= until - 60:
+        return
+    raw[fan_uuid] = until
+    # Keep the map from growing without bound: expired entries are meaningless.
+    now = int(time.time())
+    raw = {k: v for k, v in raw.items() if int(v or 0) > now}
+    _set_setting(_fv_distress_key(persona), json.dumps(raw))
+    _fv_trace(persona, 'guardrail',
+              f'{handle or fan_uuid}: distress signal — pitching paused for 24h')
+    _fv_note_event(persona, fan_uuid, 'distress')
+
+
+def _fv_profile(persona, fan_uuid, handle=''):
+    """The fan's stored profile as a plain dict, or {} when there is no DB."""
+    s = _fv_db()
+    if s is None:
+        return {}
+    try:
+        from db import get_fan_profile
+        p = get_fan_profile(s, persona, fan_uuid, handle=handle)
+        s.commit()
+        return {'fan_type': p.fan_type or '', 'confidence': p.type_confidence or 0,
+                'type_msgs_at': p.type_msgs_at or 0, 'frs': p.frs or 0,
+                'crs': p.crs or 0, 'tier': p.tier or 'C',
+                'lifetime_spend': p.lifetime_spend or 0,
+                'spend_30d': p.spend_30d or 0, 'tips': p.tips_total or 0,
+                'chargeback': bool(p.chargeback_at),
+                'review_reason': p.review_reason or '',
+                'scores_updated_at': p.scores_updated_at}
+    except Exception as e:
+        logger.debug('fan profile read failed %s/%s: %s', persona, fan_uuid, str(e)[:100])
+        return {}
+    finally:
+        _fv_close(s)
+
+
+def _fv_set_profile(persona, fan_uuid, **fields):
+    s = _fv_db()
+    if s is None:
+        return
+    try:
+        from db import get_fan_profile
+        p = get_fan_profile(s, persona, fan_uuid)
+        for k, v in fields.items():
+            if hasattr(p, k):
+                setattr(p, k, v)
+        s.commit()
+    except Exception as e:
+        logger.debug('fan profile write failed %s/%s: %s', persona, fan_uuid, str(e)[:100])
+    finally:
+        _fv_close(s)
+
+
+def _fv_model_json(prompt):
+    """A short, low-temperature model call for classification. Deliberately not
+    _persona_text: this is analysis, and answering it in character would put the
+    persona's voice where JSON has to be."""
+    if client is None:
+        return ''
+    resp = client.models.generate_content(
+        model=MODEL_NAME, contents=[{'role': 'user', 'parts': [{'text': prompt}]}],
+        config=_no_thinking(types.GenerateContentConfig(
+            temperature=0.2, max_output_tokens=200)))
+    return _gemini_text(resp)
+
+
+def _fv_classify_fan(persona, fan_key, fan_uuid, handle, msg_count, purchased=False):
+    """Place the fan in the taxonomy. Costs one model call, so it only runs when
+    the spec says to: at 3 messages, every 10 after that, and after a purchase."""
+    prof = _fv_profile(persona, fan_uuid, handle)
+    if not FN.needs_classification(prof.get('fan_type'), prof.get('type_msgs_at'),
+                                   msg_count, purchased=purchased):
+        return prof.get('fan_type') or '', prof
+    hist = _fanvue_saved_history(persona, fan_key, limit=30)
+    if not hist:
+        return prof.get('fan_type') or '', prof
+    transcript = '\n'.join(('fan: ' if d == 'in' else 'her: ') + t[:300]
+                           for (d, t) in hist)[-4000:]
+    try:
+        raw = _fv_model_json(FN.classification_prompt(transcript, prof.get('fan_type')))
+    except Exception as e:
+        logger.debug('classify failed %s/%s: %s', persona, fan_uuid, str(e)[:100])
+        return prof.get('fan_type') or '', prof
+    got = FN.parse_classification(raw)
+    if not got or got['confidence'] < FN.MIN_CONFIDENCE:
+        # An unsure answer must not overwrite a confident one.
+        _fv_set_profile(persona, fan_uuid, type_msgs_at=msg_count)
+        return prof.get('fan_type') or '', prof
+    changed = got['type'] != (prof.get('fan_type') or '')
+    _fv_set_profile(persona, fan_uuid, fan_type=got['type'],
+                    type_confidence=got['confidence'],
+                    type_updated_at=datetime.now(timezone.utc),
+                    type_msgs_at=msg_count)
+    if changed:
+        _fv_trace(persona, 'funnel',
+                  f"{handle or fan_uuid}: reads as {got['type']} "
+                  f"({FN.FAN_TYPES[got['type']][0]}, {got['confidence']}% sure)"
+                  + (f" — {got['why']}" if got.get('why') else ''))
+        _fv_note_event(persona, fan_uuid, 'classified', detail=got['type'])
+        if got['type'] == 'WH' and prof.get('fan_type') != 'WH':
+            _fv_queue_review(persona, fan_uuid, handle, 'crossed to whale')
+    prof['fan_type'] = got['type']
+    return got['type'], prof
+
+
+def _fv_queue_review(persona, fan_uuid, handle, reason):
+    """Flag a fan for a human (§5). Visible in the trace and on the profile."""
+    _fv_set_profile(persona, fan_uuid, review_reason=reason[:64],
+                    review_at=datetime.now(timezone.utc))
+    _fv_trace(persona, 'review', f'{handle or fan_uuid}: {reason} — needs a human')
+
+
+def _fv_posteriors_for(persona, fan_type):
+    """{funnel_id: (alpha, beta)} for this type's super-group."""
+    group = FN.SUPER_GROUPS.get(fan_type, fan_type)
+    s = _fv_db()
+    if s is None:
+        return {}
+    try:
+        from db import list_posteriors
+        out = {}
+        for row in list_posteriors(s, persona):
+            if row.fan_type != group or row.variant_key:
+                continue
+            out[row.funnel_id] = (row.alpha or 1, row.beta or 1)
+        return out
+    except Exception:
+        return {}
+    finally:
+        _fv_close(s)
+
+
+def _fv_assignment(persona, fan_uuid, handle, fan_type, cfg):
+    """The fan's open funnel, assigning one if they have none.
+
+    Re-sampling only happens at exit (§4.1) — switching funnel mid-thread reads
+    as bot behaviour, so an open assignment is always honoured."""
+    if not fan_type:
+        return None
+    s = _fv_db()
+    if s is None:
+        return None
+    try:
+        from db import open_assignment, FunnelAssignment
+        cur = open_assignment(s, persona, fan_uuid)
+        if cur is not None:
+            return {'id': cur.id, 'funnel': cur.funnel_id,
+                    'variant': _fv_json(cur.variant_json),
+                    'assigned_at': cur.assigned_at,
+                    'pitches_sent': cur.pitches_sent or 0,
+                    'pitches_ignored': cur.pitches_ignored or 0}
+        unlocked = cfg['unlocked']
+        if cfg.get('mode') == 'thompson':
+            funnel = FN.assign_by_thompson(fan_type, _fv_posteriors_for(persona, fan_type),
+                                           unlocked=unlocked)
+        else:
+            funnel = FN.assign_by_matrix(fan_type, unlocked=unlocked)
+        if not funnel:
+            return None
+        variant = FN.pick_variant('opener')
+        row = FunnelAssignment(persona=persona, fan_uuid=fan_uuid, funnel_id=funnel,
+                               fan_type=fan_type, variant_json=json.dumps(variant))
+        s.add(row)
+        s.commit()
+        _fv_trace(persona, 'funnel',
+                  f'{handle or fan_uuid} ({fan_type}) → {funnel} '
+                  f'{FN.FUNNELS[funnel]["name"]}')
+        return {'id': row.id, 'funnel': funnel, 'variant': variant,
+                'assigned_at': row.assigned_at, 'pitches_sent': 0,
+                'pitches_ignored': 0}
+    except Exception as e:
+        logger.debug('assignment failed %s/%s: %s', persona, fan_uuid, str(e)[:120])
+        return None
+    finally:
+        _fv_close(s)
+
+
+def _fv_json(raw, default=None):
+    try:
+        v = json.loads(raw or '')
+        return v if isinstance(v, (dict, list)) else (default or {})
+    except Exception:
+        return default if default is not None else {}
+
+
+def _fv_exit_funnel(persona, fan_uuid, handle, assignment_id, reason, next_funnel=''):
+    """Close an assignment. The next one is sampled fresh on the following
+    message, which is the only point where a funnel may change."""
+    s = _fv_db()
+    if s is None:
+        return
+    try:
+        from db import FunnelAssignment, close_assignment
+        row = s.get(FunnelAssignment, assignment_id)
+        if row is None or row.exited_at:
+            return
+        close_assignment(s, row, reason)
+        s.commit()
+        _fv_trace(persona, 'funnel',
+                  f'{handle or fan_uuid}: left {row.funnel_id} — {reason}'
+                  + (f'; next up {next_funnel}' if next_funnel else ''))
+    except Exception as e:
+        logger.debug('funnel exit failed %s: %s', assignment_id, str(e)[:100])
+    finally:
+        _fv_close(s)
+
+
+def _fv_ledger_stats(persona, fan_uuid):
+    """What the authoritative drop ledger says about this fan: consecutive
+    unbought drops, what they spent today, and their conversion rate."""
+    out = {'ignored': 0, 'spent_today': 0, 'spend_30d': 0, 'sent': 0, 'bought': 0,
+           'opens_no_buy': 0, 'lifetime': 0}
+    s = _fv_db()
+    if s is None:
+        return out
+    try:
+        from db import PpvDrop
+        rows = (s.query(PpvDrop)
+                .filter(PpvDrop.persona == persona, PpvDrop.fan_uuid == fan_uuid)
+                .order_by(PpvDrop.created_at.desc()).limit(60).all())
+        now = datetime.now(timezone.utc)
+        today, month_ago = now.date(), now - timedelta(days=30)
+        streak_open = True
+        for r in rows:
+            out['sent'] += 1
+            if r.paid_at:
+                paid_at = _as_utc(r.paid_at)
+                out['bought'] += 1
+                out['lifetime'] += int(r.price_cents or 0)
+                if paid_at.date() == today:
+                    out['spent_today'] += int(r.price_cents or 0)
+                if paid_at >= month_ago:
+                    out['spend_30d'] += int(r.price_cents or 0)
+                streak_open = False
+            elif streak_open:
+                # Consecutive unbought drops, newest first — the "two ignored
+                # pitches" rule counts these and only these.
+                out['ignored'] += 1
+                if r.read_at:
+                    out['opens_no_buy'] += 1
+        return out
+    except Exception as e:
+        logger.debug('ledger stats failed %s/%s: %s', persona, fan_uuid, str(e)[:100])
+        return out
+    finally:
+        _fv_close(s)
+
+
+def _fv_fan_insights(persona, fan_uuid):
+    """Spend, tips and subscription state straight from Fanvue.
+
+    Needs read:insights, which is an optional scope this app registration may
+    never have been granted — so a 403 here is expected, not an error, and the
+    scores fall back to what the local ledger knows."""
+    scope = _fanvue_scope(persona)
+    try:
+        res = _fanvue_call(persona, 'GET', f'{scope}/insights/fans/{fan_uuid}')
+    except Exception as e:
+        logger.debug('insights unavailable for %s: %s', fan_uuid, str(e)[:100])
+        return {}
+    if not isinstance(res, dict):
+        return {}
+    spending = res.get('spending') or {}
+    total = (spending.get('total') or {})
+    sources = spending.get('sources') or {}
+    sub = res.get('subscription') or {}
+    tips = 0
+    for k, v in sources.items():
+        if 'tip' in str(k).lower():
+            try:
+                tips += int(v.get('total') if isinstance(v, dict) else v or 0)
+            except Exception:
+                pass
+    return {
+        'lifetime': int(total.get('total') or total.get('gross') or 0),
+        'tips': tips,
+        'last_purchase_at': spending.get('lastValidPurchaseAt') or spending.get('lastPurchaseAt'),
+        'auto_renew': bool(sub.get('autoRenewalEnabled', True)),
+        'renews_at': sub.get('renewsAt'),
+        'subscribed_at': sub.get('createdAt'),
+        'status': str(res.get('status') or ''),
+    }
+
+
+def _fv_days_until(iso):
+    if not iso:
+        return None
+    try:
+        when = datetime.fromisoformat(str(iso).replace('Z', '+00:00'))
+    except Exception:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return (when - datetime.now(timezone.utc)).total_seconds() / 86400.0
+
+
+def _fv_msg_stats(persona, fan_key):
+    """Reply cadence and message length, from the saved transcript. These are
+    the two earliest churn signals and neither needs an API call."""
+    hist = _fanvue_saved_history(persona, fan_key, limit=60)
+    ins = [t for (d, t) in hist if d == 'in']
+    if not ins:
+        return {'msgs_7d': 0, 'avg_len': 0, 'len_now': 0, 'len_base': 0}
+    recent, older = ins[-5:], ins[-25:-5]
+    avg = lambda xs: (sum(len(x.split()) for x in xs) / len(xs)) if xs else 0.0
+    return {'msgs_7d': len(recent), 'avg_len': sum(len(x) for x in recent) / len(recent),
+            'len_now': avg(recent), 'len_base': avg(older) or avg(recent)}
+
+
+def _fv_score_fan(persona, fan_uuid, fan_key, handle, cfg, force=False):
+    """Recompute FRS, CRS and tier for one fan. Throttled — the inputs move
+    slowly and the insights call is rate-limited."""
+    prof = _fv_profile(persona, fan_uuid, handle)
+    last = prof.get('scores_updated_at')
+    if not force and last:
+        try:
+            age_h = (datetime.now(timezone.utc) - _as_utc(last)).total_seconds() / 3600
+            if age_h < FV_SCORE_REFRESH_HOURS:
+                return prof
+        except Exception:
+            pass
+    led = _fv_ledger_stats(persona, fan_uuid)
+    ins = _fv_fan_insights(persona, fan_uuid)
+    msgs = _fv_msg_stats(persona, fan_key)
+    lifetime = max(int(ins.get('lifetime') or 0), led['lifetime'])
+    tips = int(ins.get('tips') or 0)
+
+    hist_last = _fv_last_inbound_age_days(persona, fan_key)
+    frs = FN.fan_rank_score(
+        spend_30d=max(led['spend_30d'], int(prof.get('spend_30d') or 0)),
+        lifetime_spend=lifetime, tips=tips, msgs_7d=msgs['msgs_7d'],
+        avg_msg_len=msgs['avg_len'], days_since_msg=hist_last,
+        ppv_sent=led['sent'], ppv_bought=led['bought'],
+        chargeback=bool(prof.get('chargeback')))
+    renews_in = _fv_days_until(ins.get('renews_at'))
+    signals = FN.churn_signals(
+        len_now=msgs['len_now'], len_baseline=msgs['len_base'],
+        consecutive_opens_no_buy=led['opens_no_buy'],
+        tipped_before=tips > 0, tips_recent=tips if hist_last < 30 else 0,
+        auto_renew=bool(ins.get('auto_renew', True)),
+        renews_in_days=renews_in, days_since_msg=hist_last)
+    crs = FN.churn_risk_score(signals)
+    subscribed = str(ins.get('status') or '').lower() not in ('expired', 'cancelled', 'lapsed')
+    tier = FN.tier_for(frs, lifetime, _fv_rank_pct(persona, frs),
+                       replied_within_7d=hist_last <= 7, subscribed=subscribed)
+    tier = FN.apply_hysteresis(prof.get('tier') or '', tier,
+                               _fv_days_below(persona, fan_uuid, tier))
+    _fv_set_profile(persona, fan_uuid, frs=frs, crs=crs, tier=tier,
+                    lifetime_spend=lifetime, tips_total=tips,
+                    scores_updated_at=datetime.now(timezone.utc))
+    prof.update({'frs': frs, 'crs': crs, 'tier': tier, 'lifetime_spend': lifetime})
+    return prof
+
+
+def _as_utc(dt):
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _fv_last_inbound_age_days(persona, fan_key):
+    try:
+        from db import SessionLocal, XMessage
+        s = SessionLocal()
+        try:
+            row = (s.query(XMessage)
+                   .filter(XMessage.persona == persona,
+                           XMessage.x_user_id == fan_key,
+                           XMessage.direction == 'in')
+                   .order_by(XMessage.created_at.desc()).first())
+            if row is None or not row.created_at:
+                return 99.0
+            return max(0.0, (datetime.now(timezone.utc)
+                             - _as_utc(row.created_at)).total_seconds() / 86400.0)
+        finally:
+            s.close()
+    except Exception:
+        return 0.0
+
+
+def _fv_rank_pct(persona, frs):
+    """This fan's percentile by rank score, 0 = top. Needs the whole cohort, so
+    it is only as good as how many fans have been scored so far."""
+    s = _fv_db()
+    if s is None:
+        return 100
+    try:
+        from db import FanProfile
+        total = s.query(FanProfile).filter(FanProfile.persona == persona).count()
+        if not total:
+            return 100
+        above = (s.query(FanProfile)
+                 .filter(FanProfile.persona == persona, FanProfile.frs > frs).count())
+        return int(round(100.0 * above / total))
+    except Exception:
+        return 100
+    finally:
+        _fv_close(s)
+
+
+def _fv_days_below(persona, fan_uuid, proposed):
+    """How long the fan has been below their current tier, for the demotion
+    hysteresis. Tracked on the profile so a single bad day cannot demote."""
+    s = _fv_db()
+    if s is None:
+        return 0
+    try:
+        from db import get_fan_profile
+        p = get_fan_profile(s, persona, fan_uuid)
+        cur = p.tier or ''
+        now = datetime.now(timezone.utc)
+        worse = (cur and proposed in FN.TIER_ORDER and cur in FN.TIER_ORDER
+                 and FN.TIER_ORDER.index(proposed) > FN.TIER_ORDER.index(cur))
+        if not worse:
+            if p.tier_below_since:
+                p.tier_below_since = None
+                s.commit()
+            return 0
+        if not p.tier_below_since:
+            p.tier_below_since = now
+            s.commit()
+            return 0
+        return (now - _as_utc(p.tier_below_since)).total_seconds() / 86400.0
+    except Exception:
+        return 0
+    finally:
+        _fv_close(s)
+
+
+def _fv_pitch_gate(persona, fan_uuid, handle, fan_key, cfg, assignment):
+    """The one decision point for whether a paid ask may go out.
+
+    Returns (allowed, reason, max_price_cents). Called from _fv_maybe_ppv, so
+    every guardrail applies to every drop no matter which funnel asked for it."""
+    prof = _fv_score_fan(persona, fan_uuid, fan_key, handle, cfg)
+    led = _fv_ledger_stats(persona, fan_uuid)
+    funnel_id = (assignment or {}).get('funnel', '')
+    first_session = int((assignment or {}).get('pitches_sent', 0) or 0) == 0 \
+        and _fanvue_msg_count(persona, fan_key) < 12
+    allowed, reason, max_tier = FN.pitch_gate(
+        spent_today_cents=led['spent_today'],
+        daily_cap_cents=int(cfg.get('daily_cap_cents') or 0),
+        ignored_pitches=led['ignored'],
+        distress_until_ts=_fv_distress_until(persona, fan_uuid),
+        now_ts=int(time.time()), crs=int(prof.get('crs') or 0),
+        tier=prof.get('tier') or 'C', funnel_id=funnel_id,
+        chargeback=bool(prof.get('chargeback')), first_session=first_session)
+    cap_cents = 0
+    if max_tier:
+        cap_cents = int((cfg.get('tier_cents') or {}).get(max_tier) or 0)
+    return allowed, reason, cap_cents
+
+
+def _fv_funnel_steer(persona, fan_uuid, handle, fan_type, assignment, prof):
+    """The line injected into the reply prompt: strategy for the assigned
+    funnel, never copy. The spec keeps pitch wording hand-written."""
+    if not assignment:
+        return ''
+    f = FN.FUNNELS.get(assignment.get('funnel') or '')
+    if not f:
+        return ''
+    bits = [f"\n\nSales approach for this fan ({f['name']}): {f['steer']}"]
+    if fan_type:
+        bits.append(f"They read as: {FN.FAN_TYPES[fan_type][0]} — what they want from "
+                    f"you is {FN.FAN_TYPES[fan_type][2]}.")
+    mode = FN.churn_mode(int((prof or {}).get('crs') or 0))
+    if mode == 'save':
+        bits.append('They are close to leaving. Nothing paid, no hints at anything '
+                    'paid — just be someone worth staying for.')
+    elif mode == 'watch':
+        bits.append('They have cooled off lately. Keep any ask small and unhurried.')
+    if _fv_distress_until(persona, fan_uuid) > int(time.time()):
+        bits.append('They said something that suggests a rough time. Be kind, be '
+                    'brief, and do not sell them anything at all.')
+    return ' '.join(bits) + ' '
+
+
+def _fv_record_pitch(persona, fan_uuid, assignment_id, price_cents, drop_id):
+    s = _fv_db()
+    if s is None:
+        return
+    try:
+        from db import FunnelAssignment, log_fan_event
+        if assignment_id:
+            row = s.get(FunnelAssignment, assignment_id)
+            if row is not None:
+                row.pitches_sent = (row.pitches_sent or 0) + 1
+        log_fan_event(s, persona, fan_uuid, 'ppv_sent', amount=price_cents,
+                      assignment_id=assignment_id, content_id=drop_id)
+        s.commit()
+    except Exception as e:
+        logger.debug('pitch record failed: %s', str(e)[:100])
+    finally:
+        _fv_close(s)
+
+
+def _fv_record_purchase(persona, fan_uuid, amount_cents, drop_id=''):
+    """A settled sale, credited to whichever assignment was open when it went
+    out. This is the bandit's reward signal."""
+    s = _fv_db()
+    if s is None:
+        return
+    try:
+        from db import open_assignment, log_fan_event, get_fan_profile
+        row = open_assignment(s, persona, fan_uuid)
+        aid = row.id if row is not None else None
+        if row is not None:
+            row.revenue_cents = (row.revenue_cents or 0) + int(amount_cents or 0)
+        log_fan_event(s, persona, fan_uuid, 'ppv_bought', amount=amount_cents,
+                      assignment_id=aid, content_id=drop_id)
+        p = get_fan_profile(s, persona, fan_uuid)
+        p.lifetime_spend = (p.lifetime_spend or 0) + int(amount_cents or 0)
+        p.spend_30d = (p.spend_30d or 0) + int(amount_cents or 0)
+        s.commit()
+    except Exception as e:
+        logger.debug('purchase record failed: %s', str(e)[:100])
+    finally:
+        _fv_close(s)
+
+
+def _fv_bandit_sweep(persona, cfg):
+    """Close out assignments whose 7-day reward window has passed and fold the
+    result into the posteriors. Runs from the auto round, at most hourly."""
+    stamp_key = f'fanvue_bandit_swept_{persona}'
+    try:
+        last = float(_get_setting(stamp_key) or 0)
+    except Exception:
+        last = 0
+    if time.time() - last < 3600:
+        return 0
+    _set_setting(stamp_key, str(time.time()))
+    s = _fv_db()
+    if s is None:
+        return 0
+    done = 0
+    try:
+        from db import due_assignments, get_posterior, FanProfile
+        cutoff = datetime.now(timezone.utc) - timedelta(days=FV_REWARD_WINDOW_DAYS)
+        for a in due_assignments(s, persona, cutoff):
+            group = FN.SUPER_GROUPS.get(a.fan_type or '', a.fan_type or '')
+            if not group:
+                continue
+            prof = (s.query(FanProfile)
+                    .filter(FanProfile.persona == persona,
+                            FanProfile.fan_uuid == a.fan_uuid).first())
+            churned = bool(prof is not None and prof.churned_at
+                           and _as_utc(prof.churned_at) >= _as_utc(a.assigned_at))
+            value = FN.reward_value(a.revenue_cents or 0, churned,
+                                    int(cfg.get('avg_sub_cents') or 0))
+            for key in ('', FN.variant_key(_fv_json(a.variant_json))):
+                post = get_posterior(s, persona, group, a.funnel_id, key,
+                                     prior_alpha=1)
+                post.alpha, post.beta = FN.posterior_update(post.alpha, post.beta, value)
+                post.n = (post.n or 0) + 1
+                post.revenue_cents = (post.revenue_cents or 0) + int(a.revenue_cents or 0)
+                if churned:
+                    post.churn_n = (post.churn_n or 0) + 1
+            a.rewarded_at = datetime.now(timezone.utc)
+            done += 1
+        s.commit()
+    except Exception as e:
+        logger.debug('bandit sweep failed for %s: %s', persona, str(e)[:120])
+    finally:
+        _fv_close(s)
+    if done:
+        logger.info('FUNNEL [%s] folded %d assignments into the posteriors', persona, done)
+    return done
+
+
 def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx, context=''):
     """Consider the next PPV drop for this fan: hold the set they are already
     climbing unless another clearly fits better, then send its next tier.
@@ -11514,6 +12326,24 @@ def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx, context
         if not (send_ppv or resend):
             return
 
+        # Guardrails run before anything is chosen, so a distress signal, a
+        # spend cap or two ignored pitches stops the ask whatever the funnel
+        # would have picked. A failure in here must not block a sale, so it
+        # falls through to the old behaviour.
+        fcfg = ctx.get('funnels')
+        price_cap = 0
+        if fcfg:
+            try:
+                allowed, why, price_cap = _fv_pitch_gate(
+                    persona, fan_uuid, handle, fan_key, fcfg, ctx.get('assignment'))
+            except Exception as e:
+                logger.warning('Funnel guardrails failed for %s/%s: %s',
+                               persona, handle or fan_uuid, str(e)[:120])
+                allowed, why, price_cap = True, '', 0
+            if not allowed:
+                _fv_trace(persona, 'guardrail', f'{handle or fan_uuid}: {why}')
+                return
+
         hour = _fv_fan_hour(persona, fan_key, ctx.get('tz_offset'))
         blocked = _fv_suppressed(sets, (context or '') + ' ' + (reply or ''))
         if blocked:
@@ -11536,6 +12366,14 @@ def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx, context
         price = int(tier['price'])
         if discount:
             price = max(FV_PRICE_FLOOR, int(round(price * (1 - discount))))
+        # A cap means "nothing dearer than this right now" — hold the drop
+        # rather than discount it, so a churn-risk cap never quietly sells the
+        # creator's content below the price they set.
+        if price_cap and price > price_cap:
+            _fv_trace(persona, 'guardrail',
+                      f'{handle or fan_uuid}: holding {chosen["name"]} tier {idx + 1} '
+                      f'(${price / 100:g} is over the ${price_cap / 100:g} cap)')
+            return
         cap = _fv_caption(persona, chosen, tier, reply)
         try:
             sent = _fanvue_call(persona, 'POST', f'{scope}/chats/{fan_uuid}/message',
@@ -11552,6 +12390,9 @@ def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx, context
             msg_uuid = str(_fv_first(body, 'uuid', 'id', default='') or '')
         drop_id = _fv_record_drop(persona, fan_uuid, chosen, idx, price,
                                   tier['media_uuids'], msg_uuid)
+        if fcfg:
+            _fv_record_pitch(persona, fan_uuid,
+                             (ctx.get('assignment') or {}).get('id'), price, drop_id)
 
         if resend:
             state['retries'] = int(state.get('retries', 0) or 0) + 1
@@ -11820,6 +12661,15 @@ def _fanvue_auto_round(persona):
             not in ('1', 'true', 'yes'):
         ppv_test_phrase = ''
     hcfg = _fv_humanize_cfg(persona)
+    # The funnel system is per-persona and off by default; when it is off, fcfg
+    # is None and not one line of it runs.
+    fcfg = _fv_funnel_cfg(persona)
+    fcfg = fcfg if fcfg.get('enabled') else None
+    if fcfg:
+        try:
+            _fv_bandit_sweep(persona, fcfg)
+        except Exception as e:
+            logger.warning('Funnel sweep failed for %s: %s', persona, str(e)[:120])
     # Messages that must pass before the first drop, and between later ones.
     ppv_first_after = max(1, min(int(opts.get('ppv_first_after', 6) or 6), 200))
     ppv_gap = max(1, min(int(opts.get('ppv_gap', 8) or 8), 200))
@@ -11988,6 +12838,29 @@ def _fanvue_auto_round(persona):
             _fv_trace(persona, 'ppv', f'{who} said the test phrase — tier '
                                       f'{paid_map[fan_uuid]} counted as paid')
 
+        # Funnel state for this fan: what they said reads for distress first,
+        # then who they are, then which funnel they are in. All of it is
+        # advisory — an exception here costs the steer, never the reply.
+        fan_type, fprof, assignment = '', {}, None
+        if fcfg:
+            try:
+                if FN.detect_distress(text):
+                    _fv_flag_distress(persona, fan_uuid, handle)
+                _fv_note_event(persona, fan_uuid, 'msg_in', detail=text[:200])
+                if FN.detect_hostile(text):
+                    _fv_note_event(persona, fan_uuid, 'hostile', detail=text[:200])
+                if fcfg.get('classify'):
+                    fan_type, fprof = _fv_classify_fan(
+                        persona, fan_key, fan_uuid, handle,
+                        _fanvue_msg_count(persona, fan_key))
+                else:
+                    fprof = _fv_profile(persona, fan_uuid, handle)
+                    fan_type = fprof.get('fan_type') or ''
+                assignment = _fv_assignment(persona, fan_uuid, handle, fan_type, fcfg)
+            except Exception as e:
+                logger.warning('Funnel step failed for %s/%s: %s',
+                               persona, handle or fan_uuid, str(e)[:120])
+
         # Build the LLM history from the full saved conversation (memory).
         history = [{'role': 'model' if d == 'out' else 'user', 'content': t}
                    for (d, t) in _fanvue_saved_history(persona, fan_key, limit=40)]
@@ -12019,6 +12892,12 @@ def _fanvue_auto_round(persona):
                               ppv_state_key, text, ppv_tz)
             + "Their latest message: "
             f"\"{text}\"")
+        if fcfg and assignment:
+            try:
+                instruction += _fv_funnel_steer(persona, fan_uuid, handle, fan_type,
+                                                assignment, fprof)
+            except Exception as e:
+                logger.warning('Funnel steer failed for %s: %s', persona, str(e)[:120])
         instruction = _fan_memory_block(_fan_memory(persona, fan_key), persona) + instruction
         reply = _persona_text(persona, instruction, history=history,
                               max_tokens=lim['tokens'], temperature=0.9)
@@ -12036,7 +12915,7 @@ def _fanvue_auto_round(persona):
                    'retry_after': ppv_retry_after, 'retry_max': ppv_retry_max,
                    'retry_discount': ppv_retry_discount, 'stale_days': ppv_stale_days,
                    'state_key': ppv_state_key, 'paid_key': ppv_paid_key,
-                   'tz_offset': ppv_tz,
+                   'tz_offset': ppv_tz, 'funnels': fcfg, 'assignment': assignment,
                    'require_payment': ppv_require_payment} if ppv_on else None
         age = _fv_msg_age_minutes(newest)
         active = age is None or age < FV_ACTIVE_MIN
