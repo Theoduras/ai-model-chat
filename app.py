@@ -15488,6 +15488,7 @@ if os.getenv('TELEGRAM_POLL', '0') == '1':
 
 _tgu_runners = {}
 _tgu_errors = {}
+_tgu_stopped = set()
 
 
 def _tgu_accounts():
@@ -15684,6 +15685,7 @@ def _tgu_start(persona):
     api_id, api_hash = _tgu_app_creds()
     if not (acct.get('session') and api_id and api_hash):
         return False
+    _tgu_stopped.discard(persona)
     r = _tgu_runners.get(persona)
     if r and r.alive():
         return True
@@ -15735,6 +15737,7 @@ def _tgu_start(persona):
 
 
 def _tgu_stop(persona):
+    _tgu_stopped.add(persona)
     r = _tgu_runners.pop(persona, None)
     if r:
         r.stop()
@@ -15916,8 +15919,35 @@ def _tgu_boot():
                 _tgu_errors[persona] = str(e)[:300]
 
 
+def _tgu_supervisor():
+    """Bring an account back up as soon as its runner thread stops.
+
+    Without this a dropped MTProto connection stays down until someone presses
+    start in the dashboard, and fans' messages sit unanswered on Telegram's
+    side until then."""
+    while True:
+        time.sleep(30)
+        try:
+            with app.app_context():
+                for persona in _tgu_accounts():
+                    if persona in _tgu_stopped:
+                        continue
+                    r = _tgu_runners.get(persona)
+                    if r and r.alive():
+                        continue
+                    try:
+                        if _tgu_start(persona):
+                            _tg_trace(persona, 'restarted',
+                                      'account went offline — reconnected')
+                    except Exception as e:
+                        _tgu_errors[persona] = str(e)[:300]
+        except Exception:
+            logger.exception('tguser supervisor round failed')
+
+
 if _worker_enabled('TGUSER_AUTOSTART'):
     threading.Thread(target=_tgu_boot, daemon=True).start()
+    threading.Thread(target=_tgu_supervisor, daemon=True).start()
 
 
 _tg_worker_started = [False]

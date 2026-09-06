@@ -12,14 +12,16 @@ Sessions are strings, handed back to the caller to persist wherever it likes.
 
 import asyncio
 import threading
+from datetime import datetime, timezone
 
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 from telethon.errors import SessionPasswordNeededError
 
 
-def _client(api_id, api_hash, session_str=''):
-    return TelegramClient(StringSession(session_str or None), int(api_id), api_hash)
+def _client(api_id, api_hash, session_str='', **kwargs):
+    return TelegramClient(StringSession(session_str or None), int(api_id), api_hash,
+                          **kwargs)
 
 
 def _run(coro):
@@ -115,6 +117,9 @@ class AccountRunner:
     while the reply is "being written".
     """
 
+    KEEPALIVE_SECONDS = 45
+    KEEPALIVE_MISSES = 3
+
     def __init__(self, persona, api_id, api_hash, session_str, plan, on_sent=None,
                  on_error=None, on_trace=None):
         self.persona = persona
@@ -159,7 +164,12 @@ class AccountRunner:
                 pass
 
     async def _main(self):
-        client = _client(self.api_id, self.api_hash, self.session_str)
+        # Retry forever: the host can freeze this container for minutes at a
+        # time, and telethon's default of five attempts gives up long before
+        # the connection is usable again, leaving the account silently offline.
+        client = _client(self.api_id, self.api_hash, self.session_str,
+                         connection_retries=None, retry_delay=3, timeout=15,
+                         request_retries=5)
 
         @client.on(events.NewMessage(incoming=True))
         async def handler(event):
@@ -172,7 +182,40 @@ class AccountRunner:
         await client.connect()
         if not await client.is_user_authorized():
             raise RuntimeError('Session is no longer authorized — sign in again.')
-        await client.run_until_disconnected()
+        keepalive = asyncio.ensure_future(self._keepalive(client))
+        try:
+            await client.run_until_disconnected()
+        finally:
+            keepalive.cancel()
+
+    async def _keepalive(self, client):
+        """Poke the connection on a timer and drop it when it stops answering.
+
+        A dead-but-not-closed MTProto socket looks fine to telethon, so incoming
+        DMs pile up on Telegram's side and only arrive minutes later when
+        something else forces a reconnect. Failing fast here ends _main, and the
+        supervisor in app.py brings the account straight back up.
+        """
+        misses = 0
+        while not self._stop.is_set():
+            await asyncio.sleep(self.KEEPALIVE_SECONDS)
+            try:
+                if not client.is_connected():
+                    await client.connect()
+                    self._trace('reconnected', 'connection had dropped')
+                await asyncio.wait_for(client.get_me(), timeout=20)
+                misses = 0
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                misses += 1
+                self._trace('error', f'keepalive attempt {misses} failed: {str(e)[:120]}')
+                if misses >= self.KEEPALIVE_MISSES:
+                    try:
+                        await client.disconnect()
+                    except Exception:
+                        pass
+                    return
 
     def _trace(self, stage, detail=''):
         if self.on_trace:
@@ -198,7 +241,12 @@ class AccountRunner:
         if getattr(sender, 'bot', False):
             self._trace('ignored', f'{name} is a bot account')
             return
-        self._trace('received', f'{name} ({chat_id}): {text[:80]}')
+        lag = 0
+        sent_at = getattr(event.message, 'date', None)
+        if sent_at is not None:
+            lag = int((datetime.now(timezone.utc) - sent_at).total_seconds())
+        self._trace('received', f'{name} ({chat_id}): {text[:80]}'
+                    + (f' — arrived {lag}s after it was sent' if lag >= 15 else ''))
 
         # Gemini is blocking, so keep it off the event loop.
         plan = await asyncio.to_thread(self.plan, chat_id, name, text)

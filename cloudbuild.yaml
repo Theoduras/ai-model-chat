@@ -43,6 +43,12 @@ steps:
       - --region=${_REGION}
       - --platform=managed
       - --allow-unauthenticated
+      # The Telegram, X, Fanvue and Threads loops run inside the container, so
+      # the instance has to stay up AND keep its CPU between requests. Without
+      # these two the MTProto connection is frozen while no HTTP request is in
+      # flight and fans' messages only land minutes later, in a batch.
+      - --min-instances=1
+      - --no-cpu-throttling
 
 images:
   - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_SERVICE}/app:$SHORT_SHA
