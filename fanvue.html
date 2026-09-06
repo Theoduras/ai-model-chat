@@ -927,10 +927,11 @@ async function loadFunnelStats(){
     const fans=d.fans||[];
     document.getElementById('fn-fans').innerHTML=fans.length
       ? '<table style="border-collapse:collapse;width:100%;"><tr>'
-        +['Fan','Type','Tier','Rank','Churn','Spent','']
+        +['Fan','Where','Type','Tier','Rank','Churn','Spent','']
           .map(h=>'<th style="text-align:left;padding:3px 10px 3px 0;color:var(--text-muted);font-weight:500;">'+h+'</th>').join('')
         +'</tr>'+fans.slice(0,25).map(f=>'<tr>'
           +'<td style="padding:3px 10px 3px 0;">'+esc(f.handle||f.fan.slice(0,8))+'</td>'
+          +'<td style="padding:3px 10px 3px 0;color:var(--text-muted);">'+esc(f.platform==='telegram'?'Telegram':'Fanvue')+'</td>'
           +'<td style="padding:3px 10px 3px 0;">'+esc(f.type||'—')+'</td>'
           +'<td style="padding:3px 10px 3px 0;">'+esc(f.tier)+'</td>'
           +'<td style="padding:3px 10px 3px 0;font-variant-numeric:tabular-nums;">'+f.frs+'</td>'

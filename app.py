@@ -15,6 +15,7 @@ import urllib.request
 import urllib.parse
 import urllib.error as url_error
 from datetime import datetime, timezone, timedelta
+from contextlib import contextmanager
 from dotenv import load_dotenv
 from utils import (platform_scoped, operator_only, _is_operator,
                    owned_slugs, request_persona)
@@ -11086,6 +11087,10 @@ def api_fanvue_funnel_stats():
         for p in (s.query(FanProfile).filter(FanProfile.persona == persona)
                   .order_by(FanProfile.frs.desc()).limit(100).all()):
             fans.append({'fan': p.fan_uuid, 'handle': p.handle or '',
+                         # Both platforms feed one funnel, so say which this is.
+                         'platform': ('telegram'
+                                      if str(p.fan_uuid or '').startswith(('tg:', 'tgu:'))
+                                      else 'fanvue'),
                          'type': p.fan_type or '', 'confidence': p.type_confidence or 0,
                          'frs': p.frs or 0, 'crs': p.crs or 0,
                          'mode': FN.churn_mode(p.crs or 0),
@@ -11588,9 +11593,32 @@ def _fv_list_filter(persona, opts):
 FV_TRACE_MAX = 200
 
 
+_trace_sink = threading.local()
+
+
+@contextmanager
+def _tracing_to(fn):
+    """Send the funnel layer's own notes to another platform's log.
+
+    The funnel helpers are shared, so a distress pause or a reclassification
+    raised while answering a Telegram fan belongs in the Telegram trace, not in
+    the Fanvue one the creator is not looking at.
+    """
+    prev = getattr(_trace_sink, 'fn', None)
+    _trace_sink.fn = fn
+    try:
+        yield
+    finally:
+        _trace_sink.fn = prev
+
+
 def _fv_trace(persona, stage, detail=''):
     """Append one line to the persona's Fanvue activity log. Stored in the
     database so it survives a redeploy and can be read from the browser."""
+    sink = getattr(_trace_sink, 'fn', None)
+    if sink is not None:
+        sink(persona, stage, detail)
+        return
     key = f'fanvue_trace_{persona}'
     try:
         rows = json.loads(_get_setting(key) or '[]')
@@ -12270,6 +12298,8 @@ def _fv_fan_insights(persona, fan_uuid):
     Needs read:insights, which is an optional scope this app registration may
     never have been granted — so a 403 here is expected, not an error, and the
     scores fall back to what the local ledger knows."""
+    if ':' in (fan_uuid or ''):
+        return {}      # not a Fanvue fan — nothing to ask Fanvue about
     if _fv_insight_budget.get(persona, FV_INSIGHTS_PER_ROUND) <= 0:
         return {}
     _fv_insight_budget[persona] = _fv_insight_budget.get(
@@ -12521,6 +12551,45 @@ def _fv_funnel_step(persona, fan_uuid, handle, fan_type, cfg, text=''):
         return None
     return _fv_assignment(persona, fan_uuid, handle, fan_type, cfg,
                           force_funnel=nxt)
+
+
+def _funnel_read(persona, fan_key, fan_uuid, handle, text, cfg):
+    """Run the funnel layer over one inbound message, returning
+    (fan_type, profile, assignment) for the reply prompt.
+
+    Shared by every platform: the strategy is the creator's, not the channel's,
+    so a fan who reaches her on Telegram is read, scored and steered exactly
+    like one on Fanvue. All of it is advisory — a failure here costs the steer,
+    never the reply.
+    """
+    fan_type, prof, assignment = '', {}, None
+    if not cfg:
+        return fan_type, prof, assignment
+    try:
+        if FN.detect_distress(text):
+            _fv_flag_distress(persona, fan_uuid, handle)
+        _fv_note_event(persona, fan_uuid, 'msg_in', detail=text[:200])
+        if FN.detect_hostile(text):
+            _fv_note_event(persona, fan_uuid, 'hostile', detail=text[:200])
+        if cfg.get('classify'):
+            fan_type, prof = _fv_classify_fan(persona, fan_key, fan_uuid, handle,
+                                              _fanvue_msg_count(persona, fan_key))
+        else:
+            prof = _fv_profile(persona, fan_uuid, handle)
+            fan_type = prof.get('fan_type') or ''
+        assignment = _fv_funnel_step(persona, fan_uuid, handle, fan_type, cfg, text)
+        # Outside the PPV lock, and throttled to every few hours.
+        prof = _fv_score_fan(persona, fan_uuid, fan_key, handle, cfg) or prof
+    except Exception as e:
+        logger.warning('Funnel step failed for %s/%s: %s',
+                       persona, handle or fan_uuid, str(e)[:120])
+    return fan_type, prof, assignment
+
+
+def _funnel_pitching_paused(persona, fan_uuid):
+    """True while a paid ask would be the wrong thing to send. The single most
+    important guardrail in the spec, so it gates the CTA on every platform."""
+    return _fv_distress_until(persona, fan_uuid) > int(time.time())
 
 
 def _fv_funnel_steer(persona, fan_uuid, handle, fan_type, assignment, prof):
@@ -13332,28 +13401,8 @@ def _fanvue_auto_round(persona):
         # Funnel state for this fan: what they said reads for distress first,
         # then who they are, then which funnel they are in. All of it is
         # advisory — an exception here costs the steer, never the reply.
-        fan_type, fprof, assignment = '', {}, None
-        if fcfg:
-            try:
-                if FN.detect_distress(text):
-                    _fv_flag_distress(persona, fan_uuid, handle)
-                _fv_note_event(persona, fan_uuid, 'msg_in', detail=text[:200])
-                if FN.detect_hostile(text):
-                    _fv_note_event(persona, fan_uuid, 'hostile', detail=text[:200])
-                if fcfg.get('classify'):
-                    fan_type, fprof = _fv_classify_fan(
-                        persona, fan_key, fan_uuid, handle,
-                        _fanvue_msg_count(persona, fan_key))
-                else:
-                    fprof = _fv_profile(persona, fan_uuid, handle)
-                    fan_type = fprof.get('fan_type') or ''
-                assignment = _fv_funnel_step(persona, fan_uuid, handle, fan_type,
-                                             fcfg, text)
-                # Outside the PPV lock, and throttled to every few hours.
-                fprof = _fv_score_fan(persona, fan_uuid, fan_key, handle, fcfg) or fprof
-            except Exception as e:
-                logger.warning('Funnel step failed for %s/%s: %s',
-                               persona, handle or fan_uuid, str(e)[:120])
+        fan_type, fprof, assignment = _funnel_read(persona, fan_key, fan_uuid,
+                                                   handle, text, fcfg)
 
         # Build the LLM history from the full saved conversation (memory).
         history = [{'role': 'model' if d == 'out' else 'user', 'content': t}
@@ -14671,6 +14720,7 @@ def _tg_handle_update(persona, update):
         _tg_trace(persona, 'skipped',
                   f"{who} ({chat_id}) — not in the {len(cfg['only_fans'])} selected fan(s)")
         return
+    fan_key = _tg_fan_key(chat_id)
     fans = _tg_fans(persona)
     fan = fans.get(str(chat_id)) or {}
     fan['name'] = who
@@ -14680,9 +14730,9 @@ def _tg_handle_update(persona, update):
     fan['followups'] = 0
     fan['in_count'] = int(fan.get('in_count', 0)) + (0 if text == '/start' else 1)
 
-    _log_x_message(persona, _tg_fan_key(chat_id), who, 'in', text)
+    _log_x_message(persona, fan_key, who, 'in', text)
     _tg_trace(persona, 'received', f'← {who}: {text}')
-    _fan_memory_update(persona, _tg_fan_key(chat_id), text)
+    _fan_memory_update(persona, fan_key, text)
 
     phases = _phases(persona)
     phase_idx = _fan_phase(phases, fan)
@@ -14694,6 +14744,16 @@ def _tg_handle_update(persona, update):
     is_cta_phase = phase_idx == len(phases) - 1
     cta_asked = _cta_asked(text)
     cta_due = _cta_due(persona, text, fan, is_cta_phase, cta_url)
+
+    fcfg = _fv_funnel_cfg(persona)
+    with _tracing_to(_tg_trace):
+        fan_type, fprof, assignment = _funnel_read(
+            persona, fan_key, fan_key, who, text,
+            fcfg if fcfg.get('enabled') else None)
+    if cta_due and _funnel_pitching_paused(persona, fan_key):
+        cta_due = False
+        _tg_trace(persona, 'guardrail',
+                  f'{who}: holding the link back — they are having a rough time')
 
     catalog, media_rows, media_outfits = _tg_media_catalog(persona)
     photo_rule = ''
@@ -14735,6 +14795,10 @@ def _tg_handle_update(persona, update):
             'react to what they just said before anything else, reference what they '
             'have told you before, and let interest build slowly — no selling, no '
             'hinting at paid content yet. ' + ask_rule + photo_rule)
+
+    if assignment:
+        instruction += _fv_funnel_steer(persona, fan_key, who, fan_type,
+                                        assignment, fprof)
 
     reply = _tg_generate(persona, chat_id, instruction)
     if not reply:
@@ -14792,7 +14856,7 @@ def _tg_handle_update(persona, update):
             next((r for r in media_rows if r.id == picked_media_id), None))
         if outfit_num is not None:
             _fan_set_outfit_lock(persona, chat_id, outfit_num)
-    _log_x_message(persona, _tg_fan_key(chat_id), who, 'out', reply)
+    _log_x_message(persona, fan_key, who, 'out', reply)
     fan['last_out'] = int(time.time())
     fans[str(chat_id)] = fan
     _tg_save_fans(persona, fans)
@@ -15573,6 +15637,7 @@ def _tgu_plan(persona, chat_id, name, text, texts=None):
                   + ', '.join(cfg['only_fans'][:8]))
         return None
     acct = _tgu_accounts().get(persona) or {}
+    fan_key = _tgu_fan_key(chat_id)
     fans = _tg_fans(persona)
     key = str(chat_id)
     fan = fans.get(key) or {}
@@ -15584,7 +15649,7 @@ def _tgu_plan(persona, chat_id, name, text, texts=None):
     fan['in_count'] = int(fan.get('in_count', 0)) + len(msgs)
 
     for m in msgs:
-        _log_x_message(persona, _tgu_fan_key(chat_id), name, 'in', m)
+        _log_x_message(persona, fan_key, name, 'in', m)
 
     phases = _phases(persona)
     phase_idx = _fan_phase(phases, fan)
@@ -15596,6 +15661,16 @@ def _tgu_plan(persona, chat_id, name, text, texts=None):
     is_cta_phase = phase_idx == len(phases) - 1
     cta_asked = _cta_asked(text)
     cta_due = _cta_due(persona, text, fan, is_cta_phase, cta_url)
+
+    fcfg = _fv_funnel_cfg(persona)
+    with _tracing_to(_tg_trace):
+        fan_type, fprof, assignment = _funnel_read(
+            persona, fan_key, fan_key, name, text,
+            fcfg if fcfg.get('enabled') else None)
+    if cta_due and _funnel_pitching_paused(persona, fan_key):
+        cta_due = False
+        _tg_trace(persona, 'guardrail',
+                  f'{name}: holding the link back — they are having a rough time')
 
     catalog, media_rows, media_outfits = _tg_media_catalog(persona)
     photo_rule = ''
@@ -15611,7 +15686,7 @@ def _tgu_plan(persona, chat_id, name, text, texts=None):
             'message. Never mention the tag to the fan.')
 
     history = [{'role': 'model' if d == 'out' else 'user', 'content': t}
-               for d, t in _fanvue_saved_history(persona, _tgu_fan_key(chat_id), limit=40)]
+               for d, t in _fanvue_saved_history(persona, fan_key, limit=40)]
     ask_rule = question_rule_for(load_persona_config(persona), history)
     # The transcript is in the prompt, but she still introduces herself on
     # message fifty and asks his name a third time unless told not to.
@@ -15645,8 +15720,11 @@ def _tgu_plan(persona, chat_id, name, text, texts=None):
             'have told you before, and let interest build slowly — no selling yet. '
             + recall_rule + ask_rule + no_placeholder + photo_rule)
 
-    _fan_memory_update(persona, _tgu_fan_key(chat_id), text)
-    instruction = _fan_memory_block(_fan_memory(persona, _tgu_fan_key(chat_id)), persona) + instruction
+    if assignment:
+        instruction += _fv_funnel_steer(persona, fan_key, name, fan_type,
+                                        assignment, fprof)
+    _fan_memory_update(persona, fan_key, text)
+    instruction = _fan_memory_block(_fan_memory(persona, fan_key), persona) + instruction
     if client is None:
         reply = local_fallback_reply(text)
     else:
