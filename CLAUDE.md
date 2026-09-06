@@ -151,6 +151,25 @@ Stay completely in character. Never mention being an AI.
 
 ---
 
+## Deployment Rules — Dev Only, Never Live
+
+The app auto-deploys via Cloud Build triggers on push. Which environment a push
+lands on is decided entirely by the branch (see `ENVIRONMENTS.md`):
+
+| Branch | Service | Audience |
+|---|---|---|
+| `develop` | `ai-model-chat-dev` | internal testing |
+| `deploy/cloud-run-online` | `ai-model-chat` | **LIVE — real fans** |
+
+- **Push to `develop` only.** That is the deploy: the dev trigger picks it up.
+- **Never push to `deploy/cloud-run-online`**, never merge into it, and never run
+  a `gcloud run deploy` or `gcloud builds` command targeting `ai-model-chat`.
+  Promoting dev → live is a human decision, made by the owner, by hand.
+- If a change looks like it needs a live deploy, say so and stop there. Do not
+  ask to push to live — the answer is no.
+
+---
+
 ## Feature Development Priorities
 
 When building new features, tackle in this order:
