@@ -75,8 +75,11 @@ class FakeEvent:
         return types.SimpleNamespace(username=self._name, first_name='', bot=False)
 
 
-def _msg(text, out=False, msg_id=1):
-    return types.SimpleNamespace(out=out, raw_text=text, id=msg_id)
+def _msg(text, out=False, msg_id=1, at=None):
+    from datetime import datetime, timezone
+    return types.SimpleNamespace(out=out, raw_text=text, id=msg_id,
+                                 date=datetime.fromtimestamp(at or 1700000000,
+                                                             timezone.utc))
 
 
 def _runner(calls, traces, pre_delay=1.0, **kw):
@@ -123,16 +126,19 @@ async def run():
         return not imported
 
     h = _runner(calls, traces, needs_history=needs_history,
-                on_history=lambda cid, name, rows: imported.append((cid, rows)))
-    hc = FakeClient(history=[_msg('nice talking to you', out=True, msg_id=3),
-                            _msg('im in berlin', msg_id=2),
-                            _msg('', msg_id=1)])
+                on_history=lambda cid, name, rows, first_at=0:
+                    imported.append((cid, rows, first_at)))
+    hc = FakeClient(history=[_msg('nice talking to you', out=True, msg_id=3, at=1700000200),
+                            _msg('im in berlin', msg_id=2, at=1700000100),
+                            _msg('', msg_id=1, at=1700000000)])
     await h._handle(hc, FakeEvent('hey again', chat_id=21, name='old'))
     await asyncio.sleep(3.5)
     check('the chat is read back before the first reply', len(imported) == 1, imported)
     check('read-back is oldest first, with directions and empties dropped',
           imported and imported[0][1] == [('in', 'im in berlin'), ('out', 'nice talking to you')],
           imported)
+    check('the read-back reports when the conversation started',
+          imported and imported[0][2] == 1700000000, imported)
     check('the read-back stops at the new message',
           hc.history_calls and hc.history_calls[0][2] == 100, hc.history_calls)
 

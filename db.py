@@ -1375,10 +1375,12 @@ def fan_ppv_spend(session, persona, fan_uuid):
     return int(v or 0)
 
 
-def count_x_messages(session, persona, x_user_id):
-    return (session.query(XMessage)
-            .filter(XMessage.persona == persona, XMessage.x_user_id == str(x_user_id))
-            .count())
+def count_x_messages(session, persona, x_user_id, direction=''):
+    q = (session.query(XMessage)
+         .filter(XMessage.persona == persona, XMessage.x_user_id == str(x_user_id)))
+    if direction:
+        q = q.filter(XMessage.direction == direction)
+    return q.count()
 
 
 def count_x_messages_by_fan(session, persona, direction=''):

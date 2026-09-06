@@ -254,11 +254,14 @@ class AccountRunner:
             kw = {'limit': self.HISTORY_LIMIT}
             if first_id:
                 kw['offset_id'] = first_id
+            found = list(reversed(await client.get_messages(chat_id, **kw)))
             rows = [('out' if m.out else 'in', (m.raw_text or '').strip())
-                    for m in reversed(await client.get_messages(chat_id, **kw))]
+                    for m in found]
             rows = [r for r in rows if r[1]]
+            dates = [m.date for m in found if getattr(m, 'date', None)]
+            first_at = int(dates[0].timestamp()) if dates else 0
             if rows:
-                await asyncio.to_thread(self.on_history, chat_id, name, rows)
+                await asyncio.to_thread(self.on_history, chat_id, name, rows, first_at)
         except Exception as e:
             self._read_back.discard(chat_id)
             self._trace('error', f'reading the chat with {name} back failed: {str(e)[:160]}')

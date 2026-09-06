@@ -13059,6 +13059,19 @@ def _fanvue_msg_count(persona, fan_key):
         return 0
 
 
+def _saved_msg_count(persona, fan_key, direction='in'):
+    """How much of this conversation is stored. 0 when there is no database."""
+    try:
+        from db import SessionLocal, count_x_messages
+        s = SessionLocal()
+        try:
+            return count_x_messages(s, persona, fan_key, direction=direction)
+        finally:
+            s.close()
+    except Exception:
+        return 0
+
+
 def _saved_msg_counts(persona, direction='in'):
     """{fan_key: messages} for every fan of one persona. Empty when there is no
     database, so a caller can fall back to whatever it counted itself."""
@@ -14745,6 +14758,7 @@ def _tg_handle_update(persona, update):
     fan['in_count'] = int(fan.get('in_count', 0)) + (0 if text == '/start' else 1)
 
     _log_x_message(persona, fan_key, who, 'in', text)
+    fan['in_count'] = max(fan['in_count'], _saved_msg_count(persona, fan_key))
     _tg_trace(persona, 'received', f'← {who}: {text}')
     _fan_memory_update(persona, fan_key, text)
 
@@ -15641,7 +15655,7 @@ def _tgu_needs_history(persona, chat_id):
     return _fanvue_msg_count(persona, _tgu_fan_key(chat_id)) == 0
 
 
-def _tgu_import_history(persona, chat_id, name, rows):
+def _tgu_import_history(persona, chat_id, name, rows, first_at=0):
     """Store a conversation that happened before the account was connected.
 
     Telegram states who sent each message, so unlike the Fanvue import there is
@@ -15658,6 +15672,16 @@ def _tgu_import_history(persona, chat_id, name, rows):
             said.append(text)
     if said:
         _fan_memory_update(persona, key, '\n'.join(said[-40:])[-1500:])
+    # Phases can be paced in days, and an imported chat is as old as its first
+    # message, not as old as the import.
+    if first_at:
+        fans = _tg_fans(persona)
+        fan = fans.get(str(chat_id)) or {}
+        if int(fan.get('first_in') or 0) > first_at or not fan.get('first_in'):
+            fan['first_in'] = first_at
+            fan.setdefault('name', name)
+            fans[str(chat_id)] = fan
+            _tg_save_fans(persona, fans)
     if n:
         _tg_trace(persona, 'history', f'read back {n} earlier message(s) with {name}')
     return n
@@ -15698,6 +15722,9 @@ def _tgu_plan(persona, chat_id, name, text, texts=None):
 
     for m in msgs:
         _log_x_message(persona, fan_key, name, 'in', m)
+    # Depth is the whole conversation, not what arrived since the account was
+    # connected: a chat read back off Telegram is not a fan she just met.
+    fan['in_count'] = max(fan['in_count'], _saved_msg_count(persona, fan_key))
 
     phases = _phases(persona)
     phase_idx = _fan_phase(phases, fan)
@@ -15923,10 +15950,10 @@ def _tgu_start(persona):
             except Exception:
                 return False
 
-    def on_history(chat_id, name, rows):
+    def on_history(chat_id, name, rows, first_at=0):
         with app.app_context():
             try:
-                _tgu_import_history(persona, chat_id, name, rows)
+                _tgu_import_history(persona, chat_id, name, rows, first_at)
             except Exception:
                 logger.exception('tgu history import failed for %s', persona)
 
