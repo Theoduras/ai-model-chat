@@ -10802,6 +10802,7 @@ def api_fanvue_fan_score():
     if not persona or not fan_uuid:
         return jsonify({'ok': False, 'error': 'Missing persona or fan'}), 400
     cfg = _fv_funnel_cfg(persona)
+    _fv_insight_budget[persona] = max(1, _fv_insight_budget.get(persona, 1))
     try:
         prof = _fv_score_fan(persona, fan_uuid, 'fv:' + fan_uuid,
                              (d.get('handle') or ''), cfg, force=True)
@@ -11936,12 +11937,28 @@ def _fv_ledger_stats(persona, fan_uuid):
         _fv_close(s)
 
 
+# Fanvue allows 200 requests per 60s per user per client, and polling chats
+# already spends most of it. Scoring is the lowest-priority caller here, so it
+# gets a small budget per round and gives up the moment it is spent — a fan
+# whose scores miss one round is refreshed on the next.
+FV_INSIGHTS_PER_ROUND = 8
+_fv_insight_budget = {}
+
+
+def _fv_reset_insight_budget(persona):
+    _fv_insight_budget[persona] = FV_INSIGHTS_PER_ROUND
+
+
 def _fv_fan_insights(persona, fan_uuid):
     """Spend, tips and subscription state straight from Fanvue.
 
     Needs read:insights, which is an optional scope this app registration may
     never have been granted — so a 403 here is expected, not an error, and the
     scores fall back to what the local ledger knows."""
+    if _fv_insight_budget.get(persona, FV_INSIGHTS_PER_ROUND) <= 0:
+        return {}
+    _fv_insight_budget[persona] = _fv_insight_budget.get(
+        persona, FV_INSIGHTS_PER_ROUND) - 1
     scope = _fanvue_scope(persona)
     try:
         res = _fanvue_call(persona, 'GET', f'{scope}/insights/fans/{fan_uuid}')
@@ -12724,6 +12741,7 @@ def _fanvue_auto_round(persona):
     fcfg = _fv_funnel_cfg(persona)
     fcfg = fcfg if fcfg.get('enabled') else None
     if fcfg:
+        _fv_reset_insight_budget(persona)
         try:
             _fv_bandit_sweep(persona, fcfg)
         except Exception as e:
