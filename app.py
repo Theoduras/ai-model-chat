@@ -12766,7 +12766,11 @@ def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx, context
                                       'price': price})
         except Exception as e:
             logger.warning('Fanvue PPV to %s failed: %s', handle or fan_uuid, str(e)[:120])
-            _fv_trace(persona, 'error', f'PPV to {handle or fan_uuid} failed: {str(e)[:200]}')
+            if _fv_unreachable_error(e):
+                _fv_mark_unsendable(persona, fan_uuid, handle, str(e)[:160])
+            else:
+                _fv_trace(persona, 'error',
+                          f'PPV to {handle or fan_uuid} failed: {str(e)[:200]}')
             return
 
         msg_uuid = ''
@@ -12801,6 +12805,77 @@ def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx, context
                   f"{again} → {handle or fan_uuid} at ${price / 100:g}{off}: {cap}")
 
 
+# ── Chats Fanvue will not accept a message for ────────────────────────────────
+# A fan can be listed in /chats and still be unwritable: deleted or deactivated
+# accounts, and blocks, come back as "Invalid user UUID" on the send even though
+# reading the same chat works. Retrying every round burns a reply slot, an API
+# call against the rate limit, and fills the log — so a chat that answers this
+# way is stood down for a while and picked up again later in case it was
+# temporary.
+FV_UNSENDABLE_BASE_HOURS = 24
+FV_UNSENDABLE_MAX_HOURS = 24 * 7
+_FV_UUID_RE = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.I)
+_FV_UNREACHABLE_RE = re.compile(
+    r'invalid user uuid|user (was )?not found|no such user|user does not exist|'
+    r'recipient not found|cannot message this user|user is blocked|blocked you', re.I)
+
+
+def _fv_unreachable_error(e):
+    """True when Fanvue is saying *this recipient*, not *this request*."""
+    code = getattr(e, 'code', None)
+    return code in (400, 403, 404) and bool(_FV_UNREACHABLE_RE.search(str(e)))
+
+
+def _fv_unsendable_key(persona):
+    return f'fanvue_unsendable_{persona}'
+
+
+def _fv_unsendable(persona):
+    try:
+        raw = json.loads(_get_setting(_fv_unsendable_key(persona)) or '{}')
+        return raw if isinstance(raw, dict) else {}
+    except Exception:
+        return {}
+
+
+def _fv_is_unsendable(persona, fan_uuid):
+    row = _fv_unsendable(persona).get(fan_uuid)
+    if not isinstance(row, dict):
+        return None
+    return row if float(row.get('until') or 0) > time.time() else None
+
+
+def _fv_mark_unsendable(persona, fan_uuid, handle, why):
+    """Stand this chat down, for longer each time it fails again."""
+    rows = _fv_unsendable(persona)
+    prev = rows.get(fan_uuid) if isinstance(rows.get(fan_uuid), dict) else {}
+    tries = int(prev.get('tries') or 0) + 1
+    hours = min(FV_UNSENDABLE_BASE_HOURS * (2 ** (tries - 1)), FV_UNSENDABLE_MAX_HOURS)
+    rows[fan_uuid] = {'until': time.time() + hours * 3600, 'tries': tries,
+                      'handle': handle or '', 'why': str(why)[:160]}
+    # Drop entries that lapsed long ago rather than growing without bound.
+    cutoff = time.time() - FV_UNSENDABLE_MAX_HOURS * 3600
+    rows = {k: v for k, v in rows.items()
+            if isinstance(v, dict) and float(v.get('until') or 0) > cutoff}
+    _set_setting(_fv_unsendable_key(persona), json.dumps(rows))
+    if tries == 1:
+        # Say whether the id we sent even looks like a uuid: if it does not,
+        # this is our bug rather than a fan who deleted their account.
+        shape = ('' if _FV_UUID_RE.match(str(fan_uuid or '')) else
+                 ' — and that id is not a uuid, which is our fault, not theirs')
+        _fv_trace(persona, 'error',
+                  f'{handle or fan_uuid} [uuid {fan_uuid}] cannot be messaged '
+                  f'({why}){shape} — standing down for {hours}h. Usually a '
+                  f'deleted account or a block.')
+    logger.info('Fanvue [%s] %s unsendable (try %d, %dh): %s',
+                persona, handle or fan_uuid, tries, hours, why)
+
+
+def _fv_clear_unsendable(persona, fan_uuid):
+    rows = _fv_unsendable(persona)
+    if rows.pop(fan_uuid, None) is not None:
+        _set_setting(_fv_unsendable_key(persona), json.dumps(rows))
+
 def _fv_deliver(persona, scope, fan_uuid, fan_key, handle, reply, incoming, cfg,
                 ppv_ctx, active=True):
     """Pace out one reply, then consider the next PPV tier so the paid drop
@@ -12815,9 +12890,15 @@ def _fv_deliver(persona, scope, fan_uuid, fan_key, handle, reply, incoming, cfg,
         except Exception as e:
             logger.warning('Fanvue send to %s (%s) failed: %s',
                            handle or fan_uuid, fan_uuid, str(e)[:120])
-            _fv_trace(persona, 'error',
-                      f'send to {handle or fan_uuid} [uuid {fan_uuid}] failed: {str(e)[:200]}')
+            if _fv_unreachable_error(e):
+                # Not a transient failure: this recipient cannot be written to.
+                _fv_mark_unsendable(persona, fan_uuid, handle, str(e)[:160])
+            else:
+                _fv_trace(persona, 'error',
+                          f'send to {handle or fan_uuid} [uuid {fan_uuid}] '
+                          f'failed: {str(e)[:200]}')
             return
+        _fv_clear_unsendable(persona, fan_uuid)
         _log_x_message(persona, fan_key, handle, 'out', reply)
         _fv_trace(persona, 'sent', f'→ {handle or fan_uuid}: {reply}')
         if ppv_ctx:
@@ -13021,7 +13102,7 @@ def _fanvue_auto_round(persona):
     only = [h.strip().lstrip('@').lower()
             for h in (opts.get('only_handles') or '').split(',') if h.strip()]
     actions = {'replies': 0, 'skipped_creators': 0, 'skipped_offline': 0,
-               'skipped_lists': 0}
+               'skipped_lists': 0, 'skipped_unsendable': 0}
     log = []
     inc_lists, exc_lists = _fv_list_filter(persona, opts)
 
@@ -13116,6 +13197,15 @@ def _fanvue_auto_round(persona):
         if online_only and not _fv_chat_online(chat, online_grace):
             actions['skipped_offline'] += 1
             log.append(f'{who}: skipped (offline)')
+            continue
+        # Fanvue refuses to accept a message for this chat. Reading it still
+        # works, so without this it is re-answered every round for nothing.
+        stood_down = _fv_is_unsendable(persona, fan_uuid)
+        if stood_down:
+            actions['skipped_unsendable'] += 1
+            left = int((float(stood_down['until']) - time.time()) / 3600)
+            log.append(f'{who}: skipped (Fanvue will not accept a message — '
+                       f'{stood_down.get("why", "")}; retrying in {left}h)')
             continue
         fan_key = 'fv:' + fan_uuid
         try:
@@ -13337,6 +13427,8 @@ def _fanvue_auto_round(persona):
             why.append(f"{actions['skipped_lists']} filtered by list")
         if actions['skipped_creators']:
             why.append(f"{actions['skipped_creators']} are creators")
+        if actions['skipped_unsendable']:
+            why.append(f"{actions['skipped_unsendable']} cannot be messaged")
         summary = f"{len(chats)} chats, no replies" + (' — ' + ', '.join(why) if why else
                                                        ' — everyone already answered')
         state_key = f'fanvue_lastidle_{persona}'
@@ -13558,6 +13650,14 @@ def api_fanvue_trace():
         problems.append('No webhook signing secret, so payment webhooks are '
                         'rejected. Purchases are still picked up by Reconcile, '
                         'just later.')
+    stood_down = [r for r in _fv_unsendable(persona).values()
+                  if isinstance(r, dict) and float(r.get('until') or 0) > time.time()]
+    if stood_down:
+        problems.append(
+            '%d chat(s) Fanvue will not accept a message for (%s) — usually '
+            'deleted accounts or blocks. They are retried later.'
+            % (len(stood_down),
+               ', '.join(r.get('handle') or '?' for r in stood_down[:5])))
     if hook.get('last_error'):
         problems.append('Fanvue refused the webhook subscription for %s — %s'
                         % (hook.get('url') or 'this app', hook['last_error'][:160]))

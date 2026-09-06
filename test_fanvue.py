@@ -670,6 +670,79 @@ def test_webhook_diagnosis():
           'PUBLIC_BASE_URL' in run(refuse_all)['verdict'])
 
 
+def test_unsendable_chats():
+    """A fan can be listed in /chats and still be unwritable — deleted accounts
+    and blocks answer the send with "Invalid user UUID" while reading the same
+    chat works. Retrying every round burns a reply slot and an API call."""
+    store, traced, sent = {}, [], []
+    app._get_setting = lambda k, d=None: store.get(k, d)
+    app._set_setting = lambda k, v: store.__setitem__(k, v)
+    app._fv_trace = lambda p, st, d='': traced.append((st, d))
+    app._log_x_message = lambda *a: None
+    app._fv_send_human = lambda *a, **k: sent.append(a)
+
+    err400 = app.FanvueApiError.__new__(app.FanvueApiError)
+    err400.code, err400.detail = 400, 'Invalid user UUID'
+    err400.args = ('Fanvue API 400: Invalid user UUID',)
+    check('an invalid recipient is recognised', app._fv_unreachable_error(err400))
+    for code, msg in ((500, 'Internal error'), (400, 'price must be at least 300'),
+                      (429, 'Too many requests')):
+        e = app.FanvueApiError.__new__(app.FanvueApiError)
+        e.code, e.detail, e.args = code, msg, ('Fanvue API %d: %s' % (code, msg),)
+        check('%d %s is not treated as unreachable' % (code, msg[:18]),
+              not app._fv_unreachable_error(e))
+
+    uid = '11111111-2222-3333-4444-555555555555'
+    def boom(*a, **k):
+        raise err400
+    app._fv_send_human = boom
+    app._fv_deliver('lilly', '', uid, 'fv:' + uid, 'aikoxxx', 'hey', '', {}, None)
+    row = app._fv_is_unsendable('lilly', uid)
+    check('the chat is stood down', row is not None and row['tries'] == 1, row)
+    check('for a day to start with',
+          23 < (row['until'] - time.time()) / 3600 <= 24, row)
+    check('and it is said once, with the uuid',
+          any('cannot be messaged' in d and uid in d for st, d in traced), traced)
+    check('a real uuid is not blamed on us',
+          not any('not a uuid' in d for st, d in traced), traced)
+
+    # Failing again after the retry stands it down for longer.
+    store[app._fv_unsendable_key('lilly')] = json.dumps(
+        {uid: {'until': time.time() - 1, 'tries': 1, 'handle': 'aikoxxx', 'why': 'x'}})
+    check('an expired stand-down lets it try again',
+          app._fv_is_unsendable('lilly', uid) is None)
+    app._fv_deliver('lilly', '', uid, 'fv:' + uid, 'aikoxxx', 'hey', '', {}, None)
+    row = app._fv_is_unsendable('lilly', uid)
+    check('the second failure backs off further',
+          row['tries'] == 2 and (row['until'] - time.time()) / 3600 > 40, row)
+
+    # A send that works clears it.
+    app._fv_send_human = lambda *a, **k: sent.append(a)
+    app._fv_deliver('lilly', '', uid, 'fv:' + uid, 'aikoxxx', 'hey', '', {}, None)
+    check('a successful send clears the stand-down',
+          app._fv_is_unsendable('lilly', uid) is None)
+
+    # An id that is not a uuid is our bug, and says so.
+    traced.clear()
+    app._fv_send_human = boom
+    app._fv_deliver('lilly', '', 'chat-42', 'fv:chat-42', 'joe', 'hey', '', {}, None)
+    check('a malformed id is called out as ours',
+          any('not a uuid' in d for st, d in traced), traced)
+
+    # Anything else is still reported as a plain failure, not stood down.
+    traced.clear()
+    other = app.FanvueApiError.__new__(app.FanvueApiError)
+    other.code, other.detail = 500, 'Internal error'
+    other.args = ('Fanvue API 500: Internal error',)
+    def boom500(*a, **k):
+        raise other
+    app._fv_send_human = boom500
+    app._fv_deliver('lilly', '', uid, 'fv:' + uid, 'aikoxxx', 'hey', '', {}, None)
+    check('a server error is not a dead chat', app._fv_is_unsendable('lilly', uid) is None)
+    check('but it is still reported',
+          any('failed' in d for st, d in traced), traced)
+
+
 if __name__ == '__main__':
     for fn in (test_direction, test_import, test_identity_never_crosses,
                test_placeholders, test_pacing, test_backlog,
@@ -680,7 +753,8 @@ if __name__ == '__main__':
                test_guardrail_failure_does_not_cost_a_sale,
                test_funnel_config_roundtrip, test_distress_pause_is_written_once,
                test_funnel_exits, test_webhook_subscription,
-               test_webhook_accepts_any_known_secret, test_webhook_diagnosis):
+               test_webhook_accepts_any_known_secret, test_webhook_diagnosis,
+               test_unsendable_chats):
         print('\n--- %s ---' % fn.__name__)
         restore_app()
         fn()
