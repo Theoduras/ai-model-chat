@@ -10456,7 +10456,56 @@ def fanvue_webhook():
                         source='webhook')
     elif kind == 'creator.message.read':
         _fv_mark_read(persona, fan)
+    # Churn and chargebacks are recorded whatever the funnel flag says: they are
+    # the inputs the whole system reasons from, and history that was never
+    # collected cannot be recovered when a creator turns the system on later.
+    try:
+        _fv_note_fan_outcome(persona, fan, kind, data)
+    except Exception as e:
+        logger.warning('Fanvue outcome %s not recorded: %s', kind, str(e)[:120])
     return jsonify({'ok': True})
+
+
+# Fanvue's own names for the events that decide whether a funnel actually
+# worked. An unsub inside the reward window is what the bandit's churn penalty
+# is measured from, so without these the penalty could never fire.
+FV_CHURN_EVENTS = ('creator.subscription.deactivated',)
+FV_RESUB_EVENTS = ('creator.subscription.activated',)
+FV_CHARGEBACK_EVENTS = ('creator.refund.created', 'creator.dispute.created',
+                        'creator.dispute.flagged')
+
+
+def _fv_note_fan_outcome(persona, fan_uuid, kind, data):
+    """Record what a webhook says happened to a fan: they left, they came back,
+    or they took their money back."""
+    if not fan_uuid or kind not in (FV_CHURN_EVENTS + FV_RESUB_EVENTS
+                                    + FV_CHARGEBACK_EVENTS
+                                    + ('creator.payment.succeeded',)):
+        return
+    now = datetime.now(timezone.utc)
+    if kind == 'creator.payment.succeeded':
+        if 'tip' in str(_fv_first(data, 'source', 'kind', default='')).lower():
+            amount = _fv_first(data, 'amount', 'gross', 'total', default=0)
+            _fv_note_event(persona, fan_uuid, 'tip',
+                           amount=int(amount or 0))
+        return
+    if kind in FV_CHURN_EVENTS:
+        _fv_set_profile(persona, fan_uuid, churned_at=now)
+        _fv_note_event(persona, fan_uuid, 'unsub')
+        _fv_trace(persona, 'funnel', f'{fan_uuid[:8]} unsubscribed')
+        return
+    if kind in FV_RESUB_EVENTS:
+        _fv_set_profile(persona, fan_uuid, churned_at=None)
+        _fv_note_event(persona, fan_uuid, 'resub')
+        return
+    # A chargeback freezes the rank score at 0 for 90 days and caps the fan at
+    # the cheapest tier (§7.3), and it is always worth a human's attention.
+    _fv_set_profile(persona, fan_uuid, chargeback_at=now,
+                    review_reason='chargeback or refund', review_at=now)
+    _fv_note_event(persona, fan_uuid, 'chargeback',
+                   amount=int(_fv_first(data, 'amount', 'total', default=0) or 0))
+    _fv_trace(persona, 'review',
+              f'{fan_uuid[:8]}: {kind.split(".")[-2]} — score frozen, capped at T1')
 
 
 def _fv_reconcile_purchases(persona, days=45, limit_pages=20):
@@ -11711,7 +11760,8 @@ def _fv_profile(persona, fan_uuid, handle=''):
                 'crs': p.crs or 0, 'tier': p.tier or 'C',
                 'lifetime_spend': p.lifetime_spend or 0,
                 'spend_30d': p.spend_30d or 0, 'tips': p.tips_total or 0,
-                'chargeback': bool(p.chargeback_at),
+                'chargeback': bool(p.chargeback_at and (
+                    datetime.now(timezone.utc) - _as_utc(p.chargeback_at)).days < 90),
                 'review_reason': p.review_reason or '',
                 'scores_updated_at': p.scores_updated_at}
     except Exception as e:
