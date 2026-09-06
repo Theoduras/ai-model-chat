@@ -513,6 +513,111 @@ def test_funnel_exits():
         check('%s exits somewhere real' % fid, not nxt or nxt in app.FN.FUNNELS, nxt)
 
 
+def test_webhook_subscription():
+    """Fanvue delivers nothing to a URL that was never subscribed, so connecting
+    has to do it — and it has to be idempotent, scope-aware and safe to fail."""
+    calls, store, traced = [], {}, []
+    app._get_setting = lambda k, d=None: store.get(k, d)
+    app._set_setting = lambda k, v: store.__setitem__(k, v)
+    app._fv_trace = lambda p, st, d='': traced.append((st, d))
+    app._callback_origin = lambda: 'https://app.example.com'
+    app._fanvue_tokens = lambda p: {'access_token': 't',
+                                    'scope': 'openid read:self read:chat read:creator'}
+    existing = {'data': []}
+    def api(persona, method, path, body=None):
+        calls.append((method, path, body))
+        if method == 'GET' and path == '/webhooks/subscriptions':
+            return existing
+        if method == 'POST' and path == '/webhooks/subscriptions':
+            return {'id': 'wh-1', 'signingSecret': 'sek-1'}
+        return {}
+    app._fanvue_call = api
+
+    r = app._fv_ensure_webhook('lilly')
+    check('it subscribes on connect', r['ok'] and r['created'], r)
+    posted = [c for c in calls if c[0] == 'POST'][0][2]
+    check('to our own webhook path',
+          posted['url'] == 'https://app.example.com/webhooks/fanvue', posted)
+    check('for the churn events',
+          'creator.subscription.deactivated' in posted['events']
+          and 'creator.refund.created' in posted['events'], posted)
+    check('the secret is stored', app._fv_stored_hook('lilly')['secret'] == 'sek-1')
+
+    # Same subscription already present: leave it alone.
+    calls.clear()
+    existing['data'] = [{'id': 'wh-1', 'url': 'https://app.example.com/webhooks/fanvue',
+                         'events': list(app.FV_WEBHOOK_EVENTS)}]
+    r = app._fv_ensure_webhook('lilly')
+    check('a complete subscription is left alone',
+          r['ok'] and not r['created'] and not [c for c in calls if c[0] == 'POST'], r)
+    check('and its secret is not lost', app._fv_stored_hook('lilly')['secret'] == 'sek-1')
+
+    # Missing an event: replace it, because Fanvue cannot amend one.
+    calls.clear()
+    existing['data'] = [{'id': 'wh-1', 'url': 'https://app.example.com/webhooks/fanvue',
+                         'events': ['creator.message.read']}]
+    r = app._fv_ensure_webhook('lilly')
+    check('an incomplete one is replaced',
+          any(c[0] == 'DELETE' for c in calls) and any(c[0] == 'POST' for c in calls), calls)
+
+    # Only the events the connection has scopes for — asking for more fails the
+    # whole call and would take the ones we could have had with it.
+    calls.clear(); existing['data'] = []
+    app._fanvue_tokens = lambda p: {'access_token': 't', 'scope': 'openid read:self read:chat'}
+    r = app._fv_ensure_webhook('lilly')
+    ev = [c for c in calls if c[0] == 'POST'][0][2]['events']
+    check('read:creator events are dropped when not granted',
+          ev == ['creator.message.read'], ev)
+    check('and the gap is reported', 'creator.refund.created' in (r.get('missing') or []), r)
+
+    app._fanvue_tokens = lambda p: {'access_token': 't', 'scope': 'openid read:self'}
+    check('nothing to subscribe means no call',
+          not app._fv_ensure_webhook('lilly')['ok'])
+
+    # A local or http deployment cannot receive deliveries at all.
+    app._callback_origin = lambda: 'http://localhost:8080'
+    check('no subscription without a public https URL',
+          not app._fv_ensure_webhook('lilly')['ok'])
+    app._callback_origin = lambda: 'https://127.0.0.1'
+    check('nor for a loopback https URL', app._fv_webhook_url() == '')
+
+    # Connecting must never fail because of this.
+    app._callback_origin = lambda: 'https://app.example.com'
+    def boom(*a, **k):
+        raise RuntimeError('Fanvue is down')
+    app._fanvue_call = boom
+    r = app._fv_ensure_webhook_safe('lilly')
+    check('a failure is reported, not raised', r['ok'] is False and r['reason'], r)
+
+
+def test_webhook_accepts_any_known_secret():
+    """Every subscription mints its own secret and the header names no key, so
+    a delivery is genuine if any secret we hold verifies it."""
+    import hashlib as _h, hmac as _hm
+    store = {'fanvue_webhook_lilly': json.dumps({'id': 'wh-1', 'secret': 'per-hook'})}
+    app._get_setting = lambda k, d=None: store.get(k, d)
+    app._fv_webhook_secret = lambda: 'from-env'
+    app.db_list_personas = lambda: [{'slug': 'lilly'}]
+    app._fanvue_enabled_list = lambda: []
+    secrets = app._fv_webhook_secrets()
+    check('both secrets are candidates',
+          'from-env' in secrets and 'per-hook' in secrets, secrets)
+
+    body = b'{"type":"creator.subscription.deactivated"}'
+    ts = str(int(time.time()))
+    def sign(sec):
+        return _hm.new(sec.encode(), ts.encode() + b'.' + body, _h.sha256).hexdigest()
+    for sec in ('from-env', 'per-hook'):
+        ok, why = app._fv_verify_signature(body, 't=%s,v0=%s' % (ts, sign(sec)), sec)
+        check('a delivery signed with %s verifies' % sec, ok, why)
+    ok, _ = app._fv_verify_signature(body, 't=%s,v0=%s' % (ts, sign('wrong')), 'per-hook')
+    check('an unknown secret does not', not ok)
+    old_ts = str(int(time.time()) - 4000)
+    sig = _hm.new(b'per-hook', old_ts.encode() + b'.' + body, _h.sha256).hexdigest()
+    check('a replayed old delivery is still refused',
+          not app._fv_verify_signature(body, 't=%s,v0=%s' % (old_ts, sig), 'per-hook')[0])
+
+
 if __name__ == '__main__':
     for fn in (test_direction, test_import, test_identity_never_crosses,
                test_placeholders, test_pacing, test_backlog,
@@ -522,7 +627,8 @@ if __name__ == '__main__':
                test_price_cap_holds_rather_than_discounts,
                test_guardrail_failure_does_not_cost_a_sale,
                test_funnel_config_roundtrip, test_distress_pause_is_written_once,
-               test_funnel_exits):
+               test_funnel_exits, test_webhook_subscription,
+               test_webhook_accepts_any_known_secret):
         print('\n--- %s ---' % fn.__name__)
         restore_app()
         fn()

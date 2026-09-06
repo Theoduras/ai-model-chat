@@ -228,6 +228,7 @@
     </div>
     <button class="btn-ai" style="margin-top:12px;" onclick="saveFunnels()">Save funnel settings</button>
     <span class="hint" id="fn-status" style="margin-left:10px;"></span>
+    <div class="hint" id="fn-hook" style="display:block;margin-top:8px;font-size:.74rem;"></div>
 
     <div id="fn-stats" style="margin-top:18px;border-top:1px solid var(--border-soft);padding-top:14px;">
       <div style="font-size:.82rem;color:var(--text-2);margin-bottom:8px;"><b>What is working</b> <span class="hint">&mdash; revenue per fan assigned, by fan type and funnel. Cells go solid once there is enough data to trust them.</span></div>
@@ -796,6 +797,7 @@ async function loadFunnels(){
     const d=await fetch('/api/fanvue/funnels?persona='+encodeURIComponent(persona())).then(r=>r.json());
     if(!d.ok) return;
     fnCfg=d.config||{}; fnMeta=d;
+    renderHook(d.webhook);
     document.getElementById('fn-enabled').checked=!!fnCfg.enabled;
     document.getElementById('fn-classify').checked=fnCfg.classify!==false;
     document.getElementById('fn-guardrails').checked=fnCfg.guardrails!==false;
@@ -835,8 +837,31 @@ async function saveFunnels(){
     tier_cents:tier_cents});
   if(!d.ok){st.textContent='✗ '+(d.error||'Failed'); st.style.color='#fb7185'; return;}
   fnCfg=d.config; st.textContent='✓ Saved'; st.style.color='#4ade80';
+  if(d.webhook&&Object.keys(d.webhook).length) renderHook(
+    {subscribed:d.webhook.ok,events:d.webhook.events||[],missing:d.webhook.missing||[],
+     reason:d.webhook.reason});
   setTimeout(()=>{st.textContent='';},2500);
   loadFunnelStats();
+}
+
+// Fanvue delivers nothing to a URL that was never subscribed, and an unsub that
+// never arrives means the churn penalty silently never fires — so say plainly
+// which events are live.
+function renderHook(h){
+  const box=document.getElementById('fn-hook'); if(!box) return;
+  if(!h){box.innerHTML='';return;}
+  if(h.subscribed){
+    let msg='<span style="color:#4ade80;">✓</span> Fanvue is sending '+(h.events||[]).length
+      +' event'+((h.events||[]).length===1?'':'s')+' to this app.';
+    if((h.missing||[]).length) msg+=' <span style="color:#fbbf24;">'+h.missing.length
+      +' more need the read:creator permission — without them a fan who unsubscribes '
+      +'is never counted against the funnel that lost them.</span>';
+    box.innerHTML=msg;
+  }else{
+    box.innerHTML='<span style="color:#fbbf24;">⚠️ Not subscribed to Fanvue\'s events'
+      +(h.reason?' — '+esc(h.reason):'')+'.</span> Purchases and unsubscribes will only '
+      +'be picked up by the slower reconcile, and churn will not be scored.';
+  }
 }
 
 function fnCell(c){
