@@ -54,7 +54,7 @@ def test_import():
     """One unrecognised message used to make the whole history read as the fan's."""
     fan, me = 'fan-1', 'me-1'
     traced, logged = [], []
-    app._fv_trace = lambda p, s, dt='': traced.append((s, dt))
+    app._fv_trace = lambda p, s, dt='', fan='': traced.append((s, dt))
     app._log_x_message = lambda p, k, h, dr, t: logged.append((dr, t))
     app._fanvue_scope = lambda p: '/creators/me'
 
@@ -126,7 +126,7 @@ def test_placeholders():
     check('clean text is not flagged', not has('hey you, how was work?'))
 
     sent, traced = [], []
-    app._fv_trace = lambda p, s, dt='': traced.append((s, dt))
+    app._fv_trace = lambda p, s, dt='', fan='': traced.append((s, dt))
     app._fanvue_call = lambda p, m, path, body=None: sent.append(body) or {}
     app._fv_send_text('lilly', '/s', 'fan', 'hey you, how was the shift?')
     check('a clean reply goes out', len(sent) == 1, sent)
@@ -173,7 +173,7 @@ def test_backlog():
     """Each reply holds its worker for the whole pause, so a saturated pool makes
     replies run later and later. The log has to say so."""
     traced, store = [], {}
-    app._fv_trace = lambda p, s, dt='': traced.append((s, dt))
+    app._fv_trace = lambda p, s, dt='', fan='': traced.append((s, dt))
     app._get_setting = lambda k, d=None: store.get(k, d)
     app._set_setting = lambda k, v: store.__setitem__(k, v)
     os.environ['FANVUE_REPLY_WORKERS'] = '4'
@@ -377,7 +377,7 @@ def _stub_drop_path(sent, traced, store):
     """Enough of the world for _fv_maybe_ppv to run without a database."""
     app._fanvue_call = lambda p, m, path, body=None: (
         sent.append((path, body)) or {'uuid': 'msg-1'})
-    app._fv_trace = lambda p, st, dt='': traced.append((st, dt))
+    app._fv_trace = lambda p, st, dt='', fan='': traced.append((st, dt))
     app._fv_record_drop = lambda *a, **k: 'drop-1'
     app._fv_record_pitch = lambda *a, **k: None
     app._fanvue_msg_count = lambda p, k: 20
@@ -471,7 +471,7 @@ def test_distress_pause_is_written_once():
     store, traced = {}, []
     app._get_setting = lambda k, d=None: store.get(k, d)
     app._set_setting = lambda k, v: store.__setitem__(k, v)
-    app._fv_trace = lambda p, s, d='': traced.append((s, d))
+    app._fv_trace = lambda p, s, d='', fan='': traced.append((s, d))
     app._fv_note_event = lambda *a, **k: None
     app._fv_flag_distress('lilly', 'fan-1', 'joe')
     first = store.get('fanvue_distress_lilly')
@@ -519,7 +519,7 @@ def test_webhook_subscription():
     calls, store, traced = [], {}, []
     app._get_setting = lambda k, d=None: store.get(k, d)
     app._set_setting = lambda k, v: store.__setitem__(k, v)
-    app._fv_trace = lambda p, st, d='': traced.append((st, d))
+    app._fv_trace = lambda p, st, d='', fan='': traced.append((st, d))
     app._callback_origin = lambda: 'https://app.example.com'
     app._fanvue_tokens = lambda p: {'access_token': 't',
                                     'scope': 'openid read:self read:chat read:creator'}
@@ -677,7 +677,7 @@ def test_unsendable_chats():
     store, traced, sent = {}, [], []
     app._get_setting = lambda k, d=None: store.get(k, d)
     app._set_setting = lambda k, v: store.__setitem__(k, v)
-    app._fv_trace = lambda p, st, d='': traced.append((st, d))
+    app._fv_trace = lambda p, st, d='', fan='': traced.append((st, d))
     app._log_x_message = lambda *a: None
     app._fv_send_human = lambda *a, **k: sent.append(a)
 

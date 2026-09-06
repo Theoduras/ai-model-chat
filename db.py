@@ -9,7 +9,7 @@ import uuid
 
 from sqlalchemy import (
     create_engine, Column, String, Text, DateTime, ForeignKey, Index, Integer,
-    func
+    func, or_
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
@@ -1262,6 +1262,42 @@ def list_x_conversations(session, limit=200):
         if len(out) >= limit:
             break
     return out
+
+
+def list_conversations(session, persona, prefixes, limit=200):
+    """Newest message per fan for one persona, restricted to fan-key prefixes.
+
+    The fan key carries the platform: 'fv:' is Fanvue, 'tg:'/'tgu:' Telegram,
+    a bare id is X. An empty string in `prefixes` therefore means "bare ids",
+    and is matched by excluding every prefixed key instead of by a LIKE.
+    """
+    q = session.query(XMessage).filter(XMessage.persona == persona)
+    prefixes = tuple(prefixes or ())
+    likes = [XMessage.x_user_id.like(p.replace('%', r'\%') + '%') for p in prefixes if p]
+    if '' in prefixes:
+        # Bare ids: everything that is not one of the known prefixed shapes.
+        likes.append(~XMessage.x_user_id.contains(':'))
+    if likes:
+        q = q.filter(or_(*likes))
+    elif prefixes:
+        return []
+
+    seen, out = {}, []
+    # Newest first, then folded per fan — one pass, so a busy persona does not
+    # cost one query per conversation.
+    for m in q.order_by(XMessage.created_at.desc()).limit(4000).all():
+        d = seen.get(m.x_user_id)
+        if d is not None:
+            d['count'] += 1
+            if m.x_username and not d['x_username']:
+                d['x_username'] = m.x_username
+            continue
+        d = {'persona': m.persona, 'x_user_id': m.x_user_id,
+             'x_username': m.x_username or '', 'last': m.text,
+             'last_dir': m.direction, 'time': m.created_at, 'count': 1}
+        seen[m.x_user_id] = d
+        out.append(d)
+    return out[:limit]
 
 
 def record_x_opener(session, persona, x_user_id):

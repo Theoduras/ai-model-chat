@@ -4538,6 +4538,118 @@ def _xchat_thread_rows(persona, uid):
         s.close()
 
 
+# ── Unified inbox ─────────────────────────────────────────────────────────────
+#
+# Every platform already writes both sides of every conversation into the one
+# XMessage store through _log_x_message(), keyed by a fan id that carries the
+# platform as a prefix. So one endpoint can serve every console's chat view, and
+# adding a platform is an entry in this table rather than a new route.
+INBOX_PLATFORMS = {
+    'fanvue':   {'label': 'Fanvue',   'prefixes': ('fv:',),
+                 'trace_keys': ('fanvue_trace_%s',)},
+    'telegram': {'label': 'Telegram', 'prefixes': ('tg:', 'tgu:'),
+                 'trace_keys': ('tg_trace_%s', 'tg_trace_platform')},
+    'x':        {'label': 'X',        'prefixes': ('',),
+                 'trace_keys': ()},
+}
+
+# Trace stages that describe something that happened *to one fan*, so they can
+# sit inside that fan's thread. Anything else stays on the overview feed.
+INBOX_EVENT_STAGES = {'ppv', 'guardrail', 'error', 'skipped', 'follow-up',
+                      'funnel', 'review', 'delayed', 'routed'}
+
+
+def _inbox_trace_rows(platform, persona):
+    """Every trace row recorded for one persona on one platform, oldest first."""
+    rows = []
+    for tmpl in INBOX_PLATFORMS[platform]['trace_keys']:
+        key = tmpl % persona if '%s' in tmpl else tmpl
+        try:
+            part = json.loads(_get_setting(key) or '[]')
+        except Exception:
+            part = []
+        if isinstance(part, list):
+            rows.extend(r for r in part if isinstance(r, dict))
+    rows.sort(key=lambda r: r.get('at') or 0)
+    return rows
+
+
+def _inbox_fan_events(platform, persona, fan_key):
+    """The trace lines belonging to one fan, as thread chips.
+
+    Only rows written since traces started carrying a fan key can be placed;
+    older ones have no owner and stay on the overview feed, which is where they
+    have always been read.
+    """
+    out = []
+    for r in _inbox_trace_rows(platform, persona):
+        if r.get('fan') != fan_key:
+            continue
+        if (r.get('stage') or '') not in INBOX_EVENT_STAGES:
+            continue
+        out.append({'at': int(r.get('at') or 0), 'stage': r.get('stage') or '',
+                    'detail': r.get('detail') or ''})
+    return out
+
+
+@app.route('/api/inbox')
+@platform_scoped
+def api_inbox():
+    """The conversations of one persona on one platform, and one thread of them.
+
+    Without `fan`: the fan list. With it: that fan's messages, plus the events
+    the log recorded against them, so the console can show one ordered stream
+    instead of a table nobody can follow.
+    """
+    platform = (request.args.get('platform') or '').strip().lower()
+    meta = INBOX_PLATFORMS.get(platform)
+    if not meta:
+        return jsonify({'ok': False, 'error': 'Unknown platform'}), 400
+    persona = request_persona()
+    if not persona:
+        return jsonify({'ok': False, 'error': 'persona required'}), 400
+
+    from db import SessionLocal, list_conversations, list_x_messages
+    fan_key = (request.args.get('fan') or '').strip()
+    try:
+        s = SessionLocal()
+    except Exception as e:
+        return jsonify({'ok': False, 'error': 'No database: %s' % str(e)[:160]}), 200
+    try:
+        if not fan_key:
+            fans = []
+            for c in list_conversations(s, persona, meta['prefixes'], limit=200):
+                fans.append({
+                    'key': c['x_user_id'], 'handle': c['x_username'] or '',
+                    'last': (c['last'] or '')[:120], 'last_dir': c['last_dir'] or '',
+                    'count': c['count'],
+                    'at': int(c['time'].timestamp()) if c['time'] else 0,
+                    # A fan whose newest message is theirs is still waiting.
+                    'waiting': (c['last_dir'] or '') == 'in',
+                })
+            return jsonify({'ok': True, 'platform': platform, 'persona': persona,
+                            'fans': fans})
+
+        if not fan_key.startswith(tuple(p for p in meta['prefixes'] if p)) \
+                and '' not in meta['prefixes']:
+            return jsonify({'ok': False, 'error': 'That fan is not on this platform'}), 400
+        msgs, handle = [], ''
+        for m in list_x_messages(s, persona, fan_key, limit=500):
+            handle = m.x_username or handle
+            msgs.append({'dir': m.direction or 'in', 'text': m.text or '',
+                         'at': int(m.created_at.timestamp()) if m.created_at else 0})
+        return jsonify({'ok': True, 'platform': platform, 'persona': persona,
+                        'fan': fan_key, 'handle': handle, 'messages': msgs,
+                        'events': _inbox_fan_events(platform, persona, fan_key)})
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]}), 500
+    finally:
+        try:
+            s.close()
+        except Exception:
+            pass
+
+
 XLOG_HTML = """<!DOCTYPE html>
 <html lang="en" data-theme="dark"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -10662,7 +10774,8 @@ def _fv_note_fan_outcome(persona, fan_uuid, kind, data):
     if kind in FV_CHURN_EVENTS:
         _fv_set_profile(persona, fan_uuid, churned_at=now)
         _fv_note_event(persona, fan_uuid, 'unsub')
-        _fv_trace(persona, 'funnel', f'{fan_uuid[:8]} unsubscribed')
+        _fv_trace(persona, 'funnel', f'{fan_uuid[:8]} unsubscribed',
+                  fan=_fan_key_of(fan_uuid))
         return
     if kind in FV_RESUB_EVENTS:
         _fv_set_profile(persona, fan_uuid, churned_at=None)
@@ -11612,12 +11725,27 @@ def _tracing_to(fn):
         _trace_sink.fn = prev
 
 
-def _fv_trace(persona, stage, detail=''):
+def _fan_key_of(fan_uuid):
+    """The unified fan key for an id the shared funnel layer was handed.
+
+    Telegram calls in with its own key ('tg:'/'tgu:') as the uuid while Fanvue
+    passes a bare one, so a prefix already there is the answer and anything else
+    is Fanvue's.
+    """
+    s = str(fan_uuid or '')
+    return s if ':' in s else 'fv:' + s
+
+
+def _fv_trace(persona, stage, detail='', fan=''):
     """Append one line to the persona's Fanvue activity log. Stored in the
-    database so it survives a redeploy and can be read from the browser."""
+    database so it survives a redeploy and can be read from the browser.
+
+    `fan` is the unified fan key this line is about, when the caller knows one.
+    It lets the console thread the line into that conversation instead of only
+    listing it; lines without one stay on the overview feed."""
     sink = getattr(_trace_sink, 'fn', None)
     if sink is not None:
-        sink(persona, stage, detail)
+        sink(persona, stage, detail, fan)
         return
     key = f'fanvue_trace_{persona}'
     try:
@@ -11626,7 +11754,10 @@ def _fv_trace(persona, stage, detail=''):
             rows = []
     except Exception:
         rows = []
-    rows.append({'at': int(time.time()), 'stage': stage, 'detail': str(detail)[:500]})
+    row = {'at': int(time.time()), 'stage': stage, 'detail': str(detail)[:500]}
+    if fan:
+        row['fan'] = fan
+    rows.append(row)
     _set_setting(key, json.dumps(rows[-FV_TRACE_MAX:]))
     logger.info('FV[%s] %s: %s', persona, stage, str(detail)[:200])
 
@@ -12035,7 +12166,8 @@ def _fv_flag_distress(persona, fan_uuid, handle=''):
     raw = {k: v for k, v in raw.items() if int(v or 0) > now}
     _set_setting(_fv_distress_key(persona), json.dumps(raw))
     _fv_trace(persona, 'guardrail',
-              f'{handle or fan_uuid}: distress signal — pitching paused for 24h')
+              f'{handle or fan_uuid}: distress signal — pitching paused for 24h',
+              fan=_fan_key_of(fan_uuid))
     _fv_note_event(persona, fan_uuid, 'distress')
 
 
@@ -12137,7 +12269,8 @@ def _fv_queue_review(persona, fan_uuid, handle, reason):
     """Flag a fan for a human (§5). Visible in the trace and on the profile."""
     _fv_set_profile(persona, fan_uuid, review_reason=reason[:64],
                     review_at=datetime.now(timezone.utc))
-    _fv_trace(persona, 'review', f'{handle or fan_uuid}: {reason} — needs a human')
+    _fv_trace(persona, 'review', f'{handle or fan_uuid}: {reason} — needs a human',
+              fan=_fan_key_of(fan_uuid))
 
 
 def _fv_posteriors_for(persona, fan_type):
@@ -12198,7 +12331,7 @@ def _fv_assignment(persona, fan_uuid, handle, fan_type, cfg, force_funnel=''):
         s.commit()
         _fv_trace(persona, 'funnel',
                   f'{handle or fan_uuid} ({fan_type}) → {funnel} '
-                  f'{FN.FUNNELS[funnel]["name"]}')
+                  f'{FN.FUNNELS[funnel]["name"]}', fan=_fan_key_of(fan_uuid))
         return {'id': row.id, 'funnel': funnel, 'variant': variant,
                 'assigned_at': row.assigned_at, 'pitches_sent': 0,
                 'pitches_ignored': 0}
@@ -12232,7 +12365,7 @@ def _fv_exit_funnel(persona, fan_uuid, handle, assignment_id, reason, next_funne
         s.commit()
         _fv_trace(persona, 'funnel',
                   f'{handle or fan_uuid}: left {row.funnel_id} — {reason}'
-                  + (f'; next up {next_funnel}' if next_funnel else ''))
+                  + (f'; next up {next_funnel}' if next_funnel else ''), fan=_fan_key_of(fan_uuid))
     except Exception as e:
         logger.debug('funnel exit failed %s: %s', assignment_id, str(e)[:100])
     finally:
@@ -12756,7 +12889,8 @@ def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx, context
                 pstate, drop = _fv_drop_state(persona, state.get('last_drop_id'))
                 if pstate == PPV_UNKNOWN:
                     _fv_trace(persona, 'error',
-                              f'could not read payment state for {handle or fan_uuid} — holding')
+                              f'could not read payment state for {handle or fan_uuid} — holding',
+                              fan=fan_key)
                     return
                 paid = pstate == PPV_PAID
                 if not paid and _fv_drop_is_stale(drop, ctx.get('stale_days')):
@@ -12764,7 +12898,8 @@ def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx, context
                     logger.info('Fanvue [%s] %s: last PPV unbought past the stale '
                                 'window — moving to another set', persona, handle or fan_uuid)
                     _fv_trace(persona, 'ppv',
-                              f'{handle or fan_uuid}: unbought drop expired, trying another set')
+                              f'{handle or fan_uuid}: unbought drop expired, trying another set',
+                              fan=fan_key)
                     state['active_set'] = ''
                     state['retries'] = 0
                     paid = True
@@ -12800,7 +12935,8 @@ def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx, context
                                persona, handle or fan_uuid, str(e)[:120])
                 allowed, why, price_cap = True, '', 0
             if not allowed:
-                _fv_trace(persona, 'guardrail', f'{handle or fan_uuid}: {why}')
+                _fv_trace(persona, 'guardrail', f'{handle or fan_uuid}: {why}',
+                          fan=fan_key)
                 return
 
         hour = _fv_fan_hour(persona, fan_key, ctx.get('tz_offset'))
@@ -12809,7 +12945,8 @@ def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx, context
             logger.info('Fanvue [%s] %s: holding the drop, "%s" came up',
                         persona, handle or fan_uuid, blocked)
             _fv_trace(persona, 'ppv',
-                      f'held back from {handle or fan_uuid} — "{blocked}" came up')
+                      f'held back from {handle or fan_uuid} — "{blocked}" came up',
+                      fan=fan_key)
             return
         if resend:
             # Repeat the tier they did not buy, not the next one.
@@ -12831,7 +12968,8 @@ def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx, context
         if price_cap and price > price_cap:
             _fv_trace(persona, 'guardrail',
                       f'{handle or fan_uuid}: holding {chosen["name"]} tier {idx + 1} '
-                      f'(${price / 100:g} is over the ${price_cap / 100:g} cap)')
+                      f'(${price / 100:g} is over the ${price_cap / 100:g} cap)',
+                      fan=fan_key)
             return
         cap = _fv_caption(persona, chosen, tier, reply)
         try:
@@ -12844,7 +12982,8 @@ def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx, context
                 _fv_mark_unsendable(persona, fan_uuid, handle, str(e)[:160])
             else:
                 _fv_trace(persona, 'error',
-                          f'PPV to {handle or fan_uuid} failed: {str(e)[:200]}')
+                          f'PPV to {handle or fan_uuid} failed: {str(e)[:200]}',
+                          fan=fan_key)
             return
 
         msg_uuid = ''
@@ -12876,7 +13015,8 @@ def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx, context
                     handle or fan_uuid, price, off)
         _fv_trace(persona, 'ppv',
                   f"\U0001F48E {chosen['name']} tier {idx + 1}/{len(chosen['tiers'])}"
-                  f"{again} → {handle or fan_uuid} at ${price / 100:g}{off}: {cap}")
+                  f"{again} → {handle or fan_uuid} at ${price / 100:g}{off}: {cap}",
+                  fan=fan_key)
 
 
 # ── Chats Fanvue will not accept a message for ────────────────────────────────
@@ -12940,7 +13080,7 @@ def _fv_mark_unsendable(persona, fan_uuid, handle, why):
         _fv_trace(persona, 'error',
                   f'{handle or fan_uuid} [uuid {fan_uuid}] cannot be messaged '
                   f'({why}){shape} — standing down for {hours}h. Usually a '
-                  f'deleted account or a block.')
+                  f'deleted account or a block.', fan=_fan_key_of(fan_uuid))
     logger.info('Fanvue [%s] %s unsendable (try %d, %dh): %s',
                 persona, handle or fan_uuid, tries, hours, why)
 
@@ -12970,7 +13110,7 @@ def _fv_deliver(persona, scope, fan_uuid, fan_key, handle, reply, incoming, cfg,
             else:
                 _fv_trace(persona, 'error',
                           f'send to {handle or fan_uuid} [uuid {fan_uuid}] '
-                          f'failed: {str(e)[:200]}')
+                          f'failed: {str(e)[:200]}', fan=fan_key)
             return
         _fv_clear_unsendable(persona, fan_uuid)
         _log_x_message(persona, fan_key, handle, 'out', reply)
@@ -13114,7 +13254,8 @@ def _fanvue_import_history(persona, fan_uuid, handle, me_uuid, cap=200):
     if not me_uuid:
         _fv_trace(persona, 'error',
                   f'skipped importing history for {handle or fan_uuid}: '
-                  'this account\'s own Fanvue uuid could not be resolved')
+                  'this account\'s own Fanvue uuid could not be resolved',
+                  fan=_fan_key_of(fan_uuid))
         return 0, []
     try:
         msgs = _fanvue_chat_messages(persona, fan_uuid, cap)
@@ -13130,7 +13271,8 @@ def _fanvue_import_history(persona, fan_uuid, handle, me_uuid, cap=200):
             _fv_trace(persona, 'error',
                       f'skipped importing history for {handle or fan_uuid}: could not '
                       f'tell who sent one message (keys={sorted(m.keys())[:8]}). Starting '
-                      'this chat without history rather than mixing up who said what.')
+                      'this chat without history rather than mixing up who said what.',
+                      fan=_fan_key_of(fan_uuid))
             return 0, []
         rows.append((direction, mt))
     fan_key = 'fv:' + fan_uuid
@@ -13390,7 +13532,8 @@ def _fanvue_auto_round(persona):
                            handle, fu, '', hcfg, None, False)
                 log.append(f'↩ follow-up {sent_n + 1}/{FOLLOWUP_MAX} → {who} (typing…): {fu[:40]}')
                 _fv_trace(persona, 'follow-up',
-                          f'{who} went quiet — nudge {sent_n + 1}/{FOLLOWUP_MAX} on the way')
+                          f'{who} went quiet — nudge {sent_n + 1}/{FOLLOWUP_MAX} on the way',
+                          fan=fan_key)
             else:
                 _fv_deliver(persona, scope, fan_uuid, fan_key, handle, fu, '', hcfg,
                             None, False)
@@ -13423,7 +13566,8 @@ def _fanvue_auto_round(persona):
                 _fv_fan_state(state_map, fan_uuid, ppv_sets)['sets'].values())
             _set_setting(ppv_paid_key, json.dumps(paid_map))
             _fv_trace(persona, 'ppv', f'{who} said the test phrase — tier '
-                                      f'{paid_map[fan_uuid]} counted as paid')
+                                      f'{paid_map[fan_uuid]} counted as paid',
+                      fan=fan_key)
 
         # Funnel state for this fan: what they said reads for distress first,
         # then who they are, then which funnel they are in. All of it is
@@ -13474,7 +13618,8 @@ def _fanvue_auto_round(persona):
         reply = _fv_trim(reply, max_sentences=lim['sentences'], hard_cap=lim['cap'])
         reply = _strip_placeholders(trim_extra_questions(reply, may_ask))
         if not reply:
-            _fv_trace(persona, 'error', f'{who}: the model returned nothing — no reply sent')
+            _fv_trace(persona, 'error', f'{who}: the model returned nothing — no reply sent',
+                      fan=fan_key)
             continue
 
         # Mark cursor BEFORE sending to prevent duplicate replies on retry
@@ -14555,10 +14700,13 @@ def _tg_send_human(persona, chat_id, text, incoming='', photo_data=None):
 TG_TRACE_MAX = 120
 
 
-def _tg_trace(persona, stage, detail=''):
+def _tg_trace(persona, stage, detail='', fan=''):
     """Append one line to the persona's Telegram trace. Kept in the database so
     it survives a redeploy and can be read from the browser — Cloud Run's logs
-    are awkward to reach when a bot has simply gone quiet."""
+    are awkward to reach when a bot has simply gone quiet.
+
+    `fan` is the unified fan key ('tg:'/'tgu:') this line is about, when the
+    caller knows one, so the console can thread it into that conversation."""
     key = f'tg_trace_{persona or "platform"}'
     try:
         rows = json.loads(_get_setting(key) or '[]')
@@ -14566,7 +14714,10 @@ def _tg_trace(persona, stage, detail=''):
             rows = []
     except Exception:
         rows = []
-    rows.append({'at': int(time.time()), 'stage': stage, 'detail': str(detail)[:500]})
+    row = {'at': int(time.time()), 'stage': stage, 'detail': str(detail)[:500]}
+    if fan:
+        row['fan'] = fan
+    rows.append(row)
     _set_setting(key, json.dumps(rows[-TG_TRACE_MAX:]))
     logger.info('TG[%s] %s: %s', persona, stage, str(detail)[:200])
 
@@ -14741,11 +14892,13 @@ def _tg_handle_update(persona, update):
     cfg = _tg_settings(persona)
     if not cfg['enabled']:
         _tg_trace(persona, 'skipped',
-                  f'{who} ({chat_id}) — bot is switched off under "How she replies"')
+                  f'{who} ({chat_id}) — bot is switched off under "How she replies"',
+                  fan=_tg_fan_key(chat_id))
         return
     if not _tg_fan_allowed(cfg, chat_id, who):
         _tg_trace(persona, 'skipped',
-                  f"{who} ({chat_id}) — not in the {len(cfg['only_fans'])} selected fan(s)")
+                  f"{who} ({chat_id}) — not in the {len(cfg['only_fans'])} selected fan(s)",
+                  fan=_tg_fan_key(chat_id))
         return
     fan_key = _tg_fan_key(chat_id)
     fans = _tg_fans(persona)
@@ -14781,7 +14934,8 @@ def _tg_handle_update(persona, update):
     if cta_due and _funnel_pitching_paused(persona, fan_key):
         cta_due = False
         _tg_trace(persona, 'guardrail',
-                  f'{who}: holding the link back — they are having a rough time')
+                  f'{who}: holding the link back — they are having a rough time',
+                  fan=fan_key)
 
     catalog, media_rows, media_outfits = _tg_media_catalog(persona)
     photo_rule = ''
@@ -14830,7 +14984,8 @@ def _tg_handle_update(persona, update):
 
     reply = _tg_generate(persona, chat_id, instruction)
     if not reply:
-        _tg_trace(persona, 'error', f'{who}: the model returned nothing — no reply sent')
+        _tg_trace(persona, 'error', f'{who}: the model returned nothing — no reply sent',
+                  fan=fan_key)
         return
 
     photo_data = None
@@ -14876,7 +15031,8 @@ def _tg_handle_update(persona, update):
         _tg_send_human(persona, chat_id, reply, incoming=text, photo_data=photo_data)
         _tg_trace(persona, 'sent', f'→ {who}: {reply}')
     except Exception as e:
-        _tg_trace(persona, 'error', f'send to {who} failed: {str(e)[:200]}')
+        _tg_trace(persona, 'error', f'send to {who} failed: {str(e)[:200]}',
+                  fan=fan_key)
         raise
     if picked_media_id:
         _fan_record_sent_photo(persona, chat_id, picked_media_id)
@@ -15703,7 +15859,7 @@ def _tgu_plan(persona, chat_id, name, text, texts=None):
     if not _tg_fan_allowed(cfg, chat_id, name):
         _tg_trace(persona, 'skipped',
                   f"{name} ({chat_id}) — not in the {len(cfg['only_fans'])} selected fan(s): "
-                  + ', '.join(cfg['only_fans'][:8]))
+                  + ', '.join(cfg['only_fans'][:8]), fan=_tgu_fan_key(chat_id))
         return None
     acct = _tgu_accounts().get(persona) or {}
     fan_key = _tgu_fan_key(chat_id)
@@ -15742,7 +15898,8 @@ def _tgu_plan(persona, chat_id, name, text, texts=None):
     if cta_due and _funnel_pitching_paused(persona, fan_key):
         cta_due = False
         _tg_trace(persona, 'guardrail',
-                  f'{name}: holding the link back — they are having a rough time')
+                  f'{name}: holding the link back — they are having a rough time',
+                  fan=fan_key)
 
     catalog, media_rows, media_outfits = _tg_media_catalog(persona)
     photo_rule = ''
@@ -15905,7 +16062,8 @@ def _tgu_start(persona):
                 # showed a reply that simply never arrived.
                 try:
                     _tg_trace(persona, 'error',
-                              f'building the reply for {name} failed: {str(e)[:200]}')
+                              f'building the reply for {name} failed: {str(e)[:200]}',
+                              fan=_tgu_fan_key(chat_id))
                 except Exception:
                     pass
                 logger.exception('tgu plan failed for %s', persona)

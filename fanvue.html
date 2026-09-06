@@ -10,6 +10,8 @@
   <link rel="stylesheet" href="/css/style.css">
   <script src="/js/devnav.js" defer></script>
   <script src="/js/fanvue-guide.js" defer></script>
+  <script src="/js/chat-view.js"></script>
+  <script src="/js/console-shell.js"></script>
   <style>
     .fv-scroll { flex: 1; min-height: 0; overflow-y: auto; }
     .fv-wrap { max-width: 760px; margin: 0 auto; padding: 28px 24px 80px; display: flex; flex-direction: column; gap: 20px; }
@@ -67,7 +69,7 @@
 <div class="fv-scroll">
 <div class="fv-wrap">
 
-  <div class="form-section">
+  <div id="sec-account" class="form-section" data-tab="settings">
     <div class="section-title">Persona &amp; Fanvue account</div>
     <div class="field full" id="persona-row">
       <label>Choose a model (persona)</label>
@@ -193,7 +195,7 @@
     </div>
   </div>
 
-  <div class="form-section">
+  <div id="sec-funnels" class="form-section" data-tab="settings">
     <div class="section-title">🎯 Sales funnels &amp; fan scoring</div>
     <span class="hint" style="display:block; margin-bottom:14px;">Classifies each fan, puts them in the funnel that suits them, and learns which funnel works for which kind of fan. Off by default &mdash; with it off the PPV ladder above behaves exactly as it does today.</span>
     <div class="auto-toggles" style="display:flex; flex-wrap:wrap; gap:10px 20px;">
@@ -243,7 +245,7 @@
     </div>
   </div>
 
-  <div class="form-section">
+  <div id="sec-draft" class="form-section" data-tab="advanced">
     <div class="section-title">💬 Draft a reply</div>
     <span class="hint" style="display:block; margin-bottom:14px;">Generates an in-persona, funnel-aware reply to a fan's message. Works with no connection — copy it into Fanvue, or preview the voice before going live.</span>
     <div class="field full">
@@ -254,7 +256,7 @@
     <div class="result-box" id="draft-result"></div>
   </div>
 
-  <div class="form-section">
+  <div id="sec-auto" class="form-section" data-tab="settings">
     <div class="section-title">🤖 Auto-reply to DMs</div>
     <span class="hint" style="display:block; margin-bottom:14px;">Reads incoming Fanvue DMs and replies in-persona (with the funnel + conversation logging). Runs <b>server-side</b> — stays on across redeploys and needs no open tab. Turn it on per persona.</span>
     <div class="auto-toggles" id="fv-toggles-main" style="display:flex; flex-wrap:wrap; gap:10px 20px;">
@@ -345,7 +347,7 @@
     </div>
   </div>
 
-  <div class="form-section">
+  <div id="sec-log" class="form-section" data-tab="advanced">
     <div class="section-title">🩺 Activity log</div>
     <span class="hint" style="display:block; margin-bottom:10px;">Everything that has been said — each fan message that came in and every reply, PPV drop and error that went out. Updates by itself every few seconds.</span>
     <div id="fv-trace-problems"></div>
@@ -359,7 +361,7 @@
     </div>
   </div>
 
-  <div class="form-section">
+  <div id="sec-accounts" class="form-section" data-tab="advanced">
     <div class="section-title">👥 Connected accounts</div>
     <span class="hint" style="display:block; margin-bottom:14px;">Every persona with a Fanvue connection. Accounts with auto-reply on all run <b>at the same time</b> — one worker per account, so a busy inbox never holds up the others.</span>
     <div id="fv-accounts"><span class="hint">Loading…</span></div>
@@ -400,8 +402,7 @@ async function loadConfig(){
   loadFunnels();
   loadAuto();
   loadAccounts();
-  loadTrace();
-  startTraceLoop();
+  PlatformConsole.reset();
 }
 
 async function reconcilePpv(){
@@ -428,41 +429,115 @@ async function resetPpvProgress(){
   st.textContent='✓ Send progress cleared — purchase history kept'; st.style.color='#4ade80';
 }
 
-async function loadTrace(){
+// The Advanced tab's full log. The shell fetches the trace once and hands it
+// here, so the short feed on Overview and this table never disagree.
+function renderFullLog(d){
   const box=document.getElementById('fv-trace-rows'), pb=document.getElementById('fv-trace-problems');
-  try{
-    const d=await (await fetch('/api/fanvue/trace?persona='+encodeURIComponent(persona()))).json();
-    const bad=(d.problems||[]).length;
-    const q=(d.queued||0)>(d.workers||0)?' — '+d.queued+' queued, running late':((d.queued||0)?' ('+d.queued+' queued)':'');
-    const live=(d.connected?(d.enabled?(d.running?'● replying now':'● auto-reply on'):'○ auto-reply off'):'○ not connected')+q;
-    pb.innerHTML='<div class="note" style="border-color:'+(bad?'#3f3f46':'#14532d')+';color:'+(bad?'var(--text-2)':'#4ade80')+';margin-bottom:8px;">'+
-      (bad?'':'✓ ')+esc(d.persona||'')+' · '+live+'</div>'+
-      (d.problems||[]).map(p=>'<div class="note" style="border-color:#7f1d1d;color:#fca5a5;margin-bottom:8px;">⚠ '+esc(p)+'</div>').join('');
-    const rows=(d.rows||[]).slice().reverse();
-    const col={received:'#c7d2fe',sent:'#4ade80',ppv:'#f0abfc',typing:'var(--text-muted)','follow-up':'#fbbf24',error:'#fb7185',idle:'var(--text-muted)',delayed:'#fbbf24'};
-    box.innerHTML = rows.length ?
-      '<table class="fans"><tr><th>Time</th><th>What</th><th>Message</th></tr>'+
-      rows.map(r=>'<tr><td style="white-space:nowrap;">'+new Date((r.at||0)*1000).toLocaleTimeString()+
-        '</td><td style="color:'+(col[r.stage]||'var(--text-2)')+'">'+esc(r.stage)+
-        '</td><td style="white-space:pre-wrap;">'+esc(r.detail||'')+'</td></tr>').join('')+'</table>'
-      : '<span class="hint">Nothing recorded yet — the first line appears as soon as a fan writes.</span>';
-  }catch(e){ box.innerHTML='<span class="hint" style="color:#fb7185;">Could not load the log: '+esc(String(e))+'</span>'; }
+  const bad=(d.problems||[]).length;
+  const q=(d.queued||0)>(d.workers||0)?' — '+d.queued+' queued, running late':((d.queued||0)?' ('+d.queued+' queued)':'');
+  const live=(d.connected?(d.enabled?(d.running?'● replying now':'● auto-reply on'):'○ auto-reply off'):'○ not connected')+q;
+  pb.innerHTML='<div class="note" style="border-color:'+(bad?'#3f3f46':'#14532d')+';color:'+(bad?'var(--text-2)':'#4ade80')+';margin-bottom:8px;">'+
+    (bad?'':'✓ ')+esc(d.persona||'')+' · '+live+'</div>'+
+    (d.problems||[]).map(p=>'<div class="note" style="border-color:#7f1d1d;color:#fca5a5;margin-bottom:8px;">⚠ '+esc(p)+'</div>').join('');
+  const rows=(d.rows||[]).slice().reverse();
+  const col={received:'#c7d2fe',sent:'#4ade80',ppv:'#f0abfc',typing:'var(--text-muted)','follow-up':'#fbbf24',error:'#fb7185',idle:'var(--text-muted)',delayed:'#fbbf24'};
+  box.innerHTML = rows.length ?
+    '<table class="fans"><tr><th>Time</th><th>What</th><th>Message</th></tr>'+
+    rows.map(r=>'<tr><td style="white-space:nowrap;">'+new Date((r.at||0)*1000).toLocaleTimeString()+
+      '</td><td style="color:'+(col[r.stage]||'var(--text-2)')+'">'+esc(r.stage)+
+      '</td><td style="white-space:pre-wrap;">'+esc(r.detail||'')+'</td></tr>').join('')+'</table>'
+    : '<span class="hint">Nothing recorded yet — the first line appears as soon as a fan writes.</span>';
 }
+
+function loadTrace(){ PlatformConsole.refresh(); }
 
 async function clearTrace(){
   await fetch('/api/fanvue/trace?persona='+encodeURIComponent(persona()),{method:'DELETE'});
   loadTrace();
 }
 
-let traceTimer=null;
-function startTraceLoop(){
-  if(traceTimer) return;
-  traceTimer=setInterval(()=>{
-    if(document.hidden) return;
-    if(!document.getElementById('fv-trace-live').checked) return;
-    loadTrace();
-  },5000);
+// Which control fixes which complaint. The trace already says what is wrong in
+// plain words; this only decides where the button lands.
+const FV_FIX=[
+  [/not connected/i,            {tab:'settings', focus:'sec-account', label:'Connect her account'}],
+  [/auto-reply is off/i,        {tab:'settings', focus:'sec-auto',    label:'Turn auto-reply on'}],
+  [/only replying|never replying/i,{tab:'settings', focus:'sec-auto', label:'Check who she answers'}],
+  [/webhook/i,                  {tab:'advanced', focus:'sec-log',     label:'See the log'}],
+  [/database|ephemeral/i,       {tab:'advanced', focus:'sec-log',     label:'See the log'}],
+  [/no activity recorded/i,     {tab:'inbox',    focus:'',            label:'Open the inbox'}],
+];
+
+function fvHealth(d){
+  const rows=[
+    {state:d.connected?'ok':'bad', label:d.connected?'Account connected':'Not connected',
+     hint:d.connected?'She can read her Fanvue inbox and send as herself.'
+                     :'Connect her Fanvue account under Settings before anything else.'},
+    {state:d.enabled?'ok':'warn', label:d.enabled?'Auto-reply on':'Auto-reply off',
+     hint:d.enabled?(d.running?'She is writing a reply right now.':'She answers new DMs on her own.')
+                   :'Fans can write, but nothing will answer them.'},
+    {state:d.webhook_ready?'ok':'warn', label:d.webhook_ready?'Payments tracked live':'Payments found late',
+     hint:d.webhook_ready?'A purchase unlocks the next tier straight away.'
+                         :'Purchases still arrive, just on the next Reconcile rather than instantly.'},
+  ];
+  if(d.storage_ephemeral) rows.push({state:'bad', label:'Purchases are not saved',
+    hint:'The database is a temporary file — everything is forgotten on the next redeploy.'});
+  return rows;
 }
+
+async function fvStats(slug){
+  const out=[];
+  try{
+    const f=await (await fetch('/api/fanvue/funnel-stats?persona='+encodeURIComponent(slug))).json();
+    if(f.ok){
+      out.push({value:(f.fans||[]).length, label:'fans she knows'});
+      out.push({value:(f.review||[]).length, label:'waiting on a human'});
+    }
+  }catch(e){}
+  try{
+    const p=await (await fetch('/api/fanvue/ppv-stats?persona='+encodeURIComponent(slug))).json();
+    if(p.ok){
+      // ppv_set_stats is keyed per set:tier; the headline is the total.
+      const t=Object.values(p.stats||{}).reduce((a,v)=>({sent:a.sent+(v.sent||0),bought:a.bought+(v.bought||0)}),{sent:0,bought:0});
+      out.push({value:t.sent, label:'PPV sent'});
+      out.push({value:t.bought, label:'PPV bought'});
+    }
+  }catch(e){}
+  return out;
+}
+
+PlatformConsole.register({
+  platform:'fanvue',
+  persona:persona,
+  statusUrl:slug=>'/api/fanvue/trace?persona='+encodeURIComponent(slug),
+  emptyHint:'They appear as soon as a fan writes to her on Fanvue.',
+  // The guide borrows the console's own controls; polling into nodes that have
+  // been moved into it is pointless work and a source of flicker.
+  paused:()=>document.body.classList.contains('fg-open')
+          || !(document.getElementById('fv-trace-live')||{checked:true}).checked,
+  read:d=>({
+    live: !!(d.connected&&d.enabled),
+    broken: !d.connected,
+    title: !d.connected ? 'Fanvue is not connected'
+         : !d.enabled   ? 'Connected, but she is not answering'
+         : d.running    ? 'She is replying right now'
+                        : 'She is live and answering fans',
+    sub: !d.connected ? 'Nothing happens until her account is linked.'
+       : !d.enabled   ? 'Fans can write to her; the replies are switched off.'
+       : ((d.queued||0)>(d.workers||0) ? d.queued+' replies queued — she is running late.'
+                                       : 'New DMs are picked up every 20 seconds.'),
+    health: fvHealth(d),
+    steps: [
+      {label:'Connect',    done:!!d.connected, tab:'settings', focus:'sec-account'},
+      {label:'PPV content',done:!!d.connected&&(ppvSets||[]).some(x=>(x.tiers||[]).some(t=>(t.media_uuids||[]).length)),
+       tab:'settings', focus:'sec-auto'},
+      {label:'Reply rules',done:!!d.enabled, tab:'settings', focus:'sec-auto'},
+      {label:'Live',       done:!!(d.connected&&d.enabled&&!(d.problems||[]).length), tab:'overview'},
+    ],
+  }),
+  fixTab:p=>{ const hit=FV_FIX.find(([re])=>re.test(p)); return hit?hit[1]:{tab:'settings',label:'Open settings'}; },
+  stats:fvStats,
+  onStatus:renderFullLog,
+});
 
 let ppvSel=new Set();
 // Sets are themed bundles, like outfits; each holds its own ordered tiers.
@@ -1244,6 +1319,7 @@ async function draftReply(){
   if(!data.ok){err(box,data.error);return;}
   box.innerHTML='<div class="reply-card"><div class="rep">'+esc(data.reply)+'</div></div>';
 }
+PlatformConsole.mount('.fv-wrap');
 init();
 </script>
 

@@ -9,6 +9,8 @@
   <script src="/js/theme.js"></script>
   <link rel="stylesheet" href="/css/style.css">
   <script src="/js/devnav.js" defer></script>
+  <script src="/js/chat-view.js"></script>
+  <script src="/js/console-shell.js"></script>
   <style>
     .xbot-scroll { flex: 1; min-height: 0; overflow-y: auto; }
     .xbot-wrap { max-width: 760px; margin: 0 auto; padding: 28px 24px 80px; display: flex; flex-direction: column; gap: 20px; }
@@ -78,7 +80,7 @@
 <div class="xbot-scroll">
 <div class="xbot-wrap">
 
-  <div class="form-section">
+  <div id="sec-bot" class="form-section" data-tab="settings">
     <div class="section-title">Persona &amp; Bot</div>
     <div class="field full">
       <label>Choose a model (persona)</label>
@@ -139,7 +141,7 @@
     </div>
   </div>
 
-  <div class="form-section">
+  <div id="sec-replies" class="form-section" data-tab="settings">
     <div class="section-title">⚙️ How she replies</div>
     <span class="hint" style="display:block; margin-bottom:14px;">Applies to both the bot and the personal account below.</span>
     <div class="auto-toggles" style="display:flex; flex-wrap:wrap; gap:10px 22px;">
@@ -168,7 +170,7 @@
     </div>
   </div>
 
-  <div class="form-section">
+  <div id="sec-account" class="form-section" data-tab="settings">
     <div class="section-title">👤 Real account <span style="font-weight:400;font-size:0.75rem;color:var(--text-muted);">— no “bot” label, no /start</span></div>
     <span class="hint" style="display:block; margin-bottom:10px;">Signs in as an actual Telegram account instead of a bot. It shows up as a person, fans can message it without pressing START, and it can open conversations itself. Needs its own phone number.</span>
     <div class="note" style="border-color:#7f1d1d; color:#fca5a5; margin-bottom:14px;">⚠ Automating a user account is against the spirit of Telegram’s terms. Accounts that message people who haven’t written first get rate-limited or banned — use a number you can afford to lose, and keep the volume low.</div>
@@ -230,7 +232,7 @@
     </div>
   </div>
 
-  <div class="form-section">
+  <div id="sec-conversion" class="form-section" data-tab="settings">
     <div class="section-title">📊 Conversion</div>
     <div id="cta-warning" class="note" style="display:none; border-color:#7f1d1d; color:#fca5a5; margin-bottom:14px;"></div>
     <div class="stats">
@@ -250,7 +252,7 @@
     <span class="hint" style="display:block; margin-top:8px;">Tick <b>Talk to</b> for the fans she should reply to — with none ticked she talks to <b>everyone</b>, which is the default. Tick <b>Block</b> to shut a fan out entirely; a block always wins, even over a Talk-to tick. Skipped fans get no replies and no follow-ups; their messages are simply ignored.</span>
   </div>
 
-    <div class="form-section">
+    <div id="sec-media" class="form-section" data-tab="settings">
       <div class="section-title">
         Outfits &amp; Media
         <button type="button" class="btn-section-save" onclick="saveOutfits(this)">Save</button>
@@ -286,8 +288,9 @@
         Behind-the-scenes, Custom. Lighting and place come from the outfit, so every
         photo in a set stays consistent.
       </span>
+  </div>
 
-  <div class="form-section">
+  <div id="sec-log" class="form-section" data-tab="advanced">
     <div class="section-title">🩺 Activity log</div>
     <span class="hint" style="display:block; margin-bottom:10px;">Every incoming message and what the bot did with it. If she has gone quiet, the reason is here.</span>
     <div id="trace-problems"></div>
@@ -301,12 +304,12 @@
     </div>
   </div>
 
-  <div class="form-section">
+  <div id="sec-plumbing" class="form-section" data-tab="advanced">
     <div class="section-title">🤖 Telegram bot plumbing <span style="font-weight:400;font-size:0.75rem;color:var(--text-muted);">— only needed if you use a bot rather than the account above</span></div>
     <span class="hint" style="display:block;">Connect a bot at the top of this page. The settings below are the wiring behind it.</span>
   </div>
 
-  <div class="form-section">
+  <div id="sec-webhook" class="form-section" data-tab="advanced">
     <div class="section-title">🔗 Webhook</div>
     <span class="hint" style="display:block; margin-bottom:8px;">Registered automatically on connect. The path is unguessable and every request is checked against a per-bot secret header, so nobody else can puppet your persona.</span>
     <div class="field full">
@@ -316,7 +319,7 @@
     <div class="note" style="margin-top:12px;">Local development has no public HTTPS URL, so the webhook is skipped — deploy, or point the base URL at a tunnel, to receive messages.</div>
   </div>
 
-  <div class="form-section">
+  <div id="sec-platform" class="form-section" data-tab="advanced">
     <div class="section-title">⚙️ Platform bot <span style="font-weight:400;font-size:0.75rem;color:var(--text-muted);">— operator only, set once</span></div>
     <span class="hint" style="display:block; margin-bottom:10px;">The shared bot every subscriber connects to. Create it once in <a href="https://t.me/BotFather" target="_blank" style="color:var(--accent);">@BotFather</a> (<code>/newbot</code>), paste the token here, and from then on creators connect with one click.</span>
     <div class="row-inline">
@@ -458,21 +461,9 @@ function updateConn(){
   setMode(info.mode==='own'?'own':'hosted');
   showShare(info.share_link?info:null);
   loadStats();
-  loadTrace();
-  startTraceLoop();
+  PlatformConsole.reset();
   loadBehaviour();
   loadMedia();
-}
-
-let traceTimer=null;
-function startTraceLoop(){
-  if(traceTimer) return;
-  traceTimer=setInterval(()=>{
-    if(document.hidden) return;
-    const live=document.getElementById('tg-trace-live');
-    if(!live||!live.checked) return;
-    loadTrace();
-  },5000);
 }
 
 function togglePanel(){
@@ -578,36 +569,133 @@ async function saveBehaviour(btn){
   }catch(e){ st.textContent='✗ '+e; st.style.color='#fb7185'; }
 }
 
-async function loadTrace(){
+// The Advanced tab's full log. The shell fetches the trace once and hands the
+// same payload here, so the Overview feed and this table cannot disagree.
+function renderFullLog(d){
   const box=document.getElementById('trace-rows'), pb=document.getElementById('trace-problems');
-  try{
-    const d=await (await fetch('/api/telegram/trace?persona='+encodeURIComponent(persona()))).json();
-    // Always show what it is and whether it is live — that is the first thing
-    // you need when nothing is arriving, problems or not.
-    var live = d.personal ? (d.personal.running?'● running':'○ stopped')
-                          : (d.webhook&&d.webhook.url?'● webhook registered':'○ no webhook');
-    var head='<div class="note" style="border-color:'+((d.problems||[]).length?'#3f3f46':'#14532d')+
-      ';color:'+((d.problems||[]).length?'var(--text-2)':'#4ade80')+';margin-bottom:8px;">'+
-      ((d.problems||[]).length?'':'✓ ')+esc(d.mode||'bot')+
-      (d.username?(' @'+esc(d.username)):'')+' · '+live+
-      (d.bound_chats!=null?(' · '+d.bound_chats+' chat(s) bound'):'')+'</div>';
-    pb.innerHTML=head+(d.problems||[]).map(p=>'<div class="note" style="border-color:#7f1d1d;color:#fca5a5;margin-bottom:8px;">⚠ '+esc(p)+'</div>').join('');
-    const rows=(d.rows||[]).slice().reverse();
-    const col={received:'#c7d2fe',sent:'#4ade80',error:'#fb7185',skipped:'#fbbf24',
-               planning:'var(--text-muted)',webhook:'var(--text-muted)',routed:'#c7d2fe'};
-    box.innerHTML = rows.length ?
-      '<table class="fans"><tr><th>Time</th><th>What</th><th>Detail</th></tr>'+
-      rows.map(r=>'<tr><td style="white-space:nowrap;">'+new Date((r.at||0)*1000).toLocaleTimeString()+
-        '</td><td style="color:'+(col[r.stage]||'var(--text-2)')+'">'+esc(r.stage)+
-        '</td><td style="white-space:pre-wrap;">'+esc(r.detail||'')+'</td></tr>').join('')+'</table>'
-      : '<span class="hint">Nothing recorded yet. Send the bot a message on Telegram, then hit Refresh.</span>';
-  }catch(e){ box.innerHTML='<span class="hint" style="color:#fb7185;">Could not load the log: '+esc(String(e))+'</span>'; }
+  // Always show what it is and whether it is live — that is the first thing
+  // you need when nothing is arriving, problems or not.
+  var live = d.personal ? (d.personal.running?'● running':'○ stopped')
+                        : (d.webhook&&d.webhook.url?'● webhook registered':'○ no webhook');
+  var head='<div class="note" style="border-color:'+((d.problems||[]).length?'#3f3f46':'#14532d')+
+    ';color:'+((d.problems||[]).length?'var(--text-2)':'#4ade80')+';margin-bottom:8px;">'+
+    ((d.problems||[]).length?'':'✓ ')+esc(d.mode||'bot')+
+    (d.username?(' @'+esc(d.username)):'')+' · '+live+
+    (d.bound_chats!=null?(' · '+d.bound_chats+' chat(s) bound'):'')+'</div>';
+  pb.innerHTML=head+(d.problems||[]).map(p=>'<div class="note" style="border-color:#7f1d1d;color:#fca5a5;margin-bottom:8px;">⚠ '+esc(p)+'</div>').join('');
+  const rows=(d.rows||[]).slice().reverse();
+  const col={received:'#c7d2fe',sent:'#4ade80',error:'#fb7185',skipped:'#fbbf24',
+             planning:'var(--text-muted)',webhook:'var(--text-muted)',routed:'#c7d2fe'};
+  box.innerHTML = rows.length ?
+    '<table class="fans"><tr><th>Time</th><th>What</th><th>Detail</th></tr>'+
+    rows.map(r=>'<tr><td style="white-space:nowrap;">'+new Date((r.at||0)*1000).toLocaleTimeString()+
+      '</td><td style="color:'+(col[r.stage]||'var(--text-2)')+'">'+esc(r.stage)+
+      '</td><td style="white-space:pre-wrap;">'+esc(r.detail||'')+'</td></tr>').join('')+'</table>'
+    : '<span class="hint">Nothing recorded yet. Send the bot a message on Telegram, then hit Refresh.</span>';
 }
+
+function loadTrace(){ PlatformConsole.refresh(); }
 
 async function clearTrace(){
   await fetch('/api/telegram/trace?persona='+encodeURIComponent(persona()),{method:'DELETE'});
   loadTrace();
 }
+
+// Which control fixes which complaint. The trace already words the problem in
+// plain English; this only decides where the button lands.
+const TG_FIX=[
+  [/press Start on the Real account/i,{tab:'settings',focus:'sec-account',label:'Start her account'}],
+  [/personal account error/i,        {tab:'settings',focus:'sec-account',label:'Open the account'}],
+  [/no personal Telegram account/i,  {tab:'settings',focus:'sec-account',label:'Open the account'}],
+  [/Bot active is OFF/i,             {tab:'settings',focus:'sec-replies',label:'Turn her on'}],
+  [/only replying|never replying/i,  {tab:'settings',focus:'sec-conversion',label:'Check who she answers'}],
+  [/No Telegram bot is connected|shared bot/i,{tab:'settings',focus:'sec-bot',label:'Connect a bot'}],
+  [/no Telegram chat is bound/i,     {tab:'settings',focus:'sec-bot',label:'Get the connect link'}],
+  [/webhook|could not reach Telegram|undelivered/i,{tab:'advanced',focus:'sec-webhook',label:'Check the webhook'}],
+  [/platform bot/i,                  {tab:'advanced',focus:'sec-platform',label:'Set the platform bot'}],
+  [/No Telegram activity/i,          {tab:'inbox',   focus:'',            label:'Open the inbox'}],
+];
+
+function tgHealth(d){
+  const personal=d.personal||{};
+  const rows=[];
+  if(personal.connected){
+    rows.push({state:personal.running?'ok':'bad',
+      label:personal.running?'Her account is online':'Her account is offline',
+      hint:personal.running?('Signed in as @'+(personal.username||'her account')+'. No "bot" label, and she can write first.')
+                           :'Signed in, but not running — press Start. It also stops after a redeploy.'});
+  } else {
+    rows.push({state:d.connected?'ok':'bad',
+      label:d.connected?('Bot connected'+(d.username?' @'+d.username:'')):'Nothing connected',
+      hint:d.connected?('Running as the '+(d.mode||'bot')+'. Fans have to tap Start before she can write.')
+                      :'Connect a bot, or sign her personal account in, under Settings.'});
+    rows.push({state:(d.webhook&&d.webhook.url)?'ok':'warn',
+      label:(d.webhook&&d.webhook.url)?'Telegram can reach us':'No webhook registered',
+      hint:(d.webhook&&d.webhook.url)?'Messages are delivered the moment a fan sends them.'
+                                     :'Telegram has nowhere to deliver messages. Reconnect the bot.'});
+  }
+  rows.push({state:d.enabled?'ok':'warn', label:d.enabled?'Replies are on':'Replies are off',
+    hint:d.enabled?'She answers new messages on her own.'
+                  :'Fans can write, but the bot will not answer them.'});
+  const picked=(d.only_fans||[]).length, blocked=(d.exclude_fans||[]).length;
+  rows.push({state:(picked||blocked)?'warn':'ok',
+    label:picked?('Only '+picked+' fan(s)'):(blocked?(blocked+' fan(s) blocked'):'Everyone gets a reply'),
+    hint:picked?'Everybody else is ignored — untick them all to talk to everyone.'
+        :blocked?'Those fans are ignored; everyone else gets a reply.'
+                :'No audience filter is set, which is the default.'});
+  return rows;
+}
+
+// Whether the CTA link is set decides the third workflow step; /api/telegram/stats
+// is the only thing that knows, so remember what it said.
+let tgCtaSet=false;
+
+async function tgStats(slug){
+  try{
+    const d=await (await fetch('/api/telegram/stats?persona='+encodeURIComponent(slug))).json();
+    tgCtaSet=!!(d.cta_url||'').trim();
+    return [{value:d.fans||0, label:'fans'},
+            {value:d.cta_sent||0, label:'links sent'},
+            {value:d.cta_clicked||0, label:'links clicked'},
+            {value:(d.click_rate||0)+'%', label:'click rate'}];
+  }catch(e){ return []; }
+}
+
+PlatformConsole.register({
+  platform:'telegram',
+  persona:persona,
+  statusUrl:slug=>'/api/telegram/trace?persona='+encodeURIComponent(slug),
+  emptyHint:'They appear as soon as somebody messages her on Telegram.',
+  paused:()=>!(document.getElementById('tg-trace-live')||{checked:true}).checked,
+  read:d=>{
+    const personal=d.personal||{};
+    const up=personal.connected ? personal.running : d.connected;
+    return {
+      live: !!(up&&(personal.connected||d.enabled)),
+      broken: !up,
+      title: personal.connected
+        ? (personal.running?'Her Telegram account is answering':'Her account is signed in but stopped')
+        : (!d.connected?'Nothing is connected to Telegram'
+          : d.enabled?'Her bot is answering fans':'Bot connected, replies switched off'),
+      sub: personal.connected
+        ? (personal.running?('Running as @'+(personal.username||'her account')+' — she looks like a person, not a bot.')
+                           :'Press Start on the Real account panel. It also stops after every redeploy.')
+        : (!d.connected?'Connect a bot, or sign her real account in, under Settings.'
+          : d.enabled?('Running as the '+(d.mode||'bot')+(d.bound_chats!=null?' · '+d.bound_chats+' chat(s) bound':''))
+                     :'Fans can write to her; nothing will answer.'),
+      health: tgHealth(d),
+      steps: [
+        {label:'Connect',    done:!!(personal.connected||d.connected), tab:'settings', focus:'sec-bot'},
+        {label:'Reply rules',done:!!(d.enabled||personal.connected),   tab:'settings', focus:'sec-replies'},
+        {label:'Link & CTA', done:tgCtaSet,                            tab:'settings', focus:'sec-conversion'},
+        {label:'Live',       done:!!(up&&!(d.problems||[]).length),    tab:'overview'},
+      ],
+    };
+  },
+  fixTab:p=>{ const hit=TG_FIX.find(([re])=>re.test(p)); return hit?hit[1]:{tab:'settings',label:'Open settings'}; },
+  stats:tgStats,
+  onStatus:renderFullLog,
+});
 
 function selectAllFans(on){
   document.querySelectorAll('.fan-pick').forEach(c=>{c.checked=on;});
@@ -721,6 +809,7 @@ async function tguSend(){
 const _updateConn=updateConn;
 updateConn=function(){ _updateConn(); loadTgu(); };
 
+PlatformConsole.mount('.xbot-wrap');
 init();
 
 // ── Outfits & Media ─────────────────────────────────────────────────────────

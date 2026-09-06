@@ -3166,3 +3166,292 @@ body.embedding .form-area { padding: 0; overflow: hidden; }
   margin-left: auto; font-size: .68rem; text-transform: uppercase;
   letter-spacing: .04em; color: var(--text-muted, #6b6663);
 }
+
+/* ── Platform console ──────────────────────────────────────────────────────
+   The shell js/console-shell.js draws around the operator pages (/fanvue,
+   /telegram): a tab bar, a plain-English health read-out, and the inbox that
+   js/chat-view.js fills. Everything below is platform-agnostic on purpose —
+   a new platform registers itself and gets this for free. */
+
+.cn-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 0 0 22px;
+  padding: 4px;
+  background: var(--panel-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r);
+  overflow-x: auto;
+}
+.cn-tab {
+  flex: 1;
+  min-width: 92px;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 600;
+  padding: 9px 12px;
+  border-radius: var(--r-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+.cn-tab:hover { color: var(--text-2); background: var(--surface); }
+.cn-tab.on { background: var(--surface-2); color: var(--text); box-shadow: var(--shadow-sm); }
+.cn-tab-ic { font-size: 0.95rem; line-height: 1; }
+.cn-tab-badge {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 9999px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 0.65rem;
+  line-height: 18px;
+}
+.cn-tab-badge.warn { background: var(--warn); color: #1c1400; }
+
+.cn-pane { display: none; flex-direction: column; gap: 20px; }
+.cn-pane.on { display: flex; }
+
+/* Hero — the one sentence that says whether she is working. */
+.cn-hero {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 20px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r);
+  background: var(--panel-2);
+}
+.cn-hero-dot {
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-muted);
+  box-shadow: 0 0 0 4px var(--surface);
+}
+.cn-hero.live .cn-hero-dot { background: var(--ok); animation: cn-pulse 2.4s infinite; }
+.cn-hero.warn .cn-hero-dot { background: var(--warn); }
+.cn-hero.off  .cn-hero-dot { background: var(--err); }
+@keyframes cn-pulse { 50% { box-shadow: 0 0 0 8px transparent; } }
+.cn-hero-txt { min-width: 0; }
+.cn-hero-title { font-size: 1.05rem; font-weight: 700; color: var(--text); }
+.cn-hero-sub { font-size: 0.8rem; color: var(--text-muted); margin-top: 2px; }
+
+/* Workflow ribbon — the four things to do, in order, with where you are. */
+.cn-steps { display: flex; gap: 8px; flex-wrap: wrap; }
+.cn-step {
+  flex: 1 1 130px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 11px 13px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-sm);
+  background: var(--panel-2);
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+}
+.cn-step:hover { border-color: var(--border); color: var(--text-2); }
+.cn-step-n {
+  width: 21px; height: 21px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.7rem;
+}
+.cn-step.done { color: var(--text-2); }
+.cn-step.done .cn-step-n { background: var(--ok); border-color: var(--ok); color: #04240f; }
+.cn-step.now { border-color: var(--accent-line); color: var(--text); background: var(--accent-soft); }
+.cn-step.now .cn-step-n { border-color: var(--accent); color: var(--accent); }
+
+/* Health — one row per thing that can be wrong, said in plain words. */
+.cn-health { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; }
+.cn-hcard {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-sm);
+  background: var(--panel-2);
+}
+.cn-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; margin-top: 5px; background: var(--text-muted); }
+.cn-dot.ok { background: var(--ok); }
+.cn-dot.warn { background: var(--warn); }
+.cn-dot.bad { background: var(--err); }
+.cn-hcard-l { display: block; font-size: 0.82rem; font-weight: 600; color: var(--text); }
+.cn-hcard-h { display: block; font-size: 0.74rem; color: var(--text-muted); margin-top: 2px; line-height: 1.45; }
+
+/* Next step — deliberately never more than one at a time. */
+.cn-next {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 16px 18px;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--r);
+  background: var(--accent-soft);
+}
+.cn-next.ok { border-color: #14532d; background: #14532d22; }
+.cn-next-txt { flex: 1; min-width: 200px; }
+.cn-next-eyebrow {
+  font-size: 0.68rem; font-weight: 700; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--accent);
+}
+.cn-next.ok .cn-next-eyebrow { color: var(--ok); }
+.cn-next-body { font-size: 0.88rem; color: var(--text); line-height: 1.5; margin-top: 4px; }
+.cn-more {
+  border: 0; background: transparent; padding: 0; margin-top: 8px;
+  color: var(--text-muted); font: inherit; font-size: 0.75rem;
+  text-decoration: underline; cursor: pointer;
+}
+.cn-more-list { margin: 8px 0 0; padding-left: 18px; font-size: 0.78rem; color: var(--text-2); line-height: 1.6; }
+
+/* Counters. */
+.cn-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; }
+.cn-stat {
+  padding: 13px 15px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-sm);
+  background: var(--panel-2);
+}
+.cn-stat-v { font-family: var(--display); font-size: 1.4rem; font-weight: 700; color: var(--text); line-height: 1.1; }
+.cn-stat-l { font-size: 0.72rem; color: var(--text-muted); margin-top: 3px; }
+
+/* Recent activity — the short version. The full log lives under Advanced. */
+.cn-feed { display: flex; flex-direction: column; }
+.cn-feed-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 2px;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 0.82rem;
+  color: var(--text-2);
+}
+.cn-feed-row:last-child { border-bottom: 0; }
+.cn-feed-ic { flex-shrink: 0; font-size: 0.9rem; }
+.cn-feed-txt { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.cn-feed-at { flex-shrink: 0; font-size: 0.7rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.cn-feed-go {
+  border: 0; background: transparent; padding: 0; margin-left: 6px;
+  color: var(--accent); font: inherit; font-size: 0.72rem; cursor: pointer;
+}
+
+/* Inbox — the fan list next to the conversation, read the way a fan reads it. */
+.cn-inbox {
+  display: grid;
+  grid-template-columns: minmax(200px, 260px) 1fr;
+  gap: 0;
+  height: min(70vh, 640px);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r);
+  overflow: hidden;
+  background: var(--panel-2);
+}
+.cn-fans { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--border-soft); }
+.cn-fans-head {
+  padding: 11px 13px;
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+}
+.cn-fans-list { flex: 1; min-height: 0; overflow-y: auto; }
+.cn-fan {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%;
+  padding: 10px 13px;
+  border: 0;
+  border-bottom: 1px solid var(--border-soft);
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cn-fan:hover { background: var(--surface); }
+.cn-fan.on { background: var(--surface-2); box-shadow: inset 3px 0 0 var(--accent); }
+.cn-fan-av {
+  width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
+  background: var(--surface-2); color: var(--text-3);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.78rem; font-weight: 700; text-transform: uppercase;
+}
+.cn-fan-txt { min-width: 0; flex: 1; }
+.cn-fan-name { display: block; font-size: 0.82rem; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cn-fan-last { display: block; font-size: 0.73rem; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+.cn-fan-side { flex-shrink: 0; text-align: right; }
+.cn-fan-at { display: block; font-size: 0.66rem; color: var(--text-muted); }
+.cn-fan-wait {
+  display: inline-block; margin-top: 3px;
+  padding: 1px 6px; border-radius: 9999px;
+  background: var(--accent); color: var(--accent-ink);
+  font-size: 0.62rem; font-weight: 700;
+}
+
+.cn-thread { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.cn-thread-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--panel);
+}
+.cn-thread-back { display: none; border: 0; background: transparent; color: var(--text-2); font: inherit; font-size: 1rem; cursor: pointer; padding: 0 2px; }
+.cn-thread-name { font-size: 0.88rem; font-weight: 700; color: var(--text); }
+.cn-thread-meta { font-size: 0.72rem; color: var(--text-muted); }
+/* The fan-chat window assumes a fixed page header sits above it; in here it
+   does not, so the reserved space would show as a gap at the top. */
+.cn-thread .chat-window { padding: 16px 14px; background: var(--panel-2); }
+
+/* What the bot did, in the place in the conversation where it did it. */
+.cn-event {
+  align-self: center;
+  max-width: 88%;
+  margin: 8px 0 4px;
+  padding: 5px 12px;
+  border-radius: 9999px;
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-dim);
+  text-align: center;
+}
+.cn-event.ppv { color: #f0abfc; border-color: #f0abfc44; }
+.cn-event.error { color: #fb7185; border-color: #fb718544; }
+.cn-event.guardrail, .cn-event.skipped, .cn-event.delayed { color: var(--warn); border-color: #fbbf2444; }
+.cn-event.funnel, .cn-event.routed { color: #c7d2fe; border-color: #c7d2fe44; }
+
+.cn-empty { padding: 34px 20px; text-align: center; color: var(--text-muted); font-size: 0.83rem; line-height: 1.6; }
+
+@media (max-width: 860px) {
+  .cn-inbox { grid-template-columns: 1fr; height: min(76vh, 620px); }
+  .cn-fans { border-right: 0; border-bottom: 1px solid var(--border-soft); }
+  /* One column: the list is the screen until a fan is picked, then the thread
+     is, with a back arrow — the drill-down every phone messenger uses. */
+  .cn-inbox.reading .cn-fans { display: none; }
+  .cn-inbox:not(.reading) .cn-thread { display: none; }
+  .cn-inbox.reading .cn-thread-back { display: block; }
+}
+
+/* Where "take me there" lands, so the control it means is obvious on arrival. */
+.cn-flash { animation: cn-flash 1.6s ease-out; }
+@keyframes cn-flash {
+  0%, 100% { box-shadow: none; }
+  15%, 60% { box-shadow: var(--ring); border-color: var(--accent-line); }
+}
