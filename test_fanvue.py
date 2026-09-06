@@ -618,6 +618,58 @@ def test_webhook_accepts_any_known_secret():
           not app._fv_verify_signature(body, 't=%s,v0=%s' % (old_ts, sig), 'per-hook')[0])
 
 
+def test_webhook_diagnosis():
+    """Fanvue can refuse a subscription with a 400 and an empty error body. The
+    check has to narrow that to a cause instead of repeating the empty error."""
+    import utils
+    utils._is_operator = lambda: True
+    store = {}
+    app._get_setting = lambda k, d=None: store.get(k, d)
+    app._set_setting = lambda k, v: store.__setitem__(k, v)
+    app._callback_origin = lambda: 'https://dev.example.run.app'
+    app._fanvue_tokens = lambda p: {'access_token': 't',
+                                    'scope': 'openid read:self read:chat'}
+
+    def run(api):
+        app._fanvue_call = api
+        with app.app.test_request_context('/api/fanvue/webhook-check', method='POST',
+                                          json={'persona': 'lilly'}):
+            return json.loads(app.api_fanvue_webhook_check().get_data())
+
+    def refuse_all(p, m, path, body=None):
+        if m == 'GET':
+            return {'data': []}
+        raise RuntimeError('Fanvue API 400: {"error":""}')
+    r = run(refuse_all)
+    check('a blanket refusal points at the URL', 'points at the URL' in r['verdict'], r)
+    check('and names the URL that was sent',
+          r['url'] == 'https://dev.example.run.app/webhooks/fanvue', r['url'])
+
+    def one_event_ok(p, m, path, body=None):
+        if m == 'GET':
+            return {'data': []}
+        if len(body.get('events', [])) == 1:
+            return {'id': 'wh-2', 'signingSecret': 's2'}
+        raise RuntimeError('Fanvue API 400: {"error":""}')
+    r = run(one_event_ok)
+    check('one event succeeding points at the event list', 'event list' in r['verdict'], r)
+    check('and the subscription that worked is kept',
+          json.loads(store['fanvue_webhook_lilly'])['secret'] == 's2')
+
+    store.clear()
+    def already(p, m, path, body=None):
+        if m == 'GET':
+            return {'data': [{'id': 'wh-x', 'events': ['creator.message.read'],
+                              'url': 'https://dev.example.run.app/webhooks/fanvue'}]}
+        raise AssertionError('must not create a second subscription')
+    r = run(already)
+    check('an existing subscription is recognised', 'already subscribed' in r['verdict'], r)
+
+    app._callback_origin = lambda: 'http://localhost:8080'
+    check('a local deployment is told what is missing',
+          'PUBLIC_BASE_URL' in run(refuse_all)['verdict'])
+
+
 if __name__ == '__main__':
     for fn in (test_direction, test_import, test_identity_never_crosses,
                test_placeholders, test_pacing, test_backlog,
@@ -628,7 +680,7 @@ if __name__ == '__main__':
                test_guardrail_failure_does_not_cost_a_sale,
                test_funnel_config_roundtrip, test_distress_pause_is_written_once,
                test_funnel_exits, test_webhook_subscription,
-               test_webhook_accepts_any_known_secret):
+               test_webhook_accepts_any_known_secret, test_webhook_diagnosis):
         print('\n--- %s ---' % fn.__name__)
         restore_app()
         fn()

@@ -229,6 +229,10 @@
     <button class="btn-ai" style="margin-top:12px;" onclick="saveFunnels()">Save funnel settings</button>
     <span class="hint" id="fn-status" style="margin-left:10px;"></span>
     <div class="hint" id="fn-hook" style="display:block;margin-top:8px;font-size:.74rem;"></div>
+    <div id="fn-hook-check" style="margin-top:6px;">
+      <button class="btn-ai" style="background:var(--border);font-size:.76rem;padding:6px 12px;" onclick="checkHook()">Diagnose webhook</button>
+      <div id="fn-hook-report" style="margin-top:8px;font-size:.74rem;"></div>
+    </div>
 
     <div id="fn-stats" style="margin-top:18px;border-top:1px solid var(--border-soft);padding-top:14px;">
       <div style="font-size:.82rem;color:var(--text-2);margin-bottom:8px;"><b>What is working</b> <span class="hint">&mdash; revenue per fan assigned, by fan type and funnel. Cells go solid once there is enough data to trust them.</span></div>
@@ -862,6 +866,22 @@ function renderHook(h){
       +(h.reason?' — '+esc(h.reason):'')+'.</span> Purchases and unsubscribes will only '
       +'be picked up by the slower reconcile, and churn will not be scored.';
   }
+}
+
+// Fanvue can refuse a subscription with an empty error body, so this asks it
+// enough questions to name the cause instead of guessing.
+async function checkHook(){
+  const box=document.getElementById('fn-hook-report');
+  box.innerHTML='<span style="color:var(--text-muted);">Asking Fanvue…</span>';
+  const d=await post('/api/fanvue/webhook-check',{persona:persona()});
+  if(!d.ok){box.innerHTML='<span style="color:#fb7185;">✗ '+esc(d.error||'Failed')+'</span>';return;}
+  const steps=(d.steps||[]).map(s=>'<div style="color:'+(s.ok?'var(--text-2)':'#fb7185')+';">'
+    +(s.ok?'✓':'✗')+' '+esc(s.step)+(s.ok?'':' — '+esc(s.error||''))+'</div>').join('');
+  box.innerHTML='<div style="color:var(--text-2);">URL: <code>'+esc(d.url||'(none)')+'</code></div>'
+    +'<div style="color:var(--text-muted);">Permissions: '+esc((d.granted_scopes||[]).join(' ')||'none')+'</div>'
+    +'<div style="color:var(--text-muted);">Events wanted: '+esc((d.wanted_events||[]).join(', ')||'none')+'</div>'
+    +steps+'<div style="margin-top:6px;">'+esc(d.verdict||'')+'</div>';
+  loadFunnels();
 }
 
 function fnCell(c){

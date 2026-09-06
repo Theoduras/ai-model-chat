@@ -10473,8 +10473,12 @@ def _fv_ensure_webhook(persona, force=False):
         made = _fanvue_call(persona, 'POST', '/webhooks/subscriptions',
                             body={'url': url, 'events': wanted})
     except Exception as e:
-        _fv_trace(persona, 'error', f'webhook subscription failed: {str(e)[:180]}')
-        return {'ok': False, 'reason': str(e)[:160]}
+        _fv_trace(persona, 'error',
+                  f'webhook subscription refused for {url} '
+                  f'({len(wanted)} events: {", ".join(wanted)}) — {str(e)[:200]}')
+        _set_setting(_fv_hook_key(persona), json.dumps(
+            dict(stored, url=url, last_error=str(e)[:300], tried=wanted)))
+        return {'ok': False, 'reason': str(e)[:160], 'url': url, 'tried': wanted}
     body = made.get('data') if isinstance(made.get('data'), dict) else made
     secret = str((body or {}).get('signingSecret') or '')
     _set_setting(_fv_hook_key(persona), json.dumps(
@@ -10944,6 +10948,94 @@ def api_fanvue_funnels():
                ', '.join(cfg['unlocked'])) if cfg['enabled'] else 'funnel system off')
     return jsonify({'ok': True, 'config': cfg, 'webhook': hook})
 
+
+@app.route('/api/fanvue/webhook-check', methods=['POST'])
+@platform_scoped
+def api_fanvue_webhook_check():
+    """Work out why Fanvue is refusing the webhook subscription.
+
+    Fanvue can answer a rejected subscription with a 400 and an empty error
+    body, which says nothing. This narrows it down without guessing: what URL
+    was sent, what the account already has, and whether a single-event request
+    is refused too — which separates "the URL is the problem" from "one of the
+    events is"."""
+    d = request.json or {}
+    persona = (d.get('persona') or '').strip()
+    if not persona:
+        return jsonify({'ok': False, 'error': 'Missing persona'}), 400
+    granted = sorted((_fanvue_tokens(persona).get('scope') or '').split())
+    url = _fv_webhook_url()
+    wanted = _fv_wanted_events(persona)
+    out = {'ok': True, 'url': url, 'granted_scopes': granted,
+           'wanted_events': wanted,
+           'missing_scopes': sorted({need for ev, need in FV_WEBHOOK_EVENTS.items()
+                                     if need not in granted}),
+           'stored': {k: v for k, v in _fv_stored_hook(persona).items()
+                      if k != 'secret'},
+           'steps': []}
+
+    def step(name, fn):
+        try:
+            out['steps'].append({'step': name, 'ok': True, 'result': fn()})
+            return True
+        except Exception as e:
+            out['steps'].append({'step': name, 'ok': False,
+                                 'error': str(e)[:300],
+                                 'status': getattr(e, 'code', None)})
+            return False
+
+    if not url:
+        out['verdict'] = ('This deployment has no public https origin, so there '
+                          'is nothing to subscribe. Set PUBLIC_BASE_URL.')
+        return jsonify(out)
+
+    listed = {}
+    step('list existing subscriptions',
+         lambda: listed.setdefault('rows', [
+             {'id': r.get('id'), 'url': r.get('url'), 'events': r.get('events')}
+             for r in (_fv_list(_fanvue_call(persona, 'GET', '/webhooks/subscriptions')) or [])
+         ]))
+    rows = listed.get('rows', [])
+    if any(str(r.get('url') or '').rstrip('/') == url for r in rows):
+        out['verdict'] = ('This URL is already subscribed on the account — the '
+                          'app should be reusing it rather than creating one.')
+        return jsonify(out)
+
+    # One event, on the same URL. If this is accepted the URL is fine and the
+    # event list was the problem; if it is refused the same way, it is the URL.
+    probe_event = 'creator.message.read' if 'read:chat' in granted else (
+        wanted[0] if wanted else '')
+    created = {}
+    if probe_event:
+        ok = step(f'subscribe to {probe_event} only',
+                  lambda: created.setdefault('res', _fanvue_call(
+                      persona, 'POST', '/webhooks/subscriptions',
+                      body={'url': url, 'events': [probe_event]})))
+        if ok:
+            body = created['res']
+            body = body.get('data') if isinstance(body.get('data'), dict) else body
+            # Keep it: a subscription that works is better than none, and the
+            # secret is only ever returned here.
+            _set_setting(_fv_hook_key(persona), json.dumps(
+                {'id': str((body or {}).get('id') or ''), 'url': url,
+                 'events': [probe_event],
+                 'secret': str((body or {}).get('signingSecret') or '')}))
+            out['verdict'] = (
+                'A single-event subscription was accepted, so the URL is fine '
+                'and Fanvue rejected something in the full event list. It has '
+                'been kept, and %s is now delivered.' % probe_event)
+            if len(wanted) > 1:
+                out['verdict'] += (' Re-save the funnel settings to try the rest '
+                                   'again, one at a time.')
+            return jsonify(out)
+
+    out['verdict'] = (
+        'Fanvue refused even a single event on %s. That points at the URL '
+        'itself rather than the events: check that this exact origin is the one '
+        'registered for the app in the Fanvue Developer Area (your app → '
+        'Events), that PUBLIC_BASE_URL matches it, and that no endpoint for it '
+        'already exists there.' % url)
+    return jsonify(out)
 
 @app.route('/api/fanvue/funnel-stats')
 @platform_scoped
@@ -12721,8 +12813,10 @@ def _fv_deliver(persona, scope, fan_uuid, fan_key, handle, reply, incoming, cfg,
             _fv_send_human(persona, scope, fan_uuid, reply, incoming=incoming,
                            cfg=cfg, active=active)
         except Exception as e:
-            logger.warning('Fanvue send to %s failed: %s', handle or fan_uuid, str(e)[:120])
-            _fv_trace(persona, 'error', f'send to {handle or fan_uuid} failed: {str(e)[:200]}')
+            logger.warning('Fanvue send to %s (%s) failed: %s',
+                           handle or fan_uuid, fan_uuid, str(e)[:120])
+            _fv_trace(persona, 'error',
+                      f'send to {handle or fan_uuid} [uuid {fan_uuid}] failed: {str(e)[:200]}')
             return
         _log_x_message(persona, fan_key, handle, 'out', reply)
         _fv_trace(persona, 'sent', f'→ {handle or fan_uuid}: {reply}')
@@ -13459,16 +13553,20 @@ def api_fanvue_trace():
         problems.append('Purchases will be forgotten on the next redeploy — the '
                         'database is an ephemeral file. Set DATABASE_URL (or the '
                         'Cloud SQL env vars) to keep them.')
-    if not _fv_webhook_secret():
-        problems.append('No FANVUE_WEBHOOK_SECRET, so payment webhooks are '
+    hook = _fv_stored_hook(persona)
+    if not (_fv_webhook_secret() or hook.get('secret')):
+        problems.append('No webhook signing secret, so payment webhooks are '
                         'rejected. Purchases are still picked up by Reconcile, '
                         'just later.')
+    if hook.get('last_error'):
+        problems.append('Fanvue refused the webhook subscription for %s — %s'
+                        % (hook.get('url') or 'this app', hook['last_error'][:160]))
     return jsonify({'persona': persona, 'connected': connected,
                     'enabled': bool(opts.get('enabled')),
                     'running': bool(lock and lock.locked()),
                     'queued': _fv_inflight[0], 'workers': _fv_workers(),
                     'storage_ephemeral': ephemeral,
-                    'webhook_ready': bool(_fv_webhook_secret()),
+                    'webhook_ready': bool(_fv_webhook_secret() or hook.get('secret')),
                     'problems': problems, 'rows': rows[-FV_TRACE_MAX:]})
 
 
