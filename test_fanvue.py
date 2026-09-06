@@ -729,7 +729,30 @@ def test_unsendable_chats():
     check('a malformed id is called out as ours',
           any('not a uuid' in d for st, d in traced), traced)
 
+    # The round must not see them at all: no reply slot, no read, one log line.
+    store[app._fv_unsendable_key('lilly')] = json.dumps(
+        {uid: {'until': time.time() + 3600, 'tries': 1, 'handle': 'aikoxxx', 'why': 'x'}})
+    chats = [{'user': {'uuid': uid, 'handle': 'aikoxxx'}},
+             {'user': {'uuid': '99999999-2222-3333-4444-555555555555', 'handle': 'jo'}}]
+    read = []
+    app._fanvue_paged = lambda p, path, **k: chats if path.endswith('/chats') else []
+    app._fanvue_me_uuid = lambda p: 'me-1'
+    app._fanvue_scope = lambda p: ''
+    app._fanvue_auto_settings = lambda p: {'reply_limit': 10}
+    app._fanvue_chat_messages = lambda p, u, w: read.append(u) or []
+    app._fanvue_ppv_sets = lambda p: []
+    app._fanvue_msg_count = lambda p, k: 5
+    acts, rlog = app._fanvue_auto_round('lilly')
+    check('the dead chat is never read', uid not in read, read)
+    check('the live one still is', '99999999-2222-3333-4444-555555555555' in read, read)
+    check('it is counted as dropped', acts['skipped_unsendable'] == 1, acts)
+    check('and said once, not once per chat',
+          len([l for l in rlog if 'dropped' in l]) == 1, rlog)
+    check('the chat count reflects what is worked',
+          any(l.startswith('1 chats found') for l in rlog), rlog)
+
     # Anything else is still reported as a plain failure, not stood down.
+    store.pop(app._fv_unsendable_key('lilly'), None)   # clear the seeded row
     traced.clear()
     other = app.FanvueApiError.__new__(app.FanvueApiError)
     other.code, other.detail = 500, 'Internal error'

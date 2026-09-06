@@ -13169,6 +13169,23 @@ def _fanvue_auto_round(persona):
 
     scope = _fanvue_scope(persona)
     chats = _fanvue_paged(persona, f'{scope}/chats')
+    # A chat Fanvue will not accept a message for cannot be answered, so it is
+    # dropped before the round starts rather than walked past inside it: no
+    # reply slot, no API call, and one line in the log instead of one per chat.
+    dropped, live = [], []
+    for chat in chats:
+        fan, fan_handle = _fv_user_of_chat(chat)[:2]
+        stood_down = _fv_is_unsendable(persona, fan or '')
+        if stood_down:
+            dropped.append(fan_handle or stood_down.get('handle') or (fan or '?')[:8])
+        else:
+            live.append(chat)
+    if dropped:
+        chats = live
+        actions['skipped_unsendable'] = len(dropped)
+        log.append(f'{len(dropped)} chat(s) dropped — Fanvue will not accept a '
+                   f'message for them: ' + ', '.join(dropped[:5])
+                   + (' …' if len(dropped) > 5 else ''))
     cr = _fanvue_creator(persona).get('handle')
     log.append(f'{len(chats)} chats found' + (f' (acting as @{cr})' if cr else '') + (f'; only={only}' if only else ''))
     for chat in chats:
@@ -13197,15 +13214,6 @@ def _fanvue_auto_round(persona):
         if online_only and not _fv_chat_online(chat, online_grace):
             actions['skipped_offline'] += 1
             log.append(f'{who}: skipped (offline)')
-            continue
-        # Fanvue refuses to accept a message for this chat. Reading it still
-        # works, so without this it is re-answered every round for nothing.
-        stood_down = _fv_is_unsendable(persona, fan_uuid)
-        if stood_down:
-            actions['skipped_unsendable'] += 1
-            left = int((float(stood_down['until']) - time.time()) / 3600)
-            log.append(f'{who}: skipped (Fanvue will not accept a message — '
-                       f'{stood_down.get("why", "")}; retrying in {left}h)')
             continue
         fan_key = 'fv:' + fan_uuid
         try:
