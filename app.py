@@ -11623,6 +11623,43 @@ def _fanvue_import_history(persona, fan_uuid, handle, me_uuid, cap=200):
     return len(rows), [t for d, t in rows if d == 'in']
 
 
+FV_CHATS_PAGE_SIZE = 50   # Fanvue's max page size for /chats
+FV_CHATS_MAX_PAGES = 20   # hard stop so one round can't walk forever
+
+
+def _fanvue_all_chats(persona, scope):
+    """Every chat on the account, not just the first page.
+
+    Fanvue paginates /chats with page/size and ignores ?limit=, so the old
+    single call silently only ever saw one default-sized page — fans further
+    down the inbox were never looked at at all."""
+    out, seen = [], set()
+    for page in range(1, FV_CHATS_MAX_PAGES + 1):
+        try:
+            res = _fanvue_call(persona, 'GET', f'{scope}/chats'
+                               f'?page={page}&size={FV_CHATS_PAGE_SIZE}')
+        except Exception as e:
+            logger.info('Fanvue chats page %d failed for %s: %s', page, persona,
+                        str(e)[:200])
+            break
+        rows = _fv_list(res)
+        if not rows:
+            break
+        for chat in rows:
+            key = str(_fv_first(chat, 'uuid', 'id', default='') or '') or None
+            if key and key in seen:
+                continue
+            if key:
+                seen.add(key)
+            out.append(chat)
+        pg = (res.get('pagination') or {}) if isinstance(res, dict) else {}
+        more = pg.get('hasMore') if 'hasMore' in pg else \
+            len(rows) >= FV_CHATS_PAGE_SIZE
+        if not more:
+            break
+    return out
+
+
 def _fanvue_auto_round(persona):
     """One live auto-reply round: reply in-persona to new fan messages, skipping
     other creators when configured. Returns (actions, log)."""
@@ -11690,7 +11727,7 @@ def _fanvue_auto_round(persona):
         FOLLOWUP_BASE_MIN = 30   # first nudge after ~30m silence, then longer
 
     scope = _fanvue_scope(persona)
-    chats = _fv_list(_fanvue_call(persona, 'GET', f'{scope}/chats?limit=30'))
+    chats = _fanvue_all_chats(persona, scope)
     cr = _fanvue_creator(persona).get('handle')
     log.append(f'{len(chats)} chats found' + (f' (acting as @{cr})' if cr else '') + (f'; only={only}' if only else ''))
     for chat in chats:
