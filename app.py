@@ -10901,15 +10901,21 @@ def _fv_user_of_chat(chat):
 def _fv_chat_online(chat, grace_minutes=5):
     """Whether the fan on this chat is around right now.
 
-    Fanvue puts `online` (bool) and `lastSeenAt` (date|null) on the chat itself,
-    not on the nested user. Presence flickers when someone backgrounds the app,
-    so anyone seen within the grace window still counts as online. lastSeenAt is
-    null when the fan hides it — then only the explicit flag is trusted.
+    Fanvue spells presence on the chat itself (`online`, `lastSeenAt`) on some
+    accounts and on the nested user object on others, so both are read — reading
+    only the chat marked every fan offline on the accounts that nest it.
+    Presence flickers when someone backgrounds the app, so anyone seen within the
+    grace window still counts as online. lastSeenAt is null when the fan hides it
+    — then only the explicit flag is trusted.
     """
-    flag = chat.get('online')
-    if flag is True:
-        return True
-    seen = _fv_first(chat, 'lastSeenAt', 'lastSeen', default='')
+    u = chat.get('user') or chat.get('otherUser') or chat.get('participant') or {}
+    if not isinstance(u, dict):
+        u = {}
+    for src in (chat, u):
+        if src.get('online') is True or src.get('isOnline') is True:
+            return True
+    seen = _fv_first(chat, 'lastSeenAt', 'lastSeen', default='') or \
+        _fv_first(u, 'lastSeenAt', 'lastSeen', default='')
     if seen:
         try:
             s = str(seen).replace('Z', '+00:00')
@@ -11600,10 +11606,9 @@ def _fanvue_import_history(persona, fan_uuid, handle, me_uuid, cap=200):
                   'this account\'s own Fanvue uuid could not be resolved')
         return 0, []
     try:
-        msgs = _fv_list(_fanvue_call(persona, 'GET', f'{_fanvue_scope(persona)}/chats/{fan_uuid}/messages?limit={cap}'))
+        msgs = _fanvue_chat_messages(persona, fan_uuid, cap)
     except Exception:
         return 0, []
-    msgs = sorted(msgs, key=lambda m: _fv_first(m, 'createdAt', 'sentAt', 'timestamp', default=''))
     rows = []
     for m in msgs:
         mt = _fv_first(m, 'text', 'content', 'message', 'body', default='')
@@ -11623,41 +11628,57 @@ def _fanvue_import_history(persona, fan_uuid, handle, me_uuid, cap=200):
     return len(rows), [t for d, t in rows if d == 'in']
 
 
-FV_CHATS_PAGE_SIZE = 50   # Fanvue's max page size for /chats
-FV_CHATS_MAX_PAGES = 20   # hard stop so one round can't walk forever
+FV_PAGE_SIZE = 50         # Fanvue's max page size on paginated collections
+FV_MAX_PAGES = 20         # hard stop so one round can't walk forever
 
 
-def _fanvue_all_chats(persona, scope):
-    """Every chat on the account, not just the first page.
+def _fanvue_paged(persona, path, want=None, size=FV_PAGE_SIZE,
+                  max_pages=FV_MAX_PAGES):
+    """Every row of a paginated Fanvue collection, not just the first page.
 
-    Fanvue paginates /chats with page/size and ignores ?limit=, so the old
-    single call silently only ever saw one default-sized page — fans further
-    down the inbox were never looked at at all."""
+    Fanvue paginates with page/size and ignores ?limit=, so a single call with
+    a limit silently returned one default-sized page — which read as a hard cap
+    nobody set, on both the chat list and a chat's message history."""
     out, seen = [], set()
-    for page in range(1, FV_CHATS_MAX_PAGES + 1):
+    for page in range(1, max_pages + 1):
         try:
-            res = _fanvue_call(persona, 'GET', f'{scope}/chats'
-                               f'?page={page}&size={FV_CHATS_PAGE_SIZE}')
+            res = _fanvue_call(persona, 'GET', f'{path}?page={page}&size={size}')
         except Exception as e:
-            logger.info('Fanvue chats page %d failed for %s: %s', page, persona,
-                        str(e)[:200])
+            logger.info('Fanvue %s page %d failed for %s: %s', path, page,
+                        persona, str(e)[:200])
             break
         rows = _fv_list(res)
         if not rows:
             break
-        for chat in rows:
-            key = str(_fv_first(chat, 'uuid', 'id', default='') or '') or None
+        added = 0
+        for row in rows:
+            key = str(_fv_first(row, 'uuid', 'id', default='') or '') or None
             if key and key in seen:
                 continue
             if key:
                 seen.add(key)
-            out.append(chat)
+            out.append(row)
+            added += 1
+        # An endpoint that ignores ?page= hands back page 1 forever; without
+        # this the walk would keep paying for the same rows until max_pages.
+        if not added:
+            break
+        if want is not None and len(out) >= want:
+            return out[:want]
         pg = (res.get('pagination') or {}) if isinstance(res, dict) else {}
-        more = pg.get('hasMore') if 'hasMore' in pg else \
-            len(rows) >= FV_CHATS_PAGE_SIZE
+        more = pg.get('hasMore') if 'hasMore' in pg else len(rows) >= size
         if not more:
             break
     return out
+
+
+def _fanvue_chat_messages(persona, fan_uuid, want):
+    """The `want` most recent messages in one chat, newest last."""
+    scope = _fanvue_scope(persona)
+    msgs = _fanvue_paged(persona, f'{scope}/chats/{fan_uuid}/messages', want=want,
+                         size=min(want, FV_PAGE_SIZE))
+    return sorted(msgs, key=lambda m: _fv_first(m, 'createdAt', 'sentAt',
+                                                'timestamp', default=''))
 
 
 def _fanvue_auto_round(persona):
@@ -11727,7 +11748,7 @@ def _fanvue_auto_round(persona):
         FOLLOWUP_BASE_MIN = 30   # first nudge after ~30m silence, then longer
 
     scope = _fanvue_scope(persona)
-    chats = _fanvue_all_chats(persona, scope)
+    chats = _fanvue_paged(persona, f'{scope}/chats')
     cr = _fanvue_creator(persona).get('handle')
     log.append(f'{len(chats)} chats found' + (f' (acting as @{cr})' if cr else '') + (f'; only={only}' if only else ''))
     for chat in chats:
@@ -11759,7 +11780,7 @@ def _fanvue_auto_round(persona):
             continue
         fan_key = 'fv:' + fan_uuid
         try:
-            msgs = _fv_list(_fanvue_call(persona, 'GET', f'{scope}/chats/{fan_uuid}/messages?limit=20'))
+            msgs = _fanvue_chat_messages(persona, fan_uuid, 20)
         except Exception as e:
             log.append(f'read {who} failed: {str(e)[:50]}')
             continue
@@ -12231,7 +12252,7 @@ def api_fanvue_debug():
     except Exception as e:
         out['me_error'] = str(e)[:200]
     try:
-        chats = _fanvue_call(persona, 'GET', '/chats?limit=3')
+        chats = _fanvue_call(persona, 'GET', '/chats?page=1&size=3')
         out['chats'] = chats
         lst = _fv_list(chats)
         if lst:
@@ -12240,7 +12261,7 @@ def api_fanvue_debug():
             out['raw_first_chat_keys'] = list(lst[0].keys()) if isinstance(lst[0], dict) else str(type(lst[0]))
             out['raw_first_chat'] = lst[0]
             try:
-                out['first_messages'] = _fanvue_call(persona, 'GET', f'/chats/{uid}/messages?limit=3')
+                out['first_messages'] = _fanvue_call(persona, 'GET', f'/chats/{uid}/messages?page=1&size=3')
             except Exception as e:
                 out['messages_error'] = str(e)[:200]
             if request.args.get('probe') == '1':
