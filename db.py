@@ -845,11 +845,237 @@ def grandfather_existing_users(session):
     return n
 
 
+# ── PPV funnels, fan scoring and adaptive testing ─────────────────────────────
+# One fan per row per persona: who they are, what the classifier made of them,
+# and the two scores everything else keys off. Written nightly and on every
+# purchase, so it is a cache of derivable facts — losing it costs accuracy, not
+# money. The ppv_drops ledger remains the authority on what was actually paid.
+
+class FanProfile(Base):
+    __tablename__ = 'fan_profiles'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    persona = Column(String(64), index=True)
+    fan_uuid = Column(String(64), index=True)
+    handle = Column(String(64))
+    platform = Column(String(16), default='fanvue')
+
+    fan_type = Column(String(4))                 # GF CO DO SU FL LU WH SK
+    type_confidence = Column(Integer, default=0)  # 0-100
+    type_updated_at = Column(DateTime)
+    type_msgs_at = Column(Integer, default=0)     # msg count when last classified
+
+    subscribed_at = Column(DateTime)
+    last_msg_at = Column(DateTime)
+    churned_at = Column(DateTime)
+    lifetime_spend = Column(Integer, default=0)   # cents
+    spend_30d = Column(Integer, default=0)        # cents
+    tips_total = Column(Integer, default=0)       # cents
+
+    frs = Column(Integer, default=0)              # 0-100 fan rank score
+    crs = Column(Integer, default=0)              # 0-100 churn risk score
+    tier = Column(String(1), default='C')         # S A B C D
+    tier_since = Column(DateTime)
+    tier_below_since = Column(DateTime)           # hysteresis: 14d before demotion
+    scores_updated_at = Column(DateTime)
+
+    chargeback_at = Column(DateTime)              # FRS frozen at 0 for 90 days
+    review_reason = Column(String(64))            # queued for a human, why
+    review_at = Column(DateTime)
+    notes = Column(Text)                          # JSON scratch (signals, vectors)
+
+
+Index('ix_fan_profiles_key', FanProfile.persona, FanProfile.fan_uuid, unique=True)
+Index('ix_fan_profiles_rank', FanProfile.persona, FanProfile.frs)
+
+
+class FanEvent(Base):
+    """Append-only log of everything that happened to a fan. The bandit's reward
+    and every churn signal are derived from this, so it is never rewritten —
+    only inserted into."""
+    __tablename__ = 'fan_events'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    ts = Column(DateTime, default=_now, index=True)
+    persona = Column(String(64), index=True)
+    fan_uuid = Column(String(64), index=True)
+    assignment_id = Column(String(32), index=True)
+    kind = Column(String(16))     # msg_in msg_out ppv_sent ppv_opened ppv_bought
+                                  # tip unsub resub chargeback reward pitch_ignored
+    amount = Column(Integer, default=0)           # cents where money is involved
+    content_id = Column(String(64))
+    detail = Column(Text)
+
+
+Index('ix_fan_events_fan', FanEvent.persona, FanEvent.fan_uuid, FanEvent.ts)
+
+
+class FunnelAssignment(Base):
+    """Which funnel a fan is in, and the sub-arm variant being tested. Closed
+    with an exit_reason; the 7-day reward window is measured from assigned_at."""
+    __tablename__ = 'funnel_assignments'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    persona = Column(String(64), index=True)
+    fan_uuid = Column(String(64), index=True)
+    funnel_id = Column(String(4))                 # F1..F10
+    fan_type = Column(String(4))                  # context at assignment time
+    variant_json = Column(Text)                   # {price_tier, delay, opener, preview}
+    assigned_at = Column(DateTime, default=_now, index=True)
+    exited_at = Column(DateTime)
+    exit_reason = Column(String(32))
+    pitches_sent = Column(Integer, default=0)
+    pitches_ignored = Column(Integer, default=0)
+    revenue_cents = Column(Integer, default=0)    # settled inside the reward window
+    rewarded_at = Column(DateTime)                # when the posterior was updated
+
+
+Index('ix_funnel_assign_fan', FunnelAssignment.persona, FunnelAssignment.fan_uuid,
+      FunnelAssignment.assigned_at)
+
+
+class FunnelPosterior(Base):
+    """Beta posterior per (fan_type × funnel × variant). Thompson sampling draws
+    from these; the priors in the spec's matrix seed alpha."""
+    __tablename__ = 'funnel_posteriors'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    persona = Column(String(64), index=True)
+    fan_type = Column(String(4))
+    funnel_id = Column(String(4))
+    variant_key = Column(String(64), default='')
+    alpha = Column(Integer, default=1)            # successes + 1
+    beta = Column(Integer, default=1)             # failures + 1
+    n = Column(Integer, default=0)
+    revenue_cents = Column(Integer, default=0)
+    churn_n = Column(Integer, default=0)
+    updated_at = Column(DateTime, default=_now, onupdate=_now)
+
+
+Index('ix_posterior_key', FunnelPosterior.persona, FunnelPosterior.fan_type,
+      FunnelPosterior.funnel_id, FunnelPosterior.variant_key, unique=True)
+
+
+class FanReward(Base):
+    """A loyalty reward that was delivered, with the spend either side of it so
+    a track that does not pay for itself can be killed."""
+    __tablename__ = 'fan_rewards'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    persona = Column(String(64), index=True)
+    fan_uuid = Column(String(64), index=True)
+    track = Column(String(16))                    # tenure | spend | engagement
+    milestone = Column(String(32))
+    delivered_at = Column(DateTime, default=_now)
+    spend_30d_before = Column(Integer, default=0)
+    spend_30d_after = Column(Integer)
+
+
+Index('ix_fan_rewards_key', FanReward.persona, FanReward.fan_uuid,
+      FanReward.track, FanReward.milestone, unique=True)
+
+
+def get_fan_profile(session, persona, fan_uuid, handle=None, create=True):
+    row = (session.query(FanProfile)
+           .filter(FanProfile.persona == persona, FanProfile.fan_uuid == fan_uuid)
+           .first())
+    if row is None and create:
+        row = FanProfile(persona=persona, fan_uuid=fan_uuid, handle=handle or '')
+        session.add(row)
+        session.flush()
+    if row is not None and handle and row.handle != handle:
+        row.handle = handle
+    return row
+
+
+def log_fan_event(session, persona, fan_uuid, kind, amount=0, assignment_id=None,
+                  content_id=None, detail=''):
+    ev = FanEvent(persona=persona, fan_uuid=fan_uuid, kind=kind[:16],
+                  amount=int(amount or 0), assignment_id=assignment_id,
+                  content_id=(content_id or '')[:64], detail=(detail or '')[:2000])
+    session.add(ev)
+    return ev
+
+
+def fan_events(session, persona, fan_uuid, since=None, kinds=None, limit=500):
+    q = (session.query(FanEvent)
+         .filter(FanEvent.persona == persona, FanEvent.fan_uuid == fan_uuid))
+    if since:
+        q = q.filter(FanEvent.ts >= since)
+    if kinds:
+        q = q.filter(FanEvent.kind.in_(list(kinds)))
+    return q.order_by(FanEvent.ts.desc()).limit(limit).all()
+
+
+def open_assignment(session, persona, fan_uuid):
+    return (session.query(FunnelAssignment)
+            .filter(FunnelAssignment.persona == persona,
+                    FunnelAssignment.fan_uuid == fan_uuid,
+                    FunnelAssignment.exited_at.is_(None))
+            .order_by(FunnelAssignment.assigned_at.desc()).first())
+
+
+def close_assignment(session, assignment, reason, when=None):
+    if assignment is None or assignment.exited_at:
+        return assignment
+    assignment.exited_at = when or _now()
+    assignment.exit_reason = (reason or '')[:32]
+    return assignment
+
+
+def get_posterior(session, persona, fan_type, funnel_id, variant_key='',
+                  prior_alpha=1):
+    row = (session.query(FunnelPosterior)
+           .filter(FunnelPosterior.persona == persona,
+                   FunnelPosterior.fan_type == fan_type,
+                   FunnelPosterior.funnel_id == funnel_id,
+                   FunnelPosterior.variant_key == (variant_key or ''))
+           .first())
+    if row is None:
+        row = FunnelPosterior(persona=persona, fan_type=fan_type,
+                              funnel_id=funnel_id, variant_key=(variant_key or ''),
+                              alpha=max(1, int(prior_alpha)), beta=1)
+        session.add(row)
+        session.flush()
+    return row
+
+
+def list_posteriors(session, persona):
+    return (session.query(FunnelPosterior)
+            .filter(FunnelPosterior.persona == persona).all())
+
+
+def due_assignments(session, persona, before):
+    """Closed-or-old assignments whose 7-day reward window has passed and whose
+    posterior has not been updated yet."""
+    return (session.query(FunnelAssignment)
+            .filter(FunnelAssignment.persona == persona,
+                    FunnelAssignment.rewarded_at.is_(None),
+                    FunnelAssignment.assigned_at <= before)
+            .order_by(FunnelAssignment.assigned_at).limit(200).all())
+
+
+def top_fans(session, persona, limit=100):
+    return (session.query(FanProfile)
+            .filter(FanProfile.persona == persona)
+            .order_by(FanProfile.frs.desc()).limit(limit).all())
+
+
+def fan_reward_given(session, persona, fan_uuid, track, milestone):
+    return (session.query(FanReward)
+            .filter(FanReward.persona == persona, FanReward.fan_uuid == fan_uuid,
+                    FanReward.track == track, FanReward.milestone == milestone)
+            .first())
+
 def init_db():
     Base.metadata.create_all(engine)
     for table, model in (('users', User), ('saved_personas', SavedPersona),
                          ('payments', Payment), ('invites', Invite),
-                         ('demo_events', DemoEvent)):
+                         ('demo_events', DemoEvent), ('fan_profiles', FanProfile),
+                         ('fan_events', FanEvent),
+                         ('funnel_assignments', FunnelAssignment),
+                         ('funnel_posteriors', FunnelPosterior),
+                         ('fan_rewards', FanReward)):
         try:
             _sync_columns(table, model)
         except Exception:
