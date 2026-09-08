@@ -2047,7 +2047,39 @@ SIGNIN_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <input type="checkbox" name="remember" value="1" checked
  style="width:auto;margin:0;accent-color:#7c3aed;cursor:pointer">Keep me signed in for 30 days</label>
 <button type="submit"><span data-edit-id="submit-text">Sign in</span></button></form>
+<div class="alt"><a href="/forgot-password">Forgot your password?</a></div>
 <div class="alt"><span data-edit-id="alt-text">No account yet?</span> <a href="/register">Create one</a></div>
+</div></div></body></html>"""
+
+FORGOT_PASSWORD_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Reset your password</title>
+<style>""" + ACCOUNT_CSS + """</style></head><body data-page="login"><div class="wrap"><div class="card">
+<h1>Reset your password</h1><p class="sub">Enter your account email and we'll send a reset link.</p>
+{% if error %}<div class="err">{{ error }}</div>{% endif %}
+{% if sent %}<div class="sub" style="margin-bottom:18px">If an account exists for {{ email }}, a reset link has been sent.
+{% if reset_link %}<br><br>SMTP isn't configured, so here's the link directly: <a href="{{ reset_link }}">{{ reset_link }}</a>{% endif %}
+</div>
+{% else %}
+<form method="post">
+<label>Email</label><input type="email" name="email" required autocomplete="email" value="{{ email or '' }}">
+<button type="submit">Send reset link</button></form>
+{% endif %}
+<div class="alt"><a href="/login">Back to sign in</a></div>
+</div></div></body></html>"""
+
+RESET_PASSWORD_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Choose a new password</title>
+<style>""" + ACCOUNT_CSS + """</style></head><body data-page="login"><div class="wrap"><div class="card">
+<h1>Choose a new password</h1>
+{% if error %}<div class="err">{{ error }}</div>{% endif %}
+<form method="post">
+<label>New password</label><input type="password" name="password" required autocomplete="new-password" placeholder="At least 8 characters">
+<button type="submit">Set new password</button></form>
+<div class="alt"><a href="/login">Back to sign in</a></div>
 </div></div></body></html>"""
 
 BILLING_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
@@ -3430,6 +3462,101 @@ def login():
 def logout():
     session.pop('user_id', None)
     session.pop('admin_authed', None)
+    return redirect('/login')
+
+
+def _smtp_config():
+    host = (os.getenv('SMTP_HOST') or '').strip()
+    if not host:
+        return None
+    return {
+        'host': host,
+        'port': int(os.getenv('SMTP_PORT') or 587),
+        'user': (os.getenv('SMTP_USER') or '').strip(),
+        'password': os.getenv('SMTP_PASS') or '',
+        'from': (os.getenv('SMTP_FROM') or os.getenv('SMTP_USER') or '').strip(),
+    }
+
+
+def _send_reset_email(to_email, reset_link):
+    """Send the reset link over SMTP. Returns True if a send was attempted
+    (not whether it was delivered)."""
+    cfg = _smtp_config()
+    if not cfg:
+        return False
+    import smtplib
+    from email.mime.text import MIMEText
+    msg = MIMEText(f'Reset your password: {reset_link}\n\n'
+                    'If you did not request this, ignore this email.')
+    msg['Subject'] = 'Reset your password'
+    msg['From'] = cfg['from']
+    msg['To'] = to_email
+    try:
+        with smtplib.SMTP(cfg['host'], cfg['port'], timeout=10) as server:
+            server.starttls()
+            if cfg['user']:
+                server.login(cfg['user'], cfg['password'])
+            server.sendmail(cfg['from'], [to_email], msg.as_string())
+    except Exception:
+        logger.exception('RESET EMAIL FAILED to=%s', to_email)
+    return True
+
+
+@app.route('/forgot-password', methods=['GET', 'POST'])
+def forgot_password():
+    from db import get_user_by_email
+    if request.method == 'GET':
+        return render_template_string(FORGOT_PASSWORD_HTML)
+    email = (request.form.get('email') or '').strip().lower()
+    if not email or '@' not in email:
+        return render_template_string(FORGOT_PASSWORD_HTML, error='Enter a valid email.',
+                                      email=email)
+    reset_link = None
+    s = _db_session()
+    try:
+        u = get_user_by_email(s, email)
+        if u:
+            u.reset_token = secrets.token_urlsafe(32)
+            u.reset_token_expires = datetime.now(timezone.utc).replace(tzinfo=None) \
+                + timedelta(hours=1)
+            s.commit()
+            reset_link = request.url_root.rstrip('/') + '/reset-password/' + u.reset_token
+            if not _send_reset_email(email, reset_link):
+                logger.warning('PASSWORD RESET LINK (SMTP not configured) email=%s link=%s',
+                               email, reset_link)
+            else:
+                reset_link = None  # emailed — don't also hand it back on the page
+    finally:
+        s.close()
+    return render_template_string(FORGOT_PASSWORD_HTML, sent=True, email=email,
+                                  reset_link=reset_link)
+
+
+@app.route('/reset-password/<token>', methods=['GET', 'POST'])
+def reset_password(token):
+    from werkzeug.security import generate_password_hash
+    from db import User
+    s = _db_session()
+    try:
+        u = s.query(User).filter(User.reset_token == token).first()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        if not u or not u.reset_token_expires or u.reset_token_expires < now:
+            return render_template_string(
+                RESET_PASSWORD_HTML,
+                error='That reset link is invalid or has expired. Request a new one.')
+        if request.method == 'GET':
+            return render_template_string(RESET_PASSWORD_HTML)
+        password = request.form.get('password') or ''
+        if len(password) < 8:
+            return render_template_string(RESET_PASSWORD_HTML,
+                                          error='Password must be at least 8 characters.')
+        u.password_hash = generate_password_hash(password)
+        u.reset_token = None
+        u.reset_token_expires = None
+        s.commit()
+        logger.info('PASSWORD RESET user=%s', u.email)
+    finally:
+        s.close()
     return redirect('/login')
 
 
