@@ -454,6 +454,11 @@ class User(Base):
     created_at = Column(DateTime, default=_now)
     last_login = Column(DateTime)
 
+    # Forgot-password flow. Single-use, cleared on consumption or replaced by
+    # a fresh request; reset_token_expires makes an old, unclaimed link inert.
+    reset_token = Column(String(64), index=True)
+    reset_token_expires = Column(DateTime)
+
     # Stripe recurring billing. The customer id outlives any one subscription,
     # so it is kept even after a cancellation to reuse the saved card and to
     # open the billing portal. subscription_id is cleared when Stripe reports

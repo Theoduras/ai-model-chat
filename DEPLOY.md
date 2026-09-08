@@ -271,6 +271,25 @@ for character.
 `GET /healthz` reports `"google_login": true` once the client ID and secret
 are both readable by the running instance.
 
+## Forgot password (SMTP)
+
+`/forgot-password` emails a single-use, 1-hour reset link. Without SMTP
+configured, the app logs the link (`PASSWORD RESET LINK ...`) and shows it
+directly on the page instead — fine for local/dev testing, not for
+production.
+
+| Variable | Why |
+|---|---|
+| `SMTP_HOST` | SMTP server hostname. Unset = no email is sent; the reset link is logged and shown on the page instead. |
+| `SMTP_PORT` | Defaults to `587` (STARTTLS). |
+| `SMTP_USER` | Login username for the SMTP server. Also used as the `From` address if `SMTP_FROM` is unset. |
+| `SMTP_PASS` | Login password (or app-specific password/API key, depending on provider). |
+| `SMTP_FROM` | `From` address on the reset email. Falls back to `SMTP_USER`. |
+
+Any STARTTLS-capable SMTP provider works (Gmail with an app password,
+SendGrid, Mailgun's SMTP relay, Amazon SES, etc.) — set the four
+credentials above to that provider's values.
+
 ## Payments (Oxapay + Stripe)
 
 Plans can be paid in crypto through [Oxapay](https://oxapay.com) or by card
