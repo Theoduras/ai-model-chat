@@ -837,7 +837,9 @@ def get_system_prompt(slug):
         if 'Question frequency:' not in prompt:
             prompt = prompt.rstrip() + '\n\n' + question_freq_rule(load_persona_config(slug))
         _prompt_cache[slug] = prompt
-    return _prompt_cache[slug]
+    # Appended outside the cache: a complaint recorded a second ago has to bind
+    # on the very next message, without waiting for a persona save to clear it.
+    return _prompt_cache[slug] + _persona_avoid_block(slug)
 
 
 def local_fallback_reply(msg):
@@ -4577,6 +4579,29 @@ def _set_setting(key, value):
                 pass
 
 
+def _del_setting(key):
+    """Remove a setting row entirely. Storing '' would still read as a value;
+    the point of a reset is that the key is gone."""
+    try:
+        from db import SessionLocal, delete_app_setting
+        s = SessionLocal()
+        try:
+            gone = delete_app_setting(s, key)
+            s.commit()
+            return gone
+        finally:
+            s.close()
+    except Exception:
+        return False
+
+
+def _fan_memory_reset(persona, fan_key):
+    """Forget everything remembered about one fan."""
+    had = _fan_memory(persona, fan_key)
+    _del_setting(_fan_mem_key(persona, fan_key))
+    return had
+
+
 def _write_x_message(persona, x_user_id, x_username, direction, text):
     from db import SessionLocal, add_x_message
     s = SessionLocal()
@@ -4685,7 +4710,7 @@ INBOX_PLATFORMS = {
 # Trace stages that describe something that happened *to one fan*, so they can
 # sit inside that fan's thread. Anything else stays on the overview feed.
 INBOX_EVENT_STAGES = {'ppv', 'guardrail', 'error', 'skipped', 'follow-up',
-                      'funnel', 'review', 'delayed', 'routed'}
+                      'funnel', 'review', 'delayed', 'routed', 'complaint'}
 
 
 def _inbox_trace_rows(platform, persona):
@@ -4777,6 +4802,35 @@ def api_inbox():
             s.close()
         except Exception:
             pass
+
+
+@app.route('/api/inbox/memory', methods=['GET', 'POST'])
+@platform_scoped
+def api_inbox_memory():
+    """What the persona remembers about one fan, and a way to wipe it.
+
+    A fact she picked up wrong — or one the fan is tired of hearing about — is
+    re-injected into every reply until the row is gone, and until now the only
+    way to remove it was editing the database by hand.
+    """
+    platform = (request.args.get('platform') or '').strip().lower()
+    if platform not in INBOX_PLATFORMS:
+        return jsonify({'ok': False, 'error': 'Unknown platform'}), 400
+    persona = request_persona()
+    fan_key = ((request.get_json(silent=True) or {}).get('fan')
+               if request.method == 'POST' else request.args.get('fan')) or ''
+    fan_key = fan_key.strip()
+    if not (persona and fan_key):
+        return jsonify({'ok': False, 'error': 'persona and fan required'}), 400
+    if request.method == 'POST':
+        cleared = _fan_memory_reset(persona, fan_key)
+        _fan_trace(persona, 'complaint',
+                   'memory of this fan wiped by the creator', fan_key)
+        return jsonify({'ok': True, 'fan': fan_key, 'cleared': cleared,
+                        'memory': {}})
+    return jsonify({'ok': True, 'fan': fan_key,
+                    'memory': _fan_memory(persona, fan_key),
+                    'labels': LABELS})
 
 
 XLOG_HTML = """<!DOCTYPE html>
@@ -6656,6 +6710,25 @@ def _cta_due(persona, text, fan, is_cta_phase, cta_url, spicy_count=0):
     return not fan.get('cta_sent') and is_cta_phase
 
 
+@app.route('/api/personas/<slug>/avoid', methods=['GET', 'DELETE'])
+def api_persona_avoid(slug):
+    """The complaints this persona has learned from her fans.
+
+    GET lists them; DELETE with {"entry": "..."} forgets one, without a body
+    forgets all of them. Writes are already scoped by _guard_persona_writes.
+    """
+    if not re.match(r'^[a-z0-9_-]+$', slug):
+        return jsonify({'error': 'Invalid slug'}), 400
+    if not (_is_operator() or _can_edit_persona(slug, _current_user())):
+        return jsonify({'error': 'Not found'}), 404
+    if request.method == 'DELETE':
+        entry = (request.get_json(silent=True) or {}).get('entry')
+        removed = _persona_avoid_clear(slug, entry if entry else None)
+        return jsonify({'ok': True, 'removed': removed,
+                        'avoid': _persona_avoid(slug)})
+    return jsonify({'ok': True, 'avoid': _persona_avoid(slug)})
+
+
 @app.route('/api/personas/<slug>/phases', methods=['GET'])
 def api_persona_phases(slug):
     if not re.match(r'^[a-z0-9_-]+$', slug):
@@ -7483,7 +7556,12 @@ def _x_call(persona, method, path, body=None):
 # way to sound like a bot.
 
 FAN_MEM_KEYS = ('name', 'job', 'schedule', 'location', 'partner', 'age',
-                'doing_now', 'plans', 'interests', 'notes')
+                'doing_now', 'plans', 'interests', 'notes', 'avoid')
+
+# How many complaints are kept, per fan and for the persona as a whole. Old ones
+# stop mattering eventually; the newest are the ones that cost a fan.
+FAN_AVOID_MAX = 12
+PERSONA_AVOID_MAX = 15
 
 
 def _fan_mem_key(persona, fan_key):
@@ -7521,7 +7599,8 @@ def _fan_mem_clean(mem, mine=None):
     for k in FAN_MEM_KEYS:
         v = mem.get(k)
         if isinstance(v, list):
-            v = [str(x).strip()[:120] for x in v if str(x).strip()][:10]
+            v = [str(x).strip()[:120] for x in v if str(x).strip()]
+            v = v[-FAN_AVOID_MAX:] if k == 'avoid' else v[:10]
             if v:
                 out[k] = v
         elif v not in (None, '', [], {}):
@@ -7549,12 +7628,20 @@ def _fan_memory_update(persona, fan_key, incoming, reply=''):
         f"the fan's. The creator is: {hers}. Anything she says about herself is "
         "not about him. "
         "Return ONLY JSON with these keys: name, job, schedule, location, partner, "
-        "age, doing_now, plans, interests, notes. `interests`, `plans` and `notes` "
-        "are arrays of short strings; the rest are short strings. "
+        "age, doing_now, plans, interests, notes, avoid. `interests`, `plans`, "
+        "`notes` and `avoid` are arrays of short strings; the rest are short "
+        "strings. "
         "Carry every existing value forward unless the new message contradicts or "
         "updates it. `job` is what they do for work, in their words. `schedule` is "
         "their working hours or shift pattern, including when they finish. "
         "`doing_now` is what they are doing right now and when they said it. "
+        "`avoid` is what the fan has pushed back on: anything he corrected, called "
+        "untrue, said you had already said, called boring or repetitive, or asked "
+        "you to drop. Name the subject in a few words — \"chocolate\", \"asking "
+        "about his ex\" — never a whole sentence, and never the words he used to "
+        "complain. Never remove an entry from `avoid`. When he says something "
+        "already in this profile is wrong, clear or correct that field in the same "
+        "pass as well as adding to `avoid`. "
         "Add nothing that was not said or clearly implied. Use \"\" for unknown.")
     user = (f"Existing profile of the fan:\n{json.dumps(old, ensure_ascii=False)}\n\n"
             f"The fan just said:\n{incoming[:1500]}")
@@ -7575,16 +7662,147 @@ def _fan_memory_update(persona, fan_key, incoming, reply=''):
     except Exception as e:
         logger.info('fan memory update failed for %s: %s', fan_key, str(e)[:120])
         return old
-    merged = _fan_mem_clean({**old, **mem}, mine)
+    # `avoid` is merged in code rather than left to the model: an extraction
+    # that simply forgets to echo an entry back would drop the one thing the fan
+    # has actually asked for, and he would hear about chocolate again.
+    merged = _fan_mem_clean(
+        {**old, **mem, 'avoid': _merge_avoid(old.get('avoid'), mem.get('avoid'))},
+        mine)
     if merged != old:
         _set_setting(_fan_mem_key(persona, fan_key), json.dumps(merged))
+    fresh = [a for a in merged.get('avoid') or []
+             if a not in (old.get('avoid') or [])]
+    if fresh:
+        _record_complaint(persona, fan_key, fresh, incoming)
     return merged
+
+
+def _merge_avoid(old, new):
+    """Old complaints first, new ones appended, nothing lost, no duplicates."""
+    out, seen = [], set()
+    for v in list(old or []) + list(new or []):
+        v = str(v).strip()[:120]
+        if v and v.casefold() not in seen:
+            seen.add(v.casefold())
+            out.append(v)
+    return out
+
+
+# What a fan sounds like when he has had enough. Only a message that trips this
+# is allowed to rewrite the persona for every other fan — one man saying "nah,
+# not for me" is a preference, not a standing instruction to the whole account.
+_COMPLAINT_RE = re.compile(
+    r"you (already|keep|always|just|constantly) "
+    r"(said|say|ask|asked|told|tell|go|going|talk|talking|mention|bring|repeat)|"
+    r"said (that|it) already|(same|zelfde) (thing|question|message|answer|vraag)|"
+    r"stop (talking|going on|asking|saying|with|it)|enough about|drop it|"
+    r"shut up about|"
+    r"(that'?s |it'?s )?not true|never said|didn'?t say|you'?re wrong|wrong again|"
+    r"boring|repeating yourself|repetitive|annoying|"
+    r"herhaal|zei je al|klopt niet|niet waar|dat zei ik niet|hou op over|saai",
+    re.I)
+
+
+def _is_complaint(text):
+    """True when the fan is objecting, not just steering the conversation."""
+    return bool(_COMPLAINT_RE.search(text or ''))
+
+
+def _fan_trace(persona, stage, detail, fan_key):
+    """Trace a line into whichever console the fan is actually being read in."""
+    try:
+        if (fan_key or '').startswith(('tg:', 'tgu:')):
+            _tg_trace(persona, stage, detail, fan=fan_key)
+        else:
+            _fv_trace(persona, stage, detail, fan=fan_key)
+    except Exception:
+        pass
+
+
+def _record_complaint(persona, fan_key, entries, incoming=''):
+    """Log what the fan objected to, and — when he plainly complained — teach it
+    to the persona so no other fan hears the same thing."""
+    _fan_trace(persona, 'complaint',
+               'noted, and never again: ' + ', '.join(entries), fan_key)
+    if not _is_complaint(incoming):
+        return []
+    try:
+        return _persona_avoid_add(persona, entries)
+    except Exception as e:
+        logger.info('persona avoid update failed for %s: %s', persona, str(e)[:120])
+        return []
+
+
+# ── What fans have told this persona to stop doing ───────────────────────────
+# Kept on the persona, not on the platform: every reply path — the browser chat,
+# Fanvue, X, Telegram, follow-ups — goes through get_system_prompt(), so this is
+# the one place that reaches all of them, including any channel added later.
+
+def _persona_avoid_key(slug):
+    return f'persona_avoid_{slug}'
+
+
+def _persona_avoid(slug):
+    """Everything fans have complained about to this persona, oldest first."""
+    try:
+        rows = json.loads(_get_setting(_persona_avoid_key(slug)) or '[]')
+    except Exception:
+        return []
+    if not isinstance(rows, list):
+        return []
+    return [str(r).strip()[:120] for r in rows if str(r).strip()]
+
+
+def _persona_avoid_add(slug, entries):
+    """Fold new complaints into the persona's list. Returns what was added."""
+    cur = _persona_avoid(slug)
+    seen = {c.casefold() for c in cur}
+    added = []
+    for e in entries or []:
+        e = str(e).strip()[:120]
+        if e and e.casefold() not in seen:
+            seen.add(e.casefold())
+            added.append(e)
+    if added:
+        _set_setting(_persona_avoid_key(slug),
+                     json.dumps((cur + added)[-PERSONA_AVOID_MAX:]))
+    return added
+
+
+def _persona_avoid_clear(slug, entry=None):
+    """Forget one complaint, or all of them. Returns what was removed."""
+    cur = _persona_avoid(slug)
+    if entry is None:
+        _del_setting(_persona_avoid_key(slug))
+        return cur
+    want = str(entry).strip().casefold()
+    kept = [c for c in cur if c.casefold() != want]
+    if kept != cur:
+        _set_setting(_persona_avoid_key(slug), json.dumps(kept))
+    return [c for c in cur if c.casefold() == want]
+
+
+def _avoid_rule(entries, heading):
+    """The prompt block that turns a complaint into a rule."""
+    entries = [str(e).strip() for e in (entries or []) if str(e).strip()]
+    if not entries:
+        return ''
+    return (heading + " — do not raise it, repeat it, reword it, or work it into "
+            "a message. Bringing any of it up again is what makes them leave:\n"
+            + '\n'.join('- ' + e for e in entries) + '\n\n')
+
+
+def _persona_avoid_block(slug):
+    rule = _avoid_rule(_persona_avoid(slug),
+                       'FANS HAVE ALREADY COMPLAINED ABOUT THE FOLLOWING')
+    return ('\n\n' + rule) if rule else ''
 
 
 LABELS = {'name': 'Name', 'job': 'Work', 'schedule': 'Their hours',
           'location': 'Where they are', 'partner': 'Relationship', 'age': 'Age',
           'doing_now': 'Doing right now', 'plans': 'Coming up',
-          'interests': 'Into', 'notes': 'Other things they told you'}
+          'interests': 'Into', 'notes': 'Other things they told you',
+          'avoid': 'Never bring up again'}
 
 
 def _fan_memory_block(mem, persona=None):
@@ -7602,18 +7820,25 @@ def _fan_memory_block(mem, persona=None):
                  + f" Never address him as {mine['name']} — that is you.\n\n")
     if not mem:
         return whose
+    # What he has objected to comes first: it is the only part of the profile
+    # that costs the conversation when it is ignored.
+    whose += _avoid_rule(mem.get('avoid'),
+                         'THIS FAN HAS ALREADY PUSHED BACK ON THE FOLLOWING')
     lines = []
     for k in FAN_MEM_KEYS:
         v = mem.get(k)
-        if not v:
+        if not v or k == 'avoid':
             continue
         lines.append(f"- {LABELS[k]}: " + ('; '.join(v) if isinstance(v, list) else v))
+    if not lines:
+        return whose
     return whose + (
         "WHAT YOU ALREADY KNOW ABOUT THIS FAN — treat it as remembered, never ask "
         "for it again:\n" + '\n'.join(lines) +
         "\nBuild on it instead: if you know they are at work, ask about that job, "
         "when their shift ends, how it is going today — not what they are doing. "
-        "Refer back to it naturally, the way someone who was listening would.\n\n")
+        "Refer back to it naturally, the way someone who was listening would — one "
+        "detail at a time, and never the same one two messages running.\n\n")
 
 
 def _persona_text(persona, instruction, history=None, max_tokens=1024, temperature=0.9):

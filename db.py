@@ -283,6 +283,15 @@ def set_app_setting(session, key, value):
     return row
 
 
+def delete_app_setting(session, key):
+    """Drop one setting row. True when there was one to drop."""
+    row = session.get(AppSetting, key)
+    if row is None:
+        return False
+    session.delete(row)
+    return True
+
+
 class XOpener(Base):
     """Permanent record of every fan a persona has sent an opening DM to. Never
     pruned, so an opener is never sent to the same person twice — even after the

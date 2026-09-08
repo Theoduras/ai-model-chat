@@ -3414,6 +3414,13 @@ body.embedding .form-area { padding: 0; overflow: hidden; }
 .cn-thread-back { display: none; border: 0; background: transparent; color: var(--text-2); font: inherit; font-size: 1rem; cursor: pointer; padding: 0 2px; }
 .cn-thread-name { font-size: 0.88rem; font-weight: 700; color: var(--text); }
 .cn-thread-meta { font-size: 0.72rem; color: var(--text-muted); }
+.cn-thread-mem {
+  margin-left: auto;
+  border: 1px solid var(--border-soft); border-radius: 8px;
+  background: var(--surface); color: var(--text-2);
+  font: inherit; font-size: 0.72rem; padding: 4px 10px; cursor: pointer;
+}
+.cn-thread-mem:hover { color: var(--text); border-color: var(--border); }
 /* The fan-chat window assumes a fixed page header sits above it; in here it
    does not, so the reserved space would show as a gap at the top. */
 .cn-thread .chat-window { padding: 16px 14px; background: var(--panel-2); }
@@ -3433,11 +3440,24 @@ body.embedding .form-area { padding: 0; overflow: hidden; }
   text-align: center;
 }
 .cn-event.ppv { color: #f0abfc; border-color: #f0abfc44; }
-.cn-event.error { color: #fb7185; border-color: #fb718544; }
+.cn-event.error, .cn-event.complaint { color: #fb7185; border-color: #fb718544; }
 .cn-event.guardrail, .cn-event.skipped, .cn-event.delayed { color: var(--warn); border-color: #fbbf2444; }
 .cn-event.funnel, .cn-event.routed { color: #c7d2fe; border-color: #c7d2fe44; }
 
 .cn-empty { padding: 34px 20px; text-align: center; color: var(--text-muted); font-size: 0.83rem; line-height: 1.6; }
+
+/* Subjects a fan told the persona to drop, in the builder. */
+.avoid-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin: 0 6px 6px 0; padding: 4px 8px 4px 10px;
+  border: 1px solid #fb718544; border-radius: 9999px;
+  background: var(--surface); color: var(--text-2); font-size: 0.75rem;
+}
+.avoid-chip button {
+  border: 0; background: transparent; color: var(--text-muted);
+  font: inherit; font-size: 0.9rem; line-height: 1; cursor: pointer; padding: 0;
+}
+.avoid-chip button:hover { color: #fb7185; }
 
 @media (max-width: 860px) {
   .cn-inbox { grid-template-columns: 1fr; height: min(76vh, 620px); }

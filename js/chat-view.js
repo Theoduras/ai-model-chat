@@ -68,6 +68,7 @@
             '<button class="cn-thread-back" title="Back to the list">←</button>' +
             '<div><div class="cn-thread-name">No conversation open</div>' +
             '<div class="cn-thread-meta"></div></div>' +
+            '<button class="cn-thread-mem" title="What she remembers about this fan" hidden>Memory</button>' +
           '</div>' +
           '<div class="chat-window"><div class="cn-empty">Pick someone on the left to read the chat.</div></div>' +
         '</div>' +
@@ -78,10 +79,12 @@
     this.window = host.querySelector('.chat-window');
     this.name = host.querySelector('.cn-thread-name');
     this.meta = host.querySelector('.cn-thread-meta');
+    this.mem = host.querySelector('.cn-thread-mem');
     var self = this;
     host.querySelector('.cn-thread-back').onclick = function () {
       self.box.classList.remove('reading');
     };
+    this.mem.onclick = function () { self.showMemory(); };
   }
 
   ChatView.prototype.url = function (extra) {
@@ -161,10 +164,50 @@
       });
   };
 
+  // What the persona has remembered about this fan is injected into every one
+  // of her replies, so a fact she picked up wrong — or one he is sick of
+  // hearing about — keeps coming back until someone wipes it.
+  ChatView.prototype.memUrl = function () {
+    return '/api/inbox/memory?platform=' + encodeURIComponent(this.platform) +
+           '&persona=' + encodeURIComponent(this.persona() || '') +
+           '&fan=' + encodeURIComponent(this.fan);
+  };
+
+  ChatView.prototype.showMemory = function () {
+    var self = this, fan = this.fan;
+    if (!fan) return;
+    fetch(this.memUrl()).then(function (r) { return r.json(); }).then(function (d) {
+      if (!d.ok) throw new Error(d.error || 'could not read the memory');
+      var mem = d.memory || {}, labels = d.labels || {};
+      var lines = Object.keys(mem).map(function (k) {
+        var v = mem[k];
+        return (labels[k] || k) + ': ' + (Array.isArray(v) ? v.join(', ') : v);
+      });
+      var text = lines.length
+        ? 'She remembers this about ' + (self.name.textContent || 'this fan') + ':\n\n' +
+          lines.join('\n') + '\n\nForget all of it? She starts from the chat itself again.'
+        : 'She remembers nothing about this fan yet.';
+      if (!lines.length) { alert(text); return; }
+      if (!confirm(text)) return;
+      return fetch('/api/inbox/memory?platform=' + encodeURIComponent(self.platform),
+                   { method: 'POST',
+                     headers: { 'Content-Type': 'application/json' },
+                     body: JSON.stringify({ persona: self.persona(), fan: fan }) })
+        .then(function (r) { return r.json(); })
+        .then(function (r) {
+          if (!r.ok) throw new Error(r.error || 'could not clear the memory');
+          self.openThread(fan, true);
+        });
+    }).catch(function (e) {
+      alert('Could not read what she remembers: ' + String(e.message || e));
+    });
+  };
+
   ChatView.prototype.renderThread = function (d) {
     var msgs = d.messages || [];
     var who = d.handle || (d.fan || '').replace(/^[a-z]+:/, '');
     this.name.textContent = who;
+    this.mem.hidden = false;
     this.meta.textContent = msgs.length
       ? msgs.length + ' message' + (msgs.length === 1 ? '' : 's') + ' · ' + d.platform
       : d.platform;

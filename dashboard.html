@@ -1922,6 +1922,12 @@ function renderForm(slug, cfg) {
       </div>
     </div>
 
+    <div class="form-section">
+      <div class="section-title">What fans told her to drop</div>
+      <span class="hint">When a fan says she is repeating herself, has something wrong, or should stop a subject, she writes it down here and never raises it again — with him or with anyone else, on any platform. Remove an entry to let her use it again.</span>
+      <div id="avoid-list" style="margin-top:10px;"></div>
+    </div>
+
 
     </div>
 
@@ -1931,7 +1937,48 @@ function renderForm(slug, cfg) {
   avatarFromPhoto = !cfg.avatar || !!cfg.avatar_from_photo;
   updateWarmthSlider(document.getElementById('f-warmth'));
   renderChatPreview();
+  loadAvoid(slug);
   if (window.Onboarding) Onboarding.onFormRendered(slug, cfg);
+}
+
+// Subjects fans have complained about. Server state rather than a form field:
+// she records these herself as fans push back, and the creator only removes.
+async function loadAvoid(slug) {
+  const box = document.getElementById('avoid-list');
+  if (!box) return;
+  box.innerHTML = '<span class="hint">Loading…</span>';
+  try {
+    const r = await fetch('/api/personas/' + encodeURIComponent(slug) + '/avoid');
+    renderAvoid(slug, (await r.json()).avoid || []);
+  } catch (e) {
+    box.innerHTML = '<span class="hint">Could not load this.</span>';
+  }
+}
+
+function renderAvoid(slug, items) {
+  const box = document.getElementById('avoid-list');
+  if (!box) return;
+  if (!items.length) {
+    box.innerHTML = '<span class="hint">Nothing yet — no fan has asked her to drop a subject.</span>';
+    return;
+  }
+  box.innerHTML = items.map(t => '<span class="avoid-chip" data-entry="' + esc(t) + '">' +
+    esc(t) + '<button type="button" title="Let her bring this up again">&times;</button></span>').join('');
+  box.querySelectorAll('.avoid-chip button').forEach(b => {
+    b.onclick = () => dropAvoid(slug, b.parentNode.dataset.entry);
+  });
+}
+
+async function dropAvoid(slug, entry) {
+  try {
+    const r = await fetch('/api/personas/' + encodeURIComponent(slug) + '/avoid', {
+      method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entry: entry })
+    });
+    renderAvoid(slug, (await r.json()).avoid || []);
+  } catch (e) {
+    loadAvoid(slug);
+  }
 }
 
 function toggleNsfw(on) { document.getElementById('nsfw-level-field').style.display = on ? 'flex' : 'none'; }

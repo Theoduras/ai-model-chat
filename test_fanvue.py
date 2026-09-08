@@ -766,6 +766,89 @@ def test_unsendable_chats():
           any('failed' in d for st, d in traced), traced)
 
 
+def test_complaints_are_remembered():
+    """A fan saying she keeps going on about chocolate has to change what she
+    says next — to him, and to every other fan of that persona."""
+    store, traced = {}, []
+    app._get_setting = lambda k, d=None: store.get(k, d)
+    app._set_setting = lambda k, v: store.__setitem__(k, v)
+    app._del_setting = lambda k: store.pop(k, None) is not None
+    app._fv_trace = lambda p, st, d='', fan='': traced.append((st, d))
+    app.load_persona_config = lambda slug: {'name': 'Lilly', 'age': '22',
+                                            'location': 'Maastricht'}
+    replies = []
+
+    class _Resp:
+        def __init__(self, text):
+            self.text = text
+
+    class _Models:
+        def generate_content(self, **kw):
+            return _Resp(replies.pop(0))
+
+    class _Client:
+        models = _Models()
+
+    was_client, app.client = app.client, _Client()
+    fan = 'fv:im2ez4u'
+    try:
+        replies.append(json.dumps({'name': 'Mark', 'interests': ['chocolate']}))
+        app._fan_memory_update('lilly', fan, 'my name is Mark, I love chocolate')
+        check('what he said is remembered',
+              app._fan_memory('lilly', fan).get('interests') == ['chocolate'])
+
+        replies.append(json.dumps({'name': 'Mark', 'interests': [],
+                                   'avoid': ['chocolate']}))
+        mem = app._fan_memory_update(
+            'lilly', fan, 'you keep going on about chocolate, stop it')
+        check('the complaint is filed', mem.get('avoid') == ['chocolate'], mem)
+        check('and the fact behind it is dropped', not mem.get('interests'), mem)
+        check('the reply prompt now forbids it',
+              'chocolate' in app._fan_memory_block(mem, 'lilly') and
+              'PUSHED BACK' in app._fan_memory_block(mem, 'lilly'))
+        check('the console is told', any(st == 'complaint' for st, d in traced), traced)
+
+        # The persona itself learns it, so the next fan never hears it either.
+        check('the persona learns it too',
+              app._persona_avoid('lilly') == ['chocolate'], store)
+        app._prompt_cache.pop('lilly', None)
+        check('and every channel gets it, through the system prompt',
+              'chocolate' in app.get_system_prompt('lilly'))
+
+        # An extraction that forgets to echo `avoid` back must not lose it.
+        replies.append(json.dumps({'name': 'Mark', 'job': 'plumber'}))
+        mem = app._fan_memory_update('lilly', fan, 'I fix pipes for a living')
+        check('a later update cannot drop the complaint',
+              mem.get('avoid') == ['chocolate'], mem)
+
+        # Preferences are not complaints: one fan changing the subject must not
+        # rewrite the persona for everyone.
+        replies.append(json.dumps({'avoid': ['football']}))
+        app._fan_memory_update('lilly', fan, "let's talk about films instead")
+        check('a preference stays with that fan',
+              app._persona_avoid('lilly') == ['chocolate'], store)
+
+        check('a complaint is recognised',
+              all(app._is_complaint(t) for t in (
+                  'you already said that', 'you keep saying the same thing',
+                  'you keep going on about chocolate', 'stop it', 'enough about that',
+                  "that's not true", 'I never said that', 'this is boring',
+                  'dat klopt niet', 'je herhaalt jezelf')))
+        check('ordinary chat is not',
+              not any(app._is_complaint(t) for t in (
+                  'hey how are you', 'I finish work at 6',
+                  'tell me more about that')))
+
+        app._persona_avoid_clear('lilly', 'chocolate')
+        check('the creator can hand a subject back',
+              app._persona_avoid('lilly') == [])
+        app._fan_memory_reset('lilly', fan)
+        check('and wipe what she remembers about one fan',
+              app._fan_memory('lilly', fan) == {})
+    finally:
+        app.client = was_client
+
+
 if __name__ == '__main__':
     for fn in (test_direction, test_import, test_identity_never_crosses,
                test_placeholders, test_pacing, test_backlog,
@@ -777,7 +860,7 @@ if __name__ == '__main__':
                test_funnel_config_roundtrip, test_distress_pause_is_written_once,
                test_funnel_exits, test_webhook_subscription,
                test_webhook_accepts_any_known_secret, test_webhook_diagnosis,
-               test_unsendable_chats):
+               test_unsendable_chats, test_complaints_are_remembered):
         print('\n--- %s ---' % fn.__name__)
         restore_app()
         fn()
