@@ -15346,6 +15346,14 @@ def _tg_handle_update(persona, update):
     picked_media_id = None
     reply, photo_tags = _tg_parse_photo_tag(reply)
     reply = strip_ppv_marker(reply)
+    # A reply that was nothing but a tag strips down to '', and _tg_bursts turns
+    # that into [''] — one chunk the sender skips, so she goes quiet while the
+    # log still says a message was on its way.
+    if not reply:
+        _tg_trace(persona, 'error',
+                  f'{who}: the model sent back only a tag, so there was nothing to say',
+                  fan=fan_key)
+        return
     sent_ids = _fan_sent_photos(persona, chat_id) if media_rows else set()
     locked_outfit, _ = _fan_outfit_lock(persona, chat_id)
     roll = random.randint(1, 100) if media_rows else 0
@@ -16337,6 +16345,14 @@ def _tgu_plan(persona, chat_id, name, text, texts=None):
     picked_media_id = None
     reply, photo_tags = _tg_parse_photo_tag(reply)
     reply = strip_ppv_marker(reply)
+    # A reply that was nothing but a tag strips down to '', and _tg_bursts turns
+    # that into [''] — one chunk the sender skips, so she goes quiet while the
+    # log still says a message was on its way.
+    if not reply:
+        _tg_trace(persona, 'error',
+                  f'{name}: the model sent back only a tag, so there was nothing to say',
+                  fan=fan_key)
+        return None
     sent_ids = _fan_sent_photos(persona, chat_id) if media_rows else set()
     locked_outfit, _ = _fan_outfit_lock(persona, chat_id)
     roll = random.randint(1, 100) if media_rows else 0

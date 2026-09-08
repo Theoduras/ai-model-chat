@@ -887,6 +887,16 @@ def test_a_stopped_account_stays_stopped():
           json.loads(store['tguser_accounts'])['lilly'].get('stopped') is False)
 
 
+def test_a_tag_only_reply_is_never_sent_as_a_blank():
+    """The trap behind Telegram going quiet: strip the photo tag off a reply
+    that was nothing else and the splitter hands back a single empty message,
+    which the sender then skipped without a word."""
+    check('a tag-only reply strips to nothing',
+          app._tg_parse_photo_tag('[SEND_PHOTO:outfit=1,purpose=tease]')[0] == '')
+    check('and one empty message is what the splitter makes of it',
+          app._tg_bursts('') == [''])
+
+
 if __name__ == '__main__':
     for fn in (test_direction, test_import, test_identity_never_crosses,
                test_placeholders, test_pacing, test_backlog,
@@ -900,7 +910,8 @@ if __name__ == '__main__':
                test_webhook_accepts_any_known_secret, test_webhook_diagnosis,
                test_unsendable_chats, test_complaints_are_remembered,
                test_telegram_off_silences_the_personal_account,
-               test_a_stopped_account_stays_stopped):
+               test_a_stopped_account_stays_stopped,
+               test_a_tag_only_reply_is_never_sent_as_a_blank):
         print('\n--- %s ---' % fn.__name__)
         restore_app()
         fn()

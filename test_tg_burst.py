@@ -8,6 +8,7 @@ Run with: python test_tg_burst.py
 """
 import asyncio
 import sys
+import time
 import types
 
 _events = types.ModuleType('telethon.events')
@@ -146,6 +147,57 @@ async def run():
     await asyncio.sleep(3.5)
     check('an already-read chat is not imported twice',
           len(imported) == 1 and len(hc.history_calls) == 1, hc.history_calls)
+
+    # A reply that strips down to nothing used to be planned, logged as "1
+    # message(s)", then skipped by the sender without a word in the console.
+    blank, bt = [], []
+    b = AccountRunner('p', 1, 'h', 's',
+                      lambda chat_id, name, text, texts=None:
+                          {'read': 0, 'cps': 999, 'chunks': ['   ']},
+                      on_trace=lambda p, stage, detail: bt.append((stage, detail)),
+                      pre_delay=lambda chat_id: 0)
+    b.BURST_SECONDS = 0.5
+    bc = FakeClient()
+    await b._handle(bc, FakeEvent('you there?', chat_id=31, name='blankfan'))
+    await asyncio.sleep(1.5)
+    check('an empty reply sends nothing and says so',
+          not bc.sent and [t for t in bt if t[0] == 'no-reply']
+          and not [t for t in bt if t[0] == 'planning'], (bc.sent, bt))
+
+    # Gemini has no deadline of its own, so a stalled call held the reply open
+    # forever with nothing in the log.
+    st = []
+    slow = AccountRunner('p', 1, 'h', 's',
+                         lambda chat_id, name, text, texts=None: time.sleep(30),
+                         on_trace=lambda p, stage, detail: st.append((stage, detail)),
+                         pre_delay=lambda chat_id: 0)
+    slow.BURST_SECONDS = 0.5
+    slow.PLAN_SECONDS = 1
+    sc = FakeClient()
+    await slow._handle(sc, FakeEvent('hello?', chat_id=32, name='waiting'))
+    await asyncio.sleep(2.5)
+    check('a reply that never gets written is given up on, out loud',
+          not sc.sent and any(st_ == 'error' and 'longer than' in d for st_, d in st), st)
+
+    # Same for a send that hangs: connection_retries=None means it never returns.
+    ht = []
+    hung = AccountRunner('p', 1, 'h', 's',
+                         lambda chat_id, name, text, texts=None:
+                             {'read': 0, 'cps': 999, 'chunks': ['hi']},
+                         on_trace=lambda p, stage, detail: ht.append((stage, detail)),
+                         on_error=lambda p, e: ht.append(('on_error', e)),
+                         pre_delay=lambda chat_id: 0)
+    hung.BURST_SECONDS = 0.5
+    hung.SEND_SECONDS = 1
+
+    class HangingClient(FakeClient):
+        async def send_message(self, chat_id, text):
+            await asyncio.sleep(30)
+
+    await hung._handle(HangingClient(), FakeEvent('hi', chat_id=33, name='stuck'))
+    await asyncio.sleep(4.0)
+    check('a send that hangs is reported instead of waiting forever',
+          any(s == 'error' and 'failed' in d for s, d in ht), ht)
 
     r.MAX_HOLD_SECONDS = 2
     for _ in range(12):

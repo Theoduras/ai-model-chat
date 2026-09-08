@@ -163,6 +163,11 @@ class AccountRunner:
     BURST_SECONDS = 8
     MAX_HOLD_SECONDS = 90
     HISTORY_LIMIT = 500
+    # Neither Gemini nor MTProto is given a deadline of its own, and the client
+    # is built with connection_retries=None, so a stalled call used to hold a
+    # reply open forever with nothing in the log to say so.
+    PLAN_SECONDS = 180
+    SEND_SECONDS = 90
 
     def __init__(self, persona, api_id, api_hash, session_str, plan, on_sent=None,
                  on_error=None, on_trace=None, pre_delay=None,
@@ -205,7 +210,9 @@ class AccountRunner:
         try:
             self._loop.run_until_complete(self._main())
         except Exception as e:
-            if self.on_error:
+            # A deliberate stop surfaces here as "Event loop stopped before Future
+            # completed", which read like a crash in the console.
+            if not self._stop.is_set() and self.on_error:
                 self.on_error(self.persona, str(e)[:300])
         finally:
             try:
@@ -371,10 +378,17 @@ class AccountRunner:
                     del self._bursts[chat_id]
             await self._reply(client, chat_id, burst)
         except asyncio.CancelledError:
+            self._trace('error', f"{burst['name']}: the reply was dropped part-way "
+                                 'because the account went offline')
             raise
         except Exception as e:
             if self.on_error:
                 self.on_error(self.persona, str(e)[:300])
+
+    async def _type_and_send(self, client, chat_id, chunk, dur):
+        async with client.action(chat_id, 'typing'):
+            await asyncio.sleep(dur)
+        await client.send_message(chat_id, chunk)
 
     async def _reply(self, client, chat_id, burst):
         name = burst['name']
@@ -384,28 +398,34 @@ class AccountRunner:
             self._trace('burst', f'{name}: answering {len(texts)} messages as one')
 
         # Gemini is blocking, so keep it off the event loop.
-        plan = await asyncio.to_thread(self.plan, chat_id, name, '\n'.join(texts), texts)
-        if not plan or not plan.get('chunks'):
+        try:
+            plan = await asyncio.wait_for(
+                asyncio.to_thread(self.plan, chat_id, name, '\n'.join(texts), texts),
+                timeout=self.PLAN_SECONDS)
+        except asyncio.TimeoutError:
+            self._trace('error', f'{name}: writing the reply took longer than '
+                                 f'{self.PLAN_SECONDS}s — gave up on it')
+            return
+        chunks = [c for c in ((plan or {}).get('chunks') or []) if c and c.strip()]
+        if not chunks:
             self._trace('no-reply', f'{name}: nothing to send back')
             return
 
         read = max(0.0, float(plan.get('read', 0)))
-        self._trace('planning', f"{name}: {len(plan['chunks'])} message(s), "
-                                f"first one in about {int(read)}s")
+        self._trace('planning', f'{name}: {len(chunks)} message(s), '
+                                f'first one in about {int(read)}s')
         await asyncio.sleep(read)
         cps = max(2, int(plan.get('cps', 14)))
-        for i, chunk in enumerate(plan['chunks']):
-            if not chunk:
-                continue
+        for i, chunk in enumerate(chunks):
             if i:
                 await asyncio.sleep(1.0)
             dur = min(max(len(chunk) / float(cps), 1.2), 22.0)
-            async with client.action(chat_id, 'typing'):
-                await asyncio.sleep(dur)
             try:
-                await client.send_message(chat_id, chunk)
+                await asyncio.wait_for(self._type_and_send(client, chat_id, chunk, dur),
+                                       timeout=dur + self.SEND_SECONDS)
             except Exception as e:
-                self._trace('error', f'send to {name} failed: {str(e)[:180]}')
+                self._trace('error', f'send to {name} failed: '
+                                     f'{str(e)[:180] or e.__class__.__name__}')
                 raise
             self._trace('sent', f'→ {name}: {chunk[:120]}')
             if self.on_sent:
