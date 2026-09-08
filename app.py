@@ -3479,8 +3479,9 @@ def _smtp_config():
 
 
 def _send_reset_email(to_email, reset_link):
-    """Send the reset link over SMTP. Returns True if a send was attempted
-    (not whether it was delivered)."""
+    """Send the reset link over SMTP. Returns True only if the send actually
+    succeeded, so a failed send falls back to showing the link on the page
+    instead of silently pretending it was delivered."""
     cfg = _smtp_config()
     if not cfg:
         return False
@@ -3499,6 +3500,7 @@ def _send_reset_email(to_email, reset_link):
             server.sendmail(cfg['from'], [to_email], msg.as_string())
     except Exception:
         logger.exception('RESET EMAIL FAILED to=%s', to_email)
+        return False
     return True
 
 
@@ -3522,8 +3524,8 @@ def forgot_password():
             s.commit()
             reset_link = request.url_root.rstrip('/') + '/reset-password/' + u.reset_token
             if not _send_reset_email(email, reset_link):
-                logger.warning('PASSWORD RESET LINK (SMTP not configured) email=%s link=%s',
-                               email, reset_link)
+                logger.warning('PASSWORD RESET LINK (not emailed — SMTP unset or send failed) '
+                               'email=%s link=%s', email, reset_link)
             else:
                 reset_link = None  # emailed — don't also hand it back on the page
     finally:
