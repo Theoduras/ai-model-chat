@@ -168,6 +168,14 @@ class AccountRunner:
     # reply open forever with nothing in the log to say so.
     PLAN_SECONDS = 180
     SEND_SECONDS = 90
+    # A burst only exists in memory, so a restart drops whatever she was in the
+    # middle of and the follow-up loop skips those fans on the grounds that the
+    # reply path has them. Telegram itself is the record of what went
+    # unanswered, so she reads it back on connect.
+    CATCHUP_AFTER = 6
+    CATCHUP_CHATS = 20
+    CATCHUP_MAX = 5
+    CATCHUP_MAX_AGE = 6 * 3600
 
     def __init__(self, persona, api_id, api_hash, session_str, plan, on_sent=None,
                  on_error=None, on_trace=None, pre_delay=None,
@@ -239,11 +247,60 @@ class AccountRunner:
         await client.connect()
         if not await client.is_user_authorized():
             raise RuntimeError('Session is no longer authorized — sign in again.')
+        self._trace('connected', 'account is online')
         keepalive = asyncio.ensure_future(self._keepalive(client))
+        catchup = asyncio.ensure_future(self._catch_up(client))
         try:
             await client.run_until_disconnected()
         finally:
             keepalive.cancel()
+            catchup.cancel()
+
+    async def _catch_up(self, client):
+        """Answer anyone left hanging while she was offline.
+
+        A chat whose newest message is the fan's is one she owes a reply to, so
+        a reply lost to a restart is picked back up instead of waiting for the
+        fan to write again — which he has no reason to do.
+        """
+        await asyncio.sleep(self.CATCHUP_AFTER)
+        try:
+            me = await client.get_me()
+            dialogs = await client.get_dialogs(limit=self.CATCHUP_CHATS)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            self._trace('error', f'could not check for missed messages: {str(e)[:160]}')
+            return
+        now = datetime.now(timezone.utc)
+        answered = 0
+        for d in dialogs:
+            if answered >= self.CATCHUP_MAX:
+                return
+            ent, msg = d.entity, d.message
+            if not d.is_user or getattr(ent, 'bot', False) or ent.id == me.id:
+                continue
+            if msg is None or msg.out or not (msg.raw_text or '').strip():
+                continue
+            if getattr(msg, 'date', None) and \
+                    (now - msg.date).total_seconds() > self.CATCHUP_MAX_AGE:
+                continue
+            # He wrote again on the way here, so the live path already has him.
+            if d.id in self._bursts:
+                continue
+            name = (getattr(ent, 'username', '') or getattr(ent, 'first_name', '')
+                    or str(d.id))
+            self._trace('missed', f'{name}: went unanswered while she was offline')
+            answered += 1
+            try:
+                await self._reply(client, d.id, {
+                    'name': name, 'texts': [msg.raw_text.strip()],
+                    'first_id': getattr(msg, 'id', 0)})
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                self._trace('error', f'answering {name} after the restart failed: '
+                                     f'{str(e)[:160]}')
 
     async def _read_history(self, client, chat_id, name, first_id):
         """Pull the conversation so far the first time a fan is answered.

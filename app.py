@@ -4710,7 +4710,8 @@ INBOX_PLATFORMS = {
 # Trace stages that describe something that happened *to one fan*, so they can
 # sit inside that fan's thread. Anything else stays on the overview feed.
 INBOX_EVENT_STAGES = {'ppv', 'guardrail', 'error', 'skipped', 'follow-up',
-                      'funnel', 'review', 'delayed', 'routed', 'complaint'}
+                      'funnel', 'review', 'delayed', 'routed', 'complaint',
+                      'missed'}
 
 
 def _inbox_trace_rows(platform, persona):

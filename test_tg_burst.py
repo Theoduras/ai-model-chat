@@ -46,10 +46,17 @@ class FakeAction:
 
 
 class FakeClient:
-    def __init__(self, history=None):
+    def __init__(self, history=None, dialogs=None):
         self.sent = []
         self.history = history or []      # newest first, as Telegram returns it
         self.history_calls = []
+        self.dialogs = dialogs or []
+
+    async def get_me(self):
+        return types.SimpleNamespace(id=999)
+
+    async def get_dialogs(self, limit=None):
+        return list(self.dialogs)
 
     def action(self, *a, **kw):
         return FakeAction()
@@ -198,6 +205,35 @@ async def run():
     await asyncio.sleep(4.0)
     check('a send that hangs is reported instead of waiting forever',
           any(s == 'error' and 'failed' in d for s, d in ht), ht)
+
+    # A restart drops whatever burst was in flight, and the follow-up loop skips
+    # fans who spoke last — so without this she never answers them at all.
+    def _dialog(chat_id, name, text, out=False, age=0):
+        from datetime import datetime, timedelta, timezone as tz
+        return types.SimpleNamespace(
+            id=chat_id, is_user=True,
+            entity=types.SimpleNamespace(id=chat_id, username=name, first_name='',
+                                         bot=False),
+            message=types.SimpleNamespace(
+                out=out, raw_text=text, id=5,
+                date=datetime.now(tz.utc) - timedelta(seconds=age)))
+
+    ct = []
+    cu = _runner([], ct, pre_delay=0)
+    cu.CATCHUP_AFTER = 0.1
+    cc = FakeClient(dialogs=[
+        _dialog(41, 'ignored', 'Hey'),
+        _dialog(42, 'answered', 'nice one', out=True),
+        _dialog(43, 'ancient', 'hello?', age=cu.CATCHUP_MAX_AGE + 60),
+    ])
+    await cu._catch_up(cc)
+    check('a fan left hanging by a restart is answered on reconnect',
+          [s for s, d in ct if s == 'missed'] and len(cc.sent) == 1
+          and cc.sent[0][0] == 41, (ct, cc.sent))
+    check('a chat she already replied to is left alone',
+          not any(chat == 42 for chat, _ in cc.sent), cc.sent)
+    check('and an old message is not dredged up',
+          not any(chat == 43 for chat, _ in cc.sent), cc.sent)
 
     r.MAX_HOLD_SECONDS = 2
     for _ in range(12):
