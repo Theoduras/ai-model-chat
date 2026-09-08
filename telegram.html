@@ -145,7 +145,7 @@
     <div class="section-title">⚙️ How she replies</div>
     <span class="hint" style="display:block; margin-bottom:14px;">Applies to both the bot and the personal account below.</span>
     <div class="auto-toggles" style="display:flex; flex-wrap:wrap; gap:10px 22px;">
-      <label class="auto-chk" style="margin-top:0;"><input type="checkbox" id="f-tg-enabled" checked> <b>Bot active</b> <span style="color:var(--text-muted)">— reply to incoming messages</span></label>
+      <label class="auto-chk" style="margin-top:0;"><input type="checkbox" id="f-tg-enabled" checked> <b>Replies active</b> <span style="color:var(--text-muted)">— reply to incoming messages</span></label>
       <label class="auto-chk" style="margin-top:0;"><input type="checkbox" id="f-tg-humanize" checked> Type like a human <span style="color:var(--text-muted)">— pause to read, show “typing…”, send in bursts</span></label>
       <label class="auto-chk" style="margin-top:0;"><input type="checkbox" id="f-tg-followups" checked> Follow up on quiet fans <span style="color:var(--text-muted)">— max 2 nudges each</span></label>
     </div>
@@ -565,7 +565,7 @@ async function saveBehaviour(btn){
     const d=await r.json();
     if(!d.ok) throw new Error(d.error||'failed');
     st.textContent='✓ Saved'; st.style.color='#4ade80';
-    loadTrace();
+    loadTrace(); loadTgu();
   }catch(e){ st.textContent='✗ '+e; st.style.color='#fb7185'; }
 }
 
@@ -607,7 +607,7 @@ const TG_FIX=[
   [/press Start on the Real account/i,{tab:'settings',focus:'sec-account',label:'Start her account'}],
   [/personal account error/i,        {tab:'settings',focus:'sec-account',label:'Open the account'}],
   [/no personal Telegram account/i,  {tab:'settings',focus:'sec-account',label:'Open the account'}],
-  [/Bot active is OFF/i,             {tab:'settings',focus:'sec-replies',label:'Turn her on'}],
+  [/Replies are OFF/i,               {tab:'settings',focus:'sec-replies',label:'Turn her on'}],
   [/only replying|never replying/i,  {tab:'settings',focus:'sec-conversion',label:'Check who she answers'}],
   [/No Telegram bot is connected|shared bot/i,{tab:'settings',focus:'sec-bot',label:'Connect a bot'}],
   [/no Telegram chat is bound/i,     {tab:'settings',focus:'sec-bot',label:'Get the connect link'}],
@@ -734,8 +734,10 @@ function renderTgu(){
   const a=tguStatus[persona()]||{}, pill=document.getElementById('tgu-pill');
   if(a.connected){
     const who=a.username?('@'+a.username):(a.first_name||a.phone||'account');
-    pill.className='conn-pill '+(a.running?'ok':'run');
-    pill.textContent=(a.running?'● live as ':'○ offline · ')+who;
+    const silent=a.running && a.replies===false;
+    pill.className='conn-pill '+(a.running && !silent ? 'ok' : 'run');
+    pill.textContent=silent ? ('● '+who+' · replies off')
+      : (a.running?'● live as ':'○ offline · ')+who;
   } else { pill.className='conn-pill'; pill.textContent='Not signed in'; }
   document.getElementById('tgu-start').style.display=(a.connected&&!a.running)?'inline-flex':'none';
   document.getElementById('tgu-stop').style.display=(a.connected&&a.running)?'inline-flex':'none';

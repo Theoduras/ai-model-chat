@@ -15948,7 +15948,7 @@ def api_telegram_trace():
                             'to open your connect link once so the shared bot knows who '
                             'they came for.')
     if not cfg['enabled']:
-        problems.append('Bot active is OFF — turn it on under "How she replies" '
+        problems.append('Replies are OFF — turn them on under "How she replies" '
                         'at the top of this page.')
     if cfg['only_fans']:
         problems.append(f"Only replying to {len(cfg['only_fans'])} selected fan(s): "
@@ -16103,7 +16103,6 @@ if os.getenv('TELEGRAM_POLL', '0') == '1':
 
 _tgu_runners = {}
 _tgu_errors = {}
-_tgu_stopped = set()
 
 
 def _tgu_accounts():
@@ -16115,6 +16114,18 @@ def _tgu_accounts():
 
 def _tgu_save_accounts(data):
     _set_setting('tguser_accounts', json.dumps(data))
+
+
+def _tgu_set_stopped(persona, stopped):
+    """Remember a stop across restarts. Held in memory it was lost on every
+    Cloud Run cold start, and the supervisor brought the account straight back
+    online while the dashboard still showed it stopped."""
+    accounts = _tgu_accounts()
+    acct = accounts.get(persona)
+    if acct is None or bool(acct.get('stopped')) == bool(stopped):
+        return
+    acct['stopped'] = bool(stopped)
+    _tgu_save_accounts(accounts)
 
 
 def _tgu_app_creds():
@@ -16208,8 +16219,11 @@ def _tgu_plan(persona, chat_id, name, text, texts=None):
     runner acts on, including optional photo_data for the runner to send."""
     msgs = [t for t in (texts or [text]) if t]
     cfg = _tg_settings(persona)
-    # Deliberately no `enabled` check here: that toggle has only ever gated the
-    # bot path, and the personal account replies independently of it.
+    if not cfg['enabled']:
+        _tg_trace(persona, 'skipped',
+                  f'{name} ({chat_id}) — replies are switched off under "How she replies"',
+                  fan=_tgu_fan_key(chat_id))
+        return None
     if not _tg_fan_allowed(cfg, chat_id, name):
         _tg_trace(persona, 'skipped',
                   f"{name} ({chat_id}) — not in the {len(cfg['only_fans'])} selected fan(s): "
@@ -16401,7 +16415,7 @@ def _tgu_start(persona):
     api_id, api_hash = _tgu_app_creds()
     if not (acct.get('session') and api_id and api_hash):
         return False
-    _tgu_stopped.discard(persona)
+    _tgu_set_stopped(persona, False)
     r = _tgu_runners.get(persona)
     if r and r.alive():
         return True
@@ -16477,7 +16491,7 @@ def _tgu_start(persona):
 
 
 def _tgu_stop(persona):
-    _tgu_stopped.add(persona)
+    _tgu_set_stopped(persona, True)
     r = _tgu_runners.pop(persona, None)
     if r:
         r.stop()
@@ -16574,6 +16588,7 @@ def api_tguser_status():
         out[persona] = {
             'connected': bool(a.get('session')),
             'running': bool(r and r.alive()),
+            'replies': _tg_settings(persona)['enabled'],
             'username': a.get('username', ''),
             'first_name': a.get('first_name', ''),
             'phone': a.get('phone', ''),
@@ -16672,9 +16687,11 @@ def api_tguser_chats():
 
 
 def _tgu_boot():
-    """Reconnect every stored account after a restart."""
+    """Reconnect every stored account after a restart, bar the ones stopped by hand."""
     with app.app_context():
-        for persona in _tgu_accounts():
+        for persona, acct in _tgu_accounts().items():
+            if acct.get('stopped'):
+                continue
             try:
                 _tgu_start(persona)
             except Exception as e:
@@ -16691,8 +16708,8 @@ def _tgu_supervisor():
         time.sleep(30)
         try:
             with app.app_context():
-                for persona in _tgu_accounts():
-                    if persona in _tgu_stopped:
+                for persona, acct in _tgu_accounts().items():
+                    if acct.get('stopped'):
                         continue
                     r = _tgu_runners.get(persona)
                     if r and r.alive():

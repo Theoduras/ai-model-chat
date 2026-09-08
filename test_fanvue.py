@@ -849,6 +849,44 @@ def test_complaints_are_remembered():
         app.client = was_client
 
 
+def test_telegram_off_silences_the_personal_account():
+    """"Replies active" off has to stop the personal account too, not just the
+    bot — that is what let her keep answering with the box unchecked."""
+    store, traced = {}, []
+    app._get_setting = lambda k, d=None: store.get(k, d)
+    app._set_setting = lambda k, v: store.__setitem__(k, v)
+    app._tg_trace = lambda p, st, d='', fan='': traced.append((st, d))
+
+    store['telegram_auto_lilly'] = json.dumps({'enabled': False})
+    check('she does not answer a DM while replies are off',
+          app._tgu_plan('lilly', 11, 'fan', 'hey') is None)
+    check('and the console says why',
+          traced and traced[-1][0] == 'skipped' and 'switched off' in traced[-1][1],
+          traced)
+
+    store['telegram_auto_lilly'] = json.dumps({'enabled': True, 'only_fans': ['999']})
+    check('turning it back on clears that gate',
+          app._tgu_plan('lilly', 11, 'fan', 'hey') is None
+          and 'not in the' in traced[-1][1], traced)
+
+
+def test_a_stopped_account_stays_stopped():
+    """Stop used to live in memory only, so every Cloud Run restart brought the
+    account back online on its own."""
+    store = {}
+    app._get_setting = lambda k, d=None: store.get(k, d)
+    app._set_setting = lambda k, v: store.__setitem__(k, v)
+    store['tguser_accounts'] = json.dumps({'lilly': {'session': 'x'}})
+
+    app._tgu_stop('lilly')
+    check('a stop is written down, so a restart leaves it alone',
+          json.loads(store['tguser_accounts'])['lilly'].get('stopped') is True)
+
+    app._tgu_set_stopped('lilly', False)
+    check('and starting her again clears it',
+          json.loads(store['tguser_accounts'])['lilly'].get('stopped') is False)
+
+
 if __name__ == '__main__':
     for fn in (test_direction, test_import, test_identity_never_crosses,
                test_placeholders, test_pacing, test_backlog,
@@ -860,7 +898,9 @@ if __name__ == '__main__':
                test_funnel_config_roundtrip, test_distress_pause_is_written_once,
                test_funnel_exits, test_webhook_subscription,
                test_webhook_accepts_any_known_secret, test_webhook_diagnosis,
-               test_unsendable_chats, test_complaints_are_remembered):
+               test_unsendable_chats, test_complaints_are_remembered,
+               test_telegram_off_silences_the_personal_account,
+               test_a_stopped_account_stays_stopped):
         print('\n--- %s ---' % fn.__name__)
         restore_app()
         fn()
