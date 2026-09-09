@@ -115,6 +115,49 @@ class SplitTest(unittest.TestCase):
             dead.start('lilith', 'acct1')
 
 
+class RoundTripTest(unittest.TestCase):
+    """A frame poll runs a few times a second. Asking twice for what one
+    request can carry doubles the load on a service running one instance."""
+
+    def setUp(self):
+        of_browser.TOKEN = 'test-token'
+        self.paths = []
+        api = of_browser.service()
+
+        @api.before_request
+        def count():
+            from flask import request
+            self.paths.append(request.path)
+
+        self.server = make_server('127.0.0.1', 0, api, handler_class=Quiet)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.remote = of_browser.Remote(
+            f'http://127.0.0.1:{self.server.server_address[1]}', 'test-token')
+        self.attempt = bare_attempt()
+        of_connect._attempts[self.attempt.id] = self.attempt
+
+    def tearDown(self):
+        of_connect._attempts.clear()
+        of_connect.session_sink(None)
+        self.server.shutdown()
+        self.server.server_close()
+
+    def test_a_frame_poll_is_one_request(self):
+        far = self.remote.get('ofc_test', frame=True)
+        self.assertEqual(far.snapshot(), of_connect.get('ofc_test').snapshot())
+        self.assertEqual(len(self.paths), 1, self.paths)
+
+    def test_an_input_does_not_fetch_the_picture(self):
+        self.remote.get('ofc_test').act('click', x=1, y=2)
+        self.assertNotIn('frame', ' '.join(self.paths))
+
+    def test_a_service_that_sends_no_frame_still_answers(self):
+        # The app and the browser service deploy separately, so one can be
+        # older than the other for a while.
+        far = of_browser._Handle(self.remote, {'attempt': 'ofc_test'}, None)
+        self.assertEqual(far.snapshot(), of_connect.get('ofc_test').snapshot())
+
+
 class WiringTest(unittest.TestCase):
     def test_no_url_means_the_in_process_browser(self):
         of_browser.BASE_URL, of_browser.TOKEN = '', ''

@@ -90,7 +90,12 @@ def service():
         attempt = of_connect.get(attempt_id)
         if not attempt:
             return jsonify({'ok': False, 'error': 'no such sign-in'}), 404
-        return jsonify({'ok': True, 'attempt': attempt.status()})
+        out = {'ok': True, 'attempt': attempt.status()}
+        # The frame poll wants both and would otherwise ask twice; an input
+        # wants neither picture nor the 35KB of it.
+        if request.args.get('frame'):
+            out['frame'] = attempt.snapshot()
+        return jsonify(out)
 
     @api.route('/session/<attempt_id>/frame')
     def frame(attempt_id):
@@ -138,9 +143,10 @@ def service():
 class _Handle:
     """One attempt on the service, shaped like an of_connect.Attempt."""
 
-    def __init__(self, remote, status):
+    def __init__(self, remote, status, frame=None):
         self._remote = remote
         self._status = status
+        self._frame = frame
         self.id = status.get('attempt', '')
         self.persona = status.get('persona', '')
         self.account = status.get('account', '')
@@ -150,8 +156,10 @@ class _Handle:
         return self._status
 
     def snapshot(self):
-        # Fetched only when asked for: an input carries no frame, and the frame
-        # is by far the larger half of the traffic.
+        # Already here when the caller asked for it up front. The fallback is
+        # for a browser service too old to send it alongside the status.
+        if self._frame is not None:
+            return self._frame
         try:
             return self._remote.call('GET', f'/session/{self.id}/frame').get('frame', '')
         except of_connect.ConnectError:
@@ -208,14 +216,16 @@ class Remote:
                                           'the browser service did not start a sign-in')
         return _Handle(self, out['attempt'])
 
-    def get(self, attempt_id):
+    def get(self, attempt_id, frame=False):
         if not attempt_id:
             return None
         try:
-            out = self.call('GET', f'/session/{attempt_id}')
+            out = self.call('GET', f'/session/{attempt_id}' + ('?frame=1' if frame else ''))
         except of_connect.ConnectError:
             return None
-        return _Handle(self, out['attempt']) if out.get('attempt') else None
+        if not out.get('attempt'):
+            return None
+        return _Handle(self, out['attempt'], out.get('frame') if frame else None)
 
     def cancel(self, attempt_id):
         if not attempt_id:

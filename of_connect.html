@@ -138,13 +138,48 @@ function at(ev){
   return {x: (ev.clientX - box.left) * scale, y: (ev.clientY - box.top) * scale};
 }
 
-async function send(kind, extra){
+// One request in flight at a time, strictly in order. Fire-and-forget fetches
+// do not arrive in the order they were sent, and a mouseup that overtakes its
+// mousedown is not a click -- it releases a button that was never pressed and
+// leaves the next one held down.
+let outbox = [], inflight = false;
+
+function send(kind, extra){
   if (!attempt || finished) return;
-  const r = await post('/api/onlyfans/connect/input',
-    Object.assign({attempt: attempt, kind: kind}, extra || {}));
-  // A refused input means the window is talking to something that is not
-  // listening any more; saying so once beats hundreds of silent failures.
-  if (!r.ok) fail(r.error || 'The sign-in window lost its browser. Start it again.');
+  const item = Object.assign({kind: kind}, extra || {});
+  // A path that has not been sent yet is worth less than the one behind it:
+  // merge rather than queue, so a slow link drops stale movement instead of
+  // building a backlog the browser then has to replay.
+  const last = outbox[outbox.length - 1];
+  if (kind === 'move' && last && last.kind === 'move'){
+    last.points = (last.points || []).concat(item.points || []).slice(-60);
+    return;
+  }
+  outbox.push(item);
+  pump();
+}
+
+async function pump(){
+  if (inflight || !outbox.length) return;
+  inflight = true;
+  try {
+    while (outbox.length && !finished){
+      const item = outbox.shift();
+      let r;
+      // A dropped connection is not a dead sign-in: the frame poll is watching
+      // for that and says so on its own. Losing one keystroke to a blip beats
+      // tearing the window down, and beats wedging the queue behind it.
+      try {
+        r = await post('/api/onlyfans/connect/input',
+          Object.assign({attempt: attempt}, item));
+      } catch (e) { continue; }
+      // A refused input means the window is talking to something that is not
+      // listening any more; saying so once beats hundreds of silent failures.
+      // Movement is exempt: it is dropped freely and must not end the sign-in.
+      if (!r.ok && item.kind !== 'move')
+        return fail(r.error || 'The sign-in window lost its browser. Start it again.');
+    }
+  } finally { inflight = false; }
 }
 
 // Every point of the path is kept and sent in batches, rather than one point
@@ -162,7 +197,7 @@ img.addEventListener('mousemove', ev => {
   const p = at(ev); if (!p) return;
   p.t = Date.now();
   if (path.length < 60) path.push(p);
-  if (p.t - lastMove < 50) return;
+  if (p.t - lastMove < 120) return;
   lastMove = p.t;
   flush();
 });

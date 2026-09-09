@@ -139,6 +139,71 @@ class PathTest(unittest.TestCase):
         self.assertEqual(gaps[1], 0.05)
 
 
+class DrainTest(unittest.TestCase):
+    """What the browser thread takes off the queue each time round.
+
+    One command per iteration could not keep up -- a path is replayed in real
+    time and a screenshot follows it -- so a click queued behind a few seconds
+    of mouse movement landed seconds late, on a page that had moved on.
+    """
+
+    def drain(self, *commands):
+        a = bare_attempt()
+        for c in commands:
+            a._commands.put(c)
+        return _ATTEMPT._drain(a)
+
+    def test_a_click_is_not_left_behind_its_approach(self):
+        batch, quit_now = self.drain(
+            ('move', {'points': [{'x': 1, 'y': 1}]}),
+            ('down', {'x': 5, 'y': 5}), ('up', {'x': 5, 'y': 5}))
+        self.assertEqual([kind for kind, _ in batch], ['move', 'down', 'up'])
+        self.assertFalse(quit_now)
+
+    def test_only_the_newest_path_is_replayed(self):
+        batch, _ = self.drain(
+            ('move', {'points': [{'x': 1, 'y': 1}]}),
+            ('move', {'points': [{'x': 2, 'y': 2}]}),
+            ('move', {'points': [{'x': 3, 'y': 3}]}))
+        self.assertEqual(len(batch), 1)
+        self.assertEqual(batch[0][1]['points'], [{'x': 3, 'y': 3}])
+
+    def test_typing_is_never_dropped_or_reordered(self):
+        batch, _ = self.drain(
+            ('type', {'text': 'a'}), ('move', {'points': [{'x': 1, 'y': 1}]}),
+            ('type', {'text': 'b'}), ('move', {'points': [{'x': 2, 'y': 2}]}),
+            ('key', {'key': 'Enter'}))
+        # Movement is dropped down to the newest path; everything the creator
+        # actually pressed stays, in the order she pressed it. Where the
+        # surviving move sits among them does not matter -- a press carries
+        # its own coordinates, so it cannot be misplaced by a dropped one.
+        self.assertEqual([kind for kind, _ in batch if kind != 'move'],
+                         ['type', 'type', 'key'])
+        self.assertEqual([kw.get('text') for kind, kw in batch if kind == 'type'],
+                         ['a', 'b'])
+        moves = [kw for kind, kw in batch if kind == 'move']
+        self.assertEqual(len(moves), 1)
+        self.assertEqual(moves[0]['points'], [{'x': 2, 'y': 2}])
+
+    def test_quit_stops_the_batch_where_it_was_asked_to(self):
+        batch, quit_now = self.drain(
+            ('type', {'text': 'a'}), ('quit', {}), ('type', {'text': 'b'}))
+        self.assertTrue(quit_now)
+        self.assertEqual([kind for kind, _ in batch], ['type'])
+
+    def test_an_idle_queue_asks_for_nothing(self):
+        self.assertEqual(self.drain(), ([], False))
+
+    def test_a_long_path_gives_the_thread_back(self):
+        # Every gap is the cap, so an unbudgeted replay would sleep 60 * 50ms.
+        points = [{'x': i, 'y': i, 't': i * 9000} for i in range(60)]
+        page = mock.Mock(mouse=FakeMouse())
+        started = time.time()
+        _ATTEMPT._apply(bare_attempt(), page, 'move', {'points': points})
+        self.assertLess(time.time() - started, of_connect.MOVE_BUDGET + 0.2)
+        self.assertEqual(len(page.mouse.moves), 60)
+
+
 class BrowserTest(unittest.TestCase):
     def test_chrome_is_preferred_over_the_bundled_chromium(self):
         with mock.patch.object(of_connect, 'BROWSER_PATH', ''), \

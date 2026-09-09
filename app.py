@@ -16396,7 +16396,7 @@ def api_onlyfans_connect_frame():
     """The browser as it looks right now. Polled a few times a second while the
     creator is typing, so it answers with the last frame rather than waiting for
     a fresh one."""
-    attempt = _of_conn().get((request.args.get('attempt') or '').strip()) \
+    attempt = _of_conn().get((request.args.get('attempt') or '').strip(), frame=True) \
         if _of_direct() else None
     if not attempt:
         return jsonify({'ok': False, 'error': 'that sign-in is no longer open'}), 404

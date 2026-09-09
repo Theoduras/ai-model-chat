@@ -47,6 +47,9 @@ INPUT_KINDS = ('click', 'move', 'down', 'up', 'type', 'key', 'scroll', 'back')
 ATTEMPT_TTL = 15 * 60
 IDLE_TTL = 3 * 60
 POLL_SECONDS = 1.5
+# How long one replayed path may hold the browser thread. Everything else the
+# creator does is queued behind it.
+MOVE_BUDGET = 0.1
 
 _attempts = {}
 _lock = threading.Lock()
@@ -221,15 +224,14 @@ class Attempt:
         self.state = 'signin'
         last_check = 0.0
         while not self._done.is_set():
-            try:
-                kind, kw = self._commands.get(timeout=0.25)
-                if kind == 'quit':
-                    break
-                self._apply(page, kind, kw)
-            except queue.Empty:
-                pass
-            except Exception as e:
-                logger.debug('input to the hosted browser failed: %s', str(e)[:120])
+            batch, quit_now = self._drain()
+            for kind, kw in batch:
+                try:
+                    self._apply(page, kind, kw)
+                except Exception as e:
+                    logger.debug('input to the hosted browser failed: %s', str(e)[:120])
+            if quit_now:
+                break
             self._capture(page)
             if self.state == 'signin' and time.time() - last_check > POLL_SECONDS:
                 last_check = time.time()
@@ -246,6 +248,35 @@ class Attempt:
         shutil.rmtree(self._profile, ignore_errors=True)
         self._done.set()
 
+    def _drain(self):
+        """Everything queued right now, in order, with stale movement dropped.
+
+        One command per loop iteration cannot keep up: a move is replayed in
+        real time and a screenshot follows it, so the queue grows faster than
+        it empties and the click behind it lands seconds late. Only the newest
+        path is worth replaying -- the older ones describe a cursor that has
+        already moved on -- but everything else is a discrete act the creator
+        performed and is kept exactly as it came.
+        """
+        batch, quit_now = [], False
+        try:
+            batch.append(self._commands.get(timeout=0.25))
+        except queue.Empty:
+            return [], False
+        while True:
+            try:
+                batch.append(self._commands.get_nowait())
+            except queue.Empty:
+                break
+        if any(kind == 'quit' for kind, _ in batch):
+            quit_now = True
+            batch = batch[:[kind for kind, _ in batch].index('quit')]
+        moves = [i for i, (kind, _) in enumerate(batch) if kind == 'move']
+        if len(moves) > 1:
+            keep = set(moves[:-1])
+            batch = [c for i, c in enumerate(batch) if i not in keep]
+        return batch, quit_now
+
     def _apply(self, page, kind, kw):
         if kind == 'click':
             page.mouse.click(float(kw['x']), float(kw['y']))
@@ -255,9 +286,15 @@ class Attempt:
             # so is one that arrives in a few evenly spaced hops -- so the
             # window sends the path as it was actually drawn and it is replayed
             # here at the speed it was drawn at.
+            spent = 0.0
             for x, y, gap in _path(kw):
-                if gap:
+                # The pauses are what make the path look drawn rather than
+                # computed, but they are also the browser thread standing
+                # still. Past the budget the remaining points are walked at
+                # full speed rather than held onto.
+                if gap and spent < MOVE_BUDGET:
                     time.sleep(gap)
+                    spent += gap
                 page.mouse.move(x, y)
         elif kind == 'down':
             page.mouse.move(float(kw['x']), float(kw['y']))
@@ -366,7 +403,9 @@ def start(persona, account, proxy='', user_agent='', viewport=None):
     return attempt
 
 
-def get(attempt_id):
+def get(attempt_id, frame=False):
+    # `frame` is for the browser service, which fetches the picture in the same
+    # round trip rather than a second one. In this process it is already here.
     with _lock:
         return _attempts.get(attempt_id)
 
