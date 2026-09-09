@@ -1,0 +1,146 @@
+"""Tests for Threads publishing: media typing, carousels and container waits.
+
+The Threads graph API is stubbed, so this needs no token and no network.
+Run with: python test_threads.py
+"""
+import os
+import sys
+
+os.environ.setdefault('GEMINI_API_KEY', 'test')
+
+import app
+
+FAILURES = []
+
+
+def check(name, cond, detail=''):
+    if cond:
+        print(f'  ok   {name}')
+    else:
+        print(f'  FAIL {name} {detail}')
+        FAILURES.append(name)
+
+
+CALLS = []
+STATUS = {'value': 'FINISHED', 'error': ''}
+
+
+def fake_call(persona, method, path, params=None, body=None):
+    p = dict(params or {})
+    CALLS.append((method, path, p))
+    if path.endswith('/threads') and method == 'POST':
+        return {'id': f'c{len(CALLS)}'}
+    if path.endswith('/threads_publish'):
+        return {'id': 'M-' + p.get('creation_id', '')}
+    if path.endswith('/threads_publishing_limit'):
+        return {'data': [{'quota_usage': 7, 'config': {'quota_total': 250}}]}
+    if p.get('fields', '').startswith('status'):
+        return {'status': STATUS['value'], 'error_message': STATUS['error']}
+    return {}
+
+
+app._threads_call = fake_call
+app._threads_uid = lambda persona: 'UID'
+app.time.sleep = lambda s: None
+
+
+def publish(*a, **kw):
+    CALLS.clear()
+    return app._threads_publish(*a, **kw)
+
+
+def containers():
+    return [p for m, path, p in CALLS if path.endswith('/threads') and m == 'POST']
+
+
+def fails(fn):
+    try:
+        fn()
+    except Exception as e:
+        return str(e)
+    return ''
+
+
+print('media typing')
+check('bare url defaults to image',
+      app._threads_media_item('https://x.test/a.jpg') == ('IMAGE', {'image_url': 'https://x.test/a.jpg'}))
+check('video by extension',
+      app._threads_media_item('https://x.test/a.mp4')[0] == 'VIDEO')
+check('extension read past the query string',
+      app._threads_media_item('https://x.test/a.mov?sig=abc')[0] == 'VIDEO')
+check('explicit type wins over extension',
+      app._threads_media_item({'url': 'https://x.test/a.jpg', 'type': 'VIDEO'})[0] == 'VIDEO')
+check('video_url key implies video',
+      app._threads_media_item({'video_url': 'https://x.test/clip'})[0] == 'VIDEO')
+check('alt text carried', app._threads_media_item(
+      {'url': 'https://x.test/a.jpg', 'alt_text': 'a cat'})[1]['alt_text'] == 'a cat')
+check('http refused', 'https' in fails(lambda: app._threads_media_item('http://x.test/a.jpg')))
+check('empty url refused', 'url' in fails(lambda: app._threads_media_item({'alt_text': 'x'})))
+
+print('text posts')
+check('text post publishes', publish('lilith', 'hello') == 'M-c1')
+check('text container is TEXT', containers()[0]['media_type'] == 'TEXT')
+check('text container is not polled', not any(m == 'GET' for m, _, _ in CALLS))
+publish('lilith', 'x' * 900)
+check('text truncated to the limit', len(containers()[0]['text']) == app.THREADS_TEXT_LIMIT)
+check('empty post refused', 'needs text' in fails(lambda: publish('lilith', '')))
+
+print('single media')
+publish('lilith', 'cap', media=['https://x.test/a.jpg'])
+c = containers()[0]
+check('image container carries url and text',
+      c['media_type'] == 'IMAGE' and c['image_url'] == 'https://x.test/a.jpg' and c['text'] == 'cap')
+check('media container is polled before publish',
+      any(m == 'GET' for m, _, _ in CALLS))
+publish('lilith', '', media=['https://x.test/a.mp4'])
+check('media may post without text', 'text' not in containers()[0])
+publish('lilith', 'c', media=['https://x.test/a.jpg'], alt_text='described')
+check('alt_text applies to a single item', containers()[0]['alt_text'] == 'described')
+
+print('carousels')
+publish('lilith', 'set', media=['https://x.test/1.jpg', 'https://x.test/2.mp4'])
+cs = containers()
+check('children then parent', len(cs) == 3)
+check('children flagged as carousel items',
+      all(c.get('is_carousel_item') == 'true' for c in cs[:2]))
+check('children carry no text', not any('text' in c for c in cs[:2]))
+check('parent is a carousel', cs[2]['media_type'] == 'CAROUSEL')
+check('parent lists its children', cs[2]['children'] == 'c1,c2')
+check('parent carries the text', cs[2]['text'] == 'set')
+check('mixed types preserved', cs[0]['media_type'] == 'IMAGE' and cs[1]['media_type'] == 'VIDEO')
+check('over-long carousel refused', 'at most' in fails(
+      lambda: publish('lilith', 'x', media=[f'https://x.test/{i}.jpg' for i in range(21)])))
+
+print('replies')
+publish('lilith', 'ty', reply_to_id='R1')
+check('reply id on a text reply', containers()[0]['reply_to_id'] == 'R1')
+publish('lilith', 'ty', reply_to_id='R1', media=['https://x.test/a.jpg'])
+check('reply id on a media reply', containers()[0]['reply_to_id'] == 'R1')
+publish('lilith', 'ty', reply_to_id='R1', media=['https://x.test/1.jpg', 'https://x.test/2.jpg'])
+check('reply id only on the carousel parent',
+      'reply_to_id' not in containers()[0] and containers()[2]['reply_to_id'] == 'R1')
+
+print('container failures')
+STATUS['value'], STATUS['error'] = 'ERROR', 'aspect ratio unsupported'
+msg = fails(lambda: publish('lilith', 'x', media=['https://x.test/a.jpg']))
+check('processing error surfaces the reason', 'aspect ratio unsupported' in msg, msg)
+check('nothing is published after a failed container',
+      not any(p.endswith('/threads_publish') for _, p, _ in CALLS))
+STATUS['value'], STATUS['error'] = 'EXPIRED', ''
+check('expired container refused', 'expired' in fails(
+      lambda: publish('lilith', 'x', media=['https://x.test/a.jpg'])).lower())
+STATUS['value'], STATUS['error'] = 'IN_PROGRESS', ''
+app.time.time = (lambda real: (lambda: real() + 10 ** 6))(app.time.time)
+check('a stuck container gives up rather than looping', 'processing' in fails(
+      lambda: publish('lilith', 'x', media=['https://x.test/a.jpg'])))
+STATUS['value'] = 'FINISHED'
+
+print('quota')
+CALLS.clear()
+check('publishing limit read', app._threads_publishing_limit('lilith') == {'used': 7, 'total': 250})
+
+print()
+if FAILURES:
+    print(f'{len(FAILURES)} FAILED: {FAILURES}')
+    raise SystemExit(1)
+print('all threads tests passed')
