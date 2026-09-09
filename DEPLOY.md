@@ -446,7 +446,7 @@ to map a real domain before doing any SEO work.
 
 | Variable | Why |
 |---|---|
-| `SITE_URL` | Canonical origin, e.g. `https://velvetfunnel.app`. Without it the canonical follows whatever host answered, so a `run.app` or preview URL competes with the real domain in search. |
+| `SITE_URL` | Canonical origin, e.g. `https://velvetfunnel.app`. Without it the canonical follows whatever host answered, so a `run.app` or preview URL competes with the real domain in search. The growth panel's tracked links (`/go/<persona>/<channel>`) are built from it too, and cannot be shown until it is set. |
 | `SEO_NOINDEX_ALL` | Set to `1` on every non-production service. `robots.txt` becomes `Disallow: /`, the sitemap 404s and every response carries `X-Robots-Tag: noindex`. **Set this on `ai-model-chat-dev`.** |
 | `GOOGLE_SITE_VERIFICATION` | The `googleXXXX.html` filename Search Console hands out (with or without the extension). |
 | `GA_MEASUREMENT_ID` | GA4 measurement ID, `G-XXXXXXX`. |
