@@ -1,0 +1,270 @@
+<!doctype html><meta charset="utf-8">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#fff;font:13px/1.45 "Helvetica Neue",Arial,sans-serif;color:#222}
+.screen{width:1000px;padding:22px;border:2px solid #111;background:#fff;margin:0 0 34px}
+.cap{font:11px monospace;color:#666;margin:0 0 6px}
+h1{font-size:17px;margin:0 0 3px}
+h2{font-size:13px;margin:0 0 8px;text-transform:uppercase;letter-spacing:.08em;color:#555}
+.bar{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #111;padding-bottom:10px;margin-bottom:16px}
+.tabs{display:flex;gap:0}
+.tabs div{border:1px solid #999;border-bottom:none;padding:5px 14px;background:#f2f2f2;font-size:12px}
+.tabs div.on{background:#fff;border-color:#111;font-weight:700}
+.row{display:flex;gap:14px}
+.col{flex:1}
+.box{border:1px solid #999;padding:12px;margin-bottom:10px;background:#fff}
+.box.dash{border-style:dashed}
+.box.grey{background:#f5f5f5}
+.lbl{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#777;margin-bottom:5px}
+.inp{border:1px solid #999;padding:7px 9px;background:#fafafa;color:#555;margin-bottom:9px}
+.btn{display:inline-block;border:2px solid #111;padding:7px 16px;font-weight:700;font-size:12px;background:#111;color:#fff}
+.btn.sec{background:#fff;color:#111}
+.btn.sm{padding:4px 10px;font-weight:400;font-size:11px;border-width:1px}
+.pill{display:inline-block;border:1px solid #111;border-radius:10px;padding:1px 9px;font-size:10px;text-transform:uppercase;letter-spacing:.05em}
+.pill.off{border-color:#aaa;color:#888}
+.pill.warn{background:#111;color:#fff}
+table{width:100%;border-collapse:collapse}
+td,th{border:1px solid #ccc;padding:9px;text-align:left;font-size:12px;vertical-align:middle}
+th{background:#f2f2f2;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#666}
+.av{width:26px;height:26px;border:1px solid #999;border-radius:50%;background:#eee;display:inline-block;vertical-align:middle;margin-right:8px}
+.modal{border:2px solid #111;padding:0;box-shadow:6px 6px 0 #ddd}
+.mhead{border-bottom:1px solid #111;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;background:#f7f7f7}
+.mbody{padding:16px}
+.steps{display:flex;gap:8px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#999;margin-bottom:14px}
+.steps b{color:#111;border-bottom:2px solid #111;padding-bottom:2px}
+.browser{border:1px solid #111;background:#fff}
+.chrome{background:#e9e9e9;border-bottom:1px solid #999;padding:6px 10px;display:flex;align-items:center;gap:8px;font:11px monospace;color:#555}
+.dot{width:8px;height:8px;border-radius:50%;background:#bbb;display:inline-block}
+.url{flex:1;background:#fff;border:1px solid #bbb;padding:3px 8px}
+.of{padding:26px;text-align:center;background:#fafafa;min-height:230px}
+.of .logo{font-size:19px;font-weight:700;margin-bottom:14px}
+.of .field{max-width:330px;margin:0 auto 9px;border:1px solid #999;padding:8px;background:#fff;text-align:left;color:#666;font-size:12px}
+.of .go{max-width:330px;margin:6px auto 0;background:#00aff0;color:#fff;padding:9px;font-weight:700;border:1px solid #0090c8}
+.note{border-left:3px solid #111;padding:8px 11px;background:#f7f7f7;font-size:11px;margin-top:12px}
+.tog{display:flex;justify-content:space-between;align-items:center;border-bottom:1px dashed #ccc;padding:9px 0;font-size:12px}
+.sw{width:38px;height:19px;border:1px solid #111;border-radius:10px;position:relative;background:#111}
+.sw:after{content:"";position:absolute;width:15px;height:15px;background:#fff;border-radius:50%;top:1px;right:1px}
+.sw.off{background:#fff}.sw.off:after{background:#111;left:1px;right:auto}
+.msg{border:1px solid #ccc;padding:8px 11px;margin-bottom:8px;max-width:74%;font-size:12px}
+.msg.me{margin-left:auto;background:#111;color:#fff;border-color:#111}
+.msg small{display:block;font-size:9px;opacity:.6;margin-top:4px}
+.flow{display:flex;align-items:stretch;gap:0;flex-wrap:wrap}
+.node{border:2px solid #111;padding:10px;min-height:82px;flex:1;font-size:11px;text-align:center;display:flex;flex-direction:column;justify-content:center}
+.node b{display:block;font-size:12px;margin-bottom:4px}
+.arrow{display:flex;align-items:center;padding:0 7px;font-size:18px;color:#111}
+.lane{border:1px dashed #999;padding:11px;margin-bottom:12px}
+.lane .lt{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#777;margin-bottom:9px}
+.mini{font-size:11px;color:#666}
+code{font:11px monospace;background:#f0f0f0;padding:1px 4px}
+</style>
+
+<!-- 01 -->
+<div class="screen" id="s01">
+ <div class="bar"><div><h1>AI Model Chat — Dashboard</h1><span class="mini">Team: Theoduras</span></div><div class="mini">jeffrey@… ▾</div></div>
+ <div class="tabs"><div>Personas</div><div class="on">Connections</div><div>Inbox</div><div>Funnels</div><div>Billing</div></div>
+ <div class="box" style="border-top:none">
+  <h2>Platform connections</h2>
+  <table>
+   <tr><th>Persona</th><th>Platform</th><th>Account</th><th>Status</th><th>Session</th><th></th></tr>
+   <tr><td><span class="av"></span>Lilith</td><td>OnlyFans</td><td>@lilith.rvn</td><td><span class="pill">Live</span></td><td class="mini">Healthy · checked 40s ago</td><td><span class="btn sm sec">Manage</span></td></tr>
+   <tr><td><span class="av"></span>Lilith</td><td>Fanvue</td><td>@lilith</td><td><span class="pill">Live</span></td><td class="mini">Healthy</td><td><span class="btn sm sec">Manage</span></td></tr>
+   <tr><td><span class="av"></span>Mila</td><td>OnlyFans</td><td class="mini">— not connected —</td><td><span class="pill off">Off</span></td><td class="mini">—</td><td><span class="btn sm">Connect OnlyFans</span></td></tr>
+   <tr><td><span class="av"></span>Nova</td><td>OnlyFans</td><td>@novaxo</td><td><span class="pill warn">Reconnect</span></td><td class="mini">Session expired 2h ago</td><td><span class="btn sm">Reconnect</span></td></tr>
+  </table>
+  <div class="note">One persona ↔ one OnlyFans account. A creator connects as many accounts as they have personas; each gets its own session, its own IP and its own worker.</div>
+ </div>
+</div>
+
+<!-- 02 -->
+<div class="screen" id="s02">
+ <div class="modal" style="max-width:620px;margin:0 auto">
+  <div class="mhead"><b>Connect “Mila” to OnlyFans</b><span class="mini">✕</span></div>
+  <div class="mbody">
+   <div class="steps"><b>1 Prepare</b> › <span>2 Sign in</span> › <span>3 Verify</span> › <span>4 Permissions</span></div>
+   <div class="box grey">
+    <div class="lbl">What happens</div>
+    <div class="mini">We open a private browser for Mila and show it to you below. You sign in on the real onlyfans.com page — we never see or store your password. We keep only the session your browser gets, encrypted.</div>
+   </div>
+   <div class="lbl">Sign-in location (pins the account to one IP for good)</div>
+   <div class="inp">🌍 Netherlands — Amsterdam ▾ &nbsp;&nbsp;<span class="mini">(pick where you normally log in)</span></div>
+   <div class="lbl">Device profile</div>
+   <div class="inp">🖥 Desktop · Chrome 131 · Windows ▾</div>
+   <div class="tog"><span>Import the last 30 days of chat history so the persona has memory</span><span class="sw"></span></div>
+   <div class="tog" style="border:none"><span>Start replying immediately after connecting</span><span class="sw off"></span></div>
+   <div style="margin-top:14px"><span class="btn">Open OnlyFans sign-in</span> <span class="btn sec">Cancel</span></div>
+  </div>
+ </div>
+</div>
+
+<!-- 03 -->
+<div class="screen" id="s03">
+ <div class="modal" style="max-width:700px;margin:0 auto">
+  <div class="mhead"><b>Connect “Mila” to OnlyFans</b><span class="mini">✕</span></div>
+  <div class="mbody">
+   <div class="steps"><span>1 Prepare</span> › <b>2 Sign in</b> › <span>3 Verify</span> › <span>4 Permissions</span></div>
+   <div class="browser">
+    <div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="url">🔒 https://onlyfans.com/</span><span>live</span></div>
+    <div class="of">
+     <div class="logo">OnlyFans</div>
+     <div class="field">Email</div>
+     <div class="field">Password</div>
+     <div class="field" style="display:flex;justify-content:space-between">☑ I'm not a robot <span class="mini">Cloudflare</span></div>
+     <div class="go">LOG IN</div>
+     <div class="mini" style="margin-top:12px">Forgot password? · Sign up</div>
+    </div>
+   </div>
+   <div class="note">This is the real OnlyFans page, running in a browser we host and stream to you. You type into it directly — keystrokes go to OnlyFans, not to us. The captcha is solved by you, so no captcha service is ever needed.</div>
+  </div>
+ </div>
+</div>
+
+<!-- 04 -->
+<div class="screen" id="s04">
+ <div class="modal" style="max-width:700px;margin:0 auto">
+  <div class="mhead"><b>Connect “Mila” to OnlyFans</b><span class="mini">✕</span></div>
+  <div class="mbody">
+   <div class="steps"><span>1 Prepare</span> › <span>2 Sign in</span> › <b>3 Verify</b> › <span>4 Permissions</span></div>
+   <div class="browser">
+    <div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="url">🔒 https://onlyfans.com/</span><span>live</span></div>
+    <div class="of">
+     <div class="logo">OnlyFans</div>
+     <div class="mini" style="margin-bottom:12px">Enter the 6-digit code we sent to •••• 4471</div>
+     <div class="field" style="letter-spacing:.7em;text-align:center">▢ ▢ ▢ ▢ ▢ ▢</div>
+     <div class="go">VERIFY</div>
+    </div>
+   </div>
+   <div class="box dash" style="margin-top:12px">
+    <div class="lbl">Capturing session</div>
+    <div class="mini">✔ cookies (sess, auth_id, fp) &nbsp; ✔ x-bc device token &nbsp; ⟳ user-agent fingerprint &nbsp; ⟳ verifying with <code>GET /api2/v2/users/me</code></div>
+   </div>
+  </div>
+ </div>
+</div>
+
+<!-- 05 -->
+<div class="screen" id="s05">
+ <div class="modal" style="max-width:640px;margin:0 auto">
+  <div class="mhead"><b>Mila is connected</b><span class="mini">✕</span></div>
+  <div class="mbody">
+   <div class="steps"><span>1 Prepare</span> › <span>2 Sign in</span> › <span>3 Verify</span> › <b>4 Permissions</b></div>
+   <div class="box grey"><span class="av"></span><b>@milaxo</b> &nbsp;<span class="pill">Connected</span><div class="mini" style="margin-top:6px">1,284 fans · 41 open chats · history import running (312 / 1,900 messages)</div></div>
+   <div class="lbl">What Mila's persona may do on this account</div>
+   <div class="tog"><span><b>Read chats</b><br><span class="mini">required</span></span><span class="sw"></span></div>
+   <div class="tog"><span><b>Auto-reply to fans</b><br><span class="mini">answers in-character within 8s of the fan stopping typing</span></span><span class="sw"></span></div>
+   <div class="tog"><span><b>Sell PPV</b><br><span class="mini">max unlock price $45 · from vault album “teasers”</span></span><span class="sw"></span></div>
+   <div class="tog"><span><b>Follow up on quiet fans</b><br><span class="mini">after 24h, max 2 nudges</span></span><span class="sw"></span></div>
+   <div class="tog"><span><b>Quiet hours</b><br><span class="mini">02:00 – 09:00 Europe/Amsterdam</span></span><span class="sw"></span></div>
+   <div class="tog" style="border:none"><span><b>Human approval before first message to a new fan</b></span><span class="sw off"></span></div>
+   <div style="margin-top:14px"><span class="btn">Go live</span> <span class="btn sec">Save as paused</span></div>
+  </div>
+ </div>
+</div>
+
+<!-- 06 -->
+<div class="screen" id="s06">
+ <div class="bar"><div><h1>Admin → OnlyFans module</h1><span class="mini">One-time setup for the whole platform. Creators never see this screen.</span></div><span class="pill">Module active</span></div>
+ <div class="row">
+  <div class="col">
+   <div class="box"><h2>Signing rules</h2>
+    <div class="lbl">Source (free, public)</div>
+    <div class="inp">github.com/DATAHOARDERS/dynamic-rules ▾</div>
+    <div class="lbl">Fallbacks in order</div>
+    <div class="inp">deviint/onlyfans-dynamic-rules → self-derive from OF's app.js</div>
+    <div class="mini">Current revision <code>63708</code> · fetched 11 min ago · auto-refetch on “Please refresh the page” · <b>0</b> sign failures / 24h</div>
+    <div style="margin-top:10px"><span class="btn sm">Refresh now</span> <span class="btn sm sec">Test sign</span></div>
+   </div>
+   <div class="box"><h2>Exit IPs</h2>
+    <div class="lbl">Residential proxy pool</div>
+    <div class="inp">provider ▾ &nbsp; user ▾ &nbsp; ••••••••</div>
+    <table><tr><th>Account</th><th>Sticky IP</th><th>Used</th></tr>
+     <tr><td>@lilith.rvn</td><td class="mini">NL · 84.21.•.• </td><td class="mini">0.4 GB / mo</td></tr>
+     <tr><td>@novaxo</td><td class="mini">US · 71.9.•.•</td><td class="mini">0.3 GB / mo</td></tr>
+    </table>
+   </div>
+  </div>
+  <div class="col">
+   <div class="box"><h2>Worker</h2>
+    <div class="mini">Cloud Run <code>ai-model-chat-worker</code> · min-instances 1 · CPU always on</div>
+    <table><tr><th>Account</th><th>Feed</th><th>Lag</th><th>Rate</th></tr>
+     <tr><td>@lilith.rvn</td><td>websocket</td><td>0.6s</td><td>18 req/min</td></tr>
+     <tr><td>@novaxo</td><td>poll 5s</td><td>4.1s</td><td>9 req/min</td></tr>
+    </table>
+    <div class="mini" style="margin-top:8px">Ceiling: 1 request / 2s / account, jittered, exponential backoff on 429.</div>
+   </div>
+   <div class="box"><h2>Internal webhook</h2>
+    <div class="lbl">Endpoint the watcher posts to</div>
+    <div class="inp">https://app.…/webhooks/onlyfans</div>
+    <div class="lbl">HMAC secret</div>
+    <div class="inp">•••••••••••••••••••• &nbsp; <span class="btn sm sec">Rotate</span></div>
+    <div class="mini">Same envelope and signature the app already accepts — the reply engine does not change.</div>
+   </div>
+   <div class="box dash"><h2>Health</h2>
+    <div class="mini">✔ rules valid ✔ 2 sessions healthy ⚠ 1 session expired ✔ worker up 6d</div>
+   </div>
+  </div>
+ </div>
+</div>
+
+<!-- 07 -->
+<div class="screen" id="s07">
+ <div class="bar"><div><h1>Inbox — Mila · OnlyFans</h1><span class="mini">@milaxo · autoreply ON · 41 chats</span></div><span class="pill">Live</span></div>
+ <div class="row">
+  <div style="width:250px">
+   <div class="box" style="padding:0">
+    <div style="padding:8px;border-bottom:1px solid #ddd"><b>jaydn_92</b><div class="mini">unlocked $22 · 2m</div></div>
+    <div style="padding:8px;border-bottom:1px solid #ddd;background:#f5f5f5"><b>tom.h</b> <span class="pill" style="font-size:9px">AI</span><div class="mini">typing… · now</div></div>
+    <div style="padding:8px;border-bottom:1px solid #ddd"><b>rick_dv</b><div class="mini">quiet 3d · follow-up queued</div></div>
+    <div style="padding:8px"><b>anon4471</b><div class="mini">new fan · warm stage</div></div>
+   </div>
+  </div>
+  <div class="col">
+   <div class="box">
+    <div class="msg">hey, you actually reply? 😅<small>tom.h · 20:41</small></div>
+    <div class="msg me">only to people who say something worth replying to 😏 what's got you up this late<small>Mila (AI) · 20:41 · stage: engage</small></div>
+    <div class="msg">work. long shift<small>tom.h · 20:44</small></div>
+    <div class="msg me">poor thing. i've got something in my vault that'd fix that mood real quick 🔒<small>Mila (AI) · 20:44 · stage: tease</small></div>
+    <div class="box dash" style="margin:10px 0"><div class="lbl">PPV suggested by funnel</div><div class="mini">“teaser_04.mp4” at <b>$22</b> — fan unlocked 2 of last 3 offers.</div><div style="margin-top:8px"><span class="btn sm">Send now</span> <span class="btn sm sec">Let AI time it</span> <span class="btn sm sec">Skip</span></div></div>
+    <div class="inp" style="margin:0">Type as Mila… &nbsp;&nbsp;<span class="mini">(taking over pauses AI for this chat)</span></div>
+   </div>
+  </div>
+ </div>
+</div>
+
+<!-- 08 -->
+<div class="screen" id="s08">
+ <div class="box" style="border-width:2px;max-width:760px">
+  <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #111;padding-bottom:9px;margin-bottom:11px">
+   <b>⚠ Nova's OnlyFans session expired</b><span class="pill warn">Action needed</span>
+  </div>
+  <div class="mini">OnlyFans signed this device out 2 hours ago (password change, or the session simply aged out). Nova has stopped reading and replying. <b>18 fan messages are waiting.</b> Nothing is lost — reconnect and she picks up where she left off.</div>
+  <div class="box grey" style="margin-top:11px"><div class="lbl">Reconnect takes ~30 seconds</div><div class="mini">Same sign-in screen as before, same IP (US · 71.9.•.•) so OnlyFans sees the familiar device.</div></div>
+  <div style="margin-top:12px"><span class="btn">Reconnect now</span> <span class="btn sec">Remind me in 1h</span> <span class="btn sec">Pause Nova</span></div>
+  <div class="note">We email and push this the moment the health check fails, so a dead session is never discovered by a creator noticing quiet fans.</div>
+ </div>
+</div>
+
+<!-- 09 -->
+<div class="screen" id="s09">
+ <div class="bar"><div><h1>How it works</h1><span class="mini">Everything inside the dashed box is ours and self-hosted. No third-party OnlyFans SaaS.</span></div></div>
+ <div class="lane"><div class="lt">Once, per creator — connect</div>
+  <div class="flow">
+   <div class="node"><b>Creator</b>clicks “Connect OnlyFans”</div><div class="arrow">→</div>
+   <div class="node"><b>Hosted browser</b>Playwright Chromium on a sticky residential IP, streamed into the modal</div><div class="arrow">→</div>
+   <div class="node"><b>onlyfans.com</b>real login, real captcha, real 2FA — done by the human</div><div class="arrow">→</div>
+   <div class="node"><b>Session vault</b>cookies + x-bc + UA, encrypted, bound to persona</div>
+  </div>
+ </div>
+ <div class="lane"><div class="lt">Continuously — read, reply, sell</div>
+  <div class="flow">
+   <div class="node"><b>Watcher</b>one task per account: OF websocket, poll fallback</div><div class="arrow">→</div>
+   <div class="node"><b>Event normaliser</b>turns OF activity into our own signed webhook POST</div><div class="arrow">→</div>
+   <div class="node"><b>/webhooks/onlyfans</b>the endpoint app.py already has — unchanged</div><div class="arrow">→</div>
+   <div class="node"><b>Reply engine</b>persona prompt, funnel stage, PPV decision (unchanged)</div><div class="arrow">→</div>
+   <div class="node"><b>of_client</b>signs and sends: message, PPV, typing, tips</div>
+  </div>
+ </div>
+ <div class="row">
+  <div class="col box dash"><div class="lbl">Signing</div><div class="mini"><code>sign</code> = SHA-1 of <code>static_param:time:path:user-id</code>, checksummed with the day's public rules. Rules refetched automatically the moment a request comes back “please refresh the page”.</div></div>
+  <div class="col box dash"><div class="lbl">Cost</div><div class="mini">Rules: free. Worker: one small always-on Cloud Run instance. Proxy: ~1 GB/account/month. No per-account SaaS fee — the whole cost sits inside the subscription price.</div></div>
+ </div>
+</div>
