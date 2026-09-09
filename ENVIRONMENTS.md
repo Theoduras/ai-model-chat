@@ -26,6 +26,25 @@ gcloud run services update ai-model-chat --region europe-west4 \
 `--update-env-vars` merges; `--set-env-vars` would wipe every other variable
 on the service, secrets included.
 
+## Running the growth layer on dev only
+
+The social-to-subscriber layer (free-trial links, source attribution, the
+content register, the win-back ladder) is off for every persona unless a slug
+is named. `GROWTH_BETA_PERSONAS` is the per-environment default, so dev can run
+the beta while live stays dark:
+
+```
+# dev
+gcloud run services update ai-model-chat-dev --region europe-west4 \
+  --update-env-vars GROWTH_BETA_PERSONAS=lilly
+```
+
+Leave it unset on live. `*` switches it on for every persona.
+
+An operator can also set the roster from the dashboard's Growth panel, and
+that wins from then on — including an empty roster, which really does mean off
+everywhere. The env var is only the default before anyone has saved one.
+
 Without it the app builds callback and webhook URLs from whichever host served
 the request. That matters most for **Fanvue webhooks**: the subscription is
 created on connect for the origin it sees at that moment, so a creator who

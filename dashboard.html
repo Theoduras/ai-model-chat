@@ -1960,6 +1960,7 @@ function renderForm(slug, cfg) {
         <label>Personas on the growth beta</label>
         <input type="text" id="f-growth-beta" placeholder="lilith, nova">
         <span class="hint">Comma-separated slugs. <code>*</code> switches it on for everyone. Empty means off everywhere.</span>
+        <span class="hint" id="growth-beta-source"></span>
       </div>
       <div style="margin-top:14px;">
         <div class="section-title" style="font-size:0.8rem;">Where they came from</div>
@@ -2742,6 +2743,14 @@ async function loadGrowth() {
   try {
     const beta = await (await fetch('/api/growth/beta')).json();
     document.getElementById('f-growth-beta').value = (beta.personas || []).join(', ');
+    const note = document.getElementById('growth-beta-source');
+    if (note) {
+      note.textContent = beta.source === 'env'
+        ? 'Coming from GROWTH_BETA_PERSONAS on this environment. Saving here overrides it from now on.'
+        : (beta.env_default || []).length
+          ? 'Saved here, overriding GROWTH_BETA_PERSONAS (' + (beta.env_default || []).join(', ') + ').'
+          : 'Saved here.';
+    }
   } catch (e) {}
   try {
     const d = await (await fetch('/api/growth/sources?persona=' + encodeURIComponent(currentSlug))).json();

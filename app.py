@@ -6682,11 +6682,22 @@ def _phases_cta(slug):
     return {'cta_url': bot.get('cta_url', ''), 'cta_label': bot.get('cta_label', '')}
 
 
+def _growth_beta_roster():
+    """(roster, where it came from). The stored setting wins whenever it exists,
+    so an operator who saves an empty roster really does turn the layer off —
+    GROWTH_BETA_PERSONAS is the per-environment default before anyone has saved
+    one, which is how dev runs the beta while live stays dark."""
+    raw = _get_setting(growth.BETA_KEY)
+    if raw is None:
+        return (os.getenv('GROWTH_BETA_PERSONAS') or ''), 'env'
+    return raw, 'setting'
+
+
 def _growth_on(slug):
-    """Whether the growth layer runs for this persona. Operator-controlled and
-    off for everyone by default, so the trial link, source attribution and the
-    win-back ladder stay invisible until a slug is switched on."""
-    return growth.in_beta(_get_setting(growth.BETA_KEY) or '', slug)
+    """Whether the growth layer runs for this persona. Off for everyone by
+    default, so the trial link, source attribution and the win-back ladder stay
+    invisible until a slug is switched on."""
+    return growth.in_beta(_growth_beta_roster()[0], slug)
 
 
 def _cta_choice(persona, fan, cta=None):
@@ -7007,8 +7018,11 @@ def api_growth_beta():
         _set_setting(growth.BETA_KEY, json.dumps(slugs))
         logger.info('Growth beta roster set to %s', slugs)
         return jsonify({'ok': True, 'personas': slugs})
-    return jsonify({'ok': True,
-                    'personas': sorted(growth.beta_slugs(_get_setting(growth.BETA_KEY) or ''))})
+    raw, origin = _growth_beta_roster()
+    return jsonify({'ok': True, 'personas': sorted(growth.beta_slugs(raw)),
+                    'source': origin,
+                    'env_default': sorted(growth.beta_slugs(
+                        os.getenv('GROWTH_BETA_PERSONAS') or ''))})
 
 
 def _fan_phase(phases, fan):
