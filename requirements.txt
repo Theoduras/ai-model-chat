@@ -6,3 +6,5 @@ gunicorn
 sqlalchemy
 psycopg2-binary
 telethon
+cryptography
+playwright

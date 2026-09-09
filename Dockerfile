@@ -9,6 +9,11 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# The OnlyFans connect flow runs a real Chromium the creator signs in through,
+# so the image carries the browser and the system libraries it needs.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
+RUN playwright install --with-deps chromium
+
 COPY . .
 
 EXPOSE 8080

@@ -1,0 +1,248 @@
+"""Session vault and transport tests. Nothing here touches the network."""
+import json
+import os
+import unittest
+from unittest import mock
+
+os.environ.setdefault('SECRET_KEY', 'test-secret-for-of-session')
+
+import of_client
+import of_rules
+import of_session
+
+
+SESSION = {'user_id': '99', 'username': 'lilith', 'cookie': 'sess=abc; auth_id=99',
+           'x_bc': 'bctoken', 'user_agent': 'Mozilla/5.0 (Windows NT 10.0)',
+           'proxy': 'http://user:pw@nl.proxy.example:8000'}
+
+
+def use_memory_store():
+    """Wire the vault to a dict and hand it back."""
+    store = {}
+    of_session.store_hooks(lambda a: store.get(a, ''),
+                           lambda a, b: store.__setitem__(a, b),
+                           lambda a: store.pop(a, None),
+                           lambda: sorted(store))
+    return store
+
+
+class VaultTest(unittest.TestCase):
+    def setUp(self):
+        self.store = use_memory_store()
+        of_session.reset_key()
+
+    def test_round_trips(self):
+        of_session.put('acct1', SESSION)
+        got = of_session.get('acct1')
+        self.assertEqual(got['cookie'], SESSION['cookie'])
+        self.assertEqual(got['x_bc'], 'bctoken')
+        self.assertEqual(got['status'], of_session.STATUS_LIVE)
+
+    def test_credentials_are_encrypted_at_rest(self):
+        of_session.put('acct1', SESSION)
+        blob = self.store['acct1']
+        self.assertNotIn('sess=abc', blob)
+        self.assertNotIn('bctoken', blob)
+
+    def test_incomplete_session_is_refused(self):
+        with self.assertRaises(of_session.SessionError):
+            of_session.put('acct1', {'cookie': 'sess=abc'})
+
+    def test_public_view_hides_the_credentials(self):
+        of_session.put('acct1', SESSION)
+        pub = of_session.describe('acct1')
+        self.assertEqual(pub['username'], 'lilith')
+        self.assertEqual(pub['proxy_label'], 'nl.proxy.example:8000')
+        self.assertNotIn('cookie', pub)
+        self.assertNotIn('x_bc', pub)
+
+    def test_a_changed_key_is_reported_not_swallowed(self):
+        of_session.put('acct1', SESSION)
+        of_session.reset_key()
+        with mock.patch.dict(os.environ, {'SECRET_KEY': 'a-different-secret'}):
+            with self.assertRaises(of_session.SessionError):
+                of_session.get('acct1')
+
+    def test_marking_expired_keeps_the_credentials(self):
+        of_session.put('acct1', SESSION)
+        of_session.mark_expired('acct1', 'got a 401')
+        self.assertEqual(of_session.describe('acct1')['status'],
+                         of_session.STATUS_EXPIRED)
+        self.assertEqual(of_session.get('acct1')['cookie'], SESSION['cookie'])
+        self.assertFalse(of_session.live('acct1'))
+
+    def test_cookie_string_keeps_only_what_authenticates(self):
+        jar = [{'name': 'sess', 'value': 'abc'}, {'name': 'auth_id', 'value': '99'},
+               {'name': '_ga', 'value': 'noise'}, {'name': 'fp', 'value': 'fpv'}]
+        self.assertEqual(of_session.cookie_string(jar), 'sess=abc; auth_id=99; fp=fpv')
+
+
+class CallTest(unittest.TestCase):
+    def setUp(self):
+        use_memory_store()
+        of_session.reset_key()
+        of_session.put('acct1', SESSION)
+        for target, value in (('rules', {'static_param': 's', 'format': '{}:{:x}',
+                                         'checksum_indexes': [0], 'checksum_constant': 1,
+                                         'app_token': 't'}),):
+            p = mock.patch.object(of_rules, target, return_value=value)
+            p.start()
+            self.addCleanup(p.stop)
+        p = mock.patch.object(of_client, '_wait_turn')
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_a_rotation_refetches_the_rules_and_retries_once(self):
+        calls = []
+
+        def once(account, method, path, body, session):
+            calls.append(path)
+            if len(calls) == 1:
+                raise of_client.OnlyFansError(400, 'Please refresh the page')
+            return {'id': 99}
+
+        with mock.patch.object(of_client, '_once', once), \
+                mock.patch.object(of_rules, 'refresh') as refresh:
+            self.assertEqual(of_client.call('acct1', 'GET', '/api2/v2/users/me'),
+                             {'id': 99})
+        refresh.assert_called_once()
+        self.assertEqual(len(calls), 2)
+
+    def test_a_rotation_is_only_chased_once(self):
+        with mock.patch.object(of_client, '_once',
+                               side_effect=of_client.OnlyFansError(
+                                   400, 'Please refresh the page')), \
+                mock.patch.object(of_rules, 'refresh') as refresh:
+            with self.assertRaises(of_client.OnlyFansError):
+                of_client.call('acct1', 'GET', '/api2/v2/users/me')
+        refresh.assert_called_once()
+
+    def test_a_401_expires_the_session_instead_of_retrying(self):
+        with mock.patch.object(of_client, '_once',
+                               side_effect=of_client.OnlyFansError(401, 'nope')) as once:
+            with self.assertRaises(of_client.SessionExpired):
+                of_client.call('acct1', 'GET', '/api2/v2/users/me')
+        self.assertEqual(once.call_count, 1)
+        self.assertEqual(of_session.describe('acct1')['status'],
+                         of_session.STATUS_EXPIRED)
+
+    def test_a_rate_limit_backs_off_and_retries(self):
+        seq = [of_client.OnlyFansError(429, 'slow down'), {'ok': True}]
+
+        def once(*a, **k):
+            item = seq.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+        with mock.patch.object(of_client, '_once', once), \
+                mock.patch.object(of_client.time, 'sleep'):
+            self.assertEqual(of_client.call('acct1', 'GET', '/x'), {'ok': True})
+
+    def test_a_real_error_is_raised_straight_away(self):
+        with mock.patch.object(of_client, '_once',
+                               side_effect=of_client.OnlyFansError(
+                                   400, 'chat is blocked')) as once:
+            with self.assertRaises(of_client.OnlyFansError):
+                of_client.call('acct1', 'POST', '/api2/v2/chats/1/messages', {'x': 1})
+        self.assertEqual(once.call_count, 1)
+
+    def test_an_unknown_account_is_refused(self):
+        with self.assertRaises(of_client.OnlyFansError):
+            of_client.call('nope', 'GET', '/api2/v2/users/me')
+
+    def test_check_reports_a_dead_session_rather_than_raising(self):
+        with mock.patch.object(of_client, '_once',
+                               side_effect=of_client.OnlyFansError(401, 'nope')):
+            alive, detail = of_client.check('acct1')
+        self.assertFalse(alive)
+        self.assertIn('reconnect', detail)
+
+    def test_check_revives_an_account_that_came_back(self):
+        of_session.mark_expired('acct1', 'earlier')
+        with mock.patch.object(of_client, '_once',
+                               return_value={'id': 99, 'username': 'lilith'}):
+            alive, who = of_client.check('acct1')
+        self.assertTrue(alive)
+        self.assertEqual(who, 'lilith')
+        self.assertEqual(of_session.describe('acct1')['status'], of_session.STATUS_LIVE)
+
+
+class PagingTest(unittest.TestCase):
+    def setUp(self):
+        use_memory_store()
+        of_session.reset_key()
+        of_session.put('acct1', SESSION)
+
+    def test_follows_the_offset_and_stops_on_hasmore(self):
+        pages = [{'list': [{'id': 1}, {'id': 2}], 'hasMore': True},
+                 {'list': [{'id': 3}], 'hasMore': False}]
+        with mock.patch.object(of_client, 'call',
+                               side_effect=lambda *a, **k: pages.pop(0)):
+            got = of_client.paged('acct1', '/api2/v2/chats?limit=50')
+        self.assertEqual([r['id'] for r in got], [1, 2, 3])
+
+    def test_stops_when_a_page_repeats_itself(self):
+        with mock.patch.object(of_client, 'call',
+                               return_value={'list': [{'id': 1}], 'hasMore': True}):
+            got = of_client.paged('acct1', '/api2/v2/chats')
+        self.assertEqual(len(got), 1)
+
+    def test_honours_the_wanted_count(self):
+        with mock.patch.object(
+                of_client, 'call',
+                side_effect=lambda *a, **k: {'list': [{'id': n} for n in
+                                                      range(int(a[2].split('offset=')[1]),
+                                                            int(a[2].split('offset=')[1]) + 50)],
+                                             'hasMore': True}):
+            self.assertEqual(len(of_client.paged('acct1', '/api2/v2/chats', want=70)), 70)
+
+
+class SendTest(unittest.TestCase):
+    def setUp(self):
+        use_memory_store()
+        of_session.reset_key()
+        of_session.put('acct1', SESSION)
+
+    def test_a_paid_message_needs_media(self):
+        with self.assertRaises(of_client.OnlyFansError):
+            of_client.send('acct1', '5', 'unlock me', price=20)
+
+    def test_a_price_outside_onlyfans_limits_is_refused(self):
+        with self.assertRaises(of_client.OnlyFansError) as e:
+            of_client.send('acct1', '5', 'unlock me', price=2, media=['7'])
+        self.assertIn('between', str(e.exception))
+
+    def test_a_ppv_carries_price_and_media(self):
+        with mock.patch.object(of_client, 'call', return_value={'id': 1}) as call:
+            of_client.send('acct1', '5', 'unlock me', price=22, media=['7', '8'])
+        body = call.call_args[1]['body']
+        self.assertEqual(body['price'], 22.0)
+        self.assertEqual(body['mediaFiles'], [7, 8])
+
+    def test_a_free_message_carries_no_price(self):
+        with mock.patch.object(of_client, 'call', return_value={'id': 1}) as call:
+            of_client.send('acct1', '5', 'hey')
+        self.assertNotIn('price', call.call_args[1]['body'])
+
+
+class PacingTest(unittest.TestCase):
+    def test_requests_for_one_account_are_spaced_out(self):
+        of_client._buckets.clear()
+        slept = []
+        with mock.patch.object(of_client.time, 'sleep', slept.append):
+            of_client._wait_turn('acct1')
+            of_client._wait_turn('acct1')
+        self.assertGreaterEqual(slept[-1], of_client.OF_MIN_INTERVAL)
+
+    def test_accounts_do_not_wait_on_each_other(self):
+        of_client._buckets.clear()
+        slept = []
+        with mock.patch.object(of_client.time, 'sleep', slept.append):
+            of_client._wait_turn('acct1')
+            of_client._wait_turn('acct2')
+        self.assertFalse([s for s in slept if s > 0])
+
+
+if __name__ == '__main__':
+    unittest.main()
