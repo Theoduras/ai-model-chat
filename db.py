@@ -58,6 +58,17 @@ def _now():
     return datetime.datetime.now(datetime.timezone.utc)
 
 
+def _epoch(dt):
+    """Seconds since the epoch for a stored datetime. SQLite gives these back
+    naive and Postgres gives them back aware, so both have to be handled or one
+    host reads every timestamp as 1970."""
+    if not dt:
+        return 0
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+    return int(dt.timestamp())
+
+
 def _uid():
     return uuid.uuid4().hex
 
@@ -1113,6 +1124,71 @@ def cancel_post(session, persona, post_id):
     return bool(n)
 
 
+class LinkClick(Base):
+    """One row per click on a tracked link. This replaces a boolean on the fan,
+    which could only ever answer "did they click" — a channel is judged on how
+    many clicks it sends and what those turn into, and one flag per fan cannot
+    say that. The fan is optional because most clicks arrive from a bio, where
+    nobody is identified until they start a conversation."""
+    __tablename__ = 'link_clicks'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    persona = Column(String(64), index=True)
+    source = Column(String(40), index=True)      # the channel tag on the link
+    kind = Column(String(16))                    # chat | paid | trial | custom
+    target = Column(String(500))
+    fan_key = Column(String(80), index=True)     # 'tg:123' / 'x:456', '' when unknown
+    referrer = Column(String(300))
+    user_agent = Column(String(300))
+    created_at = Column(DateTime, default=_now, index=True)
+
+
+Index('ix_clicks_persona_at', LinkClick.persona, LinkClick.created_at)
+Index('ix_clicks_persona_source', LinkClick.persona, LinkClick.source)
+
+
+def record_click(session, persona, source, kind, target, fan_key='',
+                 referrer='', user_agent=''):
+    row = LinkClick(persona=persona, source=(source or '')[:40], kind=(kind or '')[:16],
+                    target=(target or '')[:500], fan_key=(fan_key or '')[:80],
+                    referrer=(referrer or '')[:300], user_agent=(user_agent or '')[:300])
+    session.add(row)
+    return row
+
+
+def click_stats(session, persona, since=None):
+    """{source: {clicks, fans, last}} for one persona. `fans` counts the distinct
+    identified clickers, which is always fewer than the clicks — a bio link is
+    anonymous until the conversation starts, and the same fan clicks twice."""
+    q = session.query(LinkClick.source, func.count(LinkClick.id),
+                      func.count(func.distinct(LinkClick.fan_key)),
+                      func.max(LinkClick.created_at)).filter(LinkClick.persona == persona)
+    if since is not None:
+        q = q.filter(LinkClick.created_at >= since)
+    out = {}
+    for source, clicks, fans, last in q.group_by(LinkClick.source).all():
+        # The distinct count includes the empty key when any click was anonymous,
+        # so it would otherwise report one fan for a channel that identified none.
+        anon = (session.query(func.count(LinkClick.id))
+                .filter(LinkClick.persona == persona, LinkClick.source == source,
+                        or_(LinkClick.fan_key == '', LinkClick.fan_key.is_(None)))
+                .scalar() or 0)
+        out[source or ''] = {'clicks': int(clicks or 0),
+                             'fans': max(0, int(fans or 0) - (1 if anon else 0)),
+                             'anon': int(anon),
+                             'last': _epoch(last)}
+    return out
+
+
+def recent_clicks(session, persona, limit=20):
+    rows = (session.query(LinkClick).filter(LinkClick.persona == persona)
+            .order_by(LinkClick.created_at.desc()).limit(limit).all())
+    return [{'id': r.id, 'source': r.source or '', 'kind': r.kind or '',
+             'target': r.target or '', 'fan_key': r.fan_key or '',
+             'at': _epoch(r.created_at)}
+            for r in rows]
+
+
 def get_fan_profile(session, persona, fan_uuid, handle=None, create=True):
     row = (session.query(FanProfile)
            .filter(FanProfile.persona == persona, FanProfile.fan_uuid == fan_uuid)
@@ -1224,7 +1300,8 @@ def init_db():
                          ('funnel_assignments', FunnelAssignment),
                          ('funnel_posteriors', FunnelPosterior),
                          ('fan_rewards', FanReward),
-                         ('scheduled_posts', ScheduledPost)):
+                         ('scheduled_posts', ScheduledPost),
+                         ('link_clicks', LinkClick)):
         try:
             _sync_columns(table, model)
         except Exception:

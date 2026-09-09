@@ -71,6 +71,23 @@ def clean_cta(data, existing=None):
     }
     if not _DATE_RE.match(out['promo_expires']):
         out['promo_expires'] = ''
+
+    # An optional link per channel, for the persona whose X audience should land
+    # somewhere other than her Instagram one. Absent keys keep what was stored,
+    # so saving one channel does not silently clear the rest.
+    per = data.get('platform_urls')
+    urls = dict((old.get('platform_urls') or {}))
+    if isinstance(per, dict):
+        for source, url in per.items():
+            src = normalise_source(source)
+            url = str(url or '').strip()[:500]
+            if not src:
+                continue
+            if url:
+                urls[src] = url
+            else:
+                urls.pop(src, None)
+    out['platform_urls'] = urls
     return out
 
 
@@ -92,18 +109,25 @@ def hesitating(fan):
     return bool(fan.get('cta_sent')) and not fan.get('cta_clicked')
 
 
-def cta_choice(cta, fan, beta=True, today=''):
+def cta_choice(cta, fan, beta=True, today='', source=''):
     """Which link goes out with this reply.
 
     Returns {'url', 'label', 'kind', 'promo'}. Off the beta gate — or with no
     trial link configured — this is exactly the old single-link behaviour.
+
+    `source` is the channel the fan arrived through. When that channel has its
+    own link it replaces the paid one; the trial link stays shared, because a
+    trial has a use count and splitting it per channel spends it faster than
+    anyone intends.
     """
     cta = cta or {}
-    paid = (cta.get('cta_url') or '').strip()
+    source = source or (fan or {}).get('source') or ''
     label = (cta.get('cta_label') or '').strip()
-    plain = {'url': paid, 'label': label, 'kind': 'paid', 'promo': ''}
+    base = (cta.get('cta_url') or '').strip()
     if not beta:
-        return plain
+        return {'url': base, 'label': label, 'kind': 'paid', 'promo': ''}
+    paid = platform_cta(cta, source) or base
+    plain = {'url': paid, 'label': label, 'kind': 'paid', 'promo': ''}
     if not hesitating(fan):
         return plain
     trial = (cta.get('trial_url') or '').strip()
@@ -114,6 +138,52 @@ def cta_choice(cta, fan, beta=True, today=''):
         return {'url': paid, 'label': label, 'kind': 'paid', 'promo': promo}
     return {'url': trial, 'kind': 'trial', 'promo': promo,
             'label': (cta.get('trial_label') or label).strip()}
+
+
+# Where a click on each channel's link should land. Cold traffic goes to the
+# chat to be warmed up; X is the one channel whose audience already knows who
+# she is, so it goes straight at the paid page.
+DEFAULT_ROUTES = {
+    'instagram': 'chat', 'tiktok': 'chat', 'reddit': 'chat', 'youtube': 'chat',
+    'linktree': 'chat', 'other': 'chat',
+    'x': 'paid', 'threads': 'paid', 'telegram': 'paid',
+}
+
+ROUTE_KINDS = ('chat', 'paid', 'trial')
+
+
+def clean_routes(data, existing=None):
+    """Validate a saved routing table. Only known kinds survive, so a typo in
+    the panel cannot send a channel somewhere that resolves to nothing."""
+    out = dict(existing or {})
+    for source, kind in (data or {}).items():
+        src = normalise_source(source)
+        if not src:
+            continue
+        kind = str(kind or '').strip().lower()
+        if kind in ROUTE_KINDS:
+            out[src] = kind
+        elif not kind:
+            out.pop(src, None)
+    return out
+
+
+def route_for(routes, source):
+    """Where this channel's link goes. An unconfigured channel warms up in the
+    chat rather than landing on a paywall — the wrong guess there costs a fan,
+    and the other way costs nothing but a message."""
+    src = normalise_source(source)
+    kind = (routes or {}).get(src)
+    if kind in ROUTE_KINDS:
+        return kind
+    return DEFAULT_ROUTES.get(src, 'chat')
+
+
+def platform_cta(cta, source):
+    """The channel's own link, when one is set. Most personas run a single link
+    everywhere, so this is empty far more often than not."""
+    per = (cta or {}).get('platform_urls') or {}
+    return str(per.get(normalise_source(source)) or '').strip()
 
 
 def cta_suffix(choice):

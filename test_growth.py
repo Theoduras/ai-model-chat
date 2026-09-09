@@ -158,6 +158,49 @@ check('nothing posted is not a zero-day silence',
       G.register_stats([], now=now)['totals']['quiet_days'] is None)
 
 print()
+print('tracked links')
+check('cold channels warm up in the chat',
+      all(G.route_for({}, ch) == 'chat' for ch in ('tiktok', 'instagram', 'reddit')))
+check('x goes straight at the paid page', G.route_for({}, 'x') == 'paid')
+check('an unknown channel warms up rather than landing on a paywall',
+      G.route_for({}, 'somewhere-new') == 'chat')
+check('a configured route wins', G.route_for({'x': 'chat'}, 'x') == 'chat')
+check('and the channel name is normalised first', G.route_for({'x': 'chat'}, ' X ') == 'chat')
+check('a kind that is not a kind falls back to the default',
+      G.route_for({'x': 'wherever'}, 'x') == 'paid')
+check('every default is a real kind',
+      all(k in G.ROUTE_KINDS for k in G.DEFAULT_ROUTES.values()))
+check('saving one channel leaves the others alone',
+      G.clean_routes({'x': 'chat'}, {'tiktok': 'paid'}) == {'tiktok': 'paid', 'x': 'chat'})
+check('an empty kind removes the row',
+      G.clean_routes({'tiktok': ''}, {'tiktok': 'paid'}) == {})
+check('a bad kind is dropped, not stored',
+      G.clean_routes({'x': 'nonsense'}, {}) == {})
+
+per = G.clean_cta({'cta_url': 'https://paid', 'platform_urls': {'X': 'https://x-only', 'bad': ''}})
+check('a per-channel link is kept, normalised', per['platform_urls'] == {'x': 'https://x-only'})
+check('an unrelated save does not clear it',
+      G.clean_cta({'cta_label': 'come see'}, per)['platform_urls'] == {'x': 'https://x-only'})
+check('an explicit empty clears one channel',
+      G.clean_cta({'platform_urls': {'x': ''}}, per)['platform_urls'] == {})
+check('the channel link replaces the paid one',
+      G.cta_choice(per, {'source': 'x'})['url'] == 'https://x-only')
+check('other channels keep the shared link',
+      G.cta_choice(per, {'source': 'tiktok'})['url'] == 'https://paid')
+check('a fan with no source keeps the shared link',
+      G.cta_choice(per, {})['url'] == 'https://paid')
+check('off the beta gate it is the old single link',
+      G.cta_choice(per, {'source': 'x'}, beta=False)['url'] == 'https://paid')
+trial = G.clean_cta({'cta_url': 'https://paid', 'trial_url': 'https://trial',
+                     'platform_urls': {'x': 'https://x-only'}})
+hesitant = {'cta_sent': 1, 'cta_count': 1}
+check('the trial stays shared across channels',
+      G.cta_choice(trial, {**hesitant, 'source': 'x'})['url'] == 'https://trial')
+check('and it is still marked as the trial',
+      G.cta_choice(trial, {**hesitant, 'source': 'x'})['kind'] == 'trial')
+check('no per-channel link means no lookup', G.platform_cta({}, 'x') == '')
+
+print()
 print('post queue')
 check('every publishable platform has a spec',
       all(p in G.POST_PLATFORMS for p in G.PUBLISHABLE))

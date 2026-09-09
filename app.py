@@ -7469,6 +7469,97 @@ def api_growth_links():
                     'origin': origin, 'beta': _growth_on(persona)})
 
 
+def _growth_routes(persona):
+    try:
+        raw = json.loads(_get_setting(f'growth_routes_{persona}') or '{}')
+        return raw if isinstance(raw, dict) else {}
+    except Exception:
+        return {}
+
+
+def _with_params(url, params):
+    """Add query parameters to a destination without losing the ones it came
+    with. A Fanvue trial link already carries its own code, and rebuilding the
+    query from scratch would drop it."""
+    if not params:
+        return url
+    try:
+        parts = urllib.parse.urlsplit(url)
+        merged = dict(urllib.parse.parse_qsl(parts.query, keep_blank_values=True))
+        merged.update(params)
+        return urllib.parse.urlunsplit(
+            (parts.scheme, parts.netloc, parts.path,
+             urllib.parse.urlencode(merged), parts.fragment))
+    except Exception:
+        return url
+
+
+def _record_click(persona, source, kind, target, fan_key=''):
+    """Bank one click. Wrapped because a redirect that fails on a logging error
+    is worse than a click nobody counted — the fan is mid-tap either way."""
+    try:
+        from db import SessionLocal, record_click
+        sdb = SessionLocal()
+        try:
+            record_click(sdb, persona, source, kind, target, fan_key,
+                         referrer=request.headers.get('Referer', ''),
+                         user_agent=request.headers.get('User-Agent', ''))
+            sdb.commit()
+        finally:
+            sdb.close()
+    except Exception as e:
+        logger.warning('click not recorded [%s/%s]: %s', persona, source, str(e)[:200])
+
+
+@app.route('/api/growth/routes', methods=['GET', 'POST'])
+@operator_only
+def api_growth_routes():
+    """Where each channel's tracked link lands, and how many clicks each has
+    taken. Cold channels warm up in the chat; X goes straight at the paid page.
+    A channel with no row here follows that default rather than nothing."""
+    data = request.json or {} if request.method == 'POST' else {}
+    persona = ((data.get('persona') if request.method == 'POST'
+                else request.args.get('persona')) or '').strip()
+    if not re.match(r'^[a-z0-9_-]+$', persona or ''):
+        return jsonify({'error': 'Invalid slug'}), 400
+
+    routes = _growth_routes(persona)
+    if request.method == 'POST':
+        routes = growth.clean_routes(data.get('routes') or {}, routes)
+        _set_setting(f'growth_routes_{persona}', json.dumps(routes))
+
+    try:
+        from db import SessionLocal, click_stats
+        sdb = SessionLocal()
+        try:
+            clicks = click_stats(sdb, persona)
+        finally:
+            sdb.close()
+    except Exception as e:
+        logger.warning('click stats failed [%s]: %s', persona, str(e)[:200])
+        clicks = {}
+
+    origin = _site_origin().rstrip('/')
+    rows, totals = [], {'clicks': 0, 'fans': 0, 'anon': 0}
+    for ch in sorted(set(GROWTH_CHANNELS) | set(routes) | set(clicks)):
+        kind, url = _click_destination(persona, ch)
+        c = clicks.get(ch) or {}
+        row = {'channel': ch, 'kind': kind, 'configured': routes.get(ch, ''),
+               'default': growth.DEFAULT_ROUTES.get(ch, 'chat'),
+               'link': f'{origin}/go/{persona}/{ch}' if origin else '',
+               'lands': bool(url), 'target': url,
+               'clicks': int(c.get('clicks', 0)), 'fans': int(c.get('fans', 0)),
+               'anon': int(c.get('anon', 0)), 'last': int(c.get('last', 0))}
+        for k in ('clicks', 'fans', 'anon'):
+            totals[k] += row[k]
+        rows.append(row)
+    order = {ch: i for i, ch in enumerate(GROWTH_CHANNELS)}
+    rows.sort(key=lambda r: (-r['clicks'], order.get(r['channel'], len(order)), r['channel']))
+    return jsonify({'ok': True, 'persona': persona, 'routes': rows, 'totals': totals,
+                    'kinds': list(growth.ROUTE_KINDS), 'origin': origin,
+                    'beta': _growth_on(persona)})
+
+
 def _growth_pct(part, whole):
     return round(100.0 * part / whole) if whole else 0
 
@@ -7647,7 +7738,8 @@ def api_persona_phases_save(slug):
     stored = _phases_cta(slug)
     incoming = dict(data)
     if not _is_operator():
-        for key in ('trial_url', 'trial_label', 'promo_code', 'promo_expires'):
+        for key in ('trial_url', 'trial_label', 'promo_code', 'promo_expires',
+                    'platform_urls'):
             incoming.pop(key, None)
     cta = growth.clean_cta(incoming, stored)
     _set_setting(f'phases_cta_{slug}', json.dumps(cta))
@@ -9005,6 +9097,8 @@ def x_cta_click(persona, uid):
         fan['cta_clicked'] = int(time.time())
         fans[str(uid)] = fan
         _x_save_fans(persona, fans)
+    _record_click(persona, (fan or {}).get('source') or 'x',
+                  (fan or {}).get('cta_kind') or 'paid', url, f'x:{uid}')
     return redirect(url, code=302)
 
 
@@ -16545,9 +16639,19 @@ def api_telegram_webhook(path_id):
     return '', 200
 
 
-@app.route('/go/<ref>/<chat_id>')
-def telegram_cta_click(ref, chat_id):
-    """Tracked CTA redirect — records the click, then forwards to the creator's page."""
+@app.route('/go/<ref>/<tail>')
+def tracked_click(ref, tail):
+    """Every tracked link lands here. A numeric tail is a fan we already know —
+    the Telegram redirect that has always lived at this path — and anything else
+    is a channel tag on a link pasted into a bio, where nobody is identified
+    until they start talking. One route because the two cannot be told apart by
+    shape, and a second rule of the same shape would shadow this one."""
+    if str(tail).isdigit():
+        return _tg_fan_click(ref, tail)
+    return _source_click(ref, tail)
+
+
+def _tg_fan_click(ref, chat_id):
     persona = _tg_persona_for_code(ref)
     bot = (_tg_load_bots().get(persona) or {}) if persona else {}
     if not persona:
@@ -16561,7 +16665,66 @@ def telegram_cta_click(ref, chat_id):
         fan['cta_clicked'] = int(time.time())
         fans[str(chat_id)] = fan
         _tg_save_fans(persona, fans)
+    _record_click(persona, (fan or {}).get('source') or 'telegram',
+                  (fan or {}).get('cta_kind') or 'paid', target, f'tg:{chat_id}')
     return redirect(target, code=302)
+
+
+def _click_destination(persona, source):
+    """(kind, url) for a channel's link. The routing table decides which of the
+    persona's links a channel gets; the channel's own link, where one is set,
+    replaces the paid one."""
+    cta = _phases_cta(persona)
+    kind = growth.route_for(_growth_routes(persona), source)
+    if kind == 'chat':
+        bot = _tg_load_bots().get(persona) or {}
+        if not bot.get('username'):
+            bot = {**bot, 'username': _tg_platform().get('username', '')}
+        url = _tg_share_link(bot, source)
+        if url:
+            return 'chat', url
+        # No bot connected, so there is no chat to send them to. The paid page
+        # is a worse landing than a conversation, but it is not a dead link.
+        kind = 'paid'
+    if kind == 'trial':
+        url = (cta.get('trial_url') or '').strip()
+        if url:
+            return 'trial', url
+        kind = 'paid'
+    url = growth.platform_cta(cta, source) or (cta.get('cta_url') or '').strip()
+    return 'paid', url
+
+
+def _source_click(persona, source):
+    if not re.match(r'^[a-z0-9_-]+$', persona or ''):
+        return redirect('/')
+    source = growth.normalise_source(source)
+    kind, url = _click_destination(persona, source)
+    if not url:
+        return redirect('/')
+    # Carry the campaign parameters through to the destination. Only utm_* and
+    # ref are copied: everything else on the incoming URL is ours or noise, and
+    # forwarding the lot is how a stray parameter ends up in someone's checkout.
+    passthrough = {k: v for k, v in request.args.items()
+                   if (k.startswith('utm_') or k == 'ref') and len(v) <= 100}
+    if kind != 'chat':
+        # A chat link carries the channel inside its start payload already, so
+        # only a link going somewhere with a real query gets the tag added.
+        passthrough.setdefault('utm_source', source)
+    url = _with_params(url, passthrough)
+    _record_click(persona, source, kind, url)
+    resp = redirect(url, code=302)
+    # The same cookie the chat already reads, so a fan who clicks through and
+    # comes back later is still credited to the channel that sent them. First
+    # touch wins here too: a fan who found her on TikTok and clicks an X link a
+    # week later was still brought in by TikTok.
+    if not request.cookies.get(GROWTH_SOURCE_COOKIE):
+        packed = growth.pack_source({'source': source})
+        if packed:
+            resp.set_cookie(GROWTH_SOURCE_COOKIE, packed,
+                            max_age=GROWTH_SOURCE_MAX_AGE, samesite='Lax',
+                            httponly=True, secure=request.is_secure)
+    return resp
 
 
 @app.route('/api/telegram/connect', methods=['POST'])

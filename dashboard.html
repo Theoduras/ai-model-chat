@@ -1943,6 +1943,11 @@ function renderForm(slug, cfg) {
             <span class="hint">After this date the code stops going out.</span>
           </div>
         </div>
+        <div class="field" style="margin-top:10px;">
+          <label>A different paid link per channel</label>
+          <textarea id="f-platform-urls" rows="3" placeholder="x = https://fanvue.com/you?from=x"></textarea>
+          <span class="hint">One per line, <code>channel = url</code>. A fan credited to that channel gets its link instead of the one above; everyone else gets the one above. Leave empty unless a channel really needs its own destination — the free trial is always shared, since splitting it spends the uses faster.</span>
+        </div>
       </div>
       <div id="phases-list"></div>
       <div style="margin-top:8px;">
@@ -1992,7 +1997,7 @@ function renderForm(slug, cfg) {
           Tagged links
           <button type="button" class="btn-section-save" onclick="loadGrowthLinks()">Refresh</button>
         </div>
-        <span class="hint">One link per channel. Paste the Telegram one where a tap should open the chat, the web one where it should not — both carry the channel through, which is what fills the table above.</span>
+        <span class="hint">One link per channel, and you choose where each one lands. Paste it into a bio once — changing the destination here changes where every existing copy of that link sends people, without touching the bio again. Cold channels default to the chat, X to the paid page.</span>
         <div id="growth-links" class="hint" style="margin-top:8px;">—</div>
       </div>
       <div style="margin-top:14px;">
@@ -2904,44 +2909,107 @@ async function copyLink(btn) {
   }
 }
 
+const ROUTE_WORD = { chat: 'the chat', paid: 'the paid page', trial: 'the free trial' };
+
 async function loadGrowthLinks() {
   const box = document.getElementById('growth-links');
   if (!box || !currentSlug) return;
-  let d;
+  const slug = encodeURIComponent(currentSlug);
+  let d, r;
   try {
-    d = await (await fetch('/api/growth/links?persona=' + encodeURIComponent(currentSlug))).json();
+    const [a, b] = await Promise.all([
+      fetch('/api/growth/links?persona=' + slug),
+      fetch('/api/growth/routes?persona=' + slug)
+    ]);
+    d = await a.json();
+    r = await b.json();
   } catch (e) { box.textContent = 'Could not build the links.'; return; }
-  if (!d || !d.ok) { box.textContent = 'Could not build the links.'; return; }
+  if (!d || !d.ok || !r || !r.ok) { box.textContent = 'Could not build the links.'; return; }
 
-  const links = d.links || [];
+  const byChannel = {};
+  (d.links || []).forEach(l => { byChannel[l.channel] = l; });
+  const rows = r.routes || [];
   let html = '';
   if (!d.beta) {
     html += '<div style="margin-bottom:10px; opacity:0.8;">These links work, but nothing is being credited \u2014 this persona is not on the growth beta, so an arrival through one is not recorded.</div>';
   }
-  if (!d.origin) {
-    html += '<div style="margin-bottom:10px; opacity:0.8;">PUBLIC_BASE_URL is unset, so the web link cannot be built \u2014 only the Telegram one is shown.</div>';
+  if (!r.origin) {
+    html += '<div style="margin-bottom:10px; opacity:0.8;">SITE_URL is unset, so the tracked link cannot be built \u2014 only the raw Telegram link is shown.</div>';
   }
-  const one = (label, url) => !url ? '' :
-    '<div style="display:flex; gap:8px; align-items:baseline; margin-top:2px;">'
-    + '<span style="opacity:0.6; min-width:62px;">' + label + '</span>'
-    + '<code style="word-break:break-all;">' + esc(url) + '</code>'
-    + '<button type="button" class="btn-section-save" onclick="copyLink(this)">copy</button>'
+  const t = r.totals || {};
+  html += '<div style="display:flex; flex-wrap:wrap; gap:14px; margin-bottom:12px;">'
+    + statTile('clicks', t.clicks || 0)
+    + statTile('identified', t.fans || 0)
+    + statTile('anonymous', t.anon || 0)
     + '</div>';
-  const brought = l => {
+
+  html += rows.map(row => {
+    const l = byChannel[row.channel] || {};
     const bits = [];
-    if (l.visits) bits.push(l.visits + ' visit' + (l.visits === 1 ? '' : 's'));
+    if (row.clicks) bits.push(row.clicks + ' click' + (row.clicks === 1 ? '' : 's'));
     if (l.chats) bits.push(l.chats + ' opened the chat');
     if (l.fans) bits.push(l.fans + ' fan' + (l.fans === 1 ? '' : 's'));
-    return bits.length
+    const brought = bits.length
       ? '<span style="opacity:0.65;"> \u2014 ' + bits.join(', ') + '</span>'
       : '<span style="opacity:0.45;"> \u2014 nothing yet</span>';
-  };
-  html += links.map(l => '<div style="margin-bottom:10px;"><strong>' + esc(l.channel) + '</strong>'
-    + brought(l) + one('telegram', l.telegram) + one('web', l.web) + '</div>').join('');
-  if (!links.some(l => l.telegram)) {
-    html += '<div>Connect Telegram to get a deep link that carries the channel into the chat.</div>';
-  }
+
+    const opts = ['<option value=""' + (row.configured ? '' : ' selected') + '>default ('
+      + esc(ROUTE_WORD[row.default] || row.default) + ')</option>']
+      .concat((r.kinds || []).map(k => '<option value="' + esc(k) + '"'
+        + (row.configured === k ? ' selected' : '') + '>' + esc(ROUTE_WORD[k] || k) + '</option>'));
+
+    // What it resolves to can differ from what is set: a chat route with no bot
+    // connected lands on the paid page instead, and saying so beats a surprise.
+    const fellBack = (row.configured || row.default) === 'chat' && row.kind !== 'chat';
+
+    return '<div style="margin-bottom:12px;"><strong>' + esc(row.channel) + '</strong>' + brought
+      + (row.link ? '<div style="display:flex; gap:8px; align-items:baseline; margin-top:3px;">'
+          + '<code style="word-break:break-all;">' + esc(row.link) + '</code>'
+          + '<button type="button" class="btn-section-save" onclick="copyLink(this)">copy</button>'
+          + '</div>' : '')
+      + '<div style="display:flex; gap:8px; align-items:center; margin-top:4px; flex-wrap:wrap;">'
+      + '<span style="opacity:0.6;">goes to</span>'
+      + '<select data-route="' + esc(row.channel) + '" onchange="saveGrowthRoute(this)"'
+      + ' style="width:auto; font-size:0.78rem; padding:3px 6px;">' + opts.join('') + '</select>'
+      + (row.lands ? '<span style="opacity:0.5; word-break:break-all;">' + esc(row.target.slice(0, 60)) + '</span>'
+                   : '<span style="color:#c2410c;">nothing to send them to \u2014 set a link above</span>')
+      + '</div>'
+      + (fellBack ? '<div style="opacity:0.7;">No Telegram bot connected, so this lands on the paid page instead of a conversation.</div>' : '')
+      + '</div>';
+  }).join('');
   box.innerHTML = html;
+}
+
+function parsePlatformUrls(text) {
+  // A channel listed with no url clears it, which is how a line is removed:
+  // sending only the lines that have urls would leave the old ones stored.
+  const out = {};
+  String(text || '').split('\n').forEach(line => {
+    const at = line.indexOf('=');
+    if (at < 0) {
+      const bare = line.trim();
+      if (bare) out[bare.toLowerCase()] = '';
+      return;
+    }
+    out[line.slice(0, at).trim().toLowerCase()] = line.slice(at + 1).trim();
+  });
+  return out;
+}
+
+async function saveGrowthRoute(sel) {
+  const routes = {};
+  routes[sel.dataset.route] = sel.value;
+  sel.disabled = true;
+  try {
+    const res = await fetch('/api/growth/routes', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ persona: currentSlug, routes: routes })
+    });
+    const d = await res.json();
+    if (!d.ok) { alert(d.error || 'Could not save it.'); return; }
+    loadGrowthLinks();
+  } catch (e) { alert('Could not save it.'); }
+  finally { sel.disabled = false; }
 }
 
 function statTile(label, value) {
@@ -3600,6 +3668,8 @@ async function loadPhases() {
       document.getElementById('f-trial-label').value = c.trial_label || '';
       document.getElementById('f-promo-code').value = c.promo_code || '';
       document.getElementById('f-promo-expires').value = c.promo_expires || '';
+      document.getElementById('f-platform-urls').value =
+        Object.entries(c.platform_urls || {}).map(([k, u]) => k + ' = ' + u).join('\n');
       document.getElementById('growth-beta-state').textContent =
         data.growth_beta ? '— on for this persona' : '— off for this persona';
       box.style.display = '';
@@ -3705,7 +3775,8 @@ async function postPhases(slug) {
         trial_url: v('f-trial-url'),
         trial_label: v('f-trial-label'),
         promo_code: v('f-promo-code'),
-        promo_expires: v('f-promo-expires')
+        promo_expires: v('f-promo-expires'),
+        platform_urls: parsePlatformUrls(v('f-platform-urls'))
       } : {})
     })
   });
