@@ -26,6 +26,8 @@ kept as a secondary target and still works, but is not where the app is deployed
 
 ```
 app.py                          — Flask server, Gemini API, multi-persona, builder API
+onlyfans.py                     — OnlyFansAPI transport (OnlyFans chat)
+onlyfans.html                   — OnlyFans console (connect, auto-reply, PPV)
 admin.html                      — Visual persona builder UI (creator-facing)
 index.html                      — Fan chat UI (embeds as iframe in profile.html)
 chat.html                       — Standalone fan chat (mobile hamburger link)
@@ -159,8 +161,12 @@ Stay completely in character. Never mention being an AI.
   matter if deploying to Vercel. Keep both working when adding routes — everything
   already routes through Flask, so a new `@app.route` needs no config change on
   either host. See `DEPLOY.md`.
-- The Fanvue, X and Telegram poll loops need an always-on host, so they run on
-  Cloud Run and stay off on Vercel (`IS_VERCEL` in `app.py`).
+- The Fanvue, OnlyFans, X and Telegram loops need an always-on host, so they run
+  on Cloud Run and stay off on Vercel (`IS_VERCEL` in `app.py`).
+- Fanvue and OnlyFans share one reply engine through the platform adapters
+  (`_Platform` in `app.py`): a platform says where its state is keyed, how a chat
+  reads, and how a message goes out. New platform work belongs in an adapter,
+  never in a second copy of the round.
 
 ---
 

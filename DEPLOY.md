@@ -196,6 +196,33 @@ Cloud Run pings `GET /healthz`, which returns `{"status":"ok"}`.
 
 ---
 
+## OnlyFans (OnlyFansAPI)
+
+OnlyFans has no public chat API, so `/onlyfans` talks to
+[OnlyFansAPI.com](https://app.onlyfansapi.com). One API key serves the whole
+deployment; each creator's OnlyFans account is signed in once in the
+OnlyFansAPI console and then picked from a list in our own console.
+
+| Variable | Why |
+|---|---|
+| `ONLYFANSAPI_KEY` | Team API key from OnlyFansAPI → API Keys. Without it `/onlyfans` shows no accounts. |
+| `ONLYFANS_WEBHOOK_SECRET` | The signing secret of the webhook below. Deliveries without a matching signature are refused, so until this is set she only answers on the backup sweep. |
+| `ONLYFANS_WORKER` | `0` turns the background loop off, `1` forces it on. Defaults to on everywhere but Vercel. |
+| `ONLYFANS_QUIET_SECONDS` | How long a fan has to stop typing before she answers (default 8), so three quick lines get one reply. |
+| `ONLYFANS_SWEEP_SECONDS` | The backup sweep interval (default 300). Events that arrive while the endpoint is paused are never re-sent, so this is what recovers them. |
+| `ONLYFANS_CHAT_SCAN` | How many chats one sweep looks at (default 100). |
+
+Add the webhook in **OnlyFansAPI → Webhooks**, pointing at
+`https://<this app>/webhooks/onlyfans`, with a signing secret, subscribed to
+`messages.received`, `users.typing`, `messages.ppv.unlocked` and
+`messages.sent`. Then set `ONLYFANS_WEBHOOK_SECRET` to that same secret.
+
+Loading a chat's messages marks it read on OnlyFans, so the app never polls for
+new messages — the webhook is what drives replies, and the sweep only lists
+chats.
+
+---
+
 ## Deploying to Vercel
 
 `vercel.json` routes every request to `api/index.py`, which imports the Flask
@@ -219,11 +246,11 @@ Set these in **Project → Settings → Environment Variables**:
 
 ### Background workers
 
-The Fanvue, X and Telegram poll loops do not start on Vercel: a serverless
+The Fanvue, OnlyFans, X and Telegram loops do not start on Vercel: a serverless
 invocation is frozen once the response is sent, so a loop would stall mid-round
 and restart on every cold start. Run those channels on Cloud Run (see above), or
-force them on with `FANVUE_WORKER=1`, `X_WORKER=1`, `TELEGRAM_WORKER=1`,
-`TGUSER_AUTOSTART=1` if you understand the trade-off.
+force them on with `FANVUE_WORKER=1`, `ONLYFANS_WORKER=1`, `X_WORKER=1`,
+`TELEGRAM_WORKER=1`, `TGUSER_AUTOSTART=1` if you understand the trade-off.
 
 ### Limits
 

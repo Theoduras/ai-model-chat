@@ -1007,7 +1007,7 @@ _PUBLIC_PAGES += [(f'/blog/{slug}', '0.5', 'monthly') for slug in _BLOG_SLUGS]
 # carry <meta name="robots" content="noindex">, and a crawler blocked here would
 # never fetch the page to read that tag, leaving anything already indexed stuck.
 _CRAWL_DISALLOW = ['/dashboard', '/admin', '/account', '/billing', '/api/',
-                   '/xbot', '/fanvue', '/threads', '/telegram', '/auth/',
+                   '/xbot', '/fanvue', '/onlyfans', '/threads', '/telegram', '/auth/',
                    '/logout', '/go/']
 
 
@@ -1211,8 +1211,8 @@ _BASE_TIERS = {
                         'image_generations_month': None,
                     }},
     'starter': {'name': 'Starter', 'price': 49,
-                'blurb': 'One persona on Fanvue, fully monetised.',
-                'features': ['1 AI persona', 'Fanvue chat',
+                'blurb': 'One persona on Fanvue or OnlyFans, fully monetised.',
+                'features': ['1 AI persona', 'Fanvue or OnlyFans chat',
                              'Full PPV engine — ladders, per-fan pricing, '
                              'timed re-offers',
                              'Up to 3 funnel phases + CTA',
@@ -1221,7 +1221,7 @@ _BASE_TIERS = {
                 'capabilities': {
                     'personas': 1,
                     'seats': 1,
-                    'platforms': ['fanvue'],
+                    'platforms': ['fanvue', 'onlyfans'],
                     'phases_max': 3,
                     'outfit_lock': False,
                     'scheduled_followups': False,
@@ -1232,7 +1232,7 @@ _BASE_TIERS = {
     'pro': {'name': 'Pro', 'price': 149,
             'blurb': 'Five personas, every platform.',
             'features': ['5 AI personas', '2 team seats',
-                         'Telegram, X, Fanvue and Threads',
+                         'Telegram, X, Fanvue, OnlyFans and Threads',
                          'Outfit locking + media tagging',
                          'Up to 10 funnel phases with photo rates',
                          'Scheduled follow-ups',
@@ -1699,9 +1699,11 @@ def _image_quota(user):
 
 
 # Creator-facing surface: needs a logged-in customer on an active plan.
-_PAID_PAGES =('/dashboard', '/xbot', '/fanvue', '/threads', '/telegram', '/admin')
+_PAID_PAGES =('/dashboard', '/xbot', '/fanvue', '/onlyfans', '/threads',
+              '/telegram', '/admin')
 _PAID_API = ('/api/telegram', '/api/tguser', '/api/x', '/api/xlog', '/api/threads',
-             '/api/fanvue', '/api/platforms', '/api/visitors', '/api/generate',
+             '/api/fanvue', '/api/onlyfans', '/api/platforms', '/api/visitors',
+             '/api/generate',
              '/api/backstory', '/api/config', '/api/whatsapp')
 # Fan-facing and auth/billing routes stay open. So are inbound webhooks: they
 # arrive from the platform, not a signed-in creator, and carry their own signed
@@ -1738,9 +1740,10 @@ _PLATFORM_PATHS = {
     '/api/telegram': 'telegram', '/api/tguser': 'telegram',
     '/api/x': 'x', '/api/xlog': 'x',
     '/api/fanvue': 'fanvue', '/api/threads': 'threads',
+    '/api/onlyfans': 'onlyfans',
 }
-_PLATFORM_PAGES = {'/telegram': 'telegram', '/xbot': 'x',
-                   '/fanvue': 'fanvue', '/threads': 'threads'}
+_PLATFORM_PAGES = {'/telegram': 'telegram', '/xbot': 'x', '/fanvue': 'fanvue',
+                   '/onlyfans': 'onlyfans', '/threads': 'threads'}
 # Seat roles that may not reach a path at all. Owners and admins never appear
 # here; they are filtered out before the map is consulted.
 _ROLE_DENY = {
@@ -3588,8 +3591,8 @@ def pricing():
                                   custom=CUSTOM_TIER)
 
 
-PLATFORM_NAMES = {'fanvue': 'Fanvue', 'telegram': 'Telegram', 'x': 'X',
-                  'threads': 'Threads'}
+PLATFORM_NAMES = {'fanvue': 'Fanvue', 'onlyfans': 'OnlyFans',
+                  'telegram': 'Telegram', 'x': 'X', 'threads': 'Threads'}
 
 
 @app.route('/demo-ends')
@@ -4148,6 +4151,16 @@ def xbot_page():
     if not _is_operator():
         return redirect('/dashboard')
     return send_from_directory(BASE_DIR, 'xbot.html')
+
+@app.route('/onlyfans')
+def onlyfans_page():
+    # Open past the operator check for the same reason /fanvue is: every
+    # /api/onlyfans/* call a creator can reach is already scoped to a persona
+    # they own.
+    if not _current_user():
+        return redirect('/login?next=/onlyfans')
+    return send_from_directory(BASE_DIR, 'onlyfans.html')
+
 
 @app.route('/fanvue')
 def fanvue_page():
@@ -4744,6 +4757,8 @@ def _xchat_thread_rows(persona, uid):
 INBOX_PLATFORMS = {
     'fanvue':   {'label': 'Fanvue',   'prefixes': ('fv:',),
                  'trace_keys': ('fanvue_trace_%s',)},
+    'onlyfans': {'label': 'OnlyFans', 'prefixes': ('of:',),
+                 'trace_keys': ('onlyfans_trace_%s',)},
     'telegram': {'label': 'Telegram', 'prefixes': ('tg:', 'tgu:'),
                  'trace_keys': ('tg_trace_%s', 'tg_trace_platform')},
     'x':        {'label': 'X',        'prefixes': ('',),
@@ -12012,13 +12027,17 @@ def api_fanvue_media_lookup():
 @app.route('/api/fanvue/ppv', methods=['GET', 'POST'])
 @platform_scoped
 def api_fanvue_ppv():
+    return _plat_ppv_api(PLAT_FANVUE)
+
+
+def _plat_ppv_api(plat):
     """Get or set a persona's PPV content sets. A set is a themed bundle with
     its own ordered tiers plus the cues that pick it: scene, keywords and an
     hour window. Stored per connected Fanvue account (persona)."""
     if request.method == 'GET':
         persona = (request.args.get('persona') or '').strip()
-        cfg = _fanvue_ppv(persona)
-        return jsonify({'sets': _fanvue_ppv_sets(persona),
+        cfg = _fanvue_ppv(persona, plat=plat)
+        return jsonify({'sets': _fanvue_ppv_sets(persona, plat=plat),
                         'tz_offset': cfg.get('tz_offset') or 0,
                         'enabled': bool(cfg.get('enabled', True))})
     d = request.json or {}
@@ -12067,7 +12086,7 @@ def api_fanvue_ppv():
         tz = 0
     cfg = {'sets': sets, 'tz_offset': max(-840, min(tz, 840)),
            'enabled': bool(d.get('enabled', True)) and bool(sets)}
-    _set_setting(f'fanvue_ppv_{persona}', json.dumps(cfg))
+    _set_setting(plat.k('ppv', persona), json.dumps(cfg))
     return jsonify({'ok': True, 'sets': sets, 'enabled': cfg['enabled'],
                     'warnings': _fv_set_warnings(sets)})
 
@@ -13605,6 +13624,10 @@ def _fv_send_human(persona, scope, fan_uuid, text, incoming='', cfg=None,
             continue
         if i:
             pause(random.uniform(0.6, 1.6))
+        # Where the platform has a typing indicator, raise it before the pause
+        # that stands for typing rather than after it.
+        if plat is not None:
+            plat.typing(persona, scope, fan_uuid)
         pause(min(max(len(chunk) / float(cps), 1.2), FV_TYPE_CAP) * random.uniform(0.85, 1.2))
         _fv_send_text(persona, scope, fan_uuid, chunk, plat=plat)
 
@@ -15075,6 +15098,10 @@ class _Platform:
     def typing(self, persona, scope, fan_id):
         pass
 
+    def webhook_state(self, persona):
+        """Whether purchase events can reach us, and what is wrong if not."""
+        return {'ready': False, 'problem': '', 'url': '', 'last_error': ''}
+
 
 class _FanvuePlatform(_Platform):
     slug = 'fanvue'
@@ -15128,6 +15155,15 @@ class _FanvuePlatform(_Platform):
 
     def acting_as(self, persona):
         return _fanvue_creator(persona).get('handle')
+
+    def webhook_state(self, persona):
+        hook = _fv_stored_hook(persona)
+        ready = bool(_fv_webhook_secret() or hook.get('secret'))
+        return {'ready': ready, 'url': hook.get('url') or '',
+                'last_error': hook.get('last_error') or '',
+                'problem': '' if ready else
+                'No webhook signing secret, so payment webhooks are rejected. '
+                'Purchases are still picked up by Reconcile, just later.'}
 
     def send_text(self, persona, scope, fan_id, text):
         _fv_send_text(persona, scope, fan_id, text)
@@ -15499,13 +15535,17 @@ def _plat_round_body(plat, persona):
 @app.route('/api/fanvue/auto', methods=['GET', 'POST'])
 @platform_scoped
 def api_fanvue_auto():
+    return _plat_auto_api(PLAT_FANVUE)
+
+
+def _plat_auto_api(plat):
     """Get or set the persistent auto-reply toggle + options for a persona."""
     if request.method == 'POST':
         data = request.json or {}
         persona = (data.get('persona') or '').strip()
         if not persona:
             return jsonify({'ok': False, 'error': 'persona required'}), 400
-        opts = _fanvue_auto_settings(persona)
+        opts = _fanvue_auto_settings(persona, plat=plat)
         if 'exclude_creators' in data:
             opts['exclude_creators'] = bool(data['exclude_creators'])
         if 'reply_limit' in data:
@@ -15525,7 +15565,7 @@ def api_fanvue_auto():
         followups = bool(user_capabilities(_current_user()).get('scheduled_followups'))
         if 'followup_min' in data and followups:
             try:
-                _set_setting(f'fanvue_followup_min_{persona}', str(int(float(data['followup_min']))))
+                _set_setting(plat.k('followup_min', persona), str(int(float(data['followup_min']))))
             except (ValueError, TypeError):
                 pass
         if 'include_lists' in data:
@@ -15548,17 +15588,17 @@ def api_fanvue_auto():
         if 'ppv_test_phrase' in data:
             opts['ppv_test_phrase'] = (data.get('ppv_test_phrase') or '').strip()[:80]
         if 'ppv_require_payment' in data:
-            _set_setting(f'fanvue_ppv_require_payment_{persona}', '1' if data['ppv_require_payment'] else '0')
+            _set_setting(plat.k('ppv_require_payment', persona), '1' if data['ppv_require_payment'] else '0')
         enabled = bool(data.get('enabled', opts.get('enabled', False)))
         opts['enabled'] = enabled
-        _set_setting(f'fanvue_auto_{persona}', json.dumps(opts))
-        lst = set(_fanvue_enabled_list())
+        _set_setting(plat.k('auto', persona), json.dumps(opts))
+        lst = set(_fanvue_enabled_list(plat=plat))
         lst.add(persona) if enabled else lst.discard(persona)
-        _set_setting('fanvue_auto_personas', json.dumps(sorted(lst)))
+        _set_setting(plat.k('auto_personas'), json.dumps(sorted(lst)))
         return jsonify({'ok': True, 'enabled': enabled, 'options': opts,
                         'scheduled_followups': followups})
     persona = (request.args.get('persona') or '').strip()
-    opts = _fanvue_auto_settings(persona)
+    opts = _fanvue_auto_settings(persona, plat=plat)
     return jsonify({'enabled': bool(opts.get('enabled')),
                     'exclude_creators': opts.get('exclude_creators', True),
                     'reply_limit': opts.get('reply_limit', 10),
@@ -15577,14 +15617,18 @@ def api_fanvue_auto():
                     'ppv_retry_max': int(opts.get('ppv_retry_max', 1) or 0),
                     'ppv_stale_days': int(opts.get('ppv_stale_days', 14) or 0),
                     'ppv_retry_discount': float(opts.get('ppv_retry_discount', 0) or 0),
-                    'followup_min': int(_get_setting(f'fanvue_followup_min_{persona}') or 30),
+                    'followup_min': int(_get_setting(plat.k('followup_min', persona)) or 30),
                     'scheduled_followups': bool(user_capabilities(_current_user()).get('scheduled_followups')),
-                    'ppv_require_payment': (_get_setting(f'fanvue_ppv_require_payment_{persona}') or '0') == '1'})
+                    'ppv_require_payment': (_get_setting(plat.k('ppv_require_payment', persona)) or '0') == '1'})
 
 
 @app.route('/api/fanvue/ppv-reset', methods=['POST'])
 @platform_scoped
 def api_fanvue_ppv_reset():
+    return _plat_ppv_reset_api(PLAT_FANVUE)
+
+
+def _plat_ppv_reset_api(plat):
     """Forget what has already been *sent*, so the sets start from the top again.
 
     Purchases are a different fact and are never touched: the ppv_drops ledger
@@ -15600,9 +15644,8 @@ def api_fanvue_ppv_reset():
         return jsonify({'ok': False, 'needs_confirm': True, 'error':
                         'This restarts the sets for every fan on this persona. '
                         'Send confirm:true to go ahead.'}), 400
-    keys = [f'fanvue_ppv_state_{persona}', f'fanvue_ppv_sent_{persona}',
-            f'fanvue_ppv_at_{persona}', f'fanvue_ppv_last_{persona}',
-            f'fanvue_ppv_testpaid_{persona}', f'fanvue_ppv_retry_{persona}']
+    keys = [plat.k(n, persona) for n in ('ppv_state', 'ppv_sent', 'ppv_at',
+                                        'ppv_last', 'ppv_testpaid', 'ppv_retry')]
     cleared = 0
     for k in keys:
         if fan:
@@ -15650,39 +15693,43 @@ def api_fanvue_lists():
 @app.route('/api/fanvue/trace', methods=['GET', 'DELETE'])
 @platform_scoped
 def api_fanvue_trace():
-    """Recent Fanvue chat activity for a persona — what came in, what went out,
-    PPV drops and errors — plus a verdict when nothing is happening."""
+    return _plat_trace_api(PLAT_FANVUE)
+
+
+def _plat_trace_api(plat):
+    """Recent chat activity for a persona on one platform — what came in, what
+    went out, PPV drops and errors — plus a verdict when nothing is happening."""
     # The same resolution the ownership guard used, so the two can never
     # disagree about which persona this request is for.
     persona = request_persona()
     if request.method == 'DELETE':
-        _set_setting(f'fanvue_trace_{persona}', '[]')
+        _set_setting(plat.k('trace', persona), '[]')
         return jsonify({'ok': True})
     try:
-        rows = json.loads(_get_setting(f'fanvue_trace_{persona}') or '[]')
+        rows = json.loads(_get_setting(plat.k('trace', persona)) or '[]')
     except Exception:
         rows = []
     if not isinstance(rows, list):
         rows = []
-    opts = _fanvue_auto_settings(persona)
-    connected = bool(_fanvue_tokens(persona).get('access_token'))
-    lock = _fanvue_round_locks.get(persona)
+    opts = _fanvue_auto_settings(persona, plat=plat)
+    connected = plat.connected(persona)
+    lock = _fanvue_round_locks.get(f'{plat.slug}:{persona}')
     problems = []
     if not connected:
-        problems.append('Fanvue is not connected for this persona.')
+        problems.append(f'{plat.label} is not connected for this persona.')
     elif not opts.get('enabled'):
         problems.append('Auto-reply is off — turn it on for her to answer fans.')
     elif not rows:
-        problems.append('No activity recorded yet. Rounds run every 20s; a line '
-                        'appears here as soon as a fan writes.')
+        problems.append('No activity recorded yet. A line appears here as soon '
+                        'as a fan writes.')
     if opts.get('only_handles'):
         problems.append('Only replying to: ' + opts['only_handles'])
     if opts.get('online_only'):
         problems.append('Only replying to fans who are online right now.')
-    if _fv_clean_lists(opts.get('include_lists')):
+    if plat.has_lists and _fv_clean_lists(opts.get('include_lists')):
         problems.append('Only replying to fans in: ' + ', '.join(
             l['name'] for l in _fv_clean_lists(opts['include_lists'])))
-    if _fv_clean_lists(opts.get('exclude_lists')):
+    if plat.has_lists and _fv_clean_lists(opts.get('exclude_lists')):
         problems.append('Never replying to fans in: ' + ', '.join(
             l['name'] for l in _fv_clean_lists(opts['exclude_lists'])))
     if opts.get('ppv_test_phrase'):
@@ -15700,28 +15747,28 @@ def api_fanvue_trace():
         problems.append('Purchases will be forgotten on the next redeploy — the '
                         'database is an ephemeral file. Set DATABASE_URL (or the '
                         'Cloud SQL env vars) to keep them.')
-    hook = _fv_stored_hook(persona)
-    if not (_fv_webhook_secret() or hook.get('secret')):
-        problems.append('No webhook signing secret, so payment webhooks are '
-                        'rejected. Purchases are still picked up by Reconcile, '
-                        'just later.')
-    stood_down = [r for r in _fv_unsendable(persona).values()
+    hook = plat.webhook_state(persona)
+    if not hook.get('ready'):
+        problems.append(hook.get('problem') or 'No webhook signing secret, so '
+                        'purchase webhooks are rejected.')
+    stood_down = [r for r in _fv_unsendable(persona, plat=plat).values()
                   if isinstance(r, dict) and float(r.get('until') or 0) > time.time()]
     if stood_down:
         problems.append(
-            '%d chat(s) Fanvue will not accept a message for (%s) — usually '
+            '%d chat(s) %s will not accept a message for (%s) — usually '
             'deleted accounts or blocks. They are retried later.'
-            % (len(stood_down),
+            % (len(stood_down), plat.label,
                ', '.join(r.get('handle') or '?' for r in stood_down[:5])))
     if hook.get('last_error'):
-        problems.append('Fanvue refused the webhook subscription for %s — %s'
-                        % (hook.get('url') or 'this app', hook['last_error'][:160]))
+        problems.append('%s refused the webhook subscription for %s — %s'
+                        % (plat.label, hook.get('url') or 'this app',
+                           hook['last_error'][:160]))
     return jsonify({'persona': persona, 'connected': connected,
                     'enabled': bool(opts.get('enabled')),
                     'running': bool(lock and lock.locked()),
                     'queued': _fv_inflight[0], 'workers': _fv_workers(),
                     'storage_ephemeral': ephemeral,
-                    'webhook_ready': bool(_fv_webhook_secret() or hook.get('secret')),
+                    'webhook_ready': bool(hook.get('ready')),
                     'problems': problems, 'rows': rows[-FV_TRACE_MAX:]})
 
 
@@ -15739,7 +15786,7 @@ def api_fanvue_accounts():
         tok = _fanvue_tokens(slug)
         if not tok.get('access_token') and slug not in enabled:
             continue
-        lock = _fanvue_round_locks.get(slug)
+        lock = _fanvue_round_locks.get(f'fanvue:{slug}')
         out.append({
             'persona': slug,
             'name': slug,
@@ -15754,18 +15801,24 @@ def api_fanvue_accounts():
 @app.route('/api/fanvue/auto-run', methods=['POST'])
 @platform_scoped
 def api_fanvue_auto_run():
+    return _plat_auto_run_api(PLAT_FANVUE)
+
+
+def _plat_auto_run_api(plat):
     """Run one auto-reply round now (also used by the background worker)."""
     persona = (request.json or {}).get('persona', '').strip()
     if not persona:
         return jsonify({'ok': False, 'error': 'persona required'}), 400
-    if not _fanvue_tokens(persona).get('access_token'):
-        return jsonify({'ok': False, 'error': 'Fanvue not connected for this persona.'}), 400
+    if not plat.connected(persona):
+        return jsonify({'ok': False,
+                        'error': f'{plat.label} not connected for this persona.'}), 400
     try:
-        res = _fanvue_round_now(persona, block=True)
+        res = _plat_round_now(plat, persona, block=True)
         actions, log = res if res else ({}, [])
         return jsonify({'ok': True, 'actions': actions, 'log': log})
     except url_error.HTTPError as e:
-        return jsonify({'ok': False, 'error': f'Fanvue API {e.code}: {e.read()[:200].decode(errors="ignore")}'}), 400
+        return jsonify({'ok': False, 'error': f'{plat.label} API {e.code}: '
+                        f'{e.read()[:200].decode(errors="ignore")}'}), 400
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)[:200]}), 400
 
@@ -15890,6 +15943,509 @@ def _start_fanvue_worker():
 
 if _worker_enabled('FANVUE_WORKER'):
     _start_fanvue_worker()
+
+
+
+# ── OnlyFans chatbot ──────────────────────────────────────────────────────────
+# OnlyFans has no public chat API, so this goes through OnlyFansAPI.com: one
+# team key in the environment, accounts connected in their dashboard, and a
+# per-account path prefix. Everything past the transport is the same engine
+# Fanvue runs on — the round, the pacing, the PPV ladder — reached through the
+# adapter below.
+#
+# Replies are driven by the messages.received webhook rather than by polling:
+# loading a chat's messages marks it read on OnlyFans, so a poll loop would
+# quietly clear the creator's own unread badges. The worker still sweeps on an
+# interval as a backup, because a paused endpoint loses every event it missed.
+import onlyfans as OF
+
+OF_WEBHOOK_PATH = '/webhooks/onlyfans'
+OF_CHAT_SCAN = int(os.getenv('ONLYFANS_CHAT_SCAN', '100') or 100)
+# How long a fan has to stop typing before the reply job runs. OnlyFansAPI
+# recommends 5-10s; a fan sending three short lines should get one answer.
+OF_QUIET_SECONDS = float(os.getenv('ONLYFANS_QUIET_SECONDS', '8') or 8)
+OF_SWEEP_SECONDS = float(os.getenv('ONLYFANS_SWEEP_SECONDS', '300') or 300)
+OF_SEEN_EVENTS_MAX = 1000
+
+
+def _of_account(persona):
+    """The acct_… this persona replies as, or ''."""
+    return (_get_setting(f'onlyfans_account_{persona}') or '').strip()
+
+
+def _of_account_meta(persona):
+    try:
+        return json.loads(_get_setting(f'onlyfans_account_meta_{persona}') or '{}')
+    except Exception:
+        return {}
+
+
+def _of_persona_for_account(account_id):
+    """Which persona a webhook belongs to. One endpoint serves every account
+    the team has connected, and the event names the account, not the persona."""
+    if not account_id:
+        return ''
+    for slug in sorted({p.get('slug') for p in db_list_personas()} |
+                       set(_fanvue_enabled_list(plat=PLAT_ONLYFANS))):
+        if slug and _of_account(slug) == str(account_id):
+            return slug
+    return ''
+
+
+def _of_webhook_secrets():
+    """Every secret a delivery may be signed with. Configured in the OnlyFansAPI
+    console, so the environment is where it reaches us."""
+    return [v for v in ((os.getenv('ONLYFANS_WEBHOOK_SECRET') or '').strip(),
+                        (_get_setting('onlyfans_webhook_secret') or '').strip()) if v]
+
+
+def _of_webhook_url():
+    origin = (_callback_origin() or '').rstrip('/')
+    return origin + OF_WEBHOOK_PATH if origin.startswith('https://') else ''
+
+
+class _OnlyFansPlatform(_Platform):
+    slug = 'onlyfans'
+    label = 'OnlyFans'
+    prefix = 'onlyfans'
+    fan_prefix = 'of:'
+    # Chat lists and the funnel/bandit layer stay Fanvue-only for now: the
+    # funnels reason from a purchase ledger Fanvue's payment webhook writes.
+    has_lists = False
+    has_funnels = False
+
+    def connected(self, persona):
+        return bool(OF.configured() and _of_account(persona))
+
+    def scope(self, persona):
+        return f'/api/{_of_account(persona)}'
+
+    def me(self, persona):
+        """Our own OnlyFans user id, so an imported history can tell who spoke."""
+        meta = _of_account_meta(persona)
+        return str(meta.get('onlyfans_id') or '')
+
+    def acting_as(self, persona):
+        return _of_account_meta(persona).get('username', '')
+
+    def chats(self, persona, scope):
+        return OF.chats(_of_account(persona), want=OF_CHAT_SCAN)
+
+    def read_chat(self, chat):
+        return OF.user_of_chat(chat)
+
+    def online(self, chat, grace):
+        return OF.chat_online(chat, grace)
+
+    def messages(self, persona, fan_id, want):
+        return OF.messages(_of_account(persona), fan_id, want)
+
+    def text_of(self, msg):
+        return OF.text_of(msg)
+
+    def msg_id(self, msg):
+        return OF.msg_id(msg)
+
+    def msg_time(self, msg):
+        return OF.msg_time(msg)
+
+    def msg_age(self, msg):
+        return OF.msg_age_minutes(msg)
+
+    def direction(self, msg, fan_id, me_id, recent_out=()):
+        return OF.direction_of(msg, fan_id, me_id, recent_out)
+
+    def import_history(self, persona, fan_id, handle, me_id):
+        """Store the whole chat so the persona remembers what was already said.
+
+        Unlike Fanvue, every OnlyFans message says outright whether we sent it,
+        so a line whose sender cannot be resolved is a real oddity — it is
+        skipped rather than aborting the import.
+        """
+        try:
+            msgs = OF.messages(_of_account(persona), fan_id, 200)
+        except Exception:
+            return 0, []
+        rows = []
+        for m in msgs:
+            text = OF.text_of(m)
+            if not text:
+                continue
+            direction = OF.direction_of(m, fan_id, me_id)
+            if not direction:
+                continue
+            rows.append((direction, text))
+        fan_key = self.fan_key(fan_id)
+        for direction, text in rows:
+            _log_x_message(persona, fan_key, handle, direction, text)
+        return len(rows), [t for d, t in rows if d == 'in']
+
+    def send_text(self, persona, scope, fan_id, text):
+        OF.send(_of_account(persona), fan_id, text)
+
+    def send_ppv(self, persona, scope, fan_id, caption, media, price_cents):
+        """Send the paid drop. Prices are held in cents everywhere in the engine;
+        OnlyFans wants dollars, and refuses anything outside $3-$200."""
+        usd = round(int(price_cents) / 100.0, 2)
+        if usd < OF.OF_PRICE_MIN_USD or usd > OF.OF_PRICE_MAX_USD:
+            raise OF.OnlyFansApiError(
+                0, f'OnlyFans will not take a ${usd:g} unlock — the price has to '
+                   f'be between ${OF.OF_PRICE_MIN_USD:g} and ${OF.OF_PRICE_MAX_USD:g}')
+        sent = OF.send(_of_account(persona), fan_id, caption, price=usd, media=media)
+        data = sent.get('data') if isinstance(sent, dict) else None
+        return str((data or {}).get('id') or '') if isinstance(data, dict) else ''
+
+    def typing(self, persona, scope, fan_id):
+        try:
+            OF.typing(_of_account(persona), fan_id)
+        except Exception as e:
+            logger.debug('OnlyFans typing indicator failed: %s', str(e)[:120])
+
+    def webhook_state(self, persona):
+        ready = bool(_of_webhook_secrets())
+        return {'ready': ready, 'url': _of_webhook_url(), 'last_error': '',
+                'problem': '' if ready else
+                'No webhook signing secret, so OnlyFans events are rejected and '
+                'replies only go out on the backup sweep. Add the webhook in the '
+                'OnlyFansAPI console and set ONLYFANS_WEBHOOK_SECRET.'}
+
+
+PLAT_ONLYFANS = _OnlyFansPlatform()
+PLATFORMS['onlyfans'] = PLAT_ONLYFANS
+
+
+# ── OnlyFans console API ──────────────────────────────────────────────────────
+
+@app.route('/api/onlyfans/config')
+def api_onlyfans_config():
+    """Whether this deployment can talk to OnlyFansAPI at all. Carries no key —
+    a creator's connect screen reads it to know whether to offer the picker."""
+    if not _current_user():
+        return jsonify({'error': 'Unauthorized'}), 401
+    return jsonify({'configured': OF.configured(), 'webhook_url': _of_webhook_url(),
+                    'webhook_ready': bool(_of_webhook_secrets())})
+
+
+@app.route('/api/onlyfans/accounts')
+@platform_scoped
+def api_onlyfans_accounts():
+    """The OnlyFans accounts this team has connected, for the account picker."""
+    persona = (request.args.get('persona') or '').strip()
+    if not OF.configured():
+        return jsonify({'accounts': [], 'selected': '',
+                        'error': 'No OnlyFansAPI key on this deployment. Set '
+                                 'ONLYFANSAPI_KEY and redeploy.'})
+    try:
+        rows = OF.accounts()
+    except OF.OnlyFansApiError as e:
+        return jsonify({'accounts': [], 'selected': _of_account(persona),
+                        'error': str(e)[:200]})
+    return jsonify({'selected': _of_account(persona), 'error': '', 'accounts': [
+        {'id': str(a.get('id') or ''),
+         'username': a.get('onlyfans_username') or '',
+         'name': (a.get('onlyfans_user_data') or {}).get('name') or a.get('display_name') or '',
+         'authenticated': bool(a.get('is_authenticated')),
+         'progress': a.get('authentication_progress') or ''}
+        for a in rows if isinstance(a, dict)]})
+
+
+@app.route('/api/onlyfans/account', methods=['POST'])
+@platform_scoped
+def api_onlyfans_set_account():
+    """Point a persona at one connected OnlyFans account."""
+    d = request.json or {}
+    persona = (d.get('persona') or '').strip()
+    account = (d.get('account') or '').strip()
+    if not persona:
+        return jsonify({'ok': False, 'error': 'persona required'}), 400
+    if not account:
+        _set_setting(f'onlyfans_account_{persona}', '')
+        _set_setting(f'onlyfans_account_meta_{persona}', '{}')
+        return jsonify({'ok': True, 'connected': False})
+    row = OF.account_row(account)
+    if not row:
+        return jsonify({'ok': False, 'error': 'That account is not connected to '
+                                              'this OnlyFansAPI team.'}), 400
+    if not row.get('is_authenticated'):
+        return jsonify({'ok': False, 'error':
+                        'That account is not signed in on OnlyFansAPI yet '
+                        f"({row.get('authentication_progress') or 'not authenticated'}). "
+                        'Finish connecting it there first.'}), 400
+    user = row.get('onlyfans_user_data') or {}
+    _set_setting(f'onlyfans_account_{persona}', account)
+    _set_setting(f'onlyfans_account_meta_{persona}', json.dumps({
+        'onlyfans_id': str(user.get('id') or row.get('onlyfans_id') or ''),
+        'username': row.get('onlyfans_username') or user.get('username') or '',
+        'name': user.get('name') or ''}))
+    # A fresh account starts from a clean cursor: replying to a year of history
+    # because the old account's cursor was still there would be unrecoverable.
+    _set_setting(PLAT_ONLYFANS.k('cursor', persona), '{}')
+    _log_x_event('onlyfans_connect', persona=persona,
+                 x_username=row.get('onlyfans_username') or '')
+    return jsonify({'ok': True, 'connected': True,
+                    'account': account, 'meta': _of_account_meta(persona)})
+
+
+@app.route('/api/onlyfans/status')
+@platform_scoped
+def api_onlyfans_status():
+    persona = (request.args.get('persona') or '').strip()
+    meta = _of_account_meta(persona)
+    return jsonify({'connected': PLAT_ONLYFANS.connected(persona),
+                    'configured': OF.configured(),
+                    'account': _of_account(persona),
+                    'username': meta.get('username', ''),
+                    'webhook_ready': bool(_of_webhook_secrets()),
+                    'webhook_url': _of_webhook_url()})
+
+
+@app.route('/api/onlyfans/disconnect', methods=['POST'])
+@platform_scoped
+def api_onlyfans_disconnect():
+    persona = (request.json or {}).get('persona', '').strip()
+    if persona:
+        _set_setting(f'onlyfans_account_{persona}', '')
+        _set_setting(f'onlyfans_account_meta_{persona}', '{}')
+        _set_setting(PLAT_ONLYFANS.k('cursor', persona), '{}')
+    return jsonify({'ok': True})
+
+
+@app.route('/api/onlyfans/media')
+@platform_scoped
+def api_onlyfans_media():
+    """The creator's vault, for picking what a PPV tier sends."""
+    persona = (request.args.get('persona') or '').strip()
+    if not PLAT_ONLYFANS.connected(persona):
+        return jsonify({'media': [], 'error': 'OnlyFans not connected for this persona.'})
+    try:
+        items = OF.vault(_of_account(persona),
+                         list_id=(request.args.get('list') or '').strip() or None,
+                         media_type=(request.args.get('type') or '').strip() or None,
+                         query=(request.args.get('q') or '').strip(),
+                         want=max(1, min(int(request.args.get('limit') or 200), 500)))
+    except OF.OnlyFansApiError as e:
+        return jsonify({'media': [], 'error': str(e)[:200]})
+    return jsonify({'media': [OF.media_row(m) for m in items if isinstance(m, dict)],
+                    'error': ''})
+
+
+@app.route('/api/onlyfans/auto', methods=['GET', 'POST'])
+@platform_scoped
+def api_onlyfans_auto():
+    return _plat_auto_api(PLAT_ONLYFANS)
+
+
+@app.route('/api/onlyfans/auto-run', methods=['POST'])
+@platform_scoped
+def api_onlyfans_auto_run():
+    return _plat_auto_run_api(PLAT_ONLYFANS)
+
+
+@app.route('/api/onlyfans/ppv', methods=['GET', 'POST'])
+@platform_scoped
+def api_onlyfans_ppv():
+    return _plat_ppv_api(PLAT_ONLYFANS)
+
+
+@app.route('/api/onlyfans/ppv-reset', methods=['POST'])
+@platform_scoped
+def api_onlyfans_ppv_reset():
+    return _plat_ppv_reset_api(PLAT_ONLYFANS)
+
+
+@app.route('/api/onlyfans/trace', methods=['GET', 'DELETE'])
+@platform_scoped
+def api_onlyfans_trace():
+    return _plat_trace_api(PLAT_ONLYFANS)
+
+
+@app.route('/api/onlyfans/debug')
+@operator_only
+def api_onlyfans_debug():
+    """Raw OnlyFansAPI JSON (accounts / chats / the first chat's messages) so the
+    exact field names can be confirmed against a real account."""
+    persona = (request.args.get('persona') or '').strip()
+    out = {'account': _of_account(persona), 'meta': _of_account_meta(persona)}
+    try:
+        out['accounts'] = OF.accounts()
+    except Exception as e:
+        out['accounts_error'] = str(e)[:300]
+    if out['account']:
+        try:
+            chats = OF.chats(out['account'], want=3)
+            out['chats'] = chats
+            if chats:
+                fan = OF.user_of_chat(chats[0])[0]
+                out['first_messages'] = OF.messages(out['account'], fan, 3)
+        except Exception as e:
+            out['chats_error'] = str(e)[:300]
+    return jsonify(out)
+
+
+# ── OnlyFans webhook ──────────────────────────────────────────────────────────
+# Deliveries must be answered inside 10 seconds or OnlyFansAPI retries them, so
+# nothing here does the work: an event marks the persona due and the worker
+# below picks it up on its next tick, at most a couple of seconds later.
+
+_of_due = {}
+_of_due_lock = threading.Lock()
+_of_last_sweep = [0.0]
+
+
+def _of_wake(persona, delay=0.0):
+    """Ask for a round on this persona, no sooner than `delay` seconds from now.
+
+    A fan writing three lines in a row should get one reply, so each new
+    message (or typing event) pushes the round back rather than queueing
+    another one.
+    """
+    if not persona:
+        return
+    with _of_due_lock:
+        _of_due[persona] = max(_of_due.get(persona, 0), time.time() + delay)
+
+
+def _of_event_seen(event_id):
+    """True if this event was already applied. Deliveries are at-least-once and
+    a manual redelivery reuses the same idempotency key."""
+    if not event_id:
+        return False
+    key = 'onlyfans_seen_events'
+    try:
+        seen = json.loads(_get_setting(key) or '[]')
+        if not isinstance(seen, list):
+            seen = []
+    except Exception:
+        seen = []
+    if event_id in seen:
+        return True
+    seen.append(event_id)
+    _set_setting(key, json.dumps(seen[-OF_SEEN_EVENTS_MAX:]))
+    return False
+
+
+@app.route(OF_WEBHOOK_PATH, methods=['POST'])
+def onlyfans_webhook():
+    raw = request.get_data()                       # before any parsing — the
+    header = request.headers.get('Signature')      # signature covers these bytes
+    secrets = _of_webhook_secrets()
+    ok, why = False, 'no signing secret configured'
+    for secret in secrets:
+        ok, why = OF.verify_signature(raw, header, secret)
+        if ok:
+            break
+    if not ok:
+        logger.warning('OnlyFans webhook rejected: %s (%d secret(s) tried)',
+                       why, len(secrets))
+        return jsonify({'error': 'invalid signature'}), 401
+    try:
+        ev = json.loads(raw.decode('utf-8'))
+    except Exception:
+        return jsonify({'error': 'invalid payload'}), 400
+
+    event = str(ev.get('event') or '')
+    payload = ev.get('payload') if isinstance(ev.get('payload'), dict) else {}
+    persona = _of_persona_for_account(str(ev.get('account_id') or ''))
+    if not persona:
+        return jsonify({'ok': True, 'ignored': 'unknown account'})
+    fan = OF.event_fan(payload, event)
+
+    # Typing carries no idempotency key and means nothing on its own: it only
+    # holds the reply back while the fan is still writing.
+    if event in ('users.typing', 'users.online'):
+        if event == 'users.typing':
+            _of_wake(persona, OF_QUIET_SECONDS)
+        return jsonify({'ok': True})
+
+    if _of_event_seen(request.headers.get('X-OFAPI-Idempotency-Key') or ''):
+        return jsonify({'ok': True, 'duplicate': True})
+
+    if event == 'messages.received':
+        _of_wake(persona, OF_QUIET_SECONDS)
+    elif event == 'messages.ppv.unlocked':
+        with PLAT_ONLYFANS.tracing():
+            _fv_settle_drop(persona, fan,
+                            amount_cents=OF.ppv_amount_cents(payload) or None,
+                            source='webhook')
+        # She should react to the purchase, not carry on selling it.
+        _of_wake(persona, OF_QUIET_SECONDS)
+    elif event == 'messages.sent':
+        # A human answered in the OnlyFans app. Keep it in the transcript, or
+        # the persona replies as if it never happened.
+        text = OF.text_of(payload)
+        if text and fan:
+            _log_x_message(persona, PLAT_ONLYFANS.fan_key(fan),
+                           OF.event_handle(payload), 'out', text)
+    return jsonify({'ok': True})
+
+
+# ── OnlyFans worker ───────────────────────────────────────────────────────────
+
+def _of_worker(tick=2.0):
+    """Run a round for every persona a webhook has marked due, and sweep them
+    all on an interval as the backup.
+
+    The sweep matters: an endpoint OnlyFansAPI has paused loses every event
+    fired while it was down, with no replay, so a bot driven by webhooks alone
+    would simply go quiet.
+    """
+    import time as _t
+    from concurrent.futures import ThreadPoolExecutor
+    pool = ThreadPoolExecutor(max_workers=max(1, int(os.getenv('ONLYFANS_WORKERS', '8'))),
+                              thread_name_prefix='onlyfans')
+    pending = set()
+
+    def _one(persona):
+        try:
+            _plat_round_now(PLAT_ONLYFANS, persona)
+        except Exception as e:
+            logger.exception('onlyfans round failed for %s', persona)
+            try:
+                with app.app_context(), PLAT_ONLYFANS.tracing():
+                    _fv_trace(persona, 'error', f'round failed: {str(e)[:200]}')
+            except Exception:
+                pass
+        finally:
+            with _of_due_lock:
+                pending.discard(persona)
+
+    while True:
+        try:
+            now = _t.time()
+            with _of_due_lock:
+                due = {p for p, at in _of_due.items() if at <= now}
+                for p in due:
+                    _of_due.pop(p, None)
+            if now - _of_last_sweep[0] >= OF_SWEEP_SECONDS:
+                _of_last_sweep[0] = now
+                with app.app_context():
+                    due |= set(_fanvue_enabled_list(plat=PLAT_ONLYFANS))
+            for persona in due:
+                with app.app_context():
+                    if not PLAT_ONLYFANS.connected(persona):
+                        continue
+                with _of_due_lock:
+                    if persona in pending:
+                        continue
+                    pending.add(persona)
+                pool.submit(_one, persona)
+        except Exception:
+            logger.exception('onlyfans worker tick failed')
+        _t.sleep(tick)
+
+
+_onlyfans_worker_started = [False]
+
+
+def _start_onlyfans_worker():
+    if _onlyfans_worker_started[0]:
+        return
+    _onlyfans_worker_started[0] = True
+    threading.Thread(target=_of_worker, daemon=True).start()
+
+
+if _worker_enabled('ONLYFANS_WORKER'):
+    _start_onlyfans_worker()
 
 
 # ── Error handler ─────────────────────────────────────────────────────────────

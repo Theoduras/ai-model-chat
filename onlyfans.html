@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OnlyFans Chatbot</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <script src="/js/theme.js"></script>
+  <link rel="stylesheet" href="/css/style.css">
+  <script src="/js/devnav.js" defer></script>
+  <script src="/js/chat-view.js"></script>
+  <script src="/js/console-shell.js"></script>
+  <style>
+    .fv-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+    .fv-wrap { max-width: 760px; margin: 0 auto; padding: 28px 24px 80px; display: flex; flex-direction: column; gap: 20px; }
+    .result-box { margin-top: 12px; font-size: 0.85rem; display: flex; flex-direction: column; gap: 8px; }
+    .conn-pill { font-size: 0.75rem; padding: 3px 10px; border-radius: 9999px; background: var(--surface); color: var(--text-3); }
+    .conn-pill.ok { background: #14532d; color: #4ade80; }
+    .conn-pill.err { background: #4c0519; color: #fb7185; }
+    :root[data-theme="light"] .conn-pill.ok { background: #e8f6ed; color: #0f7038; }
+    :root[data-theme="light"] .conn-pill.err { background: #fdecec; color: #c81e1e; }
+    .row-inline { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+    .row-inline .field { flex: 1; min-width: 160px; }
+    .pill { font-size: 0.75rem; padding: 4px 11px; border-radius: 9999px; border: 1px solid var(--border); background: var(--surface); color: var(--text-2); cursor: pointer; }
+    .pill.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .pill-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; max-height: 320px; overflow-y: auto; padding: 4px; border: 1px solid var(--border); border-radius: 10px; }
+    .grid .cell { position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; border: 2px solid transparent; cursor: pointer; background: var(--surface); }
+    .grid .cell.sel { border-color: var(--accent); }
+    .grid .cell img { width: 100%; height: 100%; object-fit: cover; }
+    .grid .cell .kind { position: absolute; left: 4px; bottom: 4px; font-size: 0.7rem; }
+    .chosen { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+    .chosen span { font-size: 0.72rem; background: var(--surface); border-radius: 6px; padding: 3px 8px; color: var(--text-2); }
+    table.accts { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+    table.accts td { padding: 6px 8px; border-bottom: 1px solid var(--panel-2); color: var(--text-2); }
+    @media (max-width: 640px) { .fv-wrap { padding: 18px 14px 70px; gap: 16px; } }
+  </style>
+<link rel="stylesheet" href="/css/site-nav.css">
+<script src="/js/site-nav.js" defer></script>
+</head>
+<body class="page-dashboard">
+
+<header>
+  <div style="display:flex; align-items:center; gap:10px;">
+    <h1>OnlyFans Chatbot</h1>
+    <span class="badge">OnlyFans</span>
+  </div>
+  <div style="display:flex; align-items:center; gap:16px;">
+    <a href="/fanvue" style="color:var(--accent); font-size:0.8rem; text-decoration:none;">Fanvue</a>
+    <nav data-site-nav="inline" class="sn-links sn-inline"></nav>
+    <button class="icon-btn theme-toggle" onclick="toggleTheme()" title="Light mode" aria-label="Switch to light mode">
+      <svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke-linecap="round"/></svg>
+      <svg class="ico-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" stroke-linejoin="round"/></svg>
+    </button>
+    <a href="/dashboard" style="color:var(--text-muted); font-size:0.8rem; text-decoration:none;">← Dashboard</a>
+  </div>
+</header>
+
+<div class="fv-scroll">
+<div class="fv-wrap">
+
+  <div id="sec-account" class="form-section" data-tab="settings">
+    <div class="section-title">Persona &amp; OnlyFans account</div>
+    <div class="field full">
+      <label>Choose a model (persona)</label>
+      <div class="row-inline">
+        <div class="field" style="margin:0;">
+          <select id="persona" onchange="loadConfig()"></select>
+        </div>
+        <span class="conn-pill" id="conn-pill">—</span>
+      </div>
+    </div>
+    <div class="field full">
+      <label>OnlyFans account</label>
+      <select id="account"></select>
+      <span class="hint" id="account-hint">Accounts are connected in the OnlyFansAPI console; they appear here once they are signed in.</span>
+    </div>
+    <div class="row-inline">
+      <button class="btn-ai" onclick="saveAccount()">Use this account</button>
+      <button class="btn-ai" style="background:var(--surface); color:var(--text-2);" onclick="loadAccounts(true)">Refresh list</button>
+      <button class="btn-ai" style="background:var(--surface); color:var(--text-2);" onclick="disconnect()">Disconnect</button>
+    </div>
+    <div class="result-box" id="account-status"></div>
+    <div class="result-box" id="webhook-status"></div>
+  </div>
+
+  <div id="sec-auto" class="form-section" data-tab="settings">
+    <div class="section-title">Auto-reply</div>
+    <div class="field full">
+      <label><input type="checkbox" id="a-enabled"> Answer fans automatically</label>
+      <span class="hint">Replies are triggered by OnlyFans' own message events, with a sweep every few minutes as a backup.</span>
+    </div>
+    <div class="row-inline">
+      <div class="field"><label>Most replies per round</label>
+        <input type="number" id="a-limit" min="1" max="30" value="10"></div>
+      <div class="field"><label>Only these fans (usernames, comma-separated)</label>
+        <input type="text" id="a-only" placeholder="leave empty for everyone"></div>
+    </div>
+    <div class="field full">
+      <label><input type="checkbox" id="a-humanize" checked> Type like a person (pause, then send in bursts)</label>
+    </div>
+    <div class="row-inline">
+      <div class="field"><label>Typing speed (chars/sec)</label>
+        <input type="number" id="a-speed" min="4" max="40" value="14"></div>
+      <div class="field"><label>Chance of reacting first (%)</label>
+        <input type="number" id="a-react" min="0" max="100" value="25"></div>
+    </div>
+    <div class="field full">
+      <label><input type="checkbox" id="a-online"> Only reply to fans who are online right now</label>
+    </div>
+    <div class="row-inline">
+      <div class="field"><label>Nudge a quiet fan after (minutes)</label>
+        <input type="number" id="a-followup" min="5" max="1440" value="30"></div>
+      <div class="field"><label>Skip other creators</label>
+        <select id="a-creators"><option value="1">Yes</option><option value="0">No</option></select></div>
+    </div>
+    <div class="section-title" style="margin-top:18px;">PPV pacing</div>
+    <div class="row-inline">
+      <div class="field"><label>First unlock after this many messages</label>
+        <input type="number" id="a-first" min="1" max="200" value="6"></div>
+      <div class="field"><label>Messages between unlocks</label>
+        <input type="number" id="a-gap" min="1" max="200" value="8"></div>
+    </div>
+    <div class="row-inline">
+      <div class="field"><label>Re-offer an unbought unlock after (messages, 0 = never)</label>
+        <input type="number" id="a-retry" min="0" max="500" value="0"></div>
+      <div class="field"><label>At most this many re-offers</label>
+        <input type="number" id="a-retrymax" min="0" max="10" value="1"></div>
+    </div>
+    <div class="field full">
+      <label><input type="checkbox" id="a-requirepay"> Wait for the last unlock to be bought before offering the next tier</label>
+      <span class="hint">Purchases arrive on the messages.ppv.unlocked event, so this needs the webhook configured.</span>
+    </div>
+    <div class="row-inline">
+      <button class="btn-ai" onclick="saveAuto()">Save reply rules</button>
+      <button class="btn-ai" style="background:var(--surface); color:var(--text-2);" onclick="runOnce()">Run one round now</button>
+    </div>
+    <div class="result-box" id="auto-status"></div>
+  </div>
+
+  <div id="sec-ppv" class="form-section" data-tab="settings">
+    <div class="section-title">PPV sets</div>
+    <span class="hint">A set is a themed bundle. Its tiers go out one at a time, in order, as the conversation deepens. OnlyFans takes $3–$200 per unlock, and every paid message must carry media.</span>
+    <div class="pill-row" id="set-bar"></div>
+    <div class="row-inline">
+      <div class="field"><label>Set name</label><input type="text" id="s-name"></div>
+      <div class="field"><label>What it shows (scene)</label><input type="text" id="s-scene" placeholder="shower, gym, lingerie…"></div>
+    </div>
+    <div class="field full">
+      <label>Words that make this set the right one</label>
+      <input type="text" id="s-keywords" placeholder="shower, wet, bath">
+    </div>
+    <div class="pill-row" id="tier-bar"></div>
+    <div class="row-inline">
+      <div class="field"><label>Price (USD)</label><input type="number" id="t-price" min="3" max="200" step="0.01"></div>
+      <div class="field"><label>Caption (optional — she writes one if empty)</label>
+        <input type="text" id="t-caption"></div>
+    </div>
+    <div class="chosen" id="t-chosen"></div>
+    <div class="row-inline" style="margin-bottom:8px;">
+      <div class="field"><label>Search the vault</label>
+        <input type="text" id="m-query" placeholder="type and press Enter" onkeydown="if(event.key==='Enter')loadMedia()"></div>
+      <div class="field"><label>Type</label>
+        <select id="m-type" onchange="loadMedia()">
+          <option value="">All</option><option value="photo">Photos</option>
+          <option value="video">Videos</option><option value="gif">GIFs</option>
+          <option value="audio">Audio</option>
+        </select></div>
+    </div>
+    <div class="grid" id="media-grid"></div>
+    <div class="row-inline" style="margin-top:12px;">
+      <button class="btn-ai" onclick="savePpv()">Save PPV sets</button>
+      <button class="btn-ai" style="background:var(--surface); color:var(--text-2);" onclick="resetProgress()">Restart the ladder for every fan</button>
+    </div>
+    <div class="result-box" id="ppv-status"></div>
+  </div>
+
+  <div id="sec-log" class="form-section" data-tab="advanced">
+    <div class="section-title">Activity log
+      <label style="float:right; font-weight:400; font-size:0.75rem;">
+        <input type="checkbox" id="of-trace-live" checked> live</label>
+    </div>
+    <div class="auto-log" id="full-log"><span class="hint">Nothing yet.</span></div>
+    <div class="row-inline" style="margin-top:10px;">
+      <button class="btn-ai" style="background:var(--surface); color:var(--text-2);" onclick="clearTrace()">Clear log</button>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<script>
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function persona(){return document.getElementById('persona').value;}
+function busy(box,m){box.innerHTML='<span class="hint">'+esc(m)+'</span>';}
+function ok(box,m){box.innerHTML='<span class="hint" style="color:#4ade80;">✓ '+esc(m)+'</span>';}
+function err(box,m){box.innerHTML='<span class="hint" style="color:#fb7185;">✗ '+esc(m)+'</span>';}
+async function post(url,body){const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});return r.json();}
+function dollars(c){c=parseInt(c||'0',10);return c?String(c/100):'';}
+function cents(d){d=parseFloat(d||'0');return isNaN(d)?0:Math.round(d*100);}
+
+let appCfg={};
+
+async function init(){
+  appCfg=await (await fetch('/api/onlyfans/config')).json();
+  const list=await (await fetch('/api/personas')).json();
+  const sel=document.getElementById('persona');
+  const rows=Array.isArray(list)?list:(list.personas||[]);
+  sel.innerHTML=rows.map(p=>'<option value="'+esc(p.slug)+'">'+esc(p.name||p.slug)+'</option>').join('');
+  if(!sel.options.length){err(document.getElementById('account-status'),'Create a persona first.');return;}
+  await loadConfig();
+}
+
+async function loadConfig(){
+  const box=document.getElementById('account-status');
+  if(!appCfg.configured){
+    err(box,'This deployment has no OnlyFansAPI key. Set ONLYFANSAPI_KEY and redeploy.');
+  }
+  const wb=document.getElementById('webhook-status');
+  wb.innerHTML=appCfg.webhook_ready
+    ? '<span class="hint">Webhook ready. OnlyFansAPI posts to <code>'+esc(appCfg.webhook_url||'')+'</code>.</span>'
+    : '<span class="hint" style="color:var(--warn);">No webhook signing secret. Add <code>'+esc(appCfg.webhook_url||'this app\'s /webhooks/onlyfans')+'</code> in the OnlyFansAPI console, give it a signing secret, subscribe to messages.received, users.typing, messages.ppv.unlocked and messages.sent, then set ONLYFANS_WEBHOOK_SECRET to that secret. Until then she only answers on the backup sweep.</span>';
+  await loadAccounts();
+  await loadAuto();
+  await loadPpv();
+}
+
+async function loadAccounts(refresh){
+  const box=document.getElementById('account-status');
+  const sel=document.getElementById('account');
+  if(refresh)busy(box,'Reading the account list…');
+  const d=await (await fetch('/api/onlyfans/accounts?persona='+encodeURIComponent(persona()))).json();
+  const rows=d.accounts||[];
+  sel.innerHTML='<option value="">— none —</option>'+rows.map(a=>
+    '<option value="'+esc(a.id)+'"'+(a.id===d.selected?' selected':'')+'>'+
+    esc((a.username?'@'+a.username:a.name||a.id))+(a.authenticated?'':' (not signed in)')+'</option>').join('');
+  const pill=document.getElementById('conn-pill');
+  pill.textContent=d.selected?'Connected':'Not connected';
+  pill.className='conn-pill '+(d.selected?'ok':'err');
+  if(d.error){err(box,d.error);}
+  else if(!rows.length){box.innerHTML='<span class="hint">No accounts connected on OnlyFansAPI yet.</span>';}
+  else if(refresh){ok(box,rows.length+' account(s) found.');}
+}
+
+async function saveAccount(){
+  const box=document.getElementById('account-status');
+  busy(box,'Saving…');
+  const r=await post('/api/onlyfans/account',{persona:persona(),
+    account:document.getElementById('account').value});
+  if(!r.ok){err(box,r.error);return;}
+  ok(box,r.connected?('Connected as @'+((r.meta||{}).username||'')):'Account cleared.');
+  await loadAccounts();
+}
+
+async function disconnect(){
+  if(!confirm("Disconnect this persona's OnlyFans account?"))return;
+  await post('/api/onlyfans/disconnect',{persona:persona()});
+  await loadAccounts();
+}
+
+// ── Auto-reply ───────────────────────────────────────────────────────────────
+
+async function loadAuto(){
+  const d=await (await fetch('/api/onlyfans/auto?persona='+encodeURIComponent(persona()))).json();
+  const set=(id,v)=>{const e=document.getElementById(id);if(e)e.value=v;};
+  const chk=(id,v)=>{const e=document.getElementById(id);if(e)e.checked=!!v;};
+  chk('a-enabled',d.enabled); set('a-limit',d.reply_limit); set('a-only',d.only_handles||'');
+  chk('a-humanize',d.humanize); set('a-speed',d.typing_speed); set('a-react',d.react_rate);
+  chk('a-online',d.online_only); set('a-followup',d.followup_min);
+  set('a-creators',d.exclude_creators?'1':'0');
+  set('a-first',d.ppv_first_after); set('a-gap',d.ppv_gap);
+  set('a-retry',d.ppv_retry_after); set('a-retrymax',d.ppv_retry_max);
+  chk('a-requirepay',d.ppv_require_payment);
+  const fu=document.getElementById('a-followup');
+  if(fu&&!d.scheduled_followups){fu.disabled=true;fu.title='Scheduled follow-ups need a higher plan.';}
+}
+
+async function saveAuto(){
+  const box=document.getElementById('auto-status');
+  const v=id=>document.getElementById(id).value;
+  const c=id=>document.getElementById(id).checked;
+  busy(box,'Saving…');
+  const r=await post('/api/onlyfans/auto',{persona:persona(),
+    enabled:c('a-enabled'), reply_limit:v('a-limit'), only_handles:v('a-only'),
+    humanize:c('a-humanize'), typing_speed:v('a-speed'), react_rate:v('a-react'),
+    online_only:c('a-online'), followup_min:v('a-followup'),
+    exclude_creators:v('a-creators')==='1',
+    ppv_first_after:v('a-first'), ppv_gap:v('a-gap'),
+    ppv_retry_after:v('a-retry'), ppv_retry_max:v('a-retrymax'),
+    ppv_require_payment:c('a-requirepay')});
+  if(!r.ok){err(box,r.error||'Could not save.');return;}
+  ok(box,r.enabled?'Saved — she is answering fans.':'Saved — auto-reply is off.');
+}
+
+async function runOnce(){
+  const box=document.getElementById('auto-status');
+  busy(box,'Running one round…');
+  const r=await post('/api/onlyfans/auto-run',{persona:persona()});
+  if(!r.ok){err(box,r.error);return;}
+  box.innerHTML='<span class="hint">'+esc((r.log||[]).join('\n'))+'</span>';
+  PlatformConsole.refresh();
+}
+
+async function clearTrace(){
+  await fetch('/api/onlyfans/trace?persona='+encodeURIComponent(persona()),{method:'DELETE'});
+  PlatformConsole.refresh();
+}
+
+function renderFullLog(d){
+  const box=document.getElementById('full-log');
+  if(!box)return;
+  const rows=(d.rows||[]).slice(-200).reverse();
+  box.innerHTML=rows.length?rows.map(r=>
+    '<div class="ln '+(r.stage==='error'?'er':(r.stage==='sent'||r.stage==='ppv'?'act':''))+'">'+
+    '<b>'+esc(r.stage)+'</b> '+esc(r.detail)+'</div>').join('')
+    :'<span class="hint">Nothing yet.</span>';
+}
+
+// ── PPV sets ─────────────────────────────────────────────────────────────────
+
+function blankTier(){return {media_uuids:[],price:'',caption:''};}
+function newSetId(){return 's'+Math.random().toString(36).slice(2,8);}
+function blankSet(n){return {id:newSetId(),name:'Set '+n,scene:'',keywords:'',tiers:[blankTier()]};}
+let ppvSets=[blankSet(1)], curSet=0, curTier=0;
+const mediaSeen={};
+
+function theSet(){return ppvSets[curSet]||(ppvSets[curSet]=blankSet(curSet+1));}
+function theTier(){const s=theSet();return s.tiers[curTier]||(s.tiers[curTier]=blankTier());}
+
+function stash(){
+  const s=theSet(), t=theTier();
+  s.name=document.getElementById('s-name').value.trim()||s.name;
+  s.scene=document.getElementById('s-scene').value.trim();
+  s.keywords=document.getElementById('s-keywords').value.trim();
+  t.price=cents(document.getElementById('t-price').value);
+  t.caption=document.getElementById('t-caption').value.trim();
+}
+
+function apply(){
+  const s=theSet(), t=theTier();
+  document.getElementById('s-name').value=s.name||'';
+  document.getElementById('s-scene').value=s.scene||'';
+  document.getElementById('s-keywords').value=Array.isArray(s.keywords)?s.keywords.join(', '):(s.keywords||'');
+  document.getElementById('t-price').value=dollars(t.price);
+  document.getElementById('t-caption').value=t.caption||'';
+  renderBars(); renderChosen(); renderGrid();
+}
+
+function pill(label,on,fn){
+  const b=document.createElement('button');
+  b.className='pill'+(on?' on':''); b.textContent=label; b.onclick=fn; return b;
+}
+
+function renderBars(){
+  const sb=document.getElementById('set-bar'); sb.innerHTML='';
+  ppvSets.forEach((s,i)=>sb.appendChild(pill(s.name||('Set '+(i+1)),i===curSet,()=>{stash();curSet=i;curTier=0;apply();})));
+  sb.appendChild(pill('+ set',false,()=>{stash();ppvSets.push(blankSet(ppvSets.length+1));curSet=ppvSets.length-1;curTier=0;apply();}));
+  if(ppvSets.length>1)sb.appendChild(pill('remove set',false,()=>{ppvSets.splice(curSet,1);curSet=0;curTier=0;apply();}));
+  const tb=document.getElementById('tier-bar'); tb.innerHTML='';
+  theSet().tiers.forEach((t,i)=>tb.appendChild(pill('Tier '+(i+1)+(t.price?(' · $'+dollars(t.price)):''),i===curTier,()=>{stash();curTier=i;apply();})));
+  tb.appendChild(pill('+ tier',false,()=>{stash();theSet().tiers.push(blankTier());curTier=theSet().tiers.length-1;apply();}));
+  if(theSet().tiers.length>1)tb.appendChild(pill('remove tier',false,()=>{theSet().tiers.splice(curTier,1);curTier=0;apply();}));
+}
+
+function renderChosen(){
+  const box=document.getElementById('t-chosen');
+  const ids=theTier().media_uuids||[];
+  box.innerHTML=ids.length?ids.map(id=>'<span>'+esc((mediaSeen[id]||{}).type||'file')+' '+esc(id)+
+    ' <a href="#" onclick="dropMedia(\''+esc(id)+'\');return false;">×</a></span>').join('')
+    :'<span class="hint">No media on this tier yet — a paid message needs at least one file.</span>';
+}
+
+function dropMedia(id){
+  const t=theTier();
+  t.media_uuids=(t.media_uuids||[]).filter(x=>x!==id);
+  renderChosen(); renderGrid();
+}
+
+let mediaItems=[];
+async function loadMedia(){
+  const grid=document.getElementById('media-grid');
+  grid.innerHTML='<span class="hint">Loading the vault…</span>';
+  const q=new URLSearchParams({persona:persona(),
+    q:document.getElementById('m-query').value.trim(),
+    type:document.getElementById('m-type').value});
+  const d=await (await fetch('/api/onlyfans/media?'+q.toString())).json();
+  if(d.error){grid.innerHTML='<span class="hint" style="color:#fb7185;">'+esc(d.error)+'</span>';return;}
+  mediaItems=d.media||[];
+  mediaItems.forEach(m=>{mediaSeen[m.id]=m;});
+  renderGrid();
+}
+
+function renderGrid(){
+  const grid=document.getElementById('media-grid');
+  if(!mediaItems.length){grid.innerHTML='<span class="hint">Nothing loaded yet — search the vault above.</span>';return;}
+  const chosen=new Set(theTier().media_uuids||[]);
+  grid.innerHTML=mediaItems.map(m=>
+    '<div class="cell'+(chosen.has(m.id)?' sel':'')+'" onclick="toggleMedia(\''+esc(m.id)+'\')">'+
+    (m.thumb?'<img src="'+esc(m.thumb)+'" alt="">':'')+
+    '<span class="kind">'+(m.type==='video'?'🎬':m.type==='audio'?'🎵':'🖼️')+'</span></div>').join('');
+}
+
+function toggleMedia(id){
+  const t=theTier();
+  t.media_uuids=t.media_uuids||[];
+  const i=t.media_uuids.indexOf(id);
+  if(i<0)t.media_uuids.push(id); else t.media_uuids.splice(i,1);
+  renderChosen(); renderGrid();
+}
+
+async function loadPpv(){
+  const d=await (await fetch('/api/onlyfans/ppv?persona='+encodeURIComponent(persona()))).json();
+  ppvSets=(d.sets||[]).length?d.sets.map(s=>({id:s.id,name:s.name,scene:s.scene||'',
+    keywords:(s.keywords||[]).join(', '),
+    tiers:(s.tiers||[]).map(t=>({media_uuids:t.media_uuids||[],price:t.price||'',caption:t.caption||''}))}))
+    :[blankSet(1)];
+  curSet=0; curTier=0; apply();
+}
+
+async function savePpv(){
+  const box=document.getElementById('ppv-status');
+  stash();
+  busy(box,'Saving…');
+  const r=await post('/api/onlyfans/ppv',{persona:persona(),
+    tz_offset:-new Date().getTimezoneOffset(),
+    sets:ppvSets.map(s=>({id:s.id,name:s.name,scene:s.scene,
+      keywords:String(s.keywords||'').split(',').map(x=>x.trim()).filter(Boolean),
+      tiers:(s.tiers||[]).map(t=>({media_uuids:t.media_uuids||[],price:t.price||0,caption:t.caption||''}))}))});
+  if(!r.ok){err(box,r.error);return;}
+  ok(box,'Saved.'+((r.warnings||[]).length?(' '+r.warnings.join(' ')):''));
+}
+
+async function resetProgress(){
+  if(!confirm('Restart the PPV ladder for every fan on this persona? Purchases are kept.'))return;
+  const box=document.getElementById('ppv-status');
+  const r=await post('/api/onlyfans/ppv-reset',{persona:persona(),confirm:true});
+  if(!r.ok){err(box,r.error);return;}
+  ok(box,'The sets start from the top again.');
+}
+
+// ── Console shell ────────────────────────────────────────────────────────────
+
+const OF_FIX=[
+  [/not connected/i,{tab:'settings',focus:'sec-account',label:'Connect the account'}],
+  [/Auto-reply is off/i,{tab:'settings',focus:'sec-auto',label:'Turn her on'}],
+  [/webhook/i,{tab:'settings',focus:'sec-account',label:'Fix the webhook'}],
+];
+
+PlatformConsole.register({
+  platform:'onlyfans',
+  persona:persona,
+  statusUrl:slug=>'/api/onlyfans/trace?persona='+encodeURIComponent(slug),
+  emptyHint:'They appear as soon as a fan writes to her on OnlyFans.',
+  paused:()=>!(document.getElementById('of-trace-live')||{checked:true}).checked,
+  read:d=>({
+    live: !!(d.connected&&d.enabled),
+    broken: !d.connected,
+    title: !d.connected ? 'OnlyFans is not connected'
+         : !d.enabled   ? 'Connected, but she is not answering'
+         : d.running    ? 'She is replying right now'
+                        : 'She is live and answering fans',
+    sub: !d.connected ? 'Nothing happens until an account is chosen.'
+       : !d.enabled   ? 'Fans can write to her; the replies are switched off.'
+       : ((d.queued||0)>(d.workers||0) ? d.queued+' replies queued — she is running late.'
+                                       : 'New messages arrive on the OnlyFans event feed.'),
+    health: (d.problems||[]).map(p=>({label:p,ok:false})),
+    steps: [
+      {label:'Connect',    done:!!d.connected, tab:'settings', focus:'sec-account'},
+      {label:'PPV content',done:(ppvSets||[]).some(x=>(x.tiers||[]).some(t=>(t.media_uuids||[]).length)),
+       tab:'settings', focus:'sec-ppv'},
+      {label:'Reply rules',done:!!d.enabled, tab:'settings', focus:'sec-auto'},
+      {label:'Live',       done:!!(d.connected&&d.enabled&&!(d.problems||[]).length), tab:'overview'},
+    ],
+  }),
+  fixTab:p=>{const hit=OF_FIX.find(([re])=>re.test(p));return hit?hit[1]:{tab:'settings',label:'Open settings'};},
+  onStatus:renderFullLog,
+});
+
+PlatformConsole.mount('.fv-wrap');
+init();
+</script>
+</body>
+</html>
