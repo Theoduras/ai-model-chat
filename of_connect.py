@@ -50,6 +50,14 @@ POLL_SECONDS = 1.5
 
 _attempts = {}
 _lock = threading.Lock()
+_sink = None
+
+
+def session_sink(fn):
+    """Where a captured session goes. The default is the vault; the browser
+    service overrides it, because it carries no database of its own."""
+    global _sink
+    _sink = fn
 
 
 class ConnectError(RuntimeError):
@@ -304,7 +312,7 @@ class Attempt:
                    'name': who.get('name') or '',
                    'cookie': of_session.cookie_string(cookies), 'x_bc': x_bc or '',
                    'user_agent': agent or self.user_agent, 'proxy': self.proxy}
-        self.result = of_session.put(self.account, session)
+        self.result = (_sink or of_session.put)(self.account, session)
         self.state = 'connected'
         self._done.set()
 
@@ -368,6 +376,12 @@ def cancel(attempt_id):
         attempt = _attempts.pop(attempt_id, None)
     if attempt:
         attempt.close()
+
+
+def claim(attempt):
+    """The raw session of a finished attempt, for a caller that still has to
+    store it. Nothing to hand back here: the sink already put it in the vault."""
+    return None
 
 
 def sweep():

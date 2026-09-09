@@ -16193,6 +16193,7 @@ def _of_connected_accounts():
 
 
 if _of_direct():
+    import of_browser
     import of_connect
     import of_events
     import of_rules
@@ -16218,7 +16219,7 @@ if _of_direct():
 
     of_events.sink(_of_local_sink)
 else:
-    of_connect = of_events = of_rules = of_session = None
+    of_browser = of_connect = of_events = of_rules = of_session = None
 
 
 # ── OnlyFans console API ──────────────────────────────────────────────────────
@@ -16232,7 +16233,7 @@ def api_onlyfans_config():
     return jsonify({'configured': OF.configured(), 'webhook_url': _of_webhook_url(),
                     'webhook_ready': bool(_of_webhook_secrets()),
                     'transport': ONLYFANS_TRANSPORT,
-                    'browser_ready': bool(_of_direct() and of_connect.available())})
+                    'browser_ready': bool(_of_direct() and _of_conn().available())})
 
 
 @app.route('/api/onlyfans/accounts')
@@ -16306,6 +16307,13 @@ def api_onlyfans_set_account():
 # back. The face check has a hard limit of 3 a day per account, which is why a
 # started attempt is resumed rather than restarted.
 
+def _of_conn():
+    """The hosted browser: the one in this process, or the service holding it.
+    A sign-in lives in the memory of whichever process opened it, so running the
+    browser in its own service is what keeps one alive across an app deploy."""
+    return of_browser.remote() or of_connect
+
+
 def _of_attempt(persona):
     return (_get_setting(f'onlyfans_attempt_{persona}') or '').strip()
 
@@ -16371,7 +16379,7 @@ def api_onlyfans_connect_browser():
     viewport = {'width': _side(d.get('width'), 1000, 600, 1600),
                 'height': _side(d.get('height'), 760, 500, 1200)}
     try:
-        attempt = of_connect.start(
+        attempt = _of_conn().start(
             persona, _of_account_id(persona),
             proxy=_of_proxy_for(persona, (d.get('country') or '').strip()),
             user_agent=(d.get('user_agent') or '').strip(),
@@ -16388,7 +16396,7 @@ def api_onlyfans_connect_frame():
     """The browser as it looks right now. Polled a few times a second while the
     creator is typing, so it answers with the last frame rather than waiting for
     a fresh one."""
-    attempt = of_connect.get((request.args.get('attempt') or '').strip()) \
+    attempt = _of_conn().get((request.args.get('attempt') or '').strip()) \
         if _of_direct() else None
     if not attempt:
         return jsonify({'ok': False, 'error': 'that sign-in is no longer open'}), 404
@@ -16407,7 +16415,7 @@ def api_onlyfans_connect_input():
     kind = (d.get('kind') or '').strip()
     if kind not in of_connect.INPUT_KINDS:
         return jsonify({'ok': False, 'error': 'unknown input'}), 400
-    attempt = of_connect.get((d.get('attempt') or '').strip()) if _of_direct() else None
+    attempt = _of_conn().get((d.get('attempt') or '').strip()) if _of_direct() else None
     if not attempt:
         return jsonify({'ok': False, 'error': 'that sign-in is no longer open'}), 404
     try:
@@ -16424,6 +16432,13 @@ def _of_adopt_direct(attempt):
     persona, result = attempt.persona, attempt.result or {}
     if not (persona and result.get('user_id')):
         return
+    # Claimed before the guard below, not after: a creator reconnecting the same
+    # account still needs the fresh session in the vault, and the service holds
+    # the only copy of it until this runs. In-process it is already stored and
+    # nothing comes back.
+    session = _of_conn().claim(attempt)
+    if session:
+        of_session.put(attempt.account, session)
     if _of_account(persona) == attempt.account:
         return
     _set_setting(f'onlyfans_account_{persona}', attempt.account)
@@ -16477,7 +16492,7 @@ def api_onlyfans_connect_status():
     persona = (request.args.get('persona') or '').strip()
     attempt = _of_attempt(persona)
     if _of_direct():
-        live = of_connect.get(attempt) if attempt else None
+        live = _of_conn().get(attempt) if attempt else None
         if not live:
             return jsonify({'ok': True, 'attempt': None})
         if live.status()['state'] == 'connected':
@@ -16538,7 +16553,7 @@ def api_onlyfans_connect_cancel():
     persona = ((request.json or {}).get('persona') or '').strip()
     if persona:
         if _of_direct():
-            of_connect.cancel(_of_attempt(persona))
+            _of_conn().cancel(_of_attempt(persona))
         _set_setting(f'onlyfans_attempt_{persona}', '')
     return jsonify({'ok': True})
 
@@ -16560,7 +16575,7 @@ def api_onlyfans_status():
         account = _of_account(persona)
         out['session'] = of_session.describe(account) if account else {}
         out['webhook'] = PLAT_ONLYFANS.webhook_state(persona)
-        out['browser_ready'] = of_connect.available()
+        out['browser_ready'] = _of_conn().available()
     return jsonify(out)
 
 
@@ -16573,7 +16588,7 @@ def api_onlyfans_health():
         return jsonify({'transport': ONLYFANS_TRANSPORT, 'direct': False})
     return jsonify({'transport': ONLYFANS_TRANSPORT, 'direct': True,
                     'rules': of_rules.state(),
-                    'browser_ready': of_connect.available(),
+                    'browser_ready': _of_conn().available(),
                     'proxy_pool': bool((os.getenv('ONLYFANS_PROXY_TEMPLATE') or '').strip()),
                     'accounts': of_session.accounts(),
                     'watchers': of_events.watching()})
@@ -16615,7 +16630,7 @@ def api_onlyfans_disconnect():
     if persona:
         if _of_direct():
             account = _of_account(persona)
-            of_connect.cancel(_of_attempt(persona))
+            _of_conn().cancel(_of_attempt(persona))
             of_events.unwatch(account)
             # The session is the account. Disconnecting has to destroy it, not
             # merely stop pointing at it.

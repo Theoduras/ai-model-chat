@@ -65,6 +65,50 @@ gcloud builds triggers create github \
   --substitutions=_SERVICE=ai-model-chat-dev,_REGION=europe-west4
 ```
 
+## The sign-in browser service
+
+A creator's OnlyFans sign-in runs a real Chromium, and it lives in the memory of
+whichever process opened it — a Chromium cannot be handed to another instance
+halfway through. So while that browser ran inside the app, **every app deploy
+ended every sign-in in flight**, mid-2FA, with "that sign-in is no longer open".
+
+`ai-model-chat-dev-browser` is that browser on its own service, built from the
+same image with a different entrypoint (`of_browser:service()`). Shipping app
+code no longer touches it. Its trigger is filtered to the files that actually
+change the browser, so it is redeployed rarely and deliberately:
+
+```bash
+gcloud builds triggers create github \
+  --name=ai-model-chat-browser \
+  --repo-name=ai-model-chat --repo-owner=Theoduras \
+  --branch-pattern="^develop$" \
+  --build-config=cloudbuild.browser.yaml \
+  --included-files="of_connect.py,of_browser.py,Dockerfile,requirements.txt" \
+  --substitutions=_SERVICE=ai-model-chat-dev,_REGION=europe-west4
+```
+
+Then point the app at it, with a shared token both sides hold — every route but
+`/health` refuses a request without it:
+
+```bash
+TOKEN=$(python3 -c 'import secrets;print(secrets.token_urlsafe(32))')
+
+gcloud run services update ai-model-chat-dev-browser --region europe-west4 \
+  --update-env-vars "ONLYFANS_BROWSER_TOKEN=$TOKEN"
+
+gcloud run services update ai-model-chat-dev --region europe-west4 \
+  --update-env-vars "ONLYFANS_BROWSER_TOKEN=$TOKEN,ONLYFANS_BROWSER_URL=https://<browser service URL>"
+```
+
+| Variable | Where | What it does |
+|---|---|---|
+| `ONLYFANS_BROWSER_URL` | app | The browser service's URL. **Unset means the browser runs inside the app**, as before — so nothing breaks until both variables are set on both services. |
+| `ONLYFANS_BROWSER_TOKEN` | both | Shared secret. Must match, or the app cannot drive the browser. |
+
+Once the app is pointed at the browser service, the app's own
+`--max-instances=1` (in `cloudbuild.yaml`) can come off: it is only there
+because a browser in the app's memory cannot survive a second instance.
+
 ## Password-protecting the environment
 
 The dashboard, `/admin/*`, `/xbot`, the chat/conversation logs, and the X API
