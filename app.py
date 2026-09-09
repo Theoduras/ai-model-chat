@@ -8555,39 +8555,54 @@ def _x_extract_tweet_id(ref):
     return ref.split('?')[0].split('/')[0]
 
 
-def _x_state_path(persona, name):
-    """Per-persona state file path (auto-run cursors, contacted/seen sets)."""
+def _x_state_key(persona, name):
+    """Settings key for a piece of per-persona X worker state (poll cursors, the
+    contacted set, seen comment ids). The setting key column is 64 characters,
+    and an X user id can be 19 digits, so anything that would overflow keeps a
+    readable prefix and ends in a digest of the full name."""
+    key = f'xs_{persona}_{name}'
+    if len(key) > 64:
+        key = key[:47] + '_' + hashlib.md5(key.encode()).hexdigest()[:16]
+    return key
+
+
+def _x_state_legacy_path(persona, name):
+    """Where this state used to live. Read once, on a key that has no row yet,
+    so an instance that is already running does not forget who it has already
+    cold-DMed the moment this ships."""
     fn = f'x_{name}_{persona}.json'
     return f'/tmp/{fn}' if IS_VERCEL else os.path.join(BASE_DIR, f'.{fn}')
 
 
-def _x_load_json(path, default):
+def _x_state_get(persona, name, default):
+    raw = _get_setting(_x_state_key(persona, name), None)
+    if raw is not None:
+        try:
+            v = json.loads(raw)
+        except Exception:
+            return copy.deepcopy(default)
+        return v if isinstance(v, type(default)) else copy.deepcopy(default)
     try:
-        with open(path) as f:
-            return json.load(f)
+        with open(_x_state_legacy_path(persona, name)) as f:
+            v = json.load(f)
+        return v if isinstance(v, type(default)) else copy.deepcopy(default)
     except Exception:
-        return default
+        return copy.deepcopy(default)
 
 
-def _x_save_json(path, data):
-    try:
-        with open(path, 'w') as f:
-            json.dump(data, f)
-    except Exception:
-        pass
+def _x_state_set(persona, name, data):
+    _set_setting(_x_state_key(persona, name), json.dumps(data))
 
 
 def _x_save_history(persona, other_id, entries):
-    path = _x_state_path(persona, f'hist_{other_id}')
-    _x_save_json(path, entries[-40:])
+    _x_state_set(persona, f'hist_{other_id}', entries[-40:])
 
 
 def _x_username_for(persona, uid):
     """Resolve a sender's @username from their numeric id, cached per persona."""
     if not uid:
         return ''
-    cache_path = _x_state_path(persona, 'usercache')
-    cache = _x_load_json(cache_path, {})
+    cache = _x_state_get(persona, 'usercache', {})
     if uid in cache:
         return cache[uid]
     name = ''
@@ -8598,7 +8613,11 @@ def _x_username_for(persona, uid):
         pass
     if name:
         cache[uid] = name
-        _x_save_json(cache_path, cache)
+        # Now that this survives restarts it also grows forever, and it is only
+        # a lookup saver — keep the recent senders and let the rest re-resolve.
+        if len(cache) > 500:
+            cache = dict(list(cache.items())[-500:])
+        _x_state_set(persona, 'usercache', cache)
     return name
 
 
@@ -8855,8 +8874,7 @@ def _x_dm_reply_round(persona, max_results=20):
         # Use DB history (survives restarts) with JSON file as fallback
         db_hist = _x_history(persona, sender)
         if not db_hist:
-            hist_path = _x_state_path(persona, f'hist_{sender}')
-            db_hist = _x_load_json(hist_path, [])
+            db_hist = _x_state_get(persona, f'hist_{sender}', [])
         try:
             has_history = len(db_hist) > 0
             continuity = (
@@ -8913,8 +8931,7 @@ def _x_dm_reply_round(persona, max_results=20):
             fan['last_out'] = int(time.time())
             fans[str(sender)] = fan
             _log_x_message(persona, sender, sender_name, 'out', reply)
-            hist_path = _x_state_path(persona, f'hist_{sender}')
-            file_hist = _x_load_json(hist_path, [])
+            file_hist = _x_state_get(persona, f'hist_{sender}', [])
             file_hist.append({'role': 'user', 'content': text})
             file_hist.append({'role': 'bot', 'content': reply})
             _x_save_history(persona, sender, file_hist)
@@ -9000,8 +9017,7 @@ def _x_comment_round(persona, post, limit, preview=False, skip_seen=False):
     tweets = res.get('data', []) or []
     users = {u['id']: u for u in (res.get('includes', {}).get('users', []) or [])}
 
-    seen_path = _x_state_path(persona, 'comments_seen')
-    seen = set(_x_load_json(seen_path, [])) if skip_seen else set()
+    seen = set(_x_state_get(persona, 'comments_seen', [])) if skip_seen else set()
 
     results = []
     for tw in tweets:
@@ -9038,7 +9054,7 @@ def _x_comment_round(persona, post, limit, preview=False, skip_seen=False):
         results.append(item)
 
     if skip_seen and not preview:
-        _x_save_json(seen_path, list(seen)[-1000:])
+        _x_state_set(persona, 'comments_seen', list(seen)[-1000:])
     return results
 
 
@@ -9656,11 +9672,7 @@ def api_x_poll():
 
     system_prompt = get_system_prompt(persona)
 
-    dm_state_file = f'/tmp/x_dm_cursor_{persona}.json' if IS_VERCEL else os.path.join(BASE_DIR, f'.x_dm_cursor_{persona}.json')
-    cursor_data = {}
-    if os.path.exists(dm_state_file):
-        with open(dm_state_file, 'r') as f:
-            cursor_data = json.load(f)
+    cursor_data = _x_state_get(persona, 'dm_cursor', {})
 
     replied = 0
     errors = []
@@ -9689,12 +9701,7 @@ def api_x_poll():
                 _log_x_event('dm_in', persona=persona, x_username=sender_name, detail=text[:160])
                 _log_x_message(persona, sender, sender_name, 'in', text)
             conv_id = event.get('dm_conversation_id') or event.get('conversation_id') or f'dm_{sender}'
-            history_key = f'x_hist_{persona}_{sender}'
-            hist_file = f'/tmp/{history_key}.json' if IS_VERCEL else os.path.join(BASE_DIR, f'.{history_key}.json')
-            history = []
-            if os.path.exists(hist_file):
-                with open(hist_file, 'r') as f:
-                    history = json.load(f)
+            history = _x_state_get(persona, f'hist_{sender}', [])
 
             contents = [{'role': 'model' if m['role'] == 'bot' else 'user', 'parts': [{'text': m['content']}]} for m in history[-20:]]
             contents.append({'role': 'user', 'parts': [{'text': text}]})
@@ -9719,15 +9726,13 @@ def api_x_poll():
 
                 history.append({'role': 'user', 'content': text})
                 history.append({'role': 'bot', 'content': reply_text})
-                with open(hist_file, 'w') as f:
-                    json.dump(history[-40:], f)
+                _x_save_history(persona, sender, history)
                 replied += 1
             except Exception as e:
                 errors.append(str(e)[:120])
 
         cursor_data['last_event_id'] = new_last or last_seen
-        with open(dm_state_file, 'w') as f:
-            json.dump(cursor_data, f)
+        _x_state_set(persona, 'dm_cursor', cursor_data)
 
     except url_error.HTTPError as e:
         code = e.code
@@ -9916,13 +9921,7 @@ def api_x_chat_up():
             sent = True
             _x_record_opener(persona, user['id'])
             _log_x_message(persona, user['id'], user['username'], 'out', opener)
-            history_key = f'x_hist_{persona}_{user["id"]}'
-            hist_file = f'/tmp/{history_key}.json' if IS_VERCEL else os.path.join(BASE_DIR, f'.{history_key}.json')
-            try:
-                with open(hist_file, 'w') as f:
-                    json.dump([{'role': 'bot', 'content': opener}], f)
-            except Exception:
-                pass
+            _x_save_history(persona, user['id'], [{'role': 'bot', 'content': opener}])
         return jsonify({'ok': True, 'username': user['username'], 'opener': opener, 'sent': sent})
     except url_error.HTTPError as e:
         return jsonify({'ok': False, 'error': f'X API error {e.code}: {e.read()[:200].decode(errors="ignore")}'}), 400
@@ -10022,7 +10021,7 @@ def api_x_auto_run():
                     log.append(f'Comment round failed: {str(e)[:80]}')
 
         if do_new and new_chat_limit:
-            contacted = set(_x_load_json(_x_state_path(persona, 'contacted'), []))
+            contacted = set(_x_state_get(persona, 'contacted', []))
             contacted |= _x_known_user_ids(persona)
             contacted |= _x_opener_ids(persona)
             try:
@@ -10084,7 +10083,7 @@ def api_x_auto_run():
                     log.append(f"@{u['username']} failed: {str(e)[:200]}")
                 finally:
                     contacted.add(u['id'])
-            _x_save_json(_x_state_path(persona, 'contacted'), list(contacted)[-1000:])
+            _x_state_set(persona, 'contacted', list(contacted)[-1000:])
 
         if _last_x_log_error[0]:
             log.append(f'⚠ conversation logging failed: {_last_x_log_error[0]}')
