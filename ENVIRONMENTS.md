@@ -74,8 +74,18 @@ ended every sign-in in flight**, mid-2FA, with "that sign-in is no longer open".
 
 `ai-model-chat-dev-browser` is that browser on its own service, built from the
 same image with a different entrypoint (`of_browser:service()`). Shipping app
-code no longer touches it. Its trigger is filtered to the files that actually
-change the browser, so it is redeployed rarely and deliberately:
+code no longer touches it.
+
+| Variable | Where | What it does |
+|---|---|---|
+| `ONLYFANS_BROWSER_URL` | app | The browser service's URL. **Unset means the browser runs inside the app**, as before — so nothing breaks until both variables are set on both services. |
+| `ONLYFANS_BROWSER_TOKEN` | both | Shared secret. Must match, or the app cannot drive the browser. |
+
+### 1. The trigger
+
+Filtered to the files that actually change the browser, so it is redeployed
+rarely and deliberately — an app-only push leaves the running browser alone,
+which is the entire point:
 
 ```bash
 gcloud builds triggers create github \
@@ -87,8 +97,25 @@ gcloud builds triggers create github \
   --substitutions=_SERVICE=ai-model-chat-dev,_REGION=europe-west4
 ```
 
-Then point the app at it, with a shared token both sides hold — every route but
-`/health` refuses a request without it:
+### 2. The first build
+
+That filter is also why the trigger does not fire on its own once created: the
+commit that added `of_browser.py` is already in `develop`, and the next push
+will most likely touch none of the four files. So the first build is started by
+hand — the one time that is the right thing to do, because there is no service
+to deploy over yet:
+
+```bash
+gcloud builds triggers run ai-model-chat-browser --branch=develop
+```
+
+From then on it is push-driven like everything else.
+
+### 3. The shared token
+
+Both services hold it; every route but `/health` refuses a request without it.
+Set the browser's copy first — an app that can reach an unconfigured browser
+service is the one ordering that could hand a sign-in to something unguarded:
 
 ```bash
 TOKEN=$(python3 -c 'import secrets;print(secrets.token_urlsafe(32))')
@@ -96,14 +123,27 @@ TOKEN=$(python3 -c 'import secrets;print(secrets.token_urlsafe(32))')
 gcloud run services update ai-model-chat-dev-browser --region europe-west4 \
   --update-env-vars "ONLYFANS_BROWSER_TOKEN=$TOKEN"
 
+BROWSER_URL=$(gcloud run services describe ai-model-chat-dev-browser \
+  --region europe-west4 --format='value(status.url)')
+
 gcloud run services update ai-model-chat-dev --region europe-west4 \
-  --update-env-vars "ONLYFANS_BROWSER_TOKEN=$TOKEN,ONLYFANS_BROWSER_URL=https://<browser service URL>"
+  --update-env-vars "ONLYFANS_BROWSER_TOKEN=$TOKEN,ONLYFANS_BROWSER_URL=$BROWSER_URL"
 ```
 
-| Variable | Where | What it does |
-|---|---|---|
-| `ONLYFANS_BROWSER_URL` | app | The browser service's URL. **Unset means the browser runs inside the app**, as before — so nothing breaks until both variables are set on both services. |
-| `ONLYFANS_BROWSER_TOKEN` | both | Shared secret. Must match, or the app cannot drive the browser. |
+`--update-env-vars` merges, so neither call disturbs the other variables on
+either service.
+
+### 4. Check it took
+
+```bash
+curl -s -H "X-Browser-Token: $TOKEN" "$BROWSER_URL/health"
+```
+
+`{"browser":true,"guarded":true,"ok":true}` means the service is up, has a
+working Chromium, and is enforcing the token. Without the header it must answer
+`{"ok":true,...}` too — `/health` is the one unguarded route — but every other
+path must give `401`. The app-side check is the console itself: start a sign-in
+and confirm it survives a push to `develop`.
 
 Once the app is pointed at the browser service, the app's own
 `--max-instances=1` (in `cloudbuild.yaml`) can come off: it is only there
