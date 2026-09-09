@@ -74,28 +74,26 @@ never run a deploy command by hand. One-time setup:
    ```bash
    gcloud builds triggers create github \
      --repo-name=ai-model-chat --repo-owner=Theoduras \
-     --branch-pattern="^deploy/cloud-run-online$" \
-     --build-config=cloudbuild.yaml
+     --branch-pattern="^develop$" \
+     --build-config=cloudbuild.yaml \
+     --substitutions=_SERVICE=ai-model-chat-dev,_REGION=europe-west4
    ```
-   This is the **live** trigger, so it needs no substitutions —
-   `cloudbuild.yaml` already defaults to `ai-model-chat` in `europe-west4`.
-   A trigger for any other environment must override `_SERVICE` (and
-   `_REGION` if it differs), or it deploys over live. See
-   [ENVIRONMENTS.md](ENVIRONMENTS.md).
+   `cloudbuild.yaml`'s own defaults point at `ai-model-chat`, so the
+   substitutions above are required — see [ENVIRONMENTS.md](ENVIRONMENTS.md).
 3. Set secrets once on the Cloud Run service (they persist across deploys):
    ```bash
-   gcloud run services update ai-model-chat --region europe-west4 \
+   gcloud run services update ai-model-chat-dev --region europe-west4 \
      --update-env-vars "GEMINI_API_KEY=...,ADMIN_PASSWORD=..."
    ```
    Generate `API_KEYS` in the same command so the key never lands in your shell
-   history, and use a different one per environment:
+   history:
    ```bash
-   gcloud run services update ai-model-chat --region europe-west4 \
+   gcloud run services update ai-model-chat-dev --region europe-west4 \
      --update-env-vars "API_KEYS=$(python3 -c 'import secrets;print(secrets.token_urlsafe(32))')"
    ```
    Read it back when you need to hand it to a caller:
    ```bash
-   gcloud run services describe ai-model-chat --region europe-west4 \
+   gcloud run services describe ai-model-chat-dev --region europe-west4 \
      --format="value(spec.template.spec.containers[0].env)"
    ```
 
@@ -153,8 +151,7 @@ Tables are created automatically on startup.
 **Auth:** set `API_KEYS` (comma-separated) as an env var. Callers pass it as
 `Authorization: Bearer <key>` or `X-API-Key: <key>`. **If unset, the endpoint
 refuses every request** — it sits outside the paywall, so the key is the only
-thing guarding it. Use a different key per environment, so a leaked dev key
-cannot reach live.
+thing guarding it.
 
 Request:
 ```json
@@ -465,10 +462,8 @@ tags are what makes it permanent, once Google recrawls during that window.
 
 ### Environments
 
-Only the live service should be in Search Console. The dev service at
-`ai-model-chat-dev-...run.app` serves the same pages, so an indexed copy
-competes with the real site for its own keywords. Set `SEO_NOINDEX_ALL=1`
-there.
+There is one service (`ai-model-chat-dev`, mapped to `velvetfunneler.com`) —
+that's the one to put in Search Console.
 
 `run.app` is on the [Public Suffix List](https://publicsuffix.org/list/), so a
 Search Console **Domain** property is impossible for a `*.run.app` host —
@@ -481,7 +476,7 @@ to map a real domain before doing any SEO work.
 | Variable | Why |
 |---|---|
 | `SITE_URL` | Canonical origin, e.g. `https://velvetfunnel.app`. Without it the canonical follows whatever host answered, so a `run.app` or preview URL competes with the real domain in search. The growth panel's tracked links (`/go/<persona>/<channel>`) are built from it too, and cannot be shown until it is set. |
-| `SEO_NOINDEX_ALL` | Set to `1` on every non-production service. `robots.txt` becomes `Disallow: /`, the sitemap 404s and every response carries `X-Robots-Tag: noindex`. **Set this on `ai-model-chat-dev`.** |
+| `SEO_NOINDEX_ALL` | Set to `1` on a non-production copy of the service (a preview, a fork used for testing). `robots.txt` becomes `Disallow: /`, the sitemap 404s and every response carries `X-Robots-Tag: noindex`. Leave unset on `ai-model-chat-dev` — it's the real site. |
 | `GOOGLE_SITE_VERIFICATION` | The `googleXXXX.html` filename Search Console hands out (with or without the extension). |
 | `GA_MEASUREMENT_ID` | GA4 measurement ID, `G-XXXXXXX`. |
 | `GOOGLE_ADS_ID` | Google Ads conversion ID, `AW-XXXXXXXXX`. |
