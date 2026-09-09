@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Content Planner</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <script src="/js/theme.js"></script>
+  <link rel="stylesheet" href="/css/style.css">
+  <script src="/js/devnav.js" defer></script>
+  <link rel="stylesheet" href="/css/site-nav.css">
+  <script src="/js/site-nav.js" defer></script>
+</head>
+<body class="page-dashboard">
+
+<header>
+  <div style="display:flex; align-items:center; gap:10px;">
+    <h1>Content Planner</h1>
+    <span class="badge">Week</span>
+  </div>
+  <div style="display:flex; align-items:center; gap:16px;">
+    <nav data-site-nav="inline" class="sn-links sn-inline"></nav>
+    <button class="icon-btn theme-toggle" onclick="toggleTheme()" title="Light mode" aria-label="Switch to light mode">
+      <svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke-linecap="round"/></svg>
+      <svg class="ico-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" stroke-linejoin="round"/></svg>
+    </button>
+    <a href="/dashboard" style="color:var(--text-muted); font-size:0.8rem; text-decoration:none;">← Dashboard</a>
+  </div>
+</header>
+
+<div class="pl-scroll">
+<div class="pl-wrap">
+
+  <div class="pl-head">
+    <div class="pl-head-l">
+      <h2>The week</h2>
+      <select id="pl-persona" onchange="plPickPersona(this.value)" aria-label="Persona"></select>
+    </div>
+    <div class="pl-head-r">
+      <div class="pl-week">
+        <button type="button" onclick="plShiftWeek(-1)" aria-label="Previous week">&lsaquo;</button>
+        <span id="pl-range">—</span>
+        <button type="button" onclick="plShiftWeek(1)" aria-label="Next week">&rsaquo;</button>
+      </div>
+      <button type="button" class="btn btn-secondary" onclick="plLoadQueue()">Refresh</button>
+      <button type="button" class="btn btn-primary" id="pl-plan-btn" onclick="plPlan(this)">Plan the week</button>
+    </div>
+  </div>
+
+  <p class="pl-state" id="pl-state">Loading…</p>
+  <div class="pl-stats" id="pl-stats"></div>
+  <div id="pl-bulk"></div>
+  <div class="pl-grid" id="pl-grid"></div>
+
+</div>
+</div>
+
+<div class="modal-overlay" id="pl-modal" onclick="if(event.target===this)plClose()">
+  <div class="modal" style="max-width:520px;">
+    <div class="modal-header">
+      <h2 id="pl-m-title">Post</h2>
+      <button class="modal-close" onclick="plClose()" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <p class="pl-modal-meta" id="pl-m-meta"></p>
+
+      <div class="field" style="margin-top:14px;" id="pl-m-when-field">
+        <label for="pl-m-when">When</label>
+        <input type="datetime-local" id="pl-m-when">
+      </div>
+
+      <div class="field" style="margin-top:14px;">
+        <label for="pl-m-text" style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+          <span id="pl-m-label">Post</span>
+          <span class="pl-count" id="pl-m-count"></span>
+        </label>
+        <textarea id="pl-m-text" rows="5" oninput="plCount()"></textarea>
+        <div style="margin-top:6px; display:flex; gap:6px;">
+          <button type="button" class="btn-ai" id="pl-m-write" onclick="plWrite(this)">✨ Write it</button>
+          <button type="button" class="btn-section-save" id="pl-m-copy" style="margin-left:0;" onclick="plCopy(this)">Copy</button>
+        </div>
+        <span class="hint" id="pl-m-hint" style="margin-top:6px;"></span>
+      </div>
+
+      <div class="modal-footer" style="margin-top:18px;">
+        <button type="button" class="btn btn-ghost" id="pl-m-cancel"
+                style="color:var(--err); border-color:var(--err); margin-right:auto;"
+                onclick="plCancelPost(this)">Cancel post</button>
+        <button type="button" class="btn btn-ghost" onclick="plClose()">Close</button>
+        <button type="button" class="btn btn-primary" id="pl-m-save" onclick="plSave(this)">Save changes</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// The caps mirror growth.POST_PLATFORMS. The server trims to them on every
+// write, so this copy only decides when the counter turns red.
+const PL_CAPS = { x: 280, threads: 500, instagram: 2200, tiktok: 2200, reddit: 300 };
+const PL_LABELS = { x: 'X', threads: 'Threads', instagram: 'Instagram', tiktok: 'TikTok', reddit: 'Reddit' };
+const PL_PUBLISHABLE = ['x', 'threads'];
+const PL_KIND = { value: 'worth reading', tease: 'tease', cta: 'ask' };
+const PL_STATUS = {
+  queued: 'Waiting to go out.',
+  sending: 'On its way now.',
+  posted: 'Posted.',
+  failed: 'Failed, and a failed post is not retried — edit it and queue it fresh.',
+  cancelled: 'Cancelled.'
+};
+
+let plSlug = '';
+let plWeekStart = 0;      // epoch of the Monday her week starts on
+let plQueue = [];         // real scheduled_posts rows for this window
+let plProposed = [];      // ephemeral plan slots, never persisted
+let plPlanMeta = null;
+let plOpen = null;        // the card the modal is editing
+
+function esc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// The cadence puts posts at hours of her day, so every boundary is local.
+function plMonday(d) {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
+  return Math.floor(x.getTime() / 1000);
+}
+function dayLabel(ts) {
+  return new Date(ts * 1000).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' });
+}
+function hourLabel(ts) {
+  const d = new Date(ts * 1000);
+  return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+}
+function rangeLabel(start) {
+  const a = new Date(start * 1000), b = new Date((start + 6 * 86400) * 1000);
+  const opt = { day: 'numeric', month: 'short' };
+  return a.toLocaleDateString(undefined, opt) + ' – ' + b.toLocaleDateString(undefined, opt);
+}
+function whenText(ts) {
+  const secs = ts - Math.floor(Date.now() / 1000);
+  const a = Math.abs(secs);
+  const s = a < 3600 ? Math.round(a / 60) + 'm'
+          : a < 86400 ? Math.round(a / 3600) + 'h'
+          : Math.round(a / 86400) + 'd';
+  return secs >= 0 ? 'in ' + s : s + ' ago';
+}
+function toLocalInput(ts) {
+  const d = new Date(ts * 1000);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-'
+    + String(d.getDate()).padStart(2, '0') + 'T'
+    + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+}
+function fromLocalInput(v) {
+  const t = new Date(v).getTime();
+  return isNaN(t) ? 0 : Math.floor(t / 1000);
+}
+
+function statTile(label, value) {
+  return '<div><div class="pl-stat-v">' + esc(value) + '</div>'
+    + '<div class="pl-stat-l">' + esc(label) + '</div></div>';
+}
+
+// ── Loading ──────────────────────────────────────────────────────────────────
+
+async function plInit() {
+  plWeekStart = plMonday(new Date());
+  const wanted = new URLSearchParams(location.search).get('persona') || '';
+  let list = [];
+  try {
+    list = await (await fetch('/api/personas')).json();
+  } catch (e) { /* handled below */ }
+  const sel = document.getElementById('pl-persona');
+  if (!Array.isArray(list) || !list.length) {
+    sel.innerHTML = '<option>no personas</option>';
+    document.getElementById('pl-state').textContent =
+      'No personas to plan for yet. Create one in the dashboard first.';
+    return;
+  }
+  sel.innerHTML = list.map(p =>
+    '<option value="' + esc(p.slug) + '">' + esc(p.name || p.slug) + '</option>').join('');
+  plSlug = list.some(p => p.slug === wanted) ? wanted : list[0].slug;
+  sel.value = plSlug;
+  plLoadQueue();
+}
+
+function plPickPersona(slug) {
+  plSlug = slug;
+  plProposed = [];
+  plPlanMeta = null;
+  plLoadQueue();
+}
+
+function plShiftWeek(n) {
+  const d = new Date(plWeekStart * 1000);
+  d.setDate(d.getDate() + 7 * n);
+  plWeekStart = plMonday(d);
+  // Proposals belong to the week they were planned for.
+  plProposed = [];
+  plPlanMeta = null;
+  plLoadQueue();
+}
+
+async function plLoadQueue() {
+  if (!plSlug) return;
+  document.getElementById('pl-range').textContent = rangeLabel(plWeekStart);
+  const from = plWeekStart, to = plWeekStart + 7 * 86400;
+  let d;
+  try {
+    d = await (await fetch('/api/growth/queue?persona=' + encodeURIComponent(plSlug)
+      + '&from=' + from + '&to=' + to)).json();
+  } catch (e) {
+    document.getElementById('pl-state').textContent = 'Could not read the queue.';
+    return;
+  }
+  if (!d || !d.ok) {
+    document.getElementById('pl-state').textContent = (d && d.error) || 'Could not read the queue.';
+    return;
+  }
+  plQueue = d.queue || [];
+  plRender(d);
+}
+
+// ── Rendering ────────────────────────────────────────────────────────────────
+
+function plStateLine(d) {
+  const el = document.getElementById('pl-state');
+  const off = [];
+  if (!d.beta) off.push('this persona is not on the growth beta');
+  if (!d.worker_on) off.push('the scheduler is switched off on this host');
+  if (off.length) {
+    el.className = 'pl-state is-off';
+    el.textContent = 'Nothing will go out — ' + off.join(' and ')
+      + '. Anything queued stays queued.';
+    return;
+  }
+  el.className = 'pl-state';
+  const t = d.totals || {};
+  const bits = [(t.queued || 0) + ' queued this week'];
+  if (t.next_at) bits.push('next ' + dayLabel(t.next_at) + ' ' + hourLabel(t.next_at)
+    + ' (' + whenText(t.next_at) + ')');
+  if (t.overdue) bits.push(t.overdue + ' past its slot and still waiting');
+  if (t.failed) bits.push(t.failed + ' failed — a failed post is not retried, edit it and queue it fresh');
+  el.textContent = bits.join(' · ') + '.';
+}
+
+function plRender(d) {
+  plStateLine(d);
+
+  const t = (d && d.totals) || {};
+  const manual = plProposed.filter(s => !s.publishable).length;
+  document.getElementById('pl-stats').innerHTML =
+    statTile('queued', t.queued || 0)
+    + statTile('posted', t.posted || 0)
+    + statTile('failed', t.failed || 0)
+    + (plProposed.length ? statTile('proposed', plProposed.length) : '')
+    + (manual ? statTile('by hand', manual) : '');
+
+  const queueable = plProposed.filter(s => s.publishable && s.at > Date.now() / 1000).length;
+  document.getElementById('pl-bulk').innerHTML = queueable
+    ? '<button type="button" class="btn btn-primary" onclick="plQueueWeek(this)">Queue the '
+      + queueable + ' X and Threads post' + (queueable === 1 ? '' : 's') + '</button>'
+      + (plPlanMeta && plPlanMeta.upcoming > plPlanMeta.cap
+         ? '<span class="hint" style="margin-left:10px;">Only the first ' + plPlanMeta.cap
+           + ' go in one round — plan again once those have gone out.</span>' : '')
+    : '';
+
+  // One card list per day: what is really queued, and what is only proposed.
+  const cards = [];
+  plQueue.forEach((r, i) => cards.push({
+    kind: 'queued', at: r.run_at, platform: r.platform, status: r.status,
+    text: r.text, error: r.error, attempts: r.attempts, id: r.id, idx: i
+  }));
+  plProposed.forEach((s, i) => cards.push({
+    kind: 'proposed', at: s.at, platform: s.platform, publishable: s.publishable,
+    text: s.idea, job: s.kind, idx: i
+  }));
+  cards.sort((a, b) => a.at - b.at);
+
+  const todayKey = new Date().toDateString();
+  let html = '';
+  for (let day = 0; day < 7; day++) {
+    const start = plWeekStart + day * 86400, end = start + 86400;
+    const date = new Date(start * 1000);
+    const mine = cards.filter(c => c.at >= start && c.at < end);
+    const cls = 'pl-day'
+      + (date.toDateString() === todayKey ? ' is-today' : '')
+      + (end < Date.now() / 1000 ? ' is-past' : '');
+    html += '<div class="' + cls + '"><div class="pl-day-h">' + esc(dayLabel(start)) + '</div>'
+      + (mine.length ? mine.map(plCard).join('') : '<div class="pl-empty">—</div>')
+      + '</div>';
+  }
+  document.getElementById('pl-grid').innerHTML = html;
+}
+
+function plCard(c) {
+  const manual = c.kind === 'proposed' && !c.publishable;
+  const cls = 'pl-card ' + (c.kind === 'proposed'
+    ? (manual ? 'is-proposed is-manual' : 'is-proposed')
+    : 'is-' + c.status);
+  let flag = '';
+  if (manual) flag = 'by hand';
+  else if (c.kind === 'proposed') flag = PL_KIND[c.job] || c.job;
+  else if (c.status === 'failed') flag = 'failed';
+  else if (c.status === 'posted') flag = 'posted';
+  else if (c.status === 'sending') flag = 'sending';
+  else if (c.status === 'cancelled') flag = 'cancelled';
+  return '<button type="button" class="' + cls + '" onclick="plEdit(\'' + c.kind + '\',' + c.idx + ')">'
+    + '<span class="pl-card-top"><span class="pl-when">' + hourLabel(c.at) + '</span>'
+    + '<span class="pl-chan">' + esc(PL_LABELS[c.platform] || c.platform) + '</span>'
+    + (flag ? '<span class="pl-flag">' + esc(flag) + '</span>' : '') + '</span>'
+    + '<span class="pl-text">' + esc(c.text || 'no angle yet') + '</span>'
+    + (c.error ? '<span class="pl-flag" style="margin-left:0;">' + esc(c.error.slice(0, 60)) + '</span>' : '')
+    + '</button>';
+}
+
+// ── Planning ─────────────────────────────────────────────────────────────────
+
+async function plPlan(btn) {
+  if (!plSlug) return;
+  btn.disabled = true;
+  const was = btn.textContent;
+  btn.textContent = 'planning…';
+  try {
+    const res = await fetch('/api/growth/plan', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ persona: plSlug, start: plWeekStart, days: 7 })
+    });
+    const d = await res.json();
+    if (!d.ok) { alert(d.error || 'Could not plan the week.'); return; }
+    plProposed = d.slots || [];
+    plPlanMeta = d;
+    if (!d.ideas) {
+      alert('The angles came back empty, so every proposed card needs one typed in '
+        + 'before it can be queued.');
+    }
+    plLoadQueue();
+  } catch (e) { alert('Could not plan the week.'); }
+  finally { btn.disabled = false; btn.textContent = was; }
+}
+
+async function plQueueWeek(btn) {
+  const slots = plProposed.filter(s => s.publishable);
+  if (!slots.length) return;
+  btn.disabled = true;
+  const was = btn.textContent;
+  btn.textContent = 'writing them…';
+  try {
+    const res = await fetch('/api/growth/plan', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ persona: plSlug, action: 'queue', slots: slots })
+    });
+    const d = await res.json();
+    if (!d.ok) { alert(d.error || 'Could not queue them.'); return; }
+    let msg = d.queued.length + ' post' + (d.queued.length === 1 ? '' : 's') + ' queued.';
+    if (d.failed.length) msg += ' ' + d.failed.length + ' could not be written.';
+    if (d.skipped) msg += ' ' + d.skipped + ' were over the ' + d.cap + '-post limit for one round.';
+    // The ones that went in are real rows now; anything left is still by hand.
+    plProposed = plProposed.filter(s => !s.publishable);
+    plLoadQueue();
+    alert(msg);
+  } catch (e) { alert('Could not queue them.'); }
+  finally { btn.disabled = false; btn.textContent = was; }
+}
+
+// ── The editor ───────────────────────────────────────────────────────────────
+
+function plEdit(kind, idx) {
+  const row = kind === 'queued' ? plQueue[idx] : plProposed[idx];
+  if (!row) return;
+  const at = kind === 'queued' ? row.run_at : row.at;
+  const plat = row.platform;
+  const publishable = kind === 'queued' || row.publishable;
+  const editable = kind === 'proposed' || row.status === 'queued';
+  plOpen = { kind: kind, idx: idx, id: row.id || '', platform: plat, at: at, publishable: publishable };
+
+  document.getElementById('pl-m-title').textContent =
+    dayLabel(at) + ' ' + hourLabel(at) + ' · ' + (PL_LABELS[plat] || plat);
+  document.getElementById('pl-m-meta').textContent = kind === 'proposed'
+    ? 'Proposed — ' + (PL_KIND[row.kind] || row.kind)
+      + (publishable ? '. Nothing exists until you queue it.'
+                     : '. This channel has no posting API she is allowed to use, so copy it out and post it yourself.')
+    : (PL_STATUS[row.status] || row.status)
+      + (row.attempts > 1 ? ' After ' + row.attempts + ' tries.' : '')
+      + (row.error ? ' ' + row.error : '');
+
+  const when = document.getElementById('pl-m-when');
+  when.value = toLocalInput(at);
+  when.disabled = !editable || !publishable;
+  document.getElementById('pl-m-when-field').style.display = publishable ? '' : 'none';
+
+  const ta = document.getElementById('pl-m-text');
+  ta.value = kind === 'queued' ? (row.text || '') : (row.idea || '');
+  ta.disabled = !editable;
+  document.getElementById('pl-m-label').textContent = kind === 'proposed' ? 'The angle' : 'Post';
+  document.getElementById('pl-m-hint').textContent = kind === 'proposed'
+    ? 'Edit the angle, then let her write the post from it.'
+    : '';
+
+  document.getElementById('pl-m-write').style.display = editable ? '' : 'none';
+  document.getElementById('pl-m-write').textContent = kind === 'proposed' ? '✨ Write it' : '✨ Rewrite';
+  document.getElementById('pl-m-cancel').style.display =
+    (kind === 'queued' && row.status === 'queued') ? '' : 'none';
+  const save = document.getElementById('pl-m-save');
+  save.style.display = (editable && publishable) ? '' : 'none';
+  save.textContent = kind === 'proposed' ? 'Queue it' : 'Save changes';
+
+  plCount();
+  document.getElementById('pl-modal').classList.add('open');
+}
+
+function plClose() {
+  document.getElementById('pl-modal').classList.remove('open');
+  plOpen = null;
+}
+
+function plCount() {
+  if (!plOpen) return;
+  const cap = PL_CAPS[plOpen.platform] || 280;
+  const n = document.getElementById('pl-m-text').value.length;
+  const el = document.getElementById('pl-m-count');
+  el.textContent = n + '/' + cap;
+  el.className = 'pl-count' + (n > cap ? ' over' : '');
+}
+
+async function plWrite(btn) {
+  if (!plOpen) return;
+  const ta = document.getElementById('pl-m-text');
+  const idea = plOpen.kind === 'proposed'
+    ? ta.value.trim()
+    : (prompt('What should she write about instead?', '') || '').trim();
+  if (!idea) return;
+  btn.disabled = true;
+  const was = btn.textContent;
+  btn.textContent = 'writing…';
+  try {
+    const res = await fetch('/api/growth/drafts', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ persona: plSlug, idea: idea, platforms: [plOpen.platform] })
+    });
+    const d = await res.json();
+    const draft = (d.drafts || [])[0];
+    if (!d.ok || !draft || !draft.text) {
+      alert((draft && draft.error) || d.error || 'She could not write that one.');
+      return;
+    }
+    ta.value = draft.text;
+    // A proposed card becomes a draft the moment it has words: the angle box is
+    // now the post, so saying "Queue it" no longer needs a second round trip.
+    if (plOpen.kind === 'proposed') {
+      plOpen.written = true;
+      document.getElementById('pl-m-label').textContent = 'Post';
+      document.getElementById('pl-m-hint').textContent =
+        plOpen.publishable ? 'Queue it, or edit it first.' : 'Copy it out and post it yourself.';
+    }
+    plCount();
+  } catch (e) { alert('She could not write that one.'); }
+  finally { btn.disabled = false; btn.textContent = was; }
+}
+
+function plCopy(btn) {
+  const ta = document.getElementById('pl-m-text');
+  if (!ta.value) return;
+  const done = () => { const w = btn.textContent; btn.textContent = 'Copied'; setTimeout(() => { btn.textContent = w; }, 1400); };
+  if (navigator.clipboard) navigator.clipboard.writeText(ta.value).then(done, done);
+  else { ta.select(); document.execCommand('copy'); done(); }
+}
+
+async function plSave(btn) {
+  if (!plOpen) return;
+  const text = document.getElementById('pl-m-text').value.trim();
+  const at = fromLocalInput(document.getElementById('pl-m-when').value);
+  if (!text) { alert('Nothing to post.'); return; }
+  if (!at) { alert('That is not a time.'); return; }
+
+  btn.disabled = true;
+  const was = btn.textContent;
+  btn.textContent = 'saving…';
+  try {
+    let res;
+    if (plOpen.kind === 'proposed') {
+      if (!plOpen.written) {
+        alert('Write the post first — what is in the box is still the angle.');
+        return;
+      }
+      res = await fetch('/api/growth/queue', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ persona: plSlug, platform: plOpen.platform, text: text, run_at: at })
+      });
+    } else {
+      res = await fetch('/api/growth/queue', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ persona: plSlug, id: plOpen.id, text: text, run_at: at })
+      });
+    }
+    const d = await res.json();
+    if (!d.ok) { alert(d.error || 'Could not save it.'); return; }
+    if (plOpen.kind === 'proposed') plProposed.splice(plOpen.idx, 1);
+    plClose();
+    plLoadQueue();
+  } catch (e) { alert('Could not save it.'); }
+  finally { btn.disabled = false; btn.textContent = was; }
+}
+
+async function plCancelPost(btn) {
+  if (!plOpen || !plOpen.id) return;
+  if (!confirm('Cancel this post? It will not go out.')) return;
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/growth/queue?persona=' + encodeURIComponent(plSlug)
+      + '&id=' + encodeURIComponent(plOpen.id), { method: 'DELETE' });
+    const d = await res.json();
+    if (!d.ok) { alert(d.error || 'Could not cancel it.'); return; }
+    plClose();
+    plLoadQueue();
+  } catch (e) { alert('Could not cancel it.'); }
+  finally { btn.disabled = false; }
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && document.getElementById('pl-modal').classList.contains('open')) plClose();
+});
+
+plInit();
+</script>
+</body>
+</html>

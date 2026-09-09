@@ -1108,10 +1108,16 @@ def finish_post(session, post_id, external_id='', error='', retry_at=None):
     return row
 
 
-def list_posts(session, persona, limit=50):
-    return (session.query(ScheduledPost)
-            .filter(ScheduledPost.persona == persona)
-            .order_by(ScheduledPost.run_at.desc()).limit(limit).all())
+def list_posts(session, persona, limit=50, since=None, until=None):
+    """The persona's posts, newest slot first. `since` and `until` narrow it to
+    one stretch of the calendar — the planner asks for a week, where the newest
+    fifty would silently cut a busy one short."""
+    q = session.query(ScheduledPost).filter(ScheduledPost.persona == persona)
+    if since is not None:
+        q = q.filter(ScheduledPost.run_at >= since)
+    if until is not None:
+        q = q.filter(ScheduledPost.run_at < until)
+    return q.order_by(ScheduledPost.run_at.desc()).limit(limit).all()
 
 
 def cancel_post(session, persona, post_id):
@@ -1121,6 +1127,25 @@ def cancel_post(session, persona, post_id):
          .filter(ScheduledPost.id == post_id, ScheduledPost.persona == persona,
                  ScheduledPost.status == 'queued')
          .update({'status': 'cancelled'}, synchronize_session='fetch'))
+    return bool(n)
+
+
+def update_post(session, persona, post_id, text=None, run_at=None):
+    """Edit a post that has not gone out yet. Like cancel_post, only a `queued`
+    row is the caller's to touch: once the worker has claimed it the send may
+    already be away, and once it has posted the text is history rather than a
+    draft. Returns whether anything was changed."""
+    fields = {}
+    if text is not None:
+        fields['text'] = text
+    if run_at is not None:
+        fields['run_at'] = run_at
+    if not fields:
+        return False
+    n = (session.query(ScheduledPost)
+         .filter(ScheduledPost.id == post_id, ScheduledPost.persona == persona,
+                 ScheduledPost.status == 'queued')
+         .update(fields, synchronize_session='fetch'))
     return bool(n)
 
 

@@ -4171,6 +4171,15 @@ def telegram_page():
         return redirect('/dashboard')
     return send_from_directory(BASE_DIR, 'telegram.html')
 
+@app.route('/planner')
+def planner_page():
+    # Open past the operator check, like /fanvue: every /api/growth call the
+    # planner makes is platform_scoped, so a creator only ever reaches their own
+    # personas. The roster and the analytics panels stay operator-only.
+    if not (_is_operator() or _current_user()):
+        return redirect('/dashboard')
+    return send_from_directory(BASE_DIR, 'planner.html')
+
 @app.route('/blog', methods=['GET'])
 def blog_page():
     return send_from_directory(BASE_DIR, 'blog.html')
@@ -6921,7 +6930,7 @@ def api_growth_winback():
                     'due': due[:10], 'waiting': waiting[:10]})
 
 
-def _growth_queue_rows(persona, limit=50):
+def _growth_queue_rows(persona, limit=50, since=None, until=None):
     from db import SessionLocal, list_posts
     sdb = SessionLocal()
     try:
@@ -6931,17 +6940,23 @@ def _growth_queue_rows(persona, limit=50):
                  'external_id': r.external_id or '',
                  'run_at': int(r.run_at.replace(tzinfo=timezone.utc).timestamp())
                  if r.run_at else 0}
-                for r in list_posts(sdb, persona, limit=limit)]
+                for r in list_posts(sdb, persona, limit=limit,
+                                    since=since, until=until)]
     finally:
         sdb.close()
 
 
-@app.route('/api/growth/queue', methods=['GET', 'POST', 'DELETE'])
-@operator_only
+def _growth_naive_utc(epoch):
+    """An epoch as the naive UTC datetime the scheduled_posts column stores."""
+    return datetime.fromtimestamp(int(epoch), timezone.utc).replace(tzinfo=None)
+
+
+@app.route('/api/growth/queue', methods=['GET', 'POST', 'PATCH', 'DELETE'])
+@platform_scoped
 def api_growth_queue():
     """The post queue for one persona: what is waiting, what went out, and what
-    failed. Operator-only, and nothing leaves the queue for a persona that is
-    not on the growth beta."""
+    failed. Scoped to personas the caller owns, and nothing leaves the queue for
+    a persona that is not on the growth beta."""
     persona = (request.args.get('persona')
                or ((request.json or {}).get('persona') if request.is_json else '')
                or '').strip()
@@ -6973,6 +6988,47 @@ def api_growth_queue():
                     persona, platform, run_at.isoformat(), text[:60])
         return jsonify({'ok': True, 'id': post_id, 'queue': _growth_queue_rows(persona)})
 
+    if request.method == 'PATCH':
+        data = request.json or {}
+        post_id = (data.get('id') or '').strip()
+        from db import SessionLocal, update_post, ScheduledPost
+        sdb = SessionLocal()
+        try:
+            row = (sdb.query(ScheduledPost)
+                   .filter(ScheduledPost.id == post_id,
+                           ScheduledPost.persona == persona).first())
+            if not row:
+                return jsonify({'ok': False, 'error': 'No such post.'}), 404
+            if row.status != 'queued':
+                return jsonify({'ok': False,
+                                'error': 'That post has already gone out or is '
+                                         'on its way.'}), 409
+            # The cap belongs to the channel, not to whatever typed the text —
+            # an editor is one way in among several.
+            text = (growth.trim_post(row.platform, data.get('text'))
+                    if data.get('text') is not None else None)
+            if text is not None and not text:
+                return jsonify({'ok': False, 'error': 'Nothing to post.'}), 400
+            run_at = None
+            if data.get('run_at') is not None:
+                when = int(data.get('run_at') or 0)
+                if when <= int(time.time()):
+                    return jsonify({'ok': False,
+                                    'error': 'That slot is in the past.'}), 400
+                run_at = _growth_naive_utc(when)
+            if text is None and run_at is None:
+                return jsonify({'ok': False, 'error': 'Nothing to change.'}), 400
+            done = update_post(sdb, persona, post_id, text=text, run_at=run_at)
+            sdb.commit()
+        finally:
+            sdb.close()
+        if not done:
+            return jsonify({'ok': False,
+                            'error': 'That post has already gone out or is on '
+                                     'its way.'}), 409
+        logger.info('QUEUE edited [%s] %s', persona, post_id)
+        return jsonify({'ok': True, 'queue': _growth_queue_rows(persona)})
+
     if request.method == 'DELETE':
         post_id = (request.args.get('id') or '').strip()
         from db import SessionLocal, cancel_post
@@ -6988,7 +7044,14 @@ def api_growth_queue():
                                      'its way.'}), 409
         return jsonify({'ok': True, 'queue': _growth_queue_rows(persona)})
 
-    rows = _growth_queue_rows(persona)
+    # A window keeps a busy week from being cut short by the newest fifty; with
+    # neither bound this is the list it has always returned.
+    since = int(request.args.get('from') or 0)
+    until = int(request.args.get('to') or 0)
+    rows = _growth_queue_rows(
+        persona, limit=200 if (since or until) else 50,
+        since=_growth_naive_utc(since) if since else None,
+        until=_growth_naive_utc(until) if until else None)
     stats = growth.queue_stats(rows, now=int(time.time()))
     return jsonify({'ok': True, 'persona': persona, 'beta': _growth_on(persona),
                     'worker_on': _worker_enabled('GROWTH_QUEUE_WORKER'),
@@ -7048,7 +7111,7 @@ def _growth_plan_draft(persona, platform, kind, idea):
 
 
 @app.route('/api/growth/plan', methods=['POST'])
-@operator_only
+@platform_scoped
 def api_growth_plan():
     """A week laid out: which channel, when, and whether the post is there to be
     worth reading, to hint, or to ask. Previewing costs one model call for the
@@ -7237,7 +7300,7 @@ def api_growth_bio():
 
 
 @app.route('/api/growth/drafts', methods=['POST'])
-@operator_only
+@platform_scoped
 def api_growth_drafts():
     """One idea in, a draft per channel out. Each channel gets its own brief —
     the same words posted everywhere is what the caption generator is for

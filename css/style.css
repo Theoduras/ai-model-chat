@@ -3475,3 +3475,142 @@ body.embedding .form-area { padding: 0; overflow: hidden; }
   0%, 100% { box-shadow: none; }
   15%, 60% { box-shadow: var(--ring); border-color: var(--accent-line); }
 }
+
+
+/* ── Content planner ──────────────────────────────────────────────────────── */
+/* The week as seven columns of cards rather than an hour grid: the cadence puts
+   two to six posts in a day, so a 24-row grid would be mostly empty rows. State
+   is the 3px left bar, the same device the section titles use, so nothing here
+   invents a colour vocabulary the app does not already have. */
+
+.pl-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.pl-wrap {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 24px 24px 80px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.pl-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.pl-head h2 {
+  font-family: var(--display);
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+}
+.pl-head-l { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.pl-head-r { display: flex; align-items: center; gap: 10px; margin-left: auto; flex-wrap: wrap; }
+.pl-head select { min-width: 150px; }
+
+.pl-week { display: flex; align-items: center; gap: 4px; }
+.pl-week button {
+  background: var(--surface);
+  color: var(--text-2);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-xs);
+  width: 26px;
+  height: 26px;
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.pl-week button:hover { color: var(--accent); border-color: var(--accent-line); }
+.pl-week span {
+  font-size: 0.8rem;
+  color: var(--text-2);
+  min-width: 118px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.pl-state { font-size: 0.79rem; color: var(--text-muted); line-height: 1.6; }
+.pl-state.is-off { color: var(--warn); }
+
+.pl-stats { display: flex; flex-wrap: wrap; gap: 22px; }
+.pl-stat-v { font-size: 1.3rem; font-weight: 600; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.pl-stat-l { font-size: 0.75rem; color: var(--text-muted); }
+
+.pl-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 10px;
+  align-items: start;
+}
+.pl-day { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.pl-day-h {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-muted);
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.pl-day.is-today .pl-day-h { color: var(--accent); border-bottom-color: var(--accent-line); }
+.pl-day.is-past { opacity: 0.62; }
+
+.pl-card {
+  background: var(--panel-2);
+  border: 1px solid var(--border-soft);
+  border-left: 3px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+.pl-card:hover { border-color: var(--border); transform: translateY(-1px); box-shadow: var(--shadow-sm); }
+.pl-card.is-queued  { border-left-color: var(--accent); }
+.pl-card.is-posted  { border-left-color: var(--ok); opacity: 0.72; }
+.pl-card.is-failed  { border-left-color: var(--err); }
+.pl-card.is-sending { border-left-color: var(--warn); }
+.pl-card.is-cancelled { border-left-color: var(--border); opacity: 0.5; }
+.pl-card.is-proposed {
+  background: transparent;
+  border-style: dashed;
+  border-left-style: dashed;
+  border-left-color: var(--accent-line);
+}
+.pl-card.is-manual { border-left-color: var(--text-muted); }
+
+.pl-card-top { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.pl-when { font-size: 0.7rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.pl-chan {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.pl-flag { margin-left: auto; font-size: 0.64rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px; white-space: nowrap; }
+.pl-card.is-failed .pl-flag { color: var(--err); }
+.pl-text {
+  font-size: 0.77rem;
+  color: var(--text-2);
+  line-height: 1.45;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.pl-empty { font-size: 0.72rem; color: var(--text-muted); padding: 4px 0; }
+
+.pl-count { font-size: 0.72rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.pl-count.over { color: var(--err); }
+.pl-modal-meta { font-size: 0.75rem; color: var(--text-muted); }
+
+@media (max-width: 900px) {
+  .pl-grid { grid-template-columns: 1fr; }
+  .pl-wrap { padding: 18px 16px 64px; }
+  .pl-head-r { margin-left: 0; }
+}
