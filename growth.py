@@ -441,6 +441,63 @@ POST_PLATFORMS = {
 # and posted by hand, which is why they are generated but never queued.
 PUBLISHABLE = ('x', 'threads')
 
+# ── Media ─────────────────────────────────────────────────────────────────────
+# What each channel will take, and how it takes it. `fetch` means the platform
+# collects the file from a URL we serve, so the media has to be publicly
+# reachable; `upload` means we hand it the bytes ourselves.
+MEDIA_SUPPORT = {
+    'x':         {'kinds': ('image', 'video'), 'how': 'upload', 'max': 1},
+    'threads':   {'kinds': ('image', 'video'), 'how': 'fetch',  'max': 1},
+    # No posting API, so media here is something the creator downloads and
+    # uploads by hand. Reddit takes a still; a video post there is a different
+    # submission type we do not write.
+    'instagram': {'kinds': ('image', 'video'), 'how': 'by-hand', 'max': 1},
+    'tiktok':    {'kinds': ('video',),         'how': 'by-hand', 'max': 1},
+    'reddit':    {'kinds': ('image',),         'how': 'by-hand', 'max': 1},
+}
+
+MEDIA_KINDS = ('image', 'video')
+
+# Inline bytes live in a database text column, so the cap is about what a row
+# and a request can carry rather than what the channel allows. Past it the
+# creator hosts the file and gives us the URL.
+MEDIA_INLINE_MAX_BYTES = 12 * 1024 * 1024
+
+
+def media_kind(mime):
+    """'image' or 'video' from a mime type, defaulting to image — the library
+    held nothing else before video existed."""
+    return 'video' if str(mime or '').lower().startswith('video/') else 'image'
+
+
+def media_ok(platform, kind):
+    """Whether this channel will carry this kind of media at all."""
+    spec = MEDIA_SUPPORT.get(normalise_source(platform))
+    return bool(spec) and str(kind or 'image') in spec['kinds']
+
+
+def media_how(platform):
+    """'upload', 'fetch' or 'by-hand' — how the media reaches the channel."""
+    spec = MEDIA_SUPPORT.get(normalise_source(platform))
+    return spec['how'] if spec else 'by-hand'
+
+
+def media_reject(platform, kind):
+    """Why this pairing cannot be queued, or '' when it can. The wording is the
+    error the operator sees, so it says what to do rather than what failed."""
+    plat = normalise_source(platform)
+    spec = MEDIA_SUPPORT.get(plat)
+    label = POST_PLATFORMS.get(plat, {}).get('label', plat or 'that channel')
+    if not spec:
+        return f'{label} takes no media from here.'
+    kind = str(kind or 'image')
+    if kind not in MEDIA_KINDS:
+        return f'{kind} is not a kind of media this understands.'
+    if kind not in spec['kinds']:
+        takes = ' or '.join(spec['kinds'])
+        return f'{label} takes {takes}, not {kind}.'
+    return ''
+
 QUEUE_STATES = ('queued', 'sending', 'posted', 'failed', 'cancelled')
 
 

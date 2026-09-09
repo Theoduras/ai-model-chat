@@ -83,6 +83,16 @@
         <span class="hint" id="pl-m-hint" style="margin-top:6px;"></span>
       </div>
 
+      <div class="field" style="margin-top:14px;" id="pl-m-media-field">
+        <label style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+          <span>Media</span>
+          <span class="pl-count" id="pl-m-media-note"></span>
+        </label>
+        <div class="pl-picked" id="pl-m-picked"></div>
+        <div class="pl-strip" id="pl-m-strip"></div>
+        <span class="hint" id="pl-m-media-hint" style="margin-top:6px;"></span>
+      </div>
+
       <div class="modal-footer" style="margin-top:18px;">
         <button type="button" class="btn btn-ghost" id="pl-m-cancel"
                 style="color:var(--err); border-color:var(--err); margin-right:auto;"
@@ -100,6 +110,15 @@
 const PL_CAPS = { x: 280, threads: 500, instagram: 2200, tiktok: 2200, reddit: 300 };
 const PL_LABELS = { x: 'X', threads: 'Threads', instagram: 'Instagram', tiktok: 'TikTok', reddit: 'Reddit' };
 const PL_PUBLISHABLE = ['x', 'threads'];
+// Mirrors growth.MEDIA_SUPPORT. The server checks it again on every write; this
+// copy only decides which thumbnails are worth offering.
+const PL_MEDIA = {
+  x:         ['image', 'video'],
+  threads:   ['image', 'video'],
+  instagram: ['image', 'video'],
+  tiktok:    ['video'],
+  reddit:    ['image']
+};
 const PL_KIND = { value: 'worth reading', tease: 'tease', cta: 'ask' };
 const PL_STATUS = {
   queued: 'Waiting to go out.',
@@ -115,6 +134,8 @@ let plQueue = [];         // real scheduled_posts rows for this window
 let plProposed = [];      // ephemeral plan slots, never persisted
 let plPlanMeta = null;
 let plOpen = null;        // the card the modal is editing
+let plVault = [];         // the persona's media library
+let plPickedMedia = '';   // what the open editor has attached
 
 function esc(s) {
   return String(s == null ? '' : s)
@@ -185,6 +206,7 @@ async function plInit() {
     '<option value="' + esc(p.slug) + '">' + esc(p.name || p.slug) + '</option>').join('');
   plSlug = list.some(p => p.slug === wanted) ? wanted : list[0].slug;
   sel.value = plSlug;
+  await plLoadVault();
   plLoadQueue();
 }
 
@@ -192,7 +214,20 @@ function plPickPersona(slug) {
   plSlug = slug;
   plProposed = [];
   plPlanMeta = null;
+  plLoadVault();
   plLoadQueue();
+}
+
+async function plLoadVault() {
+  if (!plSlug) return;
+  try {
+    const d = await (await fetch('/api/personas/' + encodeURIComponent(plSlug) + '/media')).json();
+    plVault = (d && d.vault) || [];
+  } catch (e) { plVault = []; }
+}
+
+function plMediaById(id) {
+  return plVault.find(m => m.id === id) || null;
 }
 
 function plShiftWeek(n) {
@@ -273,7 +308,8 @@ function plRender(d) {
   const cards = [];
   plQueue.forEach((r, i) => cards.push({
     kind: 'queued', at: r.run_at, platform: r.platform, status: r.status,
-    text: r.text, error: r.error, attempts: r.attempts, id: r.id, idx: i
+    text: r.text, error: r.error, attempts: r.attempts, id: r.id, idx: i,
+    media: r.media_id ? plMediaById(r.media_id) : null
   }));
   plProposed.forEach((s, i) => cards.push({
     kind: 'proposed', at: s.at, platform: s.platform, publishable: s.publishable,
@@ -313,6 +349,7 @@ function plCard(c) {
     + '<span class="pl-card-top"><span class="pl-when">' + hourLabel(c.at) + '</span>'
     + '<span class="pl-chan">' + esc(PL_LABELS[c.platform] || c.platform) + '</span>'
     + (flag ? '<span class="pl-flag">' + esc(flag) + '</span>' : '') + '</span>'
+    + (c.media ? plMediaThumb(c.media, ' is-card') : '')
     + '<span class="pl-text">' + esc(c.text || 'no angle yet') + '</span>'
     + (c.error ? '<span class="pl-flag" style="margin-left:0;">' + esc(c.error.slice(0, 60)) + '</span>' : '')
     + '</button>';
@@ -409,8 +446,60 @@ function plEdit(kind, idx) {
   save.style.display = (editable && publishable) ? '' : 'none';
   save.textContent = kind === 'proposed' ? 'Queue it' : 'Save changes';
 
+  // A proposal has no media until one is attached here; a queued row remembers.
+  plPickedMedia = row.media_id || '';
   plCount();
+  plRenderMedia();
   document.getElementById('pl-modal').classList.add('open');
+}
+
+function plMediaThumb(m, extra) {
+  return '<span class="pl-thumb' + (extra || '') + '">'
+    + (m.kind === 'video'
+        ? '<video src="' + esc(m.thumb) + '" muted playsinline preload="metadata"></video>'
+          + '<span class="pl-thumb-tag">video</span>'
+        : '<img src="' + esc(m.thumb) + '" alt="" loading="lazy">')
+    + '</span>';
+}
+
+function plRenderMedia() {
+  const field = document.getElementById('pl-m-media-field');
+  if (!plOpen) return;
+  const allowed = PL_MEDIA[plOpen.platform] || [];
+  const usable = plVault.filter(m => allowed.indexOf(m.kind || 'image') !== -1);
+  field.style.display = allowed.length ? '' : 'none';
+
+  const picked = plPickedMedia ? plMediaById(plPickedMedia) : null;
+  document.getElementById('pl-m-picked').innerHTML = picked
+    ? plMediaThumb(picked, ' is-picked')
+      + '<button type="button" class="btn-section-save" style="margin-left:10px;"'
+      + ' onclick="plPickMedia(\'\')">Remove</button>'
+      + (plOpen.publishable ? ''
+         : '<a class="btn-section-save" style="margin-left:6px; text-decoration:none;"'
+           + ' href="' + esc(picked.thumb) + '" download target="_blank" rel="noopener">Download</a>')
+    : '<span class="hint">Nothing attached.</span>';
+
+  document.getElementById('pl-m-media-note').textContent =
+    allowed.length ? allowed.join(' or ') : '';
+  document.getElementById('pl-m-strip').innerHTML = usable.length
+    ? usable.map(m => '<button type="button" class="pl-pick'
+        + (m.id === plPickedMedia ? ' on' : '') + '" title="' + esc(m.purpose || m.kind)
+        + '" onclick="plPickMedia(\'' + esc(m.id) + '\')">'
+        + plMediaThumb(m) + '</button>').join('')
+    : '<span class="hint">Nothing in the library this channel will take. '
+      + 'Add photos and clips in the persona editor.</span>';
+
+  document.getElementById('pl-m-media-hint').textContent = !picked ? ''
+    : plOpen.publishable
+      ? (plOpen.platform === 'threads'
+          ? 'Threads collects the file from us, so it has to be publicly reachable when the slot comes round.'
+          : 'Uploaded to X when the post goes out.')
+      : 'This channel has no posting API — download the file and post it yourself.';
+}
+
+function plPickMedia(id) {
+  plPickedMedia = (id === plPickedMedia) ? '' : id;
+  plRenderMedia();
 }
 
 function plClose() {
@@ -489,12 +578,14 @@ async function plSave(btn) {
       }
       res = await fetch('/api/growth/queue', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ persona: plSlug, platform: plOpen.platform, text: text, run_at: at })
+        body: JSON.stringify({ persona: plSlug, platform: plOpen.platform, text: text,
+                               run_at: at, media_id: plPickedMedia })
       });
     } else {
       res = await fetch('/api/growth/queue', {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ persona: plSlug, id: plOpen.id, text: text, run_at: at })
+        body: JSON.stringify({ persona: plSlug, id: plOpen.id, text: text,
+                               run_at: at, media_id: plPickedMedia })
       });
     }
     const d = await res.json();

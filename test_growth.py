@@ -363,6 +363,27 @@ check('offer wording carries the label',
       'come find me' in G.winback_instruction(True, 'come find me'))
 
 print()
+print('media rules')
+check('X takes both', G.media_ok('x', 'image') and G.media_ok('x', 'video'))
+check('Threads takes both', G.media_ok('threads', 'image') and G.media_ok('threads', 'video'))
+check('TikTok is video only', G.media_ok('tiktok', 'video') and not G.media_ok('tiktok', 'image'))
+check('Reddit is a still', G.media_ok('reddit', 'image') and not G.media_ok('reddit', 'video'))
+check('an unknown channel takes nothing', not G.media_ok('myspace', 'image'))
+check('a good pairing has no complaint', G.media_reject('x', 'video') == '')
+check('a bad one says what the channel takes',
+      'video' in G.media_reject('reddit', 'video')
+      and 'Reddit' in G.media_reject('reddit', 'video'))
+check('an unknown kind is refused', G.media_reject('x', 'gif') != '')
+check('the two publishable channels differ in how they get it',
+      G.media_how('x') == 'upload' and G.media_how('threads') == 'fetch')
+check('a by-hand channel says so', G.media_how('tiktok') == 'by-hand')
+check('mime decides the kind',
+      G.media_kind('video/mp4') == 'video' and G.media_kind('image/png') == 'image')
+check('no mime is an image, as the library was before video',
+      G.media_kind('') == 'image' and G.media_kind(None) == 'image')
+check('every publishable channel can carry a still',
+      all(G.media_ok(p, 'image') for p in G.PUBLISHABLE))
+
 if FAILURES:
     print(f'{len(FAILURES)} FAILED: {FAILURES}')
     raise SystemExit(1)

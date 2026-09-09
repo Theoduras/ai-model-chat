@@ -6494,6 +6494,8 @@ def api_persona_avatar(slug):
     try:
         header, b64 = avatar.split(',', 1)
         mime = header.split(';')[0].replace('data:', '') or 'image/jpeg'
+        # Range requests are not served, so a long video is downloaded
+        # rather than scrubbed. Platforms fetch whole files anyway.
         data = base64.b64decode(b64)
         return Response(data, mimetype=mime)
     except Exception:
@@ -6501,7 +6503,7 @@ def api_persona_avatar(slug):
 
 
 def _serve_data_url(data_url):
-    """Serve a data: URL as an image Response, or 404/400."""
+    """Serve a data: URL as a Response of its own type, or 404/400."""
     import base64
     from flask import Response
     if not data_url or not data_url.startswith('data:'):
@@ -6938,12 +6940,33 @@ def _growth_queue_rows(persona, limit=50, since=None, until=None):
                  'status': r.status, 'attempts': int(r.attempts or 0),
                  'error': r.error or '',
                  'external_id': r.external_id or '',
+                 'media_id': r.media_id or '',
                  'run_at': int(r.run_at.replace(tzinfo=timezone.utc).timestamp())
                  if r.run_at else 0}
                 for r in list_posts(sdb, persona, limit=limit,
                                     since=since, until=until)]
     finally:
         sdb.close()
+
+
+def _growth_media_check(persona, platform, media_id):
+    """Resolve the media for a queue write and say why it cannot be attached.
+    Returns (media_id, error). Checked at queue time as well as at send time —
+    here so the operator hears it now, there because the library can change in
+    between."""
+    if not media_id:
+        return '', ''
+    media = _media_row(persona, media_id)
+    if not media:
+        return '', 'That media is not in this persona\'s library.'
+    why = growth.media_reject(platform, media.get('kind'))
+    if why:
+        return '', why
+    if growth.media_how(platform) == 'fetch' and not media.get('source_url') \
+            and not _media_origin():
+        return '', ('PUBLIC_BASE_URL is unset, so there is no public address '
+                    'to give the platform for this file.')
+    return media['id'], ''
 
 
 def _growth_naive_utc(epoch):
@@ -6976,10 +6999,14 @@ def api_growth_queue():
             return jsonify({'ok': False, 'error': 'Nothing to post.'}), 400
         when = int(data.get('run_at') or 0) or int(time.time())
         run_at = datetime.fromtimestamp(when, timezone.utc).replace(tzinfo=None)
+        media_id, why = _growth_media_check(
+            persona, platform, str(data.get('media_id') or '').strip())
+        if why:
+            return jsonify({'ok': False, 'error': why}), 400
         from db import SessionLocal, queue_post
         sdb = SessionLocal()
         try:
-            row = queue_post(sdb, persona, platform, text, run_at)
+            row = queue_post(sdb, persona, platform, text, run_at, media_id)
             sdb.commit()
             post_id = row.id
         finally:
@@ -7016,9 +7043,17 @@ def api_growth_queue():
                     return jsonify({'ok': False,
                                     'error': 'That slot is in the past.'}), 400
                 run_at = _growth_naive_utc(when)
-            if text is None and run_at is None:
+            media_id = None
+            if 'media_id' in data:
+                # '' is an answer here — it takes the photo off the post.
+                wanted = str(data.get('media_id') or '').strip()
+                media_id, why = _growth_media_check(persona, row.platform, wanted)
+                if why:
+                    return jsonify({'ok': False, 'error': why}), 400
+            if text is None and run_at is None and media_id is None:
                 return jsonify({'ok': False, 'error': 'Nothing to change.'}), 400
-            done = update_post(sdb, persona, post_id, text=text, run_at=run_at)
+            done = update_post(sdb, persona, post_id, text=text, run_at=run_at,
+                               media_id=media_id)
             sdb.commit()
         finally:
             sdb.close()
@@ -7353,7 +7388,7 @@ GROWTH_QUEUE_RETRY_MINS = 10
 GROWTH_QUEUE_STALE_HRS = 6
 
 
-def _growth_publish(persona, platform, text):
+def _growth_publish(persona, platform, text, media_id=''):
     """Put one post out and write it into the content register. Returns the id
     the channel gave it; raises on failure, because only the caller knows
     whether this attempt is worth another one."""
@@ -7361,11 +7396,25 @@ def _growth_publish(persona, platform, text):
     text = growth.trim_post(plat, text)
     if not text:
         raise ValueError('nothing to post')
+    media = _media_row(persona, media_id)
+    if media_id and not media:
+        # The photo was deleted between queueing and sending. Going out without
+        # it would quietly post a caption for a picture nobody can see.
+        raise RuntimeError('the media on this post is no longer in the library')
+    if media:
+        why = growth.media_reject(plat, media.get('kind'))
+        if why:
+            raise RuntimeError(why)
     if plat == 'x':
-        res = _x_call(persona, 'POST', '/tweets', body={'text': text})
+        body = {'text': text}
+        if media:
+            blob, mime = _media_bytes(media)
+            body['media'] = {'media_ids': [
+                _x_media_upload(persona, blob, mime, media.get('kind') or 'image')]}
+        res = _x_call(persona, 'POST', '/tweets', body=body)
         posted_id = str(((res or {}).get('data') or {}).get('id') or '')
     elif plat == 'threads':
-        posted_id = str(_threads_publish(persona, text) or '')
+        posted_id = str(_threads_publish(persona, text, media=media) or '')
     else:
         raise ValueError(f'{plat} posts have to go out by hand')
     _content_register_add(persona, plat, text)
@@ -7381,6 +7430,7 @@ def _growth_queue_round():
         for row in due_posts(sdb, now, limit=20):
             post_id, persona = row.id, row.persona
             platform, text = row.platform, row.text
+            media_id = row.media_id or ''
             if not _growth_on(persona):
                 continue
             late = (now - row.run_at).total_seconds() if row.run_at else 0
@@ -7394,7 +7444,7 @@ def _growth_queue_round():
             if not claim_post(sdb, post_id):
                 continue
             try:
-                posted_id = _growth_publish(persona, platform, text)
+                posted_id = _growth_publish(persona, platform, text, media_id)
                 finish_post(sdb, post_id, external_id=posted_id)
                 logger.info('QUEUE posted [%s/%s] id=%s %s',
                             persona, platform, posted_id, text[:60])
@@ -7962,6 +8012,9 @@ def api_persona_media_list(slug):
                 'id': r.id, 'purpose': r.purpose or '',
                 'outfits': by_media.get(r.id, []),
                 'outfit': r.outfit or '',        # legacy, kept during migration
+                'kind': r.kind or 'image',
+                'mime': r.mime or '',
+                'hosted': bool(r.source_url and not r.image_data),
                 'location': (o or {}).get('location', ''),
                 'lighting': (o or {}).get('lighting', ''),
                 'thumb': f'/api/personas/{slug}/media/{r.id}/image',
@@ -7996,13 +8049,31 @@ def api_persona_media_save(slug):
         return jsonify({'error': 'Invalid slug'}), 400
     data = request.json or {}
     image = data.get('image', '')
-    if not image or not image.startswith('data:'):
-        return jsonify({'error': 'image must be a data URL'}), 400
+    source_url = str(data.get('source_url', '') or '').strip()[:600]
+    if source_url and not source_url.startswith(('http://', 'https://')):
+        return jsonify({'error': 'source_url must be an http(s) URL'}), 400
+    if not source_url and not (image or '').startswith('data:'):
+        return jsonify({'error': 'send an image data URL or a source_url'}), 400
+
+    mime = str(data.get('mime', '') or '').strip()[:60]
+    if image.startswith('data:') and not mime:
+        mime = image.split(';')[0].replace('data:', '')
+    kind = growth.media_kind(mime)
+    # Inline bytes become a database row and a whole response, so the cap is
+    # ours rather than the channel's. Past it the creator hosts the file.
+    if image.startswith('data:'):
+        approx = int(len(image.split(',', 1)[-1]) * 3 / 4)
+        if approx > growth.MEDIA_INLINE_MAX_BYTES:
+            mb = growth.MEDIA_INLINE_MAX_BYTES // (1024 * 1024)
+            return jsonify({'error': f'That file is over {mb}MB. Host it '
+                                     'somewhere and paste the link instead.'}), 413
+
     from db import SessionLocal, PersonaMedia
     s = SessionLocal()
     try:
         row = PersonaMedia(
-            slug=slug, image_data=image,
+            slug=slug, image_data=image if image.startswith('data:') else '',
+            kind=kind, mime=mime, source_url=source_url,
             location=str(data.get('location', ''))[:120],
             outfit=str(data.get('outfit', ''))[:120],
             lighting=str(data.get('lighting', ''))[:60],
@@ -8147,6 +8218,10 @@ def api_persona_media_image(slug, media_id):
         row = get_persona_media(s, media_id)
         if not row or row.slug != slug:
             return ('', 404)
+        # An externally hosted item is a redirect, so a platform fetching this
+        # URL still lands on the file rather than on nothing.
+        if not row.image_data and row.source_url:
+            return redirect(row.source_url)
         return _serve_data_url(row.image_data)
     finally:
         s.close()
@@ -8526,6 +8601,171 @@ _X_403_HINTS = (
     ('client-not-enrolled', 'your X API plan does not include this endpoint'),
     ('unsupported authentication', 'reconnect the account with OAuth 2.0'),
 )
+
+
+# ── Media on a post ───────────────────────────────────────────────────────────
+# One item from the persona's library, resolved at send time rather than copied
+# at queue time, so fixing a photo fixes every post still waiting on it.
+
+def _media_row(persona, media_id):
+    """The library item, or None. Scoped to the persona so a post can never
+    reach another creator's vault by id."""
+    if not media_id:
+        return None
+    from db import SessionLocal, get_persona_media
+    s = SessionLocal()
+    try:
+        row = get_persona_media(s, media_id)
+        if not row or row.slug != persona:
+            return None
+        return {'id': row.id, 'kind': row.kind or 'image',
+                'mime': row.mime or '', 'source_url': row.source_url or '',
+                'data': row.image_data or '', 'slug': row.slug}
+    finally:
+        s.close()
+
+
+def _media_bytes(media):
+    """The raw bytes and mime for a library item, fetching an externally hosted
+    one if that is where it lives."""
+    import base64
+    data = media.get('data') or ''
+    if data.startswith('data:'):
+        header, b64 = data.split(',', 1)
+        mime = header.split(';')[0].replace('data:', '') or media.get('mime') or ''
+        return base64.b64decode(b64), (mime or 'application/octet-stream')
+    url = media.get('source_url') or ''
+    if not url:
+        raise RuntimeError('that media item has neither bytes nor a URL')
+    req = urllib.request.Request(url, headers={'User-Agent': 'ai-model-chat'})
+    with urllib.request.urlopen(req, timeout=60) as r:
+        return r.read(), (r.headers.get('Content-Type')
+                          or media.get('mime') or 'application/octet-stream')
+
+
+def _media_public_url(media):
+    """A URL a platform can fetch the file from. An externally hosted item is
+    already one; ours is served from the media route, which is public.
+
+    Threads collects media itself rather than accepting an upload, so without
+    this there is no way to attach anything to a thread at all."""
+    if media.get('source_url'):
+        return media['source_url']
+    base = _media_origin()
+    if not base:
+        raise RuntimeError(
+            'PUBLIC_BASE_URL is unset, so there is no public address to give '
+            'the platform for this file.')
+    return f"{base}/api/personas/{media['slug']}/media/{media['id']}/image"
+
+
+def _media_origin():
+    """Where a platform can reach this app. The scheduler runs on a worker
+    thread with no request to infer a host from, so the environment has to say
+    it; _callback_origin's request fallback only helps inside a request."""
+    explicit = (os.getenv('PUBLIC_BASE_URL')
+                or _get_setting('public_base_url') or '').strip().rstrip('/')
+    if explicit:
+        return explicit
+    try:
+        return _callback_origin()
+    except Exception:
+        return ''
+
+
+# X takes the bytes itself. Images go in one call; video has to be cut into
+# chunks and then waited on, because the upload finishing is not the same as
+# the file being ready to attach.
+X_UPLOAD_API = 'https://api.x.com/2/media/upload'
+X_CHUNK_BYTES = 4 * 1024 * 1024
+X_MEDIA_WAIT_SECONDS = 180
+
+
+def _x_upload_call(access_token, fields, files=None, method='POST', query=''):
+    """One multipart (or query-only) call to the media endpoint. urllib has no
+    multipart of its own, so the body is built here."""
+    import uuid as _uuid
+    url = X_UPLOAD_API + (('?' + query) if query else '')
+    headers = {'Authorization': f'Bearer {access_token}'}
+    data = None
+    if files or fields:
+        boundary = '----aimc' + _uuid.uuid4().hex
+        buf = bytearray()
+        for k, v in (fields or {}).items():
+            buf += (f'--{boundary}\r\nContent-Disposition: form-data; name="{k}"'
+                    f'\r\n\r\n{v}\r\n').encode()
+        for k, (filename, blob, mime) in (files or {}).items():
+            buf += (f'--{boundary}\r\nContent-Disposition: form-data; name="{k}";'
+                    f' filename="{filename}"\r\nContent-Type: {mime}\r\n\r\n').encode()
+            buf += blob + b'\r\n'
+        buf += f'--{boundary}--\r\n'.encode()
+        data = bytes(buf)
+        headers['Content-Type'] = f'multipart/form-data; boundary={boundary}'
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            raw = r.read()
+            return json.loads(raw) if raw else {}
+    except url_error.HTTPError as e:
+        raise _x_http_error(e) from None
+
+
+def _x_media_upload(persona, blob, mime, kind='image'):
+    """Upload one file to X and return its media id, ready to attach to a
+    tweet. Raises with X's own message on failure."""
+    tokens = _load_x_tokens()
+    token = (tokens.get(persona) or {}).get('access_token')
+    if not token:
+        raise RuntimeError(f'No X account connected for persona "{persona}".')
+    category = 'tweet_video' if kind == 'video' else 'tweet_image'
+
+    if kind != 'video':
+        res = _x_upload_call(token, {'media_category': category},
+                             files={'media': ('upload', blob, mime)})
+        mid = str((res.get('data') or res).get('id') or res.get('media_id_string') or '')
+        if not mid:
+            raise RuntimeError(f'X returned no media id: {res}')
+        return mid
+
+    # INIT / APPEND / FINALIZE. The segments are indexed, not streamed, so a
+    # failure part-way names the chunk that broke rather than the whole file.
+    init = _x_upload_call(token, {
+        'command': 'INIT', 'total_bytes': str(len(blob)),
+        'media_type': mime, 'media_category': category})
+    mid = str((init.get('data') or init).get('id')
+              or init.get('media_id_string') or '')
+    if not mid:
+        raise RuntimeError(f'X refused the upload: {init}')
+    for i in range(0, (len(blob) + X_CHUNK_BYTES - 1) // X_CHUNK_BYTES):
+        chunk = blob[i * X_CHUNK_BYTES:(i + 1) * X_CHUNK_BYTES]
+        _x_upload_call(token,
+                       {'command': 'APPEND', 'media_id': mid, 'segment_index': str(i)},
+                       files={'media': ('chunk', chunk, 'application/octet-stream')})
+    fin = _x_upload_call(token, {'command': 'FINALIZE', 'media_id': mid})
+    _x_media_wait(token, mid, fin)
+    return mid
+
+
+def _x_media_wait(access_token, media_id, finalize_res):
+    """Wait for X to finish transcoding. FINALIZE returning is not the file
+    being usable, and attaching it too early fails the tweet, not the upload."""
+    info = ((finalize_res.get('data') or finalize_res).get('processing_info')
+            or finalize_res.get('processing_info') or {})
+    waited = 0
+    while info and info.get('state') in ('pending', 'in_progress'):
+        delay = max(1, int(info.get('check_after_secs') or 5))
+        if waited + delay > X_MEDIA_WAIT_SECONDS:
+            raise RuntimeError('X is still processing that video — try a shorter clip.')
+        time.sleep(delay)
+        waited += delay
+        res = _x_upload_call(access_token, {}, method='GET',
+                             query=urllib.parse.urlencode(
+                                 {'command': 'STATUS', 'media_id': media_id}))
+        info = ((res.get('data') or res).get('processing_info')
+                or res.get('processing_info') or {})
+    if info and info.get('state') == 'failed':
+        err = (info.get('error') or {}).get('message') or 'X could not process that file'
+        raise RuntimeError(err)
 
 
 def _x_http_error(e):
@@ -15599,16 +15839,53 @@ def _threads_call(persona, method, path, params=None, body=None):
     return _threads_api(method, url, body=body)
 
 
-def _threads_publish(persona, text, reply_to_id=None):
-    """Two-step publish: create a text container, then publish it. Returns media id."""
+# A video container is assembled asynchronously, so it has to report FINISHED
+# before it can be published. An image container is ready as soon as it exists.
+THREADS_CONTAINER_WAIT_SECONDS = 180
+
+
+def _threads_container_wait(persona, creation_id):
+    """Block until Threads has finished building the container, or say why it
+    never will. Publishing an unfinished container is rejected, and the error
+    that comes back does not mention the video."""
+    waited, delay = 0, 5
+    while waited < THREADS_CONTAINER_WAIT_SECONDS:
+        res = _threads_call(persona, 'GET', f'/{creation_id}',
+                            params={'fields': 'status,error_message'})
+        status = str(res.get('status') or '').upper()
+        if status == 'FINISHED':
+            return
+        if status in ('ERROR', 'EXPIRED'):
+            raise RuntimeError(res.get('error_message')
+                               or f'Threads could not build that post ({status}).')
+        time.sleep(delay)
+        waited += delay
+    raise RuntimeError('Threads is still processing that video — try a shorter clip.')
+
+
+def _threads_publish(persona, text, reply_to_id=None, media=None):
+    """Two-step publish: create a container, then publish it. Returns media id.
+
+    Threads collects the file from a URL rather than taking an upload, which is
+    why media has to be publicly reachable before this is called."""
     uid = _threads_uid(persona)
     params = {'media_type': 'TEXT', 'text': text[:500]}
+    kind = ''
+    if media:
+        kind = media.get('kind') or 'image'
+        url = _media_public_url(media)
+        if kind == 'video':
+            params['media_type'], params['video_url'] = 'VIDEO', url
+        else:
+            params['media_type'], params['image_url'] = 'IMAGE', url
     if reply_to_id:
         params['reply_to_id'] = reply_to_id
     created = _threads_call(persona, 'POST', f'/{uid}/threads', params=params)
     creation_id = created.get('id')
     if not creation_id:
         raise RuntimeError(f'Threads container failed: {created}')
+    if kind == 'video':
+        _threads_container_wait(persona, creation_id)
     published = _threads_call(persona, 'POST', f'/{uid}/threads_publish',
                               params={'creation_id': creation_id})
     return published.get('id', '')

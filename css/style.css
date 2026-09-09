@@ -3614,3 +3614,44 @@ body.embedding .form-area { padding: 0; overflow: hidden; }
   .pl-wrap { padding: 18px 16px 64px; }
   .pl-head-r { margin-left: 0; }
 }
+
+/* Media on a planned post. The strip is the persona's library filtered to what
+   the channel will take, so an impossible pairing is never offered rather than
+   refused after the fact. */
+.pl-picked { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; min-height: 30px; }
+.pl-strip {
+  display: flex; gap: 6px; overflow-x: auto; padding: 8px 0 2px;
+  scrollbar-width: thin;
+}
+.pl-pick {
+  flex: 0 0 auto; padding: 0; border: 2px solid transparent; border-radius: var(--r-sm);
+  background: none; cursor: pointer; line-height: 0;
+}
+.pl-pick:hover { border-color: var(--border); }
+.pl-pick.on { border-color: var(--accent); }
+.pl-thumb {
+  position: relative; display: inline-block; width: 54px; height: 54px;
+  border-radius: var(--r-xs); overflow: hidden; background: var(--surface);
+  flex: 0 0 auto;
+}
+.pl-thumb img, .pl-thumb video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pl-thumb.is-picked { width: 64px; height: 64px; }
+.pl-thumb.is-card { width: 100%; height: 62px; border-radius: var(--r-xs); margin: 2px 0; }
+/* The one place a literal colour is right: this label sits on top of whatever
+   the creator uploaded, so it needs a scrim that works over any photo in either
+   theme rather than a token that follows the page. */
+.pl-thumb-tag {
+  position: absolute; right: 2px; bottom: 2px;
+  font-size: 0.55rem; font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase;
+  padding: 1px 4px; border-radius: 3px;
+  background: rgba(0, 0, 0, 0.62); color: #fff; line-height: 1.4;
+}
+/* A clip in the vault renders its first frame; the label says what it is, since
+   a still frame and a photo look identical. */
+.vault-item video, .outfit-photo video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.vault-kind {
+  position: absolute; left: 4px; bottom: 4px;
+  font-size: 0.58rem; font-weight: 700; letter-spacing: 0.4px; text-transform: uppercase;
+  padding: 1px 5px; border-radius: 3px;
+  background: rgba(0, 0, 0, 0.62); color: #fff;
+}

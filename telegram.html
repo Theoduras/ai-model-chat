@@ -282,7 +282,11 @@
       </div>
 
       <div id="outfit-list" style="display:flex;flex-direction:column;gap:8px;"></div>
-      <input type="file" id="outfit-file-input" accept="image/*" multiple style="display:none;" onchange="onMediaFiles(event)">
+      <input type="file" id="outfit-file-input" accept="image/*,video/*" multiple style="display:none;" onchange="onMediaFiles(event)">
+      <div style="margin-top:8px; display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+        <button type="button" class="btn-section-save" style="margin-left:0;" onclick="addHostedMedia()">Add a hosted video</button>
+        <span class="hint" style="margin:0;">A clip over 12MB lives wherever you host it — paste the link and the vault keeps the reference.</span>
+      </div>
       <span class="hint">
         <b>Purpose</b> marks what a shot is for: Main (profile), Tease (flirty preview),
         Behind-the-scenes, Custom. Lighting and place come from the outfit, so every
@@ -957,7 +961,7 @@ function photoTile(it, outfitN) {
          ondragover="onPhotoDragOver(event,'${it.id}','${n}')"
          ondragleave="onPhotoDragLeave(event)"
          ondrop="onPhotoDrop(event,'${it.id}','${n}')">
-      <img src="${it.thumb}" alt="" draggable="false">
+      ${vaultThumbTag(it)}
       <button type="button" class="rm" title="Remove from this outfit (stays in the vault)"
         onclick="event.stopPropagation();unlinkFromOutfit('${it.id}','${n}')">×</button>
       <select title="Purpose" onchange="updateMedia('${it.id}','purpose',this.value)">
@@ -1017,6 +1021,15 @@ function vaultVisible() {
 function setVaultFilter(v) { vaultFilter = v; renderVault(); }
 
 function renderVault() {
+// A vault item is a photo or a clip. A <video> with no controls renders its
+// first frame, which is the thumbnail we would otherwise have to generate.
+function vaultThumbTag(it) {
+  return (it.kind === 'video')
+    ? `<video src="${it.thumb}" muted playsinline preload="metadata" draggable="false"></video>
+       <span class="vault-kind">video</span>`
+    : `<img src="${it.thumb}" alt="" draggable="false">`;
+}
+
   const grid = document.getElementById('vault-grid');
   if (!grid) return;
   const items = vaultVisible();
@@ -1033,12 +1046,12 @@ function renderVault() {
            onclick="toggleVaultSelect('${v.id}')"
            draggable="true" ondragstart="onVaultItemDragStart(event,'${v.id}')"
            ondragend="onPhotoDragEnd(event)">
-        <img src="${v.thumb}" alt="" draggable="false">
+        ${vaultThumbTag(v)}
         ${badge}
         <button type="button" class="rm" title="Delete from vault"
           onclick="event.stopPropagation();vaultDeleteOne('${v.id}')">×</button>
       </div>`;
-  }).join('') : `<div class="vault-empty">No photos yet — upload some, or generate them in an outfit.</div>`;
+  }).join('') : `<div class="vault-empty">Nothing here yet — upload photos or a clip, or generate them in an outfit.</div>`;
 
   const count = document.getElementById('vault-count');
   if (count) count.textContent = mediaVault.length ? `(${mediaVault.length})` : '';
@@ -1274,26 +1287,56 @@ async function persistMediaOrder() {
 }
 
 // Shared by the file picker and by dropping files onto an outfit.
+// Inline bytes become a database row, so a long clip is refused here rather
+// than at the server, where the whole file would have travelled first.
+const MEDIA_INLINE_MAX = 12 * 1024 * 1024;
+
 async function uploadMediaFiles(files, outfitN) {
   if (!currentSlug) { setMediaStatus('Save the persona first.', false); return; }
-  setMediaStatus('Uploading ' + files.length + ' photo(s)…', null);
+  setMediaStatus('Uploading ' + files.length + ' file(s)…', null);
   const readAsDataURL = f => new Promise(res => {
     const r = new FileReader(); r.onload = e => res(e.target.result); r.readAsDataURL(f);
   });
-  let added = 0;
+  let added = 0, toobig = 0;
   for (const file of files) {
+    if (file.size > MEDIA_INLINE_MAX) { toobig++; continue; }
     try {
       const image = await readAsDataURL(file);
       await fetch('/api/personas/' + currentSlug + '/media', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image, outfit: outfitN ? String(outfitN) : '' })
+        body: JSON.stringify({ image, mime: file.type || '',
+                               outfit: outfitN ? String(outfitN) : '' })
       });
       added++;
     } catch (e) {}
   }
   openOutfit = outfitN;
   await loadMedia();
-  setMediaStatus(added ? '✓ Added ' + added + ' photo(s)' : 'Upload failed.', !!added);
+  const note = toobig
+    ? ' ' + toobig + ' were over 12MB — host those and paste the link.'
+    : '';
+  setMediaStatus(added ? '✓ Added ' + added + ' file(s).' + note
+                       : ('Nothing added.' + note), !!added);
+}
+
+// A clip too big to store inline: we keep the link, and every channel that
+// fetches media follows it.
+async function addHostedMedia() {
+  if (!currentSlug) { setMediaStatus('Save the persona first.', false); return; }
+  const url = (prompt('Public link to the video (mp4):', '') || '').trim();
+  if (!url) return;
+  if (!/^https?:\/\//i.test(url)) { setMediaStatus('That is not an http link.', false); return; }
+  setMediaStatus('Adding the link…', null);
+  try {
+    const res = await fetch('/api/personas/' + currentSlug + '/media', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source_url: url, mime: 'video/mp4' })
+    });
+    const d = await res.json();
+    if (!d.ok) { setMediaStatus(d.error || 'Could not add it.', false); return; }
+    await loadMedia();
+    setMediaStatus('✓ Video linked', true);
+  } catch (e) { setMediaStatus('Could not add it.', false); }
 }
 
 // Copy a photo from the Photos tab into an outfit, so the face set and the

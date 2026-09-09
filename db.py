@@ -149,7 +149,13 @@ class PersonaMedia(Base):
 
     id = Column(String(32), primary_key=True, default=_uid)
     slug = Column(String(64), nullable=False, index=True)
-    image_data = Column(Text, nullable=False)
+    # Inline bytes as a data URL. Images always live here; a short clip may too.
+    # Anything longer is referenced by source_url instead, because a video in a
+    # text column is a row nobody can afford to read.
+    image_data = Column(Text, nullable=False, default='')
+    kind = Column(String(8), default='image')      # image | video
+    mime = Column(String(60), default='')
+    source_url = Column(String(600), default='')   # externally hosted, if any
     location = Column(String(120), default='')
     outfit = Column(String(120), default='')
     lighting = Column(String(60), default='')
@@ -1054,6 +1060,9 @@ class ScheduledPost(Base):
     posted_at = Column(DateTime)
     external_id = Column(String(64))               # the tweet or thread it became
     error = Column(String(300))
+    # One item from the persona's library. A reference rather than a copy, so
+    # editing the photo edits every post still waiting to use it.
+    media_id = Column(String(32), default='')
     created_at = Column(DateTime, default=_now)
 
 
@@ -1061,8 +1070,9 @@ Index('ix_scheduled_due', ScheduledPost.status, ScheduledPost.run_at)
 Index('ix_scheduled_persona', ScheduledPost.persona, ScheduledPost.run_at)
 
 
-def queue_post(session, persona, platform, text, run_at):
-    row = ScheduledPost(persona=persona, platform=platform, text=text, run_at=run_at)
+def queue_post(session, persona, platform, text, run_at, media_id=''):
+    row = ScheduledPost(persona=persona, platform=platform, text=text,
+                        run_at=run_at, media_id=media_id or '')
     session.add(row)
     session.flush()
     return row
@@ -1130,16 +1140,21 @@ def cancel_post(session, persona, post_id):
     return bool(n)
 
 
-def update_post(session, persona, post_id, text=None, run_at=None):
+def update_post(session, persona, post_id, text=None, run_at=None, media_id=None):
     """Edit a post that has not gone out yet. Like cancel_post, only a `queued`
     row is the caller's to touch: once the worker has claimed it the send may
     already be away, and once it has posted the text is history rather than a
-    draft. Returns whether anything was changed."""
+    draft. Returns whether anything was changed.
+
+    `media_id` of '' detaches the media; None leaves it alone. They are
+    different answers, so an empty string cannot mean "unchanged" here."""
     fields = {}
     if text is not None:
         fields['text'] = text
     if run_at is not None:
         fields['run_at'] = run_at
+    if media_id is not None:
+        fields['media_id'] = media_id
     if not fields:
         return False
     n = (session.query(ScheduledPost)
@@ -1326,6 +1341,7 @@ def init_db():
                          ('funnel_posteriors', FunnelPosterior),
                          ('fan_rewards', FanReward),
                          ('scheduled_posts', ScheduledPost),
+                         ('persona_media', PersonaMedia),
                          ('link_clicks', LinkClick)):
         try:
             _sync_columns(table, model)
