@@ -28,12 +28,6 @@ COPY . .
 
 EXPOSE 8080
 
-# Cloud Run sets $PORT; gunicorn binds to it. One worker with threads keeps
-# memory low while handling concurrent chat requests; bump --workers as needed.
-#
-# Under Xvfb, so the sign-in browser has a display to be headful on. Headless
-# Chrome announces itself in its user agent and its page is never focused, and
-# the human check fails it on both. `-a` picks a free display and exports
-# DISPLAY, which is what of_connect reads to decide.
-CMD exec xvfb-run -a -s "-screen 0 1920x1080x24" \
-      gunicorn --bind :$PORT --workers 1 --threads 8 --timeout 120 app:app
+# Cloud Run sets $PORT; gunicorn binds to it. start.sh brings up the display the
+# sign-in browser needs first, then hands over to gunicorn.
+CMD ["/bin/sh", "/app/start.sh"]
