@@ -32,6 +32,13 @@ OF_MAX_PAGES = 20
 # cannot be sent at all, so the caller is told rather than the send failing.
 OF_PRICE_MIN_USD = 3.0
 OF_PRICE_MAX_USD = 200.0
+# Cloudflare sits in front of OnlyFansAPI and blocks requests whose signature
+# doesn't look like a browser's — urllib's own default User-Agent
+# ("Python-urllib/3.x") is exactly what it fingerprints, and the block (error
+# 1010) lands before OnlyFansAPI's own code ever runs. A normal browser header
+# set clears it; nothing else about the request needs to change.
+OF_USER_AGENT = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                 '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36')
 
 _TAG_RE = re.compile(r'<[^>]+>')
 _WS_RE = re.compile(r'[ \t]+')
@@ -63,7 +70,8 @@ def call(method, path, body=None, idem=None, key=None, timeout=OF_TIMEOUT):
         raise OnlyFansApiError(0, 'no OnlyFansAPI key configured')
     url = path if path.startswith('http') else OF_API_BASE + path
     headers = {'Authorization': f'Bearer {token}',
-               'Content-Type': 'application/json', 'Accept': 'application/json'}
+               'Content-Type': 'application/json', 'Accept': 'application/json',
+               'User-Agent': OF_USER_AGENT, 'Accept-Language': 'en-US,en;q=0.9'}
     if idem:
         headers['Idempotency-Key'] = idem
     data = json.dumps(body).encode() if body is not None else None
