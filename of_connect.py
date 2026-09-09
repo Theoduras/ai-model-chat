@@ -229,7 +229,7 @@ class Attempt:
                 try:
                     self._apply(page, kind, kw)
                 except Exception as e:
-                    logger.debug('input to the hosted browser failed: %s', str(e)[:120])
+                    logger.warning('input to the hosted browser failed: %s', str(e)[:120])
             if quit_now:
                 break
             self._capture(page)
