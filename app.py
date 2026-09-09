@@ -1720,7 +1720,13 @@ _OPEN_PATHS = ('/login', '/register', '/logout', '/pricing', '/billing',
                # the opener via postMessage — no session to require, same as
                # a webhook.
                '/api/fanvue/oauth-redirect', '/api/x/oauth-redirect',
-               '/api/threads/oauth-redirect')
+               '/api/threads/oauth-redirect',
+               # Meta posts these itself: the webhook, and the two callbacks it
+               # requires an app to expose. Each carries its own proof — the
+               # verify token, or a signed_request checked against the app
+               # secret — so a sign-in redirect would only look like an outage.
+               '/api/threads/webhook', '/api/threads/uninstall',
+               '/api/threads/delete', '/api/threads/deletion-status')
 
 
 # Longest prefix wins in every map below, so a specific path can carry a
@@ -17162,6 +17168,98 @@ def api_threads_auto_run():
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 500
     return jsonify({'ok': True, 'actions': actions, 'log': log, 'replies': replies})
+
+
+def _meta_signed_request(raw):
+    """Decode Meta's signed_request, verifying it against the app secret.
+
+    Both callbacks below are unauthenticated routes Meta posts to, so the
+    signature is the only thing separating a real notice from anyone who can
+    guess a user id. Returns the payload, or None if it does not verify.
+    """
+    import base64
+
+    def unpad(s):
+        return base64.urlsafe_b64decode(s + '=' * (-len(s) % 4))
+
+    secret = _get_setting('threads_client_secret') or ''
+    if not secret or not raw or '.' not in raw:
+        return None
+    encoded_sig, payload = raw.split('.', 1)
+    try:
+        sig = unpad(encoded_sig)
+        data = json.loads(unpad(payload))
+    except Exception:
+        return None
+    if (data.get('algorithm') or '').upper() != 'HMAC-SHA256':
+        return None
+    expected = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).digest()
+    if not hmac.compare_digest(sig, expected):
+        return None
+    return data
+
+
+def _threads_forget_user(user_id):
+    """Drop every persona connected to that Threads account. Returns the slugs."""
+    user_id = str(user_id or '')
+    if not user_id:
+        return []
+    tokens = _threads_load_tokens()
+    gone = [slug for slug, t in tokens.items() if str(t.get('user_id') or '') == user_id]
+    for slug in gone:
+        tokens.pop(slug, None)
+    if gone:
+        _threads_save_tokens(tokens)
+    return gone
+
+
+@app.route('/api/threads/uninstall', methods=['POST'])
+def api_threads_uninstall():
+    """Meta calls this when someone removes the app from their Threads account.
+    The token is dead at that point, so drop it rather than keep failing with it."""
+    data = _meta_signed_request(request.form.get('signed_request', ''))
+    if data is None:
+        logger.warning('THREADS uninstall callback with a bad signature')
+        return jsonify({'ok': False}), 400
+    gone = _threads_forget_user(data.get('user_id'))
+    logger.info('THREADS uninstalled by user %s, disconnected: %s',
+                data.get('user_id'), ', '.join(gone) or 'nothing')
+    return jsonify({'ok': True}), 200
+
+
+@app.route('/api/threads/delete', methods=['POST'])
+def api_threads_delete():
+    """Meta's data-deletion request. Everything held for a Threads account is
+    its token, so deletion is the same disconnect, and Meta wants a code the
+    user can check the outcome with."""
+    data = _meta_signed_request(request.form.get('signed_request', ''))
+    if data is None:
+        logger.warning('THREADS deletion callback with a bad signature')
+        return jsonify({'ok': False}), 400
+    user_id = str(data.get('user_id') or '')
+    gone = _threads_forget_user(user_id)
+    code = hashlib.sha256(f'threads:{user_id}'.encode()).hexdigest()[:16]
+    logger.info('THREADS deletion request for user %s, disconnected: %s',
+                user_id, ', '.join(gone) or 'nothing')
+    origin = _media_origin() or _request_origin()
+    return jsonify({'url': f'{origin}/api/threads/deletion-status?code={code}',
+                    'confirmation_code': code}), 200
+
+
+@app.route('/api/threads/deletion-status', methods=['GET'])
+def api_threads_deletion_status():
+    """Where the confirmation code above points. Nothing is queued — the data
+    is gone by the time the code is issued — so this only says so."""
+    code = (request.args.get('code') or '').strip()
+    # The code is echoed into the page, so accept only the hex it is issued as.
+    if not re.fullmatch(r'[0-9a-f]{16}', code):
+        return 'No valid confirmation code given.', 400
+    return (f'<!DOCTYPE html><html><head><meta charset="utf-8">'
+            f'<title>Threads data deletion</title></head><body>'
+            f'<h2>Deletion complete</h2><p>Confirmation code: <code>{code}</code></p>'
+            f'<p>The Threads access token for that account was deleted. '
+            f'No other data from Threads is kept.</p></body></html>',
+            200, {'Content-Type': 'text/html; charset=utf-8'})
 
 
 @app.route('/api/threads/webhook', methods=['GET', 'POST'])
