@@ -16186,6 +16186,127 @@ def api_onlyfans_set_account():
                     'account': account, 'meta': _of_account_meta(persona)})
 
 
+
+# ── Signing a creator's OnlyFans account in ───────────────────────────────────
+# A creator signs in here, in our own dashboard, not on OnlyFansAPI's. Their
+# password is relayed straight through and never stored, logged or echoed back:
+# only the attempt id lives on our side, and only until the attempt finishes.
+#
+# OnlyFans answers a sign-in with one of three things — done, a 2FA code, or a
+# face check — so the console polls the attempt and asks for whatever comes
+# back. The face check has a hard limit of 3 a day per account, which is why a
+# started attempt is resumed rather than restarted.
+
+def _of_attempt(persona):
+    return (_get_setting(f'onlyfans_attempt_{persona}') or '').strip()
+
+
+def _of_adopt(persona, read):
+    """Attach a finished sign-in to the persona."""
+    _set_setting(f'onlyfans_account_{persona}', read['account_id'])
+    _set_setting(f'onlyfans_account_meta_{persona}', json.dumps({
+        'onlyfans_id': read['onlyfans_id'], 'username': read['username'],
+        'name': read['name']}))
+    _set_setting(f'onlyfans_attempt_{persona}', '')
+    # A different account on the same persona must not inherit the old one's
+    # place in every conversation.
+    _set_setting(PLAT_ONLYFANS.k('cursor', persona), '{}')
+    _log_x_event('onlyfans_connect', persona=persona, x_username=read['username'])
+
+
+@app.route('/api/onlyfans/connect/start', methods=['POST'])
+@platform_scoped
+def api_onlyfans_connect_start():
+    d = request.json or {}
+    persona = (d.get('persona') or '').strip()
+    if not persona:
+        return jsonify({'ok': False, 'error': 'persona required'}), 400
+    if not OF.configured():
+        return jsonify({'ok': False, 'error': 'This deployment has no OnlyFansAPI '
+                                              'key yet.'}), 400
+    mobile = bool(d.get('mobile'))
+    try:
+        res = OF.auth_start(email=(d.get('email') or '').strip(),
+                            password=d.get('password') or '',
+                            name=persona,
+                            proxy_country=(d.get('proxy_country') or '').strip(),
+                            mobile=mobile)
+    except OF.OnlyFansApiError as e:
+        return jsonify({'ok': False, 'error': str(e)[:300]}), 400
+    read = OF.auth_read(res)
+    attempt = read['attempt_id'] or str((res or {}).get('attempt_id') or '')
+    if not attempt:
+        return jsonify({'ok': False, 'error': 'OnlyFansAPI did not start a sign-in '
+                                              'attempt.'}), 400
+    _set_setting(f'onlyfans_attempt_{persona}', attempt)
+    read['attempt_id'] = attempt
+    read['deeplink'] = read['deeplink'] or str((res or {}).get('mobile_auth_session_deeplink') or '')
+    return jsonify({'ok': True, 'attempt': read})
+
+
+@app.route('/api/onlyfans/connect/status')
+@platform_scoped
+def api_onlyfans_connect_status():
+    persona = (request.args.get('persona') or '').strip()
+    attempt = _of_attempt(persona)
+    if not attempt:
+        return jsonify({'ok': True, 'attempt': None})
+    try:
+        read = OF.auth_read(OF.auth_status(attempt))
+    except OF.OnlyFansApiError as e:
+        return jsonify({'ok': False, 'error': str(e)[:300]}), 400
+    read['attempt_id'] = read['attempt_id'] or attempt
+    if read['done']:
+        _of_adopt(persona, read)
+    return jsonify({'ok': True, 'attempt': read})
+
+
+@app.route('/api/onlyfans/connect/code', methods=['POST'])
+@platform_scoped
+def api_onlyfans_connect_code():
+    """The 2FA code, or word that the browser face check is finished."""
+    d = request.json or {}
+    persona = (d.get('persona') or '').strip()
+    attempt = _of_attempt(persona)
+    if not attempt:
+        return jsonify({'ok': False, 'error': 'No sign-in is in progress.'}), 400
+    try:
+        OF.auth_submit(attempt, code=(d.get('code') or '').strip(),
+                       face_done=bool(d.get('face_done')))
+        read = OF.auth_read(OF.auth_status(attempt))
+    except OF.OnlyFansApiError as e:
+        return jsonify({'ok': False, 'error': str(e)[:300]}), 400
+    read['attempt_id'] = read['attempt_id'] or attempt
+    if read['done']:
+        _of_adopt(persona, read)
+    return jsonify({'ok': True, 'attempt': read})
+
+
+@app.route('/api/onlyfans/connect/email-otp', methods=['POST'])
+@platform_scoped
+def api_onlyfans_connect_email_otp():
+    """Have OnlyFansAPI email the creator their code, for when the phone the
+    text went to is not to hand."""
+    persona = ((request.json or {}).get('persona') or '').strip()
+    attempt = _of_attempt(persona)
+    if not attempt:
+        return jsonify({'ok': False, 'error': 'No sign-in is in progress.'}), 400
+    try:
+        OF.auth_email_otp(attempt)
+    except OF.OnlyFansApiError as e:
+        return jsonify({'ok': False, 'error': str(e)[:300]}), 400
+    return jsonify({'ok': True})
+
+
+@app.route('/api/onlyfans/connect/cancel', methods=['POST'])
+@platform_scoped
+def api_onlyfans_connect_cancel():
+    persona = ((request.json or {}).get('persona') or '').strip()
+    if persona:
+        _set_setting(f'onlyfans_attempt_{persona}', '')
+    return jsonify({'ok': True})
+
+
 @app.route('/api/onlyfans/status')
 @platform_scoped
 def api_onlyfans_status():
@@ -16193,6 +16314,7 @@ def api_onlyfans_status():
     meta = _of_account_meta(persona)
     return jsonify({'connected': PLAT_ONLYFANS.connected(persona),
                     'configured': OF.configured(),
+                    'signing_in': bool(_of_attempt(persona)),
                     'account': _of_account(persona),
                     'username': meta.get('username', ''),
                     'webhook_ready': bool(_of_webhook_secrets()),
@@ -16206,6 +16328,7 @@ def api_onlyfans_disconnect():
     if persona:
         _set_setting(f'onlyfans_account_{persona}', '')
         _set_setting(f'onlyfans_account_meta_{persona}', '{}')
+        _set_setting(f'onlyfans_attempt_{persona}', '')
         _set_setting(PLAT_ONLYFANS.k('cursor', persona), '{}')
     return jsonify({'ok': True})
 

@@ -200,8 +200,15 @@ Cloud Run pings `GET /healthz`, which returns `{"status":"ok"}`.
 
 OnlyFans has no public chat API, so `/onlyfans` talks to
 [OnlyFansAPI.com](https://app.onlyfansapi.com). One API key serves the whole
-deployment; each creator's OnlyFans account is signed in once in the
-OnlyFansAPI console and then picked from a list in our own console.
+deployment and is set once, ever. Creators sign their own OnlyFans account in
+from `/onlyfans` — email, password, then whatever OnlyFans asks for next (a
+texted code, an authenticator code, or a face check). Their password is relayed
+straight to OnlyFans and never stored here.
+
+An account whose OnlyFans profile uses the newer v2 face check cannot finish
+through any browser flow, ours or OnlyFansAPI's own — it needs OnlyFansAPI's
+Auth+ iPhone app. The console offers that as a second button, which hands back
+a deeplink to open on the phone.
 
 | Variable | Why |
 |---|---|

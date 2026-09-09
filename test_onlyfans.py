@@ -295,6 +295,85 @@ def test_round_end_to_end():
     check('the same message is not answered again', not sent, sent)
     restore()
 
+def test_signin_flow():
+    """Signing a creator in from our own dashboard: the password is relayed and
+    forgotten, 2FA and the face check are asked for, and the finished account
+    attaches itself to the persona."""
+    store, calls = {}, []
+    app._get_setting = lambda k, d=None: store.get(k, d)
+    app._set_setting = lambda k, v: store.__setitem__(k, v)
+    app._log_x_event = lambda *a, **k: None
+    app.db_list_personas = lambda *a, **k: [{'slug': 'lilly'}]
+    # The console's own routes are behind the operator/owner guard; an admin
+    # caller is the shortest way past it that does not weaken the guard itself.
+    app._current_user = lambda: {'id': 1, 'email': 'her@example.com',
+                                 'is_admin': True, 'status': 'active'}
+    OF.api_key = lambda: 'team-key'
+    client = app.app.test_client()
+
+    stage = {'now': {'attempt_id': 'auth_1',
+                     'lastAttempt': {'needs_otp': True, 'otp_phone_ending': '42'}}}
+
+    def fake_call(method, path, body=None, idem=None, key=None, timeout=None):
+        calls.append((method, path, body))
+        if method == 'POST' and path == '/api/authenticate':
+            return {'attempt_id': 'auth_1'}
+        return stage['now']
+
+    OF.call = fake_call
+
+    r = client.post('/api/onlyfans/connect/start', json={
+        'persona': 'lilly', 'email': 'her@example.com', 'password': 'hunter2'}).get_json()
+    check('the sign-in starts', r.get('ok'), r)
+    check('the attempt id is kept', store.get('onlyfans_attempt_lilly') == 'auth_1', store)
+    check('the password is never written down',
+          not any('hunter2' in str(v) for v in store.values()), store)
+    check('and it left us once, in the sign-in call only',
+          sum(1 for c in calls if 'hunter2' in str(c[2] or {})) == 1, calls)
+
+    r = client.get('/api/onlyfans/connect/status?persona=lilly').get_json()
+    check('a code is asked for', r['attempt']['needs_otp'], r)
+    check('and the console can say where it went',
+          r['attempt']['otp_phone_ending'] == '42', r)
+
+    # A wrong code must leave the attempt open rather than start over: the face
+    # check that may follow is limited to three a day.
+    stage['now'] = {'attempt_id': 'auth_1',
+                    'lastAttempt': {'needs_otp': True, 'error_message': 'wrong code',
+                                    'error_code': 'WRONG_2FA'}}
+    r = client.post('/api/onlyfans/connect/code',
+                    json={'persona': 'lilly', 'code': '000000'}).get_json()
+    check('a wrong code says so', r['attempt']['error'] == 'wrong code', r)
+    check('and the attempt is still open to try again',
+          store.get('onlyfans_attempt_lilly') == 'auth_1', store)
+
+    stage['now'] = {'attempt_id': 'auth_1', 'lastAttempt': {
+        'needs_face_otp': True, 'face_otp_verification_url': 'https://of/face'}}
+    r = client.get('/api/onlyfans/connect/status?persona=lilly').get_json()
+    check('a face check is surfaced with its link',
+          r['attempt']['needs_face'] and r['attempt']['face_url'] == 'https://of/face', r)
+
+    stage['now'] = {'attempt_id': 'auth_1', 'state': 'authenticated',
+                    'progress': 'signed_in', 'lastAttempt': {'success': True},
+                    'account': {'id': 'acct_9', 'display_name': 'Lilly',
+                                'onlyfans_data': {'id': 77, 'username': 'lilly_x'}}}
+    r = client.post('/api/onlyfans/connect/code',
+                    json={'persona': 'lilly', 'face_done': True}).get_json()
+    check('the finished sign-in is recognised', r['attempt']['done'], r)
+    check('the account is attached to the persona',
+          store.get('onlyfans_account_lilly') == 'acct_9', store)
+    check('with her own OnlyFans id, so history can tell who spoke',
+          json.loads(store['onlyfans_account_meta_lilly'])['onlyfans_id'] == '77', store)
+    check('the attempt is cleared once it is done',
+          not store.get('onlyfans_attempt_lilly'), store)
+    check('and she starts from a clean cursor rather than a year of history',
+          store.get('onlyfans_cursor_lilly') == '{}', store)
+
+    r = client.post('/api/onlyfans/connect/code',
+                    json={'persona': 'lilly', 'code': '1'}).get_json()
+    check('a code sent with no sign-in running is refused', not r.get('ok'), r)
+    restore()
+
 def test_settings_are_namespaced():
     """The two platforms must never read each other's state: one shared key
     would have OnlyFans replying with Fanvue's PPV progress."""
@@ -312,7 +391,7 @@ if __name__ == '__main__':
     for fn in (test_signature, test_strip_html, test_direction, test_chat_reading,
                test_paging, test_send_body, test_ppv_price_conversion,
                test_ppv_amount, test_webhook, test_round_end_to_end,
-               test_settings_are_namespaced):
+               test_signin_flow, test_settings_are_namespaced):
         restore()
         fn()
     restore()

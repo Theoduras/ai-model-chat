@@ -71,17 +71,72 @@
         <span class="conn-pill" id="conn-pill">—</span>
       </div>
     </div>
-    <div class="field full">
-      <label>OnlyFans account</label>
-      <select id="account"></select>
-      <span class="hint" id="account-hint">Accounts are connected in the OnlyFansAPI console; they appear here once they are signed in.</span>
+
+    <div id="signin-panel">
+      <div class="row-inline">
+        <div class="field"><label>OnlyFans email</label>
+          <input type="email" id="of-email" autocomplete="off" spellcheck="false"></div>
+        <div class="field"><label>OnlyFans password</label>
+          <input type="password" id="of-password" autocomplete="new-password"></div>
+      </div>
+      <div class="row-inline">
+        <div class="field"><label>Sign in from</label>
+          <select id="of-country">
+            <option value="">Nearest</option><option value="us">United States</option>
+            <option value="uk">United Kingdom</option>
+          </select>
+          <span class="hint">Pick the country she normally logs in from — a login from somewhere new is what makes OnlyFans ask for a code.</span>
+        </div>
+      </div>
+      <div class="row-inline">
+        <button class="btn-ai" onclick="startSignin()">Sign in to OnlyFans</button>
+        <button class="btn-ai" style="background:var(--surface); color:var(--text-2);" onclick="startSignin(true)">Use the Auth+ app instead</button>
+      </div>
+      <span class="hint">Her password is passed straight to OnlyFans to sign in and is never
+        stored here. If her account uses OnlyFans' newer face check, only the Auth+ app can
+        complete it.</span>
     </div>
-    <div class="row-inline">
-      <button class="btn-ai" onclick="saveAccount()">Use this account</button>
-      <button class="btn-ai" style="background:var(--surface); color:var(--text-2);" onclick="loadAccounts(true)">Refresh list</button>
+
+    <div id="step-otp" style="display:none;">
+      <div class="row-inline">
+        <div class="field"><label id="otp-label">Verification code</label>
+          <input type="text" id="of-code" inputmode="numeric" autocomplete="one-time-code"></div>
+        <button class="btn-ai" onclick="submitCode()">Submit code</button>
+        <button class="btn-ai" style="background:var(--surface); color:var(--text-2);" onclick="emailCode()">Email the code to her</button>
+      </div>
+    </div>
+
+    <div id="step-face" style="display:none;">
+      <span class="hint">OnlyFans wants a face check. Open the link, finish it, then press Done.
+        OnlyFans allows three of these a day, so avoid starting over.</span>
+      <div class="row-inline">
+        <a class="btn-ai" id="face-link" target="_blank" rel="noopener">Open the face check</a>
+        <button class="btn-ai" onclick="faceDone()">I've finished it</button>
+      </div>
+    </div>
+
+    <div id="step-mobile" style="display:none;">
+      <span class="hint">Open this on the iPhone running the OnlyFansAPI Auth+ app, then sign in there.</span>
+      <div class="row-inline">
+        <a class="btn-ai" id="deeplink" target="_blank" rel="noopener">Open Auth+</a>
+      </div>
+    </div>
+
+    <div class="result-box" id="account-status"></div>
+
+    <details id="account-picker" style="margin-top:14px;">
+      <summary class="hint">Already signed in elsewhere? Pick an account</summary>
+      <div class="field full" style="margin-top:10px;">
+        <select id="account"></select>
+      </div>
+      <div class="row-inline">
+        <button class="btn-ai" onclick="saveAccount()">Use this account</button>
+        <button class="btn-ai" style="background:var(--surface); color:var(--text-2);" onclick="loadAccounts(true)">Refresh list</button>
+      </div>
+    </details>
+    <div class="row-inline" style="margin-top:10px;">
       <button class="btn-ai" style="background:var(--surface); color:var(--text-2);" onclick="disconnect()">Disconnect</button>
     </div>
-    <div class="result-box" id="account-status"></div>
     <div class="result-box" id="webhook-status"></div>
   </div>
 
@@ -222,8 +277,108 @@ async function loadConfig(){
     ? '<span class="hint">Webhook ready. OnlyFansAPI posts to <code>'+esc(appCfg.webhook_url||'')+'</code>.</span>'
     : '<span class="hint" style="color:var(--warn);">No webhook signing secret. Add <code>'+esc(appCfg.webhook_url||'this app\'s /webhooks/onlyfans')+'</code> in the OnlyFansAPI console, give it a signing secret, subscribe to messages.received, users.typing, messages.ppv.unlocked and messages.sent, then set ONLYFANS_WEBHOOK_SECRET to that secret. Until then she only answers on the backup sweep.</span>';
   await loadAccounts();
+  const st=await (await fetch('/api/onlyfans/connect/status?persona='+encodeURIComponent(persona()))).json();
+  if(st.ok&&st.attempt&&!st.attempt.done){renderAttempt(st.attempt);pollAttempt();}
   await loadAuto();
   await loadPpv();
+}
+
+// ── Signing in ───────────────────────────────────────────────────────────────
+// Her password only ever exists in the field below and in the one request that
+// relays it; it is never put in a variable that outlives the call.
+let pollTimer=null;
+
+function showStep(which){
+  ['signin-panel','step-otp','step-face','step-mobile'].forEach(id=>{
+    const e=document.getElementById(id);
+    if(e)e.style.display=(id===which?'block':'none');
+  });
+}
+
+async function startSignin(mobile){
+  const box=document.getElementById('account-status');
+  const pw=document.getElementById('of-password');
+  const email=document.getElementById('of-email').value.trim();
+  if(!mobile&&(!email||!pw.value)){err(box,'Her OnlyFans email and password, please.');return;}
+  busy(box,mobile?'Opening an Auth+ session…':'Signing in to OnlyFans…');
+  const r=await post('/api/onlyfans/connect/start',{persona:persona(),
+    mobile:!!mobile, email:email, password:pw.value,
+    proxy_country:document.getElementById('of-country').value});
+  pw.value='';
+  if(!r.ok){err(box,r.error);showStep('signin-panel');return;}
+  renderAttempt(r.attempt);
+  pollAttempt();
+}
+
+function renderAttempt(a){
+  const box=document.getElementById('account-status');
+  if(!a){showStep('signin-panel');return;}
+  if(a.done){
+    stopPolling();
+    showStep(null);
+    ok(box,'Signed in as @'+(a.username||a.name||'her account')+'.');
+    loadAccounts();
+    return;
+  }
+  if(a.error){err(box,a.error);}
+  if(a.needs_face&&a.face_url){
+    document.getElementById('face-link').href=a.face_url;
+    showStep('step-face');
+    if(!a.error)busy(box,'OnlyFans wants a face check.');
+    return;
+  }
+  if(a.deeplink){
+    document.getElementById('deeplink').href=a.deeplink;
+    showStep('step-mobile');
+    if(!a.error)busy(box,'Waiting for her to finish in the Auth+ app…');
+    return;
+  }
+  if(a.needs_otp){
+    document.getElementById('otp-label').textContent=a.otp_phone_ending
+      ? ('Code texted to the number ending '+a.otp_phone_ending)
+      : 'Verification code';
+    showStep('step-otp');
+    if(!a.error)busy(box,'OnlyFans sent her a code.');
+    return;
+  }
+  if(!a.error)busy(box,'Waiting for OnlyFans…');
+}
+
+function stopPolling(){ if(pollTimer){clearInterval(pollTimer);pollTimer=null;} }
+
+function pollAttempt(){
+  stopPolling();
+  pollTimer=setInterval(async()=>{
+    const r=await (await fetch('/api/onlyfans/connect/status?persona='+encodeURIComponent(persona()))).json();
+    if(!r.ok||!r.attempt){stopPolling();return;}
+    renderAttempt(r.attempt);
+  },3000);
+}
+
+async function submitCode(){
+  const box=document.getElementById('account-status');
+  const code=document.getElementById('of-code').value.trim();
+  if(!code){err(box,'Type the code she was sent.');return;}
+  busy(box,'Checking the code…');
+  const r=await post('/api/onlyfans/connect/code',{persona:persona(),code:code});
+  document.getElementById('of-code').value='';
+  if(!r.ok){err(box,r.error);return;}
+  renderAttempt(r.attempt);
+}
+
+async function faceDone(){
+  const box=document.getElementById('account-status');
+  busy(box,'Checking with OnlyFans…');
+  const r=await post('/api/onlyfans/connect/code',{persona:persona(),face_done:true});
+  if(!r.ok){err(box,r.error);return;}
+  renderAttempt(r.attempt);
+}
+
+async function emailCode(){
+  const box=document.getElementById('account-status');
+  const r=await post('/api/onlyfans/connect/email-otp',{persona:persona()});
+  if(!r.ok){err(box,r.error);return;}
+  busy(box,'Sent — the code is in her email.');
 }
 
 async function loadAccounts(refresh){
@@ -238,9 +393,11 @@ async function loadAccounts(refresh){
   const pill=document.getElementById('conn-pill');
   pill.textContent=d.selected?'Connected':'Not connected';
   pill.className='conn-pill '+(d.selected?'ok':'err');
+  const picker=document.getElementById('account-picker');
+  if(picker)picker.style.display=rows.length?'block':'none';
+  if(d.selected)showStep(null);
   if(d.error){err(box,d.error);}
-  else if(!rows.length){box.innerHTML='<span class="hint">No accounts connected on OnlyFansAPI yet.</span>';}
-  else if(refresh){ok(box,rows.length+' account(s) found.');}
+  else if(refresh){ok(box,rows.length+' account(s) already signed in.');}
 }
 
 async function saveAccount(){
@@ -255,7 +412,9 @@ async function saveAccount(){
 
 async function disconnect(){
   if(!confirm("Disconnect this persona's OnlyFans account?"))return;
+  stopPolling();
   await post('/api/onlyfans/disconnect',{persona:persona()});
+  showStep('signin-panel');
   await loadAccounts();
 }
 

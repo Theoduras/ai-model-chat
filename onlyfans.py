@@ -188,6 +188,84 @@ def send(account, chat_id, text, price=0, media=(), idem=None):
                 idem=idem or str(uuid.uuid4()))
 
 
+def auth_start(email='', password='', name='', proxy_country='', mobile=False):
+    """Begin signing a creator's OnlyFans account in.
+
+    The password is forwarded and forgotten in the same call — it is never
+    stored, logged or returned. `mobile` starts the Auth+ flow instead, which is
+    the only one OnlyFans' v2 face check can complete.
+
+    Returns {attempt_id, polling_url, mobile_auth_session_deeplink}.
+    """
+    body = {'auth_type': 'mobile_app' if mobile else 'email_password'}
+    if name:
+        body['name'] = name
+    if proxy_country:
+        body['proxyCountry'] = proxy_country
+    if not mobile:
+        if not email or not password:
+            raise OnlyFansApiError(0, 'an email and password are needed to sign in')
+        body['email'] = email
+        body['password'] = password
+    return call('POST', '/api/authenticate', body=body, timeout=60)
+
+
+def auth_status(attempt_id):
+    """Where a sign-in attempt has got to. Safe to poll — it costs no credits
+    and carries no credentials."""
+    return call('GET', f'/api/authenticate/{attempt_id}', timeout=30)
+
+
+def auth_submit(attempt_id, code='', face_done=False):
+    """Hand back the 2FA code the creator was sent, or say the browser face
+    check is done."""
+    body = {'selfie_verification_completed': True} if face_done else {'code': str(code)}
+    return call('PUT', f'/api/authenticate/{attempt_id}', body=body, timeout=60)
+
+
+def auth_email_otp(attempt_id):
+    """Ask OnlyFansAPI to email the creator their code, for a creator who is not
+    sat next to the phone the code was texted to."""
+    return call('POST', f'/api/authenticate/{attempt_id}/send-email-to-creator',
+                body={}, timeout=30)
+
+
+def auth_read(res):
+    """One sign-in attempt as the console needs it: what to show the creator,
+    and what to ask them for next.
+
+    OnlyFansAPI spells the same fact several ways across the attempt and its
+    lastAttempt, so the reading happens here rather than in three places."""
+    d = res.get('data') if isinstance(res, dict) and isinstance(res.get('data'), dict) else res
+    d = d if isinstance(d, dict) else {}
+    last = d.get('lastAttempt') if isinstance(d.get('lastAttempt'), dict) else {}
+    account = d.get('account') if isinstance(d.get('account'), dict) else {}
+    state = str(d.get('state') or '')
+    progress = str(d.get('progress') or '')
+    done = bool(account.get('id')) and (state == 'authenticated' or progress == 'signed_in'
+                                        or last.get('success') is True)
+    face_url = str(last.get('face_otp_verification_url')
+                   or d.get('face_otp_verification_url') or '')
+    return {
+        'attempt_id': str(d.get('attempt_id') or d.get('id') or ''),
+        'state': state, 'progress': progress, 'done': done,
+        'account_id': str(account.get('id') or ''),
+        'username': str((account.get('onlyfans_data') or {}).get('username')
+                        or account.get('onlyfans_username') or ''),
+        'onlyfans_id': str((account.get('onlyfans_data') or {}).get('id')
+                           or account.get('onlyfans_id') or ''),
+        'name': str(account.get('display_name')
+                    or (account.get('onlyfans_data') or {}).get('name') or ''),
+        'needs_otp': bool(last.get('needs_otp') or progress in ('needs-otp', 'needs-app-otp')),
+        'otp_phone_ending': str(last.get('otp_phone_ending') or ''),
+        'needs_face': bool(last.get('needs_face_otp')) or bool(face_url),
+        'face_url': face_url,
+        'deeplink': str(d.get('mobile_auth_session_deeplink') or ''),
+        'error': str(last.get('error_message') or d.get('error_message') or ''),
+        'error_code': str(last.get('error_code') or ''),
+    }
+
+
 def typing(account, chat_id):
     """Show the typing indicator. It lasts a few seconds, so it is called again
     while the reply is still being paced out."""
