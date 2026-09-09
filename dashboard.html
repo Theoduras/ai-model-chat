@@ -1916,9 +1916,65 @@ function renderForm(slug, cfg) {
           <span class="hint">Shown before the link, in her voice.</span>
         </div>
       </div>
+      <div id="growth-cta" style="display:none; margin-bottom:14px; padding:12px 14px; border:1px dashed var(--line,#3a3a3a); border-radius:10px;">
+        <div style="font-size:0.72rem; letter-spacing:0.06em; text-transform:uppercase; opacity:0.7; margin-bottom:8px;">
+          Growth beta <span id="growth-beta-state" style="text-transform:none; letter-spacing:0;"></span>
+        </div>
+        <span class="hint">A fan who was sent the link and never opened it is hesitating. On the next link she sends them these instead — a free trial, and the code if one is running.</span>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:10px;">
+          <div class="field">
+            <label>Free-trial URL</label>
+            <input type="text" id="f-trial-url" placeholder="https://fanvue.com/you?trial=…">
+            <span class="hint">Leave empty to keep sending the paid link.</span>
+          </div>
+          <div class="field">
+            <label>Free-trial Link Label</label>
+            <input type="text" id="f-trial-label" placeholder="first few days on me">
+            <span class="hint">Falls back to the CTA label above.</span>
+          </div>
+          <div class="field">
+            <label>Promo Code</label>
+            <input type="text" id="f-promo-code" placeholder="LIL20">
+            <span class="hint">Added after the label, in brackets.</span>
+          </div>
+          <div class="field">
+            <label>Promo Expires</label>
+            <input type="date" id="f-promo-expires">
+            <span class="hint">After this date the code stops going out.</span>
+          </div>
+        </div>
+      </div>
       <div id="phases-list"></div>
       <div style="margin-top:8px;">
         <button type="button" class="btn btn-ghost" onclick="addPhase()" style="font-size:0.78rem;">+ Add Phase</button>
+      </div>
+    </div>
+
+    <div class="form-section" id="growth-panel" style="display:none;">
+      <div class="section-title">
+        Growth <span style="font-weight:400; opacity:0.6; font-size:0.78rem;">operator only</span>
+        <button type="button" class="btn-section-save" onclick="saveGrowthBeta(this)">Save</button>
+      </div>
+      <span class="hint">Where fans arrive from, the link to paste on each channel, and what she has already posted. Off for every persona until you switch one on here.</span>
+      <div class="field" style="margin-top:10px;">
+        <label>Personas on the growth beta</label>
+        <input type="text" id="f-growth-beta" placeholder="lilith, nova">
+        <span class="hint">Comma-separated slugs. <code>*</code> switches it on for everyone. Empty means off everywhere.</span>
+      </div>
+      <div style="margin-top:14px;">
+        <div class="section-title" style="font-size:0.8rem;">Where they came from</div>
+        <div id="growth-sources" class="hint">—</div>
+      </div>
+      <div style="margin-top:14px;">
+        <div class="section-title" style="font-size:0.8rem;">Tagged links</div>
+        <div id="growth-links" class="hint">—</div>
+      </div>
+      <div style="margin-top:14px;">
+        <div class="section-title" style="font-size:0.8rem;">
+          Already posted
+          <button type="button" class="btn-section-save" onclick="clearGrowthRegister(this)">Clear</button>
+        </div>
+        <div id="growth-register" class="hint">—</div>
       </div>
     </div>
 
@@ -2673,6 +2729,75 @@ async function generateInterests(randomize) {
   } catch(e) { clearBusy(iBtnId, 'interests-gen-status', '✗ ' + e.message, false); }
 }
 
+// ── Growth (operator only) ──────────────────────────────────────────────────
+// Everything here is behind /api/growth/*, which is operator_only, so a
+// creator's dashboard never renders the panel and never calls the endpoints.
+async function loadGrowth() {
+  const panel = document.getElementById('growth-panel');
+  if (!panel || !currentSlug) return;
+  let me = null;
+  try { me = await (await fetch('/api/me')).json(); } catch (e) { return; }
+  if (!me || !me.is_operator) { panel.style.display = 'none'; return; }
+  panel.style.display = '';
+  try {
+    const beta = await (await fetch('/api/growth/beta')).json();
+    document.getElementById('f-growth-beta').value = (beta.personas || []).join(', ');
+  } catch (e) {}
+  try {
+    const d = await (await fetch('/api/growth/sources?persona=' + encodeURIComponent(currentSlug))).json();
+    const rows = d.sources || [];
+    document.getElementById('growth-sources').innerHTML = rows.length
+      ? '<table style="width:100%; font-size:0.78rem; border-collapse:collapse;">'
+        + '<tr><th align="left">Channel</th><th align="right">Visits</th><th align="right">Chats</th><th align="right">Fans</th></tr>'
+        + rows.map(r => '<tr><td>' + esc(r.source) + '</td><td align="right">' + r.visits
+            + '</td><td align="right">' + r.chats + '</td><td align="right">' + r.fans + '</td></tr>').join('')
+        + '</table>'
+      : 'Nothing tracked yet — post a tagged link below and check back.';
+  } catch (e) {}
+  try {
+    const d = await (await fetch('/api/growth/links?persona=' + encodeURIComponent(currentSlug))).json();
+    document.getElementById('growth-links').innerHTML = (d.links || []).map(l =>
+      '<div style="margin-bottom:6px;"><strong>' + esc(l.channel) + '</strong><br>'
+      + (l.telegram ? '<code>' + esc(l.telegram) + '</code><br>' : '')
+      + (l.web ? '<code>' + esc(l.web) + '</code>' : '') + '</div>').join('')
+      || 'Connect Telegram to get a deep link.';
+  } catch (e) {}
+  await loadGrowthRegister();
+}
+
+async function loadGrowthRegister() {
+  try {
+    const d = await (await fetch('/api/growth/register?persona=' + encodeURIComponent(currentSlug))).json();
+    const rows = d.entries || [];
+    document.getElementById('growth-register').innerHTML = rows.length
+      ? rows.map(r => '<div style="margin-bottom:4px;"><strong>' + esc(r.platform) + '</strong> — '
+          + esc((r.text || '').slice(0, 140)) + '</div>').join('')
+      : 'Nothing posted through the platform yet.';
+  } catch (e) {}
+}
+
+async function saveGrowthBeta(btn) {
+  try {
+    const res = await fetch('/api/growth/beta', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ personas: v('f-growth-beta') })
+    });
+    if (!res.ok) throw new Error('save failed');
+    flashSaved(btn);
+    loadPhases();
+  } catch (e) { flashSaved(btn, false); }
+}
+
+async function clearGrowthRegister(btn) {
+  try {
+    const res = await fetch('/api/growth/register?persona=' + encodeURIComponent(currentSlug),
+                            { method: 'DELETE' });
+    if (!res.ok) throw new Error('clear failed');
+    flashSaved(btn);
+    loadGrowthRegister();
+  } catch (e) { flashSaved(btn, false); }
+}
+
 // ── Chat phases ─────────────────────────────────────────────────────────────
 let chatPhases = [];
 
@@ -2684,8 +2809,24 @@ async function loadPhases() {
     chatPhases = data.phases || [];
     document.getElementById('f-cta-url').value = data.cta_url || '';
     document.getElementById('f-cta-label').value = data.cta_label || '';
+    // Trial link and promo code are operator-only while the growth layer is in
+    // beta, so the block is not rendered at all for a creator.
+    const box = document.getElementById('growth-cta');
+    if (box && data.growth_editable) {
+      const c = data.cta || {};
+      document.getElementById('f-trial-url').value = c.trial_url || '';
+      document.getElementById('f-trial-label').value = c.trial_label || '';
+      document.getElementById('f-promo-code').value = c.promo_code || '';
+      document.getElementById('f-promo-expires').value = c.promo_expires || '';
+      document.getElementById('growth-beta-state').textContent =
+        data.growth_beta ? '— on for this persona' : '— off for this persona';
+      box.style.display = '';
+    } else if (box) {
+      box.style.display = 'none';
+    }
   } catch(e) { chatPhases = []; }
   renderPhases();
+  loadGrowth();
 }
 
 function renderPhases() {
@@ -2776,7 +2917,14 @@ async function postPhases(slug) {
     body: JSON.stringify({
       phases: chatPhases,
       cta_url: v('f-cta-url'),
-      cta_label: v('f-cta-label')
+      cta_label: v('f-cta-label'),
+      ...(document.getElementById('growth-cta') &&
+          document.getElementById('growth-cta').style.display !== 'none' ? {
+        trial_url: v('f-trial-url'),
+        trial_label: v('f-trial-label'),
+        promo_code: v('f-promo-code'),
+        promo_expires: v('f-promo-expires')
+      } : {})
     })
   });
   if (!res.ok) throw new Error('phases save failed');

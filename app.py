@@ -19,6 +19,7 @@ from contextlib import contextmanager
 from dotenv import load_dotenv
 from utils import (platform_scoped, operator_only, _is_operator,
                    owned_slugs, request_persona)
+import growth
 from google import genai
 from google.genai import types
 
@@ -4306,6 +4307,35 @@ def _finalize_visit(vid, ip, path, ua):
 
 
 @app.after_request
+def _growth_remember_source(response):
+    """Remember the channel a visitor arrived from, so it is still known by the
+    time they open the chat. Only the first tagged visit writes the cookie."""
+    try:
+        if (request.method != 'GET'
+                or not (response.mimetype or '').startswith('text/html')
+                or request.cookies.get(GROWTH_SOURCE_COOKIE)):
+            return response
+        attr = growth.source_from(request.args, request.headers.get('Referer', ''))
+        packed = growth.pack_source(attr)
+        if not packed:
+            return response
+        response.set_cookie(GROWTH_SOURCE_COOKIE, packed,
+                            max_age=GROWTH_SOURCE_MAX_AGE, samesite='Lax',
+                            httponly=True, secure=request.is_secure)
+        # A redirect is a hop, not a page view, and the routes that redirect
+        # (/t/<slug>) count the arrival themselves.
+        if response.status_code < 300 or response.status_code >= 400:
+            slug = ((request.view_args or {}).get('slug')
+                    or (request.view_args or {}).get('persona')
+                    or request.args.get('persona') or '')
+            _growth_source_bump(slug if re.match(r'^[a-z0-9_-]+$', slug or '') else '',
+                                attr.get('source', ''))
+    except Exception:
+        pass
+    return response
+
+
+@app.after_request
 def _log_visit(response):
     try:
         path = request.path or '/'
@@ -5105,7 +5135,6 @@ def _chat_channel_rules(slug, config, incoming, skip_spicy, history=None):
 
     cta_cfg = _phases_cta(slug)
     url = (cta_cfg.get('cta_url') or '').strip()
-    label = (cta_cfg.get('cta_label') or 'come find me here').strip()
 
     # The browser chat holds no fan record, so the funnel is read off the
     # history the client sends: how many messages they have sent, and whether
@@ -5116,7 +5145,12 @@ def _chat_channel_rules(slug, config, incoming, skip_spicy, history=None):
     already_sent = bool(url) and any(
         url in (m.get('content') or '') for m in (history or [])
         if (m.get('role') or '') != 'user')
+    # No fan record here, so hesitation is read off the transcript: the link
+    # already went out and they are still in the chat asking rather than gone.
     fan = {'cta_sent': already_sent}
+    choice = _cta_choice(slug, fan, cta_cfg)
+    url = choice['url'] or url
+    label = growth.cta_suffix(choice) or 'come find me here'
     cta_asked = _cta_asked(incoming)
     spicy_count = 0 if skip_spicy else _spicy_ask_count(history, incoming)
     cta_due = (not skip_spicy) and _cta_due(slug, incoming, fan, is_cta_phase, url, spicy_count)
@@ -6648,6 +6682,200 @@ def _phases_cta(slug):
     return {'cta_url': bot.get('cta_url', ''), 'cta_label': bot.get('cta_label', '')}
 
 
+def _growth_on(slug):
+    """Whether the growth layer runs for this persona. Operator-controlled and
+    off for everyone by default, so the trial link, source attribution and the
+    win-back ladder stay invisible until a slug is switched on."""
+    return growth.in_beta(_get_setting(growth.BETA_KEY) or '', slug)
+
+
+def _cta_choice(persona, fan, cta=None):
+    """Which link this reply carries: the paid page, or — for a fan who was sent
+    it once and never opened it — the free trial and any live promo code."""
+    return growth.cta_choice(cta if cta is not None else _phases_cta(persona), fan,
+                             beta=_growth_on(persona),
+                             today=datetime.now(timezone.utc).strftime('%Y-%m-%d'))
+
+
+GROWTH_SOURCE_COOKIE = 'gsrc'
+GROWTH_SOURCE_MAX_AGE = 60 * 60 * 24 * 90
+
+
+def _growth_attr():
+    """Where this browser came from: the tags on the link they followed, or the
+    referring host. First touch wins — the cookie is only written once, so a fan
+    who later arrives from a bookmark still counts against the channel that
+    actually found them."""
+    stored = growth.unpack_source(request.cookies.get(GROWTH_SOURCE_COOKIE, ''))
+    if stored:
+        return stored
+    return growth.source_from(request.args, request.headers.get('Referer', ''))
+
+
+def _growth_source_bump(persona, source, metric='visits'):
+    """Running tally per persona per channel. A cache of derivable facts kept
+    where the dashboard can read it in one go."""
+    if not source:
+        return
+    key = f'growth_sources_{persona or "_site"}'
+    try:
+        tally = json.loads(_get_setting(key) or '{}')
+        if not isinstance(tally, dict):
+            tally = {}
+    except Exception:
+        tally = {}
+    row = tally.get(source)
+    if not isinstance(row, dict):
+        row = {}
+    row[metric] = int(row.get(metric, 0) or 0) + 1
+    tally[source] = row
+    _set_setting(key, json.dumps(tally))
+
+
+def _growth_fan_source(persona, fan_key, attr):
+    """Stamp the channel onto the fan's profile row. Best effort: an attribution
+    write must never cost a reply."""
+    if not (attr or {}).get('source'):
+        return
+    try:
+        from db import SessionLocal, set_fan_source
+        sdb = SessionLocal()
+        try:
+            set_fan_source(sdb, persona, fan_key, attr['source'],
+                           attr.get('medium', ''), attr.get('campaign', ''))
+            sdb.commit()
+        finally:
+            sdb.close()
+    except Exception as e:
+        logger.warning('Could not record source for %s/%s: %s', persona, fan_key, str(e)[:120])
+
+
+def _content_register(persona):
+    """What this persona has already posted, newest first, per platform. Prompt
+    context rather than an archive, so it is capped and lives in settings."""
+    try:
+        rows = json.loads(_get_setting(f'content_register_{persona}') or '[]')
+        return rows if isinstance(rows, list) else []
+    except Exception:
+        return []
+
+
+def _content_register_add(persona, platform, text):
+    if not _growth_on(persona):
+        return
+    rows = growth.register_add(_content_register(persona), platform, text,
+                               ts=int(time.time()))
+    _set_setting(f'content_register_{persona}', json.dumps(rows))
+
+
+def _no_repeat_block(persona, platform):
+    """The 'you already posted these' paragraph, empty off the beta gate."""
+    if not _growth_on(persona):
+        return ''
+    return growth.register_block(_content_register(persona), platform)
+
+
+def _reads_as_repeat(persona, platform, text):
+    return bool(_growth_on(persona)
+                and growth.is_repeat(_content_register(persona), platform, text))
+
+
+@app.route('/api/growth/register', methods=['GET', 'DELETE'])
+@operator_only
+def api_growth_register():
+    """Read or clear the content register for one persona."""
+    persona = (request.args.get('persona') or '').strip()
+    if not re.match(r'^[a-z0-9_-]+$', persona or ''):
+        return jsonify({'error': 'Invalid slug'}), 400
+    if request.method == 'DELETE':
+        _set_setting(f'content_register_{persona}', '[]')
+        return jsonify({'ok': True, 'entries': []})
+    plat = (request.args.get('platform') or '').strip()
+    rows = growth.register_recent(_content_register(persona), plat, limit=60)
+    return jsonify({'ok': True, 'persona': persona, 'entries': rows,
+                    'beta': _growth_on(persona)})
+
+
+GROWTH_CHANNELS = ('instagram', 'tiktok', 'x', 'threads', 'reddit',
+                   'youtube', 'telegram', 'linktree', 'other')
+
+
+@app.route('/t/<slug>')
+def growth_entry(slug):
+    """The link a creator puts in a bio. Reads the channel off the query or the
+    referrer, counts the visit, and hands the fan to the chat with the tag
+    already on the deep link — which is the only way the channel survives the
+    hop into Telegram."""
+    if not re.match(r'^[a-z0-9_-]+$', slug or ''):
+        return redirect('/')
+    attr = _growth_attr() if _growth_on(slug) else {}
+    bot = _tg_load_bots().get(slug) or {}
+    if not bot.get('username'):
+        bot = {**bot, 'username': _tg_platform().get('username', '')}
+    link = _tg_share_link(bot, attr)
+    if attr.get('source'):
+        _growth_source_bump(slug, attr['source'])
+    return redirect(link or f'/landing?persona={slug}', code=302)
+
+
+@app.route('/api/growth/links')
+@operator_only
+def api_growth_links():
+    """One tagged link per channel, to paste into a bio or a post. Every arrival
+    through one is attributed to the channel it was posted on."""
+    persona = (request.args.get('persona') or '').strip()
+    if not re.match(r'^[a-z0-9_-]+$', persona or ''):
+        return jsonify({'error': 'Invalid slug'}), 400
+    bot = _tg_load_bots().get(persona) or {}
+    if not bot.get('username'):
+        plat = _tg_platform()
+        bot = {**bot, 'username': plat.get('username', '')}
+    origin = _site_origin().rstrip('/')
+    out = []
+    for ch in GROWTH_CHANNELS:
+        query = urllib.parse.urlencode({'utm_source': ch, 'utm_medium': 'bio'})
+        out.append({'channel': ch,
+                    'telegram': _tg_share_link(bot, ch),
+                    'web': f'{origin}/t/{persona}?{query}' if origin else ''})
+    return jsonify({'ok': True, 'persona': persona, 'links': out,
+                    'beta': _growth_on(persona)})
+
+
+@app.route('/api/growth/sources')
+@operator_only
+def api_growth_sources():
+    """Where a persona's traffic and fans came from. Operator-only while the
+    growth layer is in beta."""
+    persona = (request.args.get('persona') or '').strip()
+    if persona and not re.match(r'^[a-z0-9_-]+$', persona):
+        return jsonify({'error': 'Invalid slug'}), 400
+    try:
+        tally = json.loads(_get_setting(f'growth_sources_{persona or "_site"}') or '{}')
+    except Exception:
+        tally = {}
+    fans = {}
+    if persona:
+        try:
+            from db import SessionLocal, count_fans_by_source
+            sdb = SessionLocal()
+            try:
+                fans = count_fans_by_source(sdb, persona)
+            finally:
+                sdb.close()
+        except Exception as e:
+            logger.warning('Source counts failed for %s: %s', persona, str(e)[:120])
+    rows = []
+    for src in sorted(set(tally) | set(fans)):
+        row = tally.get(src) or {}
+        rows.append({'source': src,
+                     'visits': int(row.get('visits', 0) or 0),
+                     'chats': int(row.get('chats', 0) or 0),
+                     'fans': int(fans.get(src, 0) or 0)})
+    rows.sort(key=lambda r: (-r['fans'], -r['chats'], -r['visits'], r['source']))
+    return jsonify({'ok': True, 'persona': persona, 'sources': rows,
+                    'beta': _growth_on(persona) if persona else False})
+
+
 # She mirrors the fan's language (see _language_block), so an English-only
 # trigger meant a Dutch or German fan asking for the link was never heard.
 _CTA_ASK_RE = re.compile(
@@ -6734,9 +6962,11 @@ def api_persona_avoid(slug):
 def api_persona_phases(slug):
     if not re.match(r'^[a-z0-9_-]+$', slug):
         return jsonify({'error': 'Invalid slug'}), 400
-    cta = _phases_cta(slug)
-    return jsonify({'phases': _phases(slug), 'cta_url': cta.get('cta_url', ''),
-                    'cta_label': cta.get('cta_label', '')})
+    cta = growth.clean_cta({}, _phases_cta(slug))
+    return jsonify({'phases': _phases(slug), 'cta_url': cta['cta_url'],
+                    'cta_label': cta['cta_label'], 'cta': cta,
+                    'growth_beta': _growth_on(slug),
+                    'growth_editable': _is_operator()})
 
 
 @app.route('/api/personas/<slug>/phases', methods=['POST'])
@@ -6751,10 +6981,12 @@ def api_persona_phases_save(slug):
     limit = 10 if cap is None else min(10, int(cap))
     clean = [_clean_phase(p) for p in items[:limit]]
     _set_setting(f'phases_{slug}', json.dumps(clean))
-    cta = {
-        'cta_url': str(data.get('cta_url', ''))[:500].strip(),
-        'cta_label': str(data.get('cta_label', ''))[:120].strip(),
-    }
+    stored = _phases_cta(slug)
+    incoming = dict(data)
+    if not _is_operator():
+        for key in ('trial_url', 'trial_label', 'promo_code', 'promo_expires'):
+            incoming.pop(key, None)
+    cta = growth.clean_cta(incoming, stored)
     _set_setting(f'phases_cta_{slug}', json.dumps(cta))
     bots = _tg_load_bots()
     if slug in bots:
@@ -6762,6 +6994,21 @@ def api_persona_phases_save(slug):
         bots[slug]['cta_label'] = cta['cta_label']
         _tg_save_bots(bots)
     return jsonify({'ok': True, 'phases': _phases(slug)})
+
+
+@app.route('/api/growth/beta', methods=['GET', 'POST'])
+@operator_only
+def api_growth_beta():
+    """Which personas the growth layer runs for. Operator-only on purpose: the
+    trial link, source attribution and the win-back ladder all key off this."""
+    if request.method == 'POST':
+        raw = (request.json or {}).get('personas', '')
+        slugs = sorted(growth.beta_slugs(raw))
+        _set_setting(growth.BETA_KEY, json.dumps(slugs))
+        logger.info('Growth beta roster set to %s', slugs)
+        return jsonify({'ok': True, 'personas': slugs})
+    return jsonify({'ok': True,
+                    'personas': sorted(growth.beta_slugs(_get_setting(growth.BETA_KEY) or ''))})
 
 
 def _fan_phase(phases, fan):
@@ -8063,11 +8310,12 @@ def x_cta_click(persona, uid):
     if not re.match(r'^[a-z0-9_-]+$', persona or ''):
         return redirect('/')
     cta = _phases_cta(persona)
-    url = (cta.get('cta_url') or (_tg_load_bots().get(persona) or {}).get('cta_url') or '').strip()
-    if not url:
-        return redirect('/')
     fans = _x_fans(persona)
     fan = fans.get(str(uid))
+    url = ((fan or {}).get('cta_target') or cta.get('cta_url')
+           or (_tg_load_bots().get(persona) or {}).get('cta_url') or '').strip()
+    if not url:
+        return redirect('/')
     if fan is not None and not fan.get('cta_clicked'):
         fan['cta_clicked'] = int(time.time())
         fans[str(uid)] = fan
@@ -8145,9 +8393,10 @@ def _x_dm_reply_round(persona, max_results=20):
     if not incoming:
         return 0, []
     phases = _phases(persona)
-    cta = _phases_cta(persona)
-    cta_url = (cta.get('cta_url') or (_tg_load_bots().get(persona) or {}).get('cta_url') or '').strip()
-    cta_label = (cta.get('cta_label') or 'come see').strip()
+    cta = dict(_phases_cta(persona))
+    cta['cta_url'] = (cta.get('cta_url')
+                      or (_tg_load_bots().get(persona) or {}).get('cta_url') or '').strip()
+    cta_url = cta['cta_url']
     fans = _x_fans(persona)
     handled = []
     # Oldest first, so a burst of messages is answered in the order it was sent.
@@ -8222,7 +8471,10 @@ def _x_dm_reply_round(persona, max_results=20):
             if not reply:
                 continue
             if cta_due:
-                link = _x_cta_link(persona, sender, cta_url)
+                choice = _cta_choice(persona, fan, cta)
+                cta_label = growth.cta_suffix(choice) or 'come see'
+                fan['cta_target'] = choice['url']
+                link = _x_cta_link(persona, sender, choice['url'])
                 reply = f'{reply}\n\n{cta_label} → {link}'
                 fan['cta_sent'] = int(time.time())
                 fan['cta_count'] = int(fan.get('cta_count', 0)) + 1
@@ -8373,8 +8625,20 @@ def _x_generate_post(persona, topic=''):
         "Write ONE original X post (tweet) as yourself, in-character" + ctx +
         " Engaging and human, invite replies, at most one hashtag, no @mentions. "
         "It must fit in a single tweet (280 characters). Return only the tweet text.")
+    instruction += _no_repeat_block(persona, 'x')
     text = _persona_text(persona, instruction, max_tokens=400, temperature=1.0)
-    return text.strip().strip('"')[:280]
+    text = text.strip().strip('"')[:280]
+    # One retry: the model paraphrases itself often enough that a single nudge
+    # is worth the call, and a second repeat is not worth a third.
+    if _reads_as_repeat(persona, 'x', text):
+        logger.info('X post repeated an earlier one [%s], asking again', persona)
+        retry = _persona_text(
+            persona,
+            instruction + '\n\nYour last attempt was a rewrite of one of those. '
+            'Pick a different subject entirely.',
+            max_tokens=400, temperature=1.0)
+        text = (retry or text).strip().strip('"')[:280]
+    return text
 
 
 def _x_my_recent_tweet_ids(persona, n=5):
@@ -9154,6 +9418,7 @@ def api_x_post():
         if not preview:
             _log_x_event('post', persona=persona, detail=text[:80])
             _x_call(persona, 'POST', '/tweets', body={'text': text})
+            _content_register_add(persona, 'x', text)
             posted = True
         return jsonify({'ok': True, 'text': text, 'posted': posted, 'preview': preview})
     except url_error.HTTPError as e:
@@ -9281,6 +9546,7 @@ def api_x_auto_run():
                 if text:
                     _x_call(persona, 'POST', '/tweets', body={'text': text})
                     _log_x_event('post', persona=persona, detail=text[:80])
+                    _content_register_add(persona, 'x', text)
                     actions['posts'] += 1
                     log.append(f'Posted: {text[:60]}')
             except Exception as e:
@@ -14756,9 +15022,17 @@ def api_threads_publish():
     if not persona:
         return jsonify({'ok': False, 'error': 'persona required'}), 400
     instr = (f'Write ONE short, in-character Threads post{" about: " + topic if topic else ""}. '
-             f'Natural and casual, 1-2 sentences, at most one emoji, no hashtags.')
+             f'Natural and casual, 1-2 sentences, at most one emoji, no hashtags.'
+             + _no_repeat_block(persona, 'threads'))
     try:
         text = _fv_trim(_persona_text(persona, instr, max_tokens=200, temperature=0.95), hard_cap=480)
+        if _reads_as_repeat(persona, 'threads', text):
+            logger.info('Threads post repeated an earlier one [%s], asking again', persona)
+            text = _fv_trim(_persona_text(
+                persona,
+                instr + '\n\nYour last attempt was a rewrite of one of those. '
+                'Pick a different subject entirely.',
+                max_tokens=200, temperature=0.95), hard_cap=480) or text
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 500
     if preview:
@@ -14767,6 +15041,7 @@ def api_threads_publish():
         mid = _threads_publish(persona, text)
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 500
+    _content_register_add(persona, 'threads', text)
     return jsonify({'ok': True, 'text': text, 'posted': True, 'id': mid})
 
 
@@ -15153,11 +15428,15 @@ def _tg_cta_link(bot, chat_id):
     return f'{base}/go/{bot.get("code") or bot.get("path_id")}/{chat_id}'
 
 
-def _tg_share_link(bot):
-    """The link a creator puts in their bio. The payload routes the fan to them."""
+def _tg_share_link(bot, source=''):
+    """The link a creator puts in their bio. The payload routes the fan to them,
+    and carries where they came from — a channel name or a full attribution
+    dict — when one is given."""
     if not (bot.get('username') and bot.get('code')):
         return ''
-    return f'https://t.me/{bot["username"]}?start={bot["code"]}'
+    attr = source if isinstance(source, dict) else {'source': source}
+    payload = growth.join_start_payload(bot['code'], growth.pack_source(attr))
+    return f'https://t.me/{bot["username"]}?start={payload}'
 
 
 def _tg_history(persona, chat_id, limit=30):
@@ -15243,6 +15522,15 @@ def _tg_handle_update(persona, update):
     frm = msg.get('from') or {}
     who = frm.get('username') or frm.get('first_name') or str(chat_id)
 
+    # '/start <payload>' — on the shared bot the persona code has already been
+    # taken off upstream, so whatever is left is the channel tag.
+    start_src = ''
+    if text.split(None, 1)[:1] == ['/start']:
+        payload = (text.split(None, 1) + [''])[1].strip()
+        _, packed = growth.split_start_payload(payload)
+        start_src = packed or payload
+        text = '/start'
+
     bot = _tg_bot(persona)
     cfg = _tg_settings(persona)
     if not cfg['enabled']:
@@ -15262,7 +15550,16 @@ def _tg_handle_update(persona, update):
     fan['last_in'] = int(time.time())
     if not fan.get('first_in'):
         fan['first_in'] = int(time.time())
+    if start_src and _growth_on(persona) and not fan.get('source'):
+        attr = growth.unpack_source(start_src)
+        if attr:
+            fan['source'] = attr['source']
+            _growth_fan_source(persona, fan_key, attr)
+            _growth_source_bump(persona, attr['source'], 'chats')
+            _tg_trace(persona, 'routed', f'{who} arrived from {attr["source"]}',
+                      fan=fan_key)
     fan['followups'] = 0
+    fan['winback'] = 0
     fan['in_count'] = int(fan.get('in_count', 0)) + (0 if text == '/start' else 1)
 
     _log_x_message(persona, fan_key, who, 'in', text)
@@ -15275,8 +15572,10 @@ def _tg_handle_update(persona, update):
     current_phase = phases[phase_idx] if phase_idx < len(phases) else phases[-1]
     photo_rate = current_phase.get('photo_rate', 20)
 
-    cta = _phases_cta(persona)
-    cta_url = (cta.get('cta_url') or bot.get('cta_url') or '').strip()
+    cta = dict(_phases_cta(persona))
+    cta['cta_url'] = (cta.get('cta_url') or bot.get('cta_url') or '').strip()
+    cta['cta_label'] = (cta.get('cta_label') or bot.get('cta_label') or '').strip()
+    cta_url = cta['cta_url']
     is_cta_phase = phase_idx == len(phases) - 1
     cta_asked = _cta_asked(text)
     cta_due = _cta_due(persona, text, fan, is_cta_phase, cta_url)
@@ -15379,14 +15678,18 @@ def _tg_handle_update(persona, update):
             picked_media_id = picked.id
 
     if cta_due:
-        label = (cta.get('cta_label') or bot.get('cta_label') or 'come see').strip()
+        choice = _cta_choice(persona, fan, cta)
+        label = growth.cta_suffix(choice) or 'come see'
+        # The redirect is resolved at click time, so the chosen destination has
+        # to be on the fan record before the message goes out.
+        fan['cta_target'] = choice['url']
         link = _tg_cta_link(bot, chat_id)
         reply = f'{reply}\n\n{label} → {link}'
         fan['cta_sent'] = int(time.time())
         fan['cta_count'] = int(fan.get('cta_count', 0)) + 1
-        logger.info('CTA SENT [%s] fan=%s trigger=%s phase=%d count=%d link=%s',
+        logger.info('CTA SENT [%s] fan=%s trigger=%s phase=%d count=%d kind=%s link=%s',
                     persona, chat_id, 'asked' if cta_asked else 'phase',
-                    phase_idx, fan['cta_count'], link)
+                    phase_idx, fan['cta_count'], choice['kind'], link)
     elif cta_asked and not cta_url:
         logger.warning('CTA asked but no cta_url configured [%s] fan=%s', persona, chat_id)
 
@@ -15419,6 +15722,10 @@ def _tg_followup_round(persona):
     fans = _tg_fans(persona)
     now = int(time.time())
     sent = 0
+    on_beta = _growth_on(persona)
+    cta = dict(_phases_cta(persona))
+    cta['cta_url'] = (cta.get('cta_url') or bot.get('cta_url') or '').strip()
+    cta['cta_label'] = (cta.get('cta_label') or bot.get('cta_label') or '').strip()
     for chat_id, fan in list(fans.items()):
         if not _tg_fan_allowed(cfg, chat_id, fan.get('name', '')):
             continue
@@ -15426,12 +15733,25 @@ def _tg_followup_round(persona):
         if not last or fan.get('last_in', 0) > fan.get('last_out', 0):
             continue  # they spoke last — the reply path handles it
         n = int(fan.get('followups', 0))
-        if n >= TG_FOLLOWUP_MAX:
-            continue
-        if (now - last) / 60.0 < cfg['followup_min'] * (n + 1):
-            continue
+        # Once the short follow-ups are spent the win-back ladder takes over, on
+        # the day scale. It is anchored on the fan's own last message, not on
+        # ours, so sending a touch does not push the next one out forever.
+        quiet_days = int(max(0, now - int(fan.get('last_in') or last)) // 86400)
+        step = (growth.winback_step(quiet_days, int(fan.get('winback', 0)))
+                if on_beta and n >= TG_FOLLOWUP_MAX else None)
+        if step and step['offer'] and _funnel_pitching_paused(persona, _tg_fan_key(chat_id)):
+            step = {**step, 'offer': False}
+        if not step:
+            if n >= TG_FOLLOWUP_MAX:
+                continue
+            if (now - last) / 60.0 < cfg['followup_min'] * (n + 1):
+                continue
         cta_pending = bool(fan.get('cta_sent')) and not fan.get('cta_clicked')
-        if cta_pending:
+        choice = _cta_choice(persona, fan, cta) if step else None
+        if step:
+            instruction = growth.winback_instruction(
+                step['offer'] and bool(choice['url']), growth.cta_suffix(choice))
+        elif cta_pending:
             instruction = (
                 'This fan went quiet after you sent them your link. Write ONE short, '
                 'light, in-character nudge — curious whether they had a look, playful, '
@@ -15445,9 +15765,25 @@ def _tg_followup_round(persona):
             text = _tg_generate(persona, chat_id, instruction)
             if not text:
                 continue
+            offering = bool(step and step['offer'] and choice['url'])
+            if offering:
+                label = growth.cta_suffix(choice) or 'come see'
+                text = f'{text}\n\n{label} → {_tg_cta_link(bot, chat_id)}'
             _tg_send(persona, chat_id, text)
             _log_x_message(persona, _tg_fan_key(chat_id), fan.get('name', ''), 'out', text)
-            fan['followups'] = n + 1
+            # Counted only once the message is actually away, so a failed send
+            # does not burn a rung of the ladder.
+            if step:
+                fan['winback'] = step['touch']
+                fan['winback_at'] = now
+                if offering:
+                    fan['cta_target'] = choice['url']
+                    fan['cta_sent'] = now
+                    fan['cta_count'] = int(fan.get('cta_count', 0)) + 1
+                logger.info('WIN-BACK [%s] fan=%s touch=%d offer=%s quiet=%dd',
+                            persona, chat_id, step['touch'], offering, quiet_days)
+            else:
+                fan['followups'] = n + 1
             fan['last_out'] = now
             fans[chat_id] = fan
             sent += 1
@@ -15474,7 +15810,9 @@ def _tg_handle_platform_update(update):
     parts = text.split(None, 1)
     if parts and parts[0] in ('/start', '/connect'):
         payload = (parts[1] if len(parts) > 1 else '').strip()
+        start_src = ''
         if payload:
+            payload, start_src = growth.split_start_payload(payload)
             matched = _tg_persona_for_code(payload)
             if not matched:
                 _tg_api(plat['bot_token'], 'sendMessage',
@@ -15484,8 +15822,9 @@ def _tg_handle_platform_update(update):
             persona = matched
             routes[chat_id] = persona
             _tg_save_routes(routes)
-        # Let the opener branch in _tg_handle_update see a bare /start.
-        msg['text'] = '/start'
+        # Let the opener branch in _tg_handle_update see a bare /start, with
+        # the channel tag still on it so attribution survives the routing.
+        msg['text'] = f'/start {start_src}' if start_src else '/start'
     if not persona:
         _tg_trace(None, 'skipped',
                   f'chat {chat_id} is not bound to a creator — asked them for their link')
@@ -15548,15 +15887,16 @@ def telegram_cta_click(ref, chat_id):
     bot = (_tg_load_bots().get(persona) or {}) if persona else {}
     if not persona:
         persona, bot = _tg_persona_for_path(ref)
-    if not persona or not ((bot or {}).get('cta_url') or '').strip():
-        return redirect('/')
     fans = _tg_fans(persona)
     fan = fans.get(str(chat_id))
+    target = ((fan or {}).get('cta_target') or (bot or {}).get('cta_url') or '').strip()
+    if not persona or not target:
+        return redirect('/')
     if fan is not None and not fan.get('cta_clicked'):
         fan['cta_clicked'] = int(time.time())
         fans[str(chat_id)] = fan
         _tg_save_fans(persona, fans)
-    return redirect(bot['cta_url'], code=302)
+    return redirect(target, code=302)
 
 
 @app.route('/api/telegram/connect', methods=['POST'])

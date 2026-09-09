@@ -898,6 +898,11 @@ class FanProfile(Base):
     review_at = Column(DateTime)
     notes = Column(Text)                          # JSON scratch (signals, vectors)
 
+    source = Column(String(40))                   # channel they arrived from
+    source_medium = Column(String(40))
+    source_campaign = Column(String(40))
+    source_at = Column(DateTime)
+
 
 Index('ix_fan_profiles_key', FanProfile.persona, FanProfile.fan_uuid, unique=True)
 Index('ix_fan_profiles_rank', FanProfile.persona, FanProfile.frs)
@@ -987,6 +992,29 @@ class FanReward(Base):
 
 Index('ix_fan_rewards_key', FanReward.persona, FanReward.fan_uuid,
       FanReward.track, FanReward.milestone, unique=True)
+
+
+def set_fan_source(session, persona, fan_uuid, source, medium='', campaign=''):
+    """Record where a fan arrived from. First touch wins: a later link click
+    must not overwrite the channel that actually found them."""
+    if not source:
+        return None
+    row = get_fan_profile(session, persona, fan_uuid, create=True)
+    if row is None or row.source:
+        return row
+    row.source = source[:40]
+    row.source_medium = (medium or '')[:40]
+    row.source_campaign = (campaign or '')[:40]
+    row.source_at = _now()
+    return row
+
+
+def count_fans_by_source(session, persona):
+    """{source: fans} for one persona, for the growth report."""
+    rows = (session.query(FanProfile.source, func.count(FanProfile.id))
+            .filter(FanProfile.persona == persona, FanProfile.source.isnot(None))
+            .group_by(FanProfile.source).all())
+    return {(src or 'unknown'): int(n) for src, n in rows}
 
 
 def get_fan_profile(session, persona, fan_uuid, handle=None, create=True):
