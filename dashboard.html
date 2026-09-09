@@ -1963,8 +1963,12 @@ function renderForm(slug, cfg) {
         <span class="hint" id="growth-beta-source"></span>
       </div>
       <div style="margin-top:14px;">
-        <div class="section-title" style="font-size:0.8rem;">Where they came from</div>
-        <div id="growth-sources" class="hint">—</div>
+        <div class="section-title" style="font-size:0.8rem;">
+          Where they came from
+          <button type="button" class="btn-section-save" onclick="loadGrowthSources()">Refresh</button>
+        </div>
+        <span class="hint">Each tagged link below carries its channel all the way into the chat, so an arrival is credited to whatever actually found them. First touch wins and is never overwritten.</span>
+        <div id="growth-sources" class="hint" style="margin-top:8px;">—</div>
       </div>
       <div style="margin-top:14px;">
         <div class="section-title" style="font-size:0.8rem;">
@@ -2761,17 +2765,7 @@ async function loadGrowth() {
           : 'Saved here.';
     }
   } catch (e) {}
-  try {
-    const d = await (await fetch('/api/growth/sources?persona=' + encodeURIComponent(currentSlug))).json();
-    const rows = d.sources || [];
-    document.getElementById('growth-sources').innerHTML = rows.length
-      ? '<table style="width:100%; font-size:0.78rem; border-collapse:collapse;">'
-        + '<tr><th align="left">Channel</th><th align="right">Visits</th><th align="right">Chats</th><th align="right">Fans</th></tr>'
-        + rows.map(r => '<tr><td>' + esc(r.source) + '</td><td align="right">' + r.visits
-            + '</td><td align="right">' + r.chats + '</td><td align="right">' + r.fans + '</td></tr>').join('')
-        + '</table>'
-      : 'Nothing tracked yet — post a tagged link below and check back.';
-  } catch (e) {}
+  await loadGrowthSources();
   try {
     const d = await (await fetch('/api/growth/links?persona=' + encodeURIComponent(currentSlug))).json();
     document.getElementById('growth-links').innerHTML = (d.links || []).map(l =>
@@ -2782,6 +2776,67 @@ async function loadGrowth() {
   } catch (e) {}
   await loadGrowthWinback();
   await loadGrowthRegister();
+}
+
+async function loadGrowthSources() {
+  const box = document.getElementById('growth-sources');
+  if (!box || !currentSlug) return;
+  let d;
+  try {
+    d = await (await fetch('/api/growth/sources?persona=' + encodeURIComponent(currentSlug))).json();
+  } catch (e) { box.textContent = 'Could not read the numbers.'; return; }
+  if (!d || !d.ok) { box.textContent = 'Could not read the numbers.'; return; }
+
+  const t = d.totals || {};
+  const rows = d.sources || [];
+  const eur = c => '\u20ac' + Math.round((c || 0) / 100);
+  let html = '';
+  if (!d.beta) {
+    html += '<div style="margin-bottom:10px; opacity:0.8;">Not tagging new arrivals — this persona is not on the growth beta. Anything below was recorded before that.</div>';
+  }
+  html += '<div style="display:flex; flex-wrap:wrap; gap:14px; margin-bottom:12px;">'
+    + statTile('visits', t.visits || 0)
+    + statTile('opened the chat', t.chats || 0)
+    + statTile('fans tagged', t.fans || 0)
+    + statTile('paying', t.payers || 0)
+    + statTile('earned', eur(t.spend))
+    + '</div>';
+
+  if (!rows.length) {
+    box.innerHTML = html + '<div>Nothing tracked yet \u2014 post one of the tagged links below and check back.</div>';
+    return;
+  }
+
+  const num = n => '<td align="right" style="font-variant-numeric:tabular-nums;">' + n + '</td>';
+  html += '<table style="width:100%; font-size:0.78rem; border-collapse:collapse; margin-bottom:10px;">'
+    + '<tr><th align="left">Channel</th><th align="right">Visits</th><th align="right">Opened</th>'
+    + '<th align="right">Fans</th><th align="right">Paying</th><th align="right">Earned</th></tr>'
+    + rows.map(r => '<tr><td>' + esc(r.source) + '</td>' + num(r.visits) + num(r.chats)
+        + num(r.fans) + num(r.payers) + num(eur(r.spend)) + '</tr>').join('')
+    + '</table>';
+
+  // Rows come back sorted by money, so the first one is the earner.
+  const byFans = rows.slice().sort((a, b) => b.fans - a.fans)[0];
+  const notes = [];
+  if (byFans && byFans.fans) {
+    notes.push('Most fans from <strong>' + esc(byFans.source) + '</strong> \u2014 ' + byFans.fans
+      + ' of them, ' + byFans.share + '% of everyone tagged.');
+  }
+  if (rows[0] && rows[0].spend) {
+    notes.push('Most money from <strong>' + esc(rows[0].source) + '</strong> \u2014 ' + eur(rows[0].spend)
+      + ' from ' + rows[0].payers + ' paying.');
+  } else if (t.fans) {
+    notes.push('Nobody credited to a channel has paid yet.');
+  }
+  if (t.visits) {
+    notes.push(t.to_chat + '% of visits went on to open the chat.');
+  }
+  if (t.untagged) {
+    notes.push(t.untagged + (t.untagged === 1 ? ' fan carries' : ' fans carry') + ' no tag, so '
+      + t.tagged_pct + '% of the roster is accounted for here.');
+  }
+  html += notes.map(n => '<div>' + n + '</div>').join('');
+  box.innerHTML = html;
 }
 
 function statTile(label, value) {

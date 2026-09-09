@@ -6923,38 +6923,66 @@ def api_growth_links():
                     'beta': _growth_on(persona)})
 
 
+def _growth_pct(part, whole):
+    return round(100.0 * part / whole) if whole else 0
+
+
 @app.route('/api/growth/sources')
 @operator_only
 def api_growth_sources():
-    """Where a persona's traffic and fans came from. Operator-only while the
-    growth layer is in beta."""
+    """Where a persona's traffic, fans and money came from. Operator-only while
+    the growth layer is in beta."""
     persona = (request.args.get('persona') or '').strip()
     if persona and not re.match(r'^[a-z0-9_-]+$', persona):
         return jsonify({'error': 'Invalid slug'}), 400
     try:
         tally = json.loads(_get_setting(f'growth_sources_{persona or "_site"}') or '{}')
+        if not isinstance(tally, dict):
+            tally = {}
     except Exception:
         tally = {}
-    fans = {}
+    stats = {}
     if persona:
         try:
-            from db import SessionLocal, count_fans_by_source
+            from db import SessionLocal, fan_stats_by_source
             sdb = SessionLocal()
             try:
-                fans = count_fans_by_source(sdb, persona)
+                stats = fan_stats_by_source(sdb, persona)
             finally:
                 sdb.close()
         except Exception as e:
             logger.warning('Source counts failed for %s: %s', persona, str(e)[:120])
+    # Fans who carry no tag at all: they arrived before the links were tagged,
+    # or through an untagged one. The number decides how far the rest can be
+    # trusted, so it is reported rather than quietly dropped.
+    untagged = stats.pop('', None) or {'fans': 0, 'payers': 0, 'spend': 0, 'subs': 0}
+
     rows = []
-    for src in sorted(set(tally) | set(fans)):
-        row = tally.get(src) or {}
-        rows.append({'source': src,
-                     'visits': int(row.get('visits', 0) or 0),
-                     'chats': int(row.get('chats', 0) or 0),
-                     'fans': int(fans.get(src, 0) or 0)})
-    rows.sort(key=lambda r: (-r['fans'], -r['chats'], -r['visits'], r['source']))
+    totals = {'visits': 0, 'chats': 0, 'fans': 0, 'payers': 0, 'spend': 0}
+    for src in sorted(set(tally) | set(stats)):
+        counts = tally.get(src) if isinstance(tally.get(src), dict) else {}
+        fan = stats.get(src) or {}
+        row = {'source': src,
+               'visits': int(counts.get('visits', 0) or 0),
+               'chats': int(counts.get('chats', 0) or 0),
+               'fans': int(fan.get('fans', 0) or 0),
+               'payers': int(fan.get('payers', 0) or 0),
+               'spend': int(fan.get('spend', 0) or 0)}
+        for k in totals:
+            totals[k] += row[k]
+        row['to_chat'] = _growth_pct(row['chats'], row['visits'])
+        row['to_pay'] = _growth_pct(row['payers'], row['fans'])
+        rows.append(row)
+    for row in rows:
+        row['share'] = _growth_pct(row['fans'], totals['fans'])
+    totals['untagged'] = int(untagged.get('fans', 0) or 0)
+    totals['tagged_pct'] = _growth_pct(totals['fans'], totals['fans'] + totals['untagged'])
+    totals['to_chat'] = _growth_pct(totals['chats'], totals['visits'])
+    totals['to_pay'] = _growth_pct(totals['payers'], totals['fans'])
+    rows.sort(key=lambda r: (-r['spend'], -r['payers'], -r['fans'], -r['chats'],
+                             -r['visits'], r['source']))
     return jsonify({'ok': True, 'persona': persona, 'sources': rows,
+                    'totals': totals, 'untagged': untagged,
                     'beta': _growth_on(persona) if persona else False})
 
 

@@ -9,7 +9,7 @@ import uuid
 
 from sqlalchemy import (
     create_engine, Column, String, Text, DateTime, ForeignKey, Index, Integer,
-    func, or_
+    case, func, or_
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
@@ -1009,12 +1009,22 @@ def set_fan_source(session, persona, fan_uuid, source, medium='', campaign=''):
     return row
 
 
-def count_fans_by_source(session, persona):
-    """{source: fans} for one persona, for the growth report."""
-    rows = (session.query(FanProfile.source, func.count(FanProfile.id))
-            .filter(FanProfile.persona == persona, FanProfile.source.isnot(None))
+def fan_stats_by_source(session, persona):
+    """{source: {fans, payers, spend, subs}} for one persona, with the fans that
+    carry no tag under ''. Spend rides along because a channel is worth what its
+    fans go on to pay, not how many of them arrive."""
+    paid = case((FanProfile.lifetime_spend > 0, 1), else_=0)
+    subbed = case((FanProfile.subscribed_at.isnot(None), 1), else_=0)
+    rows = (session.query(FanProfile.source,
+                          func.count(FanProfile.id),
+                          func.sum(paid),
+                          func.sum(FanProfile.lifetime_spend),
+                          func.sum(subbed))
+            .filter(FanProfile.persona == persona)
             .group_by(FanProfile.source).all())
-    return {(src or 'unknown'): int(n) for src, n in rows}
+    return {(src or ''): {'fans': int(fans or 0), 'payers': int(payers or 0),
+                          'spend': int(spend or 0), 'subs': int(subs or 0)}
+            for src, fans, payers, spend, subs in rows}
 
 
 def get_fan_profile(session, persona, fan_uuid, handle=None, create=True):
