@@ -9,6 +9,7 @@ Run directly: ONLYFANS_TRANSPORT=direct python3 test_of_e2e.py
 import json
 import os
 import pathlib
+import shutil
 import sys
 import tempfile
 import time
@@ -33,8 +34,13 @@ def check(label, cond):
     print(('PASS ' if cond else 'FAIL ') + label)
 
 
-# A page that behaves like the part of OnlyFans we depend on: a form that sets
-# the session cookies and the device token, and an endpoint that confirms them.
+# A stand-in for the part of OnlyFans we depend on: a form that sets the session
+# cookies and the device token, and the endpoint that confirms them.
+#
+# /api2/v2/users/me is answered by the server rather than by a fetch the page
+# monkey-patches, because the patched driver evaluates in an isolated world:
+# scripts the page defines are not visible to us there. Cookies and storage
+# are, which is all the real capture needs.
 FAKE_SIGNIN = """<!doctype html><title>OnlyFans</title>
 <style>body{font:16px sans-serif;margin:0}
 h1{position:fixed;top:20px;left:100px}
@@ -53,28 +59,75 @@ function signIn(){
   localStorage.setItem('bcTokenSha','e2e-bc-token');
   document.getElementById('out').textContent='signed in';
 }
-const realFetch=window.fetch;
-window.fetch=function(url,opts){
-  if(String(url).includes('/api2/v2/users/me')){
-    const signed=document.cookie.includes('sess=');
-    return Promise.resolve({ok:signed, json:()=>Promise.resolve(
-      signed?{id:4242,username:'e2e_creator',name:'E2E'}:null)});
-  }
-  return realFetch(url,opts);
-};
 </script>"""
 
 
 def _serve(root):
     """A throwaway web server for the stand-in OnlyFans page."""
-    import functools
     import http.server
     import threading
-    handler = functools.partial(http.server.SimpleHTTPRequestHandler,
-                                directory=str(root))
-    httpd = http.server.ThreadingHTTPServer(('127.0.0.1', 0), handler)
+
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, directory=str(root), **kw)
+
+        def do_GET(self):
+            if not self.path.startswith('/api2/v2/users/me'):
+                return super().do_GET()
+            signed = 'sess=' in (self.headers.get('Cookie') or '')
+            body = json.dumps({'id': 4242, 'username': 'e2e_creator',
+                               'name': 'E2E'}).encode() if signed else b'null'
+            self.send_response(200 if signed else 401)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *a):
+            pass
+
+    httpd = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Handler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     return httpd.server_address[1]
+
+
+def fingerprint():
+    """What the human check reads. A browser that announces itself is refused.
+
+    Only Google Chrome can pass this, so on a host that has nothing but the
+    Chromium Playwright downloads it is skipped — the image is what this is
+    about, and the image carries Chrome.
+    """
+    if of_connect.browser_path() not in of_connect.CHROME_PATHS:
+        print('SKIP the browser does not announce itself (no Chrome on this host)')
+        return
+    if not os.environ.get('DISPLAY'):
+        print('SKIP the browser does not announce itself (no display: run under '
+              'xvfb-run, as the image does)')
+        return
+    # Launched the way an attempt launches one, but on a profile of its own:
+    # two browsers cannot share a user data directory.
+    probe = of_connect.Attempt.__new__(of_connect.Attempt)
+    probe.id, probe.proxy = 'fingerprint-' + uuid.uuid4().hex[:8], ''
+    probe.viewport = dict(of_connect.VIEWPORT)
+    with of_connect._driver()() as pw:
+        _browser, context = probe._launch(pw)
+        page = context.new_page()
+        # Client hints are only exposed in a secure context, and about:blank is
+        # not one. 127.0.0.1 is, as onlyfans.com is over TLS.
+        page.goto(of_connect.SIGNIN_URL, wait_until='domcontentloaded')
+        seen = page.evaluate("""() => ({
+          headless: navigator.userAgent.includes('Headless'),
+          webdriver: navigator.webdriver === true,
+          hints: !!(navigator.userAgentData || {}).brands,
+          h264: !!document.createElement('video')
+                  .canPlayType('video/mp4; codecs="avc1.42E01E"')})""")
+        context.close()
+    shutil.rmtree(probe._profile, ignore_errors=True)
+    check('it does not call itself headless', not seen['headless'])
+    check('it does not raise the webdriver flag', not seen['webdriver'])
+    check('it has the client hints a real Chrome has', seen['hints'])
+    check('and the codecs a real Chrome has', seen['h264'])
 
 
 def browser_flow():
@@ -91,13 +144,16 @@ def browser_flow():
     port = _serve(root)
     of_connect.SIGNIN_URL = f'http://127.0.0.1:{port}/'
     of_connect.COOKIE_ORIGIN = of_connect.SIGNIN_URL
-    if not os.getenv('PLAYWRIGHT_CHROMIUM'):
+    # Chrome if the host has one, since that is what the image runs; otherwise
+    # whatever Chromium Playwright downloaded, so this still runs on a laptop.
+    if not of_connect.browser_path():
         for guess in sorted(pathlib.Path('/opt/pw-browsers').glob('chromium-*/chrome-linux/chrome')):
             of_connect.BROWSER_PATH = str(guess)
             break
 
     attempt = of_connect.start('e2e', 'of_e2e')
     check('a hosted browser opens', attempt is not None)
+    fingerprint()
 
     frame = ''
     for _ in range(60):
@@ -132,8 +188,9 @@ def browser_flow():
 
     # The same input path the sign-in window uses: a mouse that moves, presses
     # and releases, rather than a click that teleports onto the target.
-    attempt.act('move', x=250, y=120)
-    attempt.act('move', x=300, y=130)
+    attempt.act('move', points=[{'x': 250, 'y': 120, 't': 0},
+                               {'x': 275, 'y': 125, 't': 12},
+                               {'x': 300, 'y': 130, 't': 25}])
     attempt.act('down', x=300, y=130)
     attempt.act('up', x=300, y=130)
     attempt.act('type', text='creator@example.com')

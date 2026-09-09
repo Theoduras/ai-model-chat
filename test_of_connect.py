@@ -104,6 +104,53 @@ class CaptureTest(unittest.TestCase):
         self.assertEqual(self.a.result['username'], 'lilith')
 
 
+class FakeMouse:
+    def __init__(self):
+        self.moves = []
+
+    def move(self, x, y):
+        self.moves.append((x, y))
+
+
+class PathTest(unittest.TestCase):
+    """The mouse path the human check is watching."""
+
+    def test_a_batch_is_replayed_in_order(self):
+        page = mock.Mock(mouse=FakeMouse())
+        _ATTEMPT._apply(bare_attempt(), page, 'move', {'points': [
+            {'x': 1, 'y': 2, 't': 1000}, {'x': 3, 'y': 4, 't': 1010},
+            {'x': 5, 'y': 6, 't': 1020}]})
+        self.assertEqual(page.mouse.moves, [(1.0, 2.0), (3.0, 4.0), (5.0, 6.0)])
+
+    def test_a_single_point_still_moves(self):
+        page = mock.Mock(mouse=FakeMouse())
+        _ATTEMPT._apply(bare_attempt(), page, 'move', {'x': 7, 'y': 8})
+        self.assertEqual(page.mouse.moves, [(7.0, 8.0)])
+
+    def test_the_gap_between_points_is_what_was_recorded(self):
+        self.assertEqual(
+            [gap for _x, _y, gap in of_connect._path({'points': [
+                {'x': 0, 'y': 0, 't': 0}, {'x': 1, 'y': 1, 't': 20}]})],
+            [0.0, 0.02])
+
+    def test_a_long_pause_does_not_hold_the_browser(self):
+        gaps = [gap for _x, _y, gap in of_connect._path({'points': [
+            {'x': 0, 'y': 0, 't': 0}, {'x': 1, 'y': 1, 't': 9000}]})]
+        self.assertEqual(gaps[1], 0.05)
+
+
+class BrowserTest(unittest.TestCase):
+    def test_chrome_is_preferred_over_the_bundled_chromium(self):
+        with mock.patch.object(of_connect, 'BROWSER_PATH', ''), \
+                mock.patch.object(of_connect.os.path, 'exists',
+                                  lambda p: p == '/usr/bin/google-chrome'):
+            self.assertEqual(of_connect.browser_path(), '/usr/bin/google-chrome')
+
+    def test_an_explicit_browser_wins(self):
+        with mock.patch.object(of_connect, 'BROWSER_PATH', '/somewhere/chrome'):
+            self.assertEqual(of_connect.browser_path(), '/somewhere/chrome')
+
+
 class RegistryTest(unittest.TestCase):
     def setUp(self):
         of_connect._attempts.clear()

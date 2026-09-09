@@ -51,10 +51,17 @@ today's `onlyfans.py`, so `_OnlyFansPlatform` swaps transports without noticing.
 
 ### 2.2 Connect (`of_session.py`) — the "as easy as onlyfans.com" part
 
-A Playwright Chromium instance runs in our container on the creator's assigned
-residential IP and is **streamed into the dashboard modal** (CDP screencast over
-a WebSocket; clicks and keystrokes forwarded back). The creator sees the real
-onlyfans.com login page and types into it.
+A real Google Chrome runs in our container on the creator's assigned residential
+IP and is **streamed into a sign-in window of its own** (JPEG frames polled over
+HTTP; the mouse path, presses and keystrokes forwarded back). The creator sees
+the real onlyfans.com login page and types into it.
+
+It has to be Chrome, headful, driven by patchright, because OnlyFans' human
+check reads the browser and refuses one that announces itself. Playwright's
+Chromium fails it on six counts at once: a user agent saying `HeadlessChrome`,
+`navigator.webdriver` true, no client hints, no H.264, a SwiftShader renderer,
+and no `deviceMemory`. Chrome under Xvfb, with patchright closing the CDP and
+webdriver leaks, answers the first four; the exit IP is the one that remains.
 
 Why this and not credential-relay:
 - We never receive, transmit or store the password.
@@ -193,8 +200,9 @@ Creators never see this.
 2. **The admin screen** (wireframe 8). Its API is live at
    `/api/onlyfans/health`; nothing renders it yet.
 3. **A residential proxy pool.** Without `ONLYFANS_PROXY_TEMPLATE` every account
-   goes out on the server's own address, which is fine for one and asking for
-   trouble with several.
+   goes out on the server's own address — a Google datacentre one. That is the
+   last signal the human check has left to hold against us, and it is also what
+   every poll and every sent message goes out on afterwards.
 
 ### Configuration
 
@@ -206,10 +214,12 @@ Creators never see this.
 | `ONLYFANS_MIN_INTERVAL` | Seconds between requests per account (default 2) |
 | `ONLYFANS_POLL_ACTIVE` / `ONLYFANS_POLL_IDLE` | Watcher pacing (default 5s / 60s) |
 | `ONLYFANS_SESSION_CHECK` | Seconds between session health checks (default 600) |
-| `PLAYWRIGHT_CHROMIUM` | Browser path, when the image puts it somewhere unusual |
+| `ONLYFANS_CHROME` | Browser path, when the image puts it somewhere unusual |
+| `DISPLAY` | Set by `xvfb-run` in the image; its presence is what makes the sign-in browser headful |
 
 Cloud Run needs **session affinity on** for the connect flow: the hosted browser
-lives in one instance's memory and the frame polls have to reach it.
+lives in one instance's memory and the frame polls have to reach it. It also
+needs **2Gi of memory** — a headful Chrome does not fit in the default 512Mi.
 
 ---
 

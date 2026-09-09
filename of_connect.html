@@ -64,7 +64,10 @@ const img = $('frame');
 async function post(url, body){
   const r = await fetch(url, {method: 'POST',
     headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
-  return r.json().catch(() => ({}));
+  // The status decides, not the body: a 200 whose JSON we cannot read is still
+  // a request that was accepted, and must not be reported as a refusal.
+  const out = await r.json().catch(() => ({}));
+  return Object.assign({ok: r.ok}, out, {status: r.status});
 }
 
 async function begin(){
@@ -144,13 +147,29 @@ async function send(kind, extra){
   if (!r.ok) fail(r.error || 'The sign-in window lost its browser. Start it again.');
 }
 
+// Every point of the path is kept and sent in batches, rather than one point
+// every 60ms: a hand draws a dense, uneven line, and a cursor that advances in
+// a few evenly spaced hops is as clearly not a hand as one that teleports.
+let path = [];
+
+function flush(){
+  if (!path.length) return;
+  const points = path; path = [];
+  send('move', {points: points});
+}
+
 img.addEventListener('mousemove', ev => {
-  const now = Date.now();
-  if (now - lastMove < 60) return;      // ~16/s: enough of a path, little traffic
-  lastMove = now;
-  const p = at(ev); if (p) send('move', p);
+  const p = at(ev); if (!p) return;
+  p.t = Date.now();
+  if (path.length < 60) path.push(p);
+  if (p.t - lastMove < 50) return;
+  lastMove = p.t;
+  flush();
 });
-img.addEventListener('mousedown', ev => { const p = at(ev); if (p) send('down', p); });
+img.addEventListener('mousedown', ev => {
+  flush();                              // the approach lands before the press
+  const p = at(ev); if (p) send('down', p);
+});
 img.addEventListener('mouseup', ev => { const p = at(ev); if (p) send('up', p); });
 img.addEventListener('contextmenu', ev => ev.preventDefault());
 img.addEventListener('wheel', ev => { ev.preventDefault(); send('scroll', {dy: ev.deltaY}); },

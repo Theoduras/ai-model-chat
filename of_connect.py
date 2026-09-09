@@ -16,6 +16,7 @@ import base64
 import logging
 import os
 import queue
+import shutil
 import threading
 import time
 import uuid
@@ -24,7 +25,15 @@ import of_session
 
 logger = logging.getLogger(__name__)
 
-BROWSER_PATH = (os.getenv('PLAYWRIGHT_CHROMIUM') or '').strip()
+# Where to look for a browser, best first. Real Google Chrome rather than the
+# Chromium Playwright downloads: the open-source build has no H.264, calls
+# itself HeadlessChrome and exposes no userAgentData, and the human check reads
+# all three. The bundled Chromium is the last resort, for a laptop with no
+# Chrome on it.
+CHROME_PATHS = ('/usr/bin/google-chrome', '/usr/bin/google-chrome-stable',
+                '/opt/google/chrome/chrome')
+BROWSER_PATH = (os.getenv('ONLYFANS_CHROME')
+                or os.getenv('PLAYWRIGHT_CHROMIUM') or '').strip()
 SIGNIN_URL = 'https://onlyfans.com/'
 COOKIE_ORIGIN = 'https://onlyfans.com'
 VIEWPORT = {'width': 900, 'height': 700}
@@ -47,10 +56,36 @@ class ConnectError(RuntimeError):
     pass
 
 
+def _driver():
+    """Playwright, patched if the patched build is installed.
+
+    patchright is a drop-in fork that closes the leaks the check looks for --
+    the CDP Runtime.enable call and the webdriver flag -- at the protocol level.
+    Doing the same from an init script does not work: the script is itself
+    visible to the page.
+    """
+    try:
+        from patchright.sync_api import sync_playwright
+        return sync_playwright
+    except ImportError:
+        from playwright.sync_api import sync_playwright
+        return sync_playwright
+
+
+def browser_path():
+    """The browser to drive, or '' to let the driver pick its own."""
+    if BROWSER_PATH:
+        return BROWSER_PATH
+    for path in CHROME_PATHS:
+        if os.path.exists(path):
+            return path
+    return shutil.which('google-chrome') or ''
+
+
 def available():
     """Whether this host can run the hosted browser at all."""
     try:
-        import playwright.sync_api  # noqa: F401
+        _driver()
     except ImportError:
         return False
     return True
@@ -116,7 +151,7 @@ class Attempt:
 
     def _run(self):
         try:
-            from playwright.sync_api import sync_playwright
+            sync_playwright = _driver()
         except ImportError:
             self.state, self.error = 'failed', 'this host has no browser installed'
             return
@@ -129,21 +164,52 @@ class Attempt:
                 self.state, self.error = 'failed', str(e)[:200]
 
     def _launch(self, pw):
-        opts = {'headless': True, 'args': ['--no-sandbox', '--disable-dev-shm-usage']}
-        if BROWSER_PATH:
-            opts['executable_path'] = BROWSER_PATH
+        """A browser the check has no reason to refuse.
+
+        Headful whenever there is a display to be headful on -- Xvfb provides
+        one in the container. A headless page is never focused, and the check
+        does not complete on a page it believes nobody is looking at.
+
+        The window is sized instead of the viewport, and the profile is a real
+        one on disk, because both of the shortcuts show: an overridden viewport
+        leaves innerWidth disagreeing with outerWidth, and a browser with no
+        profile behind it is not one anybody signs in with.
+        """
+        self._profile = f'/tmp/of-profile-{self.id}'
+        opts = {
+            'headless': not os.environ.get('DISPLAY'),
+            'args': ['--no-sandbox', '--disable-dev-shm-usage',
+                     '--window-size={width},{height}'.format(**self.viewport)],
+            'no_viewport': True,
+            'locale': 'en-US',
+            'timezone_id': os.getenv('ONLYFANS_TZ', 'Europe/Amsterdam'),
+        }
+        path = browser_path()
+        if path:
+            opts['executable_path'] = path
         if self.proxy:
             opts['proxy'] = _proxy_options(self.proxy)
-        browser = pw.chromium.launch(**opts)
-        context = browser.new_context(
-            viewport=self.viewport, user_agent=self.user_agent or None,
-            locale='en-US', timezone_id=os.getenv('ONLYFANS_TZ', 'Europe/Amsterdam'))
-        return browser, context
+        # No user_agent override: sending one the browser was not built with
+        # leaves it disagreeing with its own client hints, which is worse than
+        # the agent we would be hiding. What OnlyFans issued the session to is
+        # read off the page afterwards.
+        context = pw.chromium.launch_persistent_context(self._profile, **opts)
+        return None, context
 
     def _drive(self, pw):
         browser, context = self._launch(pw)
-        page = context.new_page()
+        page = context.pages[0] if context.pages else context.new_page()
         page.goto(SIGNIN_URL, wait_until='domcontentloaded', timeout=60000)
+        # What the window is told to scale by has to be the size of the frames
+        # it actually gets. Sizing the window rather than overriding the
+        # viewport means the page is a little smaller than we asked for -- the
+        # browser's own chrome -- so the real size is measured, not assumed.
+        try:
+            width, height = page.evaluate('() => [innerWidth, innerHeight]')
+            if width and height:
+                self.viewport = {'width': int(width), 'height': int(height)}
+        except Exception:
+            pass
         self.state = 'signin'
         last_check = 0.0
         while not self._done.is_set():
@@ -165,9 +231,11 @@ class Attempt:
                 break
         try:
             context.close()
-            browser.close()
+            if browser:
+                browser.close()
         except Exception:
             pass
+        shutil.rmtree(self._profile, ignore_errors=True)
         self._done.set()
 
     def _apply(self, page, kind, kw):
@@ -175,8 +243,14 @@ class Attempt:
             page.mouse.click(float(kw['x']), float(kw['y']))
         elif kind == 'move':
             # Forwarded because the human check watches for it. A cursor that
-            # teleports to a checkbox and clicks is exactly what it fails.
-            page.mouse.move(float(kw['x']), float(kw['y']))
+            # teleports to a checkbox and clicks is exactly what it fails, and
+            # so is one that arrives in a few evenly spaced hops -- so the
+            # window sends the path as it was actually drawn and it is replayed
+            # here at the speed it was drawn at.
+            for x, y, gap in _path(kw):
+                if gap:
+                    time.sleep(gap)
+                page.mouse.move(x, y)
         elif kind == 'down':
             page.mouse.move(float(kw['x']), float(kw['y']))
             page.mouse.down()
@@ -233,6 +307,26 @@ class Attempt:
         self.result = of_session.put(self.account, session)
         self.state = 'connected'
         self._done.set()
+
+
+def _path(kw):
+    """The points of one move, as (x, y, seconds to wait first).
+
+    A batch carries each point's own timestamp; a lone point is still accepted
+    so a single move is nothing special. The gap is capped because a replay
+    that pauses holds the browser thread and every other input behind it.
+    """
+    points = kw.get('points') or [{'x': kw.get('x'), 'y': kw.get('y')}]
+    out, previous = [], None
+    for point in points[:60]:
+        at = point.get('t')
+        gap = 0.0
+        if previous is not None and at is not None:
+            gap = min(max((float(at) - previous) / 1000.0, 0.0), 0.05)
+        if at is not None:
+            previous = float(at)
+        out.append((float(point['x']), float(point['y']), gap))
+    return out
 
 
 def _proxy_options(proxy):

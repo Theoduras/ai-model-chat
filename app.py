@@ -16412,7 +16412,8 @@ def api_onlyfans_connect_input():
         return jsonify({'ok': False, 'error': 'that sign-in is no longer open'}), 404
     try:
         attempt.act(kind, x=d.get('x'), y=d.get('y'), text=d.get('text'),
-                    key=d.get('key'), dy=d.get('dy'))
+                    key=d.get('key'), dy=d.get('dy'),
+                    points=(d.get('points') or [])[:60])
     except of_connect.ConnectError as e:
         return jsonify({'ok': False, 'error': str(e)[:200]}), 400
     return jsonify({'ok': True})
