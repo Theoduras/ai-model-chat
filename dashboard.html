@@ -1988,8 +1988,12 @@ function renderForm(slug, cfg) {
       </div>
 
       <div style="margin-top:14px;">
-        <div class="section-title" style="font-size:0.8rem;">Tagged links</div>
-        <div id="growth-links" class="hint">—</div>
+        <div class="section-title" style="font-size:0.8rem;">
+          Tagged links
+          <button type="button" class="btn-section-save" onclick="loadGrowthLinks()">Refresh</button>
+        </div>
+        <span class="hint">One link per channel. Paste the Telegram one where a tap should open the chat, the web one where it should not — both carry the channel through, which is what fills the table above.</span>
+        <div id="growth-links" class="hint" style="margin-top:8px;">—</div>
       </div>
       <div style="margin-top:14px;">
         <div class="section-title" style="font-size:0.8rem;">
@@ -2776,14 +2780,7 @@ async function loadGrowth() {
     }
   } catch (e) {}
   await loadGrowthSources();
-  try {
-    const d = await (await fetch('/api/growth/links?persona=' + encodeURIComponent(currentSlug))).json();
-    document.getElementById('growth-links').innerHTML = (d.links || []).map(l =>
-      '<div style="margin-bottom:6px;"><strong>' + esc(l.channel) + '</strong><br>'
-      + (l.telegram ? '<code>' + esc(l.telegram) + '</code><br>' : '')
-      + (l.web ? '<code>' + esc(l.web) + '</code>' : '') + '</div>').join('')
-      || 'Connect Telegram to get a deep link.';
-  } catch (e) {}
+  await loadGrowthLinks();
   await loadGrowthCta();
   await loadGrowthWinback();
   await loadGrowthRegister();
@@ -2847,6 +2844,67 @@ async function loadGrowthSources() {
       + t.tagged_pct + '% of the roster is accounted for here.');
   }
   html += notes.map(n => '<div>' + n + '</div>').join('');
+  box.innerHTML = html;
+}
+
+async function copyLink(btn) {
+  const code = btn.parentNode.querySelector('code');
+  const text = code ? code.textContent : '';
+  try {
+    await navigator.clipboard.writeText(text);
+    const was = btn.textContent;
+    btn.textContent = 'copied';
+    setTimeout(() => { btn.textContent = was; }, 1200);
+  } catch (e) {
+    // Clipboard access is refused on an insecure origin, so fall back to
+    // selecting the link and letting them copy it themselves.
+    if (code && window.getSelection) {
+      const r = document.createRange();
+      r.selectNodeContents(code);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(r);
+    }
+  }
+}
+
+async function loadGrowthLinks() {
+  const box = document.getElementById('growth-links');
+  if (!box || !currentSlug) return;
+  let d;
+  try {
+    d = await (await fetch('/api/growth/links?persona=' + encodeURIComponent(currentSlug))).json();
+  } catch (e) { box.textContent = 'Could not build the links.'; return; }
+  if (!d || !d.ok) { box.textContent = 'Could not build the links.'; return; }
+
+  const links = d.links || [];
+  let html = '';
+  if (!d.beta) {
+    html += '<div style="margin-bottom:10px; opacity:0.8;">These links work, but nothing is being credited \u2014 this persona is not on the growth beta, so an arrival through one is not recorded.</div>';
+  }
+  if (!d.origin) {
+    html += '<div style="margin-bottom:10px; opacity:0.8;">PUBLIC_BASE_URL is unset, so the web link cannot be built \u2014 only the Telegram one is shown.</div>';
+  }
+  const one = (label, url) => !url ? '' :
+    '<div style="display:flex; gap:8px; align-items:baseline; margin-top:2px;">'
+    + '<span style="opacity:0.6; min-width:62px;">' + label + '</span>'
+    + '<code style="word-break:break-all;">' + esc(url) + '</code>'
+    + '<button type="button" class="btn-section-save" onclick="copyLink(this)">copy</button>'
+    + '</div>';
+  const brought = l => {
+    const bits = [];
+    if (l.visits) bits.push(l.visits + ' visit' + (l.visits === 1 ? '' : 's'));
+    if (l.chats) bits.push(l.chats + ' opened the chat');
+    if (l.fans) bits.push(l.fans + ' fan' + (l.fans === 1 ? '' : 's'));
+    return bits.length
+      ? '<span style="opacity:0.65;"> \u2014 ' + bits.join(', ') + '</span>'
+      : '<span style="opacity:0.45;"> \u2014 nothing yet</span>';
+  };
+  html += links.map(l => '<div style="margin-bottom:10px;"><strong>' + esc(l.channel) + '</strong>'
+    + brought(l) + one('telegram', l.telegram) + one('web', l.web) + '</div>').join('');
+  if (!links.some(l => l.telegram)) {
+    html += '<div>Connect Telegram to get a deep link that carries the channel into the chat.</div>';
+  }
   box.innerHTML = html;
 }
 

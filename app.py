@@ -7011,28 +7011,34 @@ def api_growth_links():
         plat = _tg_platform()
         bot = {**bot, 'username': plat.get('username', '')}
     origin = _site_origin().rstrip('/')
+    tally, stats, _ = _growth_source_table(persona)
     out = []
-    for ch in GROWTH_CHANNELS:
+    for ch in sorted(set(GROWTH_CHANNELS) | set(tally) | set(stats)):
         query = urllib.parse.urlencode({'utm_source': ch, 'utm_medium': 'bio'})
+        counts = tally.get(ch) if isinstance(tally.get(ch), dict) else {}
+        fan = stats.get(ch) or {}
         out.append({'channel': ch,
                     'telegram': _tg_share_link(bot, ch),
-                    'web': f'{origin}/t/{persona}?{query}' if origin else ''})
+                    'web': f'{origin}/t/{persona}?{query}' if origin else '',
+                    'visits': int(counts.get('visits', 0) or 0),
+                    'chats': int(counts.get('chats', 0) or 0),
+                    'fans': int(fan.get('fans', 0) or 0)})
+    # Channels that have brought someone in first, then the untried ones in the
+    # order they are offered — a live link is what the operator came here for.
+    order = {ch: i for i, ch in enumerate(GROWTH_CHANNELS)}
+    out.sort(key=lambda r: (-r['fans'], -r['chats'], -r['visits'],
+                            order.get(r['channel'], len(order)), r['channel']))
     return jsonify({'ok': True, 'persona': persona, 'links': out,
-                    'beta': _growth_on(persona)})
+                    'origin': origin, 'beta': _growth_on(persona)})
 
 
 def _growth_pct(part, whole):
     return round(100.0 * part / whole) if whole else 0
 
 
-@app.route('/api/growth/sources')
-@operator_only
-def api_growth_sources():
-    """Where a persona's traffic, fans and money came from. Operator-only while
-    the growth layer is in beta."""
-    persona = (request.args.get('persona') or '').strip()
-    if persona and not re.match(r'^[a-z0-9_-]+$', persona):
-        return jsonify({'error': 'Invalid slug'}), 400
+def _growth_source_table(persona):
+    """(visit tally, per-source fan stats, the untagged fans). The tally is the
+    running count kept in settings; the stats come off the fan rows."""
     try:
         tally = json.loads(_get_setting(f'growth_sources_{persona or "_site"}') or '{}')
         if not isinstance(tally, dict):
@@ -7054,6 +7060,18 @@ def api_growth_sources():
     # or through an untagged one. The number decides how far the rest can be
     # trusted, so it is reported rather than quietly dropped.
     untagged = stats.pop('', None) or {'fans': 0, 'payers': 0, 'spend': 0, 'subs': 0}
+    return tally, stats, untagged
+
+
+@app.route('/api/growth/sources')
+@operator_only
+def api_growth_sources():
+    """Where a persona's traffic, fans and money came from. Operator-only while
+    the growth layer is in beta."""
+    persona = (request.args.get('persona') or '').strip()
+    if persona and not re.match(r'^[a-z0-9_-]+$', persona):
+        return jsonify({'error': 'Invalid slug'}), 400
+    tally, stats, untagged = _growth_source_table(persona)
 
     rows = []
     totals = {'visits': 0, 'chats': 0, 'fans': 0, 'payers': 0, 'spend': 0}
