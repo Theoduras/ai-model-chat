@@ -107,11 +107,17 @@ gcloud run deploy ai-model-chat-dev-browser \
   --image="$IMAGE" \
   --region=europe-west4 --platform=managed \
   --allow-unauthenticated \
-  --command=gunicorn \
-  --args=--bind,:8080,--workers,1,--threads,8,--timeout,0,of_browser:service\(\) \
+  --command=/bin/sh \
+  --args=/app/start.sh \
+  --update-env-vars="GUNICORN_TARGET=of_browser:service()" \
   --min-instances=1 --max-instances=1 --no-cpu-throttling \
   --session-affinity --memory=2Gi
 ```
+
+`start.sh` is what gives the sign-in browser its display: no `DISPLAY`, and Chrome runs
+headless, which is exactly what Cloudflare's check reads and refuses. Running gunicorn
+directly, as this command used to, silently drops that and sign-ins hang on the
+Cloudflare screen forever.
 
 One instance, always warm: the attempt store is per-process, so a second
 instance is one that cannot see the sign-in the first one is running.
