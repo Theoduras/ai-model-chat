@@ -1972,6 +1972,14 @@ function renderForm(slug, cfg) {
       </div>
       <div style="margin-top:14px;">
         <div class="section-title" style="font-size:0.8rem;">
+          The link
+          <button type="button" class="btn-section-save" onclick="loadGrowthCta()">Refresh</button>
+        </div>
+        <span class="hint">What happens after she sends it. A fan who was sent the paid page and never opened it gets the free trial next time — the two rates below are the test of whether that is worth doing.</span>
+        <div id="growth-cta-stats" class="hint" style="margin-top:8px;">—</div>
+      </div>
+      <div style="margin-top:14px;">
+        <div class="section-title" style="font-size:0.8rem;">
           Win-back ladder
           <button type="button" class="btn-section-save" onclick="loadGrowthWinback()">Refresh</button>
         </div>
@@ -1986,9 +1994,11 @@ function renderForm(slug, cfg) {
       <div style="margin-top:14px;">
         <div class="section-title" style="font-size:0.8rem;">
           Already posted
+          <button type="button" class="btn-section-save" onclick="loadGrowthRegister()">Refresh</button>
           <button type="button" class="btn-section-save" onclick="clearGrowthRegister(this)">Clear</button>
         </div>
-        <div id="growth-register" class="hint">—</div>
+        <span class="hint">Every post she publishes lands here and goes back into the next prompt as "do not say these again". Only the last 60 are kept, so the counts are a rolling window, not a lifetime total.</span>
+        <div id="growth-register" class="hint" style="margin-top:8px;">—</div>
       </div>
     </div>
 
@@ -2774,6 +2784,7 @@ async function loadGrowth() {
       + (l.web ? '<code>' + esc(l.web) + '</code>' : '') + '</div>').join('')
       || 'Connect Telegram to get a deep link.';
   } catch (e) {}
+  await loadGrowthCta();
   await loadGrowthWinback();
   await loadGrowthRegister();
 }
@@ -2894,15 +2905,141 @@ async function loadGrowthWinback() {
   box.innerHTML = html;
 }
 
+function daysAgo(n) {
+  if (n === null || n === undefined) return 'never';
+  return n === 0 ? 'today' : n === 1 ? 'yesterday' : n + 'd ago';
+}
+
 async function loadGrowthRegister() {
+  const box = document.getElementById('growth-register');
+  if (!box || !currentSlug) return;
+  let d;
   try {
-    const d = await (await fetch('/api/growth/register?persona=' + encodeURIComponent(currentSlug))).json();
-    const rows = d.entries || [];
-    document.getElementById('growth-register').innerHTML = rows.length
-      ? rows.map(r => '<div style="margin-bottom:4px;"><strong>' + esc(r.platform) + '</strong> — '
-          + esc((r.text || '').slice(0, 140)) + '</div>').join('')
-      : 'Nothing posted through the platform yet.';
-  } catch (e) {}
+    d = await (await fetch('/api/growth/register?persona=' + encodeURIComponent(currentSlug))).json();
+  } catch (e) { box.textContent = 'Could not read the register.'; return; }
+  if (!d || !d.ok) { box.textContent = 'Could not read the register.'; return; }
+
+  const t = d.totals || {};
+  const plats = d.platforms || [];
+  const rows = d.entries || [];
+  let html = '';
+  if (!d.beta) {
+    html += '<div style="margin-bottom:10px; opacity:0.8;">Not recording new posts \u2014 this persona is not on the growth beta, so nothing is being kept out of the next prompt.</div>';
+  }
+  html += '<div style="display:flex; flex-wrap:wrap; gap:14px; margin-bottom:12px;">'
+    + statTile('posts held', t.posts || 0)
+    + statTile('channels', t.platforms || 0)
+    + statTile('this week', t.posts_7d || 0)
+    + statTile('repeats caught', t.repeats || 0)
+    + statTile('last post', daysAgo(t.quiet_days))
+    + '</div>';
+
+  if (!plats.length) {
+    box.innerHTML = html + '<div>Nothing posted through the platform yet.</div>';
+    return;
+  }
+
+  const num = n => '<td align="right" style="font-variant-numeric:tabular-nums;">' + n + '</td>';
+  html += '<table style="width:100%; font-size:0.78rem; border-collapse:collapse; margin-bottom:10px;">'
+    + '<tr><th align="left">Channel</th><th align="right">Posts</th><th align="right">Share</th>'
+    + '<th align="right">This week</th><th align="right">Last post</th><th align="right">Repeats caught</th></tr>'
+    + plats.map(p => '<tr><td>' + esc(p.platform) + '</td>' + num(p.posts) + num(p.share + '%')
+        + num(p.posts_7d) + num(daysAgo(p.quiet_days)) + num(p.repeats || 0) + '</tr>').join('')
+    + '</table>';
+
+  const notes = [];
+  const quiet = plats.filter(p => p.quiet_days !== null && p.quiet_days >= 7);
+  if (quiet.length) {
+    notes.push('Nothing new on <strong>' + quiet.map(p => esc(p.platform)).join('</strong>, <strong>')
+      + '</strong> for over a week.');
+  }
+  if (t.repeats) {
+    notes.push(t.repeats + ' generated post' + (t.repeats === 1 ? ' was' : 's were')
+      + ' a rewrite of an earlier one and got sent back for a second try.');
+  }
+  if (t.posts >= (d.cap || 60)) {
+    notes.push('The register is full at ' + (d.cap || 60) + ', so anything older has already dropped off.');
+  }
+  html += notes.map(n => '<div>' + n + '</div>').join('');
+
+  if (rows.length) {
+    html += '<div style="margin-top:10px;"><strong>Most recent</strong>'
+      + rows.slice(0, 8).map(r => '<div style="margin-bottom:4px;"><strong>' + esc(r.platform)
+          + '</strong> \u2014 ' + esc((r.text || '').slice(0, 140)) + '</div>').join('')
+      + '</div>';
+  }
+  box.innerHTML = html;
+}
+
+async function loadGrowthCta() {
+  const box = document.getElementById('growth-cta-stats');
+  if (!box || !currentSlug) return;
+  let d;
+  try {
+    d = await (await fetch('/api/growth/cta?persona=' + encodeURIComponent(currentSlug))).json();
+  } catch (e) { box.textContent = 'Could not read the link stats.'; return; }
+  if (!d || !d.ok) { box.textContent = 'Could not read the link stats.'; return; }
+
+  const t = d.totals || {};
+  const cfg = d.config || {};
+  const kindName = k => k === 'trial' ? 'free trial' : k === 'paid' ? 'paid page'
+    : 'before this was recorded';
+  let html = '';
+  if (!d.beta) {
+    html += '<div style="margin-bottom:10px; opacity:0.8;">Not switching links \u2014 this persona is not on the growth beta, so everyone gets the paid page whether or not they opened the last one.</div>';
+  }
+  html += '<div style="display:flex; flex-wrap:wrap; gap:14px; margin-bottom:12px;">'
+    + statTile('fans sent it', t.fans || 0)
+    + statTile('times sent', t.sends || 0)
+    + statTile('opened it', t.clicked || 0)
+    + statTile('open rate', (t.rate || 0) + '%')
+    + '</div>';
+
+  if (!t.fans) {
+    box.innerHTML = html + '<div>Nobody has been sent the link yet.</div>';
+    return;
+  }
+
+  const num = n => '<td align="right" style="font-variant-numeric:tabular-nums;">' + n + '</td>';
+  const table = (head, rows, name) =>
+    '<table style="width:100%; font-size:0.78rem; border-collapse:collapse; margin-bottom:10px;">'
+    + '<tr><th align="left">' + head + '</th><th align="right">Fans</th><th align="right">Sent</th>'
+    + '<th align="right">Opened</th><th align="right">Rate</th></tr>'
+    + rows.map(r => '<tr><td>' + esc(name(r)) + '</td>' + num(r.fans) + num(r.sends)
+        + num(r.clicked) + num(r.rate + '%') + '</tr>').join('')
+    + '</table>';
+  html += table('Link', d.kinds || [], r => kindName(r.kind));
+  if ((d.channels || []).length > 1) {
+    html += table('Channel', d.channels, r => r.channel);
+  }
+
+  const byKind = {};
+  (d.kinds || []).forEach(r => { byKind[r.kind] = r; });
+  const notes = [];
+  if (byKind.trial && byKind.paid && byKind.trial.tracked && byKind.paid.tracked) {
+    notes.push('The free trial is opened ' + byKind.trial.rate + '% of the time against '
+      + byKind.paid.rate + '% for the paid page.');
+  } else if (!cfg.trial) {
+    notes.push('No trial link set, so everyone gets the paid page. Add one under Chat Phases & CTA.');
+  } else if (!byKind.trial) {
+    notes.push('The trial link has not gone out yet \u2014 it only goes to a fan who was sent the paid page and left it unopened.');
+  }
+  if (!cfg.paid) {
+    notes.push('No paid link is configured, so she has nothing to send.');
+  }
+  if (cfg.promo) {
+    notes.push(cfg.promo_live
+      ? 'Promo <strong>' + esc(cfg.promo) + '</strong> is live'
+        + (cfg.promo_expires ? ' until ' + esc(cfg.promo_expires) : ' with no end date') + '.'
+      : 'Promo <strong>' + esc(cfg.promo) + '</strong> ran out on ' + esc(cfg.promo_expires)
+        + ' and is no longer being offered.');
+  }
+  if (t.untracked) {
+    notes.push(t.untracked + ' fan' + (t.untracked === 1 ? ' was' : 's were')
+      + ' sent the address itself rather than a redirect, so their opens cannot be seen.');
+  }
+  html += notes.map(n => '<div>' + n + '</div>').join('');
+  box.innerHTML = html;
 }
 
 async function saveGrowthBeta(btn) {

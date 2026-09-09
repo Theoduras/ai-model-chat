@@ -138,6 +138,25 @@ for i in range(G.REGISTER_CAP + 10):
 check('capped', len(big) == G.REGISTER_CAP)
 check('kept the newest', big[0]['text'].endswith(str(G.REGISTER_CAP + 9)))
 
+now = 1_700_000_000
+week = 7 * 86400
+feed = []
+feed = G.register_add(feed, 'x', 'monday lift', ts=now - 2 * 86400)
+feed = G.register_add(feed, 'x', 'tuesday coffee', ts=now - 3 * 86400)
+feed = G.register_add(feed, 'x', 'old news', ts=now - week - 86400)
+feed = G.register_add(feed, 'threads', 'cannot sleep again', ts=now - 30 * 86400)
+st = G.register_stats(feed, now=now)
+check('counts every post', st['totals']['posts'] == 4)
+check('counts the last week', st['totals']['posts_7d'] == 2, st['totals'])
+check('counts platforms', st['totals']['platforms'] == 2)
+check('busiest platform first', st['platforms'][0]['platform'] == 'x')
+check('share of posts', st['platforms'][0]['share'] == 75, st['platforms'][0])
+check('days since the last post', st['platforms'][0]['quiet_days'] == 2)
+check('a quiet platform shows as quiet',
+      st['platforms'][1]['quiet_days'] == 30, st['platforms'][1])
+check('nothing posted is not a zero-day silence',
+      G.register_stats([], now=now)['totals']['quiet_days'] is None)
+
 print()
 print('win-back ladder')
 check('nothing on day zero', G.winback_step(0, 0) is None)

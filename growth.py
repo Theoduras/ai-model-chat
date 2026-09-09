@@ -289,6 +289,37 @@ def is_repeat(entries, platform, text, threshold=0.6):
     return False
 
 
+def register_stats(entries, now=0):
+    """Totals and a per-platform breakdown of what she has posted. The register
+    is a rolling window, so this counts what it still holds rather than all time
+    — the point is which channels are being fed and which have gone quiet."""
+    now = int(now or 0)
+    week = now - 7 * 86400
+    per = {}
+    totals = {'posts': 0, 'posts_7d': 0, 'platforms': 0, 'last': 0}
+    for e in entries or []:
+        if not isinstance(e, dict):
+            continue
+        plat = normalise_source(e.get('platform')) or 'other'
+        ts = int(e.get('ts') or 0)
+        row = per.setdefault(plat, {'platform': plat, 'posts': 0, 'posts_7d': 0, 'last': 0})
+        row['posts'] += 1
+        totals['posts'] += 1
+        if ts and ts >= week:
+            row['posts_7d'] += 1
+            totals['posts_7d'] += 1
+        row['last'] = max(row['last'], ts)
+        totals['last'] = max(totals['last'], ts)
+    quiet = lambda last: int((now - last) // 86400) if (now and last) else None
+    rows = sorted(per.values(), key=lambda r: (-r['posts'], r['platform']))
+    for row in rows:
+        row['quiet_days'] = quiet(row['last'])
+        row['share'] = round(100.0 * row['posts'] / totals['posts']) if totals['posts'] else 0
+    totals['platforms'] = len(rows)
+    totals['quiet_days'] = quiet(totals['last'])
+    return {'totals': totals, 'platforms': rows}
+
+
 def register_block(entries, platform, limit=REGISTER_SHOWN):
     """The "do not repeat these" paragraph injected into a generation prompt."""
     recent = register_recent(entries, platform, limit)

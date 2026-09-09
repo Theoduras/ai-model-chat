@@ -6708,6 +6708,19 @@ def _cta_choice(persona, fan, cta=None):
                              today=datetime.now(timezone.utc).strftime('%Y-%m-%d'))
 
 
+def _cta_record(fan, choice, tracked, now=None):
+    """Bank what went out with this link. The kind is stored rather than derived
+    later because the choice depends on the fan's state at the moment it was
+    made, and that state is gone by the time anyone reads the numbers. `tracked`
+    is false on the paths that send the raw URL, where a click can never be
+    seen — counting those as unclicked would understate every rate."""
+    fan['cta_target'] = choice['url']
+    fan['cta_kind'] = choice['kind']
+    fan['cta_tracked'] = bool(tracked)
+    fan['cta_sent'] = int(now or time.time())
+    fan['cta_count'] = int(fan.get('cta_count', 0)) + 1
+
+
 GROWTH_SOURCE_COOKIE = 'gsrc'
 GROWTH_SOURCE_MAX_AGE = 60 * 60 * 24 * 90
 
@@ -6786,6 +6799,22 @@ def _no_repeat_block(persona, platform):
     return growth.register_block(_content_register(persona), platform)
 
 
+def _content_repeat_blocked(persona, platform):
+    """Count a generation that came back as a rewrite of an earlier post. The
+    register is a rolling window, so this is the only durable record of whether
+    it is catching anything."""
+    key = f'content_repeats_{persona}'
+    try:
+        tally = json.loads(_get_setting(key) or '{}')
+        if not isinstance(tally, dict):
+            tally = {}
+    except Exception:
+        tally = {}
+    plat = growth.normalise_source(platform) or 'other'
+    tally[plat] = int(tally.get(plat, 0) or 0) + 1
+    _set_setting(key, json.dumps(tally))
+
+
 def _reads_as_repeat(persona, platform, text):
     return bool(_growth_on(persona)
                 and growth.is_repeat(_content_register(persona), platform, text))
@@ -6800,11 +6829,25 @@ def api_growth_register():
         return jsonify({'error': 'Invalid slug'}), 400
     if request.method == 'DELETE':
         _set_setting(f'content_register_{persona}', '[]')
+        _set_setting(f'content_repeats_{persona}', '{}')
         return jsonify({'ok': True, 'entries': []})
     plat = (request.args.get('platform') or '').strip()
-    rows = growth.register_recent(_content_register(persona), plat, limit=60)
+    entries = _content_register(persona)
+    rows = growth.register_recent(entries, plat, limit=60)
+    try:
+        repeats = json.loads(_get_setting(f'content_repeats_{persona}') or '{}')
+        if not isinstance(repeats, dict):
+            repeats = {}
+    except Exception:
+        repeats = {}
+    now = int(time.time())
+    stats = growth.register_stats(entries, now=now)
+    for row in stats['platforms']:
+        row['repeats'] = int(repeats.get(row['platform'], 0) or 0)
+    stats['totals']['repeats'] = sum(int(n or 0) for n in repeats.values())
     return jsonify({'ok': True, 'persona': persona, 'entries': rows,
-                    'beta': _growth_on(persona)})
+                    'cap': growth.REGISTER_CAP, 'beta': _growth_on(persona),
+                    **stats})
 
 
 def _winback_step_for(fan, now, on_beta):
@@ -6876,6 +6919,61 @@ def api_growth_winback():
                     'rungs': [{**r, 'fans': counts.get(r['touch'], 0)}
                               for r in growth.winback_rungs()],
                     'due': due[:10], 'waiting': waiting[:10]})
+
+
+@app.route('/api/growth/cta')
+@operator_only
+def api_growth_cta():
+    """How the link itself is doing: how often it goes out, how often it gets
+    opened, and whether the free trial is opened more than the paid page."""
+    persona = (request.args.get('persona') or '').strip()
+    if not re.match(r'^[a-z0-9_-]+$', persona or ''):
+        return jsonify({'error': 'Invalid slug'}), 400
+    cta = _phases_cta(persona)
+    blank = lambda: {'fans': 0, 'sends': 0, 'tracked': 0, 'clicked': 0}
+    by_kind, by_channel = {}, {}
+    totals, untracked = blank(), 0
+    fans = ([('telegram', f) for f in _tg_fans(persona).values()]
+            + [('x', f) for f in _x_fans(persona).values()])
+    for channel, fan in fans:
+        if not isinstance(fan, dict) or not fan.get('cta_sent'):
+            continue
+        # Fans from before the kind was recorded read as tracked, which is what
+        # they were: every path that existed then went through a redirect.
+        tracked = bool(fan.get('cta_tracked', True))
+        untracked += 0 if tracked else 1
+        hit = 1 if (tracked and fan.get('cta_clicked')) else 0
+        sends = int(fan.get('cta_count', 0) or 0) or 1
+        kind = growth.normalise_source(fan.get('cta_kind')) or 'unknown'
+        for bucket, key in ((by_kind, kind), (by_channel, channel)):
+            row = bucket.setdefault(key, blank())
+            row['fans'] += 1
+            row['sends'] += sends
+            row['tracked'] += 1 if tracked else 0
+            row['clicked'] += hit
+        totals['fans'] += 1
+        totals['sends'] += sends
+        totals['tracked'] += 1 if tracked else 0
+        totals['clicked'] += hit
+    totals['untracked'] = untracked
+
+    def listed(bucket, field):
+        out = [{field: k, **v, 'rate': _growth_pct(v['clicked'], v['tracked'])}
+               for k, v in bucket.items()]
+        out.sort(key=lambda r: (-r['fans'], r[field]))
+        return out
+
+    totals['rate'] = _growth_pct(totals['clicked'], totals['tracked'])
+    today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    return jsonify({'ok': True, 'persona': persona, 'beta': _growth_on(persona),
+                    'totals': totals,
+                    'kinds': listed(by_kind, 'kind'),
+                    'channels': listed(by_channel, 'channel'),
+                    'config': {'paid': bool(cta.get('cta_url')),
+                               'trial': bool(cta.get('trial_url')),
+                               'promo': cta.get('promo_code', ''),
+                               'promo_live': bool(growth.promo_live(cta, today)),
+                               'promo_expires': cta.get('promo_expires', '')}})
 
 
 GROWTH_CHANNELS = ('instagram', 'tiktok', 'x', 'threads', 'reddit',
@@ -8586,11 +8684,9 @@ def _x_dm_reply_round(persona, max_results=20):
             if cta_due:
                 choice = _cta_choice(persona, fan, cta)
                 cta_label = growth.cta_suffix(choice) or 'come see'
-                fan['cta_target'] = choice['url']
                 link = _x_cta_link(persona, sender, choice['url'])
                 reply = f'{reply}\n\n{cta_label} → {link}'
-                fan['cta_sent'] = int(time.time())
-                fan['cta_count'] = int(fan.get('cta_count', 0)) + 1
+                _cta_record(fan, choice, True)
                 logger.info('CTA SENT [x/%s] fan=%s trigger=%s phase=%d count=%d link=%s',
                             persona, sender_name or sender,
                             'asked' if cta_asked else 'phase', phase_idx,
@@ -8745,6 +8841,7 @@ def _x_generate_post(persona, topic=''):
     # is worth the call, and a second repeat is not worth a third.
     if _reads_as_repeat(persona, 'x', text):
         logger.info('X post repeated an earlier one [%s], asking again', persona)
+        _content_repeat_blocked(persona, 'x')
         retry = _persona_text(
             persona,
             instruction + '\n\nYour last attempt was a rewrite of one of those. '
@@ -15141,6 +15238,7 @@ def api_threads_publish():
         text = _fv_trim(_persona_text(persona, instr, max_tokens=200, temperature=0.95), hard_cap=480)
         if _reads_as_repeat(persona, 'threads', text):
             logger.info('Threads post repeated an earlier one [%s], asking again', persona)
+            _content_repeat_blocked(persona, 'threads')
             text = _fv_trim(_persona_text(
                 persona,
                 instr + '\n\nYour last attempt was a rewrite of one of those. '
@@ -15799,11 +15897,9 @@ def _tg_handle_update(persona, update):
         label = growth.cta_suffix(choice) or 'come see'
         # The redirect is resolved at click time, so the chosen destination has
         # to be on the fan record before the message goes out.
-        fan['cta_target'] = choice['url']
         link = _tg_cta_link(bot, chat_id)
         reply = f'{reply}\n\n{label} → {link}'
-        fan['cta_sent'] = int(time.time())
-        fan['cta_count'] = int(fan.get('cta_count', 0)) + 1
+        _cta_record(fan, choice, True)
         logger.info('CTA SENT [%s] fan=%s trigger=%s phase=%d count=%d kind=%s link=%s',
                     persona, chat_id, 'asked' if cta_asked else 'phase',
                     phase_idx, fan['cta_count'], choice['kind'], link)
@@ -15894,9 +15990,7 @@ def _tg_followup_round(persona):
                 fan['winback_total'] = int(fan.get('winback_total', 0) or 0) + 1
                 if offering:
                     fan['winback_offers'] = int(fan.get('winback_offers', 0) or 0) + 1
-                    fan['cta_target'] = choice['url']
-                    fan['cta_sent'] = now
-                    fan['cta_count'] = int(fan.get('cta_count', 0)) + 1
+                    _cta_record(fan, choice, True, now)
                 logger.info('WIN-BACK [%s] fan=%s touch=%d offer=%s quiet=%dd',
                             persona, chat_id, step['touch'], offering, quiet_days)
             else:
@@ -16836,14 +16930,18 @@ def _tgu_plan(persona, chat_id, name, text, texts=None):
 
     chunks = _tg_bursts(reply) if cfg['humanize'] else [reply]
     if cta_due:
-        label = (cta.get('cta_label') or acct.get('cta_label') or 'come see').strip()
-        link = cta_url
+        choice = _cta_choice(persona, fan, cta)
+        # Same ladder as the bot path — a fan who ignored the paid link once gets
+        # the trial next — but this account types the URL out, so there is no
+        # redirect to count a click through.
+        link = choice['url'] or cta_url
+        label = (growth.cta_suffix(choice)
+                 or cta.get('cta_label') or acct.get('cta_label') or 'come see').strip()
         chunks[-1] = f'{chunks[-1]}\n\n{label} → {link}'
-        fan['cta_sent'] = int(time.time())
-        fan['cta_count'] = int(fan.get('cta_count', 0)) + 1
-        logger.info('CTA SENT [%s] fan=%s trigger=%s phase=%d count=%d link=%s',
+        _cta_record(fan, {**choice, 'url': link}, False)
+        logger.info('CTA SENT [%s] fan=%s trigger=%s phase=%d count=%d kind=%s link=%s',
                     persona, chat_id, 'asked' if cta_asked else 'phase',
-                    phase_idx, fan['cta_count'], link)
+                    phase_idx, fan['cta_count'], choice['kind'], link)
     elif cta_asked and not cta_url:
         logger.warning('CTA asked but no cta_url configured [%s] fan=%s', persona, chat_id)
 
