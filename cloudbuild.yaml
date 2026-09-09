@@ -56,3 +56,8 @@ images:
 
 options:
   logging: CLOUD_LOGGING_ONLY
+
+# Cloud Build's default is 10 minutes, which the image outgrew once it started
+# carrying Chromium for the OnlyFans sign-in: the build simply timed out and
+# nothing was deployed.
+timeout: 2400s
