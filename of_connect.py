@@ -25,6 +25,8 @@ import of_session
 logger = logging.getLogger(__name__)
 
 BROWSER_PATH = (os.getenv('PLAYWRIGHT_CHROMIUM') or '').strip()
+SIGNIN_URL = 'https://onlyfans.com/'
+COOKIE_ORIGIN = 'https://onlyfans.com'
 VIEWPORT = {'width': 900, 'height': 700}
 FRAME_QUALITY = 55
 # How long a half-finished sign-in is kept alive. Long enough to find a phone
@@ -136,8 +138,7 @@ class Attempt:
     def _drive(self, pw):
         browser, context = self._launch(pw)
         page = context.new_page()
-        page.goto('https://onlyfans.com/', wait_until='domcontentloaded',
-                  timeout=60000)
+        page.goto(SIGNIN_URL, wait_until='domcontentloaded', timeout=60000)
         self.state = 'signin'
         last_check = 0.0
         while not self._done.is_set():
@@ -193,7 +194,7 @@ class Attempt:
         signed in and signs its own requests, so a successful answer proves the
         session works before we ever store it.
         """
-        cookies = context.cookies('https://onlyfans.com')
+        cookies = context.cookies(COOKIE_ORIGIN)
         names = {c['name'] for c in cookies}
         if not {'sess', 'auth_id'} <= names:
             return

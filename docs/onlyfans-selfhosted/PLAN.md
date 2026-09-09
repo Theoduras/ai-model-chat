@@ -172,16 +172,44 @@ Creators never see this.
 
 ## 4. Build order
 
-| Phase | Deliverable | Proves |
-|---|---|---|
-| 1 | `of_rules.py` + tests | We can sign a request OnlyFans accepts |
-| 2 | `of_client.py` against one manually pasted session | Read chats, send a message, send a PPV |
-| 3 | `of_session.py` hosted-browser connect + Screens 2–5 | A creator can connect themselves |
-| 4 | `of_events.py` + worker + Screens 1, 6 | Sub-second autoreply, no code change in the engine |
-| 5 | Proxy pool, health checks, Screens 7, 8 | Multi-account, survives rotation and expiry |
-| 6 | Cut `onlyfans.py` over, drop the OnlyFansAPI key | Zero per-account cost |
+| Phase | Deliverable | Proves | Status |
+|---|---|---|---|
+| 1 | `of_rules.py` + tests | We can sign a request OnlyFans accepts | Built — algorithm verified against the reference in tests; **one live request still needed** |
+| 2 | `of_client.py`, `of_session.py` | Read chats, send a message, send a PPV | Built — paced, retried, session encrypted |
+| 3 | `of_connect.py` + the sign-in panel | A creator can connect themselves | Built — real Chromium driven end to end in `test_of_e2e.py` |
+| 4 | `of_events.py` + the wiring in `app.py` | Sub-second autoreply, no change to the engine | Built — events reach the existing webhook handler |
+| 5 | Proxy pool, health checks, admin screen | Multi-account, survives rotation and expiry | Partly — session checks and `/api/onlyfans/health` are in; the admin screen is not |
+| 6 | Flip `ONLYFANS_TRANSPORT` to `direct`, drop the key | Zero per-account cost | Waiting on a live account |
 
-Phases 1–2 are the risk. If signing works, the rest is ordinary engineering.
+### What is left before this can carry a real account
+
+1. **One live signed request.** Everything downstream assumes `of_rules.sign()`
+   produces a header OnlyFans accepts. That has not been proven against
+   onlyfans.com — this sandbox cannot reach it. Run
+   `python3 -c "import of_rules, urllib.request as u; p='/api2/v2/init'; print(u.urlopen(u.Request('https://onlyfans.com'+p, headers=of_rules.headers(p))).status)"`
+   locally. A 200 means the layer works; a 400 saying "please refresh the page"
+   means the public rules are behind and the self-derive fallback is needed now
+   rather than later.
+2. **The admin screen** (wireframe 8). Its API is live at
+   `/api/onlyfans/health`; nothing renders it yet.
+3. **A residential proxy pool.** Without `ONLYFANS_PROXY_TEMPLATE` every account
+   goes out on the server's own address, which is fine for one and asking for
+   trouble with several.
+
+### Configuration
+
+| Variable | What it does |
+|---|---|
+| `ONLYFANS_TRANSPORT` | `direct` for ours, `api` for the middleman (default) |
+| `ONLYFANS_SESSION_KEY` | Fernet key for the vault; falls back to deriving one from `SECRET_KEY` |
+| `ONLYFANS_PROXY_TEMPLATE` | e.g. `http://user-{country}-session-{session}:pw@gate:7000` |
+| `ONLYFANS_MIN_INTERVAL` | Seconds between requests per account (default 2) |
+| `ONLYFANS_POLL_ACTIVE` / `ONLYFANS_POLL_IDLE` | Watcher pacing (default 5s / 60s) |
+| `ONLYFANS_SESSION_CHECK` | Seconds between session health checks (default 600) |
+| `PLAYWRIGHT_CHROMIUM` | Browser path, when the image puts it somewhere unusual |
+
+Cloud Run needs **session affinity on** for the connect flow: the hosted browser
+lives in one instance's memory and the frame polls have to reach it.
 
 ---
 

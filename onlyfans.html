@@ -34,6 +34,12 @@
     .chosen span { font-size: 0.72rem; background: var(--surface); border-radius: 6px; padding: 3px 8px; color: var(--text-2); }
     table.accts { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
     table.accts td { padding: 6px 8px; border-bottom: 1px solid var(--panel-2); color: var(--text-2); }
+    .browser-frame { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--surface); }
+    .browser-bar { display: flex; align-items: center; gap: 7px; padding: 6px 10px; background: var(--panel-2); border-bottom: 1px solid var(--border); }
+    .browser-bar .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border); }
+    .browser-url { flex: 1; font-size: 0.75rem; color: var(--text-3); }
+    #of-frame { display: block; width: 100%; background: #fff; cursor: default; outline: none; }
+    #of-frame:focus { box-shadow: inset 0 0 0 2px var(--accent); }
     @media (max-width: 640px) { .fv-wrap { padding: 18px 14px 70px; gap: 16px; } }
   </style>
 <link rel="stylesheet" href="/css/site-nav.css">
@@ -73,7 +79,7 @@
     </div>
 
     <div id="signin-panel">
-      <div class="row-inline">
+      <div class="row-inline" id="of-credentials">
         <div class="field"><label>OnlyFans email</label>
           <input type="email" id="of-email" autocomplete="off" spellcheck="false"></div>
         <div class="field"><label>OnlyFans password</label>
@@ -88,13 +94,37 @@
           <span class="hint">Pick the country she normally logs in from — a login from somewhere new is what makes OnlyFans ask for a code.</span>
         </div>
       </div>
-      <div class="row-inline">
+      <div class="row-inline" id="of-api-buttons">
         <button class="btn-ai" onclick="startSignin()">Sign in to OnlyFans</button>
         <button class="btn-ai" style="background:var(--surface); color:var(--text-2);" onclick="startSignin(true)">Use the Auth+ app instead</button>
       </div>
-      <span class="hint">Her password is passed straight to OnlyFans to sign in and is never
+      <span class="hint" id="of-api-hint">Her password is passed straight to OnlyFans to sign in and is never
         stored here. If her account uses OnlyFans' newer face check, only the Auth+ app can
         complete it.</span>
+      <div class="row-inline" id="of-browser-buttons" style="display:none;">
+        <button class="btn-ai" onclick="startBrowserSignin()">Open OnlyFans sign-in</button>
+      </div>
+      <span class="hint" id="of-browser-hint" style="display:none;">A browser opens below on
+        the address this account will keep. Sign in there exactly as you would on your own
+        laptop — nothing you type reaches us, and this stays the same device to OnlyFans
+        afterwards.</span>
+    </div>
+
+    <div id="step-browser" style="display:none;">
+      <div class="browser-frame">
+        <div class="browser-bar">
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          <span class="browser-url">🔒 onlyfans.com</span>
+          <span class="hint" id="browser-state">opening…</span>
+        </div>
+        <img id="of-frame" alt="OnlyFans sign-in" tabindex="0">
+      </div>
+      <span class="hint">This is the real OnlyFans page, running on the address this
+        account will keep. Type into it as you would in your own browser — the password
+        goes to OnlyFans, never to us. Answer the captcha and any code yourself.</span>
+      <div class="row-inline" style="margin-top:8px;">
+        <button class="btn-ai" style="background:var(--surface); color:var(--text-2);" onclick="cancelBrowser()">Cancel</button>
+      </div>
     </div>
 
     <div id="step-otp" style="display:none;">
@@ -269,16 +299,45 @@ async function init(){
 
 async function loadConfig(){
   const box=document.getElementById('account-status');
-  if(!appCfg.configured){
+  const direct=browserOn();
+  const show=(id,on)=>{const e=document.getElementById(id);if(e)e.style.display=on?'':'none';};
+  ['of-credentials','of-api-buttons','of-api-hint'].forEach(id=>show(id,!direct));
+  ['of-browser-buttons','of-browser-hint'].forEach(id=>show(id,direct));
+  show('account-picker',!direct);
+  if(direct&&!appCfg.browser_ready){
+    err(box,'This host has no browser installed, so an account cannot be connected '
+           +'here. Deploy the image that carries Chromium.');
+  }else if(!direct&&!appCfg.configured){
     err(box,'This deployment has no OnlyFansAPI key. Set ONLYFANSAPI_KEY and redeploy.');
   }
   const wb=document.getElementById('webhook-status');
-  wb.innerHTML=appCfg.webhook_ready
-    ? '<span class="hint">Webhook ready. OnlyFansAPI posts to <code>'+esc(appCfg.webhook_url||'')+'</code>.</span>'
-    : '<span class="hint" style="color:var(--warn);">No webhook signing secret. Add <code>'+esc(appCfg.webhook_url||'this app\'s /webhooks/onlyfans')+'</code> in the OnlyFansAPI console, give it a signing secret, subscribe to messages.received, users.typing, messages.ppv.unlocked and messages.sent, then set ONLYFANS_WEBHOOK_SECRET to that secret. Until then she only answers on the backup sweep.</span>';
+  if(direct){
+    const st=await (await fetch('/api/onlyfans/status?persona='+encodeURIComponent(persona()))).json();
+    const w=st.webhook||{}, s=st.session||{};
+    wb.innerHTML=!st.connected ? ''
+      : (s.status==='expired'
+        ? '<span class="hint" style="color:var(--warn);">Her OnlyFans session expired'
+          +(s.last_error?(' ('+esc(s.last_error)+')'):'')+'. She has stopped reading and '
+          +'replying until you sign in again — nothing is lost.</span>'
+        : (w.ready
+          ? '<span class="hint">Watching her inbox. New messages reach her within seconds.</span>'
+          : '<span class="hint" style="color:var(--warn);">'+esc(w.problem||'No watcher running.')+'</span>'));
+  }else{
+    wb.innerHTML=appCfg.webhook_ready
+      ? '<span class="hint">Webhook ready. OnlyFansAPI posts to <code>'+esc(appCfg.webhook_url||'')+'</code>.</span>'
+      : '<span class="hint" style="color:var(--warn);">No webhook signing secret. Add <code>'+esc(appCfg.webhook_url||'this app\'s /webhooks/onlyfans')+'</code> in the OnlyFansAPI console, give it a signing secret, subscribe to messages.received, users.typing, messages.ppv.unlocked and messages.sent, then set ONLYFANS_WEBHOOK_SECRET to that secret. Until then she only answers on the backup sweep.</span>';
+  }
   await loadAccounts();
   const st=await (await fetch('/api/onlyfans/connect/status?persona='+encodeURIComponent(persona()))).json();
-  if(st.ok&&st.attempt&&!st.attempt.done){renderAttempt(st.attempt);pollAttempt();}
+  if(direct){
+    // A half-finished sign-in survives a reload: pick the browser back up
+    // rather than making her start over and collect another OnlyFans code.
+    if(st.ok&&st.attempt&&st.attempt.state==='signin'){
+      browserAttempt=st.attempt.attempt;
+      showStep('step-browser');
+      pollFrames();
+    }
+  }else if(st.ok&&st.attempt&&!st.attempt.done){renderAttempt(st.attempt);pollAttempt();}
   await loadAuto();
   await loadPpv();
 }
@@ -289,11 +348,120 @@ async function loadConfig(){
 let pollTimer=null;
 
 function showStep(which){
-  ['signin-panel','step-otp','step-face','step-mobile'].forEach(id=>{
+  ['signin-panel','step-browser','step-otp','step-face','step-mobile'].forEach(id=>{
     const e=document.getElementById(id);
     if(e)e.style.display=(id===which?'block':'none');
   });
 }
+
+// ── Signing in through the hosted browser ────────────────────────────────────
+// A real Chromium is open on the server, on the address this account will keep.
+// We show its frames and forward what she clicks and types, so the password and
+// the captcha go to OnlyFans and never through anything of ours.
+let browserAttempt=null, browserTimer=null;
+
+function browserOn(){ return (appCfg.transport==='direct'); }
+
+async function startBrowserSignin(){
+  const box=document.getElementById('account-status');
+  busy(box,'Opening OnlyFans…');
+  const r=await post('/api/onlyfans/connect/browser',{persona:persona(),
+    country:document.getElementById('of-country').value});
+  if(!r.ok){err(box,r.error);showStep('signin-panel');return;}
+  browserAttempt=r.attempt.attempt;
+  showStep('step-browser');
+  busy(box,'Sign in on the page below.');
+  document.getElementById('of-frame').focus();
+  pollFrames();
+}
+
+function stopFrames(){ if(browserTimer)clearTimeout(browserTimer); browserTimer=null; }
+
+async function pollFrames(){
+  stopFrames();
+  if(!browserAttempt)return;
+  let r;
+  try{
+    r=await (await fetch('/api/onlyfans/connect/frame?attempt='+encodeURIComponent(browserAttempt))).json();
+  }catch(e){ browserTimer=setTimeout(pollFrames,1500); return; }
+  const box=document.getElementById('account-status');
+  if(!r.ok){err(box,r.error||'That sign-in closed.');browserAttempt=null;showStep('signin-panel');return;}
+  const img=document.getElementById('of-frame');
+  if(r.frame)img.src=r.frame;
+  const a=r.attempt||{};
+  document.getElementById('browser-state').textContent=
+    a.state==='connected'?'signed in':(a.state==='signin'?'live':a.state);
+  if(a.state==='connected'){
+    browserAttempt=null;
+    showStep(null);
+    ok(box,'Signed in as @'+((a.result||{}).username||'her account')+'. She is watching her inbox now.');
+    await loadAccounts();
+    await loadConfig();
+    return;
+  }
+  if(a.state==='failed'||a.state==='expired'){
+    browserAttempt=null;
+    err(box,a.error||'The sign-in timed out. Start it again.');
+    showStep('signin-panel');
+    return;
+  }
+  browserTimer=setTimeout(pollFrames,300);
+}
+
+function sendInput(kind,extra){
+  if(!browserAttempt)return;
+  post('/api/onlyfans/connect/input',Object.assign(
+    {attempt:browserAttempt,kind:kind},extra||{}));
+}
+
+function frameClick(ev){
+  const img=ev.currentTarget, box=img.getBoundingClientRect();
+  if(!img.naturalWidth)return;
+  // The frame is scaled to fit the panel; the browser wants its own pixels.
+  const scale=img.naturalWidth/box.width;
+  sendInput('click',{x:(ev.clientX-box.left)*scale,y:(ev.clientY-box.top)*scale});
+  img.focus();
+}
+
+function frameKey(ev){
+  if(!browserAttempt)return;
+  if(ev.key==='Enter'||ev.key==='Tab'||ev.key==='Backspace'||ev.key.startsWith('Arrow')){
+    ev.preventDefault();
+    sendInput('key',{key:ev.key});
+  }else if(ev.key.length===1){
+    ev.preventDefault();
+    sendInput('type',{text:ev.key});
+  }
+}
+
+function framePaste(ev){
+  const text=(ev.clipboardData||window.clipboardData).getData('text');
+  if(!text)return;
+  ev.preventDefault();
+  sendInput('type',{text:text.slice(0,200)});
+}
+
+function frameScroll(ev){
+  ev.preventDefault();
+  sendInput('scroll',{dy:ev.deltaY});
+}
+
+async function cancelBrowser(){
+  stopFrames();
+  browserAttempt=null;
+  await post('/api/onlyfans/connect/cancel',{persona:persona()});
+  showStep('signin-panel');
+  document.getElementById('account-status').innerHTML='';
+}
+
+document.addEventListener('DOMContentLoaded',()=>{
+  const img=document.getElementById('of-frame');
+  if(!img)return;
+  img.addEventListener('click',frameClick);
+  img.addEventListener('keydown',frameKey);
+  img.addEventListener('paste',framePaste);
+  img.addEventListener('wheel',frameScroll,{passive:false});
+});
 
 async function startSignin(mobile){
   const box=document.getElementById('account-status');

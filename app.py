@@ -16230,7 +16230,9 @@ def api_onlyfans_config():
     if not _current_user():
         return jsonify({'error': 'Unauthorized'}), 401
     return jsonify({'configured': OF.configured(), 'webhook_url': _of_webhook_url(),
-                    'webhook_ready': bool(_of_webhook_secrets())})
+                    'webhook_ready': bool(_of_webhook_secrets()),
+                    'transport': ONLYFANS_TRANSPORT,
+                    'browser_ready': bool(_of_direct() and of_connect.available())})
 
 
 @app.route('/api/onlyfans/accounts')
