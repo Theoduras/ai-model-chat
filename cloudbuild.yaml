@@ -49,6 +49,11 @@ steps:
       # flight and fans' messages only land minutes later, in a batch.
       - --min-instances=1
       - --no-cpu-throttling
+      # A Cloud Run instance defaults to 512Mi, which Chrome plus gunicorn
+      # plus the rest of the app does not reliably fit in — an OOM kill
+      # restarts the instance mid-signin, silently dropping the in-memory
+      # attempt the same way a lost session-affinity route does.
+      - --memory=2Gi
       # The OnlyFans connect flow's hosted browser lives in one instance's
       # memory (of_connect.py's _attempts dict); without affinity a frame poll
       # can land on a different instance mid-signin and find nothing there,
