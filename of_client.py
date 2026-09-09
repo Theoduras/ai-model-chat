@@ -28,9 +28,10 @@ from urllib import error as url_error
 import of_rules
 import of_session
 from onlyfans import (OF_PRICE_MAX_USD, OF_PRICE_MIN_USD, chat_online,  # noqa: F401
-                      chat_unsendable, direction_of, media_row, media_thumb,
-                      msg_age_minutes, msg_id, msg_time, strip_html, text_of,
-                      user_of_chat)
+                      chat_unsendable, direction_of, event_fan, event_handle,
+                      media_row, media_thumb, msg_age_minutes, msg_id, msg_time,
+                      ppv_amount_cents, strip_html, text_of, user_of_chat,
+                      verify_signature)
 
 logger = logging.getLogger(__name__)
 
@@ -291,3 +292,45 @@ def configured():
         return bool(of_rules.rules())
     except of_rules.RulesError:
         return False
+
+
+# ── Standing in for the middleman ─────────────────────────────────────────────
+# app.py imports whichever transport is in use under one name, so the names the
+# middleman's module exposes are answered here too. An account is what the
+# vault holds rather than what someone else's dashboard lists, and signing in
+# happens in the hosted browser, so the sign-in calls say so instead of failing
+# somewhere further down.
+
+OnlyFansApiError = OnlyFansError
+
+
+def accounts(key=None):
+    """Every account connected to this deployment, shaped like the middleman's
+    listing so the account picker does not care which transport is running."""
+    return [{'id': a['account'], 'onlyfans_username': a['username'],
+             'display_name': a['name'],
+             'onlyfans_user_data': {'id': a['user_id'], 'name': a['name'],
+                                    'username': a['username']},
+             'is_authenticated': a['status'] == of_session.STATUS_LIVE,
+             'authentication_progress': a['status']}
+            for a in of_session.accounts()]
+
+
+def account_row(account_id, key=None):
+    for a in accounts():
+        if str(a.get('id') or '') == str(account_id):
+            return a
+    return {}
+
+
+def _hosted_only(*a, **kw):
+    raise OnlyFansError(0, 'this deployment signs accounts in through the hosted '
+                           'browser, not through an API')
+
+
+auth_start = auth_status = auth_submit = auth_email_otp = _hosted_only
+
+
+def auth_read(res):
+    return {'attempt_id': '', 'done': False, 'account_id': '', 'onlyfans_id': '',
+            'username': '', 'name': '', 'needs': '', 'error': '', 'deeplink': ''}

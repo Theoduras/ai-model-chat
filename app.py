@@ -15965,6 +15965,15 @@ if _worker_enabled('FANVUE_WORKER'):
 # interval as a backup, because a paused endpoint loses every event it missed.
 import onlyfans as OF
 
+# Which transport is in use. `direct` is ours — the creator's session, our own
+# request signing, our own watcher — and `api` is the paid middleman we are
+# leaving. Both modules expose the same names, so everything below this line is
+# written once and the switch is the import.
+ONLYFANS_TRANSPORT = (os.getenv('ONLYFANS_TRANSPORT') or 'api').strip().lower()
+
+if ONLYFANS_TRANSPORT == 'direct':
+    import of_client as OF  # noqa: F811
+
 OF_WEBHOOK_PATH = '/webhooks/onlyfans'
 OF_CHAT_SCAN = int(os.getenv('ONLYFANS_CHAT_SCAN', '100') or 100)
 # How long a fan has to stop typing before the reply job runs. OnlyFansAPI
@@ -16108,6 +16117,18 @@ class _OnlyFansPlatform(_Platform):
             logger.debug('OnlyFans typing indicator failed: %s', str(e)[:120])
 
     def webhook_state(self, persona):
+        if _of_direct():
+            # Nobody delivers events to us here — the watcher makes them. What
+            # matters is whether one is running for this account.
+            account = _of_account(persona)
+            running = next((w for w in of_events.watching()
+                            if w['account'] == account), None)
+            return {'ready': bool(running and running['running']),
+                    'url': _of_webhook_url(), 'last_error':
+                        (running or {}).get('last_error', ''),
+                    'problem': '' if running else
+                    'No watcher is running for this account, so new messages are '
+                    'only picked up on the backup sweep.'}
         ready = bool(_of_webhook_secrets())
         return {'ready': ready, 'url': _of_webhook_url(), 'last_error': '',
                 'problem': '' if ready else
@@ -16118,6 +16139,86 @@ class _OnlyFansPlatform(_Platform):
 
 PLAT_ONLYFANS = _OnlyFansPlatform()
 PLATFORMS['onlyfans'] = PLAT_ONLYFANS
+
+
+# ── Running OnlyFans ourselves ────────────────────────────────────────────────
+# Everything from here to the console API only applies when this deployment
+# talks to OnlyFans directly. The vault, the signing rules and the watchers all
+# need somewhere durable to live, and this is where the app lends them the
+# database it already has.
+
+def _of_direct():
+    return ONLYFANS_TRANSPORT == 'direct'
+
+
+OF_VAULT_INDEX = 'onlyfans_vault_index'
+
+
+def _of_vault_accounts():
+    try:
+        got = json.loads(_get_setting(OF_VAULT_INDEX) or '[]')
+        return [a for a in got if isinstance(a, str)] if isinstance(got, list) else []
+    except Exception:
+        return []
+
+
+def _of_vault_save(account, blob):
+    _set_setting(f'onlyfans_vault_{account}', blob)
+    known = _of_vault_accounts()
+    if account not in known:
+        _set_setting(OF_VAULT_INDEX, json.dumps(known + [account]))
+
+
+def _of_vault_delete(account):
+    _set_setting(f'onlyfans_vault_{account}', '')
+    _set_setting(OF_VAULT_INDEX,
+                 json.dumps([a for a in _of_vault_accounts() if a != account]))
+
+
+def _of_account_id(persona):
+    """The vault key for a persona's account. One persona, one OnlyFans account,
+    so the persona names it — there is no external id to adopt."""
+    return f'of_{persona}'
+
+
+def _of_connected_accounts():
+    """The accounts a watcher should be running for: connected to a persona,
+    switched on, and not sitting expired."""
+    out = []
+    for slug in sorted(set(_fanvue_enabled_list(plat=PLAT_ONLYFANS))):
+        account = _of_account(slug)
+        if account and of_session.live(account):
+            out.append(account)
+    return out
+
+
+if _of_direct():
+    import of_connect
+    import of_events
+    import of_rules
+    import of_session
+
+    of_rules.cache_hooks(lambda: _get_setting('onlyfans_rules_cache') or '',
+                         lambda v: _set_setting('onlyfans_rules_cache', v))
+    of_session.store_hooks(lambda a: _get_setting(f'onlyfans_vault_{a}') or '',
+                           _of_vault_save, _of_vault_delete, _of_vault_accounts)
+
+    # Our watcher is already inside this process, so its events skip the
+    # webhook round trip. They still carry an idempotency key, because the
+    # backup sweep and the watcher can see the same message.
+    def _of_local_sink(event, account, payload, idem):
+        try:
+            with app.app_context():
+                _of_apply_event({'event': event, 'account_id': account,
+                                 'payload': payload}, idem)
+            return True
+        except Exception:
+            logger.exception('OnlyFans event %s could not be applied', event)
+            return False
+
+    of_events.sink(_of_local_sink)
+else:
+    of_connect = of_events = of_rules = of_session = None
 
 
 # ── OnlyFans console API ──────────────────────────────────────────────────────
@@ -16220,6 +16321,99 @@ def _of_adopt(persona, read):
     _log_x_event('onlyfans_connect', persona=persona, x_username=read['username'])
 
 
+def _of_proxy_for(persona, country=''):
+    """The exit IP this persona's account uses, for good.
+
+    ONLYFANS_PROXY_TEMPLATE names the pool and where the sticky-session id and
+    country go, e.g. http://user-{country}-session-{session}:pw@gate:7000. A
+    deployment without a pool gets '' and goes out on the server's own address,
+    which is fine for one account and asking for trouble with several.
+    """
+    template = (os.getenv('ONLYFANS_PROXY_TEMPLATE') or '').strip()
+    if not template:
+        return ''
+    country = (country or os.getenv('ONLYFANS_PROXY_COUNTRY') or 'nl').lower()[:2]
+    return template.replace('{country}', country).replace('{session}', persona)
+
+
+@app.route('/api/onlyfans/connect/browser', methods=['POST'])
+@platform_scoped
+def api_onlyfans_connect_browser():
+    """Open a browser on onlyfans.com for this creator to sign in through."""
+    d = request.json or {}
+    persona = (d.get('persona') or '').strip()
+    if not persona:
+        return jsonify({'ok': False, 'error': 'persona required'}), 400
+    if not _of_direct():
+        return jsonify({'ok': False, 'error': 'This deployment signs accounts in '
+                                              'through OnlyFansAPI.'}), 400
+    try:
+        attempt = of_connect.start(
+            persona, _of_account_id(persona),
+            proxy=_of_proxy_for(persona, (d.get('country') or '').strip()),
+            user_agent=(d.get('user_agent') or '').strip())
+    except of_connect.ConnectError as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]}), 400
+    _set_setting(f'onlyfans_attempt_{persona}', attempt.id)
+    return jsonify({'ok': True, 'attempt': attempt.status()})
+
+
+@app.route('/api/onlyfans/connect/frame')
+@platform_scoped
+def api_onlyfans_connect_frame():
+    """The browser as it looks right now. Polled a few times a second while the
+    creator is typing, so it answers with the last frame rather than waiting for
+    a fresh one."""
+    attempt = of_connect.get((request.args.get('attempt') or '').strip()) \
+        if _of_direct() else None
+    if not attempt:
+        return jsonify({'ok': False, 'error': 'that sign-in is no longer open'}), 404
+    status = attempt.status()
+    if status['state'] == 'connected':
+        _of_adopt_direct(attempt)
+        status = attempt.status()
+    return jsonify({'ok': True, 'frame': attempt.snapshot(), 'attempt': status})
+
+
+@app.route('/api/onlyfans/connect/input', methods=['POST'])
+@platform_scoped
+def api_onlyfans_connect_input():
+    """One click, keystroke or scroll, forwarded to the browser."""
+    d = request.json or {}
+    attempt = of_connect.get((d.get('attempt') or '').strip()) if _of_direct() else None
+    if not attempt:
+        return jsonify({'ok': False, 'error': 'that sign-in is no longer open'}), 404
+    kind = (d.get('kind') or '').strip()
+    if kind not in ('click', 'type', 'key', 'scroll', 'back'):
+        return jsonify({'ok': False, 'error': 'unknown input'}), 400
+    try:
+        attempt.act(kind, x=d.get('x'), y=d.get('y'), text=d.get('text'),
+                    key=d.get('key'), dy=d.get('dy'))
+    except of_connect.ConnectError as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]}), 400
+    return jsonify({'ok': True})
+
+
+def _of_adopt_direct(attempt):
+    """Attach a finished hosted-browser sign-in to its persona."""
+    persona, result = attempt.persona, attempt.result or {}
+    if not (persona and result.get('user_id')):
+        return
+    if _of_account(persona) == attempt.account:
+        return
+    _set_setting(f'onlyfans_account_{persona}', attempt.account)
+    _set_setting(f'onlyfans_account_meta_{persona}', json.dumps({
+        'onlyfans_id': result.get('user_id', ''),
+        'username': result.get('username', ''), 'name': result.get('name', '')}))
+    _set_setting(f'onlyfans_attempt_{persona}', '')
+    # A different account on the same persona must not inherit the old one's
+    # place in every conversation.
+    _set_setting(PLAT_ONLYFANS.k('cursor', persona), '{}')
+    _log_x_event('onlyfans_connect', persona=persona,
+                 x_username=result.get('username', ''))
+    of_events.watch(attempt.account)
+
+
 @app.route('/api/onlyfans/connect/start', methods=['POST'])
 @platform_scoped
 def api_onlyfans_connect_start():
@@ -16227,6 +16421,8 @@ def api_onlyfans_connect_start():
     persona = (d.get('persona') or '').strip()
     if not persona:
         return jsonify({'ok': False, 'error': 'persona required'}), 400
+    if _of_direct():
+        return api_onlyfans_connect_browser()
     if not OF.configured():
         return jsonify({'ok': False, 'error': 'This deployment has no OnlyFansAPI '
                                               'key yet.'}), 400
@@ -16255,6 +16451,13 @@ def api_onlyfans_connect_start():
 def api_onlyfans_connect_status():
     persona = (request.args.get('persona') or '').strip()
     attempt = _of_attempt(persona)
+    if _of_direct():
+        live = of_connect.get(attempt) if attempt else None
+        if not live:
+            return jsonify({'ok': True, 'attempt': None})
+        if live.status()['state'] == 'connected':
+            _of_adopt_direct(live)
+        return jsonify({'ok': True, 'attempt': live.status()})
     if not attempt:
         return jsonify({'ok': True, 'attempt': None})
     try:
@@ -16309,6 +16512,8 @@ def api_onlyfans_connect_email_otp():
 def api_onlyfans_connect_cancel():
     persona = ((request.json or {}).get('persona') or '').strip()
     if persona:
+        if _of_direct():
+            of_connect.cancel(_of_attempt(persona))
         _set_setting(f'onlyfans_attempt_{persona}', '')
     return jsonify({'ok': True})
 
@@ -16318,13 +16523,64 @@ def api_onlyfans_connect_cancel():
 def api_onlyfans_status():
     persona = (request.args.get('persona') or '').strip()
     meta = _of_account_meta(persona)
-    return jsonify({'connected': PLAT_ONLYFANS.connected(persona),
-                    'configured': OF.configured(),
-                    'signing_in': bool(_of_attempt(persona)),
-                    'account': _of_account(persona),
-                    'username': meta.get('username', ''),
-                    'webhook_ready': bool(_of_webhook_secrets()),
-                    'webhook_url': _of_webhook_url()})
+    out = {'connected': PLAT_ONLYFANS.connected(persona),
+           'configured': OF.configured(),
+           'signing_in': bool(_of_attempt(persona)),
+           'account': _of_account(persona),
+           'username': meta.get('username', ''),
+           'transport': ONLYFANS_TRANSPORT,
+           'webhook_ready': bool(_of_webhook_secrets()),
+           'webhook_url': _of_webhook_url()}
+    if _of_direct():
+        account = _of_account(persona)
+        out['session'] = of_session.describe(account) if account else {}
+        out['webhook'] = PLAT_ONLYFANS.webhook_state(persona)
+        out['browser_ready'] = of_connect.available()
+    return jsonify(out)
+
+
+@app.route('/api/onlyfans/health')
+@operator_only
+def api_onlyfans_health():
+    """The admin module screen: are we able to sign, and is every account being
+    watched. Carries no credentials — only what each account's state is."""
+    if not _of_direct():
+        return jsonify({'transport': ONLYFANS_TRANSPORT, 'direct': False})
+    return jsonify({'transport': ONLYFANS_TRANSPORT, 'direct': True,
+                    'rules': of_rules.state(),
+                    'browser_ready': of_connect.available(),
+                    'proxy_pool': bool((os.getenv('ONLYFANS_PROXY_TEMPLATE') or '').strip()),
+                    'accounts': of_session.accounts(),
+                    'watchers': of_events.watching()})
+
+
+@app.route('/api/onlyfans/rules/refresh', methods=['POST'])
+@operator_only
+def api_onlyfans_rules_refresh():
+    if not _of_direct():
+        return jsonify({'ok': False, 'error': 'not running the direct transport'}), 400
+    try:
+        of_rules.refresh()
+    except of_rules.RulesError as e:
+        return jsonify({'ok': False, 'error': str(e)[:300]}), 502
+    return jsonify({'ok': True, 'rules': of_rules.state()})
+
+
+@app.route('/api/onlyfans/session/check', methods=['POST'])
+@platform_scoped
+def api_onlyfans_session_check():
+    """Is this account still signed in? What the reconnect banner asks."""
+    persona = ((request.json or {}).get('persona') or '').strip()
+    account = _of_account(persona)
+    if not (_of_direct() and account):
+        return jsonify({'ok': False, 'error': 'nothing connected'}), 400
+    alive, detail = OF.check(account)
+    if alive:
+        of_events.watch(account)
+    else:
+        of_events.unwatch(account)
+    return jsonify({'ok': True, 'alive': alive, 'detail': detail,
+                    'session': of_session.describe(account)})
 
 
 @app.route('/api/onlyfans/disconnect', methods=['POST'])
@@ -16332,6 +16588,13 @@ def api_onlyfans_status():
 def api_onlyfans_disconnect():
     persona = (request.json or {}).get('persona', '').strip()
     if persona:
+        if _of_direct():
+            account = _of_account(persona)
+            of_connect.cancel(_of_attempt(persona))
+            of_events.unwatch(account)
+            # The session is the account. Disconnecting has to destroy it, not
+            # merely stop pointing at it.
+            of_session.drop(account)
         _set_setting(f'onlyfans_account_{persona}', '')
         _set_setting(f'onlyfans_account_meta_{persona}', '{}')
         _set_setting(f'onlyfans_attempt_{persona}', '')
@@ -16472,11 +16735,19 @@ def onlyfans_webhook():
     except Exception:
         return jsonify({'error': 'invalid payload'}), 400
 
+    return jsonify(_of_apply_event(
+        ev, request.headers.get('X-OFAPI-Idempotency-Key') or ''))
+
+
+def _of_apply_event(ev, idem=''):
+    """What an OnlyFans event does, once we trust it came from somewhere we
+    accept. The webhook route verifies a signature to get here; our own watcher
+    is already inside the process and calls it directly."""
     event = str(ev.get('event') or '')
     payload = ev.get('payload') if isinstance(ev.get('payload'), dict) else {}
     persona = _of_persona_for_account(str(ev.get('account_id') or ''))
     if not persona:
-        return jsonify({'ok': True, 'ignored': 'unknown account'})
+        return {'ok': True, 'ignored': 'unknown account'}
     fan = OF.event_fan(payload, event)
 
     # Typing carries no idempotency key and means nothing on its own: it only
@@ -16484,10 +16755,10 @@ def onlyfans_webhook():
     if event in ('users.typing', 'users.online'):
         if event == 'users.typing':
             _of_wake(persona, OF_QUIET_SECONDS)
-        return jsonify({'ok': True})
+        return {'ok': True}
 
-    if _of_event_seen(request.headers.get('X-OFAPI-Idempotency-Key') or ''):
-        return jsonify({'ok': True, 'duplicate': True})
+    if _of_event_seen(idem):
+        return {'ok': True, 'duplicate': True}
 
     if event == 'messages.received':
         _of_wake(persona, OF_QUIET_SECONDS)
@@ -16505,10 +16776,37 @@ def onlyfans_webhook():
         if text and fan:
             _log_x_message(persona, PLAT_ONLYFANS.fan_key(fan),
                            OF.event_handle(payload), 'out', text)
-    return jsonify({'ok': True})
+    return {'ok': True}
 
 
 # ── OnlyFans worker ───────────────────────────────────────────────────────────
+
+OF_SESSION_CHECK_SECONDS = float(os.getenv('ONLYFANS_SESSION_CHECK', '600') or 600)
+_of_last_session_check = {}
+
+
+def _of_check_sessions():
+    """Ask OnlyFans whether each session is still good.
+
+    A session dies quietly — OnlyFans simply stops accepting it — so a creator
+    would otherwise find out by noticing their fans went unanswered. One cheap
+    request per account, well apart, turns that into a banner they can act on.
+    """
+    now = time.time()
+    for slug in sorted(set(_fanvue_enabled_list(plat=PLAT_ONLYFANS))):
+        account = _of_account(slug)
+        if not account:
+            continue
+        if now - _of_last_session_check.get(account, 0) < OF_SESSION_CHECK_SECONDS:
+            continue
+        _of_last_session_check[account] = now
+        alive, detail = OF.check(account)
+        if not alive:
+            of_events.unwatch(account)
+            logger.warning('OnlyFans session for %s is dead: %s', slug, detail)
+            with PLAT_ONLYFANS.tracing():
+                _fv_trace(slug, 'error', f'OnlyFans session expired: {detail[:160]}')
+
 
 def _of_worker(tick=2.0):
     """Run a round for every persona a webhook has marked due, and sweep them
@@ -16549,6 +16847,11 @@ def _of_worker(tick=2.0):
                 _of_last_sweep[0] = now
                 with app.app_context():
                     due |= set(_fanvue_enabled_list(plat=PLAT_ONLYFANS))
+                    if _of_direct():
+                        # An instance that restarted comes back with no
+                        # watchers and a database full of accounts.
+                        of_events.reconcile(_of_connected_accounts())
+                        _of_check_sessions()
             for persona in due:
                 with app.app_context():
                     if not PLAT_ONLYFANS.connected(persona):
