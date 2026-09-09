@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Connect OnlyFans</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <style>
+    :root { color-scheme: light dark; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { height: 100vh; display: flex; flex-direction: column;
+           font: 14px -apple-system, "Segoe UI", Roboto, sans-serif;
+           background: #111; color: #eee; overflow: hidden; }
+    header { display: flex; align-items: center; gap: 10px; padding: 8px 14px;
+             background: #1c1c1c; border-bottom: 1px solid #333; flex: none; }
+    .lock { font-size: 0.85rem; color: #9ae6b4; }
+    .url { flex: 1; font: 12px ui-monospace, monospace; color: #aaa; }
+    .state { font-size: 0.75rem; color: #888; }
+    .state.live::before { content: "● "; color: #4ade80; }
+    button { font: inherit; padding: 5px 12px; border-radius: 6px; cursor: pointer;
+             border: 1px solid #444; background: #222; color: #ddd; }
+    button:hover { background: #2c2c2c; }
+    #stage { flex: 1; min-height: 0; display: flex; align-items: center;
+             justify-content: center; background: #0a0a0a; position: relative; }
+    #frame { display: block; max-width: 100%; max-height: 100%; background: #fff;
+             cursor: default; }
+    #veil { position: absolute; inset: 0; display: flex; align-items: center;
+            justify-content: center; background: #0a0a0a; color: #888;
+            font-size: 0.9rem; text-align: center; padding: 30px; }
+    #veil.gone { display: none; }
+    footer { flex: none; padding: 7px 14px; background: #1c1c1c;
+             border-top: 1px solid #333; font-size: 0.75rem; color: #888; }
+    footer b { color: #ccc; }
+    .done { color: #4ade80; }
+    .bad { color: #fb7185; }
+  </style>
+</head>
+<body>
+  <header>
+    <span class="lock">🔒</span>
+    <span class="url">onlyfans.com</span>
+    <span class="state" id="state">opening…</span>
+    <button onclick="cancel()">Cancel</button>
+  </header>
+  <div id="stage">
+    <img id="frame" alt="">
+    <div id="veil">Starting a browser on your account's own address…</div>
+  </div>
+  <footer id="foot">
+    <b>Sign in exactly as you would on your own laptop.</b>
+    Your password goes to OnlyFans, never to us. Move the mouse and click the
+    human check yourself — this window is a real browser.
+  </footer>
+
+<script>
+const q = new URLSearchParams(location.search);
+const persona = q.get('persona') || '';
+let attempt = q.get('attempt') || '';
+let timer = null, natural = {w: 0, h: 0}, lastMove = 0, finished = false;
+
+const $ = id => document.getElementById(id);
+const img = $('frame');
+
+async function post(url, body){
+  const r = await fetch(url, {method: 'POST',
+    headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)});
+  return r.json().catch(() => ({}));
+}
+
+async function begin(){
+  if (attempt) return poll();
+  // The hosted browser is made the size of this window, so the page is not
+  // scaled and a click lands where it looks like it will.
+  const r = await post('/api/onlyfans/connect/browser', {
+    persona: persona, country: q.get('country') || '',
+    width: Math.round($('stage').clientWidth),
+    height: Math.round($('stage').clientHeight)});
+  if (!r.ok) return fail(r.error || 'Could not open a browser.');
+  attempt = r.attempt.attempt;
+  poll();
+}
+
+async function poll(){
+  if (timer) clearTimeout(timer);
+  if (finished) return;
+  let r;
+  try {
+    r = await (await fetch('/api/onlyfans/connect/frame?attempt=' +
+      encodeURIComponent(attempt))).json();
+  } catch (e) { timer = setTimeout(poll, 1200); return; }
+  if (!r.ok) return fail(r.error || 'That sign-in is no longer open.');
+  if (r.frame){ img.src = r.frame; $('veil').classList.add('gone'); }
+  const a = r.attempt || {};
+  natural = {w: a.width || 0, h: a.height || 0};
+  const s = $('state');
+  s.textContent = a.state === 'signin' ? 'live' : a.state;
+  s.className = 'state' + (a.state === 'signin' ? ' live' : '');
+  if (a.state === 'connected') return done(a);
+  if (a.state === 'failed' || a.state === 'expired')
+    return fail(a.error || 'The sign-in timed out. Start it again.');
+  timer = setTimeout(poll, 250);
+}
+
+function done(a){
+  finished = true;
+  const who = (a.result || {}).username || 'her account';
+  $('foot').innerHTML = '<b class="done">Signed in as @' + who +
+    '. You can close this window.</b>';
+  $('state').textContent = 'signed in';
+  notify();
+  setTimeout(() => window.close(), 2500);
+}
+
+function fail(why){
+  finished = true;
+  $('veil').classList.remove('gone');
+  $('veil').textContent = why;
+  $('foot').innerHTML = '<b class="bad">' + why + '</b>';
+  notify();
+}
+
+function notify(){
+  try { if (window.opener) window.opener.postMessage({onlyfansConnect: 'done'}, '*'); }
+  catch (e) {}
+}
+
+// ── Forwarding what the creator does ─────────────────────────────────────────
+// Mouse movement is sent as well as clicks: the human check watches the path,
+// and a pointer that only ever appears on the checkbox does not pass it.
+
+function at(ev){
+  const box = img.getBoundingClientRect();
+  if (!natural.w || !box.width) return null;
+  const scale = natural.w / box.width;
+  return {x: (ev.clientX - box.left) * scale, y: (ev.clientY - box.top) * scale};
+}
+
+function send(kind, extra){
+  if (!attempt || finished) return;
+  post('/api/onlyfans/connect/input',
+       Object.assign({attempt: attempt, kind: kind}, extra || {}));
+}
+
+img.addEventListener('mousemove', ev => {
+  const now = Date.now();
+  if (now - lastMove < 60) return;      // ~16/s: enough of a path, little traffic
+  lastMove = now;
+  const p = at(ev); if (p) send('move', p);
+});
+img.addEventListener('mousedown', ev => { const p = at(ev); if (p) send('down', p); });
+img.addEventListener('mouseup', ev => { const p = at(ev); if (p) send('up', p); });
+img.addEventListener('contextmenu', ev => ev.preventDefault());
+img.addEventListener('wheel', ev => { ev.preventDefault(); send('scroll', {dy: ev.deltaY}); },
+                     {passive: false});
+
+document.addEventListener('keydown', ev => {
+  if (finished) return;
+  if (ev.metaKey || ev.ctrlKey) return;             // leave the real browser's own shortcuts alone
+  if (ev.key === 'Enter' || ev.key === 'Tab' || ev.key === 'Backspace' ||
+      ev.key === 'Delete' || ev.key.startsWith('Arrow')){
+    ev.preventDefault(); send('key', {key: ev.key});
+  } else if (ev.key.length === 1){
+    ev.preventDefault(); send('type', {text: ev.key});
+  }
+});
+
+document.addEventListener('paste', ev => {
+  const text = (ev.clipboardData || window.clipboardData).getData('text');
+  if (!text) return;
+  ev.preventDefault();
+  send('type', {text: text.slice(0, 200)});
+});
+
+async function cancel(){
+  finished = true;
+  if (timer) clearTimeout(timer);
+  await post('/api/onlyfans/connect/cancel', {persona: persona});
+  notify();
+  window.close();
+}
+
+window.addEventListener('beforeunload', () => { if (timer) clearTimeout(timer); });
+begin();
+</script>
+</body>
+</html>

@@ -34,12 +34,7 @@
     .chosen span { font-size: 0.72rem; background: var(--surface); border-radius: 6px; padding: 3px 8px; color: var(--text-2); }
     table.accts { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
     table.accts td { padding: 6px 8px; border-bottom: 1px solid var(--panel-2); color: var(--text-2); }
-    .browser-frame { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--surface); }
-    .browser-bar { display: flex; align-items: center; gap: 7px; padding: 6px 10px; background: var(--panel-2); border-bottom: 1px solid var(--border); }
-    .browser-bar .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border); }
-    .browser-url { flex: 1; font-size: 0.75rem; color: var(--text-3); }
-    #of-frame { display: block; width: 100%; background: #fff; cursor: default; outline: none; }
-    #of-frame:focus { box-shadow: inset 0 0 0 2px var(--accent); }
+    .browser-frame { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
     @media (max-width: 640px) { .fv-wrap { padding: 18px 14px 70px; gap: 16px; } }
   </style>
 <link rel="stylesheet" href="/css/site-nav.css">
@@ -111,19 +106,13 @@
     </div>
 
     <div id="step-browser" style="display:none;">
-      <div class="browser-frame">
-        <div class="browser-bar">
-          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-          <span class="browser-url">🔒 onlyfans.com</span>
-          <span class="hint" id="browser-state">opening…</span>
+      <div class="browser-frame" style="padding:16px;">
+        <div class="hint" id="browser-state">The sign-in window is open. Finish signing
+          in there, then come back to this tab.</div>
+        <div class="row-inline" style="margin-top:10px;">
+          <button class="btn-ai" onclick="focusBrowser()">Bring the window back</button>
+          <button class="btn-ai" style="background:var(--surface); color:var(--text-2);" onclick="cancelBrowser()">Cancel</button>
         </div>
-        <img id="of-frame" alt="OnlyFans sign-in" tabindex="0">
-      </div>
-      <span class="hint">This is the real OnlyFans page, running on the address this
-        account will keep. Type into it as you would in your own browser — the password
-        goes to OnlyFans, never to us. Answer the captcha and any code yourself.</span>
-      <div class="row-inline" style="margin-top:8px;">
-        <button class="btn-ai" style="background:var(--surface); color:var(--text-2);" onclick="cancelBrowser()">Cancel</button>
       </div>
     </div>
 
@@ -330,12 +319,12 @@ async function loadConfig(){
   await loadAccounts();
   const st=await (await fetch('/api/onlyfans/connect/status?persona='+encodeURIComponent(persona()))).json();
   if(direct){
-    // A half-finished sign-in survives a reload: pick the browser back up
-    // rather than making her start over and collect another OnlyFans code.
+    // A half-finished sign-in survives a reload of this tab: the window is
+    // still open, so say so rather than letting her start over and collect
+    // another code from OnlyFans.
     if(st.ok&&st.attempt&&st.attempt.state==='signin'){
-      browserAttempt=st.attempt.attempt;
       showStep('step-browser');
-      pollFrames();
+      watchBrowser();
     }
   }else if(st.ok&&st.attempt&&!st.attempt.done){renderAttempt(st.attempt);pollAttempt();}
   await loadAuto();
@@ -355,113 +344,75 @@ function showStep(which){
 }
 
 // ── Signing in through the hosted browser ────────────────────────────────────
-// A real Chromium is open on the server, on the address this account will keep.
-// We show its frames and forward what she clicks and types, so the password and
-// the captcha go to OnlyFans and never through anything of ours.
-let browserAttempt=null, browserTimer=null;
+// The browser opens in a window of its own rather than in a panel here.
+// OnlyFans' human check reads the window it is running in, and one embedded in
+// a dashboard and scaled down to fit is one it refuses — so the creator gets a
+// real window, at its real size, and we only watch for it to finish.
+let browserWindow=null, browserWatch=null;
 
 function browserOn(){ return (appCfg.transport==='direct'); }
 
-async function startBrowserSignin(){
+function startBrowserSignin(){
   const box=document.getElementById('account-status');
-  busy(box,'Opening OnlyFans…');
-  const r=await post('/api/onlyfans/connect/browser',{persona:persona(),
-    country:document.getElementById('of-country').value});
-  if(!r.ok){err(box,r.error);showStep('signin-panel');return;}
-  browserAttempt=r.attempt.attempt;
+  const url='/onlyfans/connect?persona='+encodeURIComponent(persona())
+    +'&country='+encodeURIComponent(document.getElementById('of-country').value);
+  const w=Math.min(screen.availWidth-80,1180), h=Math.min(screen.availHeight-80,900);
+  browserWindow=window.open(url,'onlyfans-signin',
+    'width='+w+',height='+h+',left='+Math.round((screen.availWidth-w)/2)
+    +',top='+Math.round((screen.availHeight-h)/2)+',menubar=no,toolbar=no');
+  if(!browserWindow){
+    err(box,'Your browser blocked the sign-in window. Allow pop-ups for this site '
+           +'and try again.');
+    return;
+  }
   showStep('step-browser');
-  busy(box,'Sign in on the page below.');
-  document.getElementById('of-frame').focus();
-  pollFrames();
+  busy(box,'Sign in in the window that just opened.');
+  watchBrowser();
 }
 
-function stopFrames(){ if(browserTimer)clearTimeout(browserTimer); browserTimer=null; }
-
-async function pollFrames(){
-  stopFrames();
-  if(!browserAttempt)return;
-  let r;
-  try{
-    r=await (await fetch('/api/onlyfans/connect/frame?attempt='+encodeURIComponent(browserAttempt))).json();
-  }catch(e){ browserTimer=setTimeout(pollFrames,1500); return; }
-  const box=document.getElementById('account-status');
-  if(!r.ok){err(box,r.error||'That sign-in closed.');browserAttempt=null;showStep('signin-panel');return;}
-  const img=document.getElementById('of-frame');
-  if(r.frame)img.src=r.frame;
-  const a=r.attempt||{};
-  document.getElementById('browser-state').textContent=
-    a.state==='connected'?'signed in':(a.state==='signin'?'live':a.state);
-  if(a.state==='connected'){
-    browserAttempt=null;
-    showStep(null);
-    ok(box,'Signed in as @'+((a.result||{}).username||'her account')+'. She is watching her inbox now.');
-    await loadAccounts();
-    await loadConfig();
-    return;
-  }
-  if(a.state==='failed'||a.state==='expired'){
-    browserAttempt=null;
-    err(box,a.error||'The sign-in timed out. Start it again.');
-    showStep('signin-panel');
-    return;
-  }
-  browserTimer=setTimeout(pollFrames,300);
+function focusBrowser(){
+  if(browserWindow&&!browserWindow.closed)browserWindow.focus();
+  else startBrowserSignin();
 }
 
-function sendInput(kind,extra){
-  if(!browserAttempt)return;
-  post('/api/onlyfans/connect/input',Object.assign(
-    {attempt:browserAttempt,kind:kind},extra||{}));
+function watchBrowser(){
+  if(browserWatch)clearInterval(browserWatch);
+  browserWatch=setInterval(async()=>{
+    const st=await (await fetch('/api/onlyfans/status?persona='+encodeURIComponent(persona()))).json();
+    if(st.connected){
+      stopWatching();
+      showStep(null);
+      ok(document.getElementById('account-status'),
+         'Signed in as @'+(st.username||'her account')+'. She is watching her inbox now.');
+      await loadAccounts();
+      await loadConfig();
+      return;
+    }
+    // The window closing without an account means she gave up or it timed out.
+    if(browserWindow&&browserWindow.closed&&!st.signing_in){
+      stopWatching();
+      showStep('signin-panel');
+      document.getElementById('account-status').innerHTML='';
+    }
+  },2000);
 }
 
-function frameClick(ev){
-  const img=ev.currentTarget, box=img.getBoundingClientRect();
-  if(!img.naturalWidth)return;
-  // The frame is scaled to fit the panel; the browser wants its own pixels.
-  const scale=img.naturalWidth/box.width;
-  sendInput('click',{x:(ev.clientX-box.left)*scale,y:(ev.clientY-box.top)*scale});
-  img.focus();
-}
+function stopWatching(){ if(browserWatch)clearInterval(browserWatch); browserWatch=null; }
 
-function frameKey(ev){
-  if(!browserAttempt)return;
-  if(ev.key==='Enter'||ev.key==='Tab'||ev.key==='Backspace'||ev.key.startsWith('Arrow')){
-    ev.preventDefault();
-    sendInput('key',{key:ev.key});
-  }else if(ev.key.length===1){
-    ev.preventDefault();
-    sendInput('type',{text:ev.key});
-  }
-}
-
-function framePaste(ev){
-  const text=(ev.clipboardData||window.clipboardData).getData('text');
-  if(!text)return;
-  ev.preventDefault();
-  sendInput('type',{text:text.slice(0,200)});
-}
-
-function frameScroll(ev){
-  ev.preventDefault();
-  sendInput('scroll',{dy:ev.deltaY});
-}
+// The window says so itself the moment it is done, so the poll above is only
+// the fallback for a window that was closed rather than finished.
+window.addEventListener('message',ev=>{
+  if(ev.data&&ev.data.onlyfansConnect==='done')watchBrowser();
+});
 
 async function cancelBrowser(){
-  stopFrames();
-  browserAttempt=null;
+  stopWatching();
+  if(browserWindow&&!browserWindow.closed)browserWindow.close();
+  browserWindow=null;
   await post('/api/onlyfans/connect/cancel',{persona:persona()});
   showStep('signin-panel');
   document.getElementById('account-status').innerHTML='';
 }
-
-document.addEventListener('DOMContentLoaded',()=>{
-  const img=document.getElementById('of-frame');
-  if(!img)return;
-  img.addEventListener('click',frameClick);
-  img.addEventListener('keydown',frameKey);
-  img.addEventListener('paste',framePaste);
-  img.addEventListener('wheel',frameScroll,{passive:false});
-});
 
 async function startSignin(mobile){
   const box=document.getElementById('account-status');

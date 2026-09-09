@@ -16338,6 +16338,16 @@ def _of_proxy_for(persona, country=''):
     return template.replace('{country}', country).replace('{session}', persona)
 
 
+@app.route('/onlyfans/connect')
+def onlyfans_connect_page():
+    """The sign-in window. It opens on its own rather than inside the console:
+    OnlyFans' human check reads the window it is in, and one embedded in a
+    dashboard, scaled down to fit a panel, is one it refuses."""
+    if not _current_user():
+        return redirect('/login?next=/onlyfans')
+    return send_from_directory(BASE_DIR, 'of_connect.html')
+
+
 @app.route('/api/onlyfans/connect/browser', methods=['POST'])
 @platform_scoped
 def api_onlyfans_connect_browser():
@@ -16349,11 +16359,23 @@ def api_onlyfans_connect_browser():
     if not _of_direct():
         return jsonify({'ok': False, 'error': 'This deployment signs accounts in '
                                               'through OnlyFansAPI.'}), 400
+
+    def _side(value, fallback, low, high):
+        try:
+            return max(low, min(int(value), high))
+        except (TypeError, ValueError):
+            return fallback
+
+    # Matching the window means the page is shown at its own size: nothing is
+    # scaled, so a click lands where the creator aimed it.
+    viewport = {'width': _side(d.get('width'), 1000, 600, 1600),
+                'height': _side(d.get('height'), 760, 500, 1200)}
     try:
         attempt = of_connect.start(
             persona, _of_account_id(persona),
             proxy=_of_proxy_for(persona, (d.get('country') or '').strip()),
-            user_agent=(d.get('user_agent') or '').strip())
+            user_agent=(d.get('user_agent') or '').strip(),
+            viewport=viewport)
     except of_connect.ConnectError as e:
         return jsonify({'ok': False, 'error': str(e)[:200]}), 400
     _set_setting(f'onlyfans_attempt_{persona}', attempt.id)

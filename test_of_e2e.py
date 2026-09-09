@@ -108,11 +108,17 @@ def browser_flow():
     check('it streams a frame of the page', frame.startswith('data:image/jpeg;base64,'))
     check('and nothing is stored before she signs in', of_session.get('of_e2e') == {})
 
-    # Type an email, then press the button — the same input path the panel uses.
-    attempt.act('click', x=300, y=130)
+    # The same input path the sign-in window uses: a mouse that moves, presses
+    # and releases, rather than a click that teleports onto the target.
+    attempt.act('move', x=250, y=120)
+    attempt.act('move', x=300, y=130)
+    attempt.act('down', x=300, y=130)
+    attempt.act('up', x=300, y=130)
     attempt.act('type', text='creator@example.com')
     time.sleep(1.5)
-    attempt.act('click', x=300, y=240)
+    attempt.act('move', x=300, y=200)
+    attempt.act('down', x=300, y=240)
+    attempt.act('up', x=300, y=240)
 
     for _ in range(40):
         if attempt.status()['state'] == 'connected':

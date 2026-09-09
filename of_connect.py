@@ -56,12 +56,13 @@ def available():
 class Attempt:
     """One creator, one sign-in, one browser."""
 
-    def __init__(self, persona, account, proxy='', user_agent=''):
+    def __init__(self, persona, account, proxy='', user_agent='', viewport=None):
         self.id = 'ofc_' + uuid.uuid4().hex[:16]
         self.persona = persona
         self.account = account
         self.proxy = proxy
         self.user_agent = user_agent
+        self.viewport = viewport or dict(VIEWPORT)
         self.state = 'starting'
         self.error = ''
         self.frame = b''
@@ -89,6 +90,7 @@ class Attempt:
         self.touched = time.time()
         return {'attempt': self.id, 'state': self.state, 'error': self.error,
                 'persona': self.persona, 'account': self.account,
+                'width': self.viewport['width'], 'height': self.viewport['height'],
                 'expires_in': max(0, int(ATTEMPT_TTL - (time.time() - self.started))),
                 'result': self.result}
 
@@ -131,7 +133,7 @@ class Attempt:
             opts['proxy'] = _proxy_options(self.proxy)
         browser = pw.chromium.launch(**opts)
         context = browser.new_context(
-            viewport=VIEWPORT, user_agent=self.user_agent or None,
+            viewport=self.viewport, user_agent=self.user_agent or None,
             locale='en-US', timezone_id=os.getenv('ONLYFANS_TZ', 'Europe/Amsterdam'))
         return browser, context
 
@@ -168,6 +170,16 @@ class Attempt:
     def _apply(self, page, kind, kw):
         if kind == 'click':
             page.mouse.click(float(kw['x']), float(kw['y']))
+        elif kind == 'move':
+            # Forwarded because the human check watches for it. A cursor that
+            # teleports to a checkbox and clicks is exactly what it fails.
+            page.mouse.move(float(kw['x']), float(kw['y']))
+        elif kind == 'down':
+            page.mouse.move(float(kw['x']), float(kw['y']))
+            page.mouse.down()
+        elif kind == 'up':
+            page.mouse.move(float(kw['x']), float(kw['y']))
+            page.mouse.up()
         elif kind == 'type':
             page.keyboard.insert_text(str(kw.get('text') or '')[:200])
         elif kind == 'key':
@@ -234,7 +246,7 @@ def _proxy_options(proxy):
 
 # ── the registry ──────────────────────────────────────────────────────────────
 
-def start(persona, account, proxy='', user_agent=''):
+def start(persona, account, proxy='', user_agent='', viewport=None):
     if not available():
         raise ConnectError('this host has no browser installed, so an account '
                            'cannot be connected here')
@@ -244,7 +256,7 @@ def start(persona, account, proxy='', user_agent=''):
             if a.persona == persona:
                 a.close()
                 _attempts.pop(a.id, None)
-        attempt = Attempt(persona, account, proxy, user_agent)
+        attempt = Attempt(persona, account, proxy, user_agent, viewport)
         _attempts[attempt.id] = attempt
     return attempt
 

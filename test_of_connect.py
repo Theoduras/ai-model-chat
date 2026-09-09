@@ -42,6 +42,7 @@ def bare_attempt(account='acct1'):
     a = _ATTEMPT.__new__(_ATTEMPT)
     a.id, a.persona, a.account = 'ofc_test', 'lilith', account
     a.proxy, a.user_agent = 'http://u:p@nl.proxy.example:8000', ''
+    a.viewport = dict(of_connect.VIEWPORT)
     a.state, a.error, a.result = 'signin', '', {}
     a.frame, a.frame_at = b'', 0.0
     a.started = a.touched = time.time()
