@@ -1027,6 +1027,92 @@ def fan_stats_by_source(session, persona):
             for src, fans, payers, spend, subs in rows}
 
 
+class ScheduledPost(Base):
+    """One post waiting to go out. The queue lives in the database rather than
+    in a worker's memory because the workers are restarted whenever Cloud Run
+    feels like it, and a post that misses its slot is worse than no queue."""
+    __tablename__ = 'scheduled_posts'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    persona = Column(String(64), index=True)
+    platform = Column(String(16))                  # x | threads
+    text = Column(Text, nullable=False)
+    run_at = Column(DateTime, index=True)          # UTC
+    status = Column(String(12), default='queued')  # queued sending posted failed cancelled
+    attempts = Column(Integer, default=0)
+    posted_at = Column(DateTime)
+    external_id = Column(String(64))               # the tweet or thread it became
+    error = Column(String(300))
+    created_at = Column(DateTime, default=_now)
+
+
+Index('ix_scheduled_due', ScheduledPost.status, ScheduledPost.run_at)
+Index('ix_scheduled_persona', ScheduledPost.persona, ScheduledPost.run_at)
+
+
+def queue_post(session, persona, platform, text, run_at):
+    row = ScheduledPost(persona=persona, platform=platform, text=text, run_at=run_at)
+    session.add(row)
+    session.flush()
+    return row
+
+
+def due_posts(session, now, limit=20):
+    return (session.query(ScheduledPost)
+            .filter(ScheduledPost.status == 'queued', ScheduledPost.run_at <= now)
+            .order_by(ScheduledPost.run_at).limit(limit).all())
+
+
+def claim_post(session, post_id):
+    """Take ownership of one queued post. The status check is part of the UPDATE,
+    so two workers reaching the same post cannot both publish it — the loser
+    updates no rows and skips. Sessions here outlive their commits, so the
+    update refreshes what they already hold rather than leaving it stale."""
+    n = (session.query(ScheduledPost)
+         .filter(ScheduledPost.id == post_id, ScheduledPost.status == 'queued')
+         .update({'status': 'sending', 'attempts': ScheduledPost.attempts + 1},
+                 synchronize_session='fetch'))
+    session.commit()
+    return bool(n)
+
+
+def finish_post(session, post_id, external_id='', error='', retry_at=None):
+    """Bank the outcome. A failure goes back in the queue when a retry time is
+    given, and is only marked failed once there is nothing left to try."""
+    row = session.query(ScheduledPost).filter(ScheduledPost.id == post_id).first()
+    if row is None:
+        return None
+    if error:
+        row.error = error[:300]
+        if retry_at is not None:
+            row.status = 'queued'
+            row.run_at = retry_at
+        else:
+            row.status = 'failed'
+    else:
+        row.status = 'posted'
+        row.posted_at = _now()
+        row.external_id = (external_id or '')[:64]
+        row.error = None
+    return row
+
+
+def list_posts(session, persona, limit=50):
+    return (session.query(ScheduledPost)
+            .filter(ScheduledPost.persona == persona)
+            .order_by(ScheduledPost.run_at.desc()).limit(limit).all())
+
+
+def cancel_post(session, persona, post_id):
+    """Cancel a post that has not gone out. A post already sending is left
+    alone: the worker owns it, and the send may already be away."""
+    n = (session.query(ScheduledPost)
+         .filter(ScheduledPost.id == post_id, ScheduledPost.persona == persona,
+                 ScheduledPost.status == 'queued')
+         .update({'status': 'cancelled'}, synchronize_session='fetch'))
+    return bool(n)
+
+
 def get_fan_profile(session, persona, fan_uuid, handle=None, create=True):
     row = (session.query(FanProfile)
            .filter(FanProfile.persona == persona, FanProfile.fan_uuid == fan_uuid)
@@ -1137,7 +1223,8 @@ def init_db():
                          ('fan_events', FanEvent),
                          ('funnel_assignments', FunnelAssignment),
                          ('funnel_posteriors', FunnelPosterior),
-                         ('fan_rewards', FanReward)):
+                         ('fan_rewards', FanReward),
+                         ('scheduled_posts', ScheduledPost)):
         try:
             _sync_columns(table, model)
         except Exception:

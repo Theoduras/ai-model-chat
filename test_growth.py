@@ -158,6 +158,40 @@ check('nothing posted is not a zero-day silence',
       G.register_stats([], now=now)['totals']['quiet_days'] is None)
 
 print()
+print('post queue')
+check('every publishable platform has a spec',
+      all(p in G.POST_PLATFORMS for p in G.PUBLISHABLE))
+check('every spec has a cap and a brief',
+      all(v.get('cap') and v.get('brief') for v in G.POST_PLATFORMS.values()))
+check('a short post is left alone', G.trim_post('x', 'hello there') == 'hello there')
+long_x = 'word ' * 100
+check('a long post is cut to the cap', len(G.trim_post('x', long_x)) <= 280)
+check('and cut on a word boundary', not G.trim_post('x', long_x).endswith('wor'))
+check('a word too long to break is still cut',
+      len(G.trim_post('x', 'x' * 400)) == 280)
+check('threads takes more than x', G.post_cap('threads') > G.post_cap('x'))
+check('an unknown platform falls back', G.post_cap('nope') == 280)
+
+qnow = 1_700_000_000
+q = [{'platform': 'x', 'status': 'queued', 'run_at': qnow + 3600},
+     {'platform': 'x', 'status': 'queued', 'run_at': qnow - 60},
+     {'platform': 'threads', 'status': 'posted', 'run_at': qnow - 86400},
+     {'platform': 'x', 'status': 'failed', 'run_at': qnow - 7200},
+     {'platform': 'x', 'status': 'nonsense', 'run_at': qnow}]
+qs = G.queue_stats(q, now=qnow)
+check('counts what is queued', qs['totals']['queued'] == 2, qs['totals'])
+check('counts what went out', qs['totals']['posted'] == 1)
+check('counts what failed', qs['totals']['failed'] == 1)
+check('ignores a status it does not know', sum(
+    qs['totals'][k] for k in G.QUEUE_STATES) == 4)
+check('the next slot is the soonest queued one',
+      qs['totals']['next_at'] == qnow - 60, qs['totals'])
+check('a slot already past counts as overdue', qs['totals']['overdue'] == 1)
+check('busiest platform first', qs['platforms'][0]['platform'] == 'x')
+check('an empty queue has no next slot',
+      G.queue_stats([], now=qnow)['totals']['next_at'] == 0)
+
+print()
 print('win-back ladder')
 check('nothing on day zero', G.winback_step(0, 0) is None)
 check('first touch on day one', G.winback_step(1, 0) == {'touch': 1, 'offer': False})

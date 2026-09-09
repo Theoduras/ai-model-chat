@@ -331,6 +331,97 @@ def register_block(entries, platform, limit=REGISTER_SHOWN):
             f'{lines}')
 
 
+# ── The post queue ────────────────────────────────────────────────────────────
+# One idea becomes a different post on every channel. The brief is what tells
+# the generator how each one differs; the cap is what the channel will take.
+POST_PLATFORMS = {
+    'x': {
+        'label': 'X',
+        'cap': 280,
+        'brief': ('a single tweet: one hook line that stands on its own, an '
+                  'invitation to reply, at most one hashtag and no @mentions'),
+    },
+    'threads': {
+        'label': 'Threads',
+        'cap': 500,
+        'brief': ('one or two casual sentences that end on a real question, at '
+                  'most one emoji, no hashtags'),
+    },
+    'instagram': {
+        'label': 'Instagram',
+        'cap': 2200,
+        'brief': ('a Reel caption: a POV hook inside the first six words, then '
+                  'one line of story, then "link in bio" on its own line'),
+    },
+    'tiktok': {
+        'label': 'TikTok',
+        'cap': 2200,
+        'brief': ('a curiosity caption of 300-400 characters that withholds the '
+                  'payoff, reads as a diary entry, and never names a paid site'),
+    },
+    'reddit': {
+        'label': 'Reddit',
+        'cap': 300,
+        'brief': ('a plain, flat title with no emoji, no hashtags, no sales '
+                  'language and no link — the sort a real person types'),
+    },
+}
+
+# What the platform can actually publish on its own. The rest are written here
+# and posted by hand, which is why they are generated but never queued.
+PUBLISHABLE = ('x', 'threads')
+
+QUEUE_STATES = ('queued', 'sending', 'posted', 'failed', 'cancelled')
+
+
+def post_cap(platform):
+    return (POST_PLATFORMS.get(normalise_source(platform)) or {}).get('cap', 280)
+
+
+def trim_post(platform, text):
+    """Cut a draft to what the channel will take, on a word boundary where one
+    is close enough to the limit to be worth keeping."""
+    text = str(text or '').strip()
+    cap = post_cap(platform)
+    if len(text) <= cap:
+        return text
+    cut = text[:cap]
+    space = cut.rfind(' ')
+    return (cut[:space] if space >= cap - 30 else cut).rstrip()
+
+
+def queue_stats(rows, now=0):
+    """Totals and the next slot for the queue panel. `rows` are dicts of
+    {platform, status, run_at} — run_at as an epoch, so the caller does the
+    timezone work once rather than here."""
+    now = int(now or 0)
+    totals = {k: 0 for k in QUEUE_STATES}
+    totals['next_at'] = 0
+    totals['overdue'] = 0
+    per = {}
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        status = str(row.get('status') or '')
+        if status not in totals:
+            continue
+        plat = normalise_source(row.get('platform')) or 'other'
+        run_at = int(row.get('run_at') or 0)
+        totals[status] += 1
+        bucket = per.setdefault(plat, {'platform': plat,
+                                       **{k: 0 for k in QUEUE_STATES}})
+        bucket[status] += 1
+        if status == 'queued':
+            if run_at and (not totals['next_at'] or run_at < totals['next_at']):
+                totals['next_at'] = run_at
+            # Due and still sitting there: the worker is off, or the persona is
+            # not on the beta. Either way it is the one thing worth saying.
+            if run_at and now and run_at <= now:
+                totals['overdue'] += 1
+    rows_out = sorted(per.values(), key=lambda r: (-r['queued'], -r['posted'], r['platform']))
+    return {'totals': totals, 'platforms': rows_out}
+
+
 # ── Win-back ladder ───────────────────────────────────────────────────────────
 # funnels.winback_due has been in the tree unused since the funnel engine
 # landed. This is the thin wrapper the follow-up rounds call.

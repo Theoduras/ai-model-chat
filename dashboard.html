@@ -1997,6 +1997,23 @@ function renderForm(slug, cfg) {
       </div>
       <div style="margin-top:14px;">
         <div class="section-title" style="font-size:0.8rem;">
+          Post queue
+          <button type="button" class="btn-section-save" onclick="loadGrowthQueue()">Refresh</button>
+        </div>
+        <span class="hint">Write once, post everywhere it fits. X and Threads go out on their own; the rest are written here for you to paste, because those platforms have no posting API she is allowed to use.</span>
+        <div class="field" style="margin-top:10px;">
+          <label>An idea to write about</label>
+          <input type="text" id="f-growth-idea" placeholder="a rainy sunday, nothing to do">
+          <div style="margin-top:6px;">
+            <button type="button" class="btn-section-save" onclick="growthDrafts(this)">Write drafts</button>
+          </div>
+        </div>
+        <div id="growth-drafts" style="margin-top:10px;"></div>
+        <div id="growth-queue" class="hint" style="margin-top:12px;">—</div>
+      </div>
+
+      <div style="margin-top:14px;">
+        <div class="section-title" style="font-size:0.8rem;">
           Already posted
           <button type="button" class="btn-section-save" onclick="loadGrowthRegister()">Refresh</button>
           <button type="button" class="btn-section-save" onclick="clearGrowthRegister(this)">Clear</button>
@@ -2781,6 +2798,7 @@ async function loadGrowth() {
   } catch (e) {}
   await loadGrowthSources();
   await loadGrowthLinks();
+  await loadGrowthQueue();
   await loadGrowthCta();
   await loadGrowthWinback();
   await loadGrowthRegister();
@@ -2960,6 +2978,179 @@ async function loadGrowthWinback() {
   if (!(d.due || []).length && !(d.waiting || []).length) {
     html += '<div>Nobody is on the ladder — every fan either replied recently or still has short follow-ups left.</div>';
   }
+  box.innerHTML = html;
+}
+
+function whenText(ts) {
+  if (!ts) return '';
+  const mins = Math.round((ts * 1000 - Date.now()) / 60000);
+  const rel = Math.abs(mins) < 60 ? Math.abs(mins) + 'm'
+    : Math.abs(mins) < 1440 ? Math.round(Math.abs(mins) / 60) + 'h'
+    : Math.round(Math.abs(mins) / 1440) + 'd';
+  return (mins >= 0 ? 'in ' + rel : rel + ' ago');
+}
+
+function localStamp(ts) {
+  const d = new Date(ts * 1000);
+  const p = n => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate())
+    + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+
+async function growthDrafts(btn) {
+  const box = document.getElementById('growth-drafts');
+  const idea = v('f-growth-idea');
+  if (!box) return;
+  if (!idea) { box.innerHTML = '<div class="hint">Give it something to write about first.</div>'; return; }
+  box.innerHTML = '<div class="hint">Writing…</div>';
+  let d;
+  try {
+    const res = await fetch('/api/growth/drafts', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ persona: currentSlug, idea })
+    });
+    d = await res.json();
+  } catch (e) { d = null; }
+  if (!d || !d.ok) {
+    box.innerHTML = '<div class="hint">' + esc((d && d.error) || 'Could not write the drafts.') + '</div>';
+    if (btn) flashSaved(btn, false);
+    return;
+  }
+  // Default every slot to the next round hour, spaced so the same idea does not
+  // land on two channels in the same minute.
+  const base = new Date(Date.now() + 3600000);
+  base.setMinutes(0, 0, 0);
+  box.innerHTML = (d.drafts || []).map((x, i) => {
+    const slot = new Date(base.getTime() + i * 1800000);
+    const p = n => String(n).padStart(2, '0');
+    const local = slot.getFullYear() + '-' + p(slot.getMonth() + 1) + '-' + p(slot.getDate())
+      + 'T' + p(slot.getHours()) + ':' + p(slot.getMinutes());
+    return '<div class="field" style="margin-bottom:10px;" data-platform="' + esc(x.platform) + '">'
+      + '<label>' + esc(x.label) + ' <span class="hint" style="text-transform:none;">'
+      + (x.publishable ? 'posts itself' : 'copy and paste') + '</span></label>'
+      + (x.error
+        ? '<div class="hint">Could not write this one: ' + esc(x.error) + '</div>'
+        : '<textarea rows="3" data-draft style="width:100%;">' + esc(x.text) + '</textarea>'
+          + '<div style="display:flex; gap:8px; align-items:center; margin-top:4px; flex-wrap:wrap;">'
+          + '<span class="hint" data-count>' + (x.text || '').length + '/' + x.cap + '</span>'
+          + (x.publishable
+            ? '<input type="datetime-local" data-when value="' + local + '">'
+              + '<button type="button" class="btn-section-save" onclick="queueDraft(this)">Queue it</button>'
+            : '<button type="button" class="btn-section-save" onclick="copyDraft(this)">copy</button>')
+          + '</div>')
+      + '</div>';
+  }).join('') || '<div class="hint">Nothing came back.</div>';
+  box.querySelectorAll('textarea[data-draft]').forEach(t => {
+    const field = t.closest('.field');
+    const count = field.querySelector('[data-count]');
+    const cap = (count.textContent.split('/')[1] || '0');
+    t.addEventListener('input', () => {
+      count.textContent = t.value.length + '/' + cap;
+      count.style.opacity = t.value.length > Number(cap) ? '1' : '';
+    });
+  });
+  if (btn) flashSaved(btn);
+}
+
+async function copyDraft(btn) {
+  const text = btn.closest('.field').querySelector('textarea[data-draft]').value;
+  try {
+    await navigator.clipboard.writeText(text);
+    const was = btn.textContent;
+    btn.textContent = 'copied';
+    setTimeout(() => { btn.textContent = was; }, 1200);
+  } catch (e) {
+    btn.closest('.field').querySelector('textarea[data-draft]').select();
+  }
+}
+
+async function queueDraft(btn) {
+  const field = btn.closest('.field');
+  const text = field.querySelector('textarea[data-draft]').value;
+  const when = field.querySelector('[data-when]').value;
+  const at = when ? Math.floor(new Date(when).getTime() / 1000) : 0;
+  try {
+    const res = await fetch('/api/growth/queue', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ persona: currentSlug, platform: field.dataset.platform,
+                             text, run_at: at })
+    });
+    const d = await res.json();
+    if (!res.ok || !d.ok) throw new Error((d && d.error) || 'queue failed');
+    flashSaved(btn);
+    field.style.opacity = '0.5';
+    loadGrowthQueue();
+  } catch (e) {
+    flashSaved(btn, false);
+  }
+}
+
+async function cancelQueued(btn, id) {
+  try {
+    const res = await fetch('/api/growth/queue?persona=' + encodeURIComponent(currentSlug)
+                            + '&id=' + encodeURIComponent(id), { method: 'DELETE' });
+    if (!res.ok) throw new Error('cancel failed');
+    loadGrowthQueue();
+  } catch (e) { flashSaved(btn, false); }
+}
+
+async function loadGrowthQueue() {
+  const box = document.getElementById('growth-queue');
+  if (!box || !currentSlug) return;
+  let d;
+  try {
+    d = await (await fetch('/api/growth/queue?persona=' + encodeURIComponent(currentSlug))).json();
+  } catch (e) { box.textContent = 'Could not read the queue.'; return; }
+  if (!d || !d.ok) { box.textContent = 'Could not read the queue.'; return; }
+
+  const t = d.totals || {};
+  let html = '';
+  const off = [];
+  if (!d.beta) off.push('this persona is not on the growth beta');
+  if (!d.worker_on) off.push('the scheduler is switched off on this host');
+  if (off.length) {
+    html += '<div style="margin-bottom:10px; opacity:0.8;">Nothing will go out \u2014 '
+      + esc(off.join(' and ')) + '. Anything queued stays queued.</div>';
+  }
+  html += '<div style="display:flex; flex-wrap:wrap; gap:14px; margin-bottom:12px;">'
+    + statTile('waiting', t.queued || 0)
+    + statTile('posted', t.posted || 0)
+    + statTile('failed', t.failed || 0)
+    + statTile('next slot', t.next_at ? whenText(t.next_at) : '—')
+    + '</div>';
+
+  const rows = d.queue || [];
+  if (!rows.length) {
+    box.innerHTML = html + '<div>Nothing queued. Write some drafts above.</div>';
+    return;
+  }
+  html += '<table style="width:100%; font-size:0.78rem; border-collapse:collapse; margin-bottom:10px;">'
+    + '<tr><th align="left">When</th><th align="left">Channel</th><th align="left">Post</th>'
+    + '<th align="left">State</th><th></th></tr>'
+    + rows.map(r => '<tr>'
+        + '<td style="white-space:nowrap;">' + localStamp(r.run_at)
+        + '<span style="opacity:0.55;"> ' + whenText(r.run_at) + '</span></td>'
+        + '<td>' + esc(r.platform) + '</td>'
+        + '<td>' + esc((r.text || '').slice(0, 90))
+        + (r.error ? '<div style="opacity:0.7;">' + esc(r.error.slice(0, 90)) + '</div>' : '')
+        + '</td>'
+        + '<td>' + esc(r.status) + (r.attempts > 1 ? ' (' + r.attempts + ' tries)' : '') + '</td>'
+        + '<td align="right">' + (r.status === 'queued'
+            ? '<button type="button" class="btn-section-save" onclick="cancelQueued(this, \''
+              + esc(r.id) + '\')">cancel</button>' : '') + '</td>'
+        + '</tr>').join('')
+    + '</table>';
+
+  const notes = [];
+  if (t.overdue) {
+    notes.push(t.overdue + ' post' + (t.overdue === 1 ? ' is' : 's are') + ' past their slot and still waiting'
+      + (off.length ? '.' : ' \u2014 the next tick should take them.'));
+  }
+  if (t.failed) {
+    notes.push('A failed post is not retried again; edit the draft and queue it fresh. Anything more than '
+      + (d.stale_hours || 6) + ' hours late is dropped rather than posted at the wrong time of day.');
+  }
+  html += notes.map(n => '<div>' + n + '</div>').join('');
   box.innerHTML = html;
 }
 

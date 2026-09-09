@@ -6921,6 +6921,203 @@ def api_growth_winback():
                     'due': due[:10], 'waiting': waiting[:10]})
 
 
+def _growth_queue_rows(persona, limit=50):
+    from db import SessionLocal, list_posts
+    sdb = SessionLocal()
+    try:
+        return [{'id': r.id, 'platform': r.platform, 'text': r.text or '',
+                 'status': r.status, 'attempts': int(r.attempts or 0),
+                 'error': r.error or '',
+                 'external_id': r.external_id or '',
+                 'run_at': int(r.run_at.replace(tzinfo=timezone.utc).timestamp())
+                 if r.run_at else 0}
+                for r in list_posts(sdb, persona, limit=limit)]
+    finally:
+        sdb.close()
+
+
+@app.route('/api/growth/queue', methods=['GET', 'POST', 'DELETE'])
+@operator_only
+def api_growth_queue():
+    """The post queue for one persona: what is waiting, what went out, and what
+    failed. Operator-only, and nothing leaves the queue for a persona that is
+    not on the growth beta."""
+    persona = (request.args.get('persona')
+               or ((request.json or {}).get('persona') if request.is_json else '')
+               or '').strip()
+    if not re.match(r'^[a-z0-9_-]+$', persona or ''):
+        return jsonify({'error': 'Invalid slug'}), 400
+
+    if request.method == 'POST':
+        data = request.json or {}
+        platform = growth.normalise_source(data.get('platform'))
+        if platform not in growth.PUBLISHABLE:
+            return jsonify({'ok': False,
+                            'error': f'{platform or "that channel"} cannot be '
+                                     'published from here — copy the draft out '
+                                     'and post it by hand.'}), 400
+        text = growth.trim_post(platform, data.get('text'))
+        if not text:
+            return jsonify({'ok': False, 'error': 'Nothing to post.'}), 400
+        when = int(data.get('run_at') or 0) or int(time.time())
+        run_at = datetime.fromtimestamp(when, timezone.utc).replace(tzinfo=None)
+        from db import SessionLocal, queue_post
+        sdb = SessionLocal()
+        try:
+            row = queue_post(sdb, persona, platform, text, run_at)
+            sdb.commit()
+            post_id = row.id
+        finally:
+            sdb.close()
+        logger.info('QUEUE added [%s/%s] for %s: %s',
+                    persona, platform, run_at.isoformat(), text[:60])
+        return jsonify({'ok': True, 'id': post_id, 'queue': _growth_queue_rows(persona)})
+
+    if request.method == 'DELETE':
+        post_id = (request.args.get('id') or '').strip()
+        from db import SessionLocal, cancel_post
+        sdb = SessionLocal()
+        try:
+            done = cancel_post(sdb, persona, post_id)
+            sdb.commit()
+        finally:
+            sdb.close()
+        if not done:
+            return jsonify({'ok': False,
+                            'error': 'That post has already gone out or is on '
+                                     'its way.'}), 409
+        return jsonify({'ok': True, 'queue': _growth_queue_rows(persona)})
+
+    rows = _growth_queue_rows(persona)
+    stats = growth.queue_stats(rows, now=int(time.time()))
+    return jsonify({'ok': True, 'persona': persona, 'beta': _growth_on(persona),
+                    'worker_on': _worker_enabled('GROWTH_QUEUE_WORKER'),
+                    'stale_hours': GROWTH_QUEUE_STALE_HRS,
+                    'queue': rows, **stats})
+
+
+@app.route('/api/growth/drafts', methods=['POST'])
+@operator_only
+def api_growth_drafts():
+    """One idea in, a draft per channel out. Each channel gets its own brief —
+    the same words posted everywhere is what the caption generator is for
+    avoiding — and each is checked against what she has already posted."""
+    data = request.json or {}
+    persona = (data.get('persona') or '').strip()
+    if not re.match(r'^[a-z0-9_-]+$', persona or ''):
+        return jsonify({'error': 'Invalid slug'}), 400
+    idea = (data.get('idea') or '').strip()[:400]
+    if not idea:
+        return jsonify({'ok': False, 'error': 'Give it an idea to work from.'}), 400
+    wanted = [growth.normalise_source(p) for p in (data.get('platforms') or [])]
+    wanted = [p for p in wanted if p in growth.POST_PLATFORMS] or list(growth.POST_PLATFORMS)
+
+    out = []
+    for plat in wanted:
+        spec = growth.POST_PLATFORMS[plat]
+        instruction = (
+            f'Write ONE {spec["label"]} post as yourself, in character, about: '
+            f'{idea}. It must be {spec["brief"]}. Stay under {spec["cap"]} '
+            'characters. Return only the post itself, no preamble and no quotes.'
+            + _no_repeat_block(persona, plat))
+        try:
+            text = growth.trim_post(plat, _persona_text(
+                persona, instruction, max_tokens=500, temperature=1.0))
+        except Exception as e:
+            out.append({'platform': plat, 'label': spec['label'], 'text': '',
+                        'error': str(e)[:200]})
+            continue
+        if text and _reads_as_repeat(persona, plat, text):
+            _content_repeat_blocked(persona, plat)
+            try:
+                text = growth.trim_post(plat, _persona_text(
+                    persona,
+                    instruction + '\n\nYour last attempt was a rewrite of one of '
+                    'those. Pick a different angle entirely.',
+                    max_tokens=500, temperature=1.0)) or text
+            except Exception:
+                pass
+        out.append({'platform': plat, 'label': spec['label'], 'text': text,
+                    'cap': spec['cap'], 'publishable': plat in growth.PUBLISHABLE})
+    return jsonify({'ok': True, 'persona': persona, 'idea': idea, 'drafts': out,
+                    'beta': _growth_on(persona)})
+
+
+GROWTH_QUEUE_RETRIES = 3
+GROWTH_QUEUE_RETRY_MINS = 10
+# A worker that was down over a slot must not wake up and dump yesterday's posts
+# into the feed all at once. Past this, the slot is gone and the post is not.
+GROWTH_QUEUE_STALE_HRS = 6
+
+
+def _growth_publish(persona, platform, text):
+    """Put one post out and write it into the content register. Returns the id
+    the channel gave it; raises on failure, because only the caller knows
+    whether this attempt is worth another one."""
+    plat = growth.normalise_source(platform)
+    text = growth.trim_post(plat, text)
+    if not text:
+        raise ValueError('nothing to post')
+    if plat == 'x':
+        res = _x_call(persona, 'POST', '/tweets', body={'text': text})
+        posted_id = str(((res or {}).get('data') or {}).get('id') or '')
+    elif plat == 'threads':
+        posted_id = str(_threads_publish(persona, text) or '')
+    else:
+        raise ValueError(f'{plat} posts have to go out by hand')
+    _content_register_add(persona, plat, text)
+    return posted_id
+
+
+def _growth_queue_round():
+    """Publish everything that has come due."""
+    from db import SessionLocal, due_posts, claim_post, finish_post
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    sdb = SessionLocal()
+    try:
+        for row in due_posts(sdb, now, limit=20):
+            post_id, persona = row.id, row.persona
+            platform, text = row.platform, row.text
+            if not _growth_on(persona):
+                continue
+            late = (now - row.run_at).total_seconds() if row.run_at else 0
+            if late > GROWTH_QUEUE_STALE_HRS * 3600:
+                if claim_post(sdb, post_id):
+                    finish_post(sdb, post_id,
+                                error=f'missed its slot by {int(late // 3600)}h')
+                    sdb.commit()
+                    logger.warning('QUEUE stale [%s/%s] %s', persona, platform, text[:60])
+                continue
+            if not claim_post(sdb, post_id):
+                continue
+            try:
+                posted_id = _growth_publish(persona, platform, text)
+                finish_post(sdb, post_id, external_id=posted_id)
+                logger.info('QUEUE posted [%s/%s] id=%s %s',
+                            persona, platform, posted_id, text[:60])
+            except Exception as e:
+                attempts = int(row.attempts or 0)
+                retry = (now + timedelta(minutes=GROWTH_QUEUE_RETRY_MINS)
+                         if attempts < GROWTH_QUEUE_RETRIES else None)
+                finish_post(sdb, post_id, error=str(e), retry_at=retry)
+                logger.warning('QUEUE failed [%s/%s] attempt %d: %s',
+                               persona, platform, attempts, str(e)[:200])
+            sdb.commit()
+    finally:
+        sdb.close()
+
+
+def _growth_queue_worker():
+    import time as _t
+    while True:
+        _t.sleep(60)
+        try:
+            with app.app_context():
+                _growth_queue_round()
+        except Exception:
+            logger.exception('growth queue tick failed')
+
+
 @app.route('/api/growth/cta')
 @operator_only
 def api_growth_cta():
@@ -17385,6 +17582,13 @@ def _x_worker():
                 pool.submit(_one, persona)
         except Exception:
             logger.exception('x worker tick failed')
+
+
+_growth_queue_started = [False]
+
+if _worker_enabled('GROWTH_QUEUE_WORKER') and not _growth_queue_started[0]:
+    _growth_queue_started[0] = True
+    threading.Thread(target=_growth_queue_worker, daemon=True).start()
 
 
 if _worker_enabled('X_WORKER') and not _x_worker_started[0]:
