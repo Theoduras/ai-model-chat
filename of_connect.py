@@ -29,6 +29,9 @@ SIGNIN_URL = 'https://onlyfans.com/'
 COOKIE_ORIGIN = 'https://onlyfans.com'
 VIEWPORT = {'width': 900, 'height': 700}
 FRAME_QUALITY = 55
+# Everything _apply knows how to do. The route rejects anything else, so the two
+# have to be read from the same place.
+INPUT_KINDS = ('click', 'move', 'down', 'up', 'type', 'key', 'scroll', 'back')
 # How long a half-finished sign-in is kept alive. Long enough to find a phone
 # and read a code out of it, short enough that an abandoned tab does not hold a
 # browser and an IP for the rest of the day.

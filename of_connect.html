@@ -135,10 +135,13 @@ function at(ev){
   return {x: (ev.clientX - box.left) * scale, y: (ev.clientY - box.top) * scale};
 }
 
-function send(kind, extra){
+async function send(kind, extra){
   if (!attempt || finished) return;
-  post('/api/onlyfans/connect/input',
-       Object.assign({attempt: attempt, kind: kind}, extra || {}));
+  const r = await post('/api/onlyfans/connect/input',
+    Object.assign({attempt: attempt, kind: kind}, extra || {}));
+  // A refused input means the window is talking to something that is not
+  // listening any more; saying so once beats hundreds of silent failures.
+  if (!r.ok) fail(r.error || 'The sign-in window lost its browser. Start it again.');
 }
 
 img.addEventListener('mousemove', ev => {

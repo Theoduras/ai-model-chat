@@ -16404,12 +16404,12 @@ def api_onlyfans_connect_frame():
 def api_onlyfans_connect_input():
     """One click, keystroke or scroll, forwarded to the browser."""
     d = request.json or {}
+    kind = (d.get('kind') or '').strip()
+    if kind not in of_connect.INPUT_KINDS:
+        return jsonify({'ok': False, 'error': 'unknown input'}), 400
     attempt = of_connect.get((d.get('attempt') or '').strip()) if _of_direct() else None
     if not attempt:
         return jsonify({'ok': False, 'error': 'that sign-in is no longer open'}), 404
-    kind = (d.get('kind') or '').strip()
-    if kind not in ('click', 'type', 'key', 'scroll', 'back'):
-        return jsonify({'ok': False, 'error': 'unknown input'}), 400
     try:
         attempt.act(kind, x=d.get('x'), y=d.get('y'), text=d.get('text'),
                     key=d.get('key'), dy=d.get('dy'))

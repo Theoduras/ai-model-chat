@@ -108,6 +108,28 @@ def browser_flow():
     check('it streams a frame of the page', frame.startswith('data:image/jpeg;base64,'))
     check('and nothing is stored before she signs in', of_session.get('of_e2e') == {})
 
+    # Every kind the sign-in window forwards has to clear the route's gate, not
+    # only Attempt.act. A gate that fell behind the window is what stopped the
+    # mouse reaching the browser at all. Sent against an attempt that does not
+    # exist, so the real sign-in below is left alone: a kind the route knows
+    # gets as far as looking the attempt up (404), one it does not is refused.
+    import utils
+    real_user, real_active = flask_app._current_user, flask_app._user_is_active
+    flask_app._current_user = lambda: {'id': 1, 'is_admin': True}
+    flask_app._user_is_active = lambda _u: True
+    utils._is_operator = lambda: True
+    gate = flask_app.app.test_client()
+    refused = [k for k in of_connect.INPUT_KINDS
+               if gate.post('/api/onlyfans/connect/input',
+                            json={'attempt': 'no-such-attempt', 'kind': k}
+                            ).status_code != 404]
+    check('the route accepts every input the window sends', not refused)
+    check('and still refuses one it does not know',
+          gate.post('/api/onlyfans/connect/input',
+                    json={'attempt': 'no-such-attempt', 'kind': 'drag'}
+                    ).status_code == 400)
+    flask_app._current_user, flask_app._user_is_active = real_user, real_active
+
     # The same input path the sign-in window uses: a mouse that moves, presses
     # and releases, rather than a click that teleports onto the target.
     attempt.act('move', x=250, y=120)
