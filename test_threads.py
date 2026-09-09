@@ -157,6 +157,68 @@ print('quota')
 CALLS.clear()
 check('publishing limit read', app._threads_publishing_limit('lilith') == {'used': 7, 'total': 250})
 
+print('meta callbacks')
+import base64 as _b64, hmac as _hmac, hashlib as _hashlib, json as _json, time as _time
+
+_SECRET = 'test-app-secret'
+app._set_setting('threads_client_secret', _SECRET)
+
+
+def _b64u(b):
+    return _b64.urlsafe_b64encode(b).decode().rstrip('=')
+
+
+def signed(user_id, secret=_SECRET, algorithm='HMAC-SHA256'):
+    payload = _b64u(_json.dumps({'user_id': user_id, 'algorithm': algorithm,
+                                 'issued_at': int(_time.time())}).encode())
+    sig = _hmac.new(secret.encode(), payload.encode(), _hashlib.sha256).digest()
+    return _b64u(sig) + '.' + payload
+
+
+def seed():
+    app._threads_save_tokens({
+        'a': {'access_token': 'A', 'user_id': '555', 'username': 'a'},
+        'b': {'access_token': 'B', 'user_id': '555', 'username': 'b'},
+        'c': {'access_token': 'C', 'user_id': '999', 'username': 'c'},
+    })
+
+
+client = app.app.test_client()
+
+
+def call(path, sr):
+    return client.post(path, data={'signed_request': sr})
+
+
+check('meta paths are not behind the sign-in gate',
+      not any(app._path_needs_plan(p, 'POST') for p in
+              ('/api/threads/webhook', '/api/threads/uninstall', '/api/threads/delete')))
+
+seed()
+check('unsigned callback refused', call('/api/threads/uninstall', '').status_code == 400)
+check('wrong secret refused',
+      call('/api/threads/uninstall', signed('555', secret='nope')).status_code == 400)
+check('tampered payload refused',
+      call('/api/threads/uninstall',
+           signed('555').split('.')[0] + '.' + _b64u(b'{"user_id":"999"}')).status_code == 400)
+check('algorithm downgrade refused',
+      call('/api/threads/uninstall', signed('555', algorithm='none')).status_code == 400)
+check('a refused callback deletes nothing', len(app._threads_load_tokens()) == 3)
+
+check('uninstall accepted', call('/api/threads/uninstall', signed('555')).status_code == 200)
+check('uninstall drops every persona on that account',
+      sorted(app._threads_load_tokens()) == ['c'])
+
+seed()
+res = call('/api/threads/delete', signed('999')).get_json()
+check('deletion returns the code and url Meta requires',
+      bool(res.get('confirmation_code')) and '/api/threads/deletion-status' in res.get('url', ''))
+check('deletion drops only that account', sorted(app._threads_load_tokens()) == ['a', 'b'])
+check('the confirmation code resolves',
+      client.get('/api/threads/deletion-status?code=' + res['confirmation_code']).status_code == 200)
+check('a non-hex code is refused rather than echoed',
+      client.get('/api/threads/deletion-status?code=<script>').status_code == 400)
+
 print()
 if FAILURES:
     print(f'{len(FAILURES)} FAILED: {FAILURES}')
