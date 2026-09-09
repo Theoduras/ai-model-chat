@@ -4161,7 +4161,11 @@ def fanvue_page():
 
 @app.route('/threads')
 def threads_page():
-    if not _is_operator():
+    # Open to creators like /fanvue: every /api/threads/* call that acts on a
+    # persona is platform_scoped, the shared Meta app credentials are operator-
+    # only to read (app-config) and to write (auth-url), and the planner sends
+    # creators here to connect their own account.
+    if not (_is_operator() or _current_user()):
         return redirect('/dashboard')
     return send_from_directory(BASE_DIR, 'threads.html')
 
@@ -15782,13 +15786,26 @@ def _threads_save_tokens(data):
     _set_setting('threads_tokens', json.dumps(data))
 
 
+def _threads_err(exc):
+    """Meta returns the useful part in a JSON error envelope, not the status line."""
+    try:
+        payload = json.loads(exc.read())
+    except Exception:
+        return str(exc)
+    err = payload.get('error') or {}
+    return err.get('message') or payload.get('error_message') or str(exc)
+
+
 def _threads_api(method, url, body=None):
     headers = {'Content-Type': 'application/json'} if body else {}
     data = json.dumps(body).encode() if body else None
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
-    with urllib.request.urlopen(req, timeout=15) as r:
-        raw = r.read()
-        return json.loads(raw) if raw else {}
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            raw = r.read()
+            return json.loads(raw) if raw else {}
+    except url_error.HTTPError as e:
+        raise RuntimeError(_threads_err(e)) from None
 
 
 def _threads_refresh(persona):
@@ -15839,17 +15856,65 @@ def _threads_call(persona, method, path, params=None, body=None):
     return _threads_api(method, url, body=body)
 
 
-# A video container is assembled asynchronously, so it has to report FINISHED
-# before it can be published. An image container is ready as soon as it exists.
+THREADS_TEXT_LIMIT = 500
+THREADS_CAROUSEL_MAX = 20
+THREADS_VIDEO_EXTS = ('.mp4', '.mov', '.m4v', '.webm', '.3gp')
+# A media container is assembled asynchronously, so it has to report FINISHED
+# before it can be published.
 THREADS_CONTAINER_WAIT_SECONDS = 180
 
 
-def _threads_container_wait(persona, creation_id):
+def _threads_media_item(spec):
+    """Normalise one media spec to (media_type, container params).
+
+    Accepts a bare URL string, a dict with `url` (or `image_url`/`video_url`),
+    an optional `type` ("IMAGE"/"VIDEO") and an optional `alt_text`, or a
+    library item, whose file Threads fetches from its public media URL.
+    """
+    if isinstance(spec, str):
+        spec = {'url': spec}
+    if not isinstance(spec, dict):
+        raise RuntimeError(f'Unsupported media entry: {spec!r}')
+    url = (spec.get('url') or spec.get('image_url') or spec.get('video_url') or '').strip()
+    kind = (spec.get('kind') or '').strip().lower()
+    if not url and kind:
+        url = _media_public_url(spec)
+    if not url:
+        raise RuntimeError('Each media item needs a url.')
+    if not url.lower().startswith('https://'):
+        raise RuntimeError(f'Threads only fetches media over https, got: {url}')
+    mtype = (spec.get('type') or spec.get('media_type') or '').strip().upper()
+    if mtype not in ('IMAGE', 'VIDEO'):
+        if kind:
+            mtype = 'VIDEO' if kind == 'video' else 'IMAGE'
+        else:
+            path = urllib.parse.urlparse(url).path.lower()
+            mtype = ('VIDEO' if path.endswith(THREADS_VIDEO_EXTS) or spec.get('video_url')
+                     else 'IMAGE')
+    params = {'video_url' if mtype == 'VIDEO' else 'image_url': url}
+    alt = (spec.get('alt_text') or '').strip()
+    if alt:
+        params['alt_text'] = alt[:1000]
+    return mtype, params
+
+
+def _threads_container(persona, params):
+    uid = _threads_uid(persona)
+    created = _threads_call(persona, 'POST', f'/{uid}/threads', params=params)
+    creation_id = created.get('id')
+    if not creation_id:
+        raise RuntimeError(f'Threads container failed: {created}')
+    return creation_id
+
+
+def _threads_await_container(persona, creation_id,
+                             timeout=THREADS_CONTAINER_WAIT_SECONDS):
     """Block until Threads has finished building the container, or say why it
     never will. Publishing an unfinished container is rejected, and the error
-    that comes back does not mention the video."""
-    waited, delay = 0, 5
-    while waited < THREADS_CONTAINER_WAIT_SECONDS:
+    that comes back does not mention the media."""
+    deadline = time.time() + timeout
+    delay = 3
+    while True:
         res = _threads_call(persona, 'GET', f'/{creation_id}',
                             params={'fields': 'status,error_message'})
         status = str(res.get('status') or '').upper()
@@ -15858,37 +15923,70 @@ def _threads_container_wait(persona, creation_id):
         if status in ('ERROR', 'EXPIRED'):
             raise RuntimeError(res.get('error_message')
                                or f'Threads could not build that post ({status}).')
-        time.sleep(delay)
-        waited += delay
-    raise RuntimeError('Threads is still processing that video — try a shorter clip.')
+        remaining = deadline - time.time()
+        if remaining <= 0:
+            raise RuntimeError('Threads is still processing that media — '
+                               'try a shorter clip or a smaller file.')
+        time.sleep(min(delay, remaining))
+        delay = min(delay * 2, 15)
 
 
-def _threads_publish(persona, text, reply_to_id=None, media=None):
+def _threads_publish(persona, text, reply_to_id=None, media=None, alt_text=None):
     """Two-step publish: create a container, then publish it. Returns media id.
 
     Threads collects the file from a URL rather than taking an upload, which is
-    why media has to be publicly reachable before this is called."""
+    why media has to be publicly reachable before this is called. `media` is a
+    single item (a library item, as the queue sends it) or a list of them; one
+    item posts as an image or a video, several as a carousel, none as text.
+    """
     uid = _threads_uid(persona)
-    params = {'media_type': 'TEXT', 'text': text[:500]}
-    kind = ''
-    if media:
-        kind = media.get('kind') or 'image'
-        url = _media_public_url(media)
-        if kind == 'video':
-            params['media_type'], params['video_url'] = 'VIDEO', url
-        else:
-            params['media_type'], params['image_url'] = 'IMAGE', url
-    if reply_to_id:
-        params['reply_to_id'] = reply_to_id
-    created = _threads_call(persona, 'POST', f'/{uid}/threads', params=params)
-    creation_id = created.get('id')
-    if not creation_id:
-        raise RuntimeError(f'Threads container failed: {created}')
-    if kind == 'video':
-        _threads_container_wait(persona, creation_id)
+    text = (text or '')[:THREADS_TEXT_LIMIT]
+    if isinstance(media, (str, dict)):
+        media = [media]
+    items = [_threads_media_item(m) for m in (media or [])]
+    if not text and not items:
+        raise RuntimeError('A Threads post needs text, media, or both.')
+    base = {'reply_to_id': reply_to_id} if reply_to_id else {}
+
+    if not items:
+        creation_id = _threads_container(persona, dict(base, media_type='TEXT', text=text))
+    elif len(items) == 1:
+        mtype, mparams = items[0]
+        if alt_text and 'alt_text' not in mparams:
+            mparams['alt_text'] = alt_text[:1000]
+        params = dict(base, media_type=mtype, **mparams)
+        if text:
+            params['text'] = text
+        creation_id = _threads_container(persona, params)
+        _threads_await_container(persona, creation_id)
+    else:
+        if len(items) > THREADS_CAROUSEL_MAX:
+            raise RuntimeError(f'A Threads carousel holds at most {THREADS_CAROUSEL_MAX} '
+                               f'items, got {len(items)}.')
+        children = []
+        for mtype, mparams in items:
+            children.append(_threads_container(
+                persona, dict(media_type=mtype, is_carousel_item='true', **mparams)))
+        for child in children:
+            _threads_await_container(persona, child)
+        params = dict(base, media_type='CAROUSEL', children=','.join(children))
+        if text:
+            params['text'] = text
+        creation_id = _threads_container(persona, params)
+        _threads_await_container(persona, creation_id)
+
     published = _threads_call(persona, 'POST', f'/{uid}/threads_publish',
                               params={'creation_id': creation_id})
     return published.get('id', '')
+
+
+def _threads_publishing_limit(persona):
+    uid = _threads_uid(persona)
+    res = _threads_call(persona, 'GET', f'/{uid}/threads_publishing_limit',
+                        params={'fields': 'quota_usage,config'})
+    row = (res.get('data') or [{}])[0]
+    return {'used': int(row.get('quota_usage') or 0),
+            'total': int((row.get('config') or {}).get('quota_total') or 250)}
 
 
 def _threads_recent_posts(persona, limit=10):
@@ -15989,15 +16087,26 @@ def api_threads_app_config():
 @platform_scoped
 def api_threads_auth_url():
     data = request.json or {}
-    client_id = (data.get('client_id') or '').strip() or (_get_setting('threads_client_id') or '')
-    client_secret = (data.get('client_secret') or '').strip() or (_get_setting('threads_client_secret') or '')
-    redirect_uri = (data.get('redirect_uri') or '').strip() or (_get_setting('threads_redirect_uri') or '')
     persona = (data.get('persona') or 'lilith').strip()
-    if not client_id or not client_secret or not redirect_uri:
-        return jsonify({'ok': False, 'error': 'client_id, client_secret and redirect_uri are required'}), 400
-    _set_setting('threads_client_id', client_id)
-    _set_setting('threads_client_secret', client_secret)
-    _set_setting('threads_redirect_uri', redirect_uri)
+    # One Meta app serves every connected account, so its credentials are
+    # platform-level: only an operator may set them, and a creator connecting
+    # their own account just reuses what is stored.
+    if _is_operator():
+        client_id = (data.get('client_id') or '').strip() or (_get_setting('threads_client_id') or '')
+        client_secret = (data.get('client_secret') or '').strip() or (_get_setting('threads_client_secret') or '')
+        redirect_uri = (data.get('redirect_uri') or '').strip() or (_get_setting('threads_redirect_uri') or '')
+        if not client_id or not client_secret or not redirect_uri:
+            return jsonify({'ok': False, 'error': 'client_id, client_secret and redirect_uri are required'}), 400
+        _set_setting('threads_client_id', client_id)
+        _set_setting('threads_client_secret', client_secret)
+        _set_setting('threads_redirect_uri', redirect_uri)
+    else:
+        client_id = _get_setting('threads_client_id') or ''
+        client_secret = _get_setting('threads_client_secret') or ''
+        redirect_uri = _get_setting('threads_redirect_uri') or ''
+        if not client_id or not client_secret or not redirect_uri:
+            return jsonify({'ok': False, 'error': 'Threads is not set up on this platform yet. '
+                                                  'Ask the operator to add the Threads app credentials.'}), 400
     state = secrets.token_urlsafe(16)
     _set_setting('threads_oauth_state', json.dumps({'state': state, 'persona': persona}))
     params = urllib.parse.urlencode({
@@ -16110,38 +16219,79 @@ def api_threads_disconnect():
     return jsonify({'ok': True})
 
 
+def _threads_media_payload(data):
+    """Pull a media list off a publish request, accepting either a `media` list
+    or flat `image_url`/`video_url` fields."""
+    media = data.get('media')
+    if isinstance(media, (str, dict)):
+        media = [media]
+    elif media is None:
+        media = []
+    elif not isinstance(media, list):
+        raise RuntimeError('`media` must be a list of urls or media objects.')
+    for key in ('image_url', 'video_url'):
+        url = (data.get(key) or '').strip()
+        if url:
+            media.append({key: url, 'alt_text': data.get('alt_text') or ''})
+    for item in media:
+        _threads_media_item(item)  # reject bad specs as 400, not as a failed post
+    return media
+
+
 @app.route('/api/threads/publish', methods=['POST'])
 @platform_scoped
 def api_threads_publish():
     data = request.json or {}
     persona = (data.get('persona') or '').strip()
     topic = (data.get('topic') or '').strip()
+    text = (data.get('text') or '').strip()
     preview = bool(data.get('preview'))
     if not persona:
         return jsonify({'ok': False, 'error': 'persona required'}), 400
-    instr = (f'Write ONE short, in-character Threads post{" about: " + topic if topic else ""}. '
-             f'Natural and casual, 1-2 sentences, at most one emoji, no hashtags.'
-             + _no_repeat_block(persona, 'threads'))
     try:
-        text = _fv_trim(_persona_text(persona, instr, max_tokens=200, temperature=0.95), hard_cap=480)
-        if _reads_as_repeat(persona, 'threads', text):
-            logger.info('Threads post repeated an earlier one [%s], asking again', persona)
-            _content_repeat_blocked(persona, 'threads')
-            text = _fv_trim(_persona_text(
-                persona,
-                instr + '\n\nYour last attempt was a rewrite of one of those. '
-                'Pick a different subject entirely.',
-                max_tokens=200, temperature=0.95), hard_cap=480) or text
-    except Exception as e:
-        return jsonify({'ok': False, 'error': str(e)}), 500
+        media = _threads_media_payload(data)
+    except RuntimeError as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+    # Caller-supplied copy is posted verbatim. Otherwise the persona writes it,
+    # unless this is bare media with no topic to write about.
+    if not text and (topic or not media):
+        instr = (f'Write ONE short, in-character Threads post{" about: " + topic if topic else ""}. '
+                 f'Natural and casual, 1-2 sentences, at most one emoji, no hashtags.'
+                 + _no_repeat_block(persona, 'threads'))
+        try:
+            text = _fv_trim(_persona_text(persona, instr, max_tokens=200, temperature=0.95), hard_cap=480)
+            if _reads_as_repeat(persona, 'threads', text):
+                logger.info('Threads post repeated an earlier one [%s], asking again', persona)
+                _content_repeat_blocked(persona, 'threads')
+                text = _fv_trim(_persona_text(
+                    persona,
+                    instr + '\n\nYour last attempt was a rewrite of one of those. '
+                    'Pick a different subject entirely.',
+                    max_tokens=200, temperature=0.95), hard_cap=480) or text
+        except Exception as e:
+            return jsonify({'ok': False, 'error': str(e)}), 500
     if preview:
-        return jsonify({'ok': True, 'text': text, 'posted': False})
+        return jsonify({'ok': True, 'text': text, 'media': media, 'posted': False})
     try:
-        mid = _threads_publish(persona, text)
+        mid = _threads_publish(persona, text, media=media,
+                               reply_to_id=(data.get('reply_to_id') or '').strip() or None)
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)}), 500
-    _content_register_add(persona, 'threads', text)
-    return jsonify({'ok': True, 'text': text, 'posted': True, 'id': mid})
+    if text:
+        _content_register_add(persona, 'threads', text)
+    return jsonify({'ok': True, 'text': text, 'media': media, 'posted': True, 'id': mid})
+
+
+@app.route('/api/threads/quota', methods=['GET'])
+@platform_scoped
+def api_threads_quota():
+    persona = (request.args.get('persona') or '').strip()
+    if not persona:
+        return jsonify({'ok': False, 'error': 'persona required'}), 400
+    try:
+        return jsonify(dict({'ok': True}, **_threads_publishing_limit(persona)))
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)}), 500
 
 
 @app.route('/api/threads/auto', methods=['GET', 'POST'])

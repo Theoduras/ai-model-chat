@@ -97,6 +97,11 @@
 
     <div id="connect-panel" style="display:none; margin-top:4px; border-top:1px solid var(--border-soft); padding-top:16px;">
       <div class="section-title" style="font-size:0.85rem;">How to connect</div>
+      <p class="hint" id="connect-creator" hidden style="margin-bottom:12px;">
+        Click <b>Authorize on Threads</b> below, sign in to the Threads account for this
+        persona and approve. Each persona connects its own account.
+      </p>
+      <div id="connect-operator">
       <ol class="steps">
         <li>Create a Meta app at <a href="https://developers.facebook.com/apps" target="_blank" style="color:var(--accent);">developers.facebook.com</a> and add the <b>Threads API</b> use case.</li>
         <li>In the app's Threads settings, add these scopes: <code>threads_basic</code>, <code>threads_content_publish</code>, <code>threads_read_replies</code>, <code>threads_manage_replies</code>.</li>
@@ -115,6 +120,7 @@
       <div class="field full" style="margin-top:12px;">
         <label>Redirect Callback URI <span style="font-weight:400;color:var(--text-muted);">(must match your app exactly)</span></label>
         <input type="text" id="th-redirect-uri" placeholder="https://your-domain/api/threads/oauth-redirect" autocomplete="off" spellcheck="false">
+      </div>
       </div>
       <div style="display:flex; gap:8px; margin-top:14px;">
         <button class="btn-ai" onclick="startConnect()">Authorize on Threads →</button>
@@ -159,10 +165,23 @@
 
   <div class="form-section">
     <div class="section-title">📝 Publish a post</div>
-    <span class="hint" style="display:block; margin-bottom:14px;">Writes an original Threads post in the persona's voice and publishes it.</span>
+    <span class="hint" style="display:block; margin-bottom:14px;">Posts to whichever Threads account the selected persona is connected to. Leave the text empty and the persona writes it.</span>
     <div class="field full">
       <label>Topic / vibe <span style="font-weight:400;color:var(--text-muted);">(optional)</span></label>
       <input type="text" id="post-topic" placeholder="e.g. lazy Sunday, gym day, new photoset teaser…">
+    </div>
+    <div class="field full">
+      <label>Text <span style="font-weight:400;color:var(--text-muted);">(optional — posted as written)</span></label>
+      <textarea id="post-text" rows="3" maxlength="500" placeholder="Leave empty to let the persona write it from the topic above."></textarea>
+    </div>
+    <div class="field full">
+      <label>Media URLs <span style="font-weight:400;color:var(--text-muted);">(optional — one per line, https only)</span></label>
+      <textarea id="post-media" rows="3" placeholder="https://cdn.example.com/photo.jpg&#10;https://cdn.example.com/clip.mp4"></textarea>
+      <span class="hint">One URL posts a single image or video, several post a carousel (max 20). Type is taken from the file extension.</span>
+    </div>
+    <div class="field full">
+      <label>Alt text <span style="font-weight:400;color:var(--text-muted);">(optional, single media only)</span></label>
+      <input type="text" id="post-alt" placeholder="Describes the image for screen readers">
     </div>
     <div style="display:flex; gap:8px;">
       <button class="btn-ai" style="background:var(--border);" onclick="runPublish(true)">Preview draft</button>
@@ -191,19 +210,29 @@
 <script>
 let connStatus = {}, appConfig = {};
 function esc(s){ return (s||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+let isOperator = false;
 function persona(){ return document.getElementById('persona').value; }
 
 async function init(){
   try {
-    const [pRes, sRes, cRes] = await Promise.all([
-      fetch('/api/personas'), fetch('/api/threads/status'), fetch('/api/threads/app-config')]);
+    const [pRes, sRes, cRes, mRes] = await Promise.all([
+      fetch('/api/personas'), fetch('/api/threads/status'),
+      fetch('/api/threads/app-config'), fetch('/api/me')]);
     const list = await pRes.json();
     connStatus = await sRes.json();
-    appConfig = await cRes.json().catch(()=>({}));
+    // app-config is operator-only; a creator gets a 401 and no credentials.
+    appConfig = cRes.ok ? await cRes.json().catch(()=>({})) : {};
+    isOperator = ((await mRes.json().catch(()=>({}))) || {}).is_operator === true;
+    document.getElementById('connect-operator').hidden = !isOperator;
+    document.getElementById('connect-creator').hidden = isOperator;
     const sel = document.getElementById('persona');
     sel.innerHTML = list.map(p=>'<option value="'+p.slug+'">'+esc(p.name||p.slug)+'</option>').join('');
+    // Arriving from the planner, land on the persona it was nagging about.
+    const wanted = new URLSearchParams(location.search).get('persona') || '';
+    if(list.some(p=>p.slug===wanted)) sel.value = wanted;
     document.getElementById('wh-url').value = location.origin + '/api/threads/webhook';
     prefillConnect(); updateConn(); loadAuto();
+    if(wanted && !(connStatus[sel.value]||{}).connected) toggleConnect();
   } catch(e){}
 }
 
@@ -291,11 +320,21 @@ async function post(url,body){
 
 async function runPublish(preview){
   const box=document.getElementById('publish-result');
-  busy(box, preview?'Drafting post…':'Publishing…');
-  const data=await post('/api/threads/publish',{persona:persona(), topic:document.getElementById('post-topic').value.trim(), preview});
+  const media=document.getElementById('post-media').value.split('\n').map(s=>s.trim()).filter(Boolean);
+  busy(box, preview?'Drafting post…':(media.length?'Uploading media and publishing…':'Publishing…'));
+  const data=await post('/api/threads/publish',{
+    persona:persona(),
+    topic:document.getElementById('post-topic').value.trim(),
+    text:document.getElementById('post-text').value.trim(),
+    alt_text:document.getElementById('post-alt').value.trim(),
+    media, preview});
   if(!data.ok){ err(box,data.error); return; }
   const tag=data.posted?'<span class="tag ok">posted</span>':'<span class="tag" style="background:var(--border);color:var(--text-3);">draft</span>';
-  box.innerHTML='<div class="reply-card">'+tag+'<div class="rep">'+esc(data.text)+'</div></div>';
+  const shot=(data.media||[]).map(m=>{
+    const u=typeof m==='string'?m:(m.url||m.image_url||m.video_url||'');
+    return '<div class="cmt">'+esc(u)+'</div>';
+  }).join('');
+  box.innerHTML='<div class="reply-card">'+tag+'<div class="rep">'+esc(data.text||'(no text)')+'</div>'+shot+'</div>';
 }
 
 async function loadAuto(){
