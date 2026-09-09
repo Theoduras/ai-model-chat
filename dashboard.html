@@ -2023,6 +2023,14 @@ function renderForm(slug, cfg) {
 
       <div style="margin-top:14px;">
         <div class="section-title" style="font-size:0.8rem;">
+          The week ahead
+          <button type="button" class="btn-section-save" onclick="growthPlan(this)">Plan the week</button>
+        </div>
+        <span class="hint">A week of slots at the cadence the guide recommends, seven parts worth-reading to two teases to one ask. Edit any angle before you queue it. Only X and Threads can be queued; the rest is a list of what to post where, and when.</span>
+        <div id="growth-plan" class="hint" style="margin-top:8px;">—</div>
+      </div>
+      <div style="margin-top:14px;">
+        <div class="section-title" style="font-size:0.8rem;">
           Already posted
           <button type="button" class="btn-section-save" onclick="loadGrowthRegister()">Refresh</button>
           <button type="button" class="btn-section-save" onclick="clearGrowthRegister(this)">Clear</button>
@@ -3295,6 +3303,127 @@ async function loadGrowthQueue() {
 function daysAgo(n) {
   if (n === null || n === undefined) return 'never';
   return n === 0 ? 'today' : n === 1 ? 'yesterday' : n + 'd ago';
+}
+
+let planSlots = [];
+
+function localMidnight() {
+  // The cadence puts posts at hours of her day, so the server needs the epoch
+  // her day starts at rather than guessing from the request time.
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return Math.floor(d.getTime() / 1000);
+}
+
+function dayLabel(ts) {
+  const d = new Date(ts * 1000);
+  return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+function hourLabel(ts) {
+  const d = new Date(ts * 1000);
+  return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+}
+
+const KIND_WORD = { value: 'worth reading', tease: 'tease', cta: 'ask' };
+
+function renderPlan(d) {
+  const box = document.getElementById('growth-plan');
+  if (!box) return;
+  planSlots = d.slots || [];
+  if (!planSlots.length) { box.textContent = 'Nothing to plan.'; return; }
+
+  let html = '';
+  const off = [];
+  if (!d.beta) off.push('this persona is not on the growth beta');
+  if (!d.worker_on) off.push('the scheduler is switched off on this host');
+  if (off.length) {
+    html += '<div style="margin-bottom:10px; opacity:0.8;">Anything queued from here stays queued \u2014 '
+      + esc(off.join(' and ')) + '.</div>';
+  }
+  html += '<div style="display:flex; flex-wrap:wrap; gap:14px; margin-bottom:12px;">'
+    + statTile('posts', d.posts || 0)
+    + statTile('queueable', d.queueable || 0)
+    + statTile('by hand', d.manual || 0)
+    + '</div>';
+  if (!d.ideas) {
+    html += '<div style="margin-bottom:10px; opacity:0.8;">The angles came back empty, so every '
+      + 'slot below needs one typing in before it can be queued.</div>';
+  }
+
+  let day = null;
+  html += '<table style="width:100%; font-size:0.78rem; border-collapse:collapse; margin-bottom:10px;">';
+  planSlots.forEach((s, i) => {
+    if (dayLabel(s.at) !== day) {
+      day = dayLabel(s.at);
+      html += '<tr><td colspan="4" style="padding-top:10px; opacity:0.65;">' + esc(day) + '</td></tr>';
+    }
+    html += '<tr' + (s.publishable ? '' : ' style="opacity:0.72;"') + '>'
+      + '<td style="white-space:nowrap; vertical-align:top; padding-right:8px;">' + hourLabel(s.at) + '</td>'
+      + '<td style="white-space:nowrap; vertical-align:top; padding-right:8px;">' + esc(s.label || s.platform)
+      + (s.publishable ? '' : ' <span style="opacity:0.6;">by hand</span>') + '</td>'
+      + '<td style="white-space:nowrap; vertical-align:top; padding-right:8px;">'
+      + esc(KIND_WORD[s.kind] || s.kind) + '</td>'
+      + '<td style="vertical-align:top;"><input type="text" data-slot="' + i + '" value="'
+      + esc(s.idea || '') + '" style="width:100%; font-size:0.78rem;"></td>'
+      + '</tr>';
+  });
+  html += '</table>';
+  if (d.upcoming > d.cap) {
+    html += '<div style="margin-bottom:8px;">Only the first ' + d.cap + ' of the ' + d.upcoming
+      + ' publishable slots are queued in one go \u2014 plan again once those have gone out.</div>';
+  }
+  html += '<button type="button" class="btn-section-save" onclick="growthPlanQueue(this)">Queue the '
+    + (d.queueable || 0) + ' X and Threads posts</button>';
+  box.innerHTML = html;
+}
+
+async function growthPlan(btn) {
+  const box = document.getElementById('growth-plan');
+  if (!currentSlug) return;
+  btn.disabled = true;
+  const was = btn.textContent;
+  btn.textContent = 'planning\u2026';
+  if (box) box.textContent = 'Working out the week\u2026';
+  try {
+    const res = await fetch('/api/growth/plan', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ persona: currentSlug, start: localMidnight() })
+    });
+    const d = await res.json();
+    if (!d.ok) { if (box) box.textContent = d.error || 'Could not plan the week.'; return; }
+    renderPlan(d);
+  } catch (e) {
+    if (box) box.textContent = 'Could not plan the week.';
+  } finally { btn.disabled = false; btn.textContent = was; }
+}
+
+async function growthPlanQueue(btn) {
+  const box = document.getElementById('growth-plan');
+  if (!planSlots.length) return;
+  // Take the angles as they stand in the boxes — they are there to be edited.
+  const edited = planSlots.map((s, i) => {
+    const el = box && box.querySelector('[data-slot="' + i + '"]');
+    return Object.assign({}, s, { idea: el ? el.value : s.idea });
+  });
+  btn.disabled = true;
+  const was = btn.textContent;
+  btn.textContent = 'writing them\u2026';
+  try {
+    const res = await fetch('/api/growth/plan', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ persona: currentSlug, action: 'queue', slots: edited })
+    });
+    const d = await res.json();
+    if (!d.ok) { alert(d.error || 'Could not queue them.'); return; }
+    let msg = d.queued.length + ' post' + (d.queued.length === 1 ? '' : 's') + ' queued.';
+    if (d.failed.length) msg += ' ' + d.failed.length + ' could not be written.';
+    if (d.skipped) msg += ' ' + d.skipped + ' were over the ' + d.cap + '-post limit for one go.';
+    if (box) box.innerHTML = '<div>' + esc(msg) + '</div>';
+    planSlots = [];
+    loadGrowthQueue();
+  } catch (e) { alert('Could not queue them.'); }
+  finally { btn.disabled = false; btn.textContent = was; }
 }
 
 async function loadGrowthRegister() {

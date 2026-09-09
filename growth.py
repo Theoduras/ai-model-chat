@@ -510,6 +510,140 @@ def queue_stats(rows, now=0):
 # ── Win-back ladder ───────────────────────────────────────────────────────────
 # funnels.winback_due has been in the tree unused since the funnel engine
 # landed. This is the thin wrapper the follow-up rounds call.
+WEEKLY_CADENCE = {
+    'x':         {'per_day': 2,  'hours': (9, 20)},
+    'threads':   {'per_day': 1,  'hours': (12,)},
+    'instagram': {'per_day': 1,  'hours': (18,)},
+    'tiktok':    {'per_day': 1,  'hours': (19,)},
+    'reddit':    {'per_week': 3, 'hours': (21,)},
+}
+
+# 70/20/10. Most of what she posts has to be worth following on its own, or a
+# tease has nothing to interrupt and an ask has nothing behind it.
+MIX_TEASE, MIX_CTA = 0.2, 0.1
+
+
+def mix_for(count):
+    """The job each of `count` posts is doing, holding the ratio at any length.
+    Spread rather than dealt in order: a week that saves every ask for Sunday
+    is a week of asks nobody sees, and a run of teases with nothing between
+    them is just selling."""
+    if count <= 0:
+        return []
+    n_cta = max(1, int(round(count * MIX_CTA))) if count >= 5 else 0
+    n_tease = max(1, int(round(count * MIX_TEASE))) if count >= 3 else 0
+    n_tease = max(0, min(n_tease, count - n_cta))
+    kinds = ['value'] * count
+
+    def place(n, label, offset):
+        step = count / float(n) if n else 0
+        for k in range(n):
+            p = int(k * step + step * offset) % count
+            for _ in range(count):
+                if kinds[p] == 'value':
+                    kinds[p] = label
+                    break
+                p = (p + 1) % count
+
+    place(n_cta, 'cta', 0.5)
+    place(n_tease, 'tease', 0.15)
+    return kinds
+
+MIX_BRIEF = {
+    'value': ('something worth reading on its own — a scene from your day, an '
+              'opinion, a small story. Sell nothing.'),
+    'tease': ('hint that there is more of this somewhere else without naming '
+              'the place or pasting a link.'),
+    'cta': ('invite them to come find you, warmly and once. Still no link — '
+            'the link lives in your bio.'),
+}
+
+# One request cannot sit there making sixty model calls, and a week generated
+# in one go is a week of drafts nobody reads before they go out.
+PLAN_QUEUE_CAP = 20
+
+
+def plan_week(start_at, days=7, cadence=None):
+    """The week's slots: what goes where, when, and which of the three jobs each
+    post is doing. Reddit never draws the ask — its own brief rules out sales
+    language, and a subreddit is the fastest place to lose an account over it."""
+    cadence = cadence or WEEKLY_CADENCE
+    # The default lives in the signature; asking for none here means one day,
+    # not a silent week.
+    days = max(1, min(int(days or 0), 28))
+    start_at = int(start_at or 0)
+    slots = []
+    for plat, spec in cadence.items():
+        hours = spec.get('hours') or (12,)
+        per_day = int(spec.get('per_day', 0) or 0)
+        per_week = int(spec.get('per_week', 0) or 0)
+        if per_day:
+            picks = [(d, hours[i % len(hours)])
+                     for d in range(days) for i in range(per_day)]
+        elif per_week:
+            total = max(1, int(round(per_week * days / 7.0)))
+            step = days / float(total)
+            picks = [(min(days - 1, int(i * step)), hours[i % len(hours)])
+                     for i in range(total)]
+        else:
+            picks = []
+        kinds = mix_for(len(picks))
+        for n, (d, h) in enumerate(picks):
+            kind = 'value' if plat == 'reddit' else kinds[n]
+            slots.append({'platform': plat, 'label': POST_PLATFORMS.get(plat, {}).get('label', plat),
+                          'day': d, 'hour': h, 'kind': kind,
+                          'at': start_at + d * 86400 + h * 3600,
+                          'publishable': plat in PUBLISHABLE})
+    slots.sort(key=lambda s: (s['at'], s['platform']))
+    return slots
+
+
+def plan_summary(slots, now=0):
+    """Counts for the panel, plus how much of the week the queue can take on its
+    own — the rest is copy she has to paste somewhere herself."""
+    now = int(now or 0)
+    by_plat, by_kind = {}, {}
+    posts = auto = upcoming = 0
+    for s in slots:
+        posts += 1
+        p = by_plat.setdefault(s['platform'], {'platform': s['platform'],
+                                               'label': s.get('label', s['platform']),
+                                               'posts': 0, 'publishable': s['publishable']})
+        p['posts'] += 1
+        by_kind[s['kind']] = by_kind.get(s['kind'], 0) + 1
+        if s['publishable']:
+            auto += 1
+            if not now or s['at'] > now:
+                upcoming += 1
+    rows = sorted(by_plat.values(), key=lambda r: (-r['posts'], r['platform']))
+    return {'posts': posts, 'auto': auto, 'manual': posts - auto,
+            'queueable': min(upcoming, PLAN_QUEUE_CAP), 'upcoming': upcoming,
+            'platforms': rows,
+            'kinds': [{'kind': k, 'posts': v} for k, v in sorted(by_kind.items())]}
+
+
+def plan_ideas(text, wanted):
+    """Pull the week's angles out of one model reply. Numbering, bullets and a
+    stray preamble all turn up; what matters is getting `wanted` distinct lines
+    and never handing a slot an empty idea."""
+    out, seen = [], set()
+    for raw in str(text or '').splitlines():
+        line = raw.strip().strip('-*\u2022').strip()
+        line = re.sub(r'^\s*\d+[\.\)]\s*', '', line).strip()
+        # Short is fine — "my cat" is an angle. What gets dropped is a
+        # fragment left over from stripping, and the heading above the list.
+        if len(line) < 5 or line.endswith(':'):
+            continue
+        key = line.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(line[:200])
+        if len(out) >= wanted:
+            break
+    return out
+
+
 def winback_step(days_since_lapse, touches):
     """{'touch', 'offer'} when a win-back touch is due, else None."""
     if days_since_lapse < 1 or not winback_due(days_since_lapse, touches):

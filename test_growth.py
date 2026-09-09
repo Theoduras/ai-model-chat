@@ -192,6 +192,73 @@ check('an empty queue has no next slot',
       G.queue_stats([], now=qnow)['totals']['next_at'] == 0)
 
 print()
+print('weekly plan')
+pstart = 1_700_000_000 - (1_700_000_000 % 86400)
+week = G.plan_week(pstart, 7)
+check('a slot per platform per day at the cadence', len(week) == 38, len(week))
+check('slots come out in time order',
+      all(week[i]['at'] <= week[i + 1]['at'] for i in range(len(week) - 1)))
+check('the hours are the cadence hours',
+      all((s['at'] - pstart) % 86400 // 3600 in G.WEEKLY_CADENCE[s['platform']]['hours']
+          for s in week))
+check('a week starts on the day it is given',
+      min(s['at'] for s in week) >= pstart)
+check('and ends inside it', max(s['at'] for s in week) < pstart + 7 * 86400)
+kinds = {}
+for s in week:
+    kinds[s['kind']] = kinds.get(s['kind'], 0) + 1
+check('most of the week is worth reading on its own',
+      0.65 <= kinds['value'] / len(week) <= 0.8, kinds)
+check('some of it teases', 0.1 <= kinds['tease'] / len(week) <= 0.3, kinds)
+check('a little of it asks', 0 < kinds['cta'] / len(week) <= 0.15, kinds)
+check('reddit never asks',
+      all(s['kind'] == 'value' for s in week if s['platform'] == 'reddit'))
+check('only x and threads are marked publishable',
+      {s['platform'] for s in week if s['publishable']} == set(G.PUBLISHABLE))
+check('a shorter run is proportionally shorter', len(G.plan_week(pstart, 1)) < len(week))
+check('days are clamped to something sane', len(G.plan_week(pstart, 999)) == len(G.plan_week(pstart, 28)))
+check('no days is still one day', len(G.plan_week(pstart, 0)) == len(G.plan_week(pstart, 1)))
+
+check('the ratio holds at any length',
+      all(0.6 <= G.mix_for(n).count('value') / n <= 0.85 for n in range(5, 40)),
+      [(n, G.mix_for(n).count('value') / n) for n in range(5, 40)
+       if not 0.6 <= G.mix_for(n).count('value') / n <= 0.85])
+check('every length gets a tease once it can afford one',
+      all('tease' in G.mix_for(n) for n in range(3, 40)))
+check('and an ask', all('cta' in G.mix_for(n) for n in range(5, 40)))
+check('two posts are both worth reading', G.mix_for(2) == ['value', 'value'])
+check('nothing in, nothing out', G.mix_for(0) == [])
+check('the asks are spread, not stacked',
+      all(len({i for i, k in enumerate(G.mix_for(n)) if k == 'cta'}) ==
+          G.mix_for(n).count('cta') for n in range(5, 40)))
+
+sm = G.plan_summary(week, now=pstart)
+check('the summary counts every slot', sm['posts'] == len(week))
+check('and splits automatic from by-hand', sm['auto'] + sm['manual'] == sm['posts'])
+check('auto is exactly the publishable ones',
+      sm['auto'] == sum(1 for s in week if s['publishable']))
+check('what can be queued in one go is capped',
+      sm['queueable'] <= G.PLAN_QUEUE_CAP)
+check('a week already past has nothing to queue',
+      G.plan_summary(week, now=pstart + 30 * 86400)['queueable'] == 0)
+check('busiest platform first', sm['platforms'][0]['platform'] == 'x')
+
+check('ideas survive numbering and bullets',
+      G.plan_ideas('1. the rain\n- a haircut\n\u2022 the quiet flat', 3)
+      == ['the rain', 'a haircut', 'the quiet flat'])
+check('a repeated idea is only taken once',
+      G.plan_ideas('the rain\nThe Rain\na haircut', 3) == ['the rain', 'a haircut'])
+check('a heading is not an idea', 'Here are some ideas:' not in
+      G.plan_ideas('Here are some ideas:\nthe rain outside', 2))
+check('and neither is a fragment', G.plan_ideas('ok\nthe rain outside', 2) == ['the rain outside'])
+check('it stops at what was asked for', len(G.plan_ideas('\n'.join(f'idea {i}' for i in range(50)), 6)) == 6)
+check('nothing in, nothing out', G.plan_ideas('', 5) == [])
+check('every slot job has a brief',
+      all(k in G.MIX_BRIEF for k in ('value', 'tease', 'cta')))
+check('only the ask invites them anywhere',
+      'invite' in G.MIX_BRIEF['cta'] and 'invite' not in G.MIX_BRIEF['value'])
+
+print()
 print('profile copy')
 check('every bio platform has a cap and a line count',
       all(v.get('cap') and v.get('lines') for v in G.BIO_PLATFORMS.values()))

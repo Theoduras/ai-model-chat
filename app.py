@@ -7022,6 +7022,127 @@ def _growth_bio_state(persona):
         return {}
 
 
+def _growth_plan_draft(persona, platform, kind, idea):
+    """One post for one slot: the platform's own brief, plus what this slot is
+    for. Re-rolled once if it reads as a rewrite of something already posted."""
+    spec = growth.POST_PLATFORMS[platform]
+    instruction = (
+        f'Write ONE {spec["label"]} post as yourself, in character, about: '
+        f'{idea}. The job of this post is {growth.MIX_BRIEF[kind]} It must be '
+        f'{spec["brief"]}. Stay under {spec["cap"]} characters. Return only the '
+        'post itself, no preamble and no quotes.'
+        + _no_repeat_block(persona, platform))
+    text = growth.trim_post(platform, _persona_text(
+        persona, instruction, max_tokens=500, temperature=1.0))
+    if text and _reads_as_repeat(persona, platform, text):
+        _content_repeat_blocked(persona, platform)
+        try:
+            text = growth.trim_post(platform, _persona_text(
+                persona,
+                instruction + '\n\nYour last attempt was a rewrite of one of '
+                'those. Pick a different angle entirely.',
+                max_tokens=500, temperature=1.0)) or text
+        except Exception:
+            pass
+    return text
+
+
+@app.route('/api/growth/plan', methods=['POST'])
+@operator_only
+def api_growth_plan():
+    """A week laid out: which channel, when, and whether the post is there to be
+    worth reading, to hint, or to ask. Previewing costs one model call for the
+    week's angles; queueing costs one per post and only touches the two channels
+    that can actually publish."""
+    data = request.json or {}
+    persona = (data.get('persona') or '').strip()
+    if not re.match(r'^[a-z0-9_-]+$', persona or ''):
+        return jsonify({'error': 'Invalid slug'}), 400
+    now = int(time.time())
+    action = (data.get('action') or 'preview').strip()
+
+    if action == 'queue':
+        wanted = []
+        for s in (data.get('slots') or []):
+            plat = growth.normalise_source(s.get('platform'))
+            at = int(s.get('at') or 0)
+            if plat not in growth.PUBLISHABLE or at <= now:
+                continue
+            kind = s.get('kind') if s.get('kind') in growth.MIX_BRIEF else 'value'
+            idea = (s.get('idea') or '').strip()[:200]
+            if idea:
+                wanted.append({'platform': plat, 'at': at, 'kind': kind, 'idea': idea})
+        if not wanted:
+            return jsonify({'ok': False,
+                            'error': 'Nothing here can be queued — the slots are '
+                                     'either in the past or on channels with no '
+                                     'posting API.'}), 400
+        wanted.sort(key=lambda s: s['at'])
+        skipped = max(0, len(wanted) - growth.PLAN_QUEUE_CAP)
+        wanted = wanted[:growth.PLAN_QUEUE_CAP]
+
+        from db import SessionLocal, queue_post
+        queued, failed = [], []
+        sdb = SessionLocal()
+        try:
+            for s in wanted:
+                try:
+                    text = _growth_plan_draft(persona, s['platform'], s['kind'], s['idea'])
+                except Exception as e:
+                    failed.append({**s, 'error': str(e)[:200]})
+                    continue
+                if not text:
+                    failed.append({**s, 'error': 'came back empty'})
+                    continue
+                run_at = datetime.fromtimestamp(s['at'], timezone.utc).replace(tzinfo=None)
+                row = queue_post(sdb, persona, s['platform'], text, run_at)
+                queued.append({**s, 'id': row.id, 'text': text})
+            sdb.commit()
+        finally:
+            sdb.close()
+        logger.info('PLAN queued [%s]: %d posts, %d failed, %d over the cap',
+                    persona, len(queued), len(failed), skipped)
+        return jsonify({'ok': True, 'persona': persona, 'queued': queued,
+                        'failed': failed, 'skipped': skipped,
+                        'cap': growth.PLAN_QUEUE_CAP,
+                        'queue': _growth_queue_rows(persona)})
+
+    days = int(data.get('days') or 7)
+    # The hours in the cadence are hours of the creator's day, so the day has to
+    # start at their midnight — which only the browser knows. Falling back to
+    # UTC midnight keeps the shape right when nothing is sent; it just puts the
+    # slots in the wrong part of someone else's day.
+    start = int(data.get('start') or 0) or (now - now % 86400)
+    # Today is planned from now on, not from this morning.
+    slots = [s for s in growth.plan_week(start, days) if s['at'] > now]
+    ideas = []
+    if slots:
+        try:
+            raw = _persona_text(
+                persona,
+                f'List {len(slots)} different things you could post about over '
+                f'the next {days} days — one per line, no numbering, no '
+                'explanation. Each is a short angle in your own words: a moment '
+                'from your day, a thought, something you noticed, something you '
+                'are willing to admit. They must all be different from each '
+                'other. Return only the lines.'
+                + _no_repeat_block(persona, ''),
+                max_tokens=1400, temperature=1.05)
+            ideas = growth.plan_ideas(raw, len(slots))
+        except Exception as e:
+            logger.warning('PLAN ideas failed [%s]: %s', persona, str(e)[:200])
+    for i, s in enumerate(slots):
+        # Fewer angles than slots means the tail repeats one rather than sitting
+        # empty; an empty slot is one the operator has to fill by hand anyway.
+        s['idea'] = ideas[i % len(ideas)] if ideas else ''
+    return jsonify({'ok': True, 'persona': persona, 'start': start, 'days': days,
+                    'slots': slots, 'ideas': len(ideas),
+                    'cap': growth.PLAN_QUEUE_CAP,
+                    'beta': _growth_on(persona),
+                    'worker_on': _worker_enabled('GROWTH_QUEUE_WORKER'),
+                    **growth.plan_summary(slots, now=now)})
+
+
 @app.route('/api/growth/bio', methods=['GET', 'POST'])
 @operator_only
 def api_growth_bio():
