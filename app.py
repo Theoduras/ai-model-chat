@@ -11430,9 +11430,9 @@ def api_fanvue_set_creator():
     return jsonify({'ok': True, 'selected': _fanvue_creator(persona)})
 
 
-def _fanvue_ppv(persona):
+def _fanvue_ppv(persona, plat=None):
     try:
-        return json.loads(_get_setting(f'fanvue_ppv_{persona}') or '{}')
+        return json.loads(_get_setting((plat or PLAT_FANVUE).k('ppv', persona)) or '{}')
     except Exception:
         return {}
 
@@ -11542,10 +11542,10 @@ def _fv_clean_set(s, index=0):
     }
 
 
-def _fanvue_ppv_sets(persona):
+def _fanvue_ppv_sets(persona, plat=None):
     """Every valid PPV content set for a persona, in creator order. An older
     flat `tiers` list is read as one set, so nothing already saved is lost."""
-    cfg = _fanvue_ppv(persona)
+    cfg = _fanvue_ppv(persona, plat=plat)
     raw = cfg.get('sets')
     if isinstance(raw, list):
         out = []
@@ -11554,16 +11554,16 @@ def _fanvue_ppv_sets(persona):
             if c:
                 out.append(c)
         return out
-    legacy = _fanvue_ppv_tiers(persona)
+    legacy = _fanvue_ppv_tiers(persona, plat=plat)
     if not legacy:
         return []
     return [{'id': 'set1', 'name': 'Set 1', 'tiers': legacy, 'scene': '',
              'keywords': [], 'hour_from': None, 'hour_to': None}]
 
 
-def _fanvue_ppv_tiers(persona):
+def _fanvue_ppv_tiers(persona, plat=None):
     """The legacy flat tier list, still read so old configs keep working."""
-    cfg = _fanvue_ppv(persona)
+    cfg = _fanvue_ppv(persona, plat=plat)
     raw = cfg.get('tiers')
     if not isinstance(raw, list):
         raw = [{'media_uuids': cfg.get('media_uuids') or [],
@@ -11830,7 +11830,8 @@ def _fv_caption(persona, chosen, tier, reply):
     return (reply or '').strip()[:2000]
 
 
-def _fv_record_drop(persona, fan_uuid, chosen, idx, price, media_uuids, message_uuid):
+def _fv_record_drop(persona, fan_uuid, chosen, idx, price, media_uuids,
+                    message_uuid, plat=None):
     """Write the sale to the ledger. Returns the row id, or '' if it could not
     be written — the drop still went out, so that is logged loudly rather than
     swallowed: without a row nothing can later confirm the fan paid."""
@@ -13226,9 +13227,9 @@ _fv_inflight = [0]
 _fv_inflight_lock = threading.Lock()
 
 
-def _fv_humanize_cfg(persona):
-    """Reply pacing for Fanvue, same shape and defaults as Telegram's."""
-    opts = _fanvue_auto_settings(persona)
+def _fv_humanize_cfg(persona, plat=None):
+    """Reply pacing, same shape and defaults as Telegram's."""
+    opts = _fanvue_auto_settings(persona, plat=plat)
     return {'humanize': bool(opts.get('humanize', True)),
             'typing_speed': max(4, min(int(opts.get('typing_speed') or 14), 40)),
             'react_rate': max(0, min(int(opts.get('react_rate', 25)), 100))}
@@ -13411,7 +13412,7 @@ def _tracing_to(fn):
         _trace_sink.fn = prev
 
 
-def _fan_key_of(fan_uuid):
+def _fan_key_of(fan_uuid, plat=None):
     """The unified fan key for an id the shared funnel layer was handed.
 
     Telegram calls in with its own key ('tg:'/'tgu:') as the uuid while Fanvue
@@ -13419,7 +13420,7 @@ def _fan_key_of(fan_uuid):
     is Fanvue's.
     """
     s = str(fan_uuid or '')
-    return s if ':' in s else 'fv:' + s
+    return s if ':' in s else (plat or PLAT_FANVUE).fan_key(s)
 
 
 def _fv_trace(persona, stage, detail='', fan=''):
@@ -13433,7 +13434,13 @@ def _fv_trace(persona, stage, detail='', fan=''):
     if sink is not None:
         sink(persona, stage, detail, fan)
         return
-    key = f'fanvue_trace_{persona}'
+    _plat_trace(PLAT_FANVUE, persona, stage, detail, fan)
+
+
+def _plat_trace(plat, persona, stage, detail='', fan=''):
+    """Write one line to a platform's activity log. Bypasses the sink above —
+    it *is* what a sink ends up calling."""
+    key = plat.k('trace', persona)
     try:
         rows = json.loads(_get_setting(key) or '[]')
         if not isinstance(rows, list):
@@ -13445,16 +13452,19 @@ def _fv_trace(persona, stage, detail='', fan=''):
         row['fan'] = fan
     rows.append(row)
     _set_setting(key, json.dumps(rows[-FV_TRACE_MAX:]))
-    logger.info('FV[%s] %s: %s', persona, stage, str(detail)[:200])
+    logger.info('%s[%s] %s: %s', plat.slug.upper()[:2], persona, stage, str(detail)[:200])
 
 
-def _fv_send_text(persona, scope, fan_uuid, text):
+def _fv_send_text(persona, scope, fan_uuid, text, plat=None):
     # Everything is stripped upstream; if one still got through, a visible gap
     # beats a broken mail-merge landing in a fan's inbox.
     if _has_placeholder(text):
         _fv_trace(persona, 'error',
                   f'refused to send a message with a placeholder in it: {text[:120]}')
         raise RuntimeError('reply still contained a bracketed placeholder')
+    if plat and plat is not PLAT_FANVUE:
+        plat.send_text(persona, scope, fan_uuid, text)
+        return
     _fanvue_call(persona, 'POST', f'{scope}/chats/{fan_uuid}/message',
                  body={'text': text[:2000]})
 
@@ -13559,7 +13569,8 @@ def _fv_send_voice_note(persona, scope, fan_uuid, media_uuid, text='', price=0):
     return _fanvue_call(persona, 'POST', f'{scope}/chats/{fan_uuid}/message', body=body)
 
 
-def _fv_send_human(persona, scope, fan_uuid, text, incoming='', cfg=None, active=True):
+def _fv_send_human(persona, scope, fan_uuid, text, incoming='', cfg=None,
+                   active=True, plat=None):
     """Send a Fanvue reply the way a person would: a pause to read, then a delay
     scaled to how long the reply takes to type, split across a burst or two.
     Same pacing as Telegram — Fanvue has no typing indicator, so the delay is
@@ -13567,9 +13578,9 @@ def _fv_send_human(persona, scope, fan_uuid, text, incoming='', cfg=None, active
 
     `active` says the fan is sat in the conversation right now, which buys a
     much shorter wait and a hard ceiling on the whole exchange."""
-    cfg = cfg or _fv_humanize_cfg(persona)
+    cfg = cfg or _fv_humanize_cfg(persona, plat=plat)
     if not cfg['humanize']:
-        _fv_send_text(persona, scope, fan_uuid, text)
+        _fv_send_text(persona, scope, fan_uuid, text, plat=plat)
         return
     cps = max(2, int(cfg['typing_speed']) // 2)
     budget = [FV_REPLY_CAP if active else None]
@@ -13585,17 +13596,17 @@ def _fv_send_human(persona, scope, fan_uuid, text, incoming='', cfg=None, active
     # React first, the way someone taps a heart before they start typing.
     if incoming and random.randint(1, 100) <= cfg.get('react_rate', 0):
         try:
-            _fv_send_text(persona, scope, fan_uuid, _fv_reaction_for(incoming))
+            _fv_send_text(persona, scope, fan_uuid, _fv_reaction_for(incoming), plat=plat)
             pause(random.uniform(1.0, 3.0))
         except Exception as e:
-            logger.info('Fanvue reaction failed: %s', str(e)[:120])
+            logger.info('Reaction failed: %s', str(e)[:120])
     for i, chunk in enumerate(_tg_bursts(text)):
         if not chunk:
             continue
         if i:
             pause(random.uniform(0.6, 1.6))
         pause(min(max(len(chunk) / float(cps), 1.2), FV_TYPE_CAP) * random.uniform(0.85, 1.2))
-        _fv_send_text(persona, scope, fan_uuid, chunk)
+        _fv_send_text(persona, scope, fan_uuid, chunk, plat=plat)
 
 
 def _ppv_count(v):
@@ -13717,19 +13728,20 @@ def _fv_set_warnings(sets):
     return out
 
 
-def _fv_migrate_ppv_state(persona, sets):
+def _fv_migrate_ppv_state(persona, sets, plat=None):
     """Fold the old parallel dicts into the single per-fan record, once.
 
     Runs before the new gating goes live so nobody who was already halfway up a
     ladder is knocked back to tier 1 by the upgrade itself. The old keys are
     left in place — this only ever writes the new one."""
-    state_key = f'fanvue_ppv_state_{persona}'
+    plat = plat or PLAT_FANVUE
+    state_key = plat.k('ppv_state', persona)
     if _get_setting(state_key):
         return
     try:
-        old_sent = json.loads(_get_setting(f'fanvue_ppv_sent_{persona}') or '{}')
-        old_at = json.loads(_get_setting(f'fanvue_ppv_at_{persona}') or '{}')
-        old_retry = json.loads(_get_setting(f'fanvue_ppv_retry_{persona}') or '{}')
+        old_sent = json.loads(_get_setting(plat.k('ppv_sent', persona)) or '{}')
+        old_at = json.loads(_get_setting(plat.k('ppv_at', persona)) or '{}')
+        old_retry = json.loads(_get_setting(plat.k('ppv_retry', persona)) or '{}')
     except Exception:
         return
     if not isinstance(old_sent, dict) or not old_sent:
@@ -13741,7 +13753,7 @@ def _fv_migrate_ppv_state(persona, sets):
         st['retries'] = int((old_retry or {}).get(fan, 0) or 0)
         out[fan] = st
     _set_setting(state_key, json.dumps(out))
-    logger.info('Fanvue [%s]: migrated %d fans to the new PPV state', persona, len(out))
+    logger.info('%s [%s]: migrated %d fans to the new PPV state', plat.label, persona, len(out))
 
 
 # ── PPV funnel system ─────────────────────────────────────────────────────────
@@ -14529,7 +14541,8 @@ def _fv_bandit_sweep(persona, cfg):
     return done
 
 
-def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx, context=''):
+def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx,
+                  context='', plat=None):
     """Consider the next PPV drop for this fan: hold the set they are already
     climbing unless another clearly fits better, then send its next tier.
 
@@ -14537,6 +14550,7 @@ def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx, context
     threads at once and the summary is a read-modify-write on one setting. Every
     send is written to the ppv_drops ledger before the counters move, so the sale
     survives anything that happens to the summary afterwards."""
+    plat = plat or PLAT_FANVUE
     sets = ctx['sets']
     if not sets:
         return
@@ -14547,7 +14561,7 @@ def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx, context
         except SettingUnreadable as e:
             # An unreadable store looks exactly like "this fan is brand new",
             # which would re-send every unlock they already bought. Hold.
-            logger.warning('Fanvue [%s] PPV state unreadable, holding: %s', persona, e)
+            logger.warning('%s [%s] PPV state unreadable, holding: %s', plat.label, persona, e)
             _fv_trace(persona, 'error', f'PPV state unreadable, no drop sent: {str(e)[:120]}')
             return
 
@@ -14581,8 +14595,9 @@ def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx, context
                 paid = pstate == PPV_PAID
                 if not paid and _fv_drop_is_stale(drop, ctx.get('stale_days')):
                     # Long past unbought: stop letting one photo end the funnel.
-                    logger.info('Fanvue [%s] %s: last PPV unbought past the stale '
-                                'window — moving to another set', persona, handle or fan_uuid)
+                    logger.info('%s [%s] %s: last PPV unbought past the stale '
+                                'window — moving to another set', plat.label, persona,
+                                handle or fan_uuid)
                     _fv_trace(persona, 'ppv',
                               f'{handle or fan_uuid}: unbought drop expired, trying another set',
                               fan=fan_key)
@@ -14591,8 +14606,8 @@ def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx, context
                     paid = True
             send_ppv = paid and enough_chat
             if not paid:
-                logger.info('Fanvue [%s] %s: waiting on payment of the last PPV',
-                            persona, handle or fan_uuid)
+                logger.info('%s [%s] %s: waiting on payment of the last PPV',
+                            plat.label, persona, handle or fan_uuid)
                 # An unbought drop otherwise blocks this fan for good. After
                 # enough more chat, offer the same one again a few times — and
                 # cheaper if they opened it, since that is a price objection.
@@ -14628,8 +14643,8 @@ def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx, context
         hour = _fv_fan_hour(persona, fan_key, ctx.get('tz_offset'))
         blocked = _fv_suppressed(sets, (context or '') + ' ' + (reply or ''))
         if blocked:
-            logger.info('Fanvue [%s] %s: holding the drop, "%s" came up',
-                        persona, handle or fan_uuid, blocked)
+            logger.info('%s [%s] %s: holding the drop, "%s" came up',
+                        plat.label, persona, handle or fan_uuid, blocked)
             _fv_trace(persona, 'ppv',
                       f'held back from {handle or fan_uuid} — "{blocked}" came up',
                       fan=fan_key)
@@ -14659,25 +14674,21 @@ def _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ctx, context
             return
         cap = _fv_caption(persona, chosen, tier, reply)
         try:
-            sent = _fanvue_call(persona, 'POST', f'{scope}/chats/{fan_uuid}/message',
-                                body={'text': cap, 'mediaUuids': tier['media_uuids'],
-                                      'price': price})
+            msg_uuid = plat.send_ppv(persona, scope, fan_uuid, cap,
+                                     tier['media_uuids'], price)
         except Exception as e:
-            logger.warning('Fanvue PPV to %s failed: %s', handle or fan_uuid, str(e)[:120])
+            logger.warning('%s PPV to %s failed: %s', plat.label, handle or fan_uuid,
+                           str(e)[:120])
             if _fv_unreachable_error(e):
-                _fv_mark_unsendable(persona, fan_uuid, handle, str(e)[:160])
+                _fv_mark_unsendable(persona, fan_uuid, handle, str(e)[:160], plat=plat)
             else:
                 _fv_trace(persona, 'error',
                           f'PPV to {handle or fan_uuid} failed: {str(e)[:200]}',
                           fan=fan_key)
             return
 
-        msg_uuid = ''
-        if isinstance(sent, dict):
-            body = sent.get('data') if isinstance(sent.get('data'), dict) else sent
-            msg_uuid = str(_fv_first(body, 'uuid', 'id', default='') or '')
         drop_id = _fv_record_drop(persona, fan_uuid, chosen, idx, price,
-                                  tier['media_uuids'], msg_uuid)
+                                  tier['media_uuids'], msg_uuid, plat=plat)
         if fcfg:
             _fv_record_pitch(persona, fan_uuid,
                              (ctx.get('assignment') or {}).get('id'), price, drop_id)
@@ -14726,28 +14737,28 @@ def _fv_unreachable_error(e):
     return code in (400, 403, 404) and bool(_FV_UNREACHABLE_RE.search(str(e)))
 
 
-def _fv_unsendable_key(persona):
-    return f'fanvue_unsendable_{persona}'
+def _fv_unsendable_key(persona, plat=None):
+    return (plat or PLAT_FANVUE).k('unsendable', persona)
 
 
-def _fv_unsendable(persona):
+def _fv_unsendable(persona, plat=None):
     try:
-        raw = json.loads(_get_setting(_fv_unsendable_key(persona)) or '{}')
+        raw = json.loads(_get_setting(_fv_unsendable_key(persona, plat)) or '{}')
         return raw if isinstance(raw, dict) else {}
     except Exception:
         return {}
 
 
-def _fv_is_unsendable(persona, fan_uuid):
-    row = _fv_unsendable(persona).get(fan_uuid)
+def _fv_is_unsendable(persona, fan_uuid, plat=None):
+    row = _fv_unsendable(persona, plat).get(fan_uuid)
     if not isinstance(row, dict):
         return None
     return row if float(row.get('until') or 0) > time.time() else None
 
 
-def _fv_mark_unsendable(persona, fan_uuid, handle, why):
+def _fv_mark_unsendable(persona, fan_uuid, handle, why, plat=None):
     """Stand this chat down, for longer each time it fails again."""
-    rows = _fv_unsendable(persona)
+    rows = _fv_unsendable(persona, plat)
     prev = rows.get(fan_uuid) if isinstance(rows.get(fan_uuid), dict) else {}
     tries = int(prev.get('tries') or 0) + 1
     hours = min(FV_UNSENDABLE_BASE_HOURS * (2 ** (tries - 1)), FV_UNSENDABLE_MAX_HOURS)
@@ -14757,7 +14768,7 @@ def _fv_mark_unsendable(persona, fan_uuid, handle, why):
     cutoff = time.time() - FV_UNSENDABLE_MAX_HOURS * 3600
     rows = {k: v for k, v in rows.items()
             if isinstance(v, dict) and float(v.get('until') or 0) > cutoff}
-    _set_setting(_fv_unsendable_key(persona), json.dumps(rows))
+    _set_setting(_fv_unsendable_key(persona, plat), json.dumps(rows))
     if tries == 1:
         # Say whether the id we sent even looks like a uuid: if it does not,
         # this is our bug rather than a fan who deleted their account.
@@ -14766,44 +14777,46 @@ def _fv_mark_unsendable(persona, fan_uuid, handle, why):
         _fv_trace(persona, 'error',
                   f'{handle or fan_uuid} [uuid {fan_uuid}] cannot be messaged '
                   f'({why}){shape} — standing down for {hours}h. Usually a '
-                  f'deleted account or a block.', fan=_fan_key_of(fan_uuid))
-    logger.info('Fanvue [%s] %s unsendable (try %d, %dh): %s',
-                persona, handle or fan_uuid, tries, hours, why)
+                  f'deleted account or a block.', fan=_fan_key_of(fan_uuid, plat))
+    logger.info('%s [%s] %s unsendable (try %d, %dh): %s',
+                (plat or PLAT_FANVUE).label, persona, handle or fan_uuid, tries,
+                hours, why)
 
 
-def _fv_clear_unsendable(persona, fan_uuid):
-    rows = _fv_unsendable(persona)
+def _fv_clear_unsendable(persona, fan_uuid, plat=None):
+    rows = _fv_unsendable(persona, plat)
     if rows.pop(fan_uuid, None) is not None:
-        _set_setting(_fv_unsendable_key(persona), json.dumps(rows))
+        _set_setting(_fv_unsendable_key(persona, plat), json.dumps(rows))
 
 def _fv_deliver(persona, scope, fan_uuid, fan_key, handle, reply, incoming, cfg,
-                ppv_ctx, active=True):
+                ppv_ctx, active=True, plat=None):
     """Pace out one reply, then consider the next PPV tier so the paid drop
     always lands after the message it belongs to."""
     # The unlock is minted by _fv_maybe_ppv below, not by the model writing a
     # marker into the caption.
+    plat = plat or PLAT_FANVUE
     reply = strip_ppv_marker(reply)
-    with app.app_context():
+    with app.app_context(), plat.tracing():
         try:
             _fv_send_human(persona, scope, fan_uuid, reply, incoming=incoming,
-                           cfg=cfg, active=active)
+                           cfg=cfg, active=active, plat=plat)
         except Exception as e:
-            logger.warning('Fanvue send to %s (%s) failed: %s',
+            logger.warning('%s send to %s (%s) failed: %s', plat.label,
                            handle or fan_uuid, fan_uuid, str(e)[:120])
             if _fv_unreachable_error(e):
                 # Not a transient failure: this recipient cannot be written to.
-                _fv_mark_unsendable(persona, fan_uuid, handle, str(e)[:160])
+                _fv_mark_unsendable(persona, fan_uuid, handle, str(e)[:160], plat=plat)
             else:
                 _fv_trace(persona, 'error',
                           f'send to {handle or fan_uuid} [uuid {fan_uuid}] '
                           f'failed: {str(e)[:200]}', fan=fan_key)
             return
-        _fv_clear_unsendable(persona, fan_uuid)
+        _fv_clear_unsendable(persona, fan_uuid, plat=plat)
         _log_x_message(persona, fan_key, handle, 'out', reply)
         _fv_trace(persona, 'sent', f'→ {handle or fan_uuid}: {reply}')
         if ppv_ctx:
-            _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply, ppv_ctx,
-                          context=incoming)
+            _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply,
+                          ppv_ctx, context=incoming, plat=plat)
 
 
 def _fv_workers():
@@ -14818,7 +14831,7 @@ def _fv_pool():
     return _fv_reply_pool[0]
 
 
-def _fv_submit(persona, *args):
+def _fv_submit(persona, *args, plat=None):
     """Queue one paced reply and report how deep the queue is.
 
     Each reply holds its worker for the whole of its pause, so the pool is the
@@ -14827,7 +14840,7 @@ def _fv_submit(persona, *args):
     """
     def run():
         try:
-            _fv_deliver(*args)
+            _fv_deliver(*args, plat=plat)
         finally:
             with _fv_inflight_lock:
                 _fv_inflight[0] = max(0, _fv_inflight[0] - 1)
@@ -14836,17 +14849,17 @@ def _fv_submit(persona, *args):
         _fv_inflight[0] += 1
         depth = _fv_inflight[0]
     _fv_pool().submit(run)
-    _fv_note_backlog(persona, depth)
+    _fv_note_backlog(persona, depth, plat=plat)
     return depth
 
 
-def _fv_note_backlog(persona, depth):
+def _fv_note_backlog(persona, depth, plat=None):
     """Trace the moment the queue starts running late, and nothing after.
 
     Deduping on the message would log again on every new depth — which is every
     submit — so the flag is the *state*, not the number.
     """
-    key = f'fanvue_backlogged_{persona}'
+    key = (plat or PLAT_FANVUE).k('backlogged', persona)
     backlogged = depth > _fv_workers()
     if backlogged == (_get_setting(key) == '1'):
         return
@@ -14859,16 +14872,18 @@ def _fv_note_backlog(persona, depth):
         _fv_trace(persona, 'delayed', 'the reply queue has caught up')
 
 
-def _fanvue_auto_settings(persona):
+def _fanvue_auto_settings(persona, plat=None):
+    plat = plat or PLAT_FANVUE
     try:
-        return json.loads(_get_setting(f'fanvue_auto_{persona}') or '{}')
+        return json.loads(_get_setting(plat.k('auto', persona)) or '{}')
     except Exception:
         return {}
 
 
-def _fanvue_enabled_list():
+def _fanvue_enabled_list(plat=None):
+    plat = plat or PLAT_FANVUE
     try:
-        return json.loads(_get_setting('fanvue_auto_personas') or '[]')
+        return json.loads(_get_setting(plat.k('auto_personas')) or '[]')
     except Exception:
         return []
 
@@ -15020,10 +15035,128 @@ def _fanvue_chat_messages(persona, fan_uuid, want):
                                                 'timestamp', default=''))
 
 
-def _fanvue_auto_round(persona):
-    """One live auto-reply round: reply in-persona to new fan messages, skipping
-    other creators when configured. Returns (actions, log)."""
-    opts = _fanvue_auto_settings(persona)
+# ── Platform adapters ─────────────────────────────────────────────────────────
+# Fanvue and OnlyFans run the same reply engine below: the same round, the same
+# human pacing, the same PPV ladder. Only three things actually differ — where a
+# persona's state is keyed, how a chat and its messages are shaped, and how a
+# message goes out. Each platform answers exactly that here, and everything in
+# the engine takes one of these as its first argument.
+
+
+class _Platform:
+    slug = ''
+    label = ''
+    prefix = ''          # settings-key namespace, so no two platforms share state
+    fan_prefix = ''      # what a fan id is prefixed with in the one message store
+    has_lists = False
+    has_funnels = False
+
+    def k(self, name, persona=''):
+        return f'{self.prefix}_{name}_{persona}' if persona else f'{self.prefix}_{name}'
+
+    def fan_key(self, fan_id):
+        return self.fan_prefix + str(fan_id)
+
+    def trace(self, persona, stage, detail='', fan=''):
+        _plat_trace(self, persona, stage, detail, fan)
+
+    def tracing(self):
+        """Send every trace line raised while this platform works — including
+        the ones the shared funnel helpers raise — to this platform's log."""
+        return _tracing_to(self.trace)
+
+    def list_filter(self, persona, opts):
+        return None, set()
+
+    def acting_as(self, persona):
+        """The handle replies go out as, when the platform names one."""
+        return ''
+
+    def typing(self, persona, scope, fan_id):
+        pass
+
+
+class _FanvuePlatform(_Platform):
+    slug = 'fanvue'
+    label = 'Fanvue'
+    prefix = 'fanvue'
+    fan_prefix = 'fv:'
+    has_lists = True
+    has_funnels = True
+
+    def connected(self, persona):
+        return bool(_fanvue_tokens(persona).get('access_token'))
+
+    def scope(self, persona):
+        return _fanvue_scope(persona)
+
+    def me(self, persona):
+        return _fanvue_me_uuid(persona)
+
+    def chats(self, persona, scope):
+        return _fanvue_paged(persona, f'{scope}/chats')
+
+    def read_chat(self, chat):
+        return _fv_user_of_chat(chat)
+
+    def online(self, chat, grace):
+        return _fv_chat_online(chat, grace)
+
+    def messages(self, persona, fan_id, want):
+        return _fanvue_chat_messages(persona, fan_id, want)
+
+    def import_history(self, persona, fan_id, handle, me_id):
+        return _fanvue_import_history(persona, fan_id, handle, me_id)
+
+    def text_of(self, msg):
+        return _fv_first(msg, 'text', 'content', 'message', 'body', default='')
+
+    def msg_id(self, msg):
+        return _fv_first(msg, 'uuid', 'id', default='')
+
+    def msg_time(self, msg):
+        return _fv_first(msg, 'createdAt', 'sentAt', default='')
+
+    def msg_age(self, msg):
+        return _fv_msg_age_minutes(msg)
+
+    def direction(self, msg, fan_id, me_id, recent_out=()):
+        return _fv_direction_of(msg, fan_id, me_id, recent_out)
+
+    def list_filter(self, persona, opts):
+        return _fv_list_filter(persona, opts)
+
+    def acting_as(self, persona):
+        return _fanvue_creator(persona).get('handle')
+
+    def send_text(self, persona, scope, fan_id, text):
+        _fv_send_text(persona, scope, fan_id, text)
+
+    def send_ppv(self, persona, scope, fan_id, caption, media, price_cents):
+        sent = _fanvue_call(persona, 'POST', f'{scope}/chats/{fan_id}/message',
+                            body={'text': caption, 'mediaUuids': list(media),
+                                  'price': price_cents})
+        body = sent.get('data') if isinstance(sent, dict) and isinstance(sent.get('data'), dict) else sent
+        return str(_fv_first(body, 'uuid', 'id', default='') or '') if isinstance(body, dict) else ''
+
+
+PLAT_FANVUE = _FanvuePlatform()
+PLATFORMS = {'fanvue': PLAT_FANVUE}
+
+
+def _platform(slug):
+    return PLATFORMS.get(str(slug or '').lower()) or PLAT_FANVUE
+
+
+def _plat_auto_round(plat, persona):
+    with plat.tracing():
+        return _plat_round_body(plat, persona)
+
+
+def _plat_round_body(plat, persona):
+    """One live auto-reply round on one platform: reply in-persona to new fan
+    messages, skipping other creators when configured. Returns (actions, log)."""
+    opts = _fanvue_auto_settings(persona, plat=plat)
     exclude_creators = opts.get('exclude_creators', True)
     online_only = bool(opts.get('online_only'))
     online_grace = max(0, min(int(opts.get('online_grace', 5)), 120))
@@ -15033,10 +15166,10 @@ def _fanvue_auto_round(persona):
     actions = {'replies': 0, 'skipped_creators': 0, 'skipped_offline': 0,
                'skipped_lists': 0, 'skipped_unsendable': 0}
     log = []
-    inc_lists, exc_lists = _fv_list_filter(persona, opts)
+    inc_lists, exc_lists = plat.list_filter(persona, opts)
 
-    me_uuid = _fanvue_me_uuid(persona)
-    cursor_key = f'fanvue_cursor_{persona}'
+    me_uuid = plat.me(persona)
+    cursor_key = plat.k('cursor', persona)
     try:
         cursor = json.loads(_get_setting(cursor_key) or '{}')
     except Exception:
@@ -15044,23 +15177,25 @@ def _fanvue_auto_round(persona):
 
     # Ordered PPV tiers + how many tiers each fan has already received, so tiers
     # go out one at a time, in order, as the conversation deepens.
-    ppv_sets = _fanvue_ppv_sets(persona)
-    ppv_on = bool(_fanvue_ppv(persona).get('enabled', True)) and bool(ppv_sets)
-    ppv_tz = _fanvue_ppv(persona).get('tz_offset') or 0
-    ppv_state_key = f'fanvue_ppv_state_{persona}'
-    ppv_paid_key = f'fanvue_ppv_testpaid_{persona}'
+    ppv_sets = _fanvue_ppv_sets(persona, plat=plat)
+    ppv_cfg = _fanvue_ppv(persona, plat=plat)
+    ppv_on = bool(ppv_cfg.get('enabled', True)) and bool(ppv_sets)
+    ppv_tz = ppv_cfg.get('tz_offset') or 0
+    ppv_state_key = plat.k('ppv_state', persona)
+    ppv_paid_key = plat.k('ppv_testpaid', persona)
     if ppv_on:
-        _fv_migrate_ppv_state(persona, ppv_sets)
+        _fv_migrate_ppv_state(persona, ppv_sets, plat=plat)
     # A fan typing this marks their own unlock paid, so it must never be live
     # in production — the env flag is the guard, not the empty string.
     ppv_test_phrase = (opts.get('ppv_test_phrase') or '').strip().lower()
     if ppv_test_phrase and (os.getenv('FANVUE_PPV_TEST_PHRASE_ENABLED') or '').strip().lower() \
             not in ('1', 'true', 'yes'):
         ppv_test_phrase = ''
-    hcfg = _fv_humanize_cfg(persona)
+    hcfg = _fv_humanize_cfg(persona, plat=plat)
     # The funnel system is per-persona and off by default; when it is off, fcfg
-    # is None and not one line of it runs.
-    fcfg = _fv_funnel_cfg(persona)
+    # is None and not one line of it runs. It is Fanvue-only for now — the
+    # ledger it reasons from is written by Fanvue's own payment webhook.
+    fcfg = _fv_funnel_cfg(persona) if plat.has_funnels else {}
     fcfg = fcfg if fcfg.get('enabled') else None
     if fcfg:
         _fv_reset_insight_budget(persona)
@@ -15081,30 +15216,30 @@ def _fanvue_auto_round(persona):
     ppv_stale_days = max(0, min(int(opts.get('ppv_stale_days', 14) or 0), 365))
     # When off, tiers advance on chatting alone (payment can't be verified for
     # agency-agent testers). When on, each later tier waits for the prior payment.
-    ppv_require_payment = (_get_setting(f'fanvue_ppv_require_payment_{persona}') or '0') == '1'
+    ppv_require_payment = (_get_setting(plat.k('ppv_require_payment', persona)) or '0') == '1'
 
     # Natural re-engagement: if the fan goes quiet, send up to a couple of
     # gentle follow-ups (spaced out), then wait. Reset when the fan replies.
-    followup_key = f'fanvue_followup_{persona}'
+    followup_key = plat.k('followup', persona)
     try:
         followups = json.loads(_get_setting(followup_key) or '{}')
     except Exception:
         followups = {}
     FOLLOWUP_MAX = 2          # at most this many nudges per quiet spell
     try:
-        FOLLOWUP_BASE_MIN = int(float(_get_setting(f'fanvue_followup_min_{persona}') or 30))
+        FOLLOWUP_BASE_MIN = int(float(_get_setting(plat.k('followup_min', persona)) or 30))
     except Exception:
         FOLLOWUP_BASE_MIN = 30   # first nudge after ~30m silence, then longer
 
-    scope = _fanvue_scope(persona)
-    chats = _fanvue_paged(persona, f'{scope}/chats')
+    scope = plat.scope(persona)
+    chats = plat.chats(persona, scope)
     # A chat Fanvue will not accept a message for cannot be answered, so it is
     # dropped before the round starts rather than walked past inside it: no
     # reply slot, no API call, and one line in the log instead of one per chat.
     dropped, live = [], []
     for chat in chats:
-        fan, fan_handle = _fv_user_of_chat(chat)[:2]
-        stood_down = _fv_is_unsendable(persona, fan or '')
+        fan, fan_handle = plat.read_chat(chat)[:2]
+        stood_down = _fv_is_unsendable(persona, fan or '', plat=plat)
         if stood_down:
             dropped.append(fan_handle or stood_down.get('handle') or (fan or '?')[:8])
         else:
@@ -15112,15 +15247,15 @@ def _fanvue_auto_round(persona):
     if dropped:
         chats = live
         actions['skipped_unsendable'] = len(dropped)
-        log.append(f'{len(dropped)} chat(s) dropped — Fanvue will not accept a '
-                   f'message for them: ' + ', '.join(dropped[:5])
+        log.append(f'{len(dropped)} chat(s) dropped — {plat.label} will not accept '
+                   f'a message for them: ' + ', '.join(dropped[:5])
                    + (' …' if len(dropped) > 5 else ''))
-    cr = _fanvue_creator(persona).get('handle')
+    cr = plat.acting_as(persona)
     log.append(f'{len(chats)} chats found' + (f' (acting as @{cr})' if cr else '') + (f'; only={only}' if only else ''))
     for chat in chats:
         if actions['replies'] >= reply_limit:
             break
-        fan_uuid, handle, is_creator, chat_uuid = _fv_user_of_chat(chat)
+        fan_uuid, handle, is_creator, chat_uuid = plat.read_chat(chat)
         if not fan_uuid:
             log.append(f'skip chat: no fan_uuid (keys={list(chat.keys())})')
             continue
@@ -15140,13 +15275,13 @@ def _fanvue_auto_round(persona):
             actions['skipped_lists'] += 1
             log.append(f'{who}: skipped (in an excluded list)')
             continue
-        if online_only and not _fv_chat_online(chat, online_grace):
+        if online_only and not plat.online(chat, online_grace):
             actions['skipped_offline'] += 1
             log.append(f'{who}: skipped (offline)')
             continue
-        fan_key = 'fv:' + fan_uuid
+        fan_key = plat.fan_key(fan_uuid)
         try:
-            msgs = _fanvue_chat_messages(persona, fan_uuid, 20)
+            msgs = plat.messages(persona, fan_uuid, 20)
         except Exception as e:
             log.append(f'read {who} failed: {str(e)[:50]}')
             continue
@@ -15158,7 +15293,7 @@ def _fanvue_auto_round(persona):
         # permanently, so the bot remembers everything already said.
         did_import = False
         if _fanvue_msg_count(persona, fan_key) == 0:
-            n, said = _fanvue_import_history(persona, fan_uuid, handle, me_uuid)
+            n, said = plat.import_history(persona, fan_uuid, handle, me_uuid)
             if n:
                 did_import = True
                 log.append(f'Imported {n} past msgs from {handle or fan_uuid}')
@@ -15169,9 +15304,9 @@ def _fanvue_auto_round(persona):
                     _fan_memory_update(persona, fan_key, '\n'.join(said[-40:])[-1500:])
 
         # Order oldest→newest; the API may return newest first.
-        newest = msgs[-1] if len(msgs) > 1 and _fv_first(msgs[0], 'createdAt', 'sentAt', default='') <= _fv_first(msgs[-1], 'createdAt', 'sentAt', default='') else msgs[0]
-        text = _fv_first(newest, 'text', 'content', 'message', 'body', default='')
-        msg_id = _fv_first(newest, 'uuid', 'id', default='')
+        newest = msgs[-1] if len(msgs) > 1 and plat.msg_time(msgs[0]) <= plat.msg_time(msgs[-1]) else msgs[0]
+        text = plat.text_of(newest)
+        msg_id = plat.msg_id(newest)
         if not text:
             log.append(f'{who}: newest has no text (keys={list(newest.keys())})')
             continue
@@ -15179,7 +15314,7 @@ def _fanvue_auto_round(persona):
         # Our own outbound never resolves to fan_uuid, so this can't loop on
         # itself.
         recent_out = {t.strip() for (d, t) in _fanvue_saved_history(persona, fan_key, limit=12) if d == 'out'}
-        direction = _fv_direction_of(newest, fan_uuid, me_uuid, recent_out)
+        direction = plat.direction(newest, fan_uuid, me_uuid, recent_out)
         # An unresolved direction here is not fatal the way it is in the import:
         # this is the newest message in a chat we are already polling, so
         # "nothing says it was ours" is good enough to answer it.
@@ -15188,7 +15323,7 @@ def _fanvue_auto_round(persona):
             # Fan is quiet (our message is newest). Send a spaced, capped
             # follow-up so chats feel alive without spamming or self-looping.
             sent_n = int(followups.get(fan_uuid, {}).get('n', 0)) if isinstance(followups.get(fan_uuid), dict) else 0
-            age = _fv_msg_age_minutes(newest)
+            age = plat.msg_age(newest)
             need = FOLLOWUP_BASE_MIN * (sent_n + 1)  # 3h, then 6h, …
             if actions['replies'] >= reply_limit:
                 continue
@@ -15215,14 +15350,14 @@ def _fanvue_auto_round(persona):
             actions['replies'] += 1
             if hcfg['humanize']:
                 _fv_submit(persona, persona, scope, fan_uuid, fan_key,
-                           handle, fu, '', hcfg, None, False)
+                           handle, fu, '', hcfg, None, False, plat=plat)
                 log.append(f'↩ follow-up {sent_n + 1}/{FOLLOWUP_MAX} → {who} (typing…): {fu[:40]}')
                 _fv_trace(persona, 'follow-up',
                           f'{who} went quiet — nudge {sent_n + 1}/{FOLLOWUP_MAX} on the way',
                           fan=fan_key)
             else:
                 _fv_deliver(persona, scope, fan_uuid, fan_key, handle, fu, '', hcfg,
-                            None, False)
+                            None, False, plat=plat)
                 log.append(f'↩ follow-up {sent_n + 1}/{FOLLOWUP_MAX} → {who}: {fu[:40]}')
             continue
         # Fan replied — clear any pending follow-up state for them.
@@ -15277,7 +15412,7 @@ def _fanvue_auto_round(persona):
         lim = reply_length_limits(pcfg)
         may_ask = question_allowed(pcfg, history)
         instruction = (
-            "Reply to this Fanvue fan in-character. You have the full earlier "
+            f"Reply to this {plat.label} fan in-character. You have the full earlier "
             "conversation above — USE it: do not re-ask anything they already told "
             "you (their name, where they're from, their interests, what they like). "
             + intro_rule +
@@ -15318,18 +15453,18 @@ def _fanvue_auto_round(persona):
                    'state_key': ppv_state_key, 'paid_key': ppv_paid_key,
                    'tz_offset': ppv_tz, 'funnels': fcfg, 'assignment': assignment,
                    'require_payment': ppv_require_payment} if ppv_on else None
-        age = _fv_msg_age_minutes(newest)
+        age = plat.msg_age(newest)
         active = age is None or age < FV_ACTIVE_MIN
         args = (persona, scope, fan_uuid, fan_key, handle, reply.strip(), text, hcfg,
                 ppv_ctx, active)
         actions['replies'] += 1
         if hcfg['humanize']:
             # Pace it on a worker so one fan's pause never delays the next fan.
-            _fv_submit(persona, *args)
+            _fv_submit(persona, *args, plat=plat)
             log.append(f'Replying → {handle or fan_uuid} (typing…): {reply[:50]}')
             _fv_trace(persona, 'typing', f'{who}: writing a reply…')
         else:
-            _fv_deliver(*args)
+            _fv_deliver(*args, plat=plat)
             log.append(f'Replied → {handle or fan_uuid}: {reply[:50]}')
 
     _set_setting(cursor_key, json.dumps(cursor))
@@ -15351,12 +15486,12 @@ def _fanvue_auto_round(persona):
             why.append(f"{actions['skipped_unsendable']} cannot be messaged")
         summary = f"{len(chats)} chats, no replies" + (' — ' + ', '.join(why) if why else
                                                        ' — everyone already answered')
-        state_key = f'fanvue_lastidle_{persona}'
+        state_key = plat.k('lastidle', persona)
         if _get_setting(state_key) != summary:
             _set_setting(state_key, summary)
             _fv_trace(persona, 'idle', summary)
     else:
-        _set_setting(f'fanvue_lastidle_{persona}', '')
+        _set_setting(plat.k('lastidle', persona), '')
 
     return actions, log
 
@@ -15680,23 +15815,31 @@ def api_fanvue_debug():
 _fanvue_worker_started = [False]
 
 
+def _fanvue_auto_round(persona):
+    return _plat_auto_round(PLAT_FANVUE, persona)
+
+
 def _fanvue_round_now(persona, block=False):
+    return _plat_round_now(PLAT_FANVUE, persona, block)
+
+
+def _plat_round_now(plat, persona, block=False):
     """Run one round for a persona, never letting that persona overlap itself.
     Returns (actions, log) or None when a round was already in flight."""
-    lock = _fanvue_persona_lock(_fanvue_round_locks, persona)
+    lock = _fanvue_persona_lock(_fanvue_round_locks, f'{plat.slug}:{persona}')
     if not lock.acquire(blocking=block):
         return None
     try:
         with app.app_context():
-            return _fanvue_auto_round(persona)
+            return _plat_auto_round(plat, persona)
     finally:
         lock.release()
 
 
-def _fanvue_worker():
+def _plat_worker(plat, interval=20):
     """Server-side loop: runs an auto-reply round for every enabled persona on an
-    interval. Reads the enabled list + tokens from the DB, so after a redeploy the
-    new instance resumes automatically without a browser tab.
+    interval. Reads the enabled list + connection from the DB, so after a redeploy
+    the new instance resumes automatically without a browser tab.
 
     Rounds run in parallel, one thread per connected account, so a slow or
     chatty account never delays the others. Per-persona locks mean an account
@@ -15704,17 +15847,17 @@ def _fanvue_worker():
     import time as _t
     from concurrent.futures import ThreadPoolExecutor
     pool = ThreadPoolExecutor(max_workers=max(1, int(os.getenv('FANVUE_WORKERS', '8'))),
-                              thread_name_prefix='fanvue')
+                              thread_name_prefix=plat.slug)
 
     pending = set()
 
     def _one(persona):
         try:
-            _fanvue_round_now(persona)
+            _plat_round_now(plat, persona)
         except Exception as e:
-            logger.exception('fanvue round failed for %s', persona)
+            logger.exception('%s round failed for %s', plat.slug, persona)
             try:
-                with app.app_context():
+                with app.app_context(), plat.tracing():
                     _fv_trace(persona, 'error', f'round failed: {str(e)[:200]}')
             except Exception:
                 pass
@@ -15724,8 +15867,7 @@ def _fanvue_worker():
 
     while True:
         try:
-            live = [p for p in _fanvue_enabled_list()
-                    if _fanvue_tokens(p).get('access_token')]
+            live = [p for p in _fanvue_enabled_list(plat=plat) if plat.connected(p)]
             for persona in live:
                 # Don't queue an account that is still running or waiting from
                 # an earlier tick — the queue would grow without bound.
@@ -15735,15 +15877,15 @@ def _fanvue_worker():
                     pending.add(persona)
                 pool.submit(_one, persona)
         except Exception:
-            logger.exception('fanvue worker tick failed')
-        _t.sleep(20)
+            logger.exception('%s worker tick failed', plat.slug)
+        _t.sleep(interval)
 
 
 def _start_fanvue_worker():
     if _fanvue_worker_started[0]:
         return
     _fanvue_worker_started[0] = True
-    threading.Thread(target=_fanvue_worker, daemon=True).start()
+    threading.Thread(target=_plat_worker, args=(PLAT_FANVUE,), daemon=True).start()
 
 
 if _worker_enabled('FANVUE_WORKER'):

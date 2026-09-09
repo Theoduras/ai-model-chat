@@ -738,9 +738,9 @@ def test_unsendable_chats():
     app._fanvue_paged = lambda p, path, **k: chats if path.endswith('/chats') else []
     app._fanvue_me_uuid = lambda p: 'me-1'
     app._fanvue_scope = lambda p: ''
-    app._fanvue_auto_settings = lambda p: {'reply_limit': 10}
+    app._fanvue_auto_settings = lambda p, **k: {'reply_limit': 10}
     app._fanvue_chat_messages = lambda p, u, w: read.append(u) or []
-    app._fanvue_ppv_sets = lambda p: []
+    app._fanvue_ppv_sets = lambda p, **k: []
     app._fanvue_msg_count = lambda p, k: 5
     acts, rlog = app._fanvue_auto_round('lilly')
     check('the dead chat is never read', uid not in read, read)
