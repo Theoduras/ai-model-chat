@@ -1967,6 +1967,15 @@ function renderForm(slug, cfg) {
         <div id="growth-sources" class="hint">—</div>
       </div>
       <div style="margin-top:14px;">
+        <div class="section-title" style="font-size:0.8rem;">
+          Win-back ladder
+          <button type="button" class="btn-section-save" onclick="loadGrowthWinback()">Refresh</button>
+        </div>
+        <span class="hint">Telegram only. Once a fan has used up their short follow-ups she goes quiet and comes back on days 1, 4, 12 and 30, then quarterly — the first two as a plain message, the rest carrying the link.</span>
+        <div id="growth-winback" class="hint" style="margin-top:8px;">—</div>
+      </div>
+
+      <div style="margin-top:14px;">
         <div class="section-title" style="font-size:0.8rem;">Tagged links</div>
         <div id="growth-links" class="hint">—</div>
       </div>
@@ -2771,7 +2780,63 @@ async function loadGrowth() {
       + (l.web ? '<code>' + esc(l.web) + '</code>' : '') + '</div>').join('')
       || 'Connect Telegram to get a deep link.';
   } catch (e) {}
+  await loadGrowthWinback();
   await loadGrowthRegister();
+}
+
+function statTile(label, value) {
+  return '<div style="flex:1 1 90px; min-width:90px;">'
+    + '<div style="font-size:1.3rem; font-weight:600; line-height:1.2;">' + value + '</div>'
+    + '<div style="opacity:0.65;">' + esc(label) + '</div></div>';
+}
+
+async function loadGrowthWinback() {
+  const box = document.getElementById('growth-winback');
+  if (!box || !currentSlug) return;
+  let d;
+  try {
+    d = await (await fetch('/api/growth/winback?persona=' + encodeURIComponent(currentSlug))).json();
+  } catch (e) { box.textContent = 'Could not read the ladder.'; return; }
+  if (!d || !d.ok) { box.textContent = 'Could not read the ladder.'; return; }
+
+  // Say plainly why nothing is moving, rather than showing a wall of zeroes.
+  const off = [];
+  if (!d.beta) off.push('this persona is not on the growth beta');
+  if (!d.followups_on) off.push('Telegram follow-ups are switched off');
+
+  const t = d.totals || {};
+  let html = '';
+  if (off.length) {
+    html += '<div style="margin-bottom:10px; opacity:0.8;">Not running — ' + esc(off.join(' and ')) + '.</div>';
+  }
+  html += '<div style="display:flex; flex-wrap:wrap; gap:14px; margin-bottom:12px;">'
+    + statTile('touches sent', t.touches || 0)
+    + statTile('carried the link', t.offers || 0)
+    + statTile('came back', t.recovered || 0)
+    + statTile('reply rate', (t.recovery_pct || 0) + '%')
+    + statTile('due now', t.due_now || 0)
+    + '</div>';
+
+  html += '<table style="width:100%; font-size:0.78rem; border-collapse:collapse; margin-bottom:10px;">'
+    + '<tr><th align="left">Touch</th><th align="left">After</th><th align="left">Sends</th><th align="right">Last touched</th></tr>'
+    + (d.rungs || []).map(r => '<tr><td>' + r.touch + '</td><td>' + r.day + ' days quiet</td><td>'
+        + (r.offer ? 'message + link' : 'message only') + '</td><td align="right">' + r.fans + '</td></tr>').join('')
+    + '</table>';
+
+  const line = (r, tail) => '<div>' + esc(r.name || r.chat_id) + ' — ' + r.quiet_days
+    + 'd quiet, touch ' + r.touch + ' ' + tail + '</div>';
+  if ((d.due || []).length) {
+    html += '<div style="margin-bottom:8px;"><strong>Due on the next round</strong>'
+      + (d.due).map(r => line(r, r.offer ? '(with the link)' : '(message only)')).join('') + '</div>';
+  }
+  if ((d.waiting || []).length) {
+    html += '<div><strong>Next up</strong>'
+      + (d.waiting).map(r => line(r, 'in ' + r.in_days + 'd')).join('') + '</div>';
+  }
+  if (!(d.due || []).length && !(d.waiting || []).length) {
+    html += '<div>Nobody is on the ladder — every fan either replied recently or still has short follow-ups left.</div>';
+  }
+  box.innerHTML = html;
 }
 
 async function loadGrowthRegister() {

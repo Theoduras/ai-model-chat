@@ -6807,6 +6807,77 @@ def api_growth_register():
                     'beta': _growth_on(persona)})
 
 
+def _winback_step_for(fan, now, on_beta):
+    """(touch due for this Telegram fan right now or None, days they have been
+    quiet). Shared by the follow-up round and the stats panel, so what the panel
+    says is due is exactly what the round will send."""
+    last_in = int(fan.get('last_in') or 0)
+    last_out = int(fan.get('last_out') or 0)
+    last = max(last_in, last_out)
+    quiet_days = int(max(0, now - (last_in or last)) // 86400)
+    if not on_beta or not last or last_in > last_out:
+        return None, quiet_days
+    if int(fan.get('followups', 0) or 0) < TG_FOLLOWUP_MAX:
+        return None, quiet_days
+    return growth.winback_step(quiet_days, int(fan.get('winback', 0) or 0)), quiet_days
+
+
+@app.route('/api/growth/winback')
+@operator_only
+def api_growth_winback():
+    """How the win-back ladder is doing for one persona: who is on it, what is
+    due, and how many fans a touch actually brought back."""
+    persona = (request.args.get('persona') or '').strip()
+    if not re.match(r'^[a-z0-9_-]+$', persona or ''):
+        return jsonify({'error': 'Invalid slug'}), 400
+    on_beta = _growth_on(persona)
+    cfg = _tg_settings(persona)
+    fans = _tg_fans(persona)
+    now = int(time.time())
+    counts = {r['touch']: 0 for r in growth.winback_rungs()}
+    totals = {'fans': 0, 'on_ladder': 0, 'due_now': 0, 'exhausted': 0,
+              'touches': 0, 'offers': 0, 'recovered': 0}
+    due, waiting = [], []
+    for chat_id, fan in fans.items():
+        if not _tg_fan_allowed(cfg, chat_id, fan.get('name', '')):
+            continue
+        totals['fans'] += 1
+        touches = int(fan.get('winback', 0) or 0)
+        totals['touches'] += int(fan.get('winback_total', 0) or 0)
+        totals['offers'] += int(fan.get('winback_offers', 0) or 0)
+        totals['recovered'] += int(fan.get('winback_recovered', 0) or 0)
+        if touches:
+            counts[touches] = counts.get(touches, 0) + 1
+            if touches >= growth.WINBACK_MAX_TOUCHES:
+                totals['exhausted'] += 1
+            else:
+                totals['on_ladder'] += 1
+        step, quiet_days = _winback_step_for(fan, now, on_beta)
+        row = {'chat_id': str(chat_id), 'name': fan.get('name', ''),
+               'quiet_days': quiet_days, 'touches': touches}
+        if step:
+            totals['due_now'] += 1
+            due.append({**row, 'touch': step['touch'], 'offer': step['offer']})
+            continue
+        # Not due, but already past the short follow-ups: worth showing when
+        # their next rung lands, since that is the whole point of the ladder.
+        nxt = growth.winback_next_day(touches)
+        if (on_beta and nxt is not None
+                and int(fan.get('followups', 0) or 0) >= TG_FOLLOWUP_MAX
+                and int(fan.get('last_in') or 0) <= int(fan.get('last_out') or 0)):
+            waiting.append({**row, 'touch': touches + 1, 'in_days': nxt - quiet_days})
+    touched = totals['touches']
+    totals['recovery_pct'] = round(100.0 * totals['recovered'] / touched) if touched else 0
+    due.sort(key=lambda r: -r['quiet_days'])
+    waiting.sort(key=lambda r: r['in_days'])
+    return jsonify({'ok': True, 'persona': persona, 'beta': on_beta,
+                    'followups_on': bool(cfg.get('followups')),
+                    'totals': totals,
+                    'rungs': [{**r, 'fans': counts.get(r['touch'], 0)}
+                              for r in growth.winback_rungs()],
+                    'due': due[:10], 'waiting': waiting[:10]})
+
+
 GROWTH_CHANNELS = ('instagram', 'tiktok', 'x', 'threads', 'reddit',
                    'youtube', 'telegram', 'linktree', 'other')
 
@@ -15573,6 +15644,10 @@ def _tg_handle_update(persona, update):
             _tg_trace(persona, 'routed', f'{who} arrived from {attr["source"]}',
                       fan=fan_key)
     fan['followups'] = 0
+    # They answered a win-back touch — that is the number the ladder is judged
+    # on, and it has to be banked before the rung counter is cleared.
+    if int(fan.get('winback', 0) or 0):
+        fan['winback_recovered'] = int(fan.get('winback_recovered', 0) or 0) + 1
     fan['winback'] = 0
     fan['in_count'] = int(fan.get('in_count', 0)) + (0 if text == '/start' else 1)
 
@@ -15750,9 +15825,7 @@ def _tg_followup_round(persona):
         # Once the short follow-ups are spent the win-back ladder takes over, on
         # the day scale. It is anchored on the fan's own last message, not on
         # ours, so sending a touch does not push the next one out forever.
-        quiet_days = int(max(0, now - int(fan.get('last_in') or last)) // 86400)
-        step = (growth.winback_step(quiet_days, int(fan.get('winback', 0)))
-                if on_beta and n >= TG_FOLLOWUP_MAX else None)
+        step, quiet_days = _winback_step_for(fan, now, on_beta)
         if step and step['offer'] and _funnel_pitching_paused(persona, _tg_fan_key(chat_id)):
             step = {**step, 'offer': False}
         if not step:
@@ -15790,7 +15863,9 @@ def _tg_followup_round(persona):
             if step:
                 fan['winback'] = step['touch']
                 fan['winback_at'] = now
+                fan['winback_total'] = int(fan.get('winback_total', 0) or 0) + 1
                 if offering:
+                    fan['winback_offers'] = int(fan.get('winback_offers', 0) or 0) + 1
                     fan['cta_target'] = choice['url']
                     fan['cta_sent'] = now
                     fan['cta_count'] = int(fan.get('cta_count', 0)) + 1

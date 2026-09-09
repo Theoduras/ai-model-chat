@@ -148,6 +148,17 @@ check('third touch carries the offer', G.winback_step(12, 2) == {'touch': 3, 'of
 check('fourth', G.winback_step(30, 3) == {'touch': 4, 'offer': True})
 check('then quarterly', G.winback_step(120, 4) == {'touch': 5, 'offer': True})
 check('and it stops', G.winback_step(400, 5) is None)
+check('next rung after none', G.winback_next_day(0) == 1)
+check('next rung after two', G.winback_next_day(2) == 12)
+check('next rung goes quarterly', G.winback_next_day(4) == 120)
+check('no rung once spent', G.winback_next_day(5) is None)
+rungs = G.winback_rungs()
+check('one row per rung', len(rungs) == 5, rungs)
+check('rungs agree with the ladder',
+      all(G.winback_step(r['day'], r['touch'] - 1) == {'touch': r['touch'], 'offer': r['offer']}
+          for r in rungs), rungs)
+check('a day early fires nothing',
+      all(G.winback_step(r['day'] - 1, r['touch'] - 1) is None for r in rungs))
 check('the early touch asks for no offer',
       'without any offer or link' in G.winback_instruction(False))
 check('offer wording carries the label',

@@ -8,7 +8,7 @@ that touches request state. Everything here is behind the operator beta gate
 import json
 import re
 
-from funnels import winback_due, winback_is_offer
+from funnels import WINBACK_DAYS, WINBACK_MAX_TOUCHES, winback_due, winback_is_offer
 
 # ── Beta gate ─────────────────────────────────────────────────────────────────
 # One app_settings row, written only by an operator. While a slug is off this
@@ -308,6 +308,23 @@ def winback_step(days_since_lapse, touches):
     if days_since_lapse < 1 or not winback_due(days_since_lapse, touches):
         return None
     return {'touch': int(touches) + 1, 'offer': winback_is_offer(touches)}
+
+
+def winback_next_day(touches):
+    """Which day of silence the next rung fires on, or None once the ladder is
+    spent. The panel counts down to it; winback_step decides."""
+    touches = int(touches)
+    if touches >= WINBACK_MAX_TOUCHES:
+        return None
+    if touches < len(WINBACK_DAYS):
+        return WINBACK_DAYS[touches]
+    return 30 + 90 * (touches - len(WINBACK_DAYS) + 1)
+
+
+def winback_rungs():
+    """Every rung of the ladder, for the panel to lay out."""
+    return [{'touch': t + 1, 'day': winback_next_day(t), 'offer': winback_is_offer(t)}
+            for t in range(WINBACK_MAX_TOUCHES)]
 
 
 def winback_instruction(offer, label=''):
