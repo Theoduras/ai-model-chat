@@ -16307,6 +16307,16 @@ def api_onlyfans_set_account():
 # back. The face check has a hard limit of 3 a day per account, which is why a
 # started attempt is resumed rather than restarted.
 
+# The browser service failing to answer is not the sign-in being over. Told
+# apart so a slow moment does not end a creator's half-finished login.
+_OF_UNREACHABLE = of_browser.Unreachable if of_browser else ()
+
+
+def _of_busy():
+    return jsonify({'ok': False, 'retry': True,
+                    'error': 'the browser is busy'}), 503
+
+
 def _of_conn():
     """The hosted browser: the one in this process, or the service holding it.
     A sign-in lives in the memory of whichever process opened it, so running the
@@ -16396,8 +16406,11 @@ def api_onlyfans_connect_frame():
     """The browser as it looks right now. Polled a few times a second while the
     creator is typing, so it answers with the last frame rather than waiting for
     a fresh one."""
-    attempt = _of_conn().get((request.args.get('attempt') or '').strip(), frame=True) \
-        if _of_direct() else None
+    try:
+        attempt = _of_conn().get((request.args.get('attempt') or '').strip(), frame=True) \
+            if _of_direct() else None
+    except _OF_UNREACHABLE:
+        return _of_busy()
     if not attempt:
         return jsonify({'ok': False, 'error': 'that sign-in is no longer open'}), 404
     status = attempt.status()
@@ -16415,13 +16428,18 @@ def api_onlyfans_connect_input():
     kind = (d.get('kind') or '').strip()
     if kind not in of_connect.INPUT_KINDS:
         return jsonify({'ok': False, 'error': 'unknown input'}), 400
-    attempt = _of_conn().get((d.get('attempt') or '').strip()) if _of_direct() else None
+    try:
+        attempt = _of_conn().get((d.get('attempt') or '').strip()) if _of_direct() else None
+    except _OF_UNREACHABLE:
+        return _of_busy()
     if not attempt:
         return jsonify({'ok': False, 'error': 'that sign-in is no longer open'}), 404
     try:
         attempt.act(kind, x=d.get('x'), y=d.get('y'), text=d.get('text'),
                     key=d.get('key'), dy=d.get('dy'),
                     points=(d.get('points') or [])[:60])
+    except _OF_UNREACHABLE:
+        return _of_busy()
     except of_connect.ConnectError as e:
         return jsonify({'ok': False, 'error': str(e)[:200]}), 400
     return jsonify({'ok': True})

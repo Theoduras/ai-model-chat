@@ -57,6 +57,10 @@ const q = new URLSearchParams(location.search);
 const persona = q.get('persona') || '';
 let attempt = q.get('attempt') || '';
 let timer = null, natural = {w: 0, h: 0}, lastMove = 0, finished = false;
+// The browser lives in another service now, and a slow answer from it is not
+// the sign-in being over. Give it a few tries before believing the worst.
+let misses = 0, stalls = 0;
+const GIVE_UP_AFTER = 5;
 
 const $ = id => document.getElementById(id);
 const img = $('frame');
@@ -86,12 +90,21 @@ async function begin(){
 async function poll(){
   if (timer) clearTimeout(timer);
   if (finished) return;
-  let r;
+  let r, status = 0;
   try {
-    r = await (await fetch('/api/onlyfans/connect/frame?attempt=' +
-      encodeURIComponent(attempt))).json();
-  } catch (e) { timer = setTimeout(poll, 1200); return; }
-  if (!r.ok) return fail(r.error || 'That sign-in is no longer open.');
+    const res = await fetch('/api/onlyfans/connect/frame?attempt=' +
+      encodeURIComponent(attempt));
+    status = res.status;
+    r = await res.json();
+  } catch (e) { return waiting(); }
+  // 404 is the only answer that means the sign-in is really gone, and even
+  // that is given a few chances: the browser service can be restarted under
+  // us, and one bad second should not throw away a half-typed password.
+  if (!r.ok){
+    if (status !== 404 || ++misses < GIVE_UP_AFTER) return waiting();
+    return fail(r.error || 'That sign-in is no longer open.');
+  }
+  misses = stalls = 0;
   if (r.frame){ img.src = r.frame; $('veil').classList.add('gone'); }
   const a = r.attempt || {};
   natural = {w: a.width || 0, h: a.height || 0};
@@ -102,6 +115,19 @@ async function poll(){
   if (a.state === 'failed' || a.state === 'expired')
     return fail(a.error || 'The sign-in timed out. Start it again.');
   timer = setTimeout(poll, 250);
+}
+
+// Keep polling, more slowly, and say so. The picture stays on screen: it is
+// stale, not wrong, and a frozen frame reads better than a black rectangle.
+function waiting(){
+  if (finished) return;
+  const s = $('state');
+  s.textContent = 'reconnecting';
+  s.className = 'state';
+  // Back off on any kind of stall, not just the ones that count towards
+  // giving up: a service answering 503 as fast as we can ask is the one case
+  // where asking harder is the wrong move.
+  timer = setTimeout(poll, Math.min(1200 + (stalls++ * 600), 3000));
 }
 
 function done(a){
@@ -173,11 +199,18 @@ async function pump(){
         r = await post('/api/onlyfans/connect/input',
           Object.assign({attempt: attempt}, item));
       } catch (e) { continue; }
-      // A refused input means the window is talking to something that is not
-      // listening any more; saying so once beats hundreds of silent failures.
-      // Movement is exempt: it is dropped freely and must not end the sign-in.
-      if (!r.ok && item.kind !== 'move')
-        return fail(r.error || 'The sign-in window lost its browser. Start it again.');
+      if (r.retry && item.kind !== 'move'){
+        // The browser is there, just busy. A keystroke is worth waiting for;
+        // a mouse path is not, and is dropped by falling through.
+        outbox.unshift(item);
+        await new Promise(ok => setTimeout(ok, 400));
+        continue;
+      }
+      // Anything else is dropped. Whether the sign-in is really over is the
+      // frame poll's call and only its call -- it is the one that waits for a
+      // few in a row before believing it, and two places deciding that
+      // separately is how one bad answer ends a live login.
+
     }
   } finally { inflight = false; }
 }

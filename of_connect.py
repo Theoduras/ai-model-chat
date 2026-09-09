@@ -396,6 +396,8 @@ def start(persona, account, proxy='', user_agent='', viewport=None):
     with _lock:
         for a in list(_attempts.values()):
             if a.persona == persona:
+                logger.info('of-connect %s dropped: %s started another sign-in',
+                            a.id, persona)
                 a.close()
                 _attempts.pop(a.id, None)
         attempt = Attempt(persona, account, proxy, user_agent, viewport)
@@ -407,13 +409,20 @@ def get(attempt_id, frame=False):
     # `frame` is for the browser service, which fetches the picture in the same
     # round trip rather than a second one. In this process it is already here.
     with _lock:
-        return _attempts.get(attempt_id)
+        attempt = _attempts.get(attempt_id)
+    # The creator sees a miss as 'that sign-in is no longer open', and the only
+    # way to tell which of the three ways it went is to have said so at the time.
+    if not attempt and attempt_id:
+        logger.info('of-connect %s asked for and not here; holding %s',
+                    attempt_id, sorted(_attempts))
+    return attempt
 
 
 def cancel(attempt_id):
     with _lock:
         attempt = _attempts.pop(attempt_id, None)
     if attempt:
+        logger.info('of-connect %s dropped: cancelled', attempt.id)
         attempt.close()
 
 
@@ -429,6 +438,8 @@ def sweep():
         stale = [a for a in _attempts.values()
                  if a.expired() or a._done.is_set() and a.state != 'connected']
     for a in stale:
+        logger.info('of-connect %s dropped: swept after %.0fs idle in state %s',
+                    a.id, time.time() - a.touched, a.state)
         a.close()
         with _lock:
             _attempts.pop(a.id, None)

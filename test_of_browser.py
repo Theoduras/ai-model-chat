@@ -109,10 +109,13 @@ class SplitTest(unittest.TestCase):
     def test_an_unreachable_service_is_not_an_exploding_console(self):
         dead = of_browser.Remote('http://127.0.0.1:1', 'test-token')
         self.assertFalse(dead.available())
-        self.assertIsNone(dead.get('ofc_test'))
         dead.cancel('ofc_test')          # must not raise
         with self.assertRaises(of_connect.ConnectError):
             dead.start('lilith', 'acct1')
+        # get() says Unreachable rather than None: None is reserved for the
+        # service answering that the sign-in is gone, and the window ends on it.
+        with self.assertRaises(of_browser.Unreachable):
+            dead.get('ofc_test')
 
 
 class RoundTripTest(unittest.TestCase):
@@ -156,6 +159,68 @@ class RoundTripTest(unittest.TestCase):
         # older than the other for a while.
         far = of_browser._Handle(self.remote, {'attempt': 'ofc_test'}, None)
         self.assertEqual(far.snapshot(), of_connect.get('ofc_test').snapshot())
+
+
+class ReachabilityTest(unittest.TestCase):
+    """Not being able to ask is not an answer.
+
+    The app turns a None from get() straight into 'that sign-in is no longer
+    open' and the creator's window stops. So None has to mean the service said
+    so -- one slow second must not end a half-finished login.
+    """
+
+    def setUp(self):
+        of_browser.TOKEN = 'test-token'
+        self.code = 500
+        api = of_browser.service()
+
+        @api.route('/session/ofc_broken')
+        def broken():
+            from flask import jsonify
+            return jsonify({'ok': False, 'error': 'boom'}), self.code
+
+        self.server = make_server('127.0.0.1', 0, api, handler_class=Quiet)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.remote = of_browser.Remote(
+            f'http://127.0.0.1:{self.server.server_address[1]}', 'test-token')
+
+    def tearDown(self):
+        of_connect._attempts.clear()
+        of_connect.session_sink(None)
+        self.server.shutdown()
+        self.server.server_close()
+
+    def test_a_service_that_says_no_such_sign_in_is_believed(self):
+        self.assertIsNone(self.remote.get('ofc_gone'))
+
+    def test_a_service_that_cannot_be_reached_is_not(self):
+        dead = of_browser.Remote('http://127.0.0.1:1', 'test-token')
+        with self.assertRaises(of_browser.Unreachable):
+            dead.get('ofc_test')
+
+    def test_a_bad_moment_is_not_a_dead_sign_in(self):
+        with self.assertRaises(of_browser.Unreachable):
+            self.remote.get('ofc_broken')
+
+    def test_a_refusal_is_still_a_refusal(self):
+        # 4xx is the service deciding, not failing. It must not be retried as
+        # though the sign-in were still there.
+        self.code = 403
+        self.assertIsNone(self.remote.get('ofc_broken'))
+
+    def test_old_call_sites_still_catch_it(self):
+        # app.py and _Handle catch of_connect.ConnectError in several places
+        # that must keep behaving as they did.
+        self.assertTrue(issubclass(of_browser.Unreachable, of_connect.ConnectError))
+        dead = of_browser.Remote('http://127.0.0.1:1', 'test-token')
+        try:
+            dead.get('ofc_test')
+        except of_connect.ConnectError:
+            pass
+        else:
+            self.fail('Unreachable did not reach an except ConnectError')
+        self.assertFalse(dead.available())   # still swallowed
+        dead.cancel('ofc_test')              # still swallowed
 
 
 class WiringTest(unittest.TestCase):

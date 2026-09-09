@@ -27,6 +27,17 @@ import of_connect
 
 logger = logging.getLogger(__name__)
 
+
+class Unreachable(of_connect.ConnectError):
+    """The browser service did not answer -- which is not the same as it
+    answering that the sign-in is gone.
+
+    Conflating the two ends a live sign-in on one slow response: the creator's
+    window is told the browser no longer exists while it is still sitting there
+    holding her half-typed password. A ConnectError subclass so that every
+    existing `except of_connect.ConnectError` keeps working unchanged.
+    """
+
 TOKEN = (os.getenv('ONLYFANS_BROWSER_TOKEN') or '').strip()
 BASE_URL = (os.getenv('ONLYFANS_BROWSER_URL') or '').strip().rstrip('/')
 # A frame poll is small and constant; opening a browser is neither.
@@ -196,9 +207,12 @@ class Remote:
                 detail = (json.loads(e.read().decode() or '{}') or {}).get('error', '')
             except Exception:
                 pass
-            raise of_connect.ConnectError(detail or f'the browser service said {e.code}')
+            # A 5xx is the service having a bad moment, not a verdict about the
+            # sign-in. Only something it deliberately refused is a real answer.
+            wrong = Unreachable if e.code >= 500 else of_connect.ConnectError
+            raise wrong(detail or f'the browser service said {e.code}')
         except (urllib.error.URLError, OSError, ValueError) as e:
-            raise of_connect.ConnectError(f'the browser service is unreachable: {e}')
+            raise Unreachable(f'the browser service is unreachable: {e}')
 
     def available(self):
         try:
@@ -217,10 +231,17 @@ class Remote:
         return _Handle(self, out['attempt'])
 
     def get(self, attempt_id, frame=False):
+        """The attempt, or None if the service says there is no such sign-in.
+
+        Raises Unreachable if it could not be asked. None has to mean one thing
+        only, because the caller turns it into 'that sign-in is no longer open'.
+        """
         if not attempt_id:
             return None
         try:
             out = self.call('GET', f'/session/{attempt_id}' + ('?frame=1' if frame else ''))
+        except Unreachable:
+            raise
         except of_connect.ConnectError:
             return None
         if not out.get('attempt'):
