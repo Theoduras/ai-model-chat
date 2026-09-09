@@ -59,6 +59,12 @@ steps:
       # can land on a different instance mid-signin and find nothing there,
       # which the console shows as "that sign-in is no longer open".
       - --session-affinity
+      # Session affinity is best-effort: Cloud Run can still route a request
+      # to a second instance under autoscaling even with a valid affinity
+      # cookie. There is only one attempt store and it is per-instance, so a
+      # second instance existing at all is what breaks the connect flow --
+      # capping at one removes the case entirely rather than just narrowing it.
+      - --max-instances=1
 
 images:
   - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_SERVICE}/app:$SHORT_SHA
