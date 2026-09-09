@@ -390,6 +390,91 @@ def trim_post(platform, text):
     return (cut[:space] if space >= cap - 30 else cut).rstrip()
 
 
+BIO_PLATFORMS = {
+    'instagram': {'label': 'Instagram', 'cap': 150, 'lines': 3},
+    # 80 characters is not three lines of anything. TikTok gets who she is and
+    # where to go, and the middle line — the promise — is the one that goes.
+    'tiktok':    {'label': 'TikTok',    'cap': 80,  'lines': 2},
+    'x':         {'label': 'X',         'cap': 160, 'lines': 3},
+    'threads':   {'label': 'Threads',   'cap': 150, 'lines': 3},
+    'reddit':    {'label': 'Reddit',    'cap': 200, 'lines': 3},
+}
+
+# The three-line bio: who she is, what a follower actually gets, where to go
+# next. Written as one instruction rather than three calls because the lines
+# have to sound like one person wrote them in one go.
+BIO_BRIEF = ('one per line, no bullets and no numbering: who you are and the '
+             'one thing you are about, then what someone following you '
+             'actually gets, then a short instruction to follow the link. No '
+             'hashtags, no @mentions, no URL — the link is added underneath.')
+
+BIO_BRIEF_SHORT = ('one per line, no bullets and no numbering: who you are and '
+                   'the one thing you are about, then a short instruction to '
+                   'follow the link. No hashtags, no @mentions, no URL — the '
+                   'link is added underneath.')
+
+
+def bio_brief(platform):
+    """The tight caps cannot hold the promise line, so they are never asked for
+    it — a bio generated to be cut is a bio that reads as if it was."""
+    return BIO_BRIEF if bio_line_count(platform) >= 3 else BIO_BRIEF_SHORT
+
+
+def bio_line_count(platform):
+    return (BIO_PLATFORMS.get(normalise_source(platform)) or {}).get('lines', 3)
+
+# How long a pinned post has to stand before it stops being the first thing
+# worth showing a new visitor. The guide's cadence is weekly.
+PIN_REFRESH_DAYS = 7
+
+
+def bio_cap(platform):
+    return (BIO_PLATFORMS.get(normalise_source(platform)) or {}).get('cap', 150)
+
+
+def bio_lines(text, platform=''):
+    """The bio's lines, fitted to the platform's cap. The last line is the one
+    that sends people to the link, so when the budget runs short the middle
+    lines go first — a bio that ends on half a word asks for nothing at all."""
+    raw = [ln.strip(' -*\u2022\t') for ln in str(text or '').splitlines()]
+    lines = [ln for ln in raw if ln]
+    if not lines:
+        return []
+    want = bio_line_count(platform) if platform else 3
+    if len(lines) > want:
+        # Keep the opening lines and the last one. The last is the CTA whatever
+        # the model called it, and merging it into the line above buries it.
+        lines = lines[:want - 1] + lines[-1:]
+    cap = bio_cap(platform) if platform else 0
+    if not cap:
+        return lines
+
+    def fits(ls):
+        return len('\n'.join(ls)) <= cap
+
+    while len(lines) > 1 and not fits(lines):
+        # Drop from the middle outwards, keeping the first line and the CTA.
+        lines.pop(len(lines) // 2 if len(lines) > 2 else 0)
+    if not fits(lines):
+        cut = lines[0][:cap]
+        space = cut.rfind(' ')
+        lines = [(cut[:space] if space >= cap - 20 else cut).rstrip()]
+    return [ln for ln in lines if ln]
+
+
+def pin_status(pinned_at=0, now=0):
+    """How the pinned post is doing: its age in days, and whether it is past
+    the refresh cadence. Never pinned counts as stale — that is the state the
+    panel most needs to shout about."""
+    now = int(now or 0)
+    pinned_at = int(pinned_at or 0)
+    if not pinned_at or pinned_at > now:
+        return {'pinned_at': pinned_at, 'days': None, 'stale': True, 'ever': False}
+    days = int((now - pinned_at) // 86400)
+    return {'pinned_at': pinned_at, 'days': days,
+            'stale': days >= PIN_REFRESH_DAYS, 'ever': True}
+
+
 def queue_stats(rows, now=0):
     """Totals and the next slot for the queue panel. `rows` are dicts of
     {platform, status, run_at} — run_at as an epoch, so the caller does the

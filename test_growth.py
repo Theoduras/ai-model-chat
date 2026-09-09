@@ -192,6 +192,41 @@ check('an empty queue has no next slot',
       G.queue_stats([], now=qnow)['totals']['next_at'] == 0)
 
 print()
+print('profile copy')
+check('every bio platform has a cap and a line count',
+      all(v.get('cap') and v.get('lines') for v in G.BIO_PLATFORMS.values()))
+bio3 = 'who i am\nwhat you get\ncome and see'
+check('three lines stay three', G.bio_lines(bio3, 'x') == ['who i am', 'what you get', 'come and see'])
+check('a tight cap drops the middle, not the call to action',
+      G.bio_lines(bio3, 'tiktok') == ['who i am', 'come and see'], G.bio_lines(bio3, 'tiktok'))
+check('bullets and numbering are stripped',
+      G.bio_lines('- who i am\n* what you get\n\u2022 come and see', 'x')[0] == 'who i am')
+check('extra lines fold into the wanted count, keeping the last',
+      G.bio_lines('a\nb\nc\nd\ne', 'x') == ['a', 'b', 'e'])
+check('a bio always fits its cap',
+      all(len('\n'.join(G.bio_lines(bio3, p))) <= G.bio_cap(p) for p in G.BIO_PLATFORMS))
+check('one line too long for the cap is cut, not dropped',
+      G.bio_lines('x' * 300, 'tiktok') == ['x' * 80])
+check('nothing in, nothing out', G.bio_lines('', 'x') == [])
+check('a short cap asks for fewer lines than a roomy one',
+      G.bio_line_count('tiktok') < G.bio_line_count('instagram'))
+check('and is briefed for that', G.bio_brief('tiktok') != G.bio_brief('instagram'))
+check('the brief never asks for a link',
+      all('no URL' in G.bio_brief(p) for p in G.BIO_PLATFORMS))
+
+pnow = 1_700_000_000
+check('never pinned reads as stale',
+      G.pin_status(0, pnow) == {'pinned_at': 0, 'days': None, 'stale': True, 'ever': False})
+check('pinned today is fresh', G.pin_status(pnow, pnow)['days'] == 0)
+check('and not stale', G.pin_status(pnow, pnow)['stale'] is False)
+check('a week later it is stale',
+      G.pin_status(pnow - G.PIN_REFRESH_DAYS * 86400, pnow)['stale'] is True)
+check('a day before that it is not',
+      G.pin_status(pnow - (G.PIN_REFRESH_DAYS - 1) * 86400, pnow)['stale'] is False)
+check('a timestamp from the future is not trusted',
+      G.pin_status(pnow + 86400, pnow)['ever'] is False)
+
+print()
 print('win-back ladder')
 check('nothing on day zero', G.winback_step(0, 0) is None)
 check('first touch on day one', G.winback_step(1, 0) == {'touch': 1, 'offer': False})

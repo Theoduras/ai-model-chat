@@ -1997,6 +1997,15 @@ function renderForm(slug, cfg) {
       </div>
       <div style="margin-top:14px;">
         <div class="section-title" style="font-size:0.8rem;">
+          Profile copy
+          <button type="button" class="btn-section-save" onclick="loadGrowthBio()">Refresh</button>
+          <button type="button" class="btn-section-save" onclick="growthBios(this)">Write them</button>
+        </div>
+        <span class="hint">The bio and the pinned post are what a stranger reads before they decide. Each bio is written to that platform's own character limit and comes with the tagged link for it. X has no API for pinning, so you pin the post yourself and tell it you did.</span>
+        <div id="growth-bio" class="hint" style="margin-top:8px;">—</div>
+      </div>
+      <div style="margin-top:14px;">
+        <div class="section-title" style="font-size:0.8rem;">
           Post queue
           <button type="button" class="btn-section-save" onclick="loadGrowthQueue()">Refresh</button>
         </div>
@@ -2798,6 +2807,7 @@ async function loadGrowth() {
   } catch (e) {}
   await loadGrowthSources();
   await loadGrowthLinks();
+  await loadGrowthBio();
   await loadGrowthQueue();
   await loadGrowthCta();
   await loadGrowthWinback();
@@ -3092,6 +3102,134 @@ async function cancelQueued(btn, id) {
     if (!res.ok) throw new Error('cancel failed');
     loadGrowthQueue();
   } catch (e) { flashSaved(btn, false); }
+}
+
+function bioBox(b) {
+  const over = b.text && b.text.length > b.cap;
+  return '<div class="field" style="margin-bottom:12px;" data-platform="' + esc(b.platform) + '">'
+    + '<label>' + esc(b.label) + ' <span style="opacity:0.6; font-weight:400;">'
+    + (b.text || '').length + '/' + b.cap + '</span></label>'
+    + '<textarea data-bio rows="' + Math.max(2, (b.lines || []).length) + '"'
+    + (over ? ' style="border-color:#c2410c;"' : '') + '>' + esc(b.text || '') + '</textarea>'
+    + (b.error ? '<span class="hint">' + esc(b.error) + '</span>' : '')
+    + (b.link ? '<div style="margin-top:6px; display:flex; align-items:center; gap:8px;">'
+        + '<code style="font-size:0.72rem; word-break:break-all;">' + esc(b.link) + '</code>'
+        + '<button type="button" class="btn-section-save" onclick="copyLink(this)">copy link</button>'
+        + '</div>' : '')
+    + '<div style="margin-top:6px;">'
+    + '<button type="button" class="btn-section-save" onclick="copyBio(this)">copy bio</button>'
+    + '</div></div>';
+}
+
+async function copyBio(btn) {
+  const ta = btn.closest('.field').querySelector('textarea[data-bio]');
+  try {
+    await navigator.clipboard.writeText(ta.value);
+    const was = btn.textContent;
+    btn.textContent = 'copied';
+    setTimeout(() => { btn.textContent = was; }, 1200);
+  } catch (e) { ta.select(); }
+}
+
+function pinnedBox(text, cap, pin, refreshDays) {
+  let note;
+  if (!pin || !pin.ever) {
+    note = 'Nothing recorded as pinned yet.';
+  } else if (pin.stale) {
+    note = 'Pinned ' + daysAgo(pin.days) + ' \u2014 past the ' + (refreshDays || 7)
+      + '-day refresh, write a fresh one.';
+  } else {
+    note = 'Pinned ' + daysAgo(pin.days) + '.';
+  }
+  return '<div class="field" style="margin-bottom:12px;">'
+    + '<label>Pinned post on X <span style="opacity:0.6; font-weight:400;">'
+    + (text || '').length + '/' + cap + '</span></label>'
+    + '<textarea data-pinned rows="3">' + esc(text || '') + '</textarea>'
+    + '<span class="hint">' + esc(note) + '</span>'
+    + '<div style="margin-top:6px; display:flex; gap:8px; flex-wrap:wrap;">'
+    + '<button type="button" class="btn-section-save" onclick="copyPinned(this)">copy</button>'
+    + '<button type="button" class="btn-section-save" onclick="markPinned(this)">I pinned it</button>'
+    + '</div></div>';
+}
+
+async function copyPinned(btn) {
+  const ta = btn.closest('.field').querySelector('textarea[data-pinned]');
+  try {
+    await navigator.clipboard.writeText(ta.value);
+    const was = btn.textContent;
+    btn.textContent = 'copied';
+    setTimeout(() => { btn.textContent = was; }, 1200);
+  } catch (e) { ta.select(); }
+}
+
+async function markPinned(btn) {
+  const ta = btn.closest('.field').querySelector('textarea[data-pinned]');
+  if (!ta.value.trim()) { alert('Write the post first.'); return; }
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/growth/bio', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ persona: currentSlug, action: 'pinned', text: ta.value })
+    });
+    const d = await res.json();
+    if (!d.ok) { alert(d.error || 'Could not record it.'); return; }
+    loadGrowthBio();
+  } catch (e) { alert('Could not record it.'); }
+  finally { btn.disabled = false; }
+}
+
+function renderGrowthBio(d, pinnedText) {
+  const box = document.getElementById('growth-bio');
+  if (!box) return;
+  const bios = d.bios || [];
+  let html = '';
+  if (!d.beta) {
+    html += '<div style="margin-bottom:10px; opacity:0.8;">This persona is not on the growth beta, '
+      + 'so the tagged links below are the only part of this that is live.</div>';
+  }
+  html += pinnedBox(pinnedText !== undefined ? pinnedText : ((d.pinned || {}).text || ''),
+                    d.pin_cap || 280, d.pin, d.refresh_days);
+  if (!bios.length) {
+    box.innerHTML = html + '<div>No bios written yet. Hit "Write them" above.</div>';
+    return;
+  }
+  html += bios.map(bioBox).join('');
+  if (d.written_at) {
+    html += '<div style="opacity:0.7;">Written ' + whenText(d.written_at)
+      + '. These are drafts \u2014 nothing is applied to any profile automatically.</div>';
+  }
+  box.innerHTML = html;
+}
+
+async function loadGrowthBio() {
+  const box = document.getElementById('growth-bio');
+  if (!box || !currentSlug) return;
+  let d;
+  try {
+    d = await (await fetch('/api/growth/bio?persona=' + encodeURIComponent(currentSlug))).json();
+  } catch (e) { box.textContent = 'Could not read the profile copy.'; return; }
+  if (!d || !d.ok) { box.textContent = 'Could not read the profile copy.'; return; }
+  renderGrowthBio(d);
+}
+
+async function growthBios(btn) {
+  const box = document.getElementById('growth-bio');
+  if (!currentSlug) return;
+  btn.disabled = true;
+  const was = btn.textContent;
+  btn.textContent = 'writing\u2026';
+  if (box) box.textContent = 'Writing \u2014 one call per platform, give it a moment.';
+  try {
+    const res = await fetch('/api/growth/bio', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ persona: currentSlug })
+    });
+    const d = await res.json();
+    if (!d.ok) { if (box) box.textContent = d.error || 'Could not write them.'; return; }
+    renderGrowthBio(d, (d.pinned_draft || {}).text || '');
+  } catch (e) {
+    if (box) box.textContent = 'Could not write them.';
+  } finally { btn.disabled = false; btn.textContent = was; }
 }
 
 async function loadGrowthQueue() {

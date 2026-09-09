@@ -6996,6 +6996,125 @@ def api_growth_queue():
                     'queue': rows, **stats})
 
 
+def _growth_channel_link(persona, channel, bot=None):
+    """The one link to put in this channel's bio. The Telegram start link wins
+    where a bot is connected — it lands the fan in a conversation rather than on
+    a page — and both carry the channel tag either way."""
+    if bot is None:
+        bot = _tg_load_bots().get(persona) or {}
+        if not bot.get('username'):
+            bot = {**bot, 'username': _tg_platform().get('username', '')}
+    tg = _tg_share_link(bot, channel)
+    if tg:
+        return tg
+    origin = _site_origin().rstrip('/')
+    if not origin:
+        return ''
+    query = urllib.parse.urlencode({'utm_source': channel, 'utm_medium': 'bio'})
+    return f'{origin}/t/{persona}?{query}'
+
+
+def _growth_bio_state(persona):
+    try:
+        raw = json.loads(_get_setting(f'growth_bio_{persona}') or '{}')
+        return raw if isinstance(raw, dict) else {}
+    except Exception:
+        return {}
+
+
+@app.route('/api/growth/bio', methods=['GET', 'POST'])
+@operator_only
+def api_growth_bio():
+    """The bio and the pinned post — the two pieces of profile copy that decide
+    whether someone who found her follows or leaves. GET returns what was
+    written last and how old the pinned post is; POST writes a fresh set."""
+    data = request.json or {} if request.method == 'POST' else {}
+    persona = ((data.get('persona') if request.method == 'POST'
+                else request.args.get('persona')) or '').strip()
+    if not re.match(r'^[a-z0-9_-]+$', persona or ''):
+        return jsonify({'error': 'Invalid slug'}), 400
+
+    state = _growth_bio_state(persona)
+    now = int(time.time())
+
+    if request.method == 'GET':
+        return jsonify({'ok': True, 'persona': persona,
+                        'bios': state.get('bios') or [],
+                        'written_at': int(state.get('written_at', 0) or 0),
+                        'pinned': state.get('pinned') or {},
+                        'pin': growth.pin_status(state.get('pinned_at', 0), now),
+                        'refresh_days': growth.PIN_REFRESH_DAYS,
+                        'pin_cap': growth.post_cap('x'),
+                        'beta': _growth_on(persona)})
+
+    # Marking the pinned post as pinned is a separate, cheap call: X has no API
+    # for pinning, so the operator does it by hand and tells us when.
+    if (data.get('action') or '') == 'pinned':
+        text = (data.get('text') or '').strip()[:600]
+        if not text:
+            return jsonify({'ok': False, 'error': 'Nothing to record as pinned.'}), 400
+        state['pinned'] = {'platform': 'x', 'text': text}
+        state['pinned_at'] = now
+        _set_setting(f'growth_bio_{persona}', json.dumps(state))
+        return jsonify({'ok': True, 'persona': persona, 'pinned': state['pinned'],
+                        'pin': growth.pin_status(now, now)})
+
+    cta = _phases_cta(persona)
+    offer = (cta.get('cta_label') or 'the rest of it').strip()
+    wanted = [growth.normalise_source(p) for p in (data.get('platforms') or [])]
+    wanted = [p for p in wanted if p in growth.BIO_PLATFORMS] or list(growth.BIO_PLATFORMS)
+    bot = _tg_load_bots().get(persona) or {}
+    if not bot.get('username'):
+        bot = {**bot, 'username': _tg_platform().get('username', '')}
+
+    bios = []
+    for plat in wanted:
+        spec = growth.BIO_PLATFORMS[plat]
+        want = growth.bio_line_count(plat)
+        instruction = (
+            f'Write your {spec["label"]} profile bio as yourself, in character. '
+            f'Exactly {want} short lines, {growth.bio_brief(plat)} The whole '
+            f'thing has to fit in {spec["cap"]} characters, so keep every line '
+            f'short. What people get on the other side of the link: {offer}. '
+            f'Return only the {want} lines.')
+        try:
+            lines = growth.bio_lines(_persona_text(persona, instruction,
+                                                   max_tokens=300, temperature=0.95),
+                                     plat)
+        except Exception as e:
+            bios.append({'platform': plat, 'label': spec['label'], 'cap': spec['cap'],
+                         'lines': [], 'text': '', 'link': '', 'error': str(e)[:200]})
+            continue
+        bios.append({'platform': plat, 'label': spec['label'], 'cap': spec['cap'],
+                     'lines': lines, 'text': '\n'.join(lines),
+                     'link': _growth_channel_link(persona, plat, bot)})
+
+    pinned = {'platform': 'x', 'cap': growth.post_cap('x'), 'text': ''}
+    if data.get('pinned', True):
+        spec = growth.POST_PLATFORMS['x']
+        instruction = (
+            'Write the post you would pin to the top of your X profile: the '
+            'first thing a stranger reads after your bio. It should say what '
+            'you post and why someone should stay, in your own voice, and end '
+            f'on an invitation to reply. It must be {spec["brief"]}. Stay under '
+            f'{spec["cap"]} characters. Return only the post.'
+            + _no_repeat_block(persona, 'x'))
+        try:
+            pinned['text'] = growth.trim_post('x', _persona_text(
+                persona, instruction, max_tokens=400, temperature=1.0))
+        except Exception as e:
+            pinned['error'] = str(e)[:200]
+
+    state.update({'bios': bios, 'written_at': now})
+    _set_setting(f'growth_bio_{persona}', json.dumps(state))
+    return jsonify({'ok': True, 'persona': persona, 'bios': bios, 'pinned_draft': pinned,
+                    'written_at': now,
+                    'pin': growth.pin_status(state.get('pinned_at', 0), now),
+                    'refresh_days': growth.PIN_REFRESH_DAYS,
+                    'pin_cap': growth.post_cap('x'),
+                    'beta': _growth_on(persona)})
+
+
 @app.route('/api/growth/drafts', methods=['POST'])
 @operator_only
 def api_growth_drafts():
