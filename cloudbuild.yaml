@@ -49,6 +49,11 @@ steps:
       # flight and fans' messages only land minutes later, in a batch.
       - --min-instances=1
       - --no-cpu-throttling
+      # The OnlyFans connect flow's hosted browser lives in one instance's
+      # memory (of_connect.py's _attempts dict); without affinity a frame poll
+      # can land on a different instance mid-signin and find nothing there,
+      # which the console shows as "that sign-in is no longer open".
+      - --session-affinity
 
 images:
   - ${_REGION}-docker.pkg.dev/$PROJECT_ID/${_SERVICE}/app:$SHORT_SHA
