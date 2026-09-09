@@ -43,7 +43,6 @@ grok-lilith-prompt.txt          — Legacy location (still loaded as fallback)
 templates/profile.html          — Jinja2 template variant (unused currently)
 .env                            — API keys (never commit)
 Dockerfile                      — Cloud Run image (the real deployment)
-cloudbuild.yaml                 — Cloud Build steps, run by the push triggers
 api/index.py                    — Vercel entrypoint (secondary host)
 vercel.json                     — Vercel routing config (secondary host)
 requirements.txt                — Python deps: flask, google-genai, python-dotenv, google-auth
@@ -176,8 +175,17 @@ The app auto-deploys via a Cloud Build trigger on push to `develop`, to the
 single Cloud Run service `ai-model-chat-dev` (see `ENVIRONMENTS.md`).
 
 - **Push to `develop`.** That is the deploy: the trigger picks it up.
-- Never run a `gcloud run deploy` or `gcloud builds` command by hand — pushing
-  to `develop` is the only deploy path.
+- Never run a `gcloud run deploy` or `gcloud builds` command by hand to ship app
+  code — pushing to `develop` is the only path for that.
+- **The trigger has an inline build config; there is no `cloudbuild.yaml`.** It
+  builds the `Dockerfile` and passes only `--image` to `gcloud run services
+  update`. So a Cloud Run setting — memory, instances, session affinity, env
+  vars — **cannot be changed from this repository at all**, and a build config
+  added here would be read by nothing. Set it on the service; it persists across
+  deploys.
+- `ai-model-chat-dev-browser` is the exception to the rule above: it runs the
+  same image with a different entrypoint, has no trigger on purpose, and is
+  deployed by hand. Not redeploying it is the feature — see `ENVIRONMENTS.md`.
 
 ---
 
