@@ -9,6 +9,7 @@ from unittest import mock
 os.environ.setdefault('SECRET_KEY', 'test-secret-for-of-session')
 
 import of_connect
+import of_rules
 import of_session
 from test_of_client import use_memory_store
 
@@ -26,7 +27,7 @@ class FakePage:
         self.who = who
         self.x_bc = x_bc
 
-    def evaluate(self, script):
+    def evaluate(self, script, arg=None):
         if 'users/me' in script:
             return self.who
         if 'bcTokenSha' in script:
@@ -70,6 +71,11 @@ class CaptureTest(unittest.TestCase):
         use_memory_store()
         of_session.reset_key()
         self.a = bare_attempt()
+        p = mock.patch.object(of_rules, 'rules', return_value={
+            'static_param': 's', 'format': '{}:{:x}',
+            'checksum_indexes': [0], 'checksum_constant': 1, 'app_token': 't'})
+        p.start()
+        self.addCleanup(p.stop)
 
     def test_nothing_is_stored_before_the_cookies_exist(self):
         self.a._try_capture_session(FakePage({'id': 9}), FakeContext(

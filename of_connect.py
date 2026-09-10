@@ -21,6 +21,7 @@ import threading
 import time
 import uuid
 
+import of_rules
 import of_session
 
 logger = logging.getLogger(__name__)
@@ -353,9 +354,24 @@ class Attempt:
             self.capture_note = 'awaiting_cookies'
             return
         try:
+            x_bc = page.evaluate("() => localStorage.getItem('bcTokenSha') || ''")
+            agent = page.evaluate('() => navigator.userAgent')
+        except Exception:
+            x_bc, agent = '', self.user_agent
+        # OnlyFans now rejects an unsigned /users/me the same as an
+        # unauthenticated one -- cookies alone are not enough. Sign it the
+        # same way of_client signs every other call; user_id '0' is correct
+        # here, this is the request that tells us our own id.
+        headers = of_rules.headers('/api2/v2/users/me',
+                                    session={'x_bc': x_bc, 'user_agent': agent})
+        # cookie/user-agent/referer are forbidden fetch() headers -- the real
+        # browser already sends its own, correctly, without our help.
+        for name in ('cookie', 'user-agent', 'referer'):
+            headers.pop(name, None)
+        try:
             who = page.evaluate(
-                "() => fetch('/api2/v2/users/me', {credentials:'include'})"
-                ".then(r => r.ok ? r.json() : null).catch(() => null)")
+                "([h]) => fetch('/api2/v2/users/me', {credentials:'include', headers:h})"
+                ".then(r => r.ok ? r.json() : null).catch(() => null)", [headers])
         except Exception:
             self.capture_note = 'me_failed'
             return
@@ -363,11 +379,6 @@ class Attempt:
             self.capture_note = 'no_user_id'
             return
         self.capture_note = 'captured'
-        try:
-            x_bc = page.evaluate("() => localStorage.getItem('bcTokenSha') || ''")
-            agent = page.evaluate('() => navigator.userAgent')
-        except Exception:
-            x_bc, agent = '', self.user_agent
         session = {'user_id': str(who['id']), 'username': who.get('username') or '',
                    'name': who.get('name') or '',
                    'cookie': of_session.cookie_string(cookies), 'x_bc': x_bc or '',
