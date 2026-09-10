@@ -388,11 +388,19 @@ function watchBrowser(){
       await loadConfig();
       return;
     }
-    // The window closing without an account means she gave up or it timed out.
+    // The window closing without an account means she gave up, it timed out,
+    // or the app could not keep the session she signed in to — say which.
     if(browserWindow&&browserWindow.closed&&!st.signing_in){
       stopWatching();
       showStep('signin-panel');
-      document.getElementById('account-status').innerHTML='';
+      const box=document.getElementById('account-status');
+      const reason={rules_unreachable:'The sign-in worked, but this deployment '
+          +'could not reach OnlyFans to finish connecting. Try again in a moment.',
+        adopt_failed:'The sign-in worked, but her session could not be saved'
+          +(st.adopt_error?(' ('+esc(st.adopt_error)+')'):'')+'. Try again.',
+        browser_down:'The sign-in browser is not reachable right now.'}
+        [(st.blockers||[])[0]];
+      if(reason)err(box,reason); else box.innerHTML='';
     }
   },2000);
 }

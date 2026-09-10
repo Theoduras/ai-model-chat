@@ -16030,6 +16030,12 @@ class _OnlyFansPlatform(_Platform):
     has_funnels = False
 
     def connected(self, persona):
+        # In direct mode the account is connected the moment she has a session
+        # in the vault — that never depended on the signing rules being
+        # reachable right now, and treating it as if it did is what read a
+        # freshly finished sign-in as a logout.
+        if _of_direct():
+            return bool(_of_account(persona))
         return bool(OF.configured() and _of_account(persona))
 
     def scope(self, persona):
@@ -16417,6 +16423,12 @@ def api_onlyfans_connect_frame():
     if status['state'] == 'connected':
         _of_adopt_direct(attempt)
         status = attempt.status()
+        adopt_err = _get_setting(f'onlyfans_adopt_error_{attempt.persona}') or ''
+        if adopt_err:
+            # The browser side finished, but the app could not keep the
+            # session — say so instead of the popup reporting success for a
+            # sign-in that is about to vanish.
+            status = dict(status, state='failed', error=adopt_err)
     return jsonify({'ok': True, 'frame': attempt.snapshot(), 'attempt': status})
 
 
@@ -16456,17 +16468,26 @@ def _of_adopt_direct(attempt):
     # nothing comes back.
     session = _of_conn().claim(attempt)
     if session:
-        of_session.put(attempt.account, session)
-    if _of_account(persona) == attempt.account:
-        return
+        try:
+            of_session.put(attempt.account, session)
+        except of_session.SessionError as e:
+            logger.error('OnlyFans session could not be stored: %s', str(e)[:200])
+            _set_setting(f'onlyfans_adopt_error_{persona}', str(e)[:200])
+            return
+    same_account = _of_account(persona) == attempt.account
+    # The attempt is cleared and the meta refreshed every time, reconnect
+    # included — only the cursor reset below is skipped for the same account,
+    # so a reconnect does not lose the fan history it already has.
     _set_setting(f'onlyfans_account_{persona}', attempt.account)
     _set_setting(f'onlyfans_account_meta_{persona}', json.dumps({
         'onlyfans_id': result.get('user_id', ''),
         'username': result.get('username', ''), 'name': result.get('name', '')}))
     _set_setting(f'onlyfans_attempt_{persona}', '')
-    # A different account on the same persona must not inherit the old one's
-    # place in every conversation.
-    _set_setting(PLAT_ONLYFANS.k('cursor', persona), '{}')
+    _set_setting(f'onlyfans_adopt_error_{persona}', '')
+    if not same_account:
+        # A different account on the same persona must not inherit the old
+        # one's place in every conversation.
+        _set_setting(PLAT_ONLYFANS.k('cursor', persona), '{}')
     _log_x_event('onlyfans_connect', persona=persona,
                  x_username=result.get('username', ''))
     of_events.watch(attempt.account)
@@ -16594,6 +16615,22 @@ def api_onlyfans_status():
         out['session'] = of_session.describe(account) if account else {}
         out['webhook'] = PLAT_ONLYFANS.webhook_state(persona)
         out['browser_ready'] = _of_conn().available()
+        out['signable'] = OF.configured()
+        out['rules'] = of_rules.state()
+        # Named causes for a console that would otherwise just go blank: the
+        # thing that actually failed, not "not connected".
+        blockers = []
+        if not out['browser_ready']:
+            blockers.append('browser_down')
+        if not out['signable']:
+            blockers.append('rules_unreachable')
+        adopt_err = _get_setting(f'onlyfans_adopt_error_{persona}') or ''
+        if adopt_err:
+            blockers.append('adopt_failed')
+            out['adopt_error'] = adopt_err
+        if account and out['session'].get('status') == of_session.STATUS_EXPIRED:
+            blockers.append('session_expired')
+        out['blockers'] = blockers
     return jsonify(out)
 
 
