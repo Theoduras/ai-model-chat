@@ -156,6 +156,26 @@ gcloud run services update ai-model-chat-dev --region europe-west4 \
 Confirm it end to end by starting a sign-in and pushing to `develop` while it is
 open. Surviving that is the whole point; before this it was what broke it.
 
+## OnlyFans exit IP (`infra/of-egress.sh`)
+
+Sign-ins reached OnlyFans but died within a second: Cloud Run's default egress
+comes from a shared Google pool that changes per request, and OnlyFans drops a
+session the moment its IP changes. `infra/of-egress.sh` fixes that for ~€9/month
+by running a small Squid VM with one reserved static IP, and pointing both
+services at it over Direct VPC egress.
+
+```bash
+infra/of-egress.sh create   # VM + static IP + VPC, one-time
+infra/of-egress.sh wire     # attaches egress to both services, sets ONLYFANS_PROXY_TEMPLATE
+infra/of-egress.sh status   # check it
+```
+
+`wire` sets `ONLYFANS_PROXY_TEMPLATE` on **both** `ai-model-chat-dev` and
+`ai-model-chat-dev-browser`. It must match on both — otherwise sign-in and API
+calls leave by different doors, which fails in exactly the confusing
+logs-in-then-drops way this was already chased for three rounds. No app code
+changes; this is infra-only and survives image deploys.
+
 To roll back, remove `ONLYFANS_BROWSER_URL` from the app and the in-process
 browser takes over on the next revision:
 
