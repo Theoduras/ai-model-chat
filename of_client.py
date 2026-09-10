@@ -128,15 +128,19 @@ def call(account, method, path, body=None):
         try:
             return _once(account, method, path, body, session)
         except OnlyFansError as e:
-            if e.code == 401 or (e.code == 403 and 'sign' not in e.detail.lower()):
-                of_session.mark_expired(account, e.detail)
-                raise SessionExpired(e.code, 'the OnlyFans session expired — '
-                                             'reconnect the account')
+            # A rotated signature and a dead session both come back as a 401,
+            # and only the response text tells them apart -- "please refresh
+            # the page" is the rotation, not a revoked session. Check that
+            # first, or the retry that would have fixed it never gets a turn.
             if of_rules.stale_response(e.code, e.detail) and not refreshed:
                 logger.info('OnlyFans rules rotated, refetching')
                 of_rules.refresh()
                 refreshed = True
                 continue
+            if e.code == 401 or (e.code == 403 and 'sign' not in e.detail.lower()):
+                of_session.mark_expired(account, e.detail)
+                raise SessionExpired(e.code, 'the OnlyFans session expired — '
+                                             'reconnect the account')
             if e.code in OF_RETRY_STATUSES and attempt < OF_MAX_RETRIES - 1:
                 time.sleep((2 ** attempt) + random.uniform(0, 1))
                 continue
