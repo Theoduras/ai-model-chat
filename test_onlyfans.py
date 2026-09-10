@@ -166,6 +166,14 @@ def test_ppv_price_conversion():
     check('$10.00 goes out as 10.0', sent[-1][1] == 10.0, sent)
     check('the message id comes back', mid == '9', mid)
 
+    # The direct transport answers with OnlyFans' own body, where the id is top
+    # level rather than wrapped in `data`. Reading only the wrapped shape lost
+    # the id of every drop sold on that path.
+    OF.send = lambda acct, chat, text, price=0, media=(), idem=None: (
+        sent.append((text, price, list(media))) or {'id': 77, 'text': text})
+    mid = app.PLAT_ONLYFANS.send_ppv('lilly', '', '42', 'unlock me', ['m1'], 1000)
+    check('an unwrapped answer still yields the message id', mid == '77', mid)
+
     for cents, why in ((100, 'under the floor'), (30000, 'over the ceiling')):
         refused = ''
         try:

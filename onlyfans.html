@@ -235,6 +235,10 @@
     <div class="row-inline" style="margin-bottom:8px;">
       <div class="field"><label>Search the vault</label>
         <input type="text" id="m-query" placeholder="type and press Enter" onkeydown="if(event.key==='Enter')loadMedia()"></div>
+      <div class="field"><label>Folder</label>
+        <select id="m-folder" onchange="loadMedia()">
+          <option value="">All folders</option>
+        </select></div>
       <div class="field"><label>Type</label>
         <select id="m-type" onchange="loadMedia()">
           <option value="">All</option><option value="photo">Photos</option>
@@ -333,6 +337,7 @@ async function loadConfig(){
   }else if(st.ok&&st.attempt&&!st.attempt.done){renderAttempt(st.attempt);pollAttempt();}
   await loadAuto();
   await loadPpv();
+  await loadFolders();
 }
 
 // ── Signing in ───────────────────────────────────────────────────────────────
@@ -673,12 +678,26 @@ function dropMedia(id){
 }
 
 let mediaItems=[];
+async function loadFolders(){
+  const sel=document.getElementById('m-folder');
+  const keep=sel.value;
+  try{
+    const d=await (await fetch('/api/onlyfans/folders?persona='+
+      encodeURIComponent(persona()))).json();
+    sel.innerHTML='<option value="">All folders</option>'+
+      (d.folders||[]).map(f=>'<option value="'+esc(f.id)+'">'+esc(f.name)+
+        (f.count?(' ('+f.count+')'):'')+'</option>').join('');
+    sel.value=keep;
+  }catch(e){ /* the picker still works on the whole vault without folders */ }
+}
+
 async function loadMedia(){
   const grid=document.getElementById('media-grid');
   grid.innerHTML='<span class="hint">Loading the vault…</span>';
   const q=new URLSearchParams({persona:persona(),
     q:document.getElementById('m-query').value.trim(),
-    type:document.getElementById('m-type').value});
+    type:document.getElementById('m-type').value,
+    list:document.getElementById('m-folder').value});
   const d=await (await fetch('/api/onlyfans/media?'+q.toString())).json();
   if(d.error){grid.innerHTML='<span class="hint" style="color:#fb7185;">'+esc(d.error)+'</span>';return;}
   mediaItems=d.media||[];

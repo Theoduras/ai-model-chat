@@ -16137,8 +16137,13 @@ class _OnlyFansPlatform(_Platform):
                 0, f'OnlyFans will not take a ${usd:g} unlock — the price has to '
                    f'be between ${OF.OF_PRICE_MIN_USD:g} and ${OF.OF_PRICE_MAX_USD:g}')
         sent = OF.send(_of_account(persona), fan_id, caption, price=usd, media=media)
-        data = sent.get('data') if isinstance(sent, dict) else None
-        return str((data or {}).get('id') or '') if isinstance(data, dict) else ''
+        if not isinstance(sent, dict):
+            return ''
+        # The middleman wraps its answer in `data`; the direct transport returns
+        # what OnlyFans itself said, where the id is top level. Reading only the
+        # wrapped shape loses the id of every drop sold on the direct path.
+        body = sent.get('data') if isinstance(sent.get('data'), dict) else sent
+        return str(body.get('id') or '')
 
     def typing(self, persona, scope, fan_id):
         try:
@@ -16763,6 +16768,36 @@ def api_onlyfans_media():
         return jsonify({'media': [], 'error': str(e)[:200]})
     return jsonify({'media': [OF.media_row(m) for m in items if isinstance(m, dict)],
                     'error': ''})
+
+
+@app.route('/api/onlyfans/folders')
+@platform_scoped
+def api_onlyfans_folders():
+    """The creator's vault folders, so the picker can narrow to one instead of
+    scrolling everything she has ever uploaded.
+
+    OnlyFans filters by list *id*, not by name the way Fanvue does, so the id is
+    what the selector has to send back to /api/onlyfans/media.
+    """
+    persona = (request.args.get('persona') or '').strip()
+    if not PLAT_ONLYFANS.connected(persona):
+        return jsonify({'folders': [], 'error': 'OnlyFans not connected for this persona.'})
+    try:
+        lists = OF.vault_lists(_of_account(persona))
+    except OF.OnlyFansApiError as e:
+        return jsonify({'folders': [], 'error': str(e)[:200]})
+    folders = []
+    for row in lists:
+        if not isinstance(row, dict) or not row.get('id'):
+            continue
+        counts = [row.get(k) for k in ('videosCount', 'photosCount', 'audiosCount')]
+        total = sum(c for c in counts if isinstance(c, int))
+        if not total:
+            total = row.get('mediasCount') or row.get('mediaCount') or 0
+        folders.append({'id': str(row['id']),
+                        'name': str(row.get('name') or row.get('type') or 'Untitled'),
+                        'count': total})
+    return jsonify({'folders': folders, 'error': ''})
 
 
 @app.route('/api/onlyfans/auto', methods=['GET', 'POST'])
