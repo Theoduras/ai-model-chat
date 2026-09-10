@@ -93,7 +93,7 @@ async function poll(){
   let r, status = 0;
   try {
     const res = await fetch('/api/onlyfans/connect/frame?attempt=' +
-      encodeURIComponent(attempt));
+      encodeURIComponent(attempt) + '&persona=' + encodeURIComponent(persona));
     status = res.status;
     r = await res.json();
   } catch (e) { return waiting(); }
@@ -197,7 +197,7 @@ async function pump(){
       // tearing the window down, and beats wedging the queue behind it.
       try {
         r = await post('/api/onlyfans/connect/input',
-          Object.assign({attempt: attempt}, item));
+          Object.assign({attempt: attempt, persona: persona}, item));
       } catch (e) { continue; }
       if (r.retry && item.kind !== 'move'){
         // The browser is there, just busy. A keystroke is worth waiting for;

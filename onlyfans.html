@@ -296,6 +296,10 @@ async function loadConfig(){
   if(direct&&!appCfg.browser_ready){
     err(box,'This host has no browser installed, so an account cannot be connected '
            +'here. Deploy the image that carries Chromium.');
+  }else if(direct&&!appCfg.proxy_pool){
+    err(box,'No residential exit IP is set for OnlyFans sign-ins (ONLYFANS_PROXY_TEMPLATE). '
+           +'Signing in will look like it worked, then OnlyFans will drop the session — '
+           +'set it before trying.');
   }else if(!direct&&!appCfg.configured){
     err(box,'This deployment has no OnlyFansAPI key. Set ONLYFANSAPI_KEY and redeploy.');
   }
@@ -400,7 +404,10 @@ function watchBrowser(){
           +(st.adopt_error?(' ('+esc(st.adopt_error)+')'):'')+'. Try again.',
         browser_down:'The sign-in browser is not reachable right now.',
         no_session_key:'This deployment has no key to encrypt her session with, '
-          +'so it cannot be saved. Set SECRET_KEY (or ONLYFANS_SESSION_KEY) and try again.'}
+          +'so it cannot be saved. Set SECRET_KEY (or ONLYFANS_SESSION_KEY) and try again.',
+        no_proxy:'This deployment has no residential exit IP set for OnlyFans '
+          +'sign-ins, so OnlyFans drops the session right after it starts. Set '
+          +'ONLYFANS_PROXY_TEMPLATE before trying again.'}
         [(st.blockers||[])[0]];
       if(reason)err(box,reason); else box.innerHTML='';
     }

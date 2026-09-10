@@ -16263,7 +16263,9 @@ def api_onlyfans_config():
     return jsonify({'configured': OF.configured(), 'webhook_url': _of_webhook_url(),
                     'webhook_ready': bool(_of_webhook_secrets()),
                     'transport': ONLYFANS_TRANSPORT,
-                    'browser_ready': bool(_of_direct() and _of_conn().available())})
+                    'browser_ready': bool(_of_direct() and _of_conn().available()),
+                    'proxy_pool': bool(_of_direct() and
+                        (os.getenv('ONLYFANS_PROXY_TEMPLATE') or '').strip())})
 
 
 @app.route('/api/onlyfans/accounts')
@@ -16670,6 +16672,13 @@ def api_onlyfans_status():
             # signs in, not after the browser finishes and nothing sticks.
             blockers.append('no_session_key')
             out['session_key_error'] = str(e)[:200]
+        out['proxy_pool'] = bool((os.getenv('ONLYFANS_PROXY_TEMPLATE') or '').strip())
+        if not account and not out['proxy_pool']:
+            # Signing in on Cloud Run's own address reads as connected for a
+            # moment and then reverts — OnlyFans drops a fresh session from a
+            # datacenter IP before it is ever captured. Say so before she
+            # burns a sign-in attempt, not after.
+            blockers.append('no_proxy')
         out['blockers'] = blockers
     return jsonify(out)
 
@@ -16862,11 +16871,33 @@ def api_onlyfans_debug_store():
         finally:
             of_session.drop(scratch_account)
 
+    # The exit IP a sign-in goes out on. Unset means Cloud Run's own address —
+    # a datacenter range OnlyFans is prone to drop a fresh session from before
+    # it is ever captured, which reads as "logged in, then instantly logged
+    # out" with nothing else here able to explain it.
+    out['proxy_pool'] = bool((os.getenv('ONLYFANS_PROXY_TEMPLATE') or '').strip())
+    try:
+        out['browser_health'] = _of_conn().call('GET', '/health', timeout=5) \
+            if hasattr(_of_conn(), 'call') else {'in_process': True}
+    except Exception as e:
+        out['browser_health_error'] = str(e)[:200]
+
     persona = (request.args.get('persona') or '').strip()
     if persona:
         out['persona'] = persona
         out['account'] = _of_account(persona)
         out['adopt_error'] = _get_setting(f'onlyfans_adopt_error_{persona}') or ''
+        out['proxy_label'] = of_session._proxy_label(_of_proxy_for(persona, ''))
+        # The live sign-in, if one is open right now — read while the window
+        # is still up, this is the state _of_adopt_direct actually saw.
+        attempt_id = _of_attempt(persona)
+        out['attempt_id'] = attempt_id
+        if attempt_id:
+            try:
+                live = _of_conn().get(attempt_id)
+                out['attempt'] = live.status() if live else None
+            except Exception as e:
+                out['attempt_error'] = str(e)[:200]
     out['rules'] = of_rules.state()
     out['last_x_log_error'] = _last_x_log_error[0]
     return jsonify(out)
