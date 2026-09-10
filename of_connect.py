@@ -345,7 +345,11 @@ class Attempt:
         cookies = context.cookies(COOKIE_ORIGIN)
         names = {c['name'] for c in cookies}
         self.cookie_names = sorted(names)
-        if not {'sess', 'auth_id'} <= names:
+        # 'sess' is the one cookie every signed-in page carries; 'auth_id' used
+        # to come with it but OnlyFans no longer always sets it, and the
+        # /users/me fetch below is the actual proof either way -- this is only
+        # a cheap pre-check to skip a fetch when there is plainly no session yet.
+        if 'sess' not in names:
             self.capture_note = 'awaiting_cookies'
             return
         try:
