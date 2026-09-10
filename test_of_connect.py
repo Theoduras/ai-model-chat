@@ -45,6 +45,8 @@ def bare_attempt(account='acct1'):
     a.viewport = dict(of_connect.VIEWPORT)
     a.state, a.error, a.result = 'signin', '', {}
     a.frame, a.frame_at = b'', 0.0
+    a.probes, a.capture_note = 0, ''
+    a.page_url, a.cookie_names = '', []
     a.started = a.touched = time.time()
     a._done = threading.Event()
     a._commands = queue.Queue()

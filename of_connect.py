@@ -119,6 +119,13 @@ class Attempt:
         self.result = {}
         self.touched = time.time()
         self.started = time.time()
+        # Diagnostics only: _try_capture_session returns silently on every
+        # failure path, so these are the only record of why a sign-in never
+        # reaches 'connected'.
+        self.probes = 0
+        self.capture_note = ''
+        self.page_url = ''
+        self.cookie_names = []
         self._commands = queue.Queue()
         self._done = threading.Event()
         self._thread = threading.Thread(target=self._run, daemon=True,
@@ -141,7 +148,9 @@ class Attempt:
                 'persona': self.persona, 'account': self.account,
                 'width': self.viewport['width'], 'height': self.viewport['height'],
                 'expires_in': max(0, int(ATTEMPT_TTL - (time.time() - self.started))),
-                'result': self.result}
+                'result': self.result, 'probes': self.probes,
+                'capture_note': self.capture_note, 'page_url': self.page_url,
+                'cookie_names': self.cookie_names}
 
     def snapshot(self):
         """The latest frame as a data URL, or '' before the first one."""
@@ -328,18 +337,28 @@ class Attempt:
         signed in and signs its own requests, so a successful answer proves the
         session works before we ever store it.
         """
+        self.probes += 1
+        try:
+            self.page_url = page.url
+        except Exception:
+            pass
         cookies = context.cookies(COOKIE_ORIGIN)
         names = {c['name'] for c in cookies}
+        self.cookie_names = sorted(names)
         if not {'sess', 'auth_id'} <= names:
+            self.capture_note = 'awaiting_cookies'
             return
         try:
             who = page.evaluate(
                 "() => fetch('/api2/v2/users/me', {credentials:'include'})"
                 ".then(r => r.ok ? r.json() : null).catch(() => null)")
         except Exception:
+            self.capture_note = 'me_failed'
             return
         if not (isinstance(who, dict) and who.get('id')):
+            self.capture_note = 'no_user_id'
             return
+        self.capture_note = 'captured'
         try:
             x_bc = page.evaluate("() => localStorage.getItem('bcTokenSha') || ''")
             agent = page.evaluate('() => navigator.userAgent')

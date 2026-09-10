@@ -80,8 +80,11 @@ def service():
 
     @api.route('/health')
     def health():
+        display = os.environ.get('DISPLAY') or ''
         return jsonify({'ok': True, 'browser': of_connect.available(),
-                        'guarded': bool(TOKEN)})
+                        'guarded': bool(TOKEN), 'display': display,
+                        'headless': not display,
+                        'browser_path': of_connect.browser_path()})
 
     @api.route('/session', methods=['POST'])
     def start():
