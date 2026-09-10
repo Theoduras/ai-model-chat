@@ -4641,6 +4641,30 @@ def _set_setting(key, value):
                 pass
 
 
+def _set_setting_strict(key, value):
+    """Like _set_setting, but a failed write raises instead of vanishing. Used
+    on paths where a silent no-op reads as 'she never connected' — the OnlyFans
+    adopt writes chief among them."""
+    def _do():
+        from db import SessionLocal, set_app_setting
+        s = SessionLocal()
+        try:
+            set_app_setting(s, key, value)
+            s.commit()
+        finally:
+            s.close()
+    try:
+        _do()
+    except Exception as e:
+        if _ensure_x_tables():
+            try:
+                _do()
+                return
+            except Exception as e2:
+                e = e2
+        raise SettingUnreadable(str(e)[:200])
+
+
 def _del_setting(key):
     """Remove a setting row entirely. Storing '' would still read as a value;
     the point of a reset is that the key is gone."""
@@ -16478,11 +16502,20 @@ def _of_adopt_direct(attempt):
     # The attempt is cleared and the meta refreshed every time, reconnect
     # included — only the cursor reset below is skipped for the same account,
     # so a reconnect does not lose the fan history it already has.
-    _set_setting(f'onlyfans_account_{persona}', attempt.account)
-    _set_setting(f'onlyfans_account_meta_{persona}', json.dumps({
-        'onlyfans_id': result.get('user_id', ''),
-        'username': result.get('username', ''), 'name': result.get('name', '')}))
-    _set_setting(f'onlyfans_attempt_{persona}', '')
+    #
+    # Strict here on purpose: a swallowed failure on this exact write is what
+    # made a real sign-in look like nothing happened — a browser that signed
+    # in and a settings store that silently refused to say so.
+    try:
+        _set_setting_strict(f'onlyfans_account_{persona}', attempt.account)
+        _set_setting_strict(f'onlyfans_account_meta_{persona}', json.dumps({
+            'onlyfans_id': result.get('user_id', ''),
+            'username': result.get('username', ''), 'name': result.get('name', '')}))
+        _set_setting_strict(f'onlyfans_attempt_{persona}', '')
+    except SettingUnreadable as e:
+        logger.error('OnlyFans account could not be saved for %s: %s', persona, str(e)[:200])
+        _set_setting(f'onlyfans_adopt_error_{persona}', f'account could not be saved: {str(e)[:180]}')
+        return
     _set_setting(f'onlyfans_adopt_error_{persona}', '')
     if not same_account:
         # A different account on the same persona must not inherit the old
@@ -16630,6 +16663,13 @@ def api_onlyfans_status():
             out['adopt_error'] = adopt_err
         if account and out['session'].get('status') == of_session.STATUS_EXPIRED:
             blockers.append('session_expired')
+        try:
+            of_session._key()
+        except of_session.SessionError as e:
+            # A session cannot be kept without this — worth saying before she
+            # signs in, not after the browser finishes and nothing sticks.
+            blockers.append('no_session_key')
+            out['session_key_error'] = str(e)[:200]
         out['blockers'] = blockers
     return jsonify(out)
 
@@ -16766,6 +16806,69 @@ def api_onlyfans_debug():
                 out['first_messages'] = OF.messages(out['account'], fan, 3)
         except Exception as e:
             out['chats_error'] = str(e)[:300]
+    return jsonify(out)
+
+
+@app.route('/api/onlyfans/debug/store')
+@operator_only
+def api_onlyfans_debug_store():
+    """Names the cause when a sign-in finishes but the account never sticks:
+    which settings backend this instance sees, whether it can actually be
+    written and read back, and whether a session can be encrypted at all.
+    Carries no credentials — round-trips use a scratch key and are cleaned up."""
+    import socket, time as _time
+    if not _of_direct():
+        return jsonify({'error': 'not running the direct transport'}), 400
+    out = {'instance': socket.gethostname()}
+    try:
+        from db import DATABASE_URL
+        out['db'] = DATABASE_URL.split(':', 1)[0].split('+')[0]
+    except Exception as e:
+        out['db_error'] = str(e)[:200]
+
+    scratch_key = f'_of_debug_roundtrip_{int(_time.time() * 1000)}'
+    scratch_val = f'probe-{os.urandom(4).hex()}'
+    try:
+        _set_setting_strict(scratch_key, scratch_val)
+        readback = _get_setting_strict(scratch_key)
+        out['settings_roundtrip'] = (readback == scratch_val)
+        if not out['settings_roundtrip']:
+            out['settings_roundtrip_readback'] = readback
+    except SettingUnreadable as e:
+        out['settings_roundtrip'] = False
+        out['settings_error'] = str(e)[:200]
+    finally:
+        _del_setting(scratch_key)
+
+    try:
+        of_session._key()
+        out['session_key_ready'] = True
+        out['session_key_source'] = ('ONLYFANS_SESSION_KEY' if
+            (os.getenv('ONLYFANS_SESSION_KEY') or '').strip() else 'derived from SECRET_KEY')
+    except of_session.SessionError as e:
+        out['session_key_ready'] = False
+        out['session_key_error'] = str(e)[:200]
+
+    if out.get('session_key_ready'):
+        scratch_account = f'_of_debug_vault_{int(_time.time() * 1000)}'
+        try:
+            of_session.put(scratch_account, {
+                'user_id': 'debug', 'cookie': 'x=1', 'user_agent': 'debug-agent'})
+            back = of_session.get(scratch_account)
+            out['vault_roundtrip'] = bool(back and back.get('user_id') == 'debug')
+        except of_session.SessionError as e:
+            out['vault_roundtrip'] = False
+            out['vault_error'] = str(e)[:200]
+        finally:
+            of_session.drop(scratch_account)
+
+    persona = (request.args.get('persona') or '').strip()
+    if persona:
+        out['persona'] = persona
+        out['account'] = _of_account(persona)
+        out['adopt_error'] = _get_setting(f'onlyfans_adopt_error_{persona}') or ''
+    out['rules'] = of_rules.state()
+    out['last_x_log_error'] = _last_x_log_error[0]
     return jsonify(out)
 
 
