@@ -902,6 +902,223 @@ _SIGNER_JS = """(path) => {
 }"""
 
 
+def _cookies_for(session):
+    """The stored session's cookie header, as cookies a context can be given.
+
+    The session is kept as the header string the page sent, because that is
+    what a signed request needs. Putting a page back into that session means
+    taking it apart again.
+    """
+    out = []
+    for part in str((session or {}).get('cookie') or '').split(';'):
+        name, _, value = part.strip().partition('=')
+        if name and value:
+            out.append({'name': name, 'value': value, 'domain': '.onlyfans.com',
+                        'path': '/', 'secure': True})
+    return out
+
+
+class Signer:
+    """A page of OnlyFans' own, kept open, that signs paths on demand.
+
+    `static_param` is not in the bundle any more -- 3.1MB of it was read and
+    the revision OnlyFans signs with is not in there -- so there is nothing
+    left to reconstruct it from. What is left is the code that does the
+    signing, running in a page, and it will sign whatever that page asks for.
+
+    Two things follow, and both are why `sign_now` could not simply be called
+    per request. It launches a browser and loads the site every time, which is
+    half a minute a signature; and it signs as whoever the page is, which
+    logged out is user 0 -- and a signature made over user 0 is refused for a
+    request made as her. So the page is opened once, with her cookie in it, and
+    kept.
+
+    Playwright's sync API belongs to the thread that made it, and this is
+    driven from Flask request threads, so the browser lives on its own thread
+    and is spoken to through a queue.
+    """
+
+    # Long enough that a quiet hour does not cost a relaunch, short enough that
+    # a page which has quietly stopped signing is replaced rather than retried.
+    MAX_AGE = 3600
+    MAX_IDLE = 900
+
+    def __init__(self, account, session, proxy=''):
+        self.account = account
+        self.session = session or {}
+        self.proxy = proxy
+        self.id = uuid.uuid4().hex[:8]
+        self.error = ''
+        self.via = ''
+        self.signed = 0
+        self.opened_at = 0.0
+        self.used_at = 0.0
+        self.page = None
+        self._q = queue.Queue()
+        self._ready = threading.Event()
+        self._thread = None
+
+    # ── the public side, called from request threads ─────────────────────────
+
+    def start(self, timeout=120):
+        self._thread = threading.Thread(target=self._run, daemon=True,
+                                        name=f'of-signer-{self.id}')
+        self._thread.start()
+        self._ready.wait(timeout)
+        return self.live()
+
+    def live(self):
+        return bool(self._thread and self._thread.is_alive() and not self.error
+                    and self.opened_at)
+
+    def stale(self):
+        now = time.time()
+        return (now - self.opened_at > self.MAX_AGE
+                or (self.used_at and now - self.used_at > self.MAX_IDLE))
+
+    def sign(self, path, timeout=25):
+        """One signature, or {} and the reason on `self.error`."""
+        if not self.live():
+            return {}
+        box = queue.Queue(1)
+        self._q.put(('sign', path, box))
+        try:
+            got = box.get(timeout=timeout)
+        except queue.Empty:
+            return {}
+        self.used_at = time.time()
+        if got:
+            self.signed += 1
+        return got
+
+    def close(self):
+        self._q.put(('stop', '', None))
+
+    def state(self):
+        return {'account': self.account, 'live': self.live(), 'via': self.via,
+                'signed': self.signed, 'error': self.error[:200],
+                'age': int(time.time() - self.opened_at) if self.opened_at else None}
+
+    # ── the browser side, all on its own thread ──────────────────────────────
+
+    def _run(self):
+        probe = Attempt('', '', proxy=self.proxy, drive=False)
+        try:
+            with _driver()() as pw:
+                context = probe._launch(pw)[1]
+                try:
+                    self._open(context)
+                    self._serve(context)
+                finally:
+                    try:
+                        context.close()
+                    except Exception:
+                        pass
+        except Exception as e:
+            self.error = str(e)[:200]
+            logger.warning('signer %s could not start: %s', self.id, self.error)
+        finally:
+            self.opened_at = 0.0
+            self._ready.set()
+
+    def _open(self, context):
+        cookies = _cookies_for(self.session)
+        if not cookies:
+            raise ConnectError('this session has no cookie to sign with')
+        context.add_cookies(cookies)
+        # Before the first navigation: the interceptor is installed by the
+        # site's own code, and the hook has to be in place before it runs.
+        context.add_init_script('(' + _SIGN_HOOK_JS + ')()')
+        page = context.pages[0] if context.pages else context.new_page()
+        page.goto(SIGNIN_URL, wait_until='domcontentloaded', timeout=60000)
+        page.wait_for_timeout(3000)
+        self.page = page
+        self.opened_at = time.time()
+        self._ready.set()
+
+    def _serve(self, context):
+        while True:
+            try:
+                what, path, box = self._q.get(timeout=60)
+            except queue.Empty:
+                if self.stale():
+                    return
+                continue
+            if what == 'stop':
+                return
+            try:
+                got = self._sign_one(path)
+            except Exception as e:
+                self.error = str(e)[:200]
+                got = {}
+            if box is not None:
+                box.put(got)
+            if not self.live():
+                return
+
+    def _sign_one(self, path):
+        page = self.page
+        # The recorder is emptied first: a signature for an earlier path is
+        # still sitting in it, and the wrong one is worse than none.
+        page.evaluate('() => { window.__ofsigs = []; }')
+        found = page.evaluate(_SIGNER_JS, path) or {}
+        self.via = found.get('via') or self.via
+        if not found.get('via'):
+            self.error = 'no request interceptor on the page'
+            return {}
+        until = time.time() + 12
+        while time.time() < until:
+            for s in (page.evaluate('() => window.__ofsigs || []') or []):
+                h = s.get('headers') or {}
+                if of_rules.path_of(s.get('url') or '') != path:
+                    continue
+                if h.get('sign') and h.get('time'):
+                    return {'path': path, 'time': h['time'],
+                            'user_id': h.get('user-id') or '0',
+                            'sign': h['sign'],
+                            'app_token': h.get('app-token') or ''}
+            page.wait_for_timeout(250)
+        self.error = 'the page did not sign our path'
+        return {}
+
+
+_signers = {}
+_signers_lock = threading.Lock()
+
+
+def signer(account, session, proxy=''):
+    """The open signer for an account, started if there is not one.
+
+    Kept per account because a signature carries the user id the page is
+    signed in as: one creator's page cannot sign another's request.
+    """
+    with _signers_lock:
+        have = _signers.get(account)
+        if have and have.live() and not have.stale():
+            return have
+        if have:
+            try:
+                have.close()
+            except Exception:
+                pass
+            _signers.pop(account, None)
+        made = Signer(account, session, proxy)
+    made.start()
+    with _signers_lock:
+        _signers[account] = made
+    return made
+
+
+def signer_state():
+    with _signers_lock:
+        return [s.state() for s in _signers.values()]
+
+
+def sign_for(account, session, path, proxy=''):
+    """Sign one path as this account, through OnlyFans' own page."""
+    return signer(account, session, proxy).sign(path)
+
+
 def sign_now(path, user_id='0', proxy='', timeout=30):
     """A signature for a path of ours, made by OnlyFans' own code.
 

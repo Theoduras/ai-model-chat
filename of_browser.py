@@ -92,6 +92,12 @@ def service():
                         # Lets the app say "this service is an older build"
                         # instead of silently capturing nothing.
                         'signing_capture': hasattr(of_connect, 'sample_now'),
+                        # Same purpose: signing through the page is newer than
+                        # the capture, so a service that has one and not the
+                        # other has to be readable as exactly that.
+                        'page_signing': hasattr(of_connect, 'sign_for'),
+                        'signers': (of_connect.signer_state()
+                                    if hasattr(of_connect, 'signer_state') else []),
                         'build': of_trace.build_id()})
 
     @api.route('/signing-sample', methods=['POST'])
@@ -116,6 +122,28 @@ def service():
             return jsonify({'ok': False, 'error': str(e)[:200]}), 400
         return jsonify({'ok': True, 'sign': out.get('sign') or {},
                         'report': out.get('report') or {}})
+
+    @api.route('/sign-for', methods=['POST'])
+    def sign_for():
+        """One signature for an account, from a page kept open as her.
+
+        The session comes over the wire on every call rather than being held
+        here: this service keeps no vault, and a signer that outlived the app's
+        idea of the session would go on signing for an account already
+        disconnected.
+        """
+        d = request.json or {}
+        account = (d.get('account') or '').strip()
+        path = (d.get('path') or '').strip()
+        if not (account and path):
+            return jsonify({'ok': False, 'error': 'account and path required'}), 400
+        try:
+            got = of_connect.sign_for(account, d.get('session') or {}, path,
+                                      proxy=(d.get('proxy') or '').strip())
+        except Exception as e:
+            return jsonify({'ok': False, 'error': str(e)[:200]}), 400
+        return jsonify({'ok': True, 'sign': got or {},
+                        'signers': of_connect.signer_state()})
 
     @api.route('/derive-rules', methods=['POST'])
     def derive_rules():
@@ -317,6 +345,21 @@ class Remote:
                         {'path': path, 'user_id': user_id, 'proxy': proxy},
                         timeout=120)
         return {'sign': out.get('sign') or {}, 'report': out.get('report') or {}}
+
+    def sign_for(self, account, session, path, proxy=''):
+        # Short: this sits in front of a real request, so a signer that has
+        # stopped answering has to fail fast enough to fall back to arithmetic
+        # rather than hold the round open.
+        out = self.call('POST', '/sign-for',
+                        {'account': account, 'session': session, 'path': path,
+                         'proxy': proxy}, timeout=40)
+        return out.get('sign') or {}
+
+    def signer_state(self):
+        try:
+            return self.call('GET', '/health', timeout=6).get('signers') or []
+        except of_connect.ConnectError:
+            return []
 
     def derive_rules(self, sample, proxy=''):
         out = self.call('POST', '/derive-rules', {'sample': sample, 'proxy': proxy},

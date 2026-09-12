@@ -260,6 +260,10 @@ def call(account, method, path, body=None):
     session = of_session.get(account)
     if not session:
         raise OnlyFansError(0, f'no OnlyFans session for {account}')
+    # of_rules signs from the session alone, and signing through OnlyFans' own
+    # page needs a page open as this account -- so the session has to carry
+    # which account it is. It is never stored with this in it.
+    session = dict(session, account=account)
     standing = _holding(account, session)
     if standing:
         raise standing

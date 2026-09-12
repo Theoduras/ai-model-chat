@@ -16405,6 +16405,28 @@ if _of_direct():
     of_session.store_hooks(lambda a: _get_setting(f'onlyfans_vault_{a}') or '',
                            _of_vault_save, _of_vault_delete, _of_vault_accounts)
 
+    def _of_page_sign(path, session):
+        """Have OnlyFans' own page sign one request, as the account making it.
+
+        of_rules reaches this only when no published set reproduces what
+        OnlyFans is producing, which is where the literal scan left us:
+        static_param is not in the bundle any more, so the code still running
+        in a page is the only thing that can sign. Returning {} puts the caller
+        back on local arithmetic, which is refused but no worse than now.
+        """
+        account = str((session or {}).get('account') or '')
+        if not account:
+            return {}
+        try:
+            return _of_conn().sign_for(account, session, path,
+                                       proxy=_of_proxy_for(account, '')) or {}
+        except Exception as e:
+            of_trace.note('signing', 'the page could not sign %s: %s'
+                          % (path[:60], str(e)[:140]), 'warning')
+            return {}
+
+    of_rules.signer_hooks(_of_page_sign)
+
     # Our watcher is already inside this process, so its events skip the
     # webhook round trip. They still carry an idempotency key, because the
     # backup sweep and the watcher can see the same message.

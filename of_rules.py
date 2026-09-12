@@ -72,6 +72,7 @@ _save_cache = None
 _load_override = None
 _load_sample = None
 _save_sample = None
+_page_signer = None
 _sample_cache = (0.0, {})
 # The oracle is consulted on the way to every signature, so it is held briefly
 # rather than read from the database each time. It only changes on a connect.
@@ -107,6 +108,17 @@ def override_hooks(load):
     source: it is the escape hatch for a rotation the mirrors have not caught."""
     global _load_override
     _load_override = load
+
+
+def signer_hooks(sign_path):
+    """Lend the module a way to have OnlyFans' own page sign a request.
+
+    Only reached when no rule set reproduces what OnlyFans is producing: local
+    arithmetic needs no browser and is the normal path, and falling back to it
+    is what keeps a signer that is down from taking the app with it.
+    """
+    global _page_signer
+    _page_signer = sign_path
 
 
 def sample_hooks(load, save):
@@ -526,6 +538,28 @@ def sign(path, user_id='0', when=None, r=None):
     return signature, stamp
 
 
+def _signature(path, user_id, session, when, r):
+    """Who signs this request: our arithmetic, or OnlyFans' own page.
+
+    Ours whenever it can be trusted, because it costs nothing. When no rule set
+    reproduces the signature OnlyFans is producing, ours is known wrong and the
+    page is asked instead -- it is running the code we can no longer rebuild.
+    """
+    # An explicit time means a comparison rather than a request. That has to
+    # stay arithmetic: compare_headers would otherwise open a browser to
+    # describe itself, and a diagnostic that makes requests is not one.
+    if when is None and _page_signer and proven() is not True:
+        try:
+            got = _page_signer(path, session) or {}
+        except Exception as e:
+            logger.warning('the page could not sign %s: %s', path[:60], str(e)[:140])
+            got = {}
+        if got.get('sign') and got.get('time'):
+            return dict(got, time=str(got['time']))
+    signature, stamp = sign(path, user_id, when=when, r=r)
+    return {'sign': signature, 'time': stamp, 'user_id': user_id}
+
+
 def headers(path, session=None, when=None):
     """Every header a signed OnlyFans request needs.
 
@@ -536,13 +570,15 @@ def headers(path, session=None, when=None):
     r = rules()
     session = session or {}
     user_id = str(session.get('user_id') or '0')
-    signature, stamp = sign(path, user_id, when=when, r=r)
+    made = _signature(path, user_id, session, when, r)
     out = {
         'accept': 'application/json, text/plain, */*',
-        'app-token': r['app_token'],
-        'sign': signature,
-        'time': stamp,
-        'user-id': user_id,
+        'app-token': made.get('app_token') or r['app_token'],
+        'sign': made['sign'],
+        'time': made['time'],
+        # Whatever signed it decides this: the id is inside the signature, so a
+        # header disagreeing with it is refused exactly as a bad signature is.
+        'user-id': str(made.get('user_id') or user_id),
         'user-agent': session.get('user_agent') or DEFAULT_USER_AGENT,
         'accept-language': 'en-US,en;q=0.9',
         'referer': 'https://onlyfans.com/',

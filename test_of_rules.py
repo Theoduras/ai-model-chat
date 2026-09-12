@@ -399,6 +399,88 @@ class OracleForcedRefreshCooldownTest(unittest.TestCase):
         self.assertEqual(len(calls), 1)
 
 
+class PageSigningTest(unittest.TestCase):
+    """When no rule set reproduces what OnlyFans produces, its own page signs.
+
+    Observed live: OnlyFans on revision 65034, and 3.1MB of its bundle read
+    without static_param in it. There is nothing left to rebuild the rules
+    from, so the code still running in a page is asked instead.
+    """
+
+    def setUp(self):
+        self.calls = []
+        of_rules._rules = dict(RULES)
+        of_rules._fetched_at = time.time()
+        self.addCleanup(setattr, of_rules, '_rules', {})
+        self.addCleanup(of_rules.signer_hooks, None)
+        self.addCleanup(of_rules.sample_hooks, None, None)
+
+    def _page(self, **over):
+        def sign(path, session):
+            self.calls.append((path, session))
+            return dict({'sign': '65034:pagemade:7bd:6aa3eaf6', 'time': '1789242509672',
+                         'user_id': '777', 'app_token': 'from-page'}, **over)
+        return sign
+
+    def _disproved(self):
+        """An oracle no loaded set reproduces -- the live situation."""
+        of_rules.sample_hooks(lambda: json.dumps(
+            {'path': '/api2/v2/users/me', 'user_id': '0',
+             'time': '1789242509672', 'sign': '65034:nothingreproducesthis:1:2'}),
+            lambda v: None)
+
+    def test_the_page_signs_when_our_own_rules_are_known_wrong(self):
+        self._disproved()
+        of_rules.signer_hooks(self._page())
+        h = of_rules.headers('/api2/v2/chats', {'user_id': '99', 'account': 'acct1'})
+        self.assertEqual(h['sign'], '65034:pagemade:7bd:6aa3eaf6')
+        self.assertEqual(h['time'], '1789242509672')
+        self.assertEqual(h['app-token'], 'from-page')
+        self.assertEqual(self.calls[0][0], '/api2/v2/chats')
+        # The session is passed through, because a page can only sign as the
+        # account it is signed in as.
+        self.assertEqual(self.calls[0][1]['account'], 'acct1')
+
+    def test_the_signing_user_id_is_the_one_that_signed(self):
+        """The id is inside the signature, so a header disagreeing with it is
+        refused exactly as a bad signature is."""
+        of_rules._rules = {k: v for k, v in RULES.items() if k != 'remove_headers'}
+        self._disproved()
+        of_rules.signer_hooks(self._page())
+        h = of_rules.headers('/api2/v2/chats', {'user_id': '99'})
+        self.assertEqual(h['user-id'], '777')
+
+    def test_rules_that_still_work_are_not_sent_to_a_browser(self):
+        """Page signing costs a round trip. It is the fallback, not the path."""
+        stamp = 1789242509672
+        of_rules.sample_hooks(lambda: json.dumps(
+            {'path': '/api2/v2/users/me', 'user_id': '0', 'time': str(stamp),
+             'sign': expected('/api2/v2/users/me', '0', stamp)}), lambda v: None)
+        of_rules.signer_hooks(self._page())
+        h = of_rules.headers('/api2/v2/chats', {'user_id': '99'})
+        self.assertEqual(self.calls, [])
+        self.assertTrue(h['sign'].startswith('63708:'))
+
+    def test_a_comparison_never_opens_a_browser(self):
+        """compare_headers describes a request; a diagnostic that makes one is
+        not a diagnostic."""
+        self._disproved()
+        of_rules.signer_hooks(self._page())
+        of_rules.headers('/api2/v2/users/me', {'user_id': '99'}, when=1789242509672)
+        self.assertEqual(self.calls, [])
+
+    def test_a_signer_that_fails_falls_back_to_arithmetic(self):
+        """Refused is no worse than now; raising would take the app down with
+        the browser."""
+        self._disproved()
+        of_rules.signer_hooks(lambda path, session: {})
+        h = of_rules.headers('/api2/v2/chats', {'user_id': '99'})
+        self.assertTrue(h['sign'].startswith('63708:'))
+        of_rules.signer_hooks(lambda path, session: 1 / 0)
+        h = of_rules.headers('/api2/v2/chats', {'user_id': '99'})
+        self.assertTrue(h['sign'].startswith('63708:'))
+
+
 class StampTest(unittest.TestCase):
     RULES = {'static_param': 's', 'format': '{}:{:x}', 'checksum_indexes': [0],
              'checksum_constant': 1, 'app_token': 't'}
