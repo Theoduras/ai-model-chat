@@ -72,6 +72,10 @@ class CaptureTest(unittest.TestCase):
     def setUp(self):
         use_memory_store()
         of_session.reset_key()
+        # Importing app (or of_browser) points the sink somewhere else, and a
+        # test that reads the vault has to be told where its own sessions go.
+        previous, of_connect._sink = of_connect._sink, None
+        self.addCleanup(setattr, of_connect, '_sink', previous)
         self.a = bare_attempt()
         p = mock.patch.object(of_rules, 'rules', return_value={
             'static_param': 's', 'format': '{}:{:x}',
