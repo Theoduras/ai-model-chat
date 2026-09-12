@@ -85,9 +85,12 @@ class CaptureTest(unittest.TestCase):
         self.assertEqual(self.a.state, 'signin')
         self.assertEqual(of_session.get('acct1'), {})
 
-    def test_nothing_is_stored_if_onlyfans_does_not_confirm_the_session(self):
+    def test_nothing_is_stored_when_there_is_no_id_to_be_had(self):
+        """A page carrying no id is not a sign-in, whatever else it carries.
+        An unconfirmed page that does carry one is kept unverified instead —
+        see ConnectDuringARotationTest."""
         self.a._try_capture_session(FakePage(None), FakeContext(
-            [{'name': 'sess', 'value': 'a'}, {'name': 'auth_id', 'value': '9'}]))
+            [{'name': 'sess', 'value': 'a'}]))
         self.assertEqual(self.a.state, 'signin')
         self.assertEqual(of_session.get('acct1'), {})
 
@@ -315,6 +318,36 @@ class SigningSampleTest(unittest.TestCase):
         self.assertNotIn('cookie', attempt.signing_sample)
         self.assertNotIn('x_bc', attempt.signing_sample)
         self.assertNotIn('secret', json.dumps(attempt.signing_sample))
+
+
+class ConnectDuringARotationTest(unittest.TestCase):
+    """A rule set OnlyFans has moved past must not be why she cannot connect."""
+
+    def _page(self, who):
+        page = mock.Mock()
+        page.evaluate.side_effect = lambda js, *a: (
+            who if 'users/me' in str(js) else 'x')
+        return page
+
+    def _context(self, cookies):
+        ctx = mock.Mock()
+        ctx.cookies.return_value = cookies
+        return ctx
+
+    def test_falls_back_to_the_id_in_her_cookies(self):
+        a = bare_attempt()
+        kept = {}
+        with mock.patch.object(of_connect, '_sink', lambda acct, s: kept.update(s)):
+            a._try_capture_session(self._page(None), self._context(
+                [{'name': 'sess', 'value': 's'}, {'name': 'auth_id', 'value': '4242'}]))
+        self.assertEqual(a.capture_note, 'unverified')
+        self.assertEqual(kept['user_id'], '4242')
+
+    def test_still_refuses_when_there_is_no_session_at_all(self):
+        a = bare_attempt()
+        a._try_capture_session(self._page(None),
+                               self._context([{'name': 'sess', 'value': 's'}]))
+        self.assertEqual(a.capture_note, 'no_user_id')
 
 
 if __name__ == '__main__':

@@ -264,6 +264,7 @@
     <div class="row-inline" style="margin-top:10px;">
       <button class="btn-ai" onclick="refreshRules()">Refresh signing rules</button>
       <button class="btn-ai" style="background:var(--surface); color:var(--text-2);" onclick="testSigning()">Test signing</button>
+      <button class="btn-ai" onclick="captureSignature()">Capture signature</button>
     </div>
     <div class="result-box" id="signing-test"></div>
     <p class="hint" style="margin-top:14px;">If no published set works, paste a current one
@@ -663,12 +664,24 @@ async function testSigning(){
     +'<tr class="hint"><th align="left">Rule set</th><th align="left">Revision</th>'
     +'<th align="left">vs OnlyFans&rsquo; own signature</th></tr>'+rows+'</table>'
     +'<p class="hint" style="margin-top:8px;">'
-    +(r.has_sample?'':'No signature captured yet — connect her account once so the page '
-      +'hands us a worked example to check against.<br>')
+    +(r.has_sample?('Signature captured '+(r.sample_age==null?'':'about '
+        +Math.max(1,Math.round(r.sample_age/60))+' min ago')+'.<br>')
+      :(r.can_capture?'No signature captured yet — press Capture signature. No sign-in needed.<br>'
+        :'No signature captured yet, and the browser service cannot capture one — it is '
+         +'running an older build, so redeploy it.<br>'))
     +'Request from this server: '+(call.ok===true?'<span style="color:#4ade80;">worked ('
       +esc(call.username||'')+')</span>':call.ok===false
       ?'<span style="color:#fb7185;">'+esc(call.error||'failed')+'</span>':'not tried')
     +'</p>';
+}
+
+async function captureSignature(){
+  const box=document.getElementById('signing-test');
+  busy(box,'Opening OnlyFans to read one signature off it… about 20 seconds.');
+  const r=await post('/api/onlyfans/signing/capture',{persona:persona()});
+  if(!r.ok){err(box,r.error||'Could not capture a signature.');return;}
+  showRules(r.rules);
+  await testSigning();
 }
 
 async function saveOverride(clear){

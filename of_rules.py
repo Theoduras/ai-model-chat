@@ -138,6 +138,28 @@ def put_sample(s):
     return kept
 
 
+def sample_age():
+    """Seconds since the oracle was captured, or None."""
+    s = sample()
+    try:
+        return max(0, int(time.time() - int(s['time']) / (1000 if len(s['time']) > 11 else 1)))
+    except (KeyError, ValueError, TypeError):
+        return None
+
+
+def format_of(s):
+    """The format string a captured signature was built with.
+
+    A sign reads `<prefix>:<sha1>:<hex checksum>:<suffix>`, so the format is
+    sitting in plain view in every sample — no need to trust a published set to
+    still have the right one.
+    """
+    parts = str((s or {}).get('sign') or '').split(':')
+    if len(parts) != 4:
+        return ''
+    return f'{parts[0]}:{{}}:{{:x}}:{parts[3]}'
+
+
 def verify(s, r):
     """Does `r` reproduce the signature in sample `s`? None when unanswerable."""
     if not (s and s.get('sign') and _valid(r)):
@@ -376,27 +398,33 @@ def path_of(url):
 _LITERAL_RE = re.compile(r'[\'"]([A-Za-z0-9+/=_-]{16,64})[\'"]')
 
 
-def solve(bundle, s=None, base=None):
+def solve(bundle, s=None, bases=None):
     """Recover the rules from OnlyFans' own JS, given a sample to check against.
 
-    `base` supplies the parts that are not being searched for (format, checksum
-    indexes and constant); only the static_param is solved. Returns the working
-    rule set, or {} when nothing in the bundle reproduces the sample.
+    The format comes from the sample itself. What cannot be read off a signature
+    is the checksum recipe, so each known set's indexes and constant are tried
+    in turn: a rotation of the static_param alone — the usual one — is then
+    recovered outright. Returns the working set, or {}.
     """
     s = s or sample()
-    base = base or _rules
-    if not (s and s.get('sign') and base and base.get('format')):
+    fmt = format_of(s)
+    if not (s and fmt):
         return {}
-    seen = set()
+    bases = [b for b in (bases or [_rules, override()]) if b and b.get('checksum_indexes')]
+    if not bases:
+        return {}
+    candidates, seen = [], set()
     for match in _LITERAL_RE.finditer(bundle or ''):
-        candidate = match.group(1)
-        if candidate in seen:
-            continue
-        seen.add(candidate)
-        trial = dict(base, static_param=candidate)
-        if verify(s, trial):
-            logger.info('recovered the OnlyFans static_param from the page bundle')
-            return trial
+        value = match.group(1)
+        if value not in seen:
+            seen.add(value)
+            candidates.append(value)
+    for base in bases:
+        for value in candidates:
+            trial = dict(base, static_param=value, format=fmt)
+            if verify(s, trial):
+                logger.info('recovered the OnlyFans static_param from the page bundle')
+                return trial
     return {}
 
 

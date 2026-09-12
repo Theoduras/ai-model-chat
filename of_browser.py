@@ -84,7 +84,20 @@ def service():
         return jsonify({'ok': True, 'browser': of_connect.available(),
                         'guarded': bool(TOKEN), 'display': display,
                         'headless': not display,
-                        'browser_path': of_connect.browser_path()})
+                        'browser_path': of_connect.browser_path(),
+                        # Lets the app say "this service is an older build"
+                        # instead of silently capturing nothing.
+                        'signing_capture': hasattr(of_connect, 'sample_now')})
+
+    @api.route('/signing-sample', methods=['POST'])
+    def signing_sample():
+        """One signature from OnlyFans' own page. No sign-in, no credentials."""
+        d = request.json or {}
+        try:
+            sample = of_connect.sample_now(proxy=(d.get('proxy') or '').strip())
+        except Exception as e:
+            return jsonify({'ok': False, 'error': str(e)[:200]}), 400
+        return jsonify({'ok': True, 'sample': sample})
 
     @api.route('/session', methods=['POST'])
     def start():
@@ -258,6 +271,11 @@ class Remote:
             self.call('POST', f'/session/{attempt_id}/cancel', {})
         except of_connect.ConnectError:
             pass
+
+    def sample_now(self, proxy='', timeout=25):
+        out = self.call('POST', '/signing-sample', {'proxy': proxy},
+                        timeout=START_TIMEOUT)
+        return out.get('sample') or {}
 
     def claim(self, attempt):
         """The raw session, for the app to put in the vault. The service holds

@@ -16780,6 +16780,32 @@ def api_onlyfans_rules_override():
     return jsonify({'ok': True, 'verified': proven, 'rules': of_rules.state()})
 
 
+@app.route('/api/onlyfans/signing/capture', methods=['POST'])
+@operator_only
+def api_onlyfans_signing_capture():
+    """Open a browser, read one signature off OnlyFans' own page, keep it.
+
+    Needs no account and no sign-in, which is the point: it is what breaks the
+    deadlock where the rules cannot be fixed without a sample and a sign-in
+    cannot finish without the rules.
+    """
+    if not _of_direct():
+        return jsonify({'ok': False, 'error': 'not running the direct transport'}), 400
+    persona = ((request.json or {}).get('persona') or '').strip()
+    try:
+        sample = _of_conn().sample_now(proxy=_of_proxy_for(persona, ''))
+    except AttributeError:
+        return jsonify({'ok': False, 'error': 'the browser service is running an older '
+                                              'build — redeploy it to capture '
+                                              'signatures'}), 400
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:250]}), 502
+    if not sample:
+        return jsonify({'ok': False, 'error': 'the page made no signed request in time'}), 502
+    of_rules.put_sample(sample)
+    return jsonify({'ok': True, 'rules': of_rules.state()})
+
+
 @app.route('/api/onlyfans/signing/test', methods=['POST'])
 @operator_only
 def api_onlyfans_signing_test():
@@ -16817,7 +16843,12 @@ def api_onlyfans_signing_test():
             live = {'ok': True, 'username': str(who.get('username') or '')}
         except Exception as e:
             live = {'ok': False, 'error': str(e)[:300]}
+    try:
+        can_capture = bool(_of_conn().available()) and hasattr(_of_conn(), 'sample_now')
+    except Exception:
+        can_capture = False
     return jsonify({'ok': True, 'has_sample': bool(want), 'candidates': rows,
+                    'sample_age': of_rules.sample_age(), 'can_capture': can_capture,
                     'server_call': live, 'rules': of_rules.state()})
 
 
@@ -17175,7 +17206,8 @@ def _of_check_sessions():
             # A session OnlyFans has revoked is marked dead in the vault; a
             # request it refused to sign leaves it live. Only the first is the
             # creator's to fix, and only the first should stop the watcher.
-            expired = not _of_direct() or not of_session.live(account)
+            stuck = 'signs what OnlyFans will accept' in detail or 'signature' in detail
+            expired = (not _of_direct() or not of_session.live(account)) and not stuck
             if expired:
                 of_events.unwatch(account)
             logger.warning('OnlyFans account %s is not answering: %s', slug, detail)

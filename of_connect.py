@@ -117,6 +117,7 @@ class Attempt:
     # Only ever replaced, never mutated in place, so one default is safe to
     # share — and status() cannot trip over an attempt built without it.
     signing_sample = {}
+    _sampled = False
 
     def __init__(self, persona, account, proxy='', user_agent='', viewport=None):
         self.id = 'ofc_' + uuid.uuid4().hex[:16]
@@ -359,14 +360,23 @@ class Attempt:
                     'path': of_rules.path_of(request.url), 'time': h['time'],
                     'user_id': h.get('user-id') or '0', 'sign': h['sign'],
                     'app_token': h.get('app-token') or ''}
+                if not self._sampled:
+                    self._sampled = True
+                    logger.info('captured a signature OnlyFans\' own page produced '
+                                '(%s)', self.signing_sample['path'])
                 if _rules_sink:
                     _rules_sink(self.signing_sample)
             except Exception as e:
                 logger.debug('could not keep a signing sample: %s', str(e)[:120])
-        try:
-            page.on('request', seen)
-        except Exception as e:
-            logger.debug('could not watch signing: %s', str(e)[:120])
+        # The context, not the page: a sign-in navigates and the human check
+        # can open a page of its own, and a request made outside the one page
+        # object we happen to hold is invisible.
+        for target in (getattr(page, 'context', None), page):
+            try:
+                target.on('request', seen)
+                return
+            except Exception as e:
+                logger.debug('could not watch signing: %s', str(e)[:120])
 
     def _capture(self, page):
         if time.time() - self.frame_at < 0.2:
@@ -422,17 +432,71 @@ class Attempt:
         except Exception:
             self.capture_note = 'me_failed'
             return
+        cookie = of_session.cookie_string(cookies)
         if not (isinstance(who, dict) and who.get('id')):
-            self.capture_note = 'no_user_id'
-            return
-        self.capture_note = 'captured'
+            # A rotation makes our own signature unacceptable, and that must not
+            # be the reason a creator cannot connect: the page is plainly signed
+            # in, so take the id OnlyFans put in her cookies and let the console
+            # say it is unverified rather than refusing to finish.
+            auth_id = next((c['value'] for c in cookies
+                            if c.get('name') == 'auth_id' and c.get('value')), '')
+            if not auth_id:
+                self.capture_note = 'no_user_id'
+                return
+            who = {'id': auth_id}
+            self.capture_note = 'unverified'
+        else:
+            self.capture_note = 'captured'
         session = {'user_id': str(who['id']), 'username': who.get('username') or '',
                    'name': who.get('name') or '',
-                   'cookie': of_session.cookie_string(cookies), 'x_bc': x_bc or '',
+                   'cookie': cookie, 'x_bc': x_bc or '',
                    'user_agent': agent or self.user_agent, 'proxy': self.proxy}
         self.result = (_sink or of_session.put)(self.account, session)
         self.state = 'connected'
         self._done.set()
+
+
+def sample_now(proxy='', timeout=25):
+    """One signature OnlyFans' own page produced, without signing in to anything.
+
+    A logged-out page signs its API calls exactly the same way, as user 0, so
+    this is a complete oracle: it says which rule set is current whether or not
+    an account can be connected. Nothing is stored and no credentials exist —
+    the browser is opened, the first signed request is read off it, and it is
+    closed again.
+    """
+    got = {}
+
+    def seen(request):
+        if got or '/api2/v2/' not in request.url:
+            return
+        h = request.headers
+        if h.get('sign') and h.get('time'):
+            got.update({'path': of_rules.path_of(request.url), 'time': h['time'],
+                        'user_id': h.get('user-id') or '0', 'sign': h['sign'],
+                        'app_token': h.get('app-token') or ''})
+
+    probe = Attempt('', '', proxy=proxy)
+    with _driver()() as pw:
+        context = probe._launch(pw)[1]
+        try:
+            page = context.pages[0] if context.pages else context.new_page()
+            context.on('request', seen)
+            try:
+                page.goto(SIGNIN_URL, wait_until='domcontentloaded', timeout=30000)
+            except Exception as e:
+                logger.info('signature capture could not load the page: %s', str(e)[:120])
+            until = time.time() + timeout
+            while not got and time.time() < until:
+                page.wait_for_timeout(250)
+        finally:
+            try:
+                context.close()
+            except Exception:
+                pass
+    if got:
+        logger.info('captured a signature with no sign-in (%s)', got['path'])
+    return got
 
 
 def _path(kw):

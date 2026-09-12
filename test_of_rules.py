@@ -122,6 +122,21 @@ class SourceTest(unittest.TestCase):
         for url in of_rules.RULES_SOURCES:
             self.assertNotIn(url.split('/')[3], of_rules.label_of(url))
 
+    def test_reads_the_format_out_of_a_signature(self):
+        self.assertEqual(of_rules.format_of({'sign': '63708:abc:1f4:6a7f22a1'}),
+                         RULES['format'])
+        self.assertEqual(of_rules.format_of({'sign': 'nonsense'}), '')
+
+    def test_solves_even_when_the_base_format_rotated(self):
+        """The sample carries the format, so a base with a stale one still works."""
+        sample = {'path': '/api2/v2/chats', 'user_id': '1', 'time': '1700000000',
+                  'sign': expected('/api2/v2/chats', '1', 1700000000)}
+        base = dict(RULES, static_param='OLD', format='999:{}:{:x}:zzzz')
+        bundle = 'x="%s"' % RULES['static_param']
+        got = of_rules.solve(bundle, sample, bases=[base])
+        self.assertEqual(got['static_param'], RULES['static_param'])
+        self.assertEqual(got['format'], RULES['format'])
+
     def test_a_fingerprint_tracks_what_the_signature_is_built_from(self):
         self.assertEqual(of_rules.fingerprint(RULES),
                          of_rules.fingerprint(dict(RULES, app_token='other')))
@@ -200,12 +215,12 @@ class OracleTest(unittest.TestCase):
 
     def test_solves_the_static_param_out_of_a_bundle(self):
         bundle = 'var a="notitatall",b="%s",c=1;' % RULES['static_param']
-        self.assertEqual(of_rules.solve(bundle, self.sample, RULES)['static_param'],
+        self.assertEqual(of_rules.solve(bundle, self.sample, bases=[RULES])['static_param'],
                          RULES['static_param'])
 
     def test_solving_gives_up_rather_than_guessing(self):
         self.assertEqual(of_rules.solve('var a="nothing useful here";',
-                                        self.sample, RULES), {})
+                                        self.sample, bases=[RULES]), {})
 
 
 class RotationTest(unittest.TestCase):
