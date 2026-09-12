@@ -352,3 +352,78 @@ class ConnectDuringARotationTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class SampleNowDiagnosticsTest(unittest.TestCase):
+    """A capture that finds nothing has to say what it saw. A bare {} is the
+    same answer for a blocked page, a slow page and a page that signs nothing,
+    and that ambiguity is what made this cost a deploy per guess."""
+
+    class _Page:
+        url = 'https://onlyfans.com/'
+
+        def __init__(self, requests):
+            self._requests = requests
+            self._ctx = None
+
+        def goto(self, *a, **kw):
+            for r in self._requests:
+                self._ctx.fire(r)
+
+        def wait_for_timeout(self, ms):
+            pass
+
+        def title(self):
+            return 'Just a moment…'
+
+    class _Context:
+        def __init__(self, page):
+            page._ctx = self
+            self.pages = [page]
+            self._on = []
+
+        def on(self, event, fn):
+            self._on.append(fn)
+
+        def fire(self, request):
+            for fn in self._on:
+                fn(request)
+
+        def close(self):
+            pass
+
+    def _run(self, requests):
+        page = self._Page(requests)
+        context = self._Context(page)
+
+        class _PW:
+            def __enter__(self_inner):
+                return object()
+
+            def __exit__(self_inner, *a):
+                return False
+
+        with mock.patch.object(of_connect, '_driver', lambda: (lambda: _PW())), \
+                mock.patch.object(of_connect.Attempt, '_launch',
+                                  lambda self, pw: (None, context)):
+            return of_connect.sample_now(timeout=0)
+
+    def test_a_signed_request_is_the_sample(self):
+        got = self._run([Req('https://onlyfans.com/api2/v2/init',
+                             {'sign': '13190:a:ff:z', 'time': '17', 'user-id': '0'})])
+        self.assertEqual(got['sign'], '13190:a:ff:z')
+        self.assertEqual(got['user_id'], '0')
+
+    def test_nothing_signed_comes_back_with_what_the_page_was_doing(self):
+        got = self._run([Req('https://onlyfans.com/api2/v2/init', {}),
+                         Req('https://onlyfans.com/style.css', {})])
+        self.assertNotIn('sign', got)
+        saw = got['_saw']
+        self.assertEqual((saw['requests'], saw['api'], saw['signed']), (2, 1, 0))
+        self.assertIn('moment', saw['title'])
+
+
+class Req:
+    def __init__(self, url, headers):
+        self.url = url
+        self.headers = headers

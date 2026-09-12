@@ -24,6 +24,7 @@ import urllib.error
 import urllib.request
 
 import of_connect
+import of_trace
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,9 @@ def service():
     from flask import Flask, jsonify, request
 
     api = Flask(__name__)
+    # The app polls /trace for these, so a capture that fails here is readable
+    # in the console instead of only in this service's Cloud Run log.
+    of_trace.install()
     # A captured session, by account, held until the app claims it. The vault
     # is on the app's side, so this is the only copy until then.
     pending = {}
@@ -98,6 +102,11 @@ def service():
         except Exception as e:
             return jsonify({'ok': False, 'error': str(e)[:200]}), 400
         return jsonify({'ok': True, 'sample': sample})
+
+    @api.route('/trace')
+    def trace():
+        return jsonify({'ok': True,
+                        'lines': of_trace.recent(int(request.args.get('after') or 0))})
 
     @api.route('/session', methods=['POST'])
     def start():
@@ -276,6 +285,12 @@ class Remote:
         out = self.call('POST', '/signing-sample', {'proxy': proxy},
                         timeout=START_TIMEOUT)
         return out.get('sample') or {}
+
+    def trace(self, after=0):
+        try:
+            return self.call('GET', f'/trace?after={int(after)}', timeout=8).get('lines') or []
+        except of_connect.ConnectError:
+            return []
 
     def claim(self, attempt):
         """The raw session, for the app to put in the vault. The service holds

@@ -250,3 +250,24 @@ class WiringTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
+
+
+class BuildHonestyTest(unittest.TestCase):
+    """The client object is not evidence about the service. This is the trap
+    that had the console reporting a capable browser service for three rounds
+    while nothing was ever captured."""
+
+    def test_the_client_has_the_method_whatever_the_service_runs(self):
+        client = of_browser.Remote('http://svc', 'tok')
+        self.assertTrue(hasattr(client, 'sample_now'))
+
+    def test_health_is_where_the_answer_is(self):
+        client = of_browser.Remote('http://svc', 'tok')
+        real = of_browser.Remote.call
+        of_browser.Remote.call = lambda *a, **k: {'browser': True,
+                                                  'signing_capture': False}
+        try:
+            health = client.call('GET', '/health')
+        finally:
+            of_browser.Remote.call = real
+        self.assertFalse(health['signing_capture'])

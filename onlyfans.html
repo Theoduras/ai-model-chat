@@ -713,7 +713,7 @@ async function saveOverride(clear){
 }
 
 // ── Live watcher ─────────────────────────────────────────────────────────────
-let watchAfter=0, watchLines=[], watchTimer=null;
+let watchAfter=0, watchBrowserAfter=0, watchLines=[], watchTimer=null;
 
 function watchAgo(sec){
   if(sec==null) return '';
@@ -726,7 +726,7 @@ async function watchNow(){
   const head=document.getElementById('watch-head'), log=document.getElementById('watch-log');
   if(!head) return;
   let r;
-  try{ r=await (await fetch('/api/onlyfans/watch?after='+watchAfter)).json(); }
+  try{ r=await (await fetch('/api/onlyfans/watch?after='+watchAfter+'&bafter='+watchBrowserAfter)).json(); }
   catch(e){ err(head,'The server did not answer: '+e); return; }
   if(!r.ok){ err(head,r.error||'Could not read the watcher.'); return; }
   const dot=v=>v?'<span style="color:#4ade80;">\u25cf</span>':'<span style="color:#fb7185;">\u25cf</span>';
@@ -739,7 +739,25 @@ async function watchNow(){
       +'<td>'+dot(w.running)+' '+(w.running?('polls '+(w.polls||0)+', events '+(w.events||0)):'no watcher')+'</td>'
       +'<td>'+(w.last_error?'<span style="color:#fb7185;">'+esc(String(w.last_error).slice(0,90))+'</span>':'')+'</td></tr>';
   }).join('');
-  head.innerHTML='<span class="hint">'+dot(r.browser)+' browser service &nbsp; '
+  const build=r.build||{};
+  const stale=build.up && !build.signing_capture
+    ? '<div style="color:#fb7185;">\u2715 The browser service is running an older build \u2014 '
+      +'redeploy ai-model-chat-dev-browser once the develop build is green.</div>' : '';
+  const notes={awaiting_cookies:'no session cookie on the page yet',
+    me_failed:'the page could not ask OnlyFans who it is',
+    no_user_id:'signed in, but no id in the cookies to store',
+    unverified:'stored from the cookies \u2014 our signature was refused',
+    captured:'captured'};
+  const signin=(r.signins||[]).map(a=>{
+    if(a.error) return '<div class="hint">Sign-in for '+esc(a.persona)+': '+esc(a.error)+'</div>';
+    const c=a.cookies||[];
+    return '<div class="hint">Sign-in for '+esc(a.persona)+': '+esc(a.state||'')
+      +', looked '+(a.probes||0)+'\u00d7 \u2014 '+esc(notes[a.note]||a.note||'nothing yet')
+      +'<br>cookies: sess '+(c.indexOf('sess')>=0?'yes':'no')+', auth_id '
+      +(c.indexOf('auth_id')>=0?'yes':'no')+' &middot; signature from the window: '
+      +(a.has_sample?'yes':'no')+'<br>'+esc(a.page_url||'')+'</div>';
+  }).join('');
+  head.innerHTML=stale+signin+'<span class="hint">'+dot(r.browser)+' browser service &nbsp; '
     +'&middot; rules rev '+esc((r.rules||{}).revision||'unknown')
     +' from '+esc((r.rules||{}).source||'unknown')
     +' &middot; signature '+(r.sample_age==null?'never captured':'captured '+watchAgo(r.sample_age))
@@ -749,6 +767,9 @@ async function watchNow(){
       +'<th align="left">Watcher</th><th align="left">Last error</th></tr>'+rows+'</table>')
       :'<p class="hint" style="margin-top:8px;">No account is connected yet.</p>');
   (r.lines||[]).forEach(l=>{ watchLines.push(l); watchAfter=Math.max(watchAfter,l.id); });
+  (r.browser_lines||[]).forEach(l=>watchLines.push(l));
+  if(r.bafter!=null) watchBrowserAfter=r.bafter;
+  watchLines.sort((a,b)=>a.at-b.at);
   watchLines=watchLines.slice(-300);
   const colour={error:'#fb7185',warning:'#fbbf24',critical:'#fb7185'};
   const near=log.scrollTop+log.clientHeight>=log.scrollHeight-30;
@@ -762,7 +783,7 @@ async function watchNow(){
 
 async function watchClear(){
   await fetch('/api/onlyfans/watch',{method:'DELETE'});
-  watchLines=[]; watchAfter=0; watchNow();
+  watchLines=[]; watchAfter=0; watchBrowserAfter=0; watchNow();
 }
 
 function watchTick(){

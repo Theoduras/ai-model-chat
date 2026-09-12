@@ -36,3 +36,21 @@ class TraceTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class BrowserTraceTest(unittest.TestCase):
+    """The browser runs in a service of its own, so its lines have to reach the
+    console over the wire -- they are the ones that say why a capture found
+    nothing."""
+
+    def test_the_service_serves_its_own_ring(self):
+        import of_browser
+        of_trace.clear()
+        of_browser.TOKEN = 'test-token'
+        api = of_browser.service()
+        of_trace.note('connect', 'no signature captured')
+        client = api.test_client()
+        r = client.get('/trace', headers={'X-Browser-Token': 'test-token'})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual([l['text'] for l in r.get_json()['lines']],
+                         ['no signature captured'])

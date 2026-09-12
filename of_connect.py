@@ -466,15 +466,22 @@ def sample_now(proxy='', timeout=25):
     closed again.
     """
     got = {}
+    saw = {'requests': 0, 'api': 0, 'signed': 0}
 
     def seen(request):
-        if got or '/api2/v2/' not in request.url:
+        saw['requests'] += 1
+        if '/api2/v2/' not in request.url:
             return
+        saw['api'] += 1
         h = request.headers
-        if h.get('sign') and h.get('time'):
-            got.update({'path': of_rules.path_of(request.url), 'time': h['time'],
-                        'user_id': h.get('user-id') or '0', 'sign': h['sign'],
-                        'app_token': h.get('app-token') or ''})
+        if not (h.get('sign') and h.get('time')):
+            return
+        saw['signed'] += 1
+        if got:
+            return
+        got.update({'path': of_rules.path_of(request.url), 'time': h['time'],
+                    'user_id': h.get('user-id') or '0', 'sign': h['sign'],
+                    'app_token': h.get('app-token') or ''})
 
     probe = Attempt('', '', proxy=proxy)
     with _driver()() as pw:
@@ -489,6 +496,14 @@ def sample_now(proxy='', timeout=25):
             until = time.time() + timeout
             while not got and time.time() < until:
                 page.wait_for_timeout(250)
+            if not got:
+                # A bare {} is indistinguishable from every cause. What the
+                # page was doing separates "blocked before it loaded" from
+                # "loaded and signs nothing".
+                try:
+                    saw['url'], saw['title'] = page.url[:120], (page.title() or '')[:80]
+                except Exception:
+                    pass
         finally:
             try:
                 context.close()
@@ -496,7 +511,11 @@ def sample_now(proxy='', timeout=25):
                 pass
     if got:
         logger.info('captured a signature with no sign-in (%s)', got['path'])
-    return got
+        return got
+    logger.warning('no signature captured: %s requests, %s to the API, %s of them '
+                   'signed; page was %s (%s)', saw['requests'], saw['api'],
+                   saw['signed'], saw.get('url', 'unknown'), saw.get('title', ''))
+    return {'_saw': saw}
 
 
 def _path(kw):

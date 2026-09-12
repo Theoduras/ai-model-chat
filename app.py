@@ -16208,6 +16208,46 @@ def _of_keep_sample(status):
     return status
 
 
+_of_last_capture = [0.0]
+# A repair attempt, not a request: at most one browser every ten minutes however
+# many watchers are failing at once.
+OF_CAPTURE_EVERY = 600
+OF_SAMPLE_STALE = 3600
+
+
+def _of_autocapture(force=False):
+    """Get a signature off OnlyFans' own page when there is no usable one.
+
+    Without it every rule set reads `unknown` and nothing can tell a stale
+    published set from a good one -- which is exactly the state a signing
+    rotation leaves the app in, and the state it cannot get out of on its own.
+    So it is taken automatically rather than waiting for somebody to notice a
+    button in the console.
+    """
+    if not _of_direct():
+        return False
+    age = of_rules.sample_age()
+    if not force and age is not None and age < OF_SAMPLE_STALE:
+        return False
+    now = time.time()
+    if not force and now - _of_last_capture[0] < OF_CAPTURE_EVERY:
+        return False
+    _of_last_capture[0] = now
+    try:
+        build = _of_browser_build()
+        if not (build.get('up') and build.get('signing_capture')):
+            return False
+        sample = _of_conn().sample_now(proxy=_of_proxy_for('', '')) or {}
+    except Exception as e:
+        logger.warning('automatic signature capture failed: %s', str(e)[:160])
+        return False
+    if not sample.get('sign'):
+        return False
+    of_rules.put_sample(sample)
+    logger.info('captured a signature automatically; rule sets can be checked again')
+    return True
+
+
 def _of_direct():
     return ONLYFANS_TRANSPORT == 'direct'
 
@@ -16391,6 +16431,36 @@ def _of_conn():
     A sign-in lives in the memory of whichever process opened it, so running the
     browser in its own service is what keeps one alive across an app deploy."""
     return of_browser.remote() or of_connect
+
+
+_of_build_cache = {'at': 0.0, 'info': {}}
+
+
+def _of_browser_build():
+    """What the browser service is actually running.
+
+    Not what this process can call: the client object has every method the
+    newest code has, whatever image the service was deployed from, so asking
+    the client is how the console came to report a capable service for three
+    rounds while nothing was captured. /health is the only honest answer.
+    """
+    now = time.time()
+    if now - _of_build_cache['at'] < 60:
+        return _of_build_cache['info']
+    conn = _of_conn()
+    info = {'up': False, 'signing_capture': False, 'remote': conn is not of_connect}
+    if not info['remote']:
+        info = {'up': of_connect.available(), 'remote': False,
+                'signing_capture': hasattr(of_connect, 'sample_now')}
+    else:
+        try:
+            health = conn.call('GET', '/health', timeout=6) or {}
+            info['up'] = bool(health.get('browser'))
+            info['signing_capture'] = bool(health.get('signing_capture'))
+        except Exception as e:
+            info['error'] = str(e)[:120]
+    _of_build_cache.update({'at': now, 'info': info})
+    return info
 
 
 def _of_attempt(persona):
@@ -16684,6 +16754,8 @@ def api_onlyfans_status():
            'webhook_url': _of_webhook_url()}
     if _of_direct():
         account = _of_account(persona)
+        if not out['connected'] or not of_rules.state()['verified']:
+            _of_autocapture()
         out['session'] = of_session.describe(account) if account else {}
         out['webhook'] = PLAT_ONLYFANS.webhook_state(persona)
         out['browser_ready'] = _of_conn().available()
@@ -16802,8 +16874,13 @@ def api_onlyfans_signing_capture():
                                               'signatures'}), 400
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)[:250]}), 502
-    if not sample:
-        return jsonify({'ok': False, 'error': 'the page made no signed request in time'}), 502
+    if not sample.get('sign'):
+        saw = sample.get('_saw') or {}
+        detail = (f" — {saw.get('api', 0)} API requests, {saw.get('signed', 0)} signed; "
+                  f"the page was {saw.get('title') or saw.get('url') or 'unknown'}"
+                  if saw else '')
+        return jsonify({'ok': False,
+                        'error': 'the page made no signed request in time' + detail}), 502
     of_rules.put_sample(sample)
     return jsonify({'ok': True, 'rules': of_rules.state()})
 
@@ -16845,10 +16922,8 @@ def api_onlyfans_signing_test():
             live = {'ok': True, 'username': str(who.get('username') or '')}
         except Exception as e:
             live = {'ok': False, 'error': str(e)[:300]}
-    try:
-        can_capture = bool(_of_conn().available()) and hasattr(_of_conn(), 'sample_now')
-    except Exception:
-        can_capture = False
+    build = _of_browser_build()
+    can_capture = bool(build.get('up') and build.get('signing_capture'))
     return jsonify({'ok': True, 'has_sample': bool(want), 'candidates': rows,
                     'sample_age': of_rules.sample_age(), 'can_capture': can_capture,
                     'server_call': live, 'rules': of_rules.state()})
@@ -16981,6 +17056,20 @@ def api_onlyfans_watch():
     if not _of_direct():
         return jsonify({'ok': False, 'error': 'not running the direct transport'}), 400
     after = int(request.args.get('after') or 0)
+    bafter = int(request.args.get('bafter') or 0)
+    # The browser runs in a service of its own, so its log lines -- the ones
+    # that say why a capture found nothing -- live in a second ring with ids
+    # of its own. Two cursors, never merged into one.
+    browser_lines = []
+    try:
+        conn = _of_conn()
+        if hasattr(conn, 'trace'):
+            browser_lines = conn.trace(bafter)
+            for line in browser_lines:
+                bafter = max(bafter, line.get('id') or 0)
+                line['where'] = 'browser/' + line.get('where', '')
+    except Exception as e:
+        logger.debug('could not read the browser trace: %s', str(e)[:120])
     accounts = []
     watchers = {w['account']: w for w in of_events.watching()}
     for slug in sorted(set(_fanvue_enabled_list(plat=PLAT_ONLYFANS))):
@@ -16991,16 +17080,38 @@ def api_onlyfans_watch():
                          'username': _of_account_meta(slug).get('username', ''),
                          'session': of_session.describe(account),
                          'watcher': watchers.get(account) or {}})
-    try:
-        browser = bool(_of_conn().available())
-    except Exception:
-        browser = False
+    # A sign-in window that is plainly logged in while the console says nothing
+    # is the hardest state to read from outside, and the attempt has known the
+    # answer all along.
+    signins = []
+    for slug in sorted(set(_fanvue_enabled_list(plat=PLAT_ONLYFANS))):
+        attempt_id = _of_attempt(slug)
+        if not attempt_id:
+            continue
+        try:
+            live = _of_conn().get(attempt_id)
+        except Exception as e:
+            signins.append({'persona': slug, 'error': str(e)[:120]})
+            continue
+        if not live:
+            signins.append({'persona': slug, 'error': 'the sign-in is no longer open'})
+            continue
+        st = _of_keep_sample(live.status())
+        signins.append({'persona': slug, 'state': st.get('state'),
+                        'probes': st.get('probes'), 'note': st.get('capture_note'),
+                        'cookies': st.get('cookie_names') or [],
+                        'page_url': st.get('page_url') or '',
+                        'has_sample': bool(st.get('signing_sample'))})
+    build = _of_browser_build()
+    browser = bool(build.get('up'))
     return jsonify({'ok': True, 'now': int(time.time()), 'browser': browser,
+                    'build': build, 'signins': signins,
                     'rules': of_rules.state(), 'sample_age': of_rules.sample_age(),
                     'accounts': accounts,
                     'unwatched': [a for a in _of_connected_accounts()
                                   if not (watchers.get(a) or {}).get('running')],
-                    'lines': of_trace.recent(after)})
+                    'lines': of_trace.recent(after),
+                    'browser_lines': browser_lines, 'bafter': bafter})
 
 
 @app.route('/api/onlyfans/watch', methods=['DELETE'])
@@ -17279,6 +17390,7 @@ def _of_worker(tick=2.0):
             _plat_round_now(PLAT_ONLYFANS, persona)
         except Exception as e:
             logger.exception('onlyfans round failed for %s', persona)
+            _of_autocapture()
             try:
                 with app.app_context(), PLAT_ONLYFANS.tracing():
                     _fv_trace(persona, 'error', f'round failed: {str(e)[:200]}')
