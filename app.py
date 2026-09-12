@@ -16270,22 +16270,30 @@ def _of_derive_rules(sample, force=False):
     """
     now = time.time()
     if not force and now - _of_last_derive[0] < OF_CAPTURE_EVERY:
-        logger.info('skipping the rule derivation: one ran %ss ago',
-                    int(now - _of_last_derive[0]))
+        of_trace.note('repair', 'skipped the derivation, one ran %ss ago'
+                      % int(now - _of_last_derive[0]))
         return False
     _of_last_derive[0] = now
     conn = _of_conn()
     if not hasattr(conn, 'derive_rules'):
+        of_trace.note('repair', 'this browser service cannot derive rules', 'warning')
         return False
+    # app.py's own logger is not one the ring listens to, so every one of these
+    # outcomes was invisible in the console -- which is where they are read.
+    of_trace.note('repair', 'asking the browser for the current signing rules')
     try:
         rules = conn.derive_rules(sample, _of_proxy_for('', '')) or {}
     except Exception as e:
-        logger.warning('could not derive the signing rules: %s', str(e)[:160])
+        of_trace.note('repair', 'the derivation call failed: ' + str(e)[:160], 'warning')
         return False
     if of_rules.verify(sample, rules) is not True:
+        of_trace.note('repair', 'the derived rules do not reproduce the signature'
+                      if rules else 'the browser derived nothing', 'warning')
         return False
     _set_setting('onlyfans_rules_override', json.dumps(rules))
     of_rules.refresh()
+    of_trace.note('repair', 'adopted rules derived from the page, revision '
+                  + str(rules.get('revision') or ''))
     logger.info('adopted signing rules derived from the page (revision %s)',
                 rules.get('revision') or '')
     return True
