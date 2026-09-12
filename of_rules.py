@@ -21,6 +21,7 @@ Nothing here touches the database or Flask. `cache_hooks()` lets app.py lend it
 somewhere durable to keep the rules between Cloud Run instances; without that
 it holds them in memory, which is all a test or a script needs.
 """
+import collections
 import hashlib
 import json
 import logging
@@ -75,6 +76,18 @@ _sample_cache = (0.0, {})
 # The oracle is consulted on the way to every signature, so it is held briefly
 # rather than read from the database each time. It only changes on a connect.
 SAMPLE_TTL = 60
+# Every signature we have produced lately. `ours()` reads it: asking instead
+# whether the *loaded* rules reproduce a sample only recognises our own
+# arithmetic while the set that made it is still loaded, and a signature we made
+# under a set since replaced was unrecognisable -- so it could be stored as the
+# oracle, and then disprove every published set for as long as it sat there.
+_made = collections.deque(maxlen=64)
+# A sample no source can reproduce is usually a rotation the mirrors have not
+# caught up with yet. But it can equally be junk -- a capture that caught one of
+# our own requests -- and then it disproves every set forever and nothing can be
+# adopted at all. Past this long with every source failing it, the sample is the
+# suspect rather than the sets.
+SAMPLE_SUSPECT_AFTER = 1800
 
 
 class RulesError(RuntimeError):
@@ -172,12 +185,18 @@ def ours(s):
 
     Our own signed requests leave through the same page the listener watches, so
     a sample can end up being our arithmetic -- and then the rules verify against
-    themselves and every check passes while every request is refused. OnlyFans
-    stamps in milliseconds; a sample our current rules reproduce over a stamp
-    that is not millisecond-shaped came from us.
+    themselves and every check passes while every request is refused.
+
+    What we signed is remembered, so a signature of ours is recognised however
+    old the rules that made it are. The stamp shape stays as a second answer for
+    one made before this process started: OnlyFans stamps in milliseconds, so a
+    sample our current rules reproduce over a stamp that is not
+    millisecond-shaped came from us.
     """
     if not (s and s.get('sign') and s.get('time')):
         return False
+    if s['sign'] in _made:
+        return True
     if len(str(s['time'])) > 11:
         return False
     return verify(s, _rules) is True
@@ -282,6 +301,36 @@ def fingerprint(rules=None):
     return f"{r['static_param']}|{r['format']}"
 
 
+def _revision_of(rules):
+    """The revision a set carries, as a number to compare.
+
+    Not every published set ships a `revision` field -- neither mirror does
+    today -- but the format's own prefix is one, and it rises over time.
+    """
+    for value in (rules.get('revision'),
+                  str(rules.get('format') or '').split(':')[0]):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            continue
+    return 0
+
+
+def _best(candidates, want=None):
+    """Which of several sets the oracle cannot decide between to take.
+
+    Position in the list was the old answer, and it is the worst one: the first
+    source has served a set three years stale, and being first is the only
+    reason it stayed loaded. The captured signature carries its own format in
+    plain view, so a set already shaped like the one OnlyFans is producing wins;
+    failing that the newest revision does, and source order only breaks a tie.
+    """
+    shape = format_of(want) if want else ''
+    return max(candidates,
+               key=lambda c: (bool(shape) and c[0].get('format') == shape,
+                              _revision_of(c[0])))
+
+
 def refresh(reject=()):
     """Pull a fresh set of rules. Raises RulesError if every source failed.
 
@@ -293,7 +342,7 @@ def refresh(reject=()):
     reject = {reject} if isinstance(reject, str) else set(reject or ())
     reject.discard('')
     want = sample()
-    errors, fallback = [], None
+    errors, unproven, disproved = [], [], []
     for url in ('override',) + tuple(RULES_SOURCES):
         try:
             rules = override() if url == 'override' else _fetch(url)
@@ -316,13 +365,26 @@ def refresh(reject=()):
             return _adopt(rules, url)
         if proven is False:
             errors.append(f'{url}: does not match the signature OnlyFans last produced')
+            disproved.append((rules, url))
             continue
-        if fallback is None:
-            fallback = (rules, url)
-    if fallback:
-        rules, url = fallback
+        unproven.append((rules, url))
+    if unproven:
+        rules, url = _best(unproven, want)
         logger.info('OnlyFans rules refreshed from %s (revision %s)',
-                    url, rules.get('revision') or rules.get('format', '')[:8])
+                    url, _revision_of(rules))
+        return _adopt(rules, url)
+    # Nothing reproduces the oracle. Either every mirror is behind a rotation,
+    # or the oracle itself is junk -- and while it sits there it disproves every
+    # set, so the stale one already loaded is never replaced. Past a point the
+    # sample is the less likely of the two to be right: drop it, take the best
+    # set on its own merits, and let the next capture put a real one back.
+    age = sample_age()
+    if disproved and (age is None or age >= SAMPLE_SUSPECT_AFTER):
+        drop_sample()
+        rules, url = _best(disproved)
+        logger.warning('no rule set reproduces the captured signature after %ss'
+                       ' — dropping it and taking %s (revision %s)',
+                       age, url, _revision_of(rules))
         return _adopt(rules, url)
     raise RulesError(('every published rule set fails the captured signature'
                       if want else 'no usable OnlyFans rules')
@@ -448,7 +510,15 @@ def sign(path, user_id='0', when=None, r=None):
     stamp = str(int(when if when is not None else time.time() * 1000))
     msg = '\n'.join([r['static_param'], stamp, path, str(user_id or '0')])
     digest = hashlib.sha1(msg.encode('utf-8')).hexdigest().encode('ascii')
-    return r['format'].format(digest.decode(), _checksum(digest, r)), stamp
+    signature = r['format'].format(digest.decode(), _checksum(digest, r))
+    if when is None:
+        # Only signatures made for a real request, which is the only kind that
+        # can leave through the page and come back as a sample. Checking a
+        # candidate set re-signs the oracle's own request at its own timestamp,
+        # and remembering that would make a set that matches turn the genuine
+        # signature into "ours" and throw it away.
+        _made.append(signature)
+    return signature, stamp
 
 
 def headers(path, session=None, when=None):

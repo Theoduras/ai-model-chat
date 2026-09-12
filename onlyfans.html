@@ -447,6 +447,8 @@ function watchBrowser(){
         adopt_failed:'The sign-in worked, but her session could not be saved'
           +(st.adopt_error?(' ('+esc(st.adopt_error)+')'):'')+'. Try again.',
         browser_down:'The sign-in browser is not reachable right now.',
+        signing_unverified:(st.unreachable||'')+' Her account is connected — it '
+          +'is the signing that needs repairing.',
         no_session_key:'This deployment has no key to encrypt her session with, '
           +'so it cannot be saved. Set SECRET_KEY (or ONLYFANS_SESSION_KEY) and try again.',
         }
@@ -872,6 +874,7 @@ function dropMedia(id){
 }
 
 let mediaItems=[];
+let searchedVault=false;
 async function loadFolders(){
   const sel=document.getElementById('m-folder');
   const keep=sel.value;
@@ -882,6 +885,10 @@ async function loadFolders(){
       (d.folders||[]).map(f=>'<option value="'+esc(f.id)+'">'+esc(f.name)+
         (f.count?(' ('+f.count+')'):'')+'</option>').join('');
     sel.value=keep;
+    // An empty dropdown and an unreachable vault looked identical, and the
+    // second is the one worth saying out loud.
+    if(d.error&&!(d.folders||[]).length)
+      sel.innerHTML='<option value="">'+esc(d.error)+'</option>';
   }catch(e){ /* the picker still works on the whole vault without folders */ }
 }
 
@@ -894,6 +901,7 @@ async function loadMedia(){
     list:document.getElementById('m-folder').value});
   const d=await (await fetch('/api/onlyfans/media?'+q.toString())).json();
   if(d.error){grid.innerHTML='<span class="hint" style="color:#fb7185;">'+esc(d.error)+'</span>';return;}
+  searchedVault=true;
   mediaItems=d.media||[];
   mediaItems.forEach(m=>{mediaSeen[m.id]=m;});
   renderGrid();
@@ -901,7 +909,9 @@ async function loadMedia(){
 
 function renderGrid(){
   const grid=document.getElementById('media-grid');
-  if(!mediaItems.length){grid.innerHTML='<span class="hint">Nothing loaded yet — search the vault above.</span>';return;}
+  if(!mediaItems.length){grid.innerHTML='<span class="hint">'+(searchedVault
+    ? 'Her vault came back empty for this search — try another folder or type.'
+    : 'Nothing loaded yet — search the vault above.')+'</span>';return;}
   const chosen=new Set(theTier().media_uuids||[]);
   grid.innerHTML=mediaItems.map(m=>
     '<div class="cell'+(chosen.has(m.id)?' sel':'')+'" onclick="toggleMedia(\''+esc(m.id)+'\')">'+
@@ -950,6 +960,9 @@ async function resetProgress(){
 // ── Console shell ────────────────────────────────────────────────────────────
 
 const OF_FIX=[
+  // Before the /not connected/ rule below: this one says she *is* connected,
+  // and sending her back to the connect button would repair nothing.
+  [/signing|refusing her session/i,{tab:'settings',focus:'sec-account',label:'Repair signing'}],
   [/not connected/i,{tab:'settings',focus:'sec-account',label:'Connect the account'}],
   [/Auto-reply is off/i,{tab:'settings',focus:'sec-auto',label:'Turn her on'}],
   [/webhook/i,{tab:'settings',focus:'sec-account',label:'Fix the webhook'}],

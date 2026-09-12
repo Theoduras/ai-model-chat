@@ -1,6 +1,7 @@
 """Signing tests. No network: the rules are injected."""
 import hashlib
 import json
+import time
 import unittest
 from unittest import mock
 
@@ -234,14 +235,50 @@ class OracleTest(unittest.TestCase):
             got = of_rules.refresh()
         self.assertEqual(got['static_param'], RULES['static_param'])
 
+    def _fresh_sample(self):
+        """A signature captured just now, rather than the setUp fixture's 2023
+        one -- how old the oracle is now decides whether it is believed."""
+        path, stamp = '/api2/v2/chats?limit=10', int(time.time() * 1000)
+        return {'path': path, 'user_id': '99', 'time': str(stamp),
+                'sign': expected(path, '99', stamp)}
+
     def test_refresh_says_so_when_nothing_matches(self):
+        """A signature captured minutes ago that no source reproduces is a
+        rotation the mirrors have not caught. Say so, rather than adopt a set
+        already known not to sign."""
         stale = dict(RULES, static_param='STALE')
-        of_rules.sample_hooks(lambda: json.dumps(self.sample), lambda v: None)
+        fresh = self._fresh_sample()
+        of_rules.sample_hooks(lambda: json.dumps(fresh), lambda v: None)
         with mock.patch.object(of_rules, 'RULES_SOURCES', ('a',)), \
                 mock.patch.object(of_rules, '_fetch', return_value=stale):
             with self.assertRaises(of_rules.RulesError) as caught:
                 of_rules.refresh()
         self.assertIn('captured signature', str(caught.exception))
+
+    def test_an_oracle_nothing_reproduces_is_eventually_the_suspect(self):
+        """A junk sample disproves every set forever, and the stale set already
+        loaded is never replaced. Past the cutoff the sample goes instead."""
+        stale = dict(RULES, static_param='STALE')
+        dropped = []
+        of_rules.sample_hooks(lambda: json.dumps(self.sample),
+                              lambda v: dropped.append(v))
+        with mock.patch.object(of_rules, 'RULES_SOURCES', ('a',)), \
+                mock.patch.object(of_rules, '_fetch', return_value=stale):
+            got = of_rules.refresh()
+        self.assertEqual(got['static_param'], 'STALE')
+        self.assertEqual(dropped, ['{}'])
+
+    def test_the_newest_set_wins_when_the_oracle_cannot_decide(self):
+        """With no sample every set is unprovable, and taking the first is how a
+        three-year-old set stayed loaded. The higher revision is the answer."""
+        old = dict(RULES, static_param='OLD', format='13190:{}:{:x}:653286c6')
+        new = dict(RULES, static_param='NEW', format='63708:{}:{:x}:6a7f22a1')
+        of_rules.sample_hooks(lambda: '{}', lambda v: None)
+        with mock.patch.object(of_rules, 'RULES_SOURCES', ('old', 'new')), \
+                mock.patch.object(of_rules, '_fetch',
+                                  lambda u: old if u == 'old' else new):
+            got = of_rules.refresh()
+        self.assertEqual(got['static_param'], 'NEW')
 
     def test_an_override_beats_every_published_source(self):
         of_rules.override_hooks(lambda: json.dumps(RULES))
@@ -391,7 +428,48 @@ class OurOwnSignatureTest(unittest.TestCase):
         self.assertTrue(of_rules.ours(self._sign(1789217425)))
         self.assertEqual(of_rules.put_sample(self._sign(1789217425)), {})
 
+    def _page_sign(self, when):
+        """A signature we did not make: computed here rather than through
+        of_rules.sign, exactly as OnlyFans' own page would arrive at it."""
+        path = '/api2/v2/users/me'
+        return {'path': path, 'user_id': '0', 'time': str(when),
+                'sign': expected(path, '0', when, self.RULES)}
+
     def test_a_millisecond_stamp_is_taken_as_the_pages_own(self):
-        s = self._sign(1789203482721)
+        s = self._page_sign(1789203482721)
         self.assertFalse(of_rules.ours(s))
         self.assertEqual(of_rules.put_sample(s)['time'], '1789203482721')
+
+    def _our_request(self):
+        """A signature made the way an outbound request makes one -- no explicit
+        timestamp -- which is the only kind that can leave through the page the
+        listener is watching and come back looking like a sample."""
+        path = '/api2/v2/users/me'
+        signature, stamp = of_rules.sign(path, '0', r=self.RULES)
+        return {'path': path, 'user_id': '0', 'time': stamp, 'sign': signature}
+
+    def test_our_own_signature_is_known_however_it_is_stamped(self):
+        """The stamp shape was a guess. What we signed is remembered, so our own
+        arithmetic is refused even wearing a millisecond stamp -- the shape a
+        real page signature has, and the disguise that let one through."""
+        s = self._our_request()
+        self.assertGreater(len(s['time']), 11)
+        self.assertTrue(of_rules.ours(s))
+        self.assertEqual(of_rules.put_sample(s), {})
+
+    def test_checking_a_set_does_not_make_the_oracle_ours(self):
+        """Verifying a candidate re-signs the sample's own request. If that
+        counted as something we made, the set that matches would be the one that
+        threw the genuine signature away."""
+        s = self._page_sign(1789203482721)
+        self.assertIs(of_rules.verify(s, self.RULES), True)
+        self.assertFalse(of_rules.ours(s))
+        self.assertEqual(of_rules.put_sample(s)['time'], '1789203482721')
+
+    def test_a_signature_survives_the_rules_that_made_it(self):
+        """Asking whether the loaded rules reproduce a sample only recognises
+        our own while that set is still loaded. It is the set being replaced
+        that puts a signature of ours up for the job."""
+        s = self._our_request()
+        of_rules._rules = dict(self.RULES, static_param='ROTATED')
+        self.assertTrue(of_rules.ours(s))

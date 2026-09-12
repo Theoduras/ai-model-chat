@@ -15132,6 +15132,15 @@ class _Platform:
         """Whether purchase events can reach us, and what is wrong if not."""
         return {'ready': False, 'problem': '', 'url': '', 'last_error': ''}
 
+    def reachable(self, persona):
+        """Why an account that *is* connected still cannot be talked to, or ''.
+
+        Being connected is only having her credentials. A platform that can
+        refuse them afterwards says so here, so the console does not show a
+        green connection while every request behind it is being turned away.
+        """
+        return ''
+
 
 class _FanvuePlatform(_Platform):
     slug = 'fanvue'
@@ -15745,8 +15754,13 @@ def _plat_trace_api(plat):
     connected = plat.connected(persona)
     lock = _fanvue_round_locks.get(f'{plat.slug}:{persona}')
     problems = []
+    unreachable = plat.reachable(persona) if connected else ''
     if not connected:
         problems.append(f'{plat.label} is not connected for this persona.')
+    elif unreachable:
+        # Ahead of "auto-reply is off": a platform refusing every request is why
+        # the chat list and the vault are empty, and it outranks a setting.
+        problems.append(unreachable)
     elif not opts.get('enabled'):
         problems.append('Auto-reply is off — turn it on for her to answer fans.')
     elif not rows:
@@ -16179,6 +16193,26 @@ class _OnlyFansPlatform(_Platform):
                 'No webhook signing secret, so OnlyFans events are rejected and '
                 'replies only go out on the backup sweep. Add the webhook in the '
                 'OnlyFansAPI console and set ONLYFANS_WEBHOOK_SECRET.'}
+
+    def reachable(self, persona):
+        """Signing is what stands between her account and every request.
+
+        When it is stale the console showed her connected, the chat list empty
+        and the vault empty, with nothing anywhere saying why — the three read
+        as "the integration is broken" when the cause is one rotated signature.
+        """
+        if not (_of_direct() and self.connected(persona)):
+            return ''
+        waiting = (OF.held() or {}).get(_of_account(persona))
+        if waiting:
+            return ('OnlyFans refused her last request, so the rest are being '
+                    'held rather than repeated at it — retrying in %ds.' % waiting)
+        if of_rules.state().get('verified') is not True:
+            return ('Her replies, chat list and vault all go through a signed '
+                    'request, and no rule set currently matches the signature '
+                    'OnlyFans itself produces — so those come back empty until '
+                    'signing is repaired.')
+        return ''
 
 
 PLAT_ONLYFANS = _OnlyFansPlatform()
@@ -16836,6 +16870,13 @@ def api_onlyfans_status():
         if adopt_err:
             blockers.append('adopt_failed')
             out['adopt_error'] = adopt_err
+        # An account can be connected and still unusable: signing is what every
+        # request goes through, and the console showed green while all of them
+        # were being refused.
+        unreachable = PLAT_ONLYFANS.reachable(persona)
+        if unreachable:
+            blockers.append('signing_unverified')
+            out['unreachable'] = unreachable
         if account and out['session'].get('status') == of_session.STATUS_EXPIRED:
             blockers.append('session_expired')
         try:

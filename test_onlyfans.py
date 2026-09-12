@@ -382,6 +382,45 @@ def test_signin_flow():
     check('a code sent with no sign-in running is refused', not r.get('ok'), r)
     restore()
 
+def test_a_connected_account_that_cannot_sign_says_so():
+    """Connected is only holding her credentials. While signing is stale every
+    request behind it is refused, and the console showed a green connection
+    beside an empty chat list and an empty vault, with the reason nowhere.
+    """
+    of = app.PLAT_ONLYFANS
+
+    class _Rules:
+        verified = None
+
+        def state(self):
+            return {'verified': self.verified}
+
+    # This file runs against the API transport, where OF is the middleman with
+    # no hold of its own and of_rules is not even imported; direct mode is what
+    # is being checked, so both are stood in for.
+    rules, was_rules = _Rules(), app.of_rules
+    app.of_rules = rules
+    app._of_direct = lambda: True
+    of.connected = lambda persona: True
+    app.OF.held = lambda: {}
+    try:
+        check('signing that cannot be checked is reported',
+              'signing is repaired' in of.reachable('lilly'), of.reachable('lilly'))
+        rules.verified = False
+        check('signing that is disproven is reported',
+              'signing is repaired' in of.reachable('lilly'), of.reachable('lilly'))
+        rules.verified = True
+        check('a proven set leaves nothing to report', of.reachable('lilly') == '',
+              of.reachable('lilly'))
+        app.OF.held = lambda: {app._of_account('lilly'): 42}
+        check('a held account says how long it is held',
+              '42s' in of.reachable('lilly'), of.reachable('lilly'))
+    finally:
+        app.of_rules = was_rules
+        del app.OF.held, of.connected
+        restore()
+
+
 def test_settings_are_namespaced():
     """The two platforms must never read each other's state: one shared key
     would have OnlyFans replying with Fanvue's PPV progress."""
@@ -399,7 +438,8 @@ if __name__ == '__main__':
     for fn in (test_signature, test_strip_html, test_direction, test_chat_reading,
                test_paging, test_send_body, test_ppv_price_conversion,
                test_ppv_amount, test_webhook, test_round_end_to_end,
-               test_signin_flow, test_settings_are_namespaced):
+               test_signin_flow, test_a_connected_account_that_cannot_sign_says_so,
+               test_settings_are_namespaced):
         restore()
         fn()
     restore()
