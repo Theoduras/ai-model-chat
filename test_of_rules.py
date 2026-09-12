@@ -91,9 +91,34 @@ class SourceTest(unittest.TestCase):
                 return {'static_param': 'x'}  # incomplete, skipped
             return RULES
 
-        with mock.patch.object(of_rules, '_fetch', fetch):
+        with mock.patch.object(of_rules, 'RULES_SOURCES', ('a', 'b', 'c')), \
+                mock.patch.object(of_rules, '_fetch', fetch):
             self.assertEqual(of_rules.refresh()['app_token'], RULES['app_token'])
         self.assertEqual(len(calls), 3)
+
+    def test_a_source_still_serving_the_rejected_revision_is_skipped(self):
+        newer = dict(RULES, static_param='NEWER', format='13190:{}:{:x}:653286c6')
+
+        def fetch(url):
+            return RULES if url == 'stale' else newer
+
+        with mock.patch.object(of_rules, 'RULES_SOURCES', ('stale', 'fresh')), \
+                mock.patch.object(of_rules, '_fetch', fetch):
+            got = of_rules.refresh(reject=of_rules.fingerprint(RULES))
+        self.assertEqual(got['static_param'], 'NEWER')
+
+    def test_every_source_serving_the_rejected_revision_raises(self):
+        with mock.patch.object(of_rules, 'RULES_SOURCES', ('a', 'b')), \
+                mock.patch.object(of_rules, '_fetch', return_value=RULES):
+            with self.assertRaises(of_rules.RulesError):
+                of_rules.refresh(reject={of_rules.fingerprint(RULES)})
+
+    def test_a_fingerprint_tracks_what_the_signature_is_built_from(self):
+        self.assertEqual(of_rules.fingerprint(RULES),
+                         of_rules.fingerprint(dict(RULES, app_token='other')))
+        self.assertNotEqual(of_rules.fingerprint(RULES),
+                            of_rules.fingerprint(dict(RULES, static_param='x')))
+        self.assertEqual(of_rules.fingerprint({'static_param': 'x'}), '')
 
     def test_every_source_failing_raises(self):
         with mock.patch.object(of_rules, '_fetch', side_effect=OSError('no')):

@@ -17066,10 +17066,17 @@ def _of_check_sessions():
         _of_last_session_check[account] = now
         alive, detail = OF.check(account)
         if not alive:
-            of_events.unwatch(account)
-            logger.warning('OnlyFans session for %s is dead: %s', slug, detail)
+            # A session OnlyFans has revoked is marked dead in the vault; a
+            # request it refused to sign leaves it live. Only the first is the
+            # creator's to fix, and only the first should stop the watcher.
+            expired = not _of_direct() or not of_session.live(account)
+            if expired:
+                of_events.unwatch(account)
+            logger.warning('OnlyFans account %s is not answering: %s', slug, detail)
             with PLAT_ONLYFANS.tracing():
-                _fv_trace(slug, 'error', f'OnlyFans session expired: {detail[:160]}')
+                _fv_trace(slug, 'error',
+                          f'OnlyFans session expired: {detail[:160]}' if expired
+                          else f'OnlyFans refused the request: {detail[:160]}')
 
 
 def _of_worker(tick=2.0):

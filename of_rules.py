@@ -8,7 +8,14 @@ per request.
 
 The rotation is not announced and cannot be polled for usefully: OnlyFans just
 starts answering `400 Please refresh the page`. So the cache is refreshed on
-that error and nothing else — `refresh()` after a rejection, then retry once.
+that error and nothing else — `refresh()` after a rejection, then retry.
+
+A source can also simply fall behind: two of these repos publish at different
+times, and one carrying last week's static_param is structurally perfect and
+rejected by every request. So a refresh chasing a rejection is told which set
+was rejected and refuses to adopt that same set again — otherwise refetching
+from the one stale source returns the identical rules and the retry cannot
+possibly succeed.
 
 Nothing here touches the database or Flask. `cache_hooks()` lets app.py lend it
 somewhere durable to keep the rules between Cloud Run instances; without that
@@ -29,9 +36,8 @@ logger = logging.getLogger(__name__)
 # Where the rules come from, best first. Each is a raw JSON document with the
 # same shape; a source that 404s or serves something unparseable is skipped.
 RULES_SOURCES = (
+    'https://raw.githubusercontent.com/DIGITALCRIMINALS/dynamic-rules/main/onlyfans.json',
     'https://raw.githubusercontent.com/DATAHOARDERS/dynamic-rules/main/onlyfans.json',
-    'https://raw.githubusercontent.com/deviint/onlyfans-dynamic-rules/main/rules.json',
-    'https://raw.githubusercontent.com/rileyllc/onlyfans-dynamic-rules/main/rules.json',
 )
 RULES_TIMEOUT = 15
 # Rules older than this are refetched on the next signature, even without a
@@ -88,8 +94,26 @@ def _adopt(rules, source=''):
     return _rules
 
 
-def refresh():
-    """Pull a fresh set of rules. Raises RulesError if every source failed."""
+def fingerprint(rules=None):
+    """What identifies one revision of the rules, for saying "not that set
+    again". The static_param and format are what a signature is actually built
+    from, so two sets agreeing on both sign identically."""
+    r = _rules if rules is None else rules
+    if not _valid(r):
+        return ''
+    return f"{r['static_param']}|{r['format']}"
+
+
+def refresh(reject=()):
+    """Pull a fresh set of rules. Raises RulesError if every source failed.
+
+    `reject` is a fingerprint, or a collection of them, that OnlyFans has just
+    refused. A source still serving one of those sets is skipped rather than
+    adopted: it is a set we already know does not work, and taking it would end
+    the caller's retry before a source that has caught up gets a turn.
+    """
+    reject = {reject} if isinstance(reject, str) else set(reject or ())
+    reject.discard('')
     errors = []
     for url in RULES_SOURCES:
         try:
@@ -99,6 +123,9 @@ def refresh():
             continue
         if not _valid(rules):
             errors.append(f'{url}: missing fields')
+            continue
+        if fingerprint(rules) in reject:
+            errors.append(f'{url}: still serving the rejected revision')
             continue
         logger.info('OnlyFans rules refreshed from %s (revision %s)',
                     url, rules.get('revision') or rules.get('format', '')[:8])
@@ -145,7 +172,7 @@ def state():
     """What the admin screen shows: which source, how old, which revision."""
     r = _rules if _valid(_rules) else {}
     return {'ready': bool(r), 'source': r.get('_source', ''),
-            'revision': str(r.get('revision') or ''),
+            'revision': str(r.get('revision') or r.get('format', '').split(':')[0]),
             'app_token': r.get('app_token', ''),
             'age_seconds': int(time.time() - _fetched_at) if _fetched_at else None}
 

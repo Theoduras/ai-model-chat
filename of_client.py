@@ -60,6 +60,12 @@ class SessionExpired(OnlyFansError):
     """The session is no longer valid — the creator has to reconnect."""
 
 
+class SigningStale(OnlyFansError):
+    """OnlyFans refused the signature and no published rule set signs any
+    better. The account is fine and reconnecting it would change nothing: the
+    free rule sources have fallen behind OnlyFans' current rotation."""
+
+
 # ── Pacing ────────────────────────────────────────────────────────────────────
 
 _buckets = {}
@@ -110,6 +116,30 @@ def _once(account, method, path, body, session):
         raise OnlyFansError(0, 'OnlyFans returned something that was not JSON')
 
 
+def _adopt_working_rules(rejected):
+    """Move on to a rule set OnlyFans has not just refused.
+
+    Refetching alone is not enough: the sources publish independently, so the
+    one that answered first may keep serving the very revision that was
+    rejected, and adopting it again would burn the retry for nothing. If no
+    source has anything else, the signature cannot be fixed here and the caller
+    is told that rather than being sent to reconnect a healthy account.
+    """
+    try:
+        fresh = of_rules.refresh(reject=rejected)
+    except of_rules.RulesError as e:
+        raise SigningStale(400, 'OnlyFans rejected the request signature and no '
+                                'published rule set could be fetched: '
+                                f'{str(e)[:160]}') from None
+    fresh_fp = of_rules.fingerprint(fresh)
+    if fresh_fp and fresh_fp in rejected:
+        raise SigningStale(400, 'OnlyFans rejected the request signature and every '
+                                'published rule set is the same one it rejected — '
+                                'the free dynamic rules are behind OnlyFans\' '
+                                'current rotation. The account is still connected.')
+    logger.info('OnlyFans rules rotated, signing with %s', fresh.get('_source', ''))
+
+
 def call(account, method, path, body=None):
     """One request as `account`, signed, paced, and retried where retrying helps.
 
@@ -122,7 +152,7 @@ def call(account, method, path, body=None):
         raise OnlyFansError(0, f'no OnlyFans session for {account}')
     if not path.startswith('/'):
         path = '/' + path
-    refreshed = False
+    rejected = set()
     for attempt in range(OF_MAX_RETRIES):
         _wait_turn(account)
         try:
@@ -132,10 +162,9 @@ def call(account, method, path, body=None):
             # and only the response text tells them apart -- "please refresh
             # the page" is the rotation, not a revoked session. Check that
             # first, or the retry that would have fixed it never gets a turn.
-            if of_rules.stale_response(e.code, e.detail) and not refreshed:
-                logger.info('OnlyFans rules rotated, refetching')
-                of_rules.refresh()
-                refreshed = True
+            if of_rules.stale_response(e.code, e.detail):
+                rejected.add(of_rules.fingerprint())
+                _adopt_working_rules(rejected)
                 continue
             if e.code == 401 or (e.code == 403 and 'sign' not in e.detail.lower()):
                 of_session.mark_expired(account, e.detail)
@@ -207,6 +236,10 @@ def check(account):
     try:
         who = me(account)
     except SessionExpired as e:
+        return False, e.detail
+    except SigningStale as e:
+        # Deliberately not marked expired: the creator reconnecting would hand
+        # us the same good session and the same unsignable request.
         return False, e.detail
     except OnlyFansError as e:
         return False, str(e)[:200]

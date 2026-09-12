@@ -92,7 +92,7 @@ class CallTest(unittest.TestCase):
         p.start()
         self.addCleanup(p.stop)
 
-    def test_a_rotation_refetches_the_rules_and_retries_once(self):
+    def test_a_rotation_refetches_the_rules_and_retries(self):
         calls = []
 
         def once(account, method, path, body, session):
@@ -102,20 +102,43 @@ class CallTest(unittest.TestCase):
             return {'id': 99}
 
         with mock.patch.object(of_client, '_once', once), \
-                mock.patch.object(of_rules, 'refresh') as refresh:
+                mock.patch.object(of_rules, 'refresh',
+                                  return_value={'static_param': 'b',
+                                                'format': '{}:{:x}',
+                                                'checksum_indexes': [0],
+                                                'checksum_constant': 1,
+                                                'app_token': 't'}) as refresh:
             self.assertEqual(of_client.call('acct1', 'GET', '/api2/v2/users/me'),
                              {'id': 99})
         refresh.assert_called_once()
         self.assertEqual(len(calls), 2)
 
-    def test_a_rotation_is_only_chased_once(self):
+    def test_a_refresh_that_returns_the_rejected_rules_gives_up(self):
+        """The source is up but has not caught up, so retrying is pointless —
+        and the account must not be blamed for it."""
+        same = {'static_param': 's', 'format': '{}:{:x}'}
+        with mock.patch.object(of_client, '_once',
+                               side_effect=of_client.OnlyFansError(
+                                   400, 'Please refresh the page')) as once, \
+                mock.patch.object(of_rules, 'fingerprint',
+                                  side_effect=lambda r=None: 'same'), \
+                mock.patch.object(of_rules, 'refresh', return_value=same):
+            with self.assertRaises(of_client.SigningStale):
+                of_client.call('acct1', 'GET', '/api2/v2/users/me')
+        self.assertEqual(once.call_count, 1)
+        self.assertEqual(of_session.describe('acct1')['status'],
+                         of_session.STATUS_LIVE)
+
+    def test_no_fetchable_rules_is_not_an_expired_session(self):
         with mock.patch.object(of_client, '_once',
                                side_effect=of_client.OnlyFansError(
                                    400, 'Please refresh the page')), \
-                mock.patch.object(of_rules, 'refresh') as refresh:
-            with self.assertRaises(of_client.OnlyFansError):
+                mock.patch.object(of_rules, 'refresh',
+                                  side_effect=of_rules.RulesError('all sources 404')):
+            with self.assertRaises(of_client.SigningStale):
                 of_client.call('acct1', 'GET', '/api2/v2/users/me')
-        refresh.assert_called_once()
+        self.assertEqual(of_session.describe('acct1')['status'],
+                         of_session.STATUS_LIVE)
 
     def test_a_401_expires_the_session_instead_of_retrying(self):
         with mock.patch.object(of_client, '_once',

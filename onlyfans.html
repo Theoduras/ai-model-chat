@@ -254,6 +254,18 @@
     <div class="result-box" id="ppv-status"></div>
   </div>
 
+  <div id="sec-rules" class="form-section" data-tab="advanced">
+    <div class="section-title">Request signing</div>
+    <p class="hint">Every request to OnlyFans is signed with rules OnlyFans rotates without
+      warning. When the log fills with <em>Please refresh the page</em>, the rules loaded here
+      are behind OnlyFans&rsquo; current set &mdash; her account is fine and reconnecting it
+      changes nothing. Refreshing pulls the newest published set.</p>
+    <div class="result-box" id="rules-state"></div>
+    <div class="row-inline" style="margin-top:10px;">
+      <button class="btn-ai" onclick="refreshRules()">Refresh signing rules</button>
+    </div>
+  </div>
+
   <div id="sec-log" class="form-section" data-tab="advanced">
     <div class="section-title">Activity log
       <label style="float:right; font-weight:400; font-size:0.75rem;">
@@ -308,9 +320,11 @@ async function loadConfig(){
     err(box,'This deployment has no OnlyFansAPI key. Set ONLYFANSAPI_KEY and redeploy.');
   }
   const wb=document.getElementById('webhook-status');
+  show('sec-rules',direct);
   if(direct){
     const st=await (await fetch('/api/onlyfans/status?persona='+encodeURIComponent(persona()))).json();
     const w=st.webhook||{}, s=st.session||{};
+    showRules(st.rules);
     wb.innerHTML=!st.connected ? ''
       : (s.status==='expired'
         ? '<span class="hint" style="color:var(--warn);">Her OnlyFans session expired'
@@ -600,6 +614,26 @@ async function runOnce(){
   if(!r.ok){err(box,r.error);return;}
   box.innerHTML='<span class="hint">'+esc((r.log||[]).join('\n'))+'</span>';
   PlatformConsole.refresh();
+}
+
+function showRules(r){
+  const box=document.getElementById('rules-state');
+  if(!box)return;
+  if(!r||!r.ready){err(box,'No signing rules loaded — nothing can be sent to OnlyFans.');return;}
+  const age=r.age_seconds==null?'':(', loaded '+(r.age_seconds<90?'just now'
+    :(Math.round(r.age_seconds/60)+' min ago')));
+  box.innerHTML='<span class="hint">Revision '+esc(r.revision||'unknown')+age
+    +'<br>Source: '+esc((r.source||'').split('/').slice(3,5).join('/')||'unknown')+'</span>';
+}
+
+async function refreshRules(){
+  const box=document.getElementById('rules-state');
+  busy(box,'Fetching the newest published rules…');
+  try{
+    const r=await post('/api/onlyfans/rules/refresh',{});
+    if(!r.ok){err(box,r.error||'Could not refresh the rules.');return;}
+    showRules(r.rules);
+  }catch(e){err(box,String(e));}
 }
 
 async function clearTrace(){
