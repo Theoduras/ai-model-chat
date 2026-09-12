@@ -121,7 +121,8 @@ class Attempt:
     signing_sample = {}
     _sampled = False
 
-    def __init__(self, persona, account, proxy='', user_agent='', viewport=None):
+    def __init__(self, persona, account, proxy='', user_agent='', viewport=None,
+                 drive=True):
         self.id = 'ofc_' + uuid.uuid4().hex[:16]
         self.persona = persona
         self.account = account
@@ -145,9 +146,15 @@ class Attempt:
         self.cookie_names = []
         self._commands = queue.Queue()
         self._done = threading.Event()
-        self._thread = threading.Thread(target=self._run, daemon=True,
-                                        name=f'of-connect-{self.id}')
-        self._thread.start()
+        self._thread = None
+        # A probe borrows _launch and drives the browser on the caller's own
+        # thread. Starting this one too would put a second Chrome on the same
+        # profile directory, which Chrome refuses -- and the refusal surfaces as
+        # the probe failing, not the thread nobody asked for.
+        if drive:
+            self._thread = threading.Thread(target=self._run, daemon=True,
+                                            name=f'of-connect-{self.id}')
+            self._thread.start()
 
     # ── what the request handlers call ────────────────────────────────────────
 
@@ -487,7 +494,7 @@ def sample_now(proxy='', timeout=25):
                     'user_id': h.get('user-id') or '0', 'sign': h['sign'],
                     'app_token': h.get('app-token') or ''})
 
-    probe = Attempt('', '', proxy=proxy)
+    probe = Attempt('', '', proxy=proxy, drive=False)
     with _driver()() as pw:
         context = probe._launch(pw)[1]
         try:
@@ -595,7 +602,7 @@ def derive_rules(sample, proxy='', timeout=45):
             confirm.append({'path': of_rules.path_of(request.url), 'time': h['time'],
                             'user_id': h.get('user-id') or '0', 'sign': h['sign']})
 
-    probe = Attempt('', '', proxy=proxy)
+    probe = Attempt('', '', proxy=proxy, drive=False)
     literals = []
     with _driver()() as pw:
         context = probe._launch(pw)[1]
