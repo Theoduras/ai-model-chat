@@ -635,7 +635,7 @@ function showRules(r){
   const age=r.age_seconds==null?'':(', loaded '+(r.age_seconds<90?'just now'
     :(Math.round(r.age_seconds/60)+' min ago')));
   box.innerHTML='<span class="hint">Revision '+esc(r.revision||'unknown')+age
-    +'<br>Source: '+esc((r.source||'').split('/').slice(3,5).join('/')||'unknown')+'</span>';
+    +'<br>Source: '+esc(r.source||'unknown')+'</span>';
 }
 
 async function refreshRules(){

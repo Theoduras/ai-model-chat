@@ -175,6 +175,25 @@ def _adopt(rules, source=''):
     return _rules
 
 
+def label_of(source):
+    """A name for a rule source that means something to whoever is reading it.
+
+    The published sets come from community repositories whose names are their
+    own business but say nothing about what the set is, and reading one in the
+    console would only make a creator wonder what her chat app is mixed up in.
+    Position is the honest description: these are interchangeable mirrors of
+    the same thing, tried in order.
+    """
+    if source == 'override':
+        return 'Pasted in the console'
+    if source == 'cached':
+        return 'In use now'
+    for i, url in enumerate(RULES_SOURCES):
+        if url == source:
+            return f'Published set {i + 1}'
+    return 'Published set' if str(source).startswith('http') else str(source or '')
+
+
 def fingerprint(rules=None):
     """What identifies one revision of the rules, for saying "not that set
     again". The static_param and format are what a signature is actually built
@@ -274,7 +293,7 @@ def rules(force=False):
 def state():
     """What the admin screen shows: which source, how old, which revision."""
     r = _rules if _valid(_rules) else {}
-    return {'ready': bool(r), 'source': r.get('_source', ''),
+    return {'ready': bool(r), 'source': label_of(r.get('_source', '')),
             'revision': str(r.get('revision') or r.get('format', '').split(':')[0]),
             'app_token': r.get('app_token', ''),
             'age_seconds': int(time.time() - _fetched_at) if _fetched_at else None,

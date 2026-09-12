@@ -16806,7 +16806,7 @@ def api_onlyfans_signing_test():
             error = '' if of_rules._valid(candidate) else 'no usable rule set'
         except Exception as e:
             candidate, error = {}, str(e)[:160]
-        rows.append({'source': name.split('/')[3] if name.startswith('http') else name,
+        rows.append({'source': of_rules.label_of(name),
                      'revision': str(candidate.get('format', '')).split(':')[0],
                      'matches_sample': of_rules.verify(want, candidate),
                      'error': error})

@@ -113,6 +113,15 @@ class SourceTest(unittest.TestCase):
             with self.assertRaises(of_rules.RulesError):
                 of_rules.refresh(reject={of_rules.fingerprint(RULES)})
 
+    def test_sources_are_named_by_position_not_by_repository(self):
+        """A creator reading her console should not meet the account names of
+        strangers on GitHub."""
+        self.assertEqual(of_rules.label_of(of_rules.RULES_SOURCES[0]), 'Published set 1')
+        self.assertEqual(of_rules.label_of('override'), 'Pasted in the console')
+        self.assertEqual(of_rules.label_of('cached'), 'In use now')
+        for url in of_rules.RULES_SOURCES:
+            self.assertNotIn(url.split('/')[3], of_rules.label_of(url))
+
     def test_a_fingerprint_tracks_what_the_signature_is_built_from(self):
         self.assertEqual(of_rules.fingerprint(RULES),
                          of_rules.fingerprint(dict(RULES, app_token='other')))
