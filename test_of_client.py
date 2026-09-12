@@ -286,7 +286,7 @@ class ProvenRulesTest(unittest.TestCase):
         p.start()
         self.addCleanup(p.stop)
 
-    def test_the_rule_set_is_never_rejected_and_the_session_is_blamed(self):
+    def test_the_rule_set_is_never_rejected(self):
         with mock.patch.object(of_client, '_once',
                                side_effect=of_client.OnlyFansError(
                                    400, 'Please refresh the page')), \
@@ -294,6 +294,27 @@ class ProvenRulesTest(unittest.TestCase):
             with self.assertRaises(of_client.SignatureRefused):
                 of_client.call('acct1', 'GET', '/api2/v2/chats')
         refresh.assert_not_called()
+
+    def test_a_refusal_that_hits_every_request_does_not_blame_the_session(self):
+        """Reconnecting costs her a working session, so it is only asked for
+        when /users/me says the session itself is what OnlyFans refuses."""
+        with mock.patch.object(of_client, '_once',
+                               side_effect=of_client.OnlyFansError(
+                                   400, 'Please refresh the page')):
+            with self.assertRaises(of_client.SignatureRefused):
+                of_client.call('acct1', 'GET', '/api2/v2/chats')
+        self.assertEqual(of_session.describe('acct1')['status'],
+                         of_session.STATUS_LIVE)
+
+    def test_a_session_only_onlyfans_rejects_is_marked_for_reconnection(self):
+        def once(account, method, path, body, session):
+            if path.endswith('/users/me'):
+                raise of_client.OnlyFansError(401, 'unauthorized')
+            raise of_client.OnlyFansError(400, 'Please refresh the page')
+
+        with mock.patch.object(of_client, '_once', once):
+            with self.assertRaises(of_client.SignatureRefused):
+                of_client.call('acct1', 'GET', '/api2/v2/chats')
         self.assertEqual(of_session.describe('acct1')['status'],
                          of_session.STATUS_EXPIRED)
 

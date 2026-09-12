@@ -270,3 +270,31 @@ class RefreshCooldownTest(unittest.TestCase):
             of_rules.refresh = real
             of_rules._refresh_failed_at[0] = 0.0
         self.assertEqual(len(calls), 1)
+
+
+class OracleForcedRefreshCooldownTest(unittest.TestCase):
+    """The set the oracle disproves is the case that repeated per request, so
+    it is the one the cooldown has to cover."""
+
+    def test_a_disproved_set_does_not_refetch_on_every_call(self):
+        of_rules._refresh_failed_at[0] = 0.0
+        of_rules._rules = {'static_param': 's', 'format': '{}:{:x}',
+                           'checksum_indexes': [0], 'checksum_constant': 1,
+                           'app_token': 't'}
+        of_rules._fetched_at = 0.0
+        calls = []
+
+        def boom(reject=()):
+            calls.append(1)
+            raise of_rules.RulesError('every source failed')
+
+        real_refresh, real_verify = of_rules.refresh, of_rules.verify
+        of_rules.refresh = boom
+        of_rules.verify = lambda s, r: False
+        try:
+            for _ in range(3):
+                of_rules.rules()
+        finally:
+            of_rules.refresh, of_rules.verify = real_refresh, real_verify
+            of_rules._refresh_failed_at[0] = 0.0
+        self.assertEqual(len(calls), 1)

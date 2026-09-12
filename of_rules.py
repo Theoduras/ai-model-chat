@@ -182,7 +182,7 @@ def proven():
     reproduces a signature OnlyFans itself produced cannot be the reason
     OnlyFans refused a request, whatever the body says.
     """
-    return verify(sample(), _rules if _valid(_rules) else rules())
+    return verify(sample(), _rules)
 
 
 def _fetch(url):
@@ -308,7 +308,12 @@ def rules(force=False):
     with _lock:
         # A cached set the oracle disproves is worse than no set: it will be
         # refused on every request until something forces a refetch.
+        # Only a caller asking for it outright ignores the cooldown below: the
+        # oracle disproving the cached set is exactly the case that repeated per
+        # request, and forcing it here would walk straight past the cooldown.
         if not force and verify(sample(), _rules) is False:
+            if _valid(_rules) and time.time() - _refresh_failed_at[0] < REFRESH_RETRY_AFTER:
+                return _rules
             force = True
         if not force and _valid(_rules) and time.time() - _fetched_at < RULES_MAX_AGE:
             return _rules

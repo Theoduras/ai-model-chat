@@ -158,9 +158,18 @@ def _repair_identity(account, session):
     a different id is the bug and is worth fixing in place, and no answer at all
     means the session really is dead. Returns True when the caller should retry.
     """
+    _wait_turn(account)
     try:
         who = _once(account, 'GET', '/api2/v2/users/me', None, session)
     except OnlyFansError as e:
+        if of_rules.stale_response(e.code, e.detail):
+            # Refused the same way as the call that got us here, so it is not
+            # this session that OnlyFans objects to -- something every request
+            # carries is wrong, and sending the creator to reconnect would cost
+            # her the session she has for nothing.
+            logger.warning('OnlyFans refuses even /users/me while the rules are '
+                           'proven current — not blaming the session for %s', account)
+            return False
         of_session.mark_expired(account, 'OnlyFans refused this session while the '
                                          'signing rules were current: ' + str(e.detail)[:120])
         return False
