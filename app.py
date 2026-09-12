@@ -16228,6 +16228,11 @@ def _of_autocapture(force=False):
         return False
     age = of_rules.sample_age()
     if not force and age is not None and age < OF_SAMPLE_STALE:
+        # A fresh signature no published set can reproduce is not a reason to
+        # wait an hour: it is everything the derivation needs, and it is the
+        # exact state the app cannot otherwise get out of.
+        if of_rules.proven() is not True:
+            _of_derive_rules(of_rules.sample())
         return False
     now = time.time()
     if not force and now - _of_last_capture[0] < OF_CAPTURE_EVERY:
