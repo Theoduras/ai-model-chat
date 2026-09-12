@@ -15779,8 +15779,10 @@ def _plat_trace_api(plat):
                         'Cloud SQL env vars) to keep them.')
     hook = plat.webhook_state(persona)
     if not hook.get('ready'):
-        problems.append(hook.get('problem') or 'No webhook signing secret, so '
-                        'purchase webhooks are rejected.')
+        problems.append(hook.get('problem') or (
+            'Her inbox watcher is not running, so new messages are only picked '
+            'up on the backup sweep.' if hook.get('watcher') else
+            'No webhook signing secret, so purchase webhooks are rejected.'))
     stood_down = [r for r in _fv_unsendable(persona, plat=plat).values()
                   if isinstance(r, dict) and float(r.get('until') or 0) > time.time()]
     if stood_down:
@@ -15790,9 +15792,14 @@ def _plat_trace_api(plat):
             % (len(stood_down), plat.label,
                ', '.join(r.get('handle') or '?' for r in stood_down[:5])))
     if hook.get('last_error'):
-        problems.append('%s refused the webhook subscription for %s — %s'
-                        % (plat.label, hook.get('url') or 'this app',
-                           hook['last_error'][:160]))
+        # Nothing subscribes to anything on a platform we poll ourselves, so
+        # saying so would send the operator looking for a webhook that does
+        # not exist.
+        problems.append(
+            '%s inbox watcher: %s' % (plat.label, hook['last_error'][:160])
+            if hook.get('watcher') else
+            '%s refused the webhook subscription for %s — %s'
+            % (plat.label, hook.get('url') or 'this app', hook['last_error'][:160]))
     return jsonify({'persona': persona, 'connected': connected,
                     'enabled': bool(opts.get('enabled')),
                     'running': bool(lock and lock.locked()),
@@ -16158,12 +16165,14 @@ class _OnlyFansPlatform(_Platform):
             account = _of_account(persona)
             running = next((w for w in of_events.watching()
                             if w['account'] == account), None)
-            return {'ready': bool(running and running['running']),
-                    'url': _of_webhook_url(), 'last_error':
-                        (running or {}).get('last_error', ''),
-                    'problem': '' if running else
-                    'No watcher is running for this account, so new messages are '
-                    'only picked up on the backup sweep.'}
+            live = bool(running and running['running'])
+            why = (running or {}).get('last_error', '')
+            return {'ready': live, 'url': '', 'watcher': True,
+                    'last_error': why,
+                    'problem': '' if live else
+                    ('Her inbox watcher has stopped'
+                     + (f' ({why[:120]})' if why else '')
+                     + ', so new messages are only picked up on the backup sweep.')}
         ready = bool(_of_webhook_secrets())
         return {'ready': ready, 'url': _of_webhook_url(), 'last_error': '',
                 'problem': '' if ready else
@@ -16236,6 +16245,10 @@ if _of_direct():
 
     of_rules.cache_hooks(lambda: _get_setting('onlyfans_rules_cache') or '',
                          lambda v: _set_setting('onlyfans_rules_cache', v))
+    of_rules.override_hooks(lambda: _get_setting('onlyfans_rules_override') or '')
+    of_rules.sample_hooks(lambda: _get_setting('onlyfans_rules_sample') or '',
+                          lambda v: _set_setting('onlyfans_rules_sample', v))
+    of_connect.rules_sink(lambda s: of_rules.put_sample(s))
     of_session.store_hooks(lambda a: _get_setting(f'onlyfans_vault_{a}') or '',
                            _of_vault_save, _of_vault_delete, _of_vault_accounts)
 
@@ -16713,6 +16726,82 @@ def api_onlyfans_rules_refresh():
     except of_rules.RulesError as e:
         return jsonify({'ok': False, 'error': str(e)[:300]}), 502
     return jsonify({'ok': True, 'rules': of_rules.state()})
+
+
+@app.route('/api/onlyfans/rules/override', methods=['POST'])
+@operator_only
+def api_onlyfans_rules_override():
+    """Store a rule set an operator pasted in, or clear one.
+
+    Checked against the captured signature before it is kept: a set that cannot
+    reproduce what OnlyFans' own page produced would only replace one broken
+    signature with another.
+    """
+    if not _of_direct():
+        return jsonify({'ok': False, 'error': 'not running the direct transport'}), 400
+    raw = ((request.json or {}).get('rules') or '').strip()
+    if not raw:
+        _set_setting('onlyfans_rules_override', '')
+        return jsonify({'ok': True, 'cleared': True, 'rules': of_rules.state()})
+    try:
+        parsed = json.loads(raw)
+    except ValueError as e:
+        return jsonify({'ok': False, 'error': f'that is not valid JSON: {str(e)[:120]}'}), 400
+    if not of_rules._valid(parsed):
+        return jsonify({'ok': False, 'error': 'missing static_param, format, '
+                                              'checksum_indexes or app_token'}), 400
+    proven = of_rules.verify(of_rules.sample(), parsed)
+    if proven is False:
+        return jsonify({'ok': False, 'error': 'this set does not reproduce the last '
+                                              'signature OnlyFans produced, so it is '
+                                              'not the current one'}), 400
+    _set_setting('onlyfans_rules_override', json.dumps(parsed))
+    try:
+        of_rules.rules(force=True)
+    except of_rules.RulesError as e:
+        return jsonify({'ok': False, 'error': str(e)[:300]}), 502
+    return jsonify({'ok': True, 'verified': proven, 'rules': of_rules.state()})
+
+
+@app.route('/api/onlyfans/signing/test', methods=['POST'])
+@operator_only
+def api_onlyfans_signing_test():
+    """Which rule set is current, and does a request from this server work?
+
+    Two different questions, and only asking both separates "the published
+    rules are stale" from "the rules are fine and something about the request
+    this server makes is being refused".
+    """
+    if not _of_direct():
+        return jsonify({'ok': False, 'error': 'not running the direct transport'}), 400
+    persona = ((request.json or {}).get('persona') or '').strip()
+    account = _of_account(persona)
+    want = of_rules.sample()
+    rows = []
+    for name in ('override', 'cached') + tuple(of_rules.RULES_SOURCES):
+        try:
+            if name == 'override':
+                candidate = of_rules.override()
+            elif name == 'cached':
+                candidate = of_rules._rules
+            else:
+                candidate = of_rules._fetch(name)
+            error = '' if of_rules._valid(candidate) else 'no usable rule set'
+        except Exception as e:
+            candidate, error = {}, str(e)[:160]
+        rows.append({'source': name.split('/')[3] if name.startswith('http') else name,
+                     'revision': str(candidate.get('format', '')).split(':')[0],
+                     'matches_sample': of_rules.verify(want, candidate),
+                     'error': error})
+    live = {}
+    if account:
+        try:
+            who = OF.me(account)
+            live = {'ok': True, 'username': str(who.get('username') or '')}
+        except Exception as e:
+            live = {'ok': False, 'error': str(e)[:300]}
+    return jsonify({'ok': True, 'has_sample': bool(want), 'candidates': rows,
+                    'server_call': live, 'rules': of_rules.state()})
 
 
 @app.route('/api/onlyfans/session/check', methods=['POST'])

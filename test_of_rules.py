@@ -143,6 +143,62 @@ class SourceTest(unittest.TestCase):
             self.assertEqual(of_rules.rules()['app_token'], RULES['app_token'])
 
 
+class OracleTest(unittest.TestCase):
+    """A signature OnlyFans' own page produced says which rule set is current."""
+
+    def setUp(self):
+        self.stamp = 1700000000
+        self.sample = {'path': '/api2/v2/chats?limit=10', 'user_id': '99',
+                       'time': str(self.stamp),
+                       'sign': expected('/api2/v2/chats?limit=10', '99', self.stamp)}
+        self.addCleanup(of_rules.sample_hooks, None, None)
+        self.addCleanup(setattr, of_rules, '_rules', {})
+
+    def test_verifies_the_matching_rules(self):
+        self.assertIs(of_rules.verify(self.sample, RULES), True)
+
+    def test_rejects_a_set_that_signs_differently(self):
+        self.assertIs(of_rules.verify(self.sample, dict(RULES, static_param='x')), False)
+
+    def test_says_nothing_without_a_sample(self):
+        self.assertIsNone(of_rules.verify({}, RULES))
+        self.assertIsNone(of_rules.verify(self.sample, {'static_param': 'x'}))
+
+    def test_refresh_prefers_the_set_the_sample_proves(self):
+        stale = dict(RULES, static_param='STALE', format='1:{}:{:x}:2')
+        of_rules.sample_hooks(lambda: json.dumps(self.sample), lambda v: None)
+        with mock.patch.object(of_rules, 'RULES_SOURCES', ('stale', 'current')), \
+                mock.patch.object(of_rules, '_fetch',
+                                  lambda u: stale if u == 'stale' else RULES):
+            got = of_rules.refresh()
+        self.assertEqual(got['static_param'], RULES['static_param'])
+
+    def test_refresh_says_so_when_nothing_matches(self):
+        stale = dict(RULES, static_param='STALE')
+        of_rules.sample_hooks(lambda: json.dumps(self.sample), lambda v: None)
+        with mock.patch.object(of_rules, 'RULES_SOURCES', ('a',)), \
+                mock.patch.object(of_rules, '_fetch', return_value=stale):
+            with self.assertRaises(of_rules.RulesError) as caught:
+                of_rules.refresh()
+        self.assertIn('captured signature', str(caught.exception))
+
+    def test_an_override_beats_every_published_source(self):
+        of_rules.override_hooks(lambda: json.dumps(RULES))
+        self.addCleanup(of_rules.override_hooks, None)
+        with mock.patch.object(of_rules, '_fetch',
+                               return_value=dict(RULES, static_param='PUBLISHED')):
+            self.assertEqual(of_rules.refresh()['static_param'], RULES['static_param'])
+
+    def test_solves_the_static_param_out_of_a_bundle(self):
+        bundle = 'var a="notitatall",b="%s",c=1;' % RULES['static_param']
+        self.assertEqual(of_rules.solve(bundle, self.sample, RULES)['static_param'],
+                         RULES['static_param'])
+
+    def test_solving_gives_up_rather_than_guessing(self):
+        self.assertEqual(of_rules.solve('var a="nothing useful here";',
+                                        self.sample, RULES), {})
+
+
 class RotationTest(unittest.TestCase):
     def test_recognises_a_rotation(self):
         self.assertTrue(of_rules.stale_response(400, 'Please refresh the page'))

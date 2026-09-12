@@ -52,9 +52,45 @@ POLL_SECONDS = 1.5
 # creator does is queued behind it.
 MOVE_BUDGET = 0.1
 
+_rules_sink = None
 _attempts = {}
 _lock = threading.Lock()
 _sink = None
+
+
+def rules_sink(fn):
+    """Where a captured signature sample goes. Set by app.py; without it a
+    sample is simply not kept."""
+    global _rules_sink
+    _rules_sink = fn
+
+
+def _watch_signing(page):
+    """Keep the newest request OnlyFans' own page signed.
+
+    The page signs its own API calls, so one of them is a worked example: for
+    this exact path, time and user id, this is the signature OnlyFans expects.
+    That turns "are our rules current" from a guess into arithmetic. Nothing
+    here touches the cookie or the device token — only the four public values
+    the signature is computed from.
+    """
+    def seen(request):
+        try:
+            if '/api2/v2/' not in request.url:
+                return
+            h = request.headers
+            if not (h.get('sign') and h.get('time')):
+                return
+            (_rules_sink or of_rules.put_sample)({
+                'path': of_rules.path_of(request.url), 'time': h['time'],
+                'user_id': h.get('user-id') or '0', 'sign': h['sign'],
+                'app_token': h.get('app-token') or ''})
+        except Exception as e:
+            logger.debug('could not keep a signing sample: %s', str(e)[:120])
+    try:
+        page.on('request', seen)
+    except Exception as e:
+        logger.debug('could not watch signing: %s', str(e)[:120])
 
 
 def session_sink(fn):
@@ -220,6 +256,7 @@ class Attempt:
     def _drive(self, pw):
         browser, context = self._launch(pw)
         page = context.pages[0] if context.pages else context.new_page()
+        _watch_signing(page)
         page.goto(SIGNIN_URL, wait_until='domcontentloaded', timeout=60000)
         # What the window is told to scale by has to be the size of the frames
         # it actually gets. Sizing the window rather than overriding the

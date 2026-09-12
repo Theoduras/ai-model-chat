@@ -25,6 +25,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import threading
 import time
 import urllib.parse
@@ -55,6 +56,13 @@ _rules = {}
 _fetched_at = 0.0
 _load_cache = None
 _save_cache = None
+_load_override = None
+_load_sample = None
+_save_sample = None
+_sample_cache = (0.0, {})
+# The oracle is consulted on the way to every signature, so it is held briefly
+# rather than read from the database each time. It only changes on a connect.
+SAMPLE_TTL = 60
 
 
 class RulesError(RuntimeError):
@@ -66,6 +74,79 @@ def cache_hooks(load, save):
     string it was last given, `save(text)` stores one."""
     global _load_cache, _save_cache
     _load_cache, _save_cache = load, save
+
+
+def override_hooks(load):
+    """Lend the module an operator-set rule set. `load()` returns the JSON an
+    operator pasted into the console, or ''. It wins over every published
+    source: it is the escape hatch for a rotation the mirrors have not caught."""
+    global _load_override
+    _load_override = load
+
+
+def sample_hooks(load, save):
+    """Lend the module somewhere to keep the signature oracle."""
+    global _load_sample, _save_sample, _sample_cache
+    _load_sample, _save_sample = load, save
+    _sample_cache = (0.0, {})
+
+
+def override():
+    """The operator's rule set, if one is stored and usable."""
+    if not _load_override:
+        return {}
+    try:
+        r = json.loads(_load_override() or '{}')
+    except (ValueError, TypeError):
+        return {}
+    return r if _valid(r) else {}
+
+
+def sample():
+    """One request OnlyFans' own page signed: {path, time, user_id, sign}.
+
+    This is the oracle. Because we know what the correct signature for that
+    exact request was, any candidate rule set can be checked against it offline
+    — no live request, no waiting to be refused.
+    """
+    global _sample_cache
+    if not _load_sample:
+        return {}
+    at, cached = _sample_cache
+    if time.time() - at < SAMPLE_TTL:
+        return cached
+    try:
+        s = json.loads(_load_sample() or '{}')
+    except (ValueError, TypeError):
+        s = {}
+    if not (isinstance(s, dict) and s.get('sign') and s.get('path')):
+        s = {}
+    _sample_cache = (time.time(), s)
+    return s
+
+
+def put_sample(s):
+    """Keep a freshly captured sample. Carries no credentials, so it is stored
+    as it came."""
+    if not (_save_sample and isinstance(s, dict) and s.get('sign') and s.get('path')):
+        return {}
+    kept = {k: s.get(k) for k in ('path', 'time', 'user_id', 'sign', 'app_token')
+            if s.get(k) not in (None, '')}
+    global _sample_cache
+    _save_sample(json.dumps(kept))
+    _sample_cache = (time.time(), kept)
+    return kept
+
+
+def verify(s, r):
+    """Does `r` reproduce the signature in sample `s`? None when unanswerable."""
+    if not (s and s.get('sign') and _valid(r)):
+        return None
+    try:
+        got, _ = sign(s['path'], s.get('user_id') or '0', when=int(s['time']), r=r)
+    except (KeyError, ValueError, TypeError, IndexError):
+        return None
+    return got == s['sign']
 
 
 def _fetch(url):
@@ -114,23 +195,41 @@ def refresh(reject=()):
     """
     reject = {reject} if isinstance(reject, str) else set(reject or ())
     reject.discard('')
-    errors = []
-    for url in RULES_SOURCES:
+    want = sample()
+    errors, fallback = [], None
+    for url in ('override',) + tuple(RULES_SOURCES):
         try:
-            rules = _fetch(url)
+            rules = override() if url == 'override' else _fetch(url)
         except (url_error.URLError, ValueError, OSError) as e:
             errors.append(f'{url}: {str(e)[:80]}')
             continue
         if not _valid(rules):
-            errors.append(f'{url}: missing fields')
+            if url != 'override':
+                errors.append(f'{url}: missing fields')
             continue
         if fingerprint(rules) in reject:
-            errors.append(f'{url}: still serving the rejected revision')
+            errors.append(f'{url}: still serving the revision OnlyFans rejected')
             continue
+        # With an oracle there is nothing to guess at: a set that reproduces a
+        # signature OnlyFans' own page produced is the current one, and a set
+        # that cannot is not worth a request.
+        proven = verify(want, rules)
+        if proven:
+            logger.info('OnlyFans rules from %s match the captured signature', url)
+            return _adopt(rules, url)
+        if proven is False:
+            errors.append(f'{url}: does not match the signature OnlyFans last produced')
+            continue
+        if fallback is None:
+            fallback = (rules, url)
+    if fallback:
+        rules, url = fallback
         logger.info('OnlyFans rules refreshed from %s (revision %s)',
                     url, rules.get('revision') or rules.get('format', '')[:8])
         return _adopt(rules, url)
-    raise RulesError('no usable OnlyFans rules: ' + '; '.join(errors))
+    raise RulesError(('every published rule set fails the captured signature'
+                      if want else 'no usable OnlyFans rules')
+                     + ': ' + '; '.join(errors))
 
 
 def _restore():
@@ -152,6 +251,10 @@ def _restore():
 def rules(force=False):
     """The rules to sign with, fetching or restoring them if needed."""
     with _lock:
+        # A cached set the oracle disproves is worse than no set: it will be
+        # refused on every request until something forces a refetch.
+        if not force and verify(sample(), _rules) is False:
+            force = True
         if not force and _valid(_rules) and time.time() - _fetched_at < RULES_MAX_AGE:
             return _rules
         if not force and not _valid(_rules) and _restore() and \
@@ -174,7 +277,9 @@ def state():
     return {'ready': bool(r), 'source': r.get('_source', ''),
             'revision': str(r.get('revision') or r.get('format', '').split(':')[0]),
             'app_token': r.get('app_token', ''),
-            'age_seconds': int(time.time() - _fetched_at) if _fetched_at else None}
+            'age_seconds': int(time.time() - _fetched_at) if _fetched_at else None,
+            'verified': verify(sample(), r), 'has_sample': bool(sample()),
+            'override': bool(override())}
 
 
 def _checksum(digest, r):
@@ -243,6 +348,37 @@ def path_of(url):
     """The path+query to sign for a full URL."""
     parts = urllib.parse.urlsplit(url)
     return parts.path + (('?' + parts.query) if parts.query else '')
+
+
+# A static_param is a long opaque literal in the site's own bundle. Nothing
+# marks it as one, so every literal of about the right shape is a candidate and
+# the oracle says which is right — brute force with a perfect checker, rather
+# than trying to understand minified code.
+_LITERAL_RE = re.compile(r'[\'"]([A-Za-z0-9+/=_-]{16,64})[\'"]')
+
+
+def solve(bundle, s=None, base=None):
+    """Recover the rules from OnlyFans' own JS, given a sample to check against.
+
+    `base` supplies the parts that are not being searched for (format, checksum
+    indexes and constant); only the static_param is solved. Returns the working
+    rule set, or {} when nothing in the bundle reproduces the sample.
+    """
+    s = s or sample()
+    base = base or _rules
+    if not (s and s.get('sign') and base and base.get('format')):
+        return {}
+    seen = set()
+    for match in _LITERAL_RE.finditer(bundle or ''):
+        candidate = match.group(1)
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        trial = dict(base, static_param=candidate)
+        if verify(s, trial):
+            logger.info('recovered the OnlyFans static_param from the page bundle')
+            return trial
+    return {}
 
 
 def stale_response(status, body):

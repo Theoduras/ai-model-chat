@@ -128,15 +128,17 @@ def _adopt_working_rules(rejected):
     try:
         fresh = of_rules.refresh(reject=rejected)
     except of_rules.RulesError as e:
-        raise SigningStale(400, 'OnlyFans rejected the request signature and no '
-                                'published rule set could be fetched: '
-                                f'{str(e)[:160]}') from None
+        # Reason first: this reaches the console through a 160-character trace,
+        # and the reason is the whole point of the message.
+        logger.warning('OnlyFans signing is stuck: %s', e)
+        raise SigningStale(400, 'no rule set signs what OnlyFans will accept — '
+                                f'{str(e)[:200]}') from None
     fresh_fp = of_rules.fingerprint(fresh)
     if fresh_fp and fresh_fp in rejected:
-        raise SigningStale(400, 'OnlyFans rejected the request signature and every '
-                                'published rule set is the same one it rejected — '
-                                'the free dynamic rules are behind OnlyFans\' '
-                                'current rotation. The account is still connected.')
+        raise SigningStale(400, 'every published rule set is the one OnlyFans just '
+                                'rejected, so the free dynamic rules are behind its '
+                                'current rotation. Paste a current set in the console '
+                                '— the account itself is still connected.')
     logger.info('OnlyFans rules rotated, signing with %s', fresh.get('_source', ''))
 
 

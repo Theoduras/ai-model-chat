@@ -237,7 +237,11 @@ def reconcile(accounts):
     accounts = {a for a in accounts if a}
     with _lock:
         current = set(_watchers)
-    for account in accounts - current:
+        # A watcher whose thread has died stays in the registry, so membership
+        # alone would leave it dead for ever. start() no-ops on a live thread,
+        # which makes restarting the stopped ones just as cheap as skipping.
+        stopped = {a for a, w in _watchers.items() if not w.state()['running']}
+    for account in (accounts - current) | (accounts & stopped):
         watch(account)
     for account in current - accounts:
         unwatch(account)

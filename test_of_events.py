@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import json
 import os
+import time
 import unittest
 from unittest import mock
 
@@ -162,6 +163,27 @@ class RegistryTest(unittest.TestCase):
         with mock.patch.object(of_events.Watcher, 'start', lambda self: self):
             first = of_events.watch('a')
             self.assertIs(of_events.watch('a'), first)
+
+
+class ReconcileTest(unittest.TestCase):
+    def tearDown(self):
+        for account in list(of_events._watchers):
+            of_events.unwatch(account)
+
+    def test_restarts_a_watcher_whose_thread_has_died(self):
+        """A watcher that stopped stays registered, so membership alone would
+        leave it dead for ever."""
+        with mock.patch.object(of_events.Watcher, 'poll',
+                               side_effect=of_client.SessionExpired(401, 'not live')):
+            of_events.watch('acct1')
+            for _ in range(100):
+                if not of_events.watching()[0]['running']:
+                    break
+                time.sleep(0.01)
+        self.assertFalse(of_events.watching()[0]['running'])
+        with mock.patch.object(of_events.Watcher, 'poll', return_value=[]):
+            of_events.reconcile(['acct1'])
+            self.assertTrue(of_events.watching()[0]['running'])
 
 
 if __name__ == '__main__':
