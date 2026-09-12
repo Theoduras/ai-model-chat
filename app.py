@@ -17218,6 +17218,17 @@ def api_diag():
         if request.args.get('repair'):
             out['repair'] = {'ran': _of_autocapture(force=True),
                              'proven_after': of_rules.proven()}
+        # The bundle does not carry the current static_param, so the rules
+        # cannot be reconstructed from it. This asks OnlyFans' own page to sign
+        # a path of ours instead, and reports what in that page could be asked.
+        if request.args.get('sign'):
+            try:
+                out['sign'] = _of_conn().sign_now(
+                    request.args.get('sign_path') or '/api2/v2/users/me',
+                    user_id=str(request.args.get('sign_user') or '0'),
+                    proxy=_of_proxy_for('', ''))
+            except Exception as e:
+                out['sign'] = {'error': str(e)[:200]}
         try:
             out['onlyfans'] = _of_watch_payload(
                 int(request.args.get('after') or 0),

@@ -104,6 +104,19 @@ def service():
             return jsonify({'ok': False, 'error': str(e)[:200]}), 400
         return jsonify({'ok': True, 'sample': sample})
 
+    @api.route('/sign', methods=['POST'])
+    def sign():
+        """OnlyFans' own code signing a path of ours. No sign-in, no credentials."""
+        d = request.json or {}
+        try:
+            out = of_connect.sign_now((d.get('path') or '').strip(),
+                                      user_id=str(d.get('user_id') or '0'),
+                                      proxy=(d.get('proxy') or '').strip())
+        except Exception as e:
+            return jsonify({'ok': False, 'error': str(e)[:200]}), 400
+        return jsonify({'ok': True, 'sign': out.get('sign') or {},
+                        'report': out.get('report') or {}})
+
     @api.route('/derive-rules', methods=['POST'])
     def derive_rules():
         """The current signing rules, worked out of OnlyFans' own bundle."""
@@ -298,6 +311,12 @@ class Remote:
         out = self.call('POST', '/signing-sample', {'proxy': proxy},
                         timeout=START_TIMEOUT)
         return out.get('sample') or {}
+
+    def sign_now(self, path, user_id='0', proxy=''):
+        out = self.call('POST', '/sign',
+                        {'path': path, 'user_id': user_id, 'proxy': proxy},
+                        timeout=120)
+        return {'sign': out.get('sign') or {}, 'report': out.get('report') or {}}
 
     def derive_rules(self, sample, proxy=''):
         out = self.call('POST', '/derive-rules', {'sample': sample, 'proxy': proxy},

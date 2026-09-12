@@ -828,3 +828,136 @@ def sweep():
         a.close()
         with _lock:
             _attempts.pop(a.id, None)
+
+
+# Every signed request the page makes, recorded from before its own scripts
+# run: the signature is built inside the app's request interceptor, so the way
+# out is the only place it can be read.
+_SIGN_HOOK_JS = """() => {
+  window.__ofsigs = [];
+  const keep = (url, headers) => {
+    if (!/\\/api2\\/v2\\//.test(url)) return;
+    window.__ofsigs.push({url: url, headers: headers});
+  };
+  const open_ = XMLHttpRequest.prototype.open;
+  const set_ = XMLHttpRequest.prototype.setRequestHeader;
+  const send_ = XMLHttpRequest.prototype.send;
+  XMLHttpRequest.prototype.open = function (m, u) {
+    this.__ofurl = u; this.__ofh = {}; return open_.apply(this, arguments);
+  };
+  XMLHttpRequest.prototype.setRequestHeader = function (k, v) {
+    if (this.__ofh) this.__ofh[String(k).toLowerCase()] = v;
+    return set_.apply(this, arguments);
+  };
+  XMLHttpRequest.prototype.send = function () {
+    try { keep(this.__ofurl || '', this.__ofh || {}); } catch (e) {}
+    return send_.apply(this, arguments);
+  };
+  const fetch_ = window.fetch;
+  window.fetch = function (input, init) {
+    try {
+      const url = typeof input === 'string' ? input : (input && input.url) || '';
+      const h = {};
+      new Headers((init && init.headers) || (input && input.headers) || {})
+        .forEach((v, k) => { h[String(k).toLowerCase()] = v; });
+      keep(url, h);
+    } catch (e) {}
+    return fetch_.apply(this, arguments);
+  };
+}"""
+
+
+# What in the page can be asked to make a signed request. The signer is a
+# closure inside a request interceptor and cannot be called directly, but
+# whatever owns that interceptor can be, and it signs whatever path it is
+# handed.
+_SIGNER_JS = """(path) => {
+  const report = {vue: false, globals: [], via: '', error: ''};
+  const callers = [];
+  const looks = (o) => {
+    try {
+      return o && o.interceptors && o.interceptors.request && typeof o.get === 'function';
+    } catch (e) { return false; }
+  };
+  for (const k of Object.getOwnPropertyNames(window)) {
+    let v;
+    try { v = window[k]; } catch (e) { continue; }
+    if (looks(v)) { report.globals.push(k); callers.push(['window.' + k, v]); }
+  }
+  const root = document.querySelector('#app') || document.body.firstElementChild;
+  const vm = root && (root.__vue__ || root.__vue_app__);
+  report.vue = !!vm;
+  if (vm) {
+    for (const name of ['$api', '$axios', '$http', 'axios']) {
+      const v = vm[name] || (vm.config && vm.config.globalProperties
+                             && vm.config.globalProperties[name]);
+      if (looks(v)) callers.push(['vue.' + name, v]);
+    }
+  }
+  for (const [name, inst] of callers) {
+    try { inst.get(path); report.via = name; break; }
+    catch (e) { report.error = String(e).slice(0, 120); }
+  }
+  return report;
+}"""
+
+
+def sign_now(path, user_id='0', proxy='', timeout=30):
+    """A signature for a path of ours, made by OnlyFans' own code.
+
+    A rotation changes `static_param`, and it is not a string in the bundle:
+    2.4MB of it was read and the revision OnlyFans signs with is not in there,
+    so there is nothing left to reconstruct it from. The page holding the
+    signer is asked to sign the path we need instead, through whichever of its
+    own objects owns the request interceptor.
+
+    Nothing here logs in. A signature covers the path, the time and the user
+    id; identity is the cookie, and that stays in the app.
+    """
+    report = {'via': '', 'vue': False, 'globals': [], 'seen': 0, 'why': ''}
+    probe = Attempt('', '', proxy=proxy, drive=False)
+    with _driver()() as pw:
+        context = probe._launch(pw)[1]
+        try:
+            context.add_init_script('(' + _SIGN_HOOK_JS + ')()')
+            page = context.pages[0] if context.pages else context.new_page()
+            try:
+                page.goto(SIGNIN_URL, wait_until='domcontentloaded',
+                          timeout=timeout * 1000)
+            except Exception as e:
+                report['why'] = 'the page did not load: ' + str(e)[:120]
+                return {'sign': {}, 'report': report}
+            page.wait_for_timeout(3000)
+            try:
+                found = page.evaluate(_SIGNER_JS, path) or {}
+            except Exception as e:
+                report['why'] = 'could not look for a signer: ' + str(e)[:120]
+                return {'sign': {}, 'report': report}
+            for key in ('vue', 'globals', 'via'):
+                report[key] = found.get(key)
+            until = time.time() + 15
+            while time.time() < until:
+                try:
+                    sigs = page.evaluate('() => window.__ofsigs || []') or []
+                except Exception:
+                    sigs = []
+                report['seen'] = len(sigs)
+                for s in sigs:
+                    h = s.get('headers') or {}
+                    if of_rules.path_of(s.get('url') or '') != path:
+                        continue
+                    if h.get('sign') and h.get('time'):
+                        return {'sign': {'path': path, 'time': h['time'],
+                                         'user_id': h.get('user-id') or user_id,
+                                         'sign': h['sign'],
+                                         'app_token': h.get('app-token') or ''},
+                                'report': report}
+                page.wait_for_timeout(500)
+            report['why'] = ('nothing signed our path; %s signed requests seen'
+                             % report['seen'])
+            return {'sign': {}, 'report': report}
+        finally:
+            try:
+                context.close()
+            except Exception:
+                pass

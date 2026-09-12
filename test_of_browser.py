@@ -10,6 +10,7 @@ import queue
 import threading
 import time
 import unittest
+from unittest import mock
 from wsgiref.simple_server import WSGIRequestHandler, make_server
 
 os.environ.setdefault('SECRET_KEY', 'test-secret-for-of-session')
@@ -66,6 +67,15 @@ class SplitTest(unittest.TestCase):
         self.assertEqual(near.persona, far.persona)
         self.assertEqual(near.account, far.account)
         self.assertEqual(near.snapshot(), far.snapshot())
+
+    def test_a_signature_and_its_report_cross_the_wire(self):
+        canned = {'sign': {'path': '/api2/v2/users/me', 'time': '1789219113274',
+                           'user_id': '0', 'sign': '65034:abc:ff:zz'},
+                  'report': {'via': 'window.axios', 'seen': 4}}
+        with mock.patch.object(of_connect, 'sign_now', return_value=canned):
+            out = self.remote.sign_now('/api2/v2/users/me')
+        self.assertEqual(out['sign']['sign'], '65034:abc:ff:zz')
+        self.assertEqual(out['report']['via'], 'window.axios')
 
     def test_a_missing_attempt_is_none_on_both_sides(self):
         self.assertIsNone(of_connect.get('ofc_nope'))
