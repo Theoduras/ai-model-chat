@@ -495,3 +495,31 @@ class InjectedSignatureTest(unittest.TestCase):
             'https://onlyfans.com/api2/v2/chats',
             {'sign': '65034:theirs:ff:y', 'time': '1789203482721', 'user-id': '9'}))
         self.assertEqual(a.signing_sample['sign'], '65034:theirs:ff:y')
+
+
+class DeriveReportTest(unittest.TestCase):
+    """A derivation that finds nothing has to say what it looked at."""
+
+    def test_a_refused_sample_still_comes_back_with_a_reason(self):
+        out = of_connect.derive_rules({'sign': 'not-four-parts', 'path': '/x'})
+        self.assertEqual(out['rules'], {})
+        self.assertIn('four parts', out['report']['why'])
+
+    def test_the_bundle_scan_reports_what_it_fetched(self):
+        class _Resp:
+            def text(self):
+                return 'var a="thisisaliteral";var b="65034x";'
+
+        class _Req:
+            def get(self, url, timeout=0):
+                return _Resp()
+
+        class _Ctx:
+            request = _Req()
+
+        literals, seen = of_connect._bundle_literals(_Ctx(), ['u1', 'u2'],
+                                                   marker='65034')
+        self.assertIn('thisisaliteral', literals)
+        self.assertEqual(seen['ok'], 2)
+        self.assertTrue(seen['marker'])
+        self.assertEqual(seen['literals'], len(literals))

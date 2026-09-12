@@ -16270,8 +16270,6 @@ def _of_derive_rules(sample, force=False):
     """
     now = time.time()
     if not force and now - _of_last_derive[0] < OF_CAPTURE_EVERY:
-        of_trace.note('repair', 'skipped the derivation, one ran %ss ago'
-                      % int(now - _of_last_derive[0]))
         return False
     _of_last_derive[0] = now
     conn = _of_conn()
@@ -16282,13 +16280,25 @@ def _of_derive_rules(sample, force=False):
     # outcomes was invisible in the console -- which is where they are read.
     of_trace.note('repair', 'asking the browser for the current signing rules')
     try:
-        rules = conn.derive_rules(sample, _of_proxy_for('', '')) or {}
+        out = conn.derive_rules(sample, _of_proxy_for('', '')) or {}
     except Exception as e:
         of_trace.note('repair', 'the derivation call failed: ' + str(e)[:160], 'warning')
         return False
+    rules, report = out.get('rules') or {}, out.get('report') or {}
+    if report:
+        # The browser service's own log ring holds a handful of lines and is
+        # emptied by every deploy, so its account of a failed derivation was
+        # unreadable by the time anyone looked. It is kept here instead.
+        of_trace.note('repair', 'the derivation read %s of %s scripts, %s bytes, '
+                      '%s literals, %s confirming signatures; revision %s in them'
+                      % (report.get('ok', 0), report.get('urls', 0),
+                         report.get('bytes', 0), report.get('literals', 0),
+                         report.get('confirm', 0),
+                         'appears' if report.get('marker') else 'does not appear'))
     if of_rules.verify(sample, rules) is not True:
-        of_trace.note('repair', 'the derived rules do not reproduce the signature'
-                      if rules else 'the browser derived nothing', 'warning')
+        of_trace.note('repair', report.get('why')
+                      or ('the derived rules do not reproduce the signature'
+                          if rules else 'the browser derived nothing'), 'warning')
         return False
     _set_setting('onlyfans_rules_override', json.dumps(rules))
     of_rules.refresh()
@@ -17502,7 +17512,6 @@ def _of_worker(tick=2.0):
             _plat_round_now(PLAT_ONLYFANS, persona)
         except Exception as e:
             logger.exception('onlyfans round failed for %s', persona)
-            _of_autocapture()
             try:
                 with app.app_context(), PLAT_ONLYFANS.tracing():
                     _fv_trace(persona, 'error', f'round failed: {str(e)[:200]}')

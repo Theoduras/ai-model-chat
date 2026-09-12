@@ -601,13 +601,14 @@ def _bundle_literals(context, urls, marker=''):
         out.update(m.group(1) for m in _LITERAL_RE.finditer(body))
         if len(out) > 400000:
             break
+    seen['literals'] = len(out)
     # Whether the revision OnlyFans is signing with appears anywhere in what we
     # fetched separates "reading the wrong files" from "the parameter is not a
     # plain string in the right ones" -- two very different problems.
     logger.info('rule derivation fetched %s of %s scripts, %s bytes; the current '
                 'revision %s in them', seen['ok'], seen['urls'], seen['bytes'],
                 'appears' if seen['marker'] else 'does not appear')
-    return list(out)
+    return list(out), seen
 
 
 def derive_rules(sample, proxy='', timeout=45):
@@ -622,11 +623,15 @@ def derive_rules(sample, proxy='', timeout=45):
     Nothing is trusted on the way out: the result only leaves here if it
     reproduces the signature OnlyFans itself produced.
     """
+    report = {'why': '', 'urls': 0, 'ok': 0, 'bytes': 0, 'literals': 0,
+              'marker': False, 'confirm': 0}
     if not (sample and sample.get('sign') and sample.get('path')):
-        return {}
+        report['why'] = 'no usable sample to derive against'
+        return {'rules': {}, 'report': report}
     parts = str(sample['sign']).split(':')
     if len(parts) != 4:
-        return {}
+        report['why'] = 'the sample signature is not four parts'
+        return {'rules': {}, 'report': report}
     prefix, digest, checksum, suffix = parts
     # One signature cannot prove a shape: the constant absorbs any choice of
     # indexes for a single digest. A second signature the page produced is what
@@ -655,8 +660,10 @@ def derive_rules(sample, proxy='', timeout=45):
             try:
                 found = page.evaluate(_LITERALS_JS) or {}
                 literals = list(found.get('literals') or [])
-                literals += _bundle_literals(context, found.get('urls') or [],
-                                             marker=prefix)
+                fetched, seen = _bundle_literals(context, found.get('urls') or [],
+                                                 marker=prefix)
+                literals += fetched
+                report.update(seen)
             except Exception as e:
                 logger.warning('rule derivation could not read the bundle: %s', str(e)[:120])
         finally:
@@ -671,23 +678,28 @@ def derive_rules(sample, proxy='', timeout=45):
         if hashlib.sha1(msg.encode('utf-8')).hexdigest() == digest:
             static_param = candidate
             break
+    report['confirm'] = len(confirm)
     if not static_param:
+        report['why'] = ('none of %s literals signs the captured request'
+                         % len(literals))
         logger.warning('rule derivation read %s literals from the bundle and none '
                        'of them signs the captured request (%s)', len(literals),
                        sample.get('path', '')[:60])
-        return {}
+        return {'rules': {}, 'report': report}
     if not confirm:
+        report['why'] = 'found the static param, no second signature to prove it'
         logger.warning('found the static param but the page produced no second '
                        'signature to prove the checksum positions with')
-        return {}
+        return {'rules': {}, 'report': report}
     rules = _solve_checksum(sample, static_param, prefix, digest, checksum, suffix,
                             confirm=confirm[:4])
     if not rules:
+        report['why'] = 'found the static param, no checksum shape reproduces it'
         logger.warning('found the static param but no checksum shape reproduces '
                        'the signature')
-        return {}
+        return {'rules': {}, 'report': report}
     logger.info('derived the current OnlyFans signing rules from the page (%s)', prefix)
-    return rules
+    return {'rules': rules, 'report': report}
 
 
 def _solve_checksum(sample, static_param, prefix, digest, checksum, suffix,
