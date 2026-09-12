@@ -539,7 +539,7 @@ _LITERALS_JS = """() => {
     if (/\\.m?js(\\?|$)/.test(e.name) || e.initiatorType === 'script') urls.add(e.name);
   }
   for (const t of document.querySelectorAll('script:not([src])')) {
-    for (const m of t.textContent.matchAll(/["'`]([\\x21-\\x7e]{8,256})["'`]/g)) out.add(m[1]);
+    for (const m of t.textContent.matchAll(/["'`]([^"'`\\\\\\s]{8,256})["'`]/g)) out.add(m[1]);
   }
   // The bundles come from a CDN on another origin, where fetch() from the page
   // is refused and returns nothing -- which is why scanning from in here reads
@@ -549,7 +549,11 @@ _LITERALS_JS = """() => {
 }"""
 
 
-_LITERAL_RE = re.compile(r'''["'`]([\x21-\x7e]{8,256})["'`]''')
+# The class must exclude what can end a string -- quotes, a backslash, any
+# space. With those inside it the greedy quantifier ran straight through the
+# delimiters and returned one blob per run of adjacent strings, so the literal
+# being looked for was never tested on its own.
+_LITERAL_RE = re.compile(r'''["'`]([^"'`\\\s]{8,256})["'`]''')
 
 
 def _bundle_literals(context, urls, marker=''):

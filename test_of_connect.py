@@ -457,3 +457,17 @@ class SolveChecksumTest(unittest.TestCase):
                                          shapes=[([3, 9, 17], 't')])
         self.assertEqual(got.get('checksum_indexes'), [3, 9, 17])
         self.assertEqual(got.get('checksum_constant'), 272)
+
+
+class LiteralScanTest(unittest.TestCase):
+    """Adjacent strings are separate literals. With the quote characters inside
+    the class, the greedy match ran through the delimiters and returned one blob
+    per run — so the value being searched for was never tested on its own."""
+
+    def test_adjacent_strings_come_back_separately(self):
+        js = 'var a="aaaaaaaaaa",b="bbbbbbbbbb",c="cccccccccc";'
+        self.assertEqual([m.group(1) for m in of_connect._LITERAL_RE.finditer(js)],
+                         ['aaaaaaaaaa', 'bbbbbbbbbb', 'cccccccccc'])
+
+    def test_the_in_page_scan_uses_the_same_class(self):
+        self.assertIn('''[^"'`\\\\\\s]''', of_connect._LITERALS_JS)
