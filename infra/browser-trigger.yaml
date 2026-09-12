@@ -1,0 +1,37 @@
+# The Cloud Build trigger that deploys ai-model-chat-dev-browser.
+#
+# Apply it with:
+#   gcloud builds triggers import --source=infra/browser-trigger.yaml --region=global
+#
+# `import` rather than `triggers create github`: create re-derives the repository
+# link from flags and refuses with a bare "INVALID_ARGUMENT: Request contains an
+# invalid argument" when it disagrees with how the repository is actually
+# connected. The github block below is copied verbatim from the app's working
+# trigger, so it is linked the same proven way -- 1st generation, through the
+# Cloud Build GitHub App, in the global region. Note the capital T in Theoduras.
+#
+# import is idempotent on name: running it again updates this trigger rather than
+# creating a second one. It does not touch the app's trigger.
+name: ai-model-chat-dev-browser
+description: Build and deploy to Cloud Run service ai-model-chat-dev-browser on push to "^develop$"
+
+github:
+  owner: Theoduras
+  name: ai-model-chat
+  push:
+    branch: ^develop$
+
+filename: cloudbuild.browser.yaml
+
+# The same service account the app's trigger deploys as, so it already carries
+# the roles this needs (run.developer, iam.serviceAccountUser) -- proven by the
+# app deploying with it today.
+serviceAccount: projects/project-e2bea538-2986-4145-abe/serviceAccounts/793708886252-compute@developer.gserviceaccount.com
+
+includeBuildLogs: INCLUDE_BUILD_LOGS_WITH_STATUS
+
+substitutions:
+  _SERVICE_NAME: ai-model-chat-dev-browser
+  _DEPLOY_REGION: europe-west4
+  _AR_HOSTNAME: europe-west4-docker.pkg.dev
+  _AR_REPOSITORY: cloud-run-source-deploy

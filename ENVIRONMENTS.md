@@ -91,70 +91,46 @@ checkout.
 
 ### Creating the trigger
 
-This is the only part that is not in the repository. **Do not type a connection
-by hand — copy the app's.** A trigger names the repository in one of two
-mutually incompatible ways, and guessing wrong is where
-`INVALID_ARGUMENT: Request contains an invalid argument` comes from: the flags
-are valid, the repository they name is simply not connected that way. The app's
-trigger already deploys from this repository, so it is the answer:
+This is the only part that is not in the repository, and it is one command:
+
+```bash
+gcloud builds triggers import --source=infra/browser-trigger.yaml --region=global
+```
+
+`infra/browser-trigger.yaml` is the trigger itself. It is imported rather than
+built up from `gcloud builds triggers create github` flags, because create
+re-derives the repository link and refuses with a bare
+`INVALID_ARGUMENT: Request contains an invalid argument` when what it derives
+disagrees with how the repository is really connected — which says nothing about
+which half was wrong. The `github:` block in that file is copied verbatim from
+the app's trigger, which has deployed from this repository since June, so the
+link is the one already proven to work:
+
+| | |
+|---|---|
+| Connection | 1st generation, Cloud Build GitHub App |
+| Trigger region | `global` — not `europe-west4`, where the services are |
+| Owner / repo | `Theoduras` / `ai-model-chat` — capital T, and it is case-sensitive |
+| Deploy service account | the project's compute default, `793708886252-compute@…` |
+
+Import is idempotent on the name: running it again updates this trigger instead
+of adding a second one, and it never touches the app's.
+
+To confirm what the app's trigger uses before trusting the copy:
 
 ```bash
 gcloud builds triggers list --region=global --format="value(name)"
-gcloud builds triggers describe RMGPGAB_NAME --region=global --format=yaml
+gcloud builds triggers describe TRIGGER_NAME --region=global \
+  --format="value(github.owner, github.name, repositoryEventConfig.repository)"
 ```
 
-Read which block it has:
+A populated `github.owner`/`github.name` is 1st generation, as above. A
+`projects/…/connections/…/repositories/…` resource name instead would mean the
+connection had been migrated to 2nd generation, and `infra/browser-trigger.yaml`
+would need its `github:` block swapped for `repositoryEventConfig:` with that
+resource name, and the trigger moved to the connection's own region.
 
-**1st generation** — a `github:` block with `owner:` and `name:`. The repository
-is connected through the Cloud Build GitHub App, and the browser's trigger is
-created with the same two flags:
-
-```bash
-gcloud builds triggers create github \
-  --name=ai-model-chat-dev-browser \
-  --repo-owner=OWNER --repo-name=REPO \
-  --branch-pattern='^develop$' \
-  --build-config=cloudbuild.browser.yaml \
-  --region=global
-```
-
-Take `OWNER` verbatim from the describe output — it is case-sensitive, and the
-GitHub owner here has been written both `Theoduras` and `theoduras`.
-
-**2nd generation** — a `repositoryEventConfig:` block with a
-`repository: projects/…/locations/…/connections/…/repositories/…` resource
-name. `--repo-owner/--repo-name` cannot address this at all; pass that resource
-name, and put the trigger in the **connection's own region**, not `global`:
-
-```bash
-gcloud builds triggers create github \
-  --name=ai-model-chat-dev-browser \
-  --repository=projects/PROJECT/locations/REGION/connections/CONN/repositories/REPO \
-  --branch-pattern='^develop$' \
-  --build-config=cloudbuild.browser.yaml \
-  --region=REGION
-```
-
-A 2nd-generation trigger must live in the same region as its connection; a
-mismatch is the same `INVALID_ARGUMENT`. If the connection turns out to be in
-`europe-west4`, the browser's trigger belongs there too, and every
-`--region=global` below becomes `--region=europe-west4`.
-
-If neither block is there, or `triggers list` is empty in `global`, the
-connection is in another region — sweep for it before concluding anything:
-
-```bash
-for r in global europe-west4 europe-west1 us-central1; do
-  echo "== $r"; gcloud builds triggers list --region="$r" --format="value(name)"
-done
-gcloud builds connections list --region=europe-west4
-```
-
-The Cloud Build service account needs `roles/run.developer` and
-`roles/iam.serviceAccountUser`, or the build's last step fails with a permission
-error after a successful push.
-
-Check it is there and firing — `--region` being whichever the trigger went into:
+Check it is there and firing:
 
 ```bash
 gcloud builds triggers list --region=global \
