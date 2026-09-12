@@ -16238,6 +16238,10 @@ def _of_autocapture(force=False):
     if not force and now - _of_last_capture[0] < OF_CAPTURE_EVERY:
         return False
     _of_last_capture[0] = now
+    if force:
+        # A stored sample that is ours keeps proven() lying, and the capture
+        # below is the only thing that can replace it.
+        of_rules.drop_sample()
     try:
         build = _of_browser_build()
         if not (build.get('up') and build.get('signing_capture')):

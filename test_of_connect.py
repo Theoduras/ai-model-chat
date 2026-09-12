@@ -40,19 +40,14 @@ _ATTEMPT = of_connect.Attempt
 
 
 def bare_attempt(account='acct1'):
-    """An Attempt without its thread, so the capture logic can be driven by hand."""
-    a = _ATTEMPT.__new__(_ATTEMPT)
-    a.id, a.persona, a.account = 'ofc_test', 'lilith', account
-    a.proxy, a.user_agent = 'http://u:p@nl.proxy.example:8000', ''
-    a.viewport = dict(of_connect.VIEWPORT)
-    a.state, a.error, a.result = 'signin', '', {}
-    a.frame, a.frame_at = b'', 0.0
-    a.signing_sample = {}
-    a.probes, a.capture_note = 0, ''
-    a.page_url, a.cookie_names = '', []
-    a.started = a.touched = time.time()
-    a._done = threading.Event()
-    a._commands = queue.Queue()
+    """An Attempt without its thread, so the capture logic can be driven by hand.
+
+    Built through the real constructor: hand-assembling one let it drift from
+    what Attempt actually holds, and the tests then failed on attributes the
+    code was right to expect."""
+    a = _ATTEMPT('lilith', account, proxy='http://u:p@nl.proxy.example:8000',
+                 drive=False)
+    a.id, a.state = 'ofc_test', 'signin'
     return a
 
 
@@ -482,3 +477,21 @@ class SafeHeadersTest(unittest.TestCase):
         self.assertEqual(out['cookie'], '<11 chars>')
         self.assertEqual(out['x-bc'], '<3 chars>')
         self.assertEqual(out['sign'], '13190:abc:ff:x')
+
+
+class InjectedSignatureTest(unittest.TestCase):
+    """The /users/me probe leaves through the same page the listener watches."""
+
+    def test_a_signature_we_injected_is_not_kept_as_the_oracle(self):
+        a = bare_attempt()
+        page = SigningSampleTest._Page()
+        a._watch_signing(page)
+        a._injected.append('13190:ours:ff:x')
+        page.handler(SigningSampleTest._Request(
+            'https://onlyfans.com/api2/v2/users/me',
+            {'sign': '13190:ours:ff:x', 'time': '1789217425', 'user-id': '0'}))
+        self.assertEqual(a.signing_sample, {})
+        page.handler(SigningSampleTest._Request(
+            'https://onlyfans.com/api2/v2/chats',
+            {'sign': '65034:theirs:ff:y', 'time': '1789203482721', 'user-id': '9'}))
+        self.assertEqual(a.signing_sample['sign'], '65034:theirs:ff:y')

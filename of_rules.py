@@ -136,12 +136,39 @@ def put_sample(s):
     as it came."""
     if not (_save_sample and isinstance(s, dict) and s.get('sign') and s.get('path')):
         return {}
+    if ours(s):
+        logger.warning('refusing a signature we generated ourselves as the oracle')
+        return {}
     kept = {k: s.get(k) for k in ('path', 'time', 'user_id', 'sign', 'app_token')
             if s.get(k) not in (None, '')}
     global _sample_cache
     _save_sample(json.dumps(kept))
     _sample_cache = (time.time(), kept)
     return kept
+
+
+def drop_sample():
+    """Forget the stored oracle, so the next capture replaces it."""
+    global _sample_cache
+    if _save_sample:
+        _save_sample('{}')
+    _sample_cache = (0.0, {})
+
+
+def ours(s):
+    """Is this signature one we made, rather than one OnlyFans' page made?
+
+    Our own signed requests leave through the same page the listener watches, so
+    a sample can end up being our arithmetic -- and then the rules verify against
+    themselves and every check passes while every request is refused. OnlyFans
+    stamps in milliseconds; a sample our current rules reproduce over a stamp
+    that is not millisecond-shaped came from us.
+    """
+    if not (s and s.get('sign') and s.get('time')):
+        return False
+    if len(str(s['time'])) > 11:
+        return False
+    return verify(s, _rules) is True
 
 
 def sample_age():

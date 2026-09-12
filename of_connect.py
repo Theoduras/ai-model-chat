@@ -14,6 +14,7 @@ every 250ms is enough to type a password into.
 """
 import hashlib
 import base64
+import collections
 import logging
 import os
 import queue
@@ -160,6 +161,10 @@ class Attempt:
         # reaches 'connected'.
         self.probes = 0
         self.capture_note = ''
+        # Signatures this attempt injected into the page. A sample must come
+        # from OnlyFans, never from us.
+        self._injected = collections.deque(maxlen=8)
+        self._warned_injected = False
         self.page_url = ''
         self.cookie_names = []
         self._commands = queue.Queue()
@@ -383,6 +388,14 @@ class Attempt:
                 h = request.headers
                 if not (h.get('sign') and h.get('time')):
                     return
+                # Our own /users/me probe goes out through this page carrying
+                # headers we built, so without this the oracle ends up holding
+                # our arithmetic and verifying our rules against themselves.
+                if h['sign'] in self._injected:
+                    if not self._warned_injected:
+                        self._warned_injected = True
+                        logger.info('ignoring a signature we generated ourselves')
+                    return
                 self.signing_sample = {
                     'path': of_rules.path_of(request.url), 'time': h['time'],
                     'user_id': h.get('user-id') or '0', 'sign': h['sign'],
@@ -453,6 +466,8 @@ class Attempt:
         # browser already sends its own, correctly, without our help.
         for name in ('cookie', 'user-agent', 'referer'):
             headers.pop(name, None)
+        if headers.get('sign'):
+            self._injected.append(headers['sign'])
         try:
             who = page.evaluate(
                 "([h]) => fetch('/api2/v2/users/me', {credentials:'include', headers:h})"

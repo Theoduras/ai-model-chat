@@ -326,3 +326,35 @@ class CompareHeadersTest(unittest.TestCase):
         rows = {r['header']: r for r in of_rules.compare_headers(sample)}
         self.assertEqual(rows['x-of-magic']['side'], 'theirs')
         self.assertNotIn('secret-value', json.dumps(rows))
+
+
+class OurOwnSignatureTest(unittest.TestCase):
+    """A signature we generated must never become the oracle: it verifies our
+    rules against our own arithmetic, so everything passes while every request
+    is refused."""
+
+    RULES = {'static_param': 's', 'format': '13190:{}:{:x}:653286c6',
+             'checksum_indexes': [3, 9], 'checksum_constant': 42,
+             'app_token': 't'}
+
+    def setUp(self):
+        self._rules = of_rules._rules
+        of_rules._rules = dict(self.RULES)
+        self.stored = {}
+        of_rules.sample_hooks(lambda: json.dumps(self.stored),
+                              lambda text: self.stored.update(json.loads(text)))
+        self.addCleanup(setattr, of_rules, '_rules', self._rules)
+
+    def _sign(self, when):
+        path = '/api2/v2/users/me'
+        return {'path': path, 'user_id': '0', 'time': str(when),
+                'sign': of_rules.sign(path, '0', when=when, r=self.RULES)[0]}
+
+    def test_our_own_seconds_stamped_signature_is_refused(self):
+        self.assertTrue(of_rules.ours(self._sign(1789217425)))
+        self.assertEqual(of_rules.put_sample(self._sign(1789217425)), {})
+
+    def test_a_millisecond_stamp_is_taken_as_the_pages_own(self):
+        s = self._sign(1789203482721)
+        self.assertFalse(of_rules.ours(s))
+        self.assertEqual(of_rules.put_sample(s)['time'], '1789203482721')
