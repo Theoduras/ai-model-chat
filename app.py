@@ -17188,6 +17188,9 @@ def api_diag():
            'revision': os.getenv('K_REVISION', ''),
            'service': os.getenv('K_SERVICE', ''),
            'transport': ONLYFANS_TRANSPORT,
+           # The stored session keeps the address it was created on, so only
+           # this says whether a pool is still configured.
+           'proxy_pool': bool((os.getenv('ONLYFANS_PROXY_TEMPLATE') or '').strip()),
            'warnings': _persistence_warnings()}
     if _of_direct():
         try:
