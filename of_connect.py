@@ -447,10 +447,12 @@ class Attempt:
             self.capture_note = 'unverified'
         else:
             self.capture_note = 'captured'
+        verified = self.capture_note == 'captured'
         session = {'user_id': str(who['id']), 'username': who.get('username') or '',
                    'name': who.get('name') or '',
                    'cookie': cookie, 'x_bc': x_bc or '',
-                   'user_agent': agent or self.user_agent, 'proxy': self.proxy}
+                   'user_agent': agent or self.user_agent, 'proxy': self.proxy,
+                   'verified': verified}
         self.result = (_sink or of_session.put)(self.account, session)
         self.state = 'connected'
         self._done.set()

@@ -66,6 +66,13 @@ class SigningStale(OnlyFansError):
     free rule sources have fallen behind OnlyFans' current rotation."""
 
 
+class SignatureRefused(OnlyFansError):
+    """OnlyFans refused a request that was signed with rules its own page
+    proves are current. The signature is not the problem, so refetching rules
+    would change nothing: what is left is who the request says it is — the
+    cookie, x-bc, or the user id we sign with."""
+
+
 # ── Pacing ────────────────────────────────────────────────────────────────────
 
 _buckets = {}
@@ -142,6 +149,33 @@ def _adopt_working_rules(rejected):
     logger.info('OnlyFans rules rotated, signing with %s', fresh.get('_source', ''))
 
 
+def _repair_identity(account, session):
+    """A last look at who this session is, when the signature is not at fault.
+
+    A session stored through the connect fallback carries an id read out of the
+    `auth_id` cookie, taken at a moment when our own /users/me could not be
+    signed. Now that the rules are proven, that request works, so ask it once:
+    a different id is the bug and is worth fixing in place, and no answer at all
+    means the session really is dead. Returns True when the caller should retry.
+    """
+    try:
+        who = _once(account, 'GET', '/api2/v2/users/me', None, session)
+    except OnlyFansError as e:
+        of_session.mark_expired(account, 'OnlyFans refused this session while the '
+                                         'signing rules were current: ' + str(e.detail)[:120])
+        return False
+    if not (isinstance(who, dict) and who.get('id')):
+        of_session.mark_expired(account, 'OnlyFans did not say who this session is')
+        return False
+    of_session.update(account, verified=True, user_id=str(who['id']))
+    if str(who['id']) == str(session.get('user_id') or ''):
+        return False
+    logger.warning('OnlyFans session for %s had the wrong user id (%s, really %s) — fixed',
+                   account, session.get('user_id'), who['id'])
+    session['user_id'] = str(who['id'])
+    return True
+
+
 def call(account, method, path, body=None):
     """One request as `account`, signed, paced, and retried where retrying helps.
 
@@ -155,6 +189,7 @@ def call(account, method, path, body=None):
     if not path.startswith('/'):
         path = '/' + path
     rejected = set()
+    proven_retried = False
     for attempt in range(OF_MAX_RETRIES):
         _wait_turn(account)
         try:
@@ -165,6 +200,21 @@ def call(account, method, path, body=None):
             # the page" is the rotation, not a revoked session. Check that
             # first, or the retry that would have fixed it never gets a turn.
             if of_rules.stale_response(e.code, e.detail):
+                # The oracle outranks the body text. A set that reproduces a
+                # signature OnlyFans' own page produced cannot be what OnlyFans
+                # is refusing -- and treating it as such poisons the one correct
+                # set, so every later refresh skips it and the account looks
+                # broken forever.
+                if of_rules.proven() is True:
+                    if attempt < OF_MAX_RETRIES - 1 and not proven_retried:
+                        proven_retried = True
+                        continue
+                    if _repair_identity(account, session):
+                        continue
+                    raise SignatureRefused(
+                        e.code, 'the signing rules reproduce OnlyFans\' own signature, '
+                                'so this is not a rotation — OnlyFans is refusing this '
+                                'account\'s session. Reconnect the account.') from None
                 rejected.add(of_rules.fingerprint())
                 _adopt_working_rules(rejected)
                 continue

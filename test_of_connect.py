@@ -342,6 +342,7 @@ class ConnectDuringARotationTest(unittest.TestCase):
                 [{'name': 'sess', 'value': 's'}, {'name': 'auth_id', 'value': '4242'}]))
         self.assertEqual(a.capture_note, 'unverified')
         self.assertEqual(kept['user_id'], '4242')
+        self.assertIs(kept['verified'], False)
 
     def test_still_refuses_when_there_is_no_session_at_all(self):
         a = bare_attempt()
@@ -427,3 +428,4 @@ class Req:
     def __init__(self, url, headers):
         self.url = url
         self.headers = headers
+

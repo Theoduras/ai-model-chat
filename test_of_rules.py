@@ -245,3 +245,28 @@ class PathTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class RefreshCooldownTest(unittest.TestCase):
+    def test_a_failed_refresh_is_not_retried_on_every_request(self):
+        of_rules._refresh_failed_at[0] = 0.0
+        of_rules._rules = {'static_param': 's', 'format': '{}:{:x}',
+                           'checksum_indexes': [0], 'checksum_constant': 1,
+                           'app_token': 't'}
+        of_rules._fetched_at = 0.0
+        calls = []
+
+        def boom(reject=()):
+            calls.append(1)
+            raise of_rules.RulesError('every source failed')
+
+        real = of_rules.refresh
+        of_rules.refresh = boom
+        try:
+            of_rules.rules()
+            of_rules.rules()
+            of_rules.rules()
+        finally:
+            of_rules.refresh = real
+            of_rules._refresh_failed_at[0] = 0.0
+        self.assertEqual(len(calls), 1)

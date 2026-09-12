@@ -24,7 +24,8 @@ logger = logging.getLogger(__name__)
 # The fields that make up an account. Anything else a caller passes is dropped,
 # so a stray page object can never be persisted alongside the credentials.
 FIELDS = ('user_id', 'username', 'name', 'cookie', 'x_bc', 'user_agent',
-          'proxy', 'connected_at', 'status', 'checked_at', 'last_error')
+          'proxy', 'connected_at', 'status', 'checked_at', 'last_error',
+          'verified')
 
 STATUS_LIVE = 'live'
 STATUS_EXPIRED = 'expired'
@@ -148,7 +149,8 @@ def public(record, account=''):
             'connected_at': record.get('connected_at'),
             'checked_at': record.get('checked_at'),
             'status': record.get('status') or STATUS_LIVE,
-            'last_error': record.get('last_error') or ''}
+            'last_error': record.get('last_error') or '',
+            'verified': bool(record.get('verified'))}
 
 
 def describe(account):

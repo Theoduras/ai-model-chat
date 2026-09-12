@@ -45,6 +45,10 @@ RULES_TIMEOUT = 15
 # rejection — a stale set that still works is fine, one that stopped working an
 # hour ago is an outage nobody reported.
 RULES_MAX_AGE = 6 * 3600
+# A refresh that failed fails the same way for every caller, so retrying it per
+# request only fills the log while the cached set keeps working.
+REFRESH_RETRY_AFTER = 60
+_refresh_failed_at = [0.0]
 # OnlyFans' own web client. The user-agent is part of what the session was
 # issued to, so a connected account overrides this with the one it logged in on.
 DEFAULT_USER_AGENT = (
@@ -169,6 +173,16 @@ def verify(s, r):
     except (KeyError, ValueError, TypeError, IndexError):
         return None
     return got == s['sign']
+
+
+def proven():
+    """Do the rules in use reproduce OnlyFans' own signature? True/False/None.
+
+    The one question worth asking before believing a 400: a set that
+    reproduces a signature OnlyFans itself produced cannot be the reason
+    OnlyFans refused a request, whatever the body says.
+    """
+    return verify(sample(), _rules if _valid(_rules) else rules())
 
 
 def _fetch(url):
@@ -301,9 +315,15 @@ def rules(force=False):
         if not force and not _valid(_rules) and _restore() and \
                 time.time() - _fetched_at < RULES_MAX_AGE:
             return _rules
+        if not force and _valid(_rules) and \
+                time.time() - _refresh_failed_at[0] < REFRESH_RETRY_AFTER:
+            return _rules
         try:
-            return refresh()
+            out = refresh()
+            _refresh_failed_at[0] = 0.0
+            return out
         except RulesError:
+            _refresh_failed_at[0] = time.time()
             # A stale set beats none: OnlyFans often keeps accepting the
             # previous revision for a while, and the caller retries on refusal.
             if _valid(_rules):

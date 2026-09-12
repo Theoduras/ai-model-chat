@@ -269,3 +269,48 @@ class PacingTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ProvenRulesTest(unittest.TestCase):
+    """A 400 cannot mean 'the rules rotated' when the rules reproduce the
+    signature OnlyFans' own page produced."""
+
+    def setUp(self):
+        use_memory_store()
+        of_session.reset_key()
+        of_session.put('acct1', dict(SESSION, verified=False))
+        p = mock.patch.object(of_client, '_wait_turn')
+        p.start()
+        self.addCleanup(p.stop)
+        p = mock.patch.object(of_rules, 'proven', return_value=True)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_the_rule_set_is_never_rejected_and_the_session_is_blamed(self):
+        with mock.patch.object(of_client, '_once',
+                               side_effect=of_client.OnlyFansError(
+                                   400, 'Please refresh the page')), \
+                mock.patch.object(of_rules, 'refresh') as refresh:
+            with self.assertRaises(of_client.SignatureRefused):
+                of_client.call('acct1', 'GET', '/api2/v2/chats')
+        refresh.assert_not_called()
+        self.assertEqual(of_session.describe('acct1')['status'],
+                         of_session.STATUS_EXPIRED)
+
+    def test_a_wrong_stored_user_id_is_fixed_and_the_call_retried(self):
+        calls = []
+
+        def once(account, method, path, body, session):
+            calls.append((path, session.get('user_id')))
+            if path.endswith('/users/me'):
+                return {'id': 777}
+            if len(calls) < 4:
+                raise of_client.OnlyFansError(400, 'Please refresh the page')
+            return {'ok': True}
+
+        with mock.patch.object(of_client, '_once', once):
+            self.assertEqual(of_client.call('acct1', 'GET', '/api2/v2/chats'),
+                             {'ok': True})
+        row = of_session.describe('acct1')
+        self.assertEqual(row['user_id'], '777')
+        self.assertTrue(row['verified'])

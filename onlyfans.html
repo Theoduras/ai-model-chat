@@ -734,7 +734,9 @@ async function watchNow(){
     const w=a.watcher||{}, s=a.session||{};
     return '<tr><td>'+esc(a.username||a.persona)+'</td>'
       +'<td>'+dot(!!a.account && s.status==='live')+' '
-        +(a.account?esc(s.status||'unknown')+(s.last_error?' \u2014 '+esc(String(s.last_error).slice(0,60)):'')
+        +(a.account?esc(s.status||'unknown')
+                   +(s.verified===false?' \u2014 stored from cookies, never confirmed':'')
+                   +(s.last_error?' \u2014 '+esc(String(s.last_error).slice(0,60)):'')
                    :'not connected')+'</td>'
       +'<td>'+dot(w.running)+' '+(w.running?('polls '+(w.polls||0)+', events '+(w.events||0)):'no watcher')+'</td>'
       +'<td>'+(w.last_error?'<span style="color:#fb7185;">'+esc(String(w.last_error).slice(0,90))+'</span>':'')+'</td></tr>';
