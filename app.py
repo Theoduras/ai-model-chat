@@ -17515,6 +17515,11 @@ def _of_worker(tick=2.0):
                         # watchers and a database full of accounts.
                         of_events.reconcile(_of_connected_accounts())
                         _of_check_sessions()
+                        # The signing repair has to run where nobody is
+                        # watching: a rotation stops the rounds that would
+                        # otherwise trigger it, and the console is not open at
+                        # three in the morning.
+                        _of_autocapture()
             for persona in due:
                 with app.app_context():
                     if not PLAT_ONLYFANS.connected(persona):
