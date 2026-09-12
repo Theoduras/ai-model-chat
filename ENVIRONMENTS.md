@@ -209,3 +209,27 @@ env? Store it in Secret Manager and use
 ## Tips
 
 - Watch a deploy: Cloud Run → service → **Revisions**, or Cloud Build → **History**.
+
+## Reading a running instance without a browser
+
+Debugging the OnlyFans plumbing has meant a person copying console text into a
+chat, one question per round, while the answer sat in a process nobody could
+query. `GET /api/diag` is that process answering for itself.
+
+```bash
+curl -s -H "X-Diag-Key: $DIAG_KEY" https://velvetfunneler.com/api/diag | jq
+```
+
+It returns the build fingerprint and Cloud Run revision, the persistence
+warnings, and — on the direct transport — the whole Live watcher payload:
+signing rules and whether they reproduce OnlyFans' own signature, the browser
+service's build, each account's session and watcher, the open sign-in's state,
+and the recent log ring from both services.
+
+It is read-only, and it does not exist until `DIAG_KEY` is set on the service
+(`gcloud run services update ai-model-chat-dev --region europe-west4
+--update-env-vars "DIAG_KEY=$(openssl rand -hex 24)"`). A key shorter than 16
+characters is treated as unset, and a wrong key gets the same 404 as no key, so
+the endpoint never announces itself. Sessions come through
+`of_session.public()`, which strips the cookie, the token and the user agent
+before anything is serialised. Rotate the key by setting a new one.

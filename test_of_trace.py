@@ -1,6 +1,12 @@
+import json
 import logging
+import os
 import unittest
 
+os.environ.setdefault('GEMINI_API_KEY', 'test')
+os.environ.setdefault('ONLYFANS_WORKER', '0')
+
+import app
 import of_trace
 
 
@@ -62,3 +68,37 @@ class BuildIdTest(unittest.TestCase):
         first = of_trace.build_id()
         self.assertEqual(len(first), 10)
         self.assertEqual(first, of_trace.build_id())
+
+
+class DiagEndpointTest(unittest.TestCase):
+    """Read-only, and closed until someone sets a key worth having."""
+
+    def setUp(self):
+        self.client = app.app.test_client()
+        self._key = os.environ.get('DIAG_KEY')
+
+    def tearDown(self):
+        if self._key is None:
+            os.environ.pop('DIAG_KEY', None)
+        else:
+            os.environ['DIAG_KEY'] = self._key
+
+    def test_closed_without_a_key(self):
+        os.environ.pop('DIAG_KEY', None)
+        self.assertEqual(self.client.get('/api/diag').status_code, 404)
+
+    def test_a_short_key_is_not_a_key(self):
+        os.environ['DIAG_KEY'] = 'short'
+        self.assertEqual(self.client.get('/api/diag?key=short').status_code, 404)
+
+    def test_the_wrong_key_looks_like_nothing_is_there(self):
+        os.environ['DIAG_KEY'] = 'k' * 32
+        self.assertEqual(self.client.get('/api/diag?key=' + 'j' * 32).status_code, 404)
+
+    def test_the_right_key_answers_without_credentials(self):
+        os.environ['DIAG_KEY'] = 'k' * 32
+        r = self.client.get('/api/diag', headers={'X-Diag-Key': 'k' * 32})
+        self.assertEqual(r.status_code, 200)
+        body = json.dumps(r.get_json())
+        for leak in ('cookie', 'x_bc', 'password', 'DIAG_KEY'):
+            self.assertNotIn(leak, body)

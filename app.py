@@ -17048,9 +17048,7 @@ def api_onlyfans_trace():
     return _plat_trace_api(PLAT_ONLYFANS)
 
 
-@app.route('/api/onlyfans/watch')
-@operator_only
-def api_onlyfans_watch():
+def _of_watch_payload(after=0, bafter=0):
     """One picture of what the OnlyFans plumbing is doing right now.
 
     The console polls this. Everything it reports is otherwise only visible in
@@ -17058,9 +17056,7 @@ def api_onlyfans_watch():
     read: the answer was always there, just nowhere the person fixing it looks.
     """
     if not _of_direct():
-        return jsonify({'ok': False, 'error': 'not running the direct transport'}), 400
-    after = int(request.args.get('after') or 0)
-    bafter = int(request.args.get('bafter') or 0)
+        return {'ok': False, 'error': 'not running the direct transport'}
     # The browser runs in a service of its own, so its log lines -- the ones
     # that say why a capture found nothing -- live in a second ring with ids
     # of its own. Two cursors, never merged into one.
@@ -17108,14 +17104,64 @@ def api_onlyfans_watch():
                         'has_sample': bool(st.get('signing_sample'))})
     build = _of_browser_build()
     browser = bool(build.get('up'))
-    return jsonify({'ok': True, 'now': int(time.time()), 'browser': browser,
-                    'build': build, 'signins': signins,
-                    'rules': of_rules.state(), 'sample_age': of_rules.sample_age(),
-                    'accounts': accounts,
-                    'unwatched': [a for a in _of_connected_accounts()
-                                  if not (watchers.get(a) or {}).get('running')],
-                    'lines': of_trace.recent(after),
-                    'browser_lines': browser_lines, 'bafter': bafter})
+    return {'ok': True, 'now': int(time.time()), 'browser': browser,
+            'build': build, 'signins': signins,
+            'rules': of_rules.state(), 'sample_age': of_rules.sample_age(),
+            'accounts': accounts,
+            'unwatched': [a for a in _of_connected_accounts()
+                          if not (watchers.get(a) or {}).get('running')],
+            'lines': of_trace.recent(after),
+            'browser_lines': browser_lines, 'bafter': bafter}
+
+
+@app.route('/api/onlyfans/watch')
+@operator_only
+def api_onlyfans_watch():
+    out = _of_watch_payload(int(request.args.get('after') or 0),
+                            int(request.args.get('bafter') or 0))
+    return jsonify(out), (200 if out.get('ok') else 400)
+
+
+def _diag_key():
+    return os.getenv('DIAG_KEY', '')
+
+
+def _diag_authed():
+    key = _diag_key()
+    if len(key) < 16:
+        return False
+    given = request.headers.get('X-Diag-Key') or request.args.get('key') or ''
+    return hmac.compare_digest(given, key)
+
+
+@app.route('/api/diag')
+def api_diag():
+    """Everything needed to diagnose this instance, without a browser session.
+
+    Debugging this app has meant a person copying console text into a chat,
+    one round per question, while the answer sat in a running process nobody
+    could query. This is that process answering for itself: read-only, and
+    behind DIAG_KEY, which does not exist until someone sets it. It reports no
+    credentials -- sessions come through of_session.public(), which strips the
+    cookie, the token and the user agent before anyone sees them.
+    """
+    if not _diag_authed():
+        return ('Not found', 404)
+    out = {'ok': True, 'now': int(time.time()),
+           'build': of_trace.build_id() if _of_direct() else '',
+           'revision': os.getenv('K_REVISION', ''),
+           'service': os.getenv('K_SERVICE', ''),
+           'transport': ONLYFANS_TRANSPORT,
+           'warnings': _persistence_warnings()}
+    if _of_direct():
+        try:
+            out['onlyfans'] = _of_watch_payload(
+                int(request.args.get('after') or 0),
+                int(request.args.get('bafter') or 0))
+            out['onlyfans']['proven'] = of_rules.proven()
+        except Exception as e:
+            out['onlyfans'] = {'ok': False, 'error': str(e)[:300]}
+    return jsonify(out)
 
 
 @app.route('/api/onlyfans/watch', methods=['DELETE'])
