@@ -16245,6 +16245,42 @@ def _of_autocapture(force=False):
         return False
     of_rules.put_sample(sample)
     logger.info('captured a signature automatically; rule sets can be checked again')
+    if of_rules.proven() is not True:
+        _of_derive_rules(sample)
+    return True
+
+
+_of_last_derive = [0.0]
+
+
+def _of_derive_rules(sample):
+    """Take the rules off OnlyFans' own page when no published set signs.
+
+    A rotation changes `static_param`, which no signature can be inverted back
+    into, so until a mirror catches up the app is simply unable to sign — days,
+    sometimes. The page it is failing to talk to is running the answer, and the
+    captured signature proves which literal in that page is the one. What comes
+    back is stored as the operator override only if it reproduces that
+    signature, so a bad parse cannot make anything worse.
+    """
+    now = time.time()
+    if now - _of_last_derive[0] < OF_CAPTURE_EVERY:
+        return False
+    _of_last_derive[0] = now
+    conn = _of_conn()
+    if not hasattr(conn, 'derive_rules'):
+        return False
+    try:
+        rules = conn.derive_rules(sample, _of_proxy_for('', '')) or {}
+    except Exception as e:
+        logger.warning('could not derive the signing rules: %s', str(e)[:160])
+        return False
+    if of_rules.verify(sample, rules) is not True:
+        return False
+    _set_setting('onlyfans_rules_override', json.dumps(rules))
+    of_rules.refresh()
+    logger.info('adopted signing rules derived from the page (revision %s)',
+                rules.get('revision') or '')
     return True
 
 

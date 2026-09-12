@@ -104,6 +104,17 @@ def service():
             return jsonify({'ok': False, 'error': str(e)[:200]}), 400
         return jsonify({'ok': True, 'sample': sample})
 
+    @api.route('/derive-rules', methods=['POST'])
+    def derive_rules():
+        """The current signing rules, worked out of OnlyFans' own bundle."""
+        d = request.json or {}
+        try:
+            rules = of_connect.derive_rules(d.get('sample') or {},
+                                            proxy=(d.get('proxy') or '').strip())
+        except Exception as e:
+            return jsonify({'ok': False, 'error': str(e)[:200]}), 400
+        return jsonify({'ok': True, 'rules': rules})
+
     @api.route('/trace')
     def trace():
         return jsonify({'ok': True,
@@ -286,6 +297,11 @@ class Remote:
         out = self.call('POST', '/signing-sample', {'proxy': proxy},
                         timeout=START_TIMEOUT)
         return out.get('sample') or {}
+
+    def derive_rules(self, sample, proxy=''):
+        out = self.call('POST', '/derive-rules', {'sample': sample, 'proxy': proxy},
+                        timeout=150)
+        return out.get('rules') or {}
 
     def trace(self, after=0):
         try:

@@ -12,6 +12,7 @@ owns a thread and is spoken to through a queue. The dashboard polls frames over
 plain HTTP rather than a websocket, because Flask serves this app and a JPEG
 every 250ms is enough to type a password into.
 """
+import hashlib
 import base64
 import logging
 import os
@@ -518,6 +519,133 @@ def sample_now(proxy='', timeout=25):
                    'signed; page was %s (%s)', saw['requests'], saw['api'],
                    saw['signed'], saw.get('url', 'unknown'), saw.get('title', ''))
     return {'_saw': saw}
+
+
+_LITERALS_JS = """() => {
+  const out = new Set();
+  const srcs = [...document.querySelectorAll('script[src]')].map(s => s.src);
+  return Promise.all(srcs.slice(0, 40).map(u =>
+    fetch(u).then(r => r.text()).catch(() => '')
+  )).then(texts => {
+    for (const t of texts) {
+      for (const m of t.matchAll(/["'`]([A-Za-z0-9+/=_.:-]{16,120})["'`]/g)) out.add(m[1]);
+    }
+    return [...out].slice(0, 200000);
+  });
+}"""
+
+
+def derive_rules(sample, proxy='', timeout=45):
+    """Work the current signing rules out of OnlyFans' own JavaScript.
+
+    The published mirrors go stale every rotation, and a rotation changes
+    `static_param` — a literal in the site's bundle, not something a signature
+    can be inverted back into. But the bundle is right there in the page, and a
+    captured signature says which literal it is: the one whose SHA-1 over that
+    request reproduces it. From there the checksum constant is arithmetic.
+
+    Nothing is trusted on the way out: the result only leaves here if it
+    reproduces the signature OnlyFans itself produced.
+    """
+    if not (sample and sample.get('sign') and sample.get('path')):
+        return {}
+    parts = str(sample['sign']).split(':')
+    if len(parts) != 4:
+        return {}
+    prefix, digest, checksum, suffix = parts
+    # One signature cannot prove a shape: the constant absorbs any choice of
+    # indexes for a single digest. A second signature the page produced is what
+    # separates the real positions from an arithmetic coincidence.
+    confirm = []
+
+    def seen(request):
+        if '/api2/v2/' not in request.url:
+            return
+        h = request.headers
+        if h.get('sign') and h.get('time') and h['sign'] != sample['sign']:
+            confirm.append({'path': of_rules.path_of(request.url), 'time': h['time'],
+                            'user_id': h.get('user-id') or '0', 'sign': h['sign']})
+
+    probe = Attempt('', '', proxy=proxy)
+    literals = []
+    with _driver()() as pw:
+        context = probe._launch(pw)[1]
+        try:
+            page = context.pages[0] if context.pages else context.new_page()
+            context.on('request', seen)
+            try:
+                page.goto(SIGNIN_URL, wait_until='networkidle', timeout=timeout * 1000)
+            except Exception as e:
+                logger.info('rule derivation could not settle the page: %s', str(e)[:120])
+            try:
+                literals = page.evaluate(_LITERALS_JS) or []
+            except Exception as e:
+                logger.warning('rule derivation could not read the bundle: %s', str(e)[:120])
+        finally:
+            try:
+                context.close()
+            except Exception:
+                pass
+    static_param = ''
+    for candidate in literals:
+        msg = '\n'.join([candidate, str(sample['time']), sample['path'],
+                          str(sample.get('user_id') or '0')])
+        if hashlib.sha1(msg.encode('utf-8')).hexdigest() == digest:
+            static_param = candidate
+            break
+    if not static_param:
+        logger.warning('rule derivation read %s literals and none of them signs '
+                       'the captured request', len(literals))
+        return {}
+    if not confirm:
+        logger.warning('found the static param but the page produced no second '
+                       'signature to prove the checksum positions with')
+        return {}
+    rules = _solve_checksum(sample, static_param, prefix, digest, checksum, suffix,
+                            confirm=confirm[:4])
+    if not rules:
+        logger.warning('found the static param but no checksum shape reproduces '
+                       'the signature')
+        return {}
+    logger.info('derived the current OnlyFans signing rules from the page (%s)', prefix)
+    return rules
+
+
+def _solve_checksum(sample, static_param, prefix, digest, checksum, suffix,
+                    confirm=(), shapes=None):
+    """The checksum is a sum over fixed positions of the digest plus a constant.
+
+    The positions move rarely and the published sets still carry them, so each
+    known shape is tried in turn: the constant is whatever makes that shape
+    produce this signature, and `of_rules.verify` is the judge.
+    """
+    shapes = list(shapes or [])
+    for url in ([] if shapes else of_rules.RULES_SOURCES):
+        try:
+            published = of_rules._fetch(url)
+        except Exception:
+            continue
+        idx = published.get('checksum_indexes')
+        if idx:
+            shapes.append((idx, published.get('app_token') or ''))
+    for indexes, app_token in shapes:
+        total = sum(ord(digest[i]) for i in indexes if i < len(digest))
+        for base, fmt in ((16, '{}:{}:{{}}:{{:x}}:{}'), (10, '{}:{}:{{}}:{{}}:{}')):
+            try:
+                wanted = int(checksum, base)
+            except ValueError:
+                continue
+            rules = {'static_param': static_param,
+                     'format': fmt.format('', prefix, suffix).lstrip(':'),
+                     'checksum_indexes': list(indexes),
+                     'checksum_constant': wanted - total,
+                     'app_token': sample.get('app_token') or app_token,
+                     'revision': prefix}
+            if of_rules.verify(sample, rules) is not True:
+                continue
+            if all(of_rules.verify(c, rules) is True for c in confirm):
+                return rules
+    return {}
 
 
 def _path(kw):

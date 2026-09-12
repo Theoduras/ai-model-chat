@@ -433,3 +433,27 @@ class Req:
         self.url = url
         self.headers = headers
 
+
+
+class SolveChecksumTest(unittest.TestCase):
+    """The solver has to reproduce a rule set that is known to be right before
+    it can be trusted with one nobody has published yet."""
+
+    def test_it_recovers_a_published_rule_set_from_one_signature(self):
+        r = {'static_param': 'STATIC', 'format': '13190:{}:{:x}:653286c6',
+             'checksum_indexes': [3, 9, 17], 'checksum_constant': 272,
+             'app_token': 't'}
+        s = {'path': '/api2/v2/users/me', 'time': '1789203482721',
+             'user_id': '284724130', 'app_token': 't'}
+        s['sign'] = of_rules.sign(s['path'], s['user_id'],
+                                  when=int(s['time']), r=r)[0]
+        other = {'path': '/api2/v2/chats?limit=10', 'time': '1789203499999',
+                 'user_id': '284724130'}
+        other['sign'] = of_rules.sign(other['path'], other['user_id'],
+                                      when=int(other['time']), r=r)[0]
+        parts = s['sign'].split(':')
+        got = of_connect._solve_checksum(s, 'STATIC', parts[0], parts[1],
+                                         parts[2], parts[3], confirm=[other],
+                                         shapes=[([3, 9, 17], 't')])
+        self.assertEqual(got.get('checksum_indexes'), [3, 9, 17])
+        self.assertEqual(got.get('checksum_constant'), 272)
