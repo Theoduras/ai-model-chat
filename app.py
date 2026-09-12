@@ -16232,7 +16232,7 @@ def _of_autocapture(force=False):
         # wait an hour: it is everything the derivation needs, and it is the
         # exact state the app cannot otherwise get out of.
         if of_rules.proven() is not True:
-            _of_derive_rules(of_rules.sample())
+            _of_derive_rules(of_rules.sample(), force=force)
         return False
     now = time.time()
     if not force and now - _of_last_capture[0] < OF_CAPTURE_EVERY:
@@ -16251,14 +16251,14 @@ def _of_autocapture(force=False):
     of_rules.put_sample(sample)
     logger.info('captured a signature automatically; rule sets can be checked again')
     if of_rules.proven() is not True:
-        _of_derive_rules(sample)
+        _of_derive_rules(sample, force=force)
     return True
 
 
 _of_last_derive = [0.0]
 
 
-def _of_derive_rules(sample):
+def _of_derive_rules(sample, force=False):
     """Take the rules off OnlyFans' own page when no published set signs.
 
     A rotation changes `static_param`, which no signature can be inverted back
@@ -16269,7 +16269,9 @@ def _of_derive_rules(sample):
     signature, so a bad parse cannot make anything worse.
     """
     now = time.time()
-    if now - _of_last_derive[0] < OF_CAPTURE_EVERY:
+    if not force and now - _of_last_derive[0] < OF_CAPTURE_EVERY:
+        logger.info('skipping the rule derivation: one ran %ss ago',
+                    int(now - _of_last_derive[0]))
         return False
     _of_last_derive[0] = now
     conn = _of_conn()
