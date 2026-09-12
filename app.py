@@ -16258,6 +16258,8 @@ if _of_direct():
     import of_connect
     import of_events
     import of_rules
+    import of_trace
+    of_trace.install()
     import of_session
 
     of_rules.cache_hooks(lambda: _get_setting('onlyfans_rules_cache') or '',
@@ -16965,6 +16967,47 @@ def api_onlyfans_ppv_reset():
 @platform_scoped
 def api_onlyfans_trace():
     return _plat_trace_api(PLAT_ONLYFANS)
+
+
+@app.route('/api/onlyfans/watch')
+@operator_only
+def api_onlyfans_watch():
+    """One picture of what the OnlyFans plumbing is doing right now.
+
+    The console polls this. Everything it reports is otherwise only visible in
+    Cloud Run's log viewer, which is why a broken signing rotation took days to
+    read: the answer was always there, just nowhere the person fixing it looks.
+    """
+    if not _of_direct():
+        return jsonify({'ok': False, 'error': 'not running the direct transport'}), 400
+    after = int(request.args.get('after') or 0)
+    accounts = []
+    watchers = {w['account']: w for w in of_events.watching()}
+    for slug in sorted(set(_fanvue_enabled_list(plat=PLAT_ONLYFANS))):
+        account = _of_account(slug)
+        if not account:
+            continue
+        accounts.append({'persona': slug, 'account': account,
+                         'username': _of_account_meta(slug).get('username', ''),
+                         'session': of_session.describe(account),
+                         'watcher': watchers.get(account) or {}})
+    try:
+        browser = bool(_of_conn().available())
+    except Exception:
+        browser = False
+    return jsonify({'ok': True, 'now': int(time.time()), 'browser': browser,
+                    'rules': of_rules.state(), 'sample_age': of_rules.sample_age(),
+                    'accounts': accounts,
+                    'unwatched': [a for a in _of_connected_accounts()
+                                  if not (watchers.get(a) or {}).get('running')],
+                    'lines': of_trace.recent(after)})
+
+
+@app.route('/api/onlyfans/watch', methods=['DELETE'])
+@operator_only
+def api_onlyfans_watch_clear():
+    of_trace.clear()
+    return jsonify({'ok': True})
 
 
 @app.route('/api/onlyfans/debug')
