@@ -184,7 +184,8 @@ single Cloud Run service `ai-model-chat-dev` (see `ENVIRONMENTS.md`).
   added here would be read by nothing. Set it on the service; it persists across
   deploys.
 - `ai-model-chat-dev-browser` runs the same image with a different entrypoint
-  and has its own trigger, `cloudbuild.browser.yaml`, on the same branch. It was
+  and deploys itself from `develop` through Cloud Run continuous deployment,
+  configured on the service rather than in this repository. It was
   hand-deployed so that a deploy could not interrupt a sign-in; in practice it
   ran week-old code and blocked the signing repair, which runs inside it. An
   interrupted sign-in can be started again — see `ENVIRONMENTS.md`.
