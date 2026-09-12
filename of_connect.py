@@ -55,17 +55,9 @@ POLL_SECONDS = 1.5
 # creator does is queued behind it.
 MOVE_BUDGET = 0.1
 
-_rules_sink = None
 _attempts = {}
 _lock = threading.Lock()
 _sink = None
-
-
-def rules_sink(fn):
-    """Where a captured signature sample goes. Set by app.py; without it a
-    sample is simply not kept."""
-    global _rules_sink
-    _rules_sink = fn
 
 
 def session_sink(fn):
@@ -405,8 +397,6 @@ class Attempt:
                     self._sampled = True
                     logger.info('captured a signature OnlyFans\' own page produced '
                                 '(%s)', self.signing_sample['path'])
-                if _rules_sink:
-                    _rules_sink(self.signing_sample)
             except Exception as e:
                 logger.debug('could not keep a signing sample: %s', str(e)[:120])
         # The context, not the page: a sign-in navigates and the human check

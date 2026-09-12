@@ -16192,19 +16192,15 @@ PLATFORMS['onlyfans'] = PLAT_ONLYFANS
 # database it already has.
 
 def _of_keep_sample(status):
-    """Keep the signature the sign-in page produced, wherever it was captured.
+    """Left deliberately inert: a sign-in page is not an oracle.
 
-    The browser service has no database, so the sample rides back on the
-    attempt's status like the session does. This is called on the status reads
-    that already happen while a sign-in is open, rather than on a poll of its
-    own.
+    The sign-in page is the one page we inject signed requests into, so a
+    signature read off it can be our own arithmetic coming back -- which is
+    exactly what happened, and it verified our rules against themselves. The
+    oracle now comes only from `sample_now`, a logged-out page nothing is
+    injected into. The sample still rides back on the status for the console
+    to show; it is no longer kept.
     """
-    try:
-        sample = (status or {}).get('signing_sample')
-        if sample:
-            of_rules.put_sample(sample)
-    except Exception as e:
-        logger.debug('could not keep the signing sample: %s', str(e)[:120])
     return status
 
 
@@ -16212,7 +16208,7 @@ _of_last_capture = [0.0]
 # A repair attempt, not a request: at most one browser every ten minutes however
 # many watchers are failing at once.
 OF_CAPTURE_EVERY = 600
-OF_SAMPLE_STALE = 3600
+OF_SAMPLE_STALE = 900
 
 
 def _of_autocapture(force=False):
@@ -16362,7 +16358,6 @@ if _of_direct():
     of_rules.override_hooks(lambda: _get_setting('onlyfans_rules_override') or '')
     of_rules.sample_hooks(lambda: _get_setting('onlyfans_rules_sample') or '',
                           lambda v: _set_setting('onlyfans_rules_sample', v))
-    of_connect.rules_sink(lambda s: of_rules.put_sample(s))
     of_session.store_hooks(lambda a: _get_setting(f'onlyfans_vault_{a}') or '',
                            _of_vault_save, _of_vault_delete, _of_vault_accounts)
 
