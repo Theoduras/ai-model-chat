@@ -17,6 +17,7 @@ import base64
 import logging
 import os
 import queue
+import re
 import shutil
 import threading
 import time
@@ -533,15 +534,34 @@ _LITERALS_JS = """() => {
   for (const t of document.querySelectorAll('script:not([src])')) {
     for (const m of t.textContent.matchAll(/["'`]([\\x21-\\x7e]{8,256})["'`]/g)) out.add(m[1]);
   }
-  return Promise.all([...urls].slice(0, 120).map(u =>
-    fetch(u).then(r => r.text()).catch(() => '')
-  )).then(texts => {
-    for (const t of texts) {
-      for (const m of t.matchAll(/["'`]([\\x21-\\x7e]{8,256})["'`]/g)) out.add(m[1]);
-    }
-    return [...out].slice(0, 400000);
-  });
+  // The bundles come from a CDN on another origin, where fetch() from the page
+  // is refused and returns nothing -- which is why scanning from in here reads
+  // only the inline scripts. The URLs go back instead, and the browser's own
+  // request context fetches them, which no cross-origin rule applies to.
+  return {literals: [...out].slice(0, 50000), urls: [...urls].slice(0, 200)};
 }"""
+
+
+_LITERAL_RE = re.compile(r'''["'`]([\x21-\x7e]{8,256})["'`]''')
+
+
+def _bundle_literals(context, urls):
+    """Every string in the scripts the page loaded, fetched as the browser.
+
+    `context.request` carries the page's cookies and origin and answers to no
+    cross-origin rule, so the CDN chunks that fetch() inside the page cannot
+    read come back in full here.
+    """
+    out = set()
+    for url in urls[:200]:
+        try:
+            body = context.request.get(url, timeout=20000).text()
+        except Exception:
+            continue
+        out.update(m.group(1) for m in _LITERAL_RE.finditer(body))
+        if len(out) > 400000:
+            break
+    return list(out)
 
 
 def derive_rules(sample, proxy='', timeout=45):
@@ -587,7 +607,9 @@ def derive_rules(sample, proxy='', timeout=45):
             except Exception as e:
                 logger.info('rule derivation could not settle the page: %s', str(e)[:120])
             try:
-                literals = page.evaluate(_LITERALS_JS) or []
+                found = page.evaluate(_LITERALS_JS) or {}
+                literals = list(found.get('literals') or [])
+                literals += _bundle_literals(context, found.get('urls') or [])
             except Exception as e:
                 logger.warning('rule derivation could not read the bundle: %s', str(e)[:120])
         finally:
