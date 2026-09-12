@@ -183,9 +183,11 @@ single Cloud Run service `ai-model-chat-dev` (see `ENVIRONMENTS.md`).
   vars — **cannot be changed from this repository at all**, and a build config
   added here would be read by nothing. Set it on the service; it persists across
   deploys.
-- `ai-model-chat-dev-browser` is the exception to the rule above: it runs the
-  same image with a different entrypoint, has no trigger on purpose, and is
-  deployed by hand. Not redeploying it is the feature — see `ENVIRONMENTS.md`.
+- `ai-model-chat-dev-browser` runs the same image with a different entrypoint
+  and has its own trigger, `cloudbuild.browser.yaml`, on the same branch. It was
+  hand-deployed so that a deploy could not interrupt a sign-in; in practice it
+  ran week-old code and blocked the signing repair, which runs inside it. An
+  interrupted sign-in can be started again — see `ENVIRONMENTS.md`.
 
 ---
 
