@@ -16836,12 +16836,6 @@ def api_onlyfans_status():
             blockers.append('no_session_key')
             out['session_key_error'] = str(e)[:200]
         out['proxy_pool'] = bool((os.getenv('ONLYFANS_PROXY_TEMPLATE') or '').strip())
-        if not account and not out['proxy_pool']:
-            # Signing in on Cloud Run's own address reads as connected for a
-            # moment and then reverts — OnlyFans drops a fresh session from a
-            # datacenter IP before it is ever captured. Say so before she
-            # burns a sign-in attempt, not after.
-            blockers.append('no_proxy')
         out['blockers'] = blockers
     return jsonify(out)
 
