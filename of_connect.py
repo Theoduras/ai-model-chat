@@ -552,22 +552,32 @@ _LITERALS_JS = """() => {
 _LITERAL_RE = re.compile(r'''["'`]([\x21-\x7e]{8,256})["'`]''')
 
 
-def _bundle_literals(context, urls):
+def _bundle_literals(context, urls, marker=''):
     """Every string in the scripts the page loaded, fetched as the browser.
 
     `context.request` carries the page's cookies and origin and answers to no
     cross-origin rule, so the CDN chunks that fetch() inside the page cannot
     read come back in full here.
     """
-    out = set()
+    out, seen = set(), {'urls': len(urls), 'ok': 0, 'bytes': 0, 'marker': False}
     for url in urls[:200]:
         try:
             body = context.request.get(url, timeout=20000).text()
         except Exception:
             continue
+        seen['ok'] += 1
+        seen['bytes'] += len(body)
+        if marker and marker in body:
+            seen['marker'] = True
         out.update(m.group(1) for m in _LITERAL_RE.finditer(body))
         if len(out) > 400000:
             break
+    # Whether the revision OnlyFans is signing with appears anywhere in what we
+    # fetched separates "reading the wrong files" from "the parameter is not a
+    # plain string in the right ones" -- two very different problems.
+    logger.info('rule derivation fetched %s of %s scripts, %s bytes; the current '
+                'revision %s in them', seen['ok'], seen['urls'], seen['bytes'],
+                'appears' if seen['marker'] else 'does not appear')
     return list(out)
 
 
@@ -616,7 +626,8 @@ def derive_rules(sample, proxy='', timeout=45):
             try:
                 found = page.evaluate(_LITERALS_JS) or {}
                 literals = list(found.get('literals') or [])
-                literals += _bundle_literals(context, found.get('urls') or [])
+                literals += _bundle_literals(context, found.get('urls') or [],
+                                             marker=prefix)
             except Exception as e:
                 logger.warning('rule derivation could not read the bundle: %s', str(e)[:120])
         finally:
