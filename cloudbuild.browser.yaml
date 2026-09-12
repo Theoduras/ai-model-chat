@@ -1,0 +1,49 @@
+# Deploys ai-model-chat-dev-browser on every push to develop.
+#
+# The sign-in browser used to be deployed by hand so that an app deploy could
+# not kill a sign-in halfway through. That protection cost more than it saved:
+# the service sat for days on an image older than the app, and a debugging round
+# was spent each time discovering it. It deploys itself now, and a sign-in
+# interrupted by a deploy is simply started again.
+#
+# This builds its own image rather than reusing the app's: the app's trigger has
+# an inline config that this repository cannot see, so there is nothing here to
+# hook into and no way to know when its image is ready.
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: ['build', '-t', '${_IMAGE}:$COMMIT_SHA', '-t', '${_IMAGE}:latest',
+           '--cache-from', '${_IMAGE}:latest', '.']
+
+  - name: gcr.io/cloud-builders/docker
+    args: ['push', '--all-tags', '${_IMAGE}']
+
+  # Every flag the service needs is repeated here, because a deploy that omits
+  # one resets it: no display means headless Chrome, which Cloudflare refuses,
+  # and more than one instance means a sign-in lands on a browser that is not
+  # holding it.
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ai-model-chat-dev-browser
+      - --image=${_IMAGE}:$COMMIT_SHA
+      - --region=${_REGION}
+      - --platform=managed
+      - --allow-unauthenticated
+      - --command=/bin/sh
+      - --args=/app/start.sh
+      - --update-env-vars=GUNICORN_TARGET=of_browser:service()
+      - --min-instances=1
+      - --max-instances=1
+      - --no-cpu-throttling
+      - --session-affinity
+      - --memory=2Gi
+
+substitutions:
+  _REGION: europe-west4
+  _IMAGE: europe-west4-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/ai-model-chat-dev-browser
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+timeout: 1800s

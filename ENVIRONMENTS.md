@@ -83,11 +83,35 @@ ended every sign-in in flight**, mid-2FA, with "that sign-in is no longer open".
 `ai-model-chat-dev-browser` is that browser on its own Cloud Run service,
 running the same image with a different entrypoint (`of_browser:service()`).
 
-**It has no trigger, deliberately.** Not being redeployed is the entire feature:
-a trigger is the thing that would kill sign-ins in flight, which is what we were
-fixing. It is deployed by hand, and only when the browser itself changes —
-`of_connect.py`, `of_browser.py`, `Dockerfile` or `requirements.txt`. Do that at
-a quiet moment; it ends any sign-in running at the time.
+**It deploys itself from `cloudbuild.browser.yaml`** on every push to `develop`.
+
+It used to have no trigger on purpose: a deploy kills a sign-in in flight, which
+was the bug being fixed when this service was split out. That protection cost
+more than it saved — the service sat for days on an image older than the app,
+the signing repair could not be fixed because the repair runs *here*, and a
+debugging round went on rediscovering it each time. A sign-in interrupted by a
+deploy is simply started again; an app whose browser is a week behind is not.
+
+It builds its own image rather than reusing the app's: the app's trigger carries
+an inline config this repository cannot see, so there is nothing here to hook
+into and no way to know when its image is ready. Two builds per push, and the
+build fingerprint in `/api/diag` says when the two services disagree.
+
+Create the trigger once:
+
+```bash
+gcloud builds triggers create github \
+  --name=ai-model-chat-dev-browser \
+  --repo-name=ai-model-chat --repo-owner=theoduras \
+  --branch-pattern='^develop$' \
+  --build-config=cloudbuild.browser.yaml \
+  --region=europe-west4
+```
+
+The Cloud Build service account needs `roles/run.developer` and
+`roles/iam.serviceAccountUser`. To deploy by hand anyway — a rollback, or a
+quiet moment — the equivalent `gcloud run deploy` is in the build config; every
+flag in it matters, since a deploy that omits one resets that setting.
 
 | Variable | Where | What it does |
 |---|---|---|
