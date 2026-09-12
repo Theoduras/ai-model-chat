@@ -1,4 +1,5 @@
 """Hosted-browser connect tests. The browser itself is faked."""
+import json
 import os
 import queue
 import threading
@@ -46,6 +47,7 @@ def bare_attempt(account='acct1'):
     a.viewport = dict(of_connect.VIEWPORT)
     a.state, a.error, a.result = 'signin', '', {}
     a.frame, a.frame_at = b'', 0.0
+    a.signing_sample = {}
     a.probes, a.capture_note = 0, ''
     a.page_url, a.cookie_names = '', []
     a.started = a.touched = time.time()
@@ -262,6 +264,57 @@ class RegistryTest(unittest.TestCase):
         a = bare_attempt()
         a.result = {'username': 'lilith'}
         self.assertEqual(set(a.status()) & {'cookie', 'x_bc'}, set())
+
+
+class SigningSampleTest(unittest.TestCase):
+    """The browser service has no database, so the sample has to ride back to
+    the app on the attempt's status."""
+
+    class _Page:
+        def __init__(self):
+            self.handler = None
+
+        def on(self, event, fn):
+            self.handler = fn
+
+    class _Request:
+        def __init__(self, url, headers):
+            self.url = url
+            self.headers = headers
+
+    def _attempt(self):
+        return bare_attempt()
+
+    def test_keeps_what_the_page_signed(self):
+        attempt, page = self._attempt(), self._Page()
+        attempt._watch_signing(page)
+        page.handler(self._Request(
+            'https://onlyfans.com/api2/v2/chats?limit=10',
+            {'sign': '13190:abc:ff:x', 'time': '1700000000', 'user-id': '99',
+             'app-token': 'tok'}))
+        self.assertEqual(attempt.signing_sample, {
+            'path': '/api2/v2/chats?limit=10', 'time': '1700000000',
+            'user_id': '99', 'sign': '13190:abc:ff:x', 'app_token': 'tok'})
+        self.assertEqual(attempt.status()['signing_sample'],
+                         attempt.signing_sample)
+
+    def test_ignores_anything_that_is_not_a_signed_api_call(self):
+        attempt, page = self._attempt(), self._Page()
+        attempt._watch_signing(page)
+        page.handler(self._Request('https://onlyfans.com/api2/v2/chats', {}))
+        page.handler(self._Request('https://onlyfans.com/theme.css',
+                                   {'sign': 's', 'time': '1'}))
+        self.assertEqual(attempt.signing_sample, {})
+
+    def test_carries_no_credentials(self):
+        attempt, page = self._attempt(), self._Page()
+        attempt._watch_signing(page)
+        page.handler(self._Request(
+            'https://onlyfans.com/api2/v2/users/me',
+            {'sign': 's', 'time': '1', 'cookie': 'sess=secret', 'x-bc': 'device'}))
+        self.assertNotIn('cookie', attempt.signing_sample)
+        self.assertNotIn('x_bc', attempt.signing_sample)
+        self.assertNotIn('secret', json.dumps(attempt.signing_sample))
 
 
 if __name__ == '__main__':

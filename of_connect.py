@@ -65,34 +65,6 @@ def rules_sink(fn):
     _rules_sink = fn
 
 
-def _watch_signing(page):
-    """Keep the newest request OnlyFans' own page signed.
-
-    The page signs its own API calls, so one of them is a worked example: for
-    this exact path, time and user id, this is the signature OnlyFans expects.
-    That turns "are our rules current" from a guess into arithmetic. Nothing
-    here touches the cookie or the device token — only the four public values
-    the signature is computed from.
-    """
-    def seen(request):
-        try:
-            if '/api2/v2/' not in request.url:
-                return
-            h = request.headers
-            if not (h.get('sign') and h.get('time')):
-                return
-            (_rules_sink or of_rules.put_sample)({
-                'path': of_rules.path_of(request.url), 'time': h['time'],
-                'user_id': h.get('user-id') or '0', 'sign': h['sign'],
-                'app_token': h.get('app-token') or ''})
-        except Exception as e:
-            logger.debug('could not keep a signing sample: %s', str(e)[:120])
-    try:
-        page.on('request', seen)
-    except Exception as e:
-        logger.debug('could not watch signing: %s', str(e)[:120])
-
-
 def session_sink(fn):
     """Where a captured session goes. The default is the vault; the browser
     service overrides it, because it carries no database of its own."""
@@ -142,6 +114,10 @@ def available():
 class Attempt:
     """One creator, one sign-in, one browser."""
 
+    # Only ever replaced, never mutated in place, so one default is safe to
+    # share — and status() cannot trip over an attempt built without it.
+    signing_sample = {}
+
     def __init__(self, persona, account, proxy='', user_agent='', viewport=None):
         self.id = 'ofc_' + uuid.uuid4().hex[:16]
         self.persona = persona
@@ -153,6 +129,7 @@ class Attempt:
         self.error = ''
         self.frame = b''
         self.frame_at = 0.0
+        self.signing_sample = {}
         self.result = {}
         self.touched = time.time()
         self.started = time.time()
@@ -187,7 +164,8 @@ class Attempt:
                 'expires_in': max(0, int(ATTEMPT_TTL - (time.time() - self.started))),
                 'result': self.result, 'probes': self.probes,
                 'capture_note': self.capture_note, 'page_url': self.page_url,
-                'cookie_names': self.cookie_names}
+                'cookie_names': self.cookie_names,
+                'signing_sample': self.signing_sample}
 
     def snapshot(self):
         """The latest frame as a data URL, or '' before the first one."""
@@ -256,7 +234,7 @@ class Attempt:
     def _drive(self, pw):
         browser, context = self._launch(pw)
         page = context.pages[0] if context.pages else context.new_page()
-        _watch_signing(page)
+        self._watch_signing(page)
         page.goto(SIGNIN_URL, wait_until='domcontentloaded', timeout=60000)
         # What the window is told to scale by has to be the size of the frames
         # it actually gets. Sizing the window rather than overriding the
@@ -357,6 +335,38 @@ class Attempt:
             page.mouse.wheel(0, float(kw.get('dy') or 0))
         elif kind == 'back':
             page.go_back()
+
+    def _watch_signing(self, page):
+        """Keep the newest request OnlyFans' own page signed.
+
+        The page signs its own API calls, so one of them is a worked example:
+        for this exact path, time and user id, this is the signature OnlyFans
+        expects. That turns "are our rules current" into arithmetic.
+
+        It is kept on the attempt rather than written anywhere, because the
+        browser service has no database — like the session, it goes back to the
+        app with the attempt's status. Nothing here reads the cookie or the
+        device token, only the four public values a signature is built from.
+        """
+        def seen(request):
+            try:
+                if '/api2/v2/' not in request.url:
+                    return
+                h = request.headers
+                if not (h.get('sign') and h.get('time')):
+                    return
+                self.signing_sample = {
+                    'path': of_rules.path_of(request.url), 'time': h['time'],
+                    'user_id': h.get('user-id') or '0', 'sign': h['sign'],
+                    'app_token': h.get('app-token') or ''}
+                if _rules_sink:
+                    _rules_sink(self.signing_sample)
+            except Exception as e:
+                logger.debug('could not keep a signing sample: %s', str(e)[:120])
+        try:
+            page.on('request', seen)
+        except Exception as e:
+            logger.debug('could not watch signing: %s', str(e)[:120])
 
     def _capture(self, page):
         if time.time() - self.frame_at < 0.2:

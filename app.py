@@ -16191,6 +16191,23 @@ PLATFORMS['onlyfans'] = PLAT_ONLYFANS
 # need somewhere durable to live, and this is where the app lends them the
 # database it already has.
 
+def _of_keep_sample(status):
+    """Keep the signature the sign-in page produced, wherever it was captured.
+
+    The browser service has no database, so the sample rides back on the
+    attempt's status like the session does. This is called on the status reads
+    that already happen while a sign-in is open, rather than on a poll of its
+    own.
+    """
+    try:
+        sample = (status or {}).get('signing_sample')
+        if sample:
+            of_rules.put_sample(sample)
+    except Exception as e:
+        logger.debug('could not keep the signing sample: %s', str(e)[:120])
+    return status
+
+
 def _of_direct():
     return ONLYFANS_TRANSPORT == 'direct'
 
@@ -16463,7 +16480,7 @@ def api_onlyfans_connect_frame():
         return _of_busy()
     if not attempt:
         return jsonify({'ok': False, 'error': 'that sign-in is no longer open'}), 404
-    status = attempt.status()
+    status = _of_keep_sample(attempt.status())
     if status['state'] == 'connected':
         _of_adopt_direct(attempt)
         status = attempt.status()
@@ -16587,7 +16604,7 @@ def api_onlyfans_connect_status():
         live = _of_conn().get(attempt) if attempt else None
         if not live:
             return jsonify({'ok': True, 'attempt': None})
-        if live.status()['state'] == 'connected':
+        if _of_keep_sample(live.status())['state'] == 'connected':
             _of_adopt_direct(live)
         return jsonify({'ok': True, 'attempt': live.status()})
     if not attempt:
@@ -16775,7 +16792,7 @@ def api_onlyfans_signing_test():
     if not _of_direct():
         return jsonify({'ok': False, 'error': 'not running the direct transport'}), 400
     persona = ((request.json or {}).get('persona') or '').strip()
-    account = _of_account(persona)
+    account = _of_account(persona) or next(iter(_of_connected_accounts()), '')
     want = of_rules.sample()
     rows = []
     for name in ('override', 'cached') + tuple(of_rules.RULES_SOURCES):
@@ -17019,7 +17036,7 @@ def api_onlyfans_debug_store():
         if attempt_id:
             try:
                 live = _of_conn().get(attempt_id)
-                out['attempt'] = live.status() if live else None
+                out['attempt'] = _of_keep_sample(live.status()) if live else None
             except Exception as e:
                 out['attempt_error'] = str(e)[:200]
     out['rules'] = of_rules.state()
