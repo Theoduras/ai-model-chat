@@ -17198,6 +17198,13 @@ def api_diag():
            'proxy_pool': bool((os.getenv('ONLYFANS_PROXY_TEMPLATE') or '').strip()),
            'warnings': _persistence_warnings()}
     if _of_direct():
+        # The one thing this endpoint does besides read: run the signing
+        # repair now rather than waiting for the next sweep. It is the same
+        # call the sweep makes, and its whole effect is to fetch a signature
+        # and work out the rules from it.
+        if request.args.get('repair'):
+            out['repair'] = {'ran': _of_autocapture(force=True),
+                             'proven_after': of_rules.proven()}
         try:
             out['onlyfans'] = _of_watch_payload(
                 int(request.args.get('after') or 0),
