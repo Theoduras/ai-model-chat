@@ -82,12 +82,6 @@ SAMPLE_TTL = 60
 # under a set since replaced was unrecognisable -- so it could be stored as the
 # oracle, and then disprove every published set for as long as it sat there.
 _made = collections.deque(maxlen=64)
-# A sample no source can reproduce is usually a rotation the mirrors have not
-# caught up with yet. But it can equally be junk -- a capture that caught one of
-# our own requests -- and then it disproves every set forever and nothing can be
-# adopted at all. Past this long with every source failing it, the sample is the
-# suspect rather than the sets.
-SAMPLE_SUSPECT_AFTER = 1800
 
 
 class RulesError(RuntimeError):
@@ -373,22 +367,33 @@ def refresh(reject=()):
         logger.info('OnlyFans rules refreshed from %s (revision %s)',
                     url, _revision_of(rules))
         return _adopt(rules, url)
-    # Nothing reproduces the oracle. Either every mirror is behind a rotation,
-    # or the oracle itself is junk -- and while it sits there it disproves every
-    # set, so the stale one already loaded is never replaced. Past a point the
-    # sample is the less likely of the two to be right: drop it, take the best
-    # set on its own merits, and let the next capture put a real one back.
-    age = sample_age()
-    if disproved and (age is None or age >= SAMPLE_SUSPECT_AFTER):
-        drop_sample()
+    # Nothing reproduces the oracle: OnlyFans has rotated and no mirror has
+    # caught up. The sample is kept -- put_sample already refuses a signature of
+    # ours, so a stored one is the genuine article, and it is the only evidence
+    # of which revision is current and the only thing the derivation can search
+    # the page for. Throwing it away here would take the repair's input with it.
+    if disproved and not _valid(_rules):
+        # Nothing loaded at all: a set that cannot sign still beats none. It
+        # gives the caller a request to be refused for, and that refusal is what
+        # drives the repair.
         rules, url = _best(disproved)
-        logger.warning('no rule set reproduces the captured signature after %ss'
-                       ' — dropping it and taking %s (revision %s)',
-                       age, url, _revision_of(rules))
+        logger.warning('no published set reproduces the signature OnlyFans '
+                       'itself produced; taking %s so there is something to '
+                       'sign with while the rules are repaired', url)
         return _adopt(rules, url)
-    raise RulesError(('every published rule set fails the captured signature'
-                      if want else 'no usable OnlyFans rules')
-                     + ': ' + '; '.join(errors))
+    raise RulesError(_why_nothing_signs(want) + ': ' + '; '.join(errors))
+
+
+def _why_nothing_signs(want):
+    """The headline for a refresh that found nothing, naming the revision
+    OnlyFans is on. It is sitting in the captured signature, and not saying it
+    is what turned one rotation into days of guessing at mirrors."""
+    if not want:
+        return 'no usable OnlyFans rules'
+    theirs = format_of(want).split(':')[0]
+    return ('every published rule set fails the captured signature'
+            + (f' — OnlyFans is signing with revision {theirs} and no source '
+               f'serves it' if theirs else ''))
 
 
 def compare():

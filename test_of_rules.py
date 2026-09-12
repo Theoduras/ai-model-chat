@@ -248,6 +248,9 @@ class OracleTest(unittest.TestCase):
         already known not to sign."""
         stale = dict(RULES, static_param='STALE')
         fresh = self._fresh_sample()
+        # A set is already loaded, so there is something to keep signing with:
+        # the last-resort branch is for a cold instance holding nothing at all.
+        of_rules._rules = dict(RULES)
         of_rules.sample_hooks(lambda: json.dumps(fresh), lambda v: None)
         with mock.patch.object(of_rules, 'RULES_SOURCES', ('a',)), \
                 mock.patch.object(of_rules, '_fetch', return_value=stale):
@@ -255,18 +258,40 @@ class OracleTest(unittest.TestCase):
                 of_rules.refresh()
         self.assertIn('captured signature', str(caught.exception))
 
-    def test_an_oracle_nothing_reproduces_is_eventually_the_suspect(self):
-        """A junk sample disproves every set forever, and the stale set already
-        loaded is never replaced. Past the cutoff the sample goes instead."""
-        stale = dict(RULES, static_param='STALE')
-        dropped = []
-        of_rules.sample_hooks(lambda: json.dumps(self.sample),
-                              lambda v: dropped.append(v))
+    def test_a_rotation_no_mirror_has_caught_keeps_the_oracle(self):
+        """Observed live: OnlyFans signing with 65034 while the two mirrors
+        served 13190 and 63708. The sample is the only evidence of which
+        revision is current and the only thing the derivation can search the
+        page for, so a refresh that finds nothing must not consume it."""
+        theirs = dict(RULES, static_param='ROTATED',
+                      format='65034:{}:{:x}:6aa3eaf6')
+        sample = {'path': '/api2/v2/users/me', 'user_id': '0',
+                  'time': '1789242509672',
+                  'sign': expected('/api2/v2/users/me', '0', 1789242509672, theirs)}
+        saved = []
+        of_rules.sample_hooks(lambda: json.dumps(sample), lambda v: saved.append(v))
+        of_rules._rules = dict(RULES)
+        with mock.patch.object(of_rules, 'RULES_SOURCES', ('a', 'b')), \
+                mock.patch.object(of_rules, '_fetch', return_value=dict(RULES)):
+            with self.assertRaises(of_rules.RulesError) as caught:
+                of_rules.refresh()
+        self.assertEqual(saved, [])
+        self.assertIn('65034', str(caught.exception))
+
+    def test_with_nothing_loaded_a_set_that_cannot_sign_still_beats_none(self):
+        """It gives the caller a request to be refused for, and that refusal is
+        what drives the repair. The oracle still survives it."""
+        theirs = dict(RULES, format='65034:{}:{:x}:6aa3eaf6')
+        sample = {'path': '/api2/v2/users/me', 'user_id': '0', 'time': '1789242509672',
+                  'sign': expected('/api2/v2/users/me', '0', 1789242509672, theirs)}
+        saved = []
+        of_rules.sample_hooks(lambda: json.dumps(sample), lambda v: saved.append(v))
+        of_rules._rules = {}
         with mock.patch.object(of_rules, 'RULES_SOURCES', ('a',)), \
-                mock.patch.object(of_rules, '_fetch', return_value=stale):
+                mock.patch.object(of_rules, '_fetch', return_value=dict(RULES)):
             got = of_rules.refresh()
-        self.assertEqual(got['static_param'], 'STALE')
-        self.assertEqual(dropped, ['{}'])
+        self.assertEqual(got['static_param'], RULES['static_param'])
+        self.assertEqual(saved, [])
 
     def test_the_newest_set_wins_when_the_oracle_cannot_decide(self):
         """With no sample every set is unprovable, and taking the first is how a
