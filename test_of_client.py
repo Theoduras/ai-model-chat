@@ -335,3 +335,30 @@ class ProvenRulesTest(unittest.TestCase):
         row = of_session.describe('acct1')
         self.assertEqual(row['user_id'], '777')
         self.assertTrue(row['verified'])
+
+
+class ProxyPoolOffTest(unittest.TestCase):
+    """Turning the pool off has to reach the sessions already in the vault."""
+
+    def setUp(self):
+        self._t = os.environ.pop('ONLYFANS_PROXY_TEMPLATE', None)
+
+    def tearDown(self):
+        if self._t is not None:
+            os.environ['ONLYFANS_PROXY_TEMPLATE'] = self._t
+        else:
+            os.environ.pop('ONLYFANS_PROXY_TEMPLATE', None)
+
+    @staticmethod
+    def _routes_through(opener, host):
+        return any(host in str(v) for h in opener.handlers
+                   for v in (getattr(h, 'proxies', None) or {}).values())
+
+    def test_a_stored_proxy_is_ignored_without_a_pool(self):
+        opener = of_client._opener('http://user:pw@gw.example.com:823')
+        self.assertFalse(self._routes_through(opener, 'gw.example.com'))
+
+    def test_a_stored_proxy_is_used_when_a_pool_is_configured(self):
+        os.environ['ONLYFANS_PROXY_TEMPLATE'] = 'http://u-{country}-{session}:p@gw:823'
+        opener = of_client._opener('http://user:pw@gw.example.com:823')
+        self.assertTrue(self._routes_through(opener, 'gw.example.com'))

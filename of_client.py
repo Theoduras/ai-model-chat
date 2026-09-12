@@ -96,6 +96,12 @@ def _opener(proxy):
     """A URL opener pinned to this account's exit IP. Every request an account
     makes has to leave from the address its session was created on — a session
     that suddenly appears from a datacentre is what gets accounts flagged."""
+    # A session stores the proxy it was created on, so turning the pool off has
+    # to reach the sessions already in the vault too: without a template
+    # configured there is no pool, and a stored address would send the account
+    # through a gateway nobody is paying for any more.
+    if not (os.getenv('ONLYFANS_PROXY_TEMPLATE') or '').strip():
+        proxy = ''
     if not proxy:
         return urllib.request.build_opener()
     return urllib.request.build_opener(

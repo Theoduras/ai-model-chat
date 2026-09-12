@@ -176,8 +176,30 @@ calls leave by different doors, which fails in exactly the confusing
 logs-in-then-drops way this was already chased for three rounds. No app code
 changes; this is infra-only and survives image deploys.
 
-To roll back, remove `ONLYFANS_BROWSER_URL` from the app and the in-process
-browser takes over on the next revision:
+### Turning the proxy pool off
+
+`ONLYFANS_PROXY_TEMPLATE` unset means no pool: accounts go out on the service's
+own address. Remove it from **both** services or they leave by different doors:
+
+```bash
+for s in ai-model-chat-dev ai-model-chat-dev-browser; do
+  gcloud run services update "$s" --region europe-west4 \
+    --remove-env-vars ONLYFANS_PROXY_TEMPLATE
+done
+```
+
+Sessions store the proxy they were created on, so `of_client._opener` ignores a
+stored address whenever no template is configured — otherwise removing the var
+would leave existing accounts still dialling a gateway nobody pays for.
+
+What this costs: Cloud Run's default egress comes from a shared Google pool
+whose address changes per request, which is what made sign-ins log in and die a
+second later. If that returns, the fix is a stable exit IP rather than a
+residential pool — `infra/of-egress.sh create && infra/of-egress.sh wire` runs
+one small Squid VM on a reserved static IP for about €9/month.
+
+To roll back the browser service, remove `ONLYFANS_BROWSER_URL` from the app and
+the in-process browser takes over on the next revision:
 
 ```bash
 gcloud run services update ai-model-chat-dev --region europe-west4 \
