@@ -54,3 +54,11 @@ class BrowserTraceTest(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertEqual([l['text'] for l in r.get_json()['lines']],
                          ['no signature captured'])
+
+
+class BuildIdTest(unittest.TestCase):
+    def test_stable_and_short(self):
+        of_trace._build[0] = ''
+        first = of_trace.build_id()
+        self.assertEqual(len(first), 10)
+        self.assertEqual(first, of_trace.build_id())

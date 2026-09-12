@@ -91,7 +91,8 @@ def service():
                         'browser_path': of_connect.browser_path(),
                         # Lets the app say "this service is an older build"
                         # instead of silently capturing nothing.
-                        'signing_capture': hasattr(of_connect, 'sample_now')})
+                        'signing_capture': hasattr(of_connect, 'sample_now'),
+                        'build': of_trace.build_id()})
 
     @api.route('/signing-sample', methods=['POST'])
     def signing_sample():

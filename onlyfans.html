@@ -740,8 +740,11 @@ async function watchNow(){
       +'<td>'+(w.last_error?'<span style="color:#fb7185;">'+esc(String(w.last_error).slice(0,90))+'</span>':'')+'</td></tr>';
   }).join('');
   const build=r.build||{};
-  const stale=build.up && !build.signing_capture
-    ? '<div style="color:#fb7185;">\u2715 The browser service is running an older build \u2014 '
+  const behind=build.up && (!build.signing_capture
+    || (build.build && build.mine && build.build!==build.mine));
+  const stale=behind
+    ? '<div style="color:#fb7185;">\u2715 The browser service is running an older build ('
+      +esc(build.build||'unknown')+' vs '+esc(build.mine||'?')+') \u2014 '
       +'redeploy ai-model-chat-dev-browser once the develop build is green.</div>' : '';
   const notes={awaiting_cookies:'no session cookie on the page yet',
     me_failed:'the page could not ask OnlyFans who it is',

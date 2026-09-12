@@ -16448,15 +16448,19 @@ def _of_browser_build():
     if now - _of_build_cache['at'] < 60:
         return _of_build_cache['info']
     conn = _of_conn()
-    info = {'up': False, 'signing_capture': False, 'remote': conn is not of_connect}
+    info = {'up': False, 'signing_capture': False, 'build': '',
+            'mine': of_trace.build_id(), 'remote': conn is not of_connect}
     if not info['remote']:
         info = {'up': of_connect.available(), 'remote': False,
-                'signing_capture': hasattr(of_connect, 'sample_now')}
+                'signing_capture': hasattr(of_connect, 'sample_now'),
+                'build': of_trace.build_id(), 'mine': of_trace.build_id()}
     else:
         try:
             health = conn.call('GET', '/health', timeout=6) or {}
             info['up'] = bool(health.get('browser'))
             info['signing_capture'] = bool(health.get('signing_capture'))
+            info['build'] = health.get('build') or ''
+            info['mine'] = of_trace.build_id()
         except Exception as e:
             info['error'] = str(e)[:120]
     _of_build_cache.update({'at': now, 'info': info})

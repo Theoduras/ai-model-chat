@@ -11,7 +11,9 @@ to the console. In memory on purpose: these are diagnostics for a live
 instance, they are worthless once it is replaced, and writing a line per poll
 to the database would cost more than it tells anyone.
 """
+import hashlib
 import logging
+import os
 import threading
 import time
 from collections import deque
@@ -73,3 +75,31 @@ def recent(after=0, limit=200):
 def clear():
     with _lock:
         _lines.clear()
+
+
+_build = ['']
+
+
+def build_id():
+    """A fingerprint of the Python this process is running.
+
+    The app and the browser service run the same image from the same repo, so
+    the same code gives the same answer. They differ only when one of them was
+    not redeployed -- which is the failure the console could not see, and which
+    no per-feature flag can catch for a feature that did not exist yet.
+    """
+    if _build[0]:
+        return _build[0]
+    here = os.path.dirname(os.path.abspath(__file__))
+    h = hashlib.sha256()
+    try:
+        for name in sorted(os.listdir(here)):
+            if not name.endswith('.py'):
+                continue
+            with open(os.path.join(here, name), 'rb') as fh:
+                h.update(name.encode())
+                h.update(fh.read())
+    except Exception:
+        return 'unknown'
+    _build[0] = h.hexdigest()[:10]
+    return _build[0]
