@@ -17159,6 +17159,11 @@ def api_diag():
                 int(request.args.get('after') or 0),
                 int(request.args.get('bafter') or 0))
             out['onlyfans']['proven'] = of_rules.proven()
+            # The oracle itself, and what each published set makes of it. No
+            # credentials: a signature is a hash of a path, a timestamp and an
+            # account id, and the sample carries nothing else.
+            out['sample'] = of_rules.sample()
+            out['sources'] = of_rules.compare()
         except Exception as e:
             out['onlyfans'] = {'ok': False, 'error': str(e)[:300]}
     return jsonify(out)

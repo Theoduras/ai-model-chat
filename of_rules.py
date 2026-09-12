@@ -287,6 +287,34 @@ def refresh(reject=()):
                      + ': ' + '; '.join(errors))
 
 
+def compare():
+    """Every source, what revision it serves, and what the oracle says of it.
+
+    `refresh` reports this as a sentence in an exception. Here it is the table
+    behind that sentence, so a disagreement can be read rather than inferred.
+    """
+    want = sample()
+    out = []
+    for url in ('override',) + tuple(RULES_SOURCES):
+        row = {'source': url}
+        try:
+            rules = override() if url == 'override' else _fetch(url)
+        except Exception as e:
+            row['error'] = str(e)[:120]
+            out.append(row)
+            continue
+        if not _valid(rules):
+            row['error'] = 'missing fields'
+            out.append(row)
+            continue
+        row['revision'] = str(rules.get('revision') or '')
+        row['app_token'] = rules.get('app_token') or ''
+        row['fingerprint'] = fingerprint(rules)
+        row['verify'] = verify(want, rules)
+        out.append(row)
+    return out
+
+
 def _restore():
     """Bring back whatever was cached, so a cold instance signs immediately."""
     global _rules, _fetched_at
