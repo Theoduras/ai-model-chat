@@ -523,14 +523,23 @@ def sample_now(proxy='', timeout=25):
 
 _LITERALS_JS = """() => {
   const out = new Set();
-  const srcs = [...document.querySelectorAll('script[src]')].map(s => s.src);
-  return Promise.all(srcs.slice(0, 40).map(u =>
+  // Every script the page actually loaded, not only the tags standing in the
+  // DOM now: the signing code rides in a chunk imported on demand, which is
+  // why scanning script[src] alone finds a few hundred strings and misses it.
+  const urls = new Set([...document.querySelectorAll('script[src]')].map(s => s.src));
+  for (const e of performance.getEntriesByType('resource')) {
+    if (/\\.m?js(\\?|$)/.test(e.name) || e.initiatorType === 'script') urls.add(e.name);
+  }
+  for (const t of document.querySelectorAll('script:not([src])')) {
+    for (const m of t.textContent.matchAll(/["'`]([\\x21-\\x7e]{8,256})["'`]/g)) out.add(m[1]);
+  }
+  return Promise.all([...urls].slice(0, 120).map(u =>
     fetch(u).then(r => r.text()).catch(() => '')
   )).then(texts => {
     for (const t of texts) {
-      for (const m of t.matchAll(/["'`]([A-Za-z0-9+/=_.:-]{16,120})["'`]/g)) out.add(m[1]);
+      for (const m of t.matchAll(/["'`]([\\x21-\\x7e]{8,256})["'`]/g)) out.add(m[1]);
     }
-    return [...out].slice(0, 200000);
+    return [...out].slice(0, 400000);
   });
 }"""
 
@@ -594,8 +603,9 @@ def derive_rules(sample, proxy='', timeout=45):
             static_param = candidate
             break
     if not static_param:
-        logger.warning('rule derivation read %s literals and none of them signs '
-                       'the captured request', len(literals))
+        logger.warning('rule derivation read %s literals from the bundle and none '
+                       'of them signs the captured request (%s)', len(literals),
+                       sample.get('path', '')[:60])
         return {}
     if not confirm:
         logger.warning('found the static param but the page produced no second '
