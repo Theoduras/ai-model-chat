@@ -301,7 +301,9 @@ class SigningSampleTest(unittest.TestCase):
              'app-token': 'tok'}))
         self.assertEqual(attempt.signing_sample, {
             'path': '/api2/v2/chats?limit=10', 'time': '1700000000',
-            'user_id': '99', 'sign': '13190:abc:ff:x', 'app_token': 'tok'})
+            'user_id': '99', 'sign': '13190:abc:ff:x', 'app_token': 'tok',
+            'headers': {'sign': '13190:abc:ff:x', 'time': '1700000000',
+                        'user-id': '99', 'app-token': 'tok'}})
         self.assertEqual(attempt.status()['signing_sample'],
                          attempt.signing_sample)
 
@@ -471,3 +473,12 @@ class LiteralScanTest(unittest.TestCase):
 
     def test_the_in_page_scan_uses_the_same_class(self):
         self.assertIn('''[^"'`\\\\\\s]''', of_connect._LITERALS_JS)
+
+
+class SafeHeadersTest(unittest.TestCase):
+    def test_a_credential_is_kept_as_a_size_not_a_value(self):
+        out = of_connect._safe_headers({'Cookie': 'sess=secret', 'x-bc': 'tok',
+                                        'sign': '13190:abc:ff:x'})
+        self.assertEqual(out['cookie'], '<11 chars>')
+        self.assertEqual(out['x-bc'], '<3 chars>')
+        self.assertEqual(out['sign'], '13190:abc:ff:x')

@@ -17225,6 +17225,9 @@ def api_diag():
             # account id, and the sample carries nothing else.
             out['sample'] = of_rules.sample()
             out['sources'] = of_rules.compare()
+            # Their request beside ours. The only specification of a request
+            # OnlyFans accepts is one it accepted.
+            out['headers'] = of_rules.compare_headers(out['sample'])
         except Exception as e:
             out['onlyfans'] = {'ok': False, 'error': str(e)[:300]}
     return jsonify(out)

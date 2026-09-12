@@ -298,3 +298,31 @@ class OracleForcedRefreshCooldownTest(unittest.TestCase):
             of_rules.refresh, of_rules.verify = real_refresh, real_verify
             of_rules._refresh_failed_at[0] = 0.0
         self.assertEqual(len(calls), 1)
+
+
+class StampTest(unittest.TestCase):
+    RULES = {'static_param': 's', 'format': '{}:{:x}', 'checksum_indexes': [0],
+             'checksum_constant': 1, 'app_token': 't'}
+
+    def test_a_signature_made_now_is_stamped_in_milliseconds(self):
+        """What OnlyFans' own page sends. Ten digits read as milliseconds is
+        1970, and the request is refused for being ancient."""
+        self.assertEqual(len(of_rules.sign('/api2/v2/users/me', '1',
+                                           r=self.RULES)[1]), 13)
+
+    def test_an_explicit_time_is_used_exactly_as_given(self):
+        stamp = of_rules.sign('/api2/v2/users/me', '1', when=1789203482721,
+                              r=self.RULES)[1]
+        self.assertEqual(stamp, '1789203482721')
+
+
+class CompareHeadersTest(unittest.TestCase):
+    def test_it_names_a_header_they_send_and_we_do_not(self):
+        sample = {'path': '/api2/v2/users/me', 'time': '1789203482721',
+                  'user_id': '9', 'sign': 'x',
+                  'headers': {'sign': 'x', 'time': '1789203482721',
+                              'user-id': '9', 'x-of-magic': 'abc',
+                              'cookie': 'secret-value'}}
+        rows = {r['header']: r for r in of_rules.compare_headers(sample)}
+        self.assertEqual(rows['x-of-magic']['side'], 'theirs')
+        self.assertNotIn('secret-value', json.dumps(rows))

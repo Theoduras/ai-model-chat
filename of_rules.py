@@ -44,6 +44,8 @@ RULES_TIMEOUT = 15
 # Rules older than this are refetched on the next signature, even without a
 # rejection — a stale set that still works is fine, one that stopped working an
 # hour ago is an outage nobody reported.
+# Never reported side by side: their values are credentials.
+SECRET_HEADERS = ('cookie', 'x-bc', 'authorization')
 RULES_MAX_AGE = 6 * 3600
 # A refresh that failed fails the same way for every caller, so retrying it per
 # request only fills the log while the cached set keeps working.
@@ -398,7 +400,11 @@ def sign(path, user_id='0', when=None, r=None):
     own OnlyFans id, '0' before sign-in.
     """
     r = r or rules()
-    stamp = str(int(when if when is not None else time.time()))
+    # Milliseconds, because that is what OnlyFans' own page sends. The digest
+    # stays consistent either way -- the server hashes the stamp we send -- but
+    # a freshness check reading ten digits as milliseconds sees 1970 and
+    # refuses, with the same "please refresh the page" a rotation gives.
+    stamp = str(int(when if when is not None else time.time() * 1000))
     msg = '\n'.join([r['static_param'], stamp, path, str(user_id or '0')])
     digest = hashlib.sha1(msg.encode('utf-8')).hexdigest().encode('ascii')
     return r['format'].format(digest.decode(), _checksum(digest, r)), stamp
@@ -435,6 +441,36 @@ def headers(path, session=None, when=None):
     # sending one it has retired is itself a tell.
     for name in (r.get('remove_headers') or []):
         out.pop(str(name).lower(), None)
+    return out
+
+
+def compare_headers(s, session=None):
+    """Our headers for the sample's request, beside the ones OnlyFans accepted.
+
+    The captured request is the only specification of what a request should look
+    like. Comparing against it is the difference between reading which header is
+    wrong and guessing one per deploy.
+    """
+    if not (s and s.get('path')):
+        return []
+    theirs = {k.lower(): v for k, v in (s.get('headers') or {}).items()}
+    try:
+        ours = headers(s['path'], session or {'user_id': s.get('user_id')},
+                       when=int(s['time']))
+    except (KeyError, ValueError, TypeError, RulesError):
+        return []
+    ours = {k.lower(): v for k, v in ours.items()}
+    out = []
+    for name in sorted(set(ours) | set(theirs)):
+        mine, yours = ours.get(name), theirs.get(name)
+        row = {'header': name,
+               'side': 'both' if (mine is not None and yours is not None)
+                       else ('ours' if mine is not None else 'theirs')}
+        if name not in SECRET_HEADERS:
+            row['ours'] = str(mine)[:120] if mine is not None else None
+            row['theirs'] = str(yours)[:120] if yours is not None else None
+            row['same'] = row['ours'] == row['theirs']
+        out.append(row)
     return out
 
 

@@ -113,6 +113,24 @@ def available():
     return True
 
 
+# Credentials, and nothing else: a request OnlyFans accepted is the only
+# specification of what one should look like, and keeping four of its fifteen
+# headers is what turned "which header is wrong" into one guess per deploy.
+SECRET_HEADERS = ('cookie', 'x-bc', 'authorization')
+
+
+def _safe_headers(headers):
+    """Every header of a request OnlyFans accepted, secrets replaced by size."""
+    out = {}
+    for name, value in (headers or {}).items():
+        name = str(name).lower()
+        if name in SECRET_HEADERS:
+            out[name] = f'<{len(value or "")} chars>'
+        else:
+            out[name] = str(value)[:200]
+    return out
+
+
 class Attempt:
     """One creator, one sign-in, one browser."""
 
@@ -368,7 +386,8 @@ class Attempt:
                 self.signing_sample = {
                     'path': of_rules.path_of(request.url), 'time': h['time'],
                     'user_id': h.get('user-id') or '0', 'sign': h['sign'],
-                    'app_token': h.get('app-token') or ''}
+                    'app_token': h.get('app-token') or '',
+                    'headers': _safe_headers(h)}
                 if not self._sampled:
                     self._sampled = True
                     logger.info('captured a signature OnlyFans\' own page produced '
@@ -492,7 +511,8 @@ def sample_now(proxy='', timeout=25):
             return
         got.update({'path': of_rules.path_of(request.url), 'time': h['time'],
                     'user_id': h.get('user-id') or '0', 'sign': h['sign'],
-                    'app_token': h.get('app-token') or ''})
+                    'app_token': h.get('app-token') or '',
+                    'headers': _safe_headers(h)})
 
     probe = Attempt('', '', proxy=proxy, drive=False)
     with _driver()() as pw:
