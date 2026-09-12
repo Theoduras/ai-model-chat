@@ -45,6 +45,10 @@ OF_MIN_INTERVAL = float(os.getenv('ONLYFANS_MIN_INTERVAL', '2.0') or 2.0)
 OF_JITTER = 0.6
 OF_RETRY_STATUSES = (429, 500, 502, 503, 504)
 OF_MAX_RETRIES = 3
+# How long an account is left alone after a refusal it cannot do anything about.
+# Long enough that a watcher stops making the same rejected request every minute,
+# short enough that a rotation caught upstream is picked up within the hour.
+OF_SIGNING_COOLDOWN = float(os.getenv('ONLYFANS_SIGNING_COOLDOWN', '300') or 300)
 
 
 class OnlyFansError(RuntimeError):
@@ -106,6 +110,59 @@ def _opener(proxy):
         return urllib.request.build_opener()
     return urllib.request.build_opener(
         urllib.request.ProxyHandler({'http': proxy, 'https': proxy}))
+
+
+# ── Holding off ───────────────────────────────────────────────────────────────
+# Two refusals cannot be argued with: rules no published source signs any better,
+# and a signature OnlyFans refuses while its own page proves those rules current.
+# Both answer every later request the same way, so a watcher that keeps polling
+# only lands a rejected request a minute against an account OnlyFans is already
+# unhappy with. The first refusal is kept and the rest are raised from here,
+# without a request, until something that could change the answer has: rules that
+# rotated under us, a session reconnected, or the cooldown running out.
+
+_held = {}
+_held_lock = threading.Lock()
+
+
+def _hold(account, session, err):
+    with _held_lock:
+        _held[account] = (time.time(), of_rules.fingerprint(),
+                          session.get('connected_at'), err)
+
+
+def _holding(account, session):
+    """The refusal still standing for this account, or None."""
+    with _held_lock:
+        held = _held.get(account)
+        if not held:
+            return None
+        at, fingerprint, connected_at, err = held
+        left = OF_SIGNING_COOLDOWN - (time.time() - at)
+        if (left <= 0 or of_rules.fingerprint() != fingerprint
+                or session.get('connected_at') != connected_at):
+            del _held[account]
+            return None
+    return type(err)(err.code, f'{err.detail} — not asking OnlyFans again for '
+                               f'another {int(left)}s')
+
+
+def resume(account=''):
+    """Try an account again now, whatever the clock says. One that reconnected
+    or a rule set an operator just pasted end the hold on their own; this is for
+    an operator who wants to know straight away."""
+    with _held_lock:
+        if account:
+            _held.pop(account, None)
+        else:
+            _held.clear()
+
+
+def held():
+    """Which accounts are being held back, and for how much longer."""
+    with _held_lock:
+        return {account: max(0, int(OF_SIGNING_COOLDOWN - (time.time() - at)))
+                for account, (at, _, _, _) in _held.items()}
 
 
 # ── Requests ──────────────────────────────────────────────────────────────────
@@ -196,13 +253,27 @@ def call(account, method, path, body=None):
 
     A rules rotation and a rate limit both come back as failures that a second
     attempt fixes; a dead session does not, so it is raised as its own error and
-    the account is marked so the creator gets told.
+    the account is marked so the creator gets told. A refusal that no retry and
+    no reconnection would change holds the account back for a while rather than
+    being collected again on every poll.
     """
     session = of_session.get(account)
     if not session:
         raise OnlyFansError(0, f'no OnlyFans session for {account}')
+    standing = _holding(account, session)
+    if standing:
+        raise standing
     if not path.startswith('/'):
         path = '/' + path
+    try:
+        return _attempts(account, method, path, body, session)
+    except (SigningStale, SignatureRefused) as e:
+        _hold(account, session, e)
+        raise
+
+
+def _attempts(account, method, path, body, session):
+    """The request and everything worth retrying it for."""
     rejected = set()
     proven_retried = False
     for attempt in range(OF_MAX_RETRIES):

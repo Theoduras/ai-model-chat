@@ -82,6 +82,8 @@ class CallTest(unittest.TestCase):
         use_memory_store()
         of_session.reset_key()
         of_session.put('acct1', SESSION)
+        of_client.resume()
+        self.addCleanup(of_client.resume)
         for target, value in (('rules', {'static_param': 's', 'format': '{}:{:x}',
                                          'checksum_indexes': [0], 'checksum_constant': 1,
                                          'app_token': 't'}),):
@@ -279,6 +281,8 @@ class ProvenRulesTest(unittest.TestCase):
         use_memory_store()
         of_session.reset_key()
         of_session.put('acct1', dict(SESSION, verified=False))
+        of_client.resume()
+        self.addCleanup(of_client.resume)
         p = mock.patch.object(of_client, '_wait_turn')
         p.start()
         self.addCleanup(p.stop)
@@ -335,6 +339,73 @@ class ProvenRulesTest(unittest.TestCase):
         row = of_session.describe('acct1')
         self.assertEqual(row['user_id'], '777')
         self.assertTrue(row['verified'])
+
+
+class HoldOffTest(unittest.TestCase):
+    """A refusal that the next request would only collect again is not made
+    again: every one of those is a rejected request against the account."""
+
+    def setUp(self):
+        use_memory_store()
+        of_session.reset_key()
+        of_session.put('acct1', SESSION)
+        of_client.resume()
+        self.addCleanup(of_client.resume)
+        p = mock.patch.object(of_client, '_wait_turn')
+        p.start()
+        self.addCleanup(p.stop)
+
+    @staticmethod
+    def _refused():
+        return mock.patch.object(of_client, '_once',
+                                 side_effect=of_client.OnlyFansError(
+                                     400, 'Please refresh the page'))
+
+    @staticmethod
+    def _nothing_signs(why='every source is behind'):
+        return mock.patch.object(of_rules, 'refresh',
+                                 side_effect=of_rules.RulesError(why))
+
+    def test_a_stuck_signature_stops_the_next_request_going_out(self):
+        with self._refused() as once, self._nothing_signs():
+            with self.assertRaises(of_client.SigningStale):
+                of_client.call('acct1', 'GET', '/api2/v2/users/me')
+            with self.assertRaises(of_client.SigningStale) as caught:
+                of_client.call('acct1', 'GET', '/api2/v2/chats')
+        self.assertEqual(once.call_count, 1)
+        self.assertIn('not asking OnlyFans again', str(caught.exception))
+        self.assertIn('acct1', of_client.held())
+
+    def test_rules_that_rotated_under_us_end_the_hold(self):
+        with self._refused(), self._nothing_signs(), \
+                mock.patch.object(of_rules, 'fingerprint', return_value='before'):
+            with self.assertRaises(of_client.SigningStale):
+                of_client.call('acct1', 'GET', '/api2/v2/users/me')
+        with self._refused() as once, self._nothing_signs(), \
+                mock.patch.object(of_rules, 'fingerprint', return_value='after'):
+            with self.assertRaises(of_client.SigningStale):
+                of_client.call('acct1', 'GET', '/api2/v2/users/me')
+        self.assertEqual(once.call_count, 1)
+
+    def test_a_reconnected_account_is_tried_again_at_once(self):
+        with self._refused(), self._nothing_signs():
+            with self.assertRaises(of_client.SigningStale):
+                of_client.call('acct1', 'GET', '/api2/v2/users/me')
+        of_session.put('acct1', dict(SESSION, connected_at=9999))
+        with mock.patch.object(of_client, '_once', return_value={'id': 99}) as once:
+            self.assertEqual(of_client.call('acct1', 'GET', '/api2/v2/users/me'),
+                             {'id': 99})
+        self.assertEqual(once.call_count, 1)
+
+    def test_a_session_onlyfans_refuses_is_held_too(self):
+        with mock.patch.object(of_rules, 'proven', return_value=True), \
+                self._refused() as once:
+            with self.assertRaises(of_client.SignatureRefused):
+                of_client.call('acct1', 'GET', '/api2/v2/chats')
+            refused = once.call_count
+            with self.assertRaises(of_client.SignatureRefused):
+                of_client.call('acct1', 'GET', '/api2/v2/chats')
+        self.assertEqual(once.call_count, refused)
 
 
 class ProxyPoolOffTest(unittest.TestCase):

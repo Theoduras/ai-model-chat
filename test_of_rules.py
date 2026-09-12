@@ -27,6 +27,43 @@ def expected(path, user_id, stamp, rules=RULES):
                                   abs(total + rules['checksum_constant']))
 
 
+class BackoffTest(unittest.TestCase):
+    """Sources that have all failed are not asked again once a minute for ever."""
+
+    def setUp(self):
+        self._reset()
+        self.addCleanup(self._reset)
+        self.addCleanup(setattr, of_rules, '_rules', {})
+
+    @staticmethod
+    def _reset():
+        of_rules._refresh_failed_at[0] = 0.0
+        of_rules._refresh_failures[0] = 0
+
+    def test_the_wait_widens_with_each_failure_in_a_row(self):
+        of_rules._refresh_failures[0] = 1
+        self.assertEqual(of_rules._retry_after(), of_rules.REFRESH_RETRY_AFTER)
+        of_rules._refresh_failures[0] = 4
+        self.assertEqual(of_rules._retry_after(), of_rules.REFRESH_RETRY_AFTER * 8)
+        of_rules._refresh_failures[0] = 40
+        self.assertEqual(of_rules._retry_after(), of_rules.REFRESH_RETRY_MAX)
+
+    def test_the_sources_are_left_alone_until_the_wait_is_up(self):
+        of_rules._rules, of_rules._fetched_at = dict(RULES), 1.0
+        with mock.patch.object(of_rules, '_fetch', side_effect=OSError('no')) as fetch:
+            of_rules.rules()
+            asked = fetch.call_count
+            of_rules.rules()
+        self.assertEqual(fetch.call_count, asked)
+        self.assertEqual(of_rules._refresh_failures[0], 1)
+
+    def test_rules_that_came_back_clear_the_backoff(self):
+        of_rules._refresh_failures[0], of_rules._refresh_failed_at[0] = 3, 1.0
+        with mock.patch.object(of_rules, '_fetch', return_value=RULES):
+            of_rules.rules(force=True)
+        self.assertEqual(of_rules._refresh_failures[0], 0)
+
+
 class SignTest(unittest.TestCase):
     def test_matches_the_reference_algorithm(self):
         got, stamp = of_rules.sign('/api2/v2/users/me', '12345',

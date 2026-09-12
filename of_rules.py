@@ -48,9 +48,15 @@ RULES_TIMEOUT = 15
 SECRET_HEADERS = ('cookie', 'x-bc', 'authorization')
 RULES_MAX_AGE = 6 * 3600
 # A refresh that failed fails the same way for every caller, so retrying it per
-# request only fills the log while the cached set keeps working.
+# request only fills the log while the cached set keeps working. A source that
+# has been behind for an hour is not going to have caught up a minute later
+# either, so each failure in a row widens the wait: a blip costs a minute, an
+# outage upstream settles into a quarter-hour poll instead of sixty requests to
+# the same two repositories.
 REFRESH_RETRY_AFTER = 60
+REFRESH_RETRY_MAX = 900
 _refresh_failed_at = [0.0]
+_refresh_failures = [0]
 # OnlyFans' own web client. The user-agent is part of what the session was
 # issued to, so a connected account overrides this with the one it logged in on.
 DEFAULT_USER_AGENT = (
@@ -73,6 +79,12 @@ SAMPLE_TTL = 60
 
 class RulesError(RuntimeError):
     """No usable rules could be fetched, so nothing can be signed."""
+
+
+def _retry_after():
+    """How long to leave the sources alone after the failures so far."""
+    return min(REFRESH_RETRY_AFTER * 2 ** max(0, _refresh_failures[0] - 1),
+               REFRESH_RETRY_MAX)
 
 
 def cache_hooks(load, save):
@@ -229,6 +241,7 @@ def _valid(rules):
 
 def _adopt(rules, source=''):
     global _rules, _fetched_at
+    _refresh_failed_at[0], _refresh_failures[0] = 0.0, 0
     _rules = dict(rules)
     _rules.setdefault('_source', source)
     _fetched_at = time.time()
@@ -369,7 +382,7 @@ def rules(force=False):
         # oracle disproving the cached set is exactly the case that repeated per
         # request, and forcing it here would walk straight past the cooldown.
         if not force and verify(sample(), _rules) is False:
-            if _valid(_rules) and time.time() - _refresh_failed_at[0] < REFRESH_RETRY_AFTER:
+            if _valid(_rules) and time.time() - _refresh_failed_at[0] < _retry_after():
                 return _rules
             force = True
         if not force and _valid(_rules) and time.time() - _fetched_at < RULES_MAX_AGE:
@@ -378,14 +391,15 @@ def rules(force=False):
                 time.time() - _fetched_at < RULES_MAX_AGE:
             return _rules
         if not force and _valid(_rules) and \
-                time.time() - _refresh_failed_at[0] < REFRESH_RETRY_AFTER:
+                time.time() - _refresh_failed_at[0] < _retry_after():
             return _rules
         try:
             out = refresh()
-            _refresh_failed_at[0] = 0.0
+            _refresh_failed_at[0], _refresh_failures[0] = 0.0, 0
             return out
         except RulesError:
             _refresh_failed_at[0] = time.time()
+            _refresh_failures[0] += 1
             # A stale set beats none: OnlyFans often keeps accepting the
             # previous revision for a while, and the caller retries on refusal.
             if _valid(_rules):
