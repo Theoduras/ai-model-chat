@@ -1,0 +1,66 @@
+# Deploys ai-model-chat-dev-browser on every push to develop.
+#
+# The browser service was first deployed by hand, so that an app deploy could not
+# kill a sign-in halfway through. That cost more than it saved: the service sat
+# for days on an image older than the app, and the signing repair could not be
+# fixed because the repair runs inside it.
+#
+# It was then handed to Cloud Run continuous deployment, configured on the
+# service in the console. That put the one thing that had already gone wrong --
+# whether this service is deploying at all -- back out of sight: nothing in this
+# repository could see it, and nothing here could repair it. This config is that
+# answer moved back into version control, where a broken deploy is readable and
+# fixable from a checkout.
+#
+# It builds its own image rather than reusing the app's: the app's trigger has an
+# inline config this repository cannot see, so there is nothing here to hook into
+# and no way to know when its image is ready. Two builds per push; the build
+# fingerprint in /api/diag and in the browser's /health says when the two
+# services disagree.
+steps:
+  # A missing :latest is the normal first build, not a failure -- --cache-from
+  # only reads an image that is already local, so a pull that fails just means no
+  # cache on this run.
+  - name: gcr.io/cloud-builders/docker
+    entrypoint: sh
+    args: ['-c', 'docker pull ${_IMAGE}:latest || true']
+
+  - name: gcr.io/cloud-builders/docker
+    args: ['build', '-t', '${_IMAGE}:$COMMIT_SHA', '-t', '${_IMAGE}:latest',
+           '--cache-from', '${_IMAGE}:latest', '.']
+
+  - name: gcr.io/cloud-builders/docker
+    args: ['push', '--all-tags', '${_IMAGE}']
+
+  # Every flag the service needs is repeated here, because a deploy that omits
+  # one resets it: no display means headless Chrome, which Cloudflare refuses,
+  # and more than one instance means a sign-in lands on a browser that is not
+  # holding it. --update-env-vars, never --set-env-vars: the latter would drop
+  # ONLYFANS_BROWSER_TOKEN, SECRET_KEY and the proxy template with it.
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ai-model-chat-dev-browser
+      - --image=${_IMAGE}:$COMMIT_SHA
+      - --region=${_REGION}
+      - --platform=managed
+      - --allow-unauthenticated
+      - --command=/bin/sh
+      - --args=/app/start.sh
+      - --update-env-vars=GUNICORN_TARGET=of_browser:service()
+      - --min-instances=1
+      - --max-instances=1
+      - --no-cpu-throttling
+      - --session-affinity
+      - --memory=2Gi
+
+substitutions:
+  _REGION: europe-west4
+  _IMAGE: europe-west4-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/ai-model-chat-dev-browser
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  machineType: E2_HIGHCPU_8
+timeout: 1800s

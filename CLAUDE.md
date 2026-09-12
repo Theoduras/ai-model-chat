@@ -177,18 +177,20 @@ single Cloud Run service `ai-model-chat-dev` (see `ENVIRONMENTS.md`).
 - **Push to `develop`.** That is the deploy: the trigger picks it up.
 - Never run a `gcloud run deploy` or `gcloud builds` command by hand to ship app
   code — pushing to `develop` is the only path for that.
-- **The trigger has an inline build config; there is no `cloudbuild.yaml`.** It
-  builds the `Dockerfile` and passes only `--image` to `gcloud run services
-  update`. So a Cloud Run setting — memory, instances, session affinity, env
-  vars — **cannot be changed from this repository at all**, and a build config
-  added here would be read by nothing. Set it on the service; it persists across
-  deploys.
+- **The app's trigger has an inline build config; there is no `cloudbuild.yaml`.**
+  It builds the `Dockerfile` and passes only `--image` to `gcloud run services
+  update`. So a Cloud Run setting for `ai-model-chat-dev` — memory, instances,
+  session affinity, env vars — **cannot be changed from this repository at
+  all**, and a `cloudbuild.yaml` added here would be read by nothing. Set it on
+  the service; it persists across deploys.
 - `ai-model-chat-dev-browser` runs the same image with a different entrypoint
-  and deploys itself from `develop` through Cloud Run continuous deployment,
-  configured on the service rather than in this repository. It was
-  hand-deployed so that a deploy could not interrupt a sign-in; in practice it
-  ran week-old code and blocked the signing repair, which runs inside it. An
-  interrupted sign-in can be started again — see `ENVIRONMENTS.md`.
+  and deploys itself from `develop` through its own trigger, which *does* read a
+  build config from here: `cloudbuild.browser.yaml`. Every service flag it needs
+  is restated in that file, because its deploy step is a full `gcloud run
+  deploy`. It was hand-deployed so that a deploy could not interrupt a sign-in;
+  in practice it ran week-old code and blocked the signing repair, which runs
+  inside it. An interrupted sign-in can be started again — see
+  `ENVIRONMENTS.md`.
 
 ---
 

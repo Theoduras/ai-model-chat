@@ -83,12 +83,41 @@ ended every sign-in in flight**, mid-2FA, with "that sign-in is no longer open".
 `ai-model-chat-dev-browser` is that browser on its own Cloud Run service,
 running the same image with a different entrypoint (`of_browser:service()`).
 
-**It deploys itself on every push to `develop`**, through Cloud Run continuous
-deployment — the same mechanism as the app, set up on the service in the Cloud
-Run console (repository `Theoduras/ai-model-chat`, branch `^develop$`, build
-type Dockerfile). Like the app's, it updates only the image: the service's own
-settings — entrypoint, `GUNICORN_TARGET`, instance counts, session affinity —
-persist across deploys and are not restated anywhere in this repository.
+**It deploys itself on every push to `develop`**, from
+[`cloudbuild.browser.yaml`](cloudbuild.browser.yaml) in this repository. Unlike
+the app's trigger, this one carries no inline config: the build config is the
+file, so what the browser service deploys with is readable and fixable from a
+checkout.
+
+Create the trigger once — this is the only part that is not in the repository:
+
+```bash
+gcloud builds triggers create github \
+  --name=ai-model-chat-dev-browser \
+  --repo-name=ai-model-chat --repo-owner=Theoduras \
+  --branch-pattern='^develop$' \
+  --build-config=cloudbuild.browser.yaml \
+  --region=global
+```
+
+`--region=global` because that is where this repository's GitHub connection
+lives; a trigger created in `europe-west4` cannot see it. The Cloud Build
+service account needs `roles/run.developer` and `roles/iam.serviceAccountUser`,
+or the build's last step fails with a permission error after a successful push.
+
+Check it is there and firing:
+
+```bash
+gcloud builds triggers list --region=global \
+  --format="table(name, disabled, github.push.branch, filename)"
+gcloud builds list --region=global --limit=5 \
+  --format="table(id, status, source.repoSource.branchName, buildTriggerId)"
+```
+
+The browser service was briefly handed to Cloud Run continuous deployment
+instead, configured on the service in the console. That put the failure this
+service already had — not deploying at all — back somewhere this repository
+could not see or repair; a build config here is what makes it visible.
 
 It used to have no trigger on purpose: a deploy kills a sign-in in flight, which
 was the bug being fixed when this service was split out. That protection cost
@@ -101,14 +130,16 @@ Both services therefore build from the same commit but as two separate builds,
 which finish at different times. The build fingerprint in `/api/diag` says when
 they disagree; a lasting disagreement means one of the two builds failed.
 
-The continuous-deployment triggers are named `rmgpgab-…` and live in the
-`global` Cloud Build region, not `europe-west4` — that is where the GitHub
-connection is. Neither carries a build config from this repository, so nothing
-here can change how either deploys.
+The app's trigger is one of Google's managed `rmgpgab-…` ones and carries an
+inline build config, so nothing here can change how *it* deploys. The browser's
+is an ordinary trigger named `ai-model-chat-dev-browser` pointed at
+`cloudbuild.browser.yaml`. Both live in the `global` Cloud Build region, not
+`europe-west4` — that is where the GitHub connection is.
 
 To deploy the browser service by hand — a rollback, or an image the trigger did
 not build — every flag matters, because a deploy that omits one resets that
-setting:
+setting. This is the same deploy step `cloudbuild.browser.yaml` runs, against
+the app's current image rather than a fresh build:
 
 ```bash
 IMAGE=$(gcloud run services describe ai-model-chat-dev --region europe-west4 \
