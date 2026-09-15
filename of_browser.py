@@ -139,6 +139,17 @@ def service():
             return jsonify({'ok': False, 'error': str(e)[:200]}), 400
         return jsonify({'ok': True, 'probe': out})
 
+    @api.route('/capture', methods=['POST'])
+    def capture():
+        """static_param off the site signing its own requests. No credentials."""
+        d = request.json or {}
+        try:
+            out = of_connect.capture_param(sample=d.get('sample') or None,
+                                           proxy=(d.get('proxy') or '').strip())
+        except Exception as e:
+            return jsonify({'ok': False, 'error': str(e)[:200]}), 400
+        return jsonify({'ok': True, 'capture': out.get('capture') or {}})
+
     @api.route('/sign-for', methods=['POST'])
     def sign_for():
         """One signature for an account, from a page kept open as her.
@@ -394,6 +405,13 @@ class Remote:
         out = self.call('POST', '/probe', {'proxy': proxy, 'budget': budget},
                         timeout=budget + 180)
         return out.get('probe') or {}
+
+    def capture_param(self, sample=None, proxy=''):
+        # Headroom over the capture's own bounded stages (a page load plus a
+        # 20s watch) so a cold Chromium launch is not read as a page failure.
+        out = self.call('POST', '/capture', {'sample': sample, 'proxy': proxy},
+                        timeout=180)
+        return out.get('capture') or {}
 
     def sign_for(self, account, session, path, proxy=''):
         # Short: this sits in front of a real request, so a signer that has

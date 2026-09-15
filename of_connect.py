@@ -15,6 +15,7 @@ every 250ms is enough to type a password into.
 import hashlib
 import base64
 import collections
+import json
 import logging
 import os
 import queue
@@ -223,7 +224,7 @@ class Attempt:
             if self.state != 'connected':
                 self.state, self.error = 'failed', str(e)[:200]
 
-    def _launch(self, pw):
+    def _launch(self, pw, bypass_csp=False):
         """A browser the check has no reason to refuse.
 
         Headful whenever there is a display to be headful on -- Xvfb provides
@@ -244,6 +245,12 @@ class Attempt:
             'locale': 'en-US',
             'timezone_id': os.getenv('ONLYFANS_TZ', 'Europe/Amsterdam'),
         }
+        if bypass_csp:
+            # So an inline <script> we append runs in the page's own world:
+            # patchright puts add_init_script and evaluate in an isolated world
+            # that cannot see the site's axios, and a real script element is
+            # the way into the main world -- but only if CSP lets it run.
+            opts['bypass_csp'] = True
         path = browser_path()
         if path:
             opts['executable_path'] = path
@@ -926,6 +933,11 @@ _SIGN_HOOK_JS = """() => {
       for (const r of records) for (const n of r.addedNodes) watch(n);
     }).observe(document.documentElement || document, {childList: true, subtree: true});
   } catch (e) {}
+  // The main frame is patched by the code above, not by patch(), so it was
+  // never counted. Without that, "nothing recorded" and "never installed"
+  // both read as zero and the probe cannot tell them apart.
+  window.__ofmain = (window.__ofmain || 0) + 1;
+  window.__offetch = window.fetch;
 }"""
 
 
@@ -1314,6 +1326,117 @@ def request_for(account, session, method, path, body=None, proxy=''):
     return signer(account, session, proxy).fetch(method, path, body)
 
 
+def _mainworld_sign(page, context, path):
+    """Ask the page's own axios to sign our path, from inside the page's world.
+
+    A real <script> element runs in the main world whatever patchright does to
+    add_init_script and evaluate, so this is where the site's request
+    interceptor is reachable. The signature is read off the wire, tagged by a
+    nonce so it is never confused with a request OnlyFans made itself. The
+    report says what the main world could see -- how many window keys, which
+    axios owners -- so an empty result separates "isolated" from "closured".
+    """
+    nonce = 'mw' + hashlib.sha1(str(time.time()).encode()).hexdigest()[:10]
+    marked = path + ('&' if '?' in path else '?') + '_ofmw=' + nonce
+    got = {}
+
+    def seen(r):
+        if nonce not in r.url:
+            return
+        h = r.headers
+        if h.get('sign') and h.get('time'):
+            got.update({'path': of_rules.path_of(r.url), 'time': h['time'],
+                        'user_id': h.get('user-id') or '0', 'sign': h['sign'],
+                        'app_token': h.get('app-token') or ''})
+
+    context.on('request', seen)
+    code = """
+    (function () {
+      var report = {vue: false, globals: [], via: '', error: '', winkeys: 0,
+                    searched: [], candidates: []};
+      var path = %s;
+      // A raw axios instance, or a Nuxt $api wrapper: the wrapper has get/post
+      // but no interceptors, and it is what most of the site calls through.
+      function looks(o) {
+        try {
+          if (!o) return false;
+          if (o.interceptors && o.interceptors.request
+              && typeof o.get === 'function') return true;
+          return typeof o.get === 'function' && typeof o.post === 'function'
+                 && (typeof o === 'function' || typeof o.create === 'function'
+                     || typeof o.request === 'function');
+        } catch (e) { return false; }
+      }
+      var callers = [];
+      function offer(name, o) {
+        if (looks(o)) { report.candidates.push(name); callers.push([name, o]); }
+      }
+      function scan(name, obj) {
+        report.searched.push(name);
+        if (!obj) return;
+        var keys; try { keys = Object.getOwnPropertyNames(obj); } catch (e) { return; }
+        for (var i = 0; i < keys.length; i++) {
+          var v; try { v = obj[keys[i]]; } catch (e) { continue; }
+          offer(name + '.' + keys[i], v);
+        }
+      }
+      var names = Object.getOwnPropertyNames(window);
+      report.winkeys = names.length;
+      for (var i = 0; i < names.length; i++) {
+        var v; try { v = window[names[i]]; } catch (e) { continue; }
+        if (looks(v)) { report.globals.push(names[i]); offer('window.' + names[i], v); }
+      }
+      // Vue 3 puts __vue_app__ on whatever element it mounted to, which is not
+      // always #app; find it by scanning rather than assuming.
+      var root = null, app = null;
+      var all = document.querySelectorAll('*');
+      for (var e = 0; e < all.length && !app; e++) {
+        if (all[e].__vue_app__) { root = all[e]; app = all[e].__vue_app__; }
+      }
+      if (!root) root = document.querySelector('#app')
+                        || (document.body && document.body.firstElementChild);
+      if (!app && root) app = root.__vue_app__;
+      var vm = (root && root.__vue__) || app;
+      report.vue = !!(vm || app);
+      report.appfound = !!app;
+      // Nuxt 3 provides its helpers through the app's inject context, not
+      // globalProperties: app._context.provides holds them under $-keys.
+      try {
+        var ctx = app && (app._context || (app._instance && app._instance.appContext));
+        if (ctx) {
+          scan('provides', ctx.provides);
+          scan('globalProperties', ctx.config && ctx.config.globalProperties);
+        }
+      } catch (e) { report.error = ('ctx: ' + e).slice(0, 120); }
+      try {
+        var nx = window.$nuxt || (typeof window.useNuxtApp === 'function'
+                                  && window.useNuxtApp());
+        if (nx) { scan('nuxt', nx); scan('nuxt.$', nx.$); }
+      } catch (e) {}
+      try { if (window.__NUXT__) scan('__NUXT__', window.__NUXT__); } catch (e) {}
+      for (var k = 0; k < callers.length; k++) {
+        try { callers[k][1].get(path); report.via = callers[k][0]; break; }
+        catch (e) { report.error = String(e).slice(0, 120); }
+      }
+      document.documentElement.setAttribute('data-ofmw', JSON.stringify(report));
+    })();
+    """ % json.dumps(marked)
+    try:
+        page.add_script_tag(content=code)
+    except Exception as e:
+        return {'error': 'main-world inject failed: ' + str(e)[:120]}, {}
+    until = time.time() + 12
+    while not got and time.time() < until:
+        page.wait_for_timeout(250)
+    try:
+        raw = page.evaluate(
+            "() => document.documentElement.getAttribute('data-ofmw') || '{}'")
+        report = json.loads(raw or '{}')
+    except Exception as e:
+        report = {'error': 'could not read the main-world report: ' + str(e)[:100]}
+    return report, got
+
+
 def sign_now(path, user_id='0', proxy='', timeout=30):
     """A signature for a path of ours, made by OnlyFans' own code.
 
@@ -1326,12 +1449,12 @@ def sign_now(path, user_id='0', proxy='', timeout=30):
     Nothing here logs in. A signature covers the path, the time and the user
     id; identity is the cookie, and that stays in the app.
     """
-    report = {'via': '', 'vue': False, 'globals': [], 'seen': 0, 'why': ''}
+    report = {'via': '', 'vue': False, 'globals': [], 'seen': 0, 'why': '',
+              'isolated': {}, 'mainworld': {}}
     probe = Attempt('', '', proxy=proxy, drive=False)
     with _driver()() as pw:
-        context = probe._launch(pw)[1]
+        context = probe._launch(pw, bypass_csp=True)[1]
         try:
-            context.add_init_script('(' + _SIGN_HOOK_JS + ')()')
             page = context.pages[0] if context.pages else context.new_page()
             try:
                 page.goto(SIGNIN_URL, wait_until='domcontentloaded',
@@ -1340,34 +1463,361 @@ def sign_now(path, user_id='0', proxy='', timeout=30):
                 report['why'] = 'the page did not load: ' + str(e)[:120]
                 return {'sign': {}, 'report': report}
             page.wait_for_timeout(3000)
+            # What evaluate's world can see, kept only to sit beside the main
+            # world's view: the difference between the two is the whole answer
+            # to whether the signer is out of reach because it is isolated or
+            # because it is closured.
             try:
-                found = page.evaluate(_SIGNER_JS, path) or {}
+                report['isolated'] = page.evaluate(_SIGNER_JS, path) or {}
             except Exception as e:
-                report['why'] = 'could not look for a signer: ' + str(e)[:120]
-                return {'sign': {}, 'report': report}
-            for key in ('vue', 'globals', 'via'):
-                report[key] = found.get(key)
-            until = time.time() + 15
-            while time.time() < until:
-                try:
-                    sigs = page.evaluate('() => window.__ofsigs || []') or []
-                except Exception:
-                    sigs = []
-                report['seen'] = len(sigs)
-                for s in sigs:
-                    h = s.get('headers') or {}
-                    if of_rules.path_of(s.get('url') or '') != path:
-                        continue
-                    if h.get('sign') and h.get('time'):
-                        return {'sign': {'path': path, 'time': h['time'],
-                                         'user_id': h.get('user-id') or user_id,
-                                         'sign': h['sign'],
-                                         'app_token': h.get('app-token') or ''},
-                                'report': report}
-                page.wait_for_timeout(500)
-            report['why'] = ('nothing signed our path; %s signed requests seen'
-                             % report['seen'])
+                report['isolated'] = {'error': str(e)[:120]}
+            mw_report, got = _mainworld_sign(page, context, path)
+            report['mainworld'] = mw_report
+            report['via'] = mw_report.get('via', '')
+            report['vue'] = mw_report.get('vue', False)
+            report['globals'] = mw_report.get('globals', [])
+            if got.get('sign'):
+                return {'sign': {'path': path, 'time': got['time'],
+                                 'user_id': got.get('user_id') or user_id,
+                                 'sign': got['sign'],
+                                 'app_token': got.get('app_token') or ''},
+                        'report': report}
+            report['why'] = (mw_report.get('error')
+                             or ('the main world saw %s window keys and no request '
+                                 'interceptor' % mw_report.get('winkeys', 0)))
             return {'sign': {}, 'report': report}
+        finally:
+            try:
+                context.close()
+            except Exception:
+                pass
+
+
+_CAPTURE_HOOK = r"""
+(function () {
+  if (window.__ofcapOn) return; window.__ofcapOn = 1;
+  var caps = [], sigs = [], workers = [];
+  var n = {digest: 0, encode: 0, fetch: 0, xhr: 0, worker: 0};
+  function boot() {
+    // Whether the SPA actually ran under our rewrite: without this, quiet
+    // counters could mean "main world signs nothing" or "bundle never booted".
+    try {
+      var app = document.querySelector('#app');
+      return {href: String(location.href).slice(0, 200),
+              nodes: document.querySelectorAll('*').length,
+              mounted: !!(app && app.children && app.children.length)};
+    } catch (e) { return {href: '', nodes: 0, mounted: false}; }
+  }
+  function flush() {
+    try {
+      document.documentElement.setAttribute(
+        'data-ofcap', JSON.stringify({caps: caps, sigs: sigs, n: n,
+                                      workers: workers, boot: boot()}));
+    } catch (e) {}
+  }
+  var stashed = 0;
+  function stashWorker(url) {
+    // A blob: worker is built from an in-memory Blob and never hits the wire,
+    // but its URL is fetchable from the page that made it. Pull the source and
+    // park it in a hidden node so the isolated-world evaluate can read it back
+    // across the shared DOM -- the signing code, and its static_param, ride in
+    // here, not in any script the wire ever saw.
+    try {
+      if (String(url).indexOf('blob:') !== 0 || stashed >= 8) return;
+      var id = 'ofworker' + stashed; stashed++;
+      fetch(url).then(function (r) { return r.text(); }).then(function (src) {
+        try {
+          var el = document.createElement('script');
+          el.type = 'text/plain'; el.id = id; el.textContent = src;
+          document.documentElement.appendChild(el);
+          n.wsrc = (n.wsrc || 0) + 1; flush();
+        } catch (e) {}
+      }).catch(function () {});
+    } catch (e) {}
+  }
+  function addWorker(url) {
+    try { url = String(url);
+      if (url && workers.indexOf(url) < 0 && workers.length < 12) {
+        workers.push(url.slice(0, 200)); flush();
+      }
+      stashWorker(url);
+    } catch (e) {}
+  }
+  // The signed message is static_param + "\n" + time + "\n" + path + "\n" + id.
+  // The path may or may not carry the /api2 prefix, so match on the shape that
+  // is always there -- a newline, a 10-13 digit timestamp, a newline -- rather
+  // than on the path. Counters below say whether any hashing happened at all,
+  // so an empty caps list means "not hashed in the main world", not "filtered".
+  function record(s) {
+    try {
+      if (typeof s !== 'string') return;
+      if (!/\n\d{10,13}\n/.test(s) && s.indexOf('/api2') < 0) return;
+      if (caps.indexOf(s) < 0 && caps.length < 12) { caps.push(s.slice(0, 400)); flush(); }
+    } catch (e) {}
+  }
+  function asString(d) {
+    try {
+      if (typeof d === 'string') return d;
+      if (d && d.buffer) return new TextDecoder().decode(d);
+      return new TextDecoder().decode(new Uint8Array(d));
+    } catch (e) { return ''; }
+  }
+  function addSig(v) {
+    try { v = String(v);
+      if (v && sigs.length < 8 && sigs.indexOf(v) < 0) { sigs.push(v.slice(0, 90)); flush(); }
+    } catch (e) {}
+  }
+  try {
+    var TE = TextEncoder.prototype.encode;
+    TextEncoder.prototype.encode = function (s) { n.encode++; record(s); return TE.apply(this, arguments); };
+  } catch (e) {}
+  try {
+    if (window.crypto && crypto.subtle && crypto.subtle.digest) {
+      var D = crypto.subtle.digest.bind(crypto.subtle);
+      crypto.subtle.digest = function (algo, data) { n.digest++; record(asString(data)); return D(algo, data); };
+    }
+  } catch (e) {}
+  try {
+    var SH = XMLHttpRequest.prototype.setRequestHeader;
+    XMLHttpRequest.prototype.setRequestHeader = function (k, v) {
+      n.xhr++;
+      try { if (String(k).toLowerCase() === 'sign') addSig(v); } catch (e) {}
+      return SH.apply(this, arguments);
+    };
+  } catch (e) {}
+  // The wire showed signed requests this hook did not, which means the sign
+  // header is set through fetch, not XHR: read it out of the fetch init.
+  try {
+    var F = window.fetch;
+    window.fetch = function (input, init) {
+      n.fetch++;
+      try {
+        var h = init && init.headers;
+        if (h) {
+          if (typeof h.get === 'function') { var s = h.get('sign'); if (s) addSig(s); }
+          else { for (var k in h) if (String(k).toLowerCase() === 'sign') addSig(h[k]); }
+        }
+      } catch (e) {}
+      return F.apply(this, arguments);
+    };
+  } catch (e) {}
+  // The signer runs off the main thread, so the decisive artifact is the
+  // worker's script URL: wrap the constructors that create one.
+  try {
+    var W = window.Worker;
+    if (W) {
+      window.Worker = function (url, opts) { n.worker++; addWorker(url); return new W(url, opts); };
+      window.Worker.prototype = W.prototype;
+    }
+  } catch (e) {}
+  try {
+    var SW = window.SharedWorker;
+    if (SW) {
+      window.SharedWorker = function (url, opts) { n.worker++; addWorker(url); return new SW(url, opts); };
+      window.SharedWorker.prototype = SW.prototype;
+    }
+  } catch (e) {}
+  try {
+    if (navigator.serviceWorker && navigator.serviceWorker.register) {
+      var REG = navigator.serviceWorker.register.bind(navigator.serviceWorker);
+      navigator.serviceWorker.register = function (url) { n.worker++; addWorker(url); return REG.apply(this, arguments); };
+    }
+  } catch (e) {}
+  flush();
+})();
+"""
+
+
+def capture_param(sample=None, proxy='', timeout=30):
+    """Recover static_param by hooking the hash input, not the request client.
+
+    The client is closured out of reach -- not on window, the Vue app, or
+    Nuxt's provides -- so it cannot be asked to sign. But whatever computes the
+    signature hashes static_param + "\\n" + time + "\\n" + path + "\\n" + id,
+    and that plaintext starts with the param itself. If the site hashes in JS
+    (crypto.subtle.digest, or a bundled sha1 fed by TextEncoder.encode), the
+    hook reads the param straight off the site signing its own load requests.
+
+    The hook must run before the bundle, and patchright's add_init_script is
+    isolated, so it is injected by rewriting only the top document. Every stage
+    is time-bounded and the context is always closed in the finally, so a stall
+    cannot wedge the single browser instance this shares -- the earlier wedge
+    came from routing every resource with no timeout and no teardown, and this
+    routes only the document, fetches with a timeout, and continues on error.
+
+    If nothing sign-shaped is ever hashed in JS, that is the answer too: the
+    signing is in WASM or a Worker, and the JS route is closed.
+    """
+    report = {'caps': [], 'sigs': [], 'param': '', 'matched': False,
+              'revision': '', 'counts': {}, 'booted': {}, 'workers': [],
+              'js': [], 'wasm': [], 'worker_src': 0, 'worker_bytes': 0,
+              'confirm': 0, 'why': ''}
+    # Every script and wasm response off the wire, so worker scripts,
+    # importScripts, dynamic-import chunks and .wasm -- none of which the DOM
+    # <script src> scan sees -- are named for the derivation to read next.
+    sources = {}
+    # The oracle: a genuine signature OnlyFans produced. Its digest is what a
+    # recovered static_param has to reproduce, which is what makes a match a
+    # proof rather than a guess. It is passed in from the app process, where the
+    # sample lives -- of_rules.sample() is empty in this browser service.
+    oracle = sample or of_rules.sample() or {}
+    oparts = str(oracle.get('sign') or '').split(':')
+    # A second genuine signature, so the checksum positions can be pinned later
+    # (Stage C) rather than fitted to one digest by coincidence.
+    confirm = []
+
+    def on_signed(request):
+        try:
+            if '/api2/v2/' not in request.url:
+                return
+            h = request.headers
+            sign = h.get('sign')
+            if (sign and h.get('time') and sign != oracle.get('sign')
+                    and len(confirm) < 4):
+                confirm.append({'path': of_rules.path_of(request.url),
+                                'time': h['time'], 'user_id': h.get('user-id') or '0',
+                                'sign': sign})
+        except Exception:
+            pass
+
+    def on_response(resp):
+        try:
+            url = resp.url
+            ct = (resp.headers.get('content-type') or '').lower()
+            kind = ''
+            if 'wasm' in ct or url.split('?')[0].endswith('.wasm'):
+                kind = 'wasm'
+            elif 'javascript' in ct or url.split('?')[0].endswith('.js'):
+                kind = 'js'
+            if kind and url not in sources:
+                sources[url] = {'url': url[:200], 'kind': kind,
+                                'size': int(resp.headers.get('content-length') or 0)}
+        except Exception:
+            pass
+
+    probe = Attempt('', '', proxy=proxy, drive=False)
+    with _driver()() as pw:
+        context = probe._launch(pw, bypass_csp=True)[1]
+        try:
+            context.on('response', on_response)
+            context.on('request', on_signed)
+
+            def handle(route):
+                req = route.request
+                try:
+                    if req.resource_type != 'document':
+                        route.continue_(); return
+                    resp = route.fetch(timeout=timeout * 1000)
+                    body = resp.text()
+                    tag = '<script>' + _CAPTURE_HOOK + '</script>'
+                    if re.search(r'<head[^>]*>', body):
+                        body = re.sub(r'(<head[^>]*>)', lambda m: m.group(1) + tag,
+                                      body, count=1)
+                    else:
+                        body = tag + body
+                    headers = {k: v for k, v in resp.headers.items()
+                               if k.lower() not in ('content-length', 'content-encoding')}
+                    route.fulfill(status=resp.status, headers=headers, body=body)
+                except Exception:
+                    try: route.continue_()
+                    except Exception: pass
+
+            context.route(re.compile(r'https://onlyfans\.com/'), handle)
+            page = context.pages[0] if context.pages else context.new_page()
+            try:
+                page.goto(SIGNIN_URL, wait_until='domcontentloaded',
+                          timeout=timeout * 1000)
+            except Exception as e:
+                report['why'] = 'the page did not load: ' + str(e)[:120]
+                return {'capture': report}
+            until = time.time() + 20
+            while time.time() < until:
+                page.wait_for_timeout(500)
+                try:
+                    raw = page.evaluate(
+                        "() => document.documentElement.getAttribute('data-ofcap') || ''")
+                except Exception:
+                    raw = ''
+                if raw:
+                    try:
+                        data = json.loads(raw)
+                    except Exception:
+                        data = {}
+                    report['caps'] = data.get('caps', [])
+                    report['sigs'] = data.get('sigs', [])
+                    report['counts'] = data.get('n', {})
+                    report['booted'] = data.get('boot', {})
+                    report['workers'] = data.get('workers', [])
+                    # The worker source, not a main-world hash, is the prize:
+                    # break once it (and a second signature) are in hand.
+                    if (report['counts'] or {}).get('wsrc') and confirm:
+                        break
+            # Read the blob-worker sources the hook parked in the DOM and hunt
+            # the literal whose sha1 reproduces the oracle -- that literal is
+            # static_param. The match is against a genuine signature, so a hit
+            # is proof, which is why matched is set without a second lookup.
+            try:
+                srcs = page.evaluate(
+                    "() => Array.from(document.querySelectorAll('script[id^=ofworker]'))"
+                    ".map(e => e.textContent || '')") or []
+            except Exception:
+                srcs = []
+            report['worker_src'] = len(srcs)
+            report['worker_bytes'] = sum(len(s) for s in srcs)
+            # The stubs are tiny; show them so the real signing code they pull
+            # in (importScripts / dynamic import URL) is named, which is what an
+            # in-worker hook must target next.
+            report['worker_texts'] = [s[:2000] for s in srcs]
+            report['confirm'] = len(confirm)
+            inv = list(sources.values())
+            # The blob workers are tiny stubs; the signing code they pull in
+            # rides the wire as an importScripts/dynamic chunk. The context-level
+            # response inventory sees those worker-initiated fetches -- which the
+            # main-thread-only _LITERALS_JS scan misses -- so scan their bodies
+            # too, alongside the stub sources and any URL a stub names.
+            js_urls = [s['url'] for s in inv if s['kind'] == 'js']
+            for src in srcs:
+                js_urls += re.findall(r'https?://[^\s"\'`)]+\.m?js\b', src)
+            body_literals, seen_stat = _bundle_literals(
+                context, list(dict.fromkeys(js_urls)), marker=(oparts[0] if len(oparts) == 4 else ''))
+            report['scanned'] = seen_stat
+            if len(oparts) == 4 and oracle.get('path'):
+                want = oparts[1]
+                otime = str(oracle.get('time') or '')
+                opath = oracle['path']
+                ouid = str(oracle.get('user_id') or '0')
+                seen_lit = set()
+                for cand in list(body_literals) + [m.group(1) for s in srcs
+                                                   for m in _LITERAL_RE.finditer(s)]:
+                    if cand in seen_lit:
+                        continue
+                    seen_lit.add(cand)
+                    msg = '\n'.join([cand, otime, opath, ouid])
+                    if hashlib.sha1(msg.encode('utf-8')).hexdigest() == want:
+                        report['param'] = cand
+                        report['matched'] = True
+                        report['revision'] = oparts[0]
+                        break
+            report['js'] = [s for s in inv if s['kind'] == 'js']
+            report['wasm'] = [s for s in inv if s['kind'] == 'wasm']
+            if not report['matched']:
+                if not (len(oparts) == 4 and oracle.get('path')):
+                    report['why'] = 'no usable oracle sample to match against'
+                elif report['worker_src'] == 0:
+                    report['why'] = ('no worker source captured (%s workers seen); '
+                                     'the blob may not be same-origin fetchable' %
+                                     len(report['workers']))
+                else:
+                    st = report.get('scanned') or {}
+                    report['why'] = ('scanned %s worker stubs (%s bytes) and %s of '
+                                     '%s wire scripts (%s literals); the revision %s '
+                                     'and no literal signs the oracle -- static_param '
+                                     'is built at runtime, not a literal' %
+                                     (report['worker_src'], report['worker_bytes'],
+                                      st.get('ok', 0), st.get('urls', 0),
+                                      st.get('literals', 0),
+                                      'appears' if st.get('marker') else 'is absent'))
+            return {'capture': report}
         finally:
             try:
                 context.close()
@@ -1450,7 +1900,9 @@ def probe_now(proxy='', budget=60):
              # the wire; `hooked` is what our patched fetch/XHR recorded. Three
              # rounds inferred this gap from separate runs instead of measuring
              # it in one, and got the cause wrong as a result.
-             'api': 0, 'hooked': 0, 'frames_patched': 0, 'page': {}, 'responses': 0}
+             'api': 0, 'hooked': 0, 'frames_patched': 0, 'page': {}, 'responses': 0,
+             'hook': {}, 'driver': _driver().__module__.split('.')[0],
+             'signed': 0, 'signed_example': ''}
     began = deadline = time.time()
     deadline += max(20, budget)
 
@@ -1483,6 +1935,14 @@ def probe_now(proxy='', budget=60):
     def request(r):
         if '/api2/v2/' in r.url and nonce not in r.url:
             found['api'] += 1
+            # The number that actually settles it, read off the wire the way
+            # sample_now reads it -- not from the main-world hook, which
+            # patchright runs in an isolated world where it sees nothing.
+            h = r.headers
+            if h.get('sign') and h.get('time'):
+                found['signed'] += 1
+                if not found.get('signed_example'):
+                    found['signed_example'] = (h.get('sign') or '')[:60]
         if nonce in r.url:
             h = r.headers
             ours['signed'] = bool(h.get('sign') and h.get('time'))
@@ -1531,6 +1991,13 @@ def probe_now(proxy='', budget=60):
             try:
                 found['hooked'] = len(page.evaluate('() => window.__ofsigs || []') or [])
                 found['frames_patched'] = page.evaluate('() => window.__offrames || 0')
+                # Whether our fetch is still the one installed decides between
+                # "the hook never ran" and "the hook ran and was bypassed".
+                found['hook'] = page.evaluate('''() => ({
+                    main: window.__ofmain || 0,
+                    sigs: typeof window.__ofsigs,
+                    ours: window.fetch === window.__offetch,
+                    native: /\\[native code\\]/.test(String(window.fetch))})''')
                 found['frames'] = [f.url[:90] for f in page.frames][:8]
             except Exception:
                 pass
