@@ -1003,6 +1003,11 @@ class Signer:
         self.proxy = proxy
         self.id = uuid.uuid4().hex[:8]
         self.error = ''
+        # `error` is why the last probe failed; `fatal` is why the page is
+        # gone. Conflating them meant one unsigned path retired the page for
+        # good, and every later request fell back to arithmetic signing.
+        self.fatal = ''
+        self.seen = {}
         self.via = ''
         self.signed = 0
         self.fetched = 0
@@ -1023,7 +1028,7 @@ class Signer:
         return self.live()
 
     def live(self):
-        return bool(self._thread and self._thread.is_alive() and not self.error
+        return bool(self._thread and self._thread.is_alive() and not self.fatal
                     and self.opened_at)
 
     def stale(self):
@@ -1073,8 +1078,17 @@ class Signer:
     def state(self):
         return {'account': self.account, 'live': self.live(), 'via': self.via,
                 'signed': self.signed, 'fetched': self.fetched,
-                'error': self.error[:200],
-                'age': int(time.time() - self.opened_at) if self.opened_at else None}
+                'error': self.error[:200], 'fatal': self.fatal[:200],
+                'age': int(time.time() - self.opened_at) if self.opened_at else None,
+                'page': self._where()}
+
+    def _where(self):
+        """What the page was last showing. Its absence is what made the last
+        round of diagnostics guesswork: a signer that signs nothing and an
+        interstitial look identical from here. Read from the cache, not the
+        page -- Playwright's sync objects belong to the browser thread, and
+        `state()` is called from whichever thread serves /health."""
+        return dict(self.seen)
 
     # ── the browser side, all on its own thread ──────────────────────────────
 
@@ -1092,7 +1106,7 @@ class Signer:
                     except Exception:
                         pass
         except Exception as e:
-            self.error = str(e)[:200]
+            self.error = self.fatal = str(e)[:200]
             logger.warning('signer %s could not start: %s', self.id, self.error)
         finally:
             self.opened_at = 0.0
@@ -1110,6 +1124,7 @@ class Signer:
         page.goto(SIGNIN_URL, wait_until='domcontentloaded', timeout=60000)
         page.wait_for_timeout(3000)
         self.page = page
+        self._look()
         self.opened_at = time.time()
         self._ready.set()
 
@@ -1128,11 +1143,31 @@ class Signer:
                        else self._sign_one(payload))
             except Exception as e:
                 self.error = str(e)[:200]
+                if self._page_gone():
+                    self.fatal = self.error
                 got = {}
+            if got:
+                self.error = ''
+            else:
+                self._look()
             if box is not None:
                 box.put(got)
             if not self.live():
                 return
+
+    def _look(self):
+        try:
+            self.seen = {'url': (self.page.url or '')[:120],
+                         'title': (self.page.title() or '')[:80],
+                         'at': int(time.time())}
+        except Exception:
+            pass
+
+    def _page_gone(self):
+        try:
+            return self.page is None or self.page.is_closed()
+        except Exception:
+            return True
 
     def _sign_one(self, path):
         page = self.page
@@ -1276,3 +1311,129 @@ def sign_now(path, user_id='0', proxy='', timeout=30):
                 context.close()
             except Exception:
                 pass
+
+
+_PROBE_JS = """(nonce) => {
+  const out = {sw: [], wasm: [], fetched: null, error: ''};
+  try {
+    for (const e of performance.getEntriesByType('resource'))
+      if (String(e.name).includes('.wasm')) out.wasm.push(String(e.name).slice(-90));
+  } catch (e) { out.error = 'resources: ' + e; }
+  const regs = (navigator.serviceWorker && navigator.serviceWorker.getRegistrations)
+    ? navigator.serviceWorker.getRegistrations() : Promise.resolve([]);
+  return regs.then(rs => {
+    for (const r of rs) {
+      const w = r.active || r.installing || r.waiting;
+      out.sw.push({scope: String(r.scope).slice(0, 90),
+                   script: w ? String(w.scriptURL).slice(-90) : '',
+                   state: w ? w.state : 'none'});
+    }
+    // Does a plain page-level fetch come back signed? If a ServiceWorker owns
+    // the signing it signs this on the way out, and we need nothing else.
+    return fetch('/api2/v2/users/me?__probe=' + nonce, {credentials: 'include'})
+      .then(r => { out.fetched = r.status; return out; })
+      .catch(e => { out.fetched = 0; out.error = (out.error + ' fetch: ' + e).trim();
+                    return out; });
+  }).catch(e => { out.error = (out.error + ' sw: ' + e).trim(); return out; });
+}"""
+
+# A signing input has to survive being sent to us, so it is a longish opaque
+# token. Anything shorter matches half the minified bundle.
+_PARAMISH = re.compile(r'[A-Za-z0-9+/=_-]{28,48}')
+
+
+def probe_now(proxy='', timeout=30):
+    """Where OnlyFans' signing actually lives, read off a logged-out page.
+
+    Three rounds of diagnostics established that the signing inputs are not
+    strings in the bundle and that the site never touches the main world's
+    fetch/XHR, which leaves a Worker, a ServiceWorker or WASM. Which one it is
+    decides whether the signer can be reached at all, and that is not
+    something the app service can find out -- only a browser can. So it is
+    asked here, and the answer is reported rather than acted on.
+
+    Nothing signs in and nothing is stored.
+    """
+    found = {'workers': [], 'service_workers': [], 'wasm': [], 'signed_fetch': None,
+             'our_fetch_signed': None, 'our_fetch_status': None, 'rules_in_bodies': [],
+             'scanned': 0, 'why': ''}
+    nonce = hashlib.sha1(str(time.time()).encode()).hexdigest()[:12]
+    want = of_rules.sample() or {}
+    revision = of_rules.format_of(want).split(':')[0] if want else ''
+    found['revision'] = revision
+    bodies, ours = [], {}
+
+    def worker(w):
+        found['workers'].append(str(w.url)[-90:])
+
+    def request(r):
+        if nonce in r.url:
+            h = r.headers
+            ours['signed'] = bool(h.get('sign') and h.get('time'))
+            ours['sign'] = (h.get('sign') or '')[:60]
+
+    def response(r):
+        kind = (r.headers.get('content-type') or '').lower()
+        if len(bodies) < 120 and ('json' in kind or 'javascript' in kind):
+            bodies.append(r)
+
+    probe = Attempt('', '', proxy=proxy, drive=False)
+    with _driver()() as pw:
+        context = probe._launch(pw)[1]
+        try:
+            page = context.pages[0] if context.pages else context.new_page()
+            page.on('worker', worker)
+            context.on('request', request)
+            context.on('response', response)
+            try:
+                context.on('serviceworker',
+                           lambda w: found['service_workers'].append(str(w.url)[-90:]))
+            except Exception:
+                pass
+            try:
+                page.goto(SIGNIN_URL, wait_until='domcontentloaded',
+                          timeout=timeout * 1000)
+            except Exception as e:
+                found['why'] = 'the page did not load: ' + str(e)[:120]
+                return found
+            page.wait_for_timeout(5000)
+            try:
+                got = page.evaluate(_PROBE_JS, nonce) or {}
+            except Exception as e:
+                found['why'] = 'could not look: ' + str(e)[:140]
+                got = {}
+            for row in got.get('sw') or []:
+                found['service_workers'].append(row)
+            found['wasm'] = got.get('wasm') or []
+            found['our_fetch_status'] = got.get('fetched')
+            if got.get('error'):
+                found['why'] = (found['why'] + ' ' + str(got['error'])[:140]).strip()
+            page.wait_for_timeout(1500)
+            found['our_fetch_signed'] = ours.get('signed')
+            found['our_fetch_sign'] = ours.get('sign', '')
+            # Does any response carry the revision OnlyFans signs with, or
+            # something param-shaped near it? If so the rules arrive over the
+            # wire and we can keep our own set current.
+            for r in bodies:
+                try:
+                    text = r.text()
+                except Exception:
+                    continue
+                found['scanned'] += 1
+                if revision and revision in text:
+                    at = text.index(revision)
+                    near = text[max(0, at - 400):at + 400]
+                    found['rules_in_bodies'].append(
+                        {'url': r.url[:120], 'params': _PARAMISH.findall(near)[:8]})
+        finally:
+            try:
+                context.close()
+            except Exception:
+                pass
+    logger.info('transport probe: %s workers, %s service workers, %s wasm; our '
+                'fetch %s and %s signed; %s bodies scanned, %s carry revision %s',
+                len(found['workers']), len(found['service_workers']),
+                len(found['wasm']), found['our_fetch_status'],
+                'was' if found['our_fetch_signed'] else 'was not',
+                found['scanned'], len(found['rules_in_bodies']), revision or '?')
+    return found

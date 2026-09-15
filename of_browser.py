@@ -100,6 +100,7 @@ def service():
                         # service that can only sign has to fall back rather
                         # than call a route that is not there.
                         'page_requests': hasattr(of_connect, 'request_for'),
+                        'transport_probe': hasattr(of_connect, 'probe_now'),
                         'signers': (of_connect.signer_state()
                                     if hasattr(of_connect, 'signer_state') else []),
                         'build': of_trace.build_id()})
@@ -126,6 +127,16 @@ def service():
             return jsonify({'ok': False, 'error': str(e)[:200]}), 400
         return jsonify({'ok': True, 'sign': out.get('sign') or {},
                         'report': out.get('report') or {}})
+
+    @api.route('/probe', methods=['POST'])
+    def probe():
+        """Where the signing lives. No sign-in, no credentials, read-only."""
+        d = request.json or {}
+        try:
+            out = of_connect.probe_now(proxy=(d.get('proxy') or '').strip())
+        except Exception as e:
+            return jsonify({'ok': False, 'error': str(e)[:200]}), 400
+        return jsonify({'ok': True, 'probe': out})
 
     @api.route('/sign-for', methods=['POST'])
     def sign_for():
@@ -375,6 +386,10 @@ class Remote:
                         {'path': path, 'user_id': user_id, 'proxy': proxy},
                         timeout=120)
         return {'sign': out.get('sign') or {}, 'report': out.get('report') or {}}
+
+    def probe_now(self, proxy=''):
+        out = self.call('POST', '/probe', {'proxy': proxy}, timeout=150)
+        return out.get('probe') or {}
 
     def sign_for(self, account, session, path, proxy=''):
         # Short: this sits in front of a real request, so a signer that has

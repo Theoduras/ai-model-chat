@@ -574,3 +574,73 @@ class DeriveReportTest(unittest.TestCase):
         self.assertEqual(seen['ok'], 2)
         self.assertTrue(seen['marker'])
         self.assertEqual(seen['literals'], len(literals))
+
+
+class SignerSurvivesAFailedProbeTest(unittest.TestCase):
+    """One unsigned path must not retire the page.
+
+    `error` was both "why the last probe failed" and "this signer is gone", so
+    the first path the page would not sign closed the context and every later
+    request fell back to arithmetic signing -- the path OnlyFans is refusing.
+    In production `signed: 0, fetched: 0` was the symptom.
+    """
+
+    class _Page:
+        def __init__(self, closed=False, url='https://onlyfans.com/', title='OnlyFans'):
+            self._closed, self._url, self._title = closed, url, title
+            self.answers = []
+
+        def is_closed(self):
+            return self._closed
+
+        @property
+        def url(self):
+            return self._url
+
+        def title(self):
+            return self._title
+
+        def evaluate(self, js, arg=None):
+            return self.answers.pop(0) if self.answers else {}
+
+        def wait_for_timeout(self, ms):
+            pass
+
+    def _signer(self, page):
+        s = of_connect.Signer.__new__(of_connect.Signer)
+        s.account, s.via, s.error, s.fatal = 'acct1', '', '', ''
+        s.seen = {}
+        s.signed = s.fetched = 0
+        s.page = page
+        return s
+
+    def test_a_failed_probe_leaves_the_signer_live(self):
+        s = self._signer(self._Page())
+        s.opened_at = time.time()
+        s._thread = mock.Mock(is_alive=lambda: True)
+        s._fetch_one({'method': 'GET', 'path': '/api2/v2/chats'})
+        self.assertTrue(s.error)
+        self.assertEqual(s.fatal, '')
+        self.assertTrue(s.live())
+
+    def test_a_closed_page_is_fatal(self):
+        s = self._signer(self._Page(closed=True))
+        self.assertTrue(s._page_gone())
+        s = self._signer(self._Page())
+        self.assertFalse(s._page_gone())
+
+    def test_state_says_where_the_page_is(self):
+        s = self._signer(self._Page(url='https://onlyfans.com/?blocked',
+                                    title='Just a moment...'))
+        s.opened_at = time.time()
+        s._thread = mock.Mock(is_alive=lambda: True)
+        s._look()
+        got = s.state()
+        self.assertEqual(got['page']['title'], 'Just a moment...')
+        self.assertIn('blocked', got['page']['url'])
+
+    def test_where_never_touches_the_page_from_another_thread(self):
+        # Playwright's sync objects belong to the browser thread; /health is
+        # served from another one, so `state()` must read the cache only.
+        s = self._signer(None)
+        self.assertEqual(s._where(), {})

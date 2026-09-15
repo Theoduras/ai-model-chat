@@ -93,6 +93,20 @@ class SplitTest(unittest.TestCase):
             out = self.remote.request_for('acct1', {}, 'GET', '/api2/v2/users/me')
         self.assertEqual(out['status'], 401)
 
+    def test_the_transport_probe_crosses_the_wire(self):
+        canned = {'workers': ['/worker.js'], 'service_workers': [],
+                  'our_fetch_signed': False, 'our_fetch_status': 401}
+        with mock.patch.object(of_connect, 'probe_now', return_value=canned):
+            out = self.remote.probe_now()
+        self.assertEqual(out['workers'], ['/worker.js'])
+        self.assertIs(out['our_fetch_signed'], False)
+
+    def test_a_probe_that_cannot_run_is_not_an_exploding_console(self):
+        with mock.patch.object(of_connect, 'probe_now',
+                               side_effect=RuntimeError('no browser')):
+            with self.assertRaises(of_connect.ConnectError):
+                self.remote.probe_now()
+
     def test_a_page_that_made_no_request_leaves_the_caller_to_sign_it(self):
         with mock.patch.object(of_connect, 'request_for', return_value={}):
             self.assertEqual(

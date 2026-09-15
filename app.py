@@ -17330,6 +17330,14 @@ def api_diag():
                     proxy=_of_proxy_for('', ''))
             except Exception as e:
                 out['sign'] = {'error': str(e)[:200]}
+        # Neither the bundle nor the main world holds the signer, which leaves
+        # a Worker, a ServiceWorker or WASM. Only a browser can say which, so
+        # it is asked and the answer reported.
+        if request.args.get('probe'):
+            try:
+                out['probe'] = _of_conn().probe_now(proxy=_of_proxy_for('', ''))
+            except Exception as e:
+                out['probe'] = {'error': str(e)[:200]}
         try:
             out['onlyfans'] = _of_watch_payload(
                 int(request.args.get('after') or 0),
