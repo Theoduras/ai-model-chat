@@ -1386,11 +1386,19 @@ def _mainworld_sign(page, context, path):
         var v; try { v = window[names[i]]; } catch (e) { continue; }
         if (looks(v)) { report.globals.push(names[i]); offer('window.' + names[i], v); }
       }
-      var root = document.querySelector('#app')
-                 || (document.body && document.body.firstElementChild);
-      var app = root && root.__vue_app__;
-      var vm = root && (root.__vue__ || app);
-      report.vue = !!vm;
+      // Vue 3 puts __vue_app__ on whatever element it mounted to, which is not
+      // always #app; find it by scanning rather than assuming.
+      var root = null, app = null;
+      var all = document.querySelectorAll('*');
+      for (var e = 0; e < all.length && !app; e++) {
+        if (all[e].__vue_app__) { root = all[e]; app = all[e].__vue_app__; }
+      }
+      if (!root) root = document.querySelector('#app')
+                        || (document.body && document.body.firstElementChild);
+      if (!app && root) app = root.__vue_app__;
+      var vm = (root && root.__vue__) || app;
+      report.vue = !!(vm || app);
+      report.appfound = !!app;
       // Nuxt 3 provides its helpers through the app's inject context, not
       // globalProperties: app._context.provides holds them under $-keys.
       try {
@@ -1405,6 +1413,7 @@ def _mainworld_sign(page, context, path):
                                   && window.useNuxtApp());
         if (nx) { scan('nuxt', nx); scan('nuxt.$', nx.$); }
       } catch (e) {}
+      try { if (window.__NUXT__) scan('__NUXT__', window.__NUXT__); } catch (e) {}
       for (var k = 0; k < callers.length; k++) {
         try { callers[k][1].get(path); report.via = callers[k][0]; break; }
         catch (e) { report.error = String(e).slice(0, 120); }
