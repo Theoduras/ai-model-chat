@@ -17330,6 +17330,23 @@ def api_diag():
                     proxy=_of_proxy_for('', ''))
             except Exception as e:
                 out['sign'] = {'error': str(e)[:200]}
+        # Taking the oracle needs no account, but its own route is behind the
+        # console login while this one is behind the diagnostic key -- so
+        # re-capturing and then probing spanned two tools and a browser tab.
+        # The probe is useless without a sample: it searches responses for the
+        # revision the sample names, and an empty one matches nothing.
+        if request.args.get('capture'):
+            try:
+                sample = _of_conn().sample_now(proxy=_of_proxy_for('', ''))
+                if sample.get('sign'):
+                    of_rules.put_sample(sample)
+                    out['capture'] = {'ok': True, 'revision':
+                                      of_rules.format_of(sample).split(':')[0],
+                                      'path': sample.get('path')}
+                else:
+                    out['capture'] = {'ok': False, 'saw': sample.get('_saw') or {}}
+            except Exception as e:
+                out['capture'] = {'ok': False, 'error': str(e)[:200]}
         # Neither the bundle nor the main world holds the signer, which leaves
         # a Worker, a ServiceWorker or WASM. Only a browser can say which, so
         # it is asked and the answer reported.
