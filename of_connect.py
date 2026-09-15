@@ -1431,51 +1431,6 @@ MAX_BODY = 400000
 MAX_BODIES = 40
 
 
-def _inject_hook(context, found):
-    """Put the hook in the document itself, rather than asking the driver to.
-
-    `add_init_script` rides on the CDP calls patchright suppresses to stay
-    undetectable, so under patchright it neither runs nor complains -- which is
-    what left three rounds of probes reading an empty `__ofsigs` as a finding
-    about OnlyFans. Rewriting the top-level HTML needs none of that machinery.
-    The page's own CSP would refuse an inline script, so it is dropped from
-    this one response; nothing else about the response changes.
-    """
-    tag = '<script>(' + _SIGN_HOOK_JS + ')()</script>'
-
-    def handle(route):
-        try:
-            if route.request.resource_type != 'document':
-                return route.continue_()
-            resp = route.fetch(timeout=15000)
-            headers = {k: v for k, v in resp.headers.items()
-                       if k.lower() not in ('content-security-policy',
-                                            'content-security-policy-report-only',
-                                            'content-length', 'content-encoding')}
-            if 'text/html' not in (resp.headers.get('content-type') or ''):
-                return route.fulfill(response=resp)
-            body = resp.text()
-            cut = body.lower().find('<head')
-            if cut >= 0:
-                cut = body.find('>', cut) + 1
-                body = body[:cut] + tag + body[cut:]
-            else:
-                body = tag + body
-            found['injected'] += 1
-            route.fulfill(response=resp, body=body, headers=headers)
-        except Exception as e:
-            found['why'] = (found.get('why', '') + ' inject: ' + str(e)[:90]).strip()
-            try:
-                route.continue_()
-            except Exception:
-                pass
-
-    try:
-        context.route(SIGNIN_URL, handle)
-    except Exception as e:
-        found['why'] = (found.get('why', '') + ' route: ' + str(e)[:90]).strip()
-
-
 def probe_now(proxy='', budget=60):
     """Where OnlyFans' signing actually lives, read off a logged-out page.
 
@@ -1501,7 +1456,7 @@ def probe_now(proxy='', budget=60):
              # rounds inferred this gap from separate runs instead of measuring
              # it in one, and got the cause wrong as a result.
              'api': 0, 'hooked': 0, 'frames_patched': 0, 'page': {}, 'responses': 0,
-             'hook': {}, 'driver': _driver().__module__.split('.')[0], 'injected': 0}
+             'hook': {}, 'driver': _driver().__module__.split('.')[0]}
     began = deadline = time.time()
     deadline += max(20, budget)
 
@@ -1546,7 +1501,6 @@ def probe_now(proxy='', budget=60):
         spent('launch', at)
         try:
             context.add_init_script('(' + _SIGN_HOOK_JS + ')()')
-            _inject_hook(context, found)
             page = context.pages[0] if context.pages else context.new_page()
             page.on('worker', lambda w: found['workers'].append(str(w.url)[-90:]))
             context.on('request', request)
