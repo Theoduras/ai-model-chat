@@ -1702,34 +1702,23 @@ def capture_param(sample=None, proxy='', timeout=30):
             context.on('response', on_response)
             context.on('request', on_signed)
 
-            def handle(route):
-                req = route.request
-                try:
-                    if req.resource_type != 'document':
-                        route.continue_(); return
-                    resp = route.fetch(timeout=timeout * 1000)
-                    body = resp.text()
-                    tag = '<script>' + _CAPTURE_HOOK + '</script>'
-                    if re.search(r'<head[^>]*>', body):
-                        body = re.sub(r'(<head[^>]*>)', lambda m: m.group(1) + tag,
-                                      body, count=1)
-                    else:
-                        body = tag + body
-                    headers = {k: v for k, v in resp.headers.items()
-                               if k.lower() not in ('content-length', 'content-encoding')}
-                    route.fulfill(status=resp.status, headers=headers, body=body)
-                except Exception:
-                    try: route.continue_()
-                    except Exception: pass
-
-            context.route(re.compile(r'https://onlyfans\.com/'), handle)
             page = context.pages[0] if context.pages else context.new_page()
             try:
+                # No document rewrite: rewriting the top navigation trips
+                # Cloudflare, which served a challenge page rather than OnlyFans
+                # (the "workers" a rewrite run saw were Cloudflare's). Load the
+                # real page the way sign_now/derive_rules do, then inject with
+                # add_script_tag -- the method that already gets past the
+                # challenge -- so the calls we count are OnlyFans' own.
                 page.goto(SIGNIN_URL, wait_until='domcontentloaded',
                           timeout=timeout * 1000)
             except Exception as e:
                 report['why'] = 'the page did not load: ' + str(e)[:120]
                 return {'capture': report}
+            try:
+                page.add_script_tag(content=_CAPTURE_HOOK)
+            except Exception as e:
+                report['why'] = 'hook injection failed: ' + str(e)[:120]
             until = time.time() + 20
             while time.time() < until:
                 page.wait_for_timeout(500)
