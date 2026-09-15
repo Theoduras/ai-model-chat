@@ -1496,12 +1496,30 @@ def sign_now(path, user_id='0', proxy='', timeout=30):
 _CAPTURE_HOOK = r"""
 (function () {
   if (window.__ofcapOn) return; window.__ofcapOn = 1;
-  var caps = [], sigs = [];
-  var n = {digest: 0, encode: 0, fetch: 0, xhr: 0};
+  var caps = [], sigs = [], workers = [];
+  var n = {digest: 0, encode: 0, fetch: 0, xhr: 0, worker: 0};
+  function boot() {
+    // Whether the SPA actually ran under our rewrite: without this, quiet
+    // counters could mean "main world signs nothing" or "bundle never booted".
+    try {
+      var app = document.querySelector('#app');
+      return {href: String(location.href).slice(0, 200),
+              nodes: document.querySelectorAll('*').length,
+              mounted: !!(app && app.children && app.children.length)};
+    } catch (e) { return {href: '', nodes: 0, mounted: false}; }
+  }
   function flush() {
     try {
       document.documentElement.setAttribute(
-        'data-ofcap', JSON.stringify({caps: caps, sigs: sigs, n: n}));
+        'data-ofcap', JSON.stringify({caps: caps, sigs: sigs, n: n,
+                                      workers: workers, boot: boot()}));
+    } catch (e) {}
+  }
+  function addWorker(url) {
+    try { url = String(url);
+      if (url && workers.indexOf(url) < 0 && workers.length < 12) {
+        workers.push(url.slice(0, 200)); flush();
+      }
     } catch (e) {}
   }
   // The signed message is static_param + "\n" + time + "\n" + path + "\n" + id.
@@ -1562,6 +1580,28 @@ _CAPTURE_HOOK = r"""
       return F.apply(this, arguments);
     };
   } catch (e) {}
+  // The signer runs off the main thread, so the decisive artifact is the
+  // worker's script URL: wrap the constructors that create one.
+  try {
+    var W = window.Worker;
+    if (W) {
+      window.Worker = function (url, opts) { n.worker++; addWorker(url); return new W(url, opts); };
+      window.Worker.prototype = W.prototype;
+    }
+  } catch (e) {}
+  try {
+    var SW = window.SharedWorker;
+    if (SW) {
+      window.SharedWorker = function (url, opts) { n.worker++; addWorker(url); return new SW(url, opts); };
+      window.SharedWorker.prototype = SW.prototype;
+    }
+  } catch (e) {}
+  try {
+    if (navigator.serviceWorker && navigator.serviceWorker.register) {
+      var REG = navigator.serviceWorker.register.bind(navigator.serviceWorker);
+      navigator.serviceWorker.register = function (url) { n.worker++; addWorker(url); return REG.apply(this, arguments); };
+    }
+  } catch (e) {}
   flush();
 })();
 """
@@ -1588,11 +1628,34 @@ def capture_param(proxy='', timeout=30):
     signing is in WASM or a Worker, and the JS route is closed.
     """
     report = {'caps': [], 'sigs': [], 'param': '', 'matched': False,
-              'revision': '', 'counts': {}, 'why': ''}
+              'revision': '', 'counts': {}, 'booted': {}, 'workers': [],
+              'js': [], 'wasm': [], 'why': ''}
+    # Every script and wasm response off the wire, so worker scripts,
+    # importScripts, dynamic-import chunks and .wasm -- none of which the DOM
+    # <script src> scan sees -- are named for the derivation to read next.
+    sources = {}
+
+    def on_response(resp):
+        try:
+            url = resp.url
+            ct = (resp.headers.get('content-type') or '').lower()
+            kind = ''
+            if 'wasm' in ct or url.split('?')[0].endswith('.wasm'):
+                kind = 'wasm'
+            elif 'javascript' in ct or url.split('?')[0].endswith('.js'):
+                kind = 'js'
+            if kind and url not in sources:
+                sources[url] = {'url': url[:200], 'kind': kind,
+                                'size': int(resp.headers.get('content-length') or 0)}
+        except Exception:
+            pass
+
     probe = Attempt('', '', proxy=proxy, drive=False)
     with _driver()() as pw:
         context = probe._launch(pw, bypass_csp=True)[1]
         try:
+            context.on('response', on_response)
+
             def handle(route):
                 req = route.request
                 try:
@@ -1637,6 +1700,8 @@ def capture_param(proxy='', timeout=30):
                     report['caps'] = data.get('caps', [])
                     report['sigs'] = data.get('sigs', [])
                     report['counts'] = data.get('n', {})
+                    report['booted'] = data.get('boot', {})
+                    report['workers'] = data.get('workers', [])
                     if report['caps']:
                         break
             for s in report['caps']:
@@ -1655,6 +1720,9 @@ def capture_param(proxy='', timeout=30):
                         report['param'] = cand
                 if report['matched']:
                     break
+            inv = list(sources.values())
+            report['js'] = [s for s in inv if s['kind'] == 'js']
+            report['wasm'] = [s for s in inv if s['kind'] == 'wasm']
             c = report['counts'] or {}
             if not report['caps']:
                 # Distinguish the real cases: no hashing at all in the main
