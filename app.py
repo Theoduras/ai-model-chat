@@ -17024,7 +17024,7 @@ def api_onlyfans_signing_capture():
     """
     if not _of_direct():
         return jsonify({'ok': False, 'error': 'not running the direct transport'}), 400
-    persona = ((request.json or {}).get('persona') or '').strip()
+    persona = ((request.get_json(silent=True) or {}).get('persona') or '').strip()
     try:
         sample = _of_conn().sample_now(proxy=_of_proxy_for(persona, ''))
     except AttributeError:
