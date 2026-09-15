@@ -864,6 +864,68 @@ _SIGN_HOOK_JS = """() => {
     } catch (e) {}
     return fetch_.apply(this, arguments);
   };
+  // A page that wants an untampered fetch takes one out of a fresh iframe's
+  // contentWindow, which our patching above never touched. That is the shape
+  // the probe found: signed requests on the wire, nothing in __ofsigs, and no
+  // worker anywhere to blame. So every frame this document makes gets the same
+  // treatment, at the moment it gets a window to patch.
+  const patch = (w) => {
+    if (!w || w.__ofpatched) return;
+    try {
+      w.__ofpatched = true;
+      const xo = w.XMLHttpRequest && w.XMLHttpRequest.prototype;
+      if (xo) {
+        const o_ = xo.open, s_ = xo.setRequestHeader, d_ = xo.send;
+        xo.open = function (m, u) {
+          this.__ofurl = u; this.__ofh = {}; return o_.apply(this, arguments);
+        };
+        xo.setRequestHeader = function (k, v) {
+          if (this.__ofh) this.__ofh[String(k).toLowerCase()] = v;
+          return s_.apply(this, arguments);
+        };
+        xo.send = function () {
+          try { keep(this.__ofurl || '', this.__ofh || {}); } catch (e) {}
+          return d_.apply(this, arguments);
+        };
+      }
+      const f_ = w.fetch;
+      if (f_) w.fetch = function (input, init) {
+        try {
+          const url = typeof input === 'string' ? input : (input && input.url) || '';
+          const h = {};
+          new w.Headers((init && init.headers) || (input && input.headers) || {})
+            .forEach((v, k) => { h[String(k).toLowerCase()] = v; });
+          keep(url, h);
+        } catch (e) {}
+        return f_.apply(this, arguments);
+      };
+      window.__offrames = (window.__offrames || 0) + 1;
+    } catch (e) {}
+  };
+  const watch = (node) => {
+    try {
+      if (!node || String(node.tagName).toLowerCase() !== 'iframe') return;
+      patch(node.contentWindow);
+      node.addEventListener('load', () => patch(node.contentWindow));
+    } catch (e) {}
+  };
+  const add_ = Node.prototype.appendChild;
+  Node.prototype.appendChild = function (node) {
+    const out = add_.apply(this, arguments);
+    watch(node);
+    return out;
+  };
+  const ins_ = Node.prototype.insertBefore;
+  Node.prototype.insertBefore = function (node) {
+    const out = ins_.apply(this, arguments);
+    watch(node);
+    return out;
+  };
+  try {
+    new MutationObserver((records) => {
+      for (const r of records) for (const n of r.addedNodes) watch(n);
+    }).observe(document.documentElement || document, {childList: true, subtree: true});
+  } catch (e) {}
 }"""
 
 
@@ -1383,7 +1445,12 @@ def probe_now(proxy='', budget=60):
     """
     found = {'workers': [], 'service_workers': [], 'wasm': [],
              'our_fetch_signed': None, 'our_fetch_status': None,
-             'rules_in_bodies': [], 'scanned': 0, 'skipped': 0, 'ms': {}, 'why': ''}
+             'rules_in_bodies': [], 'scanned': 0, 'skipped': 0, 'ms': {}, 'why': '',
+             # The two numbers that settle it. `api` is what Chromium put on
+             # the wire; `hooked` is what our patched fetch/XHR recorded. Three
+             # rounds inferred this gap from separate runs instead of measuring
+             # it in one, and got the cause wrong as a result.
+             'api': 0, 'hooked': 0, 'frames_patched': 0, 'page': {}, 'responses': 0}
     began = deadline = time.time()
     deadline += max(20, budget)
 
@@ -1407,12 +1474,15 @@ def probe_now(proxy='', budget=60):
             length = int(h.get('content-length') or 0)
         except ValueError:
             length = 0
+        found['responses'] += 1
         if worth_reading(h.get('content-type'), length or 1):
             bodies.append(r)
         else:
             found['skipped'] += 1
 
     def request(r):
+        if '/api2/v2/' in r.url and nonce not in r.url:
+            found['api'] += 1
         if nonce in r.url:
             h = r.headers
             ours['signed'] = bool(h.get('sign') and h.get('time'))
@@ -1424,6 +1494,7 @@ def probe_now(proxy='', budget=60):
         context = probe._launch(pw)[1]
         spent('launch', at)
         try:
+            context.add_init_script('(' + _SIGN_HOOK_JS + ')()')
             page = context.pages[0] if context.pages else context.new_page()
             page.on('worker', lambda w: found['workers'].append(str(w.url)[-90:]))
             context.on('request', request)
@@ -1457,6 +1528,16 @@ def probe_now(proxy='', budget=60):
                 found['why'] = (found['why'] + ' ' + str(got['error'])[:140]).strip()
             page.wait_for_timeout(1000)
             spent('evaluate', at)
+            try:
+                found['hooked'] = len(page.evaluate('() => window.__ofsigs || []') or [])
+                found['frames_patched'] = page.evaluate('() => window.__offrames || 0')
+                found['frames'] = [f.url[:90] for f in page.frames][:8]
+            except Exception:
+                pass
+            try:
+                found['page'] = {'url': page.url[:120], 'title': (page.title() or '')[:80]}
+            except Exception:
+                pass
             found['our_fetch_signed'] = ours.get('signed')
             found['our_fetch_sign'] = ours.get('sign', '')
             # Does any response carry the revision OnlyFans signs with, or
@@ -1485,10 +1566,14 @@ def probe_now(proxy='', budget=60):
             except Exception:
                 pass
     found['ms']['total'] = int((time.time() - began) * 1000)
-    logger.info('transport probe in %sms: %s workers, %s service workers, %s wasm; '
-                'our fetch %s and %s signed; %s of %s bodies scanned, %s carry '
-                'revision %s', found['ms']['total'], len(found['workers']),
+    logger.info('transport probe in %sms on %s (%s): %s workers, %s service '
+                'workers, %s wasm, %s frames patched; %s API requests on the wire '
+                'and %s recorded by the hook; our fetch %s and %s signed; %s of %s '
+                'bodies scanned, %s carry revision %s',
+                found['ms']['total'], (found['page'].get('url') or '?'),
+                (found['page'].get('title') or ''), len(found['workers']),
                 len(found['service_workers']), len(found['wasm']),
+                found['frames_patched'], found['api'], found['hooked'],
                 found['our_fetch_status'],
                 'was' if found['our_fetch_signed'] else 'was not',
                 found['scanned'], len(bodies), len(found['rules_in_bodies']),
