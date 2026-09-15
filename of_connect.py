@@ -1764,6 +1764,10 @@ def capture_param(sample=None, proxy='', timeout=30):
                 srcs = []
             report['worker_src'] = len(srcs)
             report['worker_bytes'] = sum(len(s) for s in srcs)
+            # The stubs are tiny; show them so the real signing code they pull
+            # in (importScripts / dynamic import URL) is named, which is what an
+            # in-worker hook must target next.
+            report['worker_texts'] = [s[:2000] for s in srcs]
             report['confirm'] = len(confirm)
             inv = list(sources.values())
             # The blob workers are tiny stubs; the signing code they pull in
