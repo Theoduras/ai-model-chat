@@ -1352,31 +1352,59 @@ def _mainworld_sign(page, context, path):
     context.on('request', seen)
     code = """
     (function () {
-      var report = {vue: false, globals: [], via: '', error: '', winkeys: 0};
+      var report = {vue: false, globals: [], via: '', error: '', winkeys: 0,
+                    searched: [], candidates: []};
       var path = %s;
+      // A raw axios instance, or a Nuxt $api wrapper: the wrapper has get/post
+      // but no interceptors, and it is what most of the site calls through.
       function looks(o) {
-        try { return o && o.interceptors && o.interceptors.request
-                     && typeof o.get === 'function'; } catch (e) { return false; }
+        try {
+          if (!o) return false;
+          if (o.interceptors && o.interceptors.request
+              && typeof o.get === 'function') return true;
+          return typeof o.get === 'function' && typeof o.post === 'function'
+                 && (typeof o === 'function' || typeof o.create === 'function'
+                     || typeof o.request === 'function');
+        } catch (e) { return false; }
       }
       var callers = [];
+      function offer(name, o) {
+        if (looks(o)) { report.candidates.push(name); callers.push([name, o]); }
+      }
+      function scan(name, obj) {
+        report.searched.push(name);
+        if (!obj) return;
+        var keys; try { keys = Object.getOwnPropertyNames(obj); } catch (e) { return; }
+        for (var i = 0; i < keys.length; i++) {
+          var v; try { v = obj[keys[i]]; } catch (e) { continue; }
+          offer(name + '.' + keys[i], v);
+        }
+      }
       var names = Object.getOwnPropertyNames(window);
       report.winkeys = names.length;
       for (var i = 0; i < names.length; i++) {
         var v; try { v = window[names[i]]; } catch (e) { continue; }
-        if (looks(v)) { report.globals.push(names[i]); callers.push([names[i], v]); }
+        if (looks(v)) { report.globals.push(names[i]); offer('window.' + names[i], v); }
       }
       var root = document.querySelector('#app')
                  || (document.body && document.body.firstElementChild);
-      var vm = root && (root.__vue__ || root.__vue_app__);
+      var app = root && root.__vue_app__;
+      var vm = root && (root.__vue__ || app);
       report.vue = !!vm;
-      if (vm) {
-        var ns = ['$api', '$axios', '$http', 'axios'];
-        for (var j = 0; j < ns.length; j++) {
-          var w = vm[ns[j]] || (vm.config && vm.config.globalProperties
-                                && vm.config.globalProperties[ns[j]]);
-          if (looks(w)) callers.push(['vue.' + ns[j], w]);
+      // Nuxt 3 provides its helpers through the app's inject context, not
+      // globalProperties: app._context.provides holds them under $-keys.
+      try {
+        var ctx = app && (app._context || (app._instance && app._instance.appContext));
+        if (ctx) {
+          scan('provides', ctx.provides);
+          scan('globalProperties', ctx.config && ctx.config.globalProperties);
         }
-      }
+      } catch (e) { report.error = ('ctx: ' + e).slice(0, 120); }
+      try {
+        var nx = window.$nuxt || (typeof window.useNuxtApp === 'function'
+                                  && window.useNuxtApp());
+        if (nx) { scan('nuxt', nx); scan('nuxt.$', nx.$); }
+      } catch (e) {}
       for (var k = 0; k < callers.length; k++) {
         try { callers[k][1].get(path); report.via = callers[k][0]; break; }
         catch (e) { report.error = String(e).slice(0, 120); }
