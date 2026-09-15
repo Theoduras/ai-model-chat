@@ -926,6 +926,11 @@ _SIGN_HOOK_JS = """() => {
       for (const r of records) for (const n of r.addedNodes) watch(n);
     }).observe(document.documentElement || document, {childList: true, subtree: true});
   } catch (e) {}
+  // The main frame is patched by the code above, not by patch(), so it was
+  // never counted. Without that, "nothing recorded" and "never installed"
+  // both read as zero and the probe cannot tell them apart.
+  window.__ofmain = (window.__ofmain || 0) + 1;
+  window.__offetch = window.fetch;
 }"""
 
 
@@ -1450,7 +1455,8 @@ def probe_now(proxy='', budget=60):
              # the wire; `hooked` is what our patched fetch/XHR recorded. Three
              # rounds inferred this gap from separate runs instead of measuring
              # it in one, and got the cause wrong as a result.
-             'api': 0, 'hooked': 0, 'frames_patched': 0, 'page': {}, 'responses': 0}
+             'api': 0, 'hooked': 0, 'frames_patched': 0, 'page': {}, 'responses': 0,
+             'hook': {}}
     began = deadline = time.time()
     deadline += max(20, budget)
 
@@ -1531,6 +1537,13 @@ def probe_now(proxy='', budget=60):
             try:
                 found['hooked'] = len(page.evaluate('() => window.__ofsigs || []') or [])
                 found['frames_patched'] = page.evaluate('() => window.__offrames || 0')
+                # Whether our fetch is still the one installed decides between
+                # "the hook never ran" and "the hook ran and was bypassed".
+                found['hook'] = page.evaluate('''() => ({
+                    main: window.__ofmain || 0,
+                    sigs: typeof window.__ofsigs,
+                    ours: window.fetch === window.__offetch,
+                    native: /\\[native code\\]/.test(String(window.fetch))})''')
                 found['frames'] = [f.url[:90] for f in page.frames][:8]
             except Exception:
                 pass
