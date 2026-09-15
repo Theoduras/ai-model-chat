@@ -133,7 +133,8 @@ def service():
         """Where the signing lives. No sign-in, no credentials, read-only."""
         d = request.json or {}
         try:
-            out = of_connect.probe_now(proxy=(d.get('proxy') or '').strip())
+            out = of_connect.probe_now(proxy=(d.get('proxy') or '').strip(),
+                                       budget=int(d.get('budget') or 60))
         except Exception as e:
             return jsonify({'ok': False, 'error': str(e)[:200]}), 400
         return jsonify({'ok': True, 'probe': out})
@@ -387,8 +388,11 @@ class Remote:
                         timeout=120)
         return {'sign': out.get('sign') or {}, 'report': out.get('report') or {}}
 
-    def probe_now(self, proxy=''):
-        out = self.call('POST', '/probe', {'proxy': proxy}, timeout=150)
+    def probe_now(self, proxy='', budget=60):
+        # Headroom over the probe's own budget: a cold Chromium launch is not
+        # inside it, and a read timeout here tells us nothing about the page.
+        out = self.call('POST', '/probe', {'proxy': proxy, 'budget': budget},
+                        timeout=budget + 180)
         return out.get('probe') or {}
 
     def sign_for(self, account, session, path, proxy=''):

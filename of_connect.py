@@ -1342,7 +1342,29 @@ _PROBE_JS = """(nonce) => {
 _PARAMISH = re.compile(r'[A-Za-z0-9+/=_-]{28,48}')
 
 
-def probe_now(proxy='', timeout=30):
+def worth_reading(kind, length):
+    """Whether a response body is worth pulling back over CDP to search.
+
+    The scan is the only unbounded stage of the probe and the only speculative
+    one: it is looking for rules delivered at runtime. Those arrive as data, so
+    JSON is worth reading and a chunk of the bundle is not -- re-reading 3MB of
+    minified script to regex it is the work the bundle derivation already did
+    and lost, and it is what made the first probe overrun its HTTP call.
+    """
+    kind = (kind or '').lower()
+    if 'json' in kind:
+        return length <= MAX_BODY
+    if 'javascript' in kind:
+        # Small enough to be configuration rather than code.
+        return 0 < length <= 40000
+    return False
+
+
+MAX_BODY = 400000
+MAX_BODIES = 40
+
+
+def probe_now(proxy='', budget=60):
     """Where OnlyFans' signing actually lives, read off a logged-out page.
 
     Three rounds of diagnostics established that the signing inputs are not
@@ -1352,19 +1374,43 @@ def probe_now(proxy='', timeout=30):
     something the app service can find out -- only a browser can. So it is
     asked here, and the answer is reported rather than acted on.
 
+    The whole thing runs inside one budget, because it answers one HTTP call
+    and the caller's read timeout is the real deadline. Every stage reports
+    what it cost, so a probe that runs out of time names its own cause instead
+    of costing another round of guessing.
+
     Nothing signs in and nothing is stored.
     """
-    found = {'workers': [], 'service_workers': [], 'wasm': [], 'signed_fetch': None,
-             'our_fetch_signed': None, 'our_fetch_status': None, 'rules_in_bodies': [],
-             'scanned': 0, 'why': ''}
+    found = {'workers': [], 'service_workers': [], 'wasm': [],
+             'our_fetch_signed': None, 'our_fetch_status': None,
+             'rules_in_bodies': [], 'scanned': 0, 'skipped': 0, 'ms': {}, 'why': ''}
+    began = deadline = time.time()
+    deadline += max(20, budget)
+
+    def spent(stage, since):
+        found['ms'][stage] = int((time.time() - since) * 1000)
+
+    def left():
+        return deadline - time.time()
+
     nonce = hashlib.sha1(str(time.time()).encode()).hexdigest()[:12]
     want = of_rules.sample() or {}
-    revision = of_rules.format_of(want).split(':')[0] if want else ''
-    found['revision'] = revision
+    found['revision'] = revision = (of_rules.format_of(want).split(':')[0]
+                                    if want else '')
     bodies, ours = [], {}
 
-    def worker(w):
-        found['workers'].append(str(w.url)[-90:])
+    def response(r):
+        if len(bodies) >= MAX_BODIES:
+            return
+        h = r.headers
+        try:
+            length = int(h.get('content-length') or 0)
+        except ValueError:
+            length = 0
+        if worth_reading(h.get('content-type'), length or 1):
+            bodies.append(r)
+        else:
+            found['skipped'] += 1
 
     def request(r):
         if nonce in r.url:
@@ -1372,17 +1418,14 @@ def probe_now(proxy='', timeout=30):
             ours['signed'] = bool(h.get('sign') and h.get('time'))
             ours['sign'] = (h.get('sign') or '')[:60]
 
-    def response(r):
-        kind = (r.headers.get('content-type') or '').lower()
-        if len(bodies) < 120 and ('json' in kind or 'javascript' in kind):
-            bodies.append(r)
-
     probe = Attempt('', '', proxy=proxy, drive=False)
+    at = time.time()
     with _driver()() as pw:
         context = probe._launch(pw)[1]
+        spent('launch', at)
         try:
             page = context.pages[0] if context.pages else context.new_page()
-            page.on('worker', worker)
+            page.on('worker', lambda w: found['workers'].append(str(w.url)[-90:]))
             context.on('request', request)
             context.on('response', response)
             try:
@@ -1390,13 +1433,17 @@ def probe_now(proxy='', timeout=30):
                            lambda w: found['service_workers'].append(str(w.url)[-90:]))
             except Exception:
                 pass
+            at = time.time()
             try:
                 page.goto(SIGNIN_URL, wait_until='domcontentloaded',
-                          timeout=timeout * 1000)
+                          timeout=int(min(20, max(5, left()))) * 1000)
             except Exception as e:
+                spent('load', at)
                 found['why'] = 'the page did not load: ' + str(e)[:120]
                 return found
-            page.wait_for_timeout(5000)
+            page.wait_for_timeout(4000)
+            spent('load', at)
+            at = time.time()
             try:
                 got = page.evaluate(_PROBE_JS, nonce) or {}
             except Exception as e:
@@ -1408,32 +1455,42 @@ def probe_now(proxy='', timeout=30):
             found['our_fetch_status'] = got.get('fetched')
             if got.get('error'):
                 found['why'] = (found['why'] + ' ' + str(got['error'])[:140]).strip()
-            page.wait_for_timeout(1500)
+            page.wait_for_timeout(1000)
+            spent('evaluate', at)
             found['our_fetch_signed'] = ours.get('signed')
             found['our_fetch_sign'] = ours.get('sign', '')
             # Does any response carry the revision OnlyFans signs with, or
             # something param-shaped near it? If so the rules arrive over the
             # wire and we can keep our own set current.
+            at = time.time()
             for r in bodies:
+                if left() <= 2:
+                    found['why'] = (found['why'] + ' ran out of time with %s bodies '
+                                    'unread' % (len(bodies) - found['scanned'])).strip()
+                    break
                 try:
                     text = r.text()
                 except Exception:
                     continue
                 found['scanned'] += 1
                 if revision and revision in text:
-                    at = text.index(revision)
-                    near = text[max(0, at - 400):at + 400]
+                    where = text.index(revision)
+                    near = text[max(0, where - 400):where + 400]
                     found['rules_in_bodies'].append(
                         {'url': r.url[:120], 'params': _PARAMISH.findall(near)[:8]})
+            spent('scan', at)
         finally:
             try:
                 context.close()
             except Exception:
                 pass
-    logger.info('transport probe: %s workers, %s service workers, %s wasm; our '
-                'fetch %s and %s signed; %s bodies scanned, %s carry revision %s',
-                len(found['workers']), len(found['service_workers']),
-                len(found['wasm']), found['our_fetch_status'],
+    found['ms']['total'] = int((time.time() - began) * 1000)
+    logger.info('transport probe in %sms: %s workers, %s service workers, %s wasm; '
+                'our fetch %s and %s signed; %s of %s bodies scanned, %s carry '
+                'revision %s', found['ms']['total'], len(found['workers']),
+                len(found['service_workers']), len(found['wasm']),
+                found['our_fetch_status'],
                 'was' if found['our_fetch_signed'] else 'was not',
-                found['scanned'], len(found['rules_in_bodies']), revision or '?')
+                found['scanned'], len(bodies), len(found['rules_in_bodies']),
+                revision or '?')
     return found

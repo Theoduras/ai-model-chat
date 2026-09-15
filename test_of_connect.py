@@ -644,3 +644,29 @@ class SignerSurvivesAFailedProbeTest(unittest.TestCase):
         # served from another one, so `state()` must read the cache only.
         s = self._signer(None)
         self.assertEqual(s._where(), {})
+
+
+class ProbeScanTest(unittest.TestCase):
+    """What the probe is willing to read back over CDP.
+
+    The first probe overran its HTTP call because it read every JSON and
+    script response, 3MB of bundle among them, and the caller's read timeout
+    was the real deadline.
+    """
+
+    def test_json_is_worth_reading(self):
+        self.assertTrue(of_connect.worth_reading('application/json', 2000))
+
+    def test_the_bundle_is_not(self):
+        self.assertFalse(of_connect.worth_reading(
+            'application/javascript', 900000))
+
+    def test_a_small_script_could_still_be_configuration(self):
+        self.assertTrue(of_connect.worth_reading('text/javascript', 3000))
+
+    def test_an_enormous_json_is_left_alone(self):
+        self.assertFalse(of_connect.worth_reading('application/json', 9000000))
+
+    def test_pictures_and_html_are_never_read(self):
+        for kind in ('image/webp', 'text/html', 'font/woff2', ''):
+            self.assertFalse(of_connect.worth_reading(kind, 1000), kind)
