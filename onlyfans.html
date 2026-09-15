@@ -737,7 +737,7 @@ async function watchNow(){
   const dot=v=>v?'<span style="color:#4ade80;">\u25cf</span>':'<span style="color:#fb7185;">\u25cf</span>';
   const rows=(r.accounts||[]).map(a=>{
     const w=a.watcher||{}, s=a.session||{};
-    return '<tr><td>'+esc(a.username||a.persona)+'</td>'
+    return '<tr><td>'+esc(a.username||a.persona||a.account)+'</td>'
       +'<td>'+dot(!!a.account && s.status==='live')+' '
         +(a.account?esc(s.status||'unknown')
                    +(s.verified===false?' \u2014 stored from cookies, never confirmed':'')

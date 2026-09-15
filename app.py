@@ -16386,6 +16386,22 @@ def _of_account_id(persona):
     return f'of_{persona}'
 
 
+def _of_console_personas():
+    """Every persona the OnlyFans console has something to say about.
+
+    Deliberately not the switched-on list the watchers are started from: an
+    account is connected before auto-reply is turned on, and a sign-in is in
+    progress before either. Reading the panel off that list blanks it exactly
+    when someone is watching it to find out whether the connect worked.
+    """
+    slugs = set(_fanvue_enabled_list(plat=PLAT_ONLYFANS))
+    for p in db_list_personas():
+        slug = p.get('slug')
+        if slug and (_of_account(slug) or _of_attempt(slug)):
+            slugs.add(slug)
+    return sorted(s for s in slugs if s)
+
+
 def _of_connected_accounts():
     """The accounts a watcher should be running for: connected to a persona,
     switched on, and not sitting expired."""
@@ -17236,7 +17252,8 @@ def _of_watch_payload(after=0, bafter=0):
         logger.debug('could not read the browser trace: %s', str(e)[:120])
     accounts = []
     watchers = {w['account']: w for w in of_events.watching()}
-    for slug in sorted(set(_fanvue_enabled_list(plat=PLAT_ONLYFANS))):
+    console_slugs = _of_console_personas()
+    for slug in console_slugs:
         account = _of_account(slug)
         if not account:
             continue
@@ -17244,11 +17261,22 @@ def _of_watch_payload(after=0, bafter=0):
                          'username': _of_account_meta(slug).get('username', ''),
                          'session': of_session.describe(account),
                          'watcher': watchers.get(account) or {}})
+    # A stored session no persona claims: the console said "nothing is
+    # connected" while OnlyFans was signed in and the vault held the proof.
+    listed = {row['account'] for row in accounts}
+    for stored in of_session.accounts():
+        account = stored.get('account') or ''
+        if not account or account in listed:
+            continue
+        accounts.append({'persona': '', 'account': account,
+                         'username': stored.get('username') or '',
+                         'session': stored,
+                         'watcher': watchers.get(account) or {}})
     # A sign-in window that is plainly logged in while the console says nothing
     # is the hardest state to read from outside, and the attempt has known the
     # answer all along.
     signins = []
-    for slug in sorted(set(_fanvue_enabled_list(plat=PLAT_ONLYFANS))):
+    for slug in console_slugs:
         attempt_id = _of_attempt(slug)
         if not attempt_id:
             continue
