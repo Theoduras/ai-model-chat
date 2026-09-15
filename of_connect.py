@@ -1456,7 +1456,8 @@ def probe_now(proxy='', budget=60):
              # rounds inferred this gap from separate runs instead of measuring
              # it in one, and got the cause wrong as a result.
              'api': 0, 'hooked': 0, 'frames_patched': 0, 'page': {}, 'responses': 0,
-             'hook': {}, 'driver': _driver().__module__.split('.')[0]}
+             'hook': {}, 'driver': _driver().__module__.split('.')[0],
+             'signed': 0, 'signed_example': ''}
     began = deadline = time.time()
     deadline += max(20, budget)
 
@@ -1489,6 +1490,14 @@ def probe_now(proxy='', budget=60):
     def request(r):
         if '/api2/v2/' in r.url and nonce not in r.url:
             found['api'] += 1
+            # The number that actually settles it, read off the wire the way
+            # sample_now reads it -- not from the main-world hook, which
+            # patchright runs in an isolated world where it sees nothing.
+            h = r.headers
+            if h.get('sign') and h.get('time'):
+                found['signed'] += 1
+                if not found.get('signed_example'):
+                    found['signed_example'] = (h.get('sign') or '')[:60]
         if nonce in r.url:
             h = r.headers
             ours['signed'] = bool(h.get('sign') and h.get('time'))
