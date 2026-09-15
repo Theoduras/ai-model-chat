@@ -15,6 +15,7 @@ every 250ms is enough to type a password into.
 import hashlib
 import base64
 import collections
+import json
 import logging
 import os
 import queue
