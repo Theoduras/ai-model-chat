@@ -245,6 +245,15 @@ async def run():
           len(spam) >= 1 and len(spam[0][1]) > 1, spam)
 
 
-asyncio.run(run())
-print('\nall burst tests passed' if not FAILURES else f'\n{len(FAILURES)} FAILED')
-sys.exit(1 if FAILURES else 0)
+def _run():
+    asyncio.run(run())
+    print('\nall burst tests passed' if not FAILURES else f'\n{len(FAILURES)} FAILED')
+    return 1 if FAILURES else 0
+
+
+def test_a_burst_of_messages_gets_one_reply():
+    assert _run() == 0, FAILURES
+
+
+if __name__ == '__main__':
+    sys.exit(_run())
