@@ -1447,7 +1447,7 @@ def _inject_hook(context, found):
         try:
             if route.request.resource_type != 'document':
                 return route.continue_()
-            resp = route.fetch()
+            resp = route.fetch(timeout=15000)
             headers = {k: v for k, v in resp.headers.items()
                        if k.lower() not in ('content-security-policy',
                                             'content-security-policy-report-only',
@@ -1471,7 +1471,7 @@ def _inject_hook(context, found):
                 pass
 
     try:
-        context.route('**/*', handle)
+        context.route(SIGNIN_URL, handle)
     except Exception as e:
         found['why'] = (found.get('why', '') + ' route: ' + str(e)[:90]).strip()
 
