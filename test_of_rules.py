@@ -604,3 +604,65 @@ class OurOwnSignatureTest(unittest.TestCase):
         s = self._our_request()
         of_rules._rules = dict(self.RULES, static_param='ROTATED')
         self.assertTrue(of_rules.ours(s))
+
+
+class RecoveredParamTest(unittest.TestCase):
+    """A static_param recovered from the page has to survive the whole adoption
+    path, not just verify once.
+
+    Revision 65232 is served by no published source, so the only route to it is
+    the param lifted out of the page. Adopting it as an override is what turns
+    arithmetic signing back on -- and the two things that then decide whether a
+    request is accepted are whether `proven()` believes the set, and whether
+    `headers()` sends the revision that actually signed.
+    """
+
+    PARAM = '278ensloiFsow2rJMopwDWaMUiysP5fU'
+    RULES = dict(RULES, static_param=PARAM,
+                 format='65232:{}:{:x}:6a7f22a1',
+                 app_token='33d57ade8c02dbc5a333db99ff9ae26a',
+                 revision='65232', remove_headers=[])
+
+    def setUp(self):
+        self.stamp = 1789203482721
+        path = '/api2/v2/users/me'
+        # Computed here rather than through of_rules.sign, so it stands in for
+        # a signature OnlyFans' own page produced rather than one of ours.
+        self.sample = {'path': path, 'user_id': '0', 'time': str(self.stamp),
+                       'sign': expected(path, '0', self.stamp, self.RULES)}
+        self._rules = of_rules._rules
+        self.addCleanup(setattr, of_rules, '_rules', self._rules)
+        of_rules.sample_hooks(lambda: json.dumps(self.sample), lambda v: None)
+        self.addCleanup(of_rules.sample_hooks, None, None)
+
+    def _adopt(self):
+        of_rules.override_hooks(lambda: json.dumps(self.RULES))
+        self.addCleanup(of_rules.override_hooks, None)
+        with mock.patch.object(of_rules, '_fetch',
+                               return_value=dict(RULES, static_param='PUBLISHED')):
+            return of_rules.refresh()
+
+    def test_the_recovered_param_is_what_gets_loaded(self):
+        self.assertEqual(self._adopt()['static_param'], self.PARAM)
+
+    def test_the_oracle_proves_the_adopted_set(self):
+        """Without this the first 400 sends _adopt_working_rules hunting through
+        the published sources for a revision none of them serves."""
+        self._adopt()
+        self.assertIs(of_rules.proven(), True)
+
+    def test_headers_send_the_revision_that_signed(self):
+        self._adopt()
+        got = of_rules.headers(self.sample['path'], when=self.stamp)
+        self.assertEqual(got['x-of-rev'], '65232')
+        self.assertEqual(got['app-token'], self.RULES['app_token'])
+        self.assertEqual(got['sign'], self.sample['sign'])
+
+    def test_a_wrong_param_is_refused_rather_than_loaded(self):
+        """One character off and the oracle disproves it, so it never becomes
+        the loaded set -- the operator hears about it instead of watching every
+        request come back 400 with a set that looks adopted."""
+        self.RULES = dict(self.RULES, static_param=self.PARAM[:-1] + 'X')
+        with self.assertRaises(of_rules.RulesError) as caught:
+            self._adopt()
+        self.assertIn('65232', str(caught.exception))
