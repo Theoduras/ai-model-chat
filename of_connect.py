@@ -1493,6 +1493,154 @@ def sign_now(path, user_id='0', proxy='', timeout=30):
                 pass
 
 
+_CAPTURE_HOOK = r"""
+(function () {
+  if (window.__ofcapOn) return; window.__ofcapOn = 1;
+  var caps = [], sigs = [];
+  function flush() {
+    try {
+      document.documentElement.setAttribute(
+        'data-ofcap', JSON.stringify({caps: caps, sigs: sigs}));
+    } catch (e) {}
+  }
+  // The signed message is static_param + "\n" + time + "\n" + path + "\n" + id,
+  // so its plaintext begins with the very param the bundle no longer carries.
+  // We only care about strings that hold the api path; everything else the
+  // encoder sees is skipped so a busy page is not slowed by the hook.
+  function record(s) {
+    try {
+      if (typeof s !== 'string' || s.indexOf('/api2') < 0) return;
+      if (s.split('\n').length < 2) return;
+      if (caps.indexOf(s) < 0 && caps.length < 8) { caps.push(s.slice(0, 400)); flush(); }
+    } catch (e) {}
+  }
+  function asString(d) {
+    try {
+      if (typeof d === 'string') return d;
+      if (d && d.buffer) return new TextDecoder().decode(d);
+      return new TextDecoder().decode(new Uint8Array(d));
+    } catch (e) { return ''; }
+  }
+  try {
+    var TE = TextEncoder.prototype.encode;
+    TextEncoder.prototype.encode = function (s) { record(s); return TE.apply(this, arguments); };
+  } catch (e) {}
+  try {
+    if (window.crypto && crypto.subtle && crypto.subtle.digest) {
+      var D = crypto.subtle.digest.bind(crypto.subtle);
+      crypto.subtle.digest = function (algo, data) { record(asString(data)); return D(algo, data); };
+    }
+  } catch (e) {}
+  try {
+    var SH = XMLHttpRequest.prototype.setRequestHeader;
+    XMLHttpRequest.prototype.setRequestHeader = function (k, v) {
+      try { if (String(k).toLowerCase() === 'sign' && sigs.length < 8) { sigs.push(String(v).slice(0, 90)); flush(); } } catch (e) {}
+      return SH.apply(this, arguments);
+    };
+  } catch (e) {}
+  flush();
+})();
+"""
+
+
+def capture_param(proxy='', timeout=30):
+    """Recover static_param by hooking the hash input, not the request client.
+
+    The client is closured out of reach -- not on window, the Vue app, or
+    Nuxt's provides -- so it cannot be asked to sign. But whatever computes the
+    signature hashes static_param + "\\n" + time + "\\n" + path + "\\n" + id,
+    and that plaintext starts with the param itself. If the site hashes in JS
+    (crypto.subtle.digest, or a bundled sha1 fed by TextEncoder.encode), the
+    hook reads the param straight off the site signing its own load requests.
+
+    The hook must run before the bundle, and patchright's add_init_script is
+    isolated, so it is injected by rewriting only the top document. Every stage
+    is time-bounded and the context is always closed in the finally, so a stall
+    cannot wedge the single browser instance this shares -- the earlier wedge
+    came from routing every resource with no timeout and no teardown, and this
+    routes only the document, fetches with a timeout, and continues on error.
+
+    If nothing sign-shaped is ever hashed in JS, that is the answer too: the
+    signing is in WASM or a Worker, and the JS route is closed.
+    """
+    report = {'caps': [], 'sigs': [], 'param': '', 'matched': False,
+              'revision': '', 'why': ''}
+    probe = Attempt('', '', proxy=proxy, drive=False)
+    with _driver()() as pw:
+        context = probe._launch(pw, bypass_csp=True)[1]
+        try:
+            def handle(route):
+                req = route.request
+                try:
+                    if req.resource_type != 'document':
+                        route.continue_(); return
+                    resp = route.fetch(timeout=timeout * 1000)
+                    body = resp.text()
+                    tag = '<script>' + _CAPTURE_HOOK + '</script>'
+                    if re.search(r'<head[^>]*>', body):
+                        body = re.sub(r'(<head[^>]*>)', lambda m: m.group(1) + tag,
+                                      body, count=1)
+                    else:
+                        body = tag + body
+                    headers = {k: v for k, v in resp.headers.items()
+                               if k.lower() not in ('content-length', 'content-encoding')}
+                    route.fulfill(status=resp.status, headers=headers, body=body)
+                except Exception:
+                    try: route.continue_()
+                    except Exception: pass
+
+            context.route(re.compile(r'https://onlyfans\.com/'), handle)
+            page = context.pages[0] if context.pages else context.new_page()
+            try:
+                page.goto(SIGNIN_URL, wait_until='domcontentloaded',
+                          timeout=timeout * 1000)
+            except Exception as e:
+                report['why'] = 'the page did not load: ' + str(e)[:120]
+                return {'capture': report}
+            until = time.time() + 20
+            while time.time() < until:
+                page.wait_for_timeout(500)
+                try:
+                    raw = page.evaluate(
+                        "() => document.documentElement.getAttribute('data-ofcap') || ''")
+                except Exception:
+                    raw = ''
+                if raw:
+                    try:
+                        data = json.loads(raw)
+                    except Exception:
+                        data = {}
+                    report['caps'] = data.get('caps', [])
+                    report['sigs'] = data.get('sigs', [])
+                    if report['caps']:
+                        break
+            for s in report['caps']:
+                parts = s.split('\n')
+                if len(parts) >= 3 and parts[2:3] and parts[2].startswith('/'):
+                    cand = parts[0]
+                    digest = hashlib.sha1(s.encode('utf-8', 'replace')).hexdigest()
+                    for sig in report['sigs']:
+                        f = sig.split(':')
+                        if len(f) >= 2 and f[1] == digest:
+                            report['param'] = cand
+                            report['matched'] = True
+                            report['revision'] = f[0]
+                            break
+                    if not report['param']:
+                        report['param'] = cand
+                if report['matched']:
+                    break
+            if not report['caps']:
+                report['why'] = ('nothing sign-shaped was hashed in JS; the '
+                                 'signer is in WASM or a Worker')
+            return {'capture': report}
+        finally:
+            try:
+                context.close()
+            except Exception:
+                pass
+
+
 _PROBE_JS = """(nonce) => {
   const out = {sw: [], wasm: [], fetched: null, error: ''};
   try {

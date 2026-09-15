@@ -17330,6 +17330,15 @@ def api_diag():
                     proxy=_of_proxy_for('', ''))
             except Exception as e:
                 out['sign'] = {'error': str(e)[:200]}
+        # The client is closured out of reach, so instead of asking it to
+        # sign, hook the hash input while the site signs its own requests:
+        # the signed plaintext starts with the static_param the bundle lost.
+        if request.args.get('capture'):
+            try:
+                out['capture'] = _of_conn().capture_param(
+                    proxy=_of_proxy_for('', ''))
+            except Exception as e:
+                out['capture'] = {'error': str(e)[:200]}
         # Neither the bundle nor the main world holds the signer, which leaves
         # a Worker, a ServiceWorker or WASM. Only a browser can say which, so
         # it is asked and the answer reported.
