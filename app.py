@@ -9200,7 +9200,16 @@ def _fan_memory_block(mem, persona=None):
 
 
 def _persona_text(persona, instruction, history=None, max_tokens=1024, temperature=0.9):
-    """Generate an in-character message for a persona via Gemini."""
+    """Generate an in-character message for a persona via Gemini.
+
+    Returns '' when there is no Gemini to ask. Every caller already treats an
+    empty generation as "nothing to send"; raising instead would take down a
+    whole auto-reply round, every fan in it, over one unset key.
+    """
+    if client is None:
+        logger.warning('no Gemini client, so %s cannot generate — set GEMINI_API_KEY',
+                       persona)
+        return ''
     system_prompt = get_system_prompt(persona)
     contents = []
     for m in (history or [])[-20:]:
