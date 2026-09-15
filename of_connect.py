@@ -223,7 +223,7 @@ class Attempt:
             if self.state != 'connected':
                 self.state, self.error = 'failed', str(e)[:200]
 
-    def _launch(self, pw):
+    def _launch(self, pw, bypass_csp=False):
         """A browser the check has no reason to refuse.
 
         Headful whenever there is a display to be headful on -- Xvfb provides
@@ -244,6 +244,12 @@ class Attempt:
             'locale': 'en-US',
             'timezone_id': os.getenv('ONLYFANS_TZ', 'Europe/Amsterdam'),
         }
+        if bypass_csp:
+            # So an inline <script> we append runs in the page's own world:
+            # patchright puts add_init_script and evaluate in an isolated world
+            # that cannot see the site's axios, and a real script element is
+            # the way into the main world -- but only if CSP lets it run.
+            opts['bypass_csp'] = True
         path = browser_path()
         if path:
             opts['executable_path'] = path
@@ -1319,6 +1325,80 @@ def request_for(account, session, method, path, body=None, proxy=''):
     return signer(account, session, proxy).fetch(method, path, body)
 
 
+def _mainworld_sign(page, context, path):
+    """Ask the page's own axios to sign our path, from inside the page's world.
+
+    A real <script> element runs in the main world whatever patchright does to
+    add_init_script and evaluate, so this is where the site's request
+    interceptor is reachable. The signature is read off the wire, tagged by a
+    nonce so it is never confused with a request OnlyFans made itself. The
+    report says what the main world could see -- how many window keys, which
+    axios owners -- so an empty result separates "isolated" from "closured".
+    """
+    nonce = 'mw' + hashlib.sha1(str(time.time()).encode()).hexdigest()[:10]
+    marked = path + ('&' if '?' in path else '?') + '_ofmw=' + nonce
+    got = {}
+
+    def seen(r):
+        if nonce not in r.url:
+            return
+        h = r.headers
+        if h.get('sign') and h.get('time'):
+            got.update({'path': of_rules.path_of(r.url), 'time': h['time'],
+                        'user_id': h.get('user-id') or '0', 'sign': h['sign'],
+                        'app_token': h.get('app-token') or ''})
+
+    context.on('request', seen)
+    code = """
+    (function () {
+      var report = {vue: false, globals: [], via: '', error: '', winkeys: 0};
+      var path = %s;
+      function looks(o) {
+        try { return o && o.interceptors && o.interceptors.request
+                     && typeof o.get === 'function'; } catch (e) { return false; }
+      }
+      var callers = [];
+      var names = Object.getOwnPropertyNames(window);
+      report.winkeys = names.length;
+      for (var i = 0; i < names.length; i++) {
+        var v; try { v = window[names[i]]; } catch (e) { continue; }
+        if (looks(v)) { report.globals.push(names[i]); callers.push([names[i], v]); }
+      }
+      var root = document.querySelector('#app')
+                 || (document.body && document.body.firstElementChild);
+      var vm = root && (root.__vue__ || root.__vue_app__);
+      report.vue = !!vm;
+      if (vm) {
+        var ns = ['$api', '$axios', '$http', 'axios'];
+        for (var j = 0; j < ns.length; j++) {
+          var w = vm[ns[j]] || (vm.config && vm.config.globalProperties
+                                && vm.config.globalProperties[ns[j]]);
+          if (looks(w)) callers.push(['vue.' + ns[j], w]);
+        }
+      }
+      for (var k = 0; k < callers.length; k++) {
+        try { callers[k][1].get(path); report.via = callers[k][0]; break; }
+        catch (e) { report.error = String(e).slice(0, 120); }
+      }
+      document.documentElement.setAttribute('data-ofmw', JSON.stringify(report));
+    })();
+    """ % json.dumps(marked)
+    try:
+        page.add_script_tag(content=code)
+    except Exception as e:
+        return {'error': 'main-world inject failed: ' + str(e)[:120]}, {}
+    until = time.time() + 12
+    while not got and time.time() < until:
+        page.wait_for_timeout(250)
+    try:
+        raw = page.evaluate(
+            "() => document.documentElement.getAttribute('data-ofmw') || '{}'")
+        report = json.loads(raw or '{}')
+    except Exception as e:
+        report = {'error': 'could not read the main-world report: ' + str(e)[:100]}
+    return report, got
+
+
 def sign_now(path, user_id='0', proxy='', timeout=30):
     """A signature for a path of ours, made by OnlyFans' own code.
 
@@ -1331,12 +1411,12 @@ def sign_now(path, user_id='0', proxy='', timeout=30):
     Nothing here logs in. A signature covers the path, the time and the user
     id; identity is the cookie, and that stays in the app.
     """
-    report = {'via': '', 'vue': False, 'globals': [], 'seen': 0, 'why': ''}
+    report = {'via': '', 'vue': False, 'globals': [], 'seen': 0, 'why': '',
+              'isolated': {}, 'mainworld': {}}
     probe = Attempt('', '', proxy=proxy, drive=False)
     with _driver()() as pw:
-        context = probe._launch(pw)[1]
+        context = probe._launch(pw, bypass_csp=True)[1]
         try:
-            context.add_init_script('(' + _SIGN_HOOK_JS + ')()')
             page = context.pages[0] if context.pages else context.new_page()
             try:
                 page.goto(SIGNIN_URL, wait_until='domcontentloaded',
@@ -1345,33 +1425,28 @@ def sign_now(path, user_id='0', proxy='', timeout=30):
                 report['why'] = 'the page did not load: ' + str(e)[:120]
                 return {'sign': {}, 'report': report}
             page.wait_for_timeout(3000)
+            # What evaluate's world can see, kept only to sit beside the main
+            # world's view: the difference between the two is the whole answer
+            # to whether the signer is out of reach because it is isolated or
+            # because it is closured.
             try:
-                found = page.evaluate(_SIGNER_JS, path) or {}
+                report['isolated'] = page.evaluate(_SIGNER_JS, path) or {}
             except Exception as e:
-                report['why'] = 'could not look for a signer: ' + str(e)[:120]
-                return {'sign': {}, 'report': report}
-            for key in ('vue', 'globals', 'via'):
-                report[key] = found.get(key)
-            until = time.time() + 15
-            while time.time() < until:
-                try:
-                    sigs = page.evaluate('() => window.__ofsigs || []') or []
-                except Exception:
-                    sigs = []
-                report['seen'] = len(sigs)
-                for s in sigs:
-                    h = s.get('headers') or {}
-                    if of_rules.path_of(s.get('url') or '') != path:
-                        continue
-                    if h.get('sign') and h.get('time'):
-                        return {'sign': {'path': path, 'time': h['time'],
-                                         'user_id': h.get('user-id') or user_id,
-                                         'sign': h['sign'],
-                                         'app_token': h.get('app-token') or ''},
-                                'report': report}
-                page.wait_for_timeout(500)
-            report['why'] = ('nothing signed our path; %s signed requests seen'
-                             % report['seen'])
+                report['isolated'] = {'error': str(e)[:120]}
+            mw_report, got = _mainworld_sign(page, context, path)
+            report['mainworld'] = mw_report
+            report['via'] = mw_report.get('via', '')
+            report['vue'] = mw_report.get('vue', False)
+            report['globals'] = mw_report.get('globals', [])
+            if got.get('sign'):
+                return {'sign': {'path': path, 'time': got['time'],
+                                 'user_id': got.get('user_id') or user_id,
+                                 'sign': got['sign'],
+                                 'app_token': got.get('app_token') or ''},
+                        'report': report}
+            report['why'] = (mw_report.get('error')
+                             or ('the main world saw %s window keys and no request '
+                                 'interceptor' % mw_report.get('winkeys', 0)))
             return {'sign': {}, 'report': report}
         finally:
             try:
