@@ -8972,7 +8972,7 @@ def _fan_mem_clean(mem, mine=None):
 def _fan_memory_update(persona, fan_key, incoming, reply=''):
     """Fold what the fan just said into his profile. Best effort: a failure here
     must never stop a reply going out."""
-    if not (incoming or '').strip():
+    if not (incoming or '').strip() or client is None:
         return _fan_memory(persona, fan_key)
     old = _fan_memory(persona, fan_key)
     mine = _persona_identity(persona)
