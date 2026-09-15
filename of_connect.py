@@ -1515,11 +1515,32 @@ _CAPTURE_HOOK = r"""
                                       workers: workers, boot: boot()}));
     } catch (e) {}
   }
+  var stashed = 0;
+  function stashWorker(url) {
+    // A blob: worker is built from an in-memory Blob and never hits the wire,
+    // but its URL is fetchable from the page that made it. Pull the source and
+    // park it in a hidden node so the isolated-world evaluate can read it back
+    // across the shared DOM -- the signing code, and its static_param, ride in
+    // here, not in any script the wire ever saw.
+    try {
+      if (String(url).indexOf('blob:') !== 0 || stashed >= 8) return;
+      var id = 'ofworker' + stashed; stashed++;
+      fetch(url).then(function (r) { return r.text(); }).then(function (src) {
+        try {
+          var el = document.createElement('script');
+          el.type = 'text/plain'; el.id = id; el.textContent = src;
+          document.documentElement.appendChild(el);
+          n.wsrc = (n.wsrc || 0) + 1; flush();
+        } catch (e) {}
+      }).catch(function () {});
+    } catch (e) {}
+  }
   function addWorker(url) {
     try { url = String(url);
       if (url && workers.indexOf(url) < 0 && workers.length < 12) {
         workers.push(url.slice(0, 200)); flush();
       }
+      stashWorker(url);
     } catch (e) {}
   }
   // The signed message is static_param + "\n" + time + "\n" + path + "\n" + id.
@@ -1629,11 +1650,34 @@ def capture_param(proxy='', timeout=30):
     """
     report = {'caps': [], 'sigs': [], 'param': '', 'matched': False,
               'revision': '', 'counts': {}, 'booted': {}, 'workers': [],
-              'js': [], 'wasm': [], 'why': ''}
+              'js': [], 'wasm': [], 'worker_src': 0, 'worker_bytes': 0,
+              'confirm': 0, 'why': ''}
     # Every script and wasm response off the wire, so worker scripts,
     # importScripts, dynamic-import chunks and .wasm -- none of which the DOM
     # <script src> scan sees -- are named for the derivation to read next.
     sources = {}
+    # The oracle: a genuine signature OnlyFans produced. Its digest is what a
+    # recovered static_param has to reproduce, which is what makes a match a
+    # proof rather than a guess.
+    oracle = of_rules.sample() or {}
+    oparts = str(oracle.get('sign') or '').split(':')
+    # A second genuine signature, so the checksum positions can be pinned later
+    # (Stage C) rather than fitted to one digest by coincidence.
+    confirm = []
+
+    def on_signed(request):
+        try:
+            if '/api2/v2/' not in request.url:
+                return
+            h = request.headers
+            sign = h.get('sign')
+            if (sign and h.get('time') and sign != oracle.get('sign')
+                    and len(confirm) < 4):
+                confirm.append({'path': of_rules.path_of(request.url),
+                                'time': h['time'], 'user_id': h.get('user-id') or '0',
+                                'sign': sign})
+        except Exception:
+            pass
 
     def on_response(resp):
         try:
@@ -1655,6 +1699,7 @@ def capture_param(proxy='', timeout=30):
         context = probe._launch(pw, bypass_csp=True)[1]
         try:
             context.on('response', on_response)
+            context.on('request', on_signed)
 
             def handle(route):
                 req = route.request
@@ -1702,46 +1747,58 @@ def capture_param(proxy='', timeout=30):
                     report['counts'] = data.get('n', {})
                     report['booted'] = data.get('boot', {})
                     report['workers'] = data.get('workers', [])
-                    if report['caps']:
+                    # The worker source, not a main-world hash, is the prize:
+                    # break once it (and a second signature) are in hand.
+                    if (report['counts'] or {}).get('wsrc') and confirm:
                         break
-            for s in report['caps']:
-                parts = s.split('\n')
-                if len(parts) >= 3 and parts[2:3] and parts[2].startswith('/'):
-                    cand = parts[0]
-                    digest = hashlib.sha1(s.encode('utf-8', 'replace')).hexdigest()
-                    for sig in report['sigs']:
-                        f = sig.split(':')
-                        if len(f) >= 2 and f[1] == digest:
+            # Read the blob-worker sources the hook parked in the DOM and hunt
+            # the literal whose sha1 reproduces the oracle -- that literal is
+            # static_param. The match is against a genuine signature, so a hit
+            # is proof, which is why matched is set without a second lookup.
+            try:
+                srcs = page.evaluate(
+                    "() => Array.from(document.querySelectorAll('script[id^=ofworker]'))"
+                    ".map(e => e.textContent || '')") or []
+            except Exception:
+                srcs = []
+            report['worker_src'] = len(srcs)
+            report['worker_bytes'] = sum(len(s) for s in srcs)
+            report['confirm'] = len(confirm)
+            if len(oparts) == 4 and oracle.get('path'):
+                want = oparts[1]
+                otime = str(oracle.get('time') or '')
+                opath = oracle['path']
+                ouid = str(oracle.get('user_id') or '0')
+                seen_lit = set()
+                for src in srcs:
+                    for m in _LITERAL_RE.finditer(src):
+                        cand = m.group(1)
+                        if cand in seen_lit:
+                            continue
+                        seen_lit.add(cand)
+                        msg = '\n'.join([cand, otime, opath, ouid])
+                        if hashlib.sha1(msg.encode('utf-8')).hexdigest() == want:
                             report['param'] = cand
                             report['matched'] = True
-                            report['revision'] = f[0]
+                            report['revision'] = oparts[0]
                             break
-                    if not report['param']:
-                        report['param'] = cand
-                if report['matched']:
-                    break
+                    if report['matched']:
+                        break
             inv = list(sources.values())
             report['js'] = [s for s in inv if s['kind'] == 'js']
             report['wasm'] = [s for s in inv if s['kind'] == 'wasm']
-            c = report['counts'] or {}
-            if not report['caps']:
-                # Distinguish the real cases: no hashing at all in the main
-                # world (Worker/WASM) versus hashing that happened but did not
-                # look like a signing message, versus signed requests seen on
-                # the wire that this hook still missed (off-main-thread).
-                if report['sigs']:
-                    report['why'] = ('sign headers were seen but their input was '
-                                     'not hashed in the main world; the signer '
-                                     'runs off the main thread')
-                elif (c.get('digest', 0) + c.get('encode', 0)) == 0:
-                    report['why'] = ('no hashing ran in the main world at all '
-                                     '(digest=0, encode=0); the signer is in a '
-                                     'Worker or WASM')
+            if not report['matched']:
+                if not (len(oparts) == 4 and oracle.get('path')):
+                    report['why'] = 'no usable oracle sample to match against'
+                elif report['worker_src'] == 0:
+                    report['why'] = ('no worker source captured (%s workers seen); '
+                                     'the blob may not be same-origin fetchable' %
+                                     len(report['workers']))
                 else:
-                    report['why'] = ('hashing ran (%s digest, %s encode) but no '
-                                     'input was a signing message; the param may '
-                                     'be hashed as bytes, not text' %
-                                     (c.get('digest', 0), c.get('encode', 0)))
+                    report['why'] = ('read %s worker sources (%s bytes) but no '
+                                     'literal signs the oracle; static_param is '
+                                     'built at runtime, not a literal' %
+                                     (report['worker_src'], report['worker_bytes']))
             return {'capture': report}
         finally:
             try:
