@@ -268,6 +268,57 @@ class RegistryTest(unittest.TestCase):
         self.assertEqual(set(a.status()) & {'cookie', 'x_bc'}, set())
 
 
+class PageRequestTest(unittest.TestCase):
+    """The page makes the whole request, not only the signature in front of it.
+
+    Signing in a browser and sending from the app is two clients as far as
+    OnlyFans is concerned: two exit addresses, two handshakes, and an app-token
+    taken from rules it is refusing. Here the request leaves from the browser
+    that is signed in as her, so there is nothing left to reproduce.
+    """
+
+    class _Page:
+        def __init__(self, answer):
+            self.answer = answer
+            self.asked = None
+
+        def evaluate(self, js, arg=None):
+            self.asked = arg
+            return self.answer
+
+    def _signer(self, answer):
+        s = of_connect.Signer.__new__(of_connect.Signer)
+        s.account, s.via, s.error = 'acct1', '', ''
+        s.signed = s.fetched = 0
+        s.page = self._Page(answer)
+        return s
+
+    def test_an_answer_comes_back_with_its_status(self):
+        s = self._signer({'ok': True, 'status': 200, 'via': 'window.axios',
+                          'data': {'list': [1]}})
+        self.assertEqual(s._fetch_one({'method': 'GET', 'path': '/api2/v2/chats'}),
+                         {'status': 200, 'body': {'list': [1]}})
+        self.assertEqual(s.via, 'window.axios')
+        self.assertEqual(s.page.asked['path'], '/api2/v2/chats')
+
+    def test_a_refusal_is_an_answer_not_a_failure(self):
+        s = self._signer({'ok': False, 'status': 401, 'via': 'window.axios',
+                          'data': {'error': 'nope'}})
+        got = s._fetch_one({'method': 'GET', 'path': '/api2/v2/users/me'})
+        self.assertEqual(got['status'], 401)
+
+    def test_a_page_that_made_no_request_says_why(self):
+        s = self._signer({'ok': False, 'status': 0,
+                          'error': 'no request interceptor on the page'})
+        self.assertEqual(s._fetch_one({'method': 'GET', 'path': '/x'}), {})
+        self.assertIn('interceptor', s.error)
+
+    def test_a_signer_that_is_not_live_is_not_asked(self):
+        s = self._signer({})
+        with mock.patch.object(of_connect.Signer, 'live', return_value=False):
+            self.assertEqual(s.fetch('GET', '/x'), {})
+
+
 class SigningSampleTest(unittest.TestCase):
     """The browser service has no database, so the sample has to ride back to
     the app on the attempt's status."""

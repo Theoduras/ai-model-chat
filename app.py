@@ -16427,6 +16427,37 @@ if _of_direct():
 
     of_rules.signer_hooks(_of_page_sign)
 
+    def _of_page_request(account, session, method, path, body):
+        """Make the whole request in her browser, not just the signature.
+
+        A signature made in a page and a request sent from here are two
+        clients as far as OnlyFans is concerned -- two exit addresses, two TLS
+        handshakes, and an app-token and revision taken from rules it is
+        refusing. Returning None hands the request back to local arithmetic,
+        so a browser service that is down or on an older image costs nothing
+        beyond what it cost before.
+        """
+        conn = _of_conn()
+        if not hasattr(conn, 'request_for'):
+            return None
+        # Asked before every request, so it has to be the cached answer: a
+        # browser service that is down answers a request by timing out, and
+        # three of those in front of every round is slower than not having it.
+        if conn is not of_connect and not _of_browser_build().get('page_requests'):
+            return None
+        try:
+            got = conn.request_for(account, session, method, path, body,
+                                   proxy=_of_proxy_for(account, '')) or {}
+        except Exception as e:
+            of_trace.note('transport', 'her browser could not carry %s %s: %s'
+                          % (method, path[:60], str(e)[:140]), 'warning')
+            return None
+        if not got.get('status'):
+            return None
+        return got
+
+    OF.transport_hooks(_of_page_request)
+
     # Our watcher is already inside this process, so its events skip the
     # webhook round trip. They still carry an idempotency key, because the
     # backup sweep and the watcher can see the same message.
@@ -16564,17 +16595,20 @@ def _of_browser_build():
     if now - _of_build_cache['at'] < 60:
         return _of_build_cache['info']
     conn = _of_conn()
-    info = {'up': False, 'signing_capture': False, 'build': '',
-            'mine': of_trace.build_id(), 'remote': conn is not of_connect}
+    info = {'up': False, 'signing_capture': False, 'page_requests': False,
+            'build': '', 'mine': of_trace.build_id(),
+            'remote': conn is not of_connect}
     if not info['remote']:
         info = {'up': of_connect.available(), 'remote': False,
                 'signing_capture': hasattr(of_connect, 'sample_now'),
+                'page_requests': hasattr(of_connect, 'request_for'),
                 'build': of_trace.build_id(), 'mine': of_trace.build_id()}
     else:
         try:
             health = conn.call('GET', '/health', timeout=6) or {}
             info['up'] = bool(health.get('browser'))
             info['signing_capture'] = bool(health.get('signing_capture'))
+            info['page_requests'] = bool(health.get('page_requests'))
             info['build'] = health.get('build') or ''
             info['mine'] = of_trace.build_id()
         except Exception as e:
@@ -16909,6 +16943,10 @@ def api_onlyfans_status():
             blockers.append('no_session_key')
             out['session_key_error'] = str(e)[:200]
         out['proxy_pool'] = bool((os.getenv('ONLYFANS_PROXY_TEMPLATE') or '').strip())
+        # Whether her requests are made by her own browser. When they are, no
+        # rule set is involved in one, so a rules panel showing red is not the
+        # reason she is quiet.
+        out['page_transport'] = bool(_of_browser_build().get('page_requests'))
         out['blockers'] = blockers
     return jsonify(out)
 

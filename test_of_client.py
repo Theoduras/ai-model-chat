@@ -193,6 +193,103 @@ class CallTest(unittest.TestCase):
         self.assertEqual(of_session.describe('acct1')['status'], of_session.STATUS_LIVE)
 
 
+class BlankRefusalTest(unittest.TestCase):
+    """A 401 with nothing in it is not a verdict about the session."""
+
+    def setUp(self):
+        use_memory_store()
+        of_session.reset_key()
+        of_session.put('acct1', SESSION)
+        of_client.resume()
+        self.addCleanup(of_client.resume)
+        p = mock.patch.object(of_client, '_wait_turn')
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_an_interstitial_401_is_asked_again_before_expiring(self):
+        seq = [of_client.OnlyFansError(401, '<!DOCTYPE html><html>Attention…'),
+               {'ok': True}]
+
+        def once(*a, **k):
+            item = seq.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+        with mock.patch.object(of_client, '_once', once):
+            self.assertEqual(of_client.call('acct1', 'GET', '/x'), {'ok': True})
+        self.assertEqual(of_session.describe('acct1')['status'],
+                         of_session.STATUS_LIVE)
+
+    def test_a_session_that_is_really_gone_still_expires(self):
+        with mock.patch.object(of_client, '_once',
+                               side_effect=of_client.OnlyFansError(401, '')) as once:
+            with self.assertRaises(of_client.SessionExpired):
+                of_client.call('acct1', 'GET', '/x')
+        self.assertEqual(once.call_count, 2)
+        self.assertEqual(of_session.describe('acct1')['status'],
+                         of_session.STATUS_EXPIRED)
+
+
+class PageTransportTest(unittest.TestCase):
+    """Requests made by her own browser instead of signed here."""
+
+    def setUp(self):
+        use_memory_store()
+        of_session.reset_key()
+        of_session.put('acct1', SESSION)
+        of_client.resume()
+        self.addCleanup(of_client.resume)
+        self.addCleanup(of_client.transport_hooks, None)
+        p = mock.patch.object(of_client, '_wait_turn')
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_the_page_carries_the_request_and_no_rules_are_needed(self):
+        asked = []
+
+        def page(account, session, method, path, body):
+            asked.append((account, method, path))
+            return {'status': 200, 'body': {'id': 99}}
+
+        of_client.transport_hooks(page)
+        with mock.patch.object(of_rules, 'headers',
+                               side_effect=AssertionError('signed here')):
+            self.assertEqual(of_client.call('acct1', 'GET', '/api2/v2/users/me'),
+                             {'id': 99})
+        self.assertEqual(asked, [('acct1', 'GET', '/api2/v2/users/me')])
+
+    def test_a_page_refusal_is_never_reported_as_a_rules_problem(self):
+        of_client.transport_hooks(
+            lambda a, s, m, p, b: {'status': 401,
+                                   'body': {'error': 'Please refresh the page'}})
+        with mock.patch.object(of_rules, 'refresh',
+                               side_effect=AssertionError('refetched the rules')):
+            with self.assertRaises(of_client.SessionExpired):
+                of_client.call('acct1', 'GET', '/api2/v2/users/me')
+        self.assertEqual(of_session.describe('acct1')['status'],
+                         of_session.STATUS_EXPIRED)
+
+    def test_a_page_that_cannot_answer_falls_back_to_signing_here(self):
+        of_client.transport_hooks(lambda a, s, m, p, b: {})
+        with mock.patch.object(of_client, '_through_page',
+                               wraps=of_client._through_page) as through, \
+                mock.patch.object(of_rules, 'headers', return_value={}), \
+                mock.patch.object(of_client, '_opener') as opener:
+            opener.return_value.open.return_value.__enter__.return_value.read \
+                .return_value = b'{"ok": true}'
+            self.assertEqual(of_client.call('acct1', 'GET', '/x'), {'ok': True})
+        self.assertEqual(through.call_count, 1)
+
+    def test_a_signing_hold_does_not_silence_an_account_the_page_can_reach(self):
+        of_client._hold('acct1', of_session.get('acct1'),
+                        of_client.SigningStale(400, 'no rule set signs anything'))
+        of_client.transport_hooks(
+            lambda a, s, m, p, b: {'status': 200, 'body': {'ok': True}})
+        self.assertEqual(of_client.call('acct1', 'GET', '/x'), {'ok': True})
+        self.assertNotIn('acct1', of_client.held())
+
+
 class PagingTest(unittest.TestCase):
     def setUp(self):
         use_memory_store()

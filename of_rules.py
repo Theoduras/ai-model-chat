@@ -555,9 +555,9 @@ def _signature(path, user_id, session, when, r):
             logger.warning('the page could not sign %s: %s', path[:60], str(e)[:140])
             got = {}
         if got.get('sign') and got.get('time'):
-            return dict(got, time=str(got['time']))
+            return dict(got, time=str(got['time']), via='page')
     signature, stamp = sign(path, user_id, when=when, r=r)
-    return {'sign': signature, 'time': stamp, 'user_id': user_id}
+    return {'sign': signature, 'time': stamp, 'user_id': user_id, 'via': 'rules'}
 
 
 def headers(path, session=None, when=None):
@@ -583,7 +583,11 @@ def headers(path, session=None, when=None):
         'accept-language': 'en-US,en;q=0.9',
         'referer': 'https://onlyfans.com/',
     }
-    if r.get('revision'):
+    # The revision belongs to whatever signed it. When the page signed because
+    # no published set reproduces what OnlyFans is producing, the loaded set's
+    # revision is precisely the one OnlyFans is not on -- and a fresh signature
+    # sent beside a stale revision is a mismatch it can read straight off.
+    if r.get('revision') and not (made.get('via') == 'page' and proven() is not True):
         out['x-of-rev'] = str(r['revision'])
     if session.get('cookie'):
         out['cookie'] = session['cookie']

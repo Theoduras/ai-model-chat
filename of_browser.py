@@ -96,6 +96,10 @@ def service():
                         # the capture, so a service that has one and not the
                         # other has to be readable as exactly that.
                         'page_signing': hasattr(of_connect, 'sign_for'),
+                        # And again for the request path: an app pointed at a
+                        # service that can only sign has to fall back rather
+                        # than call a route that is not there.
+                        'page_requests': hasattr(of_connect, 'request_for'),
                         'signers': (of_connect.signer_state()
                                     if hasattr(of_connect, 'signer_state') else []),
                         'build': of_trace.build_id()})
@@ -144,6 +148,32 @@ def service():
             return jsonify({'ok': False, 'error': str(e)[:200]}), 400
         return jsonify({'ok': True, 'sign': got or {},
                         'signers': of_connect.signer_state()})
+
+    @api.route('/request-for', methods=['POST'])
+    def request_for():
+        """One whole OnlyFans request, made by the page that is signed in as her.
+
+        The status OnlyFans gave is carried in the body, not in this response's
+        own status: a 401 from OnlyFans is an answer about her session, and
+        answering 401 here would be indistinguishable from this service
+        refusing the app's token.
+        """
+        d = request.json or {}
+        account = (d.get('account') or '').strip()
+        path = (d.get('path') or '').strip()
+        method = (d.get('method') or 'GET').strip().upper()
+        if not (account and path):
+            return jsonify({'ok': False, 'error': 'account and path required'}), 400
+        try:
+            got = of_connect.request_for(account, d.get('session') or {}, method,
+                                         path, d.get('body'),
+                                         proxy=(d.get('proxy') or '').strip())
+        except Exception as e:
+            return jsonify({'ok': False, 'error': str(e)[:200]}), 400
+        if not got:
+            return jsonify({'ok': False, 'error': 'the page made no request'}), 400
+        return jsonify({'ok': True, 'status': got.get('status'),
+                        'body': got.get('body')})
 
     @api.route('/derive-rules', methods=['POST'])
     def derive_rules():
@@ -354,6 +384,27 @@ class Remote:
                         {'account': account, 'session': session, 'path': path,
                          'proxy': proxy}, timeout=40)
         return out.get('sign') or {}
+
+    def request_for(self, account, session, method, path, body=None, proxy=''):
+        # Longer than /sign-for: this is the request itself, not the signature
+        # in front of it, so OnlyFans' own latency is inside it -- and the
+        # first request for an account also waits for her page to open, which
+        # is a browser launch and a site load. Timing out here is not fatal
+        # (the caller signs it itself instead) but it costs the round, so the
+        # cold case is allowed to finish rather than being cut off every time
+        # the signer has aged out.
+        try:
+            out = self.call('POST', '/request-for',
+                            {'account': account, 'session': session,
+                             'method': method, 'path': path, 'body': body,
+                             'proxy': proxy}, timeout=120)
+        except of_connect.ConnectError:
+            # A service that could not make the request is not a verdict about
+            # the account -- the caller signs it itself instead.
+            return {}
+        if not out.get('ok'):
+            return {}
+        return {'status': out.get('status'), 'body': out.get('body')}
 
     def signer_state(self):
         try:

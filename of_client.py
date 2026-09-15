@@ -57,6 +57,12 @@ class OnlyFansError(RuntimeError):
     def __init__(self, code, detail=''):
         self.code = code
         self.detail = detail
+        # Which transport OnlyFans refused: 'page' when her own browser made
+        # the request, '' when we signed and sent it ourselves. A refusal of a
+        # signature OnlyFans made itself cannot be a rules problem, and saying
+        # so is the difference between a real answer and five rounds of
+        # blaming the rule sources.
+        self.via = ''
         super().__init__(f'OnlyFans {code}: {detail}'.strip())
 
 
@@ -167,7 +173,62 @@ def held():
 
 # ── Requests ──────────────────────────────────────────────────────────────────
 
+# Her own browser, when there is one, as a way of making the whole request
+# rather than only the signature in front of it. Installed by the app so this
+# module never imports it.
+_page_request = None
+
+
+def transport_hooks(request_for):
+    """Lend the module her signed-in browser to make requests through.
+
+    Signing through the page and then sending the request ourselves leaves the
+    two halves in different places -- different exit address, different TLS
+    handshake, an app-token and a revision taken from rules OnlyFans is
+    refusing. Making the request where the signature is made needs no rule set
+    at all, so nothing has to be reconstructed after a rotation.
+    """
+    global _page_request
+    _page_request = request_for
+
+
+def _through_page(account, method, path, body, session):
+    """The request as her browser, or None if the page could not make it.
+
+    None means fall back and sign it ourselves; a refusal from OnlyFans is
+    raised, because that is an answer.
+    """
+    try:
+        got = _page_request(account, session, method, path, body) or {}
+    except Exception as e:
+        logger.warning('her browser could not carry %s %s: %s',
+                       method, path[:60], str(e)[:140])
+        return None
+    status = int(got.get('status') or 0)
+    if not status:
+        return None
+    if status >= 400:
+        detail = got.get('body')
+        if not isinstance(detail, str):
+            try:
+                detail = json.dumps(detail) if detail is not None else ''
+            except Exception:
+                detail = str(detail)
+        err = OnlyFansError(status, detail[:500])
+        err.via = 'page'
+        raise err
+    # A round that got through means whatever was being held against this
+    # account no longer describes it.
+    resume(account)
+    out = got.get('body')
+    return out if isinstance(out, (dict, list)) else {}
+
+
 def _once(account, method, path, body, session):
+    if _page_request:
+        got = _through_page(account, method, path, body, session)
+        if got is not None:
+            return got
     url = OF_BASE + path
     headers = of_rules.headers(path, session)
     if body is not None:
@@ -184,6 +245,21 @@ def _once(account, method, path, body, session):
         raise OnlyFansError(0, str(getattr(e, 'reason', e))[:200])
     except ValueError:
         raise OnlyFansError(0, 'OnlyFans returned something that was not JSON')
+
+
+def _says_nothing(detail):
+    """A refusal with no account in it: empty, or Cloudflare's own page.
+
+    OnlyFans says why in JSON. A blank body or an interstitial is something in
+    front of it answering instead, which is not evidence about the session --
+    and expiring on one takes a live account off the air and sends the creator
+    to sign in again for nothing.
+    """
+    text = str(detail or '').strip()
+    if not text:
+        return True
+    low = text.lower()
+    return '<html' in low or '<!doctype' in low
 
 
 def _adopt_working_rules(rejected):
@@ -265,7 +341,11 @@ def call(account, method, path, body=None):
     # which account it is. It is never stored with this in it.
     session = dict(session, account=account)
     standing = _holding(account, session)
-    if standing:
+    # A signing hold is about rules. With her browser making the request there
+    # are none, so the refusal that opened the hold says nothing about the
+    # request about to be made -- and honouring it would keep an account quiet
+    # for five minutes at a time for no reason.
+    if standing and not (_page_request and isinstance(standing, SigningStale)):
         raise standing
     if not path.startswith('/'):
         path = '/' + path
@@ -280,6 +360,7 @@ def _attempts(account, method, path, body, session):
     """The request and everything worth retrying it for."""
     rejected = set()
     proven_retried = False
+    unreadable_retried = False
     for attempt in range(OF_MAX_RETRIES):
         _wait_turn(account)
         try:
@@ -289,7 +370,11 @@ def _attempts(account, method, path, body, session):
             # and only the response text tells them apart -- "please refresh
             # the page" is the rotation, not a revoked session. Check that
             # first, or the retry that would have fixed it never gets a turn.
-            if of_rules.stale_response(e.code, e.detail):
+            # ...but only for a signature of ours. OnlyFans refusing one its
+            # own page made is not a rotation, and reporting it as "no rule set
+            # signs what OnlyFans will accept" would name the one thing that is
+            # no longer involved.
+            if getattr(e, 'via', '') != 'page' and of_rules.stale_response(e.code, e.detail):
                 # The oracle outranks the body text. A set that reproduces a
                 # signature OnlyFans' own page produced cannot be what OnlyFans
                 # is refusing -- and treating it as such poisons the one correct
@@ -309,6 +394,19 @@ def _attempts(account, method, path, body, session):
                 _adopt_working_rules(rejected)
                 continue
             if e.code == 401 or (e.code == 403 and 'sign' not in e.detail.lower()):
+                # A 401 that says nothing is not evidence of a revoked
+                # session: Cloudflare answers one with an HTML page, and a
+                # rotation refusal whose wording moves stops matching
+                # stale_response above. Expiring on the first of those takes a
+                # live account off the air and sends the creator to sign in
+                # again for nothing, so it costs one more request to be sure.
+                if (e.code == 401 and _says_nothing(e.detail)
+                        and not unreadable_retried and attempt < OF_MAX_RETRIES - 1):
+                    unreadable_retried = True
+                    logger.warning('OnlyFans refused %s with nothing readable in '
+                                   'it — asking once more before blaming the '
+                                   'session', account)
+                    continue
                 of_session.mark_expired(account, e.detail)
                 raise SessionExpired(e.code, 'the OnlyFans session expired — '
                                              'reconnect the account')

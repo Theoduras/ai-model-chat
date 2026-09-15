@@ -349,7 +349,7 @@ async function loadConfig(){
   if(direct){
     const st=await (await fetch('/api/onlyfans/status?persona='+encodeURIComponent(persona()))).json();
     const w=st.webhook||{}, s=st.session||{};
-    showRules(st.rules);
+    showRules(st.rules, st.page_transport);
     wb.innerHTML=!st.connected ? ''
       : (s.status==='expired'
         ? '<span class="hint" style="color:var(--warn);">Her OnlyFans session expired'
@@ -641,13 +641,22 @@ async function runOnce(){
   PlatformConsole.refresh();
 }
 
-function showRules(r){
+function showRules(r,page){
   const box=document.getElementById('rules-state');
   if(!box)return;
-  if(!r||!r.ready){err(box,'No signing rules loaded — nothing can be sent to OnlyFans.');return;}
+  // Her own browser makes the request, rules and all, so what is loaded here
+  // is a fallback. Saying so stops a red panel being read as the reason she is
+  // quiet — which is what it was read as for several rounds.
+  const via=page?'<span class="hint">Her requests are made by her own '
+    +'signed-in browser, so OnlyFans signs them itself — these rules are only '
+    +'the fallback if that browser is unavailable.</span><br>':'';
+  if(!r||!r.ready){
+    if(page){box.innerHTML=via;return;}
+    err(box,'No signing rules loaded — nothing can be sent to OnlyFans.');return;
+  }
   const age=r.age_seconds==null?'':(', loaded '+(r.age_seconds<90?'just now'
     :(Math.round(r.age_seconds/60)+' min ago')));
-  box.innerHTML='<span class="hint">Revision '+esc(r.revision||'unknown')+age
+  box.innerHTML=via+'<span class="hint">Revision '+esc(r.revision||'unknown')+age
     +'<br>Source: '+esc(r.source||'unknown')+'</span>';
 }
 

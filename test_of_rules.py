@@ -469,6 +469,30 @@ class PageSigningTest(unittest.TestCase):
         of_rules.headers('/api2/v2/users/me', {'user_id': '99'}, when=1789242509672)
         self.assertEqual(self.calls, [])
 
+    def test_a_page_signature_is_not_sent_with_the_refused_revision(self):
+        """x-of-rev belongs to whatever signed it.
+
+        The loaded set's revision is precisely the one OnlyFans is not on --
+        that is why the page was asked -- so sending it beside a fresh
+        signature is a mismatch OnlyFans can read straight off.
+        """
+        of_rules._rules = dict(RULES, revision=63708)
+        self._disproved()
+        of_rules.signer_hooks(self._page())
+        h = of_rules.headers('/api2/v2/chats', {'user_id': '99'})
+        self.assertNotIn('x-of-rev', h)
+
+    def test_our_own_signature_still_names_its_revision(self):
+        stamp = 1789242509672
+        of_rules._rules = dict(RULES, revision=63708)
+        of_rules.sample_hooks(lambda: json.dumps(
+            {'path': '/api2/v2/users/me', 'user_id': '0', 'time': str(stamp),
+             'sign': expected('/api2/v2/users/me', '0', stamp)}), lambda v: None)
+        of_rules.signer_hooks(self._page())
+        h = of_rules.headers('/api2/v2/chats', {'user_id': '99'})
+        self.assertEqual(h['x-of-rev'], '63708')
+        self.assertEqual(self.calls, [])
+
     def test_a_signer_that_fails_falls_back_to_arithmetic(self):
         """Refused is no worse than now; raising would take the app down with
         the browser."""

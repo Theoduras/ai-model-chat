@@ -77,6 +77,27 @@ class SplitTest(unittest.TestCase):
         self.assertEqual(out['sign']['sign'], '65034:abc:ff:zz')
         self.assertEqual(out['report']['via'], 'window.axios')
 
+    def test_a_whole_request_crosses_the_wire(self):
+        with mock.patch.object(of_connect, 'request_for',
+                               return_value={'status': 200,
+                                             'body': {'list': [1, 2]}}) as made:
+            out = self.remote.request_for('acct1', {'cookie': 'sess=abc'},
+                                          'GET', '/api2/v2/chats')
+        self.assertEqual(out, {'status': 200, 'body': {'list': [1, 2]}})
+        self.assertEqual(made.call_args[0][2:5], ('GET', '/api2/v2/chats', None))
+
+    def test_onlyfans_refusing_is_carried_not_turned_into_our_own_401(self):
+        """A 401 from OnlyFans must not read as the service refusing the token."""
+        with mock.patch.object(of_connect, 'request_for',
+                               return_value={'status': 401, 'body': {'error': 'x'}}):
+            out = self.remote.request_for('acct1', {}, 'GET', '/api2/v2/users/me')
+        self.assertEqual(out['status'], 401)
+
+    def test_a_page_that_made_no_request_leaves_the_caller_to_sign_it(self):
+        with mock.patch.object(of_connect, 'request_for', return_value={}):
+            self.assertEqual(
+                self.remote.request_for('acct1', {}, 'GET', '/api2/v2/users/me'), {})
+
     def test_a_missing_attempt_is_none_on_both_sides(self):
         self.assertIsNone(of_connect.get('ofc_nope'))
         self.assertIsNone(self.remote.get('ofc_nope'))

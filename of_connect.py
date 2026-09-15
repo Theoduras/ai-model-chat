@@ -902,6 +902,60 @@ _SIGNER_JS = """(path) => {
 }"""
 
 
+# The same owner, asked for the whole answer rather than only the headers it
+# signed with. This is what makes the page the client: the request leaves from
+# the browser that is signed in as her, so there is no signature to reproduce,
+# no app-token to guess and no second exit IP to explain.
+_REQUEST_JS = """(arg) => {
+  const looks = (o) => {
+    try {
+      return o && o.interceptors && o.interceptors.request && typeof o.get === 'function';
+    } catch (e) { return false; }
+  };
+  const callers = [];
+  for (const k of Object.getOwnPropertyNames(window)) {
+    let v;
+    try { v = window[k]; } catch (e) { continue; }
+    if (looks(v)) callers.push(['window.' + k, v]);
+  }
+  const root = document.querySelector('#app') || document.body.firstElementChild;
+  const vm = root && (root.__vue__ || root.__vue_app__);
+  if (vm) {
+    for (const name of ['$api', '$axios', '$http', 'axios']) {
+      const v = vm[name] || (vm.config && vm.config.globalProperties
+                             && vm.config.globalProperties[name]);
+      if (looks(v)) callers.push(['vue.' + name, v]);
+    }
+  }
+  if (!callers.length) return {ok: false, status: 0, via: '', error: 'no request interceptor on the page'};
+  const opts = {method: arg.method, url: arg.path};
+  if (arg.body !== null && arg.body !== undefined) opts.data = arg.body;
+  // Whichever owner takes it, the way the signer tries them in turn: one of
+  // these objects owns the interceptor and the others may refuse outright.
+  let call = null, name = '', why = '';
+  for (const [owner, inst] of callers) {
+    try { call = inst.request(opts); name = owner; break; }
+    catch (e) { why = String(e).slice(0, 120); }
+  }
+  if (!call) return {ok: false, status: 0, via: '', error: why || 'nothing on the page would make the request'};
+  // A refusal is an answer: axios throws on any 4xx, and the status is the
+  // whole point of asking.
+  call = Promise.resolve(call).then(
+    (r) => ({ok: true, status: r.status, via: name, data: r.data}),
+    (e) => {
+      const r = e && e.response;
+      return {ok: false, via: name, status: r ? r.status : 0,
+              data: r ? r.data : null, error: String(e).slice(0, 200)};
+    });
+  // The page is driven from a request thread with its own deadline; a promise
+  // that never settles would hold that thread open to the end of it.
+  const gaveup = new Promise((res) => setTimeout(
+    () => res({ok: false, status: 0, via: name, error: 'the page did not answer in time'}),
+    arg.ms || 30000));
+  return Promise.race([call, gaveup]);
+}"""
+
+
 def _cookies_for(session):
     """The stored session's cookie header, as cookies a context can be given.
 
@@ -951,6 +1005,7 @@ class Signer:
         self.error = ''
         self.via = ''
         self.signed = 0
+        self.fetched = 0
         self.opened_at = 0.0
         self.used_at = 0.0
         self.page = None
@@ -991,12 +1046,34 @@ class Signer:
             self.signed += 1
         return got
 
+    def fetch(self, method, path, body=None, timeout=45):
+        """One whole request as this account, made by her own browser.
+
+        Returns {'status', 'body'} — a refusal included, because a 401 from
+        OnlyFans is an answer about the session and has to reach the caller as
+        one. {} means the page never answered, and the caller falls back.
+        """
+        if not self.live():
+            return {}
+        box = queue.Queue(1)
+        self._q.put(('fetch', {'method': method, 'path': path, 'body': body,
+                               'ms': int(max(1, timeout - 5) * 1000)}, box))
+        try:
+            got = box.get(timeout=timeout)
+        except queue.Empty:
+            return {}
+        self.used_at = time.time()
+        if got:
+            self.fetched += 1
+        return got
+
     def close(self):
         self._q.put(('stop', '', None))
 
     def state(self):
         return {'account': self.account, 'live': self.live(), 'via': self.via,
-                'signed': self.signed, 'error': self.error[:200],
+                'signed': self.signed, 'fetched': self.fetched,
+                'error': self.error[:200],
                 'age': int(time.time() - self.opened_at) if self.opened_at else None}
 
     # ── the browser side, all on its own thread ──────────────────────────────
@@ -1039,7 +1116,7 @@ class Signer:
     def _serve(self, context):
         while True:
             try:
-                what, path, box = self._q.get(timeout=60)
+                what, payload, box = self._q.get(timeout=60)
             except queue.Empty:
                 if self.stale():
                     return
@@ -1047,7 +1124,8 @@ class Signer:
             if what == 'stop':
                 return
             try:
-                got = self._sign_one(path)
+                got = (self._fetch_one(payload) if what == 'fetch'
+                       else self._sign_one(payload))
             except Exception as e:
                 self.error = str(e)[:200]
                 got = {}
@@ -1080,6 +1158,14 @@ class Signer:
             page.wait_for_timeout(250)
         self.error = 'the page did not sign our path'
         return {}
+
+    def _fetch_one(self, ask):
+        got = self.page.evaluate(_REQUEST_JS, ask) or {}
+        self.via = got.get('via') or self.via
+        if not got.get('status'):
+            self.error = str(got.get('error') or 'the page made no request')[:200]
+            return {}
+        return {'status': int(got['status']), 'body': got.get('data')}
 
 
 _signers = {}
@@ -1117,6 +1203,18 @@ def signer_state():
 def sign_for(account, session, path, proxy=''):
     """Sign one path as this account, through OnlyFans' own page."""
     return signer(account, session, proxy).sign(path)
+
+
+def request_for(account, session, method, path, body=None, proxy=''):
+    """One whole OnlyFans request as this account, made by her own page.
+
+    Signing a path and then sending the request ourselves leaves the two
+    halves in different places: the signature comes from a browser here, the
+    request from the app's own address with its own TLS handshake. Making the
+    request where the signature is made is the only arrangement OnlyFans sees
+    as one client.
+    """
+    return signer(account, session, proxy).fetch(method, path, body)
 
 
 def sign_now(path, user_id='0', proxy='', timeout=30):
