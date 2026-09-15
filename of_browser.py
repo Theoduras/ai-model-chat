@@ -144,7 +144,8 @@ def service():
         """static_param off the site signing its own requests. No credentials."""
         d = request.json or {}
         try:
-            out = of_connect.capture_param(proxy=(d.get('proxy') or '').strip())
+            out = of_connect.capture_param(sample=d.get('sample') or None,
+                                           proxy=(d.get('proxy') or '').strip())
         except Exception as e:
             return jsonify({'ok': False, 'error': str(e)[:200]}), 400
         return jsonify({'ok': True, 'capture': out.get('capture') or {}})
@@ -405,10 +406,11 @@ class Remote:
                         timeout=budget + 180)
         return out.get('probe') or {}
 
-    def capture_param(self, proxy=''):
+    def capture_param(self, sample=None, proxy=''):
         # Headroom over the capture's own bounded stages (a page load plus a
         # 20s watch) so a cold Chromium launch is not read as a page failure.
-        out = self.call('POST', '/capture', {'proxy': proxy}, timeout=180)
+        out = self.call('POST', '/capture', {'sample': sample, 'proxy': proxy},
+                        timeout=180)
         return out.get('capture') or {}
 
     def sign_for(self, account, session, path, proxy=''):

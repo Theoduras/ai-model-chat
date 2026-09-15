@@ -1628,7 +1628,7 @@ _CAPTURE_HOOK = r"""
 """
 
 
-def capture_param(proxy='', timeout=30):
+def capture_param(sample=None, proxy='', timeout=30):
     """Recover static_param by hooking the hash input, not the request client.
 
     The client is closured out of reach -- not on window, the Vue app, or
@@ -1658,8 +1658,9 @@ def capture_param(proxy='', timeout=30):
     sources = {}
     # The oracle: a genuine signature OnlyFans produced. Its digest is what a
     # recovered static_param has to reproduce, which is what makes a match a
-    # proof rather than a guess.
-    oracle = of_rules.sample() or {}
+    # proof rather than a guess. It is passed in from the app process, where the
+    # sample lives -- of_rules.sample() is empty in this browser service.
+    oracle = sample or of_rules.sample() or {}
     oparts = str(oracle.get('sign') or '').split(':')
     # A second genuine signature, so the checksum positions can be pinned later
     # (Stage C) rather than fitted to one digest by coincidence.
@@ -1764,27 +1765,35 @@ def capture_param(proxy='', timeout=30):
             report['worker_src'] = len(srcs)
             report['worker_bytes'] = sum(len(s) for s in srcs)
             report['confirm'] = len(confirm)
+            inv = list(sources.values())
+            # The blob workers are tiny stubs; the signing code they pull in
+            # rides the wire as an importScripts/dynamic chunk. The context-level
+            # response inventory sees those worker-initiated fetches -- which the
+            # main-thread-only _LITERALS_JS scan misses -- so scan their bodies
+            # too, alongside the stub sources and any URL a stub names.
+            js_urls = [s['url'] for s in inv if s['kind'] == 'js']
+            for src in srcs:
+                js_urls += re.findall(r'https?://[^\s"\'`)]+\.m?js\b', src)
+            body_literals, seen_stat = _bundle_literals(
+                context, list(dict.fromkeys(js_urls)), marker=(oparts[0] if len(oparts) == 4 else ''))
+            report['scanned'] = seen_stat
             if len(oparts) == 4 and oracle.get('path'):
                 want = oparts[1]
                 otime = str(oracle.get('time') or '')
                 opath = oracle['path']
                 ouid = str(oracle.get('user_id') or '0')
                 seen_lit = set()
-                for src in srcs:
-                    for m in _LITERAL_RE.finditer(src):
-                        cand = m.group(1)
-                        if cand in seen_lit:
-                            continue
-                        seen_lit.add(cand)
-                        msg = '\n'.join([cand, otime, opath, ouid])
-                        if hashlib.sha1(msg.encode('utf-8')).hexdigest() == want:
-                            report['param'] = cand
-                            report['matched'] = True
-                            report['revision'] = oparts[0]
-                            break
-                    if report['matched']:
+                for cand in list(body_literals) + [m.group(1) for s in srcs
+                                                   for m in _LITERAL_RE.finditer(s)]:
+                    if cand in seen_lit:
+                        continue
+                    seen_lit.add(cand)
+                    msg = '\n'.join([cand, otime, opath, ouid])
+                    if hashlib.sha1(msg.encode('utf-8')).hexdigest() == want:
+                        report['param'] = cand
+                        report['matched'] = True
+                        report['revision'] = oparts[0]
                         break
-            inv = list(sources.values())
             report['js'] = [s for s in inv if s['kind'] == 'js']
             report['wasm'] = [s for s in inv if s['kind'] == 'wasm']
             if not report['matched']:
@@ -1795,10 +1804,15 @@ def capture_param(proxy='', timeout=30):
                                      'the blob may not be same-origin fetchable' %
                                      len(report['workers']))
                 else:
-                    report['why'] = ('read %s worker sources (%s bytes) but no '
-                                     'literal signs the oracle; static_param is '
-                                     'built at runtime, not a literal' %
-                                     (report['worker_src'], report['worker_bytes']))
+                    st = report.get('scanned') or {}
+                    report['why'] = ('scanned %s worker stubs (%s bytes) and %s of '
+                                     '%s wire scripts (%s literals); the revision %s '
+                                     'and no literal signs the oracle -- static_param '
+                                     'is built at runtime, not a literal' %
+                                     (report['worker_src'], report['worker_bytes'],
+                                      st.get('ok', 0), st.get('urls', 0),
+                                      st.get('literals', 0),
+                                      'appears' if st.get('marker') else 'is absent'))
             return {'capture': report}
         finally:
             try:

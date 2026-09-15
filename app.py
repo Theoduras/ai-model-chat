@@ -17336,7 +17336,7 @@ def api_diag():
         if request.args.get('capture'):
             try:
                 out['capture'] = _of_conn().capture_param(
-                    proxy=_of_proxy_for('', ''))
+                    sample=of_rules.sample(), proxy=_of_proxy_for('', ''))
             except Exception as e:
                 out['capture'] = {'error': str(e)[:200]}
         # Neither the bundle nor the main world holds the signer, which leaves
