@@ -384,7 +384,12 @@ check('no mime is an image, as the library was before video',
 check('every publishable channel can carry a still',
       all(G.media_ok(p, 'image') for p in G.PUBLISHABLE))
 
-if FAILURES:
-    print(f'{len(FAILURES)} FAILED: {FAILURES}')
-    raise SystemExit(1)
-print('all growth tests passed')
+def test_nothing_failed():
+    assert not FAILURES, FAILURES
+
+
+if __name__ == '__main__':
+    if FAILURES:
+        print(f'{len(FAILURES)} FAILED: {FAILURES}')
+        raise SystemExit(1)
+    print('all growth tests passed')

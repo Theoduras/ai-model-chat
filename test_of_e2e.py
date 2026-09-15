@@ -10,6 +10,7 @@ import json
 import os
 import pathlib
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -260,6 +261,18 @@ def webhook_flow(flask_app):
                     'fromUser': {'id': '9', 'username': 'fan9'}}, RUN + '-3')
     check('an event our watcher made takes the same path',
           'e2e' in flask_app._of_due)
+
+
+def test_the_onlyfans_round_goes_end_to_end():
+    """Run as a subprocess: this sets ONLYFANS_TRANSPORT=direct, which
+    leaks into test_onlyfans.py when both run in one pytest process."""
+    r = subprocess.run([sys.executable, os.path.abspath(__file__)],
+                       capture_output=True, text=True, timeout=600)
+    out = r.stdout + r.stderr
+    if 'no browser installed' in out:
+        import pytest
+        pytest.skip('needs a Chromium; the browser flow cannot run here')
+    assert r.returncode == 0, out
 
 
 if __name__ == '__main__':

@@ -201,7 +201,12 @@ check('empty variant key', F.variant_key({}) == '')
 check('one axis at a time', len(F.pick_variant('opener', random.Random(1))) == 1)
 
 print()
-if FAILURES:
-    print(f'{len(FAILURES)} FAILED: {FAILURES}')
-    raise SystemExit(1)
-print('all funnel tests passed')
+def test_nothing_failed():
+    assert not FAILURES, FAILURES
+
+
+if __name__ == '__main__':
+    if FAILURES:
+        print(f'{len(FAILURES)} FAILED: {FAILURES}')
+        raise SystemExit(1)
+    print('all funnel tests passed')

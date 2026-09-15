@@ -220,7 +220,12 @@ check('a non-hex code is refused rather than echoed',
       client.get('/api/threads/deletion-status?code=<script>').status_code == 400)
 
 print()
-if FAILURES:
-    print(f'{len(FAILURES)} FAILED: {FAILURES}')
-    raise SystemExit(1)
-print('all threads tests passed')
+def test_nothing_failed():
+    assert not FAILURES, FAILURES
+
+
+if __name__ == '__main__':
+    if FAILURES:
+        print(f'{len(FAILURES)} FAILED: {FAILURES}')
+        raise SystemExit(1)
+    print('all threads tests passed')
