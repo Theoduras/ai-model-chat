@@ -1496,8 +1496,8 @@ def sign_now(path, user_id='0', proxy='', timeout=30):
 _CAPTURE_HOOK = r"""
 (function () {
   if (window.__ofcapOn) return; window.__ofcapOn = 1;
-  var caps = [], sigs = [], workers = [];
-  var n = {digest: 0, encode: 0, fetch: 0, xhr: 0, worker: 0};
+  var caps = [], sigs = [], workers = [], params = [];
+  var n = {digest: 0, encode: 0, fetch: 0, xhr: 0, worker: 0, join: 0};
   function boot() {
     // Whether the SPA actually ran under our rewrite: without this, quiet
     // counters could mean "main world signs nothing" or "bundle never booted".
@@ -1512,7 +1512,8 @@ _CAPTURE_HOOK = r"""
     try {
       document.documentElement.setAttribute(
         'data-ofcap', JSON.stringify({caps: caps, sigs: sigs, n: n,
-                                      workers: workers, boot: boot()}));
+                                      workers: workers, params: params,
+                                      boot: boot()}));
     } catch (e) {}
   }
   var stashed = 0;
@@ -1601,8 +1602,28 @@ _CAPTURE_HOOK = r"""
       return F.apply(this, arguments);
     };
   } catch (e) {}
-  // The signer runs off the main thread, so the decisive artifact is the
-  // worker's script URL: wrap the constructors that create one.
+  // The sha1 is a pure-JS impl (no crypto.subtle/TextEncoder), so hook the
+  // message construction instead of the hash. The signed message is
+  // [static_param, time, path, user_id].join('\n'), so a '\n' join whose result
+  // has the signing shape hands us static_param as this[0] directly.
+  try {
+    var AJ = Array.prototype.join;
+    Array.prototype.join = function (sep) {
+      var out = AJ.apply(this, arguments);
+      try {
+        if (sep === '\n' && this.length >= 3 && typeof out === 'string'
+            && (/\n\d{10,13}\n/.test(out) || out.indexOf('/api2') >= 0)) {
+          n.join++;
+          var p = String(this[0]);
+          if (p && params.indexOf(p) < 0 && params.length < 12) {
+            params.push(p.slice(0, 200)); flush();
+          }
+        }
+      } catch (e) {}
+      return out;
+    };
+  } catch (e) {}
+  // Worker constructors, in case a future page moves signing off-thread.
   try {
     var W = window.Worker;
     if (W) {
@@ -1628,6 +1649,26 @@ _CAPTURE_HOOK = r"""
 """
 
 
+def _match_param(candidates, oparts, oracle):
+    """Which candidate static_param reproduces the oracle signature, if any.
+
+    A candidate is proven by re-signing the oracle's own request with it and
+    getting the oracle's digest back -- the same test derive_rules uses, but
+    against values captured live rather than literals from the bundle.
+    """
+    if len(oparts) != 4 or not oracle.get('path'):
+        return ''
+    want = oparts[1]
+    otime = str(oracle.get('time') or '')
+    opath = oracle['path']
+    ouid = str(oracle.get('user_id') or '0')
+    for cand in candidates or []:
+        msg = '\n'.join([cand, otime, opath, ouid])
+        if hashlib.sha1(msg.encode('utf-8')).hexdigest() == want:
+            return cand
+    return ''
+
+
 def capture_param(sample=None, proxy='', timeout=30):
     """Recover static_param by hooking the hash input, not the request client.
 
@@ -1648,10 +1689,9 @@ def capture_param(sample=None, proxy='', timeout=30):
     If nothing sign-shaped is ever hashed in JS, that is the answer too: the
     signing is in WASM or a Worker, and the JS route is closed.
     """
-    report = {'caps': [], 'sigs': [], 'param': '', 'matched': False,
+    report = {'caps': [], 'sigs': [], 'params': [], 'param': '', 'matched': False,
               'revision': '', 'counts': {}, 'booted': {}, 'workers': [],
-              'js': [], 'wasm': [], 'worker_src': 0, 'worker_bytes': 0,
-              'confirm': 0, 'why': ''}
+              'js': [], 'wasm': [], 'confirm': 0, 'why': ''}
     # Every script and wasm response off the wire, so worker scripts,
     # importScripts, dynamic-import chunks and .wasm -- none of which the DOM
     # <script src> scan sees -- are named for the derivation to read next.
@@ -1737,75 +1777,37 @@ def capture_param(sample=None, proxy='', timeout=30):
                     report['counts'] = data.get('n', {})
                     report['booted'] = data.get('boot', {})
                     report['workers'] = data.get('workers', [])
-                    # The worker source, not a main-world hash, is the prize:
-                    # break once it (and a second signature) are in hand.
-                    if (report['counts'] or {}).get('wsrc') and confirm:
+                    report['params'] = data.get('params', [])
+                    # The join hook hands us candidate static_params; stop as soon
+                    # as one reproduces the oracle rather than waiting out the clock.
+                    if _match_param(report['params'], oparts, oracle):
                         break
-            # Read the blob-worker sources the hook parked in the DOM and hunt
-            # the literal whose sha1 reproduces the oracle -- that literal is
-            # static_param. The match is against a genuine signature, so a hit
-            # is proof, which is why matched is set without a second lookup.
-            try:
-                srcs = page.evaluate(
-                    "() => Array.from(document.querySelectorAll('script[id^=ofworker]'))"
-                    ".map(e => e.textContent || '')") or []
-            except Exception:
-                srcs = []
-            report['worker_src'] = len(srcs)
-            report['worker_bytes'] = sum(len(s) for s in srcs)
-            # The stubs are tiny; show them so the real signing code they pull
-            # in (importScripts / dynamic import URL) is named, which is what an
-            # in-worker hook must target next.
-            report['worker_texts'] = [s[:2000] for s in srcs]
             report['confirm'] = len(confirm)
             inv = list(sources.values())
-            # The blob workers are tiny stubs; the signing code they pull in
-            # rides the wire as an importScripts/dynamic chunk. The context-level
-            # response inventory sees those worker-initiated fetches -- which the
-            # main-thread-only _LITERALS_JS scan misses -- so scan their bodies
-            # too, alongside the stub sources and any URL a stub names.
-            js_urls = [s['url'] for s in inv if s['kind'] == 'js']
-            for src in srcs:
-                js_urls += re.findall(r'https?://[^\s"\'`)]+\.m?js\b', src)
-            body_literals, seen_stat = _bundle_literals(
-                context, list(dict.fromkeys(js_urls)), marker=(oparts[0] if len(oparts) == 4 else ''))
-            report['scanned'] = seen_stat
-            if len(oparts) == 4 and oracle.get('path'):
-                want = oparts[1]
-                otime = str(oracle.get('time') or '')
-                opath = oracle['path']
-                ouid = str(oracle.get('user_id') or '0')
-                seen_lit = set()
-                for cand in list(body_literals) + [m.group(1) for s in srcs
-                                                   for m in _LITERAL_RE.finditer(s)]:
-                    if cand in seen_lit:
-                        continue
-                    seen_lit.add(cand)
-                    msg = '\n'.join([cand, otime, opath, ouid])
-                    if hashlib.sha1(msg.encode('utf-8')).hexdigest() == want:
-                        report['param'] = cand
-                        report['matched'] = True
-                        report['revision'] = oparts[0]
-                        break
             report['js'] = [s for s in inv if s['kind'] == 'js']
             report['wasm'] = [s for s in inv if s['kind'] == 'wasm']
-            if not report['matched']:
+            # The join hook is the recovery path: a captured this[0] whose sha1
+            # over the oracle's own request reproduces the oracle signature is
+            # static_param, proven against a genuine signature.
+            param = _match_param(report['params'], oparts, oracle)
+            if param:
+                report['param'] = param
+                report['matched'] = True
+                report['revision'] = oparts[0]
+            else:
+                c = report['counts'] or {}
                 if not (len(oparts) == 4 and oracle.get('path')):
                     report['why'] = 'no usable oracle sample to match against'
-                elif report['worker_src'] == 0:
-                    report['why'] = ('no worker source captured (%s workers seen); '
-                                     'the blob may not be same-origin fetchable' %
-                                     len(report['workers']))
+                elif not report['params']:
+                    report['why'] = ('no signing message seen (%s joins, %s xhr, '
+                                     '%s confirm); signing happens before the hook '
+                                     'installs or is not an Array.join' %
+                                     (c.get('join', 0), c.get('xhr', 0),
+                                      report['confirm']))
                 else:
-                    st = report.get('scanned') or {}
-                    report['why'] = ('scanned %s worker stubs (%s bytes) and %s of '
-                                     '%s wire scripts (%s literals); the revision %s '
-                                     'and no literal signs the oracle -- static_param '
-                                     'is built at runtime, not a literal' %
-                                     (report['worker_src'], report['worker_bytes'],
-                                      st.get('ok', 0), st.get('urls', 0),
-                                      st.get('literals', 0),
-                                      'appears' if st.get('marker') else 'is absent'))
+                    report['why'] = ('captured %s join candidates but none signs '
+                                     'the oracle; the message shape differs' %
+                                     len(report['params']))
             return {'capture': report}
         finally:
             try:
