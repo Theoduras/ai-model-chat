@@ -1497,21 +1497,23 @@ _CAPTURE_HOOK = r"""
 (function () {
   if (window.__ofcapOn) return; window.__ofcapOn = 1;
   var caps = [], sigs = [];
+  var n = {digest: 0, encode: 0, fetch: 0, xhr: 0};
   function flush() {
     try {
       document.documentElement.setAttribute(
-        'data-ofcap', JSON.stringify({caps: caps, sigs: sigs}));
+        'data-ofcap', JSON.stringify({caps: caps, sigs: sigs, n: n}));
     } catch (e) {}
   }
-  // The signed message is static_param + "\n" + time + "\n" + path + "\n" + id,
-  // so its plaintext begins with the very param the bundle no longer carries.
-  // We only care about strings that hold the api path; everything else the
-  // encoder sees is skipped so a busy page is not slowed by the hook.
+  // The signed message is static_param + "\n" + time + "\n" + path + "\n" + id.
+  // The path may or may not carry the /api2 prefix, so match on the shape that
+  // is always there -- a newline, a 10-13 digit timestamp, a newline -- rather
+  // than on the path. Counters below say whether any hashing happened at all,
+  // so an empty caps list means "not hashed in the main world", not "filtered".
   function record(s) {
     try {
-      if (typeof s !== 'string' || s.indexOf('/api2') < 0) return;
-      if (s.split('\n').length < 2) return;
-      if (caps.indexOf(s) < 0 && caps.length < 8) { caps.push(s.slice(0, 400)); flush(); }
+      if (typeof s !== 'string') return;
+      if (!/\n\d{10,13}\n/.test(s) && s.indexOf('/api2') < 0) return;
+      if (caps.indexOf(s) < 0 && caps.length < 12) { caps.push(s.slice(0, 400)); flush(); }
     } catch (e) {}
   }
   function asString(d) {
@@ -1521,21 +1523,43 @@ _CAPTURE_HOOK = r"""
       return new TextDecoder().decode(new Uint8Array(d));
     } catch (e) { return ''; }
   }
+  function addSig(v) {
+    try { v = String(v);
+      if (v && sigs.length < 8 && sigs.indexOf(v) < 0) { sigs.push(v.slice(0, 90)); flush(); }
+    } catch (e) {}
+  }
   try {
     var TE = TextEncoder.prototype.encode;
-    TextEncoder.prototype.encode = function (s) { record(s); return TE.apply(this, arguments); };
+    TextEncoder.prototype.encode = function (s) { n.encode++; record(s); return TE.apply(this, arguments); };
   } catch (e) {}
   try {
     if (window.crypto && crypto.subtle && crypto.subtle.digest) {
       var D = crypto.subtle.digest.bind(crypto.subtle);
-      crypto.subtle.digest = function (algo, data) { record(asString(data)); return D(algo, data); };
+      crypto.subtle.digest = function (algo, data) { n.digest++; record(asString(data)); return D(algo, data); };
     }
   } catch (e) {}
   try {
     var SH = XMLHttpRequest.prototype.setRequestHeader;
     XMLHttpRequest.prototype.setRequestHeader = function (k, v) {
-      try { if (String(k).toLowerCase() === 'sign' && sigs.length < 8) { sigs.push(String(v).slice(0, 90)); flush(); } } catch (e) {}
+      n.xhr++;
+      try { if (String(k).toLowerCase() === 'sign') addSig(v); } catch (e) {}
       return SH.apply(this, arguments);
+    };
+  } catch (e) {}
+  // The wire showed signed requests this hook did not, which means the sign
+  // header is set through fetch, not XHR: read it out of the fetch init.
+  try {
+    var F = window.fetch;
+    window.fetch = function (input, init) {
+      n.fetch++;
+      try {
+        var h = init && init.headers;
+        if (h) {
+          if (typeof h.get === 'function') { var s = h.get('sign'); if (s) addSig(s); }
+          else { for (var k in h) if (String(k).toLowerCase() === 'sign') addSig(h[k]); }
+        }
+      } catch (e) {}
+      return F.apply(this, arguments);
     };
   } catch (e) {}
   flush();
@@ -1564,7 +1588,7 @@ def capture_param(proxy='', timeout=30):
     signing is in WASM or a Worker, and the JS route is closed.
     """
     report = {'caps': [], 'sigs': [], 'param': '', 'matched': False,
-              'revision': '', 'why': ''}
+              'revision': '', 'counts': {}, 'why': ''}
     probe = Attempt('', '', proxy=proxy, drive=False)
     with _driver()() as pw:
         context = probe._launch(pw, bypass_csp=True)[1]
@@ -1612,6 +1636,7 @@ def capture_param(proxy='', timeout=30):
                         data = {}
                     report['caps'] = data.get('caps', [])
                     report['sigs'] = data.get('sigs', [])
+                    report['counts'] = data.get('n', {})
                     if report['caps']:
                         break
             for s in report['caps']:
@@ -1630,9 +1655,25 @@ def capture_param(proxy='', timeout=30):
                         report['param'] = cand
                 if report['matched']:
                     break
+            c = report['counts'] or {}
             if not report['caps']:
-                report['why'] = ('nothing sign-shaped was hashed in JS; the '
-                                 'signer is in WASM or a Worker')
+                # Distinguish the real cases: no hashing at all in the main
+                # world (Worker/WASM) versus hashing that happened but did not
+                # look like a signing message, versus signed requests seen on
+                # the wire that this hook still missed (off-main-thread).
+                if report['sigs']:
+                    report['why'] = ('sign headers were seen but their input was '
+                                     'not hashed in the main world; the signer '
+                                     'runs off the main thread')
+                elif (c.get('digest', 0) + c.get('encode', 0)) == 0:
+                    report['why'] = ('no hashing ran in the main world at all '
+                                     '(digest=0, encode=0); the signer is in a '
+                                     'Worker or WASM')
+                else:
+                    report['why'] = ('hashing ran (%s digest, %s encode) but no '
+                                     'input was a signing message; the param may '
+                                     'be hashed as bytes, not text' %
+                                     (c.get('digest', 0), c.get('encode', 0)))
             return {'capture': report}
         finally:
             try:
