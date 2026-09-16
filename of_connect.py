@@ -294,7 +294,16 @@ class Attempt:
             self._watch_instagram(page)
         else:
             self._watch_signing(page)
-        page.goto(self._site['url'], wait_until='domcontentloaded', timeout=60000)
+        try:
+            page.goto(self._site['url'], wait_until='domcontentloaded', timeout=60000)
+        except Exception as e:
+            # A malformed first response (ERR_HTTP_RESPONSE_CODE_FAILURE and
+            # friends) is what an anti-bot edge does to a single suspect
+            # request more often than a real block -- the same address is
+            # frequently let through on the very next try.
+            logger.warning('of-connect %s first navigation failed, retrying: %s',
+                           self.id, str(e)[:160])
+            page.goto(self._site['url'], wait_until='domcontentloaded', timeout=60000)
         # What the window is told to scale by has to be the size of the frames
         # it actually gets. Sizing the window rather than overriding the
         # viewport means the page is a little smaller than we asked for -- the
