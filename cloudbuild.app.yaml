@@ -3,7 +3,7 @@
 # The app's trigger still carries an inline build config, which cannot be read or
 # repaired from a checkout and rebuilds the image from scratch every push: Chrome
 # is re-downloaded and every dependency re-installed even when nothing but a HTML
-# file changed. This is that config moved into version control, with the caching
+# file changed -- it builds with --no-cache, so that is by construction. This is that config moved into version control, with the caching
 # the inline one has no way to express. Point the trigger at this file (Cloud
 # Build configuration file -> /cloudbuild.app.yaml) for any of it to take effect.
 #
@@ -71,12 +71,16 @@ steps:
       - update
       - ${_SERVICE_NAME}
       - --image=${_AR_HOSTNAME}/$PROJECT_ID/${_AR_REPOSITORY}/$REPO_NAME/${_SERVICE_NAME}:$COMMIT_SHA
+      # The labels the managed trigger set; they are what the Cloud Run console
+      # reads to show this service as continuously deployed.
+      - --labels=managed-by=gcp-cloud-build-deploy-cloud-run,commit-sha=$COMMIT_SHA,gcb-build-id=$BUILD_ID,gcb-trigger-id=${_TRIGGER_ID}
       - --region=${_DEPLOY_REGION}
       - --platform=managed
       - --quiet
 
 substitutions:
   _SERVICE_NAME: ai-model-chat-dev
+  _TRIGGER_ID: 5a10684b-0a2e-49ee-ada0-925737ef49f4
   _DEPLOY_REGION: europe-west4
   _AR_HOSTNAME: europe-west4-docker.pkg.dev
   _AR_REPOSITORY: cloud-run-source-deploy
