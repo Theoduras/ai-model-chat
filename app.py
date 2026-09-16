@@ -7169,6 +7169,36 @@ def _growth_bio_state(persona):
         return {}
 
 
+def _platform_ratings(persona):
+    try:
+        raw = json.loads(_get_setting(f'platform_ratings_{persona}') or '{}')
+        return raw if isinstance(raw, dict) else {}
+    except Exception:
+        return {}
+
+
+def _content_level_for(persona, platform):
+    cfg = _normalize_persona(load_persona_config(persona) or {})
+    return growth.content_level(_platform_ratings(persona), platform,
+                                cfg.get('nsfw_enabled'), cfg.get('nsfw_level'))
+
+
+def _content_level_note(persona, platform):
+    enabled, level = _content_level_for(persona, platform)
+    clause = growth.content_level_clause(enabled, level)
+    return f'\n\nContent level: {clause}' if clause else ''
+
+
+def _draft_link(persona, platform):
+    """The tracked per-channel link, when the platform's own brief allows a
+    bare link in the caption at all — Instagram/TikTok say "link in bio"
+    instead, and Reddit's brief bars a link outright."""
+    if platform == 'reddit':
+        return ''
+    origin = _site_origin().rstrip('/')
+    return f'{origin}/go/{persona}/{platform}' if origin else ''
+
+
 def _growth_plan_draft(persona, platform, kind, idea):
     """One post for one slot: the platform's own brief, plus what this slot is
     for. Re-rolled once if it reads as a rewrite of something already posted."""
@@ -7178,20 +7208,23 @@ def _growth_plan_draft(persona, platform, kind, idea):
         f'{idea}. The job of this post is {growth.MIX_BRIEF[kind]} It must be '
         f'{spec["brief"]}. Stay under {spec["cap"]} characters. Return only the '
         'post itself, no preamble and no quotes.'
+        + _content_level_note(persona, platform)
         + _no_repeat_block(persona, platform))
-    text = growth.trim_post(platform, _persona_text(
-        persona, instruction, max_tokens=500, temperature=1.0))
+    link = _draft_link(persona, platform) if platform in growth.PUBLISHABLE else ''
+    cap = spec['cap'] - (len(link) + 2 if link else 0)
+    text = growth.trim_to(_persona_text(
+        persona, instruction, max_tokens=500, temperature=1.0), max(cap, 0))
     if text and _reads_as_repeat(persona, platform, text):
         _content_repeat_blocked(persona, platform)
         try:
-            text = growth.trim_post(platform, _persona_text(
+            text = growth.trim_to(_persona_text(
                 persona,
                 instruction + '\n\nYour last attempt was a rewrite of one of '
                 'those. Pick a different angle entirely.',
-                max_tokens=500, temperature=1.0)) or text
+                max_tokens=500, temperature=1.0), max(cap, 0)) or text
         except Exception:
             pass
-    return text
+    return f'{text}\n\n{link}' if link and text else text
 
 
 @app.route('/api/growth/plan', methods=['POST'])
@@ -7406,25 +7439,37 @@ def api_growth_drafts():
             f'Write ONE {spec["label"]} post as yourself, in character, about: '
             f'{idea}. It must be {spec["brief"]}. Stay under {spec["cap"]} '
             'characters. Return only the post itself, no preamble and no quotes.'
+            + _content_level_note(persona, plat)
             + _no_repeat_block(persona, plat))
+        # X and Threads render a bare link as clickable, so it rides in the
+        # caption; Instagram and TikTok already say "link in bio" in their own
+        # brief, so pasting a raw URL there would contradict what was just
+        # generated — those get the link back separately for the operator to
+        # place themselves. Reddit's brief bars a link outright.
+        inline = plat in growth.PUBLISHABLE
+        link = _draft_link(persona, plat)
+        budget = spec['cap'] - (len(link) + 2 if inline and link else 0)
         try:
-            text = growth.trim_post(plat, _persona_text(
-                persona, instruction, max_tokens=500, temperature=1.0))
+            text = growth.trim_to(_persona_text(
+                persona, instruction, max_tokens=500, temperature=1.0), max(budget, 0))
         except Exception as e:
             out.append({'platform': plat, 'label': spec['label'], 'text': '',
-                        'error': str(e)[:200]})
+                        'link': '', 'error': str(e)[:200]})
             continue
         if text and _reads_as_repeat(persona, plat, text):
             _content_repeat_blocked(persona, plat)
             try:
-                text = growth.trim_post(plat, _persona_text(
+                text = growth.trim_to(_persona_text(
                     persona,
                     instruction + '\n\nYour last attempt was a rewrite of one of '
                     'those. Pick a different angle entirely.',
-                    max_tokens=500, temperature=1.0)) or text
+                    max_tokens=500, temperature=1.0), max(budget, 0)) or text
             except Exception:
                 pass
+        if inline and link and text:
+            text = f'{text}\n\n{link}'
         out.append({'platform': plat, 'label': spec['label'], 'text': text,
+                    'link': '' if inline else link,
                     'cap': spec['cap'], 'publishable': plat in growth.PUBLISHABLE})
     return jsonify({'ok': True, 'persona': persona, 'idea': idea, 'drafts': out,
                     'beta': _growth_on(persona)})
@@ -7671,6 +7716,36 @@ def _record_click(persona, source, kind, target, fan_key=''):
             sdb.close()
     except Exception as e:
         logger.warning('click not recorded [%s/%s]: %s', persona, source, str(e)[:200])
+
+
+@app.route('/api/growth/content-levels', methods=['GET', 'POST'])
+@operator_only
+def api_growth_content_levels():
+    """Per-platform overrides of the persona's NSFW setting, read by the
+    caption generator only — chat keeps using the global value regardless."""
+    data = request.json or {} if request.method == 'POST' else {}
+    persona = ((data.get('persona') if request.method == 'POST'
+                else request.args.get('persona')) or '').strip()
+    if not re.match(r'^[a-z0-9_-]+$', persona or ''):
+        return jsonify({'error': 'Invalid slug'}), 400
+
+    overrides = _platform_ratings(persona)
+    if request.method == 'POST':
+        overrides = growth.clean_ratings(data.get('levels') or {}, overrides)
+        _set_setting(f'platform_ratings_{persona}', json.dumps(overrides))
+
+    cfg = _normalize_persona(load_persona_config(persona) or {})
+    rows = []
+    for plat, spec in growth.POST_PLATFORMS.items():
+        enabled, level = growth.content_level(overrides, plat,
+                                              cfg.get('nsfw_enabled'), cfg.get('nsfw_level'))
+        rows.append({'platform': plat, 'label': spec['label'],
+                    'configured': overrides.get(plat), 'locked': plat in growth.SFW_LOCKED,
+                    'resolved': {'nsfw_enabled': enabled, 'nsfw_level': level}})
+    return jsonify({'ok': True, 'persona': persona, 'levels': rows,
+                    'kinds': list(growth.RATING_LEVELS),
+                    'global': {'nsfw_enabled': cfg.get('nsfw_enabled'),
+                               'nsfw_level': cfg.get('nsfw_level')}})
 
 
 @app.route('/api/growth/routes', methods=['GET', 'POST'])

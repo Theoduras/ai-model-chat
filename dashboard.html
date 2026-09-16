@@ -2011,6 +2011,14 @@ function renderForm(slug, cfg) {
 
       <div style="margin-top:14px;">
         <div class="section-title" style="font-size:0.8rem;">
+          Content level
+          <button type="button" class="btn-section-save" onclick="loadGrowthContentLevels()">Refresh</button>
+        </div>
+        <span class="hint">Overrides the global NSFW setting for one channel's captions only — chat keeps using the global level. TikTok is locked to safe-for-work no matter what is set here.</span>
+        <div id="growth-content-levels" class="hint" style="margin-top:8px;">—</div>
+      </div>
+      <div style="margin-top:14px;">
+        <div class="section-title" style="font-size:0.8rem;">
           Tagged links
           <button type="button" class="btn-section-save" onclick="loadGrowthLinks()">Refresh</button>
         </div>
@@ -2820,6 +2828,7 @@ async function loadGrowth() {
     }
   } catch (e) {}
   await loadGrowthSources();
+  await loadGrowthContentLevels();
   await loadGrowthLinks();
   await loadGrowthBio();
   await loadGrowthCta();
@@ -2910,6 +2919,53 @@ async function copyLink(btn) {
 }
 
 const ROUTE_WORD = { chat: 'the chat', paid: 'the paid page', trial: 'the free trial' };
+
+async function loadGrowthContentLevels() {
+  const box = document.getElementById('growth-content-levels');
+  if (!box || !currentSlug) return;
+  let d;
+  try {
+    d = await (await fetch('/api/growth/content-levels?persona=' + encodeURIComponent(currentSlug))).json();
+  } catch (e) { box.textContent = 'Could not read the content levels.'; return; }
+  if (!d || !d.ok) { box.textContent = 'Could not read the content levels.'; return; }
+
+  const kindOpts = k => '<option value="">default (matches global)</option>'
+    + d.kinds.map(k2 => '<option value="' + esc(k2) + '"'
+      + ((k.configured || {}).nsfw_level === k2 ? ' selected' : '') + '>' + esc(k2) + '</option>').join('');
+
+  box.innerHTML = d.levels.map(row => {
+    const on = row.configured ? row.configured.nsfw_enabled : false;
+    return '<div style="margin-bottom:8px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;" data-level-row="' + esc(row.platform) + '">'
+      + '<strong style="min-width:80px;">' + esc(row.label) + '</strong>'
+      + (row.locked
+          ? '<span style="opacity:0.6;">locked to safe-for-work</span>'
+          : '<label style="display:flex; gap:4px; align-items:center;">'
+            + '<input type="checkbox" data-level-on' + (on ? ' checked' : '') + ' onchange="saveGrowthContentLevel(this)"> enabled</label>'
+            + '<select data-level-kind onchange="saveGrowthContentLevel(this)" style="width:auto; font-size:0.78rem; padding:3px 6px;">'
+            + kindOpts(row) + '</select>'
+            + '<span style="opacity:0.5;">resolves to: ' + esc(row.resolved.nsfw_enabled ? row.resolved.nsfw_level : 'off') + '</span>')
+      + '</div>';
+  }).join('');
+}
+
+async function saveGrowthContentLevel(el) {
+  const row = el.closest('[data-level-row]');
+  const plat = row.dataset.levelRow;
+  const on = row.querySelector('[data-level-on]').checked;
+  const level = row.querySelector('[data-level-kind]').value || 'suggestive';
+  el.disabled = true;
+  try {
+    const res = await fetch('/api/growth/content-levels', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ persona: currentSlug,
+        levels: { [plat]: on || level ? { nsfw_enabled: on, nsfw_level: level } : null } })
+    });
+    const d = await res.json();
+    if (!d.ok) { alert(d.error || 'Could not save it.'); return; }
+    loadGrowthContentLevels();
+  } catch (e) { alert('Could not save it.'); }
+  finally { el.disabled = false; }
+}
 
 async function loadGrowthLinks() {
   const box = document.getElementById('growth-links');
