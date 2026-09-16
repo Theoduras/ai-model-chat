@@ -26,18 +26,19 @@ class FakeRest:
     def me(self):
         return {'pk': self.user_id, 'username': self.username}
 
-    def _record(self, target_kind, media_kind, caption):
+    def _record(self, target_kind, media_kind, caption, width=0, height=0, duration_ms=0):
         row = {'id': str(next(_ids)), 'target': target_kind,
                'media_kind': media_kind, 'caption': caption,
+               'width': width, 'height': height, 'duration_ms': duration_ms,
                'at': time.time()}
         self.posted.append(row)
         return row
 
-    def post_feed(self, media_bytes, kind, caption=''):
-        return self._record('post', kind, caption)
+    def post_feed(self, media_bytes, kind, caption='', width=0, height=0, duration_ms=0):
+        return self._record('post', kind, caption, width, height, duration_ms)
 
-    def post_story(self, media_bytes, kind, caption=''):
-        return self._record('story', kind, caption)
+    def post_story(self, media_bytes, kind, caption='', width=0, height=0, duration_ms=0):
+        return self._record('story', kind, caption, width, height, duration_ms)
 
-    def post_reel(self, media_bytes, caption=''):
-        return self._record('reel', 'video', caption)
+    def post_reel(self, media_bytes, caption='', width=0, height=0, duration_ms=0):
+        return self._record('reel', 'video', caption, width, height, duration_ms)

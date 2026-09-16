@@ -21616,7 +21616,7 @@ def _ig_media_bytes(media):
         raise ValueError('That file could not be read.')
 
 
-def _ig_post_now(persona, kind, media, caption, brief=''):
+def _ig_post_now(persona, kind, media, caption, brief='', width=0, height=0, duration_ms=0):
     kind = (kind or '').strip().lower()
     if kind not in IG_KINDS:
         raise ValueError('kind must be post, story or reel')
@@ -21629,17 +21629,23 @@ def _ig_post_now(persona, kind, media, caption, brief=''):
         # definition, and there is no AI video generation in this app yet to
         # fall back to, so an upload is the only path until there is.
         raise ValueError('A Reel needs a video file.')
+    if media_kind == 'video' and not duration_ms:
+        # Instagram's video configure calls reject a zero/missing duration
+        # with "Missing info." — the browser reads the real numbers off the
+        # file before this ever reaches us, so their absence means the
+        # console's own video-metadata read failed, not that they're optional.
+        raise ValueError('Could not read that video\'s length — try picking it again.')
     caption = (caption or '').strip()[:growth.POST_PLATFORMS['instagram']['cap']]
     if not caption:
         caption = _ig_caption(persona, kind, brief)
     rest = IR.Rest(session)
     try:
         if kind == 'post':
-            result = rest.post_feed(media_bytes, media_kind, caption)
+            result = rest.post_feed(media_bytes, media_kind, caption, width, height, duration_ms)
         elif kind == 'story':
-            result = rest.post_story(media_bytes, media_kind, caption)
+            result = rest.post_story(media_bytes, media_kind, caption, width, height, duration_ms)
         else:
-            result = rest.post_reel(media_bytes, caption)
+            result = rest.post_reel(media_bytes, caption, width, height, duration_ms)
     except IR.InstagramApiError as e:
         raise ValueError('Instagram would not accept that post'
                          + (f': {e.detail[:160]}' if e.detail else '.'))
@@ -21809,10 +21815,17 @@ def api_instagram_connect_cancel():
 def api_instagram_post_now():
     persona = request_persona()
     d = request.json or {}
+    def _num(v):
+        try:
+            return max(0, int(v))
+        except (TypeError, ValueError):
+            return 0
     try:
         result = _ig_post_now(persona, d.get('kind'), d.get('media') or '',
                               d.get('caption') or '',
-                              (d.get('brief') or '').strip()[:400])
+                              (d.get('brief') or '').strip()[:400],
+                              _num(d.get('width')), _num(d.get('height')),
+                              _num(d.get('duration_ms')))
     except ValueError as e:
         return jsonify({'ok': False, 'error': str(e)[:250]}), 400
     except Exception as e:

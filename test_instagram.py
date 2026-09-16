@@ -71,10 +71,21 @@ def test_a_reel_needs_a_video():
     check('a reel posted with a photo is refused rather than silently posted',
           threw)
 
-    result = app._ig_post_now('lilly', 'reel', _VIDEO_URL, '', '')
-    check('a reel with a video goes through', result['kind'] == 'reel')
+    threw = False
+    try:
+        app._ig_post_now('lilly', 'reel', _VIDEO_URL, '', '')
+    except ValueError as e:
+        threw = 'length' in str(e).lower()
+    check('a video with no duration read off it is refused, not posted with a zero length',
+          threw)
+
+    result = app._ig_post_now('lilly', 'reel', _VIDEO_URL, '', '', 1080, 1920, 8000)
+    check('a reel with a video and its real dimensions goes through', result['kind'] == 'reel')
     check('it lands on the reel path, not the feed or story one',
           fake.posted[-1]['target'] == 'reel', fake.posted)
+    check('the real width/height/duration reach the transport, not zeros',
+          (fake.posted[-1]['width'], fake.posted[-1]['height'], fake.posted[-1]['duration_ms'])
+          == (1080, 1920, 8000), fake.posted[-1])
 
 
 def test_kinds_route_to_the_right_call():

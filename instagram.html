@@ -138,7 +138,7 @@ function slug(){return el('persona').value;}
 async function api(path,opts){const r=await fetch(path,opts);let j={};try{j=await r.json();}catch(e){}
   if(!r.ok) throw new Error(j.error||('request failed ('+r.status+')'));return j;}
 
-let mediaDataUrl='', mounted=false, lastStatus={};
+let mediaDataUrl='', mounted=false, lastStatus={}, mediaW=0, mediaH=0, mediaDurationMs=0;
 
 async function init(){
   const list=await (await fetch('/api/personas')).json();
@@ -149,7 +149,7 @@ async function init(){
 }
 
 async function loadAll(){
-  mediaDataUrl='';
+  mediaDataUrl='';mediaW=0;mediaH=0;mediaDurationMs=0;
   el('ig-preview').style.display='none';
   await loadStatus();
   if(mounted) PlatformConsole.reset();
@@ -207,6 +207,17 @@ function onKindChange(){
 function onFilePicked(ev){
   const f=ev.target.files[0];
   if(!f)return;
+  mediaW=0;mediaH=0;mediaDurationMs=0;
+  if(f.type.startsWith('video/')){
+    const v=document.createElement('video');
+    v.preload='metadata';
+    v.onloadedmetadata=()=>{
+      mediaW=v.videoWidth||0;mediaH=v.videoHeight||0;
+      mediaDurationMs=Math.round((v.duration||0)*1000);
+      URL.revokeObjectURL(v.src);
+    };
+    v.src=URL.createObjectURL(f);
+  }
   const reader=new FileReader();
   reader.onload=()=>{mediaDataUrl=reader.result;showPreview();};
   reader.readAsDataURL(f);
@@ -229,7 +240,7 @@ async function generateImage(){
     const data=await api('/api/generate/image',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({config:persona.config,shot:'portrait'})});
     if(!data.ok||!data.image) throw new Error(data.error||'No image came back.');
-    mediaDataUrl=data.image;
+    mediaDataUrl=data.image;mediaW=0;mediaH=0;mediaDurationMs=0;
     showPreview();
     note(box,'Photo generated below. Post now when ready.');
   }catch(e){note(box,e.message,true);}
@@ -242,7 +253,8 @@ async function postNow(){
   try{
     const r=await api('/api/instagram/post-now',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({persona:slug(),kind:el('ig-kind').value,
-        caption:el('ig-caption').value,brief:el('ig-brief').value,media:mediaDataUrl})});
+        caption:el('ig-caption').value,brief:el('ig-brief').value,media:mediaDataUrl,
+        width:mediaW,height:mediaH,duration_ms:mediaDurationMs})});
     note(box,'Posted. '+(r.caption?('Caption: '+r.caption):''));
     await loadTrace();
   }catch(e){note(box,e.message,true);}

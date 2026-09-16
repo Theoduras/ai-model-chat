@@ -161,12 +161,15 @@ class Rest:
     def me(self):
         return self.call('GET', f'{self.base}/accounts/current_user/?edit=true')
 
-    def _upload(self, media_bytes, kind):
+    def _upload(self, media_bytes, kind, width=0, height=0, duration_ms=0):
         """Hand over the bytes, get back an upload_id to configure into a post.
 
         One name, one set of rupload params — the shape every Instagram client
         uses whether the post ends up in the feed, a story or a reel; what
-        differs is the configure call afterward.
+        differs is the configure call afterward. width/height/duration_ms are
+        the real values for a video (read in the browser, not guessed here) —
+        Instagram's clips/story configure calls reject zeros with "Missing
+        info.", the same way a Reel with no length does.
         """
         upload_id = str(int(time.time() * 1000))
         is_video = kind == 'video'
@@ -174,9 +177,9 @@ class Rest:
         path = PATH_UPLOAD_VIDEO if is_video else PATH_UPLOAD_PHOTO
         url = f'{INSTAGRAM_WEB}{path}{name}'
         params = {'media_type': 2 if is_video else 1, 'upload_id': upload_id,
-                  'upload_media_height': 0, 'upload_media_width': 0}
+                  'upload_media_height': int(height or 0), 'upload_media_width': int(width or 0)}
         if is_video:
-            params['upload_media_duration_ms'] = 0
+            params['upload_media_duration_ms'] = int(duration_ms or 0)
         headers = {
             'X-Entity-Name': name,
             'X-Entity-Length': str(len(media_bytes)),
@@ -188,20 +191,29 @@ class Rest:
         self.call('POST', url, body=media_bytes, headers=headers, raw=True)
         return upload_id
 
-    def post_feed(self, media_bytes, kind, caption=''):
-        upload_id = self._upload(media_bytes, kind)
+    def post_feed(self, media_bytes, kind, caption='', width=0, height=0, duration_ms=0):
+        upload_id = self._upload(media_bytes, kind, width, height, duration_ms)
         body = {'upload_id': upload_id, 'caption': caption or '',
                 'source_type': '4'}
         return self.call('POST', f'{self.base}{PATH_CONFIGURE_FEED}', body=body)
 
-    def post_story(self, media_bytes, kind, caption=''):
-        upload_id = self._upload(media_bytes, kind)
+    def post_story(self, media_bytes, kind, caption='', width=0, height=0, duration_ms=0):
+        upload_id = self._upload(media_bytes, kind, width, height, duration_ms)
         body = {'upload_id': upload_id, 'caption': caption or '',
                 'source_type': '4', 'configure_mode': 1}
+        if kind == 'video' and duration_ms:
+            body['length'] = round(duration_ms / 1000, 3)
         return self.call('POST', f'{self.base}{PATH_CONFIGURE_STORY}', body=body)
 
-    def post_reel(self, media_bytes, caption=''):
-        upload_id = self._upload(media_bytes, 'video')
+    def post_reel(self, media_bytes, caption='', width=0, height=0, duration_ms=0):
+        upload_id = self._upload(media_bytes, 'video', width, height, duration_ms)
+        length = round((duration_ms or 0) / 1000, 3)
         body = {'upload_id': upload_id, 'caption': caption or '',
-                'source_type': '4'}
+                'source_type': '4', 'length': length,
+                'clips': [{'length': length, 'source_type': '4'}],
+                'poster_frame_index': 0, 'audio_muted': False}
+        if width and height:
+            body['width'] = int(width)
+            body['height'] = int(height)
+            body['extra'] = {'source_width': int(width), 'source_height': int(height)}
         return self.call('POST', f'{self.base}{PATH_CONFIGURE_REEL}', body=body)
