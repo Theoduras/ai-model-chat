@@ -797,14 +797,36 @@ def start(persona, account, proxy='', user_agent='', viewport=None):
     return attempt
 
 
+# Attempts already reported missing, so the report is made once each rather
+# than once per poll. Bounded: an id that stops being asked for stops mattering.
+_missed = collections.OrderedDict()
+MISS_RELOG = 60
+MISS_REMEMBERED = 50
+
+
+def _say_missed(attempt_id):
+    now = time.time()
+    with _lock:
+        if now - _missed.get(attempt_id, 0.0) < MISS_RELOG:
+            return False
+        _missed[attempt_id] = now
+        _missed.move_to_end(attempt_id)
+        while len(_missed) > MISS_REMEMBERED:
+            _missed.popitem(last=False)
+    return True
+
+
 def get(attempt_id, frame=False):
     # `frame` is for the browser service, which fetches the picture in the same
     # round trip rather than a second one. In this process it is already here.
     with _lock:
         attempt = _attempts.get(attempt_id)
     # The creator sees a miss as 'that sign-in is no longer open', and the only
-    # way to tell which of the three ways it went is to have said so at the time.
-    if not attempt and attempt_id:
+    # way to tell which of the three ways it went is to have said so at the
+    # time. Once, though: the window polls a frame four times a second and its
+    # status alongside, so a sign-in that ended left seventy identical lines a
+    # second in the log everyone reads to find out what happened.
+    if not attempt and attempt_id and _say_missed(attempt_id):
         logger.info('of-connect %s asked for and not here; holding %s',
                     attempt_id, sorted(_attempts))
     return attempt

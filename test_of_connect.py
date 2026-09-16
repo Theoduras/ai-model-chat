@@ -4,6 +4,7 @@ import os
 import queue
 import threading
 import time
+import logging
 import unittest
 from unittest import mock
 
@@ -403,6 +404,28 @@ class ConnectDuringARotationTest(unittest.TestCase):
         self.assertEqual(a.capture_note, 'no_user_id')
 
 
+class MissingAttemptTest(unittest.TestCase):
+    """The window polls a dead sign-in several times a second."""
+
+    def setUp(self):
+        of_connect._missed.clear()
+
+    def test_a_missing_attempt_is_reported_once_not_once_per_poll(self):
+        with self.assertLogs('of_connect', level='INFO') as caught:
+            for _ in range(40):
+                self.assertIsNone(of_connect.get('ofc_gone'))
+            logging.getLogger('of_connect').info('end of test')
+        said = [line for line in caught.output if 'asked for and not here' in line]
+        self.assertEqual(len(said), 1)
+
+    def test_a_different_attempt_is_still_reported(self):
+        with self.assertLogs('of_connect', level='INFO') as caught:
+            of_connect.get('ofc_one')
+            of_connect.get('ofc_two')
+        said = [line for line in caught.output if 'asked for and not here' in line]
+        self.assertEqual(len(said), 2)
+
+
 if __name__ == '__main__':
     unittest.main()
 
@@ -670,3 +693,4 @@ class ProbeScanTest(unittest.TestCase):
     def test_pictures_and_html_are_never_read(self):
         for kind in ('image/webp', 'text/html', 'font/woff2', ''):
             self.assertFalse(of_connect.worth_reading(kind, 1000), kind)
+
