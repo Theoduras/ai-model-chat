@@ -11259,6 +11259,15 @@ def api_x_dm_debug():
     # back short, ?with=@handle asks X for that one conversation directly: a
     # message X will not put in the feed (a request from someone she does not
     # follow) can still be there.
+    try:
+        bare, bare_meta = _x_paged(
+            persona, '/dm_events?dm_event.fields=id,text,sender_id,created_at&max_results=100')
+        out['unfiltered_count'] = len(bare)
+        out['unfiltered_meta'] = bare_meta
+        out['unfiltered_senders'] = sorted({e.get('sender_id', '') for e in bare})
+    except Exception as e:
+        out['unfiltered_error'] = str(e)[:300]
+
     who = (request.args.get('with') or '').strip()
     if who:
         try:
@@ -11281,7 +11290,14 @@ def api_x_dm_debug():
             out['with_error'] = str(e)[:300]
 
     with_incoming = [e for e in out.get('with_events') or [] if not e['mine']]
-    if with_incoming and not [e for e in out['events'] if not e['mine']]:
+    if out.get('with') and not out.get('with_events') and not out.get('with_error'):
+        out['verdict'] = (
+            f"X serves no events for the conversation with @{out['with']['username']} — no "
+            'rows, no error, no pagination — while the same token reads other '
+            'conversations. Compare unfiltered_count below: if that is also short, X is '
+            'withholding the messages rather than this code dropping them, and the next '
+            "thing to check is the app's access tier in the X developer portal.")
+    elif with_incoming and not [e for e in out['events'] if not e['mine']]:
         out['verdict'] = ('That conversation has incoming messages X will serve directly but '
                           'leaves out of the account-wide feed the round reads — see '
                           'with_events. Accepting the message request on x.com once puts it '
