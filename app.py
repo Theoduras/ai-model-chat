@@ -1614,6 +1614,7 @@ def _current_user():
             status = 'expired'
         return {'id': u.id, 'email': u.email, 'name': u.name, 'tier': tier,
                 'status': status, 'role': role, 'avatar': bool(u.avatar),
+                'onlyfans_grandfathered': bool(owner.onlyfans_grandfathered),
                 'workspace_id': ws.id if ws is not None else u.id,
                 'workspace_name': (ws.name if ws is not None else '') or owner.email,
                 'workspace_owner_id': owner.id,
@@ -1825,7 +1826,14 @@ def user_capabilities(user):
         return dict(UNLIMITED_CAPS)
     if user.get('status') != 'active':
         return dict(DENIED_CAPS)
-    return tier_capabilities(user.get('tier'))
+    caps = tier_capabilities(user.get('tier'))
+    # OnlyFans is Pro and up, except for accounts that already had it connected
+    # when it moved: taking it off them would disconnect a live account.
+    plats = caps.get('platforms')
+    if (user.get('onlyfans_grandfathered') and isinstance(plats, list)
+            and 'onlyfans' not in plats):
+        caps['platforms'] = plats + ['onlyfans']
+    return caps
 
 
 def _is_demo(user):
