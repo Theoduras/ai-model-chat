@@ -5011,12 +5011,17 @@ def api_inbox():
     try:
         if not fan_key:
             fans = []
+            phases = _phases(persona)
+            records = _x_fans(persona) if platform == 'x' else {}
             for c in list_conversations(s, persona, meta['prefixes'], limit=200):
+                rec = records.get(str(c['x_user_id'])) or {}
+                idx = _fan_phase(phases, rec) if rec else 0
                 fans.append({
                     'key': c['x_user_id'], 'handle': c['x_username'] or '',
                     'last': (c['last'] or '')[:120], 'last_dir': c['last_dir'] or '',
                     'count': c['count'],
                     'at': int(c['time'].timestamp()) if c['time'] else 0,
+                    'phase': (phases[min(idx, len(phases) - 1)] or {}).get('name', ''),
                     # A fan whose newest message is theirs is still waiting.
                     'waiting': (c['last_dir'] or '') == 'in',
                 })
@@ -7659,17 +7664,6 @@ def _draft_media_note(has_image):
             'there.')
 
 
-def _draft_link(persona, platform):
-    """The tracked per-channel link, when the platform's own brief allows a
-    bare link in the caption at all — Instagram/TikTok say "link in bio"
-    instead, and Reddit's brief bars a link outright."""
-    plat = growth.base_platform(platform)
-    if plat == 'reddit':
-        return ''
-    origin = _site_origin().rstrip('/')
-    return f'{origin}/go/{persona}/{plat}' if origin else ''
-
-
 def _series_note(series):
     """The half of a two-part story this post is, when it is one at all."""
     brief = growth.SERIES_BRIEF.get(growth.series_part(series))
@@ -7687,8 +7681,7 @@ def _growth_plan_draft(persona, platform, kind, idea):
         'post itself, no preamble and no quotes.'
         + _content_level_note(persona, platform)
         + _no_repeat_block(persona, platform))
-    link = _draft_link(persona, platform) if platform in growth.PUBLISHABLE else ''
-    cap = spec['cap'] - (len(link) + 2 if link else 0)
+    cap = spec['cap']
     text = growth.trim_to(_persona_text(
         persona, instruction, max_tokens=500, temperature=1.0), max(cap, 0))
     if text and _reads_as_repeat(persona, platform, text):
@@ -7701,7 +7694,7 @@ def _growth_plan_draft(persona, platform, kind, idea):
                 max_tokens=500, temperature=1.0), max(cap, 0)) or text
         except Exception:
             pass
-    return f'{text}\n\n{link}' if link and text else text
+    return text
 
 
 @app.route('/api/growth/plan', methods=['POST'])
@@ -7972,14 +7965,7 @@ def api_growth_drafts():
             + media_note
             + _content_level_note(persona, plat, rating)
             + _no_repeat_block(persona, base))
-        # X and Threads render a bare link as clickable, so it rides in the
-        # caption; Instagram and TikTok already say "link in bio" in their own
-        # brief, so pasting a raw URL there would contradict what was just
-        # generated — those get the link back separately for the operator to
-        # place themselves. Reddit's brief bars a link outright.
-        inline = plat in growth.PUBLISHABLE
-        link = _draft_link(persona, plat)
-        budget = spec['cap'] - (len(link) + 2 if inline and link else 0)
+        budget = spec['cap']
         overlay_wanted = growth.wants_overlay(plat)
         if overlay_wanted:
             instruction += growth.OVERLAY_BRIEF
@@ -8006,10 +7992,8 @@ def api_growth_drafts():
                     overlay, text = head, body
             except Exception:
                 pass
-        if inline and link and text:
-            text = f'{text}\n\n{link}'
         out.append({'platform': plat, 'label': spec['label'], 'text': text,
-                    'link': '' if inline else link, 'overlay': overlay,
+                    'link': '', 'overlay': overlay,
                     'cap': spec['cap'], 'publishable': plat in growth.PUBLISHABLE})
     return jsonify({'ok': True, 'persona': persona, 'idea': idea, 'drafts': out,
                     'rating': rating, 'saw_media': bool(picture),
@@ -9305,8 +9289,9 @@ _X_403_HINTS = (
     ('unsupported authentication', 'reconnect the account with OAuth 2.0'),
     # X answers a write from a read-only app with the bare word "Forbidden" and
     # no JSON, so the token looks fine and only the app's permission is wrong.
-    ('forbidden', 'set your X app to Read and write in the developer portal, '
-                  'then reconnect the account so the token picks it up'),
+    ('forbidden', 'the app is read-only or not attached to a Project in the '
+                  'developer portal — check the consent screen offers "Post '
+                  'and repost for you", and reconnect after changing it'),
 )
 
 
@@ -9494,10 +9479,18 @@ def _x_http_error(e):
             detail = raw[:200]
     if e.code == 403 and detail:
         low = detail.lower()
-        for needle, hint in _X_403_HINTS:
-            if needle in low:
-                detail = f'{detail} ({hint})'
-                break
+        # Posting and media upload are separate endpoints with separate plan
+        # entitlements, and a bare "Forbidden" from either reads identically —
+        # but the app-permission advice only ever applies to the post.
+        if 'media/upload' in (getattr(e, 'url', '') or ''):
+            detail = (f'{detail} (media upload is not included in the free X '
+                      f'API tier — post without the photo, or move to a paid '
+                      f'plan)')
+        else:
+            for needle, hint in _X_403_HINTS:
+                if needle in low:
+                    detail = f'{detail} ({hint})'
+                    break
     return XApiError(e, detail.strip(), body)
 
 
@@ -9966,6 +9959,50 @@ def _x_state_get(persona, name, default):
 
 def _x_state_set(persona, name, data):
     _set_setting(_x_state_key(persona, name), json.dumps(data))
+
+
+# Daily ceilings for the unattended loop. X suspends accounts that act like a
+# script, and a round that runs itself every 15 minutes has no operator watching
+# the totals. A cap of 0 blocks that action for the rest of the day; a negative
+# cap means no ceiling.
+X_DAILY_CAP_DEFAULTS = {'dms': 40, 'follows': 40, 'comments': 30,
+                        'likes': 100, 'posts': 4}
+
+
+def _x_daily_counts(persona):
+    """Today's action tally, keyed by UTC date so it rolls over by itself."""
+    row = _x_state_get(persona, 'daily', {})
+    if row.get('date') != datetime.now(timezone.utc).strftime('%Y-%m-%d'):
+        return {}
+    counts = row.get('counts')
+    return counts if isinstance(counts, dict) else {}
+
+
+def _x_daily_count(persona, kind):
+    return int(_x_daily_counts(persona).get(kind, 0) or 0)
+
+
+def _x_daily_bump(persona, kind, n=1):
+    if n <= 0:
+        return
+    today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    row = _x_state_get(persona, 'daily', {})
+    if row.get('date') != today or not isinstance(row.get('counts'), dict):
+        row = {'date': today, 'counts': {}}
+    row['counts'][kind] = int(row['counts'].get(kind, 0) or 0) + int(n)
+    _x_state_set(persona, 'daily', row)
+
+
+def _x_daily_left(caps, persona, kind):
+    """How many more of `kind` this persona may do today. None means no ceiling."""
+    cap = (caps or {}).get(kind, X_DAILY_CAP_DEFAULTS.get(kind, 0))
+    try:
+        cap = int(cap)
+    except Exception:
+        cap = X_DAILY_CAP_DEFAULTS.get(kind, 0)
+    if cap < 0:
+        return None
+    return max(0, cap - _x_daily_count(persona, kind))
 
 
 def _x_save_history(persona, other_id, entries):
@@ -11316,42 +11353,49 @@ def api_x_chat_up():
         return jsonify({'ok': False, 'error': str(e)[:200]}), 400
 
 
-@app.route('/api/x/auto-run', methods=['POST'])
-@platform_scoped
-def api_x_auto_run():
-    """Run one autonomous engagement round as a persona, mirroring the manual
-    flow: keep existing DMs going, reply to a post's comments, then find new
-    people and chat them up (optionally following them first). The frontend
-    calls this on a loop so the bot keeps finding new chats.
-    Body: {persona, query, post, new_chat_limit, comment_limit, post_topic,
-           follow, dm_replies, new_chats, comments, respond_own, post_content}."""
-    data = request.json or {}
-    persona = data.get('persona', '')
-    query = (data.get('query') or '').strip()
-    post = (data.get('post') or '').strip()
-    post_topic = (data.get('post_topic') or '').strip()
-    new_chat_limit = max(0, min(int(data.get('new_chat_limit', 2)), 5))
-    comment_limit = max(0, min(int(data.get('comment_limit', 0)), 5))
-    do_follow = bool(data.get('follow', False))
-    do_dm = bool(data.get('dm_replies', True))
-    do_new = bool(data.get('new_chats', True))
-    do_comments = bool(data.get('comments', True))
-    do_respond_own = bool(data.get('respond_own', False))
-    do_post = bool(data.get('post_content', False))
-    if not persona:
-        return jsonify({'ok': False, 'error': 'persona is required'}), 400
+def _x_auto_round(persona, opts):
+    """One autonomous engagement round: post, work the feed, keep existing DMs
+    going, reply to a post's comments, then find new people and chat them up.
 
-    tokens = _load_x_tokens()
-    if not (tokens.get(persona) or {}).get('access_token'):
-        return jsonify({'ok': False, 'error': f'No X account connected for persona "{persona}".'}), 400
+    Returns (actions, log). The console and the always-on worker both come
+    through here so there is one round, not a browser copy and a server copy.
+    Daily caps are applied per sub-round: a round that has run out of a budget
+    is trimmed rather than skipped silently, and says so in the log.
+    """
+    query = (opts.get('query') or '').strip()
+    post = (opts.get('post') or '').strip()
+    post_topic = (opts.get('post_topic') or '').strip()
+    new_chat_limit = max(0, min(int(opts.get('new_chat_limit', 2) or 0), 5))
+    comment_limit = max(0, min(int(opts.get('comment_limit', 0) or 0), 5))
+    do_follow = bool(opts.get('follow', False))
+    do_dm = bool(opts.get('dm_replies', True))
+    do_new = bool(opts.get('new_chats', True))
+    do_comments = bool(opts.get('comments', True))
+    do_respond_own = bool(opts.get('respond_own', False))
+    do_post = bool(opts.get('post_content', False))
+    caps = opts.get('daily_caps') or X_DAILY_CAP_DEFAULTS
+
+    def left(kind):
+        return _x_daily_left(caps, persona, kind)
+
+    def trim(kind, want, label):
+        """Cut `want` down to the day's remaining budget, saying so in the log."""
+        avail = left(kind)
+        if avail is None or want <= avail:
+            return want
+        log.append(f'Daily {kind} cap reached — {label} trimmed from {want} to {avail}.')
+        return avail
 
     _log_x_event('auto-run', persona=persona, detail=query or post)
     actions = {'dm_replies': 0, 'followups': 0, 'new_chats': 0, 'follows': 0,
                'comments': 0, 'posts': 0, 'post_comments': 0, 'reply_answers': 0,
                'likes': 0}
     log = []
-    try:
-        if do_post:
+
+    if do_post:
+        if trim('posts', 1, 'posting') < 1:
+            log.append('Skipped posting: daily post cap reached.')
+        else:
             try:
                 text = _x_generate_post(persona, post_topic)
                 if text:
@@ -11359,122 +11403,175 @@ def api_x_auto_run():
                     _log_x_event('post', persona=persona, detail=text[:80])
                     _content_register_add(persona, 'x', text)
                     actions['posts'] += 1
+                    _x_daily_bump(persona, 'posts', 1)
                     log.append(f'Posted: {text[:60]}')
             except Exception as e:
                 log.append(f'Post failed: {str(e)[:80]}')
 
-        if bool(data.get('feed_engage')):
-            fa, flog = _x_feed_engage_round(
-                persona,
-                post_limit=max(0, min(int(data.get('feed_post_limit', 4)), 15)),
-                reply_limit=max(0, min(int(data.get('feed_reply_limit', 8)), 25)),
-                post_age_min=data.get('post_age_min'),
-                reply_age_min=data.get('reply_age_min'),
-                do_posts=bool(data.get('feed_comment_posts', True)),
-                do_replies=bool(data.get('feed_answer_replies', True)),
-                do_likes=bool(data.get('feed_like_replies', True)))
-            actions.update(fa)
-            log += flog
+    if bool(opts.get('feed_engage')):
+        post_limit = trim('comments', max(0, min(int(opts.get('feed_post_limit', 4) or 0), 15)),
+                          'feed post comments')
+        reply_limit = max(0, min(int(opts.get('feed_reply_limit', 8) or 0), 25))
+        do_likes = bool(opts.get('feed_like_replies', True))
+        if do_likes and left('likes') == 0:
+            do_likes = False
+            log.append('Daily likes cap reached — not liking replies this round.')
+        fa, flog = _x_feed_engage_round(
+            persona,
+            post_limit=post_limit,
+            reply_limit=trim('comments', reply_limit, 'feed reply answers'),
+            post_age_min=opts.get('post_age_min'),
+            reply_age_min=opts.get('reply_age_min'),
+            do_posts=bool(opts.get('feed_comment_posts', True)),
+            do_replies=bool(opts.get('feed_answer_replies', True)),
+            do_likes=do_likes)
+        actions.update(fa)
+        log += flog
+        _x_daily_bump(persona, 'comments',
+                      int(fa.get('post_comments', 0)) + int(fa.get('reply_answers', 0)))
+        _x_daily_bump(persona, 'likes', int(fa.get('likes', 0)))
 
-        if do_dm:
-            replied, dlog = _x_dm_reply_round(persona)
+    if do_dm:
+        dm_left = left('dms')
+        if dm_left == 0:
+            log.append('Daily DM cap reached — not replying to DMs this round.')
+        else:
+            replied, dlog = _x_dm_reply_round(
+                persona, max_results=20 if dm_left is None else min(20, dm_left))
             actions['dm_replies'] = replied
             log += dlog
+            _x_daily_bump(persona, 'dms', replied)
             nudged, flog = _x_followup_round(persona)
             actions['followups'] = nudged
             log += flog
+            _x_daily_bump(persona, 'dms', nudged)
 
-        if comment_limit and (do_comments and post or do_respond_own):
-            targets = []
-            if do_comments and post:
-                targets.append(post)
-            if do_respond_own:
-                try:
-                    targets += _x_my_recent_tweet_ids(persona, 5)
-                except Exception as e:
-                    log.append(f'Own-posts lookup failed: {str(e)[:80]}')
-            remaining = comment_limit
-            for tid in targets:
-                if remaining <= 0:
-                    break
-                try:
-                    res = _x_comment_round(persona, tid, remaining, skip_seen=True)
-                    posted = [r for r in res if r.get('posted')]
-                    actions['comments'] += len(posted)
-                    remaining -= len(posted)
-                    for r in posted:
-                        log.append(f"Comment reply → {r['to']}: {r['reply'][:50]}")
-                except Exception as e:
-                    log.append(f'Comment round failed: {str(e)[:80]}')
-
-        if do_new and new_chat_limit:
-            contacted = set(_x_state_get(persona, 'contacted', []))
-            contacted |= _x_known_user_ids(persona)
-            contacted |= _x_opener_ids(persona)
+    if comment_limit and (do_comments and post or do_respond_own):
+        comment_limit = trim('comments', comment_limit, 'comment replies')
+        targets = []
+        if do_comments and post:
+            targets.append(post)
+        if do_respond_own:
             try:
-                candidates = _x_audience_candidates(
-                    persona, new_chat_limit, contacted,
-                    post_age_min=data.get('post_age_min'),
-                    reply_age_min=data.get('reply_age_min'))
+                targets += _x_my_recent_tweet_ids(persona, 5)
             except Exception as e:
-                candidates = []
-                log.append(f'Finding people failed: {str(e)[:80]}')
-            me_id = _x_me_id(persona) if (candidates and do_follow) else None
-            for u in candidates:
-                try:
-                    # Final dedup: skip if we already have ANY messages with this user in DB
-                    if _x_messaged_before(persona, u['id']):
-                        continue
-                    if do_follow and me_id:
-                        try:
-                            _x_call(persona, 'POST', f'/users/{me_id}/following',
-                                    body={'target_user_id': u['id']})
-                            actions['follows'] += 1
-                            log.append(f"Followed @{u['username']}")
-                        except Exception:
-                            pass
-                    snippet = (u.get('tweet') or '')[:160]
-                    # Spelled out because the model otherwise writes these as
-                    # replies — "nice to see you pop up in my dms" to someone who
-                    # has never messaged her.
-                    cold_rule = (
-                        " THIS PERSON HAS NEVER MESSAGED YOU. You are messaging them "
-                        "first, out of the blue. Do not thank them for anything, do not "
-                        "reference them writing to you, appearing in your DMs, replying, "
-                        "or 'popping up' — none of that happened. Do not greet them as if "
-                        "you already know each other. No hashtags, no hard sell.")
-                    if snippet:
-                        instruction = (
-                            f"Write the first-ever DM to @{u['username']} on X. They recently "
-                            f"posted: \"{snippet}\". Open with something warm and in-character "
-                            "that reacts to that post, and ask one question to get them "
-                            "talking." + cold_rule)
-                    else:
-                        instruction = (
-                            f"Write the first-ever DM to @{u['username']} on X — they are "
-                            "someone you found, not someone who contacted you. Open with "
-                            "something warm and in-character, curious about them, and ask "
-                            "one question to get them talking." + cold_rule)
-                    opener = _persona_text(persona, instruction, max_tokens=1024, temperature=0.95)
-                    opener = _x_fix_cold_opener(persona, opener, instruction)
-                    if opener:
-                        _x_call(persona, 'POST',
-                                f'/dm_conversations/with/{u["id"]}/messages',
-                                body={'text': opener})
-                        actions['new_chats'] += 1
-                        _x_record_opener(persona, u['id'])
-                        _x_save_history(persona, u['id'], [{'role': 'bot', 'content': opener}])
-                        _log_x_message(persona, u['id'], u.get('username', ''), 'out', opener)
-                        log.append(f"New chat → @{u['username']}: {opener[:50]}")
-                except Exception as e:
-                    log.append(f"@{u['username']} failed: {str(e)[:200]}")
-                finally:
-                    contacted.add(u['id'])
-            _x_state_set(persona, 'contacted', list(contacted)[-1000:])
+                log.append(f'Own-posts lookup failed: {str(e)[:80]}')
+        remaining = comment_limit
+        for tid in targets:
+            if remaining <= 0:
+                break
+            try:
+                res = _x_comment_round(persona, tid, remaining, skip_seen=True)
+                posted = [r for r in res if r.get('posted')]
+                actions['comments'] += len(posted)
+                remaining -= len(posted)
+                _x_daily_bump(persona, 'comments', len(posted))
+                for r in posted:
+                    log.append(f"Comment reply → {r['to']}: {r['reply'][:50]}")
+            except Exception as e:
+                log.append(f'Comment round failed: {str(e)[:80]}')
 
+    if do_new and new_chat_limit:
+        new_chat_limit = trim('dms', new_chat_limit, 'new chats')
+    if do_new and new_chat_limit:
+        if do_follow and left('follows') == 0:
+            do_follow = False
+            log.append('Daily follow cap reached — opening chats without following.')
+        contacted = set(_x_state_get(persona, 'contacted', []))
+        contacted |= _x_known_user_ids(persona)
+        contacted |= _x_opener_ids(persona)
+        try:
+            candidates = _x_audience_candidates(
+                persona, new_chat_limit, contacted,
+                post_age_min=opts.get('post_age_min'),
+                reply_age_min=opts.get('reply_age_min'))
+        except Exception as e:
+            candidates = []
+            log.append(f'Finding people failed: {str(e)[:80]}')
+        me_id = _x_me_id(persona) if (candidates and do_follow) else None
+        for u in candidates:
+            try:
+                # Final dedup: skip if we already have ANY messages with this user in DB
+                if _x_messaged_before(persona, u['id']):
+                    continue
+                if do_follow and me_id:
+                    try:
+                        _x_call(persona, 'POST', f'/users/{me_id}/following',
+                                body={'target_user_id': u['id']})
+                        actions['follows'] += 1
+                        _x_daily_bump(persona, 'follows', 1)
+                        log.append(f"Followed @{u['username']}")
+                    except Exception:
+                        pass
+                snippet = (u.get('tweet') or '')[:160]
+                # Spelled out because the model otherwise writes these as
+                # replies — "nice to see you pop up in my dms" to someone who
+                # has never messaged her.
+                cold_rule = (
+                    " THIS PERSON HAS NEVER MESSAGED YOU. You are messaging them "
+                    "first, out of the blue. Do not thank them for anything, do not "
+                    "reference them writing to you, appearing in your DMs, replying, "
+                    "or 'popping up' — none of that happened. Do not greet them as if "
+                    "you already know each other. No hashtags, no hard sell.")
+                if snippet:
+                    instruction = (
+                        f"Write the first-ever DM to @{u['username']} on X. They recently "
+                        f"posted: \"{snippet}\". Open with something warm and in-character "
+                        "that reacts to that post, and ask one question to get them "
+                        "talking." + cold_rule)
+                else:
+                    instruction = (
+                        f"Write the first-ever DM to @{u['username']} on X — they are "
+                        "someone you found, not someone who contacted you. Open with "
+                        "something warm and in-character, curious about them, and ask "
+                        "one question to get them talking." + cold_rule)
+                opener = _persona_text(persona, instruction, max_tokens=1024, temperature=0.95)
+                opener = _x_fix_cold_opener(persona, opener, instruction)
+                if opener:
+                    _x_call(persona, 'POST',
+                            f'/dm_conversations/with/{u["id"]}/messages',
+                            body={'text': opener})
+                    actions['new_chats'] += 1
+                    _x_daily_bump(persona, 'dms', 1)
+                    _x_record_opener(persona, u['id'])
+                    _x_save_history(persona, u['id'], [{'role': 'bot', 'content': opener}])
+                    _log_x_message(persona, u['id'], u.get('username', ''), 'out', opener)
+                    log.append(f"New chat → @{u['username']}: {opener[:50]}")
+            except Exception as e:
+                log.append(f"@{u['username']} failed: {str(e)[:200]}")
+            finally:
+                contacted.add(u['id'])
+        _x_state_set(persona, 'contacted', list(contacted)[-1000:])
+
+    return actions, log
+
+
+@app.route('/api/x/auto-run', methods=['POST'])
+@platform_scoped
+def api_x_auto_run():
+    """Run one autonomous engagement round as a persona. The request body layers
+    over the persona's saved settings, so the console's "Run once" still
+    overrides them for that call while the unattended worker runs the same round
+    from the saved config alone.
+    Body: {persona, query, post, new_chat_limit, comment_limit, post_topic,
+           follow, dm_replies, new_chats, comments, respond_own, post_content}."""
+    data = request.json or {}
+    persona = data.get('persona', '')
+    if not persona:
+        return jsonify({'ok': False, 'error': 'persona is required'}), 400
+
+    tokens = _load_x_tokens()
+    if not (tokens.get(persona) or {}).get('access_token'):
+        return jsonify({'ok': False, 'error': f'No X account connected for persona "{persona}".'}), 400
+
+    opts = {**_x_behavior(persona), **{k: v for k, v in data.items() if k != 'persona'}}
+    try:
+        actions, log = _x_auto_round(persona, opts)
         if _last_x_log_error[0]:
             log.append(f'⚠ conversation logging failed: {_last_x_log_error[0]}')
         return jsonify({'ok': True, 'actions': actions, 'log': log,
+                        'daily': _x_daily_counts(persona),
+                        'daily_caps': opts.get('daily_caps') or X_DAILY_CAP_DEFAULTS,
                         'log_error': _last_x_log_error[0]})
     except url_error.HTTPError as e:
         body = e.read()[:200].decode(errors='ignore')
@@ -11483,6 +11580,100 @@ def api_x_auto_run():
         return jsonify({'ok': False, 'error': f'X API error {e.code}: {body}'}), 400
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)[:200]}), 400
+
+
+
+# How an X action reads on the console's activity feed. The keys are the shell's
+# stage vocabulary, so X gets the same icons as Fanvue and Telegram.
+X_TRACE_STAGES = {
+    'dm_in': 'received', 'dm_out': 'sent', 'post': 'sent',
+    'auto-run': 'chats', 'connect': 'connected', 'disconnect': 'error',
+    'follow': 'funnel', 'comment': 'sent', 'like': 'funnel',
+}
+
+
+@app.route('/api/x/trace')
+@platform_scoped
+def api_x_trace():
+    """What this persona's X bot is doing, in the shape every console reads:
+    the connection, the switches, what is wrong, and the last few events."""
+    persona = request_persona()
+    if not persona:
+        return jsonify({'ok': False, 'error': 'persona required'}), 400
+    t = (_load_x_tokens() or {}).get(persona) or {}
+    cfg = _x_behavior(persona)
+    connected = bool(t.get('access_token'))
+    cta = _phases_cta(persona)
+    cta_url = (cta.get('cta_url')
+               or (_tg_load_bots().get(persona) or {}).get('cta_url') or '').strip()
+
+    problems = []
+    if not connected:
+        problems.append('No X account is connected — connect one under Settings.')
+    elif not cfg.get('enabled', True):
+        problems.append('The bot is switched off, so DM rounds do nothing.')
+    if connected and not cfg.get('auto'):
+        problems.append('Always on is off — rounds only run while this tab is open.')
+    if not cta_url:
+        problems.append('No funnel link is set, so she has nothing to send fans to.')
+    if _last_x_log_error[0]:
+        problems.append(f'Conversation logging failed: {_last_x_log_error[0]}')
+
+    rows = []
+    try:
+        from db import SessionLocal, list_x_events
+        s = SessionLocal()
+        try:
+            for e in list_x_events(s, limit=200):
+                if (e.persona or '') != persona:
+                    continue
+                rows.append({
+                    'at': int(e.created_at.timestamp()) if e.created_at else 0,
+                    'stage': X_TRACE_STAGES.get(e.action or '', e.action or ''),
+                    'detail': (e.detail or e.action or '')[:200],
+                    'fan': '',
+                })
+        finally:
+            s.close()
+    except Exception as e:
+        problems.append(f'Could not read the activity log: {str(e)[:120]}')
+    rows.reverse()
+
+    return jsonify({'ok': True, 'persona': persona, 'connected': connected,
+                    'username': t.get('username', ''),
+                    'enabled': bool(cfg.get('enabled', True)),
+                    'auto': bool(cfg.get('auto')), 'interval_min': cfg.get('interval_min'),
+                    'cta_url': cta_url, 'daily': _x_daily_counts(persona),
+                    'daily_caps': cfg.get('daily_caps') or X_DAILY_CAP_DEFAULTS,
+                    'problems': problems, 'rows': rows})
+
+
+@app.route('/api/x/dm-send', methods=['POST'])
+@platform_scoped
+def api_x_dm_send():
+    """Send one DM by hand from the console inbox, so a creator can take a
+    conversation over from the bot without leaving the page."""
+    data = request.json or {}
+    persona = (data.get('persona') or '').strip()
+    uid = str(data.get('fan') or data.get('uid') or '').strip()
+    text = (data.get('text') or '').strip()
+    if not (persona and uid and text):
+        return jsonify({'ok': False, 'error': 'persona, fan and text are required'}), 400
+    try:
+        _x_call(persona, 'POST', f'/dm_conversations/with/{uid}/messages',
+                body={'text': text})
+    except url_error.HTTPError as e:
+        body = e.read()[:200].decode(errors='ignore')
+        return jsonify({'ok': False, 'error': f'X API error {e.code}: {body}'}), 400
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]}), 400
+    name = _x_username_for(persona, uid)
+    _log_x_event('dm_out', persona=persona, x_username=name, detail=text[:160])
+    _log_x_message(persona, uid, name, 'out', text)
+    hist = _x_state_get(persona, f'hist_{uid}', [])
+    _x_save_history(persona, uid, list(hist) + [{'role': 'bot', 'content': text}])
+    _x_daily_bump(persona, 'dms', 1)
+    return jsonify({'ok': True, 'sent': text})
 
 
 # ── Fanvue chatbot ────────────────────────────────────────────────────────────
@@ -20844,11 +21035,27 @@ def api_telegram_settings():
 
 def _x_behavior(persona):
     raw = _get_setting(f'x_behavior_{persona}')
-    defaults = {'enabled': True, 'humanize': True, 'followups': True,
-                'followup_min': 45, 'typing_speed': 14}
+    defaults = {
+        'enabled': True, 'humanize': True, 'followups': True,
+        'followup_min': 45, 'typing_speed': 14,
+        # Everything below drives the unattended round. It used to live only in
+        # the console form, so closing the tab lost it.
+        'auto': False, 'interval_min': 15,
+        'query': '', 'post': '', 'post_topic': '',
+        'dm_replies': True, 'new_chats': False, 'comments': False,
+        'respond_own': False, 'post_content': False, 'follow': False,
+        'feed_engage': True, 'feed_comment_posts': True,
+        'feed_answer_replies': True, 'feed_like_replies': True,
+        'new_chat_limit': 2, 'comment_limit': 0,
+        'feed_post_limit': 4, 'feed_reply_limit': 8,
+        'post_age_min': 30, 'reply_age_min': 15,
+        'daily_caps': dict(X_DAILY_CAP_DEFAULTS),
+    }
     if raw:
         try:
-            return {**defaults, **json.loads(raw)}
+            saved = json.loads(raw)
+            caps = {**X_DAILY_CAP_DEFAULTS, **(saved.get('daily_caps') or {})}
+            return {**defaults, **saved, 'daily_caps': caps}
         except Exception:
             pass
     return defaults
@@ -20859,7 +21066,7 @@ def _x_behavior(persona):
 def api_x_settings():
     if request.method == 'GET':
         persona = (request.args.get('persona') or '').strip()
-        return jsonify(_x_behavior(persona))
+        return jsonify({**_x_behavior(persona), 'daily': _x_daily_counts(persona)})
     data = request.json or {}
     persona = (data.get('persona') or '').strip()
     if not persona:
@@ -20877,8 +21084,32 @@ def api_x_settings():
         opts['humanize'] = bool(data['humanize'])
     if 'typing_speed' in data:
         opts['typing_speed'] = max(4, min(int(data['typing_speed'] or 14), 40))
+    if 'auto' in data:
+        opts['auto'] = bool(data['auto'])
+    if 'interval_min' in data:
+        opts['interval_min'] = max(1, min(int(data['interval_min'] or 15), 1440))
+    for key in ('query', 'post', 'post_topic'):
+        if key in data:
+            opts[key] = str(data[key] or '').strip()[:300]
+    for key in ('dm_replies', 'new_chats', 'comments', 'respond_own',
+                'post_content', 'follow', 'feed_engage', 'feed_comment_posts',
+                'feed_answer_replies', 'feed_like_replies'):
+        if key in data:
+            opts[key] = bool(data[key])
+    for key, hi in (('new_chat_limit', 5), ('comment_limit', 5),
+                    ('feed_post_limit', 15), ('feed_reply_limit', 25),
+                    ('post_age_min', 180), ('reply_age_min', 120)):
+        if key in data:
+            opts[key] = max(0, min(int(data[key] or 0), hi))
+    if isinstance(data.get('daily_caps'), dict):
+        caps = dict(opts.get('daily_caps') or X_DAILY_CAP_DEFAULTS)
+        for kind in X_DAILY_CAP_DEFAULTS:
+            if kind in data['daily_caps']:
+                caps[kind] = max(-1, min(int(data['daily_caps'][kind] or 0), 1000))
+        opts['daily_caps'] = caps
     _set_setting(f'x_behavior_{persona}', json.dumps(opts))
-    return jsonify({'ok': True, 'settings': opts})
+    return jsonify({'ok': True,
+                    'settings': {**opts, 'daily': _x_daily_counts(persona)}})
 
 
 @app.route('/api/telegram/trace')
@@ -21794,9 +22025,12 @@ def _x_enabled_list():
 
 
 def _x_worker():
-    """Server-side loop: keeps DM replies and follow-ups running for every
-    connected X account without an open browser tab, in parallel so one busy
-    account never holds up the others."""
+    """Server-side loop: keeps every connected X account running without an open
+    browser tab, in parallel so one busy account never holds up the others.
+
+    The 60s tick is a scheduler: a persona with `auto` on runs the full
+    engagement round on its own `interval_min`, one with it off keeps the
+    DM-reply-and-nudge behaviour this loop has always had."""
     import time as _t
     from concurrent.futures import ThreadPoolExecutor
     pool = ThreadPoolExecutor(max_workers=max(1, int(os.getenv('X_WORKERS', '8'))),
@@ -21807,8 +22041,20 @@ def _x_worker():
     def _one(persona):
         try:
             with app.app_context():
-                _x_dm_reply_round(persona)
-                _x_followup_round(persona)
+                cfg = _x_behavior(persona)
+                if not cfg.get('auto'):
+                    _x_dm_reply_round(persona)
+                    _x_followup_round(persona)
+                    return
+                gap = max(1, int(cfg.get('interval_min') or 15)) * 60
+                now = int(_t.time())
+                if now - int(_x_state_get(persona, 'auto_last', 0) or 0) < gap:
+                    return
+                _x_state_set(persona, 'auto_last', now)
+                actions, log = _x_auto_round(persona, cfg)
+                logger.info('x auto round for %s: %s', persona, actions)
+                for line in log:
+                    logger.info('x[%s] %s', persona, line)
         except Exception:
             logger.exception('x round failed for %s', persona)
         finally:

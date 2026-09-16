@@ -54,6 +54,9 @@
     this.platform = opts.platform;
     this.persona = opts.persona;          // () => slug
     this.emptyHint = opts.emptyHint || '';
+    // Where a hand-written message goes, if this platform lets the creator take
+    // a conversation over. Without it the view stays read-only, as it was.
+    this.sendUrl = opts.sendUrl || '';
     this.fan = '';
     this.fans = [];
     this.loading = false;
@@ -71,6 +74,11 @@
             '<button class="cn-thread-mem" title="What she remembers about this fan" hidden>Memory</button>' +
           '</div>' +
           '<div class="chat-window"><div class="cn-empty">Pick someone on the left to read the chat.</div></div>' +
+          (this.sendUrl
+            ? '<form class="cn-compose" hidden><input class="cn-compose-in" type="text" ' +
+              'placeholder="Write as her — the bot picks the chat up from here…" autocomplete="off">' +
+              '<button class="btn-ai cn-compose-go" type="submit">Send</button></form>'
+            : '') +
         '</div>' +
       '</div>';
     this.box = host.querySelector('.cn-inbox');
@@ -85,7 +93,31 @@
       self.box.classList.remove('reading');
     };
     this.mem.onclick = function () { self.showMemory(); };
+    this.compose = host.querySelector('.cn-compose');
+    if (this.compose) {
+      this.compose.onsubmit = function (e) { e.preventDefault(); self.send(); };
+    }
   }
+
+  ChatView.prototype.send = function () {
+    var self = this;
+    var input = this.compose.querySelector('.cn-compose-in');
+    var text = (input.value || '').trim();
+    if (!text || !this.fan) return;
+    var go = this.compose.querySelector('.cn-compose-go');
+    go.disabled = true;
+    input.value = '';
+    return fetch(this.sendUrl, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ persona: this.persona(), fan: this.fan, text: text })
+    }).then(function (r) { return r.json(); }).then(function (d) {
+      if (!d.ok) { input.value = text; alert(d.error || 'Could not send that.'); return; }
+      self.openThread(self.fan);
+    }).catch(function (e) {
+      input.value = text;
+      alert(String(e.message || e));
+    }).then(function () { go.disabled = false; });
+  };
 
   ChatView.prototype.url = function (extra) {
     return '/api/inbox?platform=' + encodeURIComponent(this.platform) +
@@ -147,6 +179,7 @@
     var self = this;
     this.fan = key;
     this.box.classList.add('reading');
+    if (this.compose) this.compose.hidden = false;
     Array.prototype.forEach.call(this.list.querySelectorAll('.cn-fan'), function (b) {
       b.classList.toggle('on', b.dataset.fan === key);
     });

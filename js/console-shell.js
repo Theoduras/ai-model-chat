@@ -253,7 +253,8 @@
       view = window.ChatView.create(wrap.querySelector('.cn-chat'), {
         platform: cfg.platform,
         persona: cfg.persona,
-        emptyHint: cfg.emptyHint || ''
+        emptyHint: cfg.emptyHint || '',
+        sendUrl: cfg.sendUrl || ''
       });
       view.onWaiting = waitingBadge;
       api.show((location.hash || '').replace('#', '') || 'overview');

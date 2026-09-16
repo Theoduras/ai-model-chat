@@ -9,6 +9,8 @@
   <script src="/js/theme.js"></script>
   <link rel="stylesheet" href="/css/style.css">
   <script src="/js/devnav.js" defer></script>
+  <script src="/js/chat-view.js"></script>
+  <script src="/js/console-shell.js"></script>
   <style>
     .xbot-scroll { flex: 1; min-height: 0; overflow-y: auto; }
     .xbot-wrap { max-width: 760px; margin: 0 auto; padding: 28px 24px 80px; display: flex; flex-direction: column; gap: 20px; }
@@ -79,7 +81,7 @@
 <div class="xbot-scroll">
 <div class="xbot-wrap">
 
-  <div class="form-section">
+  <div id="sec-account" class="form-section" data-tab="settings">
     <div class="section-title">Persona &amp; Account</div>
     <div class="field full">
       <label>Choose a model (persona)</label>
@@ -122,7 +124,7 @@
     </div>
   </div>
 
-  <div class="form-section">
+  <div id="sec-replies" class="form-section" data-tab="settings">
     <div class="section-title">⚙️ How she replies</div>
     <span class="hint" style="display:block; margin-bottom:14px;">Governs every DM this account sends — the rounds below and the server-side worker both obey it.</span>
     <div class="auto-toggles" style="display:flex; flex-wrap:wrap; gap:10px 22px;">
@@ -151,7 +153,43 @@
     </div>
   </div>
 
-  <div class="form-section" id="chat-section">
+  <div class="form-section" id="sec-always" data-tab="settings">
+    <div class="section-title">🛰️ Always on — run with the tab closed</div>
+    <span class="hint" style="display:block; margin-bottom:14px;">The settings on this page are saved to the server as you change them. Switch this on and the bot runs the whole round — DM replies, feed work, gathering and posting — on the server, on its own schedule. You can close the browser. The manual "Start" buttons below are for watching a round happen; they turn off while this is on so nothing runs twice.</span>
+    <div class="auto-toggles">
+      <label class="auto-chk"><input type="checkbox" id="auto-always"> <b>Run unattended</b></label>
+    </div>
+    <div class="xbot-grid" style="margin-top:12px;">
+      <div class="field">
+        <label>Minutes between server rounds</label>
+        <input type="number" id="auto-interval-min" min="1" max="1440" value="15">
+      </div>
+      <div class="field">
+        <label>Max DMs per day</label>
+        <input type="number" id="cap-dms" min="0" max="1000" value="40">
+      </div>
+      <div class="field">
+        <label>Max follows per day</label>
+        <input type="number" id="cap-follows" min="0" max="1000" value="40">
+      </div>
+      <div class="field">
+        <label>Max comments per day</label>
+        <input type="number" id="cap-comments" min="0" max="1000" value="30">
+      </div>
+      <div class="field">
+        <label>Max likes per day</label>
+        <input type="number" id="cap-likes" min="0" max="1000" value="100">
+      </div>
+      <div class="field">
+        <label>Max posts per day</label>
+        <input type="number" id="cap-posts" min="0" max="1000" value="4">
+      </div>
+    </div>
+    <div class="hint" id="daily-usage" style="display:block; margin-top:12px;"></div>
+    <span class="hint" id="auto-config-status"></span>
+  </div>
+
+  <div class="form-section" id="sec-chat" data-tab="settings">
     <div class="section-title">💬 Auto-chat — keep conversations going</div>
     <span class="hint" style="display:block; margin-bottom:14px;">Engages your existing audience on a loop: replies to incoming DMs, and (optionally) replies to comments on your posts and posts new content. Does NOT start new chats — that's the section below.</span>
     <div class="auto-toggles">
@@ -191,7 +229,7 @@
     </div>
   </div>
 
-  <div class="form-section" id="gather-section">
+  <div class="form-section" id="sec-gather" data-tab="settings">
     <div class="section-title">🧲 Gather new chats — find &amp; message new people</div>
     <span class="hint" style="display:block; margin-bottom:14px;">Finds fresh people from your own audience (recent followers and people who replied to your posts) and opens new in-character chats with them — skipping anyone you already have a conversation with. Runs on its own loop, independent of auto-chat.</span>
     <div class="xbot-grid">
@@ -217,6 +255,7 @@
       </div>
     </div>
     <div class="auto-toggles">
+      <label class="auto-chk"><input type="checkbox" id="auto-new-chats" checked> Gather new chats when running unattended</label>
       <label class="auto-chk"><input type="checkbox" id="auto-follow"> Follow new people first</label>
     </div>
     <div style="display:flex; gap:8px; align-items:center; margin-top:14px;">
@@ -226,12 +265,12 @@
     </div>
   </div>
 
-  <div class="form-section">
+  <div id="sec-log" class="form-section" data-tab="advanced">
     <div class="section-title">📜 Activity log</div>
     <div class="auto-log" id="auto-log"><span class="hint">Auto-chat and gathering activity appears here.</span></div>
   </div>
 
-  <div class="form-section">
+  <div id="sec-post" class="form-section" data-tab="advanced">
     <div class="section-title">📝 Post new content</div>
     <span class="hint" style="display:block; margin-bottom:14px;">Writes an original tweet in the chosen persona's voice and posts it to their X account.</span>
     <div class="field full">
@@ -245,7 +284,7 @@
     <div class="result-box" id="postnew-result"></div>
   </div>
 
-  <div class="form-section">
+  <div id="sec-comments" class="form-section" data-tab="advanced">
     <div class="section-title">💬 Reply to comments on a post</div>
     <div class="field full">
       <label>Post URL or tweet ID</label>
@@ -268,7 +307,7 @@
     <div class="result-box" id="comment-result"></div>
   </div>
 
-  <div class="form-section">
+  <div id="sec-dm" class="form-section" data-tab="advanced">
     <div class="section-title">👋 Start a chat (DM)</div>
     <div class="field full">
       <label>Target @handle or profile URL</label>
@@ -285,7 +324,7 @@
     <div class="result-box" id="dm-result"></div>
   </div>
 
-  <div class="form-section">
+  <div id="sec-follow" class="form-section" data-tab="advanced">
     <div class="section-title">➕ Follow / Unfollow</div>
     <div class="field full">
       <label>Target @handle or profile URL</label>
@@ -351,6 +390,7 @@ function updateConn() {
   document.getElementById('connect-status').innerHTML = '';
   loadBehaviorSummary();
   loadBehaviour();
+  PlatformConsole.reset();
 }
 
 async function loadBehaviour(){
@@ -362,26 +402,175 @@ async function loadBehaviour(){
   document.getElementById('f-x-followups').checked = s.followups !== false;
   document.getElementById('f-x-followup-min').value = s.followup_min || 45;
   if(s.typing_speed) document.getElementById('f-x-typing-speed').value = String(s.typing_speed);
+  hydrateAutoConfig(s);
 }
 
-async function saveBehaviour(btn){
-  const st=document.getElementById('behaviour-status');
-  st.textContent='Saving…'; st.style.color='var(--text-muted)';
-  try{
-    const r=await fetch('/api/x/settings',{method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({persona:persona(),
-        enabled:document.getElementById('f-x-enabled').checked,
-        humanize:document.getElementById('f-x-humanize').checked,
-        followups:document.getElementById('f-x-followups').checked,
-        typing_speed:parseInt(document.getElementById('f-x-typing-speed').value||'14',10),
-        followup_min:parseInt(document.getElementById('f-x-followup-min').value||'45',10)})});
-    const d=await r.json();
-    if(!d.ok) throw new Error(d.error||'failed');
-    st.textContent='✓ Saved'; st.style.color='#4ade80';
-    loadBehaviorSummary();
-  }catch(e){ st.textContent='✗ '+e; st.style.color='#fb7185'; }
+// ── Round config, shared with the server ─────────────────────────────────────
+// The form used to live only in this tab, so closing it lost everything the
+// round needs. Every field below is now saved to /api/x/settings, which is also
+// what the unattended server loop reads — one config, two readers.
+const AUTO_FIELDS = {
+  'auto-dm': 'dm_replies', 'auto-respond-own': 'respond_own',
+  'auto-comments': 'comments', 'auto-post': 'post_content',
+  'auto-feed-engage': 'feed_engage', 'auto-new-chats': 'new_chats',
+  'auto-follow': 'follow', 'auto-always': 'auto',
+  'feed-post-limit': 'feed_post_limit', 'feed-reply-limit': 'feed_reply_limit',
+  'auto-new-limit': 'new_chat_limit', 'comment-limit': 'comment_limit',
+  'gather-post-age': 'post_age_min', 'gather-reply-age': 'reply_age_min',
+  'auto-interval-min': 'interval_min',
+  'post': 'post', 'post-topic': 'post_topic',
+};
+const CAP_FIELDS = { 'cap-dms': 'dms', 'cap-follows': 'follows',
+  'cap-comments': 'comments', 'cap-likes': 'likes', 'cap-posts': 'posts' };
+let hydrating = false, autoSaveTimer = null;
+
+function hydrateAutoConfig(s){
+  hydrating = true;
+  for (const [id, key] of Object.entries(AUTO_FIELDS)) {
+    const el = document.getElementById(id);
+    if (!el || s[key] === undefined) continue;
+    if (el.type === 'checkbox') el.checked = !!s[key]; else el.value = String(s[key]);
+  }
+  const caps = s.daily_caps || {};
+  for (const [id, kind] of Object.entries(CAP_FIELDS)) {
+    const el = document.getElementById(id);
+    if (el && caps[kind] !== undefined) el.value = String(caps[kind]);
+  }
+  hydrating = false;
+  renderDailyUsage(s.daily || {}, caps);
+  applyAlwaysOn();
 }
+
+function collectAutoConfig(){
+  const body = { persona: persona(), daily_caps: {} };
+  for (const [id, key] of Object.entries(AUTO_FIELDS)) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    body[key] = el.type === 'checkbox' ? el.checked
+      : (el.type === 'number' || el.tagName === 'SELECT' ? parseInt(el.value || '0', 10) : el.value.trim());
+  }
+  for (const [id, kind] of Object.entries(CAP_FIELDS)) {
+    const el = document.getElementById(id);
+    if (el) body.daily_caps[kind] = parseInt(el.value || '0', 10);
+  }
+  return body;
+}
+
+function persistAutoConfig(){
+  if (hydrating || !persona()) return;
+  clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(async () => {
+    const st = document.getElementById('auto-config-status');
+    try {
+      const r = await fetch('/api/x/settings', { method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(collectAutoConfig()) });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || 'failed');
+      st.textContent = '✓ Settings saved'; st.style.color = '#4ade80';
+      renderDailyUsage((d.settings || {}).daily || {}, (d.settings || {}).daily_caps || {});
+    } catch (e) { st.textContent = '✗ ' + e; st.style.color = '#fb7185'; }
+  }, 500);
+}
+
+function renderDailyUsage(used, caps){
+  const el = document.getElementById('daily-usage');
+  if (!el) return;
+  const bits = Object.entries(CAP_FIELDS).map(([, kind]) => {
+    const cap = caps[kind];
+    return kind + ': ' + (used[kind] || 0) + (cap === undefined || cap < 0 ? '' : ' / ' + cap);
+  });
+  el.textContent = 'Today so far — ' + bits.join(' · ') + ' (resets at 00:00 UTC).';
+}
+
+// With the server running rounds, the local timers would double every action.
+function applyAlwaysOn(){
+  const on = document.getElementById('auto-always').checked;
+  if (on) { if (chatRunning) stopChat(); if (gatherRunning) stopGather(); }
+  for (const id of ['chat-start', 'gather-start']) {
+    const b = document.getElementById(id);
+    b.disabled = on;
+    b.title = on ? 'The server is running rounds — switch "Run unattended" off to drive them from here.' : '';
+    b.style.opacity = on ? '0.5' : '';
+  }
+  document.getElementById('chat-state').textContent = on ? 'server-side' : 'idle';
+  document.getElementById('gather-state').textContent = on ? 'server-side' : 'idle';
+}
+
+for (const id of Object.keys(AUTO_FIELDS).concat(Object.keys(CAP_FIELDS))) {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('change', () => { applyAlwaysOn(); persistAutoConfig(); });
+}
+
+// ── Console shell ────────────────────────────────────────────────────────────
+// The Overview / Inbox / Settings / Advanced shell that /fanvue and /telegram
+// use. The sections above keep their markup; this only says what X's status
+// means, so all three consoles read the same way.
+const X_FIX = [
+  [/not connected|connect one/i, {tab:'settings', focus:'sec-account', label:'Connect her account'}],
+  [/switched off/i,              {tab:'settings', focus:'sec-replies', label:'Turn the bot on'}],
+  [/always on is off/i,          {tab:'settings', focus:'sec-always',  label:'Run it unattended'}],
+  [/funnel link/i,               {tab:'settings', focus:'sec-replies', label:'Set the funnel link'}],
+  [/logging failed|activity log/i, {tab:'advanced', focus:'sec-log',   label:'See the log'}],
+];
+
+function xHealth(d){
+  const rows = [
+    {state:d.connected?'ok':'bad', label:d.connected?('Connected as @'+(d.username||'her account')):'Not connected',
+     hint:d.connected?'She can read her X DMs and post as herself.'
+                     :'Connect her X account under Settings before anything else.'},
+    {state:d.enabled?'ok':'warn', label:d.enabled?'Replies are on':'Replies are off',
+     hint:d.enabled?'She answers new DMs on her own.':'Fans can write, but nothing will answer them.'},
+    {state:d.auto?'ok':'warn', label:d.auto?('Running every '+(d.interval_min||15)+' min on the server'):'Only runs with this tab open',
+     hint:d.auto?'Outreach, feed work and posting keep going with the browser closed.'
+                :'Switch Always on under Settings so the funnel survives a closed tab.'},
+    {state:d.cta_url?'ok':'warn', label:d.cta_url?'Funnel link set':'No funnel link',
+     hint:d.cta_url?('Fans are sent to '+d.cta_url):'She has nothing to send fans to when a chat warms up.'},
+  ];
+  return rows;
+}
+
+function xStats(){
+  const used = xDaily.used || {}, caps = xDaily.caps || {};
+  return Object.entries(CAP_FIELDS).map(([, kind]) => ({
+    value: (used[kind] || 0) + (caps[kind] === undefined || caps[kind] < 0 ? '' : '/' + caps[kind]),
+    label: kind + ' today',
+  }));
+}
+
+let xDaily = {used:{}, caps:{}};
+
+PlatformConsole.register({
+  platform:'x',
+  persona:persona,
+  statusUrl:slug=>'/api/x/trace?persona='+encodeURIComponent(slug),
+  emptyHint:'They appear as soon as somebody messages her on X.',
+  sendUrl:'/api/x/dm-send',
+  read:d=>({
+    live: !!(d.connected && d.enabled),
+    broken: !d.connected,
+    title: !d.connected ? 'X is not connected'
+         : !d.enabled   ? 'Connected, but she is not answering'
+         : d.auto       ? 'She is live and running on her own'
+                        : 'She is live while this tab is open',
+    sub: !d.connected ? 'Nothing happens until her account is linked.'
+       : !d.enabled   ? 'Fans can write to her; the replies are switched off.'
+       : d.auto       ? ('The server runs a full round every ' + (d.interval_min||15) + ' minutes.')
+                      : 'Rounds only run from this page — switch Always on to change that.',
+    health: xHealth(d),
+    steps: [
+      {label:'Connect',    done:!!d.connected,           tab:'settings', focus:'sec-account'},
+      {label:'Reply rules',done:!!d.enabled,             tab:'settings', focus:'sec-replies'},
+      {label:'Link & CTA', done:!!d.cta_url,             tab:'settings', focus:'sec-replies'},
+      {label:'Always on',  done:!!(d.connected&&d.auto), tab:'settings', focus:'sec-always'},
+      {label:'Live',       done:!!(d.connected&&d.enabled&&!(d.problems||[]).length), tab:'overview'},
+    ],
+  }),
+  fixTab:p=>{ const hit=X_FIX.find(([re])=>re.test(p)); return hit?hit[1]:{tab:'settings',label:'Open settings'}; },
+  stats:xStats,
+  onStatus:d=>{ xDaily = {used:d.daily||{}, caps:d.daily_caps||{}};
+                renderDailyUsage(xDaily.used, xDaily.caps); },
+});
 
 // This tab now owns the behaviour settings, so the summary just reflects them
 // Reflect the saved behaviour and the funnel link next to the controls, so the
@@ -704,6 +893,7 @@ async function runGatherRound() {
 
 window.addEventListener('beforeunload', () => { if (chatRunning) stopChat(); if (gatherRunning) stopGather(); });
 
+PlatformConsole.mount('.xbot-wrap');
 init();
 </script>
 </body>
