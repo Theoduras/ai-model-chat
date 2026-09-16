@@ -17261,6 +17261,17 @@ if _of_direct():
 
     of_rules.signer_hooks(_of_page_sign)
 
+    _of_transport_state = ['']
+
+    def _of_transport_note(state, why):
+        """Say which way requests are leaving, once per change rather than per
+        request. Whether her own browser carries them decides whether signing
+        matters at all, and it was readable only from the code before."""
+        if _of_transport_state[0] == state:
+            return
+        _of_transport_state[0] = state
+        of_trace.note('transport', why, '' if state == 'page' else 'warning')
+
     def _of_page_request(account, session, method, path, body):
         """Make the whole request in her browser, not just the signature.
 
@@ -17273,11 +17284,16 @@ if _of_direct():
         """
         conn = _of_conn()
         if not hasattr(conn, 'request_for'):
+            _of_transport_note('local', 'this browser service cannot carry whole '
+                               'requests, so we sign them here')
             return None
         # Asked before every request, so it has to be the cached answer: a
         # browser service that is down answers a request by timing out, and
         # three of those in front of every round is slower than not having it.
         if conn is not of_connect and not _of_browser_build().get('page_requests'):
+            _of_transport_note('local', 'the browser service is on a build that '
+                               'cannot carry whole requests, so we sign them here '
+                               '— redeploy it and her own page signs instead')
             return None
         try:
             got = conn.request_for(account, session, method, path, body,
@@ -17287,7 +17303,12 @@ if _of_direct():
                           % (method, path[:60], str(e)[:140]), 'warning')
             return None
         if not got.get('status'):
+            _of_transport_note('local', 'her browser did not answer, so this '
+                               'request was signed here instead')
             return None
+        _of_transport_note('page', 'her requests are going out through her own '
+                           'browser — OnlyFans signs them, so a rotation cannot '
+                           'stop them')
         return got
 
     OF.transport_hooks(_of_page_request)
@@ -17945,6 +17966,51 @@ def api_onlyfans_signing_collect():
                     'rules': of_rules.state()})
 
 
+@app.route('/api/onlyfans/transport/test', methods=['POST'])
+@operator_only
+def api_onlyfans_transport_test():
+    """Does a request go out through her own browser, and does it work?
+
+    The signing panel answers a different question — whether our arithmetic
+    matches OnlyFans'. When her page carries the whole request there is no
+    arithmetic involved at all, so this is the one that says whether chat and
+    PPV can work right now.
+    """
+    if not _of_direct():
+        return jsonify({'ok': False, 'error': 'not running the direct transport'}), 400
+    persona = ((request.json or {}).get('persona') or '').strip()
+    account = _of_account(persona) or next(iter(_of_connected_accounts()), '')
+    if not account:
+        return jsonify({'ok': False, 'error': 'no account connected'}), 400
+    build = _of_browser_build()
+    conn = _of_conn()
+    ready = bool(hasattr(conn, 'request_for')
+                 and (conn is of_connect or build.get('page_requests')))
+    out = {'ok': True, 'ready': ready, 'account': account,
+           'browser': bool(build.get('up')), 'build': build.get('build', '')}
+    if not ready:
+        out['problem'] = ('the browser service cannot carry whole requests on '
+                          'this build, so every request is signed here and a '
+                          'rotation stops her — redeploy it')
+        return jsonify(out)
+    session = of_session.get(account)
+    try:
+        got = conn.request_for(account, session, 'GET', '/api2/v2/users/me',
+                               None, proxy=_of_proxy_for(account, '')) or {}
+    except Exception as e:
+        out['error'] = str(e)[:300]
+        return jsonify(out)
+    body = got.get('body') if isinstance(got.get('body'), dict) else {}
+    out['status'] = got.get('status')
+    out['username'] = str(body.get('username') or '')
+    out['worked'] = bool(out['username'])
+    if not out['worked']:
+        out['problem'] = ('her page answered %s — the request left through her '
+                          'browser, so this is her session or the page, not '
+                          'signing' % (got.get('status') or 'nothing'))
+    return jsonify(out)
+
+
 @app.route('/api/onlyfans/signing/test', methods=['POST'])
 @operator_only
 def api_onlyfans_signing_test():
@@ -18282,6 +18348,21 @@ def api_diag():
                 out['probe'] = _of_conn().probe_now(proxy=_of_proxy_for('', ''))
             except Exception as e:
                 out['probe'] = {'error': str(e)[:200]}
+        # Everything the signing repair reasons from, in one paste, so a
+        # rotation can be diagnosed and solved offline (of_replay.py) rather
+        # than through a deploy and a sign-in. No credentials: a signature is a
+        # hash of a path, a timestamp and an account id.
+        if request.args.get('export'):
+            out['export'] = {
+                'sample': of_rules.sample(),
+                'signatures': _of_signatures(),
+                'rules': of_rules.rules(),
+                'override': of_rules.override(),
+                'state': of_rules.state(),
+                'sources': {of_rules.label_of(url): of_rules._candidates.get(url)
+                            for url in of_rules.RULES_SOURCES
+                            if of_rules._candidates.get(url)},
+            }
         try:
             out['onlyfans'] = _of_watch_payload(
                 int(request.args.get('after') or 0),

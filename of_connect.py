@@ -1207,6 +1207,14 @@ class Signer:
         finally:
             self.opened_at = 0.0
             self._ready.set()
+            # The probe owns the profile directory this signer ran on, and a
+            # signer that ends without removing it leaves a Chrome profile
+            # behind for the life of the instance -- on a filesystem that is
+            # this instance's memory.
+            try:
+                shutil.rmtree(probe._profile, ignore_errors=True)
+            except Exception:
+                pass
 
     def _open(self, context):
         cookies = _cookies_for(self.session)
