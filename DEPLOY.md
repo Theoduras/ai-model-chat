@@ -86,6 +86,25 @@ gcloud builds triggers describe <name> --format=yaml
 
 An empty `FILENAME` column confirms the inline config.
 
+### Making it use `cloudbuild.app.yaml`
+
+[`cloudbuild.app.yaml`](cloudbuild.app.yaml) is that inline config written out,
+plus the caching it cannot express: it pulls the previous image, skips build and
+push entirely when this commit is already in the registry, and builds with
+`--cache-from` so the Chrome layer is reused instead of re-downloaded. Its deploy
+step is still `services update --image` alone, so the point above holds — service
+settings are untouched by a deploy either way.
+
+**It is read by nothing until the trigger is pointed at it**, once:
+
+```bash
+gcloud builds triggers describe <name> --format=yaml   # keep a copy of the inline config first
+gcloud builds triggers update github <name> --build-config=cloudbuild.app.yaml
+```
+
+After that the `FILENAME` column shows `cloudbuild.app.yaml`, and how the app
+deploys becomes readable and fixable from a checkout, like the browser's does.
+
 ### Changing a Cloud Run setting
 
 Directly on the service, once:

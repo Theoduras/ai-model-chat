@@ -9,6 +9,20 @@ logs/
 node_modules/
 .DS_Store
 *.db
-README.md
-grok.ps1
+
+# Nothing below is read at runtime: docs are blocked by the static handler, the
+# tests never run in the image, and api/ + vercel.json belong to the other host.
+*.md
+test_*.py
+.pytest_cache/
+docs/
+infra/
+api/
+vercel.json
+cloudbuild*.yaml
+.github/
+.claude/
+*.ps1
 chat_cli.py
+*.session
+*.session-journal

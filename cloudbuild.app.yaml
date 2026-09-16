@@ -1,0 +1,87 @@
+# Deploys ai-model-chat-dev on every push to develop.
+#
+# The app's trigger still carries an inline build config, which cannot be read or
+# repaired from a checkout and rebuilds the image from scratch every push: Chrome
+# is re-downloaded and every dependency re-installed even when nothing but a HTML
+# file changed. This is that config moved into version control, with the caching
+# the inline one has no way to express. Point the trigger at this file (Cloud
+# Build configuration file -> /cloudbuild.app.yaml) for any of it to take effect.
+#
+# The image path is composed in the args rather than kept whole in a substitution,
+# because Cloud Build does not expand substitutions inside other substitutions: a
+# $PROJECT_ID in a substitution's own value stays the literal text.
+steps:
+  # A missing :latest is the normal first build, not a failure -- --cache-from
+  # only reads an image that is already local, so a pull that fails just means no
+  # cache on this run.
+  - name: gcr.io/cloud-builders/docker
+    entrypoint: sh
+    args:
+      - -c
+      - docker pull ${_AR_HOSTNAME}/$PROJECT_ID/${_AR_REPOSITORY}/$REPO_NAME/${_SERVICE_NAME}:latest || true
+
+  # An image for this commit already in the registry is the same image: the build
+  # is deterministic in the only thing that varies, which is the source.
+  - name: gcr.io/cloud-builders/docker
+    id: Reuse
+    entrypoint: sh
+    args:
+      - -c
+      - |
+        # $$ is a shell variable here; a single $ would be read as one of Cloud
+        # Build's own substitutions and fail the build outright.
+        IMG=${_AR_HOSTNAME}/$PROJECT_ID/${_AR_REPOSITORY}/$REPO_NAME/${_SERVICE_NAME}:$COMMIT_SHA
+        if docker pull "$$IMG" >/dev/null 2>&1; then
+          echo "$$IMG is already built; skipping build and push"
+          touch /workspace/.reuse
+        fi
+
+  - name: gcr.io/cloud-builders/docker
+    id: Build
+    entrypoint: sh
+    args:
+      - -c
+      - |
+        # Not `[ -f … ] && exit 0`: that is the last command, so its own false is
+        # the step's exit status and a build that should run fails instead.
+        if [ -f /workspace/.reuse ]; then exit 0; fi
+        IMG=${_AR_HOSTNAME}/$PROJECT_ID/${_AR_REPOSITORY}/$REPO_NAME/${_SERVICE_NAME}
+        docker build -t "$$IMG:$COMMIT_SHA" -t "$$IMG:latest" \
+          --cache-from "$$IMG:latest" -f Dockerfile .
+
+  - name: gcr.io/cloud-builders/docker
+    id: Push
+    entrypoint: sh
+    args:
+      - -c
+      - |
+        if [ -f /workspace/.reuse ]; then exit 0; fi
+        docker push --all-tags \
+          ${_AR_HOSTNAME}/$PROJECT_ID/${_AR_REPOSITORY}/$REPO_NAME/${_SERVICE_NAME}
+
+  # `services update --image`, not `run deploy`: every other setting on this
+  # service -- memory, env vars, instances -- is held on the service itself, and
+  # a full deploy that omits a flag resets it.
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    id: Deploy
+    entrypoint: gcloud
+    args:
+      - run
+      - services
+      - update
+      - ${_SERVICE_NAME}
+      - --image=${_AR_HOSTNAME}/$PROJECT_ID/${_AR_REPOSITORY}/$REPO_NAME/${_SERVICE_NAME}:$COMMIT_SHA
+      - --region=${_DEPLOY_REGION}
+      - --platform=managed
+      - --quiet
+
+substitutions:
+  _SERVICE_NAME: ai-model-chat-dev
+  _DEPLOY_REGION: europe-west4
+  _AR_HOSTNAME: europe-west4-docker.pkg.dev
+  _AR_REPOSITORY: cloud-run-source-deploy
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  substitutionOption: ALLOW_LOOSE
+timeout: 1800s
