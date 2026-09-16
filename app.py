@@ -9647,6 +9647,9 @@ def _x_refresh(persona):
     t['access_token'] = td.get('access_token', t.get('access_token'))
     if td.get('refresh_token'):
         t['refresh_token'] = td['refresh_token']
+    if td.get('scope'):
+        t['scope'] = td['scope']
+    t['refreshed_at'] = int(time.time())
     tokens[persona] = t
     _save_x_tokens(tokens)
     return t['access_token']
@@ -11105,6 +11108,11 @@ def api_x_callback():
         'client_id': client_id,
         'username': username,
         'user_id': user_id,
+        # X hands back the scopes it actually granted, which is not always what
+        # was asked for: a permission the creator untick reads downstream as an
+        # empty inbox rather than as a refusal.
+        'scope': token_data.get('scope', ''),
+        'connected_at': int(time.time()),
     }
     _save_x_tokens(tokens)
     _x_oauth_state_clear()
@@ -11188,6 +11196,15 @@ def api_x_dm_debug():
         out['verdict'] = out.get('verdict') or 'Reading DMs failed — see read_error.'
         return jsonify(out)
     events = raw.get('data', []) or []
+    # X reports partial failures beside the data — a conversation it will not
+    # serve comes back in `errors` with `data` simply short, so reading only
+    # `data` turns a permission problem into "nobody has written to her".
+    out['x_meta'] = raw.get('meta', {})
+    out['x_errors'] = raw.get('errors', [])
+    out['granted_scope'] = t.get('scope', '')
+    for need in ('dm.read', 'dm.write'):
+        if out['granted_scope'] and need not in out['granted_scope']:
+            out.setdefault('missing_scopes', []).append(need)
     seen = _x_seen_events(persona)
     out['events'] = [{'id': e.get('id'), 'from': e.get('sender_id'),
                       'mine': e.get('sender_id') == t.get('user_id'),
@@ -11197,7 +11214,18 @@ def api_x_dm_debug():
     out['event_count'] = len(events)
     out['new_incoming'] = sum(1 for e in out['events']
                               if not e['mine'] and not e['already_handled'])
-    if not out.get('verdict'):
+    try:
+        conv = _x_call(persona, 'GET',
+                       '/dm_conversations?dm_conversation.fields=id&max_results=50')
+        out['conversation_count'] = len(conv.get('data', []) or [])
+        out['conversation_errors'] = conv.get('errors', [])
+    except Exception as e:
+        out['conversation_error'] = str(e)[:300]
+
+    if out.get('missing_scopes'):
+        out['verdict'] = ('X did not grant ' + ', '.join(out['missing_scopes']) +
+                          ' — reconnect the account and approve every permission.')
+    elif not out.get('verdict'):
         if not events:
             out['verdict'] = 'X returned no DM events at all.'
         elif not out['new_incoming']:
