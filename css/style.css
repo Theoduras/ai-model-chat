@@ -4,6 +4,10 @@
    Surfaces run darkest (page) to lightest (input). The accent is the coral
    from the landing page; the gradient is reserved for primary actions. */
 :root {
+  /* Native controls - the datetime picker above all - paint their own chrome
+     from this, and without it they render light-mode text onto the dark
+     field the moment they are focused. */
+  color-scheme: dark;
   --bg:          #0e0e0e;
   --panel:       #111113;
   --panel-2:     #151517;
@@ -59,6 +63,7 @@
 /* Light theme. Only the palette changes — every rule below reads these tokens,
    so nothing else needs a light-mode variant. Set by js/theme.js before paint. */
 :root[data-theme="light"] {
+  color-scheme: light;
   --bg:          #faf9f8;
   --panel:       #ffffff;
   --panel-2:     #fbfaf9;

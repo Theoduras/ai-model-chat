@@ -112,6 +112,16 @@
         <span class="hint" id="pl-m-media-hint" style="margin-top:6px;"></span>
       </div>
 
+      <div class="field" style="margin-top:14px;" id="pl-m-ig-field" hidden>
+        <label for="pl-m-ig-kind">Where it lands on Instagram</label>
+        <select id="pl-m-ig-kind" onchange="plIgKindChanged()">
+          <option value="post">Feed post</option>
+          <option value="story">Story</option>
+          <option value="reel">Reel</option>
+        </select>
+        <span class="hint" id="pl-m-ig-hint" style="margin-top:6px;"></span>
+      </div>
+
       <div class="field" style="margin-top:14px;" id="pl-m-fanvue-field" hidden>
         <label for="pl-m-audience">Who sees it on Fanvue</label>
         <select id="pl-m-audience">
@@ -167,7 +177,7 @@
 // write, so this copy only decides when the counter turns red.
 const PL_CAPS = { x: 280, threads: 500, fanvue: 5000, instagram: 2200, tiktok: 2200, reddit: 300 };
 const PL_LABELS = { x: 'X', threads: 'Threads', fanvue: 'Fanvue', instagram: 'Instagram', tiktok: 'TikTok', reddit: 'Reddit' };
-const PL_PUBLISHABLE = ['x', 'threads', 'fanvue'];
+const PL_PUBLISHABLE = ['x', 'threads', 'fanvue', 'instagram'];
 // The channels the week can be planned for. Mirrors growth.WEEKLY_CADENCE.
 const PL_PLATFORMS = ['x', 'threads', 'fanvue', 'instagram', 'tiktok', 'reddit'];
 // Mirrors growth.MEDIA_SUPPORT. The server checks it again on every write; this
@@ -791,6 +801,7 @@ function plNew() {
 
   plRenderChans();
   plRenderFanvue('', 0);
+  plRenderIg('post');
   plSetRating('');
   plCount();
   plRenderMedia();
@@ -820,6 +831,33 @@ function plFanvueFields() {
     audience: document.getElementById('pl-m-audience').value,
     price_cents: isNaN(dollars) || dollars <= 0 ? 0 : Math.round(dollars * 100)
   };
+}
+
+function plRenderIg(kind) {
+  const on = plOpen && (plOpen.kind === 'new'
+    ? plChans.indexOf('instagram') !== -1 : plOpen.platform === 'instagram');
+  document.getElementById('pl-m-ig-field').hidden = !on;
+  if (!on) return;
+  if (kind !== undefined) document.getElementById('pl-m-ig-kind').value = kind || 'post';
+  const picked = document.getElementById('pl-m-ig-kind').value;
+  document.getElementById('pl-m-ig-hint').textContent = picked === 'reel'
+    ? 'A reel is one video. Its cover is taken from the first frame.'
+    : picked === 'story'
+      ? 'A story is one photo or video, and it is gone after 24 hours.'
+      : 'A feed post can carry several photos or videos as a carousel.';
+}
+
+// Instagram takes one file for a story or a reel, several only in the feed.
+function plIgKindChanged() {
+  const kind = document.getElementById('pl-m-ig-kind').value;
+  if (kind !== 'post' && plPickedMedia.length > 1) plPickedMedia = plPickedMedia.slice(0, 1);
+  plRenderIg();
+  plRenderMedia();
+}
+
+function plIgFields() {
+  if (document.getElementById('pl-m-ig-field').hidden) return null;
+  return { ig_kind: document.getElementById('pl-m-ig-kind').value };
 }
 
 function plRenderChans() {
@@ -855,6 +893,7 @@ function plToggleChan(p) {
   plOpen.publishable = plChans.every(c => PL_PUBLISHABLE.indexOf(c) !== -1);
   plRenderChans();
   plRenderFanvue();
+  plRenderIg();
   plCount();
   plRenderMedia();
 }
@@ -921,6 +960,7 @@ function plEdit(kind, idx) {
   plChans = [];
   plRenderChans();
   plRenderFanvue(row.audience || '', row.price_cents || 0);
+  plRenderIg(row.ig_kind || 'post');
   plSetRating('');
   plCount();
   plRenderMedia();
@@ -996,9 +1036,16 @@ function plRenderMedia() {
           + 'them all. Post them separately to attach something.');
   // The strip is the first page; the whole vault, with its folders, is a click
   // away rather than an endless scroll inside the editor.
-  document.getElementById('pl-m-browse').innerHTML = fvOnly
+  document.getElementById('pl-m-browse').innerHTML = (fvOnly
     ? '<button type="button" class="btn-section-save" style="margin-left:0;"'
-      + ' onclick="plVaultOpen()">Browse the vault</button>' : '';
+      + ' onclick="plVaultOpen()">Browse the vault</button>'
+    // A Fanvue vault item has to be uploaded to Fanvue itself, so an upload
+    // here would land in the wrong library.
+    : '<button type="button" class="btn-section-save" style="margin-left:0;"'
+      + ' onclick="document.getElementById(\'pl-m-upload\').click()">Upload media</button>'
+      + '<input type="file" id="pl-m-upload" multiple accept="image/*,video/*"'
+      + ' style="display:none" onchange="plUpload(this)">')
+    + '<span class="hint" id="pl-m-upload-note" style="margin-left:8px;"></span>';
   document.getElementById('pl-m-strip').innerHTML = usable.length
     ? usable.map(m => '<button type="button" class="pl-pick'
         + (plPickedMedia.indexOf(m.id) !== -1 ? ' on' : '') + '" title="' + esc(m.purpose || m.kind)
@@ -1029,7 +1076,72 @@ function plRenderMedia() {
 function plMediaCap() {
   const chans = plOpenChans();
   if (!chans.length) return 1;
+  // A story and a reel are one file each, whatever the feed would allow.
+  const ig = plIgFields();
+  if (ig && ig.ig_kind !== 'post') return 1;
   return Math.min.apply(null, chans.map(p => PL_MEDIA_MAX[p] || 1));
+}
+
+const PL_UPLOAD_MAX = 12 * 1024 * 1024;
+
+// A video's first frame, as a data URL. Instagram wants one as a Reel's cover
+// and nothing on the server can open a video to find one, so it is taken here
+// while the file is in the browser anyway.
+function plPosterFrame(file) {
+  return new Promise(resolve => {
+    const v = document.createElement('video');
+    v.preload = 'metadata';
+    v.muted = true;
+    const done = url => { URL.revokeObjectURL(v.src); resolve(url); };
+    v.onloadedmetadata = () => { v.currentTime = Math.min(0.1, (v.duration || 0) / 2); };
+    v.onseeked = () => {
+      try {
+        const c = document.createElement('canvas');
+        c.width = v.videoWidth; c.height = v.videoHeight;
+        c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+        done(c.toDataURL('image/jpeg', 0.85));
+      } catch (e) { done(''); }
+    };
+    v.onerror = () => done('');
+    v.src = URL.createObjectURL(file);
+  });
+}
+
+async function plUpload(input) {
+  const files = Array.from(input.files || []);
+  input.value = '';
+  if (!files.length) return;
+  const note = document.getElementById('pl-m-upload-note');
+  note.textContent = 'Uploading ' + files.length + ' file(s)…';
+  const readAsDataURL = f => new Promise(res => {
+    const r = new FileReader(); r.onload = e => res(e.target.result); r.readAsDataURL(f);
+  });
+  let added = 0, toobig = 0;
+  const fresh = [];
+  for (const file of files) {
+    if (file.size > PL_UPLOAD_MAX) { toobig++; continue; }
+    try {
+      const image = await readAsDataURL(file);
+      const poster = file.type.startsWith('video/') ? await plPosterFrame(file) : '';
+      const r = await fetch('/api/personas/' + encodeURIComponent(plSlug) + '/media', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image, mime: file.type || '', poster })
+      });
+      const d = await r.json();
+      if (d.id) { fresh.push(d.id); added++; }
+    } catch (e) {}
+  }
+  await plLoadVault();
+  // Attaching them is the point of uploading from here, so they go onto the
+  // post, up to whatever it can carry.
+  fresh.forEach(id => {
+    if (plPickedMedia.indexOf(id) === -1 && plPickedMedia.length < plMediaCap()) {
+      plPickedMedia.push(id);
+    }
+  });
+  plRenderMedia();
+  note.textContent = (added ? '✓ Added ' + added + ' file(s).' : 'Nothing added.')
+    + (toobig ? ' ' + toobig + ' over 12MB — host those and paste the link.' : '');
 }
 
 function plPickMedia(id) {
@@ -1140,6 +1252,7 @@ async function plSave(btn, now) {
       + ' right now?')) return;
 
   const fv = plFanvueFields();
+  const ig = plIgFields();
   if (fv && fv.price_cents && !plPickedMedia.length) {
     alert('A paid Fanvue post needs media behind the price.'); return;
   }
@@ -1158,7 +1271,7 @@ async function plSave(btn, now) {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ persona: plSlug, platforms: plChans, text: text,
                                run_at: at, now: !!now, media_ids: plPickedMedia,
-                               ...(fv || {}) })
+                               ...(fv || {}), ...(ig || {}) })
       });
     } else if (plOpen.kind === 'proposed') {
       if (!plOpen.written) {
@@ -1169,14 +1282,14 @@ async function plSave(btn, now) {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ persona: plSlug, platform: plOpen.platform, text: text,
                                run_at: at, now: !!now, media_ids: plPickedMedia,
-                               ...(fv || {}) })
+                               ...(fv || {}), ...(ig || {}) })
       });
     } else {
       res = await fetch('/api/growth/queue', {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ persona: plSlug, id: plOpen.id, text: text,
                                run_at: at, now: !!now, media_ids: plPickedMedia,
-                               ...(fv || {}) })
+                               ...(fv || {}), ...(ig || {}) })
       });
     }
     const d = await res.json();

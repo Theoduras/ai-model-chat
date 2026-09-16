@@ -7973,6 +7973,7 @@ def _growth_queue_rows(persona, limit=50, since=None, until=None):
                  'media_id': r.media_id or '',
                  'media_ids': post_media_ids(r),
                  'audience': r.audience or '',
+                 'ig_kind': r.ig_kind or '',
                  'price_cents': int(r.price_cents or 0),
                  'run_at': int(r.run_at.replace(tzinfo=timezone.utc).timestamp())
                  if r.run_at else 0}
@@ -8115,6 +8116,25 @@ def _growth_post_extras(platform, data, media_id, current=None):
     return audience, price, ''
 
 
+def _growth_ig_kind(persona, platform, data, media_ids, current=None):
+    """Which of Instagram's three destinations a queued post is for, or '' for
+    every other channel. Returns (ig_kind, error) — the same rules
+    `_ig_post_now` enforces for a post going out by hand."""
+    if growth.normalise_source(platform) != 'instagram':
+        return '', ''
+    kind = (data.get('ig_kind') or (current or {}).get('ig_kind') or 'post').strip().lower()
+    if kind not in IG_KINDS:
+        return '', 'Pick a feed post, a story or a reel.'
+    if not media_ids:
+        return '', 'An Instagram post needs a photo or a video.'
+    if kind != 'post' and len(media_ids) > 1:
+        return '', 'A story and a reel carry one file, not several.'
+    first = (_media_row(persona, media_ids[0]) or {}).get('kind') or 'image'
+    if kind == 'reel' and first != 'video':
+        return '', 'A reel needs a video file.'
+    return kind, ''
+
+
 def _fv_media_id(media_id):
     """The Fanvue vault uuid behind a queue row's media, or ''. An item already
     in her vault is carried as 'fv:{uuid}' so it needs no column of its own and
@@ -8239,11 +8259,15 @@ def api_growth_queue():
                 if why:
                     failed.append({'platform': plat, 'error': why})
                     continue
+                ig_kind, why = _growth_ig_kind(persona, plat, data, media_ids)
+                if why:
+                    failed.append({'platform': plat, 'error': why})
+                    continue
                 row = queue_post(sdb, persona, plat, text, run_at,
                                  media_ids[0] if media_ids else '',
                                  growth.queue_status_for(plat),
                                  audience=audience, price_cents=price,
-                                 media_ids=media_ids)
+                                 media_ids=media_ids, ig_kind=ig_kind)
                 queued.append({'platform': plat, 'id': row.id,
                                'status': growth.queue_status_for(plat)})
             sdb.commit()
@@ -8268,7 +8292,7 @@ def api_growth_queue():
     if request.method == 'PATCH':
         data = request.json or {}
         post_id = (data.get('id') or '').strip()
-        from db import SessionLocal, update_post, ScheduledPost
+        from db import SessionLocal, update_post, ScheduledPost, post_media_ids
         sdb = SessionLocal()
         try:
             row = (sdb.query(ScheduledPost)
@@ -8313,12 +8337,20 @@ def api_growth_queue():
                     {'audience': row.audience, 'price_cents': row.price_cents})
                 if why:
                     return jsonify({'ok': False, 'error': why}), 400
+            ig_kind = None
+            if growth.normalise_source(row.platform) == 'instagram':
+                at_ids = media_ids if media_ids is not None else post_media_ids(row)
+                ig_kind, why = _growth_ig_kind(persona, row.platform, data, at_ids,
+                                               {'ig_kind': row.ig_kind})
+                if why:
+                    return jsonify({'ok': False, 'error': why}), 400
             if (text is None and run_at is None and media_ids is None
-                    and audience is None):
+                    and audience is None and ig_kind is None):
                 return jsonify({'ok': False, 'error': 'Nothing to change.'}), 400
             done = update_post(sdb, persona, post_id, text=text, run_at=run_at,
                                media_id=media_id, media_ids=media_ids,
-                               audience=audience, price_cents=price)
+                               audience=audience, price_cents=price,
+                               ig_kind=ig_kind)
             sdb.commit()
         finally:
             sdb.close()
@@ -8849,7 +8881,7 @@ GROWTH_QUEUE_STALE_HRS = 6
 
 
 def _growth_publish(persona, platform, text, media_id='', audience='', price_cents=0,
-                    media_ids=None):
+                    media_ids=None, ig_kind=''):
     """Put one post out and write it into the content register. Returns the id
     the channel gave it; raises on failure, because only the caller knows
     whether this attempt is worth another one."""
@@ -8920,13 +8952,20 @@ def _growth_publish(persona, platform, text, media_id='', audience='', price_cen
             width, height, duration_ms = _mp4_probe(blob)
             if not duration_ms:
                 raise RuntimeError("that video's length could not be read")
+        rest = IR.Rest(session)
         try:
-            result = IR.Rest(session).post_feed(blob, kind, text, width, height, duration_ms)
+            if ig_kind == 'story':
+                result = rest.post_story(blob, kind, text, width, height, duration_ms)
+            elif ig_kind == 'reel':
+                result = rest.post_reel(blob, text, width, height, duration_ms,
+                                        _media_poster(rows[0]))
+            else:
+                result = rest.post_feed(blob, kind, text, width, height, duration_ms)
         except IR.InstagramApiError as e:
             raise RuntimeError('Instagram would not accept that post'
                                + (f': {e.detail[:160]}' if e.detail else '.'))
         posted_id = str(((result or {}).get('media') or {}).get('pk') or '')
-        _ig_log_post(persona, 'post', text)
+        _ig_log_post(persona, ig_kind or 'post', text)
     else:
         raise ValueError(f'{plat} posts have to go out by hand')
     _content_register_add(persona, plat, text)
@@ -8961,7 +9000,8 @@ def _growth_queue_round():
                 posted_id = _growth_publish(persona, platform, text, media_id,
                                             audience=audience,
                                             price_cents=price_cents,
-                                            media_ids=media_ids)
+                                            media_ids=media_ids,
+                                            ig_kind=row.ig_kind or '')
                 finish_post(sdb, post_id, external_id=posted_id)
                 logger.info('QUEUE posted [%s/%s] id=%s %s',
                             persona, platform, posted_id, text[:60])
@@ -9654,9 +9694,11 @@ def api_persona_media_save(slug):
     from db import SessionLocal, PersonaMedia
     s = SessionLocal()
     try:
+        poster = str(data.get('poster') or '')
         row = PersonaMedia(
             slug=slug, image_data=image if image.startswith('data:') else '',
             kind=kind, mime=mime, source_url=source_url,
+            poster_data=poster if poster.startswith('data:image/') else '',
             location=str(data.get('location', ''))[:120],
             outfit=str(data.get('outfit', ''))[:120],
             lighting=str(data.get('lighting', ''))[:60],
@@ -10208,7 +10250,8 @@ def _media_row(persona, media_id):
             return None
         return {'id': row.id, 'kind': row.kind or 'image',
                 'mime': row.mime or '', 'source_url': row.source_url or '',
-                'data': row.image_data or '', 'slug': row.slug}
+                'data': row.image_data or '', 'slug': row.slug,
+                'poster': getattr(row, 'poster_data', '') or ''}
     finally:
         s.close()
 
@@ -10229,6 +10272,20 @@ def _media_bytes(media):
     with urllib.request.urlopen(req, timeout=60) as r:
         return r.read(), (r.headers.get('Content-Type')
                           or media.get('mime') or 'application/octet-stream')
+
+
+def _media_poster(media):
+    """A video's stored poster frame as raw bytes, or None. Instagram wants one
+    as a Reel's cover; it was grabbed in the browser at upload time because
+    nothing server-side can open a video."""
+    import base64
+    data = (media or {}).get('poster') or ''
+    if not data.startswith('data:'):
+        return None
+    try:
+        return base64.b64decode(data.split(',', 1)[1])
+    except Exception:
+        return None
 
 
 def _media_public_url(media):

@@ -156,6 +156,10 @@ class PersonaMedia(Base):
     kind = Column(String(8), default='image')      # image | video
     mime = Column(String(60), default='')
     source_url = Column(String(600), default='')   # externally hosted, if any
+    # A video's poster frame, grabbed in the browser when the file was
+    # uploaded. Instagram refuses a Reel with no cover, and the queue worker
+    # has no browser to pull a frame out of a video itself.
+    poster_data = Column(Text, default='')
     location = Column(String(120), default='')
     outfit = Column(String(120), default='')
     lighting = Column(String(60), default='')
@@ -1121,6 +1125,9 @@ class ScheduledPost(Base):
     # other channel ignores both.
     audience = Column(String(40), default='')
     price_cents = Column(Integer, default=0)
+    # Instagram alone has three places a post can land. Empty means a feed
+    # post, which is what every other channel's single destination amounts to.
+    ig_kind = Column(String(8), default='')        # '' | post | story | reel
     created_at = Column(DateTime, default=_now)
 
 
@@ -1129,12 +1136,13 @@ Index('ix_scheduled_persona', ScheduledPost.persona, ScheduledPost.run_at)
 
 
 def queue_post(session, persona, platform, text, run_at, media_id='', status='queued',
-               audience='', price_cents=0, media_ids=None):
+               audience='', price_cents=0, media_ids=None, ig_kind=''):
     ids = [str(m) for m in (media_ids or []) if m] or ([media_id] if media_id else [])
     row = ScheduledPost(persona=persona, platform=platform, text=text,
                         run_at=run_at, media_id=(ids[0] if ids else ''), status=status,
                         media_ids=','.join(ids),
-                        audience=audience or '', price_cents=int(price_cents or 0))
+                        audience=audience or '', price_cents=int(price_cents or 0),
+                        ig_kind=ig_kind or '')
     session.add(row)
     session.flush()
     return row
@@ -1230,7 +1238,7 @@ def post_media_ids(row):
 
 
 def update_post(session, persona, post_id, text=None, run_at=None, media_id=None,
-                audience=None, price_cents=None, media_ids=None):
+                audience=None, price_cents=None, media_ids=None, ig_kind=None):
     """Edit a post that has not gone out yet. Like cancel_post, only a `queued`
     row is the caller's to touch: once the worker has claimed it the send may
     already be away, and once it has posted the text is history rather than a
@@ -1257,6 +1265,8 @@ def update_post(session, persona, post_id, text=None, run_at=None, media_id=None
         fields['audience'] = audience
     if price_cents is not None:
         fields['price_cents'] = int(price_cents or 0)
+    if ig_kind is not None:
+        fields['ig_kind'] = ig_kind or ''
     if not fields:
         return False
     n = (session.query(ScheduledPost)

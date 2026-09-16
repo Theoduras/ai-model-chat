@@ -19,6 +19,7 @@ os.environ.setdefault('DISCORD_AUTOSTART', '0')
 os.environ.setdefault('SECRET_KEY', 'test-secret-for-instagram')
 
 import app
+import growth
 import instagram_rest as IR
 import instagram_stub as IS
 
@@ -218,6 +219,37 @@ def test_signing_in_through_the_browser():
           made.state == 'connected' and made.capture_note == 'unverified')
 
 
+def test_the_planner_picks_where_a_post_lands():
+    """The rules a queued Instagram post is held to before it is written —
+    Instagram's own, not something the console invented."""
+    rows = {'img': {'id': 'img', 'kind': 'image'}, 'vid': {'id': 'vid', 'kind': 'video'}}
+    app._media_row = lambda persona, mid: rows.get(mid)
+
+    kind, why = app._growth_ig_kind('lilly', 'instagram', {'ig_kind': 'reel'}, ['vid'])
+    check('a reel with a video is queued as a reel', kind == 'reel' and not why, why)
+
+    kind, why = app._growth_ig_kind('lilly', 'instagram', {'ig_kind': 'reel'}, ['img'])
+    check('a reel with a photo is refused at the queue, not at posting time',
+          'video' in why.lower(), why)
+
+    kind, why = app._growth_ig_kind('lilly', 'instagram', {'ig_kind': 'story'},
+                                    ['img', 'vid'])
+    check('a story carrying two files is refused', 'one file' in why.lower(), why)
+
+    kind, why = app._growth_ig_kind('lilly', 'instagram', {'ig_kind': 'post'},
+                                    ['img', 'vid'])
+    check('a feed post may carry several, as a carousel', kind == 'post' and not why, why)
+
+    kind, why = app._growth_ig_kind('lilly', 'instagram', {}, [])
+    check('an Instagram post with nothing attached is refused', bool(why), why)
+
+    kind, why = app._growth_ig_kind('lilly', 'x', {'ig_kind': 'reel'}, ['img'])
+    check('no other channel carries a post kind at all', (kind, why) == ('', ''))
+
+    check('instagram is a channel the planner can publish to itself',
+          'instagram' in growth.PUBLISHABLE)
+
+
 def test_the_routes_exist():
     rules = {str(r) for r in app.app.url_map.iter_rules()}
     for path in ('/api/instagram/status', '/api/instagram/connect',
@@ -245,6 +277,7 @@ if __name__ == '__main__':
                test_not_connected_refuses_before_touching_the_network,
                test_the_session_round_trips_through_encryption,
                test_signing_in_through_the_browser,
+               test_the_planner_picks_where_a_post_lands,
                test_the_routes_exist,
                test_the_console_has_what_it_draws):
         restore()
