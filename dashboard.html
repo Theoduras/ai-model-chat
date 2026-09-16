@@ -225,10 +225,9 @@
               <span>Reddit</span>
               <span class="sb-soon-tag">Coming soon</span>
             </button>
-            <button type="button" class="sb-item sb-soon" disabled data-search="instagram ig coming soon">
+            <button type="button" class="sb-item" data-platform="instagram" data-search="instagram ig" onclick="openPlatform('instagram', this)">
               <svg class="sb-ic-instagram" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.2" cy="6.8" r="1.1" fill="currentColor" stroke="none"/></svg>
               <span>Instagram</span>
-              <span class="sb-soon-tag">Coming soon</span>
             </button>
             <button type="button" class="sb-item sb-soon" disabled data-search="tiktok coming soon">
               <svg class="sb-ic-tiktok" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M16.6 5.82A4.28 4.28 0 0 1 15.54 3h-3.09v12.4a2.59 2.59 0 0 1-2.59 2.5 2.59 2.59 0 1 1 .77-5.06V9.7a5.67 5.67 0 0 0-.77-.05A5.66 5.66 0 1 0 15.54 15.3V8.99a7.35 7.35 0 0 0 4.3 1.38V7.28a4.29 4.29 0 0 1-3.24-1.46z"/></svg>
@@ -1294,6 +1293,7 @@ function openPlatform(platform, navEl) {
   if (platform === 'fanvue') return openEmbedded('/fanvue', navEl);
   if (platform === 'onlyfans') return openEmbedded('/onlyfans', navEl);
   if (platform === 'discord') return openEmbedded('/discord', navEl);
+  if (platform === 'instagram') return openEmbedded('/instagram', navEl);
   currentSlug = null;
   document.querySelectorAll('.persona-item').forEach(el => el.classList.remove('active'));
   clearSbActive();

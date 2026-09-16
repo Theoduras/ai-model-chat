@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Instagram Poster</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <script src="/js/theme.js"></script>
+  <link rel="stylesheet" href="/css/style.css">
+  <script src="/js/devnav.js" defer></script>
+  <style>
+    .fv-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+    .fv-wrap { max-width: 760px; margin: 0 auto; padding: 28px 24px 80px; display: flex; flex-direction: column; gap: 20px; }
+    .conn-pill { font-size: 0.75rem; padding: 3px 10px; border-radius: 9999px; background: var(--surface); color: var(--text-3); }
+    .conn-pill.ok { background: #14532d; color: #4ade80; }
+    .conn-pill.err { background: #4c0519; color: #fb7185; }
+    .warn-box { border: 1px solid #b45309; background: #78350f22; color: var(--text-2);
+                border-radius: 10px; padding: 12px 14px; font-size: 0.82rem; line-height: 1.5; }
+    .ig-preview { max-width: 220px; max-height: 220px; border-radius: 10px; margin-top: 8px; display: none; }
+  </style>
+</head>
+<body class="page-dashboard">
+
+<header>
+  <div style="display:flex; align-items:center; gap:10px;">
+    <h1>Instagram Poster</h1>
+    <span class="badge">Instagram</span>
+  </div>
+  <div style="display:flex; align-items:center; gap:16px;">
+    <nav data-site-nav="inline" class="sn-links sn-inline"></nav>
+    <a href="/dashboard" style="color:var(--text-muted); font-size:0.8rem; text-decoration:none;">← Dashboard</a>
+  </div>
+</header>
+
+<div class="fv-scroll">
+<div class="fv-wrap">
+
+  <div class="warn-box">
+    <strong>Read this before connecting an account.</strong>
+    This drives a real Instagram account through a real sign-in, not Meta's official
+    posting API — the Graph API cannot post Stories at all and needs a Business account
+    and app review even for feed posts and Reels. Instagram's terms do not allow an
+    automated client either, and accounts found doing this can be actioned. Use an
+    account you can afford to lose.
+  </div>
+
+  <div class="form-section" id="sec-account">
+    <div class="section-title">Persona &amp; Instagram account</div>
+    <div class="field full">
+      <label>Choose a model (persona)</label>
+      <div class="row-inline">
+        <div class="field" style="margin:0;">
+          <select id="persona" onchange="loadAll()"></select>
+        </div>
+        <span class="conn-pill" id="conn-pill">—</span>
+      </div>
+    </div>
+    <div class="row-inline">
+      <button class="btn-ai" onclick="startSignin()">Sign in to Instagram</button>
+      <button class="btn-ai" style="background:var(--surface); color:var(--text-2);"
+              onclick="disconnect()">Disconnect</button>
+    </div>
+    <span class="hint">A real Instagram login page opens in a window. Sign in there as you
+      would on your own phone — the human check, 2FA and any emailed code all happen on
+      Instagram's own page. Nothing you type reaches us; what comes back is the session
+      her browser was already using.</span>
+    <details style="margin-top:12px;">
+      <summary class="hint" style="cursor:pointer;">Paste a cookie instead</summary>
+      <div class="row-inline" style="margin-top:10px;">
+        <div class="field" style="flex:2;">
+          <input type="password" id="ig-cookie" autocomplete="new-password" spellcheck="false"
+                 placeholder="paste the full Cookie header from a signed-in tab">
+          <span class="hint">Only needed if this deployment has no sign-in browser.
+            Stored encrypted and never shown again.</span>
+        </div>
+        <button class="btn-ai" onclick="connect()">Use cookie</button>
+      </div>
+    </details>
+    <div id="account-status" class="hint" style="margin-top:10px;"></div>
+  </div>
+
+  <div class="form-section" id="sec-posting">
+    <div class="section-title">Post now</div>
+    <span class="hint">Stories, feed posts and Reels only — no DMs, no scheduling yet. A
+      Reel needs a video file; Stories and posts can be a photo or a video.</span>
+    <div class="row-inline" style="margin-top:12px;">
+      <div class="field"><label>What to post</label>
+        <select id="ig-kind" onchange="onKindChange()">
+          <option value="post">Feed post</option>
+          <option value="story">Story</option>
+          <option value="reel">Reel</option>
+        </select>
+      </div>
+    </div>
+    <div class="row-inline">
+      <div class="field">
+        <label>Photo or video</label>
+        <input type="file" id="ig-file" accept="image/*,video/*" onchange="onFilePicked(event)">
+      </div>
+      <button class="btn-ai" id="ig-gen-btn" style="background:var(--surface); color:var(--text-2);"
+              onclick="generateImage()">Generate a photo with AI</button>
+    </div>
+    <img id="ig-preview" class="ig-preview" alt="">
+    <div class="field full">
+      <label>Caption</label>
+      <textarea id="ig-caption" rows="3" placeholder="Leave empty and she writes one herself"></textarea>
+    </div>
+    <div class="field full">
+      <label>What she should post about (optional, only used if the caption is empty)</label>
+      <input type="text" id="ig-brief" placeholder="whatever she is up to that day — gym, work, the game she is playing">
+    </div>
+    <div class="row-inline">
+      <button class="btn-ai" onclick="postNow()">Post now</button>
+    </div>
+    <div id="post-status" class="hint" style="margin-top:10px;"></div>
+  </div>
+
+</div>
+</div>
+
+<script>
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function el(id){return document.getElementById(id);}
+function note(box,msg,bad){box.textContent=msg;box.style.color=bad?'#fb7185':'var(--text-3)';}
+function slug(){return el('persona').value;}
+async function api(path,opts){const r=await fetch(path,opts);let j={};try{j=await r.json();}catch(e){}
+  if(!r.ok) throw new Error(j.error||('request failed ('+r.status+')'));return j;}
+
+let mediaDataUrl='';
+
+async function init(){
+  const list=await (await fetch('/api/personas')).json();
+  const rows=Array.isArray(list)?list:(list.personas||[]);
+  el('persona').innerHTML=rows.map(p=>'<option value="'+esc(p.slug)+'">'+esc(p.name||p.slug)+'</option>').join('');
+  if(!el('persona').options.length){note(el('account-status'),'Create a persona first.',true);return;}
+  await loadAll();
+}
+
+async function loadAll(){
+  mediaDataUrl='';
+  el('ig-preview').style.display='none';
+  await loadStatus();
+}
+
+async function loadStatus(){
+  const s=await api('/api/instagram/status?persona='+encodeURIComponent(slug()));
+  const pill=el('conn-pill');
+  pill.textContent=s.connected?('connected as '+(s.username||'?')):'not connected';
+  pill.className='conn-pill '+(s.connected?'ok':'');
+  const si=s.signin||{};
+  const why=si.open?(si.error||si.why||'Sign-in window is open — finish it there.')
+    :(s.connected?'':'Sign in to Instagram to connect her account.');
+  note(el('account-status'),why,!!si.error&&si.open);
+}
+
+async function connect(){
+  const box=el('account-status');
+  const cookie=el('ig-cookie').value.trim();
+  if(!cookie){note(box,'Paste her Instagram cookie first.',true);return;}
+  note(box,'Connecting…');
+  try{
+    await api('/api/instagram/connect',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({persona:slug(),cookie:cookie})});
+    el('ig-cookie').value='';
+    await loadStatus();
+  }catch(e){note(box,e.message,true);}
+}
+
+function startSignin(){
+  // A popup, not a panel: Instagram's human check reads the window it runs
+  // in, and an iframe is not one. Same window OnlyFans and Discord use.
+  const w = Math.min(1100, Math.max(700, Math.round(screen.availWidth * 0.7)));
+  const h = Math.min(900, Math.max(600, Math.round(screen.availHeight * 0.8)));
+  const win = window.open('/instagram/connect?site=instagram&persona='
+    + encodeURIComponent(slug()), 'instagram-signin',
+    'width=' + w + ',height=' + h + ',menubar=no,toolbar=no');
+  if(!win){note(el('account-status'),'Allow popups for this site, then try again.',true);return;}
+  note(el('account-status'),'Signing in — finish in the window that opened.');
+  const watch=setInterval(()=>{if(win.closed){clearInterval(watch);loadStatus();}},1500);
+}
+
+async function disconnect(){
+  if(!confirm('Disconnect her Instagram account?'))return;
+  await api('/api/instagram/connect?persona='+encodeURIComponent(slug()),{method:'DELETE'});
+  await loadStatus();
+}
+
+function onKindChange(){
+  el('ig-gen-btn').disabled = el('ig-kind').value==='reel';
+}
+
+function onFilePicked(ev){
+  const f=ev.target.files[0];
+  if(!f)return;
+  const reader=new FileReader();
+  reader.onload=()=>{mediaDataUrl=reader.result;showPreview();};
+  reader.readAsDataURL(f);
+}
+
+function showPreview(){
+  const img=el('ig-preview');
+  if(mediaDataUrl && mediaDataUrl.startsWith('data:image/')){
+    img.src=mediaDataUrl;img.style.display='block';
+  } else {
+    img.style.display='none';
+  }
+}
+
+async function generateImage(){
+  const box=el('post-status');
+  note(box,'Generating…');
+  try{
+    const persona=await api('/api/personas/'+encodeURIComponent(slug()));
+    const data=await api('/api/generate/image',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({config:persona.config,shot:'portrait'})});
+    if(!data.ok||!data.image) throw new Error(data.error||'No image came back.');
+    mediaDataUrl=data.image;
+    showPreview();
+    note(box,'Photo generated below. Post now when ready.');
+  }catch(e){note(box,e.message,true);}
+}
+
+async function postNow(){
+  const box=el('post-status');
+  if(!mediaDataUrl){note(box,'Attach or generate a photo or video first.',true);return;}
+  note(box,'Posting…');
+  try{
+    const r=await api('/api/instagram/post-now',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({persona:slug(),kind:el('ig-kind').value,
+        caption:el('ig-caption').value,brief:el('ig-brief').value,media:mediaDataUrl})});
+    note(box,'Posted. '+(r.caption?('Caption: '+r.caption):''));
+  }catch(e){note(box,e.message,true);}
+}
+
+onKindChange();
+init();
+setInterval(()=>{if(el('persona').value)loadStatus();},20000);
+</script>
+</body>
+</html>

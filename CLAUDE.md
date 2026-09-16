@@ -28,11 +28,14 @@ kept as a secondary target and still works, but is not where the app is deployed
 app.py                          — Flask server, Gemini API, multi-persona, builder API
 onlyfans.py                     — OnlyFansAPI transport (OnlyFans chat)
 onlyfans.html                   — OnlyFans console (connect, auto-reply, PPV)
-of_connect.py                   — Hosted sign-in browser (OnlyFans and Discord)
+of_connect.py                   — Hosted sign-in browser (OnlyFans, Discord and Instagram)
 discord_gateway.py              — Discord user-account gateway, gates and caches
 discord_rest.py                 — Discord REST, rate limits, client fingerprint
 discord_stub.py                 — Offline Discord transport (tests only)
 discord.html                    — Discord console (connect, channels, chime-in)
+instagram_rest.py                — Instagram REST (upload + configure Post/Story/Reel)
+instagram_stub.py                — Offline Instagram transport (tests only)
+instagram.html                   — Instagram console (connect, post now — no DMs/funnel)
 admin.html                      — Visual persona builder UI (creator-facing)
 index.html                      — Fan chat UI (embeds as iframe in profile.html)
 chat.html                       — Standalone fan chat (mobile hamburger link)
@@ -186,6 +189,15 @@ Stay completely in character. Never mention being an AI.
   full of people is not a fan being worked towards something, so it never runs
   the funnel, never nudges, and never carries an offer. A paid link only ever
   goes out in a DM.
+- Instagram is built the same way Discord is — a real signed-in account
+  through the same hosted sign-in browser (`of_connect.SITES['instagram']`,
+  `/instagram/connect`), because Meta's Graph API needs a Business/Creator
+  account plus app review and still cannot post Stories at all. It is
+  posting-only (Stories, Posts, Reels via `instagram_rest.py`), so it is
+  deliberately not a `_Platform` adapter: there is no DM, no funnel and no
+  scheduler yet, just `_ig_post_now` triggered from the console. Instagram's
+  terms do not allow an automated client either, so the same care applies —
+  an account that can be lost, not the creator's only one.
 
 ---
 

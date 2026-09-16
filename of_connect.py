@@ -50,6 +50,8 @@ SITES = {
     'onlyfans': {'url': SIGNIN_URL, 'origin': COOKIE_ORIGIN, 'prefix': 'ofc_'},
     'discord': {'url': 'https://discord.com/login', 'origin': 'https://discord.com',
                 'prefix': 'dcc_'},
+    'instagram': {'url': 'https://www.instagram.com/accounts/login/',
+                  'origin': 'https://www.instagram.com', 'prefix': 'igc_'},
 }
 VIEWPORT = {'width': 900, 'height': 700}
 FRAME_QUALITY = 55
@@ -288,6 +290,8 @@ class Attempt:
         page = context.pages[0] if context.pages else context.new_page()
         if self.site == 'discord':
             self._watch_discord(page)
+        elif self.site == 'instagram':
+            self._watch_instagram(page)
         else:
             self._watch_signing(page)
         page.goto(self._site['url'], wait_until='domcontentloaded', timeout=60000)
@@ -558,6 +562,85 @@ class Attempt:
         self.state = 'connected'
         self._done.set()
 
+    def _watch_instagram(self, page):
+        """Catch the app id Instagram's own page sends. The cookie is what
+        actually authenticates a request; this only saves a stale default
+        constant from being the reason a capture fails after a release."""
+        def seen(request):
+            try:
+                if 'instagram.com' not in request.url:
+                    return
+                headers = {k.lower(): v for k, v in (request.headers or {}).items()}
+                app_id = headers.get('x-ig-app-id')
+                if app_id:
+                    self._ig_app_id = app_id
+            except Exception:
+                pass
+        try:
+            page.on('request', seen)
+        except Exception:
+            pass
+
+    def _capture_instagram(self, page, context):
+        """Finished once the cookies Instagram issued answer as somebody.
+
+        Instagram authenticates by cookie, the same as OnlyFans, so what is
+        kept is the cookie header plus the CSRF token every write call needs —
+        not a bearer token like Discord's.
+        """
+        self.probes += 1
+        try:
+            self.page_url = page.url
+        except Exception:
+            pass
+        cookies = context.cookies(self._site['origin'])
+        names = {c['name'] for c in cookies}
+        self.cookie_names = sorted(names)
+        if 'sessionid' not in names:
+            self.capture_note = 'awaiting_cookies'
+            return
+        csrftoken = next((c['value'] for c in cookies if c['name'] == 'csrftoken'), '')
+        app_id = getattr(self, '_ig_app_id', '') or '936619743392459'
+        cookie_header = '; '.join(f"{c['name']}={c['value']}" for c in cookies)
+        try:
+            agent = page.evaluate('() => navigator.userAgent')
+        except Exception:
+            agent = self.user_agent
+        try:
+            who = page.evaluate(
+                '''async ([app_id, csrftoken]) => {
+                     const r = await fetch('/api/v1/accounts/current_user/?edit=true',
+                         {credentials: 'include',
+                          headers: {'x-ig-app-id': app_id, 'x-csrftoken': csrftoken,
+                                    'x-requested-with': 'XMLHttpRequest'}});
+                     return r.ok ? await r.json() : null;
+                   }''', [app_id, csrftoken])
+        except Exception:
+            who = None
+        user = ((who or {}).get('user') or {}) if isinstance(who, dict) else {}
+        if not user.get('pk'):
+            # Plainly signed in even if that probe was refused -- ds_user_id is
+            # Instagram's own cookie record of who this is.
+            ds_user_id = next((c['value'] for c in cookies if c['name'] == 'ds_user_id'), '')
+            if not ds_user_id:
+                self.capture_note = 'no_user_id'
+                return
+            user = {'pk': ds_user_id, 'username': ''}
+            self.capture_note = 'unverified'
+        else:
+            self.capture_note = 'captured'
+        session = {'user_id': str(user['pk']), 'username': user.get('username') or '',
+                   'cookie': cookie_header, 'csrftoken': csrftoken, 'app_id': app_id,
+                   'user_agent': agent or self.user_agent, 'proxy': self.proxy,
+                   'verified': self.capture_note == 'captured'}
+        self.result = {'user_id': session['user_id'], 'username': session['username']}
+        if _sink:
+            _sink(self.account, session)
+        else:
+            self._pending_session = session
+        self.state = 'connected'
+        self._done.set()
+
     def _try_capture_session(self, page, context):
         """Is the creator in yet? If so, take the session and stop.
 
@@ -568,6 +651,8 @@ class Attempt:
         if self.site == 'discord':
             self.probes += 1
             return self._capture_discord(page, context)
+        if self.site == 'instagram':
+            return self._capture_instagram(page, context)
         self.probes += 1
         try:
             self.page_url = page.url

@@ -5083,6 +5083,15 @@ def discord_page():
     return send_from_directory(BASE_DIR, 'discord.html')
 
 
+@app.route('/instagram')
+def instagram_page():
+    # Same reasoning as /discord: every /api/instagram/* call is persona-scoped
+    # already, so the console opens past the operator check.
+    if not _current_user():
+        return redirect('/login?next=/instagram')
+    return send_from_directory(BASE_DIR, 'instagram.html')
+
+
 @app.route('/fanvue')
 def fanvue_page():
     # Unlike xbot/threads, every /api/fanvue/* call a creator can reach is
@@ -20386,6 +20395,7 @@ if _worker_enabled('ONLYFANS_WORKER'):
 # server from costing anything.
 import discord_gateway as DG
 import discord_rest as DR
+import instagram_rest as IR
 
 DISCORD_TRANSPORT = (os.getenv('DISCORD_TRANSPORT') or 'raw').strip().lower()
 # How long a fan has to stop typing before her reply goes out. Three lines in a
@@ -21428,6 +21438,356 @@ def api_discord_post_now():
         _set_setting(f'discord_post_state_{persona}', json.dumps(state))
         return jsonify({'ok': False, 'error': str(e)[:250]}), 400
     return jsonify({'ok': True, 'posted': posted})
+
+
+# ── Instagram: Stories, Posts and Reels ───────────────────────────────────────
+#
+# Built the same way Discord is: there is no honest bot API for this either —
+# Instagram's Graph API needs a Business/Creator account plus app review even
+# for feed Posts and Reels, and cannot touch Stories at all — so this drives a
+# real signed-in account through the same hosted browser, and posts through
+# instagram_rest.py the way Discord speaks through discord_rest.py. Unlike
+# Discord this is posting only: no DMs, no funnel, no scheduler yet — a
+# creator uploads or generates a photo/video and posts it on demand.
+
+def _ig_fernet():
+    """Her Instagram session is a password to a whole account, so it is never
+    stored in the clear. Same derivation as Discord's token, different salt."""
+    import base64
+    from cryptography.fernet import Fernet
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+    raw = (os.getenv('INSTAGRAM_SESSION_KEY') or '').strip()
+    if raw:
+        return Fernet(raw.encode())
+    secret = (os.getenv('SECRET_KEY') or '').strip()
+    if not secret:
+        raise RuntimeError('no INSTAGRAM_SESSION_KEY and no SECRET_KEY, so an '
+                           'Instagram session cannot be encrypted. Set one '
+                           'before connecting.')
+    derived = HKDF(algorithm=hashes.SHA256(), length=32,
+                   salt=b'instagram-session', info=b'v1').derive(secret.encode())
+    return Fernet(base64.urlsafe_b64encode(derived))
+
+
+def _ig_account(persona):
+    try:
+        return json.loads(_get_setting(f'instagram_account_{persona}') or '{}')
+    except Exception:
+        return {}
+
+
+def _ig_save_account(persona, **fields):
+    held = _ig_account(persona)
+    held.update(fields)
+    _set_setting(f'instagram_account_{persona}', json.dumps(held))
+    return held
+
+
+def _ig_session(persona):
+    """The cookie, CSRF token, app id and user agent captured at sign-in, kept
+    as one encrypted blob because a write call needs all of them together."""
+    blob = _ig_account(persona).get('session') or ''
+    if not blob:
+        return {}
+    try:
+        return json.loads(_ig_fernet().decrypt(blob.encode()).decode())
+    except Exception:
+        logger.warning('instagram session for %s could not be decrypted', persona)
+        return {}
+
+
+def _ig_set_session(persona, session):
+    if not session:
+        _ig_save_account(persona, session='')
+        return
+    blob = _ig_fernet().encrypt(json.dumps(session).encode()).decode()
+    _ig_save_account(persona, session=blob, user_id=str(session.get('user_id') or ''),
+                     username=session.get('username') or '',
+                     connected_at=int(time.time()))
+
+
+def _ig_conn():
+    """The hosted browser, imported here rather than at the top of the file —
+    same reasoning as _dc_conn: Instagram needs it either way."""
+    import of_browser as _ofb
+    import of_connect as _ofc
+    return _ofb.remote() or _ofc
+
+
+def _ig_account_id(persona):
+    """Keyed apart from OnlyFans' `of_…` and Discord's `dc_…`, so a half-
+    finished sign-in on one platform never evicts another."""
+    return f'ig_{persona}'
+
+
+# What a half-finished sign-in is waiting for, in the operator's words — same
+# idea as Discord's _DC_WAITING.
+_IG_WAITING = {
+    'awaiting_cookies': 'The browser is open and waiting for the sign-in to '
+                        'finish. Nothing is wrong yet.',
+    'captured': 'Signed in — storing her account now.',
+}
+
+
+def _ig_signin_state(persona, adopt=False):
+    attempt_id = _get_setting(f'instagram_attempt_{persona}') or ''
+    failed = _get_setting(f'instagram_adopt_error_{persona}') or ''
+    if not attempt_id:
+        return {'open': False, 'why': failed}
+    try:
+        attempt = _ig_conn().get(attempt_id)
+    except Exception:
+        return {'open': False, 'why': failed}
+    if not attempt:
+        return {'open': False, 'why': failed or
+                'That sign-in window is no longer open. Start it again.'}
+    held = attempt.status()
+    if adopt and held.get('state') == 'connected':
+        _ig_adopt(attempt)
+        failed = _get_setting(f'instagram_adopt_error_{persona}') or ''
+    return {'open': True, 'state': held.get('state') or '',
+            'why': failed or _IG_WAITING.get(held.get('capture_note') or '', ''),
+            'error': held.get('error') or ''}
+
+
+def _ig_adopt(attempt):
+    """Take the session off a finished sign-in and store it."""
+    persona = attempt.status().get('persona') or ''
+    try:
+        session = _ig_conn().claim(attempt) or {}
+    except Exception as e:
+        _set_setting(f'instagram_adopt_error_{persona}', str(e)[:200])
+        return False
+    if not (session.get('cookie') and session.get('csrftoken')):
+        _set_setting(f'instagram_adopt_error_{persona}',
+                     'the sign-in finished but handed back no usable session')
+        return False
+    _ig_set_session(persona, session)
+    _set_setting(f'instagram_attempt_{persona}', '')
+    _set_setting(f'instagram_adopt_error_{persona}', '')
+    return True
+
+
+IG_KINDS = ('post', 'story', 'reel')
+
+
+def _ig_caption(persona, kind, brief):
+    """A caption in her own voice when the creator did not write one, reusing
+    the same Instagram brief the growth planner already writes captions to."""
+    spec = growth.POST_PLATFORMS['instagram']
+    extra = f' {brief}' if brief else ''
+    instruction = (
+        f'Write ONE Instagram caption for a {kind} she is about to post, in '
+        f'character. It must be {spec["brief"]}.{extra} Stay under {spec["cap"]} '
+        f'characters. Return only the caption itself, no preamble and no quotes. '
+        f'{NO_PLACEHOLDER_RULE}')
+    text = _persona_text(persona, instruction, history=None, max_tokens=400,
+                         temperature=1.0)
+    return growth.trim_to(_strip_placeholders(text or ''), spec['cap'])
+
+
+def _ig_media_bytes(media):
+    """The data URL from the console — an upload or an AI-generated image —
+    decoded to raw bytes, and which kind Instagram needs to be told it is."""
+    import base64
+    if not (isinstance(media, str) and media.startswith('data:')):
+        raise ValueError('Attach a photo or video first.')
+    head, b64 = media.split(',', 1)
+    mime = head.split(';')[0].replace('data:', '') or 'application/octet-stream'
+    kind = 'video' if mime.startswith('video/') else 'image'
+    try:
+        return base64.b64decode(b64), kind
+    except Exception:
+        raise ValueError('That file could not be read.')
+
+
+def _ig_post_now(persona, kind, media, caption, brief=''):
+    kind = (kind or '').strip().lower()
+    if kind not in IG_KINDS:
+        raise ValueError('kind must be post, story or reel')
+    session = _ig_session(persona)
+    if not (session.get('cookie') and session.get('csrftoken')):
+        raise ValueError('Instagram is not connected for this persona.')
+    media_bytes, media_kind = _ig_media_bytes(media)
+    if kind == 'reel' and media_kind != 'video':
+        # Graph API cannot make up for this either — a Reel is a video by
+        # definition, and there is no AI video generation in this app yet to
+        # fall back to, so an upload is the only path until there is.
+        raise ValueError('A Reel needs a video file.')
+    caption = (caption or '').strip()[:growth.POST_PLATFORMS['instagram']['cap']]
+    if not caption:
+        caption = _ig_caption(persona, kind, brief)
+    rest = IR.Rest(session)
+    try:
+        if kind == 'post':
+            result = rest.post_feed(media_bytes, media_kind, caption)
+        elif kind == 'story':
+            result = rest.post_story(media_bytes, media_kind, caption)
+        else:
+            result = rest.post_reel(media_bytes, caption)
+    except IR.InstagramApiError as e:
+        raise ValueError('Instagram would not accept that post'
+                         + (f': {e.detail[:160]}' if e.detail else '.'))
+    return {'kind': kind, 'media_kind': media_kind, 'caption': caption,
+           'result': result}
+
+
+@app.route('/instagram/connect')
+def instagram_connect_page():
+    # A popup rather than a panel in the console, same reasoning as Discord's:
+    # the human check reads the window it is running in, and an iframe is not
+    # one. It is the same window OnlyFans and Discord use, reading which site
+    # to open off the query string.
+    if not _current_user():
+        return redirect('/login?next=/instagram')
+    return send_from_directory(BASE_DIR, 'of_connect.html')
+
+
+@app.route('/api/instagram/connect', methods=['GET', 'POST', 'DELETE'])
+@platform_scoped
+def api_instagram_connect():
+    persona = request_persona()
+    if request.method == 'DELETE':
+        _ig_set_session(persona, {})
+        return jsonify({'connected': False})
+    if request.method == 'POST':
+        body = request.get_json(silent=True) or {}
+        cookie = (body.get('cookie') or '').strip()
+        if not cookie:
+            return jsonify({'error': 'Paste her Instagram cookie to connect.'}), 400
+        csrftoken = ''
+        for part in cookie.split(';'):
+            name, _, value = part.strip().partition('=')
+            if name == 'csrftoken':
+                csrftoken = value
+        if not csrftoken:
+            return jsonify({'error': 'That cookie has no csrftoken in it.'}), 400
+        session = {'cookie': cookie, 'csrftoken': csrftoken, 'app_id': IR.DEFAULT_APP_ID}
+        try:
+            who = (IR.Rest(session).me() or {}).get('user') or {}
+        except IR.InstagramApiError as e:
+            return jsonify({'error': 'Instagram would not accept that cookie'
+                                     + (f': {e.detail[:160]}' if e.detail else '.')}), 400
+        session['user_id'] = str(who.get('pk') or '')
+        session['username'] = who.get('username') or ''
+        _ig_set_session(persona, session)
+    held = _ig_session(persona)
+    return jsonify({'connected': bool(held.get('cookie')),
+                    'username': held.get('username') or '',
+                    'user_id': held.get('user_id') or ''})
+
+
+@app.route('/api/instagram/status')
+@platform_scoped
+def api_instagram_status():
+    persona = request_persona()
+    # A sign-in that finished after its window was closed has nowhere else to
+    # land, same as Discord's status route — opening the console is a second
+    # chance to claim it.
+    signin = _ig_signin_state(persona, adopt=True)
+    held = _ig_session(persona)
+    return jsonify({'connected': bool(held.get('cookie')),
+                    'signin': signin,
+                    'username': held.get('username') or '',
+                    'user_id': held.get('user_id') or ''})
+
+
+@app.route('/api/instagram/connect/browser', methods=['POST'])
+@platform_scoped
+def api_instagram_connect_browser():
+    persona = request_persona()
+    d = request.json or {}
+
+    def _side(value, fallback, low, high):
+        try:
+            return max(low, min(int(value), high))
+        except (TypeError, ValueError):
+            return fallback
+
+    viewport = {'width': _side(d.get('width'), 1000, 600, 1600),
+                'height': _side(d.get('height'), 760, 500, 1200)}
+    try:
+        attempt = _ig_conn().start(
+            persona, _ig_account_id(persona),
+            proxy=_of_proxy_for(persona), viewport=viewport, site='instagram')
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]}), 400
+    _set_setting(f'instagram_attempt_{persona}', attempt.id)
+    return jsonify({'ok': True, 'attempt': attempt.status()})
+
+
+@app.route('/api/instagram/connect/frame')
+@platform_scoped
+def api_instagram_connect_frame():
+    persona = request_persona()
+    attempt_id = (request.args.get('attempt')
+                  or _get_setting(f'instagram_attempt_{persona}') or '')
+    attempt = _ig_conn().get(attempt_id, frame=True) if attempt_id else None
+    if not attempt:
+        return jsonify({'ok': False, 'error': 'no such sign-in'}), 404
+    status = attempt.status()
+    if status.get('state') == 'connected' and not _ig_session(persona).get('cookie'):
+        if not _ig_adopt(attempt):
+            status = dict(status, state='failed',
+                          error=_get_setting(f'instagram_adopt_error_{persona}') or
+                          'the sign-in finished but could not be stored')
+    return jsonify({'ok': True, 'attempt': status, 'frame': attempt.snapshot()})
+
+
+@app.route('/api/instagram/connect/input', methods=['POST'])
+@platform_scoped
+def api_instagram_connect_input():
+    persona = request_persona()
+    d = request.json or {}
+    import of_connect as _ofc
+    kind = (d.get('kind') or '').strip()
+    if kind not in _ofc.INPUT_KINDS:
+        return jsonify({'ok': False, 'error': 'unknown input'}), 400
+    attempt_id = (d.get('attempt')
+                  or _get_setting(f'instagram_attempt_{persona}') or '')
+    attempt = _ig_conn().get(attempt_id) if attempt_id else None
+    if not attempt:
+        return jsonify({'ok': False, 'error': 'no such sign-in'}), 404
+    try:
+        attempt.act(kind, x=d.get('x'), y=d.get('y'), text=d.get('text'),
+                    key=d.get('key'), dy=d.get('dy'),
+                    points=(d.get('points') or [])[:60])
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]}), 400
+    return jsonify({'ok': True})
+
+
+@app.route('/api/instagram/connect/cancel', methods=['POST'])
+@platform_scoped
+def api_instagram_connect_cancel():
+    persona = request_persona()
+    attempt_id = _get_setting(f'instagram_attempt_{persona}') or ''
+    if attempt_id:
+        try:
+            _ig_conn().cancel(attempt_id)
+        except Exception:
+            pass
+    _set_setting(f'instagram_attempt_{persona}', '')
+    return jsonify({'ok': True})
+
+
+@app.route('/api/instagram/post-now', methods=['POST'])
+@platform_scoped
+def api_instagram_post_now():
+    persona = request_persona()
+    d = request.json or {}
+    try:
+        result = _ig_post_now(persona, d.get('kind'), d.get('media') or '',
+                              d.get('caption') or '',
+                              (d.get('brief') or '').strip()[:400])
+    except ValueError as e:
+        return jsonify({'ok': False, 'error': str(e)[:250]}), 400
+    except Exception as e:
+        logger.exception('instagram post-now failed')
+        return jsonify({'ok': False, 'error': str(e)[:250]}), 400
+    return jsonify({'ok': True, **result})
+
 
 # ── Error handler ─────────────────────────────────────────────────────────────
 
