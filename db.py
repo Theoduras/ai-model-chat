@@ -492,6 +492,16 @@ class User(Base):
     stripe_customer_id = Column(String(64), index=True)
     stripe_subscription_id = Column(String(64), index=True)
 
+    # Referrals. referral_code is minted the first time a paid member opens
+    # /referrals; referred_by records the code that brought this account in, so
+    # the 5% commission is paid once, on their first subscription.
+    referral_code = Column(String(16), unique=True, index=True)
+    referred_by = Column(String(16), index=True)
+
+    # Set when an admin hands out a time-boxed trial. One per account, ever:
+    # its presence is what refuses a second one.
+    trial_at = Column(DateTime)
+
     # Creator profile, filled in after signup.
     brand = Column(String(120), default='')
     country = Column(String(80), default='')
@@ -523,6 +533,9 @@ class Payment(Base):
     # Stripe checkout session ids run past 64 characters.
     track_id = Column(String(128), index=True)
     status = Column(String(24), default='pending')  # pending | Paying | Paid | expired
+    # The referral code in play at checkout, so the webhook can pay the
+    # commission without trusting anything the browser sends back.
+    ref_code = Column(String(16), index=True)
     created_at = Column(DateTime, default=_now)
     paid_at = Column(DateTime)
 
@@ -1386,6 +1399,116 @@ def fan_reward_given(session, persona, fan_uuid, track, milestone):
                     FanReward.track == track, FanReward.milestone == milestone)
             .first())
 
+class ReferralClick(Base):
+    """One visit to a referral link. Anonymous by design — the fan-out from a
+    link to a signup is what the counter shows, so a click is not tied to an
+    account it does not have yet."""
+    __tablename__ = 'referral_clicks'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    code = Column(String(16), index=True)
+    visitor_id = Column(String(64), index=True)
+    ip = Column(String(64))
+    country = Column(String(8))
+    user_agent = Column(String(300))
+    referrer = Column(String(300))
+    created_at = Column(DateTime, default=_now, index=True)
+
+
+Index('ix_refclicks_code_at', ReferralClick.code, ReferralClick.created_at)
+
+
+def record_referral_click(session, code, visitor_id='', ip='', country='',
+                          user_agent='', referrer=''):
+    row = ReferralClick(code=(code or '')[:16], visitor_id=(visitor_id or '')[:64],
+                        ip=(ip or '')[:64], country=(country or '')[:8],
+                        user_agent=(user_agent or '')[:300],
+                        referrer=(referrer or '')[:300])
+    session.add(row)
+    return row
+
+
+def referral_click_stats(session, code):
+    """{clicks, visitors, last} for one referral code."""
+    clicks, visitors, last = (session.query(
+        func.count(ReferralClick.id),
+        func.count(func.distinct(ReferralClick.visitor_id)),
+        func.max(ReferralClick.created_at))
+        .filter(ReferralClick.code == code).one())
+    return {'clicks': int(clicks or 0), 'visitors': int(visitors or 0),
+            'last': _epoch(last)}
+
+
+class ReferralEarning(Base):
+    """5% of a referred account's first subscription payment.
+
+    Money, so it is a row of its own rather than a running total on the user:
+    the credit against the referrer's own Stripe invoice can fail and be retried
+    without ever paying the same referral twice (payment_id is unique)."""
+    __tablename__ = 'referral_earnings'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    referrer_id = Column(String(32), ForeignKey('users.id'), nullable=False, index=True)
+    referred_user_id = Column(String(32), ForeignKey('users.id'), index=True)
+    payment_id = Column(String(32), unique=True, index=True)
+    amount_cents = Column(Integer, default=0)
+    currency = Column(String(8), default='EUR')
+    status = Column(String(16), default='pending')   # pending | credited
+    created_at = Column(DateTime, default=_now, index=True)
+    credited_at = Column(DateTime)
+
+
+def add_referral_earning(session, referrer_id, referred_user_id, payment_id,
+                         amount_cents, currency='EUR'):
+    """The earning, or None when this payment already paid a commission."""
+    if session.query(ReferralEarning).filter(
+            ReferralEarning.payment_id == payment_id).first():
+        return None
+    row = ReferralEarning(referrer_id=referrer_id, referred_user_id=referred_user_id,
+                          payment_id=payment_id, amount_cents=int(amount_cents),
+                          currency=currency)
+    session.add(row)
+    return row
+
+
+def list_referral_earnings(session, referrer_id, limit=100):
+    return (session.query(ReferralEarning)
+            .filter(ReferralEarning.referrer_id == referrer_id)
+            .order_by(ReferralEarning.created_at.desc()).limit(limit).all())
+
+
+def pending_referral_earnings(session, referrer_id):
+    return (session.query(ReferralEarning)
+            .filter(ReferralEarning.referrer_id == referrer_id,
+                    ReferralEarning.status == 'pending').all())
+
+
+class TrialInvite(Base):
+    """A single-use link an admin sends out for a time-boxed trial plan."""
+    __tablename__ = 'trial_invites'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    code = Column(String(32), unique=True, index=True)
+    tier = Column(String(32), default='starter')
+    days = Column(Integer, default=7)
+    note = Column(String(200), default='')
+    created_by = Column(String(32), index=True)
+    created_at = Column(DateTime, default=_now, index=True)
+    expires_at = Column(DateTime)
+    used_by = Column(String(32), index=True)
+    used_at = Column(DateTime)
+
+
+def get_trial_invite(session, code):
+    return (session.query(TrialInvite)
+            .filter(TrialInvite.code == (code or '')).first())
+
+
+def list_trial_invites(session, limit=200):
+    return (session.query(TrialInvite)
+            .order_by(TrialInvite.created_at.desc()).limit(limit).all())
+
+
 def init_db():
     Base.metadata.create_all(engine)
     for table, model in (('users', User), ('saved_personas', SavedPersona),
@@ -1397,7 +1520,10 @@ def init_db():
                          ('fan_rewards', FanReward),
                          ('scheduled_posts', ScheduledPost),
                          ('persona_media', PersonaMedia),
-                         ('link_clicks', LinkClick)):
+                         ('link_clicks', LinkClick),
+                         ('referral_clicks', ReferralClick),
+                         ('referral_earnings', ReferralEarning),
+                         ('trial_invites', TrialInvite)):
         try:
             _sync_columns(table, model)
         except Exception:

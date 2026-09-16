@@ -1754,9 +1754,10 @@ def _note_demo_signin(session_db, user_row, detail=''):
     _log_demo_event(session_db, user_row, 'signin', detail)
 
 
-def _activate_plan(session_db, user_row, tier_key):
+def _activate_plan(session_db, user_row, tier_key, days=None):
     """Put a user on a plan. Renewals extend unexpired time rather than
-    truncating it. Returns the new expiry."""
+    truncating it. `days` overrides the plan's own length, which is what a
+    time-boxed trial runs on. Returns the new expiry."""
     tier = TIERS.get(tier_key) or {}
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     converting = (user_row.tier or '') == DEMO_TIER_KEY and tier_key != DEMO_TIER_KEY
@@ -1771,7 +1772,8 @@ def _activate_plan(session_db, user_row, tier_key):
     # of stacking on top of whatever the demo had left.
     unexpired = user_row.expires_at and user_row.expires_at > now
     start = user_row.expires_at if (unexpired and not converting) else now
-    user_row.expires_at = start + timedelta(days=int(tier.get('days', 30)))
+    user_row.expires_at = start + timedelta(
+        days=int(tier.get('days', 30) if days is None else days))
     if converting:
         _log_demo_event(session_db, user_row, 'converted', tier_key,
                         with_client=False)
@@ -2340,6 +2342,9 @@ plan is active{% if user.expires_at %} until {{ user.expires_at[:10] }}{% endif 
 <p class="sub" data-edit-id="sub">Pay by card or crypto. Access unlocks as soon as it confirms.</p>
 {% endif %}
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
+{% if ref_pct %}<div class="ok" data-ref-banner>You came in on a referral link —
+<strong>{{ ref_pct }}% off your first month</strong> is applied at checkout on any
+monthly plan.</div>{% endif %}
 <div class="ptoggle">
 <button type="button" class="active" data-set-period="month">Monthly</button>
 <button type="button" data-set-period="year">Annual <span class="save">Save {{ annual_save_pct }}%</span></button>
@@ -2356,7 +2361,14 @@ plan is active{% if user.expires_at %} until {{ user.expires_at[:10] }}{% endif 
 <h2>{{ t.name }}</h2><div class="blurb">{{ t.blurb }}</div>
 {% set verb = 'Renew' if user.status == 'expired' else 'Pay' %}{% set card_verb = 'Resubscribe' if user.status == 'expired' else 'Subscribe' %}
 <div data-period="month">
+{% if ref_pct %}
+<div class="price"><s style="opacity:.5">{{ currency }}{{ t.price }}</s>
+{{ currency }}{{ '%.2f'|format(t.price * (100 - ref_pct) / 100) }}<span>/month</span>
+<span class="vat">excl. VAT</span></div>
+<div class="permo">First month only — {{ currency }}{{ t.price }}/month after that.</div>
+{% else %}
 <div class="price">{{ currency }}{{ t.price }}<span>/month</span> <span class="vat">excl. VAT</span></div>
+{% endif %}
 <ul>{% for f in t.features %}<li>{{ f }}</li>{% endfor %}</ul>
 <div class="cta">
 {% if stripe_enabled %}<button data-tier="{{ key }}" data-provider="stripe">{{ card_verb }} with card</button>{% endif %}
@@ -2535,6 +2547,7 @@ td{padding:8px 0;border-bottom:1px solid var(--border);color:var(--text-2)}
 <a class="btn" style="background:var(--surface);color:var(--text)" href="/account/profile">Edit profile</a>
 {% if seats_cap != 1 and user.seat_role == 'owner' %}<a class="btn" style="background:var(--surface);color:var(--text)" href="/team">Team &middot; {{ seats_used }} of {{ seats_cap }} seats</a>{% endif %}
 {% if user.status == 'active' %}<a class="btn" href="/dashboard">Go to dashboard</a>
+<a class="btn" style="background:var(--surface);color:var(--text)" href="/referrals">Refer a creator &middot; earn 5%</a>
 <a class="btn" style="background:var(--surface);color:var(--text)" href="/billing">Change plan</a>
 {% else %}<a class="btn" href="/billing">Choose a plan</a>{% endif %}
 {% if user.stripe_customer_id %}
@@ -2621,6 +2634,7 @@ a.email{color:#a78bfa;text-decoration:none;font-weight:500}
 .scroll{overflow-x:auto}
 </style></head><body><div class="wrap wide" style="max-width:1100px">
 <div class="bar"><span>Admin · {{ users|length }} user{{ '' if users|length == 1 else 's' }}</span>
+<a href="/admin/trials">Trial links</a>
 <span><a href="/admin/demos">Demo accounts</a> &nbsp; <a href="/dashboard">Dashboard</a> &nbsp; <a href="/logout">Sign out</a></span></div>
 <div class="card"><div class="scroll"><table>
 <tr><th>Email</th><th>Name</th><th>Role</th><th>Team</th><th>Plan</th><th>Status</th><th>Renews</th><th>Joined</th></tr>
@@ -2759,6 +2773,14 @@ h2{font-size:1rem;margin-bottom:14px}
 <div><label>Website</label><input type="text" name="website" value="{{ p.website }}"></div></div>
 <label>Bio</label><textarea name="bio">{{ p.bio }}</textarea>
 <button type="submit">Save profile</button></form></div>
+
+<div class="card" style="margin-top:16px"><h2>Trial</h2>
+{% if u.trial_at %}<p class="sub">A trial was granted on {{ u.trial_at }}. One per account.</p>
+{% else %}<p class="sub">Puts this account on Starter for {{ trial_days }} days. No card, once only.</p>
+<form method="post" action="/admin/users/{{ u.id }}">
+<input type="hidden" name="action" value="trial">
+<button type="submit">Grant {{ trial_days }}-day trial</button></form>{% endif %}
+<p class="sub" style="margin-top:10px"><a href="/admin/trials">Shareable trial links</a></p></div>
 
 <div class="card" style="margin-top:16px"><h2>Set password</h2>
 <p class="sub">Replaces the password immediately. Tell them out of band.</p>
@@ -3028,6 +3050,15 @@ def admin_user_detail(uid):
                                     'status=%s tier=%s team=%s', me['email'],
                                     u.email, u.role, u.status, u.tier,
                                     request.form.get('team_owner') or '-')
+
+            elif action == 'trial':
+                err = _grant_trial(s, u)
+                if err:
+                    error = err
+                else:
+                    s.commit()
+                    saved = f'{TRIAL_DAYS}-day trial granted.'
+                    logger.info('ADMIN TRIAL by=%s target=%s', me['email'], u.email)
             if error:
                 s.rollback()
 
@@ -3039,13 +3070,15 @@ def admin_user_detail(uid):
         view = {'id': u.id, 'email': u.email, 'role': u.role or 'user',
                 'team_owner': owner.email if owner else '',
                 'grandfathered': _fmt_date(u.grandfathered_until),
-                'status': u.status, 'tier': u.tier, 'expires': _fmt_date(u.expires_at)}
+                'status': u.status, 'tier': u.tier, 'expires': _fmt_date(u.expires_at),
+                'trial_at': _fmt_date(u.trial_at)}
         p = {f: (getattr(u, f) or '') for f in pfields}
     finally:
         s.close()
     return render_template_string(ADMIN_USER_HTML, u=view, p=p, saved=saved,
                                   error=error, tiers=TIERS, order=DEFAULT_TIER_ORDER,
-                                  roles=ADMIN_ROLES, demo_key=DEMO_TIER_KEY)
+                                  roles=ADMIN_ROLES, demo_key=DEMO_TIER_KEY,
+                                  trial_days=TRIAL_DAYS)
 
 
 SEAT_ROLES = ('manager', 'chatter')
@@ -3634,15 +3667,22 @@ def register():
     finally:
         s.close()
     pending = session.pop('pending_invite', '')
-    return redirect('/join/' + pending if pending else '/billing?signup=1')
+    if pending:
+        return redirect('/join/' + pending)
+    trial = session.get('trial_code', '')
+    return redirect('/trial/' + trial if trial else '/billing?signup=1')
 
 
 def _post_signin_redirect(active):
     """Where a sign-in lands. A pending seat invite wins over the billing
-    bounce: an invitee has no plan of their own and never will."""
+    bounce: an invitee has no plan of their own and never will. A trial link
+    clicked before signing in is redeemed the same way."""
     pending = session.pop('pending_invite', '')
     if pending:
         return redirect('/join/' + pending)
+    trial = session.get('trial_code', '')
+    if trial:
+        return redirect('/trial/' + trial)
     return redirect('/dashboard' if active else '/billing')
 
 
@@ -3815,7 +3855,9 @@ def pricing():
                                   currency=CURRENCY_SYMBOL,
                                   annual_suffix=ANNUAL_SUFFIX,
                                   annual_save_pct=ANNUAL_SAVE_PCT,
-                                  custom=CUSTOM_TIER)
+                                  custom=CUSTOM_TIER,
+                                  ref_pct=(REF_DISCOUNT_PCT
+                                           if _active_ref_code() else 0))
 
 
 PLATFORM_NAMES = {'fanvue': 'Fanvue', 'onlyfans': 'OnlyFans',
@@ -3851,7 +3893,9 @@ def billing():
                                   currency=CURRENCY_SYMBOL,
                                   annual_suffix=ANNUAL_SUFFIX,
                                   annual_save_pct=ANNUAL_SAVE_PCT,
-                                  custom=CUSTOM_TIER)
+                                  custom=CUSTOM_TIER,
+                                  ref_pct=(REF_DISCOUNT_PCT
+                                           if _active_ref_code() else 0))
 
 
 @app.route('/billing/return')
@@ -3941,6 +3985,16 @@ def _checkout_stripe(user, tier_key, tier, order_id, base):
         'subscription_data[metadata][tier]': tier_key,
         'subscription_data[metadata][user_id]': user['id'],
     }
+    # The 20% off exists only behind a referral link: the coupon is attached
+    # here and nowhere else, so the discounted price cannot be reached by
+    # picking a plan on the open pricing page.
+    ref_code = _active_ref_code(user)
+    if ref_code and _ref_discountable(tier_key):
+        coupon = _stripe_ref_coupon()
+        if coupon:
+            form['discounts[0][coupon]'] = coupon
+            form['metadata[ref_code]'] = ref_code
+            form['subscription_data[metadata][ref_code]'] = ref_code
     # Reuse the saved card and keep one Stripe customer per account; without
     # this Stripe makes a fresh customer per checkout and the billing portal
     # would only ever show the newest subscription.
@@ -4009,7 +4063,8 @@ def api_billing_checkout():
     try:
         s.add(Payment(user_id=user['id'], tier=tier_key, provider=provider,
                       amount=str(tier['price']), currency=CURRENCY, order_id=order_id,
-                      track_id=track_id, status='pending'))
+                      track_id=track_id, status='pending',
+                      ref_code=(_active_ref_code(user) or '')))
         s.commit()
     finally:
         s.close()
@@ -4198,6 +4253,7 @@ def _stripe_checkout_completed(obj):
                 expires = _activate_plan(s, u, pay.tier)
                 logger.info('PLAN ACTIVATED user=%s tier=%s until=%s order=%s sub=%s',
                             u.email, pay.tier, expires, order_id, sub_id)
+                _award_referral(s, u, pay, obj.get('amount_total'))
         s.commit()
     finally:
         s.close()
@@ -4288,6 +4344,483 @@ def api_billing_portal():
     if not payload or not payload.get('url'):
         return jsonify({'error': 'Could not open the billing portal.'}), 502
     return jsonify({'url': payload['url']})
+
+
+REFERRALS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Refer a creator</title>
+<style>""" + ACCOUNT_CSS + """
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:16px 0}
+.stat{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px}
+.stat b{display:block;font-size:1.5rem;color:var(--text);line-height:1.2}
+.stat span{font-size:.78rem;color:var(--text-muted)}
+.linkrow{display:flex;gap:8px;margin-top:6px}
+.linkrow input{flex:1;margin:0}
+.linkrow button{width:auto;padding:0 18px;margin:0}
+table{width:100%;border-collapse:collapse;font-size:.85rem;margin-top:8px}
+th{text-align:left;color:var(--text-muted);font-weight:500;padding:8px 10px;border-bottom:1px solid var(--border)}
+td{padding:10px;border-bottom:1px solid var(--border);color:var(--text-2)}
+</style></head><body data-page="referrals"><div class="wrap wide">
+<div class="bar"><span>Signed in as {{ user.email }}</span><a href="/account">Account</a></div>
+<div class="card">
+<h1>Refer a creator</h1>
+<p class="sub">Anyone who signs up through your link gets <strong>{{ r.discount_pct }}% off
+their first month</strong>. You earn <strong>{{ r.commission_pct }}%</strong> of what they
+pay for it, credited automatically against your own next invoice.</p>
+<label>Your referral link</label>
+<div class="linkrow">
+<input id="reflink" value="{{ r.link }}" readonly onclick="this.select()">
+<button type="button" onclick="navigator.clipboard.writeText(document.getElementById('reflink').value);this.textContent='Copied'">Copy</button>
+</div>
+<div class="stats">
+<div class="stat"><b>{{ r.clicks }}</b><span>Link clicks</span></div>
+<div class="stat"><b>{{ r.visitors }}</b><span>Unique visitors</span></div>
+<div class="stat"><b>{{ r.signups }}</b><span>Signed up</span></div>
+<div class="stat"><b>{{ r.conversions }}</b><span>Subscribed</span></div>
+<div class="stat"><b>{{ r.currency }}{{ '%.2f'|format(r.earned) }}</b><span>Earned</span></div>
+<div class="stat"><b>{{ r.currency }}{{ '%.2f'|format(r.credited) }}</b><span>Credited to you</span></div>
+<div class="stat"><b>{{ r.currency }}{{ '%.2f'|format(r.pending) }}</b><span>Pending</span></div>
+</div>
+{% if r.rows %}
+<table><tr><th>Customer</th><th>Commission</th><th>Status</th><th>Date</th></tr>
+{% for row in r.rows %}<tr><td>{{ row.who }}</td>
+<td>{{ r.currency }}{{ '%.2f'|format(row.amount) }}</td>
+<td>{{ row.status }}</td><td>{{ row.when }}</td></tr>{% endfor %}</table>
+{% else %}<p class="sub">No referrals have converted yet.</p>{% endif %}
+</div></div></body></html>"""
+
+REFERRALS_LOCKED_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<link rel="icon" href="/favicon.ico" sizes="any"><title>Refer a creator</title>
+<style>""" + ACCOUNT_CSS + """</style></head><body data-page="referrals"><div class="wrap"><div class="card">
+<h1>Refer a creator</h1>
+<p class="sub">Referral links come with a paid plan. Pick one and your link is
+ready straight away.</p>
+<a class="alt" href="/pricing">See the plans</a>
+</div></div></body></html>"""
+
+TRIAL_DONE_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<link rel="icon" href="/favicon.ico" sizes="any"><title>Your trial</title>
+<style>""" + ACCOUNT_CSS + """</style></head><body data-page="trial"><div class="wrap"><div class="card">
+{% if error %}<h1>Trial link</h1><div class="err">{{ error }}</div>
+<div class="alt"><a href="/pricing">See the plans</a></div>
+{% else %}<h1>Your {{ days }}-day trial is live</h1>
+<p class="sub">Everything on the Starter plan is unlocked for the next {{ days }} days.
+No card needed — pick a plan whenever you are ready.</p>
+<a class="alt" href="/dashboard">Go to dashboard</a>{% endif %}
+</div></div></body></html>"""
+
+ADMIN_TRIALS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<link rel="icon" href="/favicon.ico" sizes="any"><title>Trial links</title>
+<style>""" + ACCOUNT_CSS + """
+table{width:100%;border-collapse:collapse;font-size:.85rem;margin-top:12px}
+th{text-align:left;color:var(--text-muted);font-weight:500;padding:8px 10px;border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:10px;border-bottom:1px solid var(--border);color:var(--text-2)}
+code{font-size:.8rem;color:#a78bfa;word-break:break-all}
+form.inline{display:inline}
+form.inline button{width:auto;padding:4px 12px;margin:0;font-size:.78rem;background:var(--surface);color:var(--text)}
+.newrow{display:flex;gap:8px}.newrow input{flex:1;margin:0}.newrow button{width:auto;padding:0 18px;margin:0}
+</style></head><body data-page="admin-trials"><div class="wrap wide">
+<div class="bar"><span>Trial links</span><a href="/admin/users">Users</a></div>
+<div class="card">
+<h1>{{ days }}-day {{ tier_name }} trials</h1>
+<p class="sub">Each link works once. Send it to a prospect: they sign up and land
+on {{ tier_name }} for {{ days }} days, no card.</p>
+{% if saved %}<div class="ok">{{ saved }}</div>{% endif %}
+{% if error %}<div class="err">{{ error }}</div>{% endif %}
+<form method="post"><input type="hidden" name="action" value="create">
+<label>Note (who is it for?)</label>
+<div class="newrow"><input name="note" placeholder="e.g. jess from IG" maxlength="200">
+<button type="submit">Create link</button></div></form>
+<table><tr><th>Link</th><th>Note</th><th>Created</th><th>Expires</th><th>Used by</th><th></th></tr>
+{% for r in rows %}<tr>
+<td><code>{{ r.link }}</code></td><td>{{ r.note }}</td><td>{{ r.created }}</td>
+<td>{{ r.expires }}{% if r.expired and not r.used_by %} (expired){% endif %}</td>
+<td>{{ r.used_by }}{% if r.used %} · {{ r.used }}{% endif %}</td>
+<td>{% if not r.used_by %}<form class="inline" method="post">
+<input type="hidden" name="action" value="revoke"><input type="hidden" name="code" value="{{ r.code }}">
+<button type="submit">Revoke</button></form>{% endif %}</td>
+</tr>{% endfor %}
+</table>
+</div></div></body></html>"""
+
+
+# ── Referrals: a paid member's link, the 20% it unlocks, the 5% it earns ──
+
+REF_DISCOUNT_PCT = 20      # off the referred account's first month
+REF_COMMISSION_PCT = 5     # of what they actually paid, to the referrer
+REF_COOKIE = 'ref'
+REF_COOKIE_DAYS = 30
+REF_COUPON_SETTING = 'stripe_ref_coupon_id'
+
+
+def _ref_discountable(tier_key):
+    """Monthly paid plans only. The commission is defined on a first monthly
+    subscription, so the discount that earns it is scoped the same way."""
+    return (tier_key in TIERS and tier_key != DEMO_TIER_KEY
+            and not tier_key.endswith(ANNUAL_SUFFIX))
+
+
+def _ref_eligible(user_row):
+    """Paid members refer; demo and lapsed accounts do not."""
+    return (user_row is not None and user_row.status == 'active'
+            and (user_row.tier or '') not in ('', DEMO_TIER_KEY))
+
+
+def _referral_code_for(session_db, user_row):
+    """This account's referral code, minted on first use."""
+    if user_row.referral_code:
+        return user_row.referral_code
+    from db import User
+    for _ in range(5):
+        code = secrets.token_urlsafe(6).replace('-', '').replace('_', '')[:10]
+        if not session_db.query(User).filter(User.referral_code == code).first():
+            user_row.referral_code = code
+            session_db.flush()
+            return code
+    return ''
+
+
+def _referral_owner(session_db, code):
+    from db import User
+    if not code:
+        return None
+    return session_db.query(User).filter(User.referral_code == code).first()
+
+
+def _active_ref_code(user=None):
+    """The referral code this visitor arrived on, if it still stands: a live
+    paid referrer, and never the visitor's own code."""
+    from flask import has_request_context
+    if not has_request_context():
+        return ''
+    code = (session.get(REF_COOKIE) or request.cookies.get(REF_COOKIE) or '').strip()
+    if not code:
+        return ''
+    user = user or _current_user()
+    s = _db_session()
+    try:
+        owner = _referral_owner(s, code)
+        if not _ref_eligible(owner):
+            return ''
+        if user and owner.id == user['id']:
+            return ''
+    finally:
+        s.close()
+    return code
+
+
+@app.route('/r/<code>')
+def referral_link(code):
+    """A referral link. Counts the click, remembers the code for 30 days and
+    drops the visitor on the pricing page with the discount already showing."""
+    code = (code or '').strip()[:16]
+    resp = redirect('/pricing')
+    s = _db_session()
+    try:
+        owner = _referral_owner(s, code)
+        if not _ref_eligible(owner):
+            return redirect('/pricing')
+        from db import record_referral_click
+        record_referral_click(s, code, visitor_id=_demo_visitor(),
+                              ip=_client_ip(),
+                              user_agent=request.headers.get('User-Agent', ''),
+                              referrer=request.headers.get('Referer', ''))
+        s.commit()
+    except Exception:
+        error_logger.error('Referral click not recorded', exc_info=True)
+    finally:
+        s.close()
+    session[REF_COOKIE] = code
+    resp.set_cookie(REF_COOKIE, code, max_age=60 * 60 * 24 * REF_COOKIE_DAYS,
+                    samesite='Lax', httponly=True, secure=request.is_secure)
+    return resp
+
+
+def _stripe_ref_coupon():
+    """The one percent-off coupon behind every referral checkout, created on
+    first use and remembered, so Stripe does not collect a coupon per session."""
+    from db import get_app_setting, set_app_setting
+    s = _db_session()
+    try:
+        existing = (get_app_setting(s, REF_COUPON_SETTING) or '').strip()
+    finally:
+        s.close()
+    if existing:
+        return existing
+    payload = _stripe_post('/coupons', {
+        'percent_off': str(REF_DISCOUNT_PCT),
+        'duration': 'once',
+        'name': f'Referral — {REF_DISCOUNT_PCT}% off first month',
+    })
+    coupon = str((payload or {}).get('id') or '')
+    if not coupon:
+        return ''
+    s = _db_session()
+    try:
+        set_app_setting(s, REF_COUPON_SETTING, coupon)
+        s.commit()
+    finally:
+        s.close()
+    return coupon
+
+
+def _award_referral(session_db, user_row, payment, amount_total):
+    """Credit the referrer 5% of a referred account's first subscription.
+
+    Paid once per account: a renewal carries no ref_code, and referred_by is
+    only unset until the first payment lands."""
+    code = (payment.ref_code or '').strip()
+    if not code or user_row.referred_by:
+        return
+    try:
+        owner = _referral_owner(session_db, code)
+        if not _ref_eligible(owner) or owner.id == user_row.id:
+            return
+        cents = int(amount_total or 0)
+        if not cents:
+            cents = int(round(float(TIERS[payment.tier]['price']) * 100))
+        from db import add_referral_earning
+        earning = add_referral_earning(
+            session_db, owner.id, user_row.id, payment.id,
+            int(round(cents * REF_COMMISSION_PCT / 100)), CURRENCY)
+        user_row.referred_by = code
+        if earning is None:
+            return
+        session_db.flush()
+        logger.info('REFERRAL EARNED referrer=%s referred=%s amount=%s cents',
+                    owner.email, user_row.email, earning.amount_cents)
+        _credit_referral_earning(owner, earning)
+    except Exception:
+        error_logger.error('Referral commission not recorded', exc_info=True)
+
+
+def _credit_referral_earning(owner_row, earning):
+    """Put the commission on the referrer's Stripe balance, so it comes off
+    their own next invoice. Without a Stripe customer it stays pending and is
+    retried the next time they open /referrals."""
+    if earning.status == 'credited' or not owner_row.stripe_customer_id:
+        return False
+    if not _stripe_key():
+        return False
+    payload = _stripe_post(
+        f'/customers/{owner_row.stripe_customer_id}/balance_transactions',
+        {'amount': str(-int(earning.amount_cents)),
+         'currency': CURRENCY.lower(),
+         'description': 'Referral commission'})
+    if not payload or not payload.get('id'):
+        return False
+    earning.status = 'credited'
+    earning.credited_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    logger.info('REFERRAL CREDITED referrer=%s amount=%s cents',
+                owner_row.email, earning.amount_cents)
+    return True
+
+
+def _credit_pending_referrals(session_db, owner_row):
+    from db import pending_referral_earnings
+    changed = False
+    for e in pending_referral_earnings(session_db, owner_row.id):
+        changed = _credit_referral_earning(owner_row, e) or changed
+    return changed
+
+
+def _referral_summary(session_db, user_row):
+    """Everything the counter shows: clicks, signups, conversions, money."""
+    from db import User, referral_click_stats, list_referral_earnings
+    code = _referral_code_for(session_db, user_row)
+    clicks = referral_click_stats(session_db, code)
+    referred = session_db.query(User).filter(User.referred_by == code).all()
+    earnings = list_referral_earnings(session_db, user_row.id)
+    by_user = {u.id: u for u in referred}
+    earned = sum(e.amount_cents for e in earnings)
+    credited = sum(e.amount_cents for e in earnings if e.status == 'credited')
+    return {
+        'code': code,
+        'link': f'{_media_origin()}/r/{code}',
+        'clicks': clicks['clicks'],
+        'visitors': clicks['visitors'],
+        'signups': len(referred),
+        'conversions': len(earnings),
+        'earned': round(earned / 100, 2),
+        'credited': round(credited / 100, 2),
+        'pending': round((earned - credited) / 100, 2),
+        'currency': CURRENCY_SYMBOL,
+        'discount_pct': REF_DISCOUNT_PCT,
+        'commission_pct': REF_COMMISSION_PCT,
+        'rows': [{
+            'who': _mask_email(getattr(by_user.get(e.referred_user_id), 'email', '')),
+            'amount': round(e.amount_cents / 100, 2),
+            'status': e.status,
+            'when': _fmt_date(e.created_at)} for e in earnings],
+    }
+
+
+def _mask_email(email):
+    """A referred customer is someone else's account, so the page shows enough
+    to recognise the referral and no more."""
+    email = email or ''
+    name, _, domain = email.partition('@')
+    if not domain:
+        return 'a new customer'
+    return (name[:2] + '•••@' + domain)
+
+
+@app.route('/referrals')
+def referrals_page():
+    user = _current_user()
+    if not user:
+        return redirect('/login?next=/referrals')
+    s = _db_session()
+    try:
+        from db import User
+        u = s.get(User, user['id'])
+        if not _ref_eligible(u):
+            return render_template_string(REFERRALS_LOCKED_HTML, user=user)
+        _credit_pending_referrals(s, u)
+        data = _referral_summary(s, u)
+        s.commit()
+    finally:
+        s.close()
+    return render_template_string(REFERRALS_HTML, user=user, r=data)
+
+
+@app.route('/api/referrals')
+def api_referrals():
+    user = _current_user()
+    if not user:
+        return jsonify({'error': 'Sign in required'}), 401
+    s = _db_session()
+    try:
+        from db import User
+        u = s.get(User, user['id'])
+        if not _ref_eligible(u):
+            return jsonify({'error': 'Referrals need an active plan'}), 403
+        _credit_pending_referrals(s, u)
+        data = _referral_summary(s, u)
+        s.commit()
+    finally:
+        s.close()
+    return jsonify(data)
+
+
+# ── Admin-issued trials ───────────────────────────────────────
+
+TRIAL_TIER = 'starter'
+TRIAL_DAYS = 7
+TRIAL_INVITE_DAYS = 30
+
+
+def _grant_trial(session_db, user_row, days=TRIAL_DAYS, tier=TRIAL_TIER):
+    """Put an account on a time-boxed plan. Returns an error string, or ''.
+
+    One per account, and never over a plan that is already paid for: the trial
+    is a way in, not a way to extend a subscription."""
+    if user_row.trial_at:
+        return 'This account has already had a trial.'
+    if user_row.status == 'active' and (user_row.tier or '') not in ('', DEMO_TIER_KEY):
+        return 'This account already has an active plan.'
+    user_row.trial_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    _activate_plan(session_db, user_row, tier, days=days)
+    logger.warning('TRIAL GRANTED user=%s tier=%s days=%s until=%s',
+                   user_row.email, tier, days, user_row.expires_at)
+    return ''
+
+
+@app.route('/admin/trials', methods=['GET', 'POST'])
+def admin_trials():
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    from db import TrialInvite, list_trial_invites
+    me = _current_user()
+    saved = error = ''
+    s = _db_session()
+    try:
+        if request.method == 'POST':
+            action = request.form.get('action', '')
+            if action == 'create':
+                inv = TrialInvite(
+                    code=secrets.token_urlsafe(9).replace('-', '').replace('_', '')[:12],
+                    tier=TRIAL_TIER, days=TRIAL_DAYS,
+                    note=(request.form.get('note') or '').strip()[:200],
+                    created_by=me['id'],
+                    expires_at=datetime.now(timezone.utc).replace(tzinfo=None)
+                    + timedelta(days=TRIAL_INVITE_DAYS))
+                s.add(inv)
+                s.commit()
+                saved = 'Trial link created.'
+                logger.info('TRIAL LINK CREATED by=%s code=%s', me['email'], inv.code)
+            elif action == 'revoke':
+                inv = s.query(TrialInvite).filter(
+                    TrialInvite.code == request.form.get('code', '')).first()
+                if inv and not inv.used_by:
+                    s.delete(inv)
+                    s.commit()
+                    saved = 'Trial link revoked.'
+                else:
+                    error = 'That link is already used or gone.'
+        from db import User
+        rows = []
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        for inv in list_trial_invites(s):
+            used_by = s.get(User, inv.used_by) if inv.used_by else None
+            rows.append({
+                'code': inv.code, 'note': inv.note or '',
+                'link': f'{_callback_origin()}/trial/{inv.code}',
+                'days': inv.days, 'tier': inv.tier,
+                'created': _fmt_date(inv.created_at),
+                'expires': _fmt_date(inv.expires_at),
+                'expired': bool(inv.expires_at and inv.expires_at < now),
+                'used_by': (used_by.email if used_by else ''),
+                'used': _fmt_date(inv.used_at)})
+    finally:
+        s.close()
+    return render_template_string(ADMIN_TRIALS_HTML, rows=rows, saved=saved,
+                                  error=error, days=TRIAL_DAYS,
+                                  tier_name=(TIERS.get(TRIAL_TIER) or {}).get(
+                                      'name', TRIAL_TIER))
+
+
+@app.route('/trial/<code>')
+def trial_invite(code):
+    """Redeem a trial link. Signing up first is fine — the code waits in the
+    session and is redeemed on the way back."""
+    code = (code or '').strip()[:32]
+    user = _current_user()
+    if not user:
+        session['trial_code'] = code
+        return redirect('/register?next=' + urllib.parse.quote('/trial/' + code))
+    from db import User, get_trial_invite
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    s = _db_session()
+    try:
+        inv = get_trial_invite(s, code)
+        if not inv or inv.used_by or (inv.expires_at and inv.expires_at < now):
+            return render_template_string(
+                TRIAL_DONE_HTML, user=user,
+                error='This trial link is no longer valid.', days=TRIAL_DAYS)
+        u = s.get(User, user['id'])
+        err = _grant_trial(s, u, days=inv.days or TRIAL_DAYS,
+                           tier=inv.tier or TRIAL_TIER)
+        if err:
+            return render_template_string(TRIAL_DONE_HTML, user=user,
+                                          error=err, days=TRIAL_DAYS)
+        inv.used_by = u.id
+        inv.used_at = now
+        s.commit()
+        session.pop('trial_code', None)
+        logger.info('TRIAL REDEEMED user=%s code=%s', u.email, code)
+    finally:
+        s.close()
+    return render_template_string(TRIAL_DONE_HTML, user=user, error='',
+                                  days=TRIAL_DAYS)
 
 
 # ── Static pages ─────────────────────────────────────────────────────────────
