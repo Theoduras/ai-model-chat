@@ -197,6 +197,12 @@ class RoundTripTest(unittest.TestCase):
         self.assertEqual(far.snapshot(), of_connect.get('ofc_test').snapshot())
         self.assertEqual(len(self.paths), 1, self.paths)
 
+    def test_a_handle_takes_the_frame_the_window_already_has(self):
+        # The app hands its own `since` to whichever of the two it is holding,
+        # so a handle that cannot take one is a 500 on every frame poll.
+        far = self.remote.get('ofc_test', frame=True, since=0)
+        self.assertEqual(far.snapshot(0), of_connect.get('ofc_test').snapshot(0))
+
     def test_an_input_does_not_fetch_the_picture(self):
         self.remote.get('ofc_test').act('click', x=1, y=2)
         self.assertNotIn('frame', ' '.join(self.paths))

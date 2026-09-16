@@ -300,13 +300,16 @@ class _Handle:
     def status(self):
         return self._status
 
-    def snapshot(self):
-        # Already here when the caller asked for it up front. The fallback is
-        # for a browser service too old to send it alongside the status.
+    def snapshot(self, since=0.0):
+        # Already here when the caller asked for it up front -- the service
+        # applied `since` when it sent it. The fallback is for a browser
+        # service too old to send it alongside the status; one too old to know
+        # `since` at all simply sends the frame, which is what it did before.
         if self._frame is not None:
             return self._frame
         try:
-            return self._remote.call('GET', f'/session/{self.id}/frame').get('frame', '')
+            return self._remote.call(
+                'GET', f'/session/{self.id}/frame?since={since}').get('frame', '')
         except of_connect.ConnectError:
             return ''
 
