@@ -23060,6 +23060,58 @@ def api_reddit_proxy():
                     'proxy_pool': bool((os.getenv('REDDIT_PROXY_TEMPLATE') or '').strip())})
 
 
+@app.route('/api/reddit/proxy/test', methods=['POST'])
+@platform_scoped
+def api_reddit_proxy_test():
+    """Dial out the way a sign-in would, and say what came back.
+
+    Two questions, and a failed sign-in answers neither: is the proxy actually
+    carrying the request, and does Reddit accept that address. So this asks an
+    echo service who it sees, then asks Reddit's own login page for a status
+    code -- the same page the sign-in browser opens.
+    """
+    import urllib.error
+    import urllib.request
+    persona = request_persona()
+    proxy = _rd_proxy_for(persona)
+    out = {'proxy': _rd_proxy_shown(persona) or ('pool' if proxy else ''),
+           'using_proxy': bool(proxy), 'ip': '', 'reddit': 0, 'error': ''}
+    if not proxy:
+        out['error'] = ('No proxy is set for this model, so a sign-in would go '
+                        'out on this server\u2019s own address \u2014 which Reddit blocks.')
+        return jsonify(out)
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({'http': proxy, 'https': proxy}))
+    try:
+        with opener.open('https://api.ipify.org?format=json', timeout=20) as r:
+            out['ip'] = (json.loads(r.read() or b'{}') or {}).get('ip') or ''
+    except Exception as e:
+        out['error'] = ('The proxy itself could not be reached: '
+                        + str(getattr(e, 'reason', e))[:160]
+                        + '. Check the host, port and credentials.')
+        return jsonify(out)
+    req = urllib.request.Request('https://www.reddit.com/login', method='GET')
+    req.add_header('User-Agent', RR.DEFAULT_UA)
+    try:
+        with opener.open(req, timeout=25) as r:
+            out['reddit'] = r.status
+    except urllib.error.HTTPError as e:
+        out['reddit'] = e.code
+        body = ''
+        try:
+            body = (e.read() or b'')[:200].decode('utf-8', 'replace')
+        except Exception:
+            pass
+        out['error'] = (f'Reddit answered {e.code} from {out["ip"]}. That exit IP is '
+                        f'blocked \u2014 ask the provider for a different one, or a '
+                        f'sticky residential session rather than a datacentre pool. '
+                        + body[:120])
+    except Exception as e:
+        out['error'] = (f'Reddit could not be reached through the proxy: '
+                        + str(getattr(e, 'reason', e))[:160])
+    return jsonify(out)
+
+
 @app.route('/api/reddit/subreddits', methods=['GET', 'POST'])
 @platform_scoped
 def api_reddit_subreddits():

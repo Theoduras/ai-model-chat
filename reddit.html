@@ -113,6 +113,8 @@
       </div>
       <button class="btn-ai" onclick="saveProxy()">Save</button>
       <button class="btn-ai" style="background:var(--surface); color:var(--text-2);"
+              onclick="testProxy()">Test it</button>
+      <button class="btn-ai" style="background:var(--surface); color:var(--text-2);"
               onclick="clearProxy()">Clear</button>
     </div>
     <div id="proxy-status" class="hint" style="margin-top:10px;"></div>
@@ -373,6 +375,19 @@ async function saveProxy(){
       body:JSON.stringify({persona:slug(),proxy:el('rd-proxy').value})});
     el('rd-proxy').value='';
     await loadStatus();
+  }catch(e){note(box,e.message,true);}
+}
+
+async function testProxy(){
+  const box=el('proxy-status');
+  note(box,'Dialling out the way a sign-in would\u2026');
+  try{
+    const r=await api('/api/reddit/proxy/test',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({persona:slug()})});
+    if(r.error){note(box,r.error,true);return;}
+    note(box,'Reddit sees her at '+(r.ip||'?')+' and answered '+r.reddit
+      +(r.reddit===200?' \u2014 this address works. Sign in now.'
+                     :' \u2014 that is not a working login page.'), r.reddit!==200);
   }catch(e){note(box,e.message,true);}
 }
 

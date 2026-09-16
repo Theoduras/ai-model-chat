@@ -486,20 +486,21 @@ def test_each_persona_dials_reddit_from_her_own_address():
     check('with nothing set she has no way out at all',
           app._rd_proxy_for('lilly') == '')
 
-    app._rd_set_proxy('lilly', 'http://u1:p1@gw.example:823')
-    app._rd_set_proxy('nova', 'http://u2:p2@gw.example:823')
+    app._rd_set_proxy('lilly', 'http://u1:pw-one-secret@gw.example:823')
+    app._rd_set_proxy('nova', 'http://u2:pw-two-secret@gw.example:823')
     check('each persona keeps her own credentials, not a shared pair',
-          app._rd_proxy_for('lilly') == 'http://u1:p1@gw.example:823'
-          and app._rd_proxy_for('nova') == 'http://u2:p2@gw.example:823')
+          app._rd_proxy_for('lilly') == 'http://u1:pw-one-secret@gw.example:823'
+          and app._rd_proxy_for('nova') == 'http://u2:pw-two-secret@gw.example:823')
     check('and neither password is readable in the setting store',
-          'p1' not in json.dumps(store) and 'p2' not in json.dumps(store), store)
+          'pw-one-secret' not in json.dumps(store)
+          and 'pw-two-secret' not in json.dumps(store), store)
     check('the console is shown the host, never the password',
           app._rd_proxy_shown('lilly') == 'u1@gw.example:823'
-          and 'p1' not in app._rd_proxy_shown('lilly'))
+          and 'pw-one-secret' not in app._rd_proxy_shown('lilly'))
 
     os.environ['REDDIT_PROXY_TEMPLATE'] = 'http://shared-{country}-{session}:pw@pool:1'
     check('her own still wins over the shared pool',
-          app._rd_proxy_for('lilly') == 'http://u1:p1@gw.example:823')
+          app._rd_proxy_for('lilly') == 'http://u1:pw-one-secret@gw.example:823')
     check('a persona without one falls back to the pool, keyed to her',
           app._rd_proxy_for('zara') == 'http://shared-nl-zara:pw@pool:1')
     app._rd_set_proxy('lilly', '')
@@ -507,7 +508,7 @@ def test_each_persona_dials_reddit_from_her_own_address():
           app._rd_proxy_for('lilly') == 'http://shared-nl-lilly:pw@pool:1')
     os.environ.pop('REDDIT_PROXY_TEMPLATE', None)
 
-    app._rd_set_proxy('lilly', 'http://u1:p1@gw.example:823')
+    app._rd_set_proxy('lilly', 'http://u1:pw-one-secret@gw.example:823')
     app._rd_set_session('lilly', dict(_SESSION, proxy='http://old:p@gone:1'))
     check('the transport is handed the proxy, so a call cannot leave by another door',
           RR.Rest(app._rd_session('lilly')).proxy == 'http://old:p@gone:1')
@@ -521,6 +522,7 @@ def test_the_routes_exist():
                  '/api/reddit/connect/browser', '/api/reddit/connect/frame',
                  '/api/reddit/connect/input', '/api/reddit/connect/cancel',
                  '/api/reddit/post-now', '/api/reddit/proxy',
+                 '/api/reddit/proxy/test',
                  '/reddit', '/reddit/connect'):
         check(f'{path} is served', path in rules)
 
