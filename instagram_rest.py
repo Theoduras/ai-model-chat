@@ -218,9 +218,10 @@ class Rest:
         body = {'upload_id': upload_id, 'caption': caption or '',
                 'source_type': '4', 'length': length,
                 'clips': [{'length': length, 'source_type': '4'}],
-                'poster_frame_index': 0, 'audio_muted': False}
+                'poster_frame_index': 0, 'audio_muted': False,
+                'original_media_type': 'video'}
         if width and height:
             body['width'] = int(width)
             body['height'] = int(height)
             body['extra'] = {'source_width': int(width), 'source_height': int(height)}
-        return self.call('POST', f'{self.base}{PATH_CONFIGURE_REEL}', body=body)
+        return self.call('POST', f'{self.base}{PATH_CONFIGURE_REEL}?video=1', body=body)
