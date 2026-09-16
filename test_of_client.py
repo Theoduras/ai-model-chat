@@ -366,6 +366,30 @@ class PacingTest(unittest.TestCase):
         self.assertFalse([s for s in slept if s > 0])
 
 
+class ProvenRulesRefusalTest(unittest.TestCase):
+    """Rules the oracle proves current, and OnlyFans still says no."""
+
+    def setUp(self):
+        self.store = use_memory_store()
+        self.proven = of_rules.proven
+        self.stale = of_rules.stale_response
+        of_rules.proven = lambda: True
+        of_rules.stale_response = lambda code, body: True
+
+    def tearDown(self):
+        of_rules.proven = self.proven
+        of_rules.stale_response = self.stale
+
+    def test_the_account_is_marked_expired_so_the_watcher_stops(self):
+        of_session.put('acct-p', dict(SESSION))
+        with mock.patch.object(of_client, '_once',
+                               side_effect=of_client.OnlyFansError(400, 'nope')), \
+                mock.patch.object(of_client, '_repair_identity', return_value=False):
+            with self.assertRaises(of_client.SignatureRefused):
+                of_client.call('acct-p', 'GET', '/api2/v2/users/me')
+        self.assertFalse(of_session.live('acct-p'))
+
+
 class StaleSigningRefusalTest(unittest.TestCase):
     """A 401 while signing is known broken must not cost her the session."""
 

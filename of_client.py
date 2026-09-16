@@ -386,6 +386,13 @@ def _attempts(account, method, path, body, session):
                         continue
                     if _repair_identity(account, session):
                         continue
+                    # Rules the oracle proves current, and OnlyFans still
+                    # refuses: whatever is being rejected, it is not the
+                    # signature. That is a revoked session, and recording it as
+                    # one is what stops the watcher and puts the reconnect in
+                    # front of the creator -- without it the same refusal was
+                    # repeated every minute for as long as the account lived.
+                    of_session.mark_expired(account, e.detail)
                     raise SignatureRefused(
                         e.code, 'the signing rules reproduce OnlyFans\' own signature, '
                                 'so this is not a rotation — OnlyFans is refusing this '

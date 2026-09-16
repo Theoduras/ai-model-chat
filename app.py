@@ -16396,6 +16396,37 @@ def _of_keep_signature(sample):
     return True
 
 
+# One page load each, so a batch is minutes of browser time and a burst of
+# requests from her exit IP. Bounded per repair rather than run to completion.
+OF_COLLECT_MAX = 25
+
+
+def _of_collect_signatures(want):
+    """Ask the page to sign, and keep what it signs. Returns how many are new.
+
+    Every signature is one equation towards the recipe, and they only count
+    while the revision holds -- so this runs in one pass rather than spreading
+    the same requests over hours and risking a rotation part-way through.
+    """
+    conn = _of_conn()
+    if not hasattr(conn, 'sample_now'):
+        return 0
+    added = 0
+    for _ in range(max(0, min(int(want), OF_COLLECT_MAX))):
+        try:
+            got = conn.sample_now(proxy=_of_proxy_for('', '')) or {}
+        except Exception as e:
+            of_trace.note('repair', 'collecting signatures stopped: ' + str(e)[:120],
+                          'warning')
+            break
+        if not got.get('sign'):
+            break
+        if _of_keep_signature(got):
+            added += 1
+            of_rules.put_sample(got)
+    return added
+
+
 def _of_solve_recipe(param, sample):
     """Recover the checksum recipe from signatures when nobody publishes it.
 
@@ -16412,11 +16443,21 @@ def _of_solve_recipe(param, sample):
         return False
     need = of_solve.DIGEST_LEN + 2
     if len(signatures) < need:
+        # The param fitting is the expensive thing to establish, and it is
+        # established. What is left is arithmetic waiting on its inputs, so the
+        # repair gathers them rather than banking one per cycle and leaving the
+        # account down for the seven hours that would take.
         of_trace.note('repair', 'the param is right and the recipe is not '
                       'published; %d of the %d signatures needed to solve for '
-                      'it are held — collect more on the signing panel'
+                      'it are held — collecting the rest'
                       % (len(signatures), need))
-        return False
+        got = _of_collect_signatures(need - len(signatures))
+        signatures = _of_signatures(revision)
+        if len(signatures) < need:
+            of_trace.note('repair', 'collected %d more, %d of %d held — '
+                          'continuing on the next repair'
+                          % (got, len(signatures), need))
+            return False
     rules = of_solve.rules_from(param, signatures, base=of_rules.rules())
     if of_rules.verify(sample, rules) is not True:
         of_trace.note('repair', 'solved a recipe from %d signatures and it does '
@@ -17205,16 +17246,7 @@ def api_onlyfans_signing_collect():
     if not _of_direct():
         return jsonify({'ok': False, 'error': 'not running the direct transport'}), 400
     want = max(1, min(int((request.json or {}).get('count') or 12), 60))
-    conn, added, errors = _of_conn(), 0, []
-    for _ in range(want):
-        try:
-            got = conn.sample_now(proxy=_of_proxy_for('', '')) or {}
-        except Exception as e:
-            errors.append(str(e)[:120])
-            break
-        if got.get('sign') and _of_keep_signature(got):
-            added += 1
-            of_rules.put_sample(got)
+    added, errors = _of_collect_signatures(want), []
     revision = str((of_rules.sample() or {}).get('sign') or '').split(':')[0]
     held = len(_of_signatures(revision))
     need = of_solve.DIGEST_LEN + 2
@@ -17821,8 +17853,14 @@ def _of_check_sessions():
             # A session OnlyFans has revoked is marked dead in the vault; a
             # request it refused to sign leaves it live. Only the first is the
             # creator's to fix, and only the first should stop the watcher.
-            stuck = 'signs what OnlyFans will accept' in detail or 'signature' in detail
-            expired = (not _of_direct() or not of_session.live(account)) and not stuck
+            # The vault's own status is the classification, not the wording of
+            # the refusal: a rotation never marks a session expired, and a
+            # refusal of the account always does. Reading the prose instead
+            # matched the word "signature" in "OnlyFans is refusing this
+            # account's session", so the one refusal that does need a reconnect
+            # was the one filed as a signing problem, and the watcher retried it
+            # every minute instead of stopping.
+            expired = not _of_direct() or not of_session.live(account)
             if expired:
                 of_events.unwatch(account)
             logger.warning('OnlyFans account %s is not answering: %s', slug, detail)
