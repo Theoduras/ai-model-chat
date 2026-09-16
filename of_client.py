@@ -396,6 +396,17 @@ def _attempts(account, method, path, body, session):
                     outcome = _repair_identity(account, session)
                     if outcome == 'retry':
                         continue
+                    if outcome == 'refused' and of_rules.proven_signed_in() is True:
+                        # The rules reproduce a signature OnlyFans made for a
+                        # request made as her, not merely one made for a
+                        # visitor. There is nothing left for signing to be
+                        # wrong about, so this is the session.
+                        of_session.mark_expired(account, e.detail)
+                        raise SignatureRefused(
+                            e.code, 'the signing rules reproduce signatures '
+                                    'OnlyFans made for her own requests, so this '
+                                    'is not a rotation — OnlyFans is refusing '
+                                    'this session. Reconnect the account.') from None
                     if outcome == 'refused':
                         # Everything we can check says this is fine: the rules
                         # reproduce a signature OnlyFans made, and the session

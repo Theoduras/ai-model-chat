@@ -16898,6 +16898,23 @@ OF_CAPTURE_EVERY = 600
 OF_SAMPLE_STALE = 900
 
 
+_of_signin_seen = [0.0]
+# How long after the last thing she did in the sign-in window the repair keeps
+# out of the way. Longer than a page load, shorter than the attempt's own life.
+OF_SIGNIN_QUIET = 300
+
+
+def _of_signin_active():
+    return time.time() - _of_signin_seen[0] < OF_SIGNIN_QUIET
+
+
+def _of_signin_touch():
+    """Called from the connect routes. The repair opens browsers of its own,
+    and this service holds one instance: a derivation launching Chrome beside
+    her sign-in window is how the window came to disappear under her."""
+    _of_signin_seen[0] = time.time()
+
+
 def _of_autocapture(force=False):
     """Get a signature off OnlyFans' own page when there is no usable one.
 
@@ -16925,6 +16942,10 @@ def _of_autocapture(force=False):
         # A stored sample that is ours keeps proven() lying, and the capture
         # below is the only thing that can replace it.
         of_rules.drop_sample()
+    if _of_signin_active():
+        of_trace.note('repair', 'a sign-in is open, so the repair is waiting '
+                      'rather than opening a browser beside it')
+        return False
     try:
         build = _of_browser_build()
         if not (build.get('up') and build.get('signing_capture')):
@@ -17055,6 +17076,10 @@ def _of_collect_signatures(want):
     conn = _of_conn()
     if not hasattr(conn, 'sample_now'):
         return 0
+    if _of_signin_active():
+        of_trace.note('repair', 'a sign-in is open, so signatures are not being '
+                      'collected beside it')
+        return 0
     added = 0
     for _ in range(max(0, min(int(want), OF_COLLECT_MAX))):
         try:
@@ -17114,6 +17139,25 @@ def _of_solve_recipe(param, sample):
     of_trace.note('repair', 'solved the signing rules from %d captured '
                   'signatures, revision %s'
                   % (len(signatures), rules.get('revision') or ''))
+    # Which of them the solved recipe actually reproduces, split by whether
+    # anyone was signed in. A recipe solved from visitor signatures alone is
+    # the case we cannot tell from "signing works" without saying so: the
+    # solver drops signatures it cannot fit rather than failing on them.
+    hers = [sig for sig in signatures
+            if str(sig.get('user_id') or '0') not in ('', '0')]
+    if not hers:
+        of_trace.note('repair', 'every signature it solved from was taken with '
+                      'nobody signed in, so this proves signing for a visitor '
+                      'and cannot speak for her own requests', 'warning')
+    else:
+        fit = [sig for sig in hers if of_rules.verify(sig, rules) is True]
+        of_trace.note('repair', 'it reproduces %d of %d signatures OnlyFans made '
+                      'while signed in%s' % (
+                          len(fit), len(hers),
+                          ', so signing is right for her requests too and a '
+                          'refusal is her session' if len(fit) == len(hers) else
+                          ' — signing is right for a visitor and wrong for her'),
+                      '' if len(fit) == len(hers) else 'warning')
     logger.info('solved OnlyFans signing rules from %d signatures (revision %s)',
                 len(signatures), rules.get('revision') or '')
     return True
@@ -17234,6 +17278,7 @@ if _of_direct():
     of_rules.cache_hooks(lambda: _get_setting('onlyfans_rules_cache') or '',
                          lambda v: _set_setting('onlyfans_rules_cache', v))
     of_rules.override_hooks(lambda: _get_setting('onlyfans_rules_override') or '')
+    of_rules.signature_hooks(_of_signatures)
     of_rules.sample_hooks(lambda: _get_setting('onlyfans_rules_sample') or '',
                           lambda v: _set_setting('onlyfans_rules_sample', v))
     of_session.store_hooks(lambda a: _get_setting(f'onlyfans_vault_{a}') or '',
@@ -17522,6 +17567,7 @@ def onlyfans_connect_page():
 @platform_scoped
 def api_onlyfans_connect_browser():
     """Open a browser on onlyfans.com for this creator to sign in through."""
+    _of_signin_touch()
     d = request.json or {}
     persona = (d.get('persona') or '').strip()
     if not persona:
@@ -17558,6 +17604,7 @@ def api_onlyfans_connect_frame():
     """The browser as it looks right now. Polled a few times a second while the
     creator is typing, so it answers with the last frame rather than waiting for
     a fresh one."""
+    _of_signin_touch()
     try:
         attempt = _of_conn().get((request.args.get('attempt') or '').strip(), frame=True) \
             if _of_direct() else None
@@ -17582,6 +17629,7 @@ def api_onlyfans_connect_frame():
 @platform_scoped
 def api_onlyfans_connect_input():
     """One click, keystroke or scroll, forwarded to the browser."""
+    _of_signin_touch()
     d = request.json or {}
     kind = (d.get('kind') or '').strip()
     if kind not in of_connect.INPUT_KINDS:
@@ -17651,6 +17699,7 @@ def _of_adopt_direct(attempt):
 @app.route('/api/onlyfans/connect/start', methods=['POST'])
 @platform_scoped
 def api_onlyfans_connect_start():
+    _of_signin_touch()
     d = request.json or {}
     persona = (d.get('persona') or '').strip()
     if not persona:
@@ -17708,6 +17757,7 @@ def api_onlyfans_connect_status():
 @platform_scoped
 def api_onlyfans_connect_code():
     """The 2FA code, or word that the browser face check is finished."""
+    _of_signin_touch()
     d = request.json or {}
     persona = (d.get('persona') or '').strip()
     attempt = _of_attempt(persona)

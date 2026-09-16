@@ -254,6 +254,44 @@ def verify(s, r):
     return got == s['sign']
 
 
+_signatures_load = None
+
+
+def signature_hooks(load):
+    """Where the signatures we have collected are kept. The app lends its own
+    store; without one only the single oracle is available."""
+    global _signatures_load
+    _signatures_load = load
+
+
+def proven_signed_in():
+    """Do the rules in use reproduce a signature OnlyFans made for a request
+    made *as her*? True/False/None.
+
+    `proven()` answers for whatever the oracle is, and the oracle is captured
+    with nobody signed in -- so on its own it says the rules are right for a
+    visitor and nothing more. That distinction cost a creator her session: a
+    refusal of her own requests was read as "not the rules" when nothing had
+    ever checked the rules against one of her requests.
+    """
+    if not _signatures_load:
+        return None
+    try:
+        held = _signatures_load() or []
+    except Exception:
+        return None
+    hers = [s for s in held if isinstance(s, dict) and s.get('sign')
+            and str(s.get('user_id') or '0') not in ('', '0')]
+    if not hers:
+        return None
+    checked = [verify(s, _rules) for s in hers]
+    if any(v is True for v in checked) and not any(v is False for v in checked):
+        return True
+    if any(v is False for v in checked):
+        return False
+    return None
+
+
 def proven():
     """Do the rules in use reproduce OnlyFans' own signature? True/False/None.
 

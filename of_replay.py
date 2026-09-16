@@ -118,7 +118,30 @@ def main(path):
     visitor = _report_solve(param, out, 'logged out:')
     hers = _report_solve(param, inn, 'signed in:') if inn else {}
 
+    # Solving needs 42 signatures; checking the rules we already hold needs
+    # one. Reaching for the solver first is what made three signed-in
+    # signatures look like no answer when they are the whole answer.
+    rules = dict(dump.get('rules') or {})
+    if rules and inn:
+        fit = [s for s in inn if of_rules.verify(s, rules) is True]
+        print('\n== the rules in use, against her own signatures')
+        print('   they reproduce %d of %d' % (len(fit), len(inn)))
+        signed_in_ok = len(fit) == len(inn) and bool(fit)
+    else:
+        signed_in_ok = None
+
     print('\n== verdict')
+    if signed_in_ok is True:
+        print('   the rules in use reproduce every signature OnlyFans made while\n'
+              '   signed in, so signing is right for her requests too — what\n'
+              '   OnlyFans is refusing is her session, and a reconnect is the fix.')
+        return 0
+    if signed_in_ok is False:
+        print('   the rules in use reproduce a visitor signature and fail her\n'
+              '   own, so they are wrong for a signed-in request. Collect signed-in\n'
+              '   signatures (42+) and solve from those alone; reconnecting will\n'
+              '   not help.')
+        return 0
     if not inn:
         print('   no signature captured while signed in, so nothing here can '
               'say whether the rules that work for a visitor work for her.\n'
