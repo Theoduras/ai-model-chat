@@ -35,7 +35,9 @@ from onlyfans import (OF_PRICE_MAX_USD, OF_PRICE_MIN_USD, chat_online,  # noqa: 
 
 logger = logging.getLogger(__name__)
 
-OF_BASE = 'https://onlyfans.com'
+# Overridable so the whole transport can be pointed at a local stand-in and
+# driven without the site (see of_stub.py). Unset everywhere but a test.
+OF_BASE = (os.getenv('ONLYFANS_BASE_URL') or 'https://onlyfans.com').rstrip('/')
 OF_TIMEOUT = 25
 OF_PAGE_LIMIT = 50
 OF_MAX_PAGES = 20
