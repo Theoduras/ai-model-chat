@@ -198,6 +198,9 @@ class Attempt:
     exit_error = ''
     blocked_by = ''
     landed = {}
+    refusal = {}
+    _last_text = ''
+    _text_at = 0.0
     _sampled = False
     # Same reason: an attempt assembled field by field rather than constructed
     # still has to be able to say which site it is for.
@@ -272,6 +275,7 @@ class Attempt:
                 'proxy_set': bool(self.proxy),
                 'blocked_by': getattr(self, 'blocked_by', ''),
                 'landed': getattr(self, 'landed', {}),
+                'refusal': getattr(self, 'refusal', {}),
                 'driver': DRIVER_NAME,
                 'signing_sample': self.signing_sample}
 
@@ -410,6 +414,44 @@ class Attempt:
                      'attention required', 'verify you are human',
                      'enable javascript and cookies')
 
+    # Words that mean the site has said no. Matched against the page itself,
+    # because every one of these arrives as an ordinary 200 with the reason
+    # drawn on screen -- there is no status code to filter on.
+    REFUSAL_WORDS = ('an error occurred', 'blocked by network security',
+                     'you have been blocked', 'attention required',
+                     'verify you are human', 'try again later',
+                     'incorrect username or password', 'too many requests',
+                     'bad request', 'something went wrong')
+
+    def _watch_page_text(self, page):
+        """Read what the page is saying, on the loop, and log it when it changes.
+
+        The message that matters appears after the operator clicks Log In, not
+        when the page loads, so reading once after navigation cannot catch it.
+        This runs on the driver thread, where calling into the browser is
+        legal -- doing it from a response handler raises and silently takes
+        the handler with it.
+        """
+        now = time.time()
+        if now - getattr(self, '_text_at', 0) < 1.0:
+            return
+        self._text_at = now
+        try:
+            text = ' '.join((page.inner_text('body') or '').split())[:600]
+        except Exception:
+            return
+        if not text or text == getattr(self, '_last_text', ''):
+            return
+        self._last_text = text
+        low = text.lower()
+        hit = next((w for w in self.REFUSAL_WORDS if w in low), '')
+        if hit:
+            self.refusal = {'said': hit, 'text': text[:400], 'url': (page.url or '')[:160]}
+            logger.warning('of-connect %s refused: %r on %s :: %s', self.id, hit,
+                           (page.url or '')[:120], text[:400])
+        else:
+            logger.info('of-connect %s page now: %s', self.id, text[:200])
+
     def _note_landing(self, page):
         """What the sign-in actually landed on, said out loud every time.
 
@@ -537,6 +579,7 @@ class Attempt:
             if quit_now:
                 break
             self._capture(page)
+            self._watch_page_text(page)
             if self.state == 'signin' and time.time() - last_check > POLL_SECONDS:
                 last_check = time.time()
                 self._try_capture_session(page, context)
@@ -901,18 +944,17 @@ class Attempt:
                     return
                 # Not filtered on status: Reddit answers a refused login with
                 # 200 and the reason in the body, so the status that looks like
-                # success is exactly the one worth reading. Filtering on >=400
-                # is what made three rounds of this log nothing at all.
-                body = ''
-                try:
-                    body = (response.text() or '')[:400]
-                except Exception:
-                    pass
+                # success is exactly the one worth reading.
+                #
+                # And nothing here calls back into the sync API -- reading
+                # response.text() from inside an event handler raises, which
+                # took the whole handler down and is why this logged nothing at
+                # all while the operator watched the login fail. What the page
+                # says is read from the page instead, in _watch_page_text.
                 self.login_errors = (getattr(self, 'login_errors', []) + [{
-                    'url': url.split('?')[0][:160], 'status': response.status,
-                    'body': body}])[-8:]
-                logger.warning('reddit sign-in answered: %s -> %s %s',
-                               url.split('?')[0][:120], response.status, body[:300])
+                    'url': url.split('?')[0][:160], 'status': response.status}])[-8:]
+                logger.warning('reddit sign-in answered: %s -> %s',
+                               url.split('?')[0][:120], response.status)
             except Exception:
                 pass
 
