@@ -260,9 +260,8 @@ print()
 print('by-hand queue rows')
 check('a publishable channel waits on the scheduler', G.queue_status_for('x') == 'queued')
 check('threads too', G.queue_status_for('threads') == 'queued')
-check('a by-hand channel waits on the creator', G.queue_status_for('tiktok') == 'manual')
-check('Instagram and Reddit publish themselves now',
-      [G.queue_status_for(p) for p in ('instagram', 'reddit')] == ['queued'] * 2)
+check('Instagram, Reddit and TikTok publish themselves now',
+      [G.queue_status_for(p) for p in ('instagram', 'reddit', 'tiktok')] == ['queued'] * 3)
 check('manual is a real state', 'manual' in G.QUEUE_STATES)
 check('both editable states can still be touched',
       set(G.EDITABLE_STATES) == {'queued', 'manual'})
@@ -446,17 +445,21 @@ print()
 print('media rules')
 check('X takes both', G.media_ok('x', 'image') and G.media_ok('x', 'video'))
 check('Threads takes both', G.media_ok('threads', 'image') and G.media_ok('threads', 'video'))
-check('TikTok is video only', G.media_ok('tiktok', 'video') and not G.media_ok('tiktok', 'image'))
+check('TikTok takes both, as a clip or a photo post',
+      G.media_ok('tiktok', 'video') and G.media_ok('tiktok', 'image'))
 check('Reddit takes both', G.media_ok('reddit', 'image') and G.media_ok('reddit', 'video'))
 check('an unknown channel takes nothing', not G.media_ok('myspace', 'image'))
 check('a good pairing has no complaint', G.media_reject('x', 'video') == '')
-check('a bad one says what the channel takes',
-      'image' in G.media_reject('tiktok', 'image')
-      and 'TikTok' in G.media_reject('tiktok', 'image'))
+check('a channel that takes nothing from here says so',
+      'no media' in G.media_reject('myspace', 'image'))
 check('an unknown kind is refused', G.media_reject('x', 'gif') != '')
 check('the two publishable channels differ in how they get it',
       G.media_how('x') == 'upload' and G.media_how('threads') == 'fetch')
-check('a by-hand channel says so', G.media_how('tiktok') == 'by-hand')
+check('a channel with no posting API at all is by-hand',
+      G.media_how('myspace') == 'by-hand')
+check('the signed-in channels hand over the bytes themselves',
+      G.media_how('tiktok') == 'upload' and G.media_how('instagram') == 'upload'
+      and G.media_how('reddit') == 'upload')
 check('mime decides the kind',
       G.media_kind('video/mp4') == 'video' and G.media_kind('image/png') == 'image')
 check('no mime is an image, as the library was before video',
@@ -465,7 +468,10 @@ print()
 print('several files on one post')
 check('a set inside the cap is fine', G.media_set_reject('x', ['image'] * 4) == '')
 check('one over it is not', 'at most 4' in G.media_set_reject('x', ['image'] * 5))
-check('a single-file channel says so', 'one file' in G.media_set_reject('tiktok', ['video'] * 2))
+check('a single-file channel says so', 'one file' in G.media_set_reject('x', ['video'] * 2)
+      or 'video' in G.media_set_reject('x', ['video'] * 2))
+check('a clip never rides with stills on TikTok either',
+      'video' in G.media_set_reject('tiktok', ['image', 'video']))
 check('a clip never rides with stills',
       'video' in G.media_set_reject('fanvue', ['image', 'video']))
 check('and one file alone is never a set problem',
@@ -473,7 +479,7 @@ check('and one file alone is never a set problem',
 check('the carousel channels take more than one',
       G.media_max('fanvue') > 1 and G.media_max('threads') > 1
       and G.media_max('reddit') > 1 and G.media_max('instagram') > 1)
-check('tiktok still takes one', G.media_max('tiktok') == 1)
+check('a TikTok photo post carries a set', G.media_max('tiktok') > 1)
 
 check('every publishable channel can carry a still',
       all(G.media_ok(p, 'image') for p in G.PUBLISHABLE))

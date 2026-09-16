@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TikTok Poster</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <script src="/js/theme.js"></script>
+  <link rel="stylesheet" href="/css/style.css">
+  <script src="/js/devnav.js" defer></script>
+  <script src="/js/chat-view.js"></script>
+  <script src="/js/console-shell.js"></script>
+  <style>
+    .fv-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+    .fv-wrap { max-width: 760px; margin: 0 auto; padding: 28px 24px 80px; display: flex; flex-direction: column; gap: 20px; }
+    .conn-pill { font-size: 0.75rem; padding: 3px 10px; border-radius: 9999px; background: var(--surface); color: var(--text-3); }
+    .conn-pill.ok { background: #14532d; color: #4ade80; }
+    .conn-pill.err { background: #4c0519; color: #fb7185; }
+    .warn-box { border: 1px solid #b45309; background: #78350f22; color: var(--text-2);
+                border-radius: 10px; padding: 12px 14px; font-size: 0.82rem; line-height: 1.5; }
+    .tt-shots { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    .tt-shot { width: 84px; height: 84px; object-fit: cover; border-radius: 8px; }
+    .tt-post { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px;
+               margin-bottom: 8px; cursor: pointer; }
+    .tt-post.on { border-color: var(--accent, #4ade80); }
+    .tt-post .meta { font-size: 0.72rem; color: var(--text-3); margin-top: 4px; }
+    .tt-c { border-top: 1px solid var(--border); padding: 10px 0; }
+    .tt-c .who { font-size: 0.75rem; color: var(--text-3); }
+    .tt-c textarea { width: 100%; margin-top: 6px; }
+  </style>
+</head>
+<body class="page-dashboard">
+
+<header>
+  <div style="display:flex; align-items:center; gap:10px;">
+    <h1>TikTok Poster</h1>
+    <span class="badge">TikTok</span>
+  </div>
+  <div style="display:flex; align-items:center; gap:16px;">
+    <nav data-site-nav="inline" class="sn-links sn-inline"></nav>
+    <a href="/dashboard" style="color:var(--text-muted); font-size:0.8rem; text-decoration:none;">← Dashboard</a>
+  </div>
+</header>
+
+<div class="fv-scroll">
+<div class="fv-wrap">
+
+  <div class="warn-box" data-tab="settings">
+    <strong>Read this before connecting an account.</strong>
+    This drives a real TikTok account through a real sign-in, not TikTok's official
+    Content Posting API — that one needs a developer app that passes a separate audit,
+    posts privately until it does, and cannot reply to a comment at all. TikTok's terms
+    do not allow an automated client either, and accounts found doing this can be
+    actioned. Use an account you can afford to lose. Everything here stays safe for
+    work: TikTok bars pointing anyone at adult content, so captions and replies never
+    name a paid site.
+  </div>
+
+  <div class="form-section" data-tab="settings" id="sec-account">
+    <div class="section-title">Persona &amp; TikTok account</div>
+    <div class="field full">
+      <label>Choose a model (persona)</label>
+      <div class="row-inline">
+        <div class="field" style="margin:0;">
+          <select id="persona" onchange="loadAll()"></select>
+        </div>
+        <span class="conn-pill" id="conn-pill">—</span>
+      </div>
+    </div>
+    <div class="row-inline">
+      <button class="btn-ai" onclick="startSignin()">Sign in to TikTok</button>
+      <button class="btn-ai" style="background:var(--surface); color:var(--text-2);"
+              onclick="disconnect()">Disconnect</button>
+    </div>
+    <span class="hint">A real TikTok login page opens in a window. Sign in there as you
+      would on your own phone — the human check, 2FA and any emailed code all happen on
+      TikTok's own page. Nothing you type reaches us; what comes back is the session her
+      browser was already using.</span>
+    <details style="margin-top:12px;">
+      <summary class="hint" style="cursor:pointer;">Paste a cookie instead</summary>
+      <div class="row-inline" style="margin-top:10px;">
+        <div class="field" style="flex:2;">
+          <input type="password" id="tt-cookie" autocomplete="new-password" spellcheck="false"
+                 placeholder="paste the full Cookie header from a signed-in tab">
+          <span class="hint">Only needed if this deployment has no sign-in browser.
+            Stored encrypted and never shown again.</span>
+        </div>
+        <button class="btn-ai" onclick="connect()">Use cookie</button>
+      </div>
+    </details>
+    <div id="account-status" class="hint" style="margin-top:10px;"></div>
+  </div>
+
+  <div class="form-section" data-tab="settings" id="sec-posting">
+    <div class="section-title">Post now</div>
+    <span class="hint">One video, or a set of photos — TikTok takes both, but never in
+      the same post. No DMs and no funnel here; scheduling lives in the content planner.</span>
+    <div class="row-inline" style="margin-top:12px;">
+      <div class="field">
+        <label>Video or photos</label>
+        <input type="file" id="tt-file" accept="image/*,video/*" multiple onchange="onFilesPicked(event)">
+      </div>
+      <button class="btn-ai" id="tt-gen-btn" style="background:var(--surface); color:var(--text-2);"
+              onclick="generateImage()">Generate a photo with AI</button>
+    </div>
+    <div class="tt-shots" id="tt-shots"></div>
+    <div class="field full">
+      <label>Caption</label>
+      <textarea id="tt-caption" rows="3" placeholder="Leave empty and she writes one herself"></textarea>
+    </div>
+    <div class="field full">
+      <label>What she should post about (optional, only used if the caption is empty)</label>
+      <input type="text" id="tt-brief" placeholder="whatever she is up to that day — gym, work, the game she is playing">
+    </div>
+    <div class="row-inline">
+      <button class="btn-ai" onclick="postNow()">Post now</button>
+    </div>
+    <div id="post-status" class="hint" style="margin-top:10px;"></div>
+  </div>
+
+  <div class="form-section" data-tab="settings" id="sec-comments">
+    <div class="section-title">Answer her comments</div>
+    <span class="hint">Pick one of her posts to read what people said under it. She
+      drafts each reply in her own voice; nothing goes out until you send it.</span>
+    <div id="tt-feed" style="margin-top:12px;"></div>
+    <div id="tt-comments"></div>
+    <div class="row-inline" style="margin-top:12px;">
+      <button class="btn-ai" style="background:var(--surface); color:var(--text-2);"
+              onclick="loadFeed()">Refresh posts</button>
+    </div>
+    <div id="feed-status" class="hint" style="margin-top:10px;"></div>
+  </div>
+
+  <div class="form-section" data-tab="advanced" id="sec-log">
+    <div class="section-title">What she has posted</div>
+    <div id="trace" style="max-height:340px; overflow:auto;"></div>
+    <div class="row-inline" style="margin-top:12px;">
+      <button class="btn-ai" style="background:var(--surface); color:var(--text-2);"
+              onclick="loadTrace()">Refresh</button>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<script>
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function el(id){return document.getElementById(id);}
+function note(box,msg,bad){box.textContent=msg;box.style.color=bad?'#fb7185':'var(--text-3)';}
+function slug(){return el('persona').value;}
+async function api(path,opts){const r=await fetch(path,opts);let j={};try{j=await r.json();}catch(e){}
+  if(!r.ok) throw new Error(j.error||('request failed ('+r.status+')'));return j;}
+
+let media=[], mounted=false, lastStatus={}, feedPosts=[], openItem='';
+
+async function init(){
+  const list=await (await fetch('/api/personas')).json();
+  const rows=Array.isArray(list)?list:(list.personas||[]);
+  el('persona').innerHTML=rows.map(p=>'<option value="'+esc(p.slug)+'">'+esc(p.name||p.slug)+'</option>').join('');
+  if(!el('persona').options.length){note(el('account-status'),'Create a persona first.',true);return;}
+  await loadAll();
+}
+
+async function loadAll(){
+  media=[];openItem='';feedPosts=[];
+  showPreview();
+  el('tt-feed').innerHTML='';el('tt-comments').innerHTML='';
+  await loadStatus();
+  if(mounted) PlatformConsole.reset();
+}
+
+async function loadStatus(){
+  const s=await api('/api/tiktok/status?persona='+encodeURIComponent(slug()));
+  lastStatus=s;
+  const pill=el('conn-pill');
+  pill.textContent=s.connected?('connected as '+(s.username||'?')):'not connected';
+  pill.className='conn-pill '+(s.connected?'ok':'');
+  const si=s.signin||{};
+  const why=si.open?(si.error||si.why||'Sign-in window is open — finish it there.')
+    :(s.connected?'':'Sign in to TikTok to connect her account.');
+  note(el('account-status'),why,!!si.error&&si.open);
+  return s;
+}
+
+async function connect(){
+  const box=el('account-status');
+  const cookie=el('tt-cookie').value.trim();
+  if(!cookie){note(box,'Paste her TikTok cookie first.',true);return;}
+  note(box,'Connecting…');
+  try{
+    await api('/api/tiktok/connect',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({persona:slug(),cookie:cookie})});
+    el('tt-cookie').value='';
+    await loadStatus();
+  }catch(e){note(box,e.message,true);}
+}
+
+function startSignin(){
+  // A popup, not a panel: TikTok's human check reads the window it runs in,
+  // and an iframe is not one. Same window OnlyFans, Discord and Instagram use.
+  const w = Math.min(1100, Math.max(700, Math.round(screen.availWidth * 0.7)));
+  const h = Math.min(900, Math.max(600, Math.round(screen.availHeight * 0.8)));
+  const win = window.open('/tiktok/connect?site=tiktok&persona='
+    + encodeURIComponent(slug()), 'tiktok-signin',
+    'width=' + w + ',height=' + h + ',menubar=no,toolbar=no');
+  if(!win){note(el('account-status'),'Allow popups for this site, then try again.',true);return;}
+  note(el('account-status'),'Signing in — finish in the window that opened.');
+  const watch=setInterval(()=>{if(win.closed){clearInterval(watch);loadStatus();}},1500);
+}
+
+async function disconnect(){
+  if(!confirm('Disconnect her TikTok account?'))return;
+  await api('/api/tiktok/connect?persona='+encodeURIComponent(slug()),{method:'DELETE'});
+  await loadStatus();
+}
+
+function onFilesPicked(ev){
+  const files=Array.from(ev.target.files||[]);
+  if(!files.length)return;
+  const video=files.find(f=>f.type.startsWith('video/'));
+  const picked=video?[video]:files.slice(0,35);
+  media=[];
+  let left=picked.length;
+  picked.forEach((f,i)=>{
+    const reader=new FileReader();
+    reader.onload=()=>{media[i]=reader.result;if(--left===0)showPreview();};
+    reader.readAsDataURL(f);
+  });
+}
+
+function showPreview(){
+  el('tt-shots').innerHTML=media.filter(m=>m&&m.startsWith('data:image/'))
+    .map(m=>'<img class="tt-shot" src="'+m+'" alt="">').join('')
+    || (media.length?'<span class="hint">Video attached.</span>':'');
+}
+
+async function generateImage(){
+  const box=el('post-status');
+  note(box,'Generating…');
+  try{
+    const persona=await api('/api/personas/'+encodeURIComponent(slug()));
+    const data=await api('/api/generate/image',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({config:persona.config,shot:'portrait'})});
+    if(!data.ok||!data.image) throw new Error(data.error||'No image came back.');
+    media=media.filter(m=>m&&m.startsWith('data:image/'));
+    media.push(data.image);
+    showPreview();
+    note(box,'Photo generated below. Post now when ready.');
+  }catch(e){note(box,e.message,true);}
+}
+
+async function postNow(){
+  const box=el('post-status');
+  if(!media.length){note(box,'Attach a video or a photo first.',true);return;}
+  note(box,'Posting…');
+  try{
+    const r=await api('/api/tiktok/post-now',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({persona:slug(),caption:el('tt-caption').value,
+        brief:el('tt-brief').value,media:media})});
+    note(box,'Posted. '+(r.caption?('Caption: '+r.caption):''));
+    await loadTrace();
+  }catch(e){note(box,e.message,true);}
+}
+
+async function loadFeed(item){
+  const box=el('feed-status');
+  note(box,'Reading her posts…');
+  try{
+    openItem=item||'';
+    const q='/api/tiktok/feed?persona='+encodeURIComponent(slug())
+      +(openItem?('&item='+encodeURIComponent(openItem)):'');
+    const d=await api(q);
+    feedPosts=d.posts||[];
+    el('tt-feed').innerHTML=feedPosts.map(p=>'<div class="tt-post'
+      +(p.id===openItem?' on':'')+'" onclick="loadFeed(\''+esc(p.id)+'\')">'
+      +esc(p.caption||'(no caption)')+'<div class="meta">'+p.comments+' comments · '
+      +p.likes+' likes</div></div>').join('')
+      ||'<span class="hint">Nothing on her account yet.</span>';
+    renderComments(d.comments||[]);
+    note(box,openItem?'':'Pick a post to read its comments.');
+  }catch(e){note(box,e.message,true);}
+}
+
+function renderComments(rows){
+  const post=feedPosts.find(p=>p.id===openItem)||{};
+  el('tt-comments').innerHTML=rows.filter(c=>!c.mine).map((c,i)=>
+    '<div class="tt-c"><div class="who">@'+esc(c.user||'someone')+'</div>'
+    +esc(c.text||'')
+    +'<textarea id="tt-r-'+i+'" rows="2" placeholder="her reply"></textarea>'
+    +'<div class="row-inline" style="margin-top:6px;">'
+    +'<button class="btn-ai" style="background:var(--surface); color:var(--text-2);" '
+    +'onclick="draftReply('+i+',\''+esc(c.id)+'\')">Draft it for her</button>'
+    +'<button class="btn-ai" onclick="sendReply('+i+',\''+esc(c.id)+'\')">Send</button>'
+    +'</div></div>').join('')
+    ||(openItem?'<span class="hint">No comments to answer under that post.</span>':'');
+  el('tt-comments').dataset.caption=post.caption||'';
+  window.__ttComments=rows.filter(c=>!c.mine);
+}
+
+async function draftReply(i,commentId){
+  const box=el('feed-status');
+  const row=(window.__ttComments||[])[i]||{};
+  note(box,'Writing…');
+  try{
+    const d=await api('/api/tiktok/reply',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({persona:slug(),item:openItem,comment:commentId,
+        comment_text:row.text||'',caption:el('tt-comments').dataset.caption||''})});
+    el('tt-r-'+i).value=d.draft||'';
+    note(box,'Read it before you send it.');
+  }catch(e){note(box,e.message,true);}
+}
+
+async function sendReply(i,commentId){
+  const box=el('feed-status');
+  const text=(el('tt-r-'+i).value||'').trim();
+  if(!text){note(box,'Write or draft a reply first.',true);return;}
+  note(box,'Sending…');
+  try{
+    await api('/api/tiktok/reply',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({persona:slug(),item:openItem,comment:commentId,text:text})});
+    el('tt-r-'+i).value='';
+    note(box,'Replied.');
+  }catch(e){note(box,e.message,true);}
+}
+
+function loadTrace(){ return PlatformConsole.refresh(); }
+
+function renderFullLog(t){
+  const rows=(t.posts||[]).slice().reverse();
+  el('trace').innerHTML=rows.map(r=>'<div class="trace-line"><span class="st">'
+    +esc(r.kind||'')+'</span>'+esc(r.caption||'')+'</div>').join('')
+    ||'<span class="hint">Nothing posted yet.</span>';
+}
+
+function tiktokHealth(d){
+  const rows=[];
+  rows.push({state:d.connected?'ok':'bad',
+    label:d.connected?('Her account is connected as '+(d.username||'her account')):'No account signed in',
+    hint:d.connected?'Ready to post videos and photos, and to answer comments.'
+                    :'Sign in to TikTok under Settings.'});
+  if(d.connected&&!d.signer){
+    rows.push({state:'warn',
+      label:'No request signer is configured',
+      hint:'TikTok signs every call from its own page. Without TIKTOK_SIGNER_URL set, '
+          +'some calls come back empty instead of working.'});
+  }
+  return rows;
+}
+
+async function ttStats(s){
+  return [];
+}
+
+PlatformConsole.register({
+  platform:'tiktok',
+  persona:slug,
+  statusUrl:s=>'/api/tiktok/status?persona='+encodeURIComponent(s),
+  emptyHint:'Nothing posted yet — post once from Settings.',
+  read:d=>{
+    return {
+      live: !!d.connected,
+      broken: !d.connected,
+      title: d.connected?('Her TikTok account is connected'):'No TikTok account is connected',
+      sub: d.connected?('Signed in as '+(d.username||'her account')+' — ready to post and to answer comments.')
+        :'Sign her in under Settings. She drives a real account, not an official API.',
+      health: tiktokHealth(d),
+      steps: [
+        {label:'Connect', done:!!d.connected, tab:'settings', focus:'sec-account'},
+        {label:'Post',    done:!!d.connected, tab:'settings', focus:'sec-posting'},
+        {label:'Reply',   done:!!d.connected, tab:'settings', focus:'sec-comments'},
+      ],
+    };
+  },
+  fixTab:p=>({tab:'settings', focus:'sec-account', label:'Open settings'}),
+  stats:ttStats,
+  onStatus:renderFullLog,
+});
+
+init().then(()=>{ PlatformConsole.mount('.fv-wrap'); mounted=true; });
+setInterval(()=>{if(el('persona').value)loadStatus();},20000);
+</script>
+</body>
+</html>
