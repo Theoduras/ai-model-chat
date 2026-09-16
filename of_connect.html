@@ -160,6 +160,16 @@ const WAIT_FOR = 4, WAIT_HIDDEN = 8;
 const Q_SHARP = 45, Q_COARSE = 30, Q_ROUGH = 22;
 const SLOW_MS = 700, VERY_SLOW_MS = 1400;
 let ping = 0, quality = Q_SHARP, relay = '';
+// Every request this window makes, with its age. Shown as a per-minute rate,
+// because "it still asks constantly" and "it asks twice a minute" look the
+// same from the outside and only one of them is a bug.
+let asks = [];
+
+function countAsk(){
+  const now = Date.now();
+  asks.push(now);
+  asks = asks.filter(t => now - t < 60000);
+}
 
 function askedQuality(){
   if (ping > VERY_SLOW_MS) return Q_ROUGH;
@@ -170,6 +180,7 @@ function askedQuality(){
 function showLag(a){
   const age = a.frame_at ? Math.max(0, Math.round(Date.now() / 1000 - a.frame_at)) : null;
   $('lag').textContent = [
+    asks.length + '/min',
     ping ? ping + 'ms' : '',
     age !== null && age > 2 ? age + 's behind' : '',
     'q' + (a.quality || quality),
@@ -211,6 +222,7 @@ async function poll(){
 async function pollOnce(){
   let r, status = 0;
   const asked = Date.now();
+  countAsk();
   try {
     const res = await fetch(API + '/frame?attempt=' +
       encodeURIComponent(attempt) + '&persona=' + encodeURIComponent(persona) +
@@ -221,11 +233,11 @@ async function pollOnce(){
   } catch (e) { return waiting(); }
   // Weighted towards what just happened: a link that has gone bad is worth
   // reacting to within a couple of frames, not a minute.
-  // Only a request that came back with something measures the link: one that
-  // was held waiting for the page to change says nothing about how slow the
-  // link is, and reading it as lag would drop the picture quality for free.
-  const took = Date.now() - asked;
-  if (r && r.frame) ping = ping ? Math.round(ping * 0.6 + took * 0.4) : took;
+  // The attempt says how long it sat on this request waiting for the page to
+  // change. That part is not the link being slow, and counting it as lag would
+  // drop the picture quality on a connection that is perfectly fine.
+  const took = Date.now() - asked - Math.round(((r && r.held) || 0) * 1000);
+  if (took >= 0) ping = ping ? Math.round(ping * 0.6 + took * 0.4) : took;
   quality = askedQuality();
   // 404 is the only answer that means the sign-in is really gone, and even
   // that is given a few chances: the browser service can be restarted under
@@ -347,6 +359,7 @@ async function pump(){
       // for that and says so on its own. Losing one keystroke to a blip beats
       // tearing the window down, and beats wedging the queue behind it.
       try {
+        countAsk();
         r = await post(API + '/input',
           Object.assign({attempt: attempt, persona: persona}, item));
       } catch (e) { continue; }

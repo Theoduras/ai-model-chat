@@ -309,6 +309,46 @@ class FrameTimeRoundTripTest(unittest.TestCase):
         self.assertGreater(held, 0.1)
 
 
+class QuietPageTest(unittest.TestCase):
+    """A login page with a text cursor in it is never byte-identical twice, so
+    "only send what changed" does not on its own stop a page nobody is touching
+    from counting as new several times a second."""
+
+    class Page:
+        def __init__(self):
+            self.taken = 0
+
+        def screenshot(self, **kw):
+            self.taken += 1
+            return b'shot-%d' % self.taken
+
+    def test_a_page_nobody_is_touching_is_looked_at_less_often(self):
+        a = bare_attempt()
+        page = self.Page()
+        a.acted_at = 0.0
+        a.frame_at = time.time() - (of_connect.FRAME_EVERY + 0.01)
+        a._capture(page)
+        self.assertEqual(page.taken, 0, 'a quiet page was shot at the busy rate')
+        a.frame_at = time.time() - (of_connect.FRAME_EVERY_QUIET + 0.01)
+        a._capture(page)
+        self.assertEqual(page.taken, 1)
+
+    def test_a_page_being_used_is_looked_at_as_often_as_before(self):
+        a = bare_attempt()
+        page = self.Page()
+        a.acted_at = time.time()
+        a.frame_at = time.time() - (of_connect.FRAME_EVERY + 0.01)
+        a._capture(page)
+        self.assertEqual(page.taken, 1)
+
+    def test_an_input_is_what_makes_it_busy(self):
+        a = bare_attempt()
+        a._commands = queue.Queue()
+        a._done = threading.Event()
+        a.act('click', x=1, y=2)
+        self.assertGreater(a.acted_at, time.time() - 1)
+
+
 class QualityTest(unittest.TestCase):
     """The window is the side that knows how slow the link is, so it is the
     side that asks for a coarser picture."""

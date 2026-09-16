@@ -19497,10 +19497,12 @@ def api_onlyfans_connect_frame():
     a fresh one."""
     _of_signin_touch()
     try:
+        _held_from = time.time()
         attempt = _of_conn().get((request.args.get('attempt') or '').strip(), frame=True,
                                  since=_signin_since(),
                                  quality=_signin_quality(),
                                  wait=_signin_wait()) if _of_direct() else None
+        held = round(time.time() - _held_from, 3)
     except _OF_UNREACHABLE:
         return _of_busy()
     if not attempt:
@@ -19516,7 +19518,7 @@ def api_onlyfans_connect_frame():
             # sign-in that is about to vanish.
             status = dict(status, state='failed', error=adopt_err)
     return jsonify({'ok': True, 'frame': attempt.snapshot(_signin_since()),
-                    'attempt': status})
+                    'attempt': status, 'held': held})
 
 
 @app.route('/api/onlyfans/connect/input', methods=['POST'])
@@ -21682,10 +21684,12 @@ def api_discord_connect_frame():
     persona = request_persona()
     attempt_id = (request.args.get('attempt')
                   or _get_setting(f'discord_attempt_{persona}') or '')
+    _held_from = time.time()
     attempt = _dc_conn().get(attempt_id, frame=True, since=_signin_since(),
                                           quality=_signin_quality(),
                                           wait=_signin_wait()) \
         if attempt_id else None
+    held = round(time.time() - _held_from, 3)
     if not attempt:
         return jsonify({'ok': False, 'error': 'no such sign-in'}), 404
     status = attempt.status()
@@ -21694,7 +21698,7 @@ def api_discord_connect_frame():
             status = dict(status, state='failed',
                           error=_get_setting(f'discord_adopt_error_{persona}') or
                           'the sign-in finished but could not be stored')
-    return jsonify({'ok': True, 'attempt': status,
+    return jsonify({'ok': True, 'attempt': status, 'held': held,
                     'frame': attempt.snapshot(_signin_since())})
 
 
@@ -22117,10 +22121,12 @@ def api_instagram_connect_frame():
     persona = request_persona()
     attempt_id = (request.args.get('attempt')
                   or _get_setting(f'instagram_attempt_{persona}') or '')
+    _held_from = time.time()
     attempt = _ig_conn().get(attempt_id, frame=True, since=_signin_since(),
                                           quality=_signin_quality(),
                                           wait=_signin_wait()) \
         if attempt_id else None
+    held = round(time.time() - _held_from, 3)
     if not attempt:
         return jsonify({'ok': False, 'error': 'no such sign-in'}), 404
     status = attempt.status()
@@ -22129,7 +22135,7 @@ def api_instagram_connect_frame():
             status = dict(status, state='failed',
                           error=_get_setting(f'instagram_adopt_error_{persona}') or
                           'the sign-in finished but could not be stored')
-    return jsonify({'ok': True, 'attempt': status,
+    return jsonify({'ok': True, 'attempt': status, 'held': held,
                     'frame': attempt.snapshot(_signin_since())})
 
 
@@ -23298,10 +23304,12 @@ def api_reddit_connect_frame():
     persona = request_persona()
     attempt_id = (request.args.get('attempt')
                   or _get_setting(f'reddit_attempt_{persona}') or '')
+    _held_from = time.time()
     attempt = _rd_conn().get(attempt_id, frame=True, since=_signin_since(),
                                           quality=_signin_quality(),
                                           wait=_signin_wait()) \
         if attempt_id else None
+    held = round(time.time() - _held_from, 3)
     if not attempt:
         return jsonify({'ok': False, 'error': 'no such sign-in'}), 404
     status = attempt.status()
@@ -23310,7 +23318,7 @@ def api_reddit_connect_frame():
             status = dict(status, state='failed',
                           error=_get_setting(f'reddit_adopt_error_{persona}') or
                           'the sign-in finished but could not be stored')
-    return jsonify({'ok': True, 'attempt': status,
+    return jsonify({'ok': True, 'attempt': status, 'held': held,
                     'frame': attempt.snapshot(_signin_since())})
 
 
@@ -23692,10 +23700,12 @@ def api_tiktok_connect_frame():
     persona = request_persona()
     attempt_id = (request.args.get('attempt')
                   or _get_setting(f'tiktok_attempt_{persona}') or '')
+    _held_from = time.time()
     attempt = _tt_conn().get(attempt_id, frame=True, since=_signin_since(),
                                           quality=_signin_quality(),
                                           wait=_signin_wait()) \
         if attempt_id else None
+    held = round(time.time() - _held_from, 3)
     if not attempt:
         return jsonify({'ok': False, 'error': 'no such sign-in'}), 404
     status = attempt.status()
@@ -23704,7 +23714,7 @@ def api_tiktok_connect_frame():
             status = dict(status, state='failed',
                           error=_get_setting(f'tiktok_adopt_error_{persona}') or
                           'the sign-in finished but could not be stored')
-    return jsonify({'ok': True, 'attempt': status,
+    return jsonify({'ok': True, 'attempt': status, 'held': held,
                     'frame': attempt.snapshot(_signin_since())})
 
 
