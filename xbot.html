@@ -542,6 +542,10 @@ function xHealth(d){
                 :'Switch Always on under Settings so the funnel survives a closed tab.'},
     {state:d.cta_url?'ok':'warn', label:d.cta_url?'Funnel link set':'No funnel link',
      hint:d.cta_url?('Fans are sent to '+d.cta_url):'She has nothing to send fans to when a chat warms up.'},
+    {state:d.reply_blocked_at?'warn':'ok',
+     label:d.reply_blocked_at?'X refuses public comments':'Public commenting allowed',
+     hint:d.reply_blocked_at?'She can only reply where she is the author or is mentioned, so feed commenting is paused. Her DMs and her own threads are unaffected — raise the app\'s access level in the X developer portal to lift it.'
+                            :'She can comment under other people\'s posts.'},
     // The one row that answers "is anything actually happening": the server
     // stamps this every time it looks at her, whether or not it found work.
     {state:xWorkerState(d), label:d.worker_last?('Server last checked '+xAgo(d.worker_last)):'The server has never checked',

@@ -10828,6 +10828,11 @@ X_SEEN_TWEETS_MAX = 600
 # X returns this when the account may not reply to a stranger's post. It is a
 # property of the account, not of the post, so one rejection means every other
 # post in the round will be rejected too.
+# How long to take X at its word before trying a public comment again. Long
+# enough not to burn a round on it, short enough that raising the app's access
+# level is picked up the same day.
+X_REPLY_BLOCK_HOURS = 12
+
 _X_REPLY_BLOCKED_RE = re.compile(
     r'only reply to or quote posts where you are mentioned|'
     r'not permitted to (reply|create)', re.I)
@@ -10878,6 +10883,16 @@ def _x_feed_engage_round(persona, post_limit=4, reply_limit=8, post_age_min=None
         return actions, [f'No posts in the feed from the last '
                          f'{int(post_age_min or X_FEED_POST_AGE_MIN)} minutes.']
 
+    # X's refusal is an account/app-level setting, not a per-post one, so it will
+    # hold for hours or days. Rediscovering it every round costs a Gemini call
+    # and an API call each time, and buries the one line that explains it.
+    blocked_at = int(_x_state_get(persona, 'reply_blocked_at', 0) or 0)
+    if do_posts and blocked_at and int(time.time()) - blocked_at < X_REPLY_BLOCK_HOURS * 3600:
+        do_posts = False
+        log.append('Not commenting on other people\'s posts: X refused it '
+                   f'{(int(time.time()) - blocked_at) // 3600}h ago for this account. '
+                   'Answering people under her own posts is unaffected.')
+
     seen = _x_seen_tweets(persona)
     handled = []
     comment_tries = 0
@@ -10909,9 +10924,10 @@ def _x_feed_engage_round(persona, post_limit=4, reply_limit=8, post_age_min=None
                         # posts. Retrying the next eleven is pointless and
                         # spends a Gemini call each time.
                         do_posts = False
+                        _x_state_set(persona, 'reply_blocked_at', int(time.time()))
                         log.append('Public commenting is blocked for this account: '
                                    + str(e)[:160]
-                                   + ' — skipping comments for the rest of this round.')
+                                   + f' — skipping comments for the next {X_REPLY_BLOCK_HOURS}h.')
                     else:
                         log.append(f'comment on @{author} failed: {str(e)[:140]}')
 
@@ -11822,6 +11838,12 @@ def api_x_trace():
         problems.append('No funnel link is set, so she has nothing to send fans to.')
     if _last_x_log_error[0]:
         problems.append(f'Conversation logging failed: {_last_x_log_error[0]}')
+    blocked_at = int(_x_state_get(persona, 'reply_blocked_at', 0) or 0)
+    if blocked_at and int(time.time()) - blocked_at < X_REPLY_BLOCK_HOURS * 3600:
+        problems.append('X refuses public comments from this account — it only lets her '
+                        'reply where she is the author or is mentioned. Her DMs and her '
+                        'own threads still work; raising the app\'s access level in the X '
+                        'developer portal is what lifts it.')
 
     worker_last = int(_x_state_get(persona, 'worker_last', 0) or 0)
     if connected and cfg.get('enabled', True) and worker_last \
@@ -11858,6 +11880,7 @@ def api_x_trace():
                     'auto': bool(cfg.get('auto')), 'interval_min': cfg.get('interval_min'),
                     'cta_url': cta_url, 'daily': _x_daily_counts(persona),
                     'worker_last': worker_last,
+                    'reply_blocked_at': blocked_at,
                     'auto_last': int(_x_state_get(persona, 'auto_last', 0) or 0),
                     'daily_caps': cfg.get('daily_caps') or X_DAILY_CAP_DEFAULTS,
                     'problems': problems, 'rows': rows})
