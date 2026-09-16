@@ -517,6 +517,19 @@ const X_FIX = [
   [/logging failed|activity log/i, {tab:'advanced', focus:'sec-log',   label:'See the log'}],
 ];
 
+function xAgo(ts){
+  if(!ts) return 'never';
+  const s = Math.max(0, Math.floor(Date.now()/1000) - ts);
+  if(s < 90) return 'just now';
+  if(s < 3600) return Math.floor(s/60)+' min ago';
+  if(s < 86400) return Math.floor(s/3600)+' h ago';
+  return Math.floor(s/86400)+' d ago';
+}
+function xWorkerState(d){
+  if(!d.worker_last) return 'bad';
+  return (Math.floor(Date.now()/1000) - d.worker_last) < 600 ? 'ok' : 'bad';
+}
+
 function xHealth(d){
   const rows = [
     {state:d.connected?'ok':'bad', label:d.connected?('Connected as @'+(d.username||'her account')):'Not connected',
@@ -529,6 +542,12 @@ function xHealth(d){
                 :'Switch Always on under Settings so the funnel survives a closed tab.'},
     {state:d.cta_url?'ok':'warn', label:d.cta_url?'Funnel link set':'No funnel link',
      hint:d.cta_url?('Fans are sent to '+d.cta_url):'She has nothing to send fans to when a chat warms up.'},
+    // The one row that answers "is anything actually happening": the server
+    // stamps this every time it looks at her, whether or not it found work.
+    {state:xWorkerState(d), label:d.worker_last?('Server last checked '+xAgo(d.worker_last)):'The server has never checked',
+     hint:!d.worker_last?'Nothing server-side has touched this persona. Rounds only run from this page.'
+        :xWorkerState(d)==='ok'?'The always-on worker is alive and looking at her every minute.'
+        :'The worker has gone quiet — it should look every minute. Check the host is always-on.'},
   ];
   return rows;
 }
@@ -557,11 +576,16 @@ PlatformConsole.register({
     broken: !d.connected,
     title: !d.connected ? 'X is not connected'
          : !d.enabled   ? 'Connected, but she is not answering'
+         : xWorkerState(d) !== 'ok' ? 'Nothing is running her on the server'
          : d.auto       ? 'She is live and running on her own'
                         : 'She is live while this tab is open',
     sub: !d.connected ? 'Nothing happens until her account is linked.'
        : !d.enabled   ? 'Fans can write to her; the replies are switched off.'
-       : d.auto       ? ('The server runs a full round every ' + (d.interval_min||15) + ' minutes.')
+       : xWorkerState(d) !== 'ok'
+                      ? ('The server last looked at her ' + xAgo(d.worker_last) +
+                         '. It should look every minute, so replies are not going out on their own.')
+       : d.auto       ? ('The server runs a full round every ' + (d.interval_min||15) +
+                         ' minutes — last one ' + xAgo(d.auto_last) + '.')
                       : 'Rounds only run from this page — switch Always on to change that.',
     health: xHealth(d),
     steps: [

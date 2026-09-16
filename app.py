@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify, send_from_directory, session, redirect, url_for, render_template_string, Response, after_this_request, g
+from flask import has_request_context
 import os
 import sys
 import copy
@@ -4411,7 +4412,14 @@ def _now_str():
 
 
 def _client_ip():
-    """Real client IP behind Cloud Run / proxies (first hop of X-Forwarded-For)."""
+    """Real client IP behind Cloud Run / proxies (first hop of X-Forwarded-For).
+
+    Empty off a request: the background workers act with nobody attached, and
+    this used to raise here — taking the whole log line down with it, which is
+    why an unattended round left no trace at all.
+    """
+    if not has_request_context():
+        return ''
     xff = request.headers.get('X-Forwarded-For', '')
     if xff:
         return xff.split(',')[0].strip()
@@ -4660,7 +4668,7 @@ def _log_x_event(action, persona='', detail='', x_username=''):
     """Record an X action with the caller's IP + geo. Best-effort, never raises."""
     try:
         ip = _client_ip()
-        ua = request.headers.get('User-Agent', '')
+        ua = request.headers.get('User-Agent', '') if has_request_context() else 'worker'
         from db import SessionLocal, add_x_event
         s = SessionLocal()
         try:
@@ -4942,7 +4950,7 @@ INBOX_PLATFORMS = {
     'telegram': {'label': 'Telegram', 'prefixes': ('tg:', 'tgu:'),
                  'trace_keys': ('tg_trace_%s', 'tg_trace_platform')},
     'x':        {'label': 'X',        'prefixes': ('',),
-                 'trace_keys': ()},
+                 'trace_keys': ('x_trace_%s',)},
 }
 
 # Trace stages that describe something that happened *to one fan*, so they can
@@ -9978,6 +9986,44 @@ def _x_state_set(persona, name, data):
     _set_setting(_x_state_key(persona, name), json.dumps(data))
 
 
+X_TRACE_MAX = 200
+
+
+def _x_trace(persona, stage, detail='', fan=''):
+    """Append one line to the persona's X trace, for the same reason Telegram
+    has one: when a bot goes quiet the answer has to be readable from the
+    browser, not from Cloud Run's logs. The background rounds write here — they
+    are the ones nobody is watching."""
+    key = f'x_trace_{persona or "platform"}'
+    try:
+        rows = json.loads(_get_setting(key) or '[]')
+        if not isinstance(rows, list):
+            rows = []
+    except Exception:
+        rows = []
+    row = {'at': int(time.time()), 'stage': stage, 'detail': str(detail)[:500]}
+    if fan:
+        row['fan'] = fan
+    rows.append(row)
+    _set_setting(key, json.dumps(rows[-X_TRACE_MAX:]))
+    logger.info('X[%s] %s: %s', persona, stage, str(detail)[:200])
+
+
+def _x_trace_line(persona, line):
+    """One line out of a round's log, filed under the stage it reads as, so the
+    console's feed shows a failure as a failure rather than as activity."""
+    low = (line or '').lower()
+    if 'failed' in low or 'error' in low or low.startswith('⚠'):
+        stage = 'error'
+    elif 'cap reached' in low or 'trimmed' in low or 'skipped' in low:
+        stage = 'skipped'
+    elif low.startswith('no ') or 'nothing' in low or 'switched off' in low:
+        stage = 'idle'
+    else:
+        stage = 'sent'
+    _x_trace(persona, stage, line)
+
+
 # Daily ceilings for the unattended loop. X suspends accounts that act like a
 # script, and a round that runs itself every 15 minutes has no operator watching
 # the totals. A cap of 0 blocks that action for the rest of the day; a negative
@@ -11636,7 +11682,16 @@ def api_x_trace():
     if _last_x_log_error[0]:
         problems.append(f'Conversation logging failed: {_last_x_log_error[0]}')
 
-    rows = []
+    worker_last = int(_x_state_get(persona, 'worker_last', 0) or 0)
+    if connected and cfg.get('enabled', True) and worker_last \
+            and int(time.time()) - worker_last > 600:
+        problems.append('The server has not run a round in over 10 minutes — the '
+                        'always-on worker may not be running on this host.')
+    if connected and not worker_last:
+        problems.append('The server has never run a round for this persona. Rounds only '
+                        'come from this page until the worker picks her up.')
+
+    rows = _inbox_trace_rows('x', persona)
     try:
         from db import SessionLocal, list_x_events
         s = SessionLocal()
@@ -11654,13 +11709,15 @@ def api_x_trace():
             s.close()
     except Exception as e:
         problems.append(f'Could not read the activity log: {str(e)[:120]}')
-    rows.reverse()
+    rows.sort(key=lambda r: r.get('at') or 0)
 
     return jsonify({'ok': True, 'persona': persona, 'connected': connected,
                     'username': t.get('username', ''),
                     'enabled': bool(cfg.get('enabled', True)),
                     'auto': bool(cfg.get('auto')), 'interval_min': cfg.get('interval_min'),
                     'cta_url': cta_url, 'daily': _x_daily_counts(persona),
+                    'worker_last': worker_last,
+                    'auto_last': int(_x_state_get(persona, 'auto_last', 0) or 0),
                     'daily_caps': cfg.get('daily_caps') or X_DAILY_CAP_DEFAULTS,
                     'problems': problems, 'rows': rows})
 
@@ -22115,9 +22172,15 @@ def _x_worker():
         try:
             with app.app_context():
                 cfg = _x_behavior(persona)
+                _x_state_set(persona, 'worker_last', int(_t.time()))
                 if not cfg.get('auto'):
-                    _x_dm_reply_round(persona)
-                    _x_followup_round(persona)
+                    replied, dlog = _x_dm_reply_round(persona)
+                    nudged, flog = _x_followup_round(persona)
+                    if replied or nudged:
+                        _x_trace(persona, 'sent',
+                                 f'{replied} DM repl(y/ies), {nudged} follow-up(s)')
+                    for line in dlog + flog:
+                        _x_trace_line(persona, line)
                     return
                 gap = max(1, int(cfg.get('interval_min') or 15)) * 60
                 now = int(_t.time())
@@ -22125,11 +22188,18 @@ def _x_worker():
                     return
                 _x_state_set(persona, 'auto_last', now)
                 actions, log = _x_auto_round(persona, cfg)
-                logger.info('x auto round for %s: %s', persona, actions)
+                did = ', '.join(f'{k.replace("_", " ")} {v}'
+                                for k, v in actions.items() if v)
+                _x_trace(persona, 'chats', 'round: ' + (did or 'nothing to do'))
                 for line in log:
-                    logger.info('x[%s] %s', persona, line)
-        except Exception:
+                    _x_trace_line(persona, line)
+        except Exception as e:
             logger.exception('x round failed for %s', persona)
+            try:
+                with app.app_context():
+                    _x_trace(persona, 'error', f'{e.__class__.__name__}: {str(e)[:300]}')
+            except Exception:
+                pass
         finally:
             with guard:
                 pending.discard(persona)
