@@ -8907,6 +8907,26 @@ def _growth_publish(persona, platform, text, media_id='', audience='', price_cen
         # _threads_publish builds the carousel itself from a list.
         posted_id = str(_threads_publish(persona, text,
                                          media=(rows if len(rows) > 1 else media)) or '')
+    elif plat == 'instagram':
+        session = _ig_session(persona)
+        if not (session.get('cookie') and session.get('csrftoken')):
+            raise RuntimeError('Instagram is not connected for this persona')
+        if not rows:
+            raise RuntimeError('Instagram needs a photo or video attached')
+        blob, mime = _media_bytes(rows[0])
+        kind = growth.media_kind(mime)
+        width = height = duration_ms = 0
+        if kind == 'video':
+            width, height, duration_ms = _mp4_probe(blob)
+            if not duration_ms:
+                raise RuntimeError("that video's length could not be read")
+        try:
+            result = IR.Rest(session).post_feed(blob, kind, text, width, height, duration_ms)
+        except IR.InstagramApiError as e:
+            raise RuntimeError('Instagram would not accept that post'
+                               + (f': {e.detail[:160]}' if e.detail else '.'))
+        posted_id = str(((result or {}).get('media') or {}).get('pk') or '')
+        _ig_log_post(persona, 'post', text)
     else:
         raise ValueError(f'{plat} posts have to go out by hand')
     _content_register_add(persona, plat, text)
@@ -21599,6 +21619,59 @@ def _ig_caption(persona, kind, brief):
     text = _persona_text(persona, instruction, history=None, max_tokens=400,
                          temperature=1.0)
     return growth.trim_to(_strip_placeholders(text or ''), spec['cap'])
+
+
+def _mp4_probe(data):
+    """Read width, height and duration_ms straight out of an MP4's own
+    moov/mvhd + moov/trak/tkhd boxes. The console gets these from a <video>
+    element in the browser, but the content planner posts from stored media
+    with no browser involved, so this is the same information taken off the
+    file itself. Returns (0, 0, 0) if the boxes aren't where expected rather
+    than raising — the caller treats a zero duration as "couldn't read it"."""
+    def boxes(buf, start, end):
+        i = start
+        while i + 8 <= end:
+            size = int.from_bytes(buf[i:i + 4], 'big')
+            kind = buf[i + 4:i + 8]
+            hdr = 8
+            if size == 1:
+                size = int.from_bytes(buf[i + 8:i + 16], 'big')
+                hdr = 16
+            if size < hdr:
+                break
+            yield kind, i + hdr, i + size
+            i += size
+    try:
+        moov_start = moov_end = 0
+        for kind, s, e in boxes(data, 0, len(data)):
+            if kind == b'moov':
+                moov_start, moov_end = s, e
+                break
+        if not moov_end:
+            return 0, 0, 0
+        duration_ms = 0
+        width = height = 0
+        for kind, s, e in boxes(data, moov_start, moov_end):
+            if kind == b'mvhd':
+                version = data[s]
+                if version == 1:
+                    timescale = int.from_bytes(data[s + 20:s + 24], 'big')
+                    duration = int.from_bytes(data[s + 24:s + 32], 'big')
+                else:
+                    timescale = int.from_bytes(data[s + 12:s + 16], 'big')
+                    duration = int.from_bytes(data[s + 16:s + 20], 'big')
+                if timescale:
+                    duration_ms = round(duration * 1000 / timescale)
+            elif kind == b'trak':
+                for tk, ts, te in boxes(data, s, e):
+                    if tk == b'tkhd':
+                        w = int.from_bytes(data[te - 8:te - 4], 'big') // 65536
+                        h = int.from_bytes(data[te - 4:te], 'big') // 65536
+                        if w and h:
+                            width, height = w, h
+        return width, height, duration_ms
+    except Exception:
+        return 0, 0, 0
 
 
 def _ig_media_bytes(media):
