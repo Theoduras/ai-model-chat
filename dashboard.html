@@ -160,7 +160,7 @@
         <button class="btn-new" data-role-area="personas" onclick="newPersona()">+ New Persona</button>
 
         <div class="sb-label">Workspace</div>
-        <button type="button" class="sb-item" data-search="chat" onclick="openEmbedded('/', this)">
+        <button type="button" class="sb-item" data-search="chat" onclick="openChat(this)">
           <svg class="sb-ic-chat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" width="16" height="16" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8A2.5 2.5 0 0 1 17.5 16H10l-4.5 4v-4H6.5A2.5 2.5 0 0 1 4 13.5v-8Z" stroke-linejoin="round"/></svg>
           <span>Chat</span>
         </button>
@@ -466,6 +466,7 @@ async function identifyUser() {
     const me = await (await fetch('/api/me')).json();
     CURRENT_UID = me.signed_in ? me.id : 'anon';
     window.USER_SETUP = me.setup || {};
+    window.ME_CAPS = me.capabilities || {};
     if (me.is_admin) document.body.classList.add('is-admin');
     applyEntitlements(me);
     loadWorkspaces();
@@ -1270,6 +1271,14 @@ function openPlatform(platform, navEl) {
 // The planner is its own page, embedded so it keeps the dashboard's sidebar and
 // topbar around it. openEmbedded clears currentSlug, so the slug is read first
 // and handed over in the URL.
+// The creator's own test chat: the same page the landing-page demo runs, with
+// the model rail kept so they can switch between their personas.
+function openChat(navEl) {
+  if (needsPersona()) return;
+  const slug = currentSlug;
+  openEmbedded('/chat?picker=1' + (slug ? '&persona=' + encodeURIComponent(slug) : ''), navEl);
+}
+
 function openPlanner(navEl) {
   if (needsPersona()) return;
   const slug = currentSlug;
@@ -1277,7 +1286,7 @@ function openPlanner(navEl) {
 }
 
 // Tools that read a persona; the account, team and admin pages do not.
-const PERSONA_PAGES = ['/', '/landing', '/planner'];
+const PERSONA_PAGES = ['/chat', '/landing', '/planner'];
 
 function openEmbedded(url, navEl) {
   if (PERSONA_PAGES.indexOf(url.split('?')[0]) !== -1 && needsPersona()) return;
