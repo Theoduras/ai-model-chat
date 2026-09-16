@@ -407,6 +407,17 @@ def _attempts(account, method, path, body, session):
                                    'it — asking once more before blaming the '
                                    'session', account)
                     continue
+                if of_rules.proven() is False:
+                    # Signing is known broken -- a captured signature no
+                    # rule set reproduces, not merely an unchecked one -- so a
+                    # refusal with nothing
+                    # readable in it is far more likely to be the signature
+                    # than the session. Expiring here stops the watcher and
+                    # sends the creator to sign in again, which hands us the
+                    # same good session and the same unsignable request.
+                    raise SigningStale(e.code, 'OnlyFans refused a request we '
+                                               'cannot sign — her session is '
+                                               'not the problem')
                 of_session.mark_expired(account, e.detail)
                 raise SessionExpired(e.code, 'the OnlyFans session expired — '
                                              'reconnect the account')

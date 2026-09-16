@@ -16342,13 +16342,60 @@ def _of_derive_rules(sample, force=False):
         of_trace.note('repair', report.get('why')
                       or ('the derived rules do not reproduce the signature'
                           if rules else 'the browser derived nothing'), 'warning')
-        return False
+        # The literal scan only finds a param the bundle still spells out. When
+        # it is built rather than written -- which is what "the revision does
+        # not appear in them" means -- the plaintext being hashed is the only
+        # place left to read it, and that needs the site to sign something
+        # while we watch. The same oracle decides it, so a wrong param cannot
+        # be adopted either way.
+        return _of_capture_param_rules(sample)
     _set_setting('onlyfans_rules_override', json.dumps(rules))
     of_rules.refresh()
     of_trace.note('repair', 'adopted rules derived from the page, revision '
                   + str(rules.get('revision') or ''))
     logger.info('adopted signing rules derived from the page (revision %s)',
                 rules.get('revision') or '')
+    return True
+
+
+def _of_capture_param_rules(sample):
+    """Last resort: read static_param off the plaintext OnlyFans hashes.
+
+    `derive_rules` reads the bundle; this watches the site sign its own
+    requests and takes the param from the front of what went into the hash.
+    Whatever comes back is still adopted only if it reproduces the captured
+    signature.
+    """
+    conn = _of_conn()
+    if not hasattr(conn, 'capture_param'):
+        of_trace.note('repair', 'this browser service cannot hook the hash input',
+                      'warning')
+        return False
+    of_trace.note('repair', 'asking the browser to read the param off the hash input')
+    try:
+        got = conn.capture_param(sample=sample, proxy=_of_proxy_for('', '')) or {}
+    except Exception as e:
+        of_trace.note('repair', 'the hash-input capture failed: ' + str(e)[:160],
+                      'warning')
+        return False
+    param = (got.get('param') or '').strip()
+    if not param:
+        of_trace.note('repair', got.get('why')
+                      or 'nothing sign-shaped was hashed in JS, so the signer is'
+                         ' in WASM or a Worker and this route is closed', 'warning')
+        return False
+    # solve() scans a blob for literals and tries each against the known
+    # checksum recipes; the captured param is a blob of exactly one.
+    rules = of_rules.solve(param, sample)
+    if of_rules.verify(sample, rules) is not True:
+        of_trace.note('repair', 'the captured param does not reproduce the '
+                      'signature — the checksum recipe rotated too, so a rule '
+                      'set has to be pasted in', 'warning')
+        return False
+    _set_setting('onlyfans_rules_override', json.dumps(rules))
+    of_rules.refresh()
+    of_trace.note('repair', 'adopted rules from the hashed plaintext, revision '
+                  + str(rules.get('revision') or ''))
     return True
 
 

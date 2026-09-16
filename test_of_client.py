@@ -366,6 +366,26 @@ class PacingTest(unittest.TestCase):
         self.assertFalse([s for s in slept if s > 0])
 
 
+class StaleSigningRefusalTest(unittest.TestCase):
+    """A 401 while signing is known broken must not cost her the session."""
+
+    def setUp(self):
+        self.store = use_memory_store()
+        self.proven = of_rules.proven
+        of_rules.proven = lambda: False
+
+    def tearDown(self):
+        of_rules.proven = self.proven
+
+    def test_a_blank_401_is_blamed_on_signing_not_the_session(self):
+        of_session.put('acct-s', dict(SESSION))
+        with mock.patch.object(of_client, '_once',
+                               side_effect=of_client.OnlyFansError(401, '')):
+            with self.assertRaises(of_client.SigningStale):
+                of_client.call('acct-s', 'GET', '/api2/v2/users/me')
+        self.assertTrue(of_session.live('acct-s'))
+
+
 if __name__ == '__main__':
     unittest.main()
 
@@ -530,3 +550,4 @@ class ProxyPoolOffTest(unittest.TestCase):
         os.environ['ONLYFANS_PROXY_TEMPLATE'] = 'http://u-{country}-{session}:p@gw:823'
         opener = of_client._opener('http://user:pw@gw.example.com:823')
         self.assertTrue(self._routes_through(opener, 'gw.example.com'))
+
