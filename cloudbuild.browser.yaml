@@ -56,12 +56,12 @@ steps:
     args:
       - -c
       - |
-        [ -f /workspace/.reuse ] && exit 0
-        docker build
-          -t ${_AR_HOSTNAME}/$PROJECT_ID/${_AR_REPOSITORY}/$REPO_NAME/${_SERVICE_NAME}:$COMMIT_SHA \
-          -t ${_AR_HOSTNAME}/$PROJECT_ID/${_AR_REPOSITORY}/$REPO_NAME/${_SERVICE_NAME}:latest \
-          --cache-from ${_AR_HOSTNAME}/$PROJECT_ID/${_AR_REPOSITORY}/$REPO_NAME/${_SERVICE_NAME}:latest \
-          -f Dockerfile .
+        # Not `[ -f … ] && exit 0`: that is the last command, so its own false
+        # is the step's exit status and a build that should run fails instead.
+        if [ -f /workspace/.reuse ]; then exit 0; fi
+        IMG=${_AR_HOSTNAME}/$PROJECT_ID/${_AR_REPOSITORY}/$REPO_NAME/${_SERVICE_NAME}
+        docker build -t "$$IMG:$COMMIT_SHA" -t "$$IMG:latest" \
+          --cache-from "$$IMG:latest" -f Dockerfile .
 
   - name: gcr.io/cloud-builders/docker
     id: Push
@@ -69,8 +69,9 @@ steps:
     args:
       - -c
       - |
-        [ -f /workspace/.reuse ] && exit 0
-        docker push --all-tags ${_AR_HOSTNAME}/$PROJECT_ID/${_AR_REPOSITORY}/$REPO_NAME/${_SERVICE_NAME}
+        if [ -f /workspace/.reuse ]; then exit 0; fi
+        docker push --all-tags \
+          ${_AR_HOSTNAME}/$PROJECT_ID/${_AR_REPOSITORY}/$REPO_NAME/${_SERVICE_NAME}
 
   # Every flag the service needs is repeated here, because this is a full
   # `run deploy` and a deploy that omits one resets it: no display means headless
