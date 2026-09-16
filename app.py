@@ -7629,17 +7629,6 @@ def _draft_media_note(has_image):
             'there.')
 
 
-def _draft_link(persona, platform):
-    """The tracked per-channel link, when the platform's own brief allows a
-    bare link in the caption at all — Instagram/TikTok say "link in bio"
-    instead, and Reddit's brief bars a link outright."""
-    plat = growth.base_platform(platform)
-    if plat == 'reddit':
-        return ''
-    origin = _site_origin().rstrip('/')
-    return f'{origin}/go/{persona}/{plat}' if origin else ''
-
-
 def _series_note(series):
     """The half of a two-part story this post is, when it is one at all."""
     brief = growth.SERIES_BRIEF.get(growth.series_part(series))
@@ -7657,8 +7646,7 @@ def _growth_plan_draft(persona, platform, kind, idea):
         'post itself, no preamble and no quotes.'
         + _content_level_note(persona, platform)
         + _no_repeat_block(persona, platform))
-    link = _draft_link(persona, platform) if platform in growth.PUBLISHABLE else ''
-    cap = spec['cap'] - (len(link) + 2 if link else 0)
+    cap = spec['cap']
     text = growth.trim_to(_persona_text(
         persona, instruction, max_tokens=500, temperature=1.0), max(cap, 0))
     if text and _reads_as_repeat(persona, platform, text):
@@ -7671,7 +7659,7 @@ def _growth_plan_draft(persona, platform, kind, idea):
                 max_tokens=500, temperature=1.0), max(cap, 0)) or text
         except Exception:
             pass
-    return f'{text}\n\n{link}' if link and text else text
+    return text
 
 
 @app.route('/api/growth/plan', methods=['POST'])
@@ -7926,14 +7914,7 @@ def api_growth_drafts():
             + media_note
             + _content_level_note(persona, plat, rating)
             + _no_repeat_block(persona, base))
-        # X and Threads render a bare link as clickable, so it rides in the
-        # caption; Instagram and TikTok already say "link in bio" in their own
-        # brief, so pasting a raw URL there would contradict what was just
-        # generated — those get the link back separately for the operator to
-        # place themselves. Reddit's brief bars a link outright.
-        inline = plat in growth.PUBLISHABLE
-        link = _draft_link(persona, plat)
-        budget = spec['cap'] - (len(link) + 2 if inline and link else 0)
+        budget = spec['cap']
         overlay_wanted = growth.wants_overlay(plat)
         if overlay_wanted:
             instruction += growth.OVERLAY_BRIEF
@@ -7960,10 +7941,8 @@ def api_growth_drafts():
                     overlay, text = head, body
             except Exception:
                 pass
-        if inline and link and text:
-            text = f'{text}\n\n{link}'
         out.append({'platform': plat, 'label': spec['label'], 'text': text,
-                    'link': '' if inline else link, 'overlay': overlay,
+                    'link': '', 'overlay': overlay,
                     'cap': spec['cap'], 'publishable': plat in growth.PUBLISHABLE})
     return jsonify({'ok': True, 'persona': persona, 'idea': idea, 'drafts': out,
                     'rating': rating, 'saw_media': bool(picture),
