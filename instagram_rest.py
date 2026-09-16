@@ -157,6 +157,8 @@ class Rest:
         try:
             with _opener(self.proxy).open(req, timeout=timeout) as resp:
                 out = resp.read()
+                if not raw:
+                    logger.warning('instagram %s %s -> 200: %s', method, url, out[:300])
                 if not out:
                     return {}
                 try:
