@@ -352,9 +352,12 @@ async function loadConfig(){
     showRules(st.rules, st.page_transport);
     wb.innerHTML=!st.connected ? ''
       : (s.status==='expired'
-        ? '<span class="hint" style="color:var(--warn);">Her OnlyFans session expired'
+        ? '<span class="hint" style="color:var(--warn);">Her OnlyFans session is flagged expired'
           +(s.last_error?(' ('+esc(s.last_error)+')'):'')+'. She has stopped reading and '
-          +'replying until you sign in again — nothing is lost.</span>'
+          +'replying — nothing is lost. The flag is ours, not OnlyFans\u2019: a refusal we could '
+          +'not read can set it while her cookie is still good. Check before signing in again.'
+          +'</span> <button class="btn-ai" onclick="checkSession()">Check her session</button>'
+          +'<span id="session-check"></span>'
         : (w.ready
           ? '<span class="hint">Watching her inbox. New messages reach her within seconds.</span>'
           : '<span class="hint" style="color:var(--warn);">'+esc(w.problem||'No watcher running.')+'</span>'));
@@ -658,6 +661,25 @@ function showRules(r,page){
     :(Math.round(r.age_seconds/60)+' min ago')));
   box.innerHTML=via+'<span class="hint">Revision '+esc(r.revision||'unknown')+age
     +'<br>Source: '+esc(r.source||'unknown')+'</span>';
+}
+
+async function checkSession(){
+  const box=document.getElementById('session-check');
+  if(!box)return;
+  busy(box,'Asking OnlyFans with her stored cookie\u2026');
+  try{
+    const r=await post('/api/onlyfans/session/check',{persona:persona()});
+    if(!r.ok){err(box,r.error||'Could not check her session.');return;}
+    if(r.alive){
+      ok(box,'Still signed in \u2014 watcher restarted.');
+      setTimeout(loadConfig,1200);
+      return;
+    }
+    const s=r.session||{};
+    err(box,(r.detail||'OnlyFans refused the request.')
+      +(s.username?(' Account: '+s.username+'.'):'')
+      +' If that names signing rather than the session, signing in again will not help.');
+  }catch(e){err(box,String(e));}
 }
 
 async function refreshRules(){
@@ -972,6 +994,10 @@ const OF_FIX=[
   // Before the /not connected/ rule below: this one says she *is* connected,
   // and sending her back to the connect button would repair nothing.
   [/signing|refusing her session/i,{tab:'settings',focus:'sec-account',label:'Repair signing'}],
+  // A session flagged expired is usually our own flag, not OnlyFans' verdict,
+  // so send her to the check rather than to a fresh sign-in.
+  [/session expired|session is not live/i,
+   {tab:'settings',focus:'sec-account',label:'Check her session'}],
   [/not connected/i,{tab:'settings',focus:'sec-account',label:'Connect the account'}],
   [/Auto-reply is off/i,{tab:'settings',focus:'sec-auto',label:'Turn her on'}],
   [/webhook/i,{tab:'settings',focus:'sec-account',label:'Fix the webhook'}],
