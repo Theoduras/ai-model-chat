@@ -9062,9 +9062,14 @@ def _growth_publish(persona, platform, text, media_id='', audience='', price_cen
         res = _x_call(persona, 'POST', '/tweets', body=body)
         posted_id = str(((res or {}).get('data') or {}).get('id') or '')
     elif plat == 'threads':
-        # _threads_publish builds the carousel itself from a list.
-        posted_id = str(_threads_publish(persona, text,
-                                         media=(rows if len(rows) > 1 else media)) or '')
+        if _th_mode(persona) == 'instagram':
+            posted_id = THR.post_id(_th_post_rows(persona, text, rows))
+        else:
+            # _threads_publish builds the carousel itself from a list.
+            posted_id = str(_threads_publish(persona, text,
+                                             media=(rows if len(rows) > 1 else media)) or '')
+        _th_log_post(persona, 'text' if not rows else
+                     ('carousel' if len(rows) > 1 else 'media'), text, posted_id)
     elif plat == 'instagram':
         session = _ig_session(persona)
         if not (session.get('cookie') and session.get('csrftoken')):
@@ -24185,6 +24190,153 @@ def _threads_publishing_limit(persona):
             'total': int((row.get('config') or {}).get('quota_total') or 250)}
 
 
+# ── Threads over the Instagram session ────────────────────────────────────────
+#
+# A Threads account *is* an Instagram account, so the cookie captured at
+# /instagram/connect authenticates Threads too — threads_rest.py sends it with
+# Threads' own app id and posts land on Threads. That is why there is no second
+# hosted sign-in and no `of_connect.SITES['threads']`: connecting Instagram
+# connects Threads.
+#
+# The graph API above stays as the fallback for a persona connected the old way
+# (a Meta app, app review, an approval per account). _th_mode is the one place
+# that decides which of the two is live, and everything else — the console, the
+# scheduler, the queue — reads it rather than guessing.
+
+import threads_rest as THR
+
+
+def _th_session(persona):
+    """Threads rides Instagram's session; there is no Threads-specific one."""
+    session = _ig_session(persona)
+    return session if (session.get('cookie') and session.get('csrftoken')) else {}
+
+
+def _th_mode(persona):
+    if _th_session(persona):
+        return 'instagram'
+    if (_threads_load_tokens().get(persona) or {}).get('access_token'):
+        return 'oauth'
+    return ''
+
+
+def _th_identity(persona):
+    """Who the console says is connected, from whichever side is live."""
+    mode = _th_mode(persona)
+    if mode == 'instagram':
+        account = _ig_account(persona)
+        return {'mode': mode, 'username': account.get('username') or '',
+                'user_id': str(account.get('user_id') or '')}
+    if mode == 'oauth':
+        token = _threads_load_tokens().get(persona) or {}
+        return {'mode': mode, 'username': token.get('username') or '',
+                'user_id': str(token.get('user_id') or '')}
+    return {'mode': '', 'username': '', 'user_id': ''}
+
+
+def _th_rest(persona):
+    session = _th_session(persona)
+    if not session:
+        raise ValueError('Threads is not connected for this persona. '
+                         'Connect Instagram and Threads comes with it.')
+    return THR.Rest(session)
+
+
+def _th_post_rows(persona, text, rows, reply_control='everyone'):
+    """Publish through the cookie session. `rows` are library rows, the same
+    ones _growth_publish already resolved, so a scheduled post and a post-now
+    take the identical path."""
+    rest = _th_rest(persona)
+    text = growth.trim_post('threads', text) or ''
+    try:
+        if not rows:
+            if not text:
+                raise ValueError('A Threads post needs text, media, or both.')
+            result = rest.post_text(text, reply_control)
+        elif len(rows) == 1:
+            blob, mime = _media_bytes(rows[0])
+            if growth.media_kind(mime) == 'video':
+                width, height, duration_ms = _mp4_probe(blob)
+                if not duration_ms:
+                    raise ValueError("That video's length could not be read.")
+                result = rest.post_video(blob, text, width, height, duration_ms,
+                                         reply_control)
+            else:
+                result = rest.post_image(blob, text, reply_control=reply_control)
+        else:
+            items = []
+            for row in rows:
+                blob, mime = _media_bytes(row)
+                if growth.media_kind(mime) == 'video':
+                    width, height, duration_ms = _mp4_probe(blob)
+                    items.append((blob, 'video', width, height, duration_ms))
+                else:
+                    items.append((blob, 'photo', 0, 0, 0))
+            result = rest.post_carousel(items, text, reply_control)
+    except THR.ThreadsApiError as e:
+        raise ValueError('Threads would not accept that post'
+                         + (f': {e.detail[:160]}' if e.detail else '.'))
+    return result
+
+
+TH_POST_LOG_CAP = 20
+
+
+def _th_log_post(persona, kind, text, posted_id=''):
+    rows = _dc_json(f'threads_posts_{persona}', [])
+    rows.append({'kind': kind, 'text': text[:200], 'id': str(posted_id or ''),
+                 'at': int(time.time())})
+    _set_setting(f'threads_posts_{persona}', json.dumps(rows[-TH_POST_LOG_CAP:]))
+
+
+def _th_posts(persona):
+    return _dc_json(f'threads_posts_{persona}', [])
+
+
+def _th_post_now(persona, text, media_ids=None, reply_control='everyone',
+                 media_urls=None):
+    """The console's Post now. Media arrives as library ids, the same currency
+    the scheduler uses, so nothing is special-cased for the immediate path.
+
+    `media_urls` is the older graph-API way in — Threads fetches the file from a
+    public URL rather than taking an upload — and only that path can use it."""
+    text = (text or '').strip()
+    media_urls = [u for u in (media_urls or []) if u]
+    rows = []
+    for one in [m for m in (media_ids or []) if m]:
+        row = _media_row(persona, one)
+        if not row:
+            raise ValueError('That photo is no longer in the library.')
+        why = growth.media_reject('threads', row.get('kind'))
+        if why:
+            raise ValueError(why)
+        rows.append(row)
+    why = growth.media_set_reject('threads', [r.get('kind') or 'image' for r in rows])
+    if why:
+        raise ValueError(why)
+    if not text and not rows and not media_urls:
+        raise ValueError('Write something, or attach a photo.')
+
+    mode = _th_mode(persona)
+    if mode == 'instagram':
+        if media_urls:
+            raise ValueError('Posting a file by URL needs the Threads app connection. '
+                             'Pick from the library instead.')
+        result = _th_post_rows(persona, text, rows, reply_control)
+        posted_id = THR.post_id(result)
+    elif mode == 'oauth':
+        media = media_urls or rows
+        posted_id = str(_threads_publish(
+            persona, text, media=(media if len(media) > 1 else (media[0] if media else None))) or '')
+    else:
+        raise ValueError('Threads is not connected for this persona. '
+                         'Connect Instagram and Threads comes with it.')
+    count = len(rows) + len(media_urls)
+    kind = 'text' if not count else ('carousel' if count > 1 else 'media')
+    _th_log_post(persona, kind, text, posted_id)
+    return {'id': posted_id, 'text': text, 'kind': kind}
+
+
 def _threads_recent_posts(persona, limit=10):
     uid = _threads_uid(persona)
     res = _threads_call(persona, 'GET', f'/{uid}/threads',
@@ -24398,11 +24550,51 @@ def api_threads_callback():
 
 @app.route('/api/threads/status', methods=['GET'])
 def api_threads_status():
+    """Every persona the caller owns, and how each one is connected. A persona
+    with an Instagram session is connected to Threads by that alone, so it shows
+    up here even though it has no Threads token."""
     mine = owned_slugs()
-    return jsonify({p: {'username': t.get('username', ''),
-                        'connected': bool(t.get('access_token'))}
-                    for p, t in _threads_load_tokens().items()
-                    if mine is None or p in mine})
+    out = {p: {'username': t.get('username', ''),
+               'connected': bool(t.get('access_token')), 'mode': 'oauth'}
+           for p, t in _threads_load_tokens().items()
+           if mine is None or p in mine}
+    asked = (request.args.get('persona') or '').strip()
+    slugs = [asked] if re.match(r'^[a-z0-9_-]+$', asked or '') else list(out)
+    for slug in slugs:
+        if mine is not None and slug not in mine:
+            continue
+        identity = _th_identity(slug)
+        if identity['mode'] == 'instagram':
+            out[slug] = {'username': identity['username'], 'connected': True,
+                         'mode': 'instagram'}
+        elif identity['mode'] == '' and slug == asked:
+            out.setdefault(slug, {'username': '', 'connected': False, 'mode': ''})
+    return jsonify(out)
+
+
+@app.route('/api/threads/post-now', methods=['POST'])
+@platform_scoped
+def api_threads_post_now():
+    persona = request_persona()
+    d = request.json or {}
+    media_ids = [str(m).strip() for m in (d.get('media_ids') or []) if str(m).strip()]
+    try:
+        result = _th_post_now(persona, d.get('text') or '', media_ids,
+                              (d.get('reply_control') or 'everyone').strip(),
+                              [str(u).strip() for u in (d.get('media_urls') or [])
+                               if str(u).strip()])
+    except ValueError as e:
+        return jsonify({'ok': False, 'error': str(e)[:250]}), 400
+    except Exception as e:
+        logger.exception('threads post-now failed')
+        return jsonify({'ok': False, 'error': str(e)[:250]}), 400
+    return jsonify({'ok': True, **result})
+
+
+@app.route('/api/threads/posts', methods=['GET'])
+@platform_scoped
+def api_threads_posts():
+    return jsonify({'posts': _th_posts(request_persona())})
 
 
 @app.route('/api/threads/disconnect', methods=['POST'])

@@ -41,7 +41,13 @@ def fake_call(persona, method, path, params=None, body=None):
 
 app._threads_call = fake_call
 app._threads_uid = lambda persona: 'UID'
-app.time.sleep = lambda s: None
+# A virtual clock: sleeping moves time forward instead of standing still, so a
+# deadline loop reaches its deadline in no real time at all. Shifting time.time
+# by a fixed offset instead moves the deadline with it and never expires.
+_real_time = app.time.time
+_skew = [0.0]
+app.time.time = lambda: _real_time() + _skew[0]
+app.time.sleep = lambda s: _skew.__setitem__(0, _skew[0] + s)
 
 
 def publish(*a, **kw):
@@ -148,7 +154,6 @@ STATUS['value'], STATUS['error'] = 'EXPIRED', ''
 check('expired container refused', 'expired' in fails(
       lambda: publish('lilith', 'x', media=['https://x.test/a.jpg'])).lower())
 STATUS['value'], STATUS['error'] = 'IN_PROGRESS', ''
-app.time.time = (lambda real: (lambda: real() + 10 ** 6))(app.time.time)
 check('a stuck container gives up rather than looping', 'processing' in fails(
       lambda: publish('lilith', 'x', media=['https://x.test/a.jpg'])))
 STATUS['value'] = 'FINISHED'
@@ -218,6 +223,81 @@ check('the confirmation code resolves',
       client.get('/api/threads/deletion-status?code=' + res['confirmation_code']).status_code == 200)
 check('a non-hex code is refused rather than echoed',
       client.get('/api/threads/deletion-status?code=<script>').status_code == 400)
+
+print('over the instagram session')
+# A Threads account is an Instagram account, so a persona with an Instagram
+# cookie is connected to Threads by that alone — no token, no second sign-in.
+import threads_stub
+
+FAKE = threads_stub.FakeRest()
+app._th_rest = lambda persona: FAKE
+IG = {'lilith': {'cookie': 'sessionid=x', 'csrftoken': 'c'}}
+app._ig_session = lambda persona: IG.get(persona, {})
+app._ig_account = lambda persona: ({'username': 'lilith_ig', 'user_id': '7'}
+                                   if persona in IG else {})
+LOGGED = []
+app._th_log_post = lambda persona, kind, text, posted_id='': LOGGED.append((kind, posted_id))
+
+check('an instagram session alone connects threads', app._th_mode('lilith') == 'instagram')
+check('identity comes off the instagram account',
+      app._th_identity('lilith')['username'] == 'lilith_ig')
+check('no instagram and no token is not connected', app._th_mode('nobody') == '')
+
+app._threads_save_tokens({'tokenonly': {'access_token': 't', 'username': 'th'}})
+check('a token alone still connects, the old way', app._th_mode('tokenonly') == 'oauth')
+check('the instagram session wins over a token',
+      app._th_mode('lilith') == 'instagram')
+app._threads_save_tokens({})
+
+ROW_IMG = {'id': 1, 'kind': 'image'}
+ROW_VID = {'id': 2, 'kind': 'video'}
+app._media_bytes = lambda row: (b'bytes', 'video/mp4' if row['kind'] == 'video' else 'image/jpeg')
+app._mp4_probe = lambda blob: (720, 1280, 4000)
+
+FAKE.posted.clear()
+app._th_post_rows('lilith', 'hello', [])
+check('no media posts as text', FAKE.posted[-1]['kind'] == 'text')
+app._th_post_rows('lilith', 'hi', [ROW_IMG])
+check('one photo posts as an image', FAKE.posted[-1]['kind'] == 'image')
+app._th_post_rows('lilith', 'hi', [ROW_VID])
+check('one clip posts as a video with its length',
+      FAKE.posted[-1]['kind'] == 'video' and FAKE.posted[-1]['duration_ms'] == 4000)
+app._th_post_rows('lilith', 'set', [ROW_IMG, ROW_VID])
+check('several post as one carousel',
+      FAKE.posted[-1]['kind'] == 'carousel' and FAKE.posted[-1]['count'] == 2)
+check('text is trimmed to the threads cap',
+      len(app._th_post_rows('lilith', 'x' * 900, [])['caption']) == app.THREADS_TEXT_LIMIT)
+check('nothing at all is refused',
+      'text, media' in fails(lambda: app._th_post_rows('lilith', '', [])))
+
+app._media_row = lambda persona, mid: {'id': mid, 'kind': 'image'}
+check('a url cannot ride the cookie session',
+      'library' in fails(lambda: app._th_post_now('lilith', 'hi', [],
+                                                  media_urls=['https://x.test/a.jpg'])))
+check('an empty post is refused', 'Write something' in fails(
+      lambda: app._th_post_now('lilith', '', [])))
+LOGGED.clear()
+out = app._th_post_now('lilith', 'out it goes', [])
+check('post-now returns the id it got', out['id'] and out['kind'] == 'text')
+check('post-now is logged', LOGGED and LOGGED[0][0] == 'text')
+
+print('the scheduler sends through whichever side is live')
+SENT = []
+app._th_post_rows = lambda persona, text, rows, *a: SENT.append(('cookie', text, len(rows))) or {'media': {'pk': '42'}}
+app._threads_publish = lambda persona, text, **kw: SENT.append(('oauth', text, 0)) or 'G-1'
+app._media_row = lambda persona, mid: ROW_IMG
+app.growth.media_reject = lambda plat, kind: ''
+app.growth.media_set_reject = lambda plat, kinds: ''
+
+check('a queued threads post goes out over the cookie session',
+      app._growth_publish('lilith', 'threads', 'queued one') == '42'
+      and SENT[-1][0] == 'cookie')
+IG.clear()
+app._threads_save_tokens({'lilith': {'access_token': 't', 'username': 'th'}})
+check('with no instagram session it falls back to the graph api',
+      app._growth_publish('lilith', 'threads', 'queued two') == 'G-1'
+      and SENT[-1][0] == 'oauth')
+app._threads_save_tokens({})
 
 print()
 def test_nothing_failed():

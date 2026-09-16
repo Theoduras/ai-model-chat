@@ -44,6 +44,23 @@
     .steps li { margin-bottom: 6px; }
     .steps code { background:var(--panel); padding:1px 6px; border-radius:5px; color:#c7d2fe; }
     .note { background:#4c051922; border:1px solid #7f1d1d; color:#fca5a5; border-radius:8px; padding:10px 12px; font-size:0.8rem; }
+    .media-strip { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    .media-strip .thumb { width: 64px; height: 64px; border-radius: 8px; overflow: hidden; border: 2px solid transparent; background: var(--surface); cursor: pointer; position: relative; }
+    .media-strip .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .media-strip .thumb.on { border-color: var(--accent); }
+    .media-strip .thumb .vid { position: absolute; right: 3px; bottom: 2px; font-size: 0.65rem; color: #fff; text-shadow: 0 1px 3px #000; }
+    .counter { float: right; font-size: 0.72rem; color: var(--text-muted); }
+    .counter.over { color: #fb7185; }
+    .q-row { display: flex; align-items: center; gap: 10px; background: var(--bg); border: 1px solid #2a2a30; border-radius: 10px; padding: 10px 12px; }
+    .q-row .when { font-size: 0.74rem; color: var(--text-3); min-width: 108px; font-family: ui-monospace, monospace; }
+    .q-row .body { flex: 1; min-width: 0; font-size: 0.8rem; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .q-row .mini { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 0.74rem; padding: 2px 6px; }
+    .q-row .mini:hover { color: var(--accent); }
+    :root[data-theme="light"] .q-row, :root[data-theme="light"] .media-strip .thumb { border-color: var(--border-soft); }
+    @media (max-width: 640px) {
+      .q-row { flex-wrap: wrap; }
+      .q-row .body { white-space: normal; }
+    }
     @media (max-width: 640px) {
       .xbot-wrap { padding: 18px 14px 70px; gap: 16px; }
       .reply-card .tag { float: none; display: inline-block; margin-bottom: 6px; }
@@ -82,13 +99,22 @@
       <label>Choose a model (persona)</label>
       <div class="row-inline">
         <div class="field" style="margin:0;">
-          <select id="persona" onchange="updateConn()"></select>
+          <select id="persona" onchange="switchPersona()"></select>
         </div>
         <span class="conn-pill" id="conn-pill">—</span>
         <button class="btn-ai" id="connect-btn" onclick="toggleConnect()">Connect Threads</button>
         <button class="btn-ai" id="disconnect-btn" style="background:var(--border); display:none;" onclick="disconnectThreads()">Disconnect</button>
       </div>
-      <span class="hint">Only personas with a connected Threads account can post or reply. Threads is public-only — no DMs.</span>
+      <span class="hint">Threads is public-only — no DMs.</span>
+      <div class="hint" id="ig-note" style="display:none; margin-top:8px; color:#4ade80;">
+        ✓ Riding this persona's Instagram session — a Threads account <i>is</i> an Instagram
+        account, so there is nothing to connect here. Manage it on
+        <a href="/instagram" style="color:var(--accent);">the Instagram console</a>.
+      </div>
+      <div class="hint" id="no-conn-note" style="display:none; margin-top:8px;">
+        Connect this persona on <a href="/instagram" style="color:var(--accent);">Instagram</a>
+        and Threads comes with it — or connect a Threads app below.
+      </div>
     </div>
 
     <div id="connect-panel" style="display:none; margin-top:4px; border-top:1px solid var(--border-soft); padding-top:16px;">
@@ -160,30 +186,66 @@
   </div>
 
   <div class="form-section">
-    <div class="section-title">📝 Publish a post</div>
-    <span class="hint" style="display:block; margin-bottom:14px;">Posts to whichever Threads account the selected persona is connected to. Leave the text empty and the persona writes it.</span>
+    <div class="section-title">📝 Compose</div>
+    <span class="hint" style="display:block; margin-bottom:14px;">Post straight away, or put it on the calendar below. Leave the text empty and the persona writes it from the topic.</span>
     <div class="field full">
       <label>Topic / vibe <span style="font-weight:400;color:var(--text-muted);">(optional)</span></label>
       <input type="text" id="post-topic" placeholder="e.g. lazy Sunday, gym day, new photoset teaser…">
     </div>
     <div class="field full">
-      <label>Text <span style="font-weight:400;color:var(--text-muted);">(optional — posted as written)</span></label>
-      <textarea id="post-text" rows="3" maxlength="500" placeholder="Leave empty to let the persona write it from the topic above."></textarea>
+      <label>Text <span class="counter" id="post-count">0 / 500</span></label>
+      <textarea id="post-text" rows="3" maxlength="500" placeholder="Leave empty to let the persona write it from the topic above." oninput="countText()"></textarea>
+      <button class="btn-ai" style="background:var(--border); margin-top:8px;" onclick="writeForMe(this)">✨ Write it for me</button>
     </div>
     <div class="field full">
-      <label>Media URLs <span style="font-weight:400;color:var(--text-muted);">(optional — one per line, https only)</span></label>
-      <textarea id="post-media" rows="3" placeholder="https://cdn.example.com/photo.jpg&#10;https://cdn.example.com/clip.mp4"></textarea>
-      <span class="hint">One URL posts a single image or video, several post a carousel (max 20). Type is taken from the file extension.</span>
+      <label>Photos &amp; videos <span style="font-weight:400;color:var(--text-muted);">(optional — from this persona's library)</span></label>
+      <div class="media-strip" id="post-media-strip"><span class="hint">Nothing in this persona's library yet.</span></div>
+      <span class="hint">Click to pick. One posts on its own, several post as a carousel (max 20).</span>
     </div>
-    <div class="field full">
-      <label>Alt text <span style="font-weight:400;color:var(--text-muted);">(optional, single media only)</span></label>
-      <input type="text" id="post-alt" placeholder="Describes the image for screen readers">
+    <div class="row-inline">
+      <div class="field" style="max-width:220px;">
+        <label>Who can reply</label>
+        <select id="post-reply-control">
+          <option value="everyone">Anyone</option>
+          <option value="followed">Accounts she follows</option>
+          <option value="mentioned">Only mentioned</option>
+        </select>
+      </div>
+      <div class="field" style="max-width:240px;">
+        <label>Schedule for</label>
+        <input type="datetime-local" id="post-when">
+      </div>
     </div>
-    <div style="display:flex; gap:8px;">
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:14px;">
+      <button class="btn-ai" onclick="postNow()">Post now</button>
+      <button class="btn-ai" style="background:var(--border);" onclick="schedulePost()">📅 Schedule</button>
       <button class="btn-ai" style="background:var(--border);" onclick="runPublish(true)">Preview draft</button>
-      <button class="btn-ai" onclick="runPublish(false)">Publish now</button>
     </div>
     <div class="result-box" id="publish-result"></div>
+
+    <div id="url-panel" style="display:none; margin-top:16px; border-top:1px solid var(--border-soft); padding-top:14px;">
+      <div class="field full">
+        <label>Media URLs <span style="font-weight:400;color:var(--text-muted);">(optional — one per line, https only)</span></label>
+        <textarea id="post-media" rows="2" placeholder="https://cdn.example.com/photo.jpg&#10;https://cdn.example.com/clip.mp4"></textarea>
+        <span class="hint">Threads fetches the file itself, so it only works on the app connection — not when Threads is riding the Instagram session.</span>
+      </div>
+      <div class="field full" style="margin-top:12px;">
+        <label>Alt text <span style="font-weight:400;color:var(--text-muted);">(optional, single media only)</span></label>
+        <input type="text" id="post-alt" placeholder="Describes the image for screen readers">
+      </div>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">🗓 Content plan</div>
+    <span class="hint" style="display:block; margin-bottom:12px;">Everything queued for Threads. The server sends each one at its slot, so this keeps running with the tab closed.</span>
+    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px;">
+      <button class="btn-ai" style="background:var(--border);" onclick="planWeek(this)">✨ Plan the week</button>
+      <button class="btn-ai" style="background:var(--border);" onclick="loadQueue()">↻ Refresh</button>
+      <span class="conn-pill" id="queue-count">—</span>
+      <a href="/planner" style="color:var(--text-muted); font-size:0.78rem; text-decoration:none; margin-left:auto;">Full planner →</a>
+    </div>
+    <div class="result-box" id="queue-list"><span class="hint">Loading…</span></div>
   </div>
 
   <div class="form-section">
@@ -209,6 +271,15 @@ function esc(s){ return (s||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','
 let isOperator = false;
 function persona(){ return document.getElementById('persona').value; }
 
+async function refreshStatus(){
+  try{
+    connStatus = await (await fetch('/api/threads/status?persona='
+      + encodeURIComponent(persona()))).json();
+  }catch(e){}
+}
+
+async function switchPersona(){ await refreshStatus(); updateConn(); }
+
 async function init(){
   try {
     const [pRes, sRes, cRes, mRes] = await Promise.all([
@@ -227,7 +298,10 @@ async function init(){
     const wanted = new URLSearchParams(location.search).get('persona') || '';
     if(list.some(p=>p.slug===wanted)) sel.value = wanted;
     document.getElementById('wh-url').value = location.origin + '/api/threads/webhook';
-    prefillConnect(); updateConn(); loadAuto();
+    // A persona connected through Instagram alone is not in the token list, so
+    // ask about the selected one by name.
+    await refreshStatus();
+    prefillConnect(); updateConn();
     if(wanted && !(connStatus[sel.value]||{}).connected) toggleConnect();
   } catch(e){}
 }
@@ -238,17 +312,173 @@ function prefillConnect(){
   if(!uriEl.value) uriEl.value = appConfig.redirect_uri || (location.origin + '/api/threads/oauth-redirect');
 }
 
+function mode(){ return (connStatus[persona()]||{}).mode || ''; }
+
 function updateConn(){
-  const pill=document.getElementById('conn-pill'), info=connStatus[persona()];
-  const connected=!!(info && info.connected);
-  if(connected){ pill.className='conn-pill ok'; pill.textContent='✓ @'+info.username; }
-  else { pill.className='conn-pill err'; pill.textContent='Not connected'; }
+  const pill=document.getElementById('conn-pill'), info=connStatus[persona()]||{};
+  const connected=!!info.connected, viaIg=info.mode==='instagram';
+  if(connected){
+    pill.className='conn-pill ok';
+    pill.textContent=(viaIg?'✓ via Instagram — @':'✓ @')+(info.username||'connected');
+  } else { pill.className='conn-pill err'; pill.textContent='Not connected'; }
+  // Riding the Instagram session there is nothing to connect and nothing to
+  // disconnect here — /instagram owns both.
+  document.getElementById('connect-btn').style.display = viaIg?'none':'inline-flex';
   document.getElementById('connect-btn').textContent = connected?'Reconnect':'Connect Threads';
-  document.getElementById('disconnect-btn').style.display = connected?'inline-flex':'none';
+  document.getElementById('disconnect-btn').style.display = (connected&&!viaIg)?'inline-flex':'none';
+  document.getElementById('ig-note').style.display = viaIg?'block':'none';
+  document.getElementById('no-conn-note').style.display = connected?'none':'block';
+  document.getElementById('url-panel').style.display = (connected&&!viaIg)?'block':'none';
   document.getElementById('connect-panel').style.display='none';
   document.getElementById('connect-step2').style.display='none';
   document.getElementById('connect-status').innerHTML='';
-  loadAuto();
+  loadAuto(); loadVault(); loadQueue();
+}
+
+function countText(){
+  const el=document.getElementById('post-count');
+  const n=document.getElementById('post-text').value.length;
+  el.textContent=n+' / 500';
+  el.className='counter'+(n>500?' over':'');
+}
+
+// ── Media library ────────────────────────────────────────────────────────────
+let vault=[], picked=[];
+
+async function loadVault(){
+  const strip=document.getElementById('post-media-strip');
+  picked=[];
+  try{
+    const d=await (await fetch('/api/personas/'+encodeURIComponent(persona())+'/media')).json();
+    vault=(d&&d.vault)||[];
+  }catch(e){ vault=[]; }
+  const usable=vault.filter(m=>['image','video'].indexOf(m.kind||'image')!==-1);
+  if(!usable.length){ strip.innerHTML='<span class="hint">Nothing in this persona\u2019s library yet — add photos in the planner.</span>'; return; }
+  strip.innerHTML=usable.map(m=>'<div class="thumb" data-id="'+esc(m.id)+'" onclick="togglePick(this)">'
+    +'<img src="'+esc(m.thumb||m.url||'')+'" alt="" loading="lazy">'
+    +((m.kind==='video')?'<span class="vid">▶</span>':'')+'</div>').join('');
+}
+
+function togglePick(el){
+  const id=el.dataset.id, at=picked.indexOf(id);
+  if(at===-1){
+    if(picked.length>=20){ alert('A Threads carousel holds at most 20 items.'); return; }
+    picked.push(id); el.classList.add('on');
+  } else { picked.splice(at,1); el.classList.remove('on'); }
+}
+
+// ── Post now / schedule ──────────────────────────────────────────────────────
+function composed(){
+  return {text:document.getElementById('post-text').value.trim(),
+          topic:document.getElementById('post-topic').value.trim()};
+}
+
+async function postNow(){
+  const box=document.getElementById('publish-result');
+  const urlEl=document.getElementById('post-media');
+  const urls=(mode()==='oauth'&&urlEl)?urlEl.value.split('\n').map(x=>x.trim()).filter(Boolean):[];
+  busy(box,'Publishing…');
+  const data=await post('/api/threads/post-now',{persona:persona(), text:composed().text,
+    media_ids:picked, media_urls:urls,
+    reply_control:document.getElementById('post-reply-control').value});
+  if(!data.ok){ err(box,data.error); return; }
+  box.innerHTML='<div class="reply-card"><span class="tag ok">posted</span>'
+    +'<div class="rep">'+esc(data.text||'(no text)')+'</div></div>';
+  loadQueue();
+}
+
+async function schedulePost(){
+  const box=document.getElementById('publish-result');
+  const when=document.getElementById('post-when').value;
+  if(!when){ err(box,'Pick a date and time first.'); return; }
+  const at=Math.floor(new Date(when).getTime()/1000);
+  if(at<=Math.floor(Date.now()/1000)){ err(box,'That slot is in the past.'); return; }
+  const text=composed().text;
+  if(!text){ err(box,'Write the text first — a scheduled post cannot be empty.'); return; }
+  busy(box,'Scheduling…');
+  const data=await post('/api/growth/queue',{persona:persona(), platforms:['threads'],
+    text, run_at:at, media_ids:picked});
+  if(!data.ok && !(data.queued||[]).length){ err(box,data.error||'Could not schedule it.'); return; }
+  box.innerHTML='<span class="hint" style="color:#4ade80;">✓ Scheduled for '
+    +esc(new Date(at*1000).toLocaleString())+'</span>';
+  document.getElementById('post-text').value=''; countText();
+  loadQueue();
+}
+
+async function writeForMe(btn){
+  const box=document.getElementById('publish-result');
+  btn.disabled=true; const was=btn.textContent; btn.textContent='writing…';
+  try{
+    const data=await post('/api/growth/drafts',{persona:persona(), platforms:['threads'],
+      idea:composed().topic, media_id:picked[0]||''});
+    const draft=(data.drafts||[]).filter(d=>d.platform==='threads')[0]||{};
+    const text=draft.text||'';
+    if(!text){ err(box,draft.error||data.error||'Nothing came back — try a different topic.'); return; }
+    document.getElementById('post-text').value=text; countText();
+    box.innerHTML='';
+  }catch(e){ err(box,'Could not write a draft.'); }
+  finally{ btn.disabled=false; btn.textContent=was; }
+}
+
+// ── The queue ────────────────────────────────────────────────────────────────
+async function loadQueue(){
+  const box=document.getElementById('queue-list');
+  const count=document.getElementById('queue-count');
+  try{
+    const d=await (await fetch('/api/growth/queue?persona='+encodeURIComponent(persona()))).json();
+    if(!d.ok){ box.innerHTML='<span class="hint">'+esc(d.error||'Could not read the queue.')+'</span>';
+               count.textContent='—'; return; }
+    const rows=(d.queue||[]).filter(r=>r.platform==='threads');
+    const waiting=rows.filter(r=>r.status==='queued').length;
+    count.textContent=waiting+' waiting';
+    if(!rows.length){ box.innerHTML='<span class="hint">Nothing queued for Threads yet.</span>'; return; }
+    box.innerHTML=rows.map(queueRow).join('');
+  }catch(e){ box.innerHTML='<span class="hint">Could not read the queue.</span>'; count.textContent='—'; }
+}
+
+function queueRow(r){
+  const when=new Date((r.run_at||0)*1000);
+  const tag=r.status==='posted'?'<span class="tag ok">posted</span>'
+    :(r.status==='failed'?'<span class="tag no">failed</span>'
+    :'<span class="tag" style="background:var(--border);color:var(--text-3);">'+esc(r.status||'queued')+'</span>');
+  const controls=(r.status==='queued')
+    ? '<button class="mini" onclick="reschedule(\''+esc(r.id)+'\','+(r.run_at||0)+')">reschedule</button>'
+      +'<button class="mini" onclick="killPost(\''+esc(r.id)+'\')">cancel</button>'
+    : '';
+  return '<div class="q-row"><span class="when">'+esc(when.toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'}))
+    +'</span><span class="body">'+esc(r.text||'')+'</span>'+tag+controls+'</div>';
+}
+
+async function reschedule(id, current){
+  const at=prompt('New date and time (YYYY-MM-DD HH:MM):',
+    new Date((current||0)*1000).toISOString().slice(0,16).replace('T',' '));
+  if(!at) return;
+  const when=Math.floor(new Date(at.replace(' ','T')).getTime()/1000);
+  if(!when){ alert('Could not read that date.'); return; }
+  const d=await fetch('/api/growth/queue',{method:'PATCH',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({persona:persona(), id, run_at:when})}).then(r=>r.json());
+  if(!d.ok){ alert(d.error||'Could not move it.'); return; }
+  loadQueue();
+}
+
+async function killPost(id){
+  if(!confirm('Cancel this post? It will not go out.')) return;
+  const d=await fetch('/api/growth/queue?persona='+encodeURIComponent(persona())
+    +'&id='+encodeURIComponent(id),{method:'DELETE'}).then(r=>r.json());
+  if(!d.ok){ alert(d.error||'Could not cancel it.'); return; }
+  loadQueue();
+}
+
+async function planWeek(btn){
+  const box=document.getElementById('queue-list');
+  btn.disabled=true; const was=btn.textContent; btn.textContent='planning…';
+  try{
+    const d=await post('/api/growth/plan',{persona:persona(), platforms:['threads']});
+    if(!d.ok){ alert(d.error||'Could not plan the week.'); return; }
+    box.innerHTML='<span class="hint">Drafts are ready in the planner — review and queue them there.</span>';
+    window.open('/planner?persona='+encodeURIComponent(persona()),'_blank');
+  }catch(e){ alert('Could not plan the week.'); }
+  finally{ btn.disabled=false; btn.textContent=was; loadQueue(); }
 }
 
 function toggleConnect(){
@@ -280,7 +510,7 @@ async function finishWith(code, state){
   const data=await post('/api/threads/callback',{code, state});
   if(!data.ok){ err(box,data.error); return; }
   box.innerHTML='<span class="hint" style="color:#4ade80;">✓ Connected as @'+esc(data.username)+'</span>';
-  connStatus = await (await fetch('/api/threads/status')).json();
+  await refreshStatus();
   setTimeout(updateConn,1100);
 }
 
@@ -316,13 +546,14 @@ async function post(url,body){
 
 async function runPublish(preview){
   const box=document.getElementById('publish-result');
-  const media=document.getElementById('post-media').value.split('\n').map(s=>s.trim()).filter(Boolean);
+  const urlEl=document.getElementById('post-media');
+  const media=urlEl?urlEl.value.split('\n').map(s=>s.trim()).filter(Boolean):[];
   busy(box, preview?'Drafting post…':(media.length?'Uploading media and publishing…':'Publishing…'));
   const data=await post('/api/threads/publish',{
     persona:persona(),
     topic:document.getElementById('post-topic').value.trim(),
     text:document.getElementById('post-text').value.trim(),
-    alt_text:document.getElementById('post-alt').value.trim(),
+    alt_text:(document.getElementById('post-alt')||{value:''}).value.trim(),
     media, preview});
   if(!data.ok){ err(box,data.error); return; }
   const tag=data.posted?'<span class="tag ok">posted</span>':'<span class="tag" style="background:var(--border);color:var(--text-3);">draft</span>';
