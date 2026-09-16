@@ -59,7 +59,17 @@ SITES = {
                'prefix': 'ttc_'},
 }
 VIEWPORT = {'width': 900, 'height': 700}
-FRAME_QUALITY = 55
+# What one frame costs the creator's link. Every poll that finds a new frame
+# carries the whole picture, several times a second, so this is the difference
+# between a window that keeps up and one that is always a second behind.
+FRAME_QUALITY = int(os.getenv('CONNECT_FRAME_QUALITY', '45'))
+# How long the browser thread waits for an input before going back to taking
+# the next picture. It used to wait a quarter of a second, which is also how
+# long the creator waited to see the result of what they last did.
+INPUT_WAIT = float(os.getenv('CONNECT_INPUT_WAIT', '0.05'))
+# The shortest gap between two screenshots. Below this the thread spends its
+# time encoding pictures instead of replaying what the creator is doing.
+FRAME_EVERY = float(os.getenv('CONNECT_FRAME_EVERY', '0.18'))
 # Everything _apply knows how to do. The route rejects anything else, so the two
 # have to be read from the same place.
 INPUT_KINDS = ('click', 'move', 'down', 'up', 'type', 'key', 'scroll', 'back')
@@ -511,7 +521,7 @@ class Attempt:
         """
         batch, quit_now = [], False
         try:
-            batch.append(self._commands.get(timeout=0.25))
+            batch.append(self._commands.get(timeout=INPUT_WAIT))
         except queue.Empty:
             return [], False
         while True:
@@ -541,9 +551,11 @@ class Attempt:
             for x, y, gap in _path(kw):
                 # The pauses are what make the path look drawn rather than
                 # computed, but they are also the browser thread standing
-                # still. Past the budget the remaining points are walked at
+                # still -- and whatever the creator did next, a click most of
+                # the time, is waiting behind them. Past the budget, or with
+                # something already queued, the rest of the path is walked at
                 # full speed rather than held onto.
-                if gap and spent < MOVE_BUDGET:
+                if gap and spent < MOVE_BUDGET and self._commands.empty():
                     time.sleep(gap)
                     spent += gap
                 page.mouse.move(x, y)
@@ -611,14 +623,22 @@ class Attempt:
                 logger.debug('could not watch signing: %s', str(e)[:120])
 
     def _capture(self, page):
-        if time.time() - self.frame_at < 0.2:
+        if time.time() - self.frame_at < FRAME_EVERY:
             return
         try:
-            self.frame = page.screenshot(type='jpeg', quality=FRAME_QUALITY,
-                                         timeout=5000)
-            self.frame_at = time.time()
+            shot = page.screenshot(type='jpeg', quality=FRAME_QUALITY,
+                                   timeout=5000)
         except Exception:
-            pass
+            return
+        # A login page sits still most of the time, and the encoder gives back
+        # the same bytes for the same pixels. Without this the picture counts
+        # as new five times a second whether or not anything moved, so the
+        # window is sent 33KB of an unchanged page for the whole sign-in and
+        # never gets to slow its polling down.
+        if shot == self.frame:
+            return
+        self.frame = shot
+        self.frame_at = time.time()
 
     def _watch_discord(self, page):
         """Catch the credentials off Discord's own client as it uses them.
