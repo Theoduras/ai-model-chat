@@ -12,18 +12,31 @@
   // outer page only. Same guard as js/devnav.js.
   if (window.self !== window.top) return;
 
-  var SIGNED_OUT = [
+  var PAGE_LINKS = [
     { href: '/#pricing', label: 'Pricing' },
     { href: '/blog', label: 'Blog', keep: true },
-    { href: '/login', label: 'Log in' },
-    { href: '/register', label: 'Register', cta: true },
   ];
-  var SIGNED_IN = [
-    { href: '/#pricing', label: 'Pricing' },
-    { href: '/blog', label: 'Blog', keep: true },
-    { href: '/dashboard', label: 'Dashboard', cta: true },
-    { href: '/logout', label: 'Log out' },
+  var ACCOUNT_OUT = [
+    { href: '/login', label: 'Log in', icon: 'login' },
+    { href: '/register', label: 'Register', icon: 'register', cta: true },
   ];
+  var ACCOUNT_IN = [
+    { href: '/dashboard', label: 'Dashboard', icon: 'dashboard', cta: true },
+    { href: '/logout', label: 'Log out', icon: 'logout' },
+  ];
+
+  function svg(paths) {
+    return '<span class="sn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"' +
+      ' stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      paths + '</svg></span>';
+  }
+  var ICONS = {
+    login: svg('<path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/>'),
+    register: svg('<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/>'),
+    dashboard: svg('<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>'),
+    logout: svg('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/>'),
+    account: svg('<circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/>'),
+  };
 
   var BRAND_HTML = '<a href="/" class="brand">' +
     '<span data-sn-brand>Velvetfunnel</span><i data-sn-suffix>.app</i></a>';
@@ -56,7 +69,8 @@
         (i.cta ? ' class="sn-cta"' : '') +
         (i.keep ? ' data-keep' : '') +
         (isCurrent(i.href) ? ' aria-current="page"' : '') +
-        '>' + i.label + '</a>';
+        '>' + (i.icon ? ICONS[i.icon] : '') +
+        '<span class="sn-label">' + i.label + '</span></a>';
     }).join('');
   }
 
@@ -72,17 +86,57 @@
     return out;
   }
 
-  function paint(items) {
+  // Marketing pages get a second pill on the right for the account actions;
+  // inline hosts (dashboard, consoles) keep one row and just gain the icons.
+  function accountHost() {
+    if (!document.querySelector('.site-nav')) return null;
+    var pill = document.querySelector('.sn-account');
+    if (pill) return pill.querySelector('.sn-acct-links');
+    pill = document.createElement('nav');
+    pill.className = 'sn-account';
+    pill.innerHTML = '<button class="sn-acct-btn" type="button" aria-expanded="false" ' +
+      'aria-label="Account menu">' + ICONS.account + '</button>' +
+      '<div class="sn-acct-links sn-links"></div>';
+    document.body.appendChild(pill);
+
+    var toggle = document.querySelector('.site-nav .theme-toggle');
+    if (toggle) pill.insertBefore(toggle, pill.firstChild);
+
+    var btn = pill.querySelector('.sn-acct-btn');
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var open = pill.classList.toggle('open');
+      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+    document.addEventListener('click', function (e) {
+      if (!pill.contains(e.target)) close();
+    });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
+    function close() {
+      pill.classList.remove('open');
+      btn.setAttribute('aria-expanded', 'false');
+    }
+    addEventListener('scroll', function () {
+      pill.classList.toggle('scrolled', scrollY > 10);
+    }, { passive: true });
+    return pill.querySelector('.sn-acct-links');
+  }
+
+  function fill(host, items) {
+    [].slice.call(host.querySelectorAll('a[data-sn]')).forEach(function (el) { el.remove(); });
+    host.insertAdjacentHTML('beforeend', linksHtml(items));
+  }
+
+  function paint(account) {
+    var pill = accountHost();
     hosts().forEach(function (host) {
       host.classList.add('sn-links');
       if (host.matches('[data-site-nav="inline"]')) host.classList.add('sn-inline');
       // Only ever replace our own links: a page's theme toggle and its own
       // entries (comingsoon.html's Pricing) share this container.
-      [].slice.call(host.querySelectorAll('a[data-sn]')).forEach(function (el) {
-        el.remove();
-      });
-      host.insertAdjacentHTML('beforeend', linksHtml(items));
+      fill(host, pill ? PAGE_LINKS : PAGE_LINKS.concat(account));
     });
+    if (pill) fill(pill, account);
   }
 
   function mount() {
@@ -99,11 +153,11 @@
 
     // Signed-out links go up straight away; a slow /api/me would otherwise leave
     // the bar empty on first paint.
-    paint(SIGNED_OUT);
+    paint(ACCOUNT_OUT);
 
     fetch('/api/me', { credentials: 'same-origin' })
       .then(function (r) { return r.json(); })
-      .then(function (me) { if (me && me.signed_in) paint(SIGNED_IN); })
+      .then(function (me) { if (me && me.signed_in) paint(ACCOUNT_IN); })
       .catch(function () { /* keep the signed-out menu */ });
 
     var bar2 = document.querySelector('.site-nav');
