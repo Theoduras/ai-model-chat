@@ -45,8 +45,17 @@
       </div>
       <button type="button" class="btn btn-secondary" onclick="plLoadQueue()">Refresh</button>
       <button type="button" class="btn btn-secondary" onclick="plNew()">New post</button>
-      <button type="button" class="btn btn-primary" id="pl-plan-btn" onclick="plPlan(this)">Plan the week</button>
+      <button type="button" class="btn btn-secondary" onclick="plClearWeek(this)">Clear week</button>
+      <button type="button" class="btn btn-primary" id="pl-plan-btn" onclick="plPlanOpen()">Plan the week</button>
     </div>
+  </div>
+
+  <div class="pl-planbar" id="pl-planbar" hidden>
+    <span class="pl-planbar-l">Plan for</span>
+    <span class="pl-chips" id="pl-plan-chans"></span>
+    <label class="pl-planbar-x"><input type="checkbox" id="pl-plan-cross"> Same post everywhere</label>
+    <button type="button" class="btn btn-primary" onclick="plPlan(this)">Plan it</button>
+    <button type="button" class="btn btn-secondary" onclick="plPlanClose()">Cancel</button>
   </div>
 
   <p class="pl-state" id="pl-state">Loading…</p>
@@ -163,6 +172,8 @@
 const PL_CAPS = { x: 280, threads: 500, fanvue: 5000, instagram: 2200, tiktok: 2200, reddit: 300 };
 const PL_LABELS = { x: 'X', threads: 'Threads', fanvue: 'Fanvue', instagram: 'Instagram', tiktok: 'TikTok', reddit: 'Reddit' };
 const PL_PUBLISHABLE = ['x', 'threads', 'fanvue'];
+// The channels the week can be planned for. Mirrors growth.WEEKLY_CADENCE.
+const PL_PLATFORMS = ['x', 'threads', 'fanvue', 'instagram', 'tiktok', 'reddit'];
 // Mirrors growth.MEDIA_SUPPORT. The server checks it again on every write; this
 // copy only decides which thumbnails are worth offering.
 const PL_MEDIA = {
@@ -200,6 +211,7 @@ let plOpen = null;        // the card the modal is editing
 let plVault = [];         // the persona's media library
 let plPickedMedia = [];   // what the open editor has attached, in order
 let plChans = [];         // channels ticked on a brand-new post
+let plPlanChans = PL_PLATFORMS.slice();  // channels the next plan covers
 let plRating = '';        // '', 'sfw' or 'nsfw' for the next draft
 let plRemote = [];        // posts Fanvue already has booked — read-only
 let plFvVault = null;     // her Fanvue vault, fetched the first time it is needed
@@ -615,7 +627,16 @@ function plCard(c) {
   else if (c.status === 'posted') flag = 'posted';
   else if (c.status === 'sending') flag = 'sending';
   else if (c.status === 'cancelled') flag = 'cancelled';
+  const kill = c.kind === 'proposed'
+    ? '<span class="pl-kill" role="button" tabindex="0" title="Drop this idea"'
+      + ' onclick="event.stopPropagation(); plDropProposed(' + c.idx + ')">&times;</span>'
+    : (['queued', 'manual', 'cancelled', 'failed'].indexOf(c.status) !== -1
+       ? '<span class="pl-kill" role="button" tabindex="0" title="'
+         + (c.status === 'cancelled' ? 'Delete for good' : 'Cancel this post') + '"'
+         + ' onclick="event.stopPropagation(); plQuickKill(\'' + c.id + '\',\'' + c.status + '\')">&times;</span>'
+       : '');
   return '<button type="button" class="' + cls + '" onclick="plEdit(\'' + c.kind + '\',' + c.idx + ')">'
+    + kill
     + '<span class="pl-card-top"><span class="pl-when">' + hourLabel(c.at) + '</span>'
     + '<span class="pl-chan">' + esc(PL_LABELS[c.platform] || c.platform) + '</span>'
     + (flag ? '<span class="pl-flag">' + esc(flag) + '</span>' : '') + '</span>'
@@ -627,20 +648,50 @@ function plCard(c) {
 
 // ── Planning ─────────────────────────────────────────────────────────────────
 
+function plPlanOpen() {
+  const bar = document.getElementById('pl-planbar');
+  bar.hidden = !bar.hidden;
+  if (!bar.hidden) plRenderPlanChans();
+}
+
+function plPlanClose() { document.getElementById('pl-planbar').hidden = true; }
+
+function plRenderPlanChans() {
+  document.getElementById('pl-plan-chans').innerHTML = PL_PLATFORMS.map(p => {
+    const on = plPlanChans.indexOf(p) !== -1;
+    return '<label class="pl-chan-pick' + (on ? ' on' : '') + '">'
+      + '<input type="checkbox"' + (on ? ' checked' : '')
+      + ' onchange="plTogglePlanChan(\'' + p + '\')">'
+      + esc(PL_LABELS[p])
+      + (PL_PUBLISHABLE.indexOf(p) === -1 ? '<span class="by-hand">by hand</span>' : '')
+      + '</label>';
+  }).join('');
+}
+
+function plTogglePlanChan(p) {
+  const i = plPlanChans.indexOf(p);
+  if (i === -1) plPlanChans.push(p); else plPlanChans.splice(i, 1);
+  plRenderPlanChans();
+}
+
 async function plPlan(btn) {
   if (!plSlug) return;
+  if (!plPlanChans.length) { alert('Pick at least one channel to plan for.'); return; }
   btn.disabled = true;
   const was = btn.textContent;
   btn.textContent = 'planning…';
   try {
     const res = await fetch('/api/growth/plan', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ persona: plSlug, start: plWeekStart, days: 7 })
+      body: JSON.stringify({ persona: plSlug, start: plWeekStart, days: 7,
+                             platforms: plPlanChans,
+                             cross: document.getElementById('pl-plan-cross').checked })
     });
     const d = await res.json();
     if (!d.ok) { alert(d.error || 'Could not plan the week.'); return; }
     plProposed = d.slots || [];
     plPlanMeta = d;
+    plPlanClose();
     if (!d.ideas) {
       alert('The angles came back empty, so every proposed card needs one typed in '
         + 'before it can be queued.');
@@ -1118,6 +1169,45 @@ async function plSave(btn, now) {
     plClose();
     plLoadQueue();
   } catch (e) { alert('Could not save it.'); }
+  finally { btn.disabled = false; btn.textContent = was; }
+}
+
+function plDropProposed(idx) {
+  plProposed.splice(idx, 1);
+  plRender(plPlanMeta || {});
+}
+
+// One click cancels; the second, on a card that is already cancelled, is the
+// one that cannot be taken back, so that is the one that asks.
+async function plQuickKill(id, status) {
+  const hard = status === 'cancelled';
+  if (hard && !confirm('Delete this post for good? This cannot be undone.')) return;
+  try {
+    const res = await fetch('/api/growth/queue?persona=' + encodeURIComponent(plSlug)
+      + '&id=' + encodeURIComponent(id) + (hard ? '&mode=delete' : ''), { method: 'DELETE' });
+    const d = await res.json();
+    if (!d.ok) { alert(d.error || 'Could not remove it.'); return; }
+    plLoadQueue();
+  } catch (e) { alert('Could not remove it.'); }
+}
+
+async function plClearWeek(btn) {
+  if (!plSlug) return;
+  if (!confirm('Delete every post still waiting in this week? Anything already '
+      + 'posted or sent stays. This cannot be undone.')) return;
+  btn.disabled = true;
+  const was = btn.textContent;
+  btn.textContent = 'clearing…';
+  try {
+    const res = await fetch('/api/growth/queue?persona=' + encodeURIComponent(plSlug)
+      + '&from=' + plWeekStart + '&to=' + (plWeekStart + 7 * 86400)
+      + '&mode=delete', { method: 'DELETE' });
+    const d = await res.json();
+    if (!d.ok) { alert(d.error || 'Could not clear the week.'); return; }
+    plProposed = [];
+    plPlanMeta = null;
+    plLoadQueue();
+  } catch (e) { alert('Could not clear the week.'); }
   finally { btn.disabled = false; btn.textContent = was; }
 }
 

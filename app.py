@@ -7519,6 +7519,36 @@ def api_growth_queue():
         # calendar for good.
         hard = (request.args.get('mode') or '').strip() == 'delete'
         from db import SessionLocal, cancel_post, delete_post
+
+        # No id, but a window: clearing a whole week in one go. Only what is
+        # still waiting goes — what already posted or failed is history, and
+        # the week reads wrong without it.
+        if not post_id:
+            since = int(request.args.get('from') or 0)
+            until = int(request.args.get('to') or 0)
+            if not (since and until and until > since):
+                return jsonify({'ok': False, 'error': 'Nothing said which posts to remove.'}), 400
+            from db import list_posts
+            removed = 0
+            sdb = SessionLocal()
+            try:
+                rows = list_posts(sdb, persona, limit=500,
+                                  since=_growth_naive_utc(since),
+                                  until=_growth_naive_utc(until))
+                # Already-cancelled rows go too when the week is being wiped:
+                # they are dead copies of what was just removed.
+                keep = ('queued', 'manual', 'cancelled') if hard else ('queued', 'manual')
+                for row in [r for r in rows if r.status in keep]:
+                    if (delete_post if hard else cancel_post)(sdb, persona, row.id):
+                        removed += 1
+                sdb.commit()
+            finally:
+                sdb.close()
+            logger.info('QUEUE week %s [%s]: %d posts',
+                        'deleted' if hard else 'cancelled', persona, removed)
+            return jsonify({'ok': True, 'removed': removed,
+                            'queue': _growth_queue_rows(persona)})
+
         sdb = SessionLocal()
         try:
             done = (delete_post if hard else cancel_post)(sdb, persona, post_id)
@@ -7757,11 +7787,24 @@ def api_growth_plan():
     # slots in the wrong part of someone else's day.
     start = int(data.get('start') or 0) or (now - now % 86400)
     # Today is planned from now on, not from this morning.
-    slots = growth.series_plan([s for s in growth.plan_week(start, days)
+    picked = [growth.normalise_source(p) for p in (data.get('platforms') or [])]
+    picked = [p for p in picked if p in growth.POST_PLATFORMS]
+    slots = growth.series_plan([s for s in growth.plan_week(start, days, platforms=picked)
                                 if s['at'] > now])
-    # A part two continues its part one, so a pair draws one angle between them
-    # and the week asks the model for that many rather than one per slot.
-    leads = [s for s in slots if (s.get('series') or {}).get('part', 1) == 1]
+    if data.get('cross') and len(picked) > 1:
+        slots = growth.cross_post(slots, picked)
+    # A part two continues its part one, and a cross-post is the same idea in
+    # several places, so each group draws one angle between them and the week
+    # asks the model for that many rather than one per slot.
+    leads, seen = [], set()
+    for s in slots:
+        group = (('cross', (s.get('cross') or {}).get('group'))
+                 if s.get('cross') else ('series', (s.get('series') or {}).get('group')))
+        if group[1] and group in seen:
+            continue
+        if group[1]:
+            seen.add(group)
+        leads.append(s)
     ideas = []
     if leads:
         try:
@@ -7783,12 +7826,15 @@ def api_growth_plan():
         # Fewer angles than slots means the tail repeats one rather than sitting
         # empty; an empty slot is one the operator has to fill by hand anyway.
         s['idea'] = ideas[i % len(ideas)] if ideas else ''
-        group = (s.get('series') or {}).get('group')
-        if group:
+        group = ((('cross', (s.get('cross') or {}).get('group')) if s.get('cross')
+                  else ('series', (s.get('series') or {}).get('group'))))
+        if group[1]:
             by_group[group] = s['idea']
     for s in slots:
         if 'idea' not in s:
-            s['idea'] = by_group.get((s.get('series') or {}).get('group'), '')
+            group = ((('cross', (s.get('cross') or {}).get('group')) if s.get('cross')
+                      else ('series', (s.get('series') or {}).get('group'))))
+            s['idea'] = by_group.get(group, '')
     return jsonify({'ok': True, 'persona': persona, 'start': start, 'days': days,
                     'slots': slots, 'ideas': len(ideas),
                     'cap': growth.PLAN_QUEUE_CAP,

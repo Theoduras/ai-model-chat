@@ -903,11 +903,17 @@ def series_part(series):
     return part if part in SERIES_BRIEF else 0
 
 
-def plan_week(start_at, days=7, cadence=None):
+def plan_week(start_at, days=7, cadence=None, platforms=None):
     """The week's slots: what goes where, when, and which of the three jobs each
     post is doing. Reddit never draws the ask — its own brief rules out sales
-    language, and a subreddit is the fastest place to lose an account over it."""
+    language, and a subreddit is the fastest place to lose an account over it.
+    `platforms` narrows the cadence to the channels she picked; an empty or
+    unknown pick means the whole cadence rather than an empty week."""
     cadence = cadence or WEEKLY_CADENCE
+    if platforms:
+        picked = {p for p in platforms if p in cadence}
+        if picked:
+            cadence = {k: v for k, v in cadence.items() if k in picked}
     # The default lives in the signature; asking for none here means one day,
     # not a silent week.
     days = max(1, min(int(days or 0), 28))
@@ -937,6 +943,35 @@ def plan_week(start_at, days=7, cadence=None):
     slots.sort(key=lambda s: (s['at'], s['platform']))
     return slots
 
+
+
+def cross_post(slots, platforms):
+    """One idea, out on every picked channel at the same hour. The busiest of
+    the picked channels sets the rhythm and the rest ride along, so a week of
+    five channels still costs the five angles one channel would — the drafting
+    step rewrites each one for its own channel and cap."""
+    picked = [p for p in (platforms or []) if p in POST_PLATFORMS]
+    if len(picked) < 2:
+        return slots
+    counts = {}
+    for s in slots:
+        counts[s['platform']] = counts.get(s['platform'], 0) + 1
+    primary = max(picked, key=lambda p: (counts.get(p, 0), -picked.index(p)))
+    out = []
+    for group, lead in enumerate([s for s in slots if s['platform'] == primary], start=1):
+        for plat in picked:
+            twin = dict(lead)
+            twin['platform'] = plat
+            twin['label'] = POST_PLATFORMS.get(plat, {}).get('label', plat)
+            twin['publishable'] = plat in PUBLISHABLE
+            twin['cross'] = {'group': group, 'of': len(picked)}
+            # A cross-post is one idea in several places; a series is one story
+            # told over two posts. Mixing them gives a part two on a channel
+            # that never saw part one.
+            twin.pop('series', None)
+            out.append(twin)
+    out.sort(key=lambda s: (s['at'], s['platform']))
+    return out
 
 def plan_summary(slots, now=0):
     """Counts for the panel, plus how much of the week the queue can take on its

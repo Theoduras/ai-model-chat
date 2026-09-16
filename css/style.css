@@ -3612,6 +3612,40 @@ body.embedding .form-area { padding: 0; overflow: hidden; }
 }
 .pl-card.is-remote:hover { transform: none; box-shadow: none; border-color: var(--border-soft); }
 
+.pl-card { position: relative; }
+.pl-kill {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  width: 16px;
+  height: 16px;
+  line-height: 15px;
+  text-align: center;
+  border-radius: 50%;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity 0.12s, color 0.12s, background 0.12s;
+}
+.pl-card:hover .pl-kill, .pl-kill:focus { opacity: 1; }
+.pl-kill:hover { color: var(--err); background: var(--panel); }
+
+.pl-planbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-sm);
+  background: var(--panel-2);
+}
+.pl-planbar-l { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-muted); }
+.pl-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.pl-planbar-x { display: flex; align-items: center; gap: 6px; font-size: 0.78rem; color: var(--text-2); }
+
 .pl-card-top { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
 .pl-when { font-size: 0.7rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .pl-chan {
