@@ -184,15 +184,17 @@ body.kbd .site-nav{display:none}
 
 .tier-toggle{position:relative;display:flex;justify-content:center;gap:4px;margin:0 auto 22px;background:var(--field);
   border:1px solid var(--field-border);border-radius:9999px;padding:5px;width:max-content;max-width:100%;flex-wrap:wrap}
-.tier-toggle .pill{position:absolute;top:5px;bottom:5px;left:5px;border-radius:9999px;background:var(--grad);
+.tier-toggle .tpill{position:absolute;top:5px;bottom:5px;left:5px;border-radius:9999px;background:var(--grad);
   background-size:300% 100%;box-shadow:0 8px 22px #ff2d7840;transition:transform .38s cubic-bezier(.22,1,.36,1),width .38s cubic-bezier(.22,1,.36,1)}
 .tier-toggle button{position:relative;z-index:1;border:0;background:transparent;color:var(--text-soft);
   font:600 14px 'Inter',system-ui,sans-serif;padding:10px 20px;border-radius:9999px;cursor:pointer;
   transition:color .25s;display:flex;align-items:baseline;gap:7px}
 .tier-toggle button:hover{color:var(--text)}
 .tier-toggle button .tprice{font-size:12px;font-weight:500;opacity:.75}
-.tier-toggle button.on{color:#fff}
-.tier-toggle button.on .tprice{opacity:.9}
+.tier-toggle.ready button.on{color:#fff}
+.tier-toggle.ready button.on .tprice{opacity:.9}
+.tier-toggle:not(.ready) button.on{color:var(--text)}
+.tier-toggle:not(.ready) .tpill{opacity:0}
 
 .feature-note{text-align:center;color:var(--text-soft);font-size:14px;margin:0 auto 26px;max-width:620px}
 .feature-note b{color:var(--text);font-weight:600}
@@ -225,12 +227,23 @@ body.kbd .site-nav{display:none}
 .feature-group li.off .detail{color:var(--text-dim);opacity:.85}
 .feature-group .label{display:flex;align-items:center;gap:8px;font-size:14.5px;font-weight:600;color:var(--text)}
 .feature-group .detail{display:block;font-size:13px;color:var(--text-soft);line-height:1.55;margin-top:3px}
+.feature-group li{cursor:pointer}
+.feature-group li>span:nth-child(2){flex:1;min-width:0}
+.feature-group .chev{flex:0 0 14px;margin:5px 0 0 auto;color:var(--text-dim);font-size:11px;
+  transition:transform .3s cubic-bezier(.22,1,.36,1),color .2s}
+.feature-group li.open .chev{transform:rotate(90deg);color:var(--accent)}
+.feature-group li:hover .chev{color:var(--accent)}
+.feature-group .explain{display:block;font-size:13px;line-height:1.6;color:var(--text-soft);
+  max-height:0;opacity:0;overflow:hidden;transition:max-height .38s cubic-bezier(.22,1,.36,1),
+  opacity .28s ease,margin .3s ease;border-left:2px solid transparent}
+.feature-group li.open .explain{max-height:280px;opacity:1;margin:9px 0 3px;padding-left:11px;
+  border-left-color:var(--accent)}
 .feature-group .tag{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;color:var(--accent);
   border:1px solid #ff5c3866;background:#ff5c3814;border-radius:9999px;padding:2px 8px}
 .features-cta{text-align:center;margin:30px auto 0}
 .features-cta a{display:inline-block;text-decoration:none;font-weight:600;font-size:14px;padding:13px 26px;border-radius:9999px;
-  color:#fff;background:var(--grad);background-size:300% 100%;animation:sweep 6s linear infinite;box-shadow:0 10px 26px #ff2d7833}
-@keyframes sweep{to{background-position:300% 0}}
+  color:#fff;background:var(--grad);background-size:300% 100%;animation:gsweep 6s linear infinite;box-shadow:0 10px 26px #ff2d7833}
+@keyframes gsweep{to{background-position:300% 0}}
 @keyframes riseIn{from{opacity:0;transform:translateY(14px) scale(.985)}to{opacity:1;transform:none}}
 @keyframes rowIn{from{opacity:0;transform:translateX(-10px)}to{opacity:1;transform:none}}
 @keyframes popIn{0%{opacity:0;transform:scale(.4) rotate(-25deg)}70%{transform:scale(1.15) rotate(3deg)}100%{opacity:1;transform:none}}
@@ -246,11 +259,11 @@ body.kbd .site-nav{display:none}
 .feature-group .tag{transition:background .2s}
 .hl{animation:riseIn .45s cubic-bezier(.22,1,.36,1) both;transition:transform .25s,border-color .25s,box-shadow .25s}
 .hl:hover{transform:translateY(-4px);border-color:var(--hair-strong);box-shadow:0 16px 34px rgba(0,0,0,.16)}
-.hl::after{animation:sweep 5s linear infinite}
+.hl::after{animation:gsweep 5s linear infinite}
 .hl .v{display:inline-block;transition:transform .2s}
 .hl:hover .v{transform:scale(1.08)}
 .sec-eyebrow{animation:riseIn .5s ease both}
-.sec-head h2 em{animation:sweep 7s linear infinite}
+.sec-head h2 em{animation:gsweep 7s linear infinite}
 .tier-toggle button:not(.on):hover{background:var(--hover)}
 .features-cta a{transition:transform .2s,box-shadow .2s}
 .features-cta a:hover{transform:translateY(-2px) scale(1.03);box-shadow:0 16px 34px #ff2d7855}
@@ -277,7 +290,7 @@ body.kbd .site-nav{display:none}
 .tier-card.soon{opacity:.85}
 .tier-card{background:var(--panel);border:1px solid var(--hair);border-radius:16px;padding:26px 22px;display:flex;flex-direction:column}
 .tier-card.featured{border-color:#ff2d78;box-shadow:0 0 0 1px #ff2d78 inset,0 20px 46px #ff2d781f;position:relative}
-.tier-card.featured::before{content:"Most popular";position:absolute;top:-11px;left:22px;background:var(--grad);background-size:300% 100%;color:#fff;font-size:10.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;padding:4px 11px;border-radius:9999px;animation:sweep 6s linear infinite}
+.tier-card.featured::before{content:"Most popular";position:absolute;top:-11px;left:22px;background:var(--grad);background-size:300% 100%;color:#fff;font-size:10.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;padding:4px 11px;border-radius:9999px;animation:gsweep 6s linear infinite}
 .tier-card{transition:transform .25s,border-color .25s,box-shadow .25s}
 .tier-card:hover{transform:translateY(-3px);border-color:var(--hair-strong)}
 .tier-card h3{font-family:'Sora';font-weight:700;font-size:19px;margin-bottom:6px}
@@ -291,7 +304,7 @@ body.kbd .site-nav{display:none}
 .tier-card li::before{content:"✓";color:var(--accent);font-weight:700}
 .tier-card a{display:block;text-align:center;text-decoration:none;font-weight:600;font-size:14px;padding:12px;border-radius:10px;color:#fff;background:var(--field);color:var(--text);border:1px solid var(--field-border)}
 .soon-cta{display:block;text-align:center;font-weight:600;font-size:14px;padding:12px;border-radius:10px;background:var(--field);color:var(--text-muted,var(--text));border:1px solid var(--field-border);opacity:.7}
-.tier-card.featured a{background:var(--grad);background-size:300% 100%;border:0;animation:sweep 6s linear infinite}
+.tier-card.featured a{background:var(--grad);background-size:300% 100%;border:0;animation:gsweep 6s linear infinite}
 @media(max-width:900px){
   .pricing{padding:70px 24px 80px}
   .pricing-head h2{font-size:28px}
@@ -377,7 +390,8 @@ fetch('/api/features')
     var note = document.getElementById('feature-note');
     var hlRow = document.getElementById('hl-row');
     var cur = d.tiers['pro'] ? 'pro' : d.order[0];
-    var ICONS = { Personas: '\u25c6', Chat: '\u25cf', Selling: '\u25b2', Platforms: '\u2726', Team: '\u25a0' };
+    var ICONS = { 'Persona & chat': '\u25c6', 'Funnel, selling & platforms': '\u25b2',
+              'Team & support': '\u25a0' };
     var cursym = d.currency || '\u20ac';
 
     function esc(v){ return String(v).replace(/[&<>]/g, function(c){
@@ -397,11 +411,19 @@ fetch('/api/features')
       });
     }
 
-    function movePill(){
-      var btn = toggle.querySelector('button.on'), pill = toggle.querySelector('.pill');
+    // The pill is measured from the live button box: fonts land late and would
+    // otherwise leave it half-covering the label (white text on a light pill).
+    function movePill(instant){
+      var btn = toggle.querySelector('button.on'), pill = toggle.querySelector('.tpill');
       if (!btn || !pill) return;
-      pill.style.width = btn.offsetWidth + 'px';
-      pill.style.transform = 'translateX(' + btn.offsetLeft + 'px)';
+      var r = btn.getBoundingClientRect(), tr = toggle.getBoundingClientRect();
+      if (!r.width) return;
+      if (instant) pill.style.transition = 'none';
+      pill.style.width = r.width + 'px';
+      pill.style.height = r.height + 'px';
+      pill.style.transform = 'translateX(' + (r.left - tr.left - 5) + 'px)';
+      if (instant) { pill.offsetHeight; pill.style.transition = ''; }
+      toggle.classList.add('ready');
     }
 
     function render(){
@@ -410,7 +432,7 @@ fetch('/api/features')
       Array.prototype.forEach.call(toggle.querySelectorAll('button'), function(b){
         b.classList.toggle('on', b.getAttribute('data-tier') === cur);
       });
-      movePill();
+      requestAnimationFrame(function(){ movePill(!toggle.classList.contains('ready')); });
 
       note.innerHTML = '<b>' + esc(t.name) + '</b> — ' + esc(t.blurb) +
         (t.price ? ' ' + cursym + t.price + '/month, excl. VAT.' : ' Free, by invitation.');
@@ -436,18 +458,42 @@ fetch('/api/features')
           '<span class="cnt">' + on + '/' + g.items.length + '</span></h3><ul>' +
           g.items.map(function(f){
             var delay = (i * 70) + (++n * 45);
-            return '<li class="' + (f.included ? '' : 'off') + '" style="animation-delay:' + delay + 'ms">' +
+            return '<li class="' + (f.included ? '' : 'off') + '" tabindex="0" role="button"' +
+              ' aria-expanded="false" style="animation-delay:' + delay + 'ms">' +
               '<span class="mark" style="animation-delay:' + (delay + 90) + 'ms">' +
               (f.included ? '\u2713' : '\u2715') + '</span>' +
               '<span><span class="label">' + esc(f.label) +
               (f.included ? '' : '<span class="tag">Upgrade</span>') + '</span>' +
               (f.detail ? '<span class="detail">' + esc(f.detail) + '</span>' : '') +
-              '</span></li>';
+              (f.explain ? '<span class="explain" data-edit-id="' + esc(f.id) + '">' +
+                esc(f.explain) + '</span>' : '') +
+              '</span><span class="chev">\u276f</span></li>';
           }).join('') + '</ul></div>';
       }).join('');
+      bindRows();
     }
 
-    toggle.innerHTML = '<span class="pill"></span>';
+    // Clicking a feature opens its explanation. While an operator is editing the
+    // page the rows stay open, so the text stays reachable and a click inside it
+    // does not collapse what is being typed.
+    function bindRows(){
+      var editing = !!document.querySelector('#pe-bar[style*="flex"]');
+      wrap.querySelectorAll('li').forEach(function(li){
+        if (!li.querySelector('.explain')) { li.removeAttribute('role'); li.removeAttribute('tabindex'); return; }
+        if (editing) { li.classList.add('open'); li.setAttribute('aria-expanded', 'true'); return; }
+        function toggleRow(e){
+          if (e.target.isContentEditable) return;
+          var open = li.classList.toggle('open');
+          li.setAttribute('aria-expanded', open ? 'true' : 'false');
+        }
+        li.addEventListener('click', toggleRow);
+        li.addEventListener('keydown', function(e){
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleRow(e); }
+        });
+      });
+    }
+
+    toggle.innerHTML = '<span class="tpill"></span>';
     d.order.forEach(function(key){
       var t = d.tiers[key];
       if (!t) return;
@@ -460,7 +506,14 @@ fetch('/api/features')
       toggle.appendChild(b);
     });
     render();
-    window.addEventListener('resize', movePill);
+    window.addEventListener('resize', function(){ movePill(true); });
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(function(){ movePill(true); });
+    }
+    // Re-open the rows once the page editor's toolbar appears.
+    document.addEventListener('click', function(e){
+      if (e.target && e.target.id === 'pe-toggle') setTimeout(bindRows, 50);
+    }, true);
   })
   .catch(function(){});
 

@@ -1305,61 +1305,107 @@ del _key, _base, _annual_price
 # The homepage feature matrix. Every row resolves itself from a tier's
 # capabilities so the marketing copy cannot drift from what the plan actually
 # unlocks; detail() returns the per-tier line, or None when the tier lacks it.
+G1 = 'Persona & chat'
+G2 = 'Funnel, selling & platforms'
+G3 = 'Team & support'
+
 FEATURE_ROWS = [
-    ('Personas', 'AI persona builder',
-     lambda c: 'Visual builder: voice, backstory, archetype, warmth, escalation'),
-    ('Personas', 'How many personas',
+    (G1, 'AI persona builder',
+     lambda c: 'Visual builder: voice, backstory, archetype, warmth, escalation',
+     'Fill in a form \u2014 name, age, backstory, archetype, warmth, escalation '
+     'pace \u2014 and the system prompt behind every reply is written for you. '
+     'No prompt engineering, no code.'),
+    (G1, 'How many personas',
      lambda c: ('Unlimited personas' if c['personas'] is None
-                else f"{c['personas']} persona" + ('' if c['personas'] == 1 else 's'))),
-    ('Personas', 'AI persona generation',
-     lambda c: 'Generate backstory, speech style, interests and triggers'),
-    ('Personas', 'AI image generation',
+                else f"{c['personas']} persona" + ('' if c['personas'] == 1 else 's')),
+     'Every persona is her own character, with her own voice, photos, funnel and '
+     'connected account. Your plan sets how many you can run at once.'),
+    (G1, 'AI persona generation',
+     lambda c: 'Generate backstory, speech style, interests and triggers',
+     'Stuck on a backstory or a speech style? Generate it and keep editing what '
+     'you like. Interests and conversion triggers come out of the same pass.'),
+    (G1, 'AI image generation',
      lambda c: ('Unlimited generations' if c['image_generations_month'] is None
-                else f"{c['image_generations_month']} generations a month")),
-    ('Personas', 'Photo library',
-     lambda c: 'Unlimited uploads, SFW and NSFW sets, per-photo tagging'),
-    ('Personas', 'Outfit locking + media tagging',
+                else f"{c['image_generations_month']} generations a month"),
+     'Create on-brand photos of your persona from a description \u2014 her look, '
+     'her outfit, the setting \u2014 without booking a shoot.'),
+    (G1, 'Photo library',
+     lambda c: 'Unlimited uploads, SFW and NSFW sets, per-photo tagging',
+     'Upload your own sets and tag them SFW or NSFW. The funnel then picks the '
+     'right photo for the right moment in the conversation.'),
+    (G1, 'Outfit locking + media tagging',
      lambda c: 'Keep her in one outfit per set and tag media for the funnel'
-     if c['outfit_lock'] else (False, 'Pro and up')),
-    ('Chat', 'Live chat engine',
-     lambda c: 'Memory of the fan, in-character replies, tone matching'),
-    ('Chat', 'Test chat + shareable landing page',
-     lambda c: 'Talk to her yourself and send fans a hosted landing page'),
-    ('Chat', 'Funnel phases',
+     if c['outfit_lock'] else (False, 'Pro and up'),
+     'Pin a persona to one outfit so a whole set stays consistent, and tag media '
+     'so she never sends a fan the same photo twice.'),
+    (G1, 'Live chat engine',
+     lambda c: 'Memory of the fan, in-character replies, tone matching',
+     'She remembers what a fan told her, answers in character and matches his '
+     'tone, so the conversation reads like a person rather than a bot.'),
+    (G1, 'Test chat + shareable landing page',
+     lambda c: 'Talk to her yourself and send fans a hosted landing page',
+     'Talk to her yourself before any fan does, and send fans a hosted page '
+     'where they can start chatting straight away.'),
+    (G2, 'Funnel phases',
      lambda c: (f"Up to {c['phases_max']} phases with per-phase photo rates"
                 if c['phases_max'] > 3
-                else f"Up to {c['phases_max']} phases + CTA")),
-    ('Chat', 'Scheduled follow-ups',
+                else f"Up to {c['phases_max']} phases + CTA"),
+     'The conversation moves through phases \u2014 warm, engage, tease, offer, '
+     'close \u2014 and you set the pace and the photo rate for each one.'),
+    (G2, 'Scheduled follow-ups',
      lambda c: 'Win back fans who go quiet, on your schedule'
-     if c['scheduled_followups'] else (False, 'Pro and up')),
-    ('Selling', 'PPV engine',
+     if c['scheduled_followups'] else (False, 'Pro and up'),
+     'Fans who go quiet get a message back in their inbox on the schedule you '
+     'choose, written in her voice rather than a template.'),
+    (G2, 'PPV engine',
      lambda c: 'Price ladders, per-fan pricing and timed re-offers'
-     if c['platforms'] != [] else (False, 'Needs a connected platform')),
-    ('Selling', 'PPV reconciliation',
-     lambda c: 'Match sent PPVs against Fanvue earnings'
-     if c['ppv_reconcile'] else (False, 'Agency only')),
-    ('Selling', 'Conversation + revenue analytics',
-     lambda c: 'Funnel stage per fan, conversion and revenue reporting'
-     if c['analytics'] else (False, 'Agency only')),
-    ('Platforms', 'Connected platforms',
-     lambda c: ((False, 'The demo stops before the platform connection')
+     if c['platforms'] != [] else (False, 'Needs a connected platform'),
+     'Price ladders, per-fan pricing and timed re-offers: she prices the unlock '
+     'to the fan in front of her, and follows up when he hesitates.'),
+    (G2, 'Connected platforms',
+     lambda c: ((False, 'Needs a paid plan')
                 if c['platforms'] == [] else
                 'Fanvue, OnlyFans, Telegram, X and Threads'
                 if c['platforms'] is None else
                 ' or '.join(PLATFORM_NAMES.get(p, p.title())
-                            for p in c['platforms']))),
-    ('Platforms', 'Growth planner',
+                            for p in c['platforms'])),
+     'Connect her account and she chats there directly \u2014 same persona, same '
+     'funnel, on every platform your plan covers.'),
+    (G2, 'Growth planner',
      lambda c: 'Plan, draft and schedule posts that feed the funnel'
-     if c['platforms'] != [] else (False, 'Needs a connected platform')),
-    ('Team', 'Team seats',
+     if c['platforms'] != [] else (False, 'Needs a connected platform'),
+     'Plan, draft and schedule the posts that pull new followers into the '
+     'funnel, without leaving the dashboard.'),
+    (G2, 'PPV reconciliation',
+     lambda c: 'Match sent PPVs against Fanvue earnings'
+     if c['ppv_reconcile'] else (False, 'Agency only'),
+     'Every PPV she sends is matched against your Fanvue earnings, so you can '
+     'see what actually converted instead of guessing.'),
+    (G2, 'Conversation + revenue analytics',
+     lambda c: 'Funnel stage per fan, conversion and revenue reporting'
+     if c['analytics'] else (False, 'Agency only'),
+     'See which funnel stage every fan sits in, where conversations stall, and '
+     'what each persona earns you per month.'),
+    (G3, 'Team seats',
      lambda c: (f"{c['seats']} seats with roles" if c['seats'] > 1
-                else '1 seat')),
-    ('Team', 'Support',
+                else '1 seat'),
+     'Invite chatters or managers with their own logins and roles, instead of '
+     'passing one password around the team.'),
+    (G3, 'Support',
      lambda c: {'demo': 'Email support', 'starter': 'Email support',
-                'pro': 'Priority support'}.get(c['_key'], 'Dedicated support')),
+                'pro': 'Priority support'}.get(c['_key'], 'Dedicated support'),
+     'How you reach us and how fast we come back to you \u2014 from email on '
+     'Starter to a named contact on Agency.'),
 ]
 
 FEATURE_TIER_ORDER = DEFAULT_TIER_ORDER
+
+
+def _feature_id(label):
+    """Stable per-feature key for the inline page editor. Must stay inside
+    [A-Za-z0-9_-] — api_site_content_set drops anything else."""
+    return 'feat-' + re.sub(r'-+', '-', re.sub(r'[^a-z0-9]+', '-',
+                                               label.lower())).strip('-')
 
 
 def _feature_matrix():
@@ -1368,12 +1414,13 @@ def _feature_matrix():
         tier = _BASE_TIERS[key]
         caps = {**tier['capabilities'], '_key': key}
         rows = []
-        for group, label, detail in FEATURE_ROWS:
+        for group, label, detail, explain in FEATURE_ROWS:
             text = detail(caps)
             included = not isinstance(text, tuple)
             if not included:
                 text = text[1]
             rows.append({'group': group, 'label': label,
+                         'id': _feature_id(label), 'explain': explain,
                          'detail': text or '', 'included': included and bool(text)})
         plats = caps['platforms']
         out[key] = {'name': tier['name'], 'price': tier['price'],
