@@ -280,16 +280,23 @@ optional there. With DataImpulse the template is:
 ```bash
 for s in ai-model-chat-dev ai-model-chat-dev-browser; do
   gcloud run services update "$s" --region europe-west4 \
-    --update-env-vars '^@^REDDIT_PROXY_TEMPLATE=http://USER__cr.{country};sessid.{session}:PASS@gw.dataimpulse.com:823'
+    --update-env-vars '^~^REDDIT_PROXY_TEMPLATE=http://USER__cr.{country}__sessid.{session}:PASS@gw.dataimpulse.com:823'
 done
 ```
 
-`{country}` and `{session}` are filled per persona, so an account keeps one
-sticky exit IP — an account that signs in from one country and posts from
-another is an account that gets checked. Set it on **both** services or the
-sign-in and the posting calls leave by different doors. `^@^` is gcloud's
-delimiter override; without it the `;` and `,` in the template are read as
-another variable.
+Copy the exact gateway string out of the provider's dashboard and swap only the
+country code for `{country}` and the session id for `{session}` — those two are
+the only placeholders the app fills, per persona, so an account keeps one
+sticky exit IP. An account that signs in from one country and posts from
+another is an account that gets checked.
+
+Set it on **both** services or the sign-in and the posting calls leave by
+different doors.
+
+`^~^` is gcloud's delimiter override, needed because the template contains `,`
+and `;` which gcloud would otherwise read as another variable. **The delimiter
+has to be a character the template does not contain** — `^@^` looks natural and
+is wrong, because `@` separates the password from the host.
 
 ### Turning the proxy pool off
 
