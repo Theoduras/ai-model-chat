@@ -1304,11 +1304,24 @@ class Signer:
 
     def _fetch_one(self, ask):
         got = self.page.evaluate(_REQUEST_JS, ask) or {}
+        if not got.get('status'):
+            # The site's client is closured out of reach on the current build,
+            # which is the same wall the signer hit. The page can still make the
+            # request itself; we sign it, which is the half we can do.
+            got = self._fetch_signed(ask) or got
         self.via = got.get('via') or self.via
         if not got.get('status'):
             self.error = str(got.get('error') or 'the page made no request')[:200]
             return {}
         return {'status': int(got['status']), 'body': got.get('data')}
+
+    def _fetch_signed(self, ask):
+        try:
+            headers = of_rules.headers(ask['path'], self.session)
+        except Exception as e:
+            self.error = 'could not sign for the page: ' + str(e)[:140]
+            return {}
+        return self.page.evaluate(_FETCH_JS, dict(ask, headers=headers)) or {}
 
 
 _signers = {}
@@ -1358,6 +1371,39 @@ def request_for(account, session, method, path, body=None, proxy=''):
     as one client.
     """
     return signer(account, session, proxy).fetch(method, path, body)
+
+
+# When the site's own client cannot be reached, the page is still the thing we
+# want: its TLS handshake, its client hints, its cookies. Only the signature has
+# to come from us -- and it can, because the rules are checked against
+# signatures OnlyFans made for her own requests before they are ever adopted.
+#
+# fetch() refuses to set cookie, user-agent or referer from script; all three
+# are the page's own anyway, which is the entire point of asking it.
+_FETCH_JS = """(arg) => {
+  const head = {};
+  for (const k of Object.keys(arg.headers || {})) {
+    const low = k.toLowerCase();
+    if (low === 'cookie' || low === 'user-agent' || low === 'referer') continue;
+    head[k] = arg.headers[k];
+  }
+  const opts = {method: arg.method, headers: head, credentials: 'include'};
+  if (arg.body !== null && arg.body !== undefined) {
+    opts.body = JSON.stringify(arg.body);
+    head['content-type'] = 'application/json';
+  }
+  const call = fetch(arg.path, opts).then(
+    (r) => r.text().then((t) => {
+      let data = null;
+      try { data = t ? JSON.parse(t) : null; } catch (e) { data = t.slice(0, 500); }
+      return {ok: r.ok, status: r.status, via: 'fetch', data: data};
+    }),
+    (e) => ({ok: false, status: 0, via: 'fetch', error: String(e).slice(0, 200)}));
+  const gaveup = new Promise((res) => setTimeout(
+    () => res({ok: false, status: 0, via: 'fetch', error: 'the page did not answer in time'}),
+    arg.ms || 30000));
+  return Promise.race([call, gaveup]);
+}"""
 
 
 def _mainworld_sign(page, context, path):
