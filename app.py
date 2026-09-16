@@ -1302,6 +1302,84 @@ for _key, _base in _BASE_TIERS.items():
                                    'monthly_equiv': round(_annual_price / 12, 2)}
 del _key, _base, _annual_price
 
+# The homepage feature matrix. Every row resolves itself from a tier's
+# capabilities so the marketing copy cannot drift from what the plan actually
+# unlocks; detail() returns the per-tier line, or None when the tier lacks it.
+FEATURE_ROWS = [
+    ('Personas', 'AI persona builder',
+     lambda c: 'Visual builder: voice, backstory, archetype, warmth, escalation'),
+    ('Personas', 'How many personas',
+     lambda c: ('Unlimited personas' if c['personas'] is None
+                else f"{c['personas']} persona" + ('' if c['personas'] == 1 else 's'))),
+    ('Personas', 'AI persona generation',
+     lambda c: 'Generate backstory, speech style, interests and triggers'),
+    ('Personas', 'AI image generation',
+     lambda c: ('Unlimited generations' if c['image_generations_month'] is None
+                else f"{c['image_generations_month']} generations a month")),
+    ('Personas', 'Photo library',
+     lambda c: 'Unlimited uploads, SFW and NSFW sets, per-photo tagging'),
+    ('Personas', 'Outfit locking + media tagging',
+     lambda c: 'Keep her in one outfit per set and tag media for the funnel'
+     if c['outfit_lock'] else (False, 'Pro and up')),
+    ('Chat', 'Live chat engine',
+     lambda c: 'Memory of the fan, in-character replies, tone matching'),
+    ('Chat', 'Test chat + shareable landing page',
+     lambda c: 'Talk to her yourself and send fans a hosted landing page'),
+    ('Chat', 'Funnel phases',
+     lambda c: (f"Up to {c['phases_max']} phases with per-phase photo rates"
+                if c['phases_max'] > 3
+                else f"Up to {c['phases_max']} phases + CTA")),
+    ('Chat', 'Scheduled follow-ups',
+     lambda c: 'Win back fans who go quiet, on your schedule'
+     if c['scheduled_followups'] else (False, 'Pro and up')),
+    ('Selling', 'PPV engine',
+     lambda c: 'Price ladders, per-fan pricing and timed re-offers'
+     if c['platforms'] != [] else (False, 'Needs a connected platform')),
+    ('Selling', 'PPV reconciliation',
+     lambda c: 'Match sent PPVs against Fanvue earnings'
+     if c['ppv_reconcile'] else (False, 'Agency only')),
+    ('Selling', 'Conversation + revenue analytics',
+     lambda c: 'Funnel stage per fan, conversion and revenue reporting'
+     if c['analytics'] else (False, 'Agency only')),
+    ('Platforms', 'Connected platforms',
+     lambda c: ((False, 'The demo stops before the platform connection')
+                if c['platforms'] == [] else
+                'Fanvue, OnlyFans, Telegram, X and Threads'
+                if c['platforms'] is None else
+                ' or '.join(PLATFORM_NAMES.get(p, p.title())
+                            for p in c['platforms']))),
+    ('Platforms', 'Growth planner',
+     lambda c: 'Plan, draft and schedule posts that feed the funnel'
+     if c['platforms'] != [] else (False, 'Needs a connected platform')),
+    ('Team', 'Team seats',
+     lambda c: (f"{c['seats']} seats with roles" if c['seats'] > 1
+                else '1 seat')),
+    ('Team', 'Support',
+     lambda c: {'demo': 'Email support', 'starter': 'Email support',
+                'pro': 'Priority support'}.get(c['_key'], 'Dedicated support')),
+]
+
+FEATURE_TIER_ORDER = [DEMO_TIER_KEY] + DEFAULT_TIER_ORDER
+
+
+def _feature_matrix():
+    out = {}
+    for key in FEATURE_TIER_ORDER:
+        tier = _BASE_TIERS[key]
+        caps = {**tier['capabilities'], '_key': key}
+        rows = []
+        for group, label, detail in FEATURE_ROWS:
+            text = detail(caps)
+            included = not isinstance(text, tuple)
+            if not included:
+                text = text[1]
+            rows.append({'group': group, 'label': label,
+                         'detail': text or '', 'included': included and bool(text)})
+        out[key] = {'name': tier['name'], 'price': tier['price'],
+                    'blurb': tier['blurb'], 'features': rows}
+    return out
+
+
 OXAPAY_API = 'https://api.oxapay.com/v1/payment/invoice'
 STRIPE_API = 'https://api.stripe.com/v1'
 # Software as a service (SaaS) — business use. Required by Managed Payments.
@@ -3583,6 +3661,13 @@ def api_pricing():
     that wants the same data without the full /pricing page)."""
     return jsonify({'order': DEFAULT_TIER_ORDER, 'tiers': TIERS,
                     'custom': CUSTOM_TIER, 'currency': CURRENCY_SYMBOL})
+
+
+@app.route('/api/features')
+def api_features():
+    """Public: the homepage feature matrix, resolved per tier."""
+    return jsonify({'order': FEATURE_TIER_ORDER, 'tiers': _feature_matrix(),
+                    'currency': CURRENCY_SYMBOL})
 
 
 @app.route('/pricing')

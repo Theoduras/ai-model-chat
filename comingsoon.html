@@ -169,6 +169,31 @@ body.kbd .site-nav{display:none}
   .auth a{padding:7px 12px;font-size:12.5px}
 }
 /* ── Pricing ── */
+.features{padding:100px 60px 20px;background:var(--bg);scroll-margin-top:96px}
+.features-head{text-align:center;max-width:640px;margin:0 auto 30px}
+.features-head h2{font-family:'Sora';font-weight:800;font-size:38px;letter-spacing:-.02em;margin-bottom:14px}
+.features-head p{color:var(--text-soft);font-size:16px;line-height:1.6}
+.tier-toggle{display:flex;justify-content:center;gap:6px;margin:0 auto 14px;background:var(--field);border:1px solid var(--field-border);
+  border-radius:9999px;padding:5px;width:max-content;max-width:100%;flex-wrap:wrap}
+.tier-toggle button{border:0;background:transparent;color:var(--text-soft);font:600 14px 'Inter',system-ui,sans-serif;
+  padding:9px 18px;border-radius:9999px;cursor:pointer;transition:all .2s}
+.tier-toggle button:hover{color:var(--text)}
+.tier-toggle button.on{background:var(--accent);color:#fff}
+.feature-note{text-align:center;color:var(--text-dim);font-size:13px;margin-bottom:34px}
+.feature-groups{display:grid;grid-template-columns:repeat(2,1fr);gap:18px;max-width:1180px;margin:0 auto}
+.feature-group{background:var(--panel);border:1px solid var(--hair);border-radius:16px;padding:22px}
+.feature-group h3{font-family:'Sora';font-weight:700;font-size:15px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--text-dim);margin-bottom:12px}
+.feature-group ul{list-style:none;margin:0;padding:0}
+.feature-group li{display:flex;gap:11px;padding:10px 0;border-top:1px solid var(--hair);align-items:flex-start}
+.feature-group li:first-child{border-top:0}
+.feature-group .mark{flex:0 0 18px;font-weight:700;color:#22c55e;line-height:1.4}
+.feature-group li.off{opacity:.45}
+.feature-group li.off .mark{color:var(--text-dim)}
+.feature-group .label{display:block;font-size:14px;font-weight:600;color:var(--text)}
+.feature-group .detail{display:block;font-size:13px;color:var(--text-soft);line-height:1.5;margin-top:2px}
+.feature-group li.off .detail{color:var(--text-dim)}
+@media(max-width:900px){.features{padding:72px 22px 10px}.feature-groups{grid-template-columns:1fr}.features-head h2{font-size:30px}}
 .pricing{padding:100px 60px 110px;background:var(--bg);scroll-margin-top:96px}
 .pricing-head{text-align:center;max-width:640px;margin:0 auto 56px}
 .pricing-head h2{font-family:'Sora';font-weight:800;font-size:38px;letter-spacing:-.02em;margin-bottom:14px}
@@ -250,6 +275,71 @@ body.kbd .site-nav{display:none}
   </div>
 
 </div>
+
+<section class="features" id="features">
+  <div class="features-head">
+    <h2 data-edit-id="features-title">Everything in the platform</h2>
+    <p data-edit-id="features-subtitle">Switch the plan to see exactly what it unlocks. Greyed-out lines are the ones that plan does not include.</p>
+  </div>
+  <div class="tier-toggle" id="tier-toggle"></div>
+  <div class="feature-note" id="feature-note"></div>
+  <div class="feature-groups" id="feature-groups">Loading features…</div>
+</section>
+
+<script>
+fetch('/api/features')
+  .then(function(r){ return r.ok ? r.json() : null; })
+  .then(function(d){
+    if (!d) return;
+    var toggle = document.getElementById('tier-toggle');
+    var wrap = document.getElementById('feature-groups');
+    var note = document.getElementById('feature-note');
+    var cur = d.order.indexOf('pro') >= 0 ? 'pro' : d.order[0];
+
+    function esc(v){ return String(v).replace(/[&<>]/g, function(c){
+      return { '&':'&amp;', '<':'&lt;', '>':'&gt;' }[c]; }); }
+
+    function render(){
+      var t = d.tiers[cur];
+      if (!t) return;
+      Array.prototype.forEach.call(toggle.children, function(b){
+        b.classList.toggle('on', b.getAttribute('data-tier') === cur);
+      });
+      note.textContent = t.blurb + (t.price ?
+        ' — ' + (d.currency || '\u20ac') + t.price + '/month, excl. VAT.' : '');
+      var groups = [];
+      t.features.forEach(function(f){
+        var g = groups.filter(function(x){ return x.name === f.group; })[0];
+        if (!g) { g = { name: f.group, items: [] }; groups.push(g); }
+        g.items.push(f);
+      });
+      wrap.innerHTML = groups.map(function(g){
+        return '<div class="feature-group"><h3>' + esc(g.name) + '</h3><ul>' +
+          g.items.map(function(f){
+            return '<li class="' + (f.included ? '' : 'off') + '">' +
+              '<span class="mark">' + (f.included ? '\u2713' : '\u2014') + '</span>' +
+              '<span><span class="label">' + esc(f.label) + '</span>' +
+              (f.detail ? '<span class="detail">' + esc(f.detail) + '</span>' : '') +
+              '</span></li>';
+          }).join('') + '</ul></div>';
+      }).join('');
+    }
+
+    toggle.innerHTML = '';
+    d.order.forEach(function(key){
+      var t = d.tiers[key];
+      if (!t) return;
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.setAttribute('data-tier', key);
+      b.textContent = t.name;
+      b.onclick = function(){ cur = key; render(); };
+      toggle.appendChild(b);
+    });
+    render();
+  })
+  .catch(function(){});
+</script>
 
 <section class="pricing" id="pricing">
   <div class="pricing-head">
