@@ -5752,6 +5752,8 @@ INBOX_PLATFORMS = {
                  'trace_keys': ('tg_trace_%s', 'tg_trace_platform')},
     'x':        {'label': 'X',        'prefixes': ('',),
                  'trace_keys': ('x_trace_%s',)},
+    'threads':  {'label': 'Threads',  'prefixes': ('th:',),
+                 'trace_keys': ('threads_trace_%s',)},
 }
 
 # Trace stages that describe something that happened *to one fan*, so they can
@@ -24347,7 +24349,17 @@ def _th_post_now(persona, text, media_ids=None, reply_control='everyone',
     return {'id': posted_id, 'text': text, 'kind': kind}
 
 
+# The three readers the public round needs. Each forks on _th_mode the same
+# way _growth_publish does — the graph API when a Meta app is connected, the
+# cookie session when Threads is riding her Instagram sign-in. Both hand back
+# the same row shape, so the round below reads one dict either way.
+
 def _threads_recent_posts(persona, limit=10):
+    if _th_mode(persona) == 'instagram':
+        uid = str(_ig_account(persona).get('user_id') or '')
+        if not uid:
+            return []
+        return [THR.feed_row(n) for n in _th_rest(persona).own_posts(uid, limit)]
     uid = _threads_uid(persona)
     res = _threads_call(persona, 'GET', f'/{uid}/threads',
                         params={'fields': 'id,text,timestamp', 'limit': limit})
@@ -24355,12 +24367,20 @@ def _threads_recent_posts(persona, limit=10):
 
 
 def _threads_replies(persona, media_id):
+    if _th_mode(persona) == 'instagram':
+        return [THR.feed_row(n) for n in _th_rest(persona).replies(media_id)]
     res = _threads_call(persona, 'GET', f'/{media_id}/replies',
                         params={'fields': 'id,text,username,timestamp'})
     return res.get('data', []) or []
 
 
 def _threads_mentions(persona, limit=15):
+    # Mentions are a graph-API notion; the cookie session has no equivalent
+    # read that has been verified against a real account, and guessing a third
+    # endpoint to fill the gap would be worse than answering none. Her own
+    # posts' replies — the larger half — still work on both.
+    if _th_mode(persona) == 'instagram':
+        return []
     uid = _threads_uid(persona)
     try:
         res = _threads_call(persona, 'GET', f'/{uid}/mentions',
@@ -24368,6 +24388,239 @@ def _threads_mentions(persona, limit=15):
         return res.get('data', []) or []
     except Exception:
         return []
+
+
+# ── Threads DMs ───────────────────────────────────────────────────────────────
+#
+# Threads has DMs now, and they ride the same direct surface Instagram's do —
+# so the cookie that already posts for her reads and answers her inbox too, and
+# there is nothing further to connect.
+#
+# This is the adapter half: a DM is a fan being worked towards something, so it
+# runs the shared round in full — funnel, nudges, win-back — exactly as Fanvue,
+# OnlyFans, Discord and Reddit do. Public replies do not, and never reach here:
+# _threads_auto_round below stays outside this round for the same reason
+# _dc_channel_round and _rd_comment_round do.
+
+
+def _th_cta_link(persona, fan_id):
+    """Tracked redirect through our own server, same shape as Discord's.
+
+    Meta filters known paysite domains the way Reddit does, so what a fan is
+    sent is her profile or linktree — the destination is resolved at click time
+    from the fan's recorded CTA choice, and this only names the fan.
+    """
+    base = (os.getenv('PUBLIC_BASE_URL') or _get_setting('public_base_url') or '').rstrip('/')
+    if base:
+        return f'{base}/go/th/{persona}/{fan_id}'
+    cta_state = _plat_cta(PLAT_THREADS, persona)
+    fan_cta = cta_state.get(str(fan_id)) or {}
+    return (fan_cta.get('target')
+            or _dc_json(f'threads_cta_{persona}', {}).get('url')
+            or _phases_cta(persona).get('cta_url') or '').strip()
+
+
+@app.route('/go/th/<persona>/<fan_id>')
+def threads_cta_click(persona, fan_id):
+    """Tracked CTA redirect for Threads DMs, same shape as Discord's."""
+    if not re.match(r'^[a-z0-9_-]+$', persona or ''):
+        return redirect('/')
+    state = _plat_cta(PLAT_THREADS, persona)
+    fan = state.get(str(fan_id)) or {}
+    override = _dc_json(f'threads_cta_{persona}', {})
+    target = (fan.get('target') or override.get('url')
+              or _phases_cta(persona).get('cta_url') or '').strip()
+    if not target:
+        return redirect('/')
+    if fan and not fan.get('clicked'):
+        fan['clicked'] = int(time.time())
+        state[str(fan_id)] = fan
+        _set_setting(PLAT_THREADS.k('cta', persona), json.dumps(state))
+    _record_click(persona, 'threads', fan.get('kind') or 'paid', target,
+                  PLAT_THREADS.fan_key(fan_id))
+    return redirect(target, code=302)
+
+
+def _th_threads_cache(persona):
+    """One inbox read per round, shared by chats() and messages(): the round
+    asks for the chat list and then for each fan's messages, and both are in
+    the same payload the inbox already returned."""
+    rest = _th_rest(persona)
+    by_fan = {}
+    for chat in rest.inbox():
+        # A group is a room full of people, not a fan. Dropped at the door, the
+        # same way a Sendbird group channel is on Reddit.
+        if THR.is_group(chat):
+            continue
+        user = THR.user_of_thread(chat)
+        if user.get('id'):
+            by_fan[user['id']] = chat
+    return by_fan
+
+
+class _ThreadsPlatform(_Platform):
+    slug = 'threads'
+    label = 'Threads'
+    prefix = 'threads'
+    fan_prefix = 'th:'
+    has_lists = False
+    has_funnels = True
+    has_winback = True
+    # No paywall and no payment webhook here either, so the tier/bandit/ledger
+    # engine cannot verify a sale — a plain CTA nudge instead, as on Discord.
+    has_ppv = False
+    has_cta = True
+
+    def connected(self, persona):
+        return bool(_th_session(persona))
+
+    def scope(self, persona):
+        return ''
+
+    def me(self, persona):
+        return {'id': str(_ig_account(persona).get('user_id') or '')}
+
+    def acting_as(self, persona):
+        return _ig_account(persona).get('username', '')
+
+    def chats(self, persona, scope):
+        # The one switch the operator has over DMs. Gated here rather than in
+        # connected(): the account *is* connected, there is simply nothing she
+        # has been told to work — so nothing is read and nothing is sent.
+        if not _dc_json(f'threads_auto_{persona}', {}).get('reply_dms', True):
+            return []
+        return list(_th_threads_cache(persona).values())
+
+    def read_chat(self, chat):
+        return THR.user_of_thread(chat)
+
+    def messages(self, persona, fan_id, want):
+        chat = _th_threads_cache(persona).get(str(fan_id)) or {}
+        return THR.messages_of(chat)[:want]
+
+    def text_of(self, msg):
+        return THR.text_of(msg)
+
+    def msg_id(self, msg):
+        return THR.msg_id(msg)
+
+    def msg_time(self, msg):
+        return THR.msg_time(msg)
+
+    def msg_age(self, msg):
+        return THR.msg_age_minutes(msg)
+
+    def direction(self, msg, fan_id, me_id, recent_out=()):
+        return 'out' if THR.is_outgoing(msg, me_id) else 'in'
+
+    def import_history(self, persona, fan_id, handle, me_id):
+        """Read a conversation we are meeting part-way through, so she does not
+        introduce herself to someone she has been talking to for a week."""
+        chat = _th_threads_cache(persona).get(str(fan_id)) or {}
+        rows = []
+        # The inbox hands them back newest first; a history reads forwards.
+        for m in reversed(THR.messages_of(chat)):
+            text = THR.text_of(m)
+            if text:
+                rows.append(('out' if THR.is_outgoing(m, me_id) else 'in', text))
+        fan_key = self.fan_key(fan_id)
+        for direction, text in rows:
+            _log_x_message(persona, fan_key, handle, direction, text)
+        return len(rows), [t for d, t in rows if d == 'in']
+
+    def _thread_of(self, persona, fan_id):
+        chat = _th_threads_cache(persona).get(str(fan_id)) or {}
+        return THR.thread_id_of(chat)
+
+    def send_text(self, persona, scope, fan_id, text):
+        thread_id = self._thread_of(persona, fan_id)
+        if not thread_id:
+            raise ValueError('that Threads conversation is no longer in her inbox')
+        _th_rest(persona).send_text(thread_id, text)
+
+    def winback_link(self, persona, fan_id):
+        return _th_cta_link(persona, fan_id)
+
+    def typing(self, persona, scope, fan_id):
+        thread_id = self._thread_of(persona, fan_id)
+        if thread_id:
+            _th_rest(persona).typing(thread_id)
+
+    def webhook_state(self, persona):
+        """Nothing is delivered to us — the round polls her inbox. What matters
+        is whether the session behind it is still good."""
+        ready = bool(_th_session(persona))
+        return {'ready': ready, 'url': '', 'watcher': True, 'last_error': '',
+                'problem': '' if ready else
+                'Her Instagram session is gone, so her Threads inbox cannot be '
+                'read. Reconnect her on the Instagram console.'}
+
+    def reachable(self, persona):
+        if not self.connected(persona):
+            return ('Threads is not connected for this persona — connect her on '
+                    'Instagram and Threads comes with it.')
+        held = THR.Rest(_th_session(persona)).held()
+        return f'Threads is rate-limiting her for another {held}s.' if held else ''
+
+
+PLAT_THREADS = _ThreadsPlatform()
+PLATFORMS['threads'] = PLAT_THREADS
+
+_threads_worker_started = [False]
+
+# How often her own posts are swept for new replies. Far slower than the DM
+# tick: a public thread is not someone waiting on an answer, and each sweep
+# costs a read per post.
+THREADS_PUBLIC_EVERY_S = int(os.getenv('THREADS_PUBLIC_EVERY_S', '300'))
+
+
+def _threads_public_worker():
+    """The comment and mention round, on a timer rather than on whether a
+    browser tab happens to be open. The DM side runs on _plat_worker like every
+    other platform; this is the public half, which is not a _Platform at all."""
+    while True:
+        try:
+            time.sleep(THREADS_PUBLIC_EVERY_S)
+            with app.app_context():
+                for persona in _dc_json('threads_auto_personas', []):
+                    cfg = _dc_json(f'threads_auto_{persona}', {})
+                    if not cfg.get('enabled'):
+                        continue
+                    try:
+                        _threads_auto_round(
+                            persona,
+                            reply_comments=cfg.get('reply_comments', True),
+                            reply_mentions=cfg.get('reply_mentions', True))
+                    except Exception as e:
+                        logger.warning('threads public round for %s failed: %s',
+                                       persona, str(e)[:160])
+        except Exception:
+            logger.exception('threads public worker round failed')
+
+
+def _start_threads_worker():
+    if _threads_worker_started[0]:
+        return
+    _threads_worker_started[0] = True
+    threading.Thread(target=_plat_worker, args=(PLAT_THREADS,), daemon=True).start()
+    threading.Thread(target=_threads_public_worker, daemon=True).start()
+
+
+if _worker_enabled('THREADS_WORKER'):
+    _start_threads_worker()
+
+
+def _threads_reply(persona, text, reply_to_id):
+    """One public reply, over whichever side is connected.
+
+    No link, no offer and no funnel ever rides this: a comment thread is a room
+    full of people, not a fan being worked towards something. That is why this
+    round sits outside _plat_round_body, the same as _dc_channel_round and
+    _rd_comment_round.
+    """
+    if _th_mode(persona) == 'instagram':
+        return _th_rest(persona).post_text(text, reply_to_id=reply_to_id)
+    return _threads_publish(persona, text, reply_to_id=reply_to_id)
 
 
 def _threads_auto_round(persona, reply_comments=True, reply_mentions=True,
@@ -24416,7 +24669,7 @@ def _threads_auto_round(persona, reply_comments=True, reply_mentions=True,
         posted = False
         if not preview:
             try:
-                _threads_publish(persona, reply, reply_to_id=rid)
+                _threads_reply(persona, reply, rid)
                 posted = True
                 seen.add(rid)
                 actions['comment_replies' if kind == 'comment' else 'mention_replies'] += 1
@@ -24703,6 +24956,7 @@ def api_threads_auto():
         opts = {
             'reply_comments': bool(data.get('reply_comments', True)),
             'reply_mentions': bool(data.get('reply_mentions', True)),
+            'reply_dms': bool(data.get('reply_dms', True)),
             'enabled': bool(data.get('enabled', False)),
         }
         _set_setting(f'threads_auto_{persona}', json.dumps(opts))

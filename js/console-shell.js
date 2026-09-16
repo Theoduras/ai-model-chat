@@ -12,12 +12,17 @@
 // than another copy of a console.
 (function () {
 
-  var TABS = [
+  var ALL_TABS = [
     { key: 'overview', label: 'Overview', icon: '◎' },
     { key: 'inbox',    label: 'Inbox',    icon: '💬' },
     { key: 'settings', label: 'Settings', icon: '⚙' },
     { key: 'advanced', label: 'Advanced', icon: '🔧' }
   ];
+
+  // A console shows all four unless it says otherwise. A platform with no DMs
+  // at all has no Inbox to show, and a tab that can only ever answer "could not
+  // load the conversations" is worse than no tab.
+  var TABS = ALL_TABS;
 
   // Icons for the short activity feed. Anything unlisted falls back to a dot,
   // which is the honest answer for a stage this file has not been taught.
@@ -77,6 +82,12 @@
       panes[panes[t] ? t : 'settings'].appendChild(n);
     });
 
+    if (panes.inbox) {
+      panes.inbox.innerHTML =
+        '<div class="form-section" style="padding:0;overflow:hidden;">' +
+        '<div class="cn-chat"></div></div>';
+    }
+
     panes.overview.innerHTML =
       '<div class="cn-hero"><span class="cn-hero-dot"></span>' +
         '<div class="cn-hero-txt"><div class="cn-hero-title">Checking…</div>' +
@@ -89,10 +100,6 @@
         '<span class="hint" style="display:block;margin-bottom:10px;">The last few things that ' +
         'happened. The whole log is under <b>Advanced</b>, and the conversations themselves are ' +
         'under <b>Inbox</b>.</span><div class="cn-feed"></div></div>';
-
-    panes.inbox.innerHTML =
-      '<div class="form-section" style="padding:0;overflow:hidden;">' +
-      '<div class="cn-chat"></div></div>';
 
     wrap.appendChild(bar);
     TABS.forEach(function (t) { wrap.appendChild(panes[t.key]); });
@@ -249,14 +256,20 @@
     mount: function (wrapSelector) {
       var wrap = document.querySelector(wrapSelector);
       if (!wrap || !cfg) return;
+      TABS = cfg.tabs
+        ? ALL_TABS.filter(function (t) { return cfg.tabs.indexOf(t.key) !== -1; })
+        : ALL_TABS;
       build(wrap);
-      view = window.ChatView.create(wrap.querySelector('.cn-chat'), {
-        platform: cfg.platform,
-        persona: cfg.persona,
-        emptyHint: cfg.emptyHint || '',
-        sendUrl: cfg.sendUrl || ''
-      });
-      view.onWaiting = waitingBadge;
+      var chat = wrap.querySelector('.cn-chat');
+      if (chat) {
+        view = window.ChatView.create(chat, {
+          platform: cfg.platform,
+          persona: cfg.persona,
+          emptyHint: cfg.emptyHint || '',
+          sendUrl: cfg.sendUrl || ''
+        });
+        view.onWaiting = waitingBadge;
+      }
       api.show((location.hash || '').replace('#', '') || 'overview');
       window.addEventListener('hashchange', function () {
         api.show((location.hash || '').replace('#', '') || 'overview');

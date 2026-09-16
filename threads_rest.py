@@ -26,6 +26,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,32 @@ PATH_CONFIGURE_VIDEO = os.getenv('THREADS_CONFIGURE_VIDEO_PATH',
 PATH_CONFIGURE_SIDECAR = os.getenv('THREADS_CONFIGURE_SIDECAR_PATH',
                                    '/media/configure_text_post_app_sidecar/')
 PATH_ME = os.getenv('THREADS_ME_PATH', '/accounts/current_user/?edit=true')
+PATH_FEED = os.getenv('THREADS_FEED_PATH', '/text_feed/{id}/profile/')
+PATH_REPLIES = os.getenv('THREADS_REPLIES_PATH', '/text_feed/{id}/replies/')
+
+# ── Direct messages ──────────────────────────────────────────────────────────
+#
+# Threads DMs ride the same direct surface Instagram's do, reached with the
+# Threads app id already set on this session. Nothing here is documented and
+# Meta moves it, so every path is an env var, same as the posting half. A 4xx
+# is the first thing to check.
+
+PATH_INBOX = os.getenv('THREADS_INBOX_PATH', '/direct_v2/inbox/')
+PATH_THREAD = os.getenv('THREADS_THREAD_PATH', '/direct_v2/threads/{id}/')
+PATH_BROADCAST = os.getenv('THREADS_BROADCAST_PATH', '/direct_v2/threads/broadcast/text/')
+PATH_ACTIVITY = os.getenv('THREADS_ACTIVITY_PATH',
+                          '/direct_v2/threads/{id}/items/indicate_activity/')
+INBOX_PAGE = int(os.getenv('THREADS_INBOX_PAGE', '20'))
+
+
+def _q(params):
+    return ('?' + urllib.parse.urlencode(params)) if params else ''
+
+
+# ── Reading what came back ───────────────────────────────────────────────────
+#
+# app.py's adapter stays a set of one-liners onto these, the same way
+# _DiscordPlatform is a set of one-liners onto discord_gateway.
 
 # 0 anyone, 1 accounts you follow, 2 mentioned only. The composer sends the
 # creator's choice; anything else Threads rejects outright.
@@ -189,6 +216,17 @@ class Rest:
     def me(self):
         return self.call('GET', f'{self.base}{PATH_ME}')
 
+    def own_posts(self, user_id, limit=10):
+        """Her own recent Threads, for the round that answers their replies."""
+        path = PATH_FEED.format(id=user_id)
+        res = self.call('GET', f'{self.base}{path}{_q({"limit": limit})}')
+        return _feed_rows(res)[:limit]
+
+    def replies(self, media_id, limit=30):
+        path = PATH_REPLIES.format(id=media_id)
+        res = self.call('GET', f'{self.base}{path}{_q({"limit": limit})}')
+        return _feed_rows(res)[:limit]
+
     def _info(self, reply_control='everyone'):
         return {'reply_control': REPLY_CONTROL.get(reply_control, 0)}
 
@@ -266,6 +304,41 @@ class Rest:
                 'text_post_app_info': self._info(reply_control)}
         return self.call('POST', f'{self.base}{PATH_CONFIGURE_SIDECAR}', body=body)
 
+    # ── Direct messages ──────────────────────────────────────────────────
+
+    def inbox(self, cursor='', limit=INBOX_PAGE):
+        params = {'limit': limit, 'thread_message_limit': 10, 'persistentBadging': 'true'}
+        if cursor:
+            params['cursor'] = cursor
+        res = self.call('GET', f'{self.base}{PATH_INBOX}{_q(params)}')
+        return ((res or {}).get('inbox') or {}).get('threads') or []
+
+    def thread(self, thread_id, cursor='', limit=INBOX_PAGE):
+        params = {'limit': limit}
+        if cursor:
+            params['cursor'] = cursor
+        path = PATH_THREAD.format(id=thread_id)
+        res = self.call('GET', f'{self.base}{path}{_q(params)}')
+        return (res or {}).get('thread') or res or {}
+
+    def send_text(self, thread_id, text):
+        body = {'action': 'send_item', 'thread_ids': json.dumps([str(thread_id)]),
+                'text': text or '',
+                'client_context': str(uuid.uuid4()),
+                '_uuid': str(uuid.uuid4())}
+        return self.call('POST', f'{self.base}{PATH_BROADCAST}', body=body)
+
+    def typing(self, thread_id):
+        """Best effort: a typing indicator that does not arrive is not a reason
+        to drop the reply that follows it."""
+        path = PATH_ACTIVITY.format(id=thread_id)
+        try:
+            return self.call('POST', f'{self.base}{path}',
+                             body={'action': 'indicate_activity', 'activity_status': '1'})
+        except ThreadsApiError as e:
+            logger.debug('threads typing indicator failed: %s', str(e)[:120])
+            return {}
+
 
 def post_id(result):
     """Threads answers with the created media under a couple of shapes depending
@@ -274,3 +347,81 @@ def post_id(result):
     media = result.get('media') or {}
     return str(media.get('pk') or media.get('id') or result.get('id')
                or result.get('pk') or '')
+
+
+def thread_id_of(chat):
+    return str((chat or {}).get('thread_id') or (chat or {}).get('thread_v2_id') or '')
+
+
+def user_of_thread(chat):
+    """The other person in a one-to-one thread. A group has several, and the
+    caller drops those rather than treating a room as a fan."""
+    users = (chat or {}).get('users') or []
+    if len(users) != 1:
+        return {}
+    u = users[0]
+    return {'id': str(u.get('pk') or u.get('id') or ''),
+            'username': u.get('username') or '',
+            'name': u.get('full_name') or ''}
+
+
+def is_group(chat):
+    return bool((chat or {}).get('is_group')) or len((chat or {}).get('users') or []) > 1
+
+
+def messages_of(chat):
+    return (chat or {}).get('items') or []
+
+
+def text_of(msg):
+    msg = msg or {}
+    if msg.get('item_type') and msg['item_type'] != 'text':
+        return ''
+    return msg.get('text') or ''
+
+
+def msg_id(msg):
+    return str((msg or {}).get('item_id') or (msg or {}).get('id') or '')
+
+
+def msg_time(msg):
+    """Direct timestamps are microseconds since the epoch, not seconds."""
+    raw = (msg or {}).get('timestamp') or 0
+    try:
+        raw = int(raw)
+    except (TypeError, ValueError):
+        return 0
+    return raw // 1000000 if raw > 10 ** 12 else raw
+
+
+def msg_age_minutes(msg):
+    at = msg_time(msg)
+    return (time.time() - at) / 60.0 if at else 0.0
+
+
+def is_outgoing(msg, me_id):
+    return str((msg or {}).get('user_id') or '') == str(me_id or '')
+
+
+def _feed_rows(res):
+    """A text feed comes back as thread containers, each wrapping the posts in
+    it. Flattened to the posts themselves, which is what a caller wants."""
+    out = []
+    for item in ((res or {}).get('threads') or (res or {}).get('items') or []):
+        for post in (item.get('thread_items') or [item]):
+            node = post.get('post') or post
+            if node:
+                out.append(node)
+    return out
+
+
+def feed_row(node):
+    """One post, in the shape the graph API's reader returns, so the round
+    reads the same dict whichever transport filled it."""
+    node = node or {}
+    user = node.get('user') or {}
+    caption = node.get('caption') or {}
+    return {'id': str(node.get('pk') or node.get('id') or ''),
+            'text': caption.get('text') or node.get('text') or '',
+            'username': user.get('username') or '',
+            'timestamp': node.get('taken_at') or 0}

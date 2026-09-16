@@ -299,6 +299,99 @@ check('with no instagram session it falls back to the graph api',
       and SENT[-1][0] == 'oauth')
 app._threads_save_tokens({})
 
+print('dms ride the same session')
+import threads_stub as TS
+
+DM = TS.FakeRest(user_id='7', username='lilith_ig')
+app._th_rest = lambda persona: DM
+app._ig_account = lambda persona: {'username': 'lilith_ig', 'user_id': '7'}
+IGS = {'lilith': {'cookie': 'sessionid=x', 'csrftoken': 'c'}}
+app._ig_session = lambda persona: IGS.get(persona, {})
+app._threads_save_tokens({})
+
+P = app.PLAT_THREADS
+check('threads is a platform adapter now', app.PLATFORMS.get('threads') is P)
+check('dms get the funnel and the ladder', P.has_funnels and P.has_winback)
+check('no ppv engine, a plain cta instead', (not P.has_ppv) and P.has_cta)
+check('fan keys are namespaced', P.fan_key('55') == 'th:55')
+check('state is namespaced', P.k('auto_personas') == 'threads_auto_personas')
+check('threads reads in the console inbox', 'threads' in app.INBOX_PLATFORMS)
+check('connected follows the instagram session', P.connected('lilith'))
+check('no session is not connected', not P.connected('nobody'))
+
+DM.seed(thread_id='t1', user_id='55', username='fan', items=[
+    {'item_id': 'a', 'user_id': '55', 'item_type': 'text', 'text': 'hey you',
+     'timestamp': 1700000000000000}])
+app._dc_json = lambda key, default=None: (
+    {'reply_dms': True} if key.startswith('threads_auto_') else (default or {}))
+chats = P.chats('lilith', '')
+check('a one-to-one thread is a chat', len(chats) == 1)
+check('the fan is read off the thread', P.read_chat(chats[0])['username'] == 'fan')
+msgs = P.messages('lilith', '55', 10)
+check('its messages read back', P.text_of(msgs[0]) == 'hey you')
+check('an incoming message is incoming', P.direction(msgs[0], '55', '7') == 'in')
+check('her own message is outgoing',
+      P.direction({'user_id': '7'}, '55', '7') == 'out')
+P.send_text('lilith', '', '55', 'hi back')
+check('a reply goes to that thread', DM.sent[-1] == ('t1', 'hi back'))
+
+DM.seed(thread_id='g1', user_id='9', username='a')
+DM.threads['g1']['users'].append({'pk': '10', 'username': 'b'})
+check('a group is dropped before the round sees it',
+      all(TS and c.get('thread_id') != 'g1' for c in P.chats('lilith', '')))
+
+app._dc_json = lambda key, default=None: (
+    {'reply_dms': False} if key.startswith('threads_auto_') else (default or {}))
+check('dms off means nothing is even read', P.chats('lilith', '') == [])
+app._dc_json = lambda key, default=None: (
+    {'reply_dms': True} if key.startswith('threads_auto_') else (default or {}))
+
+print('the public round no longer needs a token')
+# The bug this fixes: a persona connected through Instagram has no access_token,
+# and every reader went through the graph API, so the round raised.
+DM.threads = {}
+app._th_mode = lambda persona: 'instagram' if persona in IGS else ''
+DM.own_posts = lambda uid, limit=10: [
+    {'pk': 'P1', 'caption': {'text': 'her post'}, 'user': {'username': 'lilith_ig'},
+     'taken_at': 1700000000}]
+DM.replies = lambda media_id, limit=30: [
+    {'pk': 'R1', 'caption': {'text': 'nice'}, 'user': {'username': 'fan'},
+     'taken_at': 1700000001}]
+posts = app._threads_recent_posts('lilith')
+check('her own posts read over the cookie',
+      len(posts) == 1 and posts[0]['id'] == 'P1' and posts[0]['text'] == 'her post')
+reps = app._threads_replies('lilith', 'P1')
+check('replies read over the cookie',
+      reps[0]['username'] == 'fan' and reps[0]['text'] == 'nice')
+check('mentions answer empty rather than guessing an endpoint',
+      app._threads_mentions('lilith') == [])
+CALLS.clear()
+app._threads_recent_posts('tokenless')
+check('a graph persona still reads over the graph api',
+      any(m == 'GET' and p.endswith('/threads') for m, p, _ in CALLS))
+
+SENT = []
+DM.post_text = lambda text, reply_control='everyone', reply_to_id='': (
+    SENT.append(('cookie', text, reply_to_id)) or {'media': {'pk': '1'}})
+app._threads_publish = lambda persona, text, **kw: (
+    SENT.append(('graph', text, kw.get('reply_to_id'))) or 'G-1')
+app._threads_reply('lilith', 'thanks!', 'R1')
+check('a public reply goes over the cookie session', SENT[-1][:2] == ('cookie', 'thanks!'))
+app._threads_reply('tokenless', 'thanks!', 'R1')
+check('and over the graph api when that is what is connected',
+      SENT[-1][0] == 'graph')
+
+print('the public carve-out holds')
+# A comment thread is a room, not a fan. Reddit and Discord make the same
+# carve-out, and for the same reason.
+src = open('app.py').read()
+body = src[src.index('def _threads_reply('):src.index('def _threads_auto_round(')]
+check('_threads_reply carries no cta link',
+      'cta_link' not in body and '_th_cta_link' not in body)
+check('the public round is not a _Platform round',
+      '_plat_round_body' not in src[src.index('def _threads_auto_round('):
+                                    src.index('def _threads_auto_round(') + 4000])
+
 print()
 def test_nothing_failed():
     assert not FAILURES, FAILURES

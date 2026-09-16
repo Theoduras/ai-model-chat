@@ -9,6 +9,8 @@
   <script src="/js/theme.js"></script>
   <link rel="stylesheet" href="/css/style.css">
   <script src="/js/devnav.js" defer></script>
+  <script src="/js/chat-view.js"></script>
+  <script src="/js/console-shell.js"></script>
   <style>
     .xbot-scroll { flex: 1; min-height: 0; overflow-y: auto; }
     .xbot-wrap { max-width: 760px; margin: 0 auto; padding: 28px 24px 80px; display: flex; flex-direction: column; gap: 20px; }
@@ -93,7 +95,7 @@
 <div class="xbot-scroll">
 <div class="xbot-wrap">
 
-  <div class="form-section">
+  <div id="sec-account" class="form-section" data-tab="settings">
     <div class="section-title">Persona &amp; Account</div>
     <div class="field full">
       <label>Choose a model (persona)</label>
@@ -158,34 +160,12 @@
     </div>
   </div>
 
-  <div class="form-section">
-    <div class="section-title">💬 Auto-reply — engage comments &amp; mentions</div>
-    <span class="hint" style="display:block; margin-bottom:6px;">Replies in-persona to new replies on the persona's own posts and to new mentions. Runs <b>server-side</b> and via webhooks — stays on across redeploys.</span>
-    <div class="auto-toggles">
-      <label class="auto-chk"><input type="checkbox" id="auto-comments" checked> Reply to comments on my posts</label>
-      <label class="auto-chk"><input type="checkbox" id="auto-mentions" checked> Reply to mentions</label>
-    </div>
-    <div class="field" style="margin-top:12px; max-width:220px;">
-      <label>Seconds between rounds</label>
-      <select id="chat-interval">
-        <option value="90">90s</option><option value="180" selected>3 min</option><option value="300">5 min</option><option value="600">10 min</option>
-      </select>
-    </div>
-    <div style="display:flex; gap:8px; align-items:center; margin-top:14px; flex-wrap:wrap;">
-      <button class="btn-ai" id="chat-start" onclick="startChat()">▶ Start auto-reply</button>
-      <button class="btn-ai" id="chat-stop" style="background:#4c0519; display:none;" onclick="stopChat()">■ Stop</button>
-      <button class="btn-ai" style="background:var(--border);" onclick="saveAuto()">Save server-side</button>
-      <span class="conn-pill" id="chat-state">idle</span>
-    </div>
-    <div class="result-box" id="auto-result"></div>
-  </div>
-
-  <div class="form-section">
+  <div id="sec-log" class="form-section" data-tab="advanced">
     <div class="section-title">📜 Activity log</div>
     <div class="auto-log" id="auto-log"><span class="hint">Auto-reply activity appears here.</span></div>
   </div>
 
-  <div class="form-section">
+  <div id="sec-compose" class="form-section" data-tab="settings">
     <div class="section-title">📝 Compose</div>
     <span class="hint" style="display:block; margin-bottom:14px;">Post straight away, or put it on the calendar below. Leave the text empty and the persona writes it from the topic.</span>
     <div class="field full">
@@ -236,7 +216,7 @@
     </div>
   </div>
 
-  <div class="form-section">
+  <div id="sec-plan" class="form-section" data-tab="settings">
     <div class="section-title">🗓 Content plan</div>
     <span class="hint" style="display:block; margin-bottom:12px;">Everything queued for Threads. The server sends each one at its slot, so this keeps running with the tab closed.</span>
     <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:12px;">
@@ -248,7 +228,30 @@
     <div class="result-box" id="queue-list"><span class="hint">Loading…</span></div>
   </div>
 
-  <div class="form-section">
+  <div id="sec-auto" class="form-section" data-tab="settings">
+    <div class="section-title">💬 Auto-reply — engage comments &amp; mentions</div>
+    <span class="hint" style="display:block; margin-bottom:6px;">Replies in-persona to new replies on her own posts, to mentions, and to DMs. Runs <b>server-side</b> — it keeps going with this tab closed. Public replies never carry a link or an offer; only a DM runs the funnel.</span>
+    <div class="auto-toggles">
+      <label class="auto-chk"><input type="checkbox" id="auto-comments" checked> Reply to comments on my posts</label>
+      <label class="auto-chk"><input type="checkbox" id="auto-mentions" checked> Reply to mentions</label>
+      <label class="auto-chk"><input type="checkbox" id="auto-dms" checked> Answer DMs <span class="hint" style="margin-left:4px;">(runs the funnel)</span></label>
+    </div>
+    <div class="field" style="margin-top:12px; max-width:220px;">
+      <label>Seconds between rounds</label>
+      <select id="chat-interval">
+        <option value="90">90s</option><option value="180" selected>3 min</option><option value="300">5 min</option><option value="600">10 min</option>
+      </select>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center; margin-top:14px; flex-wrap:wrap;">
+      <button class="btn-ai" id="chat-start" onclick="startChat()">▶ Start auto-reply</button>
+      <button class="btn-ai" id="chat-stop" style="background:#4c0519; display:none;" onclick="stopChat()">■ Stop</button>
+      <button class="btn-ai" style="background:var(--border);" onclick="saveAuto()">Save server-side</button>
+      <span class="conn-pill" id="chat-state">idle</span>
+    </div>
+    <div class="result-box" id="auto-result"></div>
+  </div>
+
+  <div id="sec-webhook" class="form-section" data-tab="advanced">
     <div class="section-title">🔗 Webhook (real-time)</div>
     <span class="hint" style="display:block; margin-bottom:8px;">For instant replies without polling, add this in your Meta app's Threads webhook settings (topics: <code>replies</code>, <code>mentions</code>):</span>
     <div class="field full">
@@ -259,7 +262,7 @@
       <label>Verify token <span style="font-weight:400;color:var(--text-muted);">(default shown; set env <code>threads_webhook_verify_token</code> to change)</span></label>
       <input type="text" id="wh-token" value="threads-verify" readonly>
     </div>
-    <div class="note" style="margin-top:12px;">⚠ Threads has <b>no DM API</b> — this bot only does public replies, mentions, and posts. The PPV / paid-content funnel is not possible on Threads.</div>
+    <div class="note" style="margin-top:12px;">⚠ DMs ride her Instagram session, not an official API, and there is no paywall to verify a sale — so a DM offer is her profile or linktree, never a direct unlock link. Meta filters known paysite domains.</div>
   </div>
 
 </div>
@@ -278,7 +281,11 @@ async function refreshStatus(){
   }catch(e){}
 }
 
-async function switchPersona(){ await refreshStatus(); updateConn(); }
+async function switchPersona(){
+  await refreshStatus();
+  updateConn();
+  if(window.PlatformConsole) PlatformConsole.reset();
+}
 
 async function init(){
   try {
@@ -314,7 +321,9 @@ function prefillConnect(){
 
 function mode(){ return (connStatus[persona()]||{}).mode || ''; }
 
-function updateConn(){
+function updateConn(){ paintConn(); loadAuto(); loadVault(); loadQueue(); }
+
+function paintConn(){
   const pill=document.getElementById('conn-pill'), info=connStatus[persona()]||{};
   const connected=!!info.connected, viaIg=info.mode==='instagram';
   if(connected){
@@ -332,7 +341,6 @@ function updateConn(){
   document.getElementById('connect-panel').style.display='none';
   document.getElementById('connect-step2').style.display='none';
   document.getElementById('connect-status').innerHTML='';
-  loadAuto(); loadVault(); loadQueue();
 }
 
 function countText(){
@@ -569,6 +577,7 @@ async function loadAuto(){
     const a=await (await fetch('/api/threads/auto?persona='+encodeURIComponent(persona()))).json();
     document.getElementById('auto-comments').checked = a.reply_comments!==false;
     document.getElementById('auto-mentions').checked = a.reply_mentions!==false;
+    document.getElementById('auto-dms').checked = a.reply_dms!==false;
     const st=document.getElementById('chat-state');
     if(a.enabled){ st.textContent='● server-side on'; st.className='conn-pill run'; }
   }catch(e){}
@@ -580,6 +589,7 @@ async function saveAuto(){
   const data=await post('/api/threads/auto',{persona:persona(),
     reply_comments:document.getElementById('auto-comments').checked,
     reply_mentions:document.getElementById('auto-mentions').checked,
+    reply_dms:document.getElementById('auto-dms').checked,
     enabled:true});
   if(!data.ok){ err(box,data.error); return; }
   box.innerHTML='<span class="hint" style="color:#4ade80;">✓ Saved — runs server-side + via webhook.</span>';
@@ -636,7 +646,51 @@ async function runChatRound(){
 }
 window.addEventListener('beforeunload',()=>{ if(chatRunning) stopChat(); });
 
-init();
+function threadsHealth(t){
+  return [{state:t.connected?'ok':'bad',
+    label:t.connected
+      ? (t.mode==='instagram'
+          ? 'Connected through her Instagram session'
+          : 'Connected through a Threads app')
+      : 'No Threads account is connected',
+    hint:t.connected
+      ? (t.mode==='instagram'
+          ? 'A Threads account is an Instagram account, so the Instagram sign-in carries it.'
+          : 'Signed in as @'+(t.username||'her account')+' through the Threads graph API.')
+      : 'Connect her on Instagram and Threads comes with it, or add a Threads app under Settings.'}];
+}
+
+PlatformConsole.register({
+  platform:'threads',
+  persona:persona,
+  statusUrl:s=>'/api/threads/status?persona='+encodeURIComponent(s),
+  emptyHint:'No Threads DMs yet — she answers them as they arrive.',
+  read:d=>{
+    const t=(d||{})[persona()]||{};
+    const viaIg=t.mode==='instagram';
+    return {
+      live: !!t.connected,
+      broken: !t.connected,
+      title: t.connected?'Her Threads account is connected':'No Threads account is connected',
+      sub: t.connected
+        ? (viaIg?('Riding her Instagram session as @'+(t.username||'her account')
+                  +' — ready to post and to schedule.')
+                :('Signed in as @'+(t.username||'her account')+' through a Threads app.'))
+        : 'Connect her on Instagram under Settings — a Threads account is an Instagram account.',
+      health: threadsHealth(t),
+      steps: [
+        {label:'Connect',  done:!!t.connected, tab:'settings', focus:'sec-account'},
+        {label:'Write',    done:!!t.connected, tab:'settings', focus:'sec-compose'},
+        {label:'Schedule', done:!!t.connected, tab:'settings', focus:'sec-plan'},
+      ],
+    };
+  },
+  fixTab:p=>({tab:'settings', focus:'sec-account', label:'Open settings'}),
+  // One status fetch serves the shell and the page's own pill.
+  onStatus:d=>{ connStatus=d||{}; paintConn(); },
+});
+
+init().then(()=>PlatformConsole.mount('.xbot-wrap'));
 </script>
 </body>
 </html>
