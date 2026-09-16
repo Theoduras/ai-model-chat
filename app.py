@@ -1302,6 +1302,98 @@ for _key, _base in _BASE_TIERS.items():
                                    'monthly_equiv': round(_annual_price / 12, 2)}
 del _key, _base, _annual_price
 
+# The homepage feature matrix. Every row resolves itself from a tier's
+# capabilities so the marketing copy cannot drift from what the plan actually
+# unlocks; detail() returns the per-tier line, or None when the tier lacks it.
+FEATURE_ROWS = [
+    ('Personas', 'AI persona builder',
+     lambda c: 'Visual builder: voice, backstory, archetype, warmth, escalation'),
+    ('Personas', 'How many personas',
+     lambda c: ('Unlimited personas' if c['personas'] is None
+                else f"{c['personas']} persona" + ('' if c['personas'] == 1 else 's'))),
+    ('Personas', 'AI persona generation',
+     lambda c: 'Generate backstory, speech style, interests and triggers'),
+    ('Personas', 'AI image generation',
+     lambda c: ('Unlimited generations' if c['image_generations_month'] is None
+                else f"{c['image_generations_month']} generations a month")),
+    ('Personas', 'Photo library',
+     lambda c: 'Unlimited uploads, SFW and NSFW sets, per-photo tagging'),
+    ('Personas', 'Outfit locking + media tagging',
+     lambda c: 'Keep her in one outfit per set and tag media for the funnel'
+     if c['outfit_lock'] else (False, 'Pro and up')),
+    ('Chat', 'Live chat engine',
+     lambda c: 'Memory of the fan, in-character replies, tone matching'),
+    ('Chat', 'Test chat + shareable landing page',
+     lambda c: 'Talk to her yourself and send fans a hosted landing page'),
+    ('Chat', 'Funnel phases',
+     lambda c: (f"Up to {c['phases_max']} phases with per-phase photo rates"
+                if c['phases_max'] > 3
+                else f"Up to {c['phases_max']} phases + CTA")),
+    ('Chat', 'Scheduled follow-ups',
+     lambda c: 'Win back fans who go quiet, on your schedule'
+     if c['scheduled_followups'] else (False, 'Pro and up')),
+    ('Selling', 'PPV engine',
+     lambda c: 'Price ladders, per-fan pricing and timed re-offers'
+     if c['platforms'] != [] else (False, 'Needs a connected platform')),
+    ('Selling', 'PPV reconciliation',
+     lambda c: 'Match sent PPVs against Fanvue earnings'
+     if c['ppv_reconcile'] else (False, 'Agency only')),
+    ('Selling', 'Conversation + revenue analytics',
+     lambda c: 'Funnel stage per fan, conversion and revenue reporting'
+     if c['analytics'] else (False, 'Agency only')),
+    ('Platforms', 'Connected platforms',
+     lambda c: ((False, 'The demo stops before the platform connection')
+                if c['platforms'] == [] else
+                'Fanvue, OnlyFans, Telegram, X and Threads'
+                if c['platforms'] is None else
+                ' or '.join(PLATFORM_NAMES.get(p, p.title())
+                            for p in c['platforms']))),
+    ('Platforms', 'Growth planner',
+     lambda c: 'Plan, draft and schedule posts that feed the funnel'
+     if c['platforms'] != [] else (False, 'Needs a connected platform')),
+    ('Team', 'Team seats',
+     lambda c: (f"{c['seats']} seats with roles" if c['seats'] > 1
+                else '1 seat')),
+    ('Team', 'Support',
+     lambda c: {'demo': 'Email support', 'starter': 'Email support',
+                'pro': 'Priority support'}.get(c['_key'], 'Dedicated support')),
+]
+
+FEATURE_TIER_ORDER = DEFAULT_TIER_ORDER
+
+
+def _feature_matrix():
+    out = {}
+    for key in FEATURE_TIER_ORDER:
+        tier = _BASE_TIERS[key]
+        caps = {**tier['capabilities'], '_key': key}
+        rows = []
+        for group, label, detail in FEATURE_ROWS:
+            text = detail(caps)
+            included = not isinstance(text, tuple)
+            if not included:
+                text = text[1]
+            rows.append({'group': group, 'label': label,
+                         'detail': text or '', 'included': included and bool(text)})
+        plats = caps['platforms']
+        out[key] = {'name': tier['name'], 'price': tier['price'],
+                    'blurb': tier['blurb'], 'features': rows,
+                    'highlights': [
+                        {'value': ('\u221e' if caps['personas'] is None
+                                   else str(caps['personas'])),
+                         'label': 'Personas'},
+                        {'value': ('5' if plats is None else str(len(plats))),
+                         'label': 'Platforms'},
+                        {'value': str(caps['phases_max']),
+                         'label': 'Funnel phases'},
+                        {'value': ('\u221e' if caps['image_generations_month'] is None
+                                   else str(caps['image_generations_month'])),
+                         'label': 'AI images / mo'},
+                        {'value': str(caps['seats']), 'label': 'Team seats'},
+                    ]}
+    return out
+
+
 OXAPAY_API = 'https://api.oxapay.com/v1/payment/invoice'
 STRIPE_API = 'https://api.stripe.com/v1'
 # Software as a service (SaaS) — business use. Required by Managed Payments.
@@ -2067,8 +2159,9 @@ FORGOT_PASSWORD_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UT
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
 <link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Reset your password</title>
-<style>""" + ACCOUNT_CSS + """</style></head><body data-page="login"><div class="wrap"><div class="card">
-<h1>Reset your password</h1><p class="sub">Enter your account email and we'll send a reset link.</p>
+<script src="/js/page-editor.js" defer></script>
+<style>""" + ACCOUNT_CSS + """</style></head><body data-page="forgot"><div class="wrap"><div class="card">
+<h1 data-edit-id="h1">Reset your password</h1><p class="sub" data-edit-id="sub">Enter your account email and we'll send a reset link.</p>
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
 {% if sent %}<div class="sub" style="margin-bottom:18px">If an account exists for {{ email }}, a reset link has been sent.
 {% if reset_link %}<br><br>SMTP isn't configured, so here's the link directly: <a href="{{ reset_link }}">{{ reset_link }}</a>{% endif %}
@@ -2076,7 +2169,7 @@ FORGOT_PASSWORD_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UT
 {% else %}
 <form method="post">
 <label>Email</label><input type="email" name="email" required autocomplete="email" value="{{ email or '' }}">
-<button type="submit">Send reset link</button></form>
+<button type="submit"><span data-edit-id="submit-text">Send reset link</span></button></form>
 {% endif %}
 <div class="alt"><a href="/login">Back to sign in</a></div>
 </div></div></body></html>"""
@@ -2085,12 +2178,13 @@ RESET_PASSWORD_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
 <link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Choose a new password</title>
-<style>""" + ACCOUNT_CSS + """</style></head><body data-page="login"><div class="wrap"><div class="card">
-<h1>Choose a new password</h1>
+<script src="/js/page-editor.js" defer></script>
+<style>""" + ACCOUNT_CSS + """</style></head><body data-page="reset"><div class="wrap"><div class="card">
+<h1 data-edit-id="h1">Choose a new password</h1>
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
 <form method="post">
 <label>New password</label><input type="password" name="password" required autocomplete="new-password" placeholder="At least 8 characters">
-<button type="submit">Set new password</button></form>
+<button type="submit"><span data-edit-id="submit-text">Set new password</span></button></form>
 <div class="alt"><a href="/login">Back to sign in</a></div>
 </div></div></body></html>"""
 
@@ -2131,7 +2225,7 @@ plan is active{% if user.expires_at %} until {{ user.expires_at[:10] }}{% endif 
 <button type="button" class="active" data-set-period="month">Monthly</button>
 <button type="button" data-set-period="year">Annual <span class="save">Save {{ annual_save_pct }}%</span></button>
 </div>
-<p class="permo" style="margin:2px 0 10px">All prices exclude VAT — any VAT due is added at checkout. Card plans renew automatically and can be cancelled any time from your account. Crypto payments are one-off — you re-pay when the plan runs out.</p>
+<p class="permo" style="margin:2px 0 10px" data-edit-id="vat-note">All prices exclude VAT — any VAT due is added at checkout. Card plans renew automatically and can be cancelled any time from your account. Crypto payments are one-off — you re-pay when the plan runs out.</p>
 {% set pay_slots = [(1 if stripe_enabled else 0) + (1 if oxapay_enabled else 0)
                     + (1 if dev_mode else 0), 1]|max %}
 <div class="tiers" role="radiogroup" aria-label="Plans">
@@ -2258,6 +2352,7 @@ DEMO_ENDS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png">
 <title>This is where the demo ends</title>
 <script src="/js/analytics.js" defer></script>
+<script src="/js/page-editor.js" defer></script>
 <style>""" + ACCOUNT_CSS + """
 .lockart{width:64px;height:64px;border-radius:18px;display:flex;align-items:center;justify-content:center;
   background:var(--grad);background-size:300% 100%;margin:0 auto 18px}
@@ -2274,18 +2369,18 @@ DEMO_ENDS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 </style></head><body data-page="demo-ends"><div class="wrap"><div class="card" style="text-align:center">
 <div class="lockart"><svg viewBox="0 0 24 24" aria-hidden="true">
 <rect x="4" y="10.5" width="16" height="10" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></svg></div>
-<h1 style="margin-bottom:6px">This is where the demo ends</h1>
-<p class="sub">Connecting {{ platform_name }} is the paid half of Velvetfunnel. The demo
+<h1 style="margin-bottom:6px" data-edit-id="h1">This is where the demo ends</h1>
+<p class="sub" data-edit-id="sub">Connecting {{ platform_name }} is the paid half of Velvetfunnel. The demo
 gives you the persona, the funnel and the whole builder, with nothing capped &mdash; it
 stops at the moment she would start talking to your real fans and taking their money.</p>
 <ul class="steps">
-<li>Build as many personas as you like in here. Nothing runs out.</li>
-<li>Starter connects her to Fanvue and turns on the full PPV engine.</li>
-<li>{{ currency }}{{ starter_price }}/month, excl. VAT. Cancel any time.</li>
+<li data-edit-id="step-1">Build as many personas as you like in here. Nothing runs out.</li>
+<li data-edit-id="step-2">Starter connects her to Fanvue and turns on the full PPV engine.</li>
+<li>{{ currency }}{{ starter_price }}<span data-edit-id="step-3">/month, excl. VAT. Cancel any time.</span></li>
 </ul>
-<a class="btn" href="/register">Create your own account</a>
-<a class="ghostbtn" href="/pricing">See what the plans cost</a>
-<p class="kept">The demo is a shared account, so build in your own to keep your work.</p>
+<a class="btn" href="/register"><span data-edit-id="cta-primary">Create your own account</span></a>
+<a class="ghostbtn" href="/pricing"><span data-edit-id="cta-secondary">See what the plans cost</span></a>
+<p class="kept" data-edit-id="kept">The demo is a shared account, so build in your own to keep your work.</p>
 </div></div></body></html>"""
 
 
@@ -3582,6 +3677,13 @@ def api_pricing():
                     'custom': CUSTOM_TIER, 'currency': CURRENCY_SYMBOL})
 
 
+@app.route('/api/features')
+def api_features():
+    """Public: the homepage feature matrix, resolved per tier."""
+    return jsonify({'order': FEATURE_TIER_ORDER, 'tiers': _feature_matrix(),
+                    'currency': CURRENCY_SYMBOL})
+
+
 @app.route('/pricing')
 def pricing():
     user = _current_user() or {'email': '', 'status': 'unpaid', 'tier': '',
@@ -4119,7 +4221,8 @@ def landing():
 # Inline text/image editing for the plain marketing pages (not the persona
 # landing page, not the dashboard) — see js/page-editor.js. One JSON blob per
 # page, keyed by the data-edit-id an operator clicked on.
-SITE_CONTENT_PAGES = {'home', 'login', 'register', 'pricing'}
+SITE_CONTENT_PAGES = {'home', 'login', 'register', 'pricing', 'landing',
+                      'blog', 'blogpost', 'demo-ends', 'forgot', 'reset'}
 
 
 @app.route('/api/site-content/<page>')
@@ -6990,12 +7093,76 @@ def _growth_queue_rows(persona, limit=50, since=None, until=None):
                  'error': r.error or '',
                  'external_id': r.external_id or '',
                  'media_id': r.media_id or '',
+                 'audience': r.audience or '',
+                 'price_cents': int(r.price_cents or 0),
                  'run_at': int(r.run_at.replace(tzinfo=timezone.utc).timestamp())
                  if r.run_at else 0}
                 for r in list_posts(sdb, persona, limit=limit,
                                     since=since, until=until)]
     finally:
         sdb.close()
+
+
+def _growth_remote_rows(persona, since, until, rows):
+    """What the Fanvue feed already has booked in this window, so the week does
+    not plan on top of posts made in the Fanvue app itself. Anything we queued
+    ourselves is dropped — it is already on the calendar as the real row.
+
+    Returns (rows, error). A Fanvue outage or a missing scope costs the mirror,
+    never the planner: the queue is ours and renders without it."""
+    if not (since or until):
+        return [], ''
+    try:
+        posts = _fv_posts(persona, since, until)
+    except Exception as e:
+        logging.info('planner: no Fanvue mirror for %s: %s', persona, str(e)[:200])
+        return [], str(e)[:200]
+    ours = {r['external_id'] for r in rows if r.get('external_id')}
+    out = []
+    for post in posts:
+        uid = str((post or {}).get('uuid') or '')
+        if not uid or uid in ours:
+            continue
+        live = str(post.get('publishedAt') or '')
+        when = live or str(post.get('publishAt') or '') or str(post.get('createdAt') or '')
+        out.append({'external_id': uid, 'platform': 'fanvue',
+                    'text': str(post.get('text') or ''),
+                    'status': 'posted' if live else 'scheduled',
+                    'price_cents': int(post.get('price') or 0),
+                    'audience': str(post.get('audience') or ''),
+                    'read_only': True, 'run_at': _fv_epoch(when)})
+    out.sort(key=lambda r: r['run_at'])
+    return out, ''
+
+
+def _growth_post_extras(platform, data, media_id, current=None):
+    """The audience and price a Fanvue feed post carries, or empty for every
+    other channel. Returns (audience, price_cents, error)."""
+    if growth.normalise_source(platform) != 'fanvue':
+        return '', 0, ''
+    cur = current or {}
+    audience = _fv_audience(data.get('audience') or cur.get('audience') or '')
+    raw = data.get('price_cents', cur.get('price_cents'))
+    try:
+        price = int(raw or 0)
+    except (TypeError, ValueError):
+        return '', 0, 'That price is not a number.'
+    if price < 0:
+        return '', 0, 'A price cannot be negative.'
+    if price and not media_id:
+        return '', 0, 'A paid Fanvue post needs media behind the price.'
+    if price and price < FV_POST_PRICE_MIN:
+        return '', 0, (f'Fanvue will not take a price under '
+                       f'${FV_POST_PRICE_MIN / 100:.2f}.')
+    return audience, price, ''
+
+
+def _fv_media_id(media_id):
+    """The Fanvue vault uuid behind a queue row's media, or ''. An item already
+    in her vault is carried as 'fv:{uuid}' so it needs no column of its own and
+    no upload — Fanvue is holding the file already."""
+    raw = str(media_id or '')
+    return raw[3:].strip() if raw.startswith('fv:') else ''
 
 
 def _growth_media_check(persona, platform, media_id):
@@ -7005,6 +7172,15 @@ def _growth_media_check(persona, platform, media_id):
     between."""
     if not media_id:
         return '', ''
+    if _fv_media_id(media_id):
+        if growth.normalise_source(platform) != 'fanvue':
+            label = growth.POST_PLATFORMS.get(
+                growth.normalise_source(platform), {}).get('label', platform)
+            return '', (f'That file lives in the Fanvue vault, so only Fanvue can '
+                        f'post it. Pick something from the persona library for {label}.')
+        # Fanvue has already taken and processed this one; there is nothing here
+        # left to validate that it did not validate itself.
+        return media_id, ''
     media = _media_row(persona, media_id)
     if not media:
         return '', 'That media is not in this persona\'s library.'
@@ -7090,8 +7266,13 @@ def api_growth_queue():
                 if why:
                     failed.append({'platform': plat, 'error': why})
                     continue
+                audience, price, why = _growth_post_extras(plat, data, media_id)
+                if why:
+                    failed.append({'platform': plat, 'error': why})
+                    continue
                 row = queue_post(sdb, persona, plat, text, run_at, media_id,
-                                 growth.queue_status_for(plat))
+                                 growth.queue_status_for(plat),
+                                 audience=audience, price_cents=price)
                 queued.append({'platform': plat, 'id': row.id,
                                'status': growth.queue_status_for(plat)})
             sdb.commit()
@@ -7142,10 +7323,21 @@ def api_growth_queue():
                 media_id, why = _growth_media_check(persona, row.platform, wanted)
                 if why:
                     return jsonify({'ok': False, 'error': why}), 400
-            if text is None and run_at is None and media_id is None:
+            audience = price = None
+            if (('audience' in data or 'price_cents' in data)
+                    and growth.normalise_source(row.platform) == 'fanvue'):
+                at_media = media_id if media_id is not None else (row.media_id or '')
+                audience, price, why = _growth_post_extras(
+                    row.platform, data, at_media,
+                    {'audience': row.audience, 'price_cents': row.price_cents})
+                if why:
+                    return jsonify({'ok': False, 'error': why}), 400
+            if (text is None and run_at is None and media_id is None
+                    and audience is None):
                 return jsonify({'ok': False, 'error': 'Nothing to change.'}), 400
             done = update_post(sdb, persona, post_id, text=text, run_at=run_at,
-                               media_id=media_id)
+                               media_id=media_id, audience=audience,
+                               price_cents=price)
             sdb.commit()
         finally:
             sdb.close()
@@ -7188,10 +7380,12 @@ def api_growth_queue():
         since=_growth_naive_utc(since) if since else None,
         until=_growth_naive_utc(until) if until else None)
     stats = growth.queue_stats(rows, now=int(time.time()))
+    remote, remote_error = _growth_remote_rows(persona, since, until, rows)
     return jsonify({'ok': True, 'persona': persona, 'beta': _growth_on(persona),
                     'worker_on': _worker_enabled('GROWTH_QUEUE_WORKER'),
                     'stale_hours': GROWTH_QUEUE_STALE_HRS,
-                    'queue': rows, **stats})
+                    'queue': rows, 'remote': remote,
+                    'remote_error': remote_error, **stats})
 
 
 def _growth_channel_link(persona, channel, bot=None):
@@ -7234,10 +7428,63 @@ def _content_level_for(persona, platform):
                                 cfg.get('nsfw_enabled'), cfg.get('nsfw_level'))
 
 
-def _content_level_note(persona, platform):
+def _content_level_note(persona, platform, rating=''):
+    """The content level this draft is written at. `rating` is the creator
+    asking for this one draft to be safe for work or not, whatever the persona's
+    standing setting says — except on a channel whose own rules bar it, where
+    the floor still wins and asking cannot lift it."""
     enabled, level = _content_level_for(persona, platform)
+    rating = str(rating or '').strip().lower()
+    if rating == 'sfw':
+        enabled = False
+    elif rating == 'nsfw' and growth.base_platform(platform) not in growth.SFW_LOCKED:
+        enabled = True
+        level = level if enabled and level in growth.RATING_LEVELS else level
     clause = growth.content_level_clause(enabled, level)
-    return f'\n\nContent level: {clause}' if clause else ''
+    if not clause:
+        return ('\n\nContent level: keep it completely safe for work — flirty is '
+                'fine, sexual is not.')
+    return f'\n\nContent level: {clause}'
+
+
+def _draft_media_bytes(persona, media_id):
+    """The picture a draft is being written about, as (bytes, mime), or
+    (None, ''). A Fanvue vault item is fetched by its thumbnail — the full file
+    can be a video or hundreds of megabytes, and a frame is enough to write a
+    caption from."""
+    if not media_id:
+        return None, ''
+    uuid = _fv_media_id(media_id)
+    try:
+        if uuid:
+            scope = _fanvue_scope(persona)
+            m = _fanvue_call(persona, 'GET',
+                             f'{scope}/media/{uuid}?variants={FV_MEDIA_VARIANTS}') or {}
+            url = _fv_media_thumb(m)
+            if not url:
+                return None, ''
+            req = urllib.request.Request(url, headers={'User-Agent': 'ai-model-chat'})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                return r.read(), (r.headers.get('Content-Type') or 'image/jpeg')
+        media = _media_row(persona, media_id)
+        if not media:
+            return None, ''
+        blob, mime = _media_bytes(media)
+        # Gemini reads stills. A clip's caption is written from its words alone.
+        return (blob, mime) if str(mime or '').startswith('image/') else (None, '')
+    except Exception as e:
+        logging.info('draft: no picture for %s/%s: %s', persona, media_id, str(e)[:120])
+        return None, ''
+
+
+def _draft_media_note(has_image):
+    if not has_image:
+        return ''
+    return ('\n\nThe picture going out with this post is attached. Write about '
+            'what is actually in it — what you are wearing, doing, where you are '
+            '— so the words and the image are one post rather than two. Never '
+            'describe it like a caption writer looking at a photo; you were '
+            'there.')
 
 
 def _draft_link(persona, platform):
@@ -7509,6 +7756,13 @@ def api_growth_drafts():
     # so "write me everything" does not quietly cost an extra model call.
     wanted = [p for p in wanted if p in growth.POST_PLATFORMS] or growth.default_platforms()
     series = data.get('series')
+    # 'sfw' or 'nsfw' asks for this one draft at that level; '' keeps whatever
+    # the persona is already set to.
+    rating = str(data.get('rating') or '').strip().lower()
+    if rating not in ('sfw', 'nsfw'):
+        rating = ''
+    picture, pic_mime = _draft_media_bytes(persona, str(data.get('media_id') or '').strip())
+    media_note = _draft_media_note(bool(picture))
 
     out = []
     for plat in wanted:
@@ -7520,7 +7774,8 @@ def api_growth_drafts():
             f'{idea}. It must be {spec["brief"]}. Stay under {spec["cap"]} '
             'characters. Return only the post itself, no preamble and no quotes.'
             + _series_note(series)
-            + _content_level_note(persona, plat)
+            + media_note
+            + _content_level_note(persona, plat, rating)
             + _no_repeat_block(persona, base))
         # X and Threads render a bare link as clickable, so it rides in the
         # caption; Instagram and TikTok already say "link in bio" in their own
@@ -7535,8 +7790,9 @@ def api_growth_drafts():
             instruction += growth.OVERLAY_BRIEF
 
         def write(extra=''):
-            raw = _persona_text(persona, instruction + extra,
-                                max_tokens=500, temperature=1.0)
+            raw = _persona_text(persona, instruction + extra, max_tokens=500,
+                                temperature=1.0,
+                                image=(picture, pic_mime) if picture else None)
             head, body = growth.split_overlay(raw) if overlay_wanted else ('', raw)
             return head, growth.trim_to(body, max(budget, 0))
 
@@ -7561,6 +7817,7 @@ def api_growth_drafts():
                     'link': '' if inline else link, 'overlay': overlay,
                     'cap': spec['cap'], 'publishable': plat in growth.PUBLISHABLE})
     return jsonify({'ok': True, 'persona': persona, 'idea': idea, 'drafts': out,
+                    'rating': rating, 'saw_media': bool(picture),
                     'beta': _growth_on(persona)})
 
 
@@ -7571,7 +7828,7 @@ GROWTH_QUEUE_RETRY_MINS = 10
 GROWTH_QUEUE_STALE_HRS = 6
 
 
-def _growth_publish(persona, platform, text, media_id=''):
+def _growth_publish(persona, platform, text, media_id='', audience='', price_cents=0):
     """Put one post out and write it into the content register. Returns the id
     the channel gave it; raises on failure, because only the caller knows
     whether this attempt is worth another one."""
@@ -7579,16 +7836,30 @@ def _growth_publish(persona, platform, text, media_id=''):
     text = growth.trim_post(plat, text)
     if not text:
         raise ValueError('nothing to post')
-    media = _media_row(persona, media_id)
-    if media_id and not media:
+    vault_uuid = _fv_media_id(media_id)
+    media = None if vault_uuid else _media_row(persona, media_id)
+    if media_id and not vault_uuid and not media:
         # The photo was deleted between queueing and sending. Going out without
         # it would quietly post a caption for a picture nobody can see.
         raise RuntimeError('the media on this post is no longer in the library')
+    if vault_uuid and plat != 'fanvue':
+        raise RuntimeError('that file is in the Fanvue vault and only Fanvue can post it')
     if media:
         why = growth.media_reject(plat, media.get('kind'))
         if why:
             raise RuntimeError(why)
-    if plat == 'x':
+    if plat == 'fanvue':
+        uuids = [vault_uuid] if vault_uuid else []
+        if media:
+            blob, mime = _media_bytes(media)
+            kind = growth.media_kind(mime)
+            ext = (mime.split('/')[-1] or 'bin').split(';')[0]
+            uuids.append(_fv_upload_media(
+                persona, blob, kind, f'{media_id or kind}.{ext}',
+                content_type=mime or 'application/octet-stream'))
+        posted_id = _fv_create_post(persona, text, media_uuids=uuids,
+                                    price_cents=price_cents, audience=audience)
+    elif plat == 'x':
         body = {'text': text}
         if media:
             blob, mime = _media_bytes(media)
@@ -7614,6 +7885,7 @@ def _growth_queue_round():
             post_id, persona = row.id, row.persona
             platform, text = row.platform, row.text
             media_id = row.media_id or ''
+            audience, price_cents = row.audience or '', int(row.price_cents or 0)
             if not _growth_on(persona):
                 continue
             late = (now - row.run_at).total_seconds() if row.run_at else 0
@@ -7627,7 +7899,9 @@ def _growth_queue_round():
             if not claim_post(sdb, post_id):
                 continue
             try:
-                posted_id = _growth_publish(persona, platform, text, media_id)
+                posted_id = _growth_publish(persona, platform, text, media_id,
+                                            audience=audience,
+                                            price_cents=price_cents)
                 finish_post(sdb, post_id, external_id=posted_id)
                 logger.info('QUEUE posted [%s/%s] id=%s %s',
                             persona, platform, posted_id, text[:60])
@@ -9382,7 +9656,8 @@ def _fan_memory_block(mem, persona=None):
         "detail at a time, and never the same one two messages running.\n\n")
 
 
-def _persona_text(persona, instruction, history=None, max_tokens=1024, temperature=0.9):
+def _persona_text(persona, instruction, history=None, max_tokens=1024,
+                  temperature=0.9, image=None):
     """Generate an in-character message for a persona via Gemini.
 
     Returns '' when there is no Gemini to ask. Every caller already treats an
@@ -9398,7 +9673,15 @@ def _persona_text(persona, instruction, history=None, max_tokens=1024, temperatu
     for m in (history or [])[-20:]:
         contents.append({'role': 'model' if m['role'] in ('bot', 'model') else 'user',
                          'parts': [{'text': m['content']}]})
-    contents.append({'role': 'user', 'parts': [{'text': instruction}]})
+    parts = [{'text': instruction}]
+    # A picture rides with the instruction so the model writes about what is
+    # actually in the frame rather than about the idea in the abstract.
+    if image and image[0]:
+        import base64
+        parts.append({'inline_data': {
+            'mime_type': image[1] or 'image/jpeg',
+            'data': base64.b64encode(image[0]).decode()}})
+    contents.append({'role': 'user', 'parts': parts})
     cfg = _no_thinking(types.GenerateContentConfig(
         system_instruction=system_prompt, temperature=temperature,
         max_output_tokens=max_tokens))
@@ -11011,9 +11294,11 @@ FANVUE_REQUIRED_SCOPES = 'openid read:self read:chat write:chat'
 # token is still better than no connection, so they sit above the floor.
 FANVUE_CORE_SCOPES = FANVUE_REQUIRED_SCOPES + ' offline offline_access'
 FANVUE_SCOPES = (FANVUE_CORE_SCOPES + ' read:fan read:media write:media '
-                 'read:creator read:agency '
+                 'read:creator read:agency write:creator '
                  # /earnings backs the purchase reconciler.
-                 'read:insights')
+                 'read:insights '
+                 # Feed posts planned in the content planner.
+                 'read:post write:post')
 
 
 # What each optional permission actually buys, so a refusal can be described by
@@ -11027,12 +11312,16 @@ FANVUE_SCOPE_FEATURES = {
     'write:media': 'uploading media to the vault',
     'read:fan': "reading a fan's profile details",
     'read:creator': 'reading the creator profile',
+    'write:creator': 'planning Fanvue posts on an agency login',
+    'read:post': 'showing what is already booked on the Fanvue feed in the planner',
+    'write:post': 'posting to the Fanvue feed from the content planner',
     'offline': 'staying connected without reauthorizing',
     'offline_access': 'staying connected without reauthorizing',
 }
 # Missing these costs a side feature; anything else missing degrades the chat
 # itself and is worth shouting about.
-FANVUE_OPTIONAL_SCOPES = {'read:agency', 'read:insights', 'write:media', 'read:creator'}
+FANVUE_OPTIONAL_SCOPES = {'read:agency', 'read:insights', 'write:media', 'read:creator',
+                          'write:creator', 'read:post', 'write:post'}
 
 
 def _fanvue_app():
@@ -11237,18 +11526,24 @@ _FV_PATH_SCOPES = (
     ('/insights', 'read:insights'),
     ('/earnings', 'read:insights'),
     ('/users/me', 'read:self'),
+    ('/posts', 'read:post'),
     ('/creators', 'read:creator'),
 )
 
 
-def _fv_scope_for_path(path):
+def _fv_scope_for_path(path, method='GET'):
     p = (path or '').split('?')[0]
+    # Posts are the one family we call on v1; everything else is still v0.
+    if p.startswith('/v1/'):
+        p = p[3:]
     # A creator-scoped call carries the real endpoint after the uuid.
     if p.startswith('/creators/'):
         rest = p.split('/', 3)
         p = '/' + rest[3] if len(rest) > 3 else p
     for prefix, scope in _FV_PATH_SCOPES:
         if p.startswith(prefix):
+            if prefix == '/posts' and str(method).upper() != 'GET':
+                return 'write:post'
             return scope
     return ''
 
@@ -11299,16 +11594,16 @@ def _fanvue_call(persona, method, path, body=None):
             if new:
                 return _fanvue_api(method, path, new, body=body)
         if e.code == 403:
-            raise _fanvue_scope_hint(e, t, path)
+            raise _fanvue_scope_hint(e, t, path, method)
         raise
 
 
-def _fanvue_scope_hint(e, tokens, path):
+def _fanvue_scope_hint(e, tokens, path, method='GET'):
     """Say which permission a 403 is probably about. The connection can succeed
     with fewer scopes than we asked for — every call needing a missing one then
     fails identically, and nothing on screen connects that to the scope."""
     granted = (tokens.get('scope') or '').split()
-    need = _fv_scope_for_path(path)
+    need = _fv_scope_for_path(path, method)
     if need and granted and need not in granted:
         detail = (getattr(e, 'detail', '') or 'Forbidden').rstrip('.')
         e.detail = (f'{detail} — this connection was not granted "{need}" '
@@ -12102,6 +12397,101 @@ def _fv_record_drop(persona, fan_uuid, chosen, idx, price, media_uuids,
 
 # Fanvue serves media only through variant URLs, and only when the request asks
 # for them by name. blurred is what a locked item may legitimately show.
+# ── Fanvue feed posts ─────────────────────────────────────────────────────────
+# Posts are the one family we call on v1 — v0 has no cursor and pages the feed
+# by offset, which drifts under the writes the planner itself is making.
+FV_POST_AUDIENCES = ('subscribers', 'followers-and-subscribers')
+FV_POST_AUDIENCE_DEFAULT = 'followers-and-subscribers'
+FV_POST_CAP = 5000
+# Fanvue's floor for a paid post, in cents.
+FV_POST_PRICE_MIN = 300
+FV_POSTS_PAGE = 50
+FV_POSTS_MAX_PAGES = 10
+
+
+def _fv_post_path(persona, suffix=''):
+    """An agency login posts as the creator it has selected; a single account
+    posts as itself."""
+    return f'/v1{_fanvue_scope(persona)}/posts{suffix}'
+
+
+def _fv_audience(value):
+    v = str(value or '').strip()
+    return v if v in FV_POST_AUDIENCES else FV_POST_AUDIENCE_DEFAULT
+
+
+def _fv_iso(ts):
+    return datetime.fromtimestamp(int(ts), timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
+def _fv_epoch(value):
+    """An epoch from a Fanvue ISO timestamp, or 0. Fanvue writes UTC with a
+    trailing Z, which fromisoformat only learned in 3.11."""
+    raw = str(value or '').strip()
+    if not raw:
+        return 0
+    try:
+        dt = datetime.fromisoformat(raw.replace('Z', '+00:00'))
+    except ValueError:
+        return 0
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return int(dt.timestamp())
+
+
+def _fv_posts(persona, start=0, end=0, size=FV_POSTS_PAGE,
+              max_pages=FV_POSTS_MAX_PAGES):
+    """Every post on the creator's feed in a window, drafts and scheduled ones
+    included. The cursor carries the filters the first page was cut under, so
+    later pages send nothing but the cursor."""
+    q = {'size': str(int(size)), 'includeUnpublished': 'true'}
+    if start:
+        q['startDate'] = _fv_iso(start)
+    if end:
+        q['endDate'] = _fv_iso(end)
+    path = _fv_post_path(persona) + '?' + urllib.parse.urlencode(q)
+    rows, seen = [], set()
+    for _ in range(max_pages):
+        res = _fanvue_call(persona, 'GET', path) or {}
+        for row in _fv_list(res):
+            uid = str((row or {}).get('uuid') or '')
+            if uid and uid not in seen:
+                seen.add(uid)
+                rows.append(row)
+        cursor = str(res.get('nextCursor') or res.get('next_cursor') or '')
+        if not cursor:
+            break
+        path = _fv_post_path(persona) + '?' + urllib.parse.urlencode(
+            {'size': str(int(size)), 'cursor': cursor})
+    return rows
+
+
+def _fv_create_post(persona, text, media_uuids=(), price_cents=0, audience='',
+                    publish_at=None):
+    """Put one post on the creator's feed, returning the uuid Fanvue gave it.
+    Without `publish_at` it goes live now — the planner's own queue holds the
+    slot, so handing Fanvue a schedule as well would give the post two owners."""
+    media = [u for u in (media_uuids or []) if u]
+    body = {'audience': _fv_audience(audience)}
+    text = str(text or '')[:FV_POST_CAP]
+    if text:
+        body['text'] = text
+    if media:
+        body['mediaUuids'] = media
+    price = int(price_cents or 0)
+    if price:
+        if not media:
+            raise RuntimeError('a paid Fanvue post needs media behind the price')
+        if price < FV_POST_PRICE_MIN:
+            raise RuntimeError(
+                f'Fanvue will not take a price under ${FV_POST_PRICE_MIN / 100:.2f}')
+        body['price'] = price
+    if publish_at:
+        body['publishAt'] = _fv_iso(publish_at)
+    res = _fanvue_call(persona, 'POST', _fv_post_path(persona), body=body) or {}
+    return str(res.get('uuid') or '')
+
+
 FV_MEDIA_VARIANTS = 'main,thumbnail,thumbnail_gallery,blurred'
 
 

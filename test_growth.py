@@ -279,7 +279,7 @@ check('a carousel resolves to its base channel', G.base_platform('instagram_caro
 check('a real channel is its own base', G.base_platform('tiktok') == 'tiktok')
 check('the default set leaves the variants out',
       'instagram_carousel' not in G.default_platforms() and 'instagram' in G.default_platforms())
-check('the default set is the five real channels', len(G.default_platforms()) == 5)
+check('the default set is the six real channels', len(G.default_platforms()) == 6)
 check('a carousel inherits instagram\'s level',
       G.content_level({'instagram': {'nsfw_enabled': True, 'nsfw_level': 'moderate'}},
                       'instagram_carousel', False, 'suggestive') == (True, 'moderate'))
@@ -317,7 +317,7 @@ print()
 print('weekly plan')
 pstart = 1_700_000_000 - (1_700_000_000 % 86400)
 week = G.plan_week(pstart, 7)
-check('a slot per platform per day at the cadence', len(week) == 38, len(week))
+check('a slot per platform per day at the cadence', len(week) == 45, len(week))
 check('slots come out in time order',
       all(week[i]['at'] <= week[i + 1]['at'] for i in range(len(week) - 1)))
 check('the hours are the cadence hours',

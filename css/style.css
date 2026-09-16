@@ -2046,6 +2046,11 @@ body.page-dashboard .conn-dot.err { background: var(--err); }
   max-width: 480px;
   box-shadow: var(--shadow-lg);
   animation: modalIn 0.15s ease-out;
+  /* The overlay's own padding is the 40px. Without this a tall editor runs off
+     the screen and its footer buttons cannot be reached at all. */
+  max-height: calc(100vh - 40px);
+  display: flex;
+  flex-direction: column;
 }
 @keyframes modalIn {
   from { transform: translateY(8px); opacity: 0; }
@@ -2057,6 +2062,7 @@ body.page-dashboard .conn-dot.err { background: var(--err); }
   justify-content: space-between;
   padding: 18px 22px;
   border-bottom: 1px solid var(--border-soft);
+  flex-shrink: 0;
 }
 .modal-header h2 { font-size: 1.05rem; font-weight: 600; color: var(--text); }
 .modal-close {
@@ -2069,7 +2075,7 @@ body.page-dashboard .conn-dot.err { background: var(--err); }
   padding: 0 4px;
 }
 .modal-close:hover { color: var(--text); }
-.modal-body { padding: 22px; }
+.modal-body { padding: 22px; overflow-y: auto; min-height: 0; }
 .modal-footer {
   display: flex;
   align-items: center;
@@ -3581,6 +3587,16 @@ body.embedding .form-area { padding: 0; overflow: hidden; }
   border-left-color: var(--accent-line);
 }
 .pl-card.is-manual { border-left-color: var(--text-muted); }
+/* Made in the Fanvue app, shown so the week is planned around it. Not a button:
+   nothing here can change it. */
+.pl-card.is-remote {
+  border-left-color: var(--text-muted);
+  border-style: dotted;
+  border-left-style: solid;
+  opacity: 0.6;
+  cursor: default;
+}
+.pl-card.is-remote:hover { transform: none; box-shadow: none; border-color: var(--border-soft); }
 
 .pl-card-top { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
 .pl-when { font-size: 0.7rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
@@ -3669,3 +3685,74 @@ body.embedding .form-area { padding: 0; overflow: hidden; }
   padding: 1px 5px; border-radius: 3px;
   background: rgba(0, 0, 0, 0.62); color: #fff;
 }
+
+/* The Fanvue vault browser: the whole vault at a glance, rather than the first
+   page squeezed into the editor's strip. */
+.pl-vault-modal { max-width: 880px; }
+.pl-vault-bar {
+  display: flex;
+  gap: 8px;
+  padding: 14px 22px;
+  border-bottom: 1px solid var(--border-soft);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.pl-vault-bar input[type="search"] { flex: 1 1 200px; min-width: 0; }
+.pl-vault-bar select { flex: 0 1 auto; }
+.pl-vault-body { min-height: 220px; }
+.pl-vault-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(116px, 1fr));
+  gap: 10px;
+}
+.pl-vault-item {
+  background: transparent;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md);
+  padding: 6px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+}
+.pl-vault-item:hover { border-color: var(--border); }
+.pl-vault-item.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.pl-vault-item .pl-thumb { width: 100%; height: 104px; }
+.pl-vault-item .pl-thumb img,
+.pl-vault-item .pl-thumb video { width: 100%; height: 100%; object-fit: cover; }
+.pl-vault-name {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pl-vault-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 14px;
+}
+@media (max-width: 560px) {
+  .pl-vault-grid { grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); }
+  .pl-vault-item .pl-thumb { height: 84px; }
+}
+
+/* SFW / NSFW for the next draft, sitting beside Write it. */
+.pl-rating { display: inline-flex; border: 1px solid var(--border-soft); border-radius: var(--r-md); overflow: hidden; }
+.pl-rating button {
+  background: transparent;
+  border: none;
+  border-left: 1px solid var(--border-soft);
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  padding: 0 10px;
+  cursor: pointer;
+}
+.pl-rating button:first-child { border-left: none; }
+.pl-rating button:hover { color: var(--text); }
+.pl-rating button.on { background: var(--accent); color: #fff; }

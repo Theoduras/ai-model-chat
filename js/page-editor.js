@@ -16,6 +16,7 @@
 
   var editing = false;
   var original = {};
+  var saved = {};
 
   function imgGet(el) {
     if (el.tagName === 'IMG') return el.getAttribute('src') || '';
@@ -41,7 +42,16 @@
 
   fetch('/api/site-content/' + encodeURIComponent(PAGE))
     .then(function (r) { return r.ok ? r.json() : { content: {} }; })
-    .then(function (d) { applyContent(d.content || {}); })
+    .then(function (d) {
+      saved = d.content || {};
+      applyContent(saved);
+      // Pages like /landing paint their own copy in from another endpoint, so
+      // the saved overrides go back on once that has had a chance to run.
+      [400, 1500].forEach(function (ms) {
+        setTimeout(function () { if (!editing) applyContent(saved); }, ms);
+      });
+      window.addEventListener('load', function () { if (!editing) applyContent(saved); });
+    })
     .catch(function () {});
 
   fetch('/api/me')

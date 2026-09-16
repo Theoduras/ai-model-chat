@@ -14,8 +14,9 @@
   <script src="/js/devnav.js" defer></script>
 <link rel="stylesheet" href="/css/site-nav.css">
 <script src="/js/site-nav.js" defer></script>
+<script src="/js/page-editor.js" defer></script>
 </head>
-<body class="page-landing">
+<body class="page-landing" data-page="landing">
 
   <nav>
     <nav data-site-nav="inline" class="sn-links sn-inline"></nav>
@@ -24,7 +25,7 @@
         <div class="verified-dot">
           <i class="fa-solid fa-check text-white text-xs"></i>
         </div>
-        VERIFIED CREATOR / Lillyforfun_ / Lilly - Lillith
+        <span data-edit-id="verified-text">VERIFIED CREATOR / Lillyforfun_ / Lilly - Lillith</span>
       </div>
     </div>
   </nav>
@@ -34,13 +35,13 @@
 
       <div class="headline-media">
         <div class="headline-copy">
-          <h1 class="headline" id="headline">
+          <h1 class="headline" id="headline" data-edit-id="headline">
             You only see <span class="highlight">10%</span> of me.
           </h1>
-          <p class="subtext" id="subtext">The rest stays private.</p>
-          <button class="cta-button" id="cta-button">SEE MORE &rarr;</button>
+          <p class="subtext" id="subtext" data-edit-id="subtext">The rest stays private.</p>
+          <button class="cta-button" id="cta-button" data-edit-id="cta-text">SEE MORE &rarr;</button>
           <div class="secret-note" id="secret-note">
-            <span>I left something for you inside.</span>
+            <span data-edit-id="secret-note">I left something for you inside.</span>
           </div>
         </div>
 
@@ -49,7 +50,7 @@
             <div class="silhouette-head"></div>
             <div class="silhouette-body"></div>
           </div>
-          <div class="cover-label" id="cover-label">COVER PHOTO</div>
+          <div class="cover-label" id="cover-label" data-edit-id="cover-label">COVER PHOTO</div>
         </div>
       </div>
 
@@ -80,7 +81,7 @@
       </div>
 
       <div class="gallery-area">
-        <h2 class="gallery-header" id="gallery-header">A glimpse of what you're missing</h2>
+        <h2 class="gallery-header" id="gallery-header" data-edit-id="gallery-header">A glimpse of what you're missing</h2>
         <div class="gallery-grid" id="gallery-grid"></div>
       </div>
 
