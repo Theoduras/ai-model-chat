@@ -9,6 +9,8 @@
   <script src="/js/theme.js"></script>
   <link rel="stylesheet" href="/css/style.css">
   <script src="/js/devnav.js" defer></script>
+  <script src="/js/chat-view.js"></script>
+  <script src="/js/console-shell.js"></script>
   <style>
     .xbot-scroll { flex: 1; min-height: 0; overflow-y: auto; }
     .xbot-wrap { max-width: 760px; margin: 0 auto; padding: 28px 24px 80px; display: flex; flex-direction: column; gap: 20px; }
@@ -38,18 +40,6 @@
     .auto-log .ln.hd { color: var(--accent); border-left-color: #312e81; }
     .auto-log .ln.er { color: #fb7185; border-left-color: #4c0519; }
     .conn-pill.run { background: #312e81; color: #c7d2fe; }
-    .inbox-split { display: grid; grid-template-columns: 260px 1fr; gap: 14px; }
-    @media (max-width: 640px) { .inbox-split { grid-template-columns: 1fr; } }
-    .inbox-list { max-height: 340px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
-    .inbox-row { text-align: left; background: var(--bg); border: 1px solid #2a2a30; border-radius: 10px; padding: 8px 10px; cursor: pointer; font-size: 0.78rem; color: var(--text-2); }
-    .inbox-row.on { border-color: var(--accent); }
-    .inbox-row .who { color: var(--text); font-weight: 600; }
-    .inbox-row .ph { float: right; font-size: 0.68rem; color: var(--text-3); }
-    .inbox-row .pv { display: block; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .inbox-thread { max-height: 340px; overflow-y: auto; display: flex; flex-direction: column; }
-    .inbox-thread .m { border-radius: 10px; padding: 7px 11px; margin-bottom: 6px; font-size: 0.8rem; max-width: 80%; }
-    .inbox-thread .m.in { background: var(--surface); color: var(--text); align-self: flex-start; }
-    .inbox-thread .m.out { background: #1d9bf0; color: #fff; align-self: flex-end; }
     .row-inline { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
     .row-inline .field { flex: 1; min-width: 160px; }
     @media (max-width: 640px) {
@@ -91,7 +81,7 @@
 <div class="xbot-scroll">
 <div class="xbot-wrap">
 
-  <div class="form-section">
+  <div id="sec-account" class="form-section" data-tab="settings">
     <div class="section-title">Persona &amp; Account</div>
     <div class="field full">
       <label>Choose a model (persona)</label>
@@ -134,7 +124,7 @@
     </div>
   </div>
 
-  <div class="form-section">
+  <div id="sec-replies" class="form-section" data-tab="settings">
     <div class="section-title">⚙️ How she replies</div>
     <span class="hint" style="display:block; margin-bottom:14px;">Governs every DM this account sends — the rounds below and the server-side worker both obey it.</span>
     <div class="auto-toggles" style="display:flex; flex-wrap:wrap; gap:10px 22px;">
@@ -163,7 +153,7 @@
     </div>
   </div>
 
-  <div class="form-section" id="always-section">
+  <div class="form-section" id="sec-always" data-tab="settings">
     <div class="section-title">🛰️ Always on — run with the tab closed</div>
     <span class="hint" style="display:block; margin-bottom:14px;">The settings on this page are saved to the server as you change them. Switch this on and the bot runs the whole round — DM replies, feed work, gathering and posting — on the server, on its own schedule. You can close the browser. The manual "Start" buttons below are for watching a round happen; they turn off while this is on so nothing runs twice.</span>
     <div class="auto-toggles">
@@ -199,7 +189,7 @@
     <span class="hint" id="auto-config-status"></span>
   </div>
 
-  <div class="form-section" id="chat-section">
+  <div class="form-section" id="sec-chat" data-tab="settings">
     <div class="section-title">💬 Auto-chat — keep conversations going</div>
     <span class="hint" style="display:block; margin-bottom:14px;">Engages your existing audience on a loop: replies to incoming DMs, and (optionally) replies to comments on your posts and posts new content. Does NOT start new chats — that's the section below.</span>
     <div class="auto-toggles">
@@ -239,7 +229,7 @@
     </div>
   </div>
 
-  <div class="form-section" id="gather-section">
+  <div class="form-section" id="sec-gather" data-tab="settings">
     <div class="section-title">🧲 Gather new chats — find &amp; message new people</div>
     <span class="hint" style="display:block; margin-bottom:14px;">Finds fresh people from your own audience (recent followers and people who replied to your posts) and opens new in-character chats with them — skipping anyone you already have a conversation with. Runs on its own loop, independent of auto-chat.</span>
     <div class="xbot-grid">
@@ -275,32 +265,12 @@
     </div>
   </div>
 
-  <div class="form-section" id="inbox-section">
-    <div class="section-title">📥 DM inbox</div>
-    <span class="hint" style="display:block; margin-bottom:14px;">Every conversation this persona has on X, with the funnel phase each fan is in. Open one to read it and send a message yourself — the bot keeps the thread from there.</span>
-    <div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">
-      <button class="btn-ai" onclick="loadInbox()">Refresh</button>
-      <span class="conn-pill" id="inbox-state">—</span>
-    </div>
-    <div class="inbox-split">
-      <div class="inbox-list" id="inbox-list"><span class="hint">Pick a persona to load conversations.</span></div>
-      <div class="inbox-thread">
-        <div id="inbox-messages"><span class="hint">Select a conversation.</span></div>
-        <div class="row-inline" id="inbox-compose" style="display:none; margin-top:12px;">
-          <div class="field"><input type="text" id="inbox-text" placeholder="Send a DM as this persona…"></div>
-          <button class="btn-ai" onclick="sendInboxDm(this)">Send</button>
-        </div>
-        <div class="result-box" id="inbox-send-result"></div>
-      </div>
-    </div>
-  </div>
-
-  <div class="form-section">
+  <div id="sec-log" class="form-section" data-tab="advanced">
     <div class="section-title">📜 Activity log</div>
     <div class="auto-log" id="auto-log"><span class="hint">Auto-chat and gathering activity appears here.</span></div>
   </div>
 
-  <div class="form-section">
+  <div id="sec-post" class="form-section" data-tab="advanced">
     <div class="section-title">📝 Post new content</div>
     <span class="hint" style="display:block; margin-bottom:14px;">Writes an original tweet in the chosen persona's voice and posts it to their X account.</span>
     <div class="field full">
@@ -314,7 +284,7 @@
     <div class="result-box" id="postnew-result"></div>
   </div>
 
-  <div class="form-section">
+  <div id="sec-comments" class="form-section" data-tab="advanced">
     <div class="section-title">💬 Reply to comments on a post</div>
     <div class="field full">
       <label>Post URL or tweet ID</label>
@@ -337,7 +307,7 @@
     <div class="result-box" id="comment-result"></div>
   </div>
 
-  <div class="form-section">
+  <div id="sec-dm" class="form-section" data-tab="advanced">
     <div class="section-title">👋 Start a chat (DM)</div>
     <div class="field full">
       <label>Target @handle or profile URL</label>
@@ -354,7 +324,7 @@
     <div class="result-box" id="dm-result"></div>
   </div>
 
-  <div class="form-section">
+  <div id="sec-follow" class="form-section" data-tab="advanced">
     <div class="section-title">➕ Follow / Unfollow</div>
     <div class="field full">
       <label>Target @handle or profile URL</label>
@@ -420,7 +390,7 @@ function updateConn() {
   document.getElementById('connect-status').innerHTML = '';
   loadBehaviorSummary();
   loadBehaviour();
-  loadInbox();
+  PlatformConsole.reset();
 }
 
 async function loadBehaviour(){
@@ -532,85 +502,75 @@ for (const id of Object.keys(AUTO_FIELDS).concat(Object.keys(CAP_FIELDS))) {
   if (el) el.addEventListener('change', () => { applyAlwaysOn(); persistAutoConfig(); });
 }
 
-// ── DM inbox ─────────────────────────────────────────────────────────────────
-let inboxFan = null;
+// ── Console shell ────────────────────────────────────────────────────────────
+// The Overview / Inbox / Settings / Advanced shell that /fanvue and /telegram
+// use. The sections above keep their markup; this only says what X's status
+// means, so all three consoles read the same way.
+const X_FIX = [
+  [/not connected|connect one/i, {tab:'settings', focus:'sec-account', label:'Connect her account'}],
+  [/switched off/i,              {tab:'settings', focus:'sec-replies', label:'Turn the bot on'}],
+  [/always on is off/i,          {tab:'settings', focus:'sec-always',  label:'Run it unattended'}],
+  [/funnel link/i,               {tab:'settings', focus:'sec-replies', label:'Set the funnel link'}],
+  [/logging failed|activity log/i, {tab:'advanced', focus:'sec-log',   label:'See the log'}],
+];
 
-async function loadInbox(){
-  if (!persona()) return;
-  const list = document.getElementById('inbox-list');
-  setState('inbox-state', 'loading…', 'run');
-  let d;
-  try { d = await (await fetch('/api/inbox?platform=x&persona=' + encodeURIComponent(persona()))).json(); }
-  catch (e) { setState('inbox-state', 'failed', 'err'); return; }
-  if (!d.ok) { setState('inbox-state', d.error || 'failed', 'err'); return; }
-  const fans = d.fans || [];
-  setState('inbox-state', fans.length + ' conversation(s)', fans.length ? 'ok' : '');
-  if (!fans.length) { list.innerHTML = '<span class="hint">No conversations yet.</span>'; return; }
-  list.innerHTML = '';
-  fans.forEach(f => {
-    const b = document.createElement('button');
-    b.className = 'inbox-row' + (f.key === inboxFan ? ' on' : '');
-    b.innerHTML = '<span class="ph">' + esc(f.phase || '') + '</span>' +
-      '<span class="who">' + (f.waiting ? '● ' : '') + '@' + esc(f.handle || f.key) + '</span>' +
-      '<span class="pv">' + esc(f.last || '') + '</span>';
-    b.onclick = () => openInboxThread(f.key);
-    list.appendChild(b);
-  });
+function xHealth(d){
+  const rows = [
+    {state:d.connected?'ok':'bad', label:d.connected?('Connected as @'+(d.username||'her account')):'Not connected',
+     hint:d.connected?'She can read her X DMs and post as herself.'
+                     :'Connect her X account under Settings before anything else.'},
+    {state:d.enabled?'ok':'warn', label:d.enabled?'Replies are on':'Replies are off',
+     hint:d.enabled?'She answers new DMs on her own.':'Fans can write, but nothing will answer them.'},
+    {state:d.auto?'ok':'warn', label:d.auto?('Running every '+(d.interval_min||15)+' min on the server'):'Only runs with this tab open',
+     hint:d.auto?'Outreach, feed work and posting keep going with the browser closed.'
+                :'Switch Always on under Settings so the funnel survives a closed tab.'},
+    {state:d.cta_url?'ok':'warn', label:d.cta_url?'Funnel link set':'No funnel link',
+     hint:d.cta_url?('Fans are sent to '+d.cta_url):'She has nothing to send fans to when a chat warms up.'},
+  ];
+  return rows;
 }
 
-async function openInboxThread(key){
-  inboxFan = key;
-  const box = document.getElementById('inbox-messages');
-  box.innerHTML = '<span class="hint">Loading…</span>';
-  document.getElementById('inbox-compose').style.display = 'flex';
-  let d;
-  try { d = await (await fetch('/api/inbox?platform=x&persona=' + encodeURIComponent(persona()) +
-    '&fan=' + encodeURIComponent(key))).json(); }
-  catch (e) { box.innerHTML = '<span class="hint">Could not load this thread.</span>'; return; }
-  if (!d.ok) { box.innerHTML = '<span class="hint">' + esc(d.error || 'failed') + '</span>'; return; }
-  box.innerHTML = '';
-  (d.messages || []).forEach(m => {
-    const div = document.createElement('div');
-    div.className = 'm ' + (m.dir === 'out' ? 'out' : 'in');
-    div.textContent = m.text;
-    box.appendChild(div);
-  });
-  if (!(d.messages || []).length) box.innerHTML = '<span class="hint">No messages stored for this fan.</span>';
-  box.scrollTop = box.scrollHeight;
-  loadInbox();
+function xStats(){
+  const used = xDaily.used || {}, caps = xDaily.caps || {};
+  return Object.entries(CAP_FIELDS).map(([, kind]) => ({
+    value: (used[kind] || 0) + (caps[kind] === undefined || caps[kind] < 0 ? '' : '/' + caps[kind]),
+    label: kind + ' today',
+  }));
 }
 
-async function sendInboxDm(btn){
-  const box = document.getElementById('inbox-send-result');
-  const el = document.getElementById('inbox-text');
-  const text = el.value.trim();
-  if (!inboxFan || !text) { err(box, 'Pick a conversation and type a message.'); return; }
-  busy(box, 'Sending…');
-  const d = await post('/api/x/dm-send', { persona: persona(), fan: inboxFan, text });
-  if (!d.ok) { err(box, d.error); return; }
-  box.innerHTML = '<span class="hint" style="color:#4ade80;">✓ Sent</span>';
-  el.value = '';
-  openInboxThread(inboxFan);
-}
+let xDaily = {used:{}, caps:{}};
 
-async function saveBehaviour(btn){
-  const st=document.getElementById('behaviour-status');
-  st.textContent='Saving…'; st.style.color='var(--text-muted)';
-  try{
-    const r=await fetch('/api/x/settings',{method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({persona:persona(),
-        enabled:document.getElementById('f-x-enabled').checked,
-        humanize:document.getElementById('f-x-humanize').checked,
-        followups:document.getElementById('f-x-followups').checked,
-        typing_speed:parseInt(document.getElementById('f-x-typing-speed').value||'14',10),
-        followup_min:parseInt(document.getElementById('f-x-followup-min').value||'45',10)})});
-    const d=await r.json();
-    if(!d.ok) throw new Error(d.error||'failed');
-    st.textContent='✓ Saved'; st.style.color='#4ade80';
-    loadBehaviorSummary();
-  }catch(e){ st.textContent='✗ '+e; st.style.color='#fb7185'; }
-}
+PlatformConsole.register({
+  platform:'x',
+  persona:persona,
+  statusUrl:slug=>'/api/x/trace?persona='+encodeURIComponent(slug),
+  emptyHint:'They appear as soon as somebody messages her on X.',
+  sendUrl:'/api/x/dm-send',
+  read:d=>({
+    live: !!(d.connected && d.enabled),
+    broken: !d.connected,
+    title: !d.connected ? 'X is not connected'
+         : !d.enabled   ? 'Connected, but she is not answering'
+         : d.auto       ? 'She is live and running on her own'
+                        : 'She is live while this tab is open',
+    sub: !d.connected ? 'Nothing happens until her account is linked.'
+       : !d.enabled   ? 'Fans can write to her; the replies are switched off.'
+       : d.auto       ? ('The server runs a full round every ' + (d.interval_min||15) + ' minutes.')
+                      : 'Rounds only run from this page — switch Always on to change that.',
+    health: xHealth(d),
+    steps: [
+      {label:'Connect',    done:!!d.connected,           tab:'settings', focus:'sec-account'},
+      {label:'Reply rules',done:!!d.enabled,             tab:'settings', focus:'sec-replies'},
+      {label:'Link & CTA', done:!!d.cta_url,             tab:'settings', focus:'sec-replies'},
+      {label:'Always on',  done:!!(d.connected&&d.auto), tab:'settings', focus:'sec-always'},
+      {label:'Live',       done:!!(d.connected&&d.enabled&&!(d.problems||[]).length), tab:'overview'},
+    ],
+  }),
+  fixTab:p=>{ const hit=X_FIX.find(([re])=>re.test(p)); return hit?hit[1]:{tab:'settings',label:'Open settings'}; },
+  stats:xStats,
+  onStatus:d=>{ xDaily = {used:d.daily||{}, caps:d.daily_caps||{}};
+                renderDailyUsage(xDaily.used, xDaily.caps); },
+});
 
 // This tab now owns the behaviour settings, so the summary just reflects them
 // Reflect the saved behaviour and the funnel link next to the controls, so the
@@ -933,6 +893,7 @@ async function runGatherRound() {
 
 window.addEventListener('beforeunload', () => { if (chatRunning) stopChat(); if (gatherRunning) stopGather(); });
 
+PlatformConsole.mount('.xbot-wrap');
 init();
 </script>
 </body>

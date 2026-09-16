@@ -11536,6 +11536,72 @@ def api_x_auto_run():
         return jsonify({'ok': False, 'error': str(e)[:200]}), 400
 
 
+
+# How an X action reads on the console's activity feed. The keys are the shell's
+# stage vocabulary, so X gets the same icons as Fanvue and Telegram.
+X_TRACE_STAGES = {
+    'dm_in': 'received', 'dm_out': 'sent', 'post': 'sent',
+    'auto-run': 'chats', 'connect': 'connected', 'disconnect': 'error',
+    'follow': 'funnel', 'comment': 'sent', 'like': 'funnel',
+}
+
+
+@app.route('/api/x/trace')
+@platform_scoped
+def api_x_trace():
+    """What this persona's X bot is doing, in the shape every console reads:
+    the connection, the switches, what is wrong, and the last few events."""
+    persona = request_persona()
+    if not persona:
+        return jsonify({'ok': False, 'error': 'persona required'}), 400
+    t = (_load_x_tokens() or {}).get(persona) or {}
+    cfg = _x_behavior(persona)
+    connected = bool(t.get('access_token'))
+    cta = _phases_cta(persona)
+    cta_url = (cta.get('cta_url')
+               or (_tg_load_bots().get(persona) or {}).get('cta_url') or '').strip()
+
+    problems = []
+    if not connected:
+        problems.append('No X account is connected — connect one under Settings.')
+    elif not cfg.get('enabled', True):
+        problems.append('The bot is switched off, so DM rounds do nothing.')
+    if connected and not cfg.get('auto'):
+        problems.append('Always on is off — rounds only run while this tab is open.')
+    if not cta_url:
+        problems.append('No funnel link is set, so she has nothing to send fans to.')
+    if _last_x_log_error[0]:
+        problems.append(f'Conversation logging failed: {_last_x_log_error[0]}')
+
+    rows = []
+    try:
+        from db import SessionLocal, list_x_events
+        s = SessionLocal()
+        try:
+            for e in list_x_events(s, limit=200):
+                if (e.persona or '') != persona:
+                    continue
+                rows.append({
+                    'at': int(e.created_at.timestamp()) if e.created_at else 0,
+                    'stage': X_TRACE_STAGES.get(e.action or '', e.action or ''),
+                    'detail': (e.detail or e.action or '')[:200],
+                    'fan': '',
+                })
+        finally:
+            s.close()
+    except Exception as e:
+        problems.append(f'Could not read the activity log: {str(e)[:120]}')
+    rows.reverse()
+
+    return jsonify({'ok': True, 'persona': persona, 'connected': connected,
+                    'username': t.get('username', ''),
+                    'enabled': bool(cfg.get('enabled', True)),
+                    'auto': bool(cfg.get('auto')), 'interval_min': cfg.get('interval_min'),
+                    'cta_url': cta_url, 'daily': _x_daily_counts(persona),
+                    'daily_caps': cfg.get('daily_caps') or X_DAILY_CAP_DEFAULTS,
+                    'problems': problems, 'rows': rows})
+
+
 @app.route('/api/x/dm-send', methods=['POST'])
 @platform_scoped
 def api_x_dm_send():
