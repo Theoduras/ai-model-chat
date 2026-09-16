@@ -1536,7 +1536,7 @@ body.page-dashboard select {
 }
 .btn-secondary { background: var(--surface); color: var(--text); }
 .btn-secondary:hover { background: var(--border); color: var(--accent); }
-.btn-ghost  { background: transparent; color: var(--text-muted); border: 1px solid var(--border-soft); }
+.btn-ghost  { background: transparent; color: var(--text-2); border: 1px solid var(--border); }
 .btn-ghost:hover { color: var(--accent); border-color: var(--accent-line); background: var(--accent-soft); }
 .platform-tab.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .platform-tab.active:hover { background: var(--accent); border-color: var(--accent); }
@@ -1828,8 +1828,8 @@ body.page-dashboard .conn-dot.err { background: var(--err); }
 /* Per-section save button, sits at the right edge of a .section-title */
 .btn-section-save {
   margin-left: auto;
-  background: var(--border-soft);
-  color: var(--text-3);
+  background: var(--surface);
+  color: var(--text-2);
   border: 1px solid var(--border);
   border-radius: 7px;
   padding: 4px 12px;
