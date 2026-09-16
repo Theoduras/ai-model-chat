@@ -9449,14 +9449,18 @@ def _x_http_error(e):
             detail = raw[:200]
     if e.code == 403 and detail:
         low = detail.lower()
-        for needle, hint in _X_403_HINTS:
-            if needle in low:
-                detail = f'{detail} ({hint})'
-                break
         # Posting and media upload are separate endpoints with separate plan
-        # limits, and a bare "Forbidden" from either reads identically.
+        # entitlements, and a bare "Forbidden" from either reads identically —
+        # but the app-permission advice only ever applies to the post.
         if 'media/upload' in (getattr(e, 'url', '') or ''):
-            detail = f'{detail} [on media upload, not the post itself]'
+            detail = (f'{detail} (media upload is not included in the free X '
+                      f'API tier — post without the photo, or move to a paid '
+                      f'plan)')
+        else:
+            for needle, hint in _X_403_HINTS:
+                if needle in low:
+                    detail = f'{detail} ({hint})'
+                    break
     return XApiError(e, detail.strip(), body)
 
 
