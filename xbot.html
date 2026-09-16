@@ -100,6 +100,10 @@
         <input type="text" id="x-client-id" placeholder="your-app-client-id" autocomplete="off" spellcheck="false">
       </div>
       <div class="field full" style="margin-top:12px;">
+        <label>Client Secret <span style="font-weight:400;color:var(--text-muted);">(required if your X app is a confidential client)</span></label>
+        <input type="password" id="x-client-secret" placeholder="leave blank to keep the saved one" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="field full" style="margin-top:12px;">
         <label>Redirect URI <span style="font-weight:400;color:var(--text-muted);">(must match your X app's callback URL exactly)</span></label>
         <input type="text" id="x-redirect-uri" placeholder="https://your-domain/api/x/oauth-redirect" autocomplete="off" spellcheck="false">
       </div>
@@ -323,6 +327,8 @@ function prefillConnect() {
   const idEl = document.getElementById('x-client-id');
   const uriEl = document.getElementById('x-redirect-uri');
   if (!idEl.value && appConfig.client_id) idEl.value = appConfig.client_id;
+  const secEl = document.getElementById('x-client-secret');
+  if (secEl && appConfig.has_client_secret) secEl.placeholder = 'saved — leave blank to keep it';
   if (!uriEl.value) uriEl.value = appConfig.redirect_uri || (location.origin + '/api/x/oauth-redirect');
 }
 
@@ -413,7 +419,8 @@ async function startConnect() {
   if (!clientId) { err(box, 'Enter your X app Client ID.'); return; }
   if (!redirectUri) { err(box, 'Enter the Redirect URI.'); return; }
   busy(box, 'Opening X authorization…');
-  const data = await post('/api/x/auth-url', { client_id: clientId, redirect_uri: redirectUri, persona: persona() });
+  const clientSecret = (document.getElementById('x-client-secret') || {}).value?.trim() || '';
+  const data = await post('/api/x/auth-url', { client_id: clientId, client_secret: clientSecret, redirect_uri: redirectUri, persona: persona() });
   if (!data.ok) { err(box, data.error); return; }
   window.open(data.url, 'x-oauth', 'width=600,height=720');
   document.getElementById('connect-step2').style.display = 'block';
