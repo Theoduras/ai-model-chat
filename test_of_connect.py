@@ -229,6 +229,32 @@ class BrowserTest(unittest.TestCase):
             self.assertEqual(of_connect.browser_path(), '/somewhere/chrome')
 
 
+class FramePollTest(unittest.TestCase):
+    """The relay polls for a picture several times a second; the page behind it
+    is screenshotted five times a second at most. A poll that already has the
+    latest frame must not be handed it again."""
+
+    def test_a_poll_holding_the_latest_frame_gets_nothing_back(self):
+        a = bare_attempt()
+        a.frame = b'frame-bytes'
+        a.frame_at = 1000.0
+        self.assertTrue(a.snapshot())
+        self.assertTrue(a.snapshot(999.5))
+        self.assertEqual(a.snapshot(1000.0), '')
+        a.frame_at = 1000.5
+        self.assertTrue(a.snapshot(1000.0))
+
+    def test_a_frame_with_no_time_on_it_is_always_sent(self):
+        a = bare_attempt()
+        a.frame = b'frame-bytes'
+        self.assertTrue(a.snapshot(1000.0))
+
+    def test_the_window_is_told_which_frame_it_has(self):
+        a = bare_attempt()
+        a.frame_at = 1234.5
+        self.assertEqual(a.status()['frame_at'], 1234.5)
+
+
 class RegistryTest(unittest.TestCase):
     def setUp(self):
         of_connect._attempts.clear()

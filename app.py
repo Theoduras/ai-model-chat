@@ -19384,6 +19384,21 @@ def _of_proxy_for(persona, country=''):
     return template.replace('{country}', country).replace('{session}', persona)
 
 
+def _signin_since():
+    """The frame the sign-in window is already showing, off its own request.
+
+    The relay polls several times a second so a click lands where it looks
+    like it will, but the page behind it is screenshotted five times a second
+    at most. Without this every one of those polls carries back a picture the
+    window already has -- 35KB a time, a few times a second, for every open
+    sign-in on the instance.
+    """
+    try:
+        return float(request.args.get('since') or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _ig_proxy_for(persona, country=''):
     """Instagram's own pool, separate from OnlyFans': a datacentre IP is what
     got the sign-in browser an ERR_HTTP_RESPONSE_CODE_FAILURE / a hard connect
@@ -19451,8 +19466,8 @@ def api_onlyfans_connect_frame():
     a fresh one."""
     _of_signin_touch()
     try:
-        attempt = _of_conn().get((request.args.get('attempt') or '').strip(), frame=True) \
-            if _of_direct() else None
+        attempt = _of_conn().get((request.args.get('attempt') or '').strip(), frame=True,
+                                 since=_signin_since()) if _of_direct() else None
     except _OF_UNREACHABLE:
         return _of_busy()
     if not attempt:
@@ -19467,7 +19482,8 @@ def api_onlyfans_connect_frame():
             # session — say so instead of the popup reporting success for a
             # sign-in that is about to vanish.
             status = dict(status, state='failed', error=adopt_err)
-    return jsonify({'ok': True, 'frame': attempt.snapshot(), 'attempt': status})
+    return jsonify({'ok': True, 'frame': attempt.snapshot(_signin_since()),
+                    'attempt': status})
 
 
 @app.route('/api/onlyfans/connect/input', methods=['POST'])
@@ -21633,7 +21649,8 @@ def api_discord_connect_frame():
     persona = request_persona()
     attempt_id = (request.args.get('attempt')
                   or _get_setting(f'discord_attempt_{persona}') or '')
-    attempt = _dc_conn().get(attempt_id, frame=True) if attempt_id else None
+    attempt = _dc_conn().get(attempt_id, frame=True, since=_signin_since()) \
+        if attempt_id else None
     if not attempt:
         return jsonify({'ok': False, 'error': 'no such sign-in'}), 404
     status = attempt.status()
@@ -21642,7 +21659,8 @@ def api_discord_connect_frame():
             status = dict(status, state='failed',
                           error=_get_setting(f'discord_adopt_error_{persona}') or
                           'the sign-in finished but could not be stored')
-    return jsonify({'ok': True, 'attempt': status, 'frame': attempt.snapshot()})
+    return jsonify({'ok': True, 'attempt': status,
+                    'frame': attempt.snapshot(_signin_since())})
 
 
 @app.route('/api/discord/connect/input', methods=['POST'])
@@ -22064,7 +22082,8 @@ def api_instagram_connect_frame():
     persona = request_persona()
     attempt_id = (request.args.get('attempt')
                   or _get_setting(f'instagram_attempt_{persona}') or '')
-    attempt = _ig_conn().get(attempt_id, frame=True) if attempt_id else None
+    attempt = _ig_conn().get(attempt_id, frame=True, since=_signin_since()) \
+        if attempt_id else None
     if not attempt:
         return jsonify({'ok': False, 'error': 'no such sign-in'}), 404
     status = attempt.status()
@@ -22073,7 +22092,8 @@ def api_instagram_connect_frame():
             status = dict(status, state='failed',
                           error=_get_setting(f'instagram_adopt_error_{persona}') or
                           'the sign-in finished but could not be stored')
-    return jsonify({'ok': True, 'attempt': status, 'frame': attempt.snapshot()})
+    return jsonify({'ok': True, 'attempt': status,
+                    'frame': attempt.snapshot(_signin_since())})
 
 
 @app.route('/api/instagram/connect/input', methods=['POST'])
@@ -23216,7 +23236,8 @@ def api_reddit_connect_frame():
     persona = request_persona()
     attempt_id = (request.args.get('attempt')
                   or _get_setting(f'reddit_attempt_{persona}') or '')
-    attempt = _rd_conn().get(attempt_id, frame=True) if attempt_id else None
+    attempt = _rd_conn().get(attempt_id, frame=True, since=_signin_since()) \
+        if attempt_id else None
     if not attempt:
         return jsonify({'ok': False, 'error': 'no such sign-in'}), 404
     status = attempt.status()
@@ -23225,7 +23246,8 @@ def api_reddit_connect_frame():
             status = dict(status, state='failed',
                           error=_get_setting(f'reddit_adopt_error_{persona}') or
                           'the sign-in finished but could not be stored')
-    return jsonify({'ok': True, 'attempt': status, 'frame': attempt.snapshot()})
+    return jsonify({'ok': True, 'attempt': status,
+                    'frame': attempt.snapshot(_signin_since())})
 
 
 @app.route('/api/reddit/connect/input', methods=['POST'])
@@ -23606,7 +23628,8 @@ def api_tiktok_connect_frame():
     persona = request_persona()
     attempt_id = (request.args.get('attempt')
                   or _get_setting(f'tiktok_attempt_{persona}') or '')
-    attempt = _tt_conn().get(attempt_id, frame=True) if attempt_id else None
+    attempt = _tt_conn().get(attempt_id, frame=True, since=_signin_since()) \
+        if attempt_id else None
     if not attempt:
         return jsonify({'ok': False, 'error': 'no such sign-in'}), 404
     status = attempt.status()
@@ -23615,7 +23638,8 @@ def api_tiktok_connect_frame():
             status = dict(status, state='failed',
                           error=_get_setting(f'tiktok_adopt_error_{persona}') or
                           'the sign-in finished but could not be stored')
-    return jsonify({'ok': True, 'attempt': status, 'frame': attempt.snapshot()})
+    return jsonify({'ok': True, 'attempt': status,
+                    'frame': attempt.snapshot(_signin_since())})
 
 
 @app.route('/api/tiktok/connect/input', methods=['POST'])

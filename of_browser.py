@@ -238,7 +238,7 @@ def service():
         # The frame poll wants both and would otherwise ask twice; an input
         # wants neither picture nor the 35KB of it.
         if request.args.get('frame'):
-            out['frame'] = attempt.snapshot()
+            out['frame'] = attempt.snapshot(request.args.get('since') or 0)
         return jsonify(out)
 
     @api.route('/session/<attempt_id>/frame')
@@ -246,7 +246,8 @@ def service():
         attempt = of_connect.get(attempt_id)
         if not attempt:
             return jsonify({'ok': False, 'error': 'no such sign-in'}), 404
-        return jsonify({'ok': True, 'frame': attempt.snapshot()})
+        return jsonify({'ok': True,
+                        'frame': attempt.snapshot(request.args.get('since') or 0)})
 
     @api.route('/session/<attempt_id>/input', methods=['POST'])
     def send_input(attempt_id):
@@ -365,7 +366,7 @@ class Remote:
                                           'the browser service did not start a sign-in')
         return _Handle(self, out['attempt'])
 
-    def get(self, attempt_id, frame=False):
+    def get(self, attempt_id, frame=False, since=0.0):
         """The attempt, or None if the service says there is no such sign-in.
 
         Raises Unreachable if it could not be asked. None has to mean one thing
@@ -374,7 +375,8 @@ class Remote:
         if not attempt_id:
             return None
         try:
-            out = self.call('GET', f'/session/{attempt_id}' + ('?frame=1' if frame else ''))
+            query = f'?frame=1&since={since}' if frame else ''
+            out = self.call('GET', f'/session/{attempt_id}' + query)
         except Unreachable:
             raise
         except of_connect.ConnectError:
