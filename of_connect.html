@@ -135,6 +135,17 @@ const POLL_BUSY = 200, POLL_IDLE = 900, POLL_HIDDEN = 2500;
 // what follows one is the frame the creator is waiting to see.
 const BUSY_FOR = 1500;
 let lastFrameAt = 0, busyUntil = 0, stillFor = 0;
+// One poll in flight and one timer, ever. Anything that wants the picture
+// sooner moves the timer rather than starting a second chain: two chains do
+// not replace each other, they add up, and the window ends up asking twice as
+// often every time something asks it to look now.
+let polling = false;
+
+function schedule(ms){
+  if (finished) return;
+  if (timer) clearTimeout(timer);
+  timer = setTimeout(poll, Math.max(ms, POLL_BUSY));
+}
 
 function nextPoll(){
   if (document.hidden) return POLL_HIDDEN;
@@ -146,8 +157,13 @@ function nextPoll(){
 }
 
 async function poll(){
-  if (timer) clearTimeout(timer);
-  if (finished) return;
+  if (timer) { clearTimeout(timer); timer = null; }
+  if (finished || polling) return;
+  polling = true;
+  try { await pollOnce(); } finally { polling = false; }
+}
+
+async function pollOnce(){
   let r, status = 0;
   try {
     const res = await fetch(API + '/frame?attempt=' +
@@ -177,7 +193,7 @@ async function poll(){
   if (a.state === 'connected') return done(a);
   if (a.state === 'failed' || a.state === 'expired')
     return fail(a.error || 'The sign-in timed out. Start it again.');
-  timer = setTimeout(poll, nextPoll());
+  schedule(nextPoll());
 }
 
 // Coming back to the window is itself a reason to look again now, rather than
@@ -185,7 +201,7 @@ async function poll(){
 document.addEventListener('visibilitychange', () => {
   if (document.hidden || finished || !attempt) return;
   busyUntil = Date.now() + BUSY_FOR;
-  poll();
+  schedule(POLL_BUSY);
 });
 
 // Keep polling, more slowly, and say so. The picture stays on screen: it is
@@ -198,7 +214,7 @@ function waiting(){
   // Back off on any kind of stall, not just the ones that count towards
   // giving up: a service answering 503 as fast as we can ask is the one case
   // where asking harder is the wrong move.
-  timer = setTimeout(poll, Math.min(1200 + (stalls++ * 600), 3000));
+  schedule(Math.min(1200 + (stalls++ * 600), 3000));
 }
 
 function done(a){
