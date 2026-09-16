@@ -22326,6 +22326,12 @@ def _rd_signin_state(persona, adopt=False):
         _rd_adopt(attempt)
         failed = _get_setting(f'reddit_adopt_error_{persona}') or ''
     refused = held.get('login_errors') or []
+    if held.get('exit_ip'):
+        failed = failed or ''
+        seen = (f"The sign-in browser is leaving at {held['exit_ip']}"
+                + (' through her proxy.' if held.get('proxy_set')
+                   else ' \u2014 with no proxy, so that is this server.'))
+        failed = (failed + ' ' + seen).strip() if failed else seen
     if refused:
         last = refused[-1]
         # Reddit's page shows the same "Server error. Try again later." banner

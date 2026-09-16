@@ -152,9 +152,11 @@ class Attempt:
     # Only ever replaced, never mutated in place, so one default is safe to
     # share — and status() cannot trip over an attempt built without it.
     signing_sample = {}
-    # What the site answered when it refused a sign-in. Replaced, never mutated,
-    # so one default is safe to share.
+    # What the site answered when it refused a sign-in, and the address this
+    # browser was seen at. Replaced, never mutated, so a default is safe to share.
     login_errors = ()
+    exit_ip = ''
+    exit_error = ''
     _sampled = False
     # Same reason: an attempt assembled field by field rather than constructed
     # still has to be able to say which site it is for.
@@ -222,6 +224,8 @@ class Attempt:
                 'capture_note': self.capture_note, 'page_url': self.page_url,
                 'cookie_names': self.cookie_names,
                 'login_errors': getattr(self, 'login_errors', []),
+                'exit_ip': getattr(self, 'exit_ip', ''),
+                'proxy_set': bool(self.proxy),
                 'signing_sample': self.signing_sample}
 
     def snapshot(self):
@@ -270,10 +274,20 @@ class Attempt:
         if not blocked:
             return detail
         where = self._site.get('host') or self.site
+        seen = getattr(self, 'exit_ip', '')
+        at = f' The browser was seen at {seen}.' if seen else ''
+        if seen and self.proxy:
+            return (f'{where} refused the connection, and the browser was leaving '
+                    f'through the proxy at {seen} — so that address is the one '
+                    f'being turned away. Try a different exit IP. ({detail[:80]})')
+        if self.proxy and getattr(self, 'exit_error', ''):
+            return (f'The browser could not reach the internet through the proxy '
+                    f'that is set, so it never got to {where}. Check the host, '
+                    f'port and credentials. ({self.exit_error[:100]})')
         if not self.proxy:
             return (f'{where} refused the connection and no proxy was in use, so '
                     f'this came from the server\u2019s own address. Set a proxy for '
-                    f'this model before signing in. ({detail[:80]})')
+                    f'this model before signing in.{at} ({detail[:80]})')
         return (f'{where} refused the connection through the proxy that is set. '
                 f'That address is blocked or the credentials are wrong \u2014 try a '
                 f'different exit IP. ({detail[:80]})')
@@ -317,6 +331,29 @@ class Attempt:
         context = pw.chromium.launch_persistent_context(self._profile, **opts)
         return None, context
 
+    def _note_exit_ip(self, page):
+        """The address the site sees, measured from inside this browser.
+
+        A proxy checked from the app service proves nothing about this one:
+        they are separate Cloud Run services and only this one opens the
+        sign-in. When the login page will not load, the first thing worth
+        knowing is whether Chrome is even leaving through the proxy that was
+        handed to it, and that can only be asked here.
+        """
+        try:
+            page.goto('https://api.ipify.org?format=json',
+                      wait_until='domcontentloaded', timeout=20000)
+            seen = page.evaluate('() => document.body.innerText')
+            self.exit_ip = (json.loads(seen or '{}') or {}).get('ip') or ''
+        except Exception as e:
+            self.exit_ip = ''
+            self.exit_error = str(e)[:160]
+            logger.warning('of-connect %s could not reach an echo service: %s',
+                           self.id, self.exit_error)
+            return
+        logger.warning('of-connect %s browser exits at %s (proxy %s)', self.id,
+                       self.exit_ip, 'set' if self.proxy else 'NOT set')
+
     def _drive(self, pw):
         browser, context = self._launch(pw)
         page = context.pages[0] if context.pages else context.new_page()
@@ -339,6 +376,7 @@ class Attempt:
             # frequently let through on the very next try.
             logger.warning('of-connect %s first navigation failed, retrying: %s',
                            self.id, str(e)[:160])
+            self._note_exit_ip(page)
             page.goto(self._site['url'], wait_until='domcontentloaded', timeout=60000)
         # What the window is told to scale by has to be the size of the frames
         # it actually gets. Sizing the window rather than overriding the
