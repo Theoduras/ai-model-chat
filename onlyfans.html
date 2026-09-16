@@ -671,6 +671,19 @@ async function refreshRules(){
   }catch(e){err(box,String(e));}
 }
 
+function signedIn(si){
+  // The captured signature is taken logged out, so the table above only ever
+  // speaks for a visitor's request. This is the same question asked as her.
+  if(si.error) return '<br>Signed in as her: could not ask the page \u2014 '+esc(si.error);
+  if(!si.checked) return '';
+  return '<br>Signed in as her: '+(si.same
+    ? '<span style="color:#4ade80;">our signature matches the page\u2019s</span> '
+      +'\u2014 signing is right for her requests too, so a refusal is the session'
+    : '<span style="color:#fb7185;">our signature differs from the page\u2019s</span> '
+      +'\u2014 the rules are right for a visitor and wrong for her, and '
+      +'reconnecting will not help');
+}
+
 async function testSigning(){
   const box=document.getElementById('signing-test');
   busy(box,'Asking OnlyFans…');
@@ -694,6 +707,7 @@ async function testSigning(){
     +'Request from this server: '+(call.ok===true?'<span style="color:#4ade80;">worked ('
       +esc(call.username||'')+')</span>':call.ok===false
       ?'<span style="color:#fb7185;">'+esc(call.error||'failed')+'</span>':'not tried')
+    +signedIn(r.signed_in||{})
     +'</p>';
 }
 
