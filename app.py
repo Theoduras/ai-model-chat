@@ -23079,7 +23079,14 @@ def api_reddit_connect():
         cookie = (body.get('cookie') or '').strip()
         if not cookie:
             return jsonify({'error': 'Paste her Reddit cookie to connect.'}), 400
-        session = {'cookie': cookie, 'bearer': (body.get('bearer') or '').strip(),
+        # A session signed in on the operator's own machine and carried over by
+        # hand is the way in when Reddit refuses the hosted window. The bearer
+        # is optional and separate because the cookie alone is a working
+        # account for posting and comments -- it is only chat that cannot be
+        # reached without the token.
+        session = {'cookie': cookie,
+                   'bearer': re.sub(r'^Bearer\s+', '',
+                                    (body.get('bearer') or '').strip(), flags=re.I),
                    'proxy': _rd_proxy_for(persona)}
         try:
             who = RR.Rest(session).me() or {}
