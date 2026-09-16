@@ -138,7 +138,7 @@ function slug(){return el('persona').value;}
 async function api(path,opts){const r=await fetch(path,opts);let j={};try{j=await r.json();}catch(e){}
   if(!r.ok) throw new Error(j.error||('request failed ('+r.status+')'));return j;}
 
-let mediaDataUrl='', mounted=false, lastStatus={}, mediaW=0, mediaH=0, mediaDurationMs=0;
+let mediaDataUrl='', mounted=false, lastStatus={}, mediaW=0, mediaH=0, mediaDurationMs=0, mediaCoverUrl='';
 
 async function init(){
   const list=await (await fetch('/api/personas')).json();
@@ -149,7 +149,7 @@ async function init(){
 }
 
 async function loadAll(){
-  mediaDataUrl='';mediaW=0;mediaH=0;mediaDurationMs=0;
+  mediaDataUrl='';mediaW=0;mediaH=0;mediaDurationMs=0;mediaCoverUrl='';
   el('ig-preview').style.display='none';
   await loadStatus();
   if(mounted) PlatformConsole.reset();
@@ -207,13 +207,23 @@ function onKindChange(){
 function onFilePicked(ev){
   const f=ev.target.files[0];
   if(!f)return;
-  mediaW=0;mediaH=0;mediaDurationMs=0;
+  mediaW=0;mediaH=0;mediaDurationMs=0;mediaCoverUrl='';
   if(f.type.startsWith('video/')){
     const v=document.createElement('video');
     v.preload='metadata';
+    v.muted=true;
     v.onloadedmetadata=()=>{
       mediaW=v.videoWidth||0;mediaH=v.videoHeight||0;
       mediaDurationMs=Math.round((v.duration||0)*1000);
+      v.currentTime=Math.min(0.1,(v.duration||0)/2);
+    };
+    v.onseeked=()=>{
+      try{
+        const c=document.createElement('canvas');
+        c.width=v.videoWidth;c.height=v.videoHeight;
+        c.getContext('2d').drawImage(v,0,0,c.width,c.height);
+        mediaCoverUrl=c.toDataURL('image/jpeg',0.85);
+      }catch(e){}
       URL.revokeObjectURL(v.src);
     };
     v.src=URL.createObjectURL(f);
@@ -254,7 +264,7 @@ async function postNow(){
     const r=await api('/api/instagram/post-now',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({persona:slug(),kind:el('ig-kind').value,
         caption:el('ig-caption').value,brief:el('ig-brief').value,media:mediaDataUrl,
-        width:mediaW,height:mediaH,duration_ms:mediaDurationMs})});
+        width:mediaW,height:mediaH,duration_ms:mediaDurationMs,cover:mediaCoverUrl})});
     note(box,'Posted. '+(r.caption?('Caption: '+r.caption):''));
     await loadTrace();
   }catch(e){note(box,e.message,true);}

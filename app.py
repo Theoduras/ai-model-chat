@@ -21616,7 +21616,7 @@ def _ig_media_bytes(media):
         raise ValueError('That file could not be read.')
 
 
-def _ig_post_now(persona, kind, media, caption, brief='', width=0, height=0, duration_ms=0):
+def _ig_post_now(persona, kind, media, caption, brief='', width=0, height=0, duration_ms=0, cover=''):
     kind = (kind or '').strip().lower()
     if kind not in IG_KINDS:
         raise ValueError('kind must be post, story or reel')
@@ -21645,7 +21645,13 @@ def _ig_post_now(persona, kind, media, caption, brief='', width=0, height=0, dur
         elif kind == 'story':
             result = rest.post_story(media_bytes, media_kind, caption, width, height, duration_ms)
         else:
-            result = rest.post_reel(media_bytes, caption, width, height, duration_ms)
+            cover_bytes = None
+            if cover:
+                try:
+                    cover_bytes, _ = _ig_media_bytes(cover)
+                except ValueError:
+                    cover_bytes = None
+            result = rest.post_reel(media_bytes, caption, width, height, duration_ms, cover_bytes)
     except IR.InstagramApiError as e:
         raise ValueError('Instagram would not accept that post'
                          + (f': {e.detail[:160]}' if e.detail else '.'))
@@ -21825,7 +21831,7 @@ def api_instagram_post_now():
                               d.get('caption') or '',
                               (d.get('brief') or '').strip()[:400],
                               _num(d.get('width')), _num(d.get('height')),
-                              _num(d.get('duration_ms')))
+                              _num(d.get('duration_ms')), d.get('cover') or '')
     except ValueError as e:
         return jsonify({'ok': False, 'error': str(e)[:250]}), 400
     except Exception as e:

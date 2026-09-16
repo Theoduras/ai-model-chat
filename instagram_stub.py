@@ -40,5 +40,5 @@ class FakeRest:
     def post_story(self, media_bytes, kind, caption='', width=0, height=0, duration_ms=0):
         return self._record('story', kind, caption, width, height, duration_ms)
 
-    def post_reel(self, media_bytes, caption='', width=0, height=0, duration_ms=0):
+    def post_reel(self, media_bytes, caption='', width=0, height=0, duration_ms=0, cover_bytes=None):
         return self._record('reel', 'video', caption, width, height, duration_ms)

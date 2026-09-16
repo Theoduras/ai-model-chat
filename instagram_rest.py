@@ -187,7 +187,7 @@ class Rest:
     def me(self):
         return self.call('GET', f'{self.base}/accounts/current_user/?edit=true')
 
-    def _upload(self, media_bytes, kind, width=0, height=0, duration_ms=0):
+    def _upload(self, media_bytes, kind, width=0, height=0, duration_ms=0, upload_id=None):
         """Hand over the bytes, get back an upload_id to configure into a post.
 
         One name, one set of rupload params — the shape every Instagram client
@@ -196,8 +196,12 @@ class Rest:
         the real values for a video (read in the browser, not guessed here) —
         Instagram's clips/story configure calls reject zeros with "Missing
         info.", the same way a Reel with no length does.
+
+        A Reel's cover photo is uploaded under the *same* upload_id as its
+        video, not a new one — pass `upload_id` to reuse it, otherwise one is
+        minted here.
         """
-        upload_id = str(int(time.time() * 1000))
+        upload_id = upload_id or str(int(time.time() * 1000))
         is_video = kind == 'video'
         name = f'{upload_id}_0_{"video" if is_video else "photo"}'
         path = PATH_UPLOAD_VIDEO if is_video else PATH_UPLOAD_PHOTO
@@ -231,8 +235,10 @@ class Rest:
             body['length'] = round(duration_ms / 1000, 3)
         return self.call('POST', f'{self.base}{PATH_CONFIGURE_STORY}', body=body)
 
-    def post_reel(self, media_bytes, caption='', width=0, height=0, duration_ms=0):
+    def post_reel(self, media_bytes, caption='', width=0, height=0, duration_ms=0, cover_bytes=None):
         upload_id = self._upload(media_bytes, 'video', width, height, duration_ms)
+        if cover_bytes:
+            self._upload(cover_bytes, 'photo', width, height, upload_id=upload_id)
         length = round((duration_ms or 0) / 1000, 3)
         body = {'upload_id': upload_id, 'caption': caption or '',
                 'source_type': '4', 'length': length,
