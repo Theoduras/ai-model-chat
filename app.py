@@ -16631,8 +16631,21 @@ def _of_keep_sample(status):
     exactly what happened, and it verified our rules against themselves. The
     oracle now comes only from `sample_now`, a logged-out page nothing is
     injected into. The sample still rides back on the status for the console
-    to show; it is no longer kept.
+    to show; it is no longer kept as the oracle.
+
+    One thing is kept: a signature the window produced *while signed in*, which
+    a logged-out page cannot give us at all. It never becomes the oracle -- the
+    reason above still stands -- but it is the only evidence of how OnlyFans
+    signs a request as her, and without it "the rules are proven" can only mean
+    proven for a visitor. `_of_keep_signature` drops anything we made, so our
+    own arithmetic cannot come back in through here either.
     """
+    sample = (status or {}).get('signing_sample') or {}
+    if isinstance(sample, dict) and str(sample.get('user_id') or '0') not in ('', '0'):
+        if _of_keep_signature(sample):
+            of_trace.note('repair', 'kept a signature OnlyFans made for a '
+                          'signed-in request — the one thing a logged-out '
+                          'capture cannot show')
     return status
 
 
@@ -17624,42 +17637,47 @@ def api_onlyfans_signing_capture():
 
 
 def _of_signed_in_signature(account):
-    """Do we sign a request as *her* the way OnlyFans' own page does?
+    """Do our rules sign a request made *as her* the way OnlyFans does?
 
-    The oracle is captured with nobody signed in, so it proves the rules for a
-    visitor. A refusal of every signed-in request while that proof holds is
-    precisely the case it cannot speak to -- and the page can, by signing the
-    same path with her id beside us. Carries no credentials: an id and two
-    hashes.
+    The oracle is captured with nobody signed in, so "matches" in the table
+    above speaks for a visitor's request and nothing else. A refusal of every
+    signed-in request while that holds is exactly the case it cannot answer.
+
+    Asking the page to sign one is the obvious move and does not work: the
+    signer is closured out of reach, which is why the param is read off the
+    hash input rather than requested. But every sign-in window signs its own
+    requests, and those signatures carry her id -- so the answer is already in
+    the ones we kept, and it costs nothing to read.
     """
-    if not (_of_direct() and account):
+    if not _of_direct():
         return {'checked': False}
-    conn = _of_conn()
-    if not hasattr(conn, 'sign_now'):
-        return {'checked': False}
-    user_id = str((of_session.get(account) or {}).get('user_id') or '')
-    if not user_id:
-        return {'checked': False}
-    path = '/api2/v2/users/me'
-    try:
-        theirs = conn.sign_now(path, user_id=user_id,
-                              proxy=_of_proxy_for('', '')) or {}
-    except Exception as e:
-        return {'checked': False, 'error': str(e)[:160]}
-    if not (theirs.get('sign') and theirs.get('time')):
-        return {'checked': False, 'error': 'the page signed nothing'}
-    ours, _ = of_rules.sign(path, user_id, when=int(theirs['time']))
-    same = ours == theirs['sign']
-    return {'checked': True, 'same': same, 'user_id': user_id,
-            'ours': ours, 'theirs': theirs['sign'],
-            'note': ('our signature for her own request matches the one '
-                     "OnlyFans' page makes, so signing is right for a signed-in "
-                     'request too — what OnlyFans refuses is the session'
-                     if same else
-                     'our signature for her own request differs from the one '
-                     "OnlyFans' page makes, though both match when nobody is "
-                     'signed in — the rules are wrong for a signed-in request, '
-                     'and her session is not the problem')}
+    mine = str((of_session.get(account) or {}).get('user_id') or '') if account else ''
+    signed_in = [s for s in _of_signatures()
+                 if str(s.get('user_id') or '0') not in ('', '0')]
+    if mine:
+        hers = [s for s in signed_in if str(s.get('user_id')) == mine]
+        signed_in = hers or signed_in
+    if not signed_in:
+        return {'checked': False,
+                'error': 'no signature captured while signed in — connect the '
+                         'account once with the window open and one is kept'}
+    rules = of_rules.rules()
+    checked = [(s, of_rules.verify(s, rules)) for s in signed_in]
+    matched = [s for s, ok in checked if ok is True]
+    failed = [s for s, ok in checked if ok is False]
+    if not (matched or failed):
+        return {'checked': False, 'error': 'the signatures we hold say nothing'}
+    same = bool(matched) and not failed
+    return {'checked': True, 'same': same, 'user_id': mine,
+            'matched': len(matched), 'failed': len(failed),
+            'note': ('our rules reproduce %d signature(s) OnlyFans made while '
+                     'signed in, so signing is right for her requests too and '
+                     'what OnlyFans refuses is the session'
+                     % len(matched) if same else
+                     'our rules reproduce %d signed-in signature(s) and fail %d, '
+                     'though they match every logged-out one — so the rules are '
+                     'wrong for a signed-in request and reconnecting will not '
+                     'help' % (len(matched), len(failed)))}
 
 
 @app.route('/api/onlyfans/signing/collect', methods=['POST'])
