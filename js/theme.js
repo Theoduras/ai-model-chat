@@ -15,6 +15,9 @@
   window.setTheme = function (next) {
     document.documentElement.setAttribute('data-theme', next);
     try { localStorage.setItem(KEY, next); } catch (e) {}
+    document.querySelectorAll('iframe').forEach(function (f) {
+      try { f.contentDocument.documentElement.setAttribute('data-theme', next); } catch (e) {}
+    });
     document.querySelectorAll('.theme-toggle').forEach(function (btn) {
       btn.setAttribute('aria-label', next === 'light' ? 'Switch to dark mode'
                                                       : 'Switch to light mode');
