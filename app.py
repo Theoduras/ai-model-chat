@@ -16843,6 +16843,19 @@ class _OnlyFansPlatform(_Platform):
         """
         if not (_of_direct() and self.connected(persona)):
             return ''
+        account = _of_account(persona)
+        # A session opened before the exit address was fixed is bound to
+        # whichever pool address Cloud Run happened to use that minute, and
+        # every request for it now leaves from a different one. OnlyFans
+        # refuses that, and it reads as a dead session — which it is, in the
+        # only sense that matters: no amount of waiting repairs it.
+        if (os.getenv('ONLYFANS_PROXY_TEMPLATE') or '').strip() and account:
+            if not (of_session.get(account) or {}).get('proxy'):
+                return ('Her session was captured before this deployment had a '
+                        'fixed exit address, so it is bound to an address her '
+                        'requests no longer come from — OnlyFans refuses it '
+                        'whatever we sign. Reconnect the account and the new '
+                        'session keeps the fixed address.')
         waiting = (OF.held() or {}).get(_of_account(persona))
         if waiting:
             return ('OnlyFans refused her last request, so the rest are being '
