@@ -11214,15 +11214,38 @@ def api_x_dm_debug():
     out['event_count'] = len(events)
     out['new_incoming'] = sum(1 for e in out['events']
                               if not e['mine'] and not e['already_handled'])
-    try:
-        conv = _x_call(persona, 'GET',
-                       '/dm_conversations?dm_conversation.fields=id&max_results=50')
-        out['conversation_count'] = len(conv.get('data', []) or [])
-        out['conversation_errors'] = conv.get('errors', [])
-    except Exception as e:
-        out['conversation_error'] = str(e)[:300]
+    # There is no "list my conversations" endpoint in v2 — only the account-wide
+    # /dm_events feed above and one named conversation. So when that feed comes
+    # back short, ?with=@handle asks X for that one conversation directly: a
+    # message X will not put in the feed (a request from someone she does not
+    # follow) can still be there.
+    who = (request.args.get('with') or '').strip()
+    if who:
+        try:
+            u = _x_resolve_user(persona, who)
+            out['with'] = u
+            conv = _x_call(persona, 'GET',
+                           f'/dm_conversations/with/{u["id"]}/dm_events'
+                           '?dm_event.fields=id,text,sender_id,created_at,dm_conversation_id'
+                           '&event_types=MessageCreate&max_results=20')
+            out['with_events'] = [
+                {'id': e.get('id'), 'from': e.get('sender_id'),
+                 'mine': e.get('sender_id') == t.get('user_id'),
+                 'already_handled': e.get('id') in _x_seen_events(persona),
+                 'at': e.get('created_at'), 'text': (e.get('text') or '')[:120]}
+                for e in (conv.get('data') or [])]
+            out['with_meta'] = conv.get('meta', {})
+            out['with_errors'] = conv.get('errors', [])
+        except Exception as e:
+            out['with_error'] = str(e)[:300]
 
-    if out.get('missing_scopes'):
+    with_incoming = [e for e in out.get('with_events') or [] if not e['mine']]
+    if with_incoming and not [e for e in out['events'] if not e['mine']]:
+        out['verdict'] = ('That conversation has incoming messages X will serve directly but '
+                          'leaves out of the account-wide feed the round reads — see '
+                          'with_events. Accepting the message request on x.com once puts it '
+                          'in the feed.')
+    elif out.get('missing_scopes'):
         out['verdict'] = ('X did not grant ' + ', '.join(out['missing_scopes']) +
                           ' — reconnect the account and approve every permission.')
     elif not out.get('verdict'):
