@@ -258,6 +258,33 @@ class OracleTest(unittest.TestCase):
                 of_rules.refresh()
         self.assertIn('captured signature', str(caught.exception))
 
+    def test_a_newer_disproved_set_replaces_an_older_disproved_one(self):
+        """Observed live: signing on 65232, the app sat on 13190 for days while
+        a mirror served 63708. Neither signs, but the derivation searches the
+        page with the loaded set's checksum recipe, so the oldest of them is
+        the worst one to keep."""
+        old = dict(RULES, static_param='OLD', format='13190:{}:{:x}:2')
+        new = dict(RULES, static_param='NEW', format='63708:{}:{:x}:2')
+        fresh = self._fresh_sample()
+        of_rules._rules = dict(old)
+        of_rules.sample_hooks(lambda: json.dumps(fresh), lambda v: None)
+        with mock.patch.object(of_rules, 'RULES_SOURCES', ('a',)), \
+                mock.patch.object(of_rules, '_fetch', return_value=new):
+            got = of_rules.refresh()
+        self.assertEqual(got['static_param'], 'NEW')
+
+    def test_an_older_disproved_set_does_not_replace_a_newer_one(self):
+        old = dict(RULES, static_param='OLD', format='13190:{}:{:x}:2')
+        new = dict(RULES, static_param='NEW', format='63708:{}:{:x}:2')
+        fresh = self._fresh_sample()
+        of_rules._rules = dict(new)
+        of_rules.sample_hooks(lambda: json.dumps(fresh), lambda v: None)
+        with mock.patch.object(of_rules, 'RULES_SOURCES', ('a',)), \
+                mock.patch.object(of_rules, '_fetch', return_value=old):
+            with self.assertRaises(of_rules.RulesError):
+                of_rules.refresh()
+        self.assertEqual(of_rules._rules['static_param'], 'NEW')
+
     def test_a_rotation_no_mirror_has_caught_keeps_the_oracle(self):
         """Observed live: OnlyFans signing with 65034 while the two mirrors
         served 13190 and 63708. The sample is the only evidence of which

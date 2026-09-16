@@ -384,15 +384,22 @@ def refresh(reject=()):
     # ours, so a stored one is the genuine article, and it is the only evidence
     # of which revision is current and the only thing the derivation can search
     # the page for. Throwing it away here would take the repair's input with it.
-    if disproved and not _valid(_rules):
+    if disproved:
+        rules, url = _best(disproved)
         # Nothing loaded at all: a set that cannot sign still beats none. It
         # gives the caller a request to be refused for, and that refusal is what
         # drives the repair.
-        rules, url = _best(disproved)
-        logger.warning('no published set reproduces the signature OnlyFans '
-                       'itself produced; taking %s so there is something to '
-                       'sign with while the rules are repaired', url)
-        return _adopt(rules, url)
+        #
+        # And a newer disproved set beats an older one. The derivation takes its
+        # checksum recipe from whatever is loaded, so refusing to move off a set
+        # from three rotations ago leaves the repair searching the page with the
+        # least likely recipe of the ones on offer -- and leaves the console
+        # naming a revision that is not even the newest published.
+        if not _valid(_rules) or _revision_of(rules) > _revision_of(_rules):
+            logger.warning('no published set reproduces the signature OnlyFans '
+                           'itself produced; taking %s so there is something to '
+                           'sign with while the rules are repaired', url)
+            return _adopt(rules, url)
     raise RulesError(_why_nothing_signs(want) + ': ' + '; '.join(errors))
 
 
