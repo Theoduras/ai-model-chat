@@ -44,6 +44,7 @@
         <button type="button" onclick="plShiftWeek(1)" aria-label="Next week">&rsaquo;</button>
       </div>
       <button type="button" class="btn btn-secondary" onclick="plLoadQueue()">Refresh</button>
+      <button type="button" class="btn btn-secondary" onclick="plNew()">New post</button>
       <button type="button" class="btn btn-primary" id="pl-plan-btn" onclick="plPlan(this)">Plan the week</button>
     </div>
   </div>
@@ -65,6 +66,12 @@
     </div>
     <div class="modal-body">
       <p class="pl-modal-meta" id="pl-m-meta"></p>
+
+      <div class="field" style="margin-top:14px;" id="pl-m-chans-field" hidden>
+        <label>Channels</label>
+        <div class="pl-chans" id="pl-m-chans"></div>
+        <span class="hint" id="pl-m-chans-hint" style="margin-top:6px;"></span>
+      </div>
 
       <div class="field" style="margin-top:14px;" id="pl-m-when-field">
         <label for="pl-m-when">When</label>
@@ -98,6 +105,9 @@
         <button type="button" class="btn btn-ghost" id="pl-m-cancel"
                 style="color:var(--err); border-color:var(--err); margin-right:auto;"
                 onclick="plCancelPost(this)">Cancel post</button>
+        <button type="button" class="btn btn-ghost" id="pl-m-delete"
+                style="color:var(--err); border-color:var(--err);"
+                onclick="plDeletePost(this)">Delete</button>
         <button type="button" class="btn btn-ghost" onclick="plClose()">Close</button>
         <button type="button" class="btn btn-primary" id="pl-m-save" onclick="plSave(this)">Save changes</button>
       </div>
@@ -126,6 +136,8 @@ let plConn = {};
 const PL_KIND = { value: 'worth reading', tease: 'tease', cta: 'ask' };
 const PL_STATUS = {
   queued: 'Waiting to go out.',
+  manual: 'On the calendar as a reminder. This channel has no posting API she is '
+        + 'allowed to use, so copy it out and post it yourself when the slot comes.',
   sending: 'On its way now.',
   posted: 'Posted.',
   failed: 'Failed, and a failed post is not retried — edit it and queue it fresh.',
@@ -140,6 +152,7 @@ let plPlanMeta = null;
 let plOpen = null;        // the card the modal is editing
 let plVault = [];         // the persona's media library
 let plPickedMedia = '';   // what the open editor has attached
+let plChans = [];         // channels ticked on a brand-new post
 
 function esc(s) {
   return String(s == null ? '' : s)
@@ -311,7 +324,7 @@ function plRender(d) {
   plConnectLine();
 
   const t = (d && d.totals) || {};
-  const manual = plProposed.filter(s => !s.publishable).length;
+  const manual = plProposed.filter(s => !s.publishable).length + (t.manual || 0);
   document.getElementById('pl-stats').innerHTML =
     statTile('queued', t.queued || 0)
     + statTile('posted', t.posted || 0)
@@ -358,10 +371,10 @@ function plRender(d) {
 }
 
 function plCard(c) {
-  const manual = c.kind === 'proposed' && !c.publishable;
+  const manual = c.kind === 'proposed' ? !c.publishable : c.status === 'manual';
   const cls = 'pl-card ' + (c.kind === 'proposed'
     ? (manual ? 'is-proposed is-manual' : 'is-proposed')
-    : 'is-' + c.status);
+    : (manual ? 'is-manual' : 'is-' + c.status));
   let flag = '';
   if (manual) flag = 'by hand';
   else if (c.kind === 'proposed') flag = PL_KIND[c.job] || c.job;
@@ -430,13 +443,94 @@ async function plQueueWeek(btn) {
 
 // ── The editor ───────────────────────────────────────────────────────────────
 
+// A blank post. Defaults to the next round hour so the time box is never the
+// thing standing between an idea and the calendar.
+function plNew() {
+  if (!plSlug) return;
+  const soon = new Date();
+  soon.setMinutes(0, 0, 0);
+  soon.setHours(soon.getHours() + 1);
+  let at = Math.floor(soon.getTime() / 1000);
+  // Opened on a week that is not this one, the post belongs to that week.
+  if (at < plWeekStart || at >= plWeekStart + 7 * 86400) at = plWeekStart + 9 * 3600;
+  plOpen = { kind: 'new', idx: -1, id: '', platform: 'x', at: at, publishable: true };
+  plChans = ['x'];
+  plPickedMedia = '';
+
+  document.getElementById('pl-m-title').textContent = 'New post';
+  document.getElementById('pl-m-meta').textContent =
+    'Pick the channels, set the time, write it. Nothing exists until you save.';
+  const when = document.getElementById('pl-m-when');
+  when.value = toLocalInput(at);
+  when.disabled = false;
+  document.getElementById('pl-m-when-field').style.display = '';
+
+  const ta = document.getElementById('pl-m-text');
+  ta.value = '';
+  ta.disabled = false;
+  document.getElementById('pl-m-label').textContent = 'Post';
+  document.getElementById('pl-m-hint').textContent =
+    'Type an angle and press Write it, or write the post yourself.';
+  document.getElementById('pl-m-write').style.display = '';
+  document.getElementById('pl-m-write').textContent = '✨ Write it';
+  document.getElementById('pl-m-cancel').style.display = 'none';
+  document.getElementById('pl-m-delete').style.display = 'none';
+  const save = document.getElementById('pl-m-save');
+  save.style.display = '';
+  save.textContent = 'Add to the week';
+
+  plRenderChans();
+  plCount();
+  plRenderMedia();
+  document.getElementById('pl-modal').classList.add('open');
+}
+
+function plRenderChans() {
+  const field = document.getElementById('pl-m-chans-field');
+  field.hidden = !plOpen || plOpen.kind !== 'new';
+  if (field.hidden) return;
+  document.getElementById('pl-m-chans').innerHTML = Object.keys(PL_LABELS).map(p => {
+    const on = plChans.indexOf(p) !== -1;
+    const hand = PL_PUBLISHABLE.indexOf(p) === -1;
+    return '<label class="pl-chan-pick' + (on ? ' on' : '') + '">'
+      + '<input type="checkbox"' + (on ? ' checked' : '')
+      + ' onchange="plToggleChan(\'' + p + '\')">'
+      + esc(PL_LABELS[p])
+      + (hand ? '<span class="by-hand">by hand</span>' : '') + '</label>';
+  }).join('');
+  const hand = plChans.filter(p => PL_PUBLISHABLE.indexOf(p) === -1);
+  document.getElementById('pl-m-chans-hint').textContent = !plChans.length
+    ? 'Pick at least one.'
+    : hand.length
+      ? hand.map(p => PL_LABELS[p]).join(' and ') + ' cannot be posted from here, so '
+        + (hand.length === 1 ? 'it lands' : 'they land')
+        + ' on the calendar as a reminder to post by hand.'
+      : 'One post per channel, each trimmed to that channel\'s limit.';
+}
+
+function plToggleChan(p) {
+  const i = plChans.indexOf(p);
+  if (i === -1) plChans.push(p); else plChans.splice(i, 1);
+  // The media strip and the counter follow the strictest channel ticked.
+  plOpen.platform = plChans[0] || 'x';
+  plOpen.publishable = plChans.every(c => PL_PUBLISHABLE.indexOf(c) !== -1);
+  plRenderChans();
+  plCount();
+  plRenderMedia();
+}
+
 function plEdit(kind, idx) {
   const row = kind === 'queued' ? plQueue[idx] : plProposed[idx];
   if (!row) return;
   const at = kind === 'queued' ? row.run_at : row.at;
   const plat = row.platform;
-  const publishable = kind === 'queued' || row.publishable;
-  const editable = kind === 'proposed' || row.status === 'queued';
+  // A queued row on a by-hand channel is a reminder, not something that posts
+  // itself, so it reads as manual here exactly like a proposal does.
+  const publishable = kind === 'queued'
+    ? PL_PUBLISHABLE.indexOf(plat) !== -1
+    : row.publishable;
+  const editable = kind === 'proposed'
+    || row.status === 'queued' || row.status === 'manual';
   plOpen = { kind: kind, idx: idx, id: row.id || '', platform: plat, at: at, publishable: publishable };
 
   document.getElementById('pl-m-title').textContent =
@@ -444,15 +538,18 @@ function plEdit(kind, idx) {
   document.getElementById('pl-m-meta').textContent = kind === 'proposed'
     ? 'Proposed — ' + (PL_KIND[row.kind] || row.kind)
       + (publishable ? '. Nothing exists until you queue it.'
-                     : '. This channel has no posting API she is allowed to use, so copy it out and post it yourself.')
+                     : '. This channel has no posting API she is allowed to use, so adding it '
+                       + 'puts a reminder on the calendar to post it yourself.')
     : (PL_STATUS[row.status] || row.status)
       + (row.attempts > 1 ? ' After ' + row.attempts + ' tries.' : '')
       + (row.error ? ' ' + row.error : '');
 
   const when = document.getElementById('pl-m-when');
   when.value = toLocalInput(at);
-  when.disabled = !editable || !publishable;
-  document.getElementById('pl-m-when-field').style.display = publishable ? '' : 'none';
+  // Every post has a slot now, whether it goes out on its own or is a reminder
+  // to post it by hand, so the time is worth setting either way.
+  when.disabled = !editable;
+  document.getElementById('pl-m-when-field').style.display = '';
 
   const ta = document.getElementById('pl-m-text');
   ta.value = kind === 'queued' ? (row.text || '') : (row.idea || '');
@@ -466,12 +563,18 @@ function plEdit(kind, idx) {
   document.getElementById('pl-m-write').textContent = kind === 'proposed' ? '✨ Write it' : '✨ Rewrite';
   document.getElementById('pl-m-cancel').style.display =
     (kind === 'queued' && row.status === 'queued') ? '' : 'none';
+  // Only a stored row can be deleted; a proposal disappears by itself.
+  document.getElementById('pl-m-delete').style.display =
+    (kind === 'queued' && row.status !== 'sending') ? '' : 'none';
   const save = document.getElementById('pl-m-save');
-  save.style.display = (editable && publishable) ? '' : 'none';
-  save.textContent = kind === 'proposed' ? 'Queue it' : 'Save changes';
+  save.style.display = editable ? '' : 'none';
+  save.textContent = kind === 'proposed'
+    ? (publishable ? 'Queue it' : 'Add to the week') : 'Save changes';
 
   // A proposal has no media until one is attached here; a queued row remembers.
   plPickedMedia = row.media_id || '';
+  plChans = [];
+  plRenderChans();
   plCount();
   plRenderMedia();
   document.getElementById('pl-modal').classList.add('open');
@@ -489,9 +592,17 @@ function plMediaThumb(m, extra) {
 function plRenderMedia() {
   const field = document.getElementById('pl-m-media-field');
   if (!plOpen) return;
-  const allowed = PL_MEDIA[plOpen.platform] || [];
+  const chans = plOpenChans();
+  // One photo goes to every channel ticked, so only a kind they all take can
+  // be offered — TikTok takes video and Reddit takes stills, and picking both
+  // leaves nothing that satisfies the pair.
+  const allowed = chans.length
+    ? chans.map(p => PL_MEDIA[p] || [])
+        .reduce((a, b) => a.filter(k => b.indexOf(k) !== -1))
+    : [];
   const usable = plVault.filter(m => allowed.indexOf(m.kind || 'image') !== -1);
-  field.style.display = allowed.length ? '' : 'none';
+  field.style.display = chans.length ? '' : 'none';
+  if (plPickedMedia && !usable.some(m => m.id === plPickedMedia)) plPickedMedia = '';
 
   const picked = plPickedMedia ? plMediaById(plPickedMedia) : null;
   document.getElementById('pl-m-picked').innerHTML = picked
@@ -504,14 +615,17 @@ function plRenderMedia() {
     : '<span class="hint">Nothing attached.</span>';
 
   document.getElementById('pl-m-media-note').textContent =
-    allowed.length ? allowed.join(' or ') : '';
+    allowed.length ? allowed.join(' or ') : 'nothing fits every channel';
   document.getElementById('pl-m-strip').innerHTML = usable.length
     ? usable.map(m => '<button type="button" class="pl-pick'
         + (m.id === plPickedMedia ? ' on' : '') + '" title="' + esc(m.purpose || m.kind)
         + '" onclick="plPickMedia(\'' + esc(m.id) + '\')">'
         + plMediaThumb(m) + '</button>').join('')
-    : '<span class="hint">Nothing in the library this channel will take. '
-      + 'Add photos and clips in the persona editor.</span>';
+    : '<span class="hint">' + (allowed.length
+        ? 'Nothing in the library ' + (chans.length > 1 ? 'all these channels' : 'this channel')
+          + ' will take. Add photos and clips in the persona editor.'
+        : 'These channels take different kinds of media, so no one file suits '
+          + 'them all. Post them separately to attach something.') + '</span>';
 
   document.getElementById('pl-m-media-hint').textContent = !picked ? ''
     : plOpen.publishable
@@ -531,9 +645,21 @@ function plClose() {
   plOpen = null;
 }
 
+// The channels the open editor is writing for: several on a new post, one
+// everywhere else.
+function plOpenChans() {
+  if (!plOpen) return [];
+  return plOpen.kind === 'new' ? plChans.slice() : [plOpen.platform];
+}
+
 function plCount() {
   if (!plOpen) return;
-  const cap = PL_CAPS[plOpen.platform] || 280;
+  const chans = plOpenChans();
+  // Posting to several channels at once, the tightest cap is the one that
+  // matters — anything longer is silently trimmed on the strictest of them.
+  const cap = chans.length
+    ? Math.min.apply(null, chans.map(p => PL_CAPS[p] || 280))
+    : 280;
   const n = document.getElementById('pl-m-text').value.length;
   const el = document.getElementById('pl-m-count');
   el.textContent = n + '/' + cap;
@@ -595,7 +721,13 @@ async function plSave(btn) {
   btn.textContent = 'saving…';
   try {
     let res;
-    if (plOpen.kind === 'proposed') {
+    if (plOpen.kind === 'new') {
+      res = await fetch('/api/growth/queue', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ persona: plSlug, platforms: plChans, text: text,
+                               run_at: at, media_id: plPickedMedia })
+      });
+    } else if (plOpen.kind === 'proposed') {
       if (!plOpen.written) {
         alert('Write the post first — what is in the box is still the angle.');
         return;
@@ -614,6 +746,11 @@ async function plSave(btn) {
     }
     const d = await res.json();
     if (!d.ok) { alert(d.error || 'Could not save it.'); return; }
+    // Some channels can succeed while others are refused — say which, rather
+    // than letting a half-done save look complete.
+    if ((d.failed || []).length) {
+      alert(d.failed.map(f => (PL_LABELS[f.platform] || f.platform) + ': ' + f.error).join('\n'));
+    }
     if (plOpen.kind === 'proposed') plProposed.splice(plOpen.idx, 1);
     plClose();
     plLoadQueue();
@@ -633,6 +770,21 @@ async function plCancelPost(btn) {
     plClose();
     plLoadQueue();
   } catch (e) { alert('Could not cancel it.'); }
+  finally { btn.disabled = false; }
+}
+
+async function plDeletePost(btn) {
+  if (!plOpen || !plOpen.id) return;
+  if (!confirm('Delete this post? It comes off the calendar for good.')) return;
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/growth/queue?persona=' + encodeURIComponent(plSlug)
+      + '&id=' + encodeURIComponent(plOpen.id) + '&mode=delete', { method: 'DELETE' });
+    const d = await res.json();
+    if (!d.ok) { alert(d.error || 'Could not delete it.'); return; }
+    plClose();
+    plLoadQueue();
+  } catch (e) { alert('Could not delete it.'); }
   finally { btn.disabled = false; }
 }
 
