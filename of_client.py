@@ -394,6 +394,19 @@ def _attempts(account, method, path, body, session):
                 _adopt_working_rules(rejected)
                 continue
             if e.code == 401 or (e.code == 403 and 'sign' not in e.detail.lower()):
+                if of_rules.proven() is False:
+                    # Signing is known broken: a signature OnlyFans itself
+                    # produced that no rule set reproduces. Every refusal in
+                    # that window is the signature until proved otherwise,
+                    # whatever the body says -- "Access denied." is what a bad
+                    # signature earns, and reading it as a revoked session
+                    # marked a live account expired and stopped its watcher for
+                    # the rest of the outage. A session that really did expire
+                    # surfaces on the first request after signing is repaired,
+                    # which is the first request that could tell the two apart.
+                    raise SigningStale(e.code, 'OnlyFans refused a request we '
+                                               'cannot sign — her session is '
+                                               'not the problem')
                 # A 401 that says nothing is not evidence of a revoked
                 # session: Cloudflare answers one with an HTML page, and a
                 # rotation refusal whose wording moves stops matching
@@ -407,17 +420,6 @@ def _attempts(account, method, path, body, session):
                                    'it — asking once more before blaming the '
                                    'session', account)
                     continue
-                if of_rules.proven() is False:
-                    # Signing is known broken -- a captured signature no
-                    # rule set reproduces, not merely an unchecked one -- so a
-                    # refusal with nothing
-                    # readable in it is far more likely to be the signature
-                    # than the session. Expiring here stops the watcher and
-                    # sends the creator to sign in again, which hands us the
-                    # same good session and the same unsignable request.
-                    raise SigningStale(e.code, 'OnlyFans refused a request we '
-                                               'cannot sign — her session is '
-                                               'not the problem')
                 of_session.mark_expired(account, e.detail)
                 raise SessionExpired(e.code, 'the OnlyFans session expired — '
                                              'reconnect the account')
