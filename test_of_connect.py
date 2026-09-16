@@ -426,6 +426,47 @@ class MissingAttemptTest(unittest.TestCase):
         self.assertEqual(len(said), 2)
 
 
+class PageFetchFallbackTest(unittest.TestCase):
+    """The site's own client is closured out of reach on the current build, so
+    the page makes the request itself and we sign it."""
+
+    def signer(self, answers):
+        sig = of_connect.Signer.__new__(of_connect.Signer)
+        sig.session = {'cookie': 'sess=a; auth_id=9', 'x_bc': 'bc',
+                       'user_id': '9', 'user_agent': 'Mozilla/5.0'}
+        sig.via, sig.error = '', ''
+        sig.page = mock.Mock(evaluate=mock.Mock(side_effect=answers))
+        return sig
+
+    def test_no_interceptor_falls_back_to_a_signed_fetch(self):
+        sig = self.signer([
+            {'ok': False, 'status': 0, 'error': 'no request interceptor on the page'},
+            {'ok': True, 'status': 200, 'via': 'fetch', 'data': {'id': 9}}])
+        got = of_connect.Signer._fetch_one(sig, {'method': 'GET',
+                                                 'path': '/api2/v2/users/me',
+                                                 'body': None, 'ms': 1000})
+        self.assertEqual(got, {'status': 200, 'body': {'id': 9}})
+        self.assertEqual(sig.via, 'fetch')
+
+    def test_the_fetch_is_handed_our_signature(self):
+        sig = self.signer([
+            {'ok': False, 'status': 0, 'error': 'no request interceptor on the page'},
+            {'ok': True, 'status': 200, 'via': 'fetch', 'data': {}}])
+        of_connect.Signer._fetch_one(sig, {'method': 'GET', 'path': '/api2/v2/x',
+                                           'body': None, 'ms': 1000})
+        sent = sig.page.evaluate.call_args_list[-1][0][1]
+        self.assertTrue(sent['headers'].get('sign'))
+        self.assertTrue(sent['headers'].get('time'))
+
+    def test_the_interceptor_is_still_preferred_when_it_is_there(self):
+        sig = self.signer([{'ok': True, 'status': 200, 'via': 'window.axios',
+                            'data': {'id': 9}}])
+        got = of_connect.Signer._fetch_one(sig, {'method': 'GET', 'path': '/x',
+                                                 'body': None, 'ms': 1000})
+        self.assertEqual(got['status'], 200)
+        self.assertEqual(sig.page.evaluate.call_count, 1)
+
+
 if __name__ == '__main__':
     unittest.main()
 
