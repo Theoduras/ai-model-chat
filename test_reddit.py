@@ -12,6 +12,7 @@ Run with: python test_reddit.py
 import base64
 import json
 import os
+import time
 import threading
 
 os.environ.setdefault('GEMINI_API_KEY', 'test')
@@ -444,9 +445,12 @@ def test_one_planned_post_fans_out_to_one_row_per_subreddit():
     targets, why = app._growth_rd_targets('lilly', 'x', data, ['img'])
     check('no other channel carries a subreddit at all', (targets, why) == ([], ''))
 
-    check('reddit is a channel the planner publishes to itself',
-          'reddit' in growth.PUBLISHABLE
-          and growth.queue_status_for('reddit') == 'queued')
+    # Parked: the fan-out above still works and is still tested, but nothing
+    # can sign her in, so a planned Reddit post goes back to the creator rather
+    # than failing in a worker she never sees.
+    check('reddit is parked, so a planned post waits for the creator',
+          'reddit' not in growth.PUBLISHABLE
+          and growth.queue_status_for('reddit') == 'manual')
 
 
 def test_the_queue_hands_the_target_to_the_publisher():
@@ -527,6 +531,127 @@ def test_the_routes_exist():
         check(f'{path} is served', path in rules)
 
 
+def test_an_approved_app_never_carries_her_cookie():
+    """The OAuth path is the whole point of the move off the browser: she talks
+    to Reddit as a registered app, from this server, with no session to expire
+    and nothing to hide behind."""
+    import reddit_rest as RR
+
+    rest = RR.Rest({'access_token': 'tok', 'proxy': 'http://pool:1'})
+    check('an approved app is connected without a cookie', rest.configured())
+    headers = rest._headers()
+    check('it identifies with a bearer token', headers.get('Authorization') == 'Bearer tok')
+    check('and never hands Reddit a session cookie as well',
+          'Cookie' not in headers and 'X-Modhash' not in headers, headers)
+    check('it declares itself rather than wearing a browser User-Agent',
+          headers.get('User-Agent', '').startswith('web:'), headers)
+    check('every call goes to the OAuth host',
+          rest._p('/api/submit') == 'https://oauth.reddit.com/api/submit')
+    check('identity lives somewhere else there',
+          rest._p('/api/me.json') == 'https://oauth.reddit.com/api/v1/me')
+    check('and the legacy .json suffix is dropped, query kept',
+          rest._p('/user/x/submitted.json?limit=5')
+          == 'https://oauth.reddit.com/user/x/submitted?limit=5')
+    check('an approved app has no reason to route through a residential pool',
+          rest.proxy == '')
+
+    old = RR.Rest({'cookie': 'reddit_session=a', 'modhash': 'm'})
+    check('a carried-over session still speaks to the web host as before',
+          old._p('/api/me.json') == 'https://www.reddit.com/api/me.json'
+          and old._headers().get('Cookie') == 'reddit_session=a')
+
+
+def test_a_token_is_refreshed_before_it_dies_and_never_thrown_away():
+    """An access token lasts an hour; the refresh token behind it does not
+    expire. Losing the refresh token means approving again by hand, so a
+    network blip must never cost it -- only a refusal Reddit calls final."""
+    import reddit_oauth as RO
+
+    store = {}
+    app._get_setting = lambda k, d=None: store.get(k, d)
+    app._set_setting = lambda k, v: store.__setitem__(k, v)
+
+    calls = []
+    app.RO = type('M', (), {
+        'refresh': staticmethod(lambda rt: (calls.append(rt) or ('fresh', 3600))),
+        'RedditAuthError': RO.RedditAuthError,
+        'configured': staticmethod(lambda: True),
+        'revoke': staticmethod(lambda *a, **k: None)})
+
+    app._rd_set_session('lilly', {'auth': 'oauth', 'refresh_token': 'keep-me',
+                                  'access_token': 'old',
+                                  'access_expires': time.time() + 5})
+    rest = app._rd_rest('lilly')
+    check('a token about to expire is refreshed once', calls == ['keep-me'], calls)
+    check('and the call goes out on the new one', rest.access_token == 'fresh')
+    app._rd_rest('lilly')
+    check('a fresh token is not refreshed again', calls == ['keep-me'], calls)
+
+    def blip(rt):
+        raise RO.RedditAuthError('connection reset', fatal=False)
+
+    app.RO = type('M', (), {'refresh': staticmethod(blip),
+                            'RedditAuthError': RO.RedditAuthError,
+                            'configured': staticmethod(lambda: True),
+                            'revoke': staticmethod(lambda *a, **k: None)})
+    held = app._rd_session('lilly')
+    app._rd_set_session('lilly', dict(held, access_expires=0))
+    threw = False
+    try:
+        app._rd_rest('lilly')
+    except ValueError:
+        threw = True
+    check('a network failure is reported rather than swallowed', threw)
+    check('and her refresh token survives it',
+          app._rd_session('lilly').get('refresh_token') == 'keep-me')
+
+    def refused(rt):
+        raise RO.RedditAuthError('400 invalid_grant', fatal=True)
+
+    app.RO = type('M', (), {'refresh': staticmethod(refused),
+                            'RedditAuthError': RO.RedditAuthError,
+                            'configured': staticmethod(lambda: True),
+                            'revoke': staticmethod(lambda *a, **k: None)})
+    try:
+        app._rd_rest('lilly')
+    except ValueError:
+        pass
+    check('a refusal Reddit calls final clears the connection instead of '
+          'retrying at a credential it has already rejected',
+          app._rd_session('lilly') == {})
+
+
+def test_the_sign_in_link_cannot_be_driven_by_a_stranger():
+    """The callback stores an account against whatever persona the state names,
+    so an unsigned state would let anyone who can reach the URL attach their own
+    Reddit account to somebody else's model."""
+    import reddit_oauth as RO
+
+    os.environ['SECRET_KEY'] = 'test-secret-for-reddit'
+    good = RO.sign_state('lilly')
+    check('a state we signed names the persona back', RO.read_state(good) == 'lilly')
+    check('a tampered persona is refused',
+          RO.read_state(good.replace('lilly', 'nova', 1)) == '')
+    check('a tampered signature is refused', RO.read_state(good[:-1] + 'z') == '')
+    check('nonsense is refused rather than trusted', RO.read_state('lilly') == '')
+    persona, stamp, mac = good.split(':')
+    stale = f'{persona}:{int(stamp) - RO.STATE_TTL - 10}:{mac}'
+    check('and a link left lying around for an hour is refused too',
+          RO.read_state(stale) == '')
+
+    check('the scopes cover what she does and nothing more',
+          set(RO.SCOPES.split()) == {'identity', 'submit', 'edit', 'read',
+                                     'history', 'privatemessages', 'flair'})
+    os.environ['REDDIT_CLIENT_ID'] = 'cid'
+    os.environ['REDDIT_CLIENT_SECRET'] = 'secret'
+    os.environ['REDDIT_REDIRECT_URI'] = 'https://x.test/reddit/oauth/callback'
+    url = RO.authorize_url(good)
+    check('the approval link asks for a token that does not expire',
+          'duration=permanent' in url, url)
+    check('and never carries the app secret to the browser',
+          'secret' not in url, url)
+
+
 if __name__ == '__main__':
     for fn in (test_a_submission_needs_somewhere_to_go,
                test_the_flair_comes_from_the_subreddit_she_set_up,
@@ -541,6 +666,9 @@ if __name__ == '__main__':
                test_a_missing_chat_token_is_posting_only_not_broken,
                test_the_session_round_trips_through_encryption,
                test_each_persona_dials_reddit_from_her_own_address,
+               test_an_approved_app_never_carries_her_cookie,
+               test_a_token_is_refreshed_before_it_dies_and_never_thrown_away,
+               test_the_sign_in_link_cannot_be_driven_by_a_stranger,
                test_signing_in_through_the_browser,
                test_one_planned_post_fans_out_to_one_row_per_subreddit,
                test_the_queue_hands_the_target_to_the_publisher,

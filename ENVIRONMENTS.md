@@ -283,6 +283,42 @@ calls leave by different doors, which fails in exactly the confusing
 logs-in-then-drops way this was already chased for three rounds. No app code
 changes; this is infra-only and survives image deploys.
 
+### Reddit's app (the way Reddit is connected)
+
+Reddit is not signed in through a browser any more. It refused the hosted
+window on every path — correct credentials answered "invalid username or
+password", the emailed one-time link answered `UPEl3D` — while the page itself
+loaded fine on a clean residential IP. So Reddit is a registered app instead,
+and the connection never expires.
+
+Set up once, for every persona:
+
+1. Sign in on reddit.com as the account that will own the app, go to
+   <https://www.reddit.com/prefs/apps> → **create another app**.
+2. Type: **web app**. Redirect URI: the service URL plus
+   `/reddit/oauth/callback`, exactly — Reddit compares it character for
+   character. For dev that is
+   `https://ai-model-chat-dev-<hash>.run.app/reddit/oauth/callback`.
+3. The id is the string under the app name; the secret is next to `secret`.
+4. Put them on the **app** service (not the browser one):
+
+```bash
+gcloud run services update ai-model-chat-dev --region europe-west4 \
+  --update-env-vars \
+  'REDDIT_CLIENT_ID=...,REDDIT_CLIENT_SECRET=...,REDDIT_REDIRECT_URI=https://.../reddit/oauth/callback,REDDIT_APP_UA=web:ai-model-chat:v1 (by /u/<owner>)'
+```
+
+`REDDIT_APP_UA` is not cosmetic: `oauth.reddit.com` rate-limits a
+browser-shaped User-Agent far harder than a declared one, and the declared form
+is what Reddit's API rules ask for.
+
+Then per persona: `/reddit` → **Connect with Reddit** → approve. Done for good
+— `duration=permanent` means the refresh token does not expire, and nothing
+needs re-pasting.
+
+A persona connected this way needs **no proxy**; `_rd_proxy_for` returns `''`
+for her deliberately. The pools below only matter for the two fallbacks.
+
 ### Reddit, Instagram and TikTok pools
 
 Each has its own template, read by both the sign-in browser and the REST side:

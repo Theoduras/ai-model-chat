@@ -22219,6 +22219,7 @@ def api_instagram_post_now():
 import reddit_rest as RR
 import tiktok_rest as TR
 import reddit_chat as RC
+import reddit_oauth as RO
 
 
 def _rd_fernet():
@@ -22275,12 +22276,63 @@ def _rd_set_session(persona, session):
     blob = _rd_fernet().encrypt(json.dumps(session).encode()).decode()
     _rd_save_account(persona, session=blob, user_id=str(session.get('user_id') or ''),
                      username=session.get('username') or '',
+                     auth=session.get('auth') or 'cookie',
                      chat_ready=bool(session.get('bearer')),
                      connected_at=int(time.time()))
 
 
+_RD_TOKEN_LOCKS = {}
+_RD_TOKEN_GUARD = threading.Lock()
+
+
+def _rd_token_lock(persona):
+    with _RD_TOKEN_GUARD:
+        return _RD_TOKEN_LOCKS.setdefault(persona, threading.Lock())
+
+
+def _rd_fresh_token(persona, session):
+    """An access token good for the next minute, minted from her refresh token.
+
+    Reddit's access tokens last an hour; the refresh token behind them does not
+    expire at all, which is the whole reason the console moved to OAuth. A
+    refusal Reddit calls final clears the connection so the console says so
+    plainly. A network failure does not: losing her refresh token to a blip
+    would mean approving again for nothing.
+    """
+    if session.get('auth') != 'oauth':
+        return session
+    if session.get('access_token') and float(session.get('access_expires') or 0) > time.time() + 60:
+        return session
+    with _rd_token_lock(persona):
+        session = _rd_session(persona)
+        if session.get('auth') != 'oauth':
+            return session
+        if session.get('access_token') and float(session.get('access_expires') or 0) > time.time() + 60:
+            return session
+        try:
+            token, ttl = RO.refresh(session.get('refresh_token') or '')
+        except RO.RedditAuthError as e:
+            if e.fatal:
+                logger.warning('reddit refused %s\'s refresh token: %s', persona, e.detail)
+                _rd_set_session(persona, {})
+                raise ValueError('Reddit has ended this connection. Connect her '
+                                 'account again.')
+            logger.warning('reddit token refresh for %s failed: %s', persona, e.detail)
+            raise ValueError('Could not reach Reddit to refresh her token.')
+        session = dict(session, access_token=token,
+                       access_expires=time.time() + max(int(ttl) - 60, 60))
+        _rd_set_session(persona, session)
+        return session
+
+
+def _rd_connected(session):
+    """Connected either way: an approved app, or a session carried over by
+    hand when there was no other way in."""
+    return bool((session or {}).get('refresh_token') or (session or {}).get('cookie'))
+
+
 def _rd_rest(persona):
-    return RR.Rest(_rd_session(persona))
+    return RR.Rest(_rd_fresh_token(persona, _rd_session(persona)))
 
 
 def _rd_proxy(persona):
@@ -22325,6 +22377,10 @@ def _rd_proxy_for(persona, country=''):
     with it. So a persona can carry her own, and the template stays the
     fallback for a deployment running a single account.
     """
+    if _rd_session(persona).get('auth') == 'oauth':
+        # A registered app is allowed to be here. Routing it through a
+        # residential pool only adds a way for a post to fail.
+        return ''
     own = _rd_proxy(persona)
     if own:
         return own
@@ -22523,7 +22579,7 @@ class _RedditPlatform(_Platform):
     has_cta = True
 
     def connected(self, persona):
-        return bool(_rd_session(persona).get('cookie'))
+        return _rd_connected(_rd_session(persona))
 
     def scope(self, persona):
         return ''
@@ -23072,7 +23128,9 @@ def api_reddit_status():
     signin = _rd_signin_state(persona, adopt=True)
     held = _rd_session(persona)
     live = RC.runner(persona)
-    return jsonify({'connected': bool(held.get('cookie')),
+    return jsonify({'connected': _rd_connected(held),
+                    'auth': held.get('auth') or '',
+                    'app_ready': RO.configured(),
                     'chat_ready': bool(held.get('bearer')),
                     'signin': signin,
                     'username': held.get('username') or '',
@@ -23094,6 +23152,9 @@ def api_reddit_connect():
         live = RC.runner(persona)
         if live:
             live.stop()
+        held = _rd_session(persona)
+        if held.get('refresh_token'):
+            RO.revoke(held['refresh_token'])
         _rd_set_session(persona, {})
         return jsonify({'connected': False})
     if request.method == 'POST':
@@ -23123,10 +23184,80 @@ def api_reddit_connect():
         _rd_set_session(persona, session)
         _rd_connect(persona)
     held = _rd_session(persona)
-    return jsonify({'connected': bool(held.get('cookie')),
+    return jsonify({'connected': _rd_connected(held),
+                    'auth': held.get('auth') or '',
                     'chat_ready': bool(held.get('bearer')),
                     'username': held.get('username') or '',
                     'user_id': held.get('user_id') or ''})
+
+
+@app.route('/reddit/oauth/start')
+@platform_scoped
+def reddit_oauth_start():
+    """Step one of the only sign-in that has ever worked here.
+
+    Reddit refused the hosted browser on every path -- correct credentials came
+    back as wrong ones -- so her account is connected as a registered app
+    instead: the operator approves once, on reddit.com's own page, and the
+    refresh token that comes back does not expire.
+    """
+    persona = request_persona()
+    if not RO.configured():
+        return ('This service has no Reddit app configured yet. '
+                'REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET and REDDIT_REDIRECT_URI '
+                'have to be set on it first.'), 503
+    return redirect(RO.authorize_url(RO.sign_state(persona)))
+
+
+@app.route('/reddit/oauth/callback')
+def reddit_oauth_callback():
+    """Step two: Reddit sends the operator back here with an approval code.
+
+    No @platform_scoped and no persona parameter -- which persona this is for
+    comes out of the signed state, because an unsigned one would let anyone who
+    can reach this URL attach their own Reddit account to someone else's
+    persona.
+    """
+    def done(message, ok=False):
+        return render_template_string(
+            '<!doctype html><meta charset=utf-8>'
+            '<body style="font:15px system-ui;padding:40px;background:#111;color:#eee">'
+            '<p>{{ m }}</p><p><a style="color:#8ab4f8" href="/reddit">'
+            'Back to the Reddit console</a></p></body>', m=message), (200 if ok else 400)
+
+    if request.args.get('error'):
+        return done('Reddit did not approve that connection (%s).'
+                    % str(request.args['error'])[:60])
+    persona = RO.read_state(request.args.get('state') or '')
+    if not persona:
+        return done('That sign-in link was not one this app handed out, or it '
+                    'has expired. Start again from the Reddit console.')
+    code = (request.args.get('code') or '').strip()
+    if not code:
+        return done('Reddit sent no approval code back.')
+    try:
+        token, refresh_token, ttl = RO.exchange(code)
+    except RO.RedditAuthError as e:
+        logger.warning('reddit oauth exchange failed for %s: %s', persona, e.detail)
+        return done('Reddit would not issue a token: %s' % (e.detail[:160] or 'no detail'))
+    if not refresh_token:
+        # Without duration=permanent the connection would quietly die in an
+        # hour, which is exactly the failure this whole change removes.
+        return done('Reddit issued a one-hour token instead of a lasting one. '
+                    'Connect again from the console.')
+    held = {'auth': 'oauth', 'refresh_token': refresh_token,
+            'access_token': token,
+            'access_expires': time.time() + max(int(ttl) - 60, 60)}
+    try:
+        who = RR.Rest(held).me() or {}
+    except RR.RedditApiError as e:
+        return done('Reddit accepted the sign-in but would not say who she is'
+                    + (f': {e.detail[:160]}' if e.detail else '.'))
+    held['user_id'] = str(who.get('id') or '')
+    held['username'] = who.get('name') or ''
+    _rd_set_session(persona, held)
+    return done('Connected as u/%s. She can post and answer comments now.'
+                % (held['username'] or '?'), ok=True)
 
 
 @app.route('/api/reddit/proxy', methods=['GET', 'POST', 'DELETE'])

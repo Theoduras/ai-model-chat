@@ -453,7 +453,7 @@ POST_PLATFORMS = {
 
 # What the platform can actually publish on its own. The rest are written here
 # and posted by hand, which is why they are generated but never queued.
-PUBLISHABLE = ('x', 'threads', 'fanvue', 'instagram', 'reddit', 'tiktok')
+PUBLISHABLE = ('x', 'threads', 'fanvue', 'instagram', 'tiktok')
 
 # A variant is a second way to write for a channel that already exists, not a
 # channel of its own, so anything keyed per channel — the content level, the
@@ -505,7 +505,11 @@ MEDIA_SUPPORT = {
     # a set of stills, never a mix: the two are one route there.
     'instagram': {'kinds': ('image', 'video'), 'how': 'upload', 'max': 10},
     'tiktok':    {'kinds': ('image', 'video'), 'how': 'upload', 'max': 35},
-    'reddit':    {'kinds': ('image', 'video'), 'how': 'upload', 'max': 20},
+    # Parked: the transport posts, but nothing can sign her in. Reddit killed
+    # self-serve app creation, and it refuses the hosted browser outright. So a
+    # planned Reddit post goes back to the creator rather than failing in a
+    # worker she never sees.
+    'reddit':    {'kinds': ('image', 'video'), 'how': 'by-hand', 'max': 20},
 }
 
 MEDIA_KINDS = ('image', 'video')

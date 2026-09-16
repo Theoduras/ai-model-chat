@@ -261,7 +261,8 @@ print('by-hand queue rows')
 check('a publishable channel waits on the scheduler', G.queue_status_for('x') == 'queued')
 check('threads too', G.queue_status_for('threads') == 'queued')
 check('Instagram, Reddit and TikTok publish themselves now',
-      [G.queue_status_for(p) for p in ('instagram', 'reddit', 'tiktok')] == ['queued'] * 3)
+      [G.queue_status_for(p) for p in ('instagram', 'tiktok')] == ['queued'] * 2
+      and G.queue_status_for('reddit') == 'manual')
 check('manual is a real state', 'manual' in G.QUEUE_STATES)
 check('both editable states can still be touched',
       set(G.EDITABLE_STATES) == {'queued', 'manual'})
@@ -459,7 +460,7 @@ check('a channel with no posting API at all is by-hand',
       G.media_how('myspace') == 'by-hand')
 check('the signed-in channels hand over the bytes themselves',
       G.media_how('tiktok') == 'upload' and G.media_how('instagram') == 'upload'
-      and G.media_how('reddit') == 'upload')
+      and G.media_how('reddit') == 'by-hand')
 check('mime decides the kind',
       G.media_kind('video/mp4') == 'video' and G.media_kind('image/png') == 'image')
 check('no mime is an image, as the library was before video',

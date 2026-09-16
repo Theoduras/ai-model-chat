@@ -36,6 +36,7 @@ discord.html                    — Discord console (connect, channels, chime-in
 instagram_rest.py                — Instagram REST (upload + configure Post/Story/Reel)
 instagram_stub.py                — Offline Instagram transport (tests only)
 instagram.html                   — Instagram console (connect, post now — no DMs/funnel)
+reddit_oauth.py                  — Reddit OAuth (approve once, refresh token that never expires)
 reddit_rest.py                   — Reddit REST (S3 media lease, submit, comments, flairs)
 reddit_chat.py                   — Reddit Chat gateway (Sendbird socket, DMs only)
 reddit_stub.py                   — Offline Reddit transports (tests only)
@@ -196,17 +197,51 @@ Stay completely in character. Never mention being an AI.
   full of people is not a fan being worked towards something, so it never runs
   the funnel, never nudges, and never carries an offer. A paid link only ever
   goes out in a DM.
-- Reddit is built the same way Discord is, and for the same reason: Reddit's
-  Data API has needed manual approval for new access since late 2025 and has
-  never been able to reach Reddit Chat at all. So her account is connected
-  through the same hosted sign-in browser (`of_connect.SITES['reddit']`,
-  `/reddit/connect`), posting and comments go through `reddit_rest.py`, and
-  chat is a Sendbird socket in `reddit_chat.py` that mirrors
-  `discord_gateway.py`'s public surface so one `_Platform` adapter reads both.
-  The sign-in captures the bearer token and the chat handshake off the page —
-  captured, never guessed, exactly as Discord's build is. A capture without the
-  bearer is still kept: posting works off the cookie, and she is reported as
-  posting-only rather than broken.
+- **Reddit is parked.** The sidebar says Coming soon, `growth.PUBLISHABLE` no
+  longer carries it, and a planned Reddit post goes back to the creator as a
+  `manual` row. Everything else is built and tested and stays in the tree —
+  only the way in is missing, and it is missing at Reddit's end, not ours.
+  Reddit shut down self-serve app creation (the create button on
+  `/prefs/apps` silently refreshes), Data API access is now a manual approval
+  at <https://developers.reddit.com/app-registration>, and Devvit cannot
+  stand in: its apps install only into communities you fully moderate, and
+  `runAs: 'USER'` states plainly that it needs "an explicit manual action,
+  e.g. from a button" and forbids automated actions. Unpark it by getting an
+  approved `client_id` and putting Reddit back in `PUBLISHABLE` and the
+  sidebar.
+- Reddit is the one platform here that is **not** a driven browser, and it got
+  there the hard way. It started out like Discord — hosted sign-in
+  (`of_connect.SITES['reddit']`), cookie, bearer, a Sendbird socket for chat —
+  because Reddit Chat has never been reachable from the API. Reddit refused that
+  browser on every auth path: correct credentials came back "invalid username or
+  password", the one-time email link came back `UPEl3D`, on a clean residential
+  IP with patchright, with the page loading fine. Reddit was rejecting the
+  client, not the account. Chat was then dropped from scope, which removed the
+  only reason to drive a browser at all, so her account is now connected as a
+  **registered Reddit app** (`reddit_oauth.py`, `/reddit/oauth/start` →
+  `/reddit/oauth/callback`): the operator approves once, `duration=permanent`
+  brings back a refresh token that does not expire, and `reddit_rest.Rest`
+  speaks to `oauth.reddit.com` with a bearer and no cookie. That is the only
+  path worth extending. It also fixes the ToS posture — a declared app under
+  Reddit's developer terms, rather than a client its terms forbid.
+- Devvit (Reddit's Developer Platform, developers.reddit.com) is **not** an
+  option for this and was checked: a Devvit app can only be installed into
+  communities the developer *fully moderates*. It cannot post into a subreddit
+  she does not own, which is the entire job. It is worth revisiting only if a
+  persona ever runs her own subreddit — there it needs no auth at all, fires on
+  a CommentCreate trigger rather than polling, and can act as her via
+  `runAs: 'USER'` — but it is TypeScript on Reddit's infrastructure, so it
+  would be a second codebase calling back into this one for the reply text.
+- The two fallbacks stay because they are the only things that can carry a chat
+  token: the hosted window, and a session pasted in by hand. Both expire, both
+  need a per-persona residential proxy (`_rd_proxy_for`), and an OAuth session
+  deliberately uses no proxy at all — an approved app has no reason to hide, and
+  a pool only adds a way for a post to fail. `reddit_chat.py` and the DM half of
+  the adapter are kept but dormant, gated on a `bearer` no OAuth session has.
+- A refresh token is the whole connection, so it is never thrown away on a
+  guess. `_rd_fresh_token` clears the session only when Reddit calls the
+  refusal final (400/401/403); a network failure raises and leaves the token
+  alone, because losing it means the operator approves again for nothing.
 - Reddit's two carve-outs are not optional. A public comment thread never runs
   the funnel and never carries a link, a CTA or a URL — a subreddit is the
   fastest place to lose an account over one, and `_rd_comment_round` is
