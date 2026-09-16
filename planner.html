@@ -192,7 +192,7 @@
 // write, so this copy only decides when the counter turns red.
 const PL_CAPS = { x: 280, threads: 500, fanvue: 5000, instagram: 2200, tiktok: 2200, reddit: 300 };
 const PL_LABELS = { x: 'X', threads: 'Threads', fanvue: 'Fanvue', instagram: 'Instagram', tiktok: 'TikTok', reddit: 'Reddit' };
-const PL_PUBLISHABLE = ['x', 'threads', 'fanvue', 'instagram', 'reddit'];
+const PL_PUBLISHABLE = ['x', 'threads', 'fanvue', 'instagram', 'reddit', 'tiktok'];
 // The channels the week can be planned for. Mirrors growth.WEEKLY_CADENCE.
 const PL_PLATFORMS = ['x', 'threads', 'fanvue', 'instagram', 'tiktok', 'reddit'];
 // Mirrors growth.MEDIA_SUPPORT. The server checks it again on every write; this
@@ -202,14 +202,15 @@ const PL_MEDIA = {
   threads:   ['image', 'video'],
   fanvue:    ['image', 'video'],
   instagram: ['image', 'video'],
-  tiktok:    ['video'],
+  tiktok:    ['image', 'video'],
   reddit:    ['image', 'video']
 };
 // Where a creator connects each publishable channel, for the prompt below.
 // Mirrors growth.MEDIA_SUPPORT's max. The server checks it again on every write.
-const PL_MEDIA_MAX = { x: 4, threads: 20, fanvue: 20, instagram: 10, tiktok: 1, reddit: 20 };
+const PL_MEDIA_MAX = { x: 4, threads: 20, fanvue: 20, instagram: 10, tiktok: 35, reddit: 20 };
 const PL_CONNECT_AT = { x: '/xbot', threads: '/threads', fanvue: '/fanvue',
-                        instagram: '/instagram', reddit: '/reddit' };
+                        instagram: '/instagram', reddit: '/reddit',
+                        tiktok: '/tiktok' };
 // Reddit's kinds, mirroring app.RD_KINDS.
 const PL_RD_KINDS = ['image', 'video', 'text', 'link'];
 // Minutes between one subreddit and the next by default. Reddit's spam filters

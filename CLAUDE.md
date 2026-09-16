@@ -40,6 +40,9 @@ reddit_rest.py                   — Reddit REST (S3 media lease, submit, commen
 reddit_chat.py                   — Reddit Chat gateway (Sendbird socket, DMs only)
 reddit_stub.py                   — Offline Reddit transports (tests only)
 reddit.html                      — Reddit console (connect, subreddits, post, DMs, comments)
+tiktok_rest.py                   — TikTok REST (upload + post video/photos, comments, replies)
+tiktok_stub.py                   — Offline TikTok transport (tests only)
+tiktok.html                      — TikTok console (connect, post now, answer comments)
 admin.html                      — Visual persona builder UI (creator-facing)
 index.html                      — Fan chat UI (embeds as iframe in profile.html)
 chat.html                       — Standalone fan chat (mobile hamburger link)
@@ -225,6 +228,19 @@ Stay completely in character. Never mention being an AI.
   scheduler yet, just `_ig_post_now` triggered from the console. Instagram's
   terms do not allow an automated client either, so the same care applies —
   an account that can be lost, not the creator's only one.
+- TikTok is built the same way Instagram is, and for the same reason: its
+  Content Posting API needs a developer app that passes a separate audit, posts
+  privately until it does, and has no comment API at all. So it is a real
+  signed-in account through the hosted sign-in browser
+  (`of_connect.SITES['tiktok']`, `/tiktok/connect`), posting and replying
+  through `tiktok_rest.py`. It posts one video or a set of stills — never both
+  — and it is not a `_Platform` adapter either: no DMs, no funnel, and a reply
+  to a comment is drafted for the creator to send, never sent by a loop. The
+  one thing a captured session cannot carry is TikTok's per-request signature,
+  which its own JavaScript computes; `TIKTOK_SIGNER_URL` points at something
+  that mints one, and without it some calls answer with an empty 200. TikTok
+  bars pointing anyone at adult content at all, so `growth.SFW_LOCKED` holds
+  this channel safe for work and no paid link ever rides on it.
 
 ---
 

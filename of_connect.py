@@ -23,6 +23,7 @@ import re
 import shutil
 import threading
 import time
+import urllib.parse
 import uuid
 
 import of_rules
@@ -54,6 +55,8 @@ SITES = {
                   'origin': 'https://www.instagram.com', 'prefix': 'igc_'},
     'reddit': {'url': 'https://www.reddit.com/login', 'origin': 'https://www.reddit.com',
                'prefix': 'rdc_'},
+    'tiktok': {'url': 'https://www.tiktok.com/login', 'origin': 'https://www.tiktok.com',
+               'prefix': 'ttc_'},
 }
 VIEWPORT = {'width': 900, 'height': 700}
 FRAME_QUALITY = 55
@@ -296,6 +299,8 @@ class Attempt:
             self._watch_instagram(page)
         elif self.site == 'reddit':
             self._watch_reddit(page)
+        elif self.site == 'tiktok':
+            self._watch_tiktok(page)
         else:
             self._watch_signing(page)
         try:
@@ -739,6 +744,106 @@ class Attempt:
         self.state = 'connected'
         self._done.set()
 
+    def _watch_tiktok(self, page):
+        """Catch the device id TikTok's own page sends on every API call.
+
+        Unlike Instagram's app id this one is per browser, not a constant: it
+        is minted when the page first loads and every later call carries it.
+        A call from a session claiming a different device is what TikTok
+        answers with an empty body.
+        """
+        def seen(request):
+            try:
+                if 'tiktok.com' not in request.url or 'device_id=' not in request.url:
+                    return
+                query = urllib.parse.parse_qs(
+                    urllib.parse.urlsplit(request.url).query)
+                device_id = (query.get('device_id') or [''])[0]
+                if device_id and device_id.isdigit():
+                    self._tt_device_id = device_id
+            except Exception:
+                pass
+        try:
+            page.on('request', seen)
+        except Exception:
+            pass
+
+    def _capture_tiktok(self, page, context):
+        """Finished once the cookies TikTok issued answer as somebody.
+
+        TikTok authenticates by cookie like Instagram does, but a write call
+        also needs the CSRF token, the device id its own page was minted with
+        and the msToken -- which its anti-bot script re-mints in the browser
+        and cannot be made up here. All four are read off the real session.
+        """
+        self.probes += 1
+        try:
+            self.page_url = page.url
+        except Exception:
+            pass
+        cookies = context.cookies(self._site['origin'])
+        names = {c['name'] for c in cookies}
+        self.cookie_names = sorted(names)
+        if 'sessionid' not in names:
+            self.capture_note = 'awaiting_cookies'
+            return
+        by_name = {c['name']: c['value'] for c in cookies}
+        cookie_header = '; '.join(f"{c['name']}={c['value']}" for c in cookies)
+        try:
+            agent = page.evaluate('() => navigator.userAgent')
+        except Exception:
+            agent = self.user_agent
+        try:
+            who = page.evaluate(
+                """async () => {
+                     const r = await fetch('/passport/web/account/info/',
+                         {credentials: 'include'});
+                     return r.ok ? await r.json() : null;
+                   }""")
+        except Exception:
+            who = None
+        data = ((who or {}).get('data') or {}) if isinstance(who, dict) else {}
+        user_id = str(data.get('user_id_str') or data.get('user_id') or '')
+        username = data.get('username') or ''
+        if user_id:
+            self.capture_note = 'captured'
+        else:
+            # Plainly signed in even if that probe was refused -- TikTok keeps
+            # its own record of who this is in the session cookie pair.
+            user_id = by_name.get('uid_tt') or by_name.get('sid_tt') or ''
+            if not user_id:
+                self.capture_note = 'no_user_id'
+                return
+            self.capture_note = 'unverified'
+        sec_uid = ''
+        if username:
+            try:
+                got = page.evaluate(
+                    """async (name) => {
+                         const r = await fetch('/api/user/detail/?uniqueId=' +
+                             encodeURIComponent(name), {credentials: 'include'});
+                         return r.ok ? await r.json() : null;
+                       }""", username)
+                sec_uid = (((got or {}).get('userInfo') or {}).get('user')
+                           or {}).get('secUid') or ''
+            except Exception:
+                sec_uid = ''
+        session = {'user_id': user_id, 'username': username, 'sec_uid': sec_uid,
+                   'cookie': cookie_header,
+                   'csrftoken': by_name.get('tt_csrf_token') or '',
+                   'ms_token': by_name.get('msToken') or '',
+                   'device_id': getattr(self, '_tt_device_id', ''),
+                   'user_agent': agent or self.user_agent, 'proxy': self.proxy,
+                   'verified': self.capture_note == 'captured'}
+        self.result = {'user_id': user_id, 'username': username}
+        if _sink:
+            _sink(self.account, session)
+        else:
+            self._pending_session = session
+        self.state = 'connected'
+        self._done.set()
+
+
     def _try_capture_session(self, page, context):
         """Is the creator in yet? If so, take the session and stop.
 
@@ -753,6 +858,8 @@ class Attempt:
             return self._capture_instagram(page, context)
         if self.site == 'reddit':
             return self._capture_reddit(page, context)
+        if self.site == 'tiktok':
+            return self._capture_tiktok(page, context)
         self.probes += 1
         try:
             self.page_url = page.url
