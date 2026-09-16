@@ -284,6 +284,13 @@ for s in ai-model-chat-dev ai-model-chat-dev-browser; do
 done
 ```
 
+**Per-model credentials come first.** `REDDIT_PROXY_TEMPLATE` is one provider
+account with a sticky session per persona: different exit IPs, but one
+subscription, so a ban on one model's credentials reaches every model behind
+it. Each persona can instead carry her own proxy, set in the Reddit console
+under *Her connection* and stored encrypted beside her session. Hers wins over
+the template, which stays the fallback for a deployment running one account.
+
 Copy the exact gateway string out of the provider's dashboard and swap only the
 country code for `{country}` and the session id for `{session}` — those two are
 the only placeholders the app fills, per persona, so an account keeps one

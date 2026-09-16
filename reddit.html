@@ -94,6 +94,30 @@
     <div id="account-status" class="hint" style="margin-top:10px;"></div>
   </div>
 
+  <div class="form-section" data-tab="settings" id="sec-proxy">
+    <div class="section-title">Her connection</div>
+    <span class="hint">Reddit blocks this server's own address at the login page
+      &mdash; Cloudflare answers &ldquo;You've been blocked by network security&rdquo;
+      &mdash; so she needs a residential proxy of her own before she can sign in
+      at all. Give each model her own credentials rather than sharing one: a pool
+      account that gets banned should not take the others with it, and an account
+      that signs in from one country and posts from another is an account that
+      gets checked.</span>
+    <div class="row-inline" style="margin-top:12px;">
+      <div class="field" style="flex:2;">
+        <label>Proxy URL</label>
+        <input type="password" id="rd-proxy" autocomplete="new-password" spellcheck="false"
+               placeholder="http://user:pass@gw.dataimpulse.com:823">
+        <span class="hint">Stored encrypted and never shown again. Leave empty to
+          fall back to the shared pool, if this deployment has one.</span>
+      </div>
+      <button class="btn-ai" onclick="saveProxy()">Save</button>
+      <button class="btn-ai" style="background:var(--surface); color:var(--text-2);"
+              onclick="clearProxy()">Clear</button>
+    </div>
+    <div id="proxy-status" class="hint" style="margin-top:10px;"></div>
+  </div>
+
   <div class="form-section" data-tab="settings" id="sec-subs">
     <div class="section-title">Subreddits she posts to</div>
     <span class="hint">Nothing here means nothing to post to. Most NSFW subreddits remove a
@@ -284,6 +308,7 @@ async function loadStatus(){
   const why=si.open?(si.error||si.why||'Sign-in window is open — finish it there.')
     :(s.reachable||si.why||(s.connected?'':'Sign in to Reddit to connect her account.'));
   note(el('account-status'),why,!!(s.reachable||si.error)&&!si.open);
+  drawProxy(s);
   subs=(s.subs||[]).slice();
   drawSubs();
   drawSubPicker();
@@ -327,6 +352,34 @@ function startSignin(){
 async function disconnect(){
   if(!confirm('Disconnect her Reddit account? She stops answering and stops posting.'))return;
   await api('/api/reddit/connect?persona='+encodeURIComponent(slug()),{method:'DELETE'});
+  await loadStatus();
+}
+
+function drawProxy(s){
+  const box=el('proxy-status');
+  box.textContent=s.proxy
+    ? ('Going out through '+s.proxy+'.')
+    : (s.proxy_pool
+        ? 'Using the shared pool. Give her, her own to keep her apart from the others.'
+        : 'No proxy set, so she dials Reddit from this server \u2014 which Reddit blocks.');
+  box.style.color=(s.proxy||s.proxy_pool)?'var(--text-3)':'#fb7185';
+}
+
+async function saveProxy(){
+  const box=el('proxy-status');
+  note(box,'Saving\u2026');
+  try{
+    await api('/api/reddit/proxy',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({persona:slug(),proxy:el('rd-proxy').value})});
+    el('rd-proxy').value='';
+    await loadStatus();
+  }catch(e){note(box,e.message,true);}
+}
+
+async function clearProxy(){
+  if(!confirm('Clear her proxy? She falls back to the shared pool, or to this '
+      +'server\u2019s own address if there is none \u2014 which Reddit blocks.'))return;
+  await api('/api/reddit/proxy?persona='+encodeURIComponent(slug()),{method:'DELETE'});
   await loadStatus();
 }
 
@@ -556,6 +609,7 @@ const RD_FIX=[
   [/not connected for this persona|Sign in to Reddit/i,{tab:'settings',focus:'sec-account',label:'Sign her in'}],
   [/chat token|refused her chat|socket|reconnect/i,    {tab:'settings',focus:'sec-account',label:'Open the account'}],
   [/Auto-reply is off/i,                               {tab:'settings',focus:'sec-replies',label:'Turn her on'}],
+  [/blocked|network security|proxy|connection/i,       {tab:'settings',focus:'sec-proxy',label:'Check her connection'}],
   [/subreddit|flair|r\//i,                             {tab:'settings',focus:'sec-subs',label:'Check her subreddits'}],
   [/comment/i,                                         {tab:'settings',focus:'sec-comments',label:'Check comment replies'}],
   [/post/i,                                            {tab:'settings',focus:'sec-posting',label:'Check posting'}],
@@ -583,6 +637,13 @@ function redditHealth(d){
            +'answer DMs — reconnect and open her chat once in that window.'))});
   rows.push({state:d.enabled?'ok':'warn', label:d.enabled?'DM replies are on':'DM replies are off',
     hint:d.enabled?'She answers Reddit chat.':'Fans can write, but nothing will answer them.'});
+  rows.push({state:(d.proxy||d.proxy_pool)?'ok':'bad',
+    label:d.proxy?'She has her own connection'
+      :(d.proxy_pool?'Sharing the pool connection':'No connection of her own'),
+    hint:d.proxy?('Reddit sees her at '+d.proxy+', and only her.')
+      :(d.proxy_pool?'Give her, her own so a ban on one model does not reach the rest.'
+        :'Reddit blocks this server\u2019s address at the login page, so she cannot '
+         +'sign in until a proxy is set.')});
   rows.push({state:subs.length?'ok':'warn',
     label:subs.length?(subs.length+' subreddit(s) set up'):'Nowhere to post',
     hint:subs.length?'She posts to those, with the flair each one needs.'
@@ -625,6 +686,7 @@ PlatformConsole.register({
         :'Fans can write to her; nothing will answer.',
       health: redditHealth(d),
       steps: [
+        {label:'Connection', done:!!(d.proxy||d.proxy_pool),        tab:'settings', focus:'sec-proxy'},
         {label:'Connect',    done:!!d.connected,                    tab:'settings', focus:'sec-account'},
         {label:'Subreddits', done:subs.length>0,                    tab:'settings', focus:'sec-subs'},
         {label:'Replies',    done:!!d.enabled,                      tab:'settings', focus:'sec-replies'},

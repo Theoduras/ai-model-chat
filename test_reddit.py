@@ -474,6 +474,45 @@ def test_the_queue_hands_the_target_to_the_publisher():
     check('a Reddit row with no subreddit on it never posts', 'subreddit' in threw, threw)
 
 
+def test_each_persona_dials_reddit_from_her_own_address():
+    """Reddit blocks this server at the login page outright, so the proxy is
+    what makes a sign-in possible at all -- and sharing one across personas
+    means one ban takes every model with it."""
+    store = {}
+    app._get_setting = lambda k, d=None: store.get(k, d)
+    app._set_setting = lambda k, v: store.__setitem__(k, v)
+    os.environ.pop('REDDIT_PROXY_TEMPLATE', None)
+
+    check('with nothing set she has no way out at all',
+          app._rd_proxy_for('lilly') == '')
+
+    app._rd_set_proxy('lilly', 'http://u1:p1@gw.example:823')
+    app._rd_set_proxy('nova', 'http://u2:p2@gw.example:823')
+    check('each persona keeps her own credentials, not a shared pair',
+          app._rd_proxy_for('lilly') == 'http://u1:p1@gw.example:823'
+          and app._rd_proxy_for('nova') == 'http://u2:p2@gw.example:823')
+    check('and neither password is readable in the setting store',
+          'p1' not in json.dumps(store) and 'p2' not in json.dumps(store), store)
+    check('the console is shown the host, never the password',
+          app._rd_proxy_shown('lilly') == 'u1@gw.example:823'
+          and 'p1' not in app._rd_proxy_shown('lilly'))
+
+    os.environ['REDDIT_PROXY_TEMPLATE'] = 'http://shared-{country}-{session}:pw@pool:1'
+    check('her own still wins over the shared pool',
+          app._rd_proxy_for('lilly') == 'http://u1:p1@gw.example:823')
+    check('a persona without one falls back to the pool, keyed to her',
+          app._rd_proxy_for('zara') == 'http://shared-nl-zara:pw@pool:1')
+    app._rd_set_proxy('lilly', '')
+    check('clearing hers drops her back to the pool rather than to no proxy',
+          app._rd_proxy_for('lilly') == 'http://shared-nl-lilly:pw@pool:1')
+    os.environ.pop('REDDIT_PROXY_TEMPLATE', None)
+
+    app._rd_set_proxy('lilly', 'http://u1:p1@gw.example:823')
+    app._rd_set_session('lilly', dict(_SESSION, proxy='http://old:p@gone:1'))
+    check('the transport is handed the proxy, so a call cannot leave by another door',
+          RR.Rest(app._rd_session('lilly')).proxy == 'http://old:p@gone:1')
+
+
 def test_the_routes_exist():
     rules = {str(r) for r in app.app.url_map.iter_rules()}
     for path in ('/api/reddit/status', '/api/reddit/connect', '/api/reddit/subreddits',
@@ -481,7 +520,8 @@ def test_the_routes_exist():
                  '/api/reddit/auto', '/api/reddit/dm-send', '/api/reddit/trace',
                  '/api/reddit/connect/browser', '/api/reddit/connect/frame',
                  '/api/reddit/connect/input', '/api/reddit/connect/cancel',
-                 '/api/reddit/post-now', '/reddit', '/reddit/connect'):
+                 '/api/reddit/post-now', '/api/reddit/proxy',
+                 '/reddit', '/reddit/connect'):
         check(f'{path} is served', path in rules)
 
 
@@ -498,6 +538,7 @@ if __name__ == '__main__':
                test_the_adapter_reads_the_shape_the_round_expects,
                test_a_missing_chat_token_is_posting_only_not_broken,
                test_the_session_round_trips_through_encryption,
+               test_each_persona_dials_reddit_from_her_own_address,
                test_signing_in_through_the_browser,
                test_one_planned_post_fans_out_to_one_row_per_subreddit,
                test_the_queue_hands_the_target_to_the_publisher,

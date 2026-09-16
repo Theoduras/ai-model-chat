@@ -22220,15 +22220,72 @@ def _rd_rest(persona):
     return RR.Rest(_rd_session(persona))
 
 
+def _rd_proxy(persona):
+    """This persona's own proxy, decrypted, or ''.
+
+    A proxy URL carries a username and password, so it is stored the same way
+    her session is rather than in the clear.
+    """
+    blob = _rd_account(persona).get('proxy') or ''
+    if not blob:
+        return ''
+    try:
+        return _rd_fernet().decrypt(blob.encode()).decode()
+    except Exception:
+        logger.warning('reddit proxy for %s could not be decrypted', persona)
+        return ''
+
+
+def _rd_set_proxy(persona, url):
+    url = (url or '').strip()
+    blob = _rd_fernet().encrypt(url.encode()).decode() if url else ''
+    _rd_save_account(persona, proxy=blob)
+    # The socket is dialled through whatever proxy was current when it opened,
+    # so a change only takes effect once it has been brought down.
+    live = RC.runner(persona)
+    if live:
+        live.stop()
+    return url
+
+
 def _rd_proxy_for(persona, country=''):
-    """Reddit's own pool, kept apart from Instagram's and OnlyFans' for the
-    same reason those are kept apart from each other: turning one off should
-    not silently move another account onto a datacentre IP."""
+    """The exit IP this persona's Reddit account uses, for good.
+
+    Reddit blocks Google's ranges at the login page outright -- Cloudflare
+    answers with "You've been blocked by network security" -- so this is not
+    optional here the way it is for a channel that only reads.
+
+    Her own proxy wins over the shared template. A sticky session on one pool
+    account gives each persona a different exit IP but not a different
+    provider account, and several personas behind one subscription is itself a
+    pattern -- a pool that gets one persona banned should not take the others
+    with it. So a persona can carry her own, and the template stays the
+    fallback for a deployment running a single account.
+    """
+    own = _rd_proxy(persona)
+    if own:
+        return own
     template = (os.getenv('REDDIT_PROXY_TEMPLATE') or '').strip()
     if not template:
         return ''
     country = (country or os.getenv('REDDIT_PROXY_COUNTRY') or 'nl').lower()[:2]
     return template.replace('{country}', country).replace('{session}', persona)
+
+
+def _rd_proxy_shown(persona):
+    """The proxy as the console may show it: host and port, never the password."""
+    url = _rd_proxy(persona)
+    if not url:
+        return ''
+    try:
+        from urllib.parse import urlsplit
+        bits = urlsplit(url)
+        user = bits.username or ''
+        host = bits.hostname or ''
+        port = f':{bits.port}' if bits.port else ''
+        return f'{user}@{host}{port}' if user else f'{host}{port}'
+    except Exception:
+        return 'set'
 
 
 def _rd_conn():
@@ -22936,6 +22993,8 @@ def api_reddit_status():
                     'state': live.state() if live else {},
                     'reachable': PLAT_REDDIT.reachable(persona),
                     'subs': _rd_subs(persona),
+                    'proxy': _rd_proxy_shown(persona),
+                    'proxy_pool': bool((os.getenv('REDDIT_PROXY_TEMPLATE') or '').strip()),
                     'replies': _rd_replies_cfg(persona),
                     'posts': _rd_posts(persona)})
 
@@ -22974,6 +23033,31 @@ def api_reddit_connect():
                     'chat_ready': bool(held.get('bearer')),
                     'username': held.get('username') or '',
                     'user_id': held.get('user_id') or ''})
+
+
+@app.route('/api/reddit/proxy', methods=['GET', 'POST', 'DELETE'])
+@platform_scoped
+def api_reddit_proxy():
+    """Her own exit IP. Write-only: what comes back is the host, never the
+    password, the same way a stored session is never shown again."""
+    persona = request_persona()
+    if request.method == 'DELETE':
+        _rd_set_proxy(persona, '')
+    elif request.method == 'POST':
+        url = ((request.get_json(silent=True) or {}).get('proxy') or '').strip()
+        if url and not url.startswith(('http://', 'https://', 'socks5://')):
+            return jsonify({'error': 'That has to be a full proxy URL, starting '
+                                     'http:// or socks5://.'}), 400
+        _rd_set_proxy(persona, url)
+        # Her stored session was captured through whatever proxy was current
+        # then. Leaving it pointed at the old one is a session that changes
+        # country mid-life, which is what gets an account looked at.
+        held = _rd_session(persona)
+        if held:
+            _rd_set_session(persona, dict(held, proxy=_rd_proxy_for(persona)))
+            _rd_connect(persona)
+    return jsonify({'proxy': _rd_proxy_shown(persona),
+                    'proxy_pool': bool((os.getenv('REDDIT_PROXY_TEMPLATE') or '').strip())})
 
 
 @app.route('/api/reddit/subreddits', methods=['GET', 'POST'])
