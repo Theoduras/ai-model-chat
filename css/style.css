@@ -632,7 +632,12 @@ body.page-chat.embed .chat-shell {
   height: 100%;
   gap: 0;
 }
-body.page-chat.embed .persona-rail { display: none; }
+body.page-chat.embed .persona-rail,
+body.page-chat.only .persona-rail { display: none; }
+/* A direct link is top-level, so js/site-nav.js's iframe guard doesn't hide
+   the marketing menu for it the way it does everywhere else this page is
+   used (always inside a dashboard/landing iframe) — hide it explicitly. */
+body.page-chat.only .sn-links { display: none; }
 /* The demo embed is one fixed model, so it keeps the rail hidden. */
 body.page-chat.embed.demo { padding: 14px; }
 body.page-chat.embed.demo .chat-shell { gap: 14px; height: 100%; max-height: 100%; }

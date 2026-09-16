@@ -145,17 +145,20 @@ let persona = params.get('persona') || 'lilly';
 const DEMO = params.get('demo') === '1';
 const DEMO_PERSONA = 'nova';
 if (DEMO) persona = DEMO_PERSONA;
-// The landing page embeds one model, so it hides the model picker.
+// The landing page (and a direct shareable link) show one model, so they
+// hide the model picker rail.
 const ONLY = params.get('only') === '1';
 // The dashboard embeds this as the creator's own test chat and wants the
 // picker, which an embed otherwise hides.
 const PICKER = params.get('picker') === '1';
-// A direct shareable link (embed-setup's "Direct link") wants the same
-// clean, rail-free chrome as an iframed embed, but is opened top-level.
+// The widget bubble and the landing-page drawer render this inside a
+// fixed-size iframe and want it edge-to-edge; a direct shareable link opens
+// top-level and stays the normal contained card (see ONLY above for the rail).
 const EMBED = params.get('embed') === '1';
 let PFX = 'persona_' + persona + '_';
 
 if ((EMBED || window.self !== window.top) && !PICKER) { document.body.classList.add('embed'); }
+if (ONLY) document.body.classList.add('only');
 if (DEMO) document.body.classList.add('demo');
 
 function applyPersonaConfig(cfg) {

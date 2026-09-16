@@ -115,7 +115,7 @@ function renderLink(){
   const persona = document.getElementById('persona').value;
   const theme = document.getElementById('theme').value;
   const url = location.origin + '/chat?persona=' + encodeURIComponent(persona)
-    + '&only=1&embed=1&theme=' + encodeURIComponent(theme);
+    + '&only=1&theme=' + encodeURIComponent(theme);
   document.getElementById('chat-link').value = url;
 }
 
