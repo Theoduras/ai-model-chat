@@ -52,6 +52,8 @@ SITES = {
                 'prefix': 'dcc_'},
     'instagram': {'url': 'https://www.instagram.com/accounts/login/',
                   'origin': 'https://www.instagram.com', 'prefix': 'igc_'},
+    'reddit': {'url': 'https://www.reddit.com/login', 'origin': 'https://www.reddit.com',
+               'prefix': 'rdc_'},
 }
 VIEWPORT = {'width': 900, 'height': 700}
 FRAME_QUALITY = 55
@@ -292,6 +294,8 @@ class Attempt:
             self._watch_discord(page)
         elif self.site == 'instagram':
             self._watch_instagram(page)
+        elif self.site == 'reddit':
+            self._watch_reddit(page)
         else:
             self._watch_signing(page)
         try:
@@ -650,6 +654,91 @@ class Attempt:
         self.state = 'connected'
         self._done.set()
 
+    def _watch_reddit(self, page):
+        """Take Reddit's own bearer token and chat handshake off the page.
+
+        Reddit's web app authenticates gql and oauth calls with a bearer token
+        the cookies alone will not give us, and reaches chat through a Sendbird
+        deployment whose app id and websocket host are published nowhere and
+        move between releases. Both are read off requests the real page makes,
+        for the same reason Discord's build number is captured rather than
+        guessed: a constant we invented is a constant that is wrong after the
+        next deploy, and a client that looks nothing like the browser that
+        signed in is the thing that loses the account.
+        """
+        def seen(request):
+            try:
+                url = request.url or ''
+                headers = {k.lower(): v for k, v in (request.headers or {}).items()}
+                auth = headers.get('authorization') or ''
+                if auth.lower().startswith('bearer ') and 'reddit' in url:
+                    self._rd_bearer = auth.split(' ', 1)[1].strip()
+                if 'sendbird' in url.lower():
+                    sb = dict(getattr(self, '_rd_chat', {}) or {})
+                    sb['url'] = url
+                    for name in ('session-key', 'app-id', 'sendbird'):
+                        if headers.get(name):
+                            sb[name.replace('-', '_')] = headers[name]
+                    self._rd_chat = sb
+            except Exception:
+                pass
+        try:
+            page.on('request', seen)
+        except Exception:
+            pass
+
+    def _capture_reddit(self, page, context):
+        """Finished once Reddit's cookies answer as somebody.
+
+        The cookie header is what authenticates www.reddit.com; the bearer
+        token watched above is what oauth.reddit.com and chat want. A capture
+        without the bearer is still a usable session -- posting and commenting
+        go through the cookie -- so it is kept and marked, rather than thrown
+        away for the sake of the half that only chat needs.
+        """
+        self.probes += 1
+        try:
+            self.page_url = page.url
+        except Exception:
+            pass
+        cookies = context.cookies(self._site['origin'])
+        names = {c['name'] for c in cookies}
+        self.cookie_names = sorted(names)
+        if 'reddit_session' not in names and 'token_v2' not in names:
+            self.capture_note = 'awaiting_cookies'
+            return
+        cookie_header = '; '.join(f"{c['name']}={c['value']}" for c in cookies)
+        try:
+            agent = page.evaluate('() => navigator.userAgent')
+        except Exception:
+            agent = self.user_agent
+        try:
+            who = page.evaluate(
+                """async () => {
+                     const r = await fetch('/api/me.json', {credentials: 'include'});
+                     return r.ok ? await r.json() : null;
+                   }""")
+        except Exception:
+            who = None
+        data = ((who or {}).get('data') or {}) if isinstance(who, dict) else {}
+        if not data.get('name'):
+            self.capture_note = 'no_user_id'
+            return
+        bearer = getattr(self, '_rd_bearer', '') or ''
+        self.capture_note = 'captured' if bearer else 'unverified'
+        session = {'user_id': str(data.get('id') or ''), 'username': data.get('name') or '',
+                   'cookie': cookie_header, 'modhash': data.get('modhash') or '',
+                   'bearer': bearer, 'chat': getattr(self, '_rd_chat', {}) or {},
+                   'user_agent': agent or self.user_agent, 'proxy': self.proxy,
+                   'verified': bool(bearer)}
+        self.result = {'user_id': session['user_id'], 'username': session['username']}
+        if _sink:
+            _sink(self.account, session)
+        else:
+            self._pending_session = session
+        self.state = 'connected'
+        self._done.set()
+
     def _try_capture_session(self, page, context):
         """Is the creator in yet? If so, take the session and stop.
 
@@ -662,6 +751,8 @@ class Attempt:
             return self._capture_discord(page, context)
         if self.site == 'instagram':
             return self._capture_instagram(page, context)
+        if self.site == 'reddit':
+            return self._capture_reddit(page, context)
         self.probes += 1
         try:
             self.page_url = page.url
