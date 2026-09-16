@@ -7183,6 +7183,25 @@ def _growth_remote_rows(persona, since, until, rows):
     return out, ''
 
 
+def _growth_scope_warning(persona, platforms):
+    """Whether this connection can actually publish what is being queued. A
+    Fanvue post needs write:post, which every connection made before feed
+    posting existed is without — and the failure would otherwise arrive hours
+    later, at the slot, as a dead row."""
+    if 'fanvue' not in [growth.normalise_source(p) for p in platforms]:
+        return ''
+    granted = (_fanvue_tokens(persona).get('scope') or '').split()
+    if not granted or 'write:post' in granted:
+        return ''
+    if 'write:post' not in _fanvue_scopes().split():
+        return ('This Fanvue connection cannot post to the feed, and reconnecting '
+                'will not fix it: "write:post" is being left out of the request. '
+                'Clear the remembered refusals on the Fanvue page, and check '
+                'FANVUE_SCOPES is not pinned to an older list.')
+    return ('This Fanvue connection was not granted "write:post", so this post '
+            'will fail at its slot. Reconnect the Fanvue account first.')
+
+
 def _growth_media_check_list(persona, platform, ids):
     """Resolve every file for a queue write. Returns (ids, error) — the set is
     refused whole, because half a carousel is not what was asked for."""
@@ -7359,7 +7378,9 @@ def api_growth_queue():
                     ','.join(q['platform'] for q in queued), run_at.isoformat(),
                     (data.get('text') or '')[:60])
         return jsonify({'ok': True, 'id': queued[0]['id'], 'queued': queued,
-                        'failed': failed, 'queue': _growth_queue_rows(persona)})
+                        'failed': failed,
+                        'warning': _growth_scope_warning(persona, wanted),
+                        'queue': _growth_queue_rows(persona)})
 
     if request.method == 'PATCH':
         data = request.json or {}
@@ -12007,9 +12028,21 @@ def api_fanvue_status():
     missing = [{'scope': s, 'feature': FANVUE_SCOPE_FEATURES.get(s, ''),
                 'optional': s in FANVUE_OPTIONAL_SCOPES}
                for s in FANVUE_SCOPES.split() if granted and s not in granted]
+    # What a reconnect would actually ask for. An env override or a remembered
+    # refusal can drop a scope from the request, and then reconnecting to gain
+    # it is advice that cannot work — better to say so than to send the creator
+    # round the loop again.
+    requested = _fanvue_scopes().split()
+    unrequested = [m['scope'] for m in missing if m['scope'] not in requested]
     return jsonify({'connected': bool(t.get('access_token')), 'username': t.get('username', ''),
                     'creator': _fanvue_creator(persona),
                     'scope': t.get('scope', ''), 'missing_scopes': missing,
+                    'requested_scopes': ' '.join(requested),
+                    'unrequested_scopes': unrequested,
+                    'scopes_overridden': bool(os.environ.get('FANVUE_SCOPES', '').strip()
+                                              or (_get_setting('fanvue_scopes') or '').strip()),
+                    'denied_scopes': _fanvue_denied_scopes(),
+                    'reconnect_fixes': bool(missing) and not unrequested,
                     'degraded': any(not m['optional'] for m in missing)})
 
 

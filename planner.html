@@ -1095,6 +1095,9 @@ async function plSave(btn) {
     if ((d.failed || []).length) {
       alert(d.failed.map(f => (PL_LABELS[f.platform] || f.platform) + ': ' + f.error).join('\n'));
     }
+    // Queued, but it cannot go out as things stand — said now rather than at
+    // the slot, where it would just be a failed row.
+    if (d.warning) alert(d.warning);
     if (plOpen.kind === 'proposed') plProposed.splice(plOpen.idx, 1);
     plClose();
     plLoadQueue();
