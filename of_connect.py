@@ -71,7 +71,7 @@ FRAME_QUALITY = int(os.getenv('CONNECT_FRAME_QUALITY', '45'))
 # so does each service's health, because "is the fix deployed" is otherwise a
 # guess: the app and the browser service deploy separately and either can be
 # the old one.
-RELAY_VERSION = '4'
+RELAY_VERSION = '5'
 # What the window may ask a frame to be worth. A creator on a slow link is
 # better served by a coarser picture that keeps up than a sharp one that is
 # always a second behind; below this it stops being a page you can read.
@@ -92,6 +92,13 @@ INPUT_WAIT = float(os.getenv('CONNECT_INPUT_WAIT', '0.05'))
 # The shortest gap between two screenshots. Below this the thread spends its
 # time encoding pictures instead of replaying what the creator is doing.
 FRAME_EVERY = float(os.getenv('CONNECT_FRAME_EVERY', '0.18'))
+# The gap once the creator has stopped doing anything. A login page that
+# animates -- a blinking caret is enough -- counts as a new picture every time
+# it is looked at, so a page nobody is touching would otherwise hold the
+# window at the fast rate for the whole sign-in.
+FRAME_EVERY_QUIET = float(os.getenv('CONNECT_FRAME_QUIET', '0.6'))
+# How long after an input the fast rate is worth it.
+BUSY_FOR = float(os.getenv('CONNECT_BUSY_FOR', '2.5'))
 # Everything _apply knows how to do. The route rejects anything else, so the two
 # have to be read from the same place.
 INPUT_KINDS = ('click', 'move', 'down', 'up', 'type', 'key', 'scroll', 'back',
@@ -204,6 +211,7 @@ class Attempt:
     # the two above: status() reads it, so an attempt built without going
     # through __init__ must not trip over it.
     quality = FRAME_QUALITY
+    acted_at = 0.0
     exit_ip = ''
     exit_error = ''
     blocked_by = ''
@@ -232,6 +240,7 @@ class Attempt:
         self.frame = b''
         self.frame_at = 0.0
         self.quality = FRAME_QUALITY
+        self.acted_at = 0.0
         self.signing_sample = {}
         self.result = {}
         self.touched = time.time()
@@ -264,7 +273,7 @@ class Attempt:
     def act(self, kind, **kw):
         """Queue one input for the browser. Returns immediately: the creator's
         next frame poll is what shows them it happened."""
-        self.touched = time.time()
+        self.touched = self.acted_at = time.time()
         if self._done.is_set():
             raise ConnectError('this sign-in has finished')
         self._commands.put((kind, kw))
@@ -764,7 +773,8 @@ class Attempt:
                 logger.debug('could not watch signing: %s', str(e)[:120])
 
     def _capture(self, page):
-        if time.time() - self.frame_at < FRAME_EVERY:
+        busy = time.time() - self.acted_at < BUSY_FOR
+        if time.time() - self.frame_at < (FRAME_EVERY if busy else FRAME_EVERY_QUIET):
             return
         try:
             shot = page.screenshot(type='jpeg', quality=self.quality,
