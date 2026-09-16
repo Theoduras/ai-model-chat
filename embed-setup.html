@@ -11,7 +11,10 @@
   <link rel="stylesheet" href="/css/style.css">
   <script src="/js/devnav.js" defer></script>
   <style>
-    .es-wrap { max-width: 720px; margin: 0 auto; padding: 28px 24px 80px; display: flex; flex-direction: column; gap: 20px; }
+    /* body.page-dashboard is a fixed-height, overflow:hidden flex column, so
+       this page's own content needs to be the scroll region — telegram.html's
+       .xbot-scroll does the same thing. */
+    .es-wrap { max-width: 720px; margin: 0 auto; padding: 28px 24px 80px; display: flex; flex-direction: column; gap: 20px; flex: 1; min-height: 0; overflow-y: auto; }
     .note { background: var(--bg); border: 1px solid #2a2a30; color: var(--text-3); border-radius: 8px; padding: 10px 12px; font-size: 0.8rem; line-height: 1.55; }
     .es-snippet { width: 100%; min-height: 108px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; }
     .es-link { width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; }
