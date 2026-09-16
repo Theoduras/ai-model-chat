@@ -254,6 +254,9 @@ def service():
         # wants neither picture nor the 35KB of it.
         if request.args.get('quality'):
             attempt.ask_quality(request.args.get('quality'))
+        if request.args.get('wait'):
+            attempt.wait_frame(request.args.get('since') or 0,
+                               request.args.get('wait') or 0)
         if request.args.get('frame'):
             out['frame'] = attempt.snapshot(request.args.get('since') or 0)
             out['attempt'] = attempt.status()
@@ -392,7 +395,7 @@ class Remote:
                                           'the browser service did not start a sign-in')
         return _Handle(self, out['attempt'])
 
-    def get(self, attempt_id, frame=False, since=0.0, quality=0):
+    def get(self, attempt_id, frame=False, since=0.0, quality=0, wait=0.0):
         """The attempt, or None if the service says there is no such sign-in.
 
         Raises Unreachable if it could not be asked. None has to mean one thing
@@ -404,7 +407,10 @@ class Remote:
             query = f'?frame=1&since={since}' if frame else ''
             if frame and quality:
                 query += f'&quality={int(quality)}'
-            out = self.call('GET', f'/session/{attempt_id}' + query)
+            if frame and wait:
+                query += f'&wait={float(wait)}'
+            out = self.call('GET', f'/session/{attempt_id}' + query,
+                            timeout=TIMEOUT + float(wait or 0))
         except Unreachable:
             raise
         except of_connect.ConnectError:

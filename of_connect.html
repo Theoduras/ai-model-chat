@@ -131,7 +131,15 @@ async function begin(){
 // only ever re-asks for a picture that is already on screen. Fast while the
 // creator is doing something, slower while the page sits still, slower again
 // while nobody is looking at this window.
-const POLL_BUSY = 200, POLL_IDLE = 900, POLL_HIDDEN = 2500;
+// The request is held open by the attempt until there is a new picture, so
+// these are the gaps between one answer and the next ask, not the rate the
+// window asks at. A held request that came back empty-handed has already
+// waited WAIT_FOR; going straight back is right.
+const POLL_BUSY = 60, POLL_IDLE = 120, POLL_HIDDEN = 3000;
+// How long the window lets a request be held. Long enough that an idle page
+// costs about one request a second rather than five, short enough to stay
+// inside every proxy between here and the browser.
+const WAIT_FOR = 4, WAIT_HIDDEN = 8;
 // What a frame is worth asking for. A creator on a slow link is better served
 // by a coarser picture that keeps up than a sharp one that is always a second
 // behind -- and clicking what you are shown only works if what you are shown
@@ -193,14 +201,18 @@ async function pollOnce(){
   try {
     const res = await fetch(API + '/frame?attempt=' +
       encodeURIComponent(attempt) + '&persona=' + encodeURIComponent(persona) +
-      '&since=' + encodeURIComponent(lastFrameAt) + '&q=' + askedQuality());
+      '&since=' + encodeURIComponent(lastFrameAt) + '&q=' + askedQuality() +
+      (lastFrameAt ? '&wait=' + (document.hidden ? WAIT_HIDDEN : WAIT_FOR) : ''));
     status = res.status;
     r = await res.json();
   } catch (e) { return waiting(); }
   // Weighted towards what just happened: a link that has gone bad is worth
   // reacting to within a couple of frames, not a minute.
+  // Only a request that came back with something measures the link: one that
+  // was held waiting for the page to change says nothing about how slow the
+  // link is, and reading it as lag would drop the picture quality for free.
   const took = Date.now() - asked;
-  ping = ping ? Math.round(ping * 0.6 + took * 0.4) : took;
+  if (r && r.frame) ping = ping ? Math.round(ping * 0.6 + took * 0.4) : took;
   quality = askedQuality();
   // 404 is the only answer that means the sign-in is really gone, and even
   // that is given a few chances: the browser service can be restarted under
@@ -221,8 +233,12 @@ async function pollOnce(){
   showLag(a);
   natural = {w: a.width || 0, h: a.height || 0};
   const s = $('state');
-  s.textContent = a.state === 'signin' ? 'live' : a.state;
-  s.className = 'state' + (a.state === 'signin' ? ' live' : '');
+  // A press leaves a note in here; it stands until the picture has caught up,
+  // which is the thing the creator was waiting to see.
+  if (!(r.frame === '' && Date.now() < busyUntil)){
+    s.textContent = a.state === 'signin' ? 'live' : a.state;
+    s.className = 'state' + (a.state === 'signin' ? ' live' : '');
+  }
   if (a.state === 'connected') return done(a);
   if (a.state === 'failed' || a.state === 'expired')
     return fail(a.error || 'The sign-in timed out. Start it again.');
@@ -343,6 +359,7 @@ async function pump(){
 let path = [];
 
 function flush(){
+  if (restTimer){ clearTimeout(restTimer); restTimer = null; }
   if (!path.length) return;
   const points = path; path = [];
   send('move', {points: points});
@@ -353,7 +370,9 @@ function flush(){
 // the browser thread then replays in real time before it takes the next
 // screenshot, so a batch the creator cannot see the result of is a frame they
 // do not get.
-const MOVE_EVERY = 200, MOVE_AT_LEAST = 4;
+// How long the pointer has to have rested before its path is worth sending,
+// and the longest a path may be held back by a hand that never rests.
+const MOVE_REST = 140, MOVE_LATEST = 700, MOVE_AT_LEAST = 4;
 
 function moved(points){
   if (points.length < 2) return 0;
@@ -361,11 +380,28 @@ function moved(points){
   return Math.abs(b.x - a.x) + Math.abs(b.y - a.y);
 }
 
+// The path goes over when the hand stops, not while it is still moving. A
+// cursor is only worth replaying once it has arrived somewhere, and every
+// batch sent on the way is a request the browser thread stops to replay --
+// which is the same thread the creator is waiting on for the next picture.
+// A hand that never stops is still handed over, on MOVE_LATEST, so a slow
+// circling mouse cannot hold the whole path back.
+let restTimer = null;
+
+function restFlush(){
+  restTimer = null;
+  if (moved(path) < MOVE_AT_LEAST) { path = []; return; }
+  lastMove = Date.now();
+  flush();
+}
+
 img.addEventListener('mousemove', ev => {
   const p = at(ev); if (!p) return;
   p.t = Date.now();
   if (path.length < 60) path.push(p);
-  if (p.t - lastMove < MOVE_EVERY) return;
+  if (restTimer) clearTimeout(restTimer);
+  restTimer = setTimeout(restFlush, MOVE_REST);
+  if (p.t - lastMove < MOVE_LATEST) return;
   if (moved(path) < MOVE_AT_LEAST) return;
   lastMove = p.t;
   flush();
@@ -376,7 +412,32 @@ img.addEventListener('mousemove', ev => {
 // button that responds and one that has to be hit twice. A press that is held
 // -- a drag, a long press -- is sent as itself once the window is up.
 const CLICK_WINDOW = 90;
-let pending = null;
+// A login page's "send me a code" button is rate-limited by the site, not by
+// us: a second press because the first one looked like it did nothing is what
+// gets a phone number blocked for the rest of the day. So the same spot,
+// twice, inside this window is one press -- and the window says so rather than
+// swallowing it silently.
+// The test is not how quickly the second press came but whether the page has
+// answered the first one yet: once the button has started its countdown the
+// picture changes, and a press after that is a real one.
+const SAME_SPOT_MS = 4000, SAME_SPOT_PX = 8;
+let pending = null, lastClick = {x: -999, y: -999, at: 0, frameAt: -1};
+
+function repeatOf(p){
+  return Date.now() - lastClick.at < SAME_SPOT_MS &&
+         lastFrameAt === lastClick.frameAt &&
+         Math.abs(p.x - lastClick.x) + Math.abs(p.y - lastClick.y) <= SAME_SPOT_PX;
+}
+
+// After a press the picture is a moment behind, which is exactly when a
+// creator presses again. Saying the press is on its way is what stops that.
+function pressed(note){
+  const s = $('state');
+  s.textContent = note;
+  s.className = 'state';
+  busyUntil = Date.now() + BUSY_FOR;
+  stillFor = 0;
+}
 
 function pressNow(){
   if (!pending) return;
@@ -392,19 +453,28 @@ img.addEventListener('mousedown', ev => {
   pending = {at: p, timer: null, sent: false};
   pending.timer = setTimeout(pressNow, CLICK_WINDOW);
 });
-img.addEventListener('mouseup', ev => {
-  const p = at(ev); if (!p) return;
+// On the window rather than the image: a press that drifts off the picture
+// before it is released would otherwise never be released at all, and the
+// hosted browser would be left holding its mouse button down.
+window.addEventListener('mouseup', ev => {
   const held = pending;
   pending = null;
-  if (!held){ send('up', p); return; }
+  if (!held) return;
   if (held.timer) clearTimeout(held.timer);
+  const p = at(ev) || held.at;
   if (held.sent){ send('up', p); return; }
   if (Math.abs(p.x - held.at.x) + Math.abs(p.y - held.at.y) > 6){
     send('down', held.at);
     send('up', p);
     return;
   }
+  if (repeatOf(held.at)){
+    pressed('that click was already sent — give the page a moment');
+    return;
+  }
+  lastClick = {x: held.at.x, y: held.at.y, at: Date.now(), frameAt: lastFrameAt};
   send('click', held.at);
+  pressed('click sent — waiting for the page');
 });
 img.addEventListener('contextmenu', ev => ev.preventDefault());
 img.addEventListener('wheel', ev => { ev.preventDefault(); send('scroll', {dy: ev.deltaY}); },

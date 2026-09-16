@@ -269,6 +269,46 @@ class StillPageTest(unittest.TestCase):
         self.assertEqual(page.taken, 1)
 
 
+class FrameTimeRoundTripTest(unittest.TestCase):
+    """The window is told the frame time and sends it straight back as "the
+    picture I already have". The two have to be the same number after a trip
+    through JSON, or every poll looks like it needs the whole picture again --
+    which is exactly what it did: 33KB, several times a second, all sign-in."""
+
+    def test_the_time_survives_the_trip_to_the_window_and_back(self):
+        a = bare_attempt()
+        a.frame, a.frame_at = b'a picture', 1789596971.5674
+        since = json.loads(json.dumps(a.status()))['frame_at']
+        self.assertEqual(a.snapshot(since), '',
+                         'the window was sent a picture it already had')
+        self.assertTrue(a.snapshot(since - 1), 'an older frame still gets one')
+
+    def test_a_held_request_is_not_answered_by_the_frame_it_is_holding_for(self):
+        a = bare_attempt()
+        a.frame, a.frame_at = b'a picture', time.time()
+        since = json.loads(json.dumps(a.status()))['frame_at']
+        began = time.time()
+        a.wait_frame(since, 0.4)
+        self.assertGreater(time.time() - began, 0.3,
+                           'it came straight back, so the window asks again at once')
+
+    def test_a_new_frame_ends_the_wait(self):
+        a = bare_attempt()
+        a.frame, a.frame_at = b'a picture', time.time()
+        since = a.frame_at
+
+        def moves():
+            time.sleep(0.15)
+            a.frame, a.frame_at = b'another', time.time()
+
+        threading.Thread(target=moves, daemon=True).start()
+        began = time.time()
+        a.wait_frame(since, 5)
+        held = time.time() - began
+        self.assertLess(held, 1.0, 'it kept waiting after the page had moved')
+        self.assertGreater(held, 0.1)
+
+
 class QualityTest(unittest.TestCase):
     """The window is the side that knows how slow the link is, so it is the
     side that asks for a coarser picture."""

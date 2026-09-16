@@ -71,11 +71,20 @@ FRAME_QUALITY = int(os.getenv('CONNECT_FRAME_QUALITY', '45'))
 # so does each service's health, because "is the fix deployed" is otherwise a
 # guess: the app and the browser service deploy separately and either can be
 # the old one.
-RELAY_VERSION = '3'
+RELAY_VERSION = '4'
 # What the window may ask a frame to be worth. A creator on a slow link is
 # better served by a coarser picture that keeps up than a sharp one that is
 # always a second behind; below this it stops being a page you can read.
 QUALITY_FLOOR, QUALITY_CEILING = 25, 70
+# The longest one frame request may be held waiting for something to happen.
+# Long enough that an idle sign-in costs about one request a second, short
+# enough to stay well inside every proxy's idle timeout between here and the
+# creator's browser.
+MAX_FRAME_WAIT = float(os.getenv('CONNECT_FRAME_WAIT', '5'))
+# Frame times cross two JSON hops and a JavaScript double before coming back as
+# "the one I have". Comparing them exactly is how a millisecond of drift turns
+# into the whole picture being re-sent several times a second.
+FRAME_EPSILON = 0.002
 # How long the browser thread waits for an input before going back to taking
 # the next picture. It used to wait a quarter of a second, which is also how
 # long the creator waited to see the result of what they last did.
@@ -263,7 +272,11 @@ class Attempt:
                 'width': self.viewport['width'], 'height': self.viewport['height'],
                 'expires_in': max(0, int(ATTEMPT_TTL - (time.time() - self.started))),
                 'result': self.result, 'probes': self.probes,
-                'frame_at': round(self.frame_at, 3), 'quality': self.quality,
+                # Not rounded: the window sends this back as "the frame I
+                # have", and a value rounded down is a value that is always
+                # older than the frame it names -- so every poll counted as
+                # new and was answered with the whole picture again.
+                'frame_at': self.frame_at, 'quality': self.quality,
                 'relay': RELAY_VERSION,
                 'capture_note': self.capture_note, 'page_url': self.page_url,
                 'cookie_names': self.cookie_names,
@@ -274,6 +287,28 @@ class Attempt:
                 'landed': getattr(self, 'landed', {}),
                 'driver': DRIVER_NAME,
                 'signing_sample': self.signing_sample}
+
+    def wait_frame(self, since=0.0, budget=0.0):
+        """Hold until there is a picture newer than the one the window has.
+
+        The window asked several times a second for a page that changes a few
+        times a minute, because asking was the only way to find out. Waiting
+        here instead costs one held request per open sign-in and answers the
+        moment something happens, which is both fewer requests and a fresher
+        frame than polling ever gave.
+        """
+        try:
+            since, budget = float(since or 0), float(budget or 0)
+        except (TypeError, ValueError):
+            return
+        if not (since and budget > 0):
+            return
+        until = time.time() + min(budget, MAX_FRAME_WAIT)
+        while time.time() < until:
+            if (self.frame_at > since + FRAME_EPSILON or self.state != 'signin'
+                    or self._done.is_set()):
+                return
+            time.sleep(0.05)
 
     def ask_quality(self, quality):
         """What the window says a frame is worth to it right now. It is the
@@ -301,7 +336,7 @@ class Attempt:
         if not self.frame:
             return ''
         try:
-            if self.frame_at and float(since or 0) >= self.frame_at:
+            if self.frame_at and float(since or 0) + FRAME_EPSILON >= self.frame_at:
                 return ''
         except (TypeError, ValueError):
             pass
@@ -1488,7 +1523,7 @@ def _say_missed(attempt_id):
     return True
 
 
-def get(attempt_id, frame=False, since=0.0, quality=0):
+def get(attempt_id, frame=False, since=0.0, quality=0, wait=0.0):
     # `frame` is for the browser service, which fetches the picture in the same
     # round trip rather than a second one. In this process it is already here.
     with _lock:
@@ -1503,6 +1538,8 @@ def get(attempt_id, frame=False, since=0.0, quality=0):
                     attempt_id, sorted(_attempts))
     if attempt and quality:
         attempt.ask_quality(quality)
+    if attempt and wait:
+        attempt.wait_frame(since, wait)
     return attempt
 
 

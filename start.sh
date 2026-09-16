@@ -25,5 +25,10 @@ done
 
 [ -n "$DISPLAY" ] || echo 'no display: the OnlyFans sign-in browser will be headless' >&2
 
-exec gunicorn --bind ":${PORT:-8080}" --workers 1 --threads 8 \
+# Threads, not workers: every request this serves is waiting on something else
+# -- Gemini, a platform's API, or, for a sign-in window, the browser service one
+# hop away. Eight of them is eight frame polls before the ninth request queues,
+# and a sign-in window on its own asks several times a second, so the window
+# and the site it is hosting were competing for the same handful.
+exec gunicorn --bind ":${PORT:-8080}" --workers 1 --threads "${GUNICORN_THREADS:-32}" \
      --timeout "${GUNICORN_TIMEOUT:-0}" "${GUNICORN_TARGET:-app:app}"

@@ -19389,6 +19389,19 @@ def _of_proxy_for(persona, country=''):
     return template.replace('{country}', country).replace('{session}', persona)
 
 
+def _signin_wait():
+    """How long the window is willing to have this request held open.
+
+    A sign-in page changes a few times a minute and was asked for several times
+    a second, because asking was the only way to find out. The window says how
+    long it will wait; the attempt answers the moment there is something new.
+    """
+    try:
+        return max(0.0, min(float(request.args.get('wait') or 0), 10.0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def _signin_quality():
     """What the sign-in window says a frame is worth to it, 0 for "you decide".
 
@@ -19486,7 +19499,8 @@ def api_onlyfans_connect_frame():
     try:
         attempt = _of_conn().get((request.args.get('attempt') or '').strip(), frame=True,
                                  since=_signin_since(),
-                                 quality=_signin_quality()) if _of_direct() else None
+                                 quality=_signin_quality(),
+                                 wait=_signin_wait()) if _of_direct() else None
     except _OF_UNREACHABLE:
         return _of_busy()
     if not attempt:
@@ -21669,7 +21683,8 @@ def api_discord_connect_frame():
     attempt_id = (request.args.get('attempt')
                   or _get_setting(f'discord_attempt_{persona}') or '')
     attempt = _dc_conn().get(attempt_id, frame=True, since=_signin_since(),
-                                          quality=_signin_quality()) \
+                                          quality=_signin_quality(),
+                                          wait=_signin_wait()) \
         if attempt_id else None
     if not attempt:
         return jsonify({'ok': False, 'error': 'no such sign-in'}), 404
@@ -22103,7 +22118,8 @@ def api_instagram_connect_frame():
     attempt_id = (request.args.get('attempt')
                   or _get_setting(f'instagram_attempt_{persona}') or '')
     attempt = _ig_conn().get(attempt_id, frame=True, since=_signin_since(),
-                                          quality=_signin_quality()) \
+                                          quality=_signin_quality(),
+                                          wait=_signin_wait()) \
         if attempt_id else None
     if not attempt:
         return jsonify({'ok': False, 'error': 'no such sign-in'}), 404
@@ -23272,7 +23288,8 @@ def api_reddit_connect_frame():
     attempt_id = (request.args.get('attempt')
                   or _get_setting(f'reddit_attempt_{persona}') or '')
     attempt = _rd_conn().get(attempt_id, frame=True, since=_signin_since(),
-                                          quality=_signin_quality()) \
+                                          quality=_signin_quality(),
+                                          wait=_signin_wait()) \
         if attempt_id else None
     if not attempt:
         return jsonify({'ok': False, 'error': 'no such sign-in'}), 404
@@ -23665,7 +23682,8 @@ def api_tiktok_connect_frame():
     attempt_id = (request.args.get('attempt')
                   or _get_setting(f'tiktok_attempt_{persona}') or '')
     attempt = _tt_conn().get(attempt_id, frame=True, since=_signin_since(),
-                                          quality=_signin_quality()) \
+                                          quality=_signin_quality(),
+                                          wait=_signin_wait()) \
         if attempt_id else None
     if not attempt:
         return jsonify({'ok': False, 'error': 'no such sign-in'}), 404
