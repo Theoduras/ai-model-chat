@@ -21,6 +21,7 @@
     { href: '/register', label: 'Register', icon: 'register', cta: true },
   ];
   var ACCOUNT_IN = [
+    { href: '/referrals', label: 'Refer &amp; earn 5%', icon: 'gift', cta: true, keep: true },
     { href: '/dashboard', label: 'Dashboard', icon: 'dashboard', cta: true },
     { href: '/logout', label: 'Log out', icon: 'logout' },
   ];
@@ -35,6 +36,7 @@
     register: svg('<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/>'),
     dashboard: svg('<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>'),
     logout: svg('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/>'),
+    gift: svg('<rect x="3" y="8" width="18" height="4" rx="1"/><path d="M5 12v8a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-8"/><path d="M12 8v13"/><path d="M12 8C10.5 8 7.5 8 7 6.5 6.6 5.3 7.6 4 9 4c2 0 3 4 3 4Zm0 0c1.5 0 4.5 0 5-1.5.4-1.2-.6-2.5-2-2.5-2 0-3 4-3 4Z"/>'),
     account: svg('<circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/>'),
   };
 
