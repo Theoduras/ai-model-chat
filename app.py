@@ -9453,6 +9453,10 @@ def _x_http_error(e):
             if needle in low:
                 detail = f'{detail} ({hint})'
                 break
+        # Posting and media upload are separate endpoints with separate plan
+        # limits, and a bare "Forbidden" from either reads identically.
+        if 'media/upload' in (getattr(e, 'url', '') or ''):
+            detail = f'{detail} [on media upload, not the post itself]'
     return XApiError(e, detail.strip(), body)
 
 
