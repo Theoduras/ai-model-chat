@@ -1375,8 +1375,22 @@ def _feature_matrix():
                 text = text[1]
             rows.append({'group': group, 'label': label,
                          'detail': text or '', 'included': included and bool(text)})
+        plats = caps['platforms']
         out[key] = {'name': tier['name'], 'price': tier['price'],
-                    'blurb': tier['blurb'], 'features': rows}
+                    'blurb': tier['blurb'], 'features': rows,
+                    'highlights': [
+                        {'value': ('\u221e' if caps['personas'] is None
+                                   else str(caps['personas'])),
+                         'label': 'Personas'},
+                        {'value': ('5' if plats is None else str(len(plats))),
+                         'label': 'Platforms'},
+                        {'value': str(caps['phases_max']),
+                         'label': 'Funnel phases'},
+                        {'value': ('\u221e' if caps['image_generations_month'] is None
+                                   else str(caps['image_generations_month'])),
+                         'label': 'AI images / mo'},
+                        {'value': str(caps['seats']), 'label': 'Team seats'},
+                    ]}
     return out
 
 
