@@ -8784,6 +8784,10 @@ _X_403_HINTS = (
     ('not permitted', 'your X app is missing a required scope — reconnect the account'),
     ('client-not-enrolled', 'your X API plan does not include this endpoint'),
     ('unsupported authentication', 'reconnect the account with OAuth 2.0'),
+    # X answers a write from a read-only app with the bare word "Forbidden" and
+    # no JSON, so the token looks fine and only the app's permission is wrong.
+    ('forbidden', 'set your X app to Read and write in the developer portal, '
+                  'then reconnect the account so the token picks it up'),
 )
 
 
