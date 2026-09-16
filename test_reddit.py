@@ -134,8 +134,8 @@ def test_an_upload_waits_for_reddit_before_submitting():
 
     class Traced(RR.Rest):
         def call(self, method, url, body=None, headers=None, raw=False, retries=1,
-                 content_type=''):
-            seen.append((method, url))
+                 content_type='', bare=False):
+            seen.append((method, url, bare))
             if url.endswith(RR.PATH_ASSET):
                 return {'args': {'action': 'https://s3.example/up',
                                  'fields': [{'name': 'key', 'value': 'k1'}]},
@@ -148,20 +148,23 @@ def test_an_upload_waits_for_reddit_before_submitting():
 
     rest = Traced(dict(_SESSION))
     rest.submit_image('gonewild', 'a title', b'bytes', 'image/png', 'f1')
-    order = [u for _, u in seen]
+    order = [u for _, u, _b in seen]
     lease = next(i for i, u in enumerate(order) if u.endswith(RR.PATH_ASSET))
     s3 = next(i for i, u in enumerate(order) if u.startswith('https://s3.example'))
     wait = next(i for i, u in enumerate(order) if '/api/media/asset/' in u)
     submit = next(i for i, u in enumerate(order) if u.endswith(RR.PATH_SUBMIT))
     check('the lease comes first, then S3, then the wait, then the submission',
           lease < s3 < wait < submit, order)
+    check('her Reddit credentials never travel to Amazon',
+          seen[s3][2] is True and seen[submit][2] is False, seen)
 
     class Failing(Traced):
         def call(self, method, url, body=None, headers=None, raw=False, retries=1,
-                 content_type=''):
+                 content_type='', bare=False):
             if '/api/media/asset/' in url:
                 return {'processing_state': 'failed'}
-            return Traced.call(self, method, url, body, headers, raw, retries, content_type)
+            return Traced.call(self, method, url, body, headers, raw, retries,
+                               content_type, bare)
 
     threw = False
     try:

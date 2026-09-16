@@ -163,13 +163,19 @@ class Rest:
             time.sleep(min(left, 5.0))
 
     def call(self, method, url, body=None, headers=None, raw=False, retries=1,
-             content_type=''):
+             content_type='', bare=False):
+        """One request. `bare` sends no Reddit credentials at all -- the S3
+        upload is a request to Amazon, and handing her session cookie to a
+        third party because the helper happens to add it by default is how a
+        credential leaks."""
         if not self.configured():
             raise RedditApiError(0, 'No Reddit session for this persona')
         self._wait()
         data = body if raw else (_encode_form(body) if body is not None else None)
         req = urllib.request.Request(url, data=data, method=method.upper())
-        for key, value in self._headers(headers).items():
+        sent = ({'User-Agent': self.user_agent, **(headers or {})} if bare
+                else self._headers(headers))
+        for key, value in sent.items():
             req.add_header(key, value)
         if data is not None:
             req.add_header('Content-Type',
@@ -196,7 +202,7 @@ class Rest:
                     self._until = time.time() + after
                 self._wait()
                 return self.call(method, url, body, headers, raw, retries - 1,
-                                 content_type)
+                                 content_type, bare)
             logger.warning('reddit %s %s -> %s: %s', method, url, e.code, detail[:300])
             raise RedditApiError(e.code, detail)
         except urllib.error.URLError as e:
@@ -239,7 +245,8 @@ class Rest:
         if not (action and fields):
             raise RedditApiError(0, 'Reddit issued no upload lease for that file')
         payload, content_type = _multipart(fields, filename, blob, mime)
-        self.call('POST', action, body=payload, raw=True, content_type=content_type)
+        self.call('POST', action, body=payload, raw=True, content_type=content_type,
+                  bare=True)
         key = dict(fields).get('key') or ''
         asset = (lease or {}).get('asset') or {}
         self._await_asset(asset.get('asset_id') or '')
@@ -256,7 +263,16 @@ class Rest:
             return
         deadline = time.time() + REDDIT_ASSET_WAIT
         while time.time() < deadline:
-            status = self.call('GET', f'{self.base}/api/media/asset/{asset_id}')
+            try:
+                status = self.call('GET', f'{self.base}/api/media/asset/{asset_id}')
+            except RedditApiError as e:
+                # The status route moves with Reddit's releases. Losing it means
+                # we cannot see the answer, not that the answer was no -- so
+                # give the upload a moment and let the submission report the
+                # real verdict, rather than failing a post that would work.
+                logger.warning('reddit asset status unavailable (%s); waiting instead', e.code)
+                time.sleep(5)
+                return
             state = str((status or {}).get('processing_state') or '').lower()
             if state in ('complete', 'valid', ''):
                 return

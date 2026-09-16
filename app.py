@@ -22619,7 +22619,8 @@ def _rd_comment_round(persona):
         return 0
     rest = _rd_rest(persona)
     me = (_rd_account(persona).get('username') or '').lower()
-    seen = set(_dc_json(f'reddit_seen_comments_{persona}', []))
+    held = _dc_json(f'reddit_seen_comments_{persona}', [])
+    seen = set(held)
     answered = 0
     targets = []
     if cfg['own_posts']:
@@ -22646,6 +22647,7 @@ def _rd_comment_round(persona):
         if not body or name in seen or author == me or author in ('automoderator', '[deleted]'):
             continue
         seen.add(name)
+        held.append(name)
         read.append(name)
         reply = _rd_comment_reply(persona, row.get('author') or '', body, where)
         if not reply:
@@ -22661,8 +22663,7 @@ def _rd_comment_round(persona):
                     f'→ (r/{where}) {reply[:120]}')
     if read:
         rest.mark_read(read)
-    _set_setting(f'reddit_seen_comments_{persona}',
-                 json.dumps(list(seen)[-600:]))
+    _set_setting(f'reddit_seen_comments_{persona}', json.dumps(held[-600:]))
     return answered
 
 
