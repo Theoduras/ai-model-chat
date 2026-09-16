@@ -343,6 +343,92 @@ def test_a_channel_reply():
     check('a channel taken off the allowlist gets nothing', not prompts, prompts)
 
 
+def test_the_winback_ladder():
+    """What happens after the two short nudges are spent. Days 1 and 4 are a
+    plain hello; the offer rungs come later and carry the link."""
+    check('only Discord opted in',
+          (app.PLAT_DISCORD.has_winback, app.PLAT_FANVUE.has_winback,
+           app.PLAT_ONLYFANS.has_winback) == (True, False, False))
+    check('and the other platforms have nowhere for an offer to point',
+          app.PLAT_FANVUE.winback_link('lilly', '1') == '')
+
+    step = growth_step = __import__('growth').winback_step
+    check('nothing is due on the first quiet day with no nudges spent',
+          step(0, 0) is None)
+    check('day 1 is the first rung, and it is a message',
+          step(1, 0) == {'touch': 1, 'offer': False})
+    check('day 4 is the second, still a message',
+          step(4, 1) == {'touch': 2, 'offer': False})
+    check('the third rung is the first that offers anything',
+          (step(12, 2) or {}).get('offer') is True)
+    import funnels
+    check('and the ladder runs out rather than going forever',
+          step(9999, funnels.WINBACK_MAX_TOUCHES) is None)
+
+    saved = {}
+    app._get_setting = lambda k, d=None: saved.get(k, d)
+    app._set_setting = lambda k, v: saved.__setitem__(k, v)
+    saved['discord_winback_lilly'] = json.dumps({'77': {'n': 2}})
+    check('where a fan has got to is read back per platform',
+          app._plat_winback(app.PLAT_DISCORD, 'lilly').get('77', {}).get('n') == 2)
+    check('and that key is namespaced like every other bit of state',
+          app.PLAT_DISCORD.k('winback', 'lilly') == 'discord_winback_lilly')
+
+    runner = DS.install('lilly')
+    app._phases_cta = lambda slug: {'cta_url': 'https://paid.example/lilly'}
+    app._get_setting = lambda k, d=None: (
+        '' if k.startswith('discord_cta') else
+        'https://app.example' if k == 'public_base_url' else saved.get(k, d))
+    check('an offer rung points at her tracked link, not the raw page',
+          app.PLAT_DISCORD.winback_link('lilly', '77')
+          == 'https://app.example/go/dc/lilly/77')
+
+
+def test_posting_on_a_schedule():
+    """The clock-driven post. It must respect the allowlist, the interval and
+    the same daily budget as joining in, and must never carry a link."""
+    runner = DS.install('lilly')
+    allow = [{'guild': '9', 'channel': '90', 'nsfw': False, 'post': True},
+             {'guild': '9', 'channel': '91', 'nsfw': False, 'post': False}]
+    runner.configure({'allow': allow, 'chime': {}})
+
+    store = {'discord_guilds_lilly': json.dumps({'allow': allow}),
+             'discord_chime_lilly': json.dumps({'enabled': False, 'daily_cap': 1}),
+             'discord_post_lilly': json.dumps({'enabled': True, 'interval_min': 30,
+                                               'brief': 'her day at the gym'})}
+    prompts = []
+    app._get_setting = lambda k, d=None: store.get(k, d)
+    app._set_setting = lambda k, v: store.__setitem__(k, v)
+    app._log_x_message = lambda *a: None
+    app._fv_trace = lambda p, st, d='', fan='': None
+    app._persona_text = lambda p, instr, **k: prompts.append(instr) or 'gym was brutal today'
+    DG.OUT_FLOOR_SECONDS = 0
+
+    check('it posts once', app._dc_post_round('lilly') == 1)
+    check('into the channel marked scheduled, and only that one',
+          [r['channel_id'] for r in runner.rest.sent] == ['90'], runner.rest.sent)
+    check('the brief reaches the model', prompts and 'gym' in prompts[0])
+    check('and it is told never to post a link', prompts and 'never a link' in prompts[0])
+
+    check('it does not post again inside the interval',
+          app._dc_post_round('lilly') == 0)
+
+    store['discord_post_state_lilly'] = json.dumps({})
+    check('and not once the daily budget is spent either',
+          app._dc_post_round('lilly') == 0)
+
+    store['discord_post_state_lilly'] = json.dumps({})
+    store['discord_chime_lilly'] = json.dumps({'enabled': False, 'daily_cap': 0})
+    store['discord_chime_state_lilly'] = json.dumps({})
+    check('a cap of zero silences the schedule too, not just chiming in',
+          app._dc_post_round('lilly') == 0)
+
+    store['discord_post_lilly'] = json.dumps({'enabled': False})
+    store['discord_post_state_lilly'] = json.dumps({})
+    check('and it does nothing at all when switched off',
+          app._dc_post_round('lilly') == 0)
+
+
 if __name__ == '__main__':
     for fn in (test_adapter_shape, test_a_dm_is_taken, test_the_mention_gate,
                test_chiming_in_is_capped, test_the_daily_cap_survives_a_restart,
@@ -353,7 +439,9 @@ if __name__ == '__main__':
                test_the_fingerprint_agrees_with_itself,
                test_a_whole_dm_round,
                test_a_click_is_recorded_as_opened_not_paid,
-               test_a_channel_reply):
+               test_a_channel_reply,
+               test_posting_on_a_schedule,
+               test_the_winback_ladder):
         restore()
         fn()
     restore()

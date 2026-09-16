@@ -19,7 +19,7 @@
     .conn-pill.err { background: #4c0519; color: #fb7185; }
     .warn-box { border: 1px solid #b45309; background: #78350f22; color: var(--text-2);
                 border-radius: 10px; padding: 12px 14px; font-size: 0.82rem; line-height: 1.5; }
-    .chan-row { display: grid; grid-template-columns: 1fr 1fr 1.2fr auto auto; gap: 8px;
+    .chan-row { display: grid; grid-template-columns: 1fr 1fr 1.2fr auto auto auto; gap: 8px;
                 align-items: center; margin-bottom: 8px; }
     .chan-row input[type=text] { margin: 0; }
     .nsfw-cell { display: flex; align-items: center; gap: 6px; font-size: 0.78rem; color: var(--text-3); white-space: nowrap; }
@@ -160,6 +160,31 @@
   </div>
 
   <div class="form-section">
+    <div class="section-title">Posting on a schedule</div>
+    <span class="hint">She posts into the channels ticked <em>scheduled</em> above, on a
+      clock rather than in answer to anyone. It draws on the same daily budget as joining
+      in, so a cap of zero there silences this too. Never carries a link.</span>
+    <div class="row-inline" style="margin-top:12px;">
+      <div class="field nowrap">
+        <label class="switch"><input type="checkbox" id="post-enabled"><span>Post on a schedule</span></label>
+      </div>
+      <div class="field"><label>How often (minutes)</label>
+        <input type="number" id="post-interval" min="30" max="10080" value="240"></div>
+    </div>
+    <div class="field full">
+      <label>What she should post about</label>
+      <input type="text" id="post-brief" placeholder="whatever she is up to that day — gym, work, the game she is playing">
+      <span class="hint">Optional. Leave empty and she picks from her own persona.</span>
+    </div>
+    <div class="row-inline">
+      <button class="btn-ai" onclick="saveChime()">Save</button>
+      <button class="btn-ai" style="background:var(--surface); color:var(--text-2);"
+              onclick="postNow()">Post once now</button>
+    </div>
+    <div id="post-status" class="hint" style="margin-top:10px;"></div>
+  </div>
+
+  <div class="form-section">
     <div class="section-title">The offer</div>
     <span class="hint">Discord has no paid messages, so an offer is her paid link, sent in a
       DM and never in a channel. Clicks are counted; a click is not a sale.</span>
@@ -282,13 +307,27 @@ function drawChannels(){
     +'<input type="text" value="'+esc(c.channel||'')+'" placeholder="channel ID" oninput="channels['+i+'].channel=this.value">'
     +'<label class="nsfw-cell"><input type="checkbox" '+(c.nsfw?'checked':'')
       +' onchange="channels['+i+'].nsfw=this.checked"> adult</label>'
+    +'<label class="nsfw-cell"><input type="checkbox" '+(c.post?'checked':'')
+      +' onchange="channels['+i+'].post=this.checked"> scheduled</label>'
     +'<button class="btn-ai" style="background:var(--surface); color:var(--text-2); padding:4px 10px;"'
       +' onclick="channels.splice('+i+',1);drawChannels()">remove</button>'
     +'</div>').join('')
     ||'<span class="hint">No channels yet, so she stays quiet in public.</span>';
 }
 
-function addChannel(){channels.push({name:'',guild:'',channel:'',nsfw:false});drawChannels();}
+function addChannel(){channels.push({name:'',guild:'',channel:'',nsfw:false,post:false});drawChannels();}
+
+async function postNow(){
+  const box=el('post-status');
+  note(box,'Posting…');
+  try{
+    const r=await api('/api/discord/post-now',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({persona:slug()})});
+    note(box,r.posted?('Posted into '+r.posted+' channel(s).')
+      :'Nothing posted — check a channel is ticked scheduled and the daily budget is not spent.');
+    await loadTrace();
+  }catch(e){note(box,e.message,true);}
+}
 
 async function saveGuilds(){
   const box=el('guild-status');
@@ -308,6 +347,10 @@ async function loadChime(){
   el('chime-keywords').value=(c.chime.keywords||[]).join(', ');
   el('dm-accept').checked=!!c.dm.auto_accept;
   el('dm-friends').checked=!!c.dm.auto_accept_friends;
+  const p=c.post||{};
+  el('post-enabled').checked=!!p.enabled;
+  el('post-interval').value=p.interval_min||240;
+  el('post-brief').value=p.brief||'';
 }
 
 async function saveChime(quiet){
@@ -317,7 +360,9 @@ async function saveChime(quiet){
       body:JSON.stringify({persona:slug(),enabled:el('chime-enabled').checked,
         cooldown_min:+el('chime-cooldown').value,daily_cap:+el('chime-cap').value,
         keywords:el('chime-keywords').value.split(',').map(s=>s.trim()).filter(Boolean),
-        auto_accept:el('dm-accept').checked,auto_accept_friends:el('dm-friends').checked})});
+        auto_accept:el('dm-accept').checked,auto_accept_friends:el('dm-friends').checked,
+        post_enabled:el('post-enabled').checked,post_interval_min:+el('post-interval').value,
+        post_brief:el('post-brief').value})});
     if(!quiet)note(box,'Saved.');
   }catch(e){note(box,e.message,true);}
 }

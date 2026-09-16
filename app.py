@@ -5731,6 +5731,22 @@ INBOX_PLATFORMS = {
 
 # Trace stages that describe something that happened *to one fan*, so they can
 # sit inside that fan's thread. Anything else stays on the overview feed.
+def _platform_of_fan(fan_key):
+    """Which platform a fan id belongs to, from the prefix it carries.
+
+    Anything reporting per platform reads it from here rather than testing a
+    couple of prefixes itself, so adding a platform to the table above is enough
+    and a new one cannot quietly report as an old one.
+    """
+    key = str(fan_key or '')
+    for slug, meta in INBOX_PLATFORMS.items():
+        if any(prefix and key.startswith(prefix) for prefix in meta['prefixes']):
+            return slug
+    # X ids carry no prefix, and neither did Fanvue's before the store was
+    # shared. Fanvue is the older of the two, so it stays the fallback.
+    return 'fanvue'
+
+
 INBOX_EVENT_STAGES = {'ppv', 'guardrail', 'error', 'skipped', 'follow-up',
                       'funnel', 'review', 'delayed', 'routed', 'complaint',
                       'missed'}
@@ -8943,6 +8959,40 @@ def _growth_queue_worker():
             logger.exception('growth queue tick failed')
 
 
+def _dc_cta_fans(persona):
+    """Discord's side of the CTA breakdown, read from the PPV ledger.
+
+    Telegram and X each keep their own per-fan dict with the CTA counters on it.
+    Discord has no such store — a drop there is a link, and the ledger already
+    records that it went out and whether it was opened. So the same two numbers
+    are read back from where they actually live rather than kept twice.
+
+    A Discord drop is the only kind whose message id is a `dc:` one, which is
+    what separates these rows from Fanvue's and OnlyFans' in the shared table.
+    """
+    out = {}
+    try:
+        from db import SessionLocal, PpvDrop
+        s = SessionLocal()
+        try:
+            rows = (s.query(PpvDrop)
+                    .filter(PpvDrop.persona == persona,
+                            PpvDrop.message_uuid.like('dc:%'))
+                    .all())
+            for r in rows:
+                fan = out.setdefault(str(r.fan_uuid or ''), {
+                    'cta_sent': 1, 'cta_count': 0, 'cta_tracked': True,
+                    'cta_clicked': 0, 'cta_kind': 'paid'})
+                fan['cta_count'] += 1
+                if r.read_at:
+                    fan['cta_clicked'] = 1
+        finally:
+            s.close()
+    except Exception as e:
+        logger.debug('discord CTA rollup failed for %s: %s', persona, str(e)[:120])
+    return out
+
+
 @app.route('/api/growth/cta')
 @operator_only
 def api_growth_cta():
@@ -8956,7 +9006,8 @@ def api_growth_cta():
     by_kind, by_channel = {}, {}
     totals, untracked = blank(), 0
     fans = ([('telegram', f) for f in _tg_fans(persona).values()]
-            + [('x', f) for f in _x_fans(persona).values()])
+            + [('x', f) for f in _x_fans(persona).values()]
+            + [('discord', f) for f in _dc_cta_fans(persona).values()])
     for channel, fan in fans:
         if not isinstance(fan, dict) or not fan.get('cta_sent'):
             continue
@@ -8999,7 +9050,7 @@ def api_growth_cta():
 
 
 GROWTH_CHANNELS = ('instagram', 'tiktok', 'x', 'threads', 'reddit',
-                   'youtube', 'telegram', 'linktree', 'other')
+                   'youtube', 'telegram', 'discord', 'linktree', 'other')
 
 
 @app.route('/t/<slug>')
@@ -14932,10 +14983,11 @@ def api_fanvue_funnel_stats():
         for p in (s.query(FanProfile).filter(FanProfile.persona == persona)
                   .order_by(FanProfile.frs.desc()).limit(100).all()):
             fans.append({'fan': p.fan_uuid, 'handle': p.handle or '',
-                         # Both platforms feed one funnel, so say which this is.
-                         'platform': ('telegram'
-                                      if str(p.fan_uuid or '').startswith(('tg:', 'tgu:'))
-                                      else 'fanvue'),
+                         # Several platforms feed one funnel, so say which this
+                         # is — read off the registry rather than guessed, since
+                         # a two-way test here reported every Discord fan as a
+                         # Fanvue one the moment Discord existed.
+                         'platform': _platform_of_fan(p.fan_uuid),
                          'type': p.fan_type or '', 'confidence': p.type_confidence or 0,
                          'frs': p.frs or 0, 'crs': p.crs or 0,
                          'mode': FN.churn_mode(p.crs or 0),
@@ -17099,6 +17151,10 @@ class _Platform:
     fan_prefix = ''      # what a fan id is prefixed with in the one message store
     has_lists = False
     has_funnels = False
+    # Whether the day-scale win-back ladder runs once the short follow-up nudges
+    # are spent. Off unless a platform says otherwise, so no existing one
+    # changes behaviour by the ladder merely existing.
+    has_winback = False
 
     def k(self, name, persona=''):
         return f'{self.prefix}_{name}_{persona}' if persona else f'{self.prefix}_{name}'
@@ -17127,6 +17183,11 @@ class _Platform:
     def webhook_state(self, persona):
         """Whether purchase events can reach us, and what is wrong if not."""
         return {'ready': False, 'problem': '', 'url': '', 'last_error': ''}
+
+    def winback_link(self, persona, fan_id):
+        """Where a win-back offer points. Empty means the ladder only ever sends
+        messages on this platform, never an offer."""
+        return ''
 
     def reachable(self, persona):
         """Why an account that *is* connected still cannot be talked to, or ''.
@@ -17217,6 +17278,15 @@ PLATFORMS = {'fanvue': PLAT_FANVUE}
 
 def _platform(slug):
     return PLATFORMS.get(str(slug or '').lower()) or PLAT_FANVUE
+
+
+def _plat_winback(plat, persona):
+    """How far up the win-back ladder each fan is: {fan: {'n', 'last'}}."""
+    try:
+        held = json.loads(_get_setting(plat.k('winback', persona)) or '{}')
+        return held if isinstance(held, dict) else {}
+    except Exception:
+        return {}
 
 
 def _plat_auto_round(plat, persona):
@@ -17398,24 +17468,59 @@ def _plat_round_body(plat, persona):
             need = FOLLOWUP_BASE_MIN * (sent_n + 1)  # 3h, then 6h, …
             if actions['replies'] >= reply_limit:
                 continue
-            if sent_n >= FOLLOWUP_MAX or age is None or age < need:
+            fu_lim = persona_length_limits(persona)
+            # Two nudges is the right answer to someone who has been quiet for an
+            # afternoon, and the wrong one to someone who has been quiet for a
+            # month — the second is a different conversation, on a scale of days.
+            # So once the nudges are spent the win-back ladder takes over, on the
+            # platforms that asked for it.
+            winback = None
+            if sent_n >= FOLLOWUP_MAX and plat.has_winback and age is not None:
+                wb_state = _plat_winback(plat, persona)
+                touches = int((wb_state.get(fan_uuid) or {}).get('n') or 0)
+                winback = growth.winback_step(int(age // 1440), touches)
+                if winback is None:
+                    log.append(f'{who}: quiet {int(age // 1440)}d, win-back '
+                               f'{touches}/{FN.WINBACK_MAX_TOUCHES} — waiting')
+                    continue
+                if winback['offer'] and _funnel_pitching_paused(persona, fan_key):
+                    log.append(f'{who}: holding the win-back offer back — rough patch')
+                    continue
+            elif sent_n >= FOLLOWUP_MAX or age is None or age < need:
                 log.append(f'{who}: quiet {int(age) if age else "?"}m, follow-ups {sent_n}/{FOLLOWUP_MAX} — waiting')
                 continue
             hist = [{'role': 'model' if d == 'out' else 'user', 'content': t}
                     for (d, t) in _fanvue_saved_history(persona, fan_key, limit=40)]
-            fu_lim = persona_length_limits(persona)
-            fu_instr = (
-                "This fan went quiet and hasn't replied to your last message. Send "
-                "ONE warm, natural follow-up like a real person double-texting "
-                "— playful and low-pressure, NOT needy or salesy. Reference something "
-                "from earlier if it fits. Do NOT repeat your previous message. "
-                + fu_lim['note'] + ' ' + NO_PLACEHOLDER_RULE)
+            if winback:
+                link = plat.winback_link(persona, fan_uuid) if winback['offer'] else ''
+                fu_instr = (growth.winback_instruction(bool(link), '')
+                            + ' ' + fu_lim['note'] + ' ' + NO_PLACEHOLDER_RULE)
+            else:
+                link = ''
+                fu_instr = (
+                    "This fan went quiet and hasn't replied to your last message. Send "
+                    "ONE warm, natural follow-up like a real person double-texting "
+                    "— playful and low-pressure, NOT needy or salesy. Reference something "
+                    "from earlier if it fits. Do NOT repeat your previous message. "
+                    + fu_lim['note'] + ' ' + NO_PLACEHOLDER_RULE)
             fu = _strip_placeholders(
                 _fv_trim(_persona_text(persona, fu_instr, history=hist,
                                        max_tokens=fu_lim['tokens'], temperature=0.95),
                          max_sentences=fu_lim['sentences'], hard_cap=fu_lim['cap']))
             if not fu:
                 continue
+            if winback:
+                # The model is told not to paste a URL, so the link is appended
+                # here — that way an offer rung always carries exactly one, and a
+                # message rung can never carry one at all.
+                if link:
+                    fu = f'{fu}\n{link}'
+                wb_state[fan_uuid] = {'n': winback['touch'], 'last': int(time.time())}
+                _set_setting(plat.k('winback', persona), json.dumps(wb_state))
+                _fv_trace(persona, 'follow-up',
+                          f'{who} has been gone {int(age // 1440)}d — win-back '
+                          f'{winback["touch"]}/{FN.WINBACK_MAX_TOUCHES}'
+                          + (' with her link' if link else ''), fan=fan_key)
             followups[fan_uuid] = {'n': sent_n + 1}
             _set_setting(followup_key, json.dumps(followups))
             actions['replies'] += 1
@@ -17434,6 +17539,12 @@ def _plat_round_body(plat, persona):
         # Fan replied — clear any pending follow-up state for them.
         if followups.pop(fan_uuid, None) is not None:
             _set_setting(followup_key, json.dumps(followups))
+        # And put the win-back ladder back to the bottom: they came back, so the
+        # next silence is a new one and starts at a plain hello, not at an offer.
+        if plat.has_winback:
+            wb_held = _plat_winback(plat, persona)
+            if wb_held.pop(fan_uuid, None) is not None:
+                _set_setting(plat.k('winback', persona), json.dumps(wb_held))
         if cursor.get(fan_uuid) == msg_id:
             log.append(f'{who}: already replied to their latest')
             continue  # already handled this latest inbound message
@@ -20321,10 +20432,24 @@ def _dc_dm_cfg(persona):
             'ignore_bots': held.get('ignore_bots', True) is not False}
 
 
+def _dc_post_cfg(persona):
+    held = _dc_json(f'discord_post_{persona}', {})
+    return {'enabled': bool(held.get('enabled')),
+            'interval_min': max(30, int(held.get('interval_min') or 240)),
+            'brief': (held.get('brief') or '').strip()[:400]}
+
+
 def _dc_chime_spend(persona, channel_id, cap):
     """Whether an unprompted line is still within today's budget, and book it if
-    so. The gateway keeps a looser count in memory to stay cheap; this one is
-    the count that matters, because it is the one that survives a restart."""
+    so.
+
+    One budget covers everything she says in a channel without being spoken to,
+    whether it came from the conversation or from the clock — the limit that
+    matters to a server's members, and to Discord, is how often she talks at
+    them, not which of our features decided to. The gateway keeps a looser count
+    in memory to stay cheap; this is the one that matters, because it survives a
+    restart.
+    """
     key = f'discord_chime_state_{persona}'
     state = _dc_json(key, {})
     today = time.strftime('%Y-%m-%d')
@@ -20407,6 +20532,10 @@ class _DiscordPlatform(_Platform):
     # DMs get the funnel. Public channels never reach this round at all, so
     # turning it on here cannot put a pitch in a server.
     has_funnels = True
+    # Discord fans go quiet for weeks and come back, which is exactly what the
+    # ladder is for. It only ever runs in a DM — a channel never reaches this
+    # round.
+    has_winback = True
 
     def connected(self, persona):
         return bool(_dc_token(persona))
@@ -20478,6 +20607,9 @@ class _DiscordPlatform(_Platform):
             import uuid
             return f'link:{uuid.uuid4().hex}'
         return f'dc:{(sent or {}).get("channel_id") or ""}:{mid}'
+
+    def winback_link(self, persona, fan_id):
+        return _dc_cta_link(persona, fan_id)
 
     def typing(self, persona, scope, fan_id):
         try:
@@ -20652,6 +20784,10 @@ def _discord_worker(tick=2.0):
                 with app.app_context():
                     for persona in _fanvue_enabled_list(plat=PLAT_DISCORD):
                         _dc_connect(persona)
+                        try:
+                            _dc_post_round(persona)
+                        except Exception:
+                            logger.exception('discord post round failed for %s', persona)
                     due |= set(_fanvue_enabled_list(plat=PLAT_DISCORD))
             for (persona, guild_id, channel_id), addressed in channels:
                 with app.app_context():
@@ -20746,6 +20882,74 @@ def _dc_channel_round(persona, guild_id, channel_id, addressed):
     _dc_on_trace(persona, 'reply',
                  f'#{channel_id}: {"answered" if addressed else "joined in"} — {text[:80]}',
                  fan=fan_key)
+
+
+def _dc_post_round(persona):
+    """Say something in a channel on a clock rather than in answer to anyone.
+
+    Deliberately the thinnest of the three paths: no history, no funnel, no
+    offer. A scheduled post is a fresh thought, and reading the channel back to
+    the model first would double what the cheapest feature here costs without
+    making the post any better. It draws on the same daily budget as chiming in,
+    so turning that to zero silences her in public completely.
+    """
+    cfg = _dc_post_cfg(persona)
+    live = DG.runner(persona)
+    if not (cfg['enabled'] and live):
+        return 0
+    targets = [c for c in _dc_guilds(persona) if c.get('post') and c.get('channel')]
+    if not targets:
+        return 0
+    cap = _dc_chime(persona)['daily_cap']
+    state = _dc_json(f'discord_post_state_{persona}', {})
+    config = load_persona_config(persona)
+    limits = reply_length_limits(config)
+    now, posted = time.time(), 0
+    for entry in targets:
+        channel_id = str(entry['channel'])
+        guild_id = str(entry.get('guild') or '')
+        key = f'{guild_id}:{channel_id}'
+        fan_key = f'dcg:{key}'
+        if now - float(state.get(channel_id) or 0) < cfg['interval_min'] * 60:
+            continue
+        if live.allowed_channel(guild_id, channel_id) is None:
+            continue
+        if not _dc_chime_spend(persona, channel_id, cap):
+            _dc_on_trace(persona, 'skipped',
+                         f'#{channel_id}: nothing posted — today\'s budget for '
+                         'speaking up in public is spent', fan=fan_key)
+            continue
+        clean = ('' if entry.get('nsfw') else
+                 ' This is a public channel and it stays clean: no sexual '
+                 'content, no innuendo, nothing you would only say in a DM.')
+        brief = f' {cfg["brief"]}' if cfg['brief'] else ''
+        instruction = (
+            'Post one message into a Discord server channel, unprompted. Nobody '
+            'asked you anything — this is you saying something because you felt '
+            f'like it.{brief}{clean} Write it the way you would type it into a '
+            'group chat: no greeting, no sign-off, nothing that reads like an '
+            'announcement or an advert, and never a link. '
+            f'{limits["note"]} {NO_PLACEHOLDER_RULE}')
+        try:
+            text = _persona_text(persona, instruction, history=None,
+                                 max_tokens=limits['tokens'], temperature=1.0)
+            text = _fv_trim(_strip_placeholders(text or ''),
+                            limits['sentences'], limits['cap'])
+            if not text:
+                continue
+            DG.send(persona, key, text, guild=True)
+        except Exception as e:
+            _dc_on_trace(persona, 'error', f'#{channel_id}: {str(e)[:160]}', fan=fan_key)
+            continue
+        state[channel_id] = now
+        posted += 1
+        _log_x_message(persona, fan_key,
+                       PLAT_DISCORD.acting_as(persona) or persona, 'out', text)
+        _dc_on_trace(persona, 'reply', f'#{channel_id}: posted — {text[:80]}',
+                     fan=fan_key)
+    if posted:
+        _set_setting(f'discord_post_state_{persona}', json.dumps(state))
+    return posted
 
 
 _discord_worker_started = [False]
@@ -20853,7 +21057,8 @@ def api_discord_guilds():
             rows.append({'guild': str(entry.get('guild') or ''),
                          'channel': str(entry.get('channel')),
                          'name': (entry.get('name') or '').strip()[:80],
-                         'nsfw': bool(entry.get('nsfw'))})
+                         'nsfw': bool(entry.get('nsfw')),
+                         'post': bool(entry.get('post'))})
         _set_setting(f'discord_guilds_{persona}', json.dumps({'allow': rows}))
         live = DG.runner(persona)
         if live:
@@ -20877,10 +21082,16 @@ def api_discord_chime():
               'auto_accept_friends': bool(body.get('auto_accept_friends')),
               'ignore_bots': body.get('ignore_bots', True) is not False}
         _set_setting(f'discord_dm_{persona}', json.dumps(dm))
+        if 'post_enabled' in body or 'post_interval_min' in body or 'post_brief' in body:
+            _set_setting(f'discord_post_{persona}', json.dumps({
+                'enabled': bool(body.get('post_enabled')),
+                'interval_min': max(30, min(int(body.get('post_interval_min') or 240), 10080)),
+                'brief': (body.get('post_brief') or '').strip()[:400]}))
         live = DG.runner(persona)
         if live:
             live.configure({'chime': saved, 'dm': dm})
-    return jsonify({'chime': _dc_chime(persona), 'dm': _dc_dm_cfg(persona)})
+    return jsonify({'chime': _dc_chime(persona), 'dm': _dc_dm_cfg(persona),
+                    'post': _dc_post_cfg(persona)})
 
 
 @app.route('/api/discord/status')
@@ -20894,7 +21105,24 @@ def api_discord_status():
                     'webhook': PLAT_DISCORD.webhook_state(persona),
                     'allow': _dc_guilds(persona),
                     'chime': _dc_chime(persona),
+                    'post': _dc_post_cfg(persona),
                     'transport': DISCORD_TRANSPORT})
+
+
+@app.route('/api/discord/post-now', methods=['POST'])
+@platform_scoped
+def api_discord_post_now():
+    """Post into the scheduled channels now, ignoring the clock but not the
+    daily budget — so a test cannot be used to talk past the cap."""
+    persona = request_persona()
+    state = _dc_json(f'discord_post_state_{persona}', {})
+    _set_setting(f'discord_post_state_{persona}', json.dumps({}))
+    try:
+        posted = _dc_post_round(persona)
+    except Exception as e:
+        _set_setting(f'discord_post_state_{persona}', json.dumps(state))
+        return jsonify({'ok': False, 'error': str(e)[:250]}), 400
+    return jsonify({'ok': True, 'posted': posted})
 
 # ── Error handler ─────────────────────────────────────────────────────────────
 
