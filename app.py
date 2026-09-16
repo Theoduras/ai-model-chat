@@ -2067,8 +2067,9 @@ FORGOT_PASSWORD_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UT
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
 <link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Reset your password</title>
-<style>""" + ACCOUNT_CSS + """</style></head><body data-page="login"><div class="wrap"><div class="card">
-<h1>Reset your password</h1><p class="sub">Enter your account email and we'll send a reset link.</p>
+<script src="/js/page-editor.js" defer></script>
+<style>""" + ACCOUNT_CSS + """</style></head><body data-page="forgot"><div class="wrap"><div class="card">
+<h1 data-edit-id="h1">Reset your password</h1><p class="sub" data-edit-id="sub">Enter your account email and we'll send a reset link.</p>
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
 {% if sent %}<div class="sub" style="margin-bottom:18px">If an account exists for {{ email }}, a reset link has been sent.
 {% if reset_link %}<br><br>SMTP isn't configured, so here's the link directly: <a href="{{ reset_link }}">{{ reset_link }}</a>{% endif %}
@@ -2076,7 +2077,7 @@ FORGOT_PASSWORD_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UT
 {% else %}
 <form method="post">
 <label>Email</label><input type="email" name="email" required autocomplete="email" value="{{ email or '' }}">
-<button type="submit">Send reset link</button></form>
+<button type="submit"><span data-edit-id="submit-text">Send reset link</span></button></form>
 {% endif %}
 <div class="alt"><a href="/login">Back to sign in</a></div>
 </div></div></body></html>"""
@@ -2085,12 +2086,13 @@ RESET_PASSWORD_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
 <link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Choose a new password</title>
-<style>""" + ACCOUNT_CSS + """</style></head><body data-page="login"><div class="wrap"><div class="card">
-<h1>Choose a new password</h1>
+<script src="/js/page-editor.js" defer></script>
+<style>""" + ACCOUNT_CSS + """</style></head><body data-page="reset"><div class="wrap"><div class="card">
+<h1 data-edit-id="h1">Choose a new password</h1>
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
 <form method="post">
 <label>New password</label><input type="password" name="password" required autocomplete="new-password" placeholder="At least 8 characters">
-<button type="submit">Set new password</button></form>
+<button type="submit"><span data-edit-id="submit-text">Set new password</span></button></form>
 <div class="alt"><a href="/login">Back to sign in</a></div>
 </div></div></body></html>"""
 
@@ -2131,7 +2133,7 @@ plan is active{% if user.expires_at %} until {{ user.expires_at[:10] }}{% endif 
 <button type="button" class="active" data-set-period="month">Monthly</button>
 <button type="button" data-set-period="year">Annual <span class="save">Save {{ annual_save_pct }}%</span></button>
 </div>
-<p class="permo" style="margin:2px 0 10px">All prices exclude VAT — any VAT due is added at checkout. Card plans renew automatically and can be cancelled any time from your account. Crypto payments are one-off — you re-pay when the plan runs out.</p>
+<p class="permo" style="margin:2px 0 10px" data-edit-id="vat-note">All prices exclude VAT — any VAT due is added at checkout. Card plans renew automatically and can be cancelled any time from your account. Crypto payments are one-off — you re-pay when the plan runs out.</p>
 {% set pay_slots = [(1 if stripe_enabled else 0) + (1 if oxapay_enabled else 0)
                     + (1 if dev_mode else 0), 1]|max %}
 <div class="tiers" role="radiogroup" aria-label="Plans">
@@ -2258,6 +2260,7 @@ DEMO_ENDS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png">
 <title>This is where the demo ends</title>
 <script src="/js/analytics.js" defer></script>
+<script src="/js/page-editor.js" defer></script>
 <style>""" + ACCOUNT_CSS + """
 .lockart{width:64px;height:64px;border-radius:18px;display:flex;align-items:center;justify-content:center;
   background:var(--grad);background-size:300% 100%;margin:0 auto 18px}
@@ -2274,18 +2277,18 @@ DEMO_ENDS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 </style></head><body data-page="demo-ends"><div class="wrap"><div class="card" style="text-align:center">
 <div class="lockart"><svg viewBox="0 0 24 24" aria-hidden="true">
 <rect x="4" y="10.5" width="16" height="10" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></svg></div>
-<h1 style="margin-bottom:6px">This is where the demo ends</h1>
-<p class="sub">Connecting {{ platform_name }} is the paid half of Velvetfunnel. The demo
+<h1 style="margin-bottom:6px" data-edit-id="h1">This is where the demo ends</h1>
+<p class="sub" data-edit-id="sub">Connecting {{ platform_name }} is the paid half of Velvetfunnel. The demo
 gives you the persona, the funnel and the whole builder, with nothing capped &mdash; it
 stops at the moment she would start talking to your real fans and taking their money.</p>
 <ul class="steps">
-<li>Build as many personas as you like in here. Nothing runs out.</li>
-<li>Starter connects her to Fanvue and turns on the full PPV engine.</li>
-<li>{{ currency }}{{ starter_price }}/month, excl. VAT. Cancel any time.</li>
+<li data-edit-id="step-1">Build as many personas as you like in here. Nothing runs out.</li>
+<li data-edit-id="step-2">Starter connects her to Fanvue and turns on the full PPV engine.</li>
+<li>{{ currency }}{{ starter_price }}<span data-edit-id="step-3">/month, excl. VAT. Cancel any time.</span></li>
 </ul>
-<a class="btn" href="/register">Create your own account</a>
-<a class="ghostbtn" href="/pricing">See what the plans cost</a>
-<p class="kept">The demo is a shared account, so build in your own to keep your work.</p>
+<a class="btn" href="/register"><span data-edit-id="cta-primary">Create your own account</span></a>
+<a class="ghostbtn" href="/pricing"><span data-edit-id="cta-secondary">See what the plans cost</span></a>
+<p class="kept" data-edit-id="kept">The demo is a shared account, so build in your own to keep your work.</p>
 </div></div></body></html>"""
 
 
@@ -4119,7 +4122,8 @@ def landing():
 # Inline text/image editing for the plain marketing pages (not the persona
 # landing page, not the dashboard) — see js/page-editor.js. One JSON blob per
 # page, keyed by the data-edit-id an operator clicked on.
-SITE_CONTENT_PAGES = {'home', 'login', 'register', 'pricing'}
+SITE_CONTENT_PAGES = {'home', 'login', 'register', 'pricing', 'landing',
+                      'blog', 'blogpost', 'demo-ends', 'forgot', 'reset'}
 
 
 @app.route('/api/site-content/<page>')
