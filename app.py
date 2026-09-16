@@ -7646,8 +7646,6 @@ def api_growth_drafts():
     if not re.match(r'^[a-z0-9_-]+$', persona or ''):
         return jsonify({'error': 'Invalid slug'}), 400
     idea = (data.get('idea') or '').strip()[:400]
-    if not idea:
-        return jsonify({'ok': False, 'error': 'Give it an idea to work from.'}), 400
     wanted = [growth.normalise_source(p) for p in (data.get('platforms') or [])]
     # The variants are asked for by name; the default is the five real channels,
     # so "write me everything" does not quietly cost an extra model call.
@@ -7666,9 +7664,18 @@ def api_growth_drafts():
         spec = growth.POST_PLATFORMS[plat]
         # A variant shares its base channel's register, link and no-repeat log.
         base = growth.base_platform(plat)
+        # No angle given is the ordinary case now: the picture is the subject,
+        # and with no picture either she picks something out of her own life.
+        if idea:
+            subject = f'about: {idea}.'
+        elif picture:
+            subject = 'about the picture attached.'
+        else:
+            subject = ('about something from your own life today — pick it '
+                       'yourself, from who you are and what you are into.')
         instruction = (
-            f'Write ONE {spec["label"]} post as yourself, in character, about: '
-            f'{idea}. It must be {spec["brief"]}. Stay under {spec["cap"]} '
+            f'Write ONE {spec["label"]} post as yourself, in character, '
+            f'{subject} It must be {spec["brief"]}. Stay under {spec["cap"]} '
             'characters. Return only the post itself, no preamble and no quotes.'
             + _series_note(series)
             + media_note
