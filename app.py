@@ -19140,6 +19140,20 @@ def _of_proxy_for(persona, country=''):
     return template.replace('{country}', country).replace('{session}', persona)
 
 
+def _ig_proxy_for(persona, country=''):
+    """Instagram's own pool, separate from OnlyFans': a datacentre IP is what
+    got the sign-in browser an ERR_HTTP_RESPONSE_CODE_FAILURE / a hard connect
+    failure in the first place, and Instagram blocklists Google's ranges more
+    readily than a residential provider's. Same templating as
+    ONLYFANS_PROXY_TEMPLATE, kept apart so turning one pool off does not touch
+    the other."""
+    template = (os.getenv('INSTAGRAM_PROXY_TEMPLATE') or '').strip()
+    if not template:
+        return ''
+    country = (country or os.getenv('INSTAGRAM_PROXY_COUNTRY') or 'nl').lower()[:2]
+    return template.replace('{country}', country).replace('{session}', persona)
+
+
 @app.route('/onlyfans/connect')
 def onlyfans_connect_page():
     """The sign-in window. It opens on its own rather than inside the console:
@@ -21679,7 +21693,8 @@ def api_instagram_connect():
                 csrftoken = value
         if not csrftoken:
             return jsonify({'error': 'That cookie has no csrftoken in it.'}), 400
-        session = {'cookie': cookie, 'csrftoken': csrftoken, 'app_id': IR.DEFAULT_APP_ID}
+        session = {'cookie': cookie, 'csrftoken': csrftoken, 'app_id': IR.DEFAULT_APP_ID,
+                  'proxy': _ig_proxy_for(persona)}
         try:
             who = (IR.Rest(session).me() or {}).get('user') or {}
         except IR.InstagramApiError as e:
@@ -21727,7 +21742,7 @@ def api_instagram_connect_browser():
     try:
         attempt = _ig_conn().start(
             persona, _ig_account_id(persona),
-            proxy=_of_proxy_for(persona), viewport=viewport, site='instagram')
+            proxy=_ig_proxy_for(persona), viewport=viewport, site='instagram')
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)[:200]}), 400
     _set_setting(f'instagram_attempt_{persona}', attempt.id)

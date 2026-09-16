@@ -34,6 +34,23 @@ DEFAULT_APP_ID = os.getenv('INSTAGRAM_APP_ID', '936619743392459')
 DEFAULT_UA = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
               '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36')
 
+
+def _opener(proxy):
+    """A URL opener pinned to this account's exit IP, same reasoning as
+    of_client._opener: a session that suddenly calls from a datacentre after
+    signing in from a residential one is what gets an account flagged.
+
+    Turning the pool off (unsetting INSTAGRAM_PROXY_TEMPLATE) has to reach
+    sessions already stored too, or they keep dialling a gateway nobody is
+    paying for any more.
+    """
+    if not (os.getenv('INSTAGRAM_PROXY_TEMPLATE') or '').strip():
+        proxy = ''
+    if not proxy:
+        return urllib.request.build_opener()
+    return urllib.request.build_opener(
+        urllib.request.ProxyHandler({'http': proxy, 'https': proxy}))
+
 # Where each step of a post actually goes. Kept as names rather than inlined
 # so a rotation shows up as one env var to set, the same idea as Discord's
 # ACCEPT_ROUTES.
@@ -67,6 +84,7 @@ class Rest:
         self.csrftoken = session.get('csrftoken') or ''
         self.app_id = session.get('app_id') or DEFAULT_APP_ID
         self.user_agent = session.get('user_agent') or DEFAULT_UA
+        self.proxy = session.get('proxy') or ''
         self.base = base.rstrip('/')
         self._lock = threading.Lock()
         self._until = 0.0
@@ -114,7 +132,7 @@ class Rest:
         if not raw and body is not None:
             req.add_header('Content-Type', 'application/json')
         try:
-            with urllib.request.urlopen(req, timeout=INSTAGRAM_TIMEOUT) as resp:
+            with _opener(self.proxy).open(req, timeout=INSTAGRAM_TIMEOUT) as resp:
                 out = resp.read()
                 if not out:
                     return {}
