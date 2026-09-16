@@ -503,11 +503,14 @@ class Attempt:
             pass
 
     def _capture_discord(self, page, context):
-        """Finished once the page has made a call as somebody.
+        """Finished once the captured token answers as somebody.
 
-        Deliberately no /users/@me of our own: the client makes that call itself
-        the moment it loads, so waiting for it proves the credentials work
-        without adding a request that the real client never made.
+        The token is checked by using it, because holding one is not the same as
+        holding a working one. It goes on the Authorization header: Discord does
+        not authenticate by cookie, so a `credentials: 'include'` fetch is a 401
+        whether or not anyone is signed in — which is exactly what made this sit
+        on 'awaiting_login' forever while the operator watched their own Discord
+        load in the window.
         """
         held = getattr(self, '_dc_seen', None)
         if not held:
@@ -522,10 +525,11 @@ class Attempt:
         me = {}
         try:
             me = page.evaluate(
-                '''async () => {
-                     const r = await fetch('/api/v9/users/@me', {credentials: 'include'});
+                '''async (token) => {
+                     const r = await fetch('/api/v9/users/@me',
+                                           {headers: {authorization: token}});
                      return r.ok ? await r.json() : {};
-                   }''')
+                   }''', held['token'])
         except Exception:
             pass
         if not (me or {}).get('id'):

@@ -248,7 +248,12 @@ async function loadStatus(){
   const live=s.state&&s.state.connected;
   pill.textContent=s.connected?(live?('connected as '+(s.state.username||'?')):'connecting…'):'not connected';
   pill.className='conn-pill '+(live?'ok':(s.connected?'':'err'));
-  note(el('account-status'),s.reachable||(s.connected?'':'Paste her token to connect.'),!!s.reachable);
+  const si=s.signin||{};
+  // A sign-in in progress outranks "not connected": it is the answer to the
+  // question the operator is actually asking.
+  const why=si.open?(si.error||si.why||'Sign-in window is open — finish it there.')
+    :(s.reachable||si.why||(s.connected?'':'Sign in to Discord to connect her account.'));
+  note(el('account-status'),why,!!(s.reachable||si.error)&&!si.open);
   channels=(s.allow||[]).slice();
   drawChannels();
 }

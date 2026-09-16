@@ -373,17 +373,34 @@ def test_signing_in_through_the_browser():
     made._pending_session = None
 
     class Page:
-        def __init__(self, me):
-            self.me = me
+        """Answers the way Discord does: by the Authorization header alone.
 
-        def evaluate(self, js):
+        The earlier version of this returned a body whatever it was handed,
+        which is why it happily passed while the real sign-in hung forever —
+        the check was fetching with cookies and no header, and Discord does not
+        authenticate by cookie.
+        """
+
+        def __init__(self, me, expect='tok-abc'):
+            self.me = me
+            self.expect = expect
+            self.tokens = []
+
+        def evaluate(self, js, token=None):
+            self.tokens.append(token)
+            if 'credentials' in js or token != self.expect:
+                return {}
             return self.me
 
-    made._capture_discord(Page({}), None)
+    signed_out = Page({})
+    made._capture_discord(signed_out, None)
     check('a page that is not signed in yet finishes nothing',
           made.state == 'signin' and made.capture_note == 'awaiting_login')
 
-    made._capture_discord(Page({'id': '4242', 'username': 'lilly'}), None)
+    live = Page({'id': '4242', 'username': 'lilly'})
+    made._capture_discord(live, None)
+    check('the token is what proves the login, not a cookie',
+          live.tokens == ['tok-abc'], live.tokens)
     check('once it is, the sign-in is done', made.state == 'connected')
     held = made._pending_session
     check('the token comes back', (held or {}).get('token') == 'tok-abc')

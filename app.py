@@ -21099,8 +21099,13 @@ def api_discord_chime():
 @platform_scoped
 def api_discord_status():
     persona = request_persona()
+    # A sign-in that finished after its window was closed has nowhere else to
+    # land, so opening the console is a second chance to claim it rather than a
+    # reason to start again.
+    signin = _dc_signin_state(persona, adopt=True)
     live = DG.runner(persona)
     return jsonify({'connected': bool(_dc_token(persona)),
+                    'signin': signin,
                     'state': live.state() if live else {},
                     'reachable': PLAT_DISCORD.reachable(persona),
                     'webhook': PLAT_DISCORD.webhook_state(persona),
@@ -21141,6 +21146,39 @@ def _dc_account_id(persona):
     """Keyed apart from OnlyFans' `of_…`, so one creator can hold a
     half-finished sign-in on both at once without either evicting the other."""
     return f'dc_{persona}'
+
+
+# What a half-finished sign-in is waiting for, in the operator's words. Without
+# these the console said "not connected" whether the browser had never been
+# opened, was sitting on a login page, or had signed in and failed to store what
+# it got — three very different problems that looked identical.
+_DC_WAITING = {
+    'awaiting_login': 'The browser is open and waiting for the sign-in to '
+                      'finish. Nothing is wrong yet.',
+    'captured': 'Signed in — storing her account now.',
+}
+
+
+def _dc_signin_state(persona, adopt=False):
+    """How the sign-in in progress is doing, if there is one."""
+    attempt_id = _get_setting(f'discord_attempt_{persona}') or ''
+    failed = _get_setting(f'discord_adopt_error_{persona}') or ''
+    if not attempt_id:
+        return {'open': False, 'why': failed}
+    try:
+        attempt = _dc_conn().get(attempt_id)
+    except Exception:
+        return {'open': False, 'why': failed}
+    if not attempt:
+        return {'open': False, 'why': failed or
+                'That sign-in window is no longer open. Start it again.'}
+    held = attempt.status()
+    if adopt and held.get('state') == 'connected':
+        _dc_adopt(attempt)
+        failed = _get_setting(f'discord_adopt_error_{persona}') or ''
+    return {'open': True, 'state': held.get('state') or '',
+            'why': failed or _DC_WAITING.get(held.get('capture_note') or '', ''),
+            'error': held.get('error') or ''}
 
 
 def _dc_adopt(attempt):
