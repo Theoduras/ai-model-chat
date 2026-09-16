@@ -9,6 +9,8 @@
   <script src="/js/theme.js"></script>
   <link rel="stylesheet" href="/css/style.css">
   <script src="/js/devnav.js" defer></script>
+  <script src="/js/chat-view.js"></script>
+  <script src="/js/console-shell.js"></script>
   <style>
     .fv-scroll { flex: 1; min-height: 0; overflow-y: auto; }
     .fv-wrap { max-width: 760px; margin: 0 auto; padding: 28px 24px 80px; display: flex; flex-direction: column; gap: 20px; }
@@ -36,7 +38,7 @@
 <div class="fv-scroll">
 <div class="fv-wrap">
 
-  <div class="warn-box">
+  <div class="warn-box" data-tab="settings">
     <strong>Read this before connecting an account.</strong>
     This drives a real Instagram account through a real sign-in, not Meta's official
     posting API — the Graph API cannot post Stories at all and needs a Business account
@@ -45,7 +47,7 @@
     account you can afford to lose.
   </div>
 
-  <div class="form-section" id="sec-account">
+  <div class="form-section" data-tab="settings" id="sec-account">
     <div class="section-title">Persona &amp; Instagram account</div>
     <div class="field full">
       <label>Choose a model (persona)</label>
@@ -80,7 +82,7 @@
     <div id="account-status" class="hint" style="margin-top:10px;"></div>
   </div>
 
-  <div class="form-section" id="sec-posting">
+  <div class="form-section" data-tab="settings" id="sec-posting">
     <div class="section-title">Post now</div>
     <span class="hint">Stories, feed posts and Reels only — no DMs, no scheduling yet. A
       Reel needs a video file; Stories and posts can be a photo or a video.</span>
@@ -116,6 +118,15 @@
     <div id="post-status" class="hint" style="margin-top:10px;"></div>
   </div>
 
+  <div class="form-section" data-tab="advanced" id="sec-log">
+    <div class="section-title">What she has posted</div>
+    <div id="trace" style="max-height:340px; overflow:auto;"></div>
+    <div class="row-inline" style="margin-top:12px;">
+      <button class="btn-ai" style="background:var(--surface); color:var(--text-2);"
+              onclick="loadTrace()">Refresh</button>
+    </div>
+  </div>
+
 </div>
 </div>
 
@@ -127,7 +138,7 @@ function slug(){return el('persona').value;}
 async function api(path,opts){const r=await fetch(path,opts);let j={};try{j=await r.json();}catch(e){}
   if(!r.ok) throw new Error(j.error||('request failed ('+r.status+')'));return j;}
 
-let mediaDataUrl='';
+let mediaDataUrl='', mounted=false, lastStatus={};
 
 async function init(){
   const list=await (await fetch('/api/personas')).json();
@@ -141,10 +152,12 @@ async function loadAll(){
   mediaDataUrl='';
   el('ig-preview').style.display='none';
   await loadStatus();
+  if(mounted) PlatformConsole.reset();
 }
 
 async function loadStatus(){
   const s=await api('/api/instagram/status?persona='+encodeURIComponent(slug()));
+  lastStatus=s;
   const pill=el('conn-pill');
   pill.textContent=s.connected?('connected as '+(s.username||'?')):'not connected';
   pill.className='conn-pill '+(s.connected?'ok':'');
@@ -152,6 +165,7 @@ async function loadStatus(){
   const why=si.open?(si.error||si.why||'Sign-in window is open — finish it there.')
     :(s.connected?'':'Sign in to Instagram to connect her account.');
   note(el('account-status'),why,!!si.error&&si.open);
+  return s;
 }
 
 async function connect(){
@@ -230,11 +244,57 @@ async function postNow(){
       body:JSON.stringify({persona:slug(),kind:el('ig-kind').value,
         caption:el('ig-caption').value,brief:el('ig-brief').value,media:mediaDataUrl})});
     note(box,'Posted. '+(r.caption?('Caption: '+r.caption):''));
+    await loadTrace();
   }catch(e){note(box,e.message,true);}
 }
 
-onKindChange();
-init();
+function loadTrace(){ return PlatformConsole.refresh(); }
+
+function renderFullLog(t){
+  const rows=(t.posts||[]).slice().reverse();
+  el('trace').innerHTML=rows.map(r=>'<div class="trace-line"><span class="st">'
+    +esc(r.kind||'')+'</span>'+esc(r.caption||'')+'</div>').join('')
+    ||'<span class="hint">Nothing posted yet.</span>';
+}
+
+function instagramHealth(d){
+  const rows=[];
+  rows.push({state:d.connected?'ok':'bad',
+    label:d.connected?('Her account is connected as '+(d.username||'her account')):'No account signed in',
+    hint:d.connected?'Ready to post Stories, feed posts and Reels on demand.'
+                    :'Sign in to Instagram under Settings.'});
+  return rows;
+}
+
+async function igStats(s){
+  return [];
+}
+
+PlatformConsole.register({
+  platform:'instagram',
+  persona:slug,
+  statusUrl:s=>'/api/instagram/status?persona='+encodeURIComponent(s),
+  emptyHint:'Nothing posted yet — post once from Settings.',
+  read:d=>{
+    return {
+      live: !!d.connected,
+      broken: !d.connected,
+      title: d.connected?('Her Instagram account is connected'):'No Instagram account is connected',
+      sub: d.connected?('Signed in as '+(d.username||'her account')+' — ready to post Stories, posts and Reels.')
+        :'Sign her in under Settings. She drives a real account, not an official API.',
+      health: instagramHealth(d),
+      steps: [
+        {label:'Connect', done:!!d.connected, tab:'settings', focus:'sec-account'},
+        {label:'Post',    done:!!d.connected, tab:'settings', focus:'sec-posting'},
+      ],
+    };
+  },
+  fixTab:p=>({tab:'settings', focus:'sec-account', label:'Open settings'}),
+  stats:igStats,
+  onStatus:renderFullLog,
+});
+
+init().then(()=>{ PlatformConsole.mount('.fv-wrap'); mounted=true; });
 setInterval(()=>{if(el('persona').value)loadStatus();},20000);
 </script>
 </body>

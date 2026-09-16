@@ -21629,8 +21629,24 @@ def _ig_post_now(persona, kind, media, caption, brief=''):
     except IR.InstagramApiError as e:
         raise ValueError('Instagram would not accept that post'
                          + (f': {e.detail[:160]}' if e.detail else '.'))
+    _ig_log_post(persona, kind, caption)
     return {'kind': kind, 'media_kind': media_kind, 'caption': caption,
            'result': result}
+
+
+IG_POST_LOG_CAP = 20
+
+
+def _ig_log_post(persona, kind, caption):
+    """The console's Advanced tab reads this back — no funnel, no fan, just
+    what went out and when, same idea as Discord's trace but far thinner."""
+    rows = _dc_json(f'instagram_posts_{persona}', [])
+    rows.append({'kind': kind, 'caption': caption[:200], 'at': int(time.time())})
+    _set_setting(f'instagram_posts_{persona}', json.dumps(rows[-IG_POST_LOG_CAP:]))
+
+
+def _ig_posts(persona):
+    return _dc_json(f'instagram_posts_{persona}', [])
 
 
 @app.route('/instagram/connect')
@@ -21690,7 +21706,8 @@ def api_instagram_status():
     return jsonify({'connected': bool(held.get('cookie')),
                     'signin': signin,
                     'username': held.get('username') or '',
-                    'user_id': held.get('user_id') or ''})
+                    'user_id': held.get('user_id') or '',
+                    'posts': _ig_posts(persona)})
 
 
 @app.route('/api/instagram/connect/browser', methods=['POST'])
