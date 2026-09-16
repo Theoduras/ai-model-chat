@@ -3618,6 +3618,20 @@ body.embedding .form-area { padding: 0; overflow: hidden; }
 /* Media on a planned post. The strip is the persona's library filtered to what
    the channel will take, so an impossible pairing is never offered rather than
    refused after the fact. */
+.pl-chans { display: flex; gap: 6px; flex-wrap: wrap; }
+.pl-chan-pick {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 10px; border: 1px solid var(--border-soft); border-radius: 999px;
+  background: var(--panel-2); cursor: pointer;
+  font-size: 0.74rem; color: var(--text-2); user-select: none;
+}
+.pl-chan-pick:hover { border-color: var(--border); }
+.pl-chan-pick.on { border-color: var(--accent); color: var(--text); }
+.pl-chan-pick input { margin: 0; cursor: pointer; }
+/* A channel with no posting API still earns a slot on the calendar; it just
+   says so, so nobody waits on a post that was always going out by hand. */
+.pl-chan-pick .by-hand { font-size: 0.62rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px; }
+
 .pl-picked { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; min-height: 30px; }
 .pl-strip {
   display: flex; gap: 6px; overflow-x: auto; padding: 8px 0 2px;

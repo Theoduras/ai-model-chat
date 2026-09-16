@@ -7058,32 +7058,54 @@ def api_growth_queue():
 
     if request.method == 'POST':
         data = request.json or {}
-        platform = growth.normalise_source(data.get('platform'))
-        if platform not in growth.PUBLISHABLE:
-            return jsonify({'ok': False,
-                            'error': f'{platform or "that channel"} cannot be '
-                                     'published from here — copy the draft out '
-                                     'and post it by hand.'}), 400
-        text = growth.trim_post(platform, data.get('text'))
-        if not text:
-            return jsonify({'ok': False, 'error': 'Nothing to post.'}), 400
+        # One post can go to several channels at once. `platform` stays for the
+        # single-channel callers that predate this.
+        asked = data.get('platforms') or ([data.get('platform')]
+                                          if data.get('platform') else [])
+        wanted, seen = [], set()
+        for p in asked:
+            plat = growth.base_platform(p)
+            if plat in growth.POST_PLATFORMS and plat not in seen:
+                seen.add(plat)
+                wanted.append(plat)
+        if not wanted:
+            return jsonify({'ok': False, 'error': 'Pick at least one channel.'}), 400
+
         when = int(data.get('run_at') or 0) or int(time.time())
         run_at = datetime.fromtimestamp(when, timezone.utc).replace(tzinfo=None)
-        media_id, why = _growth_media_check(
-            persona, platform, str(data.get('media_id') or '').strip())
-        if why:
-            return jsonify({'ok': False, 'error': why}), 400
+        raw_media = str(data.get('media_id') or '').strip()
+
         from db import SessionLocal, queue_post
+        queued, failed = [], []
         sdb = SessionLocal()
         try:
-            row = queue_post(sdb, persona, platform, text, run_at, media_id)
+            for plat in wanted:
+                # The cap is the channel's, so the same words are trimmed
+                # differently per channel rather than to the tightest of them.
+                text = growth.trim_post(plat, data.get('text'))
+                if not text:
+                    failed.append({'platform': plat, 'error': 'Nothing to post.'})
+                    continue
+                media_id, why = _growth_media_check(persona, plat, raw_media)
+                if why:
+                    failed.append({'platform': plat, 'error': why})
+                    continue
+                row = queue_post(sdb, persona, plat, text, run_at, media_id,
+                                 growth.queue_status_for(plat))
+                queued.append({'platform': plat, 'id': row.id,
+                               'status': growth.queue_status_for(plat)})
             sdb.commit()
-            post_id = row.id
         finally:
             sdb.close()
-        logger.info('QUEUE added [%s/%s] for %s: %s',
-                    persona, platform, run_at.isoformat(), text[:60])
-        return jsonify({'ok': True, 'id': post_id, 'queue': _growth_queue_rows(persona)})
+        if not queued:
+            return jsonify({'ok': False, 'failed': failed,
+                            'error': failed[0]['error'] if failed
+                                     else 'Nothing could be queued.'}), 400
+        logger.info('QUEUE added [%s] %s for %s: %s', persona,
+                    ','.join(q['platform'] for q in queued), run_at.isoformat(),
+                    (data.get('text') or '')[:60])
+        return jsonify({'ok': True, 'id': queued[0]['id'], 'queued': queued,
+                        'failed': failed, 'queue': _growth_queue_rows(persona)})
 
     if request.method == 'PATCH':
         data = request.json or {}
@@ -7096,7 +7118,7 @@ def api_growth_queue():
                            ScheduledPost.persona == persona).first())
             if not row:
                 return jsonify({'ok': False, 'error': 'No such post.'}), 404
-            if row.status != 'queued':
+            if row.status not in growth.EDITABLE_STATES:
                 return jsonify({'ok': False,
                                 'error': 'That post has already gone out or is '
                                          'on its way.'}), 409
@@ -7136,17 +7158,25 @@ def api_growth_queue():
 
     if request.method == 'DELETE':
         post_id = (request.args.get('id') or '').strip()
-        from db import SessionLocal, cancel_post
+        # Two different intents: cancelling keeps the row so the week still
+        # shows what was planned and called off, deleting takes it off the
+        # calendar for good.
+        hard = (request.args.get('mode') or '').strip() == 'delete'
+        from db import SessionLocal, cancel_post, delete_post
         sdb = SessionLocal()
         try:
-            done = cancel_post(sdb, persona, post_id)
+            done = (delete_post if hard else cancel_post)(sdb, persona, post_id)
             sdb.commit()
         finally:
             sdb.close()
         if not done:
             return jsonify({'ok': False,
-                            'error': 'That post has already gone out or is on '
+                            'error': 'That post is on its way out right now.'
+                                     if hard else
+                                     'That post has already gone out or is on '
                                      'its way.'}), 409
+        logger.info('QUEUE %s [%s] %s', 'deleted' if hard else 'cancelled',
+                    persona, post_id)
         return jsonify({'ok': True, 'queue': _growth_queue_rows(persona)})
 
     # A window keeps a busy week from being cut short by the newest fifty; with

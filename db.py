@@ -1070,9 +1070,9 @@ Index('ix_scheduled_due', ScheduledPost.status, ScheduledPost.run_at)
 Index('ix_scheduled_persona', ScheduledPost.persona, ScheduledPost.run_at)
 
 
-def queue_post(session, persona, platform, text, run_at, media_id=''):
+def queue_post(session, persona, platform, text, run_at, media_id='', status='queued'):
     row = ScheduledPost(persona=persona, platform=platform, text=text,
-                        run_at=run_at, media_id=media_id or '')
+                        run_at=run_at, media_id=media_id or '', status=status)
     session.add(row)
     session.flush()
     return row
@@ -1130,13 +1130,30 @@ def list_posts(session, persona, limit=50, since=None, until=None):
     return q.order_by(ScheduledPost.run_at.desc()).limit(limit).all()
 
 
+# A post the creator may still act on. Kept here rather than imported from
+# growth so the data layer does not depend on the content layer.
+_EDITABLE = ('queued', 'manual')
+
+
 def cancel_post(session, persona, post_id):
     """Cancel a post that has not gone out. A post already sending is left
     alone: the worker owns it, and the send may already be away."""
     n = (session.query(ScheduledPost)
          .filter(ScheduledPost.id == post_id, ScheduledPost.persona == persona,
-                 ScheduledPost.status == 'queued')
+                 ScheduledPost.status.in_(_EDITABLE))
          .update({'status': 'cancelled'}, synchronize_session='fetch'))
+    return bool(n)
+
+
+def delete_post(session, persona, post_id):
+    """Remove a post from the calendar for good. Anything the worker is holding
+    is left alone — cancelling is the way to stop one of those — but a post that
+    already went out, failed or was called off is only clutter by then, so it
+    deletes like any other."""
+    n = (session.query(ScheduledPost)
+         .filter(ScheduledPost.id == post_id, ScheduledPost.persona == persona,
+                 ScheduledPost.status != 'sending')
+         .delete(synchronize_session='fetch'))
     return bool(n)
 
 
@@ -1147,7 +1164,9 @@ def update_post(session, persona, post_id, text=None, run_at=None, media_id=None
     draft. Returns whether anything was changed.
 
     `media_id` of '' detaches the media; None leaves it alone. They are
-    different answers, so an empty string cannot mean "unchanged" here."""
+    different answers, so an empty string cannot mean "unchanged" here.
+
+    A by-hand post edits the same way: nothing has claimed it either."""
     fields = {}
     if text is not None:
         fields['text'] = text
@@ -1159,7 +1178,7 @@ def update_post(session, persona, post_id, text=None, run_at=None, media_id=None
         return False
     n = (session.query(ScheduledPost)
          .filter(ScheduledPost.id == post_id, ScheduledPost.persona == persona,
-                 ScheduledPost.status == 'queued')
+                 ScheduledPost.status.in_(_EDITABLE))
          .update(fields, synchronize_session='fetch'))
     return bool(n)
 

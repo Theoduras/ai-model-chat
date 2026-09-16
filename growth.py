@@ -539,7 +539,21 @@ def media_reject(platform, kind):
         return f'{label} takes {takes}, not {kind}.'
     return ''
 
-QUEUE_STATES = ('queued', 'sending', 'posted', 'failed', 'cancelled')
+# 'manual' is a post on a channel with no posting API: it sits on the calendar
+# as a reminder and the scheduler never sees it, because due_posts only ever
+# claims a 'queued' row. Without it a by-hand post would either be invisible or
+# would fail at its slot for a reason the creator can do nothing about.
+QUEUE_STATES = ('queued', 'manual', 'sending', 'posted', 'failed', 'cancelled')
+
+# What is still the creator's to edit, move or call off. A 'sending' row belongs
+# to the worker and the send may already be away.
+EDITABLE_STATES = ('queued', 'manual')
+
+
+def queue_status_for(platform):
+    """The status a freshly queued post starts in: waiting for the scheduler on
+    a channel we can publish to, waiting for the creator everywhere else."""
+    return 'queued' if normalise_source(platform) in PUBLISHABLE else 'manual'
 
 
 def post_cap(platform):
