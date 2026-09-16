@@ -423,6 +423,13 @@ POST_PLATFORMS = {
         'brief': ('a Reel caption: a POV hook inside the first six words, then '
                   'one line of story, then "link in bio" on its own line'),
     },
+    'instagram_carousel': {
+        'label': 'Instagram carousel',
+        'cap': 2200,
+        'brief': ('a carousel micro-story across 3-5 slides, one short line per '
+                  'slide numbered "1." to "5.", the first slide a hook and the '
+                  'last hinting that the rest of it lives somewhere else'),
+    },
     'tiktok': {
         'label': 'TikTok',
         'cap': 2200,
@@ -440,6 +447,40 @@ POST_PLATFORMS = {
 # What the platform can actually publish on its own. The rest are written here
 # and posted by hand, which is why they are generated but never queued.
 PUBLISHABLE = ('x', 'threads')
+
+# A variant is a second way to write for a channel that already exists, not a
+# channel of its own, so anything keyed per channel — the content level, the
+# tracked link, the no-repeat log — resolves through its base. Kept out of the
+# default set so "write me everything" stays the five real channels.
+VARIANT_BASE = {'instagram_carousel': 'instagram'}
+OPTIONAL_VARIANTS = tuple(VARIANT_BASE)
+
+
+def base_platform(platform):
+    plat = normalise_source(platform)
+    return VARIANT_BASE.get(plat, plat)
+
+
+def default_platforms():
+    return [p for p in POST_PLATFORMS if p not in VARIANT_BASE]
+
+
+# On a video the words on screen and the words in the caption do different jobs:
+# the overlay has to stop the scroll inside two seconds, the caption is read
+# afterwards if at all. Both come out of one reply so they stay about one post.
+# A carousel is excluded on purpose — its slides are already the words on screen.
+OVERLAY_PLATFORMS = ('instagram', 'tiktok')
+OVERLAY_CAP = 90
+
+OVERLAY_BRIEF = (
+    '\n\nReturn exactly two labelled sections and nothing else:\n'
+    f'OVERLAY: the words on screen in the first two seconds, under {OVERLAY_CAP} '
+    'characters, written to stop someone scrolling.\n'
+    'CAPTION: the caption itself, exactly as described above.')
+
+
+def wants_overlay(platform):
+    return normalise_source(platform) in OVERLAY_PLATFORMS
 
 # ── Media ─────────────────────────────────────────────────────────────────────
 # What each channel will take, and how it takes it. `fetch` means the platform
@@ -520,6 +561,30 @@ def trim_post(platform, text):
     return trim_to(text, post_cap(platform))
 
 
+def split_overlay(text):
+    """(overlay, caption) from a two-section reply. A reply that ignored the
+    format counts as all caption: the overlay is the half that can go missing
+    without costing the post, so a stray format is never a lost draft."""
+    overlay, caption, mode = [], [], ''
+    for line in str(text or '').strip().splitlines():
+        stripped = line.strip()
+        low = stripped.lower()
+        if low.startswith('overlay:'):
+            mode, stripped = 'overlay', stripped[8:].strip()
+        elif low.startswith('caption:'):
+            mode, stripped = 'caption', stripped[8:].strip()
+        elif mode:
+            stripped = line
+        else:
+            continue
+        (overlay if mode == 'overlay' else caption).append(stripped)
+    head = ' '.join(x for x in overlay if x.strip()).strip().strip('"')
+    body = '\n'.join(caption).strip()
+    if not head or not body:
+        return '', str(text or '').strip()
+    return trim_to(head, OVERLAY_CAP), body
+
+
 RATING_LEVELS = ('suggestive', 'moderate', 'explicit')
 
 # TikTok's ToS bars directing users to adult content at all — this is a policy
@@ -551,8 +616,9 @@ def clean_ratings(data, existing=None):
 def content_level(overrides, platform, global_enabled, global_level):
     """(enabled, level) for one platform's captions: an explicit override
     wins, then the SFW floor, then the persona's global chat setting — so a
-    caption never assumes a looser level than the creator actually set."""
-    src = normalise_source(platform)
+    caption never assumes a looser level than the creator actually set. A
+    variant reads its base channel's level: a carousel is still Instagram."""
+    src = base_platform(platform)
     row = (overrides or {}).get(src)
     if row:
         return bool(row.get('nsfw_enabled')), row.get('nsfw_level', 'suggestive')
@@ -746,6 +812,44 @@ MIX_BRIEF = {
 # One request cannot sit there making sixty model calls, and a week generated
 # in one go is a week of drafts nobody reads before they go out.
 PLAN_QUEUE_CAP = 20
+
+# Two posts telling one story a few days apart: part one withholds the payoff
+# and says so, part two delivers it. Only where the guide uses the device — the
+# curiosity gap belongs to short video; on X it is a cliffhanger nobody asked for.
+SERIES_PLATFORMS = ('tiktok', 'instagram')
+SERIES_PARTS = 2
+
+SERIES_BRIEF = {
+    1: ('This is part one of two. Set it up and stop before the payoff, and say '
+        'in your own words that part two is coming.'),
+    2: ('This is part two of two and they have already seen part one. Pay off '
+        'what it set up — no recap and no second hook.'),
+}
+
+
+def series_plan(slots):
+    """Pair a channel's slots into two-part series, in the order they run. A
+    trailing odd slot stays on its own rather than becoming a part one whose
+    part two never comes. Both halves share one idea, so the caller assigns an
+    idea per group: two halves of one story cannot be about two things."""
+    group = 0
+    for plat in SERIES_PLATFORMS:
+        mine = [s for s in slots if s.get('platform') == plat]
+        for i in range(0, len(mine) - 1, SERIES_PARTS):
+            group += 1
+            for part, slot in enumerate(mine[i:i + SERIES_PARTS], start=1):
+                slot['series'] = {'group': group, 'part': part, 'of': SERIES_PARTS}
+    return slots
+
+
+def series_part(series):
+    """The validated part number in a series payload, or 0. Comes back off the
+    wire from the planner, so a bad shape means no series rather than a 500."""
+    try:
+        part = int((series or {}).get('part') or 0)
+    except (TypeError, ValueError, AttributeError):
+        return 0
+    return part if part in SERIES_BRIEF else 0
 
 
 def plan_week(start_at, days=7, cadence=None):

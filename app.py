@@ -7018,6 +7018,27 @@ def _growth_media_check(persona, platform, media_id):
     return media['id'], ''
 
 
+def _plan_media_pick(persona, platform, used):
+    """One library item for a queued post: the first this channel will take that
+    nothing in the queue already carries, so a week of posts does not go out
+    wearing the same photo. Returns '' when the library has nothing left, which
+    queues the post as text rather than failing it — a week that runs out of
+    photos is still a week of posts."""
+    from db import SessionLocal, list_persona_media
+    sdb = SessionLocal()
+    try:
+        rows = list_persona_media(sdb, persona)
+    finally:
+        sdb.close()
+    for row in rows:
+        if row.id in used or not growth.media_ok(platform, row.kind or 'image'):
+            continue
+        media_id, _why = _growth_media_check(persona, platform, row.id)
+        if media_id:
+            return media_id
+    return ''
+
+
 def _growth_naive_utc(epoch):
     """An epoch as the naive UTC datetime the scheduled_posts column stores."""
     return datetime.fromtimestamp(int(epoch), timezone.utc).replace(tzinfo=None)
@@ -7193,10 +7214,17 @@ def _draft_link(persona, platform):
     """The tracked per-channel link, when the platform's own brief allows a
     bare link in the caption at all — Instagram/TikTok say "link in bio"
     instead, and Reddit's brief bars a link outright."""
-    if platform == 'reddit':
+    plat = growth.base_platform(platform)
+    if plat == 'reddit':
         return ''
     origin = _site_origin().rstrip('/')
-    return f'{origin}/go/{persona}/{platform}' if origin else ''
+    return f'{origin}/go/{persona}/{plat}' if origin else ''
+
+
+def _series_note(series):
+    """The half of a two-part story this post is, when it is one at all."""
+    brief = growth.SERIES_BRIEF.get(growth.series_part(series))
+    return f'\n\n{brief}' if brief else ''
 
 
 def _growth_plan_draft(persona, platform, kind, idea):
@@ -7263,6 +7291,9 @@ def api_growth_plan():
 
         from db import SessionLocal, queue_post
         queued, failed = [], []
+        # Media already spoken for by the queue, so a fresh week keeps reaching
+        # for photos the feed has not seen rather than recycling the first one.
+        used = {r['media_id'] for r in _growth_queue_rows(persona) if r['media_id']}
         sdb = SessionLocal()
         try:
             for s in wanted:
@@ -7274,9 +7305,12 @@ def api_growth_plan():
                 if not text:
                     failed.append({**s, 'error': 'came back empty'})
                     continue
+                media_id = _plan_media_pick(persona, s['platform'], used)
+                if media_id:
+                    used.add(media_id)
                 run_at = datetime.fromtimestamp(s['at'], timezone.utc).replace(tzinfo=None)
-                row = queue_post(sdb, persona, s['platform'], text, run_at)
-                queued.append({**s, 'id': row.id, 'text': text})
+                row = queue_post(sdb, persona, s['platform'], text, run_at, media_id)
+                queued.append({**s, 'id': row.id, 'text': text, 'media_id': media_id})
             sdb.commit()
         finally:
             sdb.close()
@@ -7294,13 +7328,17 @@ def api_growth_plan():
     # slots in the wrong part of someone else's day.
     start = int(data.get('start') or 0) or (now - now % 86400)
     # Today is planned from now on, not from this morning.
-    slots = [s for s in growth.plan_week(start, days) if s['at'] > now]
+    slots = growth.series_plan([s for s in growth.plan_week(start, days)
+                                if s['at'] > now])
+    # A part two continues its part one, so a pair draws one angle between them
+    # and the week asks the model for that many rather than one per slot.
+    leads = [s for s in slots if (s.get('series') or {}).get('part', 1) == 1]
     ideas = []
-    if slots:
+    if leads:
         try:
             raw = _persona_text(
                 persona,
-                f'List {len(slots)} different things you could post about over '
+                f'List {len(leads)} different things you could post about over '
                 f'the next {days} days — one per line, no numbering, no '
                 'explanation. Each is a short angle in your own words: a moment '
                 'from your day, a thought, something you noticed, something you '
@@ -7308,13 +7346,20 @@ def api_growth_plan():
                 'other. Return only the lines.'
                 + _no_repeat_block(persona, ''),
                 max_tokens=1400, temperature=1.05)
-            ideas = growth.plan_ideas(raw, len(slots))
+            ideas = growth.plan_ideas(raw, len(leads))
         except Exception as e:
             logger.warning('PLAN ideas failed [%s]: %s', persona, str(e)[:200])
-    for i, s in enumerate(slots):
+    by_group = {}
+    for i, s in enumerate(leads):
         # Fewer angles than slots means the tail repeats one rather than sitting
         # empty; an empty slot is one the operator has to fill by hand anyway.
         s['idea'] = ideas[i % len(ideas)] if ideas else ''
+        group = (s.get('series') or {}).get('group')
+        if group:
+            by_group[group] = s['idea']
+    for s in slots:
+        if 'idea' not in s:
+            s['idea'] = by_group.get((s.get('series') or {}).get('group'), '')
     return jsonify({'ok': True, 'persona': persona, 'start': start, 'days': days,
                     'slots': slots, 'ideas': len(ideas),
                     'cap': growth.PLAN_QUEUE_CAP,
@@ -7430,17 +7475,23 @@ def api_growth_drafts():
     if not idea:
         return jsonify({'ok': False, 'error': 'Give it an idea to work from.'}), 400
     wanted = [growth.normalise_source(p) for p in (data.get('platforms') or [])]
-    wanted = [p for p in wanted if p in growth.POST_PLATFORMS] or list(growth.POST_PLATFORMS)
+    # The variants are asked for by name; the default is the five real channels,
+    # so "write me everything" does not quietly cost an extra model call.
+    wanted = [p for p in wanted if p in growth.POST_PLATFORMS] or growth.default_platforms()
+    series = data.get('series')
 
     out = []
     for plat in wanted:
         spec = growth.POST_PLATFORMS[plat]
+        # A variant shares its base channel's register, link and no-repeat log.
+        base = growth.base_platform(plat)
         instruction = (
             f'Write ONE {spec["label"]} post as yourself, in character, about: '
             f'{idea}. It must be {spec["brief"]}. Stay under {spec["cap"]} '
             'characters. Return only the post itself, no preamble and no quotes.'
+            + _series_note(series)
             + _content_level_note(persona, plat)
-            + _no_repeat_block(persona, plat))
+            + _no_repeat_block(persona, base))
         # X and Threads render a bare link as clickable, so it rides in the
         # caption; Instagram and TikTok already say "link in bio" in their own
         # brief, so pasting a raw URL there would contradict what was just
@@ -7449,27 +7500,35 @@ def api_growth_drafts():
         inline = plat in growth.PUBLISHABLE
         link = _draft_link(persona, plat)
         budget = spec['cap'] - (len(link) + 2 if inline and link else 0)
+        overlay_wanted = growth.wants_overlay(plat)
+        if overlay_wanted:
+            instruction += growth.OVERLAY_BRIEF
+
+        def write(extra=''):
+            raw = _persona_text(persona, instruction + extra,
+                                max_tokens=500, temperature=1.0)
+            head, body = growth.split_overlay(raw) if overlay_wanted else ('', raw)
+            return head, growth.trim_to(body, max(budget, 0))
+
         try:
-            text = growth.trim_to(_persona_text(
-                persona, instruction, max_tokens=500, temperature=1.0), max(budget, 0))
+            overlay, text = write()
         except Exception as e:
             out.append({'platform': plat, 'label': spec['label'], 'text': '',
-                        'link': '', 'error': str(e)[:200]})
+                        'link': '', 'overlay': '', 'error': str(e)[:200]})
             continue
-        if text and _reads_as_repeat(persona, plat, text):
-            _content_repeat_blocked(persona, plat)
+        if text and _reads_as_repeat(persona, base, text):
+            _content_repeat_blocked(persona, base)
             try:
-                text = growth.trim_to(_persona_text(
-                    persona,
-                    instruction + '\n\nYour last attempt was a rewrite of one of '
-                    'those. Pick a different angle entirely.',
-                    max_tokens=500, temperature=1.0), max(budget, 0)) or text
+                head, body = write('\n\nYour last attempt was a rewrite of one of '
+                                   'those. Pick a different angle entirely.')
+                if body:
+                    overlay, text = head, body
             except Exception:
                 pass
         if inline and link and text:
             text = f'{text}\n\n{link}'
         out.append({'platform': plat, 'label': spec['label'], 'text': text,
-                    'link': '' if inline else link,
+                    'link': '' if inline else link, 'overlay': overlay,
                     'cap': spec['cap'], 'publishable': plat in growth.PUBLISHABLE})
     return jsonify({'ok': True, 'persona': persona, 'idea': idea, 'drafts': out,
                     'beta': _growth_on(persona)})
@@ -7736,7 +7795,8 @@ def api_growth_content_levels():
 
     cfg = _normalize_persona(load_persona_config(persona) or {})
     rows = []
-    for plat, spec in growth.POST_PLATFORMS.items():
+    for plat in growth.default_platforms():
+        spec = growth.POST_PLATFORMS[plat]
         enabled, level = growth.content_level(overrides, plat,
                                               cfg.get('nsfw_enabled'), cfg.get('nsfw_level'))
         rows.append({'platform': plat, 'label': spec['label'],
