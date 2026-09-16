@@ -257,6 +257,46 @@ check('disabled reads as no clause', G.content_level_clause(False, 'explicit') =
 check('enabled carries the level wording', 'suggestive' in G.content_level_clause(True, 'suggestive').lower())
 
 print()
+print('variants and overlay')
+check('a carousel resolves to its base channel', G.base_platform('instagram_carousel') == 'instagram')
+check('a real channel is its own base', G.base_platform('tiktok') == 'tiktok')
+check('the default set leaves the variants out',
+      'instagram_carousel' not in G.default_platforms() and 'instagram' in G.default_platforms())
+check('the default set is the five real channels', len(G.default_platforms()) == 5)
+check('a carousel inherits instagram\'s level',
+      G.content_level({'instagram': {'nsfw_enabled': True, 'nsfw_level': 'moderate'}},
+                      'instagram_carousel', False, 'suggestive') == (True, 'moderate'))
+check('a carousel wants no overlay', G.wants_overlay('instagram_carousel') is False)
+check('a reel and a tiktok want one',
+      G.wants_overlay('instagram') and G.wants_overlay('tiktok'))
+check('x wants no overlay', G.wants_overlay('x') is False)
+ov, cap = G.split_overlay('OVERLAY: stop scrolling\nCAPTION: the rest of it\nsecond line')
+check('a two-section reply splits', (ov, cap) == ('stop scrolling', 'the rest of it\nsecond line'))
+check('an unlabelled reply is all caption',
+      G.split_overlay('just a caption') == ('', 'just a caption'))
+check('an overlay with no caption keeps the whole reply',
+      G.split_overlay('OVERLAY: only this')[1] == 'OVERLAY: only this')
+check('a long overlay is cut to the cap',
+      len(G.split_overlay('OVERLAY: ' + 'x' * 400 + '\nCAPTION: body')[0]) <= G.OVERLAY_CAP)
+
+print()
+print('series')
+sl = [{'platform': 'tiktok'}, {'platform': 'tiktok'}, {'platform': 'tiktok'},
+      {'platform': 'x'}, {'platform': 'x'}]
+G.series_plan(sl)
+check('the first two tiktoks pair up',
+      sl[0]['series']['part'] == 1 and sl[1]['series']['part'] == 2
+      and sl[0]['series']['group'] == sl[1]['series']['group'])
+check('an odd trailing slot is left alone', 'series' not in sl[2])
+check('x never draws a series', all('series' not in s for s in sl if s['platform'] == 'x'))
+check('a part number off the wire validates', G.series_part({'part': 2}) == 2)
+check('a junk series payload is no series',
+      G.series_part({'part': 9}) == 0 and G.series_part('nonsense') == 0
+      and G.series_part(None) == 0)
+check('each part has its own brief',
+      G.SERIES_BRIEF[1] != G.SERIES_BRIEF[2] and 'part two' in G.SERIES_BRIEF[1].lower())
+
+print()
 print('weekly plan')
 pstart = 1_700_000_000 - (1_700_000_000 % 86400)
 week = G.plan_week(pstart, 7)
