@@ -42,9 +42,11 @@ steps:
     args:
       - -c
       - |
+        # $$ is a shell variable here; a single $ would be read as one of
+        # Cloud Build's own substitutions and fail the build outright.
         IMG=${_AR_HOSTNAME}/$PROJECT_ID/${_AR_REPOSITORY}/$REPO_NAME/${_SERVICE_NAME}:$COMMIT_SHA
-        if docker pull "$IMG" >/dev/null 2>&1; then
-          echo "$IMG is already built; skipping build and push"
+        if docker pull "$$IMG" >/dev/null 2>&1; then
+          echo "$$IMG is already built; skipping build and push"
           touch /workspace/.reuse
         fi
 
