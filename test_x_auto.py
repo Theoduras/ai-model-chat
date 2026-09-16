@@ -108,6 +108,50 @@ class SettingsEndpointTest(XAutoBase):
         self.assertEqual(s['daily_caps']['posts'], 1)
 
 
+class TokenStoreTest(XAutoBase):
+    """The connection must outlive the container. It used to be a file next to
+    the code, which Cloud Run throws away on every deploy."""
+
+    def test_tokens_round_trip_through_settings(self):
+        app._save_x_tokens({PERSONA: {'access_token': 'tok', 'username': 'her'}})
+        self.assertIn(app.X_TOKENS_KEY, self.store)
+        self.assertEqual(app._load_x_tokens()[PERSONA]['username'], 'her')
+
+    def test_no_disk_read_when_settings_have_them(self):
+        self.store[app.X_TOKENS_KEY] = json.dumps({PERSONA: {'access_token': 'tok'}})
+        with mock.patch.object(app.os.path, 'exists',
+                               side_effect=AssertionError('read the disk')):
+            self.assertTrue(app._load_x_tokens()[PERSONA]['access_token'])
+
+    def test_oauth_state_round_trips(self):
+        app._x_oauth_state_put({'state': 'abc', 'persona': PERSONA})
+        self.assertEqual(app._x_oauth_state_get()['state'], 'abc')
+        app._x_oauth_state_clear()
+        with mock.patch.object(app.os.path, 'exists', return_value=False):
+            self.assertEqual(app._x_oauth_state_get(), {})
+
+
+class WorkerLogTest(XAutoBase):
+    """A round the worker ran has to leave a trace. It used to leave none: the
+    log call read the request's IP, raised off a request, and swallowed it."""
+
+    def test_client_ip_is_empty_off_a_request(self):
+        self.assertEqual(app._client_ip(), '')
+
+    def test_trace_records_a_line_without_a_request(self):
+        app._x_trace(PERSONA, 'chats', 'round: dm replies 1')
+        rows = json.loads(self.store[f'x_trace_{PERSONA}'])
+        self.assertEqual(rows[-1]['detail'], 'round: dm replies 1')
+        self.assertEqual(rows[-1]['stage'], 'chats')
+
+    def test_a_failure_is_filed_as_an_error(self):
+        app._x_trace_line(PERSONA, 'Post failed: over capacity')
+        app._x_trace_line(PERSONA, 'Daily DM cap reached — not replying this round.')
+        rows = json.loads(self.store[f'x_trace_{PERSONA}'])
+        self.assertEqual(rows[0]['stage'], 'error')
+        self.assertEqual(rows[1]['stage'], 'skipped')
+
+
 class DailyCountTest(XAutoBase):
     def test_bump_and_rollover(self):
         self.assertEqual(app._x_daily_count(PERSONA, 'dms'), 0)

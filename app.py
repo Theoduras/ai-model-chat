@@ -1157,16 +1157,87 @@ X_TOKENS_FILE = '/tmp/x_tokens.json' if IS_VERCEL else os.path.join(BASE_DIR, 'x
 X_OAUTH_STATE_FILE = '/tmp/x_oauth_state.json' if IS_VERCEL else os.path.join(BASE_DIR, '.x_oauth_state.json')
 
 
+# X's OAuth tokens live in the settings table, the way Fanvue's and Telegram's
+# do. They used to be a JSON file next to the code: on Cloud Run that is the
+# container's own filesystem, so every deploy, restart and scale-to-zero threw
+# the connection away and the bot went quiet with nothing in the log to say why.
+X_TOKENS_KEY = 'x_tokens'
+
+
 def _load_x_tokens():
-    if os.path.exists(X_TOKENS_FILE):
-        with open(X_TOKENS_FILE, 'r') as f:
-            return json.load(f)
+    raw = _get_setting(X_TOKENS_KEY)
+    if raw:
+        try:
+            data = json.loads(raw)
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            pass
+    # One-time lift of a file written before the move, so an account connected
+    # on the old build survives the upgrade rather than needing a reconnect.
+    try:
+        if os.path.exists(X_TOKENS_FILE):
+            with open(X_TOKENS_FILE, 'r') as f:
+                data = json.load(f)
+            if isinstance(data, dict) and data:
+                _set_setting(X_TOKENS_KEY, json.dumps(data))
+                return data
+    except Exception:
+        pass
     return {}
 
 
+X_OAUTH_STATE_KEY = 'x_oauth_state'
+
+
+def _x_oauth_state_put(data):
+    """The in-flight PKCE handshake. In the settings table for the same reason
+    the tokens are: on Cloud Run the callback can land on a different instance
+    than the one that started the flow, and a file on the first instance is not
+    there to read."""
+    _set_setting(X_OAUTH_STATE_KEY, json.dumps(data))
+    try:
+        with open(X_OAUTH_STATE_FILE, 'w') as f:
+            json.dump(data, f)
+    except Exception:
+        pass
+
+
+def _x_oauth_state_get():
+    raw = _get_setting(X_OAUTH_STATE_KEY)
+    if raw:
+        try:
+            d = json.loads(raw)
+            if isinstance(d, dict) and d:
+                return d
+        except Exception:
+            pass
+    try:
+        if os.path.exists(X_OAUTH_STATE_FILE):
+            with open(X_OAUTH_STATE_FILE, 'r') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+def _x_oauth_state_clear():
+    _set_setting(X_OAUTH_STATE_KEY, '')
+    try:
+        os.remove(X_OAUTH_STATE_FILE)
+    except Exception:
+        pass
+
+
 def _save_x_tokens(data):
-    with open(X_TOKENS_FILE, 'w') as f:
-        json.dump(data, f)
+    _set_setting(X_TOKENS_KEY, json.dumps(data))
+    # Best-effort mirror: harmless where the disk is writable, and the only
+    # copy if the settings table is unreachable mid-request.
+    try:
+        with open(X_TOKENS_FILE, 'w') as f:
+            json.dump(data, f)
+    except Exception:
+        pass
 
 
 # ── Customer accounts, tiers and the paywall ─────────────────────────────────
@@ -10946,8 +11017,7 @@ def api_x_auth_url():
 
     oauth_state = {'code_verifier': code_verifier, 'state': state, 'client_id': client_id,
                    'redirect_uri': redirect_uri, 'persona': persona}
-    with open(X_OAUTH_STATE_FILE, 'w') as f:
-        json.dump(oauth_state, f)
+    _x_oauth_state_put(oauth_state)
 
     params = urllib.parse.urlencode({
         'response_type': 'code',
@@ -10982,10 +11052,9 @@ def api_x_callback():
     code = data.get('code', '').strip()
     state = data.get('state', '').strip()
 
-    if not os.path.exists(X_OAUTH_STATE_FILE):
+    saved = _x_oauth_state_get()
+    if not saved:
         return jsonify({'ok': False, 'error': 'OAuth session expired. Start the flow again.'}), 400
-    with open(X_OAUTH_STATE_FILE, 'r') as f:
-        saved = json.load(f)
 
     if state != saved.get('state'):
         return jsonify({'ok': False, 'error': 'State mismatch. Possible CSRF. Start again.'}), 400
@@ -11038,7 +11107,7 @@ def api_x_callback():
         'user_id': user_id,
     }
     _save_x_tokens(tokens)
-    os.remove(X_OAUTH_STATE_FILE)
+    _x_oauth_state_clear()
 
     _log_x_event('connect_complete', persona=persona, x_username=username)
     return jsonify({'ok': True, 'username': username, 'persona': persona})
