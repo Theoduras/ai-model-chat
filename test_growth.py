@@ -235,6 +235,28 @@ check('an empty queue has no next slot',
       G.queue_stats([], now=qnow)['totals']['next_at'] == 0)
 
 print()
+print('content level')
+check('no override falls to global', G.content_level({}, 'x', True, 'moderate') == (True, 'moderate'))
+check('tiktok is locked off even with an enabled global',
+      G.content_level({}, 'tiktok', True, 'explicit') == (False, 'suggestive'))
+check('an explicit override wins',
+      G.content_level({'x': {'nsfw_enabled': True, 'nsfw_level': 'moderate'}}, 'x', False, 'suggestive')
+      == (True, 'moderate'))
+r = G.clean_ratings({'tiktok': {'nsfw_enabled': True, 'nsfw_level': 'explicit'}}, {})
+check('the tiktok lock cannot be lifted by an override', r['tiktok']['nsfw_enabled'] is False)
+check('an invalid level falls back to suggestive',
+      G.clean_ratings({'x': {'nsfw_enabled': True, 'nsfw_level': 'wild'}}, {})['x']['nsfw_level'] == 'suggestive')
+cleared = G.clean_ratings({'x': None}, {'x': {'nsfw_enabled': True, 'nsfw_level': 'moderate'}})
+check('an explicit null clears the override', 'x' not in cleared)
+check('a bad platform name is dropped', G.clean_ratings({'not a channel!!': {}}, {}) == {})
+check('an unrelated save leaves other platforms alone',
+      G.clean_ratings({'threads': {'nsfw_enabled': True, 'nsfw_level': 'moderate'}},
+                      {'x': {'nsfw_enabled': True, 'nsfw_level': 'explicit'}}).get('x', {}).get('nsfw_level')
+      == 'explicit')
+check('disabled reads as no clause', G.content_level_clause(False, 'explicit') == '')
+check('enabled carries the level wording', 'suggestive' in G.content_level_clause(True, 'suggestive').lower())
+
+print()
 print('weekly plan')
 pstart = 1_700_000_000 - (1_700_000_000 % 86400)
 week = G.plan_week(pstart, 7)

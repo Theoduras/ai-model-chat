@@ -505,16 +505,74 @@ def post_cap(platform):
     return (POST_PLATFORMS.get(normalise_source(platform)) or {}).get('cap', 280)
 
 
-def trim_post(platform, text):
-    """Cut a draft to what the channel will take, on a word boundary where one
-    is close enough to the limit to be worth keeping."""
+def trim_to(text, cap):
+    """Cut text to a character budget, on a word boundary where one is close
+    enough to the limit to be worth keeping."""
     text = str(text or '').strip()
-    cap = post_cap(platform)
     if len(text) <= cap:
         return text
     cut = text[:cap]
     space = cut.rfind(' ')
     return (cut[:space] if space >= cap - 30 else cut).rstrip()
+
+
+def trim_post(platform, text):
+    return trim_to(text, post_cap(platform))
+
+
+RATING_LEVELS = ('suggestive', 'moderate', 'explicit')
+
+# TikTok's ToS bars directing users to adult content at all — this is a policy
+# floor, not a formatting default, so an override cannot lift it the way a
+# route or a bio can be overridden.
+SFW_LOCKED = {'tiktok'}
+
+
+def clean_ratings(data, existing=None):
+    """Validate a saved content-level table. TikTok is coerced back off no
+    matter what came in, the same way a typo'd route falls back to the default
+    rather than resolving to nothing."""
+    out = dict(existing or {})
+    for source, val in (data or {}).items():
+        src = normalise_source(source)
+        if not src:
+            continue
+        if not val:
+            out.pop(src, None)
+            continue
+        enabled = bool((val or {}).get('nsfw_enabled')) and src not in SFW_LOCKED
+        level = str((val or {}).get('nsfw_level') or '').strip().lower()
+        if level not in RATING_LEVELS:
+            level = 'suggestive'
+        out[src] = {'nsfw_enabled': enabled, 'nsfw_level': level}
+    return out
+
+
+def content_level(overrides, platform, global_enabled, global_level):
+    """(enabled, level) for one platform's captions: an explicit override
+    wins, then the SFW floor, then the persona's global chat setting — so a
+    caption never assumes a looser level than the creator actually set."""
+    src = normalise_source(platform)
+    row = (overrides or {}).get(src)
+    if row:
+        return bool(row.get('nsfw_enabled')), row.get('nsfw_level', 'suggestive')
+    if src in SFW_LOCKED:
+        return False, 'suggestive'
+    return bool(global_enabled), (global_level if global_level in RATING_LEVELS
+                                  else 'suggestive')
+
+
+# Kept in the same words the chat prompt uses, so a caption never reads
+# looser or tighter than a message the persona would actually send.
+_LEVEL_CLAUSE = {
+    'suggestive': 'Be suggestive and flirtatious. Hint at things without going explicit.',
+    'moderate': 'Be openly sexual in language. Moderately explicit — describe feelings, sensations, intentions vividly.',
+    'explicit': 'Go fully explicit when the moment calls for it. Direct, specific, graphic language.',
+}
+
+
+def content_level_clause(enabled, level):
+    return _LEVEL_CLAUSE.get(level, _LEVEL_CLAUSE['suggestive']) if enabled else ''
 
 
 BIO_PLATFORMS = {
