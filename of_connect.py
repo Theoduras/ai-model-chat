@@ -152,6 +152,9 @@ class Attempt:
     # Only ever replaced, never mutated in place, so one default is safe to
     # share — and status() cannot trip over an attempt built without it.
     signing_sample = {}
+    # What the site answered when it refused a sign-in. Replaced, never mutated,
+    # so one default is safe to share.
+    login_errors = ()
     _sampled = False
     # Same reason: an attempt assembled field by field rather than constructed
     # still has to be able to say which site it is for.
@@ -218,6 +221,7 @@ class Attempt:
                 'result': self.result, 'probes': self.probes,
                 'capture_note': self.capture_note, 'page_url': self.page_url,
                 'cookie_names': self.cookie_names,
+                'login_errors': getattr(self, 'login_errors', []),
                 'signing_sample': self.signing_sample}
 
     def snapshot(self):
@@ -671,6 +675,35 @@ class Attempt:
         next deploy, and a client that looks nothing like the browser that
         signed in is the thing that loses the account.
         """
+        def answered(response):
+            """What Reddit said when it turned a sign-in down.
+
+            "Server error. Try again later." is the banner Reddit's page shows
+            for every refusal, so the page itself tells us nothing. The reason
+            is in the response behind it -- a rate limit, a blocked IP, a
+            failed bot check -- and without recording it here the only evidence
+            of a failed sign-in is a screenshot of that banner.
+            """
+            try:
+                url = response.url or ''
+                if 'reddit.com' not in url or response.status < 400:
+                    return
+                if not any(hit in url for hit in ('login', 'oauth', 'token',
+                                                  'gql', 'api/')):
+                    return
+                body = ''
+                try:
+                    body = (response.text() or '')[:300]
+                except Exception:
+                    pass
+                self.login_errors = (getattr(self, 'login_errors', []) + [{
+                    'url': url.split('?')[0][:160], 'status': response.status,
+                    'body': body}])[-6:]
+                logger.warning('reddit sign-in refused: %s -> %s %s',
+                               url.split('?')[0][:120], response.status, body[:200])
+            except Exception:
+                pass
+
         def seen(request):
             try:
                 url = request.url or ''
@@ -689,6 +722,7 @@ class Attempt:
                 pass
         try:
             page.on('request', seen)
+            page.on('response', answered)
         except Exception:
             pass
 

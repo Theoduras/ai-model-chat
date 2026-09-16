@@ -22268,9 +22268,17 @@ def _rd_signin_state(persona, adopt=False):
     if adopt and held.get('state') == 'connected':
         _rd_adopt(attempt)
         failed = _get_setting(f'reddit_adopt_error_{persona}') or ''
+    refused = held.get('login_errors') or []
+    if refused:
+        last = refused[-1]
+        # Reddit's page shows the same "Server error. Try again later." banner
+        # for every refusal, so the status line says what it actually answered.
+        failed = failed or (f"Reddit refused the sign-in: {last.get('status')} on "
+                            f"{last.get('url', '')}. {str(last.get('body') or '')[:160]}")
     return {'open': True, 'state': held.get('state') or '',
             'why': failed or _RD_WAITING.get(held.get('capture_note') or '', ''),
-            'error': held.get('error') or ''}
+            'error': held.get('error') or '',
+            'refused': refused}
 
 
 def _rd_adopt(attempt):
