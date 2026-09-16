@@ -40,6 +40,7 @@
     <span class="lock">🔒</span>
     <span class="url">onlyfans.com</span>
     <span class="state" id="state">opening…</span>
+    <span class="state" id="lag" title="round trip · frame age · picture quality · relay build"></span>
     <button onclick="cancel()">Cancel</button>
   </header>
   <div id="stage">
@@ -131,6 +132,29 @@ async function begin(){
 // creator is doing something, slower while the page sits still, slower again
 // while nobody is looking at this window.
 const POLL_BUSY = 200, POLL_IDLE = 900, POLL_HIDDEN = 2500;
+// What a frame is worth asking for. A creator on a slow link is better served
+// by a coarser picture that keeps up than a sharp one that is always a second
+// behind -- and clicking what you are shown only works if what you are shown
+// is now. The window is the side that knows how long the last one took.
+const Q_SHARP = 45, Q_COARSE = 30, Q_ROUGH = 22;
+const SLOW_MS = 700, VERY_SLOW_MS = 1400;
+let ping = 0, quality = Q_SHARP, relay = '';
+
+function askedQuality(){
+  if (ping > VERY_SLOW_MS) return Q_ROUGH;
+  if (ping > SLOW_MS) return Q_COARSE;
+  return Q_SHARP;
+}
+
+function showLag(a){
+  const age = a.frame_at ? Math.max(0, Math.round(Date.now() / 1000 - a.frame_at)) : null;
+  $('lag').textContent = [
+    ping ? ping + 'ms' : '',
+    age !== null && age > 2 ? age + 's behind' : '',
+    'q' + (a.quality || quality),
+    relay ? 'r' + relay : ''
+  ].filter(Boolean).join(' · ');
+}
 // Keep asking at the fast rate for a moment after every click and keystroke:
 // what follows one is the frame the creator is waiting to see.
 const BUSY_FOR = 1500;
@@ -165,13 +189,19 @@ async function poll(){
 
 async function pollOnce(){
   let r, status = 0;
+  const asked = Date.now();
   try {
     const res = await fetch(API + '/frame?attempt=' +
       encodeURIComponent(attempt) + '&persona=' + encodeURIComponent(persona) +
-      '&since=' + encodeURIComponent(lastFrameAt));
+      '&since=' + encodeURIComponent(lastFrameAt) + '&q=' + askedQuality());
     status = res.status;
     r = await res.json();
   } catch (e) { return waiting(); }
+  // Weighted towards what just happened: a link that has gone bad is worth
+  // reacting to within a couple of frames, not a minute.
+  const took = Date.now() - asked;
+  ping = ping ? Math.round(ping * 0.6 + took * 0.4) : took;
+  quality = askedQuality();
   // 404 is the only answer that means the sign-in is really gone, and even
   // that is given a few chances: the browser service can be restarted under
   // us, and one bad second should not throw away a half-typed password.
@@ -185,7 +215,10 @@ async function pollOnce(){
   if (r.frame){ img.src = r.frame; $('veil').classList.add('gone'); }
   const a = r.attempt || {};
   if (a.frame_at && a.frame_at !== lastFrameAt){ lastFrameAt = a.frame_at; stillFor = 0; }
+  else if (!a.frame_at && r.frame){ stillFor = 0; }   // an older service sends no frame time
   else { stillFor++; }
+  relay = a.relay || relay;
+  showLag(a);
   natural = {w: a.width || 0, h: a.height || 0};
   const s = $('state');
   s.textContent = a.state === 'signin' ? 'live' : a.state;

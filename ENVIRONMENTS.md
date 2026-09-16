@@ -234,6 +234,23 @@ BROWSER_URL=$(gcloud run services describe ai-model-chat-dev-browser \
 curl -s "$BROWSER_URL/health"
 ```
 
+## Which build is live
+
+The app and the browser service deploy from `develop` through separate
+triggers, so either can be the old one — and a sign-in window driven by an old
+browser service behaves like the bug you just fixed. Both report the sign-in
+relay they carry:
+
+```bash
+curl -s https://velvetfunneler.com/healthz | grep -o '"relay":"[^"]*"'
+curl -s "$BROWSER_URL/health" | grep -o '"relay":"[^"]*"'
+```
+
+Two different numbers means one of the two has not deployed yet. The number is
+also in the sign-in window's own header (`r3`), next to the round-trip time and
+the picture quality it settled on — so a creator reporting a slow window can
+say which build they were on and how slow the link actually was.
+
 Wanted: `{"browser":true,"guarded":true,"ok":true}`. `browser:false` means
 Chromium is not starting there — **stop, and leave the app unwired**, because
 the in-process browser it would replace still works. Only then:
