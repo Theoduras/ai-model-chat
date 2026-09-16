@@ -38,6 +38,18 @@
     .auto-log .ln.hd { color: var(--accent); border-left-color: #312e81; }
     .auto-log .ln.er { color: #fb7185; border-left-color: #4c0519; }
     .conn-pill.run { background: #312e81; color: #c7d2fe; }
+    .inbox-split { display: grid; grid-template-columns: 260px 1fr; gap: 14px; }
+    @media (max-width: 640px) { .inbox-split { grid-template-columns: 1fr; } }
+    .inbox-list { max-height: 340px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+    .inbox-row { text-align: left; background: var(--bg); border: 1px solid #2a2a30; border-radius: 10px; padding: 8px 10px; cursor: pointer; font-size: 0.78rem; color: var(--text-2); }
+    .inbox-row.on { border-color: var(--accent); }
+    .inbox-row .who { color: var(--text); font-weight: 600; }
+    .inbox-row .ph { float: right; font-size: 0.68rem; color: var(--text-3); }
+    .inbox-row .pv { display: block; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .inbox-thread { max-height: 340px; overflow-y: auto; display: flex; flex-direction: column; }
+    .inbox-thread .m { border-radius: 10px; padding: 7px 11px; margin-bottom: 6px; font-size: 0.8rem; max-width: 80%; }
+    .inbox-thread .m.in { background: var(--surface); color: var(--text); align-self: flex-start; }
+    .inbox-thread .m.out { background: #1d9bf0; color: #fff; align-self: flex-end; }
     .row-inline { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
     .row-inline .field { flex: 1; min-width: 160px; }
     @media (max-width: 640px) {
@@ -151,6 +163,42 @@
     </div>
   </div>
 
+  <div class="form-section" id="always-section">
+    <div class="section-title">🛰️ Always on — run with the tab closed</div>
+    <span class="hint" style="display:block; margin-bottom:14px;">The settings on this page are saved to the server as you change them. Switch this on and the bot runs the whole round — DM replies, feed work, gathering and posting — on the server, on its own schedule. You can close the browser. The manual "Start" buttons below are for watching a round happen; they turn off while this is on so nothing runs twice.</span>
+    <div class="auto-toggles">
+      <label class="auto-chk"><input type="checkbox" id="auto-always"> <b>Run unattended</b></label>
+    </div>
+    <div class="xbot-grid" style="margin-top:12px;">
+      <div class="field">
+        <label>Minutes between server rounds</label>
+        <input type="number" id="auto-interval-min" min="1" max="1440" value="15">
+      </div>
+      <div class="field">
+        <label>Max DMs per day</label>
+        <input type="number" id="cap-dms" min="0" max="1000" value="40">
+      </div>
+      <div class="field">
+        <label>Max follows per day</label>
+        <input type="number" id="cap-follows" min="0" max="1000" value="40">
+      </div>
+      <div class="field">
+        <label>Max comments per day</label>
+        <input type="number" id="cap-comments" min="0" max="1000" value="30">
+      </div>
+      <div class="field">
+        <label>Max likes per day</label>
+        <input type="number" id="cap-likes" min="0" max="1000" value="100">
+      </div>
+      <div class="field">
+        <label>Max posts per day</label>
+        <input type="number" id="cap-posts" min="0" max="1000" value="4">
+      </div>
+    </div>
+    <div class="hint" id="daily-usage" style="display:block; margin-top:12px;"></div>
+    <span class="hint" id="auto-config-status"></span>
+  </div>
+
   <div class="form-section" id="chat-section">
     <div class="section-title">💬 Auto-chat — keep conversations going</div>
     <span class="hint" style="display:block; margin-bottom:14px;">Engages your existing audience on a loop: replies to incoming DMs, and (optionally) replies to comments on your posts and posts new content. Does NOT start new chats — that's the section below.</span>
@@ -217,12 +265,33 @@
       </div>
     </div>
     <div class="auto-toggles">
+      <label class="auto-chk"><input type="checkbox" id="auto-new-chats" checked> Gather new chats when running unattended</label>
       <label class="auto-chk"><input type="checkbox" id="auto-follow"> Follow new people first</label>
     </div>
     <div style="display:flex; gap:8px; align-items:center; margin-top:14px;">
       <button class="btn-ai" id="gather-start" onclick="startGather()">▶ Start gathering</button>
       <button class="btn-ai" id="gather-stop" style="background:#4c0519; display:none;" onclick="stopGather()">■ Stop</button>
       <span class="conn-pill" id="gather-state">idle</span>
+    </div>
+  </div>
+
+  <div class="form-section" id="inbox-section">
+    <div class="section-title">📥 DM inbox</div>
+    <span class="hint" style="display:block; margin-bottom:14px;">Every conversation this persona has on X, with the funnel phase each fan is in. Open one to read it and send a message yourself — the bot keeps the thread from there.</span>
+    <div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">
+      <button class="btn-ai" onclick="loadInbox()">Refresh</button>
+      <span class="conn-pill" id="inbox-state">—</span>
+    </div>
+    <div class="inbox-split">
+      <div class="inbox-list" id="inbox-list"><span class="hint">Pick a persona to load conversations.</span></div>
+      <div class="inbox-thread">
+        <div id="inbox-messages"><span class="hint">Select a conversation.</span></div>
+        <div class="row-inline" id="inbox-compose" style="display:none; margin-top:12px;">
+          <div class="field"><input type="text" id="inbox-text" placeholder="Send a DM as this persona…"></div>
+          <button class="btn-ai" onclick="sendInboxDm(this)">Send</button>
+        </div>
+        <div class="result-box" id="inbox-send-result"></div>
+      </div>
     </div>
   </div>
 
@@ -351,6 +420,7 @@ function updateConn() {
   document.getElementById('connect-status').innerHTML = '';
   loadBehaviorSummary();
   loadBehaviour();
+  loadInbox();
 }
 
 async function loadBehaviour(){
@@ -362,6 +432,165 @@ async function loadBehaviour(){
   document.getElementById('f-x-followups').checked = s.followups !== false;
   document.getElementById('f-x-followup-min').value = s.followup_min || 45;
   if(s.typing_speed) document.getElementById('f-x-typing-speed').value = String(s.typing_speed);
+  hydrateAutoConfig(s);
+}
+
+// ── Round config, shared with the server ─────────────────────────────────────
+// The form used to live only in this tab, so closing it lost everything the
+// round needs. Every field below is now saved to /api/x/settings, which is also
+// what the unattended server loop reads — one config, two readers.
+const AUTO_FIELDS = {
+  'auto-dm': 'dm_replies', 'auto-respond-own': 'respond_own',
+  'auto-comments': 'comments', 'auto-post': 'post_content',
+  'auto-feed-engage': 'feed_engage', 'auto-new-chats': 'new_chats',
+  'auto-follow': 'follow', 'auto-always': 'auto',
+  'feed-post-limit': 'feed_post_limit', 'feed-reply-limit': 'feed_reply_limit',
+  'auto-new-limit': 'new_chat_limit', 'comment-limit': 'comment_limit',
+  'gather-post-age': 'post_age_min', 'gather-reply-age': 'reply_age_min',
+  'auto-interval-min': 'interval_min',
+  'post': 'post', 'post-topic': 'post_topic',
+};
+const CAP_FIELDS = { 'cap-dms': 'dms', 'cap-follows': 'follows',
+  'cap-comments': 'comments', 'cap-likes': 'likes', 'cap-posts': 'posts' };
+let hydrating = false, autoSaveTimer = null;
+
+function hydrateAutoConfig(s){
+  hydrating = true;
+  for (const [id, key] of Object.entries(AUTO_FIELDS)) {
+    const el = document.getElementById(id);
+    if (!el || s[key] === undefined) continue;
+    if (el.type === 'checkbox') el.checked = !!s[key]; else el.value = String(s[key]);
+  }
+  const caps = s.daily_caps || {};
+  for (const [id, kind] of Object.entries(CAP_FIELDS)) {
+    const el = document.getElementById(id);
+    if (el && caps[kind] !== undefined) el.value = String(caps[kind]);
+  }
+  hydrating = false;
+  renderDailyUsage(s.daily || {}, caps);
+  applyAlwaysOn();
+}
+
+function collectAutoConfig(){
+  const body = { persona: persona(), daily_caps: {} };
+  for (const [id, key] of Object.entries(AUTO_FIELDS)) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    body[key] = el.type === 'checkbox' ? el.checked
+      : (el.type === 'number' || el.tagName === 'SELECT' ? parseInt(el.value || '0', 10) : el.value.trim());
+  }
+  for (const [id, kind] of Object.entries(CAP_FIELDS)) {
+    const el = document.getElementById(id);
+    if (el) body.daily_caps[kind] = parseInt(el.value || '0', 10);
+  }
+  return body;
+}
+
+function persistAutoConfig(){
+  if (hydrating || !persona()) return;
+  clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(async () => {
+    const st = document.getElementById('auto-config-status');
+    try {
+      const r = await fetch('/api/x/settings', { method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(collectAutoConfig()) });
+      const d = await r.json();
+      if (!d.ok) throw new Error(d.error || 'failed');
+      st.textContent = '✓ Settings saved'; st.style.color = '#4ade80';
+      renderDailyUsage((d.settings || {}).daily || {}, (d.settings || {}).daily_caps || {});
+    } catch (e) { st.textContent = '✗ ' + e; st.style.color = '#fb7185'; }
+  }, 500);
+}
+
+function renderDailyUsage(used, caps){
+  const el = document.getElementById('daily-usage');
+  if (!el) return;
+  const bits = Object.entries(CAP_FIELDS).map(([, kind]) => {
+    const cap = caps[kind];
+    return kind + ': ' + (used[kind] || 0) + (cap === undefined || cap < 0 ? '' : ' / ' + cap);
+  });
+  el.textContent = 'Today so far — ' + bits.join(' · ') + ' (resets at 00:00 UTC).';
+}
+
+// With the server running rounds, the local timers would double every action.
+function applyAlwaysOn(){
+  const on = document.getElementById('auto-always').checked;
+  if (on) { if (chatRunning) stopChat(); if (gatherRunning) stopGather(); }
+  for (const id of ['chat-start', 'gather-start']) {
+    const b = document.getElementById(id);
+    b.disabled = on;
+    b.title = on ? 'The server is running rounds — switch "Run unattended" off to drive them from here.' : '';
+    b.style.opacity = on ? '0.5' : '';
+  }
+  document.getElementById('chat-state').textContent = on ? 'server-side' : 'idle';
+  document.getElementById('gather-state').textContent = on ? 'server-side' : 'idle';
+}
+
+for (const id of Object.keys(AUTO_FIELDS).concat(Object.keys(CAP_FIELDS))) {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('change', () => { applyAlwaysOn(); persistAutoConfig(); });
+}
+
+// ── DM inbox ─────────────────────────────────────────────────────────────────
+let inboxFan = null;
+
+async function loadInbox(){
+  if (!persona()) return;
+  const list = document.getElementById('inbox-list');
+  setState('inbox-state', 'loading…', 'run');
+  let d;
+  try { d = await (await fetch('/api/inbox?platform=x&persona=' + encodeURIComponent(persona()))).json(); }
+  catch (e) { setState('inbox-state', 'failed', 'err'); return; }
+  if (!d.ok) { setState('inbox-state', d.error || 'failed', 'err'); return; }
+  const fans = d.fans || [];
+  setState('inbox-state', fans.length + ' conversation(s)', fans.length ? 'ok' : '');
+  if (!fans.length) { list.innerHTML = '<span class="hint">No conversations yet.</span>'; return; }
+  list.innerHTML = '';
+  fans.forEach(f => {
+    const b = document.createElement('button');
+    b.className = 'inbox-row' + (f.key === inboxFan ? ' on' : '');
+    b.innerHTML = '<span class="ph">' + esc(f.phase || '') + '</span>' +
+      '<span class="who">' + (f.waiting ? '● ' : '') + '@' + esc(f.handle || f.key) + '</span>' +
+      '<span class="pv">' + esc(f.last || '') + '</span>';
+    b.onclick = () => openInboxThread(f.key);
+    list.appendChild(b);
+  });
+}
+
+async function openInboxThread(key){
+  inboxFan = key;
+  const box = document.getElementById('inbox-messages');
+  box.innerHTML = '<span class="hint">Loading…</span>';
+  document.getElementById('inbox-compose').style.display = 'flex';
+  let d;
+  try { d = await (await fetch('/api/inbox?platform=x&persona=' + encodeURIComponent(persona()) +
+    '&fan=' + encodeURIComponent(key))).json(); }
+  catch (e) { box.innerHTML = '<span class="hint">Could not load this thread.</span>'; return; }
+  if (!d.ok) { box.innerHTML = '<span class="hint">' + esc(d.error || 'failed') + '</span>'; return; }
+  box.innerHTML = '';
+  (d.messages || []).forEach(m => {
+    const div = document.createElement('div');
+    div.className = 'm ' + (m.dir === 'out' ? 'out' : 'in');
+    div.textContent = m.text;
+    box.appendChild(div);
+  });
+  if (!(d.messages || []).length) box.innerHTML = '<span class="hint">No messages stored for this fan.</span>';
+  box.scrollTop = box.scrollHeight;
+  loadInbox();
+}
+
+async function sendInboxDm(btn){
+  const box = document.getElementById('inbox-send-result');
+  const el = document.getElementById('inbox-text');
+  const text = el.value.trim();
+  if (!inboxFan || !text) { err(box, 'Pick a conversation and type a message.'); return; }
+  busy(box, 'Sending…');
+  const d = await post('/api/x/dm-send', { persona: persona(), fan: inboxFan, text });
+  if (!d.ok) { err(box, d.error); return; }
+  box.innerHTML = '<span class="hint" style="color:#4ade80;">✓ Sent</span>';
+  el.value = '';
+  openInboxThread(inboxFan);
 }
 
 async function saveBehaviour(btn){
