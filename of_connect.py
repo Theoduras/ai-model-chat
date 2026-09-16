@@ -865,21 +865,25 @@ class Attempt:
             """
             try:
                 url = response.url or ''
-                if 'reddit.com' not in url or response.status < 400:
+                if 'reddit.com' not in url:
                     return
                 if not any(hit in url for hit in ('login', 'oauth', 'token',
-                                                  'gql', 'api/')):
+                                                  'gql', 'register', 'svc/')):
                     return
+                # Not filtered on status: Reddit answers a refused login with
+                # 200 and the reason in the body, so the status that looks like
+                # success is exactly the one worth reading. Filtering on >=400
+                # is what made three rounds of this log nothing at all.
                 body = ''
                 try:
-                    body = (response.text() or '')[:300]
+                    body = (response.text() or '')[:400]
                 except Exception:
                     pass
                 self.login_errors = (getattr(self, 'login_errors', []) + [{
                     'url': url.split('?')[0][:160], 'status': response.status,
-                    'body': body}])[-6:]
-                logger.warning('reddit sign-in refused: %s -> %s %s',
-                               url.split('?')[0][:120], response.status, body[:200])
+                    'body': body}])[-8:]
+                logger.warning('reddit sign-in answered: %s -> %s %s',
+                               url.split('?')[0][:120], response.status, body[:300])
             except Exception:
                 pass
 
