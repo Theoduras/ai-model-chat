@@ -1,11 +1,11 @@
 # Deploys ai-model-chat-dev on every push to develop.
 #
 # The app's trigger still carries an inline build config, which cannot be read or
-# repaired from a checkout and rebuilds the image from scratch every push: Chrome
-# is re-downloaded and every dependency re-installed even when nothing but a HTML
-# file changed -- it builds with --no-cache, so that is by construction. This is that config moved into version control, with the caching
-# the inline one has no way to express. Point the trigger at this file (Cloud
-# Build configuration file -> /cloudbuild.app.yaml) for any of it to take effect.
+# repaired from a checkout and builds with --no-cache: Chrome is re-downloaded and
+# every dependency reinstalled on every push, even one that touched a single HTML
+# file. This is that config moved into version control, with the caching the
+# inline one has no way to express. Point the trigger at this file (Cloud Build
+# configuration file -> /cloudbuild.app.yaml) for any of it to take effect.
 #
 # The image path is composed in the args rather than kept whole in a substitution,
 # because Cloud Build does not expand substitutions inside other substitutions: a
