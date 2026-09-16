@@ -169,6 +169,8 @@ let plVault = [];         // the persona's media library
 let plPickedMedia = '';   // what the open editor has attached
 let plChans = [];         // channels ticked on a brand-new post
 let plRemote = [];        // posts Fanvue already has booked — read-only
+let plFvVault = null;     // her Fanvue vault, fetched the first time it is needed
+let plFvVaultError = '';
 
 function esc(s) {
   return String(s == null ? '' : s)
@@ -245,6 +247,8 @@ async function plInit() {
 
 function plPickPersona(slug) {
   plSlug = slug;
+  plFvVault = null;
+  plFvVaultError = '';
   plProposed = [];
   plPlanMeta = null;
   plLoadVault();
@@ -260,7 +264,33 @@ async function plLoadVault() {
 }
 
 function plMediaById(id) {
-  return plVault.find(m => m.id === id) || null;
+  return plVault.find(m => m.id === id)
+      || (plFvVault || []).find(m => m.id === id) || null;
+}
+
+// Her own Fanvue vault is only on offer when Fanvue is the only channel ticked:
+// it attaches by uuid with nothing uploaded, and that uuid means nothing to X or
+// Threads, which need the file itself.
+function plFanvueOnly() {
+  const chans = plOpenChans();
+  return chans.length === 1 && chans[0] === 'fanvue';
+}
+
+async function plLoadFvVault() {
+  if (plFvVault || !plSlug) return;
+  plFvVault = [];
+  try {
+    const d = await (await fetch('/api/fanvue/media?persona='
+      + encodeURIComponent(plSlug))).json();
+    plFvVaultError = (d && d.error) || '';
+    plFvVault = ((d && d.media) || []).map(m => ({
+      id: 'fv:' + m.uuid,
+      kind: String(m.mediaType || '').toLowerCase() === 'video' ? 'video' : 'image',
+      thumb: m.thumb || '',
+      purpose: m.name || ''
+    }));
+  } catch (e) { plFvVaultError = 'Could not read the Fanvue vault.'; }
+  plRenderMedia();
 }
 
 function plShiftWeek(n) {
@@ -653,6 +683,20 @@ function plEdit(kind, idx) {
   document.getElementById('pl-modal').classList.add('open');
 }
 
+// What happens to the attached file when the slot comes round, per channel.
+function plMediaHint(picked) {
+  const plat = plOpen.kind === 'new' ? (plChans[0] || '') : plOpen.platform;
+  if (String(picked.id || '').indexOf('fv:') === 0) {
+    return 'Already in her Fanvue vault — attached as it is, with nothing uploaded.';
+  }
+  if (plat === 'threads') {
+    return 'Threads collects the file from us, so it has to be publicly reachable '
+         + 'when the slot comes round.';
+  }
+  if (plat === 'fanvue') return 'Uploaded into her Fanvue vault when the post goes out.';
+  return 'Uploaded to X when the post goes out.';
+}
+
 function plMediaThumb(m, extra) {
   return '<span class="pl-thumb' + (extra || '') + '">'
     + (m.kind === 'video'
@@ -673,8 +717,13 @@ function plRenderMedia() {
     ? chans.map(p => PL_MEDIA[p] || [])
         .reduce((a, b) => a.filter(k => b.indexOf(k) !== -1))
     : [];
-  const usable = plVault.filter(m => allowed.indexOf(m.kind || 'image') !== -1);
+  const fvOnly = plFanvueOnly();
+  if (fvOnly && plFvVault === null) { plLoadFvVault(); }
+  const library = fvOnly ? (plFvVault || []) : plVault;
+  const usable = library.filter(m => allowed.indexOf(m.kind || 'image') !== -1);
   field.style.display = chans.length ? '' : 'none';
+  // A pick from the other library cannot survive the switch — a Fanvue uuid is
+  // nothing to X, and a library photo is nothing to the vault strip.
   if (plPickedMedia && !usable.some(m => m.id === plPickedMedia)) plPickedMedia = '';
 
   const picked = plPickedMedia ? plMediaById(plPickedMedia) : null;
@@ -687,25 +736,37 @@ function plRenderMedia() {
            + ' href="' + esc(picked.thumb) + '" download target="_blank" rel="noopener">Download</a>')
     : '<span class="hint">Nothing attached.</span>';
 
-  document.getElementById('pl-m-media-note').textContent =
-    allowed.length ? allowed.join(' or ') : 'nothing fits every channel';
+  const emptyNote = fvOnly
+    ? (plFvVaultError
+        ? esc(plFvVaultError)
+        : plFvVault === null ? 'Reading her Fanvue vault…'
+          : 'Nothing in her Fanvue vault yet. Upload to Fanvue and it shows up here.')
+    : (allowed.length
+        ? 'Nothing in the library ' + (chans.length > 1 ? 'all these channels' : 'this channel')
+          + ' will take. Add photos and clips in the persona editor.'
+        : 'These channels take different kinds of media, so no one file suits '
+          + 'them all. Post them separately to attach something.');
   document.getElementById('pl-m-strip').innerHTML = usable.length
     ? usable.map(m => '<button type="button" class="pl-pick'
         + (m.id === plPickedMedia ? ' on' : '') + '" title="' + esc(m.purpose || m.kind)
         + '" onclick="plPickMedia(\'' + esc(m.id) + '\')">'
         + plMediaThumb(m) + '</button>').join('')
-    : '<span class="hint">' + (allowed.length
-        ? 'Nothing in the library ' + (chans.length > 1 ? 'all these channels' : 'this channel')
-          + ' will take. Add photos and clips in the persona editor.'
-        : 'These channels take different kinds of media, so no one file suits '
-          + 'them all. Post them separately to attach something.') + '</span>';
+    : '<span class="hint">' + emptyNote + '</span>';
 
-  document.getElementById('pl-m-media-hint').textContent = !picked ? ''
-    : plOpen.publishable
-      ? (plOpen.platform === 'threads'
-          ? 'Threads collects the file from us, so it has to be publicly reachable when the slot comes round.'
-          : 'Uploaded to X when the post goes out.')
-      : 'This channel has no posting API — download the file and post it yourself.';
+  // A Fanvue post ticked with another channel is drawn from the persona library
+  // instead, so the note has to say that rather than leave an empty strip.
+  document.getElementById('pl-m-media-note').textContent =
+    (allowed.length ? allowed.join(' or ') : 'nothing fits every channel')
+    + (fvOnly ? ' · from her Fanvue vault' : '');
+
+  document.getElementById('pl-m-media-hint').textContent =
+    !picked
+      ? (chans.indexOf('fanvue') !== -1 && !fvOnly
+          ? 'Her Fanvue vault is not on offer here — the other channels ticked cannot '
+            + 'use it. Untick them to pick from the vault.' : '')
+      : !plOpen.publishable
+        ? 'This channel has no posting API — download the file and post it yourself.'
+        : plMediaHint(picked);
 }
 
 function plPickMedia(id) {

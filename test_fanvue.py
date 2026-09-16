@@ -359,6 +359,15 @@ def test_planner_posts():
     finally:
         app._fanvue_call, app._fanvue_scope = orig_call, orig_scope
 
+    check('a vault id is recognised', app._fv_media_id('fv:abc') == 'abc')
+    check('and a library id is not', app._fv_media_id('m1') == '')
+    check('a vault item posts by uuid, with nothing uploaded',
+          app._growth_media_check('lilly', 'fanvue', 'fv:abc') == ('fv:abc', ''),
+          app._growth_media_check('lilly', 'fanvue', 'fv:abc'))
+    check('and X is told why it cannot have it',
+          'Fanvue vault' in app._growth_media_check('lilly', 'x', 'fv:abc')[1],
+          app._growth_media_check('lilly', 'x', 'fv:abc'))
+
     check('reading posts names read:post',
           app._fv_scope_for_path('/v1/posts?size=50') == 'read:post',
           app._fv_scope_for_path('/v1/posts?size=50'))

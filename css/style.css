@@ -2046,6 +2046,11 @@ body.page-dashboard .conn-dot.err { background: var(--err); }
   max-width: 480px;
   box-shadow: var(--shadow-lg);
   animation: modalIn 0.15s ease-out;
+  /* The overlay's own padding is the 40px. Without this a tall editor runs off
+     the screen and its footer buttons cannot be reached at all. */
+  max-height: calc(100vh - 40px);
+  display: flex;
+  flex-direction: column;
 }
 @keyframes modalIn {
   from { transform: translateY(8px); opacity: 0; }
@@ -2057,6 +2062,7 @@ body.page-dashboard .conn-dot.err { background: var(--err); }
   justify-content: space-between;
   padding: 18px 22px;
   border-bottom: 1px solid var(--border-soft);
+  flex-shrink: 0;
 }
 .modal-header h2 { font-size: 1.05rem; font-weight: 600; color: var(--text); }
 .modal-close {
@@ -2069,7 +2075,7 @@ body.page-dashboard .conn-dot.err { background: var(--err); }
   padding: 0 4px;
 }
 .modal-close:hover { color: var(--text); }
-.modal-body { padding: 22px; }
+.modal-body { padding: 22px; overflow-y: auto; min-height: 0; }
 .modal-footer {
   display: flex;
   align-items: center;

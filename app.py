@@ -7054,6 +7054,14 @@ def _growth_post_extras(platform, data, media_id, current=None):
     return audience, price, ''
 
 
+def _fv_media_id(media_id):
+    """The Fanvue vault uuid behind a queue row's media, or ''. An item already
+    in her vault is carried as 'fv:{uuid}' so it needs no column of its own and
+    no upload — Fanvue is holding the file already."""
+    raw = str(media_id or '')
+    return raw[3:].strip() if raw.startswith('fv:') else ''
+
+
 def _growth_media_check(persona, platform, media_id):
     """Resolve the media for a queue write and say why it cannot be attached.
     Returns (media_id, error). Checked at queue time as well as at send time —
@@ -7061,6 +7069,15 @@ def _growth_media_check(persona, platform, media_id):
     between."""
     if not media_id:
         return '', ''
+    if _fv_media_id(media_id):
+        if growth.normalise_source(platform) != 'fanvue':
+            label = growth.POST_PLATFORMS.get(
+                growth.normalise_source(platform), {}).get('label', platform)
+            return '', (f'That file lives in the Fanvue vault, so only Fanvue can '
+                        f'post it. Pick something from the persona library for {label}.')
+        # Fanvue has already taken and processed this one; there is nothing here
+        # left to validate that it did not validate itself.
+        return media_id, ''
     media = _media_row(persona, media_id)
     if not media:
         return '', 'That media is not in this persona\'s library.'
@@ -7653,17 +7670,20 @@ def _growth_publish(persona, platform, text, media_id='', audience='', price_cen
     text = growth.trim_post(plat, text)
     if not text:
         raise ValueError('nothing to post')
-    media = _media_row(persona, media_id)
-    if media_id and not media:
+    vault_uuid = _fv_media_id(media_id)
+    media = None if vault_uuid else _media_row(persona, media_id)
+    if media_id and not vault_uuid and not media:
         # The photo was deleted between queueing and sending. Going out without
         # it would quietly post a caption for a picture nobody can see.
         raise RuntimeError('the media on this post is no longer in the library')
+    if vault_uuid and plat != 'fanvue':
+        raise RuntimeError('that file is in the Fanvue vault and only Fanvue can post it')
     if media:
         why = growth.media_reject(plat, media.get('kind'))
         if why:
             raise RuntimeError(why)
     if plat == 'fanvue':
-        uuids = []
+        uuids = [vault_uuid] if vault_uuid else []
         if media:
             blob, mime = _media_bytes(media)
             kind = growth.media_kind(mime)
