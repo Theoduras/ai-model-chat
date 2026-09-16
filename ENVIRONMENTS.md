@@ -46,10 +46,12 @@ roster, which really does mean off everywhere.
 ## Cloud Build trigger
 
 The `develop` trigger was created by **Cloud Run → Set up continuous
-deployment**, so it is one of Google's managed `rmgpgab-*` triggers with an
-inline build config. **There is no `cloudbuild.yaml`** — the trigger builds the
-`Dockerfile` and runs `gcloud run services update ai-model-chat-dev --image=...`
-and nothing more.
+deployment**, so it is one of Google's managed `rmgpgab-*` triggers. The inline
+build config it came with — which built with `--no-cache`, rebuilding Chrome and
+every dependency on every push — has been replaced by
+[`cloudbuild.app.yaml`](cloudbuild.app.yaml) in this repository. It builds the
+`Dockerfile` with a layer cache and runs `gcloud run services update
+ai-model-chat-dev --image=...` and nothing more.
 
 The practical consequence: **no Cloud Run setting can be changed from this
 repository.** Memory, CPU throttling, min/max instances, session affinity and
@@ -155,10 +157,9 @@ Both services therefore build from the same commit but as two separate builds,
 which finish at different times. The build fingerprint in `/api/diag` says when
 they disagree; a lasting disagreement means one of the two builds failed.
 
-The app's trigger is one of Google's managed `rmgpgab-…` ones and carries an
-inline build config, so nothing here can change how *it* deploys. The browser's
-is an ordinary trigger named `ai-model-chat-dev-browser` pointed at
-`cloudbuild.browser.yaml`. Both live in the `global` Cloud Build region, not
+The app's trigger is one of Google's managed `rmgpgab-…` ones, now pointed at
+`cloudbuild.app.yaml`. The browser's is an ordinary trigger named
+`ai-model-chat-dev-browser` pointed at `cloudbuild.browser.yaml`. Both live in the `global` Cloud Build region, not
 `europe-west4` — that is where the GitHub connection is.
 
 To deploy the browser service by hand — a rollback, or an image the trigger did

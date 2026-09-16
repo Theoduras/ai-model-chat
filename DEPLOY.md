@@ -63,19 +63,26 @@ command by hand. It is already set up; this section is what it actually is, not
 how to recreate it.
 
 The trigger was created by **Cloud Run → Set up continuous deployment**, not by
-hand, so it is one of Google's managed `rmgpgab-*` triggers. That matters:
+hand, so it is one of Google's managed `rmgpgab-*` triggers. It no longer carries
+the inline build config it was born with: it reads
+[`cloudbuild.app.yaml`](cloudbuild.app.yaml) from this repository, like the
+browser's trigger reads its own config.
 
-- **It carries its own inline build config. There is no `cloudbuild.yaml`.** The
-  trigger builds the `Dockerfile` and then runs `gcloud run services update
-  <service> --image=...`, passing nothing else.
-- **So Cloud Run flags cannot be set from the repo.** Memory, CPU throttling,
-  min/max instances, session affinity, env vars — none of it is in version
-  control, and a file in the repo claiming to set them would be ignored. There
-  used to be a `cloudbuild.yaml` here that did exactly that, silently, for
-  months; it has been deleted rather than left to mislead.
-- **Service settings persist across deploys.** `services update --image` leaves
-  everything else alone, so a setting applied once stays applied. That is why
-  the commands below are one-time.
+- **The inline config built with `--no-cache`.** Every push re-downloaded Chrome
+  and reinstalled every dependency, even a push that changed one HTML file. That
+  is the single biggest reason builds took as long as they did, and it could not
+  be seen or fixed from a checkout.
+- **`cloudbuild.app.yaml` is that config with caching added.** It pulls the
+  previous image, skips build and push entirely when this commit's image is
+  already in the registry, and builds with `--cache-from` so the Chrome layer is
+  reused. Its deploy step is unchanged: `gcloud run services update --image=...`
+  plus the `managed-by=gcp-cloud-build-deploy-cloud-run` labels the managed
+  trigger set.
+- **Cloud Run flags still are not set from the repo.** Memory, CPU throttling,
+  min/max instances, session affinity, env vars — a `services update --image`
+  leaves all of it alone, which is why the commands below are one-time. Do not
+  turn that step into a full `run deploy` to set a flag from here; a deploy that
+  omits a flag resets it.
 
 Inspect the trigger with:
 
@@ -84,26 +91,23 @@ gcloud builds triggers list --format="table(name, github.owner, github.name, fil
 gcloud builds triggers describe <name> --format=yaml
 ```
 
-An empty `FILENAME` column confirms the inline config.
+`FILENAME` should read `cloudbuild.app.yaml`. An empty column means the trigger
+fell back to an inline config and nothing in this repository governs the app's
+deploy any more.
 
-### Making it use `cloudbuild.app.yaml`
+### Pointing the trigger at a config file
 
-[`cloudbuild.app.yaml`](cloudbuild.app.yaml) is that inline config written out,
-plus the caching it cannot express: it pulls the previous image, skips build and
-push entirely when this commit is already in the registry, and builds with
-`--cache-from` so the Chrome layer is reused instead of re-downloaded. Its deploy
-step is still `services update --image` alone, so the point above holds — service
-settings are untouched by a deploy either way.
-
-**It is read by nothing until the trigger is pointed at it**, once:
+`gcloud builds triggers update github` rejects these managed triggers
+(`INVALID_ARGUMENT`). Export, edit, import instead:
 
 ```bash
-gcloud builds triggers describe <name> --format=yaml   # keep a copy of the inline config first
-gcloud builds triggers update github <name> --build-config=cloudbuild.app.yaml
+gcloud builds triggers describe <name> --format=yaml > trigger.yaml
+# drop the whole `build:` block and the read-only createTime / id / resourceName,
+# add:  filename: cloudbuild.app.yaml
+gcloud builds triggers import --source=trigger.yaml
 ```
 
-After that the `FILENAME` column shows `cloudbuild.app.yaml`, and how the app
-deploys becomes readable and fixable from a checkout, like the browser's does.
+Keep the exported copy: it is the only record of an inline config once replaced.
 
 ### Changing a Cloud Run setting
 
