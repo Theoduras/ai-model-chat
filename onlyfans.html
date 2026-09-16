@@ -746,8 +746,13 @@ async function testTransport(){
       +'does not come into it.';
     return;
   }
+  const hers=(r.signers||[]).filter(x=>x.account===r.account);
   err(box,(r.problem||'her browser did not answer')
-    +(r.error?' \u2014 '+esc(r.error):''));
+    +(r.error?' \u2014 '+esc(r.error):'')
+    +(hers.length?'<br><span class="hint">signer: '+(hers[0].live?'open':'not open')
+      +', signed '+(hers[0].signed||0)+', fetched '+(hers[0].fetched||0)
+      +(hers[0].error?' \u2014 '+esc(String(hers[0].error).slice(0,120)):'')
+      +'</span>':''));
 }
 
 async function collectSignatures(){

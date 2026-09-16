@@ -77,7 +77,13 @@ steps:
       - --max-instances=1
       - --no-cpu-throttling
       - --session-affinity
-      - --memory=2Gi
+      # Two browsers at once is the normal case, not the exception: a sign-in
+      # window is open while the account's own signer page is held, and each is
+      # a Chrome with a profile on a filesystem that is also this container's
+      # memory. At 2Gi the second one ended the container, which reads from the
+      # app as "her browser answered nothing" moments after a sign-in.
+      - --cpu=2
+      - --memory=4Gi
       - --quiet
 
 images:

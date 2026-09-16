@@ -17419,6 +17419,10 @@ def _of_browser_build():
             info['page_requests'] = bool(health.get('page_requests'))
             info['build'] = health.get('build') or ''
             info['mine'] = of_trace.build_id()
+            # What her page is actually doing over there. A signer that died
+            # reads as "her browser answered nothing" from this side, which
+            # names the symptom and not one cause.
+            info['signers'] = health.get('signers') or []
         except Exception as e:
             info['error'] = str(e)[:120]
     _of_build_cache.update({'at': now, 'info': info})
@@ -17957,10 +17961,26 @@ def api_onlyfans_transport_test():
     out['status'] = got.get('status')
     out['username'] = str(body.get('username') or '')
     out['worked'] = bool(out['username'])
-    if not out['worked']:
+    out['signers'] = _of_browser_build().get('signers') or []
+    if not out['worked'] and got.get('status'):
         out['problem'] = ('her page answered %s — the request left through her '
                           'browser, so this is her session or the page, not '
-                          'signing' % (got.get('status') or 'nothing'))
+                          'signing' % got['status'])
+    elif not out['worked']:
+        # No status at all: the page never answered, which is a browser that
+        # never opened or one that died holding the request. The service's own
+        # account of its signers is the only thing that separates those.
+        hers = next((sig for sig in out['signers']
+                     if sig.get('account') == account), {})
+        out['problem'] = ('her browser never answered. ' + (
+            'Her signer is not open: ' + (hers.get('fatal') or hers.get('error')
+                                          or 'no reason recorded')
+            if hers and not hers.get('live') else
+            'Her signer says it is open, so the request timed out inside it'
+            if hers else
+            'No signer exists for her, so the browser could not be started — '
+            'the usual cause is the service running out of memory while a '
+            'sign-in browser is also open'))
     return jsonify(out)
 
 
