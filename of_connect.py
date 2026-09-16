@@ -253,7 +253,30 @@ class Attempt:
         except Exception as e:
             logger.exception('OnlyFans connect attempt failed')
             if self.state != 'connected':
-                self.state, self.error = 'failed', str(e)[:200]
+                self.state, self.error = 'failed', self._why_it_died(e)
+
+    def _why_it_died(self, e):
+        """The failure, and whether a proxy was in play.
+
+        A login page that refuses to load at all is nearly always the exit IP,
+        and the operator's first question is whether their proxy was actually
+        being used -- which the raw Playwright error cannot answer, so it is
+        said here rather than guessed at from the outside.
+        """
+        detail = str(e)[:200]
+        blocked = ('ERR_HTTP_RESPONSE_CODE_FAILURE' in detail
+                   or 'ERR_TUNNEL_CONNECTION_FAILED' in detail
+                   or 'ERR_CONNECTION' in detail)
+        if not blocked:
+            return detail
+        where = self._site.get('host') or self.site
+        if not self.proxy:
+            return (f'{where} refused the connection and no proxy was in use, so '
+                    f'this came from the server\u2019s own address. Set a proxy for '
+                    f'this model before signing in. ({detail[:80]})')
+        return (f'{where} refused the connection through the proxy that is set. '
+                f'That address is blocked or the credentials are wrong \u2014 try a '
+                f'different exit IP. ({detail[:80]})')
 
     def _launch(self, pw, bypass_csp=False):
         """A browser the check has no reason to refuse.
