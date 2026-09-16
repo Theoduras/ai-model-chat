@@ -147,9 +147,12 @@ const DEMO_PERSONA = 'nova';
 if (DEMO) persona = DEMO_PERSONA;
 // The landing page embeds one model, so it hides the model picker.
 const ONLY = params.get('only') === '1';
+// The dashboard embeds this as the creator's own test chat and wants the
+// picker, which an embed otherwise hides.
+const PICKER = params.get('picker') === '1';
 let PFX = 'persona_' + persona + '_';
 
-if (window.self !== window.top) { document.body.classList.add('embed'); }
+if (window.self !== window.top && !PICKER) { document.body.classList.add('embed'); }
 if (DEMO) document.body.classList.add('demo');
 
 function applyPersonaConfig(cfg) {
@@ -286,6 +289,12 @@ function loadPersonaList() {
     if (ONLY) {   // one model only, unless that slug is missing
       const only = items.filter(p => p.slug === persona);
       if (only.length) items = only;
+    }
+    // Opened from the dashboard with no model named: start on the first one
+    // the creator owns rather than the built-in default.
+    if (PICKER && !params.get('persona') && items.length
+        && !items.some(p => p.slug === persona)) {
+      switchPersona(items[0].slug);
     }
     renderRail(items);
   }).catch(() => {});

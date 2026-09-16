@@ -441,6 +441,68 @@
     else if (e.key === 'ArrowLeft')  tourGo(tour.idx - 1);
   }
 
+  // What the plan actually covers: null means every platform, a list means only
+  // those, so the done card never offers a connection the creator cannot make.
+  var PLATFORM_CARDS = {
+    telegram: { label: 'Telegram', icon: '\ud83d\udcac',
+                desc: 'Point a Telegram account at her so she replies to real fans.' },
+    fanvue:   { label: 'Fanvue', icon: '\ud83d\udc8e',
+                desc: 'Connect her Fanvue account and she starts answering subscribers.' },
+    onlyfans: { label: 'OnlyFans', icon: '\ud83d\udd35',
+                desc: 'Connect her OnlyFans account and she starts answering subscribers.' },
+    x:        { label: '\ud835\udd4f', icon: '\ud835\udd4f',
+                desc: 'Reply to mentions and DMs in her voice.' },
+    threads:  { label: 'Threads', icon: '@',
+                desc: 'Reply to mentions and DMs in her voice.' },
+  };
+
+  function allowedPlatforms() {
+    var caps = window.ME_CAPS || {};
+    return caps.platforms === undefined ? null : caps.platforms;
+  }
+
+  function tuneCard() {
+    return '<a class="ob-nxt-c" href="#" onclick="Onboarding.exit();return false;">' +
+      '<div class="ob-nxt-i">\u2699\ufe0f</div>' +
+      '<div class="ob-nxt-t">Fine-tune her</div>' +
+      '<div class="ob-nxt-d">Open the full builder to adjust anything you set up here.</div></a>';
+  }
+
+  // Fanvue and OnlyFans have their own consoles, the rest run the connect
+  // wizard on the persona just built — the same split the sidebar makes.
+  function connectCard(key) {
+    var p = PLATFORM_CARDS[key];
+    if (!p) return '';
+    var go = (key === 'fanvue' || key === 'onlyfans')
+      ? "openPlatform('" + key + "')"
+      : "PlatformSetup.open('" + key + "','" + esc(state.slug) + "')";
+    return '<a class="ob-nxt-c" href="#" onclick="' + go + ';return false;">' +
+      '<div class="ob-nxt-i">' + p.icon + '</div>' +
+      '<div class="ob-nxt-t">Connect ' + p.label + '</div>' +
+      '<div class="ob-nxt-d">' + p.desc + '</div></a>';
+  }
+
+  function nextCards() {
+    var allowed = allowedPlatforms();
+    if (allowed === null) {
+      return connectCard('telegram') +
+        '<a class="ob-nxt-c" href="#" onclick="PlatformSetup.hub();return false;">' +
+          '<div class="ob-nxt-i">\ud83d\udc8e</div>' +
+          '<div class="ob-nxt-t">See all platforms</div>' +
+          '<div class="ob-nxt-d">Every model against every platform she can work on.</div></a>' +
+        tuneCard();
+    }
+    return allowed.map(connectCard).join('') + tuneCard();
+  }
+
+  function doneSub() {
+    var allowed = allowedPlatforms();
+    return (allowed && !allowed.length)
+      ? 'Her personality, voice and funnel are set. Open the builder to keep shaping her.'
+      : 'Her personality, voice and funnel are set. Connect a platform and she\'ll start ' +
+        'answering fans on her own.';
+  }
+
   var Onboarding = {
 
     // Non-admins get the wizard; admins keep the full form.
@@ -555,21 +617,10 @@
       document.body.classList.remove('ob-running');
       byId('form-area').innerHTML =
         '<div class="ob-done">' +
-          '<div class="ob-seal">✓</div>' +
+          '<div class="ob-seal">\u2713</div>' +
           '<h2 class="ob-done-h">' + esc(name) + ' is ready.</h2>' +
-          '<p class="ob-done-s">Her personality, voice and funnel are set. Connect a platform and she\'ll start answering fans on her own.</p>' +
-          '<div class="ob-nxt">' +
-            '<a class="ob-nxt-c" href="#" onclick="PlatformSetup.open(\'telegram\',\'' +
-                esc(state.slug) + '\');return false;"><div class="ob-nxt-i">💬</div>' +
-              '<div class="ob-nxt-t">Connect Telegram</div>' +
-              '<div class="ob-nxt-d">Point a Telegram account at her so she replies to real fans.</div></a>' +
-            '<a class="ob-nxt-c" href="#" onclick="PlatformSetup.hub();return false;"><div class="ob-nxt-i">💎</div>' +
-              '<div class="ob-nxt-t">See all platforms</div>' +
-              '<div class="ob-nxt-d">Every model against every platform she can work on.</div></a>' +
-            '<a class="ob-nxt-c" href="#" onclick="Onboarding.exit();return false;"><div class="ob-nxt-i">⚙️</div>' +
-              '<div class="ob-nxt-t">Fine-tune her</div>' +
-              '<div class="ob-nxt-d">Open the full builder to adjust anything you set up here.</div></a>' +
-          '</div>' +
+          '<p class="ob-done-s">' + doneSub() + '</p>' +
+          '<div class="ob-nxt">' + nextCards() + '</div>' +
         '</div>';
     },
 

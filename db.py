@@ -8,8 +8,8 @@ import datetime
 import uuid
 
 from sqlalchemy import (
-    create_engine, Column, String, Text, DateTime, ForeignKey, Index, Integer,
-    case, func, or_
+    create_engine, Boolean, Column, String, Text, DateTime, ForeignKey, Index,
+    Integer, case, func, or_
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
@@ -284,6 +284,7 @@ class AppSetting(Base):
 
 
 GRANDFATHER_FLAG = 'entitlements_grandfather_backfill'
+OF_GRANDFATHER_FLAG = 'onlyfans_starter_grandfather_backfill'
 
 
 def get_app_setting(session, key, default=None):
@@ -498,6 +499,10 @@ class User(Base):
     referral_code = Column(String(16), unique=True, index=True)
     referred_by = Column(String(16), index=True)
 
+    # OnlyFans moved to Pro and up. Accounts that had it connected before that
+    # keep it on their existing plan, so the change is not a disconnection.
+    onlyfans_grandfathered = Column(Boolean, default=False)
+
     # Set when an admin hands out a time-boxed trial. One per account, ever:
     # its presence is what refuses a second one.
     trial_at = Column(DateTime)
@@ -509,6 +514,8 @@ class User(Base):
     phone = Column(String(40), default='')
     website = Column(String(255), default='')
     bio = Column(Text, default='')
+    # Data URL, sized down in the browser before it is posted.
+    avatar = Column(Text, default='')
     onboarded_at = Column(DateTime)
 
     # Guided persona setup, keyed by persona slug:
@@ -885,6 +892,33 @@ def grandfather_existing_users(session):
         u.grandfathered_until = u.expires_at
         n += 1
     set_app_setting(session, GRANDFATHER_FLAG, _now().isoformat())
+    session.commit()
+    return n
+
+
+def grandfather_onlyfans_users(session):
+    """One-off at the cutover: an account that already had an OnlyFans account
+    connected keeps OnlyFans on whatever plan it is on. Guarded by a setting so
+    a later revocation is not silently undone."""
+    if get_app_setting(session, OF_GRANDFATHER_FLAG):
+        return 0
+    prefix = 'onlyfans_account_'
+    slugs = [r.key[len(prefix):] for r in session.query(AppSetting)
+             .filter(AppSetting.key.like(prefix + '%')).all()
+             if (r.value or '').strip() and not r.key.startswith(prefix + 'meta_')]
+    n = 0
+    if slugs:
+        # A persona's owner_id is its workspace; the plan sits on the owner.
+        ws_ids = {sp.owner_id for sp in session.query(SavedPersona)
+                  .filter(SavedPersona.slug.in_(slugs)).all() if sp.owner_id}
+        if ws_ids:
+            uids = set(ws_ids) | {w.owner_id for w in session.query(Workspace)
+                                  .filter(Workspace.id.in_(ws_ids)).all() if w.owner_id}
+            for u in session.query(User).filter(User.id.in_(uids)).all():
+                if not u.onlyfans_grandfathered:
+                    u.onlyfans_grandfathered = True
+                    n += 1
+    set_app_setting(session, OF_GRANDFATHER_FLAG, _now().isoformat())
     session.commit()
     return n
 
@@ -1576,6 +1610,7 @@ def init_db():
         try:
             grandfather_existing_users(s)
             backfill_workspaces(s)
+            grandfather_onlyfans_users(s)
         finally:
             s.close()
     except Exception:

@@ -21,6 +21,7 @@
     { href: '/register', label: 'Register', icon: 'register', cta: true },
   ];
   var ACCOUNT_IN = [
+    { href: '/billing', label: 'Upgrade', icon: 'upgrade', cta: true, keep: true },
     { href: '/dashboard', label: 'Dashboard', icon: 'dashboard', cta: true },
     { href: '/logout', label: 'Log out', icon: 'logout' },
   ];
@@ -35,6 +36,7 @@
     register: svg('<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/>'),
     dashboard: svg('<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>'),
     logout: svg('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/>'),
+    upgrade: svg('<path d="M12 19V5"/><path d="m5 12 7-7 7 7"/>'),
     account: svg('<circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/>'),
   };
 
@@ -131,10 +133,14 @@
     var pill = accountHost();
     hosts().forEach(function (host) {
       host.classList.add('sn-links');
-      if (host.matches('[data-site-nav="inline"]')) host.classList.add('sn-inline');
+      // Inline hosts are the app's own chrome (dashboard, consoles): the
+      // marketing links belong to the marketing pages only.
+      var inline = host.matches('[data-site-nav="inline"]');
+      if (inline) host.classList.add('sn-inline');
+      var links = inline ? [] : PAGE_LINKS;
       // Only ever replace our own links: a page's theme toggle and its own
       // entries (comingsoon.html's Pricing) share this container.
-      fill(host, pill ? PAGE_LINKS : PAGE_LINKS.concat(account));
+      fill(host, pill ? links : links.concat(account));
     });
     if (pill) fill(pill, account);
   }
