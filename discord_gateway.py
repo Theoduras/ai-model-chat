@@ -108,10 +108,14 @@ class Runner:
     """One account's socket. Owns its thread, its loop, and nothing else."""
 
     def __init__(self, persona, token, props=None, on_dm=None, on_channel=None,
-                 on_typing=None, on_trace=None, on_accept=None):
+                 on_typing=None, on_trace=None, on_accept=None, capabilities=0):
         self.persona = persona
         self.token = token or ''
         self.props = props or DR.properties()
+        # What this account's own browser identified with, when a sign-in
+        # captured it. The fallback is a guess, and a guess is what a refused
+        # connection usually turns out to have been.
+        self.capabilities = int(capabilities or 0) or DR.DEFAULT_CAPABILITIES
         self.rest = DR.Rest(self.token, self.props)
         self.on_dm = on_dm or (lambda *a: None)
         self.on_channel = on_channel or (lambda *a: None)
@@ -239,7 +243,7 @@ class Runner:
         the client description the REST calls will repeat."""
         return {'op': 2, 'd': {
             'token': self.token,
-            'capabilities': DR.DEFAULT_CAPABILITIES,
+            'capabilities': self.capabilities,
             'properties': self.props,
             'presence': {'status': 'online', 'since': 0, 'activities': [], 'afk': False},
             'compress': False,

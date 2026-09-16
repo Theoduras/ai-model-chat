@@ -223,7 +223,8 @@ def service():
                 (d.get('persona') or '').strip(), (d.get('account') or '').strip(),
                 proxy=(d.get('proxy') or '').strip(),
                 user_agent=(d.get('user_agent') or '').strip(),
-                viewport=d.get('viewport') or None)
+                viewport=d.get('viewport') or None,
+                site=(d.get('site') or 'onlyfans').strip())
         except of_connect.ConnectError as e:
             return jsonify({'ok': False, 'error': str(e)[:200]}), 400
         return jsonify({'ok': True, 'attempt': attempt.status()})
@@ -352,10 +353,12 @@ class Remote:
         except of_connect.ConnectError:
             return False
 
-    def start(self, persona, account, proxy='', user_agent='', viewport=None):
+    def start(self, persona, account, proxy='', user_agent='', viewport=None,
+              site='onlyfans'):
         out = self.call('POST', '/session',
                         {'persona': persona, 'account': account, 'proxy': proxy,
-                         'user_agent': user_agent, 'viewport': viewport},
+                         'user_agent': user_agent, 'viewport': viewport,
+                         'site': site},
                         timeout=START_TIMEOUT)
         if not out.get('attempt'):
             raise of_connect.ConnectError(out.get('error') or

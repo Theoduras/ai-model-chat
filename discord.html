@@ -65,19 +65,26 @@
       </div>
     </div>
     <div class="row-inline">
-      <div class="field" style="flex:2;">
-        <label>Her Discord token</label>
-        <input type="password" id="dc-token" autocomplete="new-password" spellcheck="false"
-               placeholder="paste the account token">
-        <span class="hint">Stored encrypted and never shown again. Taken from the account
-          she posts as — not a bot token.</span>
-      </div>
-    </div>
-    <div class="row-inline">
-      <button class="btn-ai" onclick="connect()">Connect</button>
+      <button class="btn-ai" onclick="startSignin()">Sign in to Discord</button>
       <button class="btn-ai" style="background:var(--surface); color:var(--text-2);"
               onclick="disconnect()">Disconnect</button>
     </div>
+    <span class="hint">A real Discord login page opens in a window. Sign in there as you
+      would on your own laptop — the human check, 2FA and any emailed code all happen on
+      Discord's own page. Nothing you type reaches us; what comes back is the session her
+      browser was already using.</span>
+    <details style="margin-top:12px;">
+      <summary class="hint" style="cursor:pointer;">Paste a token instead</summary>
+      <div class="row-inline" style="margin-top:10px;">
+        <div class="field" style="flex:2;">
+          <input type="password" id="dc-token" autocomplete="new-password" spellcheck="false"
+                 placeholder="paste the account token">
+          <span class="hint">Only needed if this deployment has no sign-in browser.
+            Stored encrypted and never shown again.</span>
+        </div>
+        <button class="btn-ai" onclick="connect()">Use token</button>
+      </div>
+    </details>
     <div id="account-status" class="hint" style="margin-top:10px;"></div>
   </div>
 
@@ -257,6 +264,21 @@ async function connect(){
     el('dc-token').value='';
     await loadStatus();
   }catch(e){note(box,e.message,true);}
+}
+
+function startSignin(){
+  // A popup, not a panel: Discord's human check reads the window it runs in,
+  // and an iframe is not one.
+  const w = Math.min(1100, Math.max(700, Math.round(screen.availWidth * 0.7)));
+  const h = Math.min(900, Math.max(600, Math.round(screen.availHeight * 0.8)));
+  const win = window.open('/discord/connect?site=discord&persona='
+    + encodeURIComponent(slug()), 'discord-signin',
+    'width=' + w + ',height=' + h + ',menubar=no,toolbar=no');
+  if(!win){note(el('account-status'),'Allow popups for this site, then try again.',true);return;}
+  note(el('account-status'),'Signing in — finish in the window that opened.');
+  const back=ev=>{if(ev.data&&ev.data.onlyfansConnect){window.removeEventListener('message',back);loadStatus();}};
+  window.addEventListener('message',back);
+  const watch=setInterval(()=>{if(win.closed){clearInterval(watch);loadStatus();}},1500);
 }
 
 async function disconnect(){

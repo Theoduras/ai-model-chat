@@ -28,6 +28,7 @@ kept as a secondary target and still works, but is not where the app is deployed
 app.py                          — Flask server, Gemini API, multi-persona, builder API
 onlyfans.py                     — OnlyFansAPI transport (OnlyFans chat)
 onlyfans.html                   — OnlyFans console (connect, auto-reply, PPV)
+of_connect.py                   — Hosted sign-in browser (OnlyFans and Discord)
 discord_gateway.py              — Discord user-account gateway, gates and caches
 discord_rest.py                 — Discord REST, rate limits, client fingerprint
 discord_stub.py                 — Offline Discord transport (tests only)
@@ -171,6 +172,12 @@ Stay completely in character. Never mention being an AI.
   so anything that makes an account look automated is a bug: one socket per
   token, one stable client fingerprint, never join a server, never open a DM
   first, and never reconnect at a token Discord has already refused.
+- Her Discord account is connected through the same hosted sign-in browser
+  OnlyFans uses (`of_connect.SITES`, `/discord/connect`), not by pasting a
+  token. The operator signs in on Discord's own page, so the captcha, 2FA and
+  the new-device code are Discord's to handle; what comes back is the token
+  plus the build and capabilities that account really identified with. Those
+  two are what the gateway must then claim to be — captured, never guessed.
 - Fanvue, OnlyFans and Discord DMs share one reply engine through the platform
   adapters (`_Platform` in `app.py`): a platform says where its state is keyed,
   how a chat reads, and how a message goes out. New platform work belongs in an

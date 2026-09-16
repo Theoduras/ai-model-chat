@@ -343,6 +343,61 @@ def test_a_channel_reply():
     check('a channel taken off the allowlist gets nothing', not prompts, prompts)
 
 
+def test_signing_in_through_the_browser():
+    """The sign-in relay, driven as Discord rather than as OnlyFans. Nothing
+    here opens a browser — what is checked is that the site is carried through
+    and that the two never tread on each other."""
+    import of_connect
+
+    check('discord is a site the relay knows', 'discord' in of_connect.SITES)
+    check('and it opens Discord, not OnlyFans',
+          of_connect.SITES['discord']['url'].startswith('https://discord.com'))
+    check('an attempt built without a site still answers as one',
+          of_connect.Attempt.site == 'onlyfans')
+
+    made = of_connect.Attempt.__new__(of_connect.Attempt)
+    made.site = 'discord'
+    made._site = of_connect.SITES['discord']
+    made._dc_seen = {'token': 'tok-abc',
+                     'super_properties': __import__('base64').b64encode(
+                         json.dumps({'client_build_number': 4242}).encode()).decode(),
+                     'user_agent': 'Mozilla/5.0 test'}
+    made._dc_caps = 16381
+    made.proxy = ''
+    made.account = 'dc_lilly'
+    made.capture_note = ''
+    made.result = {}
+    made.probes = 0
+    made.state = 'signin'
+    made._done = __import__('threading').Event()
+    made._pending_session = None
+
+    class Page:
+        def __init__(self, me):
+            self.me = me
+
+        def evaluate(self, js):
+            return self.me
+
+    made._capture_discord(Page({}), None)
+    check('a page that is not signed in yet finishes nothing',
+          made.state == 'signin' and made.capture_note == 'awaiting_login')
+
+    made._capture_discord(Page({'id': '4242', 'username': 'lilly'}), None)
+    check('once it is, the sign-in is done', made.state == 'connected')
+    held = made._pending_session
+    check('the token comes back', (held or {}).get('token') == 'tok-abc')
+    check('with the build the real client used, not a guess',
+          (held or {}).get('build') == 4242)
+    check('and the capabilities it really identified with',
+          (held or {}).get('capabilities') == 16381)
+    check('claim hands it over exactly once',
+          of_connect.claim(made) == held and of_connect.claim(made) is None)
+
+    check('the app keys Discord accounts apart from OnlyFans',
+          app._dc_account_id('lilly') == 'dc_lilly')
+
+
 def test_the_winback_ladder():
     """What happens after the two short nudges are spent. Days 1 and 4 are a
     plain hello; the offer rungs come later and carry the link."""
@@ -441,7 +496,8 @@ if __name__ == '__main__':
                test_a_click_is_recorded_as_opened_not_paid,
                test_a_channel_reply,
                test_posting_on_a_schedule,
-               test_the_winback_ladder):
+               test_the_winback_ladder,
+               test_signing_in_through_the_browser):
         restore()
         fn()
     restore()

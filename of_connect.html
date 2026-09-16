@@ -55,6 +55,23 @@
 <script>
 const q = new URLSearchParams(location.search);
 const persona = q.get('persona') || '';
+// The relay is the same for any login page — a picture of a real browser and
+// the operator's own mouse and keys going back to it. Only the site it opened
+// and the routes that reach it differ, so those are read from the URL rather
+// than duplicated into a second copy of this window.
+const site = q.get('site') === 'discord' ? 'discord' : 'onlyfans';
+const API = '/api/' + site + '/connect';
+const SITES = {
+  onlyfans: {host: 'onlyfans.com',
+             foot: '<b>Sign in exactly as you would on your own laptop.</b> '
+                 + 'Your password goes to OnlyFans, never to us. Move the mouse '
+                 + 'and click the human check yourself — this window is a real browser.'},
+  discord: {host: 'discord.com',
+            foot: '<b>Sign in exactly as you would on your own laptop.</b> '
+                + 'Her password goes to Discord, never to us. Do the human check '
+                + 'and any 2FA or emailed code here — this window is a real '
+                + 'browser, so Discord treats it as one.'}
+};
 let attempt = q.get('attempt') || '';
 let timer = null, natural = {w: 0, h: 0}, lastMove = 0, finished = false;
 // The browser lives in another service now, and a slow answer from it is not
@@ -64,6 +81,9 @@ const GIVE_UP_AFTER = 5;
 
 const $ = id => document.getElementById(id);
 const img = $('frame');
+document.title = 'Connect ' + (site === 'discord' ? 'Discord' : 'OnlyFans');
+document.querySelector('.url').textContent = SITES[site].host;
+$('foot').innerHTML = SITES[site].foot;
 
 async function post(url, body){
   const r = await fetch(url, {method: 'POST',
@@ -78,7 +98,7 @@ async function begin(){
   if (attempt) return poll();
   // The hosted browser is made the size of this window, so the page is not
   // scaled and a click lands where it looks like it will.
-  const r = await post('/api/onlyfans/connect/browser', {
+  const r = await post(API + '/browser', {
     persona: persona, country: q.get('country') || '',
     width: Math.round($('stage').clientWidth),
     height: Math.round($('stage').clientHeight)});
@@ -92,7 +112,7 @@ async function poll(){
   if (finished) return;
   let r, status = 0;
   try {
-    const res = await fetch('/api/onlyfans/connect/frame?attempt=' +
+    const res = await fetch(API + '/frame?attempt=' +
       encodeURIComponent(attempt) + '&persona=' + encodeURIComponent(persona));
     status = res.status;
     r = await res.json();
@@ -196,7 +216,7 @@ async function pump(){
       // for that and says so on its own. Losing one keystroke to a blip beats
       // tearing the window down, and beats wedging the queue behind it.
       try {
-        r = await post('/api/onlyfans/connect/input',
+        r = await post(API + '/input',
           Object.assign({attempt: attempt, persona: persona}, item));
       } catch (e) { continue; }
       if (r.retry && item.kind !== 'move'){
@@ -264,7 +284,7 @@ document.addEventListener('paste', ev => {
 async function cancel(){
   finished = true;
   if (timer) clearTimeout(timer);
-  await post('/api/onlyfans/connect/cancel', {persona: persona});
+  await post(API + '/cancel', {persona: persona});
   notify();
   window.close();
 }

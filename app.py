@@ -20714,7 +20714,8 @@ def _dc_connect(persona):
     live = DG.register(persona, token, _dc_props(persona),
                        on_dm=_dc_on_dm, on_channel=_dc_on_channel,
                        on_typing=_dc_on_typing, on_trace=_dc_on_trace,
-                       on_accept=_dc_on_accept)
+                       on_accept=_dc_on_accept,
+                       capabilities=int(_dc_account(persona).get('capabilities') or 0))
     live.configure({'allow': _dc_guilds(persona), 'chime': _dc_chime(persona),
                     'dm': _dc_dm_cfg(persona),
                     'accept_route': _get_setting('discord_accept_endpoint') or ''})
@@ -21107,6 +21108,162 @@ def api_discord_status():
                     'chime': _dc_chime(persona),
                     'post': _dc_post_cfg(persona),
                     'transport': DISCORD_TRANSPORT})
+
+
+# ── Signing in without going and finding a token ──────────────────────────────
+#
+# Discord's gateway accepts nothing but a token, so one always exists. What the
+# operator should not have to do is open devtools and dig it out of a request
+# header by hand. So the same hosted browser that signs OnlyFans accounts in
+# opens Discord's own login page: the operator signs in there, which means the
+# captcha, the 2FA prompt and the new-device email code are all handled by
+# Discord's own page rather than re-implemented here badly.
+#
+# The other half of the reason is the fingerprint. What comes back is not just
+# the token but the exact client build and capabilities that account really
+# identified with — numbers that change with Discord's releases and that we
+# would otherwise be guessing at, with a wrong guess showing up as a refused
+# connection at best and an automated-looking account at worst.
+
+
+def _dc_conn():
+    """The hosted browser, imported here rather than at the top of the file.
+
+    The OnlyFans modules only load when that platform is running in direct mode;
+    Discord needs the browser either way, so it asks for it when it needs it.
+    """
+    import of_browser as _ofb
+    import of_connect as _ofc
+    return _ofb.remote() or _ofc
+
+
+def _dc_account_id(persona):
+    """Keyed apart from OnlyFans' `of_…`, so one creator can hold a
+    half-finished sign-in on both at once without either evicting the other."""
+    return f'dc_{persona}'
+
+
+def _dc_adopt(attempt):
+    """Take the credentials off a finished sign-in and store them."""
+    persona = attempt.status().get('persona') or ''
+    try:
+        session = _dc_conn().claim(attempt) or {}
+    except Exception as e:
+        _set_setting(f'discord_adopt_error_{persona}', str(e)[:200])
+        return False
+    token = (session.get('token') or '').strip()
+    if not token:
+        _set_setting(f'discord_adopt_error_{persona}',
+                     'the sign-in finished but handed back no token')
+        return False
+    _dc_set_token(persona, token)
+    _dc_save_account(persona,
+                     user_id=str(session.get('user_id') or ''),
+                     username=session.get('username') or '',
+                     ua=session.get('user_agent') or '',
+                     build=int(session.get('build') or 0),
+                     capabilities=int(session.get('capabilities') or 0),
+                     connected_at=int(time.time()))
+    _set_setting(f'discord_attempt_{persona}', '')
+    _set_setting(f'discord_adopt_error_{persona}', '')
+    _dc_connect(persona)
+    return True
+
+
+@app.route('/discord/connect')
+def discord_connect_page():
+    # A popup rather than a panel in the console, for the same reason the
+    # OnlyFans one is: a human check reads the window it is running in, and an
+    # iframe is not one.
+    if not _current_user():
+        return redirect('/login?next=/discord')
+    # The same window OnlyFans uses. It is a picture of a browser and the
+    # operator's own mouse going back to it, which is not a per-site idea — it
+    # reads which site it opened off the query string.
+    return send_from_directory(BASE_DIR, 'of_connect.html')
+
+
+@app.route('/api/discord/connect/browser', methods=['POST'])
+@platform_scoped
+def api_discord_connect_browser():
+    persona = request_persona()
+    d = request.json or {}
+
+    def _side(value, fallback, low, high):
+        try:
+            return max(low, min(int(value), high))
+        except (TypeError, ValueError):
+            return fallback
+
+    viewport = {'width': _side(d.get('width'), 1000, 600, 1600),
+                'height': _side(d.get('height'), 760, 500, 1200)}
+    try:
+        attempt = _dc_conn().start(
+            persona, _dc_account_id(persona),
+            # The same fixed exit address OnlyFans uses. A login that arrives
+            # from one address and a gateway that connects from another is a
+            # pair Discord notices.
+            proxy=_of_proxy_for(persona),
+            viewport=viewport, site='discord')
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]}), 400
+    _set_setting(f'discord_attempt_{persona}', attempt.id)
+    return jsonify({'ok': True, 'attempt': attempt.status()})
+
+
+@app.route('/api/discord/connect/frame')
+@platform_scoped
+def api_discord_connect_frame():
+    persona = request_persona()
+    attempt_id = (request.args.get('attempt')
+                  or _get_setting(f'discord_attempt_{persona}') or '')
+    attempt = _dc_conn().get(attempt_id, frame=True) if attempt_id else None
+    if not attempt:
+        return jsonify({'ok': False, 'error': 'no such sign-in'}), 404
+    status = attempt.status()
+    if status.get('state') == 'connected' and not _dc_account(persona).get('user_id'):
+        if not _dc_adopt(attempt):
+            status = dict(status, state='failed',
+                          error=_get_setting(f'discord_adopt_error_{persona}') or
+                          'the sign-in finished but could not be stored')
+    return jsonify({'ok': True, 'attempt': status, 'frame': attempt.snapshot()})
+
+
+@app.route('/api/discord/connect/input', methods=['POST'])
+@platform_scoped
+def api_discord_connect_input():
+    persona = request_persona()
+    d = request.json or {}
+    import of_connect as _ofc
+    kind = (d.get('kind') or '').strip()
+    if kind not in _ofc.INPUT_KINDS:
+        return jsonify({'ok': False, 'error': 'unknown input'}), 400
+    attempt_id = (d.get('attempt')
+                  or _get_setting(f'discord_attempt_{persona}') or '')
+    attempt = _dc_conn().get(attempt_id) if attempt_id else None
+    if not attempt:
+        return jsonify({'ok': False, 'error': 'no such sign-in'}), 404
+    try:
+        attempt.act(kind, x=d.get('x'), y=d.get('y'), text=d.get('text'),
+                    key=d.get('key'), dy=d.get('dy'),
+                    points=(d.get('points') or [])[:60])
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]}), 400
+    return jsonify({'ok': True})
+
+
+@app.route('/api/discord/connect/cancel', methods=['POST'])
+@platform_scoped
+def api_discord_connect_cancel():
+    persona = request_persona()
+    attempt_id = _get_setting(f'discord_attempt_{persona}') or ''
+    if attempt_id:
+        try:
+            _dc_conn().cancel(attempt_id)
+        except Exception:
+            pass
+    _set_setting(f'discord_attempt_{persona}', '')
+    return jsonify({'ok': True})
 
 
 @app.route('/api/discord/post-now', methods=['POST'])

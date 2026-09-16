@@ -41,6 +41,16 @@ BROWSER_PATH = (os.getenv('ONLYFANS_CHROME')
                 or os.getenv('PLAYWRIGHT_CHROMIUM') or '').strip()
 SIGNIN_URL = 'https://onlyfans.com/'
 COOKIE_ORIGIN = 'https://onlyfans.com'
+# Which site a sign-in is for. Everything that makes this a *browser* rather
+# than an OnlyFans client — the input relay, the frame capture, the profile, the
+# anti-detection setup — works for any login page, so the parts that do not are
+# named here rather than spread through the module. The only real difference is
+# what a finished sign-in leaves behind and where to look for it.
+SITES = {
+    'onlyfans': {'url': SIGNIN_URL, 'origin': COOKIE_ORIGIN, 'prefix': 'ofc_'},
+    'discord': {'url': 'https://discord.com/login', 'origin': 'https://discord.com',
+                'prefix': 'dcc_'},
+}
 VIEWPORT = {'width': 900, 'height': 700}
 FRAME_QUALITY = 55
 # Everything _apply knows how to do. The route rejects anything else, so the two
@@ -136,10 +146,16 @@ class Attempt:
     # share — and status() cannot trip over an attempt built without it.
     signing_sample = {}
     _sampled = False
+    # Same reason: an attempt assembled field by field rather than constructed
+    # still has to be able to say which site it is for.
+    site = 'onlyfans'
+    _site = SITES['onlyfans']
 
     def __init__(self, persona, account, proxy='', user_agent='', viewport=None,
-                 drive=True):
-        self.id = 'ofc_' + uuid.uuid4().hex[:16]
+                 drive=True, site='onlyfans'):
+        self.site = site if site in SITES else 'onlyfans'
+        self._site = SITES[self.site]
+        self.id = self._site['prefix'] + uuid.uuid4().hex[:16]
         self.persona = persona
         self.account = account
         self.proxy = proxy
@@ -189,7 +205,7 @@ class Attempt:
     def status(self):
         self.touched = time.time()
         return {'attempt': self.id, 'state': self.state, 'error': self.error,
-                'persona': self.persona, 'account': self.account,
+                'persona': self.persona, 'account': self.account, 'site': self.site,
                 'width': self.viewport['width'], 'height': self.viewport['height'],
                 'expires_in': max(0, int(ATTEMPT_TTL - (time.time() - self.started))),
                 'result': self.result, 'probes': self.probes,
@@ -270,8 +286,11 @@ class Attempt:
     def _drive(self, pw):
         browser, context = self._launch(pw)
         page = context.pages[0] if context.pages else context.new_page()
-        self._watch_signing(page)
-        page.goto(SIGNIN_URL, wait_until='domcontentloaded', timeout=60000)
+        if self.site == 'discord':
+            self._watch_discord(page)
+        else:
+            self._watch_signing(page)
+        page.goto(self._site['url'], wait_until='domcontentloaded', timeout=60000)
         # What the window is told to scale by has to be the size of the frames
         # it actually gets. Sizing the window rather than overriding the
         # viewport means the page is a little smaller than we asked for -- the
@@ -430,6 +449,111 @@ class Attempt:
         except Exception:
             pass
 
+    def _watch_discord(self, page):
+        """Catch the credentials off Discord's own client as it uses them.
+
+        Discord deletes `window.localStorage` in its client specifically to stop
+        the token being read out of the page, so it is taken the way it actually
+        travels: on the Authorization header of the first API call the signed-in
+        client makes. The same request carries the two things that are otherwise
+        guesswork — the client build the account really identified with, and the
+        user agent — and a gateway whose fingerprint disagrees with the browser
+        it claims to be is the loudest thing an automated account can do.
+        """
+        def seen(request):
+            try:
+                if '/api/' not in request.url or 'discord.com' not in request.url:
+                    return
+                headers = {k.lower(): v for k, v in (request.headers or {}).items()}
+                token = (headers.get('authorization') or '').strip()
+                # A bot token would be prefixed; a user's is bare. An OAuth
+                # bearer belongs to some embedded app, not to her account.
+                if not token or ' ' in token:
+                    return
+                self._dc_seen = {
+                    'token': token,
+                    'super_properties': headers.get('x-super-properties') or '',
+                    'user_agent': headers.get('user-agent') or '',
+                }
+            except Exception:
+                pass
+
+        def identified(ws):
+            # The client opens the gateway itself on load, and its IDENTIFY
+            # carries the capabilities bitfield — a number that changes with
+            # Discord's own releases and cannot be read from anywhere else.
+            # Taking it from the real client is the difference between matching
+            # the account's own browser and guessing at it.
+            def frame(payload):
+                try:
+                    sent = json.loads(payload)
+                    if sent.get('op') == 2:
+                        self._dc_caps = int((sent.get('d') or {}).get('capabilities') or 0)
+                except Exception:
+                    pass
+            try:
+                ws.on('framesent', frame)
+            except Exception:
+                pass
+
+        try:
+            page.on('request', seen)
+            page.on('websocket', identified)
+        except Exception:
+            pass
+
+    def _capture_discord(self, page, context):
+        """Finished once the page has made a call as somebody.
+
+        Deliberately no /users/@me of our own: the client makes that call itself
+        the moment it loads, so waiting for it proves the credentials work
+        without adding a request that the real client never made.
+        """
+        held = getattr(self, '_dc_seen', None)
+        if not held:
+            self.capture_note = 'awaiting_login'
+            return
+        build, capabilities = 0, int(getattr(self, '_dc_caps', 0) or 0)
+        try:
+            raw = json.loads(base64.b64decode(held['super_properties']).decode())
+            build = int(raw.get('client_build_number') or 0)
+        except Exception:
+            pass
+        me = {}
+        try:
+            me = page.evaluate(
+                '''async () => {
+                     const r = await fetch('/api/v9/users/@me', {credentials: 'include'});
+                     return r.ok ? await r.json() : {};
+                   }''')
+        except Exception:
+            pass
+        if not (me or {}).get('id'):
+            self.capture_note = 'awaiting_login'
+            return
+        session = {'user_id': str(me.get('id')),
+                   'username': me.get('username') or '',
+                   'name': me.get('global_name') or me.get('username') or '',
+                   'token': held['token'],
+                   'super_properties': held['super_properties'],
+                   'build': build, 'capabilities': capabilities,
+                   'user_agent': held['user_agent'],
+                   'proxy': self.proxy, 'verified': True}
+        self.capture_note = 'captured'
+        self.result = {'user_id': session['user_id'], 'username': session['username'],
+                       'name': session['name'], 'build': build}
+        if _sink:
+            _sink(self.account, session)
+        else:
+            # No sink means we are running inside the app rather than the
+            # browser service, and Discord's credentials live in its own
+            # encrypted row rather than the OnlyFans vault — so they wait here
+            # for claim() instead of being written from a module that cannot
+            # reach the database.
+            self._pending_session = session
+        self.state = 'connected'
+        self._done.set()
+
     def _try_capture_session(self, page, context):
         """Is the creator in yet? If so, take the session and stop.
 
@@ -437,6 +561,9 @@ class Attempt:
         signed in and signs its own requests, so a successful answer proves the
         session works before we ever store it.
         """
+        if self.site == 'discord':
+            self.probes += 1
+            return self._capture_discord(page, context)
         self.probes += 1
         try:
             self.page_url = page.url
@@ -784,19 +911,22 @@ def _proxy_options(proxy):
 
 # ── the registry ──────────────────────────────────────────────────────────────
 
-def start(persona, account, proxy='', user_agent='', viewport=None):
+def start(persona, account, proxy='', user_agent='', viewport=None, site='onlyfans'):
     if not available():
         raise ConnectError('this host has no browser installed, so an account '
                            'cannot be connected here')
     sweep()
     with _lock:
         for a in list(_attempts.values()):
-            if a.persona == persona:
-                logger.info('of-connect %s dropped: %s started another sign-in',
-                            a.id, persona)
+            # Only the same site: signing into Discord is not a reason to throw
+            # away a half-finished OnlyFans sign-in the same creator is holding
+            # a phone for.
+            if a.persona == persona and getattr(a, 'site', 'onlyfans') == site:
+                logger.info('of-connect %s dropped: %s started another %s sign-in',
+                            a.id, persona, site)
                 a.close()
                 _attempts.pop(a.id, None)
-        attempt = Attempt(persona, account, proxy, user_agent, viewport)
+        attempt = Attempt(persona, account, proxy, user_agent, viewport, site=site)
         _attempts[attempt.id] = attempt
     return attempt
 
@@ -846,8 +976,13 @@ def cancel(attempt_id):
 
 def claim(attempt):
     """The raw session of a finished attempt, for a caller that still has to
-    store it. Nothing to hand back here: the sink already put it in the vault."""
-    return None
+    store it. Usually nothing to hand back — the sink already put it in the
+    vault — but a site that keeps its credentials somewhere else leaves them
+    here, once."""
+    held = getattr(attempt, '_pending_session', None)
+    if held is not None:
+        attempt._pending_session = None
+    return held
 
 
 def sweep():
