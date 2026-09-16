@@ -315,19 +315,64 @@ function flush(){
   send('move', {points: points});
 }
 
+// How often the path is handed over, and how far the pointer has to have
+// travelled to be worth handing over at all. Every batch is a request that
+// the browser thread then replays in real time before it takes the next
+// screenshot, so a batch the creator cannot see the result of is a frame they
+// do not get.
+const MOVE_EVERY = 200, MOVE_AT_LEAST = 4;
+
+function moved(points){
+  if (points.length < 2) return 0;
+  const a = points[0], b = points[points.length - 1];
+  return Math.abs(b.x - a.x) + Math.abs(b.y - a.y);
+}
+
 img.addEventListener('mousemove', ev => {
   const p = at(ev); if (!p) return;
   p.t = Date.now();
   if (path.length < 60) path.push(p);
-  if (p.t - lastMove < 120) return;
+  if (p.t - lastMove < MOVE_EVERY) return;
+  if (moved(path) < MOVE_AT_LEAST) return;
   lastMove = p.t;
   flush();
 });
+
+// A press and a release a moment apart at the same spot is a click, and goes
+// over as one: two requests to land one click is the difference between a
+// button that responds and one that has to be hit twice. A press that is held
+// -- a drag, a long press -- is sent as itself once the window is up.
+const CLICK_WINDOW = 90;
+let pending = null;
+
+function pressNow(){
+  if (!pending) return;
+  const p = pending.at;
+  pending.sent = true;
+  if (pending.timer) { clearTimeout(pending.timer); pending.timer = null; }
+  send('down', p);
+}
+
 img.addEventListener('mousedown', ev => {
   flush();                              // the approach lands before the press
-  const p = at(ev); if (p) send('down', p);
+  const p = at(ev); if (!p) return;
+  pending = {at: p, timer: null, sent: false};
+  pending.timer = setTimeout(pressNow, CLICK_WINDOW);
 });
-img.addEventListener('mouseup', ev => { const p = at(ev); if (p) send('up', p); });
+img.addEventListener('mouseup', ev => {
+  const p = at(ev); if (!p) return;
+  const held = pending;
+  pending = null;
+  if (!held){ send('up', p); return; }
+  if (held.timer) clearTimeout(held.timer);
+  if (held.sent){ send('up', p); return; }
+  if (Math.abs(p.x - held.at.x) + Math.abs(p.y - held.at.y) > 6){
+    send('down', held.at);
+    send('up', p);
+    return;
+  }
+  send('click', held.at);
+});
 img.addEventListener('contextmenu', ev => ev.preventDefault());
 img.addEventListener('wheel', ev => { ev.preventDefault(); send('scroll', {dy: ev.deltaY}); },
                      {passive: false});

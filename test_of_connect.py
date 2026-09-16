@@ -229,6 +229,46 @@ class BrowserTest(unittest.TestCase):
             self.assertEqual(of_connect.browser_path(), '/somewhere/chrome')
 
 
+class StillPageTest(unittest.TestCase):
+    """A login page sits still most of the time. The window is told that by
+    the frame time not moving, which is also how it knows to stop asking so
+    often -- so an unchanged picture must not count as a new one."""
+
+    class Page:
+        def __init__(self, shots):
+            self.shots = list(shots)
+            self.taken = 0
+
+        def screenshot(self, **kw):
+            self.taken += 1
+            return self.shots.pop(0)
+
+    def test_an_unchanged_picture_is_not_a_new_frame(self):
+        a = bare_attempt()
+        page = self.Page([b'one', b'one', b'two'])
+        a._capture(page)
+        first = a.frame_at
+        self.assertEqual(a.frame, b'one')
+        self.assertTrue(first)
+
+        a.frame_at -= of_connect.FRAME_EVERY + 1
+        held = a.frame_at
+        a._capture(page)
+        self.assertEqual(a.frame_at, held, 'the same picture moved the clock on')
+
+        a.frame_at -= of_connect.FRAME_EVERY + 1
+        a._capture(page)
+        self.assertEqual(a.frame, b'two')
+        self.assertGreater(a.frame_at, held)
+
+    def test_frames_are_not_taken_faster_than_the_gate(self):
+        a = bare_attempt()
+        page = self.Page([b'one', b'two'])
+        a._capture(page)
+        a._capture(page)
+        self.assertEqual(page.taken, 1)
+
+
 class FramePollTest(unittest.TestCase):
     """The relay polls for a picture several times a second; the page behind it
     is screenshotted five times a second at most. A poll that already has the
