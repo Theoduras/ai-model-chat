@@ -85,7 +85,8 @@ INPUT_WAIT = float(os.getenv('CONNECT_INPUT_WAIT', '0.05'))
 FRAME_EVERY = float(os.getenv('CONNECT_FRAME_EVERY', '0.18'))
 # Everything _apply knows how to do. The route rejects anything else, so the two
 # have to be read from the same place.
-INPUT_KINDS = ('click', 'move', 'down', 'up', 'type', 'key', 'scroll', 'back')
+INPUT_KINDS = ('click', 'move', 'down', 'up', 'type', 'key', 'scroll', 'back',
+               'goto')
 # How long a half-finished sign-in is kept alive. Long enough to find a phone
 # and read a code out of it, short enough that an abandoned tab does not hold a
 # browser and an IP for the rest of the day.
@@ -659,6 +660,25 @@ class Attempt:
             page.mouse.wheel(0, float(kw.get('dy') or 0))
         elif kind == 'back':
             page.go_back()
+        elif kind == 'goto':
+            # A sign-in link emailed to the operator opens in whatever browser
+            # their mail client hands it to, which signs them in there and not
+            # here -- and a one-time link is spent either way. Pasting it in is
+            # the only way that path reaches this window.
+            #
+            # Held to the site being signed in to: this window will follow a
+            # link the operator pastes, and an attempt is a browser holding
+            # credentials, so it does not follow one anywhere else.
+            url = str(kw.get('url') or '').strip()[:2000]
+            host = urllib.parse.urlsplit(url).hostname or ''
+            allowed = urllib.parse.urlsplit(self._site['origin']).hostname or ''
+            root = '.'.join(allowed.split('.')[-2:])
+            if not url.startswith('https://') or not (host == allowed
+                                                      or host.endswith('.' + root)
+                                                      or host == root):
+                raise ConnectError(f'That link is not on {root}, so this window '
+                                   f'will not open it.')
+            page.goto(url, wait_until='domcontentloaded', timeout=60000)
 
     def _watch_signing(self, page):
         """Keep the newest request OnlyFans' own page signed.

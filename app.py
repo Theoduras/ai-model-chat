@@ -19522,7 +19522,7 @@ def api_onlyfans_connect_input():
         return jsonify({'ok': False, 'error': 'that sign-in is no longer open'}), 404
     try:
         attempt.act(kind, x=d.get('x'), y=d.get('y'), text=d.get('text'),
-                    key=d.get('key'), dy=d.get('dy'),
+                    key=d.get('key'), dy=d.get('dy'), url=d.get('url'),
                     points=(d.get('points') or [])[:60])
     except _OF_UNREACHABLE:
         return _of_busy()
@@ -21699,7 +21699,7 @@ def api_discord_connect_input():
         return jsonify({'ok': False, 'error': 'no such sign-in'}), 404
     try:
         attempt.act(kind, x=d.get('x'), y=d.get('y'), text=d.get('text'),
-                    key=d.get('key'), dy=d.get('dy'),
+                    key=d.get('key'), dy=d.get('dy'), url=d.get('url'),
                     points=(d.get('points') or [])[:60])
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)[:200]}), 400
@@ -22133,7 +22133,7 @@ def api_instagram_connect_input():
         return jsonify({'ok': False, 'error': 'no such sign-in'}), 404
     try:
         attempt.act(kind, x=d.get('x'), y=d.get('y'), text=d.get('text'),
-                    key=d.get('key'), dy=d.get('dy'),
+                    key=d.get('key'), dy=d.get('dy'), url=d.get('url'),
                     points=(d.get('points') or [])[:60])
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)[:200]}), 400
@@ -23306,7 +23306,7 @@ def api_reddit_connect_input():
         return jsonify({'ok': False, 'error': 'no such sign-in'}), 404
     try:
         attempt.act(kind, x=d.get('x'), y=d.get('y'), text=d.get('text'),
-                    key=d.get('key'), dy=d.get('dy'),
+                    key=d.get('key'), dy=d.get('dy'), url=d.get('url'),
                     points=(d.get('points') or [])[:60])
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)[:200]}), 400
@@ -23699,7 +23699,7 @@ def api_tiktok_connect_input():
         return jsonify({'ok': False, 'error': 'no such sign-in'}), 404
     try:
         attempt.act(kind, x=d.get('x'), y=d.get('y'), text=d.get('text'),
-                    key=d.get('key'), dy=d.get('dy'),
+                    key=d.get('key'), dy=d.get('dy'), url=d.get('url'),
                     points=(d.get('points') or [])[:60])
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)[:200]}), 400

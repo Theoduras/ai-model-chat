@@ -565,6 +565,51 @@ class PageFetchFallbackTest(unittest.TestCase):
         self.assertEqual(sig.page.evaluate.call_count, 1)
 
 
+
+class GotoGuardTests(unittest.TestCase):
+    """A sign-in link emailed to the operator opens in whatever browser their
+    mail client hands it to, which signs them in there rather than in the
+    hosted window. Pasting it in is the only way that path reaches this
+    browser -- and this window holds credentials, so it follows a pasted link
+    only on the site being signed in to."""
+
+    class Page:
+        def __init__(self):
+            self.went = []
+
+        def goto(self, url, **kw):
+            self.went.append(url)
+
+    def _attempt(self, site='reddit'):
+        made = of_connect.Attempt.__new__(of_connect.Attempt)
+        made.site = site
+        made._site = of_connect.SITES[site]
+        return made
+
+    def test_it_follows_a_link_on_the_site_being_signed_in_to(self):
+        made = self._attempt()
+        for url in ('https://www.reddit.com/r/x', 'https://reddit.com/login',
+                    'https://old.reddit.com/a'):
+            page = self.Page()
+            made._apply(page, 'goto', {'url': url})
+            self.assertEqual(page.went, [url])
+
+    def test_it_refuses_a_link_anywhere_else(self):
+        made = self._attempt()
+        for url in ('https://evil.com/steal',
+                    'https://reddit.com.evil.com/x',
+                    'https://notreddit.com/x',
+                    'http://www.reddit.com/x',
+                    'javascript:alert(1)',
+                    ''):
+            page = self.Page()
+            with self.assertRaises(of_connect.ConnectError):
+                made._apply(page, 'goto', {'url': url})
+            self.assertEqual(page.went, [])
+
+    def test_goto_is_an_input_the_route_will_accept(self):
+        self.assertIn('goto', of_connect.INPUT_KINDS)
+
 if __name__ == '__main__':
     unittest.main()
 
