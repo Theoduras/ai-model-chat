@@ -59,7 +59,7 @@
 </div>
 
 <div class="modal-overlay" id="pl-modal" onclick="if(event.target===this)plClose()">
-  <div class="modal" style="max-width:520px;">
+  <div class="modal pl-post-modal">
     <div class="modal-header">
       <h2 id="pl-m-title">Post</h2>
       <button class="modal-close" onclick="plClose()" aria-label="Close">&times;</button>
@@ -172,6 +172,8 @@ const PL_MEDIA = {
   reddit:    ['image']
 };
 // Where a creator connects each publishable channel, for the prompt below.
+// Mirrors growth.MEDIA_SUPPORT's max. The server checks it again on every write.
+const PL_MEDIA_MAX = { x: 4, threads: 20, fanvue: 20, instagram: 10, tiktok: 1, reddit: 20 };
 const PL_CONNECT_AT = { x: '/xbot', threads: '/threads', fanvue: '/fanvue' };
 // Fanvue's floor for a paid post, in cents. The server checks it again.
 const PL_FV_PRICE_MIN = 300;
@@ -194,7 +196,7 @@ let plProposed = [];      // ephemeral plan slots, never persisted
 let plPlanMeta = null;
 let plOpen = null;        // the card the modal is editing
 let plVault = [];         // the persona's media library
-let plPickedMedia = '';   // what the open editor has attached
+let plPickedMedia = [];   // what the open editor has attached, in order
 let plChans = [];         // channels ticked on a brand-new post
 let plRating = '';        // '', 'sfw' or 'nsfw' for the next draft
 let plRemote = [];        // posts Fanvue already has booked — read-only
@@ -409,7 +411,7 @@ function plVaultDraw() {
   const grid = document.getElementById('pl-v-grid');
   grid.innerHTML = shown.length
     ? shown.map(m => '<button type="button" class="pl-vault-item'
-        + (m.id === plPickedMedia ? ' on' : '')
+        + (plPickedMedia.indexOf(m.id) !== -1 ? ' on' : '')
         + '" onclick="plVaultPick(\'' + esc(m.id) + '\')">'
         + plMediaThumb(m)
         + '<span class="pl-vault-name">' + esc(m.purpose || 'untitled') + '</span>'
@@ -422,17 +424,28 @@ function plVaultDraw() {
   const foot = document.getElementById('pl-v-foot');
   const count = shown.length + (q && shown.length !== plFvItems.length
     ? ' of ' + plFvItems.length : '');
-  foot.innerHTML = (plFvItems.length
-      ? '<span class="hint">' + count + ' shown</span>' : '')
+  const cap = plMediaCap();
+  foot.innerHTML = '<span class="hint">'
+      + (plFvItems.length ? count + ' shown' : '')
+      + (cap > 1 && plPickedMedia.length
+          ? (plFvItems.length ? ' · ' : '') + plPickedMedia.length + ' of ' + cap + ' picked'
+          : '')
+    + '</span><span style="display:flex; gap:8px;">'
     + (plFvHasMore && !plFvLoading
         ? '<button type="button" class="btn btn-ghost" onclick="plVaultMore(this)">Load more</button>'
-        : '');
+        : '')
+    + (cap > 1
+        ? '<button type="button" class="btn btn-primary" onclick="plVaultClose()">Done</button>'
+        : '')
+    + '</span>';
 }
 
 function plVaultPick(id) {
-  plPickedMedia = id;
-  plVaultClose();
-  plRenderMedia();
+  // The overlay stays open while a post can still take more, so a carousel is
+  // picked in one visit rather than one reopen per file.
+  plPickMedia(id);
+  if (plMediaCap() <= 1 || plPickedMedia.length >= plMediaCap()) plVaultClose();
+  else plVaultDraw();
 }
 
 
@@ -673,7 +686,7 @@ function plNew() {
   if (at < plWeekStart || at >= plWeekStart + 7 * 86400) at = plWeekStart + 9 * 3600;
   plOpen = { kind: 'new', idx: -1, id: '', platform: 'x', at: at, publishable: true };
   plChans = ['x'];
-  plPickedMedia = '';
+  plPickedMedia = [];
 
   document.getElementById('pl-m-title').textContent = 'New post';
   document.getElementById('pl-m-meta').textContent =
@@ -818,7 +831,8 @@ function plEdit(kind, idx) {
     ? (publishable ? 'Queue it' : 'Add to the week') : 'Save changes';
 
   // A proposal has no media until one is attached here; a queued row remembers.
-  plPickedMedia = row.media_id || '';
+  plPickedMedia = (row.media_ids && row.media_ids.length)
+    ? row.media_ids.slice() : (row.media_id ? [row.media_id] : []);
   plChans = [];
   plRenderChans();
   plRenderFanvue(row.audience || '', row.price_cents || 0);
@@ -869,16 +883,20 @@ function plRenderMedia() {
   field.style.display = chans.length ? '' : 'none';
   // A pick from the other library cannot survive the switch — a Fanvue uuid is
   // nothing to X, and a library photo is nothing to the vault strip.
-  if (plPickedMedia && !usable.some(m => m.id === plPickedMedia)) plPickedMedia = '';
+  plPickedMedia = plPickedMedia.filter(id => usable.some(m => m.id === id));
+  const cap = plMediaCap();
+  if (plPickedMedia.length > cap) plPickedMedia = plPickedMedia.slice(0, cap);
 
-  const picked = plPickedMedia ? plMediaById(plPickedMedia) : null;
-  document.getElementById('pl-m-picked').innerHTML = picked
-    ? plMediaThumb(picked, ' is-picked')
-      + '<button type="button" class="btn-section-save" style="margin-left:10px;"'
-      + ' onclick="plPickMedia(\'\')">Remove</button>'
-      + (plOpen.publishable ? ''
-         : '<a class="btn-section-save" style="margin-left:6px; text-decoration:none;"'
-           + ' href="' + esc(picked.thumb) + '" download target="_blank" rel="noopener">Download</a>')
+  const picked = plPickedMedia.map(plMediaById).filter(Boolean);
+  document.getElementById('pl-m-picked').innerHTML = picked.length
+    ? picked.map(m => '<span class="pl-attached">'
+        + plMediaThumb(m, ' is-picked')
+        + '<button type="button" class="pl-attached-x" title="Remove"'
+        + ' onclick="plPickMedia(\'' + esc(m.id) + '\')">&times;</button>'
+        + (plOpen.publishable ? ''
+           : '<a class="pl-attached-dl" title="Download" href="' + esc(m.thumb)
+             + '" download target="_blank" rel="noopener">&darr;</a>')
+        + '</span>').join('')
     : '<span class="hint">Nothing attached.</span>';
 
   const emptyNote = fvOnly
@@ -898,7 +916,7 @@ function plRenderMedia() {
       + ' onclick="plVaultOpen()">Browse the vault</button>' : '';
   document.getElementById('pl-m-strip').innerHTML = usable.length
     ? usable.map(m => '<button type="button" class="pl-pick'
-        + (m.id === plPickedMedia ? ' on' : '') + '" title="' + esc(m.purpose || m.kind)
+        + (plPickedMedia.indexOf(m.id) !== -1 ? ' on' : '') + '" title="' + esc(m.purpose || m.kind)
         + '" onclick="plPickMedia(\'' + esc(m.id) + '\')">'
         + plMediaThumb(m) + '</button>').join('')
     : '<span class="hint">' + emptyNote + '</span>';
@@ -907,6 +925,7 @@ function plRenderMedia() {
   // instead, so the note has to say that rather than leave an empty strip.
   document.getElementById('pl-m-media-note').textContent =
     (allowed.length ? allowed.join(' or ') : 'nothing fits every channel')
+    + (cap > 1 ? ' · up to ' + cap : '')
     + (fvOnly ? ' · from her Fanvue vault' : '');
 
   document.getElementById('pl-m-media-hint').textContent =
@@ -920,8 +939,23 @@ function plRenderMedia() {
           + 'what is in it.';
 }
 
+// How many files every ticked channel will carry — the strictest wins, the same
+// way the character count follows the tightest cap.
+function plMediaCap() {
+  const chans = plOpenChans();
+  if (!chans.length) return 1;
+  return Math.min.apply(null, chans.map(p => PL_MEDIA_MAX[p] || 1));
+}
+
 function plPickMedia(id) {
-  plPickedMedia = (id === plPickedMedia) ? '' : id;
+  const i = plPickedMedia.indexOf(id);
+  if (i !== -1) { plPickedMedia.splice(i, 1); plRenderMedia(); return; }
+  const cap = plMediaCap();
+  // At a cap of one, picking is replacing — asking the creator to remove the
+  // old one first would be a step with no decision in it.
+  if (cap <= 1) plPickedMedia = [id];
+  else if (plPickedMedia.length < cap) plPickedMedia.push(id);
+  else { alert('That is the most this post can carry — ' + cap + '.'); return; }
   plRenderMedia();
 }
 
@@ -976,7 +1010,8 @@ async function plWrite(btn) {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ persona: plSlug, idea: idea,
                              platforms: [plOpen.platform],
-                             rating: plRating, media_id: plPickedMedia })
+                             rating: plRating,
+                             media_id: plPickedMedia[0] || '' })
     });
     const d = await res.json();
     const draft = (d.drafts || [])[0];
@@ -1014,7 +1049,7 @@ async function plSave(btn) {
   if (!at) { alert('That is not a time.'); return; }
 
   const fv = plFanvueFields();
-  if (fv && fv.price_cents && !plPickedMedia) {
+  if (fv && fv.price_cents && !plPickedMedia.length) {
     alert('A paid Fanvue post needs media behind the price.'); return;
   }
   if (fv && fv.price_cents && fv.price_cents < PL_FV_PRICE_MIN) {
@@ -1031,7 +1066,7 @@ async function plSave(btn) {
       res = await fetch('/api/growth/queue', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ persona: plSlug, platforms: plChans, text: text,
-                               run_at: at, media_id: plPickedMedia,
+                               run_at: at, media_ids: plPickedMedia,
                                ...(fv || {}) })
       });
     } else if (plOpen.kind === 'proposed') {
@@ -1042,14 +1077,14 @@ async function plSave(btn) {
       res = await fetch('/api/growth/queue', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ persona: plSlug, platform: plOpen.platform, text: text,
-                               run_at: at, media_id: plPickedMedia,
+                               run_at: at, media_ids: plPickedMedia,
                                ...(fv || {}) })
       });
     } else {
       res = await fetch('/api/growth/queue', {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ persona: plSlug, id: plOpen.id, text: text,
-                               run_at: at, media_id: plPickedMedia,
+                               run_at: at, media_ids: plPickedMedia,
                                ...(fv || {}) })
       });
     }

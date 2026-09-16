@@ -460,6 +460,20 @@ check('mime decides the kind',
       G.media_kind('video/mp4') == 'video' and G.media_kind('image/png') == 'image')
 check('no mime is an image, as the library was before video',
       G.media_kind('') == 'image' and G.media_kind(None) == 'image')
+print()
+print('several files on one post')
+check('a set inside the cap is fine', G.media_set_reject('x', ['image'] * 4) == '')
+check('one over it is not', 'at most 4' in G.media_set_reject('x', ['image'] * 5))
+check('a single-file channel says so', 'one file' in G.media_set_reject('tiktok', ['video'] * 2))
+check('a clip never rides with stills',
+      'video' in G.media_set_reject('fanvue', ['image', 'video']))
+check('and one file alone is never a set problem',
+      G.media_set_reject('tiktok', ['video']) == '')
+check('the carousel channels take more than one',
+      G.media_max('fanvue') > 1 and G.media_max('threads') > 1
+      and G.media_max('reddit') > 1 and G.media_max('instagram') > 1)
+check('tiktok still takes one', G.media_max('tiktok') == 1)
+
 check('every publishable channel can carry a still',
       all(G.media_ok(p, 'image') for p in G.PUBLISHABLE))
 

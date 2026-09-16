@@ -3756,3 +3756,34 @@ body.embedding .form-area { padding: 0; overflow: hidden; }
 .pl-rating button:first-child { border-left: none; }
 .pl-rating button:hover { color: var(--text); }
 .pl-rating button.on { background: var(--accent); color: #fff; }
+
+/* The post editor. Wider than the shared 480px default: it carries a channel
+   row, a textarea and a media strip side by side rather than in a column. */
+.pl-post-modal { max-width: 760px; }
+
+/* Every file attached to a post, each with its own remove. */
+.pl-picked { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.pl-attached { position: relative; display: inline-flex; }
+.pl-attached-x,
+.pl-attached-dl {
+  position: absolute;
+  top: -6px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid var(--border-soft);
+  background: var(--panel);
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  text-decoration: none;
+  padding: 0;
+}
+.pl-attached-x { right: -6px; }
+.pl-attached-dl { left: -6px; }
+.pl-attached-x:hover { color: var(--err); border-color: var(--err); }
+.pl-attached-dl:hover { color: var(--text); }

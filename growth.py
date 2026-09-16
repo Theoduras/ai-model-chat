@@ -494,15 +494,17 @@ def wants_overlay(platform):
 # collects the file from a URL we serve, so the media has to be publicly
 # reachable; `upload` means we hand it the bytes ourselves.
 MEDIA_SUPPORT = {
-    'x':         {'kinds': ('image', 'video'), 'how': 'upload', 'max': 1},
-    'threads':   {'kinds': ('image', 'video'), 'how': 'fetch',  'max': 1},
-    'fanvue':    {'kinds': ('image', 'video'), 'how': 'upload', 'max': 1},
+    # X takes four stills or one clip, never a mix. Threads and Fanvue build a
+    # carousel out of whatever they are given.
+    'x':         {'kinds': ('image', 'video'), 'how': 'upload', 'max': 4},
+    'threads':   {'kinds': ('image', 'video'), 'how': 'fetch',  'max': 20},
+    'fanvue':    {'kinds': ('image', 'video'), 'how': 'upload', 'max': 20},
     # No posting API, so media here is something the creator downloads and
     # uploads by hand. Reddit takes a still; a video post there is a different
     # submission type we do not write.
-    'instagram': {'kinds': ('image', 'video'), 'how': 'by-hand', 'max': 1},
+    'instagram': {'kinds': ('image', 'video'), 'how': 'by-hand', 'max': 10},
     'tiktok':    {'kinds': ('video',),         'how': 'by-hand', 'max': 1},
-    'reddit':    {'kinds': ('image',),         'how': 'by-hand', 'max': 1},
+    'reddit':    {'kinds': ('image',),         'how': 'by-hand', 'max': 20},
 }
 
 MEDIA_KINDS = ('image', 'video')
@@ -529,6 +531,32 @@ def media_how(platform):
     """'upload', 'fetch' or 'by-hand' — how the media reaches the channel."""
     spec = MEDIA_SUPPORT.get(normalise_source(platform))
     return spec['how'] if spec else 'by-hand'
+
+
+def media_max(platform):
+    """How many files this channel will carry on one post."""
+    spec = MEDIA_SUPPORT.get(normalise_source(platform))
+    return int(spec['max']) if spec else 1
+
+
+# A clip is never one of several: none of these channels builds a carousel with a
+# video in it, and X refuses the mix outright.
+def media_set_reject(platform, kinds):
+    """Why this set of files cannot go on one post here, or '' when it can.
+    Each file is still checked on its own by media_reject; this is about the set."""
+    plat = normalise_source(platform)
+    kinds = list(kinds or [])
+    if len(kinds) <= 1:
+        return ''
+    label = POST_PLATFORMS.get(plat, {}).get('label', plat or 'that channel')
+    cap = media_max(plat)
+    if cap <= 1:
+        return f'{label} takes one file per post, not {len(kinds)}.'
+    if len(kinds) > cap:
+        return f'{label} takes at most {cap} files per post, not {len(kinds)}.'
+    if any(k == 'video' for k in kinds):
+        return f'{label} will not carry a video alongside other files. Post the clip on its own.'
+    return ''
 
 
 def media_reject(platform, kind):

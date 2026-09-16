@@ -7132,7 +7132,7 @@ def api_growth_winback():
 
 
 def _growth_queue_rows(persona, limit=50, since=None, until=None):
-    from db import SessionLocal, list_posts
+    from db import SessionLocal, list_posts, post_media_ids
     sdb = SessionLocal()
     try:
         return [{'id': r.id, 'platform': r.platform, 'text': r.text or '',
@@ -7140,6 +7140,7 @@ def _growth_queue_rows(persona, limit=50, since=None, until=None):
                  'error': r.error or '',
                  'external_id': r.external_id or '',
                  'media_id': r.media_id or '',
+                 'media_ids': post_media_ids(r),
                  'audience': r.audience or '',
                  'price_cents': int(r.price_cents or 0),
                  'run_at': int(r.run_at.replace(tzinfo=timezone.utc).timestamp())
@@ -7180,6 +7181,26 @@ def _growth_remote_rows(persona, since, until, rows):
                     'read_only': True, 'run_at': _fv_epoch(when)})
     out.sort(key=lambda r: r['run_at'])
     return out, ''
+
+
+def _growth_media_check_list(persona, platform, ids):
+    """Resolve every file for a queue write. Returns (ids, error) — the set is
+    refused whole, because half a carousel is not what was asked for."""
+    out = []
+    for raw in ids:
+        one, why = _growth_media_check(persona, platform, raw)
+        if why:
+            return [], why
+        if one:
+            out.append(one)
+    kinds = []
+    for one in out:
+        uuid = _fv_media_id(one)
+        # A vault item's kind lives at Fanvue; it is checked there, and Fanvue
+        # is the only channel that can hold one anyway.
+        kinds.append('image' if uuid else ((_media_row(persona, one) or {}).get('kind') or 'image'))
+    why = growth.media_set_reject(platform, kinds)
+    return ([], why) if why else (out, '')
 
 
 def _growth_post_extras(platform, data, media_id, current=None):
@@ -7296,7 +7317,9 @@ def api_growth_queue():
 
         when = int(data.get('run_at') or 0) or int(time.time())
         run_at = datetime.fromtimestamp(when, timezone.utc).replace(tzinfo=None)
-        raw_media = str(data.get('media_id') or '').strip()
+        raw_media = [str(m).strip() for m in (data.get('media_ids') or []) if str(m).strip()] \
+            or ([str(data.get('media_id') or '').strip()]
+                if str(data.get('media_id') or '').strip() else [])
 
         from db import SessionLocal, queue_post
         queued, failed = [], []
@@ -7309,17 +7332,20 @@ def api_growth_queue():
                 if not text:
                     failed.append({'platform': plat, 'error': 'Nothing to post.'})
                     continue
-                media_id, why = _growth_media_check(persona, plat, raw_media)
+                media_ids, why = _growth_media_check_list(persona, plat, raw_media)
                 if why:
                     failed.append({'platform': plat, 'error': why})
                     continue
-                audience, price, why = _growth_post_extras(plat, data, media_id)
+                audience, price, why = _growth_post_extras(
+                    plat, data, media_ids[0] if media_ids else '')
                 if why:
                     failed.append({'platform': plat, 'error': why})
                     continue
-                row = queue_post(sdb, persona, plat, text, run_at, media_id,
+                row = queue_post(sdb, persona, plat, text, run_at,
+                                 media_ids[0] if media_ids else '',
                                  growth.queue_status_for(plat),
-                                 audience=audience, price_cents=price)
+                                 audience=audience, price_cents=price,
+                                 media_ids=media_ids)
                 queued.append({'platform': plat, 'id': row.id,
                                'status': growth.queue_status_for(plat)})
             sdb.commit()
@@ -7363,28 +7389,32 @@ def api_growth_queue():
                     return jsonify({'ok': False,
                                     'error': 'That slot is in the past.'}), 400
                 run_at = _growth_naive_utc(when)
-            media_id = None
-            if 'media_id' in data:
-                # '' is an answer here — it takes the photo off the post.
-                wanted = str(data.get('media_id') or '').strip()
-                media_id, why = _growth_media_check(persona, row.platform, wanted)
+            media_id = media_ids = None
+            if 'media_ids' in data or 'media_id' in data:
+                # '' and [] are answers here — they take the files off the post.
+                wanted = ([str(m).strip() for m in (data.get('media_ids') or [])
+                           if str(m).strip()] if 'media_ids' in data
+                          else ([str(data.get('media_id') or '').strip()]
+                                if str(data.get('media_id') or '').strip() else []))
+                media_ids, why = _growth_media_check_list(persona, row.platform, wanted)
                 if why:
                     return jsonify({'ok': False, 'error': why}), 400
+                media_id = media_ids[0] if media_ids else ''
             audience = price = None
             if (('audience' in data or 'price_cents' in data)
                     and growth.normalise_source(row.platform) == 'fanvue'):
-                at_media = media_id if media_id is not None else (row.media_id or '')
+                at_media = media_id if media_id is not None else (row.media_id or '')  # noqa
                 audience, price, why = _growth_post_extras(
                     row.platform, data, at_media,
                     {'audience': row.audience, 'price_cents': row.price_cents})
                 if why:
                     return jsonify({'ok': False, 'error': why}), 400
-            if (text is None and run_at is None and media_id is None
+            if (text is None and run_at is None and media_ids is None
                     and audience is None):
                 return jsonify({'ok': False, 'error': 'Nothing to change.'}), 400
             done = update_post(sdb, persona, post_id, text=text, run_at=run_at,
-                               media_id=media_id, audience=audience,
-                               price_cents=price)
+                               media_id=media_id, media_ids=media_ids,
+                               audience=audience, price_cents=price)
             sdb.commit()
         finally:
             sdb.close()
@@ -7882,7 +7912,8 @@ GROWTH_QUEUE_RETRY_MINS = 10
 GROWTH_QUEUE_STALE_HRS = 6
 
 
-def _growth_publish(persona, platform, text, media_id='', audience='', price_cents=0):
+def _growth_publish(persona, platform, text, media_id='', audience='', price_cents=0,
+                    media_ids=None):
     """Put one post out and write it into the content register. Returns the id
     the channel gave it; raises on failure, because only the caller knows
     whether this attempt is worth another one."""
@@ -7890,39 +7921,56 @@ def _growth_publish(persona, platform, text, media_id='', audience='', price_cen
     text = growth.trim_post(plat, text)
     if not text:
         raise ValueError('nothing to post')
-    vault_uuid = _fv_media_id(media_id)
-    media = None if vault_uuid else _media_row(persona, media_id)
-    if media_id and not vault_uuid and not media:
-        # The photo was deleted between queueing and sending. Going out without
-        # it would quietly post a caption for a picture nobody can see.
-        raise RuntimeError('the media on this post is no longer in the library')
-    if vault_uuid and plat != 'fanvue':
-        raise RuntimeError('that file is in the Fanvue vault and only Fanvue can post it')
-    if media:
-        why = growth.media_reject(plat, media.get('kind'))
+    ids = [m for m in (media_ids or ([media_id] if media_id else [])) if m]
+    vault_uuids, rows = [], []
+    for one in ids:
+        uuid = _fv_media_id(one)
+        if uuid:
+            if plat != 'fanvue':
+                raise RuntimeError('that file is in the Fanvue vault and only '
+                                   'Fanvue can post it')
+            vault_uuids.append(uuid)
+            continue
+        row = _media_row(persona, one)
+        if not row:
+            # The photo was deleted between queueing and sending. Going out
+            # without it would quietly post a caption for a picture nobody can see.
+            raise RuntimeError('the media on this post is no longer in the library')
+        why = growth.media_reject(plat, row.get('kind'))
         if why:
             raise RuntimeError(why)
+        rows.append(row)
+    why = growth.media_set_reject(
+        plat, ['image'] * len(vault_uuids) + [r.get('kind') or 'image' for r in rows])
+    if why:
+        raise RuntimeError(why)
+    media = rows[0] if rows else None
     if plat == 'fanvue':
-        uuids = [vault_uuid] if vault_uuid else []
-        if media:
-            blob, mime = _media_bytes(media)
+        uuids = list(vault_uuids)
+        for row in rows:
+            blob, mime = _media_bytes(row)
             kind = growth.media_kind(mime)
             ext = (mime.split('/')[-1] or 'bin').split(';')[0]
             uuids.append(_fv_upload_media(
-                persona, blob, kind, f'{media_id or kind}.{ext}',
+                persona, blob, kind, f'{row.get("id") or kind}.{ext}',
                 content_type=mime or 'application/octet-stream'))
         posted_id = _fv_create_post(persona, text, media_uuids=uuids,
                                     price_cents=price_cents, audience=audience)
     elif plat == 'x':
         body = {'text': text}
-        if media:
-            blob, mime = _media_bytes(media)
-            body['media'] = {'media_ids': [
-                _x_media_upload(persona, blob, mime, media.get('kind') or 'image')]}
+        if rows:
+            uploaded = []
+            for row in rows:
+                blob, mime = _media_bytes(row)
+                uploaded.append(_x_media_upload(persona, blob, mime,
+                                                row.get('kind') or 'image'))
+            body['media'] = {'media_ids': uploaded}
         res = _x_call(persona, 'POST', '/tweets', body=body)
         posted_id = str(((res or {}).get('data') or {}).get('id') or '')
     elif plat == 'threads':
-        posted_id = str(_threads_publish(persona, text, media=media) or '')
+        # _threads_publish builds the carousel itself from a list.
+        posted_id = str(_threads_publish(persona, text,
+                                         media=(rows if len(rows) > 1 else media)) or '')
     else:
         raise ValueError(f'{plat} posts have to go out by hand')
     _content_register_add(persona, plat, text)
@@ -7931,7 +7979,7 @@ def _growth_publish(persona, platform, text, media_id='', audience='', price_cen
 
 def _growth_queue_round():
     """Publish everything that has come due."""
-    from db import SessionLocal, due_posts, claim_post, finish_post
+    from db import SessionLocal, due_posts, claim_post, finish_post, post_media_ids
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     sdb = SessionLocal()
     try:
@@ -7939,6 +7987,7 @@ def _growth_queue_round():
             post_id, persona = row.id, row.persona
             platform, text = row.platform, row.text
             media_id = row.media_id or ''
+            media_ids = post_media_ids(row)
             audience, price_cents = row.audience or '', int(row.price_cents or 0)
             if not _growth_on(persona):
                 continue
@@ -7955,7 +8004,8 @@ def _growth_queue_round():
             try:
                 posted_id = _growth_publish(persona, platform, text, media_id,
                                             audience=audience,
-                                            price_cents=price_cents)
+                                            price_cents=price_cents,
+                                            media_ids=media_ids)
                 finish_post(sdb, post_id, external_id=posted_id)
                 logger.info('QUEUE posted [%s/%s] id=%s %s',
                             persona, platform, posted_id, text[:60])
