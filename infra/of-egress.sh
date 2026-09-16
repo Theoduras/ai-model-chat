@@ -113,6 +113,19 @@ systemctl restart squid
 systemctl enable squid
 EOF
 
+  # A VM that exists but is not running is worse than one that does not exist:
+  # wiring points both services at a proxy nothing answers on, which takes
+  # OnlyFans offline entirely rather than leaving it as it was.
+  VM_STATE=$(gcloud compute instances describe "$VM_NAME" --zone="$ZONE" \
+    --project="$PROJECT" --format='value(status)' 2>/dev/null || true)
+  case "$VM_STATE" in
+    SUSPENDED)
+      run gcloud compute instances resume "$VM_NAME" --zone="$ZONE" --project="$PROJECT"
+      ;;
+    TERMINATED|STOPPED)
+      run gcloud compute instances start "$VM_NAME" --zone="$ZONE" --project="$PROJECT"
+      ;;
+  esac
   if ! gcloud compute instances describe "$VM_NAME" --zone="$ZONE" --project="$PROJECT" >/dev/null 2>&1; then
     run gcloud compute instances create "$VM_NAME" --project="$PROJECT" --zone="$ZONE" \
       --machine-type=e2-micro \
@@ -154,6 +167,14 @@ cmd_wire() {
 }
 
 cmd_status() {
+  VM_STATE=$(gcloud compute instances describe "$VM_NAME" --zone="$ZONE" \
+    --project="$PROJECT" --format='value(status)' 2>/dev/null || true)
+  if [[ -n "$VM_STATE" && "$VM_STATE" != "RUNNING" ]]; then
+    echo "!! The proxy VM is $VM_STATE. Both services send OnlyFans traffic"
+    echo "!! through it, so nothing will reach OnlyFans until it is running:"
+    echo "!!   gcloud compute instances resume $VM_NAME --zone=$ZONE"
+    echo
+  fi
   require_project
 
   echo "-- VM --"
