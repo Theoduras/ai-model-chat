@@ -20,6 +20,7 @@ import os
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 
@@ -66,6 +67,18 @@ PATH_CONFIGURE_STORY = os.getenv('INSTAGRAM_CONFIGURE_STORY_PATH',
                                   '/media/configure_to_story/')
 PATH_CONFIGURE_REEL = os.getenv('INSTAGRAM_CONFIGURE_REEL_PATH',
                                  '/media/configure_to_clips/')
+
+
+def _encode_form(body):
+    parts = {}
+    for k, v in body.items():
+        if isinstance(v, (dict, list)):
+            parts[k] = json.dumps(v, separators=(',', ':'))
+        elif isinstance(v, bool):
+            parts[k] = 'true' if v else 'false'
+        else:
+            parts[k] = str(v)
+    return urllib.parse.urlencode(parts).encode()
 
 
 class InstagramApiError(RuntimeError):
@@ -125,17 +138,21 @@ class Rest:
             time.sleep(min(left, 5.0))
 
     def call(self, method, url, body=None, headers=None, raw=False, retries=1):
-        """One request. `body` is JSON unless `raw` — an upload sends bytes and
-        signs its own content headers instead, and gets the longer timeout."""
+        """One request. `body` is form-urlencoded unless `raw` — an upload
+        sends bytes and signs its own content headers instead, and gets the
+        longer timeout. Instagram's own web client posts configure calls as
+        a plain form (dict/list values as a JSON string per field), not a
+        JSON body — confirmed off a real browser capture of
+        configure_to_clips."""
         if not self.configured():
             raise InstagramApiError(0, 'No Instagram session for this persona')
         self._wait()
-        data = body if raw else (json.dumps(body).encode() if body is not None else None)
+        data = body if raw else (_encode_form(body) if body is not None else None)
         req = urllib.request.Request(url, data=data, method=method.upper())
         for key, value in self._headers(headers).items():
             req.add_header(key, value)
         if not raw and body is not None:
-            req.add_header('Content-Type', 'application/json')
+            req.add_header('Content-Type', 'application/x-www-form-urlencoded')
         timeout = INSTAGRAM_UPLOAD_TIMEOUT if raw else INSTAGRAM_TIMEOUT
         try:
             with _opener(self.proxy).open(req, timeout=timeout) as resp:
