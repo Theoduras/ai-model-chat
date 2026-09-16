@@ -161,6 +161,13 @@ check('no second trial for the same account',
 
 page = a.get('/admin/trials').get_data(as_text=True)
 check('admin page counts the uses', '<strong>2</strong> use' in page)
+s = D.SessionLocal()
+inv = s.query(D.TrialInvite).filter(D.TrialInvite.code == link_code).first()
+clicks = inv.clicks
+s.close()
+check('link clicks are counted', clicks == 3, clicks)
+check('trial accounts are flagged in the user list',
+      'pill trial' in a.get('/admin/users').get_data(as_text=True))
 check('admin page names the redeemers',
       'one@example.com' in page and 'two@example.com' in page)
 

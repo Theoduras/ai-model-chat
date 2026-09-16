@@ -2705,6 +2705,7 @@ a.email{color:#a78bfa;text-decoration:none;font-weight:500}
 .pill.unpaid,.pill.expired{background:#3f1515;color:#fca5a5}
 .pill.admin{background:#2e1065;color:#c4b5fd}
 .pill.role{background:#1f2937;color:#cbd5e1}
+.pill.trial{background:#1e3a5f;color:#93c5fd}
 .pill.role.admin{background:#2e1065;color:#c4b5fd}
 .pill.role.support{background:#0c4a6e;color:#bae6fd}
 .pill.role.manager{background:#1e3a2f;color:#a7f3d0}
@@ -2722,7 +2723,8 @@ a.email{color:#a78bfa;text-decoration:none;font-weight:500}
 <td>{{ u.name or '—' }}</td>
 <td><span class="pill role {{ u.role }}">{{ u.role }}</span></td>
 <td>{% if u.team %}seat of {{ u.team }}{% elif u.seats %}{{ u.seats }} / {{ u.seat_cap }} seats{% else %}—{% endif %}</td>
-<td>{{ u.tier or '—' }}{% if u.grandfathered %} <span class="pill legacy" title="No plan limits until {{ u.grandfathered }}">legacy</span>{% endif %}</td>
+<td>{{ u.tier or '—' }}{% if u.grandfathered %} <span class="pill legacy" title="No plan limits until {{ u.grandfathered }}">legacy</span>{% endif %}
+{% if u.trial %} <span class="pill trial" title="Trial granted {{ u.trial }}">trial</span>{% endif %}</td>
 <td><span class="pill {{ u.status }}">{{ u.status }}</span></td>
 <td>{{ u.expires or '—' }}</td><td>{{ u.created or '—' }}</td>
 </tr>{% endfor %}
@@ -2961,6 +2963,7 @@ def admin_users():
                 'seats': (n + 1) if n > 0 else 0,
                 'seat_cap': tier_capabilities(u.tier).get('seats') or 1,
                 'grandfathered': _fmt_date(u.grandfathered_until),
+                'trial': _fmt_date(u.trial_at),
                 'expires': _fmt_date(u.expires_at),
                 'created': _fmt_date(u.created_at)})
     finally:
@@ -4543,10 +4546,11 @@ Nobody gets a second trial.</p>
 <label>Note (who is it for?)</label>
 <div class="newrow"><input name="note" placeholder="e.g. jess from IG" maxlength="200">
 <button type="submit">Create link</button></div></form>
-<table><tr><th>Link</th><th>Note</th><th>Created</th><th>Expires</th><th>Redeemed by</th><th></th></tr>
+<table><tr><th>Link</th><th>Note</th><th>Created</th><th>Expires</th><th>Clicks</th><th>Redeemed by</th><th></th></tr>
 {% for r in rows %}<tr>
 <td><code>{{ r.link }}</code></td><td>{{ r.note }}</td><td>{{ r.created }}</td>
 <td>{{ r.expires }}{% if r.state != 'live' %} ({{ r.state }}){% endif %}</td>
+<td>{{ r.clicks }}</td>
 <td><strong>{{ r.uses }}</strong> use{{ '' if r.uses == 1 else 's' }}
 {% for p in r.people %}<div class="who">{{ p.email }} · {{ p.at }}</div>{% endfor %}</td>
 <td>{% if r.live %}<form class="inline" method="post">
@@ -4897,6 +4901,7 @@ def admin_trials():
                 'live': not expired and not inv.revoked_at,
                 'state': ('cancelled' if inv.revoked_at
                           else 'expired' if expired else 'live'),
+                'clicks': inv.clicks or 0,
                 'uses': len(people),
                 'people': [{'email': p['email'], 'at': _fmt_date(p['at'])}
                            for p in people]})
@@ -4909,6 +4914,26 @@ def admin_trials():
                                       'name', TRIAL_TIER))
 
 
+def _count_trial_click(code):
+    """One click per visitor per link. The anonymous visit bounces through
+    /register and comes back, and that round trip is one person, not two."""
+    seen = session.get('trial_seen') or []
+    if code in seen:
+        return
+    from db import TrialInvite
+    s = _db_session()
+    try:
+        inv = s.query(TrialInvite).filter(TrialInvite.code == code).first()
+        if inv:
+            inv.clicks = (inv.clicks or 0) + 1
+            s.commit()
+            session['trial_seen'] = seen + [code]
+    except Exception:
+        error_logger.error('Trial click not counted', exc_info=True)
+    finally:
+        s.close()
+
+
 @app.route('/trial/<code>')
 def trial_invite(code):
     """Redeem a trial link. Signing up first is fine — the code waits in the
@@ -4917,6 +4942,7 @@ def trial_invite(code):
     One link serves any number of new accounts until an admin cancels it or it
     expires; the one trial per account is enforced by _grant_trial."""
     code = (code or '').strip()[:32]
+    _count_trial_click(code)
     user = _current_user()
     if not user:
         session['trial_code'] = code

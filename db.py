@@ -1533,6 +1533,7 @@ class TrialInvite(Base):
     created_by = Column(String(32), index=True)
     created_at = Column(DateTime, default=_now, index=True)
     expires_at = Column(DateTime)
+    clicks = Column(Integer, default=0)
     revoked_at = Column(DateTime)
     # Superseded by trial_redemptions, which holds every redemption rather than
     # the first one. Kept so links issued before the link became multi-use
