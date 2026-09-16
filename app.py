@@ -1359,7 +1359,7 @@ FEATURE_ROWS = [
                 'pro': 'Priority support'}.get(c['_key'], 'Dedicated support')),
 ]
 
-FEATURE_TIER_ORDER = [DEMO_TIER_KEY] + DEFAULT_TIER_ORDER
+FEATURE_TIER_ORDER = DEFAULT_TIER_ORDER
 
 
 def _feature_matrix():
