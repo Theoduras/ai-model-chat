@@ -266,6 +266,31 @@ calls leave by different doors, which fails in exactly the confusing
 logs-in-then-drops way this was already chased for three rounds. No app code
 changes; this is infra-only and survives image deploys.
 
+### Reddit, Instagram and TikTok pools
+
+Each has its own template, read by both the sign-in browser and the REST side:
+`REDDIT_PROXY_TEMPLATE`, `INSTAGRAM_PROXY_TEMPLATE`, `TIKTOK_PROXY_TEMPLATE`.
+They are kept apart from OnlyFans' so turning one pool off does not move
+another account onto a datacentre IP.
+
+Reddit refuses a sign-in from Google's ranges and shows only its generic
+"Server error. Try again later." banner for it, so a residential pool is not
+optional there. With DataImpulse the template is:
+
+```bash
+for s in ai-model-chat-dev ai-model-chat-dev-browser; do
+  gcloud run services update "$s" --region europe-west4 \
+    --update-env-vars '^@^REDDIT_PROXY_TEMPLATE=http://USER__cr.{country};sessid.{session}:PASS@gw.dataimpulse.com:823'
+done
+```
+
+`{country}` and `{session}` are filled per persona, so an account keeps one
+sticky exit IP — an account that signs in from one country and posts from
+another is an account that gets checked. Set it on **both** services or the
+sign-in and the posting calls leave by different doors. `^@^` is gcloud's
+delimiter override; without it the `;` and `,` in the template are read as
+another variable.
+
 ### Turning the proxy pool off
 
 `ONLYFANS_PROXY_TEMPLATE` unset means no pool: accounts go out on the service's
