@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reddit Console</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <script src="/js/theme.js"></script>
+  <link rel="stylesheet" href="/css/style.css">
+  <script src="/js/devnav.js" defer></script>
+  <script src="/js/chat-view.js"></script>
+  <script src="/js/console-shell.js"></script>
+  <style>
+    .fv-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+    .fv-wrap { max-width: 760px; margin: 0 auto; padding: 28px 24px 80px; display: flex; flex-direction: column; gap: 20px; }
+    .conn-pill { font-size: 0.75rem; padding: 3px 10px; border-radius: 9999px; background: var(--surface); color: var(--text-3); }
+    .conn-pill.ok { background: #14532d; color: #4ade80; }
+    .conn-pill.err { background: #4c0519; color: #fb7185; }
+    .warn-box { border: 1px solid #b45309; background: #78350f22; color: var(--text-2);
+                border-radius: 10px; padding: 12px 14px; font-size: 0.82rem; line-height: 1.5; }
+    .rd-preview { max-width: 220px; max-height: 220px; border-radius: 10px; margin-top: 8px; display: none; }
+    .rd-sub-row { display: flex; gap: 8px; align-items: flex-end; margin-bottom: 10px; flex-wrap: wrap; }
+    .rd-sub-row .field { margin: 0; }
+  </style>
+</head>
+<body class="page-dashboard">
+
+<header>
+  <div style="display:flex; align-items:center; gap:10px;">
+    <h1>Reddit Console</h1>
+    <span class="badge">Reddit</span>
+  </div>
+  <div style="display:flex; align-items:center; gap:16px;">
+    <nav data-site-nav="inline" class="sn-links sn-inline"></nav>
+    <a href="/dashboard" style="color:var(--text-muted); font-size:0.8rem; text-decoration:none;">← Dashboard</a>
+  </div>
+</header>
+
+<div class="fv-scroll">
+<div class="fv-wrap">
+
+  <div class="warn-box" data-tab="settings">
+    <strong>Read this before connecting an account.</strong>
+    This drives a real Reddit account through a real sign-in, not Reddit's Data API —
+    that API has needed manual approval for new access since late 2025 and has never
+    been able to reach Reddit Chat at all. Reddit's terms do not allow an automated
+    client either, and accounts found doing this get suspended, often along with the
+    subreddit bans that follow. Use an account you can afford to lose, and keep her to
+    subreddits that allow promotion.
+  </div>
+
+  <div class="form-section" data-tab="settings" id="sec-account">
+    <div class="section-title">Persona &amp; Reddit account</div>
+    <div class="field full">
+      <label>Choose a model (persona)</label>
+      <div class="row-inline">
+        <div class="field" style="margin:0;">
+          <select id="persona" onchange="loadAll()"></select>
+        </div>
+        <span class="conn-pill" id="conn-pill">—</span>
+      </div>
+    </div>
+    <div class="row-inline">
+      <button class="btn-ai" onclick="startSignin()">Sign in to Reddit</button>
+      <button class="btn-ai" style="background:var(--surface); color:var(--text-2);"
+              onclick="disconnect()">Disconnect</button>
+    </div>
+    <span class="hint">A real Reddit login page opens in a window. Sign in there as you
+      would on your own laptop — the human check, 2FA and any emailed code all happen on
+      Reddit's own page. Nothing you type reaches us. <strong>Open her chat once in that
+      window before closing it</strong>: chat needs a token Reddit only issues to the
+      page, and without it she can post and comment but not answer DMs.</span>
+    <details style="margin-top:12px;">
+      <summary class="hint" style="cursor:pointer;">Paste a cookie instead</summary>
+      <div class="row-inline" style="margin-top:10px;">
+        <div class="field" style="flex:2;">
+          <input type="password" id="rd-cookie" autocomplete="new-password" spellcheck="false"
+                 placeholder="paste the full Cookie header from a signed-in tab">
+          <span class="hint">Only needed if this deployment has no sign-in browser.
+            Stored encrypted and never shown again. A cookie alone gets posting and
+            comments, not chat.</span>
+        </div>
+        <button class="btn-ai" onclick="connect()">Use cookie</button>
+      </div>
+    </details>
+    <div id="account-status" class="hint" style="margin-top:10px;"></div>
+  </div>
+
+  <div class="form-section" data-tab="settings" id="sec-subs">
+    <div class="section-title">Subreddits she posts to</div>
+    <span class="hint">Nothing here means nothing to post to. Most NSFW subreddits remove a
+      post that arrives without a flair, so pick one per subreddit — the list is read from
+      the subreddit itself once her account is connected.</span>
+    <div id="sub-list" style="margin-top:14px;"></div>
+    <div class="row-inline">
+      <button class="btn-ai" style="background:var(--surface); color:var(--text-2);"
+              onclick="addSub()">Add a subreddit</button>
+      <button class="btn-ai" onclick="saveSubs()">Save subreddits</button>
+    </div>
+    <div id="sub-status" class="hint" style="margin-top:10px;"></div>
+  </div>
+
+  <div class="form-section" data-tab="settings" id="sec-posting">
+    <div class="section-title">Post now</div>
+    <span class="hint">One submission, straight away. For anything on a schedule — and for
+      sending the same set to several subreddits — use the content planner.</span>
+    <div class="row-inline" style="margin-top:12px;">
+      <div class="field"><label>Subreddit</label>
+        <select id="rd-sub"></select>
+      </div>
+      <div class="field"><label>What kind of post</label>
+        <select id="rd-kind" onchange="onKindChange()">
+          <option value="image">Image</option>
+          <option value="video">Video</option>
+          <option value="text">Text</option>
+          <option value="link">Link</option>
+        </select>
+      </div>
+      <div class="field"><label>Flair</label>
+        <select id="rd-flair"><option value="">— none —</option></select>
+      </div>
+    </div>
+    <div class="row-inline" id="row-media">
+      <div class="field">
+        <label>Photo or video</label>
+        <input type="file" id="rd-file" accept="image/*,video/*" onchange="onFilePicked(event)">
+      </div>
+      <button class="btn-ai" id="rd-gen-btn" style="background:var(--surface); color:var(--text-2);"
+              onclick="generateImage()">Generate a photo with AI</button>
+    </div>
+    <img id="rd-preview" class="rd-preview" alt="">
+    <div class="field full">
+      <label>Title</label>
+      <input type="text" id="rd-title" maxlength="300"
+             placeholder="Leave empty and she writes one herself">
+    </div>
+    <div class="field full" id="row-body" style="display:none;">
+      <label>Body</label>
+      <textarea id="rd-body" rows="4" placeholder="the text of the post"></textarea>
+    </div>
+    <div class="field full" id="row-url" style="display:none;">
+      <label>Link</label>
+      <input type="text" id="rd-url" placeholder="https://…">
+    </div>
+    <div class="field full">
+      <label>What she should post about (optional, only used if the title is empty)</label>
+      <input type="text" id="rd-brief" placeholder="whatever she is up to that day — gym, work, the game she is playing">
+    </div>
+    <div class="row-inline">
+      <button class="btn-ai" onclick="postNow()">Post now</button>
+    </div>
+    <div id="post-status" class="hint" style="margin-top:10px;"></div>
+  </div>
+
+  <div class="form-section" data-tab="settings" id="sec-replies">
+    <div class="section-title">Replying to DMs</div>
+    <span class="hint">Reddit chat, not the old message inbox — that is where fans actually
+      write. She never opens a chat first.</span>
+    <div class="row-inline" style="margin-top:12px;">
+      <div class="field nowrap">
+        <label class="switch"><input type="checkbox" id="auto-enabled"><span>Auto-reply is on</span></label>
+      </div>
+      <div class="field"><label>Most replies per round</label>
+        <input type="number" id="reply-limit" min="1" max="30" value="10"></div>
+      <div class="field"><label>Typing speed (chars/sec)</label>
+        <input type="number" id="typing-speed" min="4" max="40" value="14"></div>
+    </div>
+    <div class="row-inline">
+      <div class="field nowrap">
+        <label class="switch"><input type="checkbox" id="humanize" checked><span>Human pacing</span></label>
+        <span class="hint">Reads for a moment, shows as typing, splits a long reply across
+          a message or two.</span>
+      </div>
+    </div>
+    <div class="row-inline">
+      <button class="btn-ai" onclick="saveAuto()">Save</button>
+      <button class="btn-ai" style="background:var(--surface); color:var(--text-2);"
+              onclick="runNow()">Run a round now</button>
+    </div>
+    <div id="auto-status" class="hint" style="margin-top:10px;"></div>
+  </div>
+
+  <div class="form-section" data-tab="settings" id="sec-comments">
+    <div class="section-title">Replying to comments</div>
+    <span class="hint">Comments on her own posts, and anywhere she is mentioned by name.
+      These are public threads, so a reply from here never mentions a link, a page or
+      anything she sells — a subreddit is the fastest place on the internet to lose an
+      account over one.</span>
+    <div class="row-inline" style="margin-top:12px;">
+      <div class="field nowrap">
+        <label class="switch"><input type="checkbox" id="cm-enabled"><span>Answer comments</span></label>
+      </div>
+      <div class="field nowrap">
+        <label class="switch"><input type="checkbox" id="cm-own" checked><span>On her own posts</span></label>
+      </div>
+      <div class="field nowrap">
+        <label class="switch"><input type="checkbox" id="cm-mentions" checked><span>Where she is mentioned</span></label>
+      </div>
+    </div>
+    <div class="row-inline">
+      <div class="field"><label>Most replies per round</label>
+        <input type="number" id="cm-max" min="1" max="25" value="5"></div>
+      <div class="field"><label>Posts to look back over</label>
+        <input type="number" id="cm-scan" min="1" max="50" value="10"></div>
+    </div>
+    <div class="row-inline">
+      <button class="btn-ai" onclick="saveReplies()">Save</button>
+      <button class="btn-ai" style="background:var(--surface); color:var(--text-2);"
+              onclick="runReplies()">Run a round now</button>
+    </div>
+    <div id="cm-status" class="hint" style="margin-top:10px;"></div>
+  </div>
+
+  <div class="form-section" data-tab="settings" id="sec-conversion">
+    <div class="section-title">The offer</div>
+    <span class="hint">Reddit has no paid messages, so an offer is her link, sent in a chat
+      and never in a comment. Reddit filters known paysite domains, so point it at her
+      profile or linktree rather than straight at an unlock — it survives the filter and
+      lands the same place one hop later. Clicks are counted; a click is not a sale.</span>
+    <div class="row-inline" style="margin-top:12px;">
+      <div class="field"><label>First offer after this many messages</label>
+        <input type="number" id="ppv-first" min="1" max="200" value="6"></div>
+      <div class="field"><label>And not again for this many</label>
+        <input type="number" id="ppv-gap" min="1" max="200" value="8"></div>
+    </div>
+    <div class="row-inline"><button class="btn-ai" onclick="saveAuto()">Save</button></div>
+  </div>
+
+  <div class="form-section" data-tab="advanced" id="sec-log">
+    <div class="section-title">What she has been doing</div>
+    <div id="trace" style="max-height:340px; overflow:auto;"></div>
+    <div class="row-inline" style="margin-top:12px;">
+      <button class="btn-ai" style="background:var(--surface); color:var(--text-2);"
+              onclick="loadTrace()">Refresh</button>
+      <button class="btn-ai" style="background:var(--surface); color:var(--text-2);"
+              onclick="clearTrace()">Clear</button>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<script>
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function el(id){return document.getElementById(id);}
+function note(box,msg,bad){box.textContent=msg;box.style.color=bad?'#fb7185':'var(--text-3)';}
+function slug(){return el('persona').value;}
+async function api(path,opts){const r=await fetch(path,opts);let j={};try{j=await r.json();}catch(e){}
+  if(!r.ok) throw new Error(j.error||('request failed ('+r.status+')'));return j;}
+
+let subs=[], mediaDataUrl='', mediaCoverUrl='', mounted=false, flairCache={};
+
+async function init(){
+  const list=await (await fetch('/api/personas')).json();
+  const rows=Array.isArray(list)?list:(list.personas||[]);
+  el('persona').innerHTML=rows.map(p=>'<option value="'+esc(p.slug)+'">'+esc(p.name||p.slug)+'</option>').join('');
+  if(!el('persona').options.length){note(el('account-status'),'Create a persona first.',true);return;}
+  await loadAll();
+}
+
+async function loadAll(){
+  mediaDataUrl='';mediaCoverUrl='';flairCache={};
+  el('rd-preview').style.display='none';
+  await Promise.all([loadStatus(),loadAuto()]);
+  if(mounted) PlatformConsole.reset();
+}
+
+async function loadStatus(){
+  const s=await api('/api/reddit/status?persona='+encodeURIComponent(slug()));
+  const pill=el('conn-pill');
+  const live=s.state&&s.state.connected;
+  pill.textContent=s.connected?(live?('connected as '+(s.username||'?'))
+    :(s.chat_ready?'connecting…':'posting only')):'not connected';
+  pill.className='conn-pill '+(live?'ok':(s.connected?'':'err'));
+  const si=s.signin||{};
+  const why=si.open?(si.error||si.why||'Sign-in window is open — finish it there.')
+    :(s.reachable||si.why||(s.connected?'':'Sign in to Reddit to connect her account.'));
+  note(el('account-status'),why,!!(s.reachable||si.error)&&!si.open);
+  subs=(s.subs||[]).slice();
+  drawSubs();
+  drawSubPicker();
+  const cm=s.replies||{};
+  el('cm-enabled').checked=!!cm.enabled;
+  el('cm-own').checked=cm.own_posts!==false;
+  el('cm-mentions').checked=cm.mentions!==false;
+  el('cm-max').value=cm.max_per_round||5;
+  el('cm-scan').value=cm.posts_scanned||10;
+  return s;
+}
+
+async function connect(){
+  const box=el('account-status');
+  const cookie=el('rd-cookie').value.trim();
+  if(!cookie){note(box,'Paste her Reddit cookie first.',true);return;}
+  note(box,'Connecting…');
+  try{
+    await api('/api/reddit/connect',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({persona:slug(),cookie:cookie})});
+    el('rd-cookie').value='';
+    await loadStatus();
+  }catch(e){note(box,e.message,true);}
+}
+
+function startSignin(){
+  // A popup, not a panel: Reddit's human check reads the window it runs in,
+  // and an iframe is not one. Same window OnlyFans, Discord and Instagram use.
+  const w = Math.min(1100, Math.max(700, Math.round(screen.availWidth * 0.7)));
+  const h = Math.min(900, Math.max(600, Math.round(screen.availHeight * 0.8)));
+  const win = window.open('/reddit/connect?site=reddit&persona='
+    + encodeURIComponent(slug()), 'reddit-signin',
+    'width=' + w + ',height=' + h + ',menubar=no,toolbar=no');
+  if(!win){note(el('account-status'),'Allow popups for this site, then try again.',true);return;}
+  note(el('account-status'),'Signing in — finish in the window that opened, and open her chat once before closing it.');
+  const back=ev=>{if(ev.data&&ev.data.onlyfansConnect){window.removeEventListener('message',back);loadStatus();}};
+  window.addEventListener('message',back);
+  const watch=setInterval(()=>{if(win.closed){clearInterval(watch);loadStatus();}},1500);
+}
+
+async function disconnect(){
+  if(!confirm('Disconnect her Reddit account? She stops answering and stops posting.'))return;
+  await api('/api/reddit/connect?persona='+encodeURIComponent(slug()),{method:'DELETE'});
+  await loadStatus();
+}
+
+// ── Subreddits ──────────────────────────────────────────────────────────────
+
+function drawSubs(){
+  el('sub-list').innerHTML=subs.map((row,i)=>
+    '<div class="rd-sub-row">'
+    +'<div class="field"><label>Subreddit</label>'
+    +'<input type="text" value="'+esc(row.sub)+'" placeholder="gonewild" '
+    +'onchange="editSub('+i+',\'sub\',this.value)" onblur="loadFlairs('+i+')"></div>'
+    +'<div class="field"><label>Flair</label><select id="sub-flair-'+i+'" '
+    +'onchange="editSub('+i+',\'flair\',this.value)">'
+    +'<option value="'+esc(row.flair)+'">'+esc(row.flair_text||row.flair||'— none —')+'</option>'
+    +'</select></div>'
+    +'<div class="field nowrap"><label class="switch"><input type="checkbox" '
+    +(row.nsfw?'checked':'')+' onchange="editSub('+i+',\'nsfw\',this.checked)"><span>NSFW</span></label></div>'
+    +'<button class="btn-ai" style="background:var(--surface); color:var(--text-2);" '
+    +'onclick="dropSub('+i+')">Remove</button></div>').join('')
+    ||'<span class="hint">No subreddits yet. She has nowhere to post.</span>';
+  subs.forEach((row,i)=>loadFlairs(i));
+}
+
+function drawSubPicker(){
+  const pick=el('rd-sub');
+  pick.innerHTML=subs.map(r=>'<option value="'+esc(r.sub)+'">r/'+esc(r.sub)+'</option>').join('')
+    ||'<option value="">— add a subreddit first —</option>';
+  pick.onchange=()=>fillFlairPicker(pick.value);
+  fillFlairPicker(pick.value);
+}
+
+function editSub(i,key,value){ if(subs[i]) subs[i][key]=value; if(key==='sub') drawSubPicker(); }
+function dropSub(i){ subs.splice(i,1); drawSubs(); drawSubPicker(); }
+function addSub(){ subs.push({sub:'',flair:'',flair_text:'',nsfw:true}); drawSubs(); drawSubPicker(); }
+
+async function fetchFlairs(sub){
+  if(!sub) return [];
+  if(flairCache[sub]) return flairCache[sub];
+  try{
+    const r=await api('/api/reddit/flairs?persona='+encodeURIComponent(slug())
+      +'&sub='+encodeURIComponent(sub));
+    flairCache[sub]=r.flairs||[];
+  }catch(e){ flairCache[sub]=[]; }
+  return flairCache[sub];
+}
+
+async function loadFlairs(i){
+  const row=subs[i];
+  const box=el('sub-flair-'+i);
+  if(!row||!row.sub||!box) return;
+  const flairs=await fetchFlairs(row.sub);
+  box.innerHTML='<option value="">— none —</option>'
+    +flairs.map(f=>'<option value="'+esc(f.id)+'"'+(f.id===row.flair?' selected':'')
+      +'>'+esc(f.text||f.id)+'</option>').join('');
+  box.value=row.flair||'';
+}
+
+async function fillFlairPicker(sub){
+  const box=el('rd-flair');
+  const held=subs.find(r=>r.sub===sub)||{};
+  const flairs=await fetchFlairs(sub);
+  box.innerHTML='<option value="">— none —</option>'
+    +flairs.map(f=>'<option value="'+esc(f.id)+'">'+esc(f.text||f.id)+'</option>').join('');
+  box.value=held.flair||'';
+}
+
+async function saveSubs(){
+  const box=el('sub-status');
+  try{
+    const r=await api('/api/reddit/subreddits',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({persona:slug(),subs:subs.filter(s=>s.sub)})});
+    subs=r.subs||[];
+    drawSubs();drawSubPicker();
+    note(box,'Saved.');
+    if(mounted) PlatformConsole.reset();
+  }catch(e){note(box,e.message,true);}
+}
+
+// ── Posting ─────────────────────────────────────────────────────────────────
+
+function onKindChange(){
+  const kind=el('rd-kind').value;
+  el('row-media').style.display=(kind==='image'||kind==='video')?'':'none';
+  el('row-body').style.display=kind==='text'?'':'none';
+  el('row-url').style.display=kind==='link'?'':'none';
+  el('rd-gen-btn').disabled=kind!=='image';
+}
+
+function onFilePicked(ev){
+  const f=ev.target.files[0];
+  if(!f)return;
+  mediaCoverUrl='';
+  if(f.type.startsWith('video/')){
+    // Reddit refuses a video with no poster frame, so one is taken here rather
+    // than letting the submission fall back to its grey placeholder.
+    const v=document.createElement('video');
+    v.preload='metadata';v.muted=true;
+    v.onloadedmetadata=()=>{v.currentTime=Math.min(0.1,(v.duration||0)/2);};
+    v.onseeked=()=>{
+      try{
+        const c=document.createElement('canvas');
+        c.width=v.videoWidth;c.height=v.videoHeight;
+        c.getContext('2d').drawImage(v,0,0,c.width,c.height);
+        mediaCoverUrl=c.toDataURL('image/jpeg',0.85);
+      }catch(e){}
+      URL.revokeObjectURL(v.src);
+    };
+    v.src=URL.createObjectURL(f);
+  }
+  const reader=new FileReader();
+  reader.onload=()=>{mediaDataUrl=reader.result;showPreview();};
+  reader.readAsDataURL(f);
+}
+
+function showPreview(){
+  const img=el('rd-preview');
+  if(mediaDataUrl && mediaDataUrl.startsWith('data:image/')){
+    img.src=mediaDataUrl;img.style.display='block';
+  } else { img.style.display='none'; }
+}
+
+async function generateImage(){
+  const box=el('post-status');
+  note(box,'Generating…');
+  try{
+    const persona=await api('/api/personas/'+encodeURIComponent(slug()));
+    const data=await api('/api/generate/image',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({config:persona.config,shot:'portrait'})});
+    if(!data.ok||!data.image) throw new Error(data.error||'No image came back.');
+    mediaDataUrl=data.image;mediaCoverUrl='';
+    showPreview();
+    note(box,'Photo generated below. Post now when ready.');
+  }catch(e){note(box,e.message,true);}
+}
+
+async function postNow(){
+  const box=el('post-status');
+  const kind=el('rd-kind').value;
+  if(!el('rd-sub').value){note(box,'Add a subreddit first.',true);return;}
+  if((kind==='image'||kind==='video')&&!mediaDataUrl){
+    note(box,'Attach or generate a photo or video first.',true);return;}
+  note(box,'Posting…');
+  try{
+    const r=await api('/api/reddit/post-now',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({persona:slug(),sub:el('rd-sub').value,kind:kind,
+        title:el('rd-title').value,brief:el('rd-brief').value,
+        body:el('rd-body').value,url:el('rd-url').value,
+        flair:el('rd-flair').value,media:mediaDataUrl,cover:mediaCoverUrl})});
+    note(box,'Posted to r/'+r.sub+'. '+(r.title?('Title: '+r.title):''));
+    await loadTrace();
+  }catch(e){note(box,e.message,true);}
+}
+
+// ── Replying ────────────────────────────────────────────────────────────────
+
+async function saveAuto(){
+  const box=el('auto-status');
+  try{
+    await api('/api/reddit/auto',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({persona:slug(),enabled:el('auto-enabled').checked,
+        reply_limit:+el('reply-limit').value,typing_speed:+el('typing-speed').value,
+        humanize:el('humanize').checked,
+        ppv_first_after:+el('ppv-first').value,ppv_gap:+el('ppv-gap').value})});
+    note(box,'Saved.');
+    if(mounted) PlatformConsole.reset();
+  }catch(e){note(box,e.message,true);}
+}
+
+async function loadAuto(){
+  const a=await api('/api/reddit/auto?persona='+encodeURIComponent(slug()));
+  el('auto-enabled').checked=!!a.enabled;
+  el('reply-limit').value=a.reply_limit;
+  el('typing-speed').value=a.typing_speed;
+  el('humanize').checked=!!a.humanize;
+  el('ppv-first').value=a.ppv_first_after;
+  el('ppv-gap').value=a.ppv_gap;
+}
+
+async function runNow(){
+  const box=el('auto-status');
+  note(box,'Running…');
+  try{
+    await api('/api/reddit/auto-run',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({persona:slug()})});
+    note(box,'Done.');await loadTrace();
+  }catch(e){note(box,e.message,true);}
+}
+
+async function saveReplies(){
+  const box=el('cm-status');
+  try{
+    await api('/api/reddit/replies',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({persona:slug(),enabled:el('cm-enabled').checked,
+        own_posts:el('cm-own').checked,mentions:el('cm-mentions').checked,
+        max_per_round:+el('cm-max').value,posts_scanned:+el('cm-scan').value})});
+    note(box,'Saved.');
+  }catch(e){note(box,e.message,true);}
+}
+
+async function runReplies(){
+  const box=el('cm-status');
+  note(box,'Reading her posts…');
+  try{
+    const r=await api('/api/reddit/replies-run',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({persona:slug()})});
+    note(box,r.answered?('Answered '+r.answered+' comment(s).'):'Nothing new to answer.');
+    await loadTrace();
+  }catch(e){note(box,e.message,true);}
+}
+
+// ── The log ─────────────────────────────────────────────────────────────────
+
+function renderFullLog(t){
+  const rows=(t.rows||t.trace||[]).slice().reverse();
+  el('trace').innerHTML=rows.map(r=>'<div class="trace-line"><span class="st">'
+    +esc(r.stage||'')+'</span>'+esc(r.detail||'')+'</div>').join('')
+    ||'<span class="hint">Nothing yet.</span>';
+}
+
+function loadTrace(){ return PlatformConsole.refresh(); }
+
+async function clearTrace(){
+  await api('/api/reddit/trace?persona='+encodeURIComponent(slug()),{method:'DELETE'});
+  loadTrace();
+}
+
+const RD_FIX=[
+  [/not connected for this persona|Sign in to Reddit/i,{tab:'settings',focus:'sec-account',label:'Sign her in'}],
+  [/chat token|refused her chat|socket|reconnect/i,    {tab:'settings',focus:'sec-account',label:'Open the account'}],
+  [/Auto-reply is off/i,                               {tab:'settings',focus:'sec-replies',label:'Turn her on'}],
+  [/subreddit|flair|r\//i,                             {tab:'settings',focus:'sec-subs',label:'Check her subreddits'}],
+  [/comment/i,                                         {tab:'settings',focus:'sec-comments',label:'Check comment replies'}],
+  [/post/i,                                            {tab:'settings',focus:'sec-posting',label:'Check posting'}],
+  [/offer|link/i,                                      {tab:'settings',focus:'sec-conversion',label:'Check the offer'}],
+  [/No activity recorded/i,                            {tab:'inbox',   focus:'',            label:'Open the inbox'}],
+];
+
+// "Connected" has two halves here, the same way Discord's does: a cookie we
+// hold, and a chat socket that is actually up. A cookie on its own is a real,
+// useful state — she posts and comments from it — so it is not reported as
+// broken, only as posting-only.
+function redditHealth(d){
+  const st=d.state||{}, si=d.signin||{}, acc=d.account||{};
+  const who=acc.username||'her account';
+  const rows=[];
+  rows.push({state:d.connected?(st.connected?'ok':'warn'):'bad',
+    label:!d.connected?'No account signed in'
+      :(st.connected?('Her account is online as '+who)
+        :(acc.chat_ready?'Signed in, but chat is down':'Signed in — posting only')),
+    hint:!d.connected?(si.open?'A sign-in window is open — finish it there.'
+                              :'Sign in to Reddit under Settings.')
+      :(st.connected?'Chat is connected, so she sees DMs as they arrive.'
+        :(acc.chat_ready?(st.error||'Her chat socket is down and is being retried.')
+          :'Her sign-in captured no chat token. She posts and comments, but cannot '
+           +'answer DMs — reconnect and open her chat once in that window.'))});
+  rows.push({state:d.enabled?'ok':'warn', label:d.enabled?'DM replies are on':'DM replies are off',
+    hint:d.enabled?'She answers Reddit chat.':'Fans can write, but nothing will answer them.'});
+  rows.push({state:subs.length?'ok':'warn',
+    label:subs.length?(subs.length+' subreddit(s) set up'):'Nowhere to post',
+    hint:subs.length?'She posts to those, with the flair each one needs.'
+                    :'Add the subreddits she is allowed to post in. DMs still work.'});
+  return rows;
+}
+
+async function rdStats(s){
+  try{
+    const d=await (await fetch('/api/reddit/stats?persona='+encodeURIComponent(s))).json();
+    return [{value:d.conversations||0, label:'conversations'},
+            {value:d.subs||0,          label:'subreddits'},
+            {value:d.posts||0,         label:'posts'},
+            {value:d.drops_opened||0,  label:'links opened'}];
+  }catch(e){ return []; }
+}
+
+PlatformConsole.register({
+  platform:'reddit',
+  persona:slug,
+  statusUrl:s=>'/api/reddit/trace?persona='+encodeURIComponent(s),
+  emptyHint:'They appear as soon as somebody messages her on Reddit.',
+  sendUrl:'/api/reddit/dm-send',
+  read:d=>{
+    const st=d.state||{}, si=d.signin||{}, acc=d.account||{};
+    const up=d.connected&&st.connected;
+    return {
+      live: !!(up&&d.enabled),
+      broken: !d.connected,
+      title: !d.connected?(si.open?'Finish the sign-in that is open':'No Reddit account is connected')
+        : !st.connected?(acc.chat_ready?'Signed in, but chat is not connected':'Signed in — posting only')
+        : d.enabled?'Her Reddit account is answering'
+        :'Connected, replies switched off',
+      sub: !d.connected?(si.open?(si.error||si.why||'Sign in on the window that opened.')
+                                :'Sign her in under Settings. She drives a real account, not an app.')
+        : !st.connected?(acc.chat_ready?(st.error||'Her chat socket is down and is being retried.')
+            :'Posting and comments work. Reconnect and open her chat once to pick up DMs.')
+        : d.enabled?('Online as '+(acc.username||'her account')+' — '
+                     +subs.length+' subreddit(s), DMs always.')
+        :'Fans can write to her; nothing will answer.',
+      health: redditHealth(d),
+      steps: [
+        {label:'Connect',    done:!!d.connected,                    tab:'settings', focus:'sec-account'},
+        {label:'Subreddits', done:subs.length>0,                    tab:'settings', focus:'sec-subs'},
+        {label:'Replies',    done:!!d.enabled,                      tab:'settings', focus:'sec-replies'},
+        {label:'Live',       done:!!(up&&!(d.problems||[]).length), tab:'overview'},
+      ],
+    };
+  },
+  fixTab:p=>{ const hit=RD_FIX.find(([re])=>re.test(p)); return hit?hit[1]:{tab:'settings',label:'Open settings'}; },
+  stats:rdStats,
+  onStatus:renderFullLog,
+});
+
+onKindChange();
+init().then(()=>{ PlatformConsole.mount('.fv-wrap'); mounted=true; });
+// The shell polls the trace; the account pill and the subreddit list come from
+// a different endpoint, so they still need their own slow tick.
+setInterval(()=>{if(el('persona').value)loadStatus();},20000);
+</script>
+</body>
+</html>

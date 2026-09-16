@@ -122,6 +122,21 @@
         <span class="hint" id="pl-m-ig-hint" style="margin-top:6px;"></span>
       </div>
 
+      <div class="field" style="margin-top:14px;" id="pl-m-rd-field" hidden>
+        <label for="pl-m-rd-kind">How it lands on Reddit</label>
+        <select id="pl-m-rd-kind" onchange="plRdKindChanged()">
+          <option value="image">Image</option>
+          <option value="video">Video</option>
+          <option value="text">Text</option>
+          <option value="link">Link</option>
+        </select>
+        <label style="margin-top:12px;">Subreddits</label>
+        <div id="pl-m-rd-subs"></div>
+        <span class="hint" id="pl-m-rd-hint" style="margin-top:6px;"></span>
+        <label style="margin-top:12px;" for="pl-m-rd-stagger">Minutes between subreddits</label>
+        <input type="number" id="pl-m-rd-stagger" min="0" max="240" value="20">
+      </div>
+
       <div class="field" style="margin-top:14px;" id="pl-m-fanvue-field" hidden>
         <label for="pl-m-audience">Who sees it on Fanvue</label>
         <select id="pl-m-audience">
@@ -177,7 +192,7 @@
 // write, so this copy only decides when the counter turns red.
 const PL_CAPS = { x: 280, threads: 500, fanvue: 5000, instagram: 2200, tiktok: 2200, reddit: 300 };
 const PL_LABELS = { x: 'X', threads: 'Threads', fanvue: 'Fanvue', instagram: 'Instagram', tiktok: 'TikTok', reddit: 'Reddit' };
-const PL_PUBLISHABLE = ['x', 'threads', 'fanvue', 'instagram'];
+const PL_PUBLISHABLE = ['x', 'threads', 'fanvue', 'instagram', 'reddit'];
 // The channels the week can be planned for. Mirrors growth.WEEKLY_CADENCE.
 const PL_PLATFORMS = ['x', 'threads', 'fanvue', 'instagram', 'tiktok', 'reddit'];
 // Mirrors growth.MEDIA_SUPPORT. The server checks it again on every write; this
@@ -188,12 +203,18 @@ const PL_MEDIA = {
   fanvue:    ['image', 'video'],
   instagram: ['image', 'video'],
   tiktok:    ['video'],
-  reddit:    ['image']
+  reddit:    ['image', 'video']
 };
 // Where a creator connects each publishable channel, for the prompt below.
 // Mirrors growth.MEDIA_SUPPORT's max. The server checks it again on every write.
 const PL_MEDIA_MAX = { x: 4, threads: 20, fanvue: 20, instagram: 10, tiktok: 1, reddit: 20 };
-const PL_CONNECT_AT = { x: '/xbot', threads: '/threads', fanvue: '/fanvue' };
+const PL_CONNECT_AT = { x: '/xbot', threads: '/threads', fanvue: '/fanvue',
+                        instagram: '/instagram', reddit: '/reddit' };
+// Reddit's kinds, mirroring app.RD_KINDS.
+const PL_RD_KINDS = ['image', 'video', 'text', 'link'];
+// Minutes between one subreddit and the next by default. Reddit's spam filters
+// read a burst of near-identical submissions as exactly that.
+const PL_RD_STAGGER = 20;
 // Fanvue's floor for a paid post, in cents. The server checks it again.
 const PL_FV_PRICE_MIN = 300;
 let plConn = {};
@@ -802,6 +823,8 @@ function plNew() {
   plRenderChans();
   plRenderFanvue('', 0);
   plRenderIg('post');
+  plRdTitles = {};
+  plRenderRd();
   plSetRating('');
   plCount();
   plRenderMedia();
@@ -860,6 +883,98 @@ function plIgFields() {
   return { ig_kind: document.getElementById('pl-m-ig-kind').value };
 }
 
+// Reddit is the only channel here where one planned post is several posts: the
+// same set goes to three or four subreddits, each with its own flair and its
+// own title. So the panel collects a title per subreddit and the server writes
+// a row for each -- a fan-out that reads as one person posting in four places,
+// rather than the same words pasted four times.
+let plRdSubs = [], plRdTitles = {};
+
+function plRdOn() {
+  return !!(plOpen && (plOpen.kind === 'new'
+    ? plChans.indexOf('reddit') !== -1 : plOpen.platform === 'reddit'));
+}
+
+async function plRdLoadSubs() {
+  if (plRdSubs.length) return plRdSubs;
+  try {
+    const r = await fetch('/api/reddit/subreddits?persona=' + encodeURIComponent(plSlug));
+    const d = await r.json();
+    plRdSubs = d.subs || [];
+  } catch (e) { plRdSubs = []; }
+  return plRdSubs;
+}
+
+function plRenderRd(row) {
+  const on = plRdOn();
+  document.getElementById('pl-m-rd-field').hidden = !on;
+  if (!on) return;
+  if (row) {
+    if (row.rd_kind) document.getElementById('pl-m-rd-kind').value = row.rd_kind;
+    // An existing row is one subreddit: it was already fanned out when queued.
+    if (row.rd_sub) plRdTitles = { [row.rd_sub]: row.text || '' };
+  }
+  plRdLoadSubs().then(subs => {
+    const editing = plOpen && plOpen.kind === 'queued';
+    const only = editing ? (plOpen.rd_sub || '') : '';
+    const rows = editing ? subs.filter(s => s.sub === only) : subs;
+    document.getElementById('pl-m-rd-subs').innerHTML = rows.length
+      ? rows.map(s => {
+          const on2 = editing || plRdTitles[s.sub] !== undefined;
+          return '<label class="pl-chan-pick' + (on2 ? ' on' : '') + '" style="display:block;">'
+            + '<input type="checkbox"' + (on2 ? ' checked' : '')
+            + (editing ? ' disabled' : '')
+            + ' onchange="plRdToggle(\'' + esc(s.sub) + '\')"> r/' + esc(s.sub)
+            + (s.flair_text || s.flair ? '<span class="by-hand">'
+                + esc(s.flair_text || s.flair) + '</span>' : '')
+            + '</label>'
+            + (on2 ? '<input type="text" maxlength="300" style="margin:4px 0 10px;" '
+                + 'placeholder="title for r/' + esc(s.sub) + ' — blank uses the post text" '
+                + 'value="' + esc(plRdTitles[s.sub] || '') + '" '
+                + 'oninput="plRdTitle(\'' + esc(s.sub) + '\', this.value)">' : '');
+        }).join('')
+      : '<span class="hint">No subreddits set up yet. Add them in the Reddit console.</span>';
+    const n = Object.keys(plRdTitles).length;
+    document.getElementById('pl-m-rd-hint').textContent = !subs.length
+      ? 'She has nowhere to post until a subreddit is added under Reddit.'
+      : editing
+        ? 'A queued Reddit post goes to one subreddit. Queue the others as their own posts.'
+        : n > 1
+          ? n + ' subreddits, one post each, spaced out below. Give each its own '
+            + 'title — the same words in four places is what a spam filter looks for.'
+          : 'Pick the subreddits this goes to. Most need a flair, which is taken '
+            + 'from the Reddit console.';
+  });
+}
+
+function plRdToggle(sub) {
+  if (plRdTitles[sub] === undefined) plRdTitles[sub] = '';
+  else delete plRdTitles[sub];
+  plRenderRd();
+}
+
+function plRdTitle(sub, value) { plRdTitles[sub] = value; }
+
+// Reddit takes one file per submission here, whatever the gallery would allow.
+function plRdKindChanged() {
+  if (plPickedMedia.length > 1) plPickedMedia = plPickedMedia.slice(0, 1);
+  plRenderRd();
+  plRenderMedia();
+}
+
+function plRdFields(text) {
+  if (!plRdOn()) return null;
+  const subs = Object.keys(plRdTitles);
+  if (!subs.length) return null;
+  let stagger = parseInt(document.getElementById('pl-m-rd-stagger').value, 10);
+  if (isNaN(stagger) || stagger < 0) stagger = PL_RD_STAGGER;
+  return { reddit: {
+    kind: document.getElementById('pl-m-rd-kind').value,
+    stagger_min: stagger,
+    subs: subs.map(sub => ({ sub: sub, title: plRdTitles[sub] || text }))
+  } };
+}
+
 function plRenderChans() {
   const field = document.getElementById('pl-m-chans-field');
   field.hidden = !plOpen || plOpen.kind !== 'new';
@@ -894,6 +1009,7 @@ function plToggleChan(p) {
   plRenderChans();
   plRenderFanvue();
   plRenderIg();
+  plRenderRd();
   plCount();
   plRenderMedia();
 }
@@ -961,6 +1077,8 @@ function plEdit(kind, idx) {
   plRenderChans();
   plRenderFanvue(row.audience || '', row.price_cents || 0);
   plRenderIg(row.ig_kind || 'post');
+  plRdTitles = {};
+  plRenderRd(row);
   plSetRating('');
   plCount();
   plRenderMedia();
@@ -978,6 +1096,8 @@ function plMediaHint(picked) {
          + 'when the slot comes round.';
   }
   if (plat === 'fanvue') return 'Uploaded into her Fanvue vault when the post goes out.';
+  if (plat === 'reddit') return 'Uploaded to Reddit when the post goes out, once per subreddit.';
+  if (plat === 'instagram') return 'Uploaded to Instagram when the post goes out.';
   return 'Uploaded to X when the post goes out.';
 }
 
@@ -995,8 +1115,8 @@ function plRenderMedia() {
   if (!plOpen) return;
   const chans = plOpenChans();
   // One photo goes to every channel ticked, so only a kind they all take can
-  // be offered — TikTok takes video and Reddit takes stills, and picking both
-  // leaves nothing that satisfies the pair.
+  // be offered — TikTok takes only video, so pairing it with a stills-only
+  // channel leaves nothing that satisfies both.
   const allowed = chans.length
     ? chans.map(p => PL_MEDIA[p] || [])
         .reduce((a, b) => a.filter(k => b.indexOf(k) !== -1))
@@ -1079,6 +1199,8 @@ function plMediaCap() {
   // A story and a reel are one file each, whatever the feed would allow.
   const ig = plIgFields();
   if (ig && ig.ig_kind !== 'post') return 1;
+  // A Reddit submission carries one file here; a gallery is its own endpoint.
+  if (plRdOn()) return 1;
   return Math.min.apply(null, chans.map(p => PL_MEDIA_MAX[p] || 1));
 }
 
@@ -1253,6 +1375,10 @@ async function plSave(btn, now) {
 
   const fv = plFanvueFields();
   const ig = plIgFields();
+  const rd = plRdFields(text);
+  if (plRdOn() && !rd) {
+    alert('Pick at least one subreddit for the Reddit post.'); return;
+  }
   if (fv && fv.price_cents && !plPickedMedia.length) {
     alert('A paid Fanvue post needs media behind the price.'); return;
   }
@@ -1271,7 +1397,7 @@ async function plSave(btn, now) {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ persona: plSlug, platforms: plChans, text: text,
                                run_at: at, now: !!now, media_ids: plPickedMedia,
-                               ...(fv || {}), ...(ig || {}) })
+                               ...(fv || {}), ...(ig || {}), ...(rd || {}) })
       });
     } else if (plOpen.kind === 'proposed') {
       if (!plOpen.written) {
@@ -1282,14 +1408,14 @@ async function plSave(btn, now) {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ persona: plSlug, platform: plOpen.platform, text: text,
                                run_at: at, now: !!now, media_ids: plPickedMedia,
-                               ...(fv || {}), ...(ig || {}) })
+                               ...(fv || {}), ...(ig || {}), ...(rd || {}) })
       });
     } else {
       res = await fetch('/api/growth/queue', {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ persona: plSlug, id: plOpen.id, text: text,
                                run_at: at, now: !!now, media_ids: plPickedMedia,
-                               ...(fv || {}), ...(ig || {}) })
+                               ...(fv || {}), ...(ig || {}), ...(rd || {}) })
       });
     }
     const d = await res.json();
