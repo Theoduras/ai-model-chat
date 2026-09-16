@@ -37,10 +37,22 @@ logger = logging.getLogger(__name__)
 
 # Where the rules come from, best first. Each is a raw JSON document with the
 # same shape; a source that 404s or serves something unparseable is skipped.
+# Every mirror that publishes a usable set. They rotate at different speeds and
+# sometimes only one of them catches a revision, so more of them is strictly
+# better: a candidate is adopted only if it reproduces a signature OnlyFans
+# itself produced, which no source can talk its way past.
 RULES_SOURCES = (
     'https://raw.githubusercontent.com/DIGITALCRIMINALS/dynamic-rules/main/onlyfans.json',
     'https://raw.githubusercontent.com/DATAHOARDERS/dynamic-rules/main/onlyfans.json',
+    'https://raw.githubusercontent.com/xagler/dynamic-rules/main/onlyfans.json',
+    'https://raw.githubusercontent.com/patchsets/onlyfans-dynamic-rules/main/rules.json',
+    'https://raw.githubusercontent.com/folkevil/onlyfans-dynamic-rules/main/rules.json',
+    'https://raw.githubusercontent.com/NettoRedes/OF-Sign/main/onlyfans.json',
 )
+# The app token has been this value across every revision and every mirror, and
+# some of them stopped publishing it. It is not a secret -- OnlyFans' own page
+# sends it on every request -- so a source that omits it is not unusable.
+DEFAULT_APP_TOKEN = '33d57ade8c02dbc5a333db99ff9ae26a'
 RULES_TIMEOUT = 15
 # Rules older than this are refetched on the next signature, even without a
 # rejection — a stale set that still works is fine, one that stopped working an
@@ -56,6 +68,7 @@ RULES_MAX_AGE = 6 * 3600
 # the same two repositories.
 REFRESH_RETRY_AFTER = 60
 REFRESH_RETRY_MAX = 900
+_candidates = {}
 _refresh_failed_at = [0.0]
 _refresh_failures = [0]
 # OnlyFans' own web client. The user-agent is part of what the session was
@@ -251,11 +264,45 @@ def proven():
     return verify(sample(), _rules)
 
 
+def _normalise(rules):
+    """One shape out of the several the mirrors publish.
+
+    They agree on the arithmetic and disagree on the spelling: camelCase, the
+    revision and suffix split into two fields under three different pairs of
+    names, `app-token` with a hyphen. Reading only this repository's own
+    spelling is what made most of them unusable, and they are the mirrors most
+    likely to catch a rotation the others miss.
+    """
+    if not isinstance(rules, dict):
+        return {}
+    out = dict(rules)
+    for alias, name in (('staticParam', 'static_param'),
+                        ('checksumIndexes', 'checksum_indexes'),
+                        ('checksumConstant', 'checksum_constant'),
+                        ('checksumConstants', 'checksum_constants'),
+                        ('app-token', 'app_token'),
+                        ('appToken', 'app_token')):
+        if not out.get(name) and rules.get(alias) is not None:
+            out[name] = rules[alias]
+    if not out.get('format'):
+        # The format is a revision, the two placeholders, and a suffix. A
+        # mirror that ships the ends separately is describing the same string.
+        for head, tail in (('start', 'end'), ('prefix', 'suffix'),
+                           ('first_param', 'last_param')):
+            if rules.get(head) and rules.get(tail):
+                out['format'] = '%s:{}:{:x}:%s' % (rules[head], rules[tail])
+                break
+    out.setdefault('app_token', DEFAULT_APP_TOKEN)
+    if not out.get('app_token'):
+        out['app_token'] = DEFAULT_APP_TOKEN
+    return out
+
+
 def _fetch(url):
     req = urllib.request.Request(url, headers={
         'User-Agent': DEFAULT_USER_AGENT, 'Accept': 'application/json'})
     with urllib.request.urlopen(req, timeout=RULES_TIMEOUT) as r:
-        return json.loads(r.read().decode('utf-8', 'replace'))
+        return _normalise(json.loads(r.read().decode('utf-8', 'replace')))
 
 
 def _valid(rules):
@@ -359,6 +406,10 @@ def refresh(reject=()):
             if url != 'override':
                 errors.append(f'{url}: missing fields')
             continue
+        # Kept whether or not it signs: a rotation can change the checksum
+        # recipe as well as the param, and then the recipe the derivation needs
+        # is one of these rather than the one currently loaded.
+        _candidates[url] = dict(rules)
         if fingerprint(rules) in reject:
             errors.append(f'{url}: still serving the revision OnlyFans rejected')
             continue
@@ -662,7 +713,8 @@ def solve(bundle, s=None, bases=None):
     fmt = format_of(s)
     if not (s and fmt):
         return {}
-    bases = [b for b in (bases or [_rules, override()]) if b and b.get('checksum_indexes')]
+    bases = bases or ([_rules, override()] + list(_candidates.values()))
+    bases = [b for b in bases if b and b.get('checksum_indexes')]
     if not bases:
         return {}
     candidates, seen = [], set()
