@@ -69,27 +69,32 @@
       </div>
     </div>
     <div class="row-inline">
-      <button class="btn-ai" onclick="startSignin()">Sign in to Reddit</button>
+      <button class="btn-ai" onclick="startOauth()">Connect with Reddit</button>
       <button class="btn-ai" style="background:var(--surface); color:var(--text-2);"
               onclick="disconnect()">Disconnect</button>
     </div>
-    <span class="hint">A real Reddit login page opens in a window. Sign in there as you
-      would on your own laptop — the human check, 2FA and any emailed code all happen on
-      Reddit's own page. Nothing you type reaches us. <strong>Open her chat once in that
-      window before closing it</strong>: chat needs a token Reddit only issues to the
-      page, and without it she can post and comment but not answer DMs.</span>
+    <span class="hint">This sends you to Reddit's own page to approve her account
+      once. What comes back never expires, so this is the last time you do it &mdash;
+      no proxy, no window to keep open, nothing to re-paste later. She can post,
+      upload media and answer comments from it. <strong>Reddit chat is not part of
+      it</strong>: chat runs on a system Reddit's API has never been able to reach.</span>
     <details style="margin-top:12px;">
-      <summary class="hint" style="cursor:pointer;">Sign in on your own browser instead</summary>
+      <summary class="hint" style="cursor:pointer;">The old ways in (chat only)</summary>
       <div style="margin-top:10px;">
         <span class="hint" style="display:block; margin-bottom:10px;">
-          When Reddit refuses the hosted window, sign in as her on your own
-          machine and bring the session over. In that tab press F12 &rarr;
-          <b>Network</b>, reload, click any request to reddit.com, and copy two
-          things from <b>Request Headers</b>: the whole <code>cookie</code> line,
-          and the <code>authorization</code> line without the leading
-          <code>Bearer&nbsp;</code>. The token is what chat needs &mdash; without it
-          she posts and comments but cannot answer DMs.
+          These two exist only because they can carry a chat token, and chat is
+          off. Reddit refuses the hosted window on most accounts, and a
+          hand-carried session expires after a few weeks &mdash; so prefer the
+          button above for anything else. To carry one over: sign in as her on
+          your own machine, press F12 &rarr; <b>Network</b>, reload, click any
+          request to reddit.com, and copy from <b>Request Headers</b> the whole
+          <code>cookie</code> line and the <code>authorization</code> line
+          without the leading <code>Bearer&nbsp;</code>.
         </span>
+        <div class="row-inline" style="margin-bottom:10px;">
+          <button class="btn-ai" style="background:var(--surface); color:var(--text-2);"
+                  onclick="startSignin()">Open the hosted sign-in window</button>
+        </div>
         <div class="field full">
           <label>Cookie header</label>
           <input type="password" id="rd-cookie" autocomplete="new-password" spellcheck="false"
@@ -106,15 +111,17 @@
         </div>
       </div>
     </details>
-    <div id="account-status" class="hint" style="margin-top:10px;"></div>
+        <div id="account-status" class="hint" style="margin-top:10px;"></div>
   </div>
 
   <div class="form-section" data-tab="settings" id="sec-proxy">
     <div class="section-title">Her connection</div>
-    <span class="hint">Reddit blocks this server's own address at the login page
-      &mdash; Cloudflare answers &ldquo;You've been blocked by network security&rdquo;
-      &mdash; so she needs a residential proxy of her own before she can sign in
-      at all. Give each model her own credentials rather than sharing one: a pool
+    <span class="hint"><b>Only the fallback sign-ins use this.</b> An account
+      connected with the button above talks to Reddit as an approved app and
+      goes out from this server directly, so it needs no proxy at all. The
+      hosted window and a hand-carried session do: Reddit blocks this server's
+      own address at the login page &mdash; Cloudflare answers &ldquo;You've been
+      blocked by network security&rdquo;. Give each model her own credentials rather than sharing one: a pool
       account that gets banned should not take the others with it, and an account
       that signs in from one country and posts from another is an account that
       gets checked.</span>
@@ -314,17 +321,25 @@ async function loadAll(){
   if(mounted) PlatformConsole.reset();
 }
 
+let lastStatus={};
+
 async function loadStatus(){
   const s=await api('/api/reddit/status?persona='+encodeURIComponent(slug()));
+  lastStatus=s;
   const pill=el('conn-pill');
   const live=s.state&&s.state.connected;
-  pill.textContent=s.connected?(live?('connected as '+(s.username||'?'))
-    :(s.chat_ready?'connecting…':'posting only')):'not connected';
-  pill.className='conn-pill '+(live?'ok':(s.connected?'':'err'));
+  const oauth=s.auth==='oauth';
+  pill.textContent=oauth?('connected as u/'+(s.username||'?'))
+    :(s.connected?(live?('connected as '+(s.username||'?'))
+      :(s.chat_ready?'connecting…':'posting only')):'not connected');
+  pill.className='conn-pill '+((oauth||live)?'ok':(s.connected?'':'err'));
   const si=s.signin||{};
-  const why=si.open?(si.error||si.why||'Sign-in window is open — finish it there.')
-    :(s.reachable||si.why||(s.connected?'':'Sign in to Reddit to connect her account.'));
-  note(el('account-status'),why,!!(s.reachable||si.error)&&!si.open);
+  const why=oauth?''
+    :(si.open?(si.error||si.why||'Sign-in window is open — finish it there.')
+      :(s.reachable||si.why||(s.connected?''
+        :(s.app_ready?'Hit Connect with Reddit to approve her account.'
+                     :'No Reddit app is configured on this service yet.'))));
+  note(el('account-status'),why,!oauth&&!!(s.reachable||si.error)&&!si.open);
   drawProxy(s);
   subs=(s.subs||[]).slice();
   drawSubs();
@@ -353,6 +368,23 @@ async function connect(){
   }catch(e){note(box,e.message,true);}
 }
 
+function startOauth(){
+  // Reddit's approval page, in a popup so the console keeps its state. What
+  // comes back is a refresh token that does not expire, which is why this is
+  // the main path and the window below is the fallback.
+  if(!lastStatus.app_ready){
+    note(el('account-status'),'This service has no Reddit app configured yet \u2014 '
+      +'REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET and REDDIT_REDIRECT_URI have to be '
+      +'set on it first.',true);
+    return;
+  }
+  const win=window.open('/reddit/oauth/start?persona='+encodeURIComponent(slug()),
+                        'reddit-oauth','width=560,height=740,menubar=no,toolbar=no');
+  if(!win){note(el('account-status'),'Allow popups for this site, then try again.',true);return;}
+  note(el('account-status'),'Approve her account in the window that opened.');
+  const watch=setInterval(()=>{if(win.closed){clearInterval(watch);loadStatus();}},1500);
+}
+
 function startSignin(){
   // A popup, not a panel: Reddit's human check reads the window it runs in,
   // and an iframe is not one. Same window OnlyFans, Discord and Instagram use.
@@ -376,6 +408,12 @@ async function disconnect(){
 
 function drawProxy(s){
   const box=el('proxy-status');
+  if(s.auth==='oauth'){
+    box.textContent='Not used \u2014 she is connected as an approved Reddit app, '
+      +'so she goes out from this server directly.';
+    box.style.color='var(--text-3)';
+    return;
+  }
   box.textContent=s.proxy
     ? ('Going out through '+s.proxy+'.')
     : (s.proxy_pool
@@ -657,19 +695,30 @@ function redditHealth(d){
   const st=d.state||{}, si=d.signin||{}, acc=d.account||{};
   const who=acc.username||'her account';
   const rows=[];
-  rows.push({state:d.connected?(st.connected?'ok':'warn'):'bad',
-    label:!d.connected?'No account signed in'
-      :(st.connected?('Her account is online as '+who)
-        :(acc.chat_ready?'Signed in, but chat is down':'Signed in — posting only')),
-    hint:!d.connected?(si.open?'A sign-in window is open — finish it there.'
-                              :'Sign in to Reddit under Settings.')
-      :(st.connected?'Chat is connected, so she sees DMs as they arrive.'
-        :(acc.chat_ready?(st.error||'Her chat socket is down and is being retried.')
-          :'Her sign-in captured no chat token. She posts and comments, but cannot '
-           +'answer DMs — reconnect and open her chat once in that window.'))});
-  rows.push({state:d.enabled?'ok':'warn', label:d.enabled?'DM replies are on':'DM replies are off',
-    hint:d.enabled?'She answers Reddit chat.':'Fans can write, but nothing will answer them.'});
-  rows.push({state:(d.proxy||d.proxy_pool)?'ok':'bad',
+  if(d.auth==='oauth'){
+    rows.push({state:'ok', label:'Connected as u/'+(acc.username||'?'),
+      hint:'Approved as a Reddit app, so this does not expire. She posts, '
+          +'uploads media and answers comments. Reddit chat is not reachable '
+          +'this way and stays off.'});
+  }else{
+    rows.push({state:d.connected?(st.connected?'ok':'warn'):'bad',
+      label:!d.connected?'No account connected'
+        :(st.connected?('Her account is online as '+who)
+          :(acc.chat_ready?'Signed in, but chat is down':'Signed in — posting only')),
+      hint:!d.connected?(si.open?'A sign-in window is open — finish it there.'
+                                :(d.app_ready?'Hit Connect with Reddit under Settings.'
+                                             :'No Reddit app is configured on this service yet.'))
+        :(st.connected?'Chat is connected, so she sees DMs as they arrive.'
+          :(acc.chat_ready?(st.error||'Her chat socket is down and is being retried.')
+            :'This is a carried-over session with no chat token. It also expires — '
+             +'connect her with the Reddit button instead.'))});
+  }
+  if(d.auth!=='oauth'){
+    rows.push({state:d.enabled?'ok':'warn', label:d.enabled?'DM replies are on':'DM replies are off',
+      hint:d.enabled?'She answers Reddit chat.':'Fans can write, but nothing will answer them.'});
+  }
+  if(d.auth!=='oauth')
+    rows.push({state:(d.proxy||d.proxy_pool)?'ok':'bad',
     label:d.proxy?'She has her own connection'
       :(d.proxy_pool?'Sharing the pool connection':'No connection of her own'),
     hint:d.proxy?('Reddit sees her at '+d.proxy+', and only her.')

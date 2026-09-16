@@ -127,20 +127,53 @@ class Rest:
         self.bearer = session.get('bearer') or ''
         self.username = session.get('username') or ''
         self.user_id = session.get('user_id') or ''
+        self.access_token = session.get('access_token') or ''
         self.user_agent = session.get('user_agent') or DEFAULT_UA
         self.proxy = session.get('proxy') or ''
         self.base = base.rstrip('/')
+        if self.access_token:
+            # A registered app talks to the OAuth host as itself: its own
+            # declared User-Agent, no cookie, and no reason to hide behind a
+            # residential exit IP the way a scraped session did.
+            import reddit_oauth as _ro
+            self.base = REDDIT_OAUTH.rstrip('/')
+            self.user_agent = _ro.user_agent()
+            self.proxy = ''
         self._lock = threading.Lock()
         self._until = 0.0
 
     def configured(self):
-        return bool(self.cookie)
+        return bool(self.access_token or self.cookie)
+
+    def oauth(self):
+        return bool(self.access_token)
+
+    def _p(self, path):
+        """The same route on whichever host this session speaks to.
+
+        The OAuth host serves the API without the legacy `.json` suffix the
+        web endpoints carry, and identity lives somewhere else entirely.
+        """
+        if not self.access_token:
+            return f'{self.base}{path}'
+        if path.startswith('/api/me'):
+            return f'{self.base}/api/v1/me'
+        head, _, tail = path.partition('?')
+        head = head[:-5] if head.endswith('.json') else head
+        return f'{self.base}{head}' + (f'?{tail}' if tail else '')
 
     def held(self):
         left = self._until - time.time()
         return int(left) + 1 if left > 0 else 0
 
     def _headers(self, extra=None):
+        if self.access_token:
+            h = {'Authorization': f'Bearer {self.access_token}',
+                 'User-Agent': self.user_agent,
+                 'Accept': 'application/json'}
+            if extra:
+                h.update(extra)
+            return h
         h = {
             'Cookie': self.cookie,
             'User-Agent': self.user_agent,
@@ -209,7 +242,7 @@ class Rest:
             raise RedditApiError(0, str(getattr(e, 'reason', e))[:200])
 
     def _post(self, path, body):
-        payload = self.call('POST', f'{self.base}{path}',
+        payload = self.call('POST', self._p(path),
                             body=dict(body, api_type='json', raw_json=1))
         why = _api_errors(payload)
         if why:
@@ -219,7 +252,10 @@ class Rest:
     # ── Who she is ───────────────────────────────────────────────────────────
 
     def me(self):
-        return self.call('GET', f'{self.base}/api/me.json').get('data') or {}
+        got = self.call('GET', self._p('/api/me.json')) or {}
+        # The web route wraps her account in `data`; the OAuth one returns it
+        # flat.
+        return got.get('data') if isinstance(got.get('data'), dict) else got
 
     # ── Media ────────────────────────────────────────────────────────────────
 
@@ -234,7 +270,7 @@ class Rest:
         """
         mime = mime or 'application/octet-stream'
         filename = filename or f'{uuid.uuid4().hex}.{(mimetypes.guess_extension(mime) or ".bin").lstrip(".")}'
-        lease = self.call('POST', f'{self.base}{PATH_ASSET}',
+        lease = self.call('POST', self._p(PATH_ASSET),
                           body={'filepath': filename, 'mimetype': mime})
         args = (lease or {}).get('args') or {}
         action = args.get('action') or ''
@@ -264,7 +300,7 @@ class Rest:
         deadline = time.time() + REDDIT_ASSET_WAIT
         while time.time() < deadline:
             try:
-                status = self.call('GET', f'{self.base}/api/media/asset/{asset_id}')
+                status = self.call('GET', self._p(f'/api/media/asset/{asset_id}'))
             except RedditApiError as e:
                 # The status route moves with Reddit's releases. Losing it means
                 # we cannot see the answer, not that the answer was no -- so
@@ -332,7 +368,7 @@ class Rest:
                 'show_error_list': True, 'api_type': 'json'}
         if flair_id:
             body['flair_id'] = flair_id
-        payload = self.call('POST', f'{self.base}{PATH_GALLERY}', body=body)
+        payload = self.call('POST', self._p(PATH_GALLERY), body=body)
         why = _api_errors(payload)
         if why:
             raise RedditApiError(400, why)
@@ -344,7 +380,7 @@ class Rest:
         """What flairs this subreddit offers. Most NSFW subs auto-remove a post
         without one, so the console has to be able to show the real list."""
         sub = str(sub).lstrip('/').removeprefix('r/')
-        got = self.call('GET', f'{self.base}/r/{sub}/api/link_flair_v2.json')
+        got = self.call('GET', self._p(f'/r/{sub}/api/link_flair_v2.json'))
         rows = got if isinstance(got, list) else []
         return [{'id': r.get('id') or '', 'text': r.get('text') or '',
                  'editable': bool(r.get('text_editable'))} for r in rows]
@@ -356,14 +392,14 @@ class Rest:
         name = username or self.username
         if not name:
             return []
-        got = self.call('GET', f'{self.base}/user/{name}/submitted.json?limit={int(limit)}')
+        got = self.call('GET', self._p(f'/user/{name}/submitted.json?limit={int(limit)}'))
         return [c.get('data') or {} for c in ((got or {}).get('data') or {}).get('children') or []]
 
     def post_comments(self, article_id, limit=100):
         """Every comment on one of her posts, flattened -- the tree shape does
         not matter when the question is only which ones are new."""
         article = str(article_id).removeprefix('t3_')
-        got = self.call('GET', f'{self.base}/comments/{article}.json?limit={int(limit)}')
+        got = self.call('GET', self._p(f'/comments/{article}.json?limit={int(limit)}'))
         out = []
 
         def walk(node):
@@ -388,7 +424,7 @@ class Rest:
         out = []
         for path in ('/message/mentions.json', '/message/unread.json'):
             try:
-                got = self.call('GET', f'{self.base}{path}?limit={int(limit)}')
+                got = self.call('GET', self._p(f'{path}?limit={int(limit)}'))
             except RedditApiError:
                 continue
             for child in ((got or {}).get('data') or {}).get('children') or []:
@@ -407,7 +443,7 @@ class Rest:
         if not names:
             return
         try:
-            self.call('POST', f'{self.base}/api/read_message',
+            self.call('POST', self._p('/api/read_message'),
                       body={'id': ','.join(names)})
         except RedditApiError as e:
             logger.debug('reddit mark_read failed: %s', str(e)[:120])
