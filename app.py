@@ -17278,6 +17278,7 @@ if _of_direct():
     of_rules.cache_hooks(lambda: _get_setting('onlyfans_rules_cache') or '',
                          lambda v: _set_setting('onlyfans_rules_cache', v))
     of_rules.override_hooks(lambda: _get_setting('onlyfans_rules_override') or '')
+    of_rules.signature_hooks(_of_signatures)
     of_rules.sample_hooks(lambda: _get_setting('onlyfans_rules_sample') or '',
                           lambda v: _set_setting('onlyfans_rules_sample', v))
     of_session.store_hooks(lambda a: _get_setting(f'onlyfans_vault_{a}') or '',
