@@ -1024,6 +1024,7 @@ body.auth-pending .sb-plan { display: none !important; }
   grid-template-columns: 280px 1fr 340px;
   min-height: 0;
   overflow: hidden;
+  transition: grid-template-columns 0.28s ease-in-out;
 }
 
 .sidebar {
@@ -1032,7 +1033,10 @@ body.auth-pending .sb-plan { display: none !important; }
   flex-direction: column;
   overflow: hidden;
   height: 100%;
+  min-width: 0;
+  transition: opacity 0.28s ease-in-out;
 }
+
 .sb-scroll { flex: 1; overflow-y: auto; min-height: 0; padding: 10px 10px 6px; }
 
 .sb-ws { display: flex; align-items: center; gap: 10px; padding: 6px 6px 14px; }
@@ -1272,7 +1276,7 @@ body.auth-pending .sb-plan { display: none !important; }
   transition: transform 0.25s ease-out, box-shadow 0.25s ease-out;
   flex-shrink: 0;
 }
-.sb-refer { margin: 4px 2px 8px; width: calc(100% - 4px); }
+.sb-refer { margin: 4px 2px 8px; width: calc(100% - 4px); font-size: 0.82rem; padding: 10px; }
 
 .btn-new:hover { transform: translateY(-1px); box-shadow: 0 6px 20px #ff2d7855; animation: sweep 3s ease-in-out infinite alternate; }
 
@@ -2123,7 +2127,7 @@ body.page-dashboard code {
     position: fixed; top: 0; bottom: 0; height: 100%;
     z-index: 200; width: 290px; max-width: 86vw;
     background: var(--bg);
-    transition: transform 0.26s cubic-bezier(.4,0,.2,1);
+    transition: transform 0.28s ease-in-out;
     will-change: transform;
   }
   .sidebar { left: 0; border-right: 1px solid var(--surface); transform: translateX(-101%); }
@@ -2961,12 +2965,20 @@ body.embedding:not(.ob-running) .preview-panel { display: none; }
    hiding the sidebar would kill the hamburger, and these column templates would
    leave the form a sliver of the viewport. */
 @media (min-width: 901px) {
-  body.sidebar-off .sidebar { display: none; }
+  /* The track count has to match across the toggle or the width cannot animate,
+     so the collapsed sidebar is a 0px column rather than a removed one, and its
+     contents keep their width and are clipped by it instead of reflowing. */
+  .sidebar > * { width: 280px; flex-shrink: 0; }
+  body.sidebar-off .sidebar { opacity: 0; border-right-color: transparent; }
   body.browsing:not(.ob-running) .layout,
   body.embedding:not(.ob-running) .layout { grid-template-columns: 280px 1fr; }
-  body.sidebar-off .layout { grid-template-columns: 1fr 340px; }
+  body.sidebar-off .layout { grid-template-columns: 0px 1fr 340px; }
   body.browsing.sidebar-off:not(.ob-running) .layout,
-  body.embedding.sidebar-off:not(.ob-running) .layout { grid-template-columns: 1fr; }
+  body.embedding.sidebar-off:not(.ob-running) .layout { grid-template-columns: 0px 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .layout, .sidebar, .preview-panel { transition: none; }
 }
 body.browsing:not(.ob-running) .form-area { padding: 24px 28px; }
 body.embedding .form-area { padding: 0; overflow: hidden; }
