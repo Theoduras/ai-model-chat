@@ -22346,6 +22346,20 @@ def _rd_signin_state(persona, adopt=False):
         _rd_adopt(attempt)
         failed = _get_setting(f'reddit_adopt_error_{persona}') or ''
     refused = held.get('login_errors') or []
+    landed = held.get('landed') or {}
+    if landed and not held.get('blocked_by'):
+        failed = failed or (f"The sign-in browser landed on {landed.get('url', '')} "
+                            f"\u2014 {landed.get('title') or 'no title'}.")
+    if held.get('blocked_by'):
+        where = held.get('exit_ip') or 'this server'
+        failed = failed or (
+            f"Reddit showed the sign-in browser a block page at {where}"
+            + (' through her proxy.' if held.get('proxy_set') else ', with no proxy set.')
+            + (' The address is fine, so it is the browser being recognised '
+               'as automated \u2014 the sign-in container is running unpatched '
+               'Playwright.' if held.get('driver') == 'playwright' else
+               ' The address loaded the page, so it is the browser being '
+               'recognised as automated rather than the IP.'))
     if held.get('exit_ip'):
         failed = failed or ''
         seen = (f"The sign-in browser is leaving at {held['exit_ip']}"
