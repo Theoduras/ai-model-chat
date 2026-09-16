@@ -44,6 +44,7 @@
         <button type="button" onclick="plShiftWeek(1)" aria-label="Next week">&rsaquo;</button>
       </div>
       <button type="button" class="btn btn-secondary" onclick="plLoadQueue()">Refresh</button>
+      <button type="button" class="btn btn-secondary" onclick="plNew()">New post</button>
       <button type="button" class="btn btn-primary" id="pl-plan-btn" onclick="plPlan(this)">Plan the week</button>
     </div>
   </div>
@@ -58,13 +59,19 @@
 </div>
 
 <div class="modal-overlay" id="pl-modal" onclick="if(event.target===this)plClose()">
-  <div class="modal" style="max-width:520px;">
+  <div class="modal pl-post-modal">
     <div class="modal-header">
       <h2 id="pl-m-title">Post</h2>
       <button class="modal-close" onclick="plClose()" aria-label="Close">&times;</button>
     </div>
     <div class="modal-body">
       <p class="pl-modal-meta" id="pl-m-meta"></p>
+
+      <div class="field" style="margin-top:14px;" id="pl-m-chans-field" hidden>
+        <label>Channels</label>
+        <div class="pl-chans" id="pl-m-chans"></div>
+        <span class="hint" id="pl-m-chans-hint" style="margin-top:6px;"></span>
+      </div>
 
       <div class="field" style="margin-top:14px;" id="pl-m-when-field">
         <label for="pl-m-when">When</label>
@@ -79,6 +86,11 @@
         <textarea id="pl-m-text" rows="5" oninput="plCount()"></textarea>
         <div style="margin-top:6px; display:flex; gap:6px;">
           <button type="button" class="btn-ai" id="pl-m-write" onclick="plWrite(this)">✨ Write it</button>
+          <span class="pl-rating" id="pl-m-rating">
+            <button type="button" class="on" data-r="" onclick="plSetRating('')" title="Whatever this persona is set to">Auto</button>
+            <button type="button" data-r="sfw" onclick="plSetRating('sfw')">SFW</button>
+            <button type="button" data-r="nsfw" onclick="plSetRating('nsfw')">NSFW</button>
+          </span>
           <button type="button" class="btn-section-save" id="pl-m-copy" style="margin-left:0;" onclick="plCopy(this)">Copy</button>
         </div>
         <span class="hint" id="pl-m-hint" style="margin-top:6px;"></span>
@@ -90,17 +102,57 @@
           <span class="pl-count" id="pl-m-media-note"></span>
         </label>
         <div class="pl-picked" id="pl-m-picked"></div>
+        <div id="pl-m-browse" style="margin:8px 0 2px;"></div>
         <div class="pl-strip" id="pl-m-strip"></div>
         <span class="hint" id="pl-m-media-hint" style="margin-top:6px;"></span>
+      </div>
+
+      <div class="field" style="margin-top:14px;" id="pl-m-fanvue-field" hidden>
+        <label for="pl-m-audience">Who sees it on Fanvue</label>
+        <select id="pl-m-audience">
+          <option value="followers-and-subscribers">Followers and subscribers</option>
+          <option value="subscribers">Subscribers only</option>
+        </select>
+        <label for="pl-m-price" style="margin-top:10px;">Unlock price</label>
+        <input type="number" id="pl-m-price" min="0" step="0.01" placeholder="0.00">
+        <span class="hint" style="margin-top:6px;">Leave it empty for a free post.
+          A price needs media behind it, and Fanvue's floor is $3.00.</span>
       </div>
 
       <div class="modal-footer" style="margin-top:18px;">
         <button type="button" class="btn btn-ghost" id="pl-m-cancel"
                 style="color:var(--err); border-color:var(--err); margin-right:auto;"
                 onclick="plCancelPost(this)">Cancel post</button>
+        <button type="button" class="btn btn-ghost" id="pl-m-delete"
+                style="color:var(--err); border-color:var(--err);"
+                onclick="plDeletePost(this)">Delete</button>
         <button type="button" class="btn btn-ghost" onclick="plClose()">Close</button>
+        <button type="button" class="btn btn-secondary" id="pl-m-now"
+                onclick="plSave(this, true)">Post now</button>
         <button type="button" class="btn btn-primary" id="pl-m-save" onclick="plSave(this)">Save changes</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="pl-vault" onclick="if(event.target===this)plVaultClose()">
+  <div class="modal pl-vault-modal">
+    <div class="modal-header">
+      <h2>Fanvue vault</h2>
+      <button class="modal-close" onclick="plVaultClose()" aria-label="Close">&times;</button>
+    </div>
+    <div class="pl-vault-bar">
+      <input type="search" id="pl-v-q" placeholder="Search by name…" oninput="plVaultDraw()">
+      <select id="pl-v-folder" onchange="plVaultReload()"><option value="">All folders</option></select>
+      <select id="pl-v-type" onchange="plVaultReload()">
+        <option value="">Images and video</option>
+        <option value="image">Images</option>
+        <option value="video">Video</option>
+      </select>
+    </div>
+    <div class="modal-body pl-vault-body">
+      <div class="pl-vault-grid" id="pl-v-grid"></div>
+      <div class="pl-vault-foot" id="pl-v-foot"></div>
     </div>
   </div>
 </div>
@@ -108,24 +160,31 @@
 <script>
 // The caps mirror growth.POST_PLATFORMS. The server trims to them on every
 // write, so this copy only decides when the counter turns red.
-const PL_CAPS = { x: 280, threads: 500, instagram: 2200, tiktok: 2200, reddit: 300 };
-const PL_LABELS = { x: 'X', threads: 'Threads', instagram: 'Instagram', tiktok: 'TikTok', reddit: 'Reddit' };
-const PL_PUBLISHABLE = ['x', 'threads'];
+const PL_CAPS = { x: 280, threads: 500, fanvue: 5000, instagram: 2200, tiktok: 2200, reddit: 300 };
+const PL_LABELS = { x: 'X', threads: 'Threads', fanvue: 'Fanvue', instagram: 'Instagram', tiktok: 'TikTok', reddit: 'Reddit' };
+const PL_PUBLISHABLE = ['x', 'threads', 'fanvue'];
 // Mirrors growth.MEDIA_SUPPORT. The server checks it again on every write; this
 // copy only decides which thumbnails are worth offering.
 const PL_MEDIA = {
   x:         ['image', 'video'],
   threads:   ['image', 'video'],
+  fanvue:    ['image', 'video'],
   instagram: ['image', 'video'],
   tiktok:    ['video'],
   reddit:    ['image']
 };
 // Where a creator connects each publishable channel, for the prompt below.
-const PL_CONNECT_AT = { x: '/xbot', threads: '/threads' };
+// Mirrors growth.MEDIA_SUPPORT's max. The server checks it again on every write.
+const PL_MEDIA_MAX = { x: 4, threads: 20, fanvue: 20, instagram: 10, tiktok: 1, reddit: 20 };
+const PL_CONNECT_AT = { x: '/xbot', threads: '/threads', fanvue: '/fanvue' };
+// Fanvue's floor for a paid post, in cents. The server checks it again.
+const PL_FV_PRICE_MIN = 300;
 let plConn = {};
 const PL_KIND = { value: 'worth reading', tease: 'tease', cta: 'ask' };
 const PL_STATUS = {
   queued: 'Waiting to go out.',
+  manual: 'On the calendar as a reminder. This channel has no posting API she is '
+        + 'allowed to use, so copy it out and post it yourself when the slot comes.',
   sending: 'On its way now.',
   posted: 'Posted.',
   failed: 'Failed, and a failed post is not retried — edit it and queue it fresh.',
@@ -139,7 +198,15 @@ let plProposed = [];      // ephemeral plan slots, never persisted
 let plPlanMeta = null;
 let plOpen = null;        // the card the modal is editing
 let plVault = [];         // the persona's media library
-let plPickedMedia = '';   // what the open editor has attached
+let plPickedMedia = [];   // what the open editor has attached, in order
+let plChans = [];         // channels ticked on a brand-new post
+let plRating = '';        // '', 'sfw' or 'nsfw' for the next draft
+let plRemote = [];        // posts Fanvue already has booked — read-only
+let plFvVault = null;     // her Fanvue vault, fetched the first time it is needed
+let plFvVaultError = '';
+let plFvItems = [];       // what the vault overlay has loaded
+let plFvPage = 1, plFvHasMore = false, plFvLoading = false;
+let plFvFolder = '', plFvType = '';
 
 function esc(s) {
   return String(s == null ? '' : s)
@@ -216,6 +283,8 @@ async function plInit() {
 
 function plPickPersona(slug) {
   plSlug = slug;
+  plFvVault = null;
+  plFvVaultError = '';
   plProposed = [];
   plPlanMeta = null;
   plLoadVault();
@@ -231,8 +300,156 @@ async function plLoadVault() {
 }
 
 function plMediaById(id) {
-  return plVault.find(m => m.id === id) || null;
+  return plVault.find(m => m.id === id)
+      || (plFvVault || []).find(m => m.id === id) || null;
 }
+
+// Her own Fanvue vault is only on offer when Fanvue is the only channel ticked:
+// it attaches by uuid with nothing uploaded, and that uuid means nothing to X or
+// Threads, which need the file itself.
+function plFanvueOnly() {
+  const chans = plOpenChans();
+  return chans.length === 1 && chans[0] === 'fanvue';
+}
+
+async function plFvFetch(page) {
+  const q = new URLSearchParams({ persona: plSlug, page: String(page) });
+  if (plFvFolder) q.set('folder', plFvFolder);
+  if (plFvType) q.set('type', plFvType);
+  const d = await (await fetch('/api/fanvue/media?' + q)).json();
+  plFvVaultError = (d && d.error) || '';
+  plFvHasMore = !!(d && d.has_more);
+  return ((d && d.media) || []).map(m => ({
+    id: 'fv:' + m.uuid,
+    kind: String(m.mediaType || '').toLowerCase() === 'video' ? 'video' : 'image',
+    thumb: m.thumb || '',
+    purpose: m.name || ''
+  }));
+}
+
+// Everything loaded so far, so a pick made in the overlay still resolves to a
+// thumbnail once the overlay is gone.
+function plFvRemember(items) {
+  items.forEach(m => {
+    if (!(plFvVault || []).some(x => x.id === m.id)) plFvVault.push(m);
+  });
+}
+
+async function plLoadFvVault() {
+  if (plFvVault || !plSlug) return;
+  plFvVault = [];
+  try {
+    plFvRemember(await plFvFetch(1));
+  } catch (e) { plFvVaultError = 'Could not read the Fanvue vault.'; }
+  plRenderMedia();
+}
+
+// ── The vault overlay ────────────────────────────────────────────────────────
+// The strip under the editor shows the first page. This is the whole vault:
+// folders, kinds and a name search, so a picture can be found rather than
+// scrolled past.
+async function plVaultOpen() {
+  if (!plSlug) return;
+  plFvItems = [];
+  plFvPage = 1;
+  document.getElementById('pl-v-q').value = '';
+  document.getElementById('pl-vault').classList.add('open');
+  plVaultLoadFolders();
+  plVaultReload();
+}
+
+function plVaultClose() {
+  document.getElementById('pl-vault').classList.remove('open');
+}
+
+async function plVaultLoadFolders() {
+  const sel = document.getElementById('pl-v-folder');
+  if (sel.dataset.slug === plSlug) return;
+  try {
+    const d = await (await fetch('/api/fanvue/folders?persona='
+      + encodeURIComponent(plSlug))).json();
+    sel.innerHTML = '<option value="">All folders</option>'
+      + (d.folders || []).map(f => '<option value="' + esc(f.name) + '">'
+        + esc(f.name) + (f.count == null ? '' : ' (' + f.count + ')')
+        + '</option>').join('');
+    sel.dataset.slug = plSlug;
+  } catch (e) { /* the folder filter is a convenience; the grid still loads */ }
+}
+
+async function plVaultReload() {
+  plFvFolder = document.getElementById('pl-v-folder').value;
+  plFvType = document.getElementById('pl-v-type').value;
+  plFvItems = [];
+  plFvPage = 1;
+  plFvLoading = true;
+  plVaultDraw();
+  try {
+    plFvItems = await plFvFetch(1);
+    plFvRemember(plFvItems);
+  } catch (e) { plFvVaultError = 'Could not read the Fanvue vault.'; }
+  plFvLoading = false;
+  plVaultDraw();
+}
+
+async function plVaultMore(btn) {
+  btn.disabled = true;
+  btn.textContent = 'loading…';
+  try {
+    const more = await plFvFetch(plFvPage + 1);
+    plFvPage += 1;
+    plFvItems = plFvItems.concat(more);
+    plFvRemember(more);
+  } catch (e) { plFvVaultError = 'Could not read the rest of the vault.'; }
+  plVaultDraw();
+}
+
+// The search is over what has been loaded, because Fanvue's media list takes no
+// query of its own — so the footer says how much of the vault it has seen.
+function plVaultDraw() {
+  const q = document.getElementById('pl-v-q').value.trim().toLowerCase();
+  const shown = q
+    ? plFvItems.filter(m => (m.purpose || '').toLowerCase().indexOf(q) !== -1)
+    : plFvItems;
+  const grid = document.getElementById('pl-v-grid');
+  grid.innerHTML = shown.length
+    ? shown.map(m => '<button type="button" class="pl-vault-item'
+        + (plPickedMedia.indexOf(m.id) !== -1 ? ' on' : '')
+        + '" onclick="plVaultPick(\'' + esc(m.id) + '\')">'
+        + plMediaThumb(m)
+        + '<span class="pl-vault-name">' + esc(m.purpose || 'untitled') + '</span>'
+        + '</button>').join('')
+    : '<span class="hint">' + (plFvLoading ? 'Reading her vault…'
+        : plFvVaultError ? esc(plFvVaultError)
+        : q ? 'Nothing loaded matches that. Load more, or clear the search.'
+        : 'Nothing here. Upload to Fanvue and it shows up.') + '</span>';
+
+  const foot = document.getElementById('pl-v-foot');
+  const count = shown.length + (q && shown.length !== plFvItems.length
+    ? ' of ' + plFvItems.length : '');
+  const cap = plMediaCap();
+  foot.innerHTML = '<span class="hint">'
+      + (plFvItems.length ? count + ' shown' : '')
+      + (cap > 1 && plPickedMedia.length
+          ? (plFvItems.length ? ' · ' : '') + plPickedMedia.length + ' of ' + cap + ' picked'
+          : '')
+    + '</span><span style="display:flex; gap:8px;">'
+    + (plFvHasMore && !plFvLoading
+        ? '<button type="button" class="btn btn-ghost" onclick="plVaultMore(this)">Load more</button>'
+        : '')
+    + (cap > 1
+        ? '<button type="button" class="btn btn-primary" onclick="plVaultClose()">Done</button>'
+        : '')
+    + '</span>';
+}
+
+function plVaultPick(id) {
+  // The overlay stays open while a post can still take more, so a carousel is
+  // picked in one visit rather than one reopen per file.
+  plPickMedia(id);
+  if (plMediaCap() <= 1 || plPickedMedia.length >= plMediaCap()) plVaultClose();
+  else plVaultDraw();
+}
+
 
 function plShiftWeek(n) {
   const d = new Date(plWeekStart * 1000);
@@ -261,6 +478,7 @@ async function plLoadQueue() {
     return;
   }
   plQueue = d.queue || [];
+  plRemote = d.remote || [];
   try {
     const ov = await (await fetch('/api/platforms/overview')).json();
     plConn = ((ov.personas || {})[plSlug]) || {};
@@ -311,7 +529,7 @@ function plRender(d) {
   plConnectLine();
 
   const t = (d && d.totals) || {};
-  const manual = plProposed.filter(s => !s.publishable).length;
+  const manual = plProposed.filter(s => !s.publishable).length + (t.manual || 0);
   document.getElementById('pl-stats').innerHTML =
     statTile('queued', t.queued || 0)
     + statTile('posted', t.posted || 0)
@@ -322,7 +540,7 @@ function plRender(d) {
   const queueable = plProposed.filter(s => s.publishable && s.at > Date.now() / 1000).length;
   document.getElementById('pl-bulk').innerHTML = queueable
     ? '<button type="button" class="btn btn-primary" onclick="plQueueWeek(this)">Queue the '
-      + queueable + ' X and Threads post' + (queueable === 1 ? '' : 's') + '</button>'
+      + queueable + ' ' + plAutoChannels() + ' post' + (queueable === 1 ? '' : 's') + '</button>'
       + (plPlanMeta && plPlanMeta.upcoming > plPlanMeta.cap
          ? '<span class="hint" style="margin-left:10px;">Only the first ' + plPlanMeta.cap
            + ' go in one round — plan again once those have gone out.</span>' : '')
@@ -338,6 +556,12 @@ function plRender(d) {
   plProposed.forEach((s, i) => cards.push({
     kind: 'proposed', at: s.at, platform: s.platform, publishable: s.publishable,
     text: s.idea, job: s.kind, idx: i
+  }));
+  // Posts made in the Fanvue app itself. Shown so the week is planned around
+  // them, never edited from here — they are not ours to change.
+  plRemote.forEach(r => cards.push({
+    kind: 'remote', at: r.run_at, platform: r.platform, status: r.status,
+    text: r.text, price: r.price_cents
   }));
   cards.sort((a, b) => a.at - b.at);
 
@@ -357,11 +581,33 @@ function plRender(d) {
   document.getElementById('pl-grid').innerHTML = html;
 }
 
+// The channels the proposals on screen can actually post to, named so the bulk
+// button says what it is about to queue rather than naming a fixed pair.
+function plAutoChannels() {
+  const names = [];
+  plProposed.forEach(s => {
+    if (!s.publishable) return;
+    const n = PL_LABELS[s.platform] || s.platform;
+    if (names.indexOf(n) === -1) names.push(n);
+  });
+  if (!names.length) return '';
+  if (names.length === 1) return names[0];
+  return names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
+}
+
 function plCard(c) {
-  const manual = c.kind === 'proposed' && !c.publishable;
+  if (c.kind === 'remote') {
+    const price = c.price ? ' · $' + (c.price / 100).toFixed(2) : '';
+    return '<div class="pl-card is-remote" title="Made in Fanvue — edit it there">'
+      + '<span class="pl-card-top"><span class="pl-when">' + hourLabel(c.at) + '</span>'
+      + '<span class="pl-chan">' + esc(PL_LABELS[c.platform] || c.platform) + '</span>'
+      + '<span class="pl-flag">' + esc((c.status === 'posted' ? 'on Fanvue' : 'scheduled') + price) + '</span></span>'
+      + '<span class="pl-text">' + esc(c.text || 'no caption') + '</span></div>';
+  }
+  const manual = c.kind === 'proposed' ? !c.publishable : c.status === 'manual';
   const cls = 'pl-card ' + (c.kind === 'proposed'
     ? (manual ? 'is-proposed is-manual' : 'is-proposed')
-    : 'is-' + c.status);
+    : (manual ? 'is-manual' : 'is-' + c.status));
   let flag = '';
   if (manual) flag = 'by hand';
   else if (c.kind === 'proposed') flag = PL_KIND[c.job] || c.job;
@@ -430,13 +676,123 @@ async function plQueueWeek(btn) {
 
 // ── The editor ───────────────────────────────────────────────────────────────
 
+// A blank post. Defaults to the next round hour so the time box is never the
+// thing standing between an idea and the calendar.
+function plNew() {
+  if (!plSlug) return;
+  const soon = new Date();
+  soon.setMinutes(0, 0, 0);
+  soon.setHours(soon.getHours() + 1);
+  let at = Math.floor(soon.getTime() / 1000);
+  // Opened on a week that is not this one, the post belongs to that week.
+  if (at < plWeekStart || at >= plWeekStart + 7 * 86400) at = plWeekStart + 9 * 3600;
+  plOpen = { kind: 'new', idx: -1, id: '', platform: 'x', at: at, publishable: true };
+  plChans = ['x'];
+  plPickedMedia = [];
+
+  document.getElementById('pl-m-title').textContent = 'New post';
+  document.getElementById('pl-m-meta').textContent =
+    'Pick the channels, set the time, write it. Nothing exists until you save.';
+  const when = document.getElementById('pl-m-when');
+  when.value = toLocalInput(at);
+  when.disabled = false;
+  document.getElementById('pl-m-when-field').style.display = '';
+
+  const ta = document.getElementById('pl-m-text');
+  ta.value = '';
+  ta.disabled = false;
+  document.getElementById('pl-m-label').textContent = 'Post';
+  document.getElementById('pl-m-hint').textContent =
+    'Type an angle and press Write it, or write the post yourself.';
+  document.getElementById('pl-m-write').style.display = '';
+  document.getElementById('pl-m-write').textContent = '✨ Write it';
+  document.getElementById('pl-m-cancel').style.display = 'none';
+  document.getElementById('pl-m-delete').style.display = 'none';
+  const save = document.getElementById('pl-m-save');
+  save.style.display = '';
+  save.textContent = 'Add to the week';
+  document.getElementById('pl-m-now').style.display = '';
+
+  plRenderChans();
+  plRenderFanvue('', 0);
+  plSetRating('');
+  plCount();
+  plRenderMedia();
+  document.getElementById('pl-modal').classList.add('open');
+}
+
+// The audience and the price are Fanvue's alone, so the field only exists while
+// Fanvue is one of the channels this post is going to.
+function plRenderFanvue(audience, priceCents) {
+  const on = plOpen && (plOpen.kind === 'new'
+    ? plChans.indexOf('fanvue') !== -1 : plOpen.platform === 'fanvue');
+  document.getElementById('pl-m-fanvue-field').hidden = !on;
+  if (!on) return;
+  if (audience !== undefined) {
+    document.getElementById('pl-m-audience').value = audience || 'followers-and-subscribers';
+  }
+  if (priceCents !== undefined) {
+    document.getElementById('pl-m-price').value = priceCents ? (priceCents / 100).toFixed(2) : '';
+  }
+}
+
+// What the two Fanvue boxes say right now, or null when they are not showing.
+function plFanvueFields() {
+  if (document.getElementById('pl-m-fanvue-field').hidden) return null;
+  const dollars = parseFloat(document.getElementById('pl-m-price').value);
+  return {
+    audience: document.getElementById('pl-m-audience').value,
+    price_cents: isNaN(dollars) || dollars <= 0 ? 0 : Math.round(dollars * 100)
+  };
+}
+
+function plRenderChans() {
+  const field = document.getElementById('pl-m-chans-field');
+  field.hidden = !plOpen || plOpen.kind !== 'new';
+  if (field.hidden) return;
+  document.getElementById('pl-m-chans').innerHTML = Object.keys(PL_LABELS).map(p => {
+    const on = plChans.indexOf(p) !== -1;
+    const hand = PL_PUBLISHABLE.indexOf(p) === -1;
+    return '<label class="pl-chan-pick' + (on ? ' on' : '') + '">'
+      + '<input type="checkbox"' + (on ? ' checked' : '')
+      + ' onchange="plToggleChan(\'' + p + '\')">'
+      + esc(PL_LABELS[p])
+      + (hand ? '<span class="by-hand">by hand</span>' : '') + '</label>';
+  }).join('');
+  const hand = plChans.filter(p => PL_PUBLISHABLE.indexOf(p) === -1);
+  document.getElementById('pl-m-chans-hint').textContent = !plChans.length
+    ? 'Pick at least one.'
+    : hand.length
+      ? hand.map(p => PL_LABELS[p]).join(' and ') + ' cannot be posted from here, so '
+        + (hand.length === 1 ? 'it lands' : 'they land')
+        + ' on the calendar as a reminder to post by hand.'
+      : 'One post per channel, each trimmed to that channel\'s limit.';
+}
+
+function plToggleChan(p) {
+  const i = plChans.indexOf(p);
+  if (i === -1) plChans.push(p); else plChans.splice(i, 1);
+  // The media strip and the counter follow the strictest channel ticked.
+  plOpen.platform = plChans[0] || 'x';
+  plOpen.publishable = plChans.every(c => PL_PUBLISHABLE.indexOf(c) !== -1);
+  plRenderChans();
+  plRenderFanvue();
+  plCount();
+  plRenderMedia();
+}
+
 function plEdit(kind, idx) {
   const row = kind === 'queued' ? plQueue[idx] : plProposed[idx];
   if (!row) return;
   const at = kind === 'queued' ? row.run_at : row.at;
   const plat = row.platform;
-  const publishable = kind === 'queued' || row.publishable;
-  const editable = kind === 'proposed' || row.status === 'queued';
+  // A queued row on a by-hand channel is a reminder, not something that posts
+  // itself, so it reads as manual here exactly like a proposal does.
+  const publishable = kind === 'queued'
+    ? PL_PUBLISHABLE.indexOf(plat) !== -1
+    : row.publishable;
+  const editable = kind === 'proposed'
+    || row.status === 'queued' || row.status === 'manual';
   plOpen = { kind: kind, idx: idx, id: row.id || '', platform: plat, at: at, publishable: publishable };
 
   document.getElementById('pl-m-title').textContent =
@@ -444,15 +800,18 @@ function plEdit(kind, idx) {
   document.getElementById('pl-m-meta').textContent = kind === 'proposed'
     ? 'Proposed — ' + (PL_KIND[row.kind] || row.kind)
       + (publishable ? '. Nothing exists until you queue it.'
-                     : '. This channel has no posting API she is allowed to use, so copy it out and post it yourself.')
+                     : '. This channel has no posting API she is allowed to use, so adding it '
+                       + 'puts a reminder on the calendar to post it yourself.')
     : (PL_STATUS[row.status] || row.status)
       + (row.attempts > 1 ? ' After ' + row.attempts + ' tries.' : '')
       + (row.error ? ' ' + row.error : '');
 
   const when = document.getElementById('pl-m-when');
   when.value = toLocalInput(at);
-  when.disabled = !editable || !publishable;
-  document.getElementById('pl-m-when-field').style.display = publishable ? '' : 'none';
+  // Every post has a slot now, whether it goes out on its own or is a reminder
+  // to post it by hand, so the time is worth setting either way.
+  when.disabled = !editable;
+  document.getElementById('pl-m-when-field').style.display = '';
 
   const ta = document.getElementById('pl-m-text');
   ta.value = kind === 'queued' ? (row.text || '') : (row.idea || '');
@@ -466,15 +825,42 @@ function plEdit(kind, idx) {
   document.getElementById('pl-m-write').textContent = kind === 'proposed' ? '✨ Write it' : '✨ Rewrite';
   document.getElementById('pl-m-cancel').style.display =
     (kind === 'queued' && row.status === 'queued') ? '' : 'none';
+  // Only a stored row can be deleted; a proposal disappears by itself.
+  document.getElementById('pl-m-delete').style.display =
+    (kind === 'queued' && row.status !== 'sending') ? '' : 'none';
   const save = document.getElementById('pl-m-save');
-  save.style.display = (editable && publishable) ? '' : 'none';
-  save.textContent = kind === 'proposed' ? 'Queue it' : 'Save changes';
+  save.style.display = editable ? '' : 'none';
+  // An existing row already has a slot; Post now belongs to something being
+  // written, not to moving a booked post forward.
+  document.getElementById('pl-m-now').style.display =
+    (kind === 'proposed' && plOpen.publishable) ? '' : 'none';
+  save.textContent = kind === 'proposed'
+    ? (publishable ? 'Queue it' : 'Add to the week') : 'Save changes';
 
   // A proposal has no media until one is attached here; a queued row remembers.
-  plPickedMedia = row.media_id || '';
+  plPickedMedia = (row.media_ids && row.media_ids.length)
+    ? row.media_ids.slice() : (row.media_id ? [row.media_id] : []);
+  plChans = [];
+  plRenderChans();
+  plRenderFanvue(row.audience || '', row.price_cents || 0);
+  plSetRating('');
   plCount();
   plRenderMedia();
   document.getElementById('pl-modal').classList.add('open');
+}
+
+// What happens to the attached file when the slot comes round, per channel.
+function plMediaHint(picked) {
+  const plat = plOpen.kind === 'new' ? (plChans[0] || '') : plOpen.platform;
+  if (String(picked.id || '').indexOf('fv:') === 0) {
+    return 'Already in her Fanvue vault — attached as it is, with nothing uploaded.';
+  }
+  if (plat === 'threads') {
+    return 'Threads collects the file from us, so it has to be publicly reachable '
+         + 'when the slot comes round.';
+  }
+  if (plat === 'fanvue') return 'Uploaded into her Fanvue vault when the post goes out.';
+  return 'Uploaded to X when the post goes out.';
 }
 
 function plMediaThumb(m, extra) {
@@ -489,40 +875,94 @@ function plMediaThumb(m, extra) {
 function plRenderMedia() {
   const field = document.getElementById('pl-m-media-field');
   if (!plOpen) return;
-  const allowed = PL_MEDIA[plOpen.platform] || [];
-  const usable = plVault.filter(m => allowed.indexOf(m.kind || 'image') !== -1);
-  field.style.display = allowed.length ? '' : 'none';
+  const chans = plOpenChans();
+  // One photo goes to every channel ticked, so only a kind they all take can
+  // be offered — TikTok takes video and Reddit takes stills, and picking both
+  // leaves nothing that satisfies the pair.
+  const allowed = chans.length
+    ? chans.map(p => PL_MEDIA[p] || [])
+        .reduce((a, b) => a.filter(k => b.indexOf(k) !== -1))
+    : [];
+  const fvOnly = plFanvueOnly();
+  if (fvOnly && plFvVault === null) { plLoadFvVault(); }
+  const library = fvOnly ? (plFvVault || []) : plVault;
+  const usable = library.filter(m => allowed.indexOf(m.kind || 'image') !== -1);
+  field.style.display = chans.length ? '' : 'none';
+  // A pick from the other library cannot survive the switch — a Fanvue uuid is
+  // nothing to X, and a library photo is nothing to the vault strip.
+  plPickedMedia = plPickedMedia.filter(id => usable.some(m => m.id === id));
+  const cap = plMediaCap();
+  if (plPickedMedia.length > cap) plPickedMedia = plPickedMedia.slice(0, cap);
 
-  const picked = plPickedMedia ? plMediaById(plPickedMedia) : null;
-  document.getElementById('pl-m-picked').innerHTML = picked
-    ? plMediaThumb(picked, ' is-picked')
-      + '<button type="button" class="btn-section-save" style="margin-left:10px;"'
-      + ' onclick="plPickMedia(\'\')">Remove</button>'
-      + (plOpen.publishable ? ''
-         : '<a class="btn-section-save" style="margin-left:6px; text-decoration:none;"'
-           + ' href="' + esc(picked.thumb) + '" download target="_blank" rel="noopener">Download</a>')
+  const picked = plPickedMedia.map(plMediaById).filter(Boolean);
+  document.getElementById('pl-m-picked').innerHTML = picked.length
+    ? picked.map(m => '<span class="pl-attached">'
+        + plMediaThumb(m, ' is-picked')
+        + '<button type="button" class="pl-attached-x" title="Remove"'
+        + ' onclick="plPickMedia(\'' + esc(m.id) + '\')">&times;</button>'
+        + (plOpen.publishable ? ''
+           : '<a class="pl-attached-dl" title="Download" href="' + esc(m.thumb)
+             + '" download target="_blank" rel="noopener">&darr;</a>')
+        + '</span>').join('')
     : '<span class="hint">Nothing attached.</span>';
 
-  document.getElementById('pl-m-media-note').textContent =
-    allowed.length ? allowed.join(' or ') : '';
+  const emptyNote = fvOnly
+    ? (plFvVaultError
+        ? esc(plFvVaultError)
+        : plFvVault === null ? 'Reading her Fanvue vault…'
+          : 'Nothing in her Fanvue vault yet. Upload to Fanvue and it shows up here.')
+    : (allowed.length
+        ? 'Nothing in the library ' + (chans.length > 1 ? 'all these channels' : 'this channel')
+          + ' will take. Add photos and clips in the persona editor.'
+        : 'These channels take different kinds of media, so no one file suits '
+          + 'them all. Post them separately to attach something.');
+  // The strip is the first page; the whole vault, with its folders, is a click
+  // away rather than an endless scroll inside the editor.
+  document.getElementById('pl-m-browse').innerHTML = fvOnly
+    ? '<button type="button" class="btn-section-save" style="margin-left:0;"'
+      + ' onclick="plVaultOpen()">Browse the vault</button>' : '';
   document.getElementById('pl-m-strip').innerHTML = usable.length
     ? usable.map(m => '<button type="button" class="pl-pick'
-        + (m.id === plPickedMedia ? ' on' : '') + '" title="' + esc(m.purpose || m.kind)
+        + (plPickedMedia.indexOf(m.id) !== -1 ? ' on' : '') + '" title="' + esc(m.purpose || m.kind)
         + '" onclick="plPickMedia(\'' + esc(m.id) + '\')">'
         + plMediaThumb(m) + '</button>').join('')
-    : '<span class="hint">Nothing in the library this channel will take. '
-      + 'Add photos and clips in the persona editor.</span>';
+    : '<span class="hint">' + emptyNote + '</span>';
 
-  document.getElementById('pl-m-media-hint').textContent = !picked ? ''
-    : plOpen.publishable
-      ? (plOpen.platform === 'threads'
-          ? 'Threads collects the file from us, so it has to be publicly reachable when the slot comes round.'
-          : 'Uploaded to X when the post goes out.')
-      : 'This channel has no posting API — download the file and post it yourself.';
+  // A Fanvue post ticked with another channel is drawn from the persona library
+  // instead, so the note has to say that rather than leave an empty strip.
+  document.getElementById('pl-m-media-note').textContent =
+    (allowed.length ? allowed.join(' or ') : 'nothing fits every channel')
+    + (cap > 1 ? ' · up to ' + cap : '')
+    + (fvOnly ? ' · from her Fanvue vault' : '');
+
+  document.getElementById('pl-m-media-hint').textContent =
+    !picked
+      ? (chans.indexOf('fanvue') !== -1 && !fvOnly
+          ? 'Her Fanvue vault is not on offer here — the other channels ticked cannot '
+            + 'use it. Untick them to pick from the vault.' : '')
+      : !plOpen.publishable
+        ? 'This channel has no posting API — download the file and post it yourself.'
+        : plMediaHint(picked) + ' Write it reads this picture and writes about '
+          + 'what is in it.';
+}
+
+// How many files every ticked channel will carry — the strictest wins, the same
+// way the character count follows the tightest cap.
+function plMediaCap() {
+  const chans = plOpenChans();
+  if (!chans.length) return 1;
+  return Math.min.apply(null, chans.map(p => PL_MEDIA_MAX[p] || 1));
 }
 
 function plPickMedia(id) {
-  plPickedMedia = (id === plPickedMedia) ? '' : id;
+  const i = plPickedMedia.indexOf(id);
+  if (i !== -1) { plPickedMedia.splice(i, 1); plRenderMedia(); return; }
+  const cap = plMediaCap();
+  // At a cap of one, picking is replacing — asking the creator to remove the
+  // old one first would be a step with no decision in it.
+  if (cap <= 1) plPickedMedia = [id];
+  else if (plPickedMedia.length < cap) plPickedMedia.push(id);
+  else { alert('That is the most this post can carry — ' + cap + '.'); return; }
   plRenderMedia();
 }
 
@@ -531,29 +971,54 @@ function plClose() {
   plOpen = null;
 }
 
+// The channels the open editor is writing for: several on a new post, one
+// everywhere else.
+function plOpenChans() {
+  if (!plOpen) return [];
+  return plOpen.kind === 'new' ? plChans.slice() : [plOpen.platform];
+}
+
 function plCount() {
   if (!plOpen) return;
-  const cap = PL_CAPS[plOpen.platform] || 280;
+  const chans = plOpenChans();
+  // Posting to several channels at once, the tightest cap is the one that
+  // matters — anything longer is silently trimmed on the strictest of them.
+  const cap = chans.length
+    ? Math.min.apply(null, chans.map(p => PL_CAPS[p] || 280))
+    : 280;
   const n = document.getElementById('pl-m-text').value.length;
   const el = document.getElementById('pl-m-count');
   el.textContent = n + '/' + cap;
   el.className = 'pl-count' + (n > cap ? ' over' : '');
 }
 
+// Which level the next draft is written at. A channel with its own rules — a
+// TikTok caption — stays safe for work whatever is picked here; the server has
+// the last word on that.
+function plSetRating(r) {
+  plRating = r;
+  document.querySelectorAll('#pl-m-rating button').forEach(b => {
+    b.classList.toggle('on', (b.dataset.r || '') === r);
+  });
+}
+
 async function plWrite(btn) {
   if (!plOpen) return;
   const ta = document.getElementById('pl-m-text');
-  const idea = plOpen.kind === 'proposed'
-    ? ta.value.trim()
-    : (prompt('What should she write about instead?', '') || '').trim();
-  if (!idea) return;
+  // No angle is the ordinary case: the picture is the subject, and with no
+  // picture she picks something herself. Only a proposal arrives with an angle
+  // already in the box.
+  const idea = plOpen.kind === 'proposed' ? ta.value.trim() : '';
   btn.disabled = true;
   const was = btn.textContent;
   btn.textContent = 'writing…';
   try {
     const res = await fetch('/api/growth/drafts', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ persona: plSlug, idea: idea, platforms: [plOpen.platform] })
+      body: JSON.stringify({ persona: plSlug, idea: idea,
+                             platforms: [plOpen.platform],
+                             rating: plRating,
+                             media_id: plPickedMedia[0] || '' })
     });
     const d = await res.json();
     const draft = (d.drafts || [])[0];
@@ -583,19 +1048,41 @@ function plCopy(btn) {
   else { ta.select(); document.execCommand('copy'); done(); }
 }
 
-async function plSave(btn) {
+async function plSave(btn, now) {
   if (!plOpen) return;
   const text = document.getElementById('pl-m-text').value.trim();
-  const at = fromLocalInput(document.getElementById('pl-m-when').value);
+  // Posting now still writes a row, so the week shows what went out and when;
+  // it just does not wait for the slot.
+  const at = now ? Math.floor(Date.now() / 1000)
+                 : fromLocalInput(document.getElementById('pl-m-when').value);
   if (!text) { alert('Nothing to post.'); return; }
   if (!at) { alert('That is not a time.'); return; }
+  if (now && !confirm('Post this to '
+      + plOpenChans().map(p => PL_LABELS[p] || p).join(' and ')
+      + ' right now?')) return;
+
+  const fv = plFanvueFields();
+  if (fv && fv.price_cents && !plPickedMedia.length) {
+    alert('A paid Fanvue post needs media behind the price.'); return;
+  }
+  if (fv && fv.price_cents && fv.price_cents < PL_FV_PRICE_MIN) {
+    alert('Fanvue will not take a price under $' + (PL_FV_PRICE_MIN / 100).toFixed(2) + '.');
+    return;
+  }
 
   btn.disabled = true;
   const was = btn.textContent;
-  btn.textContent = 'saving…';
+  btn.textContent = now ? 'posting…' : 'saving…';
   try {
     let res;
-    if (plOpen.kind === 'proposed') {
+    if (plOpen.kind === 'new') {
+      res = await fetch('/api/growth/queue', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ persona: plSlug, platforms: plChans, text: text,
+                               run_at: at, now: !!now, media_ids: plPickedMedia,
+                               ...(fv || {}) })
+      });
+    } else if (plOpen.kind === 'proposed') {
       if (!plOpen.written) {
         alert('Write the post first — what is in the box is still the angle.');
         return;
@@ -603,17 +1090,30 @@ async function plSave(btn) {
       res = await fetch('/api/growth/queue', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ persona: plSlug, platform: plOpen.platform, text: text,
-                               run_at: at, media_id: plPickedMedia })
+                               run_at: at, now: !!now, media_ids: plPickedMedia,
+                               ...(fv || {}) })
       });
     } else {
       res = await fetch('/api/growth/queue', {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ persona: plSlug, id: plOpen.id, text: text,
-                               run_at: at, media_id: plPickedMedia })
+                               run_at: at, now: !!now, media_ids: plPickedMedia,
+                               ...(fv || {}) })
       });
     }
     const d = await res.json();
     if (!d.ok) { alert(d.error || 'Could not save it.'); return; }
+    // Some channels can succeed while others are refused — say which, rather
+    // than letting a half-done save look complete.
+    if ((d.failed || []).length) {
+      alert(d.failed.map(f => (PL_LABELS[f.platform] || f.platform) + ': ' + f.error).join('\n'));
+    }
+    // Queued, but it cannot go out as things stand — said now rather than at
+    // the slot, where it would just be a failed row.
+    if (d.warning) alert(d.warning);
+    if (now && (d.sent || []).length) {
+      alert('Posted to ' + d.sent.map(x => PL_LABELS[x.platform] || x.platform).join(' and ') + '.');
+    }
     if (plOpen.kind === 'proposed') plProposed.splice(plOpen.idx, 1);
     plClose();
     plLoadQueue();
@@ -633,6 +1133,21 @@ async function plCancelPost(btn) {
     plClose();
     plLoadQueue();
   } catch (e) { alert('Could not cancel it.'); }
+  finally { btn.disabled = false; }
+}
+
+async function plDeletePost(btn) {
+  if (!plOpen || !plOpen.id) return;
+  if (!confirm('Delete this post? It comes off the calendar for good.')) return;
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/growth/queue?persona=' + encodeURIComponent(plSlug)
+      + '&id=' + encodeURIComponent(plOpen.id) + '&mode=delete', { method: 'DELETE' });
+    const d = await res.json();
+    if (!d.ok) { alert(d.error || 'Could not delete it.'); return; }
+    plClose();
+    plLoadQueue();
+  } catch (e) { alert('Could not delete it.'); }
   finally { btn.disabled = false; }
 }
 

@@ -1302,6 +1302,145 @@ for _key, _base in _BASE_TIERS.items():
                                    'monthly_equiv': round(_annual_price / 12, 2)}
 del _key, _base, _annual_price
 
+# The homepage feature matrix. Every row resolves itself from a tier's
+# capabilities so the marketing copy cannot drift from what the plan actually
+# unlocks; detail() returns the per-tier line, or None when the tier lacks it.
+G1 = 'Persona & chat'
+G2 = 'Funnel, selling & platforms'
+G3 = 'Team & support'
+
+FEATURE_ROWS = [
+    (G1, 'AI persona builder',
+     lambda c: 'Visual builder: voice, backstory, archetype, warmth, escalation',
+     'Fill in a form \u2014 name, age, backstory, archetype, warmth, escalation '
+     'pace \u2014 and the system prompt behind every reply is written for you. '
+     'No prompt engineering, no code.'),
+    (G1, 'How many personas',
+     lambda c: ('Unlimited personas' if c['personas'] is None
+                else f"{c['personas']} persona" + ('' if c['personas'] == 1 else 's')),
+     'Every persona is her own character, with her own voice, photos, funnel and '
+     'connected account. Your plan sets how many you can run at once.'),
+    (G1, 'AI persona generation',
+     lambda c: 'Generate backstory, speech style, interests and triggers',
+     'Stuck on a backstory or a speech style? Generate it and keep editing what '
+     'you like. Interests and conversion triggers come out of the same pass.'),
+    (G1, 'AI image generation',
+     lambda c: ('Unlimited generations' if c['image_generations_month'] is None
+                else f"{c['image_generations_month']} generations a month"),
+     'Create on-brand photos of your persona from a description \u2014 her look, '
+     'her outfit, the setting \u2014 without booking a shoot.'),
+    (G1, 'Photo library',
+     lambda c: 'Unlimited uploads, SFW and NSFW sets, per-photo tagging',
+     'Upload your own sets and tag them SFW or NSFW. The funnel then picks the '
+     'right photo for the right moment in the conversation.'),
+    (G1, 'Outfit locking + media tagging',
+     lambda c: 'Keep her in one outfit per set and tag media for the funnel'
+     if c['outfit_lock'] else (False, 'Pro and up'),
+     'Pin a persona to one outfit so a whole set stays consistent, and tag media '
+     'so she never sends a fan the same photo twice.'),
+    (G1, 'Live chat engine',
+     lambda c: 'Memory of the fan, in-character replies, tone matching',
+     'She remembers what a fan told her, answers in character and matches his '
+     'tone, so the conversation reads like a person rather than a bot.'),
+    (G1, 'Test chat + shareable landing page',
+     lambda c: 'Talk to her yourself and send fans a hosted landing page',
+     'Talk to her yourself before any fan does, and send fans a hosted page '
+     'where they can start chatting straight away.'),
+    (G2, 'Funnel phases',
+     lambda c: (f"Up to {c['phases_max']} phases with per-phase photo rates"
+                if c['phases_max'] > 3
+                else f"Up to {c['phases_max']} phases + CTA"),
+     'The conversation moves through phases \u2014 warm, engage, tease, offer, '
+     'close \u2014 and you set the pace and the photo rate for each one.'),
+    (G2, 'Scheduled follow-ups',
+     lambda c: 'Win back fans who go quiet, on your schedule'
+     if c['scheduled_followups'] else (False, 'Pro and up'),
+     'Fans who go quiet get a message back in their inbox on the schedule you '
+     'choose, written in her voice rather than a template.'),
+    (G2, 'PPV engine',
+     lambda c: 'Price ladders, per-fan pricing and timed re-offers'
+     if c['platforms'] != [] else (False, 'Needs a connected platform'),
+     'Price ladders, per-fan pricing and timed re-offers: she prices the unlock '
+     'to the fan in front of her, and follows up when he hesitates.'),
+    (G2, 'Connected platforms',
+     lambda c: ((False, 'Needs a paid plan')
+                if c['platforms'] == [] else
+                'Fanvue, OnlyFans, Telegram, X and Threads'
+                if c['platforms'] is None else
+                ' or '.join(PLATFORM_NAMES.get(p, p.title())
+                            for p in c['platforms'])),
+     'Connect her account and she chats there directly \u2014 same persona, same '
+     'funnel, on every platform your plan covers.'),
+    (G2, 'Growth planner',
+     lambda c: 'Plan, draft and schedule posts that feed the funnel'
+     if c['platforms'] != [] else (False, 'Needs a connected platform'),
+     'Plan, draft and schedule the posts that pull new followers into the '
+     'funnel, without leaving the dashboard.'),
+    (G2, 'PPV reconciliation',
+     lambda c: 'Match sent PPVs against Fanvue earnings'
+     if c['ppv_reconcile'] else (False, 'Agency only'),
+     'Every PPV she sends is matched against your Fanvue earnings, so you can '
+     'see what actually converted instead of guessing.'),
+    (G2, 'Conversation + revenue analytics',
+     lambda c: 'Funnel stage per fan, conversion and revenue reporting'
+     if c['analytics'] else (False, 'Agency only'),
+     'See which funnel stage every fan sits in, where conversations stall, and '
+     'what each persona earns you per month.'),
+    (G3, 'Team seats',
+     lambda c: (f"{c['seats']} seats with roles" if c['seats'] > 1
+                else '1 seat'),
+     'Invite chatters or managers with their own logins and roles, instead of '
+     'passing one password around the team.'),
+    (G3, 'Support',
+     lambda c: {'demo': 'Email support', 'starter': 'Email support',
+                'pro': 'Priority support'}.get(c['_key'], 'Dedicated support'),
+     'How you reach us and how fast we come back to you \u2014 from email on '
+     'Starter to a named contact on Agency.'),
+]
+
+FEATURE_TIER_ORDER = DEFAULT_TIER_ORDER
+
+
+def _feature_id(label):
+    """Stable per-feature key for the inline page editor. Must stay inside
+    [A-Za-z0-9_-] — api_site_content_set drops anything else."""
+    return 'feat-' + re.sub(r'-+', '-', re.sub(r'[^a-z0-9]+', '-',
+                                               label.lower())).strip('-')
+
+
+def _feature_matrix():
+    out = {}
+    for key in FEATURE_TIER_ORDER:
+        tier = _BASE_TIERS[key]
+        caps = {**tier['capabilities'], '_key': key}
+        rows = []
+        for group, label, detail, explain in FEATURE_ROWS:
+            text = detail(caps)
+            included = not isinstance(text, tuple)
+            if not included:
+                text = text[1]
+            rows.append({'group': group, 'label': label,
+                         'id': _feature_id(label), 'explain': explain,
+                         'detail': text or '', 'included': included and bool(text)})
+        plats = caps['platforms']
+        out[key] = {'name': tier['name'], 'price': tier['price'],
+                    'blurb': tier['blurb'], 'features': rows,
+                    'highlights': [
+                        {'value': ('\u221e' if caps['personas'] is None
+                                   else str(caps['personas'])),
+                         'label': 'Personas'},
+                        {'value': ('5' if plats is None else str(len(plats))),
+                         'label': 'Platforms'},
+                        {'value': str(caps['phases_max']),
+                         'label': 'Funnel phases'},
+                        {'value': ('\u221e' if caps['image_generations_month'] is None
+                                   else str(caps['image_generations_month'])),
+                         'label': 'AI images / mo'},
+                        {'value': str(caps['seats']), 'label': 'Team seats'},
+                    ]}
+    return out
+
+
 OXAPAY_API = 'https://api.oxapay.com/v1/payment/invoice'
 STRIPE_API = 'https://api.stripe.com/v1'
 # Software as a service (SaaS) — business use. Required by Managed Payments.
@@ -2067,8 +2206,9 @@ FORGOT_PASSWORD_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UT
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
 <link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Reset your password</title>
-<style>""" + ACCOUNT_CSS + """</style></head><body data-page="login"><div class="wrap"><div class="card">
-<h1>Reset your password</h1><p class="sub">Enter your account email and we'll send a reset link.</p>
+<script src="/js/page-editor.js" defer></script>
+<style>""" + ACCOUNT_CSS + """</style></head><body data-page="forgot"><div class="wrap"><div class="card">
+<h1 data-edit-id="h1">Reset your password</h1><p class="sub" data-edit-id="sub">Enter your account email and we'll send a reset link.</p>
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
 {% if sent %}<div class="sub" style="margin-bottom:18px">If an account exists for {{ email }}, a reset link has been sent.
 {% if reset_link %}<br><br>SMTP isn't configured, so here's the link directly: <a href="{{ reset_link }}">{{ reset_link }}</a>{% endif %}
@@ -2076,7 +2216,7 @@ FORGOT_PASSWORD_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UT
 {% else %}
 <form method="post">
 <label>Email</label><input type="email" name="email" required autocomplete="email" value="{{ email or '' }}">
-<button type="submit">Send reset link</button></form>
+<button type="submit"><span data-edit-id="submit-text">Send reset link</span></button></form>
 {% endif %}
 <div class="alt"><a href="/login">Back to sign in</a></div>
 </div></div></body></html>"""
@@ -2085,12 +2225,13 @@ RESET_PASSWORD_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
 <link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Choose a new password</title>
-<style>""" + ACCOUNT_CSS + """</style></head><body data-page="login"><div class="wrap"><div class="card">
-<h1>Choose a new password</h1>
+<script src="/js/page-editor.js" defer></script>
+<style>""" + ACCOUNT_CSS + """</style></head><body data-page="reset"><div class="wrap"><div class="card">
+<h1 data-edit-id="h1">Choose a new password</h1>
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
 <form method="post">
 <label>New password</label><input type="password" name="password" required autocomplete="new-password" placeholder="At least 8 characters">
-<button type="submit">Set new password</button></form>
+<button type="submit"><span data-edit-id="submit-text">Set new password</span></button></form>
 <div class="alt"><a href="/login">Back to sign in</a></div>
 </div></div></body></html>"""
 
@@ -2131,7 +2272,7 @@ plan is active{% if user.expires_at %} until {{ user.expires_at[:10] }}{% endif 
 <button type="button" class="active" data-set-period="month">Monthly</button>
 <button type="button" data-set-period="year">Annual <span class="save">Save {{ annual_save_pct }}%</span></button>
 </div>
-<p class="permo" style="margin:2px 0 10px">All prices exclude VAT — any VAT due is added at checkout. Card plans renew automatically and can be cancelled any time from your account. Crypto payments are one-off — you re-pay when the plan runs out.</p>
+<p class="permo" style="margin:2px 0 10px" data-edit-id="vat-note">All prices exclude VAT — any VAT due is added at checkout. Card plans renew automatically and can be cancelled any time from your account. Crypto payments are one-off — you re-pay when the plan runs out.</p>
 {% set pay_slots = [(1 if stripe_enabled else 0) + (1 if oxapay_enabled else 0)
                     + (1 if dev_mode else 0), 1]|max %}
 <div class="tiers" role="radiogroup" aria-label="Plans">
@@ -2258,6 +2399,7 @@ DEMO_ENDS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png">
 <title>This is where the demo ends</title>
 <script src="/js/analytics.js" defer></script>
+<script src="/js/page-editor.js" defer></script>
 <style>""" + ACCOUNT_CSS + """
 .lockart{width:64px;height:64px;border-radius:18px;display:flex;align-items:center;justify-content:center;
   background:var(--grad);background-size:300% 100%;margin:0 auto 18px}
@@ -2274,18 +2416,18 @@ DEMO_ENDS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 </style></head><body data-page="demo-ends"><div class="wrap"><div class="card" style="text-align:center">
 <div class="lockart"><svg viewBox="0 0 24 24" aria-hidden="true">
 <rect x="4" y="10.5" width="16" height="10" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></svg></div>
-<h1 style="margin-bottom:6px">This is where the demo ends</h1>
-<p class="sub">Connecting {{ platform_name }} is the paid half of Velvetfunnel. The demo
+<h1 style="margin-bottom:6px" data-edit-id="h1">This is where the demo ends</h1>
+<p class="sub" data-edit-id="sub">Connecting {{ platform_name }} is the paid half of Velvetfunnel. The demo
 gives you the persona, the funnel and the whole builder, with nothing capped &mdash; it
 stops at the moment she would start talking to your real fans and taking their money.</p>
 <ul class="steps">
-<li>Build as many personas as you like in here. Nothing runs out.</li>
-<li>Starter connects her to Fanvue and turns on the full PPV engine.</li>
-<li>{{ currency }}{{ starter_price }}/month, excl. VAT. Cancel any time.</li>
+<li data-edit-id="step-1">Build as many personas as you like in here. Nothing runs out.</li>
+<li data-edit-id="step-2">Starter connects her to Fanvue and turns on the full PPV engine.</li>
+<li>{{ currency }}{{ starter_price }}<span data-edit-id="step-3">/month, excl. VAT. Cancel any time.</span></li>
 </ul>
-<a class="btn" href="/register">Create your own account</a>
-<a class="ghostbtn" href="/pricing">See what the plans cost</a>
-<p class="kept">The demo is a shared account, so build in your own to keep your work.</p>
+<a class="btn" href="/register"><span data-edit-id="cta-primary">Create your own account</span></a>
+<a class="ghostbtn" href="/pricing"><span data-edit-id="cta-secondary">See what the plans cost</span></a>
+<p class="kept" data-edit-id="kept">The demo is a shared account, so build in your own to keep your work.</p>
 </div></div></body></html>"""
 
 
@@ -3582,6 +3724,13 @@ def api_pricing():
                     'custom': CUSTOM_TIER, 'currency': CURRENCY_SYMBOL})
 
 
+@app.route('/api/features')
+def api_features():
+    """Public: the homepage feature matrix, resolved per tier."""
+    return jsonify({'order': FEATURE_TIER_ORDER, 'tiers': _feature_matrix(),
+                    'currency': CURRENCY_SYMBOL})
+
+
 @app.route('/pricing')
 def pricing():
     user = _current_user() or {'email': '', 'status': 'unpaid', 'tier': '',
@@ -4119,7 +4268,8 @@ def landing():
 # Inline text/image editing for the plain marketing pages (not the persona
 # landing page, not the dashboard) — see js/page-editor.js. One JSON blob per
 # page, keyed by the data-edit-id an operator clicked on.
-SITE_CONTENT_PAGES = {'home', 'login', 'register', 'pricing'}
+SITE_CONTENT_PAGES = {'home', 'login', 'register', 'pricing', 'landing',
+                      'blog', 'blogpost', 'demo-ends', 'forgot', 'reset'}
 
 
 @app.route('/api/site-content/<page>')
@@ -6982,7 +7132,7 @@ def api_growth_winback():
 
 
 def _growth_queue_rows(persona, limit=50, since=None, until=None):
-    from db import SessionLocal, list_posts
+    from db import SessionLocal, list_posts, post_media_ids
     sdb = SessionLocal()
     try:
         return [{'id': r.id, 'platform': r.platform, 'text': r.text or '',
@@ -6990,12 +7140,156 @@ def _growth_queue_rows(persona, limit=50, since=None, until=None):
                  'error': r.error or '',
                  'external_id': r.external_id or '',
                  'media_id': r.media_id or '',
+                 'media_ids': post_media_ids(r),
+                 'audience': r.audience or '',
+                 'price_cents': int(r.price_cents or 0),
                  'run_at': int(r.run_at.replace(tzinfo=timezone.utc).timestamp())
                  if r.run_at else 0}
                 for r in list_posts(sdb, persona, limit=limit,
                                     since=since, until=until)]
     finally:
         sdb.close()
+
+
+def _growth_remote_rows(persona, since, until, rows):
+    """What the Fanvue feed already has booked in this window, so the week does
+    not plan on top of posts made in the Fanvue app itself. Anything we queued
+    ourselves is dropped — it is already on the calendar as the real row.
+
+    Returns (rows, error). A Fanvue outage or a missing scope costs the mirror,
+    never the planner: the queue is ours and renders without it."""
+    if not (since or until):
+        return [], ''
+    try:
+        posts = _fv_posts(persona, since, until)
+    except Exception as e:
+        logging.info('planner: no Fanvue mirror for %s: %s', persona, str(e)[:200])
+        return [], str(e)[:200]
+    ours = {r['external_id'] for r in rows if r.get('external_id')}
+    out = []
+    for post in posts:
+        uid = str((post or {}).get('uuid') or '')
+        if not uid or uid in ours:
+            continue
+        live = str(post.get('publishedAt') or '')
+        when = live or str(post.get('publishAt') or '') or str(post.get('createdAt') or '')
+        out.append({'external_id': uid, 'platform': 'fanvue',
+                    'text': str(post.get('text') or ''),
+                    'status': 'posted' if live else 'scheduled',
+                    'price_cents': int(post.get('price') or 0),
+                    'audience': str(post.get('audience') or ''),
+                    'read_only': True, 'run_at': _fv_epoch(when)})
+    out.sort(key=lambda r: r['run_at'])
+    return out, ''
+
+
+def _growth_send_now(persona, queued):
+    """Publish rows that were just queued, instead of waiting for their slot.
+    Goes through claim_post/finish_post exactly as the worker does, so a post
+    the worker is already holding is never sent twice and the row ends in the
+    same states the calendar knows how to draw."""
+    from db import SessionLocal, ScheduledPost, claim_post, finish_post, post_media_ids
+    sent, failed = [], []
+    sdb = SessionLocal()
+    try:
+        for q in queued:
+            plat = q['platform']
+            if q['status'] != 'queued':
+                failed.append({'platform': plat,
+                               'error': 'This channel has no posting API, so it '
+                                        'stays on the calendar to post by hand.'})
+                continue
+            row = sdb.query(ScheduledPost).filter(ScheduledPost.id == q['id']).first()
+            if not row or not claim_post(sdb, row.id):
+                failed.append({'platform': plat, 'error': 'It is already on its way.'})
+                continue
+            try:
+                posted_id = _growth_publish(persona, plat, row.text, row.media_id or '',
+                                            audience=row.audience or '',
+                                            price_cents=int(row.price_cents or 0),
+                                            media_ids=post_media_ids(row))
+                finish_post(sdb, row.id, external_id=posted_id)
+                sent.append({'platform': plat, 'id': row.id, 'external_id': posted_id})
+                logger.info('QUEUE posted now [%s/%s] id=%s', persona, plat, posted_id)
+            except Exception as e:
+                # No retry ladder here: someone is watching this one, and a row
+                # that quietly retries in ten minutes is not "post now".
+                finish_post(sdb, row.id, error=str(e))
+                failed.append({'platform': plat, 'error': str(e)[:200]})
+                logger.warning('QUEUE post-now failed [%s/%s]: %s', persona, plat, str(e)[:200])
+            sdb.commit()
+    finally:
+        sdb.close()
+    return sent, failed
+
+
+def _growth_scope_warning(persona, platforms):
+    """Whether this connection can actually publish what is being queued. A
+    Fanvue post needs write:post, which every connection made before feed
+    posting existed is without — and the failure would otherwise arrive hours
+    later, at the slot, as a dead row."""
+    if 'fanvue' not in [growth.normalise_source(p) for p in platforms]:
+        return ''
+    granted = (_fanvue_tokens(persona).get('scope') or '').split()
+    if not granted or 'write:post' in granted:
+        return ''
+    if 'write:post' not in _fanvue_scopes().split():
+        return ('This Fanvue connection cannot post to the feed, and reconnecting '
+                'will not fix it: "write:post" is being left out of the request. '
+                'Clear the remembered refusals on the Fanvue page, and check '
+                'FANVUE_SCOPES is not pinned to an older list.')
+    return ('This Fanvue connection was not granted "write:post", so this post '
+            'will fail at its slot. Reconnect the Fanvue account first.')
+
+
+def _growth_media_check_list(persona, platform, ids):
+    """Resolve every file for a queue write. Returns (ids, error) — the set is
+    refused whole, because half a carousel is not what was asked for."""
+    out = []
+    for raw in ids:
+        one, why = _growth_media_check(persona, platform, raw)
+        if why:
+            return [], why
+        if one:
+            out.append(one)
+    kinds = []
+    for one in out:
+        uuid = _fv_media_id(one)
+        # A vault item's kind lives at Fanvue; it is checked there, and Fanvue
+        # is the only channel that can hold one anyway.
+        kinds.append('image' if uuid else ((_media_row(persona, one) or {}).get('kind') or 'image'))
+    why = growth.media_set_reject(platform, kinds)
+    return ([], why) if why else (out, '')
+
+
+def _growth_post_extras(platform, data, media_id, current=None):
+    """The audience and price a Fanvue feed post carries, or empty for every
+    other channel. Returns (audience, price_cents, error)."""
+    if growth.normalise_source(platform) != 'fanvue':
+        return '', 0, ''
+    cur = current or {}
+    audience = _fv_audience(data.get('audience') or cur.get('audience') or '')
+    raw = data.get('price_cents', cur.get('price_cents'))
+    try:
+        price = int(raw or 0)
+    except (TypeError, ValueError):
+        return '', 0, 'That price is not a number.'
+    if price < 0:
+        return '', 0, 'A price cannot be negative.'
+    if price and not media_id:
+        return '', 0, 'A paid Fanvue post needs media behind the price.'
+    if price and price < FV_POST_PRICE_MIN:
+        return '', 0, (f'Fanvue will not take a price under '
+                       f'${FV_POST_PRICE_MIN / 100:.2f}.')
+    return audience, price, ''
+
+
+def _fv_media_id(media_id):
+    """The Fanvue vault uuid behind a queue row's media, or ''. An item already
+    in her vault is carried as 'fv:{uuid}' so it needs no column of its own and
+    no upload — Fanvue is holding the file already."""
+    raw = str(media_id or '')
+    return raw[3:].strip() if raw.startswith('fv:') else ''
 
 
 def _growth_media_check(persona, platform, media_id):
@@ -7005,6 +7299,15 @@ def _growth_media_check(persona, platform, media_id):
     between."""
     if not media_id:
         return '', ''
+    if _fv_media_id(media_id):
+        if growth.normalise_source(platform) != 'fanvue':
+            label = growth.POST_PLATFORMS.get(
+                growth.normalise_source(platform), {}).get('label', platform)
+            return '', (f'That file lives in the Fanvue vault, so only Fanvue can '
+                        f'post it. Pick something from the persona library for {label}.')
+        # Fanvue has already taken and processed this one; there is nothing here
+        # left to validate that it did not validate itself.
+        return media_id, ''
     media = _media_row(persona, media_id)
     if not media:
         return '', 'That media is not in this persona\'s library.'
@@ -7058,32 +7361,70 @@ def api_growth_queue():
 
     if request.method == 'POST':
         data = request.json or {}
-        platform = growth.normalise_source(data.get('platform'))
-        if platform not in growth.PUBLISHABLE:
-            return jsonify({'ok': False,
-                            'error': f'{platform or "that channel"} cannot be '
-                                     'published from here — copy the draft out '
-                                     'and post it by hand.'}), 400
-        text = growth.trim_post(platform, data.get('text'))
-        if not text:
-            return jsonify({'ok': False, 'error': 'Nothing to post.'}), 400
+        # One post can go to several channels at once. `platform` stays for the
+        # single-channel callers that predate this.
+        asked = data.get('platforms') or ([data.get('platform')]
+                                          if data.get('platform') else [])
+        wanted, seen = [], set()
+        for p in asked:
+            plat = growth.base_platform(p)
+            if plat in growth.POST_PLATFORMS and plat not in seen:
+                seen.add(plat)
+                wanted.append(plat)
+        if not wanted:
+            return jsonify({'ok': False, 'error': 'Pick at least one channel.'}), 400
+
         when = int(data.get('run_at') or 0) or int(time.time())
         run_at = datetime.fromtimestamp(when, timezone.utc).replace(tzinfo=None)
-        media_id, why = _growth_media_check(
-            persona, platform, str(data.get('media_id') or '').strip())
-        if why:
-            return jsonify({'ok': False, 'error': why}), 400
+        raw_media = [str(m).strip() for m in (data.get('media_ids') or []) if str(m).strip()] \
+            or ([str(data.get('media_id') or '').strip()]
+                if str(data.get('media_id') or '').strip() else [])
+
         from db import SessionLocal, queue_post
+        queued, failed = [], []
         sdb = SessionLocal()
         try:
-            row = queue_post(sdb, persona, platform, text, run_at, media_id)
+            for plat in wanted:
+                # The cap is the channel's, so the same words are trimmed
+                # differently per channel rather than to the tightest of them.
+                text = growth.trim_post(plat, data.get('text'))
+                if not text:
+                    failed.append({'platform': plat, 'error': 'Nothing to post.'})
+                    continue
+                media_ids, why = _growth_media_check_list(persona, plat, raw_media)
+                if why:
+                    failed.append({'platform': plat, 'error': why})
+                    continue
+                audience, price, why = _growth_post_extras(
+                    plat, data, media_ids[0] if media_ids else '')
+                if why:
+                    failed.append({'platform': plat, 'error': why})
+                    continue
+                row = queue_post(sdb, persona, plat, text, run_at,
+                                 media_ids[0] if media_ids else '',
+                                 growth.queue_status_for(plat),
+                                 audience=audience, price_cents=price,
+                                 media_ids=media_ids)
+                queued.append({'platform': plat, 'id': row.id,
+                               'status': growth.queue_status_for(plat)})
             sdb.commit()
-            post_id = row.id
         finally:
             sdb.close()
-        logger.info('QUEUE added [%s/%s] for %s: %s',
-                    persona, platform, run_at.isoformat(), text[:60])
-        return jsonify({'ok': True, 'id': post_id, 'queue': _growth_queue_rows(persona)})
+        if not queued:
+            return jsonify({'ok': False, 'failed': failed,
+                            'error': failed[0]['error'] if failed
+                                     else 'Nothing could be queued.'}), 400
+        logger.info('QUEUE added [%s] %s for %s: %s', persona,
+                    ','.join(q['platform'] for q in queued), run_at.isoformat(),
+                    (data.get('text') or '')[:60])
+        sent = []
+        if data.get('now'):
+            sent, now_failed = _growth_send_now(persona, queued)
+            failed = failed + now_failed
+        return jsonify({'ok': True, 'id': queued[0]['id'], 'queued': queued,
+                        'sent': sent, 'failed': failed,
+                        'warning': '' if sent else _growth_scope_warning(persona, wanted),
+                        'queue': _growth_queue_rows(persona)})
 
     if request.method == 'PATCH':
         data = request.json or {}
@@ -7096,7 +7437,7 @@ def api_growth_queue():
                            ScheduledPost.persona == persona).first())
             if not row:
                 return jsonify({'ok': False, 'error': 'No such post.'}), 404
-            if row.status != 'queued':
+            if row.status not in growth.EDITABLE_STATES:
                 return jsonify({'ok': False,
                                 'error': 'That post has already gone out or is '
                                          'on its way.'}), 409
@@ -7113,17 +7454,32 @@ def api_growth_queue():
                     return jsonify({'ok': False,
                                     'error': 'That slot is in the past.'}), 400
                 run_at = _growth_naive_utc(when)
-            media_id = None
-            if 'media_id' in data:
-                # '' is an answer here — it takes the photo off the post.
-                wanted = str(data.get('media_id') or '').strip()
-                media_id, why = _growth_media_check(persona, row.platform, wanted)
+            media_id = media_ids = None
+            if 'media_ids' in data or 'media_id' in data:
+                # '' and [] are answers here — they take the files off the post.
+                wanted = ([str(m).strip() for m in (data.get('media_ids') or [])
+                           if str(m).strip()] if 'media_ids' in data
+                          else ([str(data.get('media_id') or '').strip()]
+                                if str(data.get('media_id') or '').strip() else []))
+                media_ids, why = _growth_media_check_list(persona, row.platform, wanted)
                 if why:
                     return jsonify({'ok': False, 'error': why}), 400
-            if text is None and run_at is None and media_id is None:
+                media_id = media_ids[0] if media_ids else ''
+            audience = price = None
+            if (('audience' in data or 'price_cents' in data)
+                    and growth.normalise_source(row.platform) == 'fanvue'):
+                at_media = media_id if media_id is not None else (row.media_id or '')  # noqa
+                audience, price, why = _growth_post_extras(
+                    row.platform, data, at_media,
+                    {'audience': row.audience, 'price_cents': row.price_cents})
+                if why:
+                    return jsonify({'ok': False, 'error': why}), 400
+            if (text is None and run_at is None and media_ids is None
+                    and audience is None):
                 return jsonify({'ok': False, 'error': 'Nothing to change.'}), 400
             done = update_post(sdb, persona, post_id, text=text, run_at=run_at,
-                               media_id=media_id)
+                               media_id=media_id, media_ids=media_ids,
+                               audience=audience, price_cents=price)
             sdb.commit()
         finally:
             sdb.close()
@@ -7136,17 +7492,25 @@ def api_growth_queue():
 
     if request.method == 'DELETE':
         post_id = (request.args.get('id') or '').strip()
-        from db import SessionLocal, cancel_post
+        # Two different intents: cancelling keeps the row so the week still
+        # shows what was planned and called off, deleting takes it off the
+        # calendar for good.
+        hard = (request.args.get('mode') or '').strip() == 'delete'
+        from db import SessionLocal, cancel_post, delete_post
         sdb = SessionLocal()
         try:
-            done = cancel_post(sdb, persona, post_id)
+            done = (delete_post if hard else cancel_post)(sdb, persona, post_id)
             sdb.commit()
         finally:
             sdb.close()
         if not done:
             return jsonify({'ok': False,
-                            'error': 'That post has already gone out or is on '
+                            'error': 'That post is on its way out right now.'
+                                     if hard else
+                                     'That post has already gone out or is on '
                                      'its way.'}), 409
+        logger.info('QUEUE %s [%s] %s', 'deleted' if hard else 'cancelled',
+                    persona, post_id)
         return jsonify({'ok': True, 'queue': _growth_queue_rows(persona)})
 
     # A window keeps a busy week from being cut short by the newest fifty; with
@@ -7158,10 +7522,12 @@ def api_growth_queue():
         since=_growth_naive_utc(since) if since else None,
         until=_growth_naive_utc(until) if until else None)
     stats = growth.queue_stats(rows, now=int(time.time()))
+    remote, remote_error = _growth_remote_rows(persona, since, until, rows)
     return jsonify({'ok': True, 'persona': persona, 'beta': _growth_on(persona),
                     'worker_on': _worker_enabled('GROWTH_QUEUE_WORKER'),
                     'stale_hours': GROWTH_QUEUE_STALE_HRS,
-                    'queue': rows, **stats})
+                    'queue': rows, 'remote': remote,
+                    'remote_error': remote_error, **stats})
 
 
 def _growth_channel_link(persona, channel, bot=None):
@@ -7204,10 +7570,63 @@ def _content_level_for(persona, platform):
                                 cfg.get('nsfw_enabled'), cfg.get('nsfw_level'))
 
 
-def _content_level_note(persona, platform):
+def _content_level_note(persona, platform, rating=''):
+    """The content level this draft is written at. `rating` is the creator
+    asking for this one draft to be safe for work or not, whatever the persona's
+    standing setting says — except on a channel whose own rules bar it, where
+    the floor still wins and asking cannot lift it."""
     enabled, level = _content_level_for(persona, platform)
+    rating = str(rating or '').strip().lower()
+    if rating == 'sfw':
+        enabled = False
+    elif rating == 'nsfw' and growth.base_platform(platform) not in growth.SFW_LOCKED:
+        enabled = True
+        level = level if enabled and level in growth.RATING_LEVELS else level
     clause = growth.content_level_clause(enabled, level)
-    return f'\n\nContent level: {clause}' if clause else ''
+    if not clause:
+        return ('\n\nContent level: keep it completely safe for work — flirty is '
+                'fine, sexual is not.')
+    return f'\n\nContent level: {clause}'
+
+
+def _draft_media_bytes(persona, media_id):
+    """The picture a draft is being written about, as (bytes, mime), or
+    (None, ''). A Fanvue vault item is fetched by its thumbnail — the full file
+    can be a video or hundreds of megabytes, and a frame is enough to write a
+    caption from."""
+    if not media_id:
+        return None, ''
+    uuid = _fv_media_id(media_id)
+    try:
+        if uuid:
+            scope = _fanvue_scope(persona)
+            m = _fanvue_call(persona, 'GET',
+                             f'{scope}/media/{uuid}?variants={FV_MEDIA_VARIANTS}') or {}
+            url = _fv_media_thumb(m)
+            if not url:
+                return None, ''
+            req = urllib.request.Request(url, headers={'User-Agent': 'ai-model-chat'})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                return r.read(), (r.headers.get('Content-Type') or 'image/jpeg')
+        media = _media_row(persona, media_id)
+        if not media:
+            return None, ''
+        blob, mime = _media_bytes(media)
+        # Gemini reads stills. A clip's caption is written from its words alone.
+        return (blob, mime) if str(mime or '').startswith('image/') else (None, '')
+    except Exception as e:
+        logging.info('draft: no picture for %s/%s: %s', persona, media_id, str(e)[:120])
+        return None, ''
+
+
+def _draft_media_note(has_image):
+    if not has_image:
+        return ''
+    return ('\n\nThe picture going out with this post is attached. Write about '
+            'what is actually in it — what you are wearing, doing, where you are '
+            '— so the words and the image are one post rather than two. Never '
+            'describe it like a caption writer looking at a photo; you were '
+            'there.')
 
 
 def _draft_link(persona, platform):
@@ -7472,25 +7891,40 @@ def api_growth_drafts():
     if not re.match(r'^[a-z0-9_-]+$', persona or ''):
         return jsonify({'error': 'Invalid slug'}), 400
     idea = (data.get('idea') or '').strip()[:400]
-    if not idea:
-        return jsonify({'ok': False, 'error': 'Give it an idea to work from.'}), 400
     wanted = [growth.normalise_source(p) for p in (data.get('platforms') or [])]
     # The variants are asked for by name; the default is the five real channels,
     # so "write me everything" does not quietly cost an extra model call.
     wanted = [p for p in wanted if p in growth.POST_PLATFORMS] or growth.default_platforms()
     series = data.get('series')
+    # 'sfw' or 'nsfw' asks for this one draft at that level; '' keeps whatever
+    # the persona is already set to.
+    rating = str(data.get('rating') or '').strip().lower()
+    if rating not in ('sfw', 'nsfw'):
+        rating = ''
+    picture, pic_mime = _draft_media_bytes(persona, str(data.get('media_id') or '').strip())
+    media_note = _draft_media_note(bool(picture))
 
     out = []
     for plat in wanted:
         spec = growth.POST_PLATFORMS[plat]
         # A variant shares its base channel's register, link and no-repeat log.
         base = growth.base_platform(plat)
+        # No angle given is the ordinary case now: the picture is the subject,
+        # and with no picture either she picks something out of her own life.
+        if idea:
+            subject = f'about: {idea}.'
+        elif picture:
+            subject = 'about the picture attached.'
+        else:
+            subject = ('about something from your own life today — pick it '
+                       'yourself, from who you are and what you are into.')
         instruction = (
-            f'Write ONE {spec["label"]} post as yourself, in character, about: '
-            f'{idea}. It must be {spec["brief"]}. Stay under {spec["cap"]} '
+            f'Write ONE {spec["label"]} post as yourself, in character, '
+            f'{subject} It must be {spec["brief"]}. Stay under {spec["cap"]} '
             'characters. Return only the post itself, no preamble and no quotes.'
             + _series_note(series)
-            + _content_level_note(persona, plat)
+            + media_note
+            + _content_level_note(persona, plat, rating)
             + _no_repeat_block(persona, base))
         # X and Threads render a bare link as clickable, so it rides in the
         # caption; Instagram and TikTok already say "link in bio" in their own
@@ -7505,8 +7939,9 @@ def api_growth_drafts():
             instruction += growth.OVERLAY_BRIEF
 
         def write(extra=''):
-            raw = _persona_text(persona, instruction + extra,
-                                max_tokens=500, temperature=1.0)
+            raw = _persona_text(persona, instruction + extra, max_tokens=500,
+                                temperature=1.0,
+                                image=(picture, pic_mime) if picture else None)
             head, body = growth.split_overlay(raw) if overlay_wanted else ('', raw)
             return head, growth.trim_to(body, max(budget, 0))
 
@@ -7531,6 +7966,7 @@ def api_growth_drafts():
                     'link': '' if inline else link, 'overlay': overlay,
                     'cap': spec['cap'], 'publishable': plat in growth.PUBLISHABLE})
     return jsonify({'ok': True, 'persona': persona, 'idea': idea, 'drafts': out,
+                    'rating': rating, 'saw_media': bool(picture),
                     'beta': _growth_on(persona)})
 
 
@@ -7541,7 +7977,8 @@ GROWTH_QUEUE_RETRY_MINS = 10
 GROWTH_QUEUE_STALE_HRS = 6
 
 
-def _growth_publish(persona, platform, text, media_id=''):
+def _growth_publish(persona, platform, text, media_id='', audience='', price_cents=0,
+                    media_ids=None):
     """Put one post out and write it into the content register. Returns the id
     the channel gave it; raises on failure, because only the caller knows
     whether this attempt is worth another one."""
@@ -7549,25 +7986,56 @@ def _growth_publish(persona, platform, text, media_id=''):
     text = growth.trim_post(plat, text)
     if not text:
         raise ValueError('nothing to post')
-    media = _media_row(persona, media_id)
-    if media_id and not media:
-        # The photo was deleted between queueing and sending. Going out without
-        # it would quietly post a caption for a picture nobody can see.
-        raise RuntimeError('the media on this post is no longer in the library')
-    if media:
-        why = growth.media_reject(plat, media.get('kind'))
+    ids = [m for m in (media_ids or ([media_id] if media_id else [])) if m]
+    vault_uuids, rows = [], []
+    for one in ids:
+        uuid = _fv_media_id(one)
+        if uuid:
+            if plat != 'fanvue':
+                raise RuntimeError('that file is in the Fanvue vault and only '
+                                   'Fanvue can post it')
+            vault_uuids.append(uuid)
+            continue
+        row = _media_row(persona, one)
+        if not row:
+            # The photo was deleted between queueing and sending. Going out
+            # without it would quietly post a caption for a picture nobody can see.
+            raise RuntimeError('the media on this post is no longer in the library')
+        why = growth.media_reject(plat, row.get('kind'))
         if why:
             raise RuntimeError(why)
-    if plat == 'x':
+        rows.append(row)
+    why = growth.media_set_reject(
+        plat, ['image'] * len(vault_uuids) + [r.get('kind') or 'image' for r in rows])
+    if why:
+        raise RuntimeError(why)
+    media = rows[0] if rows else None
+    if plat == 'fanvue':
+        uuids = list(vault_uuids)
+        for row in rows:
+            blob, mime = _media_bytes(row)
+            kind = growth.media_kind(mime)
+            ext = (mime.split('/')[-1] or 'bin').split(';')[0]
+            uuids.append(_fv_upload_media(
+                persona, blob, kind, f'{row.get("id") or kind}.{ext}',
+                content_type=mime or 'application/octet-stream'))
+        posted_id = _fv_create_post(persona, text, media_uuids=uuids,
+                                    price_cents=price_cents, audience=audience)
+    elif plat == 'x':
         body = {'text': text}
-        if media:
-            blob, mime = _media_bytes(media)
-            body['media'] = {'media_ids': [
-                _x_media_upload(persona, blob, mime, media.get('kind') or 'image')]}
+        if rows:
+            uploaded = []
+            for row in rows:
+                blob, mime = _media_bytes(row)
+                uploaded.append(_x_media_upload(persona, blob, mime,
+                                                row.get('kind') or 'image'))
+            body['media'] = {'media_ids': uploaded}
         res = _x_call(persona, 'POST', '/tweets', body=body)
         posted_id = str(((res or {}).get('data') or {}).get('id') or '')
     elif plat == 'threads':
-        posted_id = str(_threads_publish(persona, text, media=media) or '')
+        # _threads_publish builds the carousel itself from a list.
+        posted_id = str(_threads_publish(persona, text,
+                                         media=(rows if len(rows) > 1 else media)) or '')
     else:
         raise ValueError(f'{plat} posts have to go out by hand')
     _content_register_add(persona, plat, text)
@@ -7576,7 +8044,7 @@ def _growth_publish(persona, platform, text, media_id=''):
 
 def _growth_queue_round():
     """Publish everything that has come due."""
-    from db import SessionLocal, due_posts, claim_post, finish_post
+    from db import SessionLocal, due_posts, claim_post, finish_post, post_media_ids
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     sdb = SessionLocal()
     try:
@@ -7584,6 +8052,8 @@ def _growth_queue_round():
             post_id, persona = row.id, row.persona
             platform, text = row.platform, row.text
             media_id = row.media_id or ''
+            media_ids = post_media_ids(row)
+            audience, price_cents = row.audience or '', int(row.price_cents or 0)
             if not _growth_on(persona):
                 continue
             late = (now - row.run_at).total_seconds() if row.run_at else 0
@@ -7597,7 +8067,10 @@ def _growth_queue_round():
             if not claim_post(sdb, post_id):
                 continue
             try:
-                posted_id = _growth_publish(persona, platform, text, media_id)
+                posted_id = _growth_publish(persona, platform, text, media_id,
+                                            audience=audience,
+                                            price_cents=price_cents,
+                                            media_ids=media_ids)
                 finish_post(sdb, post_id, external_id=posted_id)
                 logger.info('QUEUE posted [%s/%s] id=%s %s',
                             persona, platform, posted_id, text[:60])
@@ -9353,7 +9826,8 @@ def _fan_memory_block(mem, persona=None):
         "detail at a time, and never the same one two messages running.\n\n")
 
 
-def _persona_text(persona, instruction, history=None, max_tokens=1024, temperature=0.9):
+def _persona_text(persona, instruction, history=None, max_tokens=1024,
+                  temperature=0.9, image=None):
     """Generate an in-character message for a persona via Gemini.
 
     Returns '' when there is no Gemini to ask. Every caller already treats an
@@ -9369,7 +9843,15 @@ def _persona_text(persona, instruction, history=None, max_tokens=1024, temperatu
     for m in (history or [])[-20:]:
         contents.append({'role': 'model' if m['role'] in ('bot', 'model') else 'user',
                          'parts': [{'text': m['content']}]})
-    contents.append({'role': 'user', 'parts': [{'text': instruction}]})
+    parts = [{'text': instruction}]
+    # A picture rides with the instruction so the model writes about what is
+    # actually in the frame rather than about the idea in the abstract.
+    if image and image[0]:
+        import base64
+        parts.append({'inline_data': {
+            'mime_type': image[1] or 'image/jpeg',
+            'data': base64.b64encode(image[0]).decode()}})
+    contents.append({'role': 'user', 'parts': parts})
     cfg = _no_thinking(types.GenerateContentConfig(
         system_instruction=system_prompt, temperature=temperature,
         max_output_tokens=max_tokens))
@@ -10982,9 +11464,11 @@ FANVUE_REQUIRED_SCOPES = 'openid read:self read:chat write:chat'
 # token is still better than no connection, so they sit above the floor.
 FANVUE_CORE_SCOPES = FANVUE_REQUIRED_SCOPES + ' offline offline_access'
 FANVUE_SCOPES = (FANVUE_CORE_SCOPES + ' read:fan read:media write:media '
-                 'read:creator read:agency '
+                 'read:creator read:agency write:creator '
                  # /earnings backs the purchase reconciler.
-                 'read:insights')
+                 'read:insights '
+                 # Feed posts planned in the content planner.
+                 'read:post write:post')
 
 
 # What each optional permission actually buys, so a refusal can be described by
@@ -10998,12 +11482,16 @@ FANVUE_SCOPE_FEATURES = {
     'write:media': 'uploading media to the vault',
     'read:fan': "reading a fan's profile details",
     'read:creator': 'reading the creator profile',
+    'write:creator': 'planning Fanvue posts on an agency login',
+    'read:post': 'showing what is already booked on the Fanvue feed in the planner',
+    'write:post': 'posting to the Fanvue feed from the content planner',
     'offline': 'staying connected without reauthorizing',
     'offline_access': 'staying connected without reauthorizing',
 }
 # Missing these costs a side feature; anything else missing degrades the chat
 # itself and is worth shouting about.
-FANVUE_OPTIONAL_SCOPES = {'read:agency', 'read:insights', 'write:media', 'read:creator'}
+FANVUE_OPTIONAL_SCOPES = {'read:agency', 'read:insights', 'write:media', 'read:creator',
+                          'write:creator', 'read:post', 'write:post'}
 
 
 def _fanvue_app():
@@ -11208,18 +11696,24 @@ _FV_PATH_SCOPES = (
     ('/insights', 'read:insights'),
     ('/earnings', 'read:insights'),
     ('/users/me', 'read:self'),
+    ('/posts', 'read:post'),
     ('/creators', 'read:creator'),
 )
 
 
-def _fv_scope_for_path(path):
+def _fv_scope_for_path(path, method='GET'):
     p = (path or '').split('?')[0]
+    # Posts are the one family we call on v1; everything else is still v0.
+    if p.startswith('/v1/'):
+        p = p[3:]
     # A creator-scoped call carries the real endpoint after the uuid.
     if p.startswith('/creators/'):
         rest = p.split('/', 3)
         p = '/' + rest[3] if len(rest) > 3 else p
     for prefix, scope in _FV_PATH_SCOPES:
         if p.startswith(prefix):
+            if prefix == '/posts' and str(method).upper() != 'GET':
+                return 'write:post'
             return scope
     return ''
 
@@ -11270,16 +11764,16 @@ def _fanvue_call(persona, method, path, body=None):
             if new:
                 return _fanvue_api(method, path, new, body=body)
         if e.code == 403:
-            raise _fanvue_scope_hint(e, t, path)
+            raise _fanvue_scope_hint(e, t, path, method)
         raise
 
 
-def _fanvue_scope_hint(e, tokens, path):
+def _fanvue_scope_hint(e, tokens, path, method='GET'):
     """Say which permission a 403 is probably about. The connection can succeed
     with fewer scopes than we asked for — every call needing a missing one then
     fails identically, and nothing on screen connects that to the scope."""
     granted = (tokens.get('scope') or '').split()
-    need = _fv_scope_for_path(path)
+    need = _fv_scope_for_path(path, method)
     if need and granted and need not in granted:
         detail = (getattr(e, 'detail', '') or 'Forbidden').rstrip('.')
         e.detail = (f'{detail} — this connection was not granted "{need}" '
@@ -11579,9 +12073,21 @@ def api_fanvue_status():
     missing = [{'scope': s, 'feature': FANVUE_SCOPE_FEATURES.get(s, ''),
                 'optional': s in FANVUE_OPTIONAL_SCOPES}
                for s in FANVUE_SCOPES.split() if granted and s not in granted]
+    # What a reconnect would actually ask for. An env override or a remembered
+    # refusal can drop a scope from the request, and then reconnecting to gain
+    # it is advice that cannot work — better to say so than to send the creator
+    # round the loop again.
+    requested = _fanvue_scopes().split()
+    unrequested = [m['scope'] for m in missing if m['scope'] not in requested]
     return jsonify({'connected': bool(t.get('access_token')), 'username': t.get('username', ''),
                     'creator': _fanvue_creator(persona),
                     'scope': t.get('scope', ''), 'missing_scopes': missing,
+                    'requested_scopes': ' '.join(requested),
+                    'unrequested_scopes': unrequested,
+                    'scopes_overridden': bool(os.environ.get('FANVUE_SCOPES', '').strip()
+                                              or (_get_setting('fanvue_scopes') or '').strip()),
+                    'denied_scopes': _fanvue_denied_scopes(),
+                    'reconnect_fixes': bool(missing) and not unrequested,
                     'degraded': any(not m['optional'] for m in missing)})
 
 
@@ -12073,6 +12579,101 @@ def _fv_record_drop(persona, fan_uuid, chosen, idx, price, media_uuids,
 
 # Fanvue serves media only through variant URLs, and only when the request asks
 # for them by name. blurred is what a locked item may legitimately show.
+# ── Fanvue feed posts ─────────────────────────────────────────────────────────
+# Posts are the one family we call on v1 — v0 has no cursor and pages the feed
+# by offset, which drifts under the writes the planner itself is making.
+FV_POST_AUDIENCES = ('subscribers', 'followers-and-subscribers')
+FV_POST_AUDIENCE_DEFAULT = 'followers-and-subscribers'
+FV_POST_CAP = 5000
+# Fanvue's floor for a paid post, in cents.
+FV_POST_PRICE_MIN = 300
+FV_POSTS_PAGE = 50
+FV_POSTS_MAX_PAGES = 10
+
+
+def _fv_post_path(persona, suffix=''):
+    """An agency login posts as the creator it has selected; a single account
+    posts as itself."""
+    return f'/v1{_fanvue_scope(persona)}/posts{suffix}'
+
+
+def _fv_audience(value):
+    v = str(value or '').strip()
+    return v if v in FV_POST_AUDIENCES else FV_POST_AUDIENCE_DEFAULT
+
+
+def _fv_iso(ts):
+    return datetime.fromtimestamp(int(ts), timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
+def _fv_epoch(value):
+    """An epoch from a Fanvue ISO timestamp, or 0. Fanvue writes UTC with a
+    trailing Z, which fromisoformat only learned in 3.11."""
+    raw = str(value or '').strip()
+    if not raw:
+        return 0
+    try:
+        dt = datetime.fromisoformat(raw.replace('Z', '+00:00'))
+    except ValueError:
+        return 0
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return int(dt.timestamp())
+
+
+def _fv_posts(persona, start=0, end=0, size=FV_POSTS_PAGE,
+              max_pages=FV_POSTS_MAX_PAGES):
+    """Every post on the creator's feed in a window, drafts and scheduled ones
+    included. The cursor carries the filters the first page was cut under, so
+    later pages send nothing but the cursor."""
+    q = {'size': str(int(size)), 'includeUnpublished': 'true'}
+    if start:
+        q['startDate'] = _fv_iso(start)
+    if end:
+        q['endDate'] = _fv_iso(end)
+    path = _fv_post_path(persona) + '?' + urllib.parse.urlencode(q)
+    rows, seen = [], set()
+    for _ in range(max_pages):
+        res = _fanvue_call(persona, 'GET', path) or {}
+        for row in _fv_list(res):
+            uid = str((row or {}).get('uuid') or '')
+            if uid and uid not in seen:
+                seen.add(uid)
+                rows.append(row)
+        cursor = str(res.get('nextCursor') or res.get('next_cursor') or '')
+        if not cursor:
+            break
+        path = _fv_post_path(persona) + '?' + urllib.parse.urlencode(
+            {'size': str(int(size)), 'cursor': cursor})
+    return rows
+
+
+def _fv_create_post(persona, text, media_uuids=(), price_cents=0, audience='',
+                    publish_at=None):
+    """Put one post on the creator's feed, returning the uuid Fanvue gave it.
+    Without `publish_at` it goes live now — the planner's own queue holds the
+    slot, so handing Fanvue a schedule as well would give the post two owners."""
+    media = [u for u in (media_uuids or []) if u]
+    body = {'audience': _fv_audience(audience)}
+    text = str(text or '')[:FV_POST_CAP]
+    if text:
+        body['text'] = text
+    if media:
+        body['mediaUuids'] = media
+    price = int(price_cents or 0)
+    if price:
+        if not media:
+            raise RuntimeError('a paid Fanvue post needs media behind the price')
+        if price < FV_POST_PRICE_MIN:
+            raise RuntimeError(
+                f'Fanvue will not take a price under ${FV_POST_PRICE_MIN / 100:.2f}')
+        body['price'] = price
+    if publish_at:
+        body['publishAt'] = _fv_iso(publish_at)
+    res = _fanvue_call(persona, 'POST', _fv_post_path(persona), body=body) or {}
+    return str(res.get('uuid') or '')
+
+
 FV_MEDIA_VARIANTS = 'main,thumbnail,thumbnail_gallery,blurred'
 
 
@@ -16377,6 +16978,19 @@ class _OnlyFansPlatform(_Platform):
         """
         if not (_of_direct() and self.connected(persona)):
             return ''
+        account = _of_account(persona)
+        # A session opened before the exit address was fixed is bound to
+        # whichever pool address Cloud Run happened to use that minute, and
+        # every request for it now leaves from a different one. OnlyFans
+        # refuses that, and it reads as a dead session — which it is, in the
+        # only sense that matters: no amount of waiting repairs it.
+        if (os.getenv('ONLYFANS_PROXY_TEMPLATE') or '').strip() and account:
+            if not (of_session.get(account) or {}).get('proxy'):
+                return ('Her session was captured before this deployment had a '
+                        'fixed exit address, so it is bound to an address her '
+                        'requests no longer come from — OnlyFans refuses it '
+                        'whatever we sign. Reconnect the account and the new '
+                        'session keeps the fixed address.')
         waiting = (OF.held() or {}).get(_of_account(persona))
         if waiting:
             return ('OnlyFans refused her last request, so the rest are being '
@@ -16407,8 +17021,21 @@ def _of_keep_sample(status):
     exactly what happened, and it verified our rules against themselves. The
     oracle now comes only from `sample_now`, a logged-out page nothing is
     injected into. The sample still rides back on the status for the console
-    to show; it is no longer kept.
+    to show; it is no longer kept as the oracle.
+
+    One thing is kept: a signature the window produced *while signed in*, which
+    a logged-out page cannot give us at all. It never becomes the oracle -- the
+    reason above still stands -- but it is the only evidence of how OnlyFans
+    signs a request as her, and without it "the rules are proven" can only mean
+    proven for a visitor. `_of_keep_signature` drops anything we made, so our
+    own arithmetic cannot come back in through here either.
     """
+    sample = (status or {}).get('signing_sample') or {}
+    if isinstance(sample, dict) and str(sample.get('user_id') or '0') not in ('', '0'):
+        if _of_keep_signature(sample):
+            of_trace.note('repair', 'kept a signature OnlyFans made for a '
+                          'signed-in request — the one thing a logged-out '
+                          'capture cannot show')
     return status
 
 
@@ -16417,6 +17044,47 @@ _of_last_capture = [0.0]
 # many watchers are failing at once.
 OF_CAPTURE_EVERY = 600
 OF_SAMPLE_STALE = 900
+
+
+_of_signin_seen = [0.0]
+# How long after the last thing she did in the sign-in window the repair keeps
+# out of the way. Longer than a page load, shorter than the attempt's own life.
+OF_SIGNIN_QUIET = 300
+
+
+def _of_signin_active():
+    return time.time() - _of_signin_seen[0] < OF_SIGNIN_QUIET
+
+
+def _of_egress_ip(account=''):
+    """The address OnlyFans sees us from, and whether it is the fixed one.
+
+    A session is bound to the IP it was opened on, so a sign-in in one service
+    and a request from another is refused however well it is signed — which is
+    indistinguishable from a dead session unless something actually looks.
+    """
+    import urllib.request as _req
+    out = {'proxy_configured': bool((os.getenv('ONLYFANS_PROXY_TEMPLATE') or '').strip())}
+    proxy = _of_proxy_for(account, '') if account else \
+        (os.getenv('ONLYFANS_PROXY_TEMPLATE') or '').strip()
+    out['proxy'] = of_session._proxy_label(proxy) if proxy else ''
+    for label, through in (('direct', ''), ('proxy', proxy)):
+        if label == 'proxy' and not proxy:
+            continue
+        try:
+            opener = OF._opener(through) if hasattr(OF, '_opener') else _req.build_opener()
+            with opener.open('https://api.ipify.org?format=json', timeout=8) as r:
+                out[label] = json.loads(r.read().decode())['ip']
+        except Exception as e:
+            out[label] = 'failed: ' + str(e)[:120]
+    return out
+
+
+def _of_signin_touch():
+    """Called from the connect routes. The repair opens browsers of its own,
+    and this service holds one instance: a derivation launching Chrome beside
+    her sign-in window is how the window came to disappear under her."""
+    _of_signin_seen[0] = time.time()
 
 
 def _of_autocapture(force=False):
@@ -16446,6 +17114,10 @@ def _of_autocapture(force=False):
         # A stored sample that is ours keeps proven() lying, and the capture
         # below is the only thing that can replace it.
         of_rules.drop_sample()
+    if _of_signin_active():
+        of_trace.note('repair', 'a sign-in is open, so the repair is waiting '
+                      'rather than opening a browser beside it')
+        return False
     try:
         build = _of_browser_build()
         if not (build.get('up') and build.get('signing_capture')):
@@ -16576,6 +17248,10 @@ def _of_collect_signatures(want):
     conn = _of_conn()
     if not hasattr(conn, 'sample_now'):
         return 0
+    if _of_signin_active():
+        of_trace.note('repair', 'a sign-in is open, so signatures are not being '
+                      'collected beside it')
+        return 0
     added = 0
     for _ in range(max(0, min(int(want), OF_COLLECT_MAX))):
         try:
@@ -16635,6 +17311,25 @@ def _of_solve_recipe(param, sample):
     of_trace.note('repair', 'solved the signing rules from %d captured '
                   'signatures, revision %s'
                   % (len(signatures), rules.get('revision') or ''))
+    # Which of them the solved recipe actually reproduces, split by whether
+    # anyone was signed in. A recipe solved from visitor signatures alone is
+    # the case we cannot tell from "signing works" without saying so: the
+    # solver drops signatures it cannot fit rather than failing on them.
+    hers = [sig for sig in signatures
+            if str(sig.get('user_id') or '0') not in ('', '0')]
+    if not hers:
+        of_trace.note('repair', 'every signature it solved from was taken with '
+                      'nobody signed in, so this proves signing for a visitor '
+                      'and cannot speak for her own requests', 'warning')
+    else:
+        fit = [sig for sig in hers if of_rules.verify(sig, rules) is True]
+        of_trace.note('repair', 'it reproduces %d of %d signatures OnlyFans made '
+                      'while signed in%s' % (
+                          len(fit), len(hers),
+                          ', so signing is right for her requests too and a '
+                          'refusal is her session' if len(fit) == len(hers) else
+                          ' — signing is right for a visitor and wrong for her'),
+                      '' if len(fit) == len(hers) else 'warning')
     logger.info('solved OnlyFans signing rules from %d signatures (revision %s)',
                 len(signatures), rules.get('revision') or '')
     return True
@@ -16755,6 +17450,7 @@ if _of_direct():
     of_rules.cache_hooks(lambda: _get_setting('onlyfans_rules_cache') or '',
                          lambda v: _set_setting('onlyfans_rules_cache', v))
     of_rules.override_hooks(lambda: _get_setting('onlyfans_rules_override') or '')
+    of_rules.signature_hooks(_of_signatures)
     of_rules.sample_hooks(lambda: _get_setting('onlyfans_rules_sample') or '',
                           lambda v: _set_setting('onlyfans_rules_sample', v))
     of_session.store_hooks(lambda a: _get_setting(f'onlyfans_vault_{a}') or '',
@@ -16782,6 +17478,17 @@ if _of_direct():
 
     of_rules.signer_hooks(_of_page_sign)
 
+    _of_transport_state = ['']
+
+    def _of_transport_note(state, why):
+        """Say which way requests are leaving, once per change rather than per
+        request. Whether her own browser carries them decides whether signing
+        matters at all, and it was readable only from the code before."""
+        if _of_transport_state[0] == state:
+            return
+        _of_transport_state[0] = state
+        of_trace.note('transport', why, '' if state == 'page' else 'warning')
+
     def _of_page_request(account, session, method, path, body):
         """Make the whole request in her browser, not just the signature.
 
@@ -16794,11 +17501,16 @@ if _of_direct():
         """
         conn = _of_conn()
         if not hasattr(conn, 'request_for'):
+            _of_transport_note('local', 'this browser service cannot carry whole '
+                               'requests, so we sign them here')
             return None
         # Asked before every request, so it has to be the cached answer: a
         # browser service that is down answers a request by timing out, and
         # three of those in front of every round is slower than not having it.
         if conn is not of_connect and not _of_browser_build().get('page_requests'):
+            _of_transport_note('local', 'the browser service is on a build that '
+                               'cannot carry whole requests, so we sign them here '
+                               '— redeploy it and her own page signs instead')
             return None
         try:
             got = conn.request_for(account, session, method, path, body,
@@ -16808,7 +17520,12 @@ if _of_direct():
                           % (method, path[:60], str(e)[:140]), 'warning')
             return None
         if not got.get('status'):
+            _of_transport_note('local', 'her browser did not answer, so this '
+                               'request was signed here instead')
             return None
+        _of_transport_note('page', 'her requests are going out through her own '
+                           'browser — OnlyFans signs them, so a rotation cannot '
+                           'stop them')
         return got
 
     OF.transport_hooks(_of_page_request)
@@ -16966,6 +17683,10 @@ def _of_browser_build():
             info['page_requests'] = bool(health.get('page_requests'))
             info['build'] = health.get('build') or ''
             info['mine'] = of_trace.build_id()
+            # What her page is actually doing over there. A signer that died
+            # reads as "her browser answered nothing" from this side, which
+            # names the symptom and not one cause.
+            info['signers'] = health.get('signers') or []
         except Exception as e:
             info['error'] = str(e)[:120]
     _of_build_cache.update({'at': now, 'info': info})
@@ -17018,6 +17739,7 @@ def onlyfans_connect_page():
 @platform_scoped
 def api_onlyfans_connect_browser():
     """Open a browser on onlyfans.com for this creator to sign in through."""
+    _of_signin_touch()
     d = request.json or {}
     persona = (d.get('persona') or '').strip()
     if not persona:
@@ -17054,6 +17776,7 @@ def api_onlyfans_connect_frame():
     """The browser as it looks right now. Polled a few times a second while the
     creator is typing, so it answers with the last frame rather than waiting for
     a fresh one."""
+    _of_signin_touch()
     try:
         attempt = _of_conn().get((request.args.get('attempt') or '').strip(), frame=True) \
             if _of_direct() else None
@@ -17078,6 +17801,7 @@ def api_onlyfans_connect_frame():
 @platform_scoped
 def api_onlyfans_connect_input():
     """One click, keystroke or scroll, forwarded to the browser."""
+    _of_signin_touch()
     d = request.json or {}
     kind = (d.get('kind') or '').strip()
     if kind not in of_connect.INPUT_KINDS:
@@ -17147,6 +17871,7 @@ def _of_adopt_direct(attempt):
 @app.route('/api/onlyfans/connect/start', methods=['POST'])
 @platform_scoped
 def api_onlyfans_connect_start():
+    _of_signin_touch()
     d = request.json or {}
     persona = (d.get('persona') or '').strip()
     if not persona:
@@ -17204,6 +17929,7 @@ def api_onlyfans_connect_status():
 @platform_scoped
 def api_onlyfans_connect_code():
     """The 2FA code, or word that the browser face check is finished."""
+    _of_signin_touch()
     d = request.json or {}
     persona = (d.get('persona') or '').strip()
     attempt = _of_attempt(persona)
@@ -17400,42 +18126,47 @@ def api_onlyfans_signing_capture():
 
 
 def _of_signed_in_signature(account):
-    """Do we sign a request as *her* the way OnlyFans' own page does?
+    """Do our rules sign a request made *as her* the way OnlyFans does?
 
-    The oracle is captured with nobody signed in, so it proves the rules for a
-    visitor. A refusal of every signed-in request while that proof holds is
-    precisely the case it cannot speak to -- and the page can, by signing the
-    same path with her id beside us. Carries no credentials: an id and two
-    hashes.
+    The oracle is captured with nobody signed in, so "matches" in the table
+    above speaks for a visitor's request and nothing else. A refusal of every
+    signed-in request while that holds is exactly the case it cannot answer.
+
+    Asking the page to sign one is the obvious move and does not work: the
+    signer is closured out of reach, which is why the param is read off the
+    hash input rather than requested. But every sign-in window signs its own
+    requests, and those signatures carry her id -- so the answer is already in
+    the ones we kept, and it costs nothing to read.
     """
-    if not (_of_direct() and account):
+    if not _of_direct():
         return {'checked': False}
-    conn = _of_conn()
-    if not hasattr(conn, 'sign_now'):
-        return {'checked': False}
-    user_id = str((of_session.get(account) or {}).get('user_id') or '')
-    if not user_id:
-        return {'checked': False}
-    path = '/api2/v2/users/me'
-    try:
-        theirs = conn.sign_now(path, user_id=user_id,
-                              proxy=_of_proxy_for('', '')) or {}
-    except Exception as e:
-        return {'checked': False, 'error': str(e)[:160]}
-    if not (theirs.get('sign') and theirs.get('time')):
-        return {'checked': False, 'error': 'the page signed nothing'}
-    ours, _ = of_rules.sign(path, user_id, when=int(theirs['time']))
-    same = ours == theirs['sign']
-    return {'checked': True, 'same': same, 'user_id': user_id,
-            'ours': ours, 'theirs': theirs['sign'],
-            'note': ('our signature for her own request matches the one '
-                     "OnlyFans' page makes, so signing is right for a signed-in "
-                     'request too — what OnlyFans refuses is the session'
-                     if same else
-                     'our signature for her own request differs from the one '
-                     "OnlyFans' page makes, though both match when nobody is "
-                     'signed in — the rules are wrong for a signed-in request, '
-                     'and her session is not the problem')}
+    mine = str((of_session.get(account) or {}).get('user_id') or '') if account else ''
+    signed_in = [s for s in _of_signatures()
+                 if str(s.get('user_id') or '0') not in ('', '0')]
+    if mine:
+        hers = [s for s in signed_in if str(s.get('user_id')) == mine]
+        signed_in = hers or signed_in
+    if not signed_in:
+        return {'checked': False,
+                'error': 'no signature captured while signed in — connect the '
+                         'account once with the window open and one is kept'}
+    rules = of_rules.rules()
+    checked = [(s, of_rules.verify(s, rules)) for s in signed_in]
+    matched = [s for s, ok in checked if ok is True]
+    failed = [s for s, ok in checked if ok is False]
+    if not (matched or failed):
+        return {'checked': False, 'error': 'the signatures we hold say nothing'}
+    same = bool(matched) and not failed
+    return {'checked': True, 'same': same, 'user_id': mine,
+            'matched': len(matched), 'failed': len(failed),
+            'note': ('our rules reproduce %d signature(s) OnlyFans made while '
+                     'signed in, so signing is right for her requests too and '
+                     'what OnlyFans refuses is the session'
+                     % len(matched) if same else
+                     'our rules reproduce %d signed-in signature(s) and fail %d, '
+                     'though they match every logged-out one — so the rules are '
+                     'wrong for a signed-in request and reconnecting will not '
+                     'help' % (len(matched), len(failed)))}
 
 
 @app.route('/api/onlyfans/signing/collect', methods=['POST'])
@@ -17459,6 +18190,67 @@ def api_onlyfans_signing_collect():
     return jsonify({'ok': True, 'added': added, 'held': held, 'need': need,
                     'revision': revision, 'errors': errors,
                     'rules': of_rules.state()})
+
+
+@app.route('/api/onlyfans/transport/test', methods=['POST'])
+@operator_only
+def api_onlyfans_transport_test():
+    """Does a request go out through her own browser, and does it work?
+
+    The signing panel answers a different question — whether our arithmetic
+    matches OnlyFans'. When her page carries the whole request there is no
+    arithmetic involved at all, so this is the one that says whether chat and
+    PPV can work right now.
+    """
+    if not _of_direct():
+        return jsonify({'ok': False, 'error': 'not running the direct transport'}), 400
+    persona = ((request.json or {}).get('persona') or '').strip()
+    account = _of_account(persona) or next(iter(_of_connected_accounts()), '')
+    if not account:
+        return jsonify({'ok': False, 'error': 'no account connected'}), 400
+    build = _of_browser_build()
+    conn = _of_conn()
+    ready = bool(hasattr(conn, 'request_for')
+                 and (conn is of_connect or build.get('page_requests')))
+    out = {'ok': True, 'ready': ready, 'account': account,
+           'browser': bool(build.get('up')), 'build': build.get('build', '')}
+    if not ready:
+        out['problem'] = ('the browser service cannot carry whole requests on '
+                          'this build, so every request is signed here and a '
+                          'rotation stops her — redeploy it')
+        return jsonify(out)
+    session = of_session.get(account)
+    try:
+        got = conn.request_for(account, session, 'GET', '/api2/v2/users/me',
+                               None, proxy=_of_proxy_for(account, '')) or {}
+    except Exception as e:
+        out['error'] = str(e)[:300]
+        return jsonify(out)
+    body = got.get('body') if isinstance(got.get('body'), dict) else {}
+    out['status'] = got.get('status')
+    out['username'] = str(body.get('username') or '')
+    out['worked'] = bool(out['username'])
+    out['signers'] = _of_browser_build().get('signers') or []
+    if not out['worked'] and got.get('status'):
+        out['problem'] = ('her page answered %s — the request left through her '
+                          'browser, so this is her session or the page, not '
+                          'signing' % got['status'])
+    elif not out['worked']:
+        # No status at all: the page never answered, which is a browser that
+        # never opened or one that died holding the request. The service's own
+        # account of its signers is the only thing that separates those.
+        hers = next((sig for sig in out['signers']
+                     if sig.get('account') == account), {})
+        out['problem'] = ('her browser never answered. ' + (
+            'Her signer is not open: ' + (hers.get('fatal') or hers.get('error')
+                                          or 'no reason recorded')
+            if hers and not hers.get('live') else
+            'Her signer says it is open, so the request timed out inside it'
+            if hers else
+            'No signer exists for her, so the browser could not be started — '
+            'the usual cause is the service running out of memory while a '
+            'sign-in browser is also open'))
+    return jsonify(out)
 
 
 @app.route('/api/onlyfans/signing/test', methods=['POST'])
@@ -17798,6 +18590,23 @@ def api_diag():
                 out['probe'] = _of_conn().probe_now(proxy=_of_proxy_for('', ''))
             except Exception as e:
                 out['probe'] = {'error': str(e)[:200]}
+        # Everything the signing repair reasons from, in one paste, so a
+        # rotation can be diagnosed and solved offline (of_replay.py) rather
+        # than through a deploy and a sign-in. No credentials: a signature is a
+        # hash of a path, a timestamp and an account id.
+        if request.args.get('egress'):
+            out['egress'] = _of_egress_ip(request.args.get('account') or '')
+        if request.args.get('export'):
+            out['export'] = {
+                'sample': of_rules.sample(),
+                'signatures': _of_signatures(),
+                'rules': of_rules.rules(),
+                'override': of_rules.override(),
+                'state': of_rules.state(),
+                'sources': {of_rules.label_of(url): of_rules._candidates.get(url)
+                            for url in of_rules.RULES_SOURCES
+                            if of_rules._candidates.get(url)},
+            }
         try:
             out['onlyfans'] = _of_watch_payload(
                 int(request.args.get('after') or 0),

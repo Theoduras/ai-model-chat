@@ -12,6 +12,7 @@
 <script src="/js/theme.js"></script>
 <script src="/js/site-nav.js" defer></script>
 <script src="/js/blog-posts.js"></script>
+<script src="/js/page-editor.js" defer></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Inter:wght@400;500;600&display=swap');
 *{margin:0;padding:0;box-sizing:border-box}
@@ -125,7 +126,7 @@ footer{border-top:1px solid var(--hair);padding:28px 24px;text-align:center;
 }
 </style>
 </head>
-<body>
+<body data-page="blog">
 <header class="site-nav" id="site-nav">
   <a href="/" class="brand"><span data-sn-brand>Velvetfunnel</span><i data-sn-suffix>.app</i></a>
   <nav class="auth sn-links">
@@ -138,9 +139,9 @@ footer{border-top:1px solid var(--hair);padding:28px 24px;text-align:center;
 
 <main class="wrap">
   <div class="page-head">
-    <div class="eyebrow">The Velvetfunnel blog</div>
-    <h1>Personas, funnels and the craft of the sale.</h1>
-    <p class="page-sub">What we learn from the conversations that convert — voice,
+    <div class="eyebrow" data-edit-id="eyebrow">The Velvetfunnel blog</div>
+    <h1 data-edit-id="h1">Personas, funnels and the craft of the sale.</h1>
+    <p class="page-sub" data-edit-id="page-sub">What we learn from the conversations that convert — voice,
       pacing, photos and the moment a fan decides to buy.</p>
   </div>
   <div id="posts"></div>

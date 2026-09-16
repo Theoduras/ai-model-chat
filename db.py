@@ -1062,7 +1062,18 @@ class ScheduledPost(Base):
     error = Column(String(300))
     # One item from the persona's library. A reference rather than a copy, so
     # editing the photo edits every post still waiting to use it.
-    media_id = Column(String(32), default='')
+    # A Fanvue vault item is carried as 'fv:{uuid}', which is 39 characters —
+    # Postgres refuses the write at VARCHAR(32) where SQLite silently truncates,
+    # so this has to be wide enough for the longest id, not the library's own.
+    media_id = Column(String(64), default='')
+    # Every file on the post, comma-separated in display order. media_id holds
+    # the first, so rows written before a post could carry more than one still
+    # read correctly.
+    media_ids = Column(Text, default='')
+    # Fanvue feed posts carry a visibility and an optional unlock price; every
+    # other channel ignores both.
+    audience = Column(String(40), default='')
+    price_cents = Column(Integer, default=0)
     created_at = Column(DateTime, default=_now)
 
 
@@ -1070,9 +1081,13 @@ Index('ix_scheduled_due', ScheduledPost.status, ScheduledPost.run_at)
 Index('ix_scheduled_persona', ScheduledPost.persona, ScheduledPost.run_at)
 
 
-def queue_post(session, persona, platform, text, run_at, media_id=''):
+def queue_post(session, persona, platform, text, run_at, media_id='', status='queued',
+               audience='', price_cents=0, media_ids=None):
+    ids = [str(m) for m in (media_ids or []) if m] or ([media_id] if media_id else [])
     row = ScheduledPost(persona=persona, platform=platform, text=text,
-                        run_at=run_at, media_id=media_id or '')
+                        run_at=run_at, media_id=(ids[0] if ids else ''), status=status,
+                        media_ids=','.join(ids),
+                        audience=audience or '', price_cents=int(price_cents or 0))
     session.add(row)
     session.flush()
     return row
@@ -1130,36 +1145,76 @@ def list_posts(session, persona, limit=50, since=None, until=None):
     return q.order_by(ScheduledPost.run_at.desc()).limit(limit).all()
 
 
+# A post the creator may still act on. Kept here rather than imported from
+# growth so the data layer does not depend on the content layer.
+_EDITABLE = ('queued', 'manual')
+
+
 def cancel_post(session, persona, post_id):
     """Cancel a post that has not gone out. A post already sending is left
     alone: the worker owns it, and the send may already be away."""
     n = (session.query(ScheduledPost)
          .filter(ScheduledPost.id == post_id, ScheduledPost.persona == persona,
-                 ScheduledPost.status == 'queued')
+                 ScheduledPost.status.in_(_EDITABLE))
          .update({'status': 'cancelled'}, synchronize_session='fetch'))
     return bool(n)
 
 
-def update_post(session, persona, post_id, text=None, run_at=None, media_id=None):
+def delete_post(session, persona, post_id):
+    """Remove a post from the calendar for good. Anything the worker is holding
+    is left alone — cancelling is the way to stop one of those — but a post that
+    already went out, failed or was called off is only clutter by then, so it
+    deletes like any other."""
+    n = (session.query(ScheduledPost)
+         .filter(ScheduledPost.id == post_id, ScheduledPost.persona == persona,
+                 ScheduledPost.status != 'sending')
+         .delete(synchronize_session='fetch'))
+    return bool(n)
+
+
+def post_media_ids(row):
+    """Every file on a post, in order. Reads the list where one was written and
+    falls back to the single id, so a row from either era answers the same."""
+    raw = str(getattr(row, 'media_ids', '') or '')
+    if raw:
+        return [m for m in raw.split(',') if m]
+    one = str(getattr(row, 'media_id', '') or '')
+    return [one] if one else []
+
+
+def update_post(session, persona, post_id, text=None, run_at=None, media_id=None,
+                audience=None, price_cents=None, media_ids=None):
     """Edit a post that has not gone out yet. Like cancel_post, only a `queued`
     row is the caller's to touch: once the worker has claimed it the send may
     already be away, and once it has posted the text is history rather than a
     draft. Returns whether anything was changed.
 
     `media_id` of '' detaches the media; None leaves it alone. They are
-    different answers, so an empty string cannot mean "unchanged" here."""
+    different answers, so an empty string cannot mean "unchanged" here.
+
+    A by-hand post edits the same way: nothing has claimed it either."""
     fields = {}
     if text is not None:
         fields['text'] = text
     if run_at is not None:
         fields['run_at'] = run_at
-    if media_id is not None:
+    if media_ids is not None:
+        # '' detaches everything here too, the same answer media_id gives.
+        ids = [str(m) for m in media_ids if m]
+        fields['media_ids'] = ','.join(ids)
+        fields['media_id'] = ids[0] if ids else ''
+    elif media_id is not None:
         fields['media_id'] = media_id
+        fields['media_ids'] = media_id or ''
+    if audience is not None:
+        fields['audience'] = audience
+    if price_cents is not None:
+        fields['price_cents'] = int(price_cents or 0)
     if not fields:
         return False
     n = (session.query(ScheduledPost)
          .filter(ScheduledPost.id == post_id, ScheduledPost.persona == persona,
-                 ScheduledPost.status == 'queued')
+                 ScheduledPost.status.in_(_EDITABLE))
          .update(fields, synchronize_session='fetch'))
     return bool(n)
 

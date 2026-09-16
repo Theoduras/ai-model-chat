@@ -266,6 +266,7 @@
       <button class="btn-ai" style="background:var(--surface); color:var(--text-2);" onclick="testSigning()">Test signing</button>
       <button class="btn-ai" onclick="captureSignature()">Capture signature</button>
       <button class="btn-ai" style="background:var(--surface); color:var(--text-2);" onclick="collectSignatures()">Collect signatures</button>
+      <button class="btn-ai" onclick="testTransport()">Test her browser</button>
     </div>
     <div class="result-box" id="signing-test"></div>
     <p class="hint" style="margin-top:14px;">If no published set works, paste a current one
@@ -671,6 +672,19 @@ async function refreshRules(){
   }catch(e){err(box,String(e));}
 }
 
+function signedIn(si){
+  // The captured signature is taken logged out, so the table above only ever
+  // speaks for a visitor's request. This is the same question asked as her.
+  if(si.error) return '<br>Signed in as her: could not ask the page \u2014 '+esc(si.error);
+  if(!si.checked) return '';
+  return '<br>Signed in as her: '+(si.same
+    ? '<span style="color:#4ade80;">our signature matches the page\u2019s</span> '
+      +'\u2014 signing is right for her requests too, so a refusal is the session'
+    : '<span style="color:#fb7185;">our signature differs from the page\u2019s</span> '
+      +'\u2014 the rules are right for a visitor and wrong for her, and '
+      +'reconnecting will not help');
+}
+
 async function testSigning(){
   const box=document.getElementById('signing-test');
   busy(box,'Asking OnlyFans…');
@@ -694,6 +708,7 @@ async function testSigning(){
     +'Request from this server: '+(call.ok===true?'<span style="color:#4ade80;">worked ('
       +esc(call.username||'')+')</span>':call.ok===false
       ?'<span style="color:#fb7185;">'+esc(call.error||'failed')+'</span>':'not tried')
+    +signedIn(r.signed_in||{})
     +'</p>';
 }
 
@@ -716,6 +731,28 @@ async function saveOverride(clear){
   else ok(box,r.verified?'Saved — it matches OnlyFans\u2019 own signature.'
     :'Saved. No captured signature to check it against yet.');
   showRules(r.rules);
+}
+
+async function testTransport(){
+  // A different question from Test signing: when her own page carries the
+  // request there is no signature of ours involved at all.
+  const box=document.getElementById('signing-test');
+  busy(box,'Asking her browser to fetch her own account\u2026 up to two minutes if it is cold.');
+  const r=await post('/api/onlyfans/transport/test',{persona:persona()});
+  if(!r.ok){err(box,r.error||'Could not test the transport.');return;}
+  if(r.worked){
+    box.innerHTML='<span style="color:#4ade80;">Her browser fetched her account ('
+      +esc(r.username)+').</span> Chat and PPV can go out this way, and signing '
+      +'does not come into it.';
+    return;
+  }
+  const hers=(r.signers||[]).filter(x=>x.account===r.account);
+  err(box,(r.problem||'her browser did not answer')
+    +(r.error?' \u2014 '+esc(r.error):'')
+    +(hers.length?'<br><span class="hint">signer: '+(hers[0].live?'open':'not open')
+      +', signed '+(hers[0].signed||0)+', fetched '+(hers[0].fetched||0)
+      +(hers[0].error?' \u2014 '+esc(String(hers[0].error).slice(0,120)):'')
+      +'</span>':''));
 }
 
 async function collectSignatures(){

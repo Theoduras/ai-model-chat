@@ -257,12 +257,29 @@ check('disabled reads as no clause', G.content_level_clause(False, 'explicit') =
 check('enabled carries the level wording', 'suggestive' in G.content_level_clause(True, 'suggestive').lower())
 
 print()
+print('by-hand queue rows')
+check('a publishable channel waits on the scheduler', G.queue_status_for('x') == 'queued')
+check('threads too', G.queue_status_for('threads') == 'queued')
+check('a by-hand channel waits on the creator',
+      [G.queue_status_for(p) for p in ('instagram', 'tiktok', 'reddit')] == ['manual'] * 3)
+check('manual is a real state', 'manual' in G.QUEUE_STATES)
+check('both editable states can still be touched',
+      set(G.EDITABLE_STATES) == {'queued', 'manual'})
+qrows = [{'platform': 'x', 'status': 'queued', 'run_at': 100},
+         {'platform': 'tiktok', 'status': 'manual', 'run_at': 50},
+         {'platform': 'reddit', 'status': 'manual', 'run_at': 60}]
+qs = G.queue_stats(qrows, now=80)
+check('manual rows are counted', qs['totals']['manual'] == 2)
+check('a by-hand row is never overdue', qs['totals']['overdue'] == 0)
+check('and never the next thing going out', qs['totals']['next_at'] == 100)
+
+print()
 print('variants and overlay')
 check('a carousel resolves to its base channel', G.base_platform('instagram_carousel') == 'instagram')
 check('a real channel is its own base', G.base_platform('tiktok') == 'tiktok')
 check('the default set leaves the variants out',
       'instagram_carousel' not in G.default_platforms() and 'instagram' in G.default_platforms())
-check('the default set is the five real channels', len(G.default_platforms()) == 5)
+check('the default set is the six real channels', len(G.default_platforms()) == 6)
 check('a carousel inherits instagram\'s level',
       G.content_level({'instagram': {'nsfw_enabled': True, 'nsfw_level': 'moderate'}},
                       'instagram_carousel', False, 'suggestive') == (True, 'moderate'))
@@ -300,7 +317,7 @@ print()
 print('weekly plan')
 pstart = 1_700_000_000 - (1_700_000_000 % 86400)
 week = G.plan_week(pstart, 7)
-check('a slot per platform per day at the cadence', len(week) == 38, len(week))
+check('a slot per platform per day at the cadence', len(week) == 45, len(week))
 check('slots come out in time order',
       all(week[i]['at'] <= week[i + 1]['at'] for i in range(len(week) - 1)))
 check('the hours are the cadence hours',
@@ -443,6 +460,20 @@ check('mime decides the kind',
       G.media_kind('video/mp4') == 'video' and G.media_kind('image/png') == 'image')
 check('no mime is an image, as the library was before video',
       G.media_kind('') == 'image' and G.media_kind(None) == 'image')
+print()
+print('several files on one post')
+check('a set inside the cap is fine', G.media_set_reject('x', ['image'] * 4) == '')
+check('one over it is not', 'at most 4' in G.media_set_reject('x', ['image'] * 5))
+check('a single-file channel says so', 'one file' in G.media_set_reject('tiktok', ['video'] * 2))
+check('a clip never rides with stills',
+      'video' in G.media_set_reject('fanvue', ['image', 'video']))
+check('and one file alone is never a set problem',
+      G.media_set_reject('tiktok', ['video']) == '')
+check('the carousel channels take more than one',
+      G.media_max('fanvue') > 1 and G.media_max('threads') > 1
+      and G.media_max('reddit') > 1 and G.media_max('instagram') > 1)
+check('tiktok still takes one', G.media_max('tiktok') == 1)
+
 check('every publishable channel can carry a still',
       all(G.media_ok(p, 'image') for p in G.PUBLISHABLE))
 

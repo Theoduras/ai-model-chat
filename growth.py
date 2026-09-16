@@ -436,6 +436,13 @@ POST_PLATFORMS = {
         'brief': ('a curiosity caption of 300-400 characters that withholds the '
                   'payoff, reads as a diary entry, and never names a paid site'),
     },
+    'fanvue': {
+        'label': 'Fanvue',
+        'cap': 5000,
+        'brief': ('a post for people who already subscribe: no hook written at '
+                  'strangers, no "link in bio", no explaining who you are. Talk '
+                  'about what is in front of them and what else is waiting'),
+    },
     'reddit': {
         'label': 'Reddit',
         'cap': 300,
@@ -446,7 +453,7 @@ POST_PLATFORMS = {
 
 # What the platform can actually publish on its own. The rest are written here
 # and posted by hand, which is why they are generated but never queued.
-PUBLISHABLE = ('x', 'threads')
+PUBLISHABLE = ('x', 'threads', 'fanvue')
 
 # A variant is a second way to write for a channel that already exists, not a
 # channel of its own, so anything keyed per channel — the content level, the
@@ -487,14 +494,17 @@ def wants_overlay(platform):
 # collects the file from a URL we serve, so the media has to be publicly
 # reachable; `upload` means we hand it the bytes ourselves.
 MEDIA_SUPPORT = {
-    'x':         {'kinds': ('image', 'video'), 'how': 'upload', 'max': 1},
-    'threads':   {'kinds': ('image', 'video'), 'how': 'fetch',  'max': 1},
+    # X takes four stills or one clip, never a mix. Threads and Fanvue build a
+    # carousel out of whatever they are given.
+    'x':         {'kinds': ('image', 'video'), 'how': 'upload', 'max': 4},
+    'threads':   {'kinds': ('image', 'video'), 'how': 'fetch',  'max': 20},
+    'fanvue':    {'kinds': ('image', 'video'), 'how': 'upload', 'max': 20},
     # No posting API, so media here is something the creator downloads and
     # uploads by hand. Reddit takes a still; a video post there is a different
     # submission type we do not write.
-    'instagram': {'kinds': ('image', 'video'), 'how': 'by-hand', 'max': 1},
+    'instagram': {'kinds': ('image', 'video'), 'how': 'by-hand', 'max': 10},
     'tiktok':    {'kinds': ('video',),         'how': 'by-hand', 'max': 1},
-    'reddit':    {'kinds': ('image',),         'how': 'by-hand', 'max': 1},
+    'reddit':    {'kinds': ('image',),         'how': 'by-hand', 'max': 20},
 }
 
 MEDIA_KINDS = ('image', 'video')
@@ -523,6 +533,32 @@ def media_how(platform):
     return spec['how'] if spec else 'by-hand'
 
 
+def media_max(platform):
+    """How many files this channel will carry on one post."""
+    spec = MEDIA_SUPPORT.get(normalise_source(platform))
+    return int(spec['max']) if spec else 1
+
+
+# A clip is never one of several: none of these channels builds a carousel with a
+# video in it, and X refuses the mix outright.
+def media_set_reject(platform, kinds):
+    """Why this set of files cannot go on one post here, or '' when it can.
+    Each file is still checked on its own by media_reject; this is about the set."""
+    plat = normalise_source(platform)
+    kinds = list(kinds or [])
+    if len(kinds) <= 1:
+        return ''
+    label = POST_PLATFORMS.get(plat, {}).get('label', plat or 'that channel')
+    cap = media_max(plat)
+    if cap <= 1:
+        return f'{label} takes one file per post, not {len(kinds)}.'
+    if len(kinds) > cap:
+        return f'{label} takes at most {cap} files per post, not {len(kinds)}.'
+    if any(k == 'video' for k in kinds):
+        return f'{label} will not carry a video alongside other files. Post the clip on its own.'
+    return ''
+
+
 def media_reject(platform, kind):
     """Why this pairing cannot be queued, or '' when it can. The wording is the
     error the operator sees, so it says what to do rather than what failed."""
@@ -539,7 +575,21 @@ def media_reject(platform, kind):
         return f'{label} takes {takes}, not {kind}.'
     return ''
 
-QUEUE_STATES = ('queued', 'sending', 'posted', 'failed', 'cancelled')
+# 'manual' is a post on a channel with no posting API: it sits on the calendar
+# as a reminder and the scheduler never sees it, because due_posts only ever
+# claims a 'queued' row. Without it a by-hand post would either be invisible or
+# would fail at its slot for a reason the creator can do nothing about.
+QUEUE_STATES = ('queued', 'manual', 'sending', 'posted', 'failed', 'cancelled')
+
+# What is still the creator's to edit, move or call off. A 'sending' row belongs
+# to the worker and the send may already be away.
+EDITABLE_STATES = ('queued', 'manual')
+
+
+def queue_status_for(platform):
+    """The status a freshly queued post starts in: waiting for the scheduler on
+    a channel we can publish to, waiting for the creator everywhere else."""
+    return 'queued' if normalise_source(platform) in PUBLISHABLE else 'manual'
 
 
 def post_cap(platform):
@@ -764,6 +814,7 @@ def queue_stats(rows, now=0):
 WEEKLY_CADENCE = {
     'x':         {'per_day': 2,  'hours': (9, 20)},
     'threads':   {'per_day': 1,  'hours': (12,)},
+    'fanvue':    {'per_day': 1,  'hours': (11,)},
     'instagram': {'per_day': 1,  'hours': (18,)},
     'tiktok':    {'per_day': 1,  'hours': (19,)},
     'reddit':    {'per_week': 3, 'hours': (21,)},
