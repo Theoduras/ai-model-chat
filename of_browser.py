@@ -20,6 +20,7 @@ import hmac
 import json
 import logging
 import os
+import sys
 import urllib.error
 import urllib.request
 
@@ -27,6 +28,16 @@ import of_connect
 import of_trace
 
 logger = logging.getLogger(__name__)
+
+# This service has no app.py to configure logging for it, so without this every
+# logger.warning in of_connect -- the whole diagnostic trail for a sign-in that
+# will not load -- is written nowhere, and a failed sign-in leaves no evidence
+# at all in the one service that actually drives the browser.
+logging.basicConfig(
+    level=os.getenv('BROWSER_LOG_LEVEL', 'INFO').upper(),
+    format='%(levelname)s %(name)s %(message)s',
+    stream=sys.stderr,
+    force=True)
 
 
 class Unreachable(of_connect.ConnectError):
