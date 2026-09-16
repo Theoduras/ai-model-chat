@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Discord Chatbot</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <script src="/js/theme.js"></script>
+  <link rel="stylesheet" href="/css/style.css">
+  <script src="/js/devnav.js" defer></script>
+  <script src="/js/chat-view.js"></script>
+  <script src="/js/console-shell.js"></script>
+  <style>
+    .fv-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+    .fv-wrap { max-width: 760px; margin: 0 auto; padding: 28px 24px 80px; display: flex; flex-direction: column; gap: 20px; }
+    .conn-pill { font-size: 0.75rem; padding: 3px 10px; border-radius: 9999px; background: var(--surface); color: var(--text-3); }
+    .conn-pill.ok { background: #14532d; color: #4ade80; }
+    .conn-pill.err { background: #4c0519; color: #fb7185; }
+    .warn-box { border: 1px solid #b45309; background: #78350f22; color: var(--text-2);
+                border-radius: 10px; padding: 12px 14px; font-size: 0.82rem; line-height: 1.5; }
+    .chan-row { display: grid; grid-template-columns: 1fr 1fr 1.2fr auto auto; gap: 8px;
+                align-items: center; margin-bottom: 8px; }
+    .chan-row input[type=text] { margin: 0; }
+    .nsfw-cell { display: flex; align-items: center; gap: 6px; font-size: 0.78rem; color: var(--text-3); white-space: nowrap; }
+    .trace-line { font-family: ui-monospace, monospace; font-size: 0.76rem; padding: 4px 0;
+                  border-bottom: 1px solid var(--border); color: var(--text-2); }
+    .trace-line .st { color: var(--accent); margin-right: 8px; }
+    .problems li { font-size: 0.82rem; color: var(--text-2); margin-bottom: 4px; }
+  </style>
+</head>
+<body class="page-dashboard">
+
+<header>
+  <div style="display:flex; align-items:center; gap:10px;">
+    <h1>Discord Chatbot</h1>
+    <span class="badge">Discord</span>
+  </div>
+  <div style="display:flex; align-items:center; gap:16px;">
+    <nav data-site-nav="inline" class="sn-links sn-inline"></nav>
+    <a href="/dashboard" style="color:var(--text-muted); font-size:0.8rem; text-decoration:none;">← Dashboard</a>
+  </div>
+</header>
+
+<div class="fv-scroll">
+<div class="fv-wrap">
+
+  <div class="warn-box">
+    <strong>Read this before connecting an account.</strong>
+    This drives a real Discord account, not a bot application. Discord's terms do not
+    allow that, and accounts found doing it are terminated — sometimes along with other
+    accounts on the same device. Use an account you can afford to lose, keep her to
+    servers she was actually invited to, and keep the chime-in rate low.
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">Persona &amp; Discord account</div>
+    <div class="field full">
+      <label>Choose a model (persona)</label>
+      <div class="row-inline">
+        <div class="field" style="margin:0;">
+          <select id="persona" onchange="loadAll()"></select>
+        </div>
+        <span class="conn-pill" id="conn-pill">—</span>
+      </div>
+    </div>
+    <div class="row-inline">
+      <div class="field" style="flex:2;">
+        <label>Her Discord token</label>
+        <input type="password" id="dc-token" autocomplete="new-password" spellcheck="false"
+               placeholder="paste the account token">
+        <span class="hint">Stored encrypted and never shown again. Taken from the account
+          she posts as — not a bot token.</span>
+      </div>
+    </div>
+    <div class="row-inline">
+      <button class="btn-ai" onclick="connect()">Connect</button>
+      <button class="btn-ai" style="background:var(--surface); color:var(--text-2);"
+              onclick="disconnect()">Disconnect</button>
+    </div>
+    <div id="account-status" class="hint" style="margin-top:10px;"></div>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">Replying</div>
+    <div class="row-inline">
+      <div class="field nowrap">
+        <label class="switch"><input type="checkbox" id="auto-enabled"><span>Auto-reply is on</span></label>
+        <span class="hint">She answers DMs, and answers when she is @mentioned in an
+          allowed channel.</span>
+      </div>
+    </div>
+    <div class="row-inline">
+      <div class="field"><label>Most replies per round</label>
+        <input type="number" id="reply-limit" min="1" max="30" value="10"></div>
+      <div class="field"><label>Typing speed (chars/sec)</label>
+        <input type="number" id="typing-speed" min="4" max="40" value="14"></div>
+      <div class="field"><label>Reaction rate (%)</label>
+        <input type="number" id="react-rate" min="0" max="100" value="25"></div>
+    </div>
+    <div class="row-inline">
+      <div class="field nowrap">
+        <label class="switch"><input type="checkbox" id="humanize" checked><span>Human pacing</span></label>
+        <span class="hint">Reads for a moment, shows as typing, splits a long reply across
+          a message or two.</span>
+      </div>
+      <div class="field nowrap">
+        <label class="switch"><input type="checkbox" id="dm-accept" checked><span>Accept DM requests</span></label>
+        <span class="hint">Answers someone who is not a friend yet. She never opens a DM
+          first — Discord treats that as spam.</span>
+      </div>
+      <div class="field nowrap">
+        <label class="switch"><input type="checkbox" id="dm-friends"><span>Accept friend requests</span></label>
+      </div>
+    </div>
+    <div class="row-inline">
+      <button class="btn-ai" onclick="saveAuto()">Save</button>
+      <button class="btn-ai" style="background:var(--surface); color:var(--text-2);"
+              onclick="runNow()">Run a round now</button>
+    </div>
+    <div id="auto-status" class="hint" style="margin-top:10px;"></div>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">Channels she may speak in</div>
+    <span class="hint">Nothing here means she says nothing in public anywhere — being in a
+      server is not permission to talk in it. Right-click a channel in Discord with
+      developer mode on to copy its ID.</span>
+    <div id="chan-list" style="margin-top:14px;"></div>
+    <div class="row-inline">
+      <button class="btn-ai" style="background:var(--surface); color:var(--text-2);"
+              onclick="addChannel()">Add a channel</button>
+      <button class="btn-ai" onclick="saveGuilds()">Save channels</button>
+    </div>
+    <div id="guild-status" class="hint" style="margin-top:10px;"></div>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">Joining in unprompted</div>
+    <span class="hint">Answering a mention is free. This is the only thing she does without
+      being spoken to, so it is the only thing here that costs money on a quiet server —
+      keep the cap low.</span>
+    <div class="row-inline" style="margin-top:12px;">
+      <div class="field nowrap">
+        <label class="switch"><input type="checkbox" id="chime-enabled"><span>Let her join in</span></label>
+      </div>
+      <div class="field"><label>Wait between (minutes)</label>
+        <input type="number" id="chime-cooldown" min="1" max="1440" value="45"></div>
+      <div class="field"><label>Most per channel per day</label>
+        <input type="number" id="chime-cap" min="0" max="100" value="6"></div>
+    </div>
+    <div class="field full">
+      <label>Only when someone says one of these</label>
+      <input type="text" id="chime-keywords" placeholder="gaming, gym, cooking">
+      <span class="hint">Comma separated. Leave empty and she may join any conversation in
+        an allowed channel, within the limits above.</span>
+    </div>
+    <div class="row-inline"><button class="btn-ai" onclick="saveChime()">Save</button></div>
+    <div id="chime-status" class="hint" style="margin-top:10px;"></div>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">The offer</div>
+    <span class="hint">Discord has no paid messages, so an offer is her paid link, sent in a
+      DM and never in a channel. Clicks are counted; a click is not a sale.</span>
+    <div class="row-inline" style="margin-top:12px;">
+      <div class="field"><label>First offer after this many messages</label>
+        <input type="number" id="ppv-first" min="1" max="200" value="6"></div>
+      <div class="field"><label>And not again for this many</label>
+        <input type="number" id="ppv-gap" min="1" max="200" value="8"></div>
+    </div>
+    <div class="row-inline"><button class="btn-ai" onclick="saveAuto()">Save</button></div>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">What she has been doing</div>
+    <ul id="problems" class="problems" style="margin:0 0 12px; padding-left:18px;"></ul>
+    <div id="trace" style="max-height:340px; overflow:auto;"></div>
+    <div class="row-inline" style="margin-top:12px;">
+      <button class="btn-ai" style="background:var(--surface); color:var(--text-2);"
+              onclick="loadTrace()">Refresh</button>
+      <button class="btn-ai" style="background:var(--surface); color:var(--text-2);"
+              onclick="clearTrace()">Clear</button>
+    </div>
+  </div>
+
+</div>
+</div>
+
+<script>
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function el(id){return document.getElementById(id);}
+function note(box,msg,bad){box.textContent=msg;box.style.color=bad?'#fb7185':'var(--text-3)';}
+function slug(){return el('persona').value;}
+async function api(path,opts){const r=await fetch(path,opts);let j={};try{j=await r.json();}catch(e){}
+  if(!r.ok) throw new Error(j.error||('request failed ('+r.status+')'));return j;}
+
+let channels=[];
+
+async function init(){
+  const list=await (await fetch('/api/personas')).json();
+  const rows=Array.isArray(list)?list:(list.personas||[]);
+  el('persona').innerHTML=rows.map(p=>'<option value="'+esc(p.slug)+'">'+esc(p.name||p.slug)+'</option>').join('');
+  if(!el('persona').options.length){note(el('account-status'),'Create a persona first.',true);return;}
+  await loadAll();
+}
+
+async function loadAll(){
+  await Promise.all([loadStatus(),loadAuto(),loadChime()]);
+  await loadTrace();
+}
+
+async function loadStatus(){
+  const s=await api('/api/discord/status?persona='+encodeURIComponent(slug()));
+  const pill=el('conn-pill');
+  const live=s.state&&s.state.connected;
+  pill.textContent=s.connected?(live?('connected as '+(s.state.username||'?')):'connecting…'):'not connected';
+  pill.className='conn-pill '+(live?'ok':(s.connected?'':'err'));
+  note(el('account-status'),s.reachable||(s.connected?'':'Paste her token to connect.'),!!s.reachable);
+  channels=(s.allow||[]).slice();
+  drawChannels();
+}
+
+async function connect(){
+  const box=el('account-status');
+  const token=el('dc-token').value.trim();
+  if(!token){note(box,'Paste her Discord token first.',true);return;}
+  note(box,'Connecting…');
+  try{
+    await api('/api/discord/connect',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({persona:slug(),token:token})});
+    el('dc-token').value='';
+    await loadStatus();
+  }catch(e){note(box,e.message,true);}
+}
+
+async function disconnect(){
+  if(!confirm('Disconnect her Discord account? She stops answering everywhere.'))return;
+  await api('/api/discord/connect?persona='+encodeURIComponent(slug()),{method:'DELETE'});
+  await loadStatus();
+}
+
+async function loadAuto(){
+  const a=await api('/api/discord/auto?persona='+encodeURIComponent(slug()));
+  el('auto-enabled').checked=!!a.enabled;
+  el('reply-limit').value=a.reply_limit;
+  el('typing-speed').value=a.typing_speed;
+  el('react-rate').value=a.react_rate;
+  el('humanize').checked=!!a.humanize;
+  el('ppv-first').value=a.ppv_first_after;
+  el('ppv-gap').value=a.ppv_gap;
+}
+
+async function saveAuto(){
+  const box=el('auto-status');
+  try{
+    await api('/api/discord/auto',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({persona:slug(),enabled:el('auto-enabled').checked,
+        reply_limit:+el('reply-limit').value,typing_speed:+el('typing-speed').value,
+        react_rate:+el('react-rate').value,humanize:el('humanize').checked,
+        ppv_first_after:+el('ppv-first').value,ppv_gap:+el('ppv-gap').value})});
+    await saveChime(true);
+    note(box,'Saved.');
+  }catch(e){note(box,e.message,true);}
+}
+
+async function runNow(){
+  const box=el('auto-status');
+  note(box,'Running…');
+  try{
+    await api('/api/discord/auto-run',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({persona:slug()})});
+    note(box,'Done.');await loadTrace();
+  }catch(e){note(box,e.message,true);}
+}
+
+function drawChannels(){
+  el('chan-list').innerHTML=channels.map((c,i)=>
+    '<div class="chan-row">'
+    +'<input type="text" value="'+esc(c.name||'')+'" placeholder="what it is called" oninput="channels['+i+'].name=this.value">'
+    +'<input type="text" value="'+esc(c.guild||'')+'" placeholder="server ID" oninput="channels['+i+'].guild=this.value">'
+    +'<input type="text" value="'+esc(c.channel||'')+'" placeholder="channel ID" oninput="channels['+i+'].channel=this.value">'
+    +'<label class="nsfw-cell"><input type="checkbox" '+(c.nsfw?'checked':'')
+      +' onchange="channels['+i+'].nsfw=this.checked"> adult</label>'
+    +'<button class="btn-ai" style="background:var(--surface); color:var(--text-2); padding:4px 10px;"'
+      +' onclick="channels.splice('+i+',1);drawChannels()">remove</button>'
+    +'</div>').join('')
+    ||'<span class="hint">No channels yet, so she stays quiet in public.</span>';
+}
+
+function addChannel(){channels.push({name:'',guild:'',channel:'',nsfw:false});drawChannels();}
+
+async function saveGuilds(){
+  const box=el('guild-status');
+  try{
+    const r=await api('/api/discord/guilds',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({persona:slug(),allow:channels.filter(c=>c.channel)})});
+    channels=r.allow||[];drawChannels();
+    note(box,'Saved. She speaks in '+channels.length+' channel(s).');
+  }catch(e){note(box,e.message,true);}
+}
+
+async function loadChime(){
+  const c=await api('/api/discord/chime?persona='+encodeURIComponent(slug()));
+  el('chime-enabled').checked=!!c.chime.enabled;
+  el('chime-cooldown').value=c.chime.cooldown_min;
+  el('chime-cap').value=c.chime.daily_cap;
+  el('chime-keywords').value=(c.chime.keywords||[]).join(', ');
+  el('dm-accept').checked=!!c.dm.auto_accept;
+  el('dm-friends').checked=!!c.dm.auto_accept_friends;
+}
+
+async function saveChime(quiet){
+  const box=el('chime-status');
+  try{
+    await api('/api/discord/chime',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({persona:slug(),enabled:el('chime-enabled').checked,
+        cooldown_min:+el('chime-cooldown').value,daily_cap:+el('chime-cap').value,
+        keywords:el('chime-keywords').value.split(',').map(s=>s.trim()).filter(Boolean),
+        auto_accept:el('dm-accept').checked,auto_accept_friends:el('dm-friends').checked})});
+    if(!quiet)note(box,'Saved.');
+  }catch(e){note(box,e.message,true);}
+}
+
+async function loadTrace(){
+  const t=await api('/api/discord/trace?persona='+encodeURIComponent(slug()));
+  el('problems').innerHTML=(t.problems||[]).map(p=>'<li>'+esc(p)+'</li>').join('');
+  const rows=(t.rows||[]).slice().reverse();
+  el('trace').innerHTML=rows.map(r=>'<div class="trace-line"><span class="st">'
+    +esc(r.stage||'')+'</span>'+esc(r.detail||'')+'</div>').join('')
+    ||'<span class="hint">Nothing yet.</span>';
+}
+
+async function clearTrace(){
+  await api('/api/discord/trace?persona='+encodeURIComponent(slug()),{method:'DELETE'});
+  await loadTrace();
+}
+
+init();
+setInterval(()=>{if(el('persona').value)loadStatus();},20000);
+</script>
+</body>
+</html>

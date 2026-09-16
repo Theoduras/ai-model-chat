@@ -21,3 +21,4 @@ x_tokens.json
 
 data.db
 data.db-journal
+.venv/

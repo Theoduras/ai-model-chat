@@ -146,7 +146,7 @@ def cta_choice(cta, fan, beta=True, today='', source=''):
 DEFAULT_ROUTES = {
     'instagram': 'chat', 'tiktok': 'chat', 'reddit': 'chat', 'youtube': 'chat',
     'linktree': 'chat', 'other': 'chat',
-    'x': 'paid', 'threads': 'paid', 'telegram': 'paid',
+    'x': 'paid', 'threads': 'paid', 'telegram': 'paid', 'discord': 'paid',
 }
 
 ROUTE_KINDS = ('chat', 'paid', 'trial')

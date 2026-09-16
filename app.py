@@ -1983,10 +1983,11 @@ _PLATFORM_PATHS = {
     '/api/telegram': 'telegram', '/api/tguser': 'telegram',
     '/api/x': 'x', '/api/xlog': 'x',
     '/api/fanvue': 'fanvue', '/api/threads': 'threads',
-    '/api/onlyfans': 'onlyfans',
+    '/api/onlyfans': 'onlyfans', '/api/discord': 'discord',
 }
 _PLATFORM_PAGES = {'/telegram': 'telegram', '/xbot': 'x', '/fanvue': 'fanvue',
-                   '/onlyfans': 'onlyfans', '/threads': 'threads'}
+                   '/onlyfans': 'onlyfans', '/threads': 'threads',
+                   '/discord': 'discord'}
 # Seat roles that may not reach a path at all. Owners and admins never appear
 # here; they are filtered out before the map is consulted.
 _ROLE_DENY = {
@@ -5073,6 +5074,15 @@ def onlyfans_page():
     return send_from_directory(BASE_DIR, 'onlyfans.html')
 
 
+@app.route('/discord')
+def discord_page():
+    # Same reasoning as /onlyfans: every /api/discord/* call is persona-scoped
+    # already, so the console opens past the operator check.
+    if not _current_user():
+        return redirect('/login?next=/discord')
+    return send_from_directory(BASE_DIR, 'discord.html')
+
+
 @app.route('/fanvue')
 def fanvue_page():
     # Unlike xbot/threads, every /api/fanvue/* call a creator can reach is
@@ -5709,6 +5719,10 @@ INBOX_PLATFORMS = {
                  'trace_keys': ('fanvue_trace_%s',)},
     'onlyfans': {'label': 'OnlyFans', 'prefixes': ('of:',),
                  'trace_keys': ('onlyfans_trace_%s',)},
+    # Two prefixes: a DM is one fan, and a server channel is a room. Both are
+    # conversations she is in, so both belong in the one inbox.
+    'discord':  {'label': 'Discord',  'prefixes': ('dc:', 'dcg:'),
+                 'trace_keys': ('discord_trace_%s',)},
     'telegram': {'label': 'Telegram', 'prefixes': ('tg:', 'tgu:'),
                  'trace_keys': ('tg_trace_%s', 'tg_trace_platform')},
     'x':        {'label': 'X',        'prefixes': ('',),
@@ -13425,9 +13439,16 @@ def _fv_clean_tier(t):
         price = int(t.get('price') or 0)
     except (TypeError, ValueError):
         price = 0
-    if not media or price < 300:
+    # A link tier sells somewhere else — Discord has no paywall of its own, so
+    # the drop is a tracked link and there is no media to attach and no floor
+    # the platform imposes. Every other platform leaves the flag unset and is
+    # held to the same rules as before.
+    link = bool(t.get('link'))
+    if not link and (not media or price < 300):
         return None
-    return {'media_uuids': media, 'price': price,
+    if link and price < 0:
+        return None
+    return {'media_uuids': media, 'price': price, 'link': link,
             'caption': (t.get('caption') or '').strip()}
 
 
@@ -20189,6 +20210,691 @@ def _start_onlyfans_worker():
 if _worker_enabled('ONLYFANS_WORKER'):
     _start_onlyfans_worker()
 
+
+
+# ── Discord ───────────────────────────────────────────────────────────────────
+#
+# Discord is the one platform where she is not an account the fan came to — she
+# is a member of a room they are both in. So it runs two different things on one
+# adapter: DMs go through the shared round exactly as Fanvue and OnlyFans do,
+# funnel and all, and public channels get their own much smaller round that
+# never pitches anything. The funnel lives in DMs because a paid link in a
+# public channel is an advert, and reads as one.
+#
+# Everything that decides whether a message is worth answering already happened
+# in discord_gateway before anything here is woken, which is what keeps a busy
+# server from costing anything.
+import discord_gateway as DG
+import discord_rest as DR
+
+DISCORD_TRANSPORT = (os.getenv('DISCORD_TRANSPORT') or 'raw').strip().lower()
+# How long a fan has to stop typing before her reply goes out. Three lines in a
+# row should get one answer, so each new line pushes this back.
+DISCORD_QUIET_SECONDS = float(os.getenv('DISCORD_QUIET_SECONDS', '8') or 8)
+DISCORD_SWEEP_SECONDS = float(os.getenv('DISCORD_SWEEP_SECONDS', '300') or 300)
+DISCORD_CHANNEL_HISTORY = 6
+
+
+def _dc_fernet():
+    """Her Discord token is a password to a whole account, so it is never stored
+    in the clear. Same derivation as the OnlyFans vault, different salt."""
+    import base64
+    from cryptography.fernet import Fernet
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+    raw = (os.getenv('DISCORD_TOKEN_KEY') or '').strip()
+    if raw:
+        return Fernet(raw.encode())
+    secret = (os.getenv('SECRET_KEY') or '').strip()
+    if not secret:
+        raise RuntimeError('no DISCORD_TOKEN_KEY and no SECRET_KEY, so a Discord '
+                           'token cannot be encrypted. Set one before connecting.')
+    derived = HKDF(algorithm=hashes.SHA256(), length=32,
+                   salt=b'discord-token', info=b'v1').derive(secret.encode())
+    return Fernet(base64.urlsafe_b64encode(derived))
+
+
+def _dc_account(persona):
+    try:
+        return json.loads(_get_setting(f'discord_account_{persona}') or '{}')
+    except Exception:
+        return {}
+
+
+def _dc_save_account(persona, **fields):
+    held = _dc_account(persona)
+    held.update(fields)
+    _set_setting(f'discord_account_{persona}', json.dumps(held))
+    return held
+
+
+def _dc_token(persona):
+    blob = _dc_account(persona).get('token') or ''
+    if not blob:
+        return ''
+    try:
+        return _dc_fernet().decrypt(blob.encode()).decode()
+    except Exception:
+        logger.warning('discord token for %s could not be decrypted', persona)
+        return ''
+
+
+def _dc_set_token(persona, token):
+    blob = _dc_fernet().encrypt((token or '').encode()).decode() if token else ''
+    return _dc_save_account(persona, token=blob, stopped=False)
+
+
+def _dc_props(persona):
+    held = _dc_account(persona)
+    return DR.properties(ua=held.get('ua') or DR.DEFAULT_UA,
+                         build=held.get('build') or DR.DEFAULT_BUILD)
+
+
+def _dc_json(key, default):
+    try:
+        value = json.loads(_get_setting(key) or 'null')
+    except Exception:
+        value = None
+    return value if isinstance(value, type(default)) else json.loads(json.dumps(default))
+
+
+def _dc_guilds(persona):
+    """Which channels she is allowed to speak in. Empty means none: a server she
+    was added to should not become one she talks in by default."""
+    held = _dc_json(f'discord_guilds_{persona}', {})
+    rows = held.get('allow') if isinstance(held, dict) else None
+    return [r for r in (rows or []) if isinstance(r, dict) and r.get('channel')]
+
+
+def _dc_chime(persona):
+    held = _dc_json(f'discord_chime_{persona}', {})
+    return {'enabled': bool(held.get('enabled')),
+            'cooldown_min': max(1, int(held.get('cooldown_min') or 45)),
+            'daily_cap': max(0, int(held['daily_cap'])) if held.get('daily_cap') is not None else 6,
+            'keywords': [str(w).strip() for w in (held.get('keywords') or []) if str(w).strip()]}
+
+
+def _dc_dm_cfg(persona):
+    held = _dc_json(f'discord_dm_{persona}', {})
+    return {'auto_accept': held.get('auto_accept', True) is not False,
+            'auto_accept_friends': bool(held.get('auto_accept_friends')),
+            'ignore_bots': held.get('ignore_bots', True) is not False}
+
+
+def _dc_chime_spend(persona, channel_id, cap):
+    """Whether an unprompted line is still within today's budget, and book it if
+    so. The gateway keeps a looser count in memory to stay cheap; this one is
+    the count that matters, because it is the one that survives a restart."""
+    key = f'discord_chime_state_{persona}'
+    state = _dc_json(key, {})
+    today = time.strftime('%Y-%m-%d')
+    held = state.get(str(channel_id)) or {}
+    used = int(held.get('n') or 0) if held.get('day') == today else 0
+    # A cap of zero is a cap, not an absent one: it is how the console says
+    # "answer when spoken to and never otherwise".
+    if cap <= 0 or used >= cap:
+        return False
+    state[str(channel_id)] = {'day': today, 'n': used + 1, 'last': int(time.time())}
+    for chan, row in list(state.items()):
+        if row.get('day') and row['day'] < time.strftime(
+                '%Y-%m-%d', time.gmtime(time.time() - 7 * 86400)):
+            state.pop(chan, None)
+    _set_setting(key, json.dumps(state))
+    return True
+
+
+def _dc_cta_link(persona, fan_id):
+    """The paid link, routed through our own redirect so a click is countable.
+    Same shape as X's, because it answers the same question."""
+    cta = dict(_phases_cta(persona))
+    override = _dc_json(f'discord_cta_{persona}', {})
+    target = (override.get('url') or cta.get('cta_url') or '').strip()
+    if not target:
+        return ''
+    base = (os.getenv('PUBLIC_BASE_URL') or _get_setting('public_base_url') or '').rstrip('/')
+    return f'{base}/go/dc/{persona}/{fan_id}' if base else target
+
+
+@app.route('/go/dc/<persona>/<fan_id>')
+def discord_cta_click(persona, fan_id):
+    """Tracked CTA redirect for Discord DMs.
+
+    A click is recorded against the drop as having been *opened*, never as
+    having been paid: nothing here can see a purchase, and marking one would
+    make every revenue figure downstream a lie.
+    """
+    if not re.match(r'^[a-z0-9_-]+$', persona or ''):
+        return redirect('/')
+    override = _dc_json(f'discord_cta_{persona}', {})
+    url = (override.get('url') or _phases_cta(persona).get('cta_url') or '').strip()
+    if not url:
+        return redirect('/')
+    try:
+        _dc_mark_opened(persona, fan_id)
+    except Exception:
+        logger.debug('discord click could not be recorded for %s', fan_id)
+    _record_click(persona, 'discord', 'paid', url, PLAT_DISCORD.fan_key(fan_id))
+    return redirect(url, code=302)
+
+
+def _dc_mark_opened(persona, fan_id):
+    """Mark this fan's newest drop as opened.
+
+    Opened, not paid: nothing here can see a purchase, and writing one would
+    make every revenue figure downstream a lie. It is also the state the
+    retry-with-discount logic already reads to tell "saw it and passed" from
+    "never looked", so a Discord drop gets that behaviour for free.
+    """
+    from db import SessionLocal, PpvDrop, mark_ppv_read
+    s = SessionLocal()
+    try:
+        row = (s.query(PpvDrop)
+               .filter(PpvDrop.persona == persona, PpvDrop.fan_uuid == str(fan_id))
+               .order_by(PpvDrop.created_at.desc()).first())
+        if row is not None:
+            mark_ppv_read(s, row.id)
+            s.commit()
+    finally:
+        s.close()
+
+
+class _DiscordPlatform(_Platform):
+    slug = 'discord'
+    label = 'Discord'
+    prefix = 'discord'
+    fan_prefix = 'dc:'
+    has_lists = False
+    # DMs get the funnel. Public channels never reach this round at all, so
+    # turning it on here cannot put a pitch in a server.
+    has_funnels = True
+
+    def connected(self, persona):
+        return bool(_dc_token(persona))
+
+    def scope(self, persona):
+        return ''
+
+    def me(self, persona):
+        return DG.me(persona)
+
+    def acting_as(self, persona):
+        return _dc_account(persona).get('username', '')
+
+    def chats(self, persona, scope):
+        return DG.chats(persona)
+
+    def read_chat(self, chat):
+        return DG.user_of_chat(chat)
+
+    def online(self, chat, grace):
+        return DG.chat_online(chat, grace)
+
+    def messages(self, persona, fan_id, want):
+        return DG.messages(persona, fan_id, want)
+
+    def text_of(self, msg):
+        return DG.text_of(msg)
+
+    def msg_id(self, msg):
+        return DG.msg_id(msg)
+
+    def msg_time(self, msg):
+        return DG.msg_time(msg)
+
+    def msg_age(self, msg):
+        return DG.msg_age_minutes(msg)
+
+    def direction(self, msg, fan_id, me_id, recent_out=()):
+        return DG.direction_of(msg, fan_id, me_id, recent_out)
+
+    def import_history(self, persona, fan_id, handle, me_id):
+        """Read a conversation we are meeting part-way through, so she does not
+        introduce herself to someone she has been talking to for a week."""
+        rows = []
+        for m in DG.history(persona, fan_id):
+            text = DG.text_of(m)
+            if text:
+                rows.append(('out' if m.get('out') else 'in', text))
+        fan_key = self.fan_key(fan_id)
+        for direction, text in rows:
+            _log_x_message(persona, fan_key, handle, direction, text)
+        return len(rows), [t for d, t in rows if d == 'in']
+
+    def send_text(self, persona, scope, fan_id, text):
+        DG.send(persona, fan_id, text)
+
+    def send_ppv(self, persona, scope, fan_id, caption, media, price_cents):
+        """Discord has no paywall, so the drop is the caption and a tracked link
+        to the page that does. It still returns a real message id, so the drop
+        is recorded and settled like any other."""
+        url = _dc_cta_link(persona, fan_id)
+        if not url:
+            raise DR.DiscordApiError(
+                0, 'No paid link is set for this persona, so there is nowhere '
+                   'to send her Discord fans. Set one in the funnel settings.')
+        sent = DG.send(persona, fan_id, f'{caption}\n{url}'.strip())
+        mid = str((sent or {}).get('id') or '')
+        if not mid:
+            import uuid
+            return f'link:{uuid.uuid4().hex}'
+        return f'dc:{(sent or {}).get("channel_id") or ""}:{mid}'
+
+    def typing(self, persona, scope, fan_id):
+        try:
+            DG.typing(persona, fan_id)
+        except Exception as e:
+            logger.debug('discord typing indicator failed: %s', str(e)[:120])
+
+    def webhook_state(self, persona):
+        """Nothing is delivered to us here — the socket is the delivery. What
+        matters is whether one is open."""
+        live = DG.runner(persona)
+        state = live.state() if live else {}
+        ready = bool(state.get('connected'))
+        return {'ready': ready, 'url': '', 'watcher': True,
+                'last_error': state.get('error') or '',
+                'problem': '' if ready else
+                'Her Discord connection is down, so nothing new is being picked '
+                'up. Reconnect the account.'}
+
+    def reachable(self, persona):
+        live = DG.runner(persona)
+        if not (live and self.connected(persona)):
+            return ''
+        state = live.state()
+        if state.get('stopped'):
+            return ('Discord refused her token, so nothing can be sent or read. '
+                    'The account has to be reconnected.')
+        held = state.get('held') or 0
+        if held:
+            return ('Discord is rate-limiting her account, so requests are being '
+                    'held rather than repeated at it — retrying in %ds.' % held)
+        if not state.get('connected'):
+            return ('Her Discord connection has dropped and is being retried, so '
+                    'new messages are only picked up once it is back.')
+        return ''
+
+
+PLAT_DISCORD = _DiscordPlatform()
+PLATFORMS['discord'] = PLAT_DISCORD
+
+
+# ── Running Discord ───────────────────────────────────────────────────────────
+#
+# The socket cannot do the work: a round reads the database, asks Gemini and
+# sleeps its way through human pacing, and all of that on the gateway's event
+# loop would stall the heartbeat until Discord dropped the connection. So an
+# event only marks a persona due, and the worker below picks it up.
+
+_dc_due = {}
+_dc_channel_due = {}
+_dc_accepts = []
+_dc_due_lock = threading.Lock()
+_dc_last_sweep = [0.0]
+
+
+def _discord_wake(persona, delay=0.0):
+    if not persona:
+        return
+    with _dc_due_lock:
+        _dc_due[persona] = max(_dc_due.get(persona, 0), time.time() + delay)
+
+
+def _dc_on_dm(persona, fan_id):
+    _discord_wake(persona, DISCORD_QUIET_SECONDS)
+
+
+def _dc_on_typing(persona, fan_id):
+    # Still mid-thought. Answering now and again in four seconds is what makes a
+    # bot obvious.
+    _discord_wake(persona, DISCORD_QUIET_SECONDS)
+
+
+def _dc_on_channel(persona, guild_id, channel_id, addressed):
+    with _dc_due_lock:
+        key = (persona, str(guild_id), str(channel_id))
+        at = time.time() + (2.0 if addressed else DISCORD_QUIET_SECONDS)
+        held = _dc_channel_due.get(key)
+        _dc_channel_due[key] = (max(held[0], at) if held else at,
+                                bool(addressed) or bool(held and held[1]))
+
+
+def _dc_on_accept(persona, channel_id, user_id):
+    with _dc_due_lock:
+        _dc_accepts.append((persona, str(channel_id), str(user_id)))
+
+
+def _dc_on_trace(persona, stage, detail='', fan=''):
+    try:
+        with app.app_context(), PLAT_DISCORD.tracing():
+            _fv_trace(persona, stage, detail, fan=fan)
+    except Exception:
+        pass
+
+
+def _dc_connect(persona):
+    """Bring this persona's socket up, or leave the one that is already up
+    alone. Two live sessions on one user token is the single loudest thing an
+    automated account can do, so `register` reuses rather than replaces."""
+    token = _dc_token(persona)
+    if not token:
+        return None
+    live = DG.register(persona, token, _dc_props(persona),
+                       on_dm=_dc_on_dm, on_channel=_dc_on_channel,
+                       on_typing=_dc_on_typing, on_trace=_dc_on_trace,
+                       on_accept=_dc_on_accept)
+    live.configure({'allow': _dc_guilds(persona), 'chime': _dc_chime(persona),
+                    'dm': _dc_dm_cfg(persona),
+                    'accept_route': _get_setting('discord_accept_endpoint') or ''})
+    if not live.alive() and not live.stopped:
+        live.start()
+    return live
+
+
+def _dc_drain_accepts():
+    """Accept the DM requests the socket saw. Best-effort by design: replying
+    clears a request on Discord's side anyway, so this only tidies up what the
+    reply would have done, and a failure never stops the reply."""
+    with _dc_due_lock:
+        pending, _dc_accepts[:] = list(_dc_accepts), []
+    if not pending:
+        return
+    known = _get_setting('discord_accept_endpoint') or ''
+    for persona, channel_id, user_id in pending[:20]:
+        live = DG.runner(persona)
+        if not live:
+            continue
+        try:
+            found = DR.accept_request(live.rest, channel_id, user_id, known)
+        except Exception:
+            continue
+        if found and found != known:
+            known = found
+            _set_setting('discord_accept_endpoint', found)
+
+
+def _discord_worker(tick=2.0):
+    """Answer every persona a message has marked due, sweep them all on an
+    interval as the backup, and keep the sockets up."""
+    import time as _t
+    from concurrent.futures import ThreadPoolExecutor
+    pool = ThreadPoolExecutor(max_workers=max(1, int(os.getenv('DISCORD_WORKERS', '4'))),
+                              thread_name_prefix='discord')
+    pending = set()
+
+    def _one(persona):
+        try:
+            _plat_round_now(PLAT_DISCORD, persona)
+        except Exception as e:
+            logger.exception('discord round failed for %s', persona)
+            try:
+                with app.app_context(), PLAT_DISCORD.tracing():
+                    _fv_trace(persona, 'error', f'round failed: {str(e)[:200]}')
+            except Exception:
+                pass
+        finally:
+            with _dc_due_lock:
+                pending.discard(persona)
+
+    while True:
+        try:
+            now = _t.time()
+            with _dc_due_lock:
+                due = {p for p, at in _dc_due.items() if at <= now}
+                for p in due:
+                    _dc_due.pop(p, None)
+                channels = [(k, v[1]) for k, v in _dc_channel_due.items() if v[0] <= now]
+                for k, _ in channels:
+                    _dc_channel_due.pop(k, None)
+            _dc_drain_accepts()
+            if now - _dc_last_sweep[0] >= DISCORD_SWEEP_SECONDS:
+                _dc_last_sweep[0] = now
+                with app.app_context():
+                    for persona in _fanvue_enabled_list(plat=PLAT_DISCORD):
+                        _dc_connect(persona)
+                    due |= set(_fanvue_enabled_list(plat=PLAT_DISCORD))
+            for (persona, guild_id, channel_id), addressed in channels:
+                with app.app_context():
+                    try:
+                        _dc_channel_round(persona, guild_id, channel_id, addressed)
+                    except Exception:
+                        logger.exception('discord channel round failed for %s', persona)
+            for persona in due:
+                with app.app_context():
+                    if not PLAT_DISCORD.connected(persona):
+                        continue
+                with _dc_due_lock:
+                    if persona in pending:
+                        continue
+                    pending.add(persona)
+                pool.submit(_one, persona)
+        except Exception:
+            logger.exception('discord worker tick failed')
+        _t.sleep(tick)
+
+
+# ── A public channel ──────────────────────────────────────────────────────────
+#
+# Deliberately not the shared round. That round is built around one fan she is
+# working towards something with: it counts their messages, remembers them,
+# nudges them when they go quiet and eventually offers them something. Every one
+# of those is wrong in a room full of people, and bolting eight exceptions into
+# the function every platform shares to say so would put all of them one bug
+# away from a pitch landing in public.
+
+def _dc_channel_round(persona, guild_id, channel_id, addressed):
+    key = f'{guild_id}:{channel_id}'
+    fan_key = f'dcg:{key}'
+    live = DG.runner(persona)
+    if not live:
+        return
+    entry = live.allowed_channel(guild_id, channel_id)
+    if entry is None:
+        return
+    chime = _dc_chime(persona)
+    if not addressed:
+        if not chime['enabled']:
+            return
+        if not _dc_chime_spend(persona, channel_id, chime['daily_cap']):
+            _dc_on_trace(persona, 'skipped',
+                         f'#{channel_id}: today\'s chime-in budget is spent', fan=fan_key)
+            return
+    recent = DG.messages(persona, key, DISCORD_CHANNEL_HISTORY)
+    inbound = [m for m in recent if not m.get('out')]
+    if not inbound:
+        return
+    newest = inbound[-1]
+    for m in inbound:
+        _log_x_message(persona, fan_key, m.get('handle') or '', 'in', DG.text_of(m))
+    config = load_persona_config(persona)
+    limits = reply_length_limits(config)
+    lines = '\n'.join(f"{m.get('handle') or 'someone'}: {DG.text_of(m)}"
+                      for m in recent if DG.text_of(m))
+    # A channel is not a chat. She is one voice among several, so she is told
+    # that rather than left to infer it from a transcript that looks like a DM.
+    manner = ('Someone just spoke to you directly, so answer them.' if addressed
+              else 'Nobody asked you anything — you are joining in because the '
+                   'topic suits you. Keep it light and do not make it about you.')
+    clean = ('' if entry.get('nsfw') else
+             ' This is a public channel and it stays clean: no sexual content, '
+             'no innuendo, no flirting, whatever you would say in a DM. If the '
+             'conversation goes that way, stay friendly and do not follow it.')
+    instruction = (
+        f'You are in a Discord server channel with several people talking. '
+        f'{manner}{clean} Write one short message, the way you would type it in '
+        f'a group chat — no greeting, no sign-off, no names in front. '
+        f'{limits["note"]} {NO_PLACEHOLDER_RULE}\n\n'
+        f'The last few messages:\n{lines}')
+    try:
+        text = _persona_text(persona, instruction, history=None,
+                             max_tokens=limits['tokens'], temperature=0.9)
+    except Exception as e:
+        _dc_on_trace(persona, 'error', f'#{channel_id}: {str(e)[:160]}', fan=fan_key)
+        return
+    text = _fv_trim(_strip_placeholders(text or ''), limits['sentences'], limits['cap'])
+    if not text:
+        return
+    try:
+        DG.typing(persona, key, guild=True)
+        time.sleep(min(6.0, max(1.5, len(text) / 18.0)))
+        DG.send(persona, key, text, guild=True)
+    except Exception as e:
+        _dc_on_trace(persona, 'error', f'#{channel_id}: {str(e)[:160]}', fan=fan_key)
+        return
+    _log_x_message(persona, fan_key, PLAT_DISCORD.acting_as(persona) or persona,
+                   'out', text)
+    _dc_on_trace(persona, 'reply',
+                 f'#{channel_id}: {"answered" if addressed else "joined in"} — {text[:80]}',
+                 fan=fan_key)
+
+
+_discord_worker_started = [False]
+
+
+def _start_discord_worker():
+    if _discord_worker_started[0]:
+        return
+    _discord_worker_started[0] = True
+    threading.Thread(target=_discord_worker, daemon=True).start()
+
+
+def _dc_boot():
+    """Bring up every persona that has Discord switched on, once, at startup."""
+    try:
+        with app.app_context():
+            for persona in _fanvue_enabled_list(plat=PLAT_DISCORD):
+                _dc_connect(persona)
+    except Exception:
+        logger.exception('discord boot failed')
+
+
+if _worker_enabled('DISCORD_WORKER'):
+    _start_discord_worker()
+if _worker_enabled('DISCORD_AUTOSTART'):
+    threading.Thread(target=_dc_boot, daemon=True).start()
+
+
+# ── Discord API ───────────────────────────────────────────────────────────────
+
+@app.route('/api/discord/auto', methods=['GET', 'POST'])
+@platform_scoped
+def api_discord_auto():
+    return _plat_auto_api(PLAT_DISCORD)
+
+
+@app.route('/api/discord/auto-run', methods=['POST'])
+@platform_scoped
+def api_discord_auto_run():
+    return _plat_auto_run_api(PLAT_DISCORD)
+
+
+@app.route('/api/discord/ppv', methods=['GET', 'POST'])
+@platform_scoped
+def api_discord_ppv():
+    return _plat_ppv_api(PLAT_DISCORD)
+
+
+@app.route('/api/discord/ppv-reset', methods=['POST'])
+@platform_scoped
+def api_discord_ppv_reset():
+    return _plat_ppv_reset_api(PLAT_DISCORD)
+
+
+@app.route('/api/discord/trace', methods=['GET', 'DELETE'])
+@platform_scoped
+def api_discord_trace():
+    return _plat_trace_api(PLAT_DISCORD)
+
+
+@app.route('/api/discord/connect', methods=['GET', 'POST', 'DELETE'])
+@platform_scoped
+def api_discord_connect():
+    persona = request_persona()
+    if request.method == 'DELETE':
+        live = DG.runner(persona)
+        if live:
+            live.stop()
+        _dc_set_token(persona, '')
+        return jsonify({'connected': False})
+    if request.method == 'POST':
+        body = request.get_json(silent=True) or {}
+        token = (body.get('token') or '').strip()
+        if not token:
+            return jsonify({'error': 'Paste her Discord token to connect.'}), 400
+        try:
+            who = DR.Rest(token, _dc_props(persona)).me()
+        except DR.DiscordApiError as e:
+            return jsonify({'error': 'Discord would not accept that token'
+                                     + (f': {e.detail[:160]}' if e.detail else '.')}), 400
+        _dc_set_token(persona, token)
+        _dc_save_account(persona, user_id=str(who.get('id') or ''),
+                         username=who.get('username') or '',
+                         connected_at=int(time.time()))
+        _dc_connect(persona)
+    live = DG.runner(persona)
+    held = _dc_account(persona)
+    return jsonify({'connected': bool(_dc_token(persona)),
+                    'username': held.get('username') or '',
+                    'user_id': held.get('user_id') or '',
+                    'state': live.state() if live else {},
+                    'reachable': PLAT_DISCORD.reachable(persona)})
+
+
+@app.route('/api/discord/guilds', methods=['GET', 'POST'])
+@platform_scoped
+def api_discord_guilds():
+    persona = request_persona()
+    if request.method == 'POST':
+        body = request.get_json(silent=True) or {}
+        rows = []
+        for entry in (body.get('allow') or [])[:100]:
+            if not isinstance(entry, dict) or not entry.get('channel'):
+                continue
+            rows.append({'guild': str(entry.get('guild') or ''),
+                         'channel': str(entry.get('channel')),
+                         'name': (entry.get('name') or '').strip()[:80],
+                         'nsfw': bool(entry.get('nsfw'))})
+        _set_setting(f'discord_guilds_{persona}', json.dumps({'allow': rows}))
+        live = DG.runner(persona)
+        if live:
+            live.configure({'allow': rows})
+    return jsonify({'allow': _dc_guilds(persona)})
+
+
+@app.route('/api/discord/chime', methods=['GET', 'POST'])
+@platform_scoped
+def api_discord_chime():
+    persona = request_persona()
+    if request.method == 'POST':
+        body = request.get_json(silent=True) or {}
+        saved = {'enabled': bool(body.get('enabled')),
+                 'cooldown_min': max(1, min(int(body.get('cooldown_min') or 45), 1440)),
+                 'daily_cap': max(0, min(int(body.get('daily_cap') or 6), 100)),
+                 'keywords': [str(w).strip()[:40]
+                              for w in (body.get('keywords') or [])[:40] if str(w).strip()]}
+        _set_setting(f'discord_chime_{persona}', json.dumps(saved))
+        dm = {'auto_accept': body.get('auto_accept', True) is not False,
+              'auto_accept_friends': bool(body.get('auto_accept_friends')),
+              'ignore_bots': body.get('ignore_bots', True) is not False}
+        _set_setting(f'discord_dm_{persona}', json.dumps(dm))
+        live = DG.runner(persona)
+        if live:
+            live.configure({'chime': saved, 'dm': dm})
+    return jsonify({'chime': _dc_chime(persona), 'dm': _dc_dm_cfg(persona)})
+
+
+@app.route('/api/discord/status')
+@platform_scoped
+def api_discord_status():
+    persona = request_persona()
+    live = DG.runner(persona)
+    return jsonify({'connected': bool(_dc_token(persona)),
+                    'state': live.state() if live else {},
+                    'reachable': PLAT_DISCORD.reachable(persona),
+                    'webhook': PLAT_DISCORD.webhook_state(persona),
+                    'allow': _dc_guilds(persona),
+                    'chime': _dc_chime(persona),
+                    'transport': DISCORD_TRANSPORT})
 
 # ── Error handler ─────────────────────────────────────────────────────────────
 

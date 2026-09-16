@@ -28,6 +28,10 @@ kept as a secondary target and still works, but is not where the app is deployed
 app.py                          — Flask server, Gemini API, multi-persona, builder API
 onlyfans.py                     — OnlyFansAPI transport (OnlyFans chat)
 onlyfans.html                   — OnlyFans console (connect, auto-reply, PPV)
+discord_gateway.py              — Discord user-account gateway, gates and caches
+discord_rest.py                 — Discord REST, rate limits, client fingerprint
+discord_stub.py                 — Offline Discord transport (tests only)
+discord.html                    — Discord console (connect, channels, chime-in)
 admin.html                      — Visual persona builder UI (creator-facing)
 index.html                      — Fan chat UI (embeds as iframe in profile.html)
 chat.html                       — Standalone fan chat (mobile hamburger link)
@@ -160,12 +164,21 @@ Stay completely in character. Never mention being an AI.
   matter if deploying to Vercel. Keep both working when adding routes — everything
   already routes through Flask, so a new `@app.route` needs no config change on
   either host. See `DEPLOY.md`.
-- The Fanvue, OnlyFans, X and Telegram loops need an always-on host, so they run
-  on Cloud Run and stay off on Vercel (`IS_VERCEL` in `app.py`).
-- Fanvue and OnlyFans share one reply engine through the platform adapters
-  (`_Platform` in `app.py`): a platform says where its state is keyed, how a chat
-  reads, and how a message goes out. New platform work belongs in an adapter,
-  never in a second copy of the round.
+- The Fanvue, OnlyFans, X, Telegram and Discord loops need an always-on host, so
+  they run on Cloud Run and stay off on Vercel (`IS_VERCEL` in `app.py`).
+- Discord is driven as a real user account, not a bot application. That is
+  against Discord's terms of service and the account can be terminated for it,
+  so anything that makes an account look automated is a bug: one socket per
+  token, one stable client fingerprint, never join a server, never open a DM
+  first, and never reconnect at a token Discord has already refused.
+- Fanvue, OnlyFans and Discord DMs share one reply engine through the platform
+  adapters (`_Platform` in `app.py`): a platform says where its state is keyed,
+  how a chat reads, and how a message goes out. New platform work belongs in an
+  adapter, never in a second copy of the round.
+- Discord server channels are the one exception, in `_dc_channel_round`: a room
+  full of people is not a fan being worked towards something, so it never runs
+  the funnel, never nudges, and never carries an offer. A paid link only ever
+  goes out in a DM.
 
 ---
 
