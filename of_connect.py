@@ -234,20 +234,32 @@ class Attempt:
                 'width': self.viewport['width'], 'height': self.viewport['height'],
                 'expires_in': max(0, int(ATTEMPT_TTL - (time.time() - self.started))),
                 'result': self.result, 'probes': self.probes,
+                'frame_at': round(self.frame_at, 3),
                 'capture_note': self.capture_note, 'page_url': self.page_url,
                 'cookie_names': self.cookie_names,
-                'login_errors': getattr(self, 'login_errors', []),
+                'login_errors': list(getattr(self, 'login_errors', [])),
                 'exit_ip': getattr(self, 'exit_ip', ''),
                 'proxy_set': bool(self.proxy),
                 'blocked_by': getattr(self, 'blocked_by', ''),
                 'driver': DRIVER_NAME,
                 'signing_sample': self.signing_sample}
 
-    def snapshot(self):
-        """The latest frame as a data URL, or '' before the first one."""
+    def snapshot(self, since=0.0):
+        """The latest frame as a data URL, or '' before the first one.
+
+        `since` is the frame the window is already showing. The page is
+        screenshotted five times a second at most, so a poll faster than that
+        would otherwise re-send a picture identical to the one on screen --
+        35KB a time, several times a second, for nothing.
+        """
         self.touched = time.time()
         if not self.frame:
             return ''
+        try:
+            if self.frame_at and float(since or 0) >= self.frame_at:
+                return ''
+        except (TypeError, ValueError):
+            pass
         return 'data:image/jpeg;base64,' + base64.b64encode(self.frame).decode()
 
     def close(self):
@@ -1390,7 +1402,7 @@ def _say_missed(attempt_id):
     return True
 
 
-def get(attempt_id, frame=False):
+def get(attempt_id, frame=False, since=0.0):
     # `frame` is for the browser service, which fetches the picture in the same
     # round trip rather than a second one. In this process it is already here.
     with _lock:

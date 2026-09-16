@@ -238,7 +238,7 @@ def service():
         # The frame poll wants both and would otherwise ask twice; an input
         # wants neither picture nor the 35KB of it.
         if request.args.get('frame'):
-            out['frame'] = attempt.snapshot()
+            out['frame'] = attempt.snapshot(request.args.get('since') or 0)
         return jsonify(out)
 
     @api.route('/session/<attempt_id>/frame')
@@ -246,7 +246,8 @@ def service():
         attempt = of_connect.get(attempt_id)
         if not attempt:
             return jsonify({'ok': False, 'error': 'no such sign-in'}), 404
-        return jsonify({'ok': True, 'frame': attempt.snapshot()})
+        return jsonify({'ok': True,
+                        'frame': attempt.snapshot(request.args.get('since') or 0)})
 
     @api.route('/session/<attempt_id>/input', methods=['POST'])
     def send_input(attempt_id):
@@ -299,13 +300,16 @@ class _Handle:
     def status(self):
         return self._status
 
-    def snapshot(self):
-        # Already here when the caller asked for it up front. The fallback is
-        # for a browser service too old to send it alongside the status.
+    def snapshot(self, since=0.0):
+        # Already here when the caller asked for it up front -- the service
+        # applied `since` when it sent it. The fallback is for a browser
+        # service too old to send it alongside the status; one too old to know
+        # `since` at all simply sends the frame, which is what it did before.
         if self._frame is not None:
             return self._frame
         try:
-            return self._remote.call('GET', f'/session/{self.id}/frame').get('frame', '')
+            return self._remote.call(
+                'GET', f'/session/{self.id}/frame?since={since}').get('frame', '')
         except of_connect.ConnectError:
             return ''
 
@@ -365,7 +369,7 @@ class Remote:
                                           'the browser service did not start a sign-in')
         return _Handle(self, out['attempt'])
 
-    def get(self, attempt_id, frame=False):
+    def get(self, attempt_id, frame=False, since=0.0):
         """The attempt, or None if the service says there is no such sign-in.
 
         Raises Unreachable if it could not be asked. None has to mean one thing
@@ -374,7 +378,8 @@ class Remote:
         if not attempt_id:
             return None
         try:
-            out = self.call('GET', f'/session/{attempt_id}' + ('?frame=1' if frame else ''))
+            query = f'?frame=1&since={since}' if frame else ''
+            out = self.call('GET', f'/session/{attempt_id}' + query)
         except Unreachable:
             raise
         except of_connect.ConnectError:

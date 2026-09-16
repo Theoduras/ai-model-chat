@@ -125,13 +125,34 @@ async function begin(){
   poll();
 }
 
+// How long to wait before asking for the next frame. The page behind this is
+// screenshotted five times a second at most, so asking twenty times a second
+// only ever re-asks for a picture that is already on screen. Fast while the
+// creator is doing something, slower while the page sits still, slower again
+// while nobody is looking at this window.
+const POLL_BUSY = 200, POLL_IDLE = 900, POLL_HIDDEN = 2500;
+// Keep asking at the fast rate for a moment after every click and keystroke:
+// what follows one is the frame the creator is waiting to see.
+const BUSY_FOR = 1500;
+let lastFrameAt = 0, busyUntil = 0, stillFor = 0;
+
+function nextPoll(){
+  if (document.hidden) return POLL_HIDDEN;
+  if (Date.now() < busyUntil) return POLL_BUSY;
+  // A page that has not changed for a while is a page waiting on a human --
+  // an emailed code being fetched, a phone being found. Ease off until it or
+  // the creator moves again.
+  return stillFor > 8 ? POLL_IDLE : POLL_BUSY;
+}
+
 async function poll(){
   if (timer) clearTimeout(timer);
   if (finished) return;
   let r, status = 0;
   try {
     const res = await fetch(API + '/frame?attempt=' +
-      encodeURIComponent(attempt) + '&persona=' + encodeURIComponent(persona));
+      encodeURIComponent(attempt) + '&persona=' + encodeURIComponent(persona) +
+      '&since=' + encodeURIComponent(lastFrameAt));
     status = res.status;
     r = await res.json();
   } catch (e) { return waiting(); }
@@ -143,8 +164,12 @@ async function poll(){
     return fail(r.error || 'That sign-in is no longer open.');
   }
   misses = stalls = 0;
+  // No frame means nothing has changed since the one on screen, not that the
+  // picture is gone.
   if (r.frame){ img.src = r.frame; $('veil').classList.add('gone'); }
   const a = r.attempt || {};
+  if (a.frame_at && a.frame_at !== lastFrameAt){ lastFrameAt = a.frame_at; stillFor = 0; }
+  else { stillFor++; }
   natural = {w: a.width || 0, h: a.height || 0};
   const s = $('state');
   s.textContent = a.state === 'signin' ? 'live' : a.state;
@@ -152,8 +177,16 @@ async function poll(){
   if (a.state === 'connected') return done(a);
   if (a.state === 'failed' || a.state === 'expired')
     return fail(a.error || 'The sign-in timed out. Start it again.');
-  timer = setTimeout(poll, 50);
+  timer = setTimeout(poll, nextPoll());
 }
+
+// Coming back to the window is itself a reason to look again now, rather than
+// showing a frame two and a half seconds old until the next slow tick.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden || finished || !attempt) return;
+  busyUntil = Date.now() + BUSY_FOR;
+  poll();
+});
 
 // Keep polling, more slowly, and say so. The picture stays on screen: it is
 // stale, not wrong, and a frozen frame reads better than a black rectangle.
@@ -210,6 +243,8 @@ let outbox = [], inflight = false;
 
 function send(kind, extra){
   if (!attempt || finished) return;
+  busyUntil = Date.now() + BUSY_FOR;
+  stillFor = 0;
   const item = Object.assign({kind: kind}, extra || {});
   // A path that has not been sent yet is worth less than the one behind it:
   // merge rather than queue, so a slow link drops stale movement instead of
