@@ -9000,6 +9000,20 @@ def _x_api(method, path, access_token=None, bearer=None, body=None):
         raise _x_http_error(e) from None
 
 
+def _x_token_headers():
+    """X rejects the token endpoint with "Missing valid authorization header"
+    when the app is a confidential client: those must send the client
+    credentials as HTTP Basic, not just client_id in the form body."""
+    h = {'Content-Type': 'application/x-www-form-urlencoded'}
+    cid = _get_setting('x_client_id') or ''
+    secret = _get_setting('x_client_secret') or os.environ.get('X_CLIENT_SECRET', '')
+    if cid and secret:
+        import base64
+        h['Authorization'] = 'Basic ' + base64.b64encode(
+            f'{cid}:{secret}'.encode()).decode()
+    return h
+
+
 def _x_refresh(persona):
     """Refresh a persona's access token using its stored refresh_token.
     Returns the new access token, or None if refresh isn't possible."""
@@ -9016,7 +9030,7 @@ def _x_refresh(persona):
     }).encode()
     req = urllib.request.Request(
         'https://api.twitter.com/2/oauth2/token', data=body,
-        headers={'Content-Type': 'application/x-www-form-urlencoded'}, method='POST')
+        headers=_x_token_headers(), method='POST')
     try:
         with urllib.request.urlopen(req, timeout=10) as r:
             td = json.loads(r.read())
@@ -10283,6 +10297,7 @@ def api_x_auth_url():
     data = request.json or {}
     client_id = data.get('client_id', '').strip() or (_get_setting('x_client_id') or '')
     redirect_uri = data.get('redirect_uri', '').strip() or (_get_setting('x_redirect_uri') or '')
+    client_secret = data.get('client_secret', '').strip()
     persona = data.get('persona', 'lilly')
     if not client_id or not redirect_uri:
         return jsonify({'ok': False, 'error': 'client_id and redirect_uri are required'}), 400
@@ -10290,6 +10305,8 @@ def api_x_auth_url():
     # Remember the app credentials so future connects/refreshes don't need them re-entered.
     _set_setting('x_client_id', client_id)
     _set_setting('x_redirect_uri', redirect_uri)
+    if client_secret:
+        _set_setting('x_client_secret', client_secret)
     _log_x_event('connect_start', persona=persona)
     code_verifier = secrets.token_urlsafe(64)
     code_challenge = urllib.parse.quote(
@@ -10323,6 +10340,8 @@ def api_x_app_config():
     pre-fill them (so they don't need re-entering each connect/reconnect)."""
     return jsonify({
         'client_id': _get_setting('x_client_id') or '',
+        'has_client_secret': bool(_get_setting('x_client_secret')
+                                  or os.environ.get('X_CLIENT_SECRET', '')),
         'redirect_uri': _get_setting('x_redirect_uri') or '',
     })
 
@@ -10358,7 +10377,7 @@ def api_x_callback():
     req = urllib.request.Request(
         'https://api.twitter.com/2/oauth2/token',
         data=body,
-        headers={'Content-Type': 'application/x-www-form-urlencoded'},
+        headers=_x_token_headers(),
         method='POST'
     )
     try:
