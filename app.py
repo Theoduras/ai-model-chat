@@ -4426,26 +4426,30 @@ code{font-size:.8rem;color:#a78bfa;word-break:break-all}
 form.inline{display:inline}
 form.inline button{width:auto;padding:4px 12px;margin:0;font-size:.78rem;background:var(--surface);color:var(--text)}
 .newrow{display:flex;gap:8px}.newrow input{flex:1;margin:0}.newrow button{width:auto;padding:0 18px;margin:0}
+.who{font-size:.78rem;color:var(--text-muted);margin-top:3px}
 </style></head><body data-page="admin-trials"><div class="wrap wide">
 <div class="bar"><span>Trial links</span><a href="/admin/users">Users</a></div>
 <div class="card">
 <h1>{{ days }}-day {{ tier_name }} trials</h1>
-<p class="sub">Each link works once. Send it to a prospect: they sign up and land
-on {{ tier_name }} for {{ days }} days, no card.</p>
+<p class="sub">One link, any number of new accounts: each person who opens it
+signs up and lands on {{ tier_name }} for {{ days }} days, no card. It keeps
+working until you cancel it, and expires on its own after {{ link_days }} days.
+Nobody gets a second trial.</p>
 {% if saved %}<div class="ok">{{ saved }}</div>{% endif %}
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
 <form method="post"><input type="hidden" name="action" value="create">
 <label>Note (who is it for?)</label>
 <div class="newrow"><input name="note" placeholder="e.g. jess from IG" maxlength="200">
 <button type="submit">Create link</button></div></form>
-<table><tr><th>Link</th><th>Note</th><th>Created</th><th>Expires</th><th>Used by</th><th></th></tr>
+<table><tr><th>Link</th><th>Note</th><th>Created</th><th>Expires</th><th>Redeemed by</th><th></th></tr>
 {% for r in rows %}<tr>
 <td><code>{{ r.link }}</code></td><td>{{ r.note }}</td><td>{{ r.created }}</td>
-<td>{{ r.expires }}{% if r.expired and not r.used_by %} (expired){% endif %}</td>
-<td>{{ r.used_by }}{% if r.used %} · {{ r.used }}{% endif %}</td>
-<td>{% if not r.used_by %}<form class="inline" method="post">
+<td>{{ r.expires }}{% if r.state != 'live' %} ({{ r.state }}){% endif %}</td>
+<td><strong>{{ r.uses }}</strong> use{{ '' if r.uses == 1 else 's' }}
+{% for p in r.people %}<div class="who">{{ p.email }} · {{ p.at }}</div>{% endfor %}</td>
+<td>{% if r.live %}<form class="inline" method="post">
 <input type="hidden" name="action" value="revoke"><input type="hidden" name="code" value="{{ r.code }}">
-<button type="submit">Revoke</button></form>{% endif %}</td>
+<button type="submit">Cancel link</button></form>{% endif %}</td>
 </tr>{% endfor %}
 </table>
 </div></div></body></html>"""
@@ -4714,7 +4718,7 @@ def api_referrals():
 
 TRIAL_TIER = 'starter'
 TRIAL_DAYS = 7
-TRIAL_INVITE_DAYS = 30
+TRIAL_INVITE_DAYS = 14
 
 
 def _grant_trial(session_db, user_row, days=TRIAL_DAYS, tier=TRIAL_TIER):
@@ -4760,30 +4764,45 @@ def admin_trials():
             elif action == 'revoke':
                 inv = s.query(TrialInvite).filter(
                     TrialInvite.code == request.form.get('code', '')).first()
-                if inv and not inv.used_by:
-                    s.delete(inv)
+                if inv and not inv.revoked_at:
+                    inv.revoked_at = datetime.now(timezone.utc).replace(tzinfo=None)
                     s.commit()
-                    saved = 'Trial link revoked.'
+                    saved = 'Trial link cancelled. It stops working now.'
+                    logger.info('TRIAL LINK CANCELLED by=%s code=%s',
+                                me['email'], inv.code)
                 else:
-                    error = 'That link is already used or gone.'
-        from db import User
+                    error = 'That link is already cancelled or gone.'
+        from db import User, trial_redemptions_by_code
         rows = []
         now = datetime.now(timezone.utc).replace(tzinfo=None)
-        for inv in list_trial_invites(s):
-            used_by = s.get(User, inv.used_by) if inv.used_by else None
+        invites = list_trial_invites(s)
+        used = trial_redemptions_by_code(s, [i.code for i in invites])
+        for inv in invites:
+            people = list(used.get(inv.code, []))
+            # A link issued before they became multi-use has its one redemption
+            # on the invite row rather than in the redemptions table.
+            if inv.used_by and not people:
+                legacy = s.get(User, inv.used_by)
+                people = [{'email': legacy.email if legacy else '(deleted)',
+                           'at': inv.used_at}]
+            expired = bool(inv.expires_at and inv.expires_at < now)
             rows.append({
                 'code': inv.code, 'note': inv.note or '',
                 'link': f'{_callback_origin()}/trial/{inv.code}',
                 'days': inv.days, 'tier': inv.tier,
                 'created': _fmt_date(inv.created_at),
                 'expires': _fmt_date(inv.expires_at),
-                'expired': bool(inv.expires_at and inv.expires_at < now),
-                'used_by': (used_by.email if used_by else ''),
-                'used': _fmt_date(inv.used_at)})
+                'live': not expired and not inv.revoked_at,
+                'state': ('cancelled' if inv.revoked_at
+                          else 'expired' if expired else 'live'),
+                'uses': len(people),
+                'people': [{'email': p['email'], 'at': _fmt_date(p['at'])}
+                           for p in people]})
     finally:
         s.close()
     return render_template_string(ADMIN_TRIALS_HTML, rows=rows, saved=saved,
                                   error=error, days=TRIAL_DAYS,
+                                  link_days=TRIAL_INVITE_DAYS,
                                   tier_name=(TIERS.get(TRIAL_TIER) or {}).get(
                                       'name', TRIAL_TIER))
 
@@ -4791,7 +4810,10 @@ def admin_trials():
 @app.route('/trial/<code>')
 def trial_invite(code):
     """Redeem a trial link. Signing up first is fine — the code waits in the
-    session and is redeemed on the way back."""
+    session and is redeemed on the way back.
+
+    One link serves any number of new accounts until an admin cancels it or it
+    expires; the one trial per account is enforced by _grant_trial."""
     code = (code or '').strip()[:32]
     user = _current_user()
     if not user:
@@ -4802,7 +4824,7 @@ def trial_invite(code):
     s = _db_session()
     try:
         inv = get_trial_invite(s, code)
-        if not inv or inv.used_by or (inv.expires_at and inv.expires_at < now):
+        if not inv or inv.revoked_at or (inv.expires_at and inv.expires_at < now):
             return render_template_string(
                 TRIAL_DONE_HTML, user=user,
                 error='This trial link is no longer valid.', days=TRIAL_DAYS)
@@ -4812,8 +4834,8 @@ def trial_invite(code):
         if err:
             return render_template_string(TRIAL_DONE_HTML, user=user,
                                           error=err, days=TRIAL_DAYS)
-        inv.used_by = u.id
-        inv.used_at = now
+        from db import record_trial_redemption
+        record_trial_redemption(s, inv, u)
         s.commit()
         session.pop('trial_code', None)
         logger.info('TRIAL REDEEMED user=%s code=%s', u.email, code)

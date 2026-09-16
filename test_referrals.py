@@ -120,6 +120,56 @@ paid = s.get(D.User, ref_id)
 check('refused on a paying account', A._grant_trial(s, paid) != '')
 s.close()
 
+print('trial links serve a group')
+admin_id = mkuser('admin@example.com')
+s = D.SessionLocal()
+s.get(D.User, admin_id).role = 'admin'
+s.commit()
+s.close()
+a = A.app.test_client()
+with a.session_transaction() as sess:
+    sess['user_id'] = admin_id
+a.post('/admin/trials', data={'action': 'create', 'note': 'group'})
+page = a.get('/admin/trials').get_data(as_text=True)
+import re
+link_code = re.findall(r'/trial/([A-Za-z0-9]+)', page)[0]
+
+
+def redeem(email):
+    uid = mkuser(email, tier='', status='unpaid')
+    c = A.app.test_client()
+    with c.session_transaction() as sess:
+        sess['user_id'] = uid
+    return uid, c.get('/trial/' + link_code).get_data(as_text=True)
+
+id_a, body_a = redeem('one@example.com')
+id_b, body_b = redeem('two@example.com')
+check('first account gets the trial', 'trial is live' in body_a)
+check('second account gets it too', 'trial is live' in body_b)
+s = D.SessionLocal()
+check('both on starter',
+      all(s.get(D.User, i).tier == A.TRIAL_TIER for i in (id_a, id_b)))
+used = D.trial_redemptions_by_code(s, [link_code])
+s.close()
+check('both redemptions recorded', len(used.get(link_code, [])) == 2, used)
+
+c = A.app.test_client()
+with c.session_transaction() as sess:
+    sess['user_id'] = id_a
+check('no second trial for the same account',
+      'already had a trial' in c.get('/trial/' + link_code).get_data(as_text=True))
+
+page = a.get('/admin/trials').get_data(as_text=True)
+check('admin page counts the uses', '<strong>2</strong> use' in page)
+check('admin page names the redeemers',
+      'one@example.com' in page and 'two@example.com' in page)
+
+a.post('/admin/trials', data={'action': 'revoke', 'code': link_code})
+_, after = redeem('three@example.com')
+check('a cancelled link stops working', 'no longer valid' in after)
+check('cancelled links keep their history',
+      'one@example.com' in a.get('/admin/trials').get_data(as_text=True))
+
 print()
 if FAILURES:
     print(f'{len(FAILURES)} failed: ' + ', '.join(FAILURES))

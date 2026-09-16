@@ -1484,7 +1484,11 @@ def pending_referral_earnings(session, referrer_id):
 
 
 class TrialInvite(Base):
-    """A single-use link an admin sends out for a time-boxed trial plan."""
+    """A link an admin sends out for a time-boxed trial plan.
+
+    Good for any number of new accounts until it is cancelled or expires — one
+    link goes to a whole group. What stops a second week is the trial_at stamp
+    on the account that redeems it, not the link."""
     __tablename__ = 'trial_invites'
 
     id = Column(String(32), primary_key=True, default=_uid)
@@ -1495,8 +1499,46 @@ class TrialInvite(Base):
     created_by = Column(String(32), index=True)
     created_at = Column(DateTime, default=_now, index=True)
     expires_at = Column(DateTime)
+    revoked_at = Column(DateTime)
+    # Superseded by trial_redemptions, which holds every redemption rather than
+    # the first one. Kept so links issued before the link became multi-use
+    # still show who used them.
     used_by = Column(String(32), index=True)
     used_at = Column(DateTime)
+
+
+class TrialRedemption(Base):
+    """One account taking up one trial link."""
+    __tablename__ = 'trial_redemptions'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    code = Column(String(32), index=True)
+    invite_id = Column(String(32), index=True)
+    user_id = Column(String(32), ForeignKey('users.id'), index=True)
+    created_at = Column(DateTime, default=_now, index=True)
+
+
+def record_trial_redemption(session, invite, user_row):
+    row = TrialRedemption(code=invite.code, invite_id=invite.id,
+                          user_id=user_row.id)
+    session.add(row)
+    return row
+
+
+def trial_redemptions_by_code(session, codes):
+    """{code: [{email, at}]} for the admin list, newest first."""
+    codes = list(codes or [])
+    if not codes:
+        return {}
+    rows = (session.query(TrialRedemption, User.email)
+            .outerjoin(User, User.id == TrialRedemption.user_id)
+            .filter(TrialRedemption.code.in_(codes))
+            .order_by(TrialRedemption.created_at.desc()).all())
+    out = {}
+    for r, email in rows:
+        out.setdefault(r.code, []).append({'email': email or '(deleted)',
+                                           'at': r.created_at})
+    return out
 
 
 def get_trial_invite(session, code):
@@ -1523,7 +1565,8 @@ def init_db():
                          ('link_clicks', LinkClick),
                          ('referral_clicks', ReferralClick),
                          ('referral_earnings', ReferralEarning),
-                         ('trial_invites', TrialInvite)):
+                         ('trial_invites', TrialInvite),
+                         ('trial_redemptions', TrialRedemption)):
         try:
             _sync_columns(table, model)
         except Exception:
