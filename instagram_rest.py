@@ -158,6 +158,7 @@ class Rest:
                     self._until = time.time() + after
                 self._wait()
                 return self.call(method, url, body, headers, raw, retries - 1)
+            logger.warning('instagram %s %s -> %s: %s', method, url, e.code, detail[:300])
             raise InstagramApiError(e.code, detail)
         except urllib.error.URLError as e:
             raise InstagramApiError(0, str(getattr(e, 'reason', e))[:200])
