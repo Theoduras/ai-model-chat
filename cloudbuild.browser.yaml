@@ -32,26 +32,43 @@ steps:
       - -c
       - docker pull ${_AR_HOSTNAME}/$PROJECT_ID/${_AR_REPOSITORY}/$REPO_NAME/${_SERVICE_NAME}:latest || true
 
+  # An image for this commit already in the registry is the same image: the
+  # build is deterministic in the only thing that varies, which is the source.
+  # Rebuilding it costs several minutes on every retry and every second push of
+  # the same tree, which is most of them on a night spent deploying to test.
+  - name: gcr.io/cloud-builders/docker
+    id: Reuse
+    entrypoint: sh
+    args:
+      - -c
+      - |
+        IMG=${_AR_HOSTNAME}/$PROJECT_ID/${_AR_REPOSITORY}/$REPO_NAME/${_SERVICE_NAME}:$COMMIT_SHA
+        if docker pull "$IMG" >/dev/null 2>&1; then
+          echo "$IMG is already built; skipping build and push"
+          touch /workspace/.reuse
+        fi
+
   - name: gcr.io/cloud-builders/docker
     id: Build
+    entrypoint: sh
     args:
-      - build
-      - -t
-      - ${_AR_HOSTNAME}/$PROJECT_ID/${_AR_REPOSITORY}/$REPO_NAME/${_SERVICE_NAME}:$COMMIT_SHA
-      - -t
-      - ${_AR_HOSTNAME}/$PROJECT_ID/${_AR_REPOSITORY}/$REPO_NAME/${_SERVICE_NAME}:latest
-      - --cache-from
-      - ${_AR_HOSTNAME}/$PROJECT_ID/${_AR_REPOSITORY}/$REPO_NAME/${_SERVICE_NAME}:latest
-      - -f
-      - Dockerfile
-      - .
+      - -c
+      - |
+        [ -f /workspace/.reuse ] && exit 0
+        docker build
+          -t ${_AR_HOSTNAME}/$PROJECT_ID/${_AR_REPOSITORY}/$REPO_NAME/${_SERVICE_NAME}:$COMMIT_SHA \
+          -t ${_AR_HOSTNAME}/$PROJECT_ID/${_AR_REPOSITORY}/$REPO_NAME/${_SERVICE_NAME}:latest \
+          --cache-from ${_AR_HOSTNAME}/$PROJECT_ID/${_AR_REPOSITORY}/$REPO_NAME/${_SERVICE_NAME}:latest \
+          -f Dockerfile .
 
   - name: gcr.io/cloud-builders/docker
     id: Push
+    entrypoint: sh
     args:
-      - push
-      - --all-tags
-      - ${_AR_HOSTNAME}/$PROJECT_ID/${_AR_REPOSITORY}/$REPO_NAME/${_SERVICE_NAME}
+      - -c
+      - |
+        [ -f /workspace/.reuse ] && exit 0
+        docker push --all-tags ${_AR_HOSTNAME}/$PROJECT_ID/${_AR_REPOSITORY}/$REPO_NAME/${_SERVICE_NAME}
 
   # Every flag the service needs is repeated here, because this is a full
   # `run deploy` and a deploy that omits one resets it: no display means headless
@@ -85,9 +102,6 @@ steps:
       - --cpu=2
       - --memory=4Gi
       - --quiet
-
-images:
-  - ${_AR_HOSTNAME}/$PROJECT_ID/${_AR_REPOSITORY}/$REPO_NAME/${_SERVICE_NAME}:$COMMIT_SHA
 
 substitutions:
   _SERVICE_NAME: ai-model-chat-dev-browser

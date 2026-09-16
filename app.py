@@ -16908,6 +16908,30 @@ def _of_signin_active():
     return time.time() - _of_signin_seen[0] < OF_SIGNIN_QUIET
 
 
+def _of_egress_ip(account=''):
+    """The address OnlyFans sees us from, and whether it is the fixed one.
+
+    A session is bound to the IP it was opened on, so a sign-in in one service
+    and a request from another is refused however well it is signed — which is
+    indistinguishable from a dead session unless something actually looks.
+    """
+    import urllib.request as _req
+    out = {'proxy_configured': bool((os.getenv('ONLYFANS_PROXY_TEMPLATE') or '').strip())}
+    proxy = _of_proxy_for(account, '') if account else \
+        (os.getenv('ONLYFANS_PROXY_TEMPLATE') or '').strip()
+    out['proxy'] = of_session._proxy_label(proxy) if proxy else ''
+    for label, through in (('direct', ''), ('proxy', proxy)):
+        if label == 'proxy' and not proxy:
+            continue
+        try:
+            opener = OF._opener(through) if hasattr(OF, '_opener') else _req.build_opener()
+            with opener.open('https://api.ipify.org?format=json', timeout=8) as r:
+                out[label] = json.loads(r.read().decode())['ip']
+        except Exception as e:
+            out[label] = 'failed: ' + str(e)[:120]
+    return out
+
+
 def _of_signin_touch():
     """Called from the connect routes. The repair opens browsers of its own,
     and this service holds one instance: a derivation launching Chrome beside
@@ -18422,6 +18446,8 @@ def api_diag():
         # rotation can be diagnosed and solved offline (of_replay.py) rather
         # than through a deploy and a sign-in. No credentials: a signature is a
         # hash of a path, a timestamp and an account id.
+        if request.args.get('egress'):
+            out['egress'] = _of_egress_ip(request.args.get('account') or '')
         if request.args.get('export'):
             out['export'] = {
                 'sample': of_rules.sample(),
