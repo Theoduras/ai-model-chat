@@ -152,6 +152,44 @@ class WorkerLogTest(XAutoBase):
         self.assertEqual(rows[1]['stage'], 'skipped')
 
 
+class PagingTest(XAutoBase):
+    """X answers a DM read with however many events it likes plus a next_token.
+    One event and "there is more" is a normal reply, not an empty inbox."""
+
+    def test_follows_next_token(self):
+        pages = [
+            {'data': [{'id': '1'}], 'meta': {'result_count': 1, 'next_token': 'a'}},
+            {'data': [{'id': '2'}, {'id': '3'}], 'meta': {'result_count': 2, 'next_token': 'b'}},
+            {'data': [{'id': '4'}], 'meta': {'result_count': 1}},
+        ]
+        calls = []
+
+        def fake(persona, method, path, body=None):
+            calls.append(path)
+            return pages[len(calls) - 1]
+
+        with mock.patch.object(app, '_x_call', fake):
+            rows, meta = app._x_paged(PERSONA, '/dm_events?x=1')
+        self.assertEqual([r['id'] for r in rows], ['1', '2', '3', '4'])
+        self.assertNotIn('pagination_token', calls[0])
+        self.assertIn('pagination_token=a', calls[1])
+        self.assertIn('pagination_token=b', calls[2])
+        self.assertEqual(meta.get('next_token'), None)
+
+    def test_stops_at_the_page_limit(self):
+        page = {'data': [{'id': 'x'}], 'meta': {'next_token': 'more'}}
+        with mock.patch.object(app, '_x_call', mock.Mock(return_value=page)) as c:
+            rows, _ = app._x_paged(PERSONA, '/dm_events?x=1', pages=3)
+        self.assertEqual(c.call_count, 3)
+        self.assertEqual(len(rows), 3)
+
+    def test_a_single_page_costs_one_call(self):
+        page = {'data': [{'id': 'x'}], 'meta': {'result_count': 1}}
+        with mock.patch.object(app, '_x_call', mock.Mock(return_value=page)) as c:
+            app._x_paged(PERSONA, '/dm_events?x=1')
+        self.assertEqual(c.call_count, 1)
+
+
 class DailyCountTest(XAutoBase):
     def test_bump_and_rollover(self):
         self.assertEqual(app._x_daily_count(PERSONA, 'dms'), 0)

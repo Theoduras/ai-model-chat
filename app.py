@@ -10343,6 +10343,26 @@ def _x_send_human(persona, conv_id, text, incoming='', cfg=None):
         _x_send_dm(persona, conv_id, chunk)
 
 
+def _x_paged(persona, path, pages=5, cap=200):
+    """Follow X's pagination and return (rows, last_meta).
+
+    X answers a DM read with however many events it feels like plus a
+    next_token: one event and "there is more" is a normal reply, not an empty
+    inbox. Reading only the first page therefore loses messages silently — a
+    fan writes, X puts her own last message on page one, and the round sees
+    nothing to answer.
+    """
+    rows, token, meta = [], '', {}
+    for _ in range(max(1, pages)):
+        d = _x_call(persona, 'GET', path + (f'&pagination_token={token}' if token else ''))
+        rows.extend(d.get('data') or [])
+        meta = d.get('meta') or {}
+        token = meta.get('next_token') or ''
+        if not token or len(rows) >= cap:
+            break
+    return rows, meta
+
+
 def _x_dm_reply_round(persona, max_results=20):
     """Reply in-character to new incoming DMs. Returns (replied_count, log_lines)."""
     cfg = _x_behavior(persona)
@@ -10369,10 +10389,9 @@ def _x_dm_reply_round(persona, max_results=20):
     path = ('/dm_events?dm_event.fields=id,text,sender_id,created_at,dm_conversation_id'
             f'&event_types=MessageCreate&max_results={max_results}')
     try:
-        convs = _x_call(persona, 'GET', path)
+        events, _meta = _x_paged(persona, path)
     except Exception as e:
         return 0, [f'DM read failed: {str(e)[:200]}']
-    events = convs.get('data', []) or []
     replied = 0
     log = []
     if not events:
@@ -11188,14 +11207,15 @@ def api_x_dm_debug():
     if not out['behavior'].get('enabled', True):
         out['verdict'] = 'Bot is switched off under "How she replies" on the X Bot tab.'
     try:
-        raw = _x_call(persona, 'GET',
-                      '/dm_events?dm_event.fields=id,text,sender_id,created_at,'
-                      f'dm_conversation_id&event_types=MessageCreate&max_results=20')
+        events, raw_meta = _x_paged(
+            persona,
+            '/dm_events?dm_event.fields=id,text,sender_id,created_at,'
+            'dm_conversation_id&event_types=MessageCreate&max_results=20')
+        raw = {'meta': raw_meta, 'errors': []}
     except Exception as e:
         out['read_error'] = str(e)[:300]
         out['verdict'] = out.get('verdict') or 'Reading DMs failed — see read_error.'
         return jsonify(out)
-    events = raw.get('data', []) or []
     # X reports partial failures beside the data — a conversation it will not
     # serve comes back in `errors` with `data` simply short, so reading only
     # `data` turns a permission problem into "nobody has written to her".
@@ -11224,18 +11244,19 @@ def api_x_dm_debug():
         try:
             u = _x_resolve_user(persona, who)
             out['with'] = u
-            conv = _x_call(persona, 'GET',
-                           f'/dm_conversations/with/{u["id"]}/dm_events'
-                           '?dm_event.fields=id,text,sender_id,created_at,dm_conversation_id'
-                           '&event_types=MessageCreate&max_results=20')
+            conv_rows, conv_meta = _x_paged(
+                persona,
+                f'/dm_conversations/with/{u["id"]}/dm_events'
+                '?dm_event.fields=id,text,sender_id,created_at,dm_conversation_id'
+                '&event_types=MessageCreate&max_results=20')
             out['with_events'] = [
                 {'id': e.get('id'), 'from': e.get('sender_id'),
                  'mine': e.get('sender_id') == t.get('user_id'),
                  'already_handled': e.get('id') in _x_seen_events(persona),
                  'at': e.get('created_at'), 'text': (e.get('text') or '')[:120]}
-                for e in (conv.get('data') or [])]
-            out['with_meta'] = conv.get('meta', {})
-            out['with_errors'] = conv.get('errors', [])
+                for e in conv_rows]
+            out['with_meta'] = conv_meta
+            out['with_errors'] = []
         except Exception as e:
             out['with_error'] = str(e)[:300]
 
