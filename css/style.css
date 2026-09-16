@@ -1111,6 +1111,13 @@ body.auth-pending .sb-plan { display: none !important; }
 }
 .sb-group.open .sb-children { display: flex; }
 .sb-children .sb-item { font-size: 0.8rem; }
+.sb-item.sb-soon { opacity: .5; cursor: default; }
+.sb-item.sb-soon:hover { background: none; }
+.sb-soon-tag {
+  margin-left: auto; font-size: .6rem; font-weight: 600; letter-spacing: .03em;
+  text-transform: uppercase; padding: 2px 6px; border-radius: 999px;
+  background: var(--surface-2); color: var(--text-muted); white-space: nowrap;
+}
 
 .sb-no-match { padding: 10px 8px; font-size: 0.8rem; color: var(--text-muted); }
 

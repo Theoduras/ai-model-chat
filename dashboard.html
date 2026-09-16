@@ -175,9 +175,32 @@
 
 
         <div class="sb-group" id="sb-group-platforms" data-role-area="platforms">
-          <button type="button" class="sb-item sb-item-toggle" data-search="platforms telegram fanvue threads x bot" onclick="toggleSbGroup('platforms')">
+          <button type="button" class="sb-item sb-item-toggle" data-search="platforms fanvue onlyfans fansly" onclick="toggleSbGroup('platforms')">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><rect x="3" y="4" width="7" height="7" rx="1.3"/><rect x="14" y="4" width="7" height="7" rx="1.3"/><rect x="3" y="14" width="7" height="7" rx="1.3"/><rect x="14" y="14" width="7" height="7" rx="1.3"/></svg>
             <span>Platforms</span>
+            <svg class="sb-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12" aria-hidden="true"><path d="M9 6l6 6-6 6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <div class="sb-children">
+            <button type="button" class="sb-item" data-platform="fanvue" data-search="fanvue" onclick="openPlatform('fanvue', this)">
+              <svg class="sb-ic-fanvue" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect width="24" height="24" rx="6" fill="#FF2D6B"/><text x="12" y="16.5" font-family="Arial, sans-serif" font-size="12" font-weight="700" fill="#fff" text-anchor="middle">F</text></svg>
+              <span>Fanvue</span>
+            </button>
+            <button type="button" class="sb-item" data-platform="onlyfans" data-search="onlyfans of" onclick="openPlatform('onlyfans', this)">
+              <svg class="sb-ic-onlyfans" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect width="24" height="24" rx="6" fill="#00AFF0"/><circle cx="12" cy="12" r="5" fill="none" stroke="#fff" stroke-width="2.6"/></svg>
+              <span>OnlyFans</span>
+            </button>
+            <button type="button" class="sb-item sb-soon" disabled data-search="fansly coming soon">
+              <svg class="sb-ic-fansly" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect width="24" height="24" rx="6" fill="#1DA1F2"/><text x="12" y="16.5" font-family="Arial, sans-serif" font-size="12" font-weight="700" fill="#fff" text-anchor="middle">f</text></svg>
+              <span>Fansly</span>
+              <span class="sb-soon-tag">Coming soon</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="sb-group" id="sb-group-social" data-role-area="platforms">
+          <button type="button" class="sb-item sb-item-toggle" data-search="social media telegram threads x bot reddit instagram tiktok discord" onclick="toggleSbGroup('social')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><circle cx="18" cy="5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/><path d="M8.4 10.8 15.6 6.4M8.4 13.2l7.2 4.4" stroke-linecap="round"/></svg>
+            <span>Social media</span>
             <svg class="sb-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12" aria-hidden="true"><path d="M9 6l6 6-6 6" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
           <div class="sb-children">
@@ -187,19 +210,31 @@
             </button>
             <button type="button" class="sb-item" data-platform="x" data-search="x bot twitter" onclick="openPlatform('x', this)">
               <svg class="sb-ic-x" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M14.234 10.162 22.977 0h-2.072l-7.591 8.824L7.251 0H.258l9.168 13.343L.258 24H2.33l8.016-9.318L16.749 24h6.993zm-2.837 3.299-.929-1.329L3.076 1.56h3.182l5.965 8.532.929 1.329 7.754 11.09h-3.182z"/></svg>
-              <span>𝕏 Bot</span>
-            </button>
-            <button type="button" class="sb-item" data-platform="fanvue" data-search="fanvue" onclick="openPlatform('fanvue', this)">
-              <svg class="sb-ic-fanvue" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect width="24" height="24" rx="6" fill="#FF2D6B"/><text x="12" y="16.5" font-family="Arial, sans-serif" font-size="12" font-weight="700" fill="#fff" text-anchor="middle">F</text></svg>
-              <span>Fanvue</span>
-            </button>
-            <button type="button" class="sb-item" data-platform="onlyfans" data-search="onlyfans of" onclick="openPlatform('onlyfans', this)">
-              <svg class="sb-ic-onlyfans" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect width="24" height="24" rx="6" fill="#00AFF0"/><circle cx="12" cy="12" r="5" fill="none" stroke="#fff" stroke-width="2.6"/></svg>
-              <span>OnlyFans</span>
+              <span>&#120143; Bot</span>
             </button>
             <button type="button" class="sb-item" data-platform="threads" data-search="threads" onclick="openPlatform('threads', this)">
               <svg class="sb-ic-threads" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M18.263 11.097c-.03-3.486-1.92-5.586-5.111-5.586-2.13 0-3.922.963-4.863 2.499l2.062 1.438c.535-.843 1.272-1.543 2.628-1.543 1.528 0 2.318.85 2.544 2.431a15 15 0 0 0-2.236-.173c-4.125 0-6.068 1.867-6.068 4.336s1.943 3.99 4.804 3.99c3.139 0 5.013-2.115 5.781-4.735.798.361 1.348 1.204 1.348 2.47 0 3.387-3.907 5.232-7.22 5.232-4.885 0-8.077-3.207-8.077-8.424 0-6.392 4.223-10.487 9.9-10.487 3.808 0 5.69 1.671 6.97 3.914l2.108-1.475C21.44 2.078 18.331 0 13.663 0 6.227 0 1.168 5.277 1.168 12.934c0 7 4.953 11.066 10.856 11.066 4.878 0 9.809-2.846 9.809-7.716 0-2.545-1.46-4.231-3.569-5.187m-6.33 4.855c-1.077 0-2.026-.512-2.026-1.453 0-1.483 1.822-1.934 3.606-1.934.678 0 1.34.045 1.927.173-.422 1.927-1.671 3.215-3.508 3.214Z"/></svg>
               <span>Threads</span>
+            </button>
+            <button type="button" class="sb-item sb-soon" disabled data-search="reddit coming soon">
+              <svg class="sb-ic-reddit" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.01 4.744c.688 0 1.25.561 1.25 1.249a1.25 1.25 0 0 1-2.498.056l-2.597-.547-.8 3.747c1.824.07 3.48.632 4.674 1.488.308-.309.73-.491 1.207-.491.968 0 1.754.786 1.754 1.754 0 .716-.435 1.333-1.01 1.614a3.111 3.111 0 0 1 .042.52c0 2.694-3.13 4.87-7.004 4.87-3.874 0-7.004-2.176-7.004-4.87 0-.183.015-.366.043-.534A1.748 1.748 0 0 1 4.028 12.3c0-.968.786-1.754 1.754-1.754.463 0 .898.196 1.207.49 1.207-.883 2.878-1.43 4.744-1.487l.885-4.182a.342.342 0 0 1 .14-.197.35.35 0 0 1 .238-.042l2.906.617a1.214 1.214 0 0 1 1.108-.701zM9.25 12C8.561 12 8 12.562 8 13.25c0 .687.561 1.248 1.25 1.248.687 0 1.248-.561 1.248-1.249 0-.688-.561-1.249-1.249-1.249zm5.5 0c-.687 0-1.248.561-1.248 1.25 0 .687.561 1.248 1.249 1.248.688 0 1.249-.561 1.249-1.249 0-.687-.562-1.249-1.25-1.249zm-5.466 3.99a.327.327 0 0 0-.231.094.33.33 0 0 0 0 .463c.842.842 2.484.913 2.961.913.477 0 2.105-.056 2.961-.913a.361.361 0 0 0 .029-.463.33.33 0 0 0-.464 0c-.547.533-1.684.73-2.512.73-.828 0-1.979-.196-2.512-.73a.326.326 0 0 0-.232-.095z"/></svg>
+              <span>Reddit</span>
+              <span class="sb-soon-tag">Coming soon</span>
+            </button>
+            <button type="button" class="sb-item sb-soon" disabled data-search="instagram ig coming soon">
+              <svg class="sb-ic-instagram" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.2" cy="6.8" r="1.1" fill="currentColor" stroke="none"/></svg>
+              <span>Instagram</span>
+              <span class="sb-soon-tag">Coming soon</span>
+            </button>
+            <button type="button" class="sb-item sb-soon" disabled data-search="tiktok coming soon">
+              <svg class="sb-ic-tiktok" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M16.6 5.82A4.28 4.28 0 0 1 15.54 3h-3.09v12.4a2.59 2.59 0 0 1-2.59 2.5 2.59 2.59 0 1 1 .77-5.06V9.7a5.67 5.67 0 0 0-.77-.05A5.66 5.66 0 1 0 15.54 15.3V8.99a7.35 7.35 0 0 0 4.3 1.38V7.28a4.29 4.29 0 0 1-3.24-1.46z"/></svg>
+              <span>TikTok</span>
+              <span class="sb-soon-tag">Coming soon</span>
+            </button>
+            <button type="button" class="sb-item sb-soon" disabled data-search="discord coming soon">
+              <svg class="sb-ic-discord" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M20.317 4.369a19.79 19.79 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.6 12.6 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.1 13.1 0 0 1-1.872-.892.077.077 0 0 1-.008-.128c.126-.094.252-.192.372-.291a.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.009c.12.099.246.198.373.292a.077.077 0 0 1-.006.127c-.598.35-1.22.644-1.873.891a.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.84 19.84 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.028zM8.02 15.331c-1.183 0-2.157-1.086-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.42 0 1.332-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.086-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.42 0 1.332-.946 2.418-2.157 2.418z"/></svg>
+              <span>Discord</span>
+              <span class="sb-soon-tag">Coming soon</span>
             </button>
           </div>
         </div>
