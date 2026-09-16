@@ -22346,6 +22346,10 @@ def _rd_signin_state(persona, adopt=False):
         _rd_adopt(attempt)
         failed = _get_setting(f'reddit_adopt_error_{persona}') or ''
     refused = held.get('login_errors') or []
+    landed = held.get('landed') or {}
+    if landed and not held.get('blocked_by'):
+        failed = failed or (f"The sign-in browser landed on {landed.get('url', '')} "
+                            f"\u2014 {landed.get('title') or 'no title'}.")
     if held.get('blocked_by'):
         where = held.get('exit_ip') or 'this server'
         failed = failed or (

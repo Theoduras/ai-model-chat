@@ -170,6 +170,7 @@ class Attempt:
     exit_ip = ''
     exit_error = ''
     blocked_by = ''
+    landed = {}
     _sampled = False
     # Same reason: an attempt assembled field by field rather than constructed
     # still has to be able to say which site it is for.
@@ -241,6 +242,7 @@ class Attempt:
                 'exit_ip': getattr(self, 'exit_ip', ''),
                 'proxy_set': bool(self.proxy),
                 'blocked_by': getattr(self, 'blocked_by', ''),
+                'landed': getattr(self, 'landed', {}),
                 'driver': DRIVER_NAME,
                 'signing_sample': self.signing_sample}
 
@@ -365,6 +367,26 @@ class Attempt:
                      'attention required', 'verify you are human',
                      'enable javascript and cookies')
 
+    def _note_landing(self, page):
+        """What the sign-in actually landed on, said out loud every time.
+
+        Three rounds of narrower diagnostics each logged nothing, because each
+        one guessed at the shape of the failure: a navigation error, a 4xx, a
+        known block-page phrase. A line that is always written costs one log
+        entry per sign-in and cannot miss.
+        """
+        title = url = text = ''
+        try:
+            url = page.url or ''
+            title = (page.title() or '')[:120]
+            text = ' '.join((page.inner_text('body') or '').split())[:400]
+        except Exception as e:
+            text = f'<could not read the page: {str(e)[:120]}>'
+        self.landed = {'url': url[:200], 'title': title, 'text': text}
+        logger.warning('of-connect %s landed: driver=%s proxy=%s url=%s title=%r '
+                       'text=%r', self.id, DRIVER_NAME or '?',
+                       'set' if self.proxy else 'NOT set', url[:160], title, text[:300])
+
     def _note_block_page(self, page):
         """Did the page that loaded turn out to be a block page?
 
@@ -438,6 +460,7 @@ class Attempt:
                            self.id, str(e)[:160])
             self._note_exit_ip(page)
             page.goto(self._site['url'], wait_until='domcontentloaded', timeout=60000)
+        self._note_landing(page)
         self._note_block_page(page)
         # What the window is told to scale by has to be the size of the frames
         # it actually gets. Sizing the window rather than overriding the
