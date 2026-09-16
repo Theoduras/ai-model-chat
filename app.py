@@ -10352,14 +10352,18 @@ def _x_paged(persona, path, pages=5, cap=200):
     fan writes, X puts her own last message on page one, and the round sees
     nothing to answer.
     """
-    rows, token, meta = [], '', {}
+    rows, token, meta, read = [], '', {}, 0
     for _ in range(max(1, pages)):
         d = _x_call(persona, 'GET', path + (f'&pagination_token={token}' if token else ''))
         rows.extend(d.get('data') or [])
         meta = d.get('meta') or {}
+        read += 1
         token = meta.get('next_token') or ''
         if not token or len(rows) >= cap:
             break
+    # The caller sees the last page's meta, whose result_count is that page's,
+    # not the total — so say how many pages were actually read.
+    meta = {**meta, 'pages_read': read, 'rows_total': len(rows)}
     return rows, meta
 
 

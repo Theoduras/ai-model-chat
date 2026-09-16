@@ -175,6 +175,9 @@ class PagingTest(XAutoBase):
         self.assertIn('pagination_token=a', calls[1])
         self.assertIn('pagination_token=b', calls[2])
         self.assertEqual(meta.get('next_token'), None)
+        # The last page's result_count is that page's, not the total.
+        self.assertEqual(meta['pages_read'], 3)
+        self.assertEqual(meta['rows_total'], 4)
 
     def test_stops_at_the_page_limit(self):
         page = {'data': [{'id': 'x'}], 'meta': {'next_token': 'more'}}
