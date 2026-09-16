@@ -49,8 +49,12 @@ INPUT_KINDS = ('click', 'move', 'down', 'up', 'type', 'key', 'scroll', 'back')
 # How long a half-finished sign-in is kept alive. Long enough to find a phone
 # and read a code out of it, short enough that an abandoned tab does not hold a
 # browser and an IP for the rest of the day.
-ATTEMPT_TTL = 15 * 60
-IDLE_TTL = 3 * 60
+ATTEMPT_TTL = 20 * 60
+# Three minutes was too short for the thing this window exists for: finding a
+# phone, opening an email, reading a code back. The window closing under
+# someone mid-sign-in costs the whole attempt, which is worse than a browser
+# held for a few more minutes.
+IDLE_TTL = 8 * 60
 POLL_SECONDS = 1.5
 # How long one replayed path may hold the browser thread. Everything else the
 # creator does is queued behind it.
@@ -1207,6 +1211,14 @@ class Signer:
         finally:
             self.opened_at = 0.0
             self._ready.set()
+            # The probe owns the profile directory this signer ran on, and a
+            # signer that ends without removing it leaves a Chrome profile
+            # behind for the life of the instance -- on a filesystem that is
+            # this instance's memory.
+            try:
+                shutil.rmtree(probe._profile, ignore_errors=True)
+            except Exception:
+                pass
 
     def _open(self, context):
         cookies = _cookies_for(self.session)

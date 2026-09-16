@@ -32,26 +32,46 @@ steps:
       - -c
       - docker pull ${_AR_HOSTNAME}/$PROJECT_ID/${_AR_REPOSITORY}/$REPO_NAME/${_SERVICE_NAME}:latest || true
 
+  # An image for this commit already in the registry is the same image: the
+  # build is deterministic in the only thing that varies, which is the source.
+  # Rebuilding it costs several minutes on every retry and every second push of
+  # the same tree, which is most of them on a night spent deploying to test.
+  - name: gcr.io/cloud-builders/docker
+    id: Reuse
+    entrypoint: sh
+    args:
+      - -c
+      - |
+        # $$ is a shell variable here; a single $ would be read as one of
+        # Cloud Build's own substitutions and fail the build outright.
+        IMG=${_AR_HOSTNAME}/$PROJECT_ID/${_AR_REPOSITORY}/$REPO_NAME/${_SERVICE_NAME}:$COMMIT_SHA
+        if docker pull "$$IMG" >/dev/null 2>&1; then
+          echo "$$IMG is already built; skipping build and push"
+          touch /workspace/.reuse
+        fi
+
   - name: gcr.io/cloud-builders/docker
     id: Build
+    entrypoint: sh
     args:
-      - build
-      - -t
-      - ${_AR_HOSTNAME}/$PROJECT_ID/${_AR_REPOSITORY}/$REPO_NAME/${_SERVICE_NAME}:$COMMIT_SHA
-      - -t
-      - ${_AR_HOSTNAME}/$PROJECT_ID/${_AR_REPOSITORY}/$REPO_NAME/${_SERVICE_NAME}:latest
-      - --cache-from
-      - ${_AR_HOSTNAME}/$PROJECT_ID/${_AR_REPOSITORY}/$REPO_NAME/${_SERVICE_NAME}:latest
-      - -f
-      - Dockerfile
-      - .
+      - -c
+      - |
+        # Not `[ -f … ] && exit 0`: that is the last command, so its own false
+        # is the step's exit status and a build that should run fails instead.
+        if [ -f /workspace/.reuse ]; then exit 0; fi
+        IMG=${_AR_HOSTNAME}/$PROJECT_ID/${_AR_REPOSITORY}/$REPO_NAME/${_SERVICE_NAME}
+        docker build -t "$$IMG:$COMMIT_SHA" -t "$$IMG:latest" \
+          --cache-from "$$IMG:latest" -f Dockerfile .
 
   - name: gcr.io/cloud-builders/docker
     id: Push
+    entrypoint: sh
     args:
-      - push
-      - --all-tags
-      - ${_AR_HOSTNAME}/$PROJECT_ID/${_AR_REPOSITORY}/$REPO_NAME/${_SERVICE_NAME}
+      - -c
+      - |
+        if [ -f /workspace/.reuse ]; then exit 0; fi
+        docker push --all-tags \
+          ${_AR_HOSTNAME}/$PROJECT_ID/${_AR_REPOSITORY}/$REPO_NAME/${_SERVICE_NAME}
 
   # Every flag the service needs is repeated here, because this is a full
   # `run deploy` and a deploy that omits one resets it: no display means headless
@@ -77,11 +97,14 @@ steps:
       - --max-instances=1
       - --no-cpu-throttling
       - --session-affinity
-      - --memory=2Gi
+      # Two browsers at once is the normal case, not the exception: a sign-in
+      # window is open while the account's own signer page is held, and each is
+      # a Chrome with a profile on a filesystem that is also this container's
+      # memory. At 2Gi the second one ended the container, which reads from the
+      # app as "her browser answered nothing" moments after a sign-in.
+      - --cpu=2
+      - --memory=4Gi
       - --quiet
-
-images:
-  - ${_AR_HOSTNAME}/$PROJECT_ID/${_AR_REPOSITORY}/$REPO_NAME/${_SERVICE_NAME}:$COMMIT_SHA
 
 substitutions:
   _SERVICE_NAME: ai-model-chat-dev-browser

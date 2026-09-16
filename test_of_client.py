@@ -389,6 +389,20 @@ class ProvenRulesRefusalTest(unittest.TestCase):
                 of_client.call('acct-p', 'GET', '/api2/v2/users/me')
         self.assertIn('Reconnect', str(caught.exception))
 
+    def test_her_own_signatures_matching_makes_it_the_session(self):
+        """Proof for a visitor cannot clear a session; proof for her can. This
+        is the distinction that cost a creator hers."""
+        of_session.put('acct-r', dict(SESSION))
+        with mock.patch.object(of_client, '_once',
+                               side_effect=of_client.OnlyFansError(400, 'nope')), \
+                mock.patch.object(of_client, '_repair_identity',
+                                  return_value='refused'), \
+                mock.patch.object(of_rules, 'proven_signed_in', return_value=True):
+            with self.assertRaises(of_client.SignatureRefused) as caught:
+                of_client.call('acct-r', 'GET', '/api2/v2/users/me')
+        self.assertIn('Reconnect', str(caught.exception))
+        self.assertFalse(of_session.live('acct-r'))
+
     def test_a_session_just_cleared_is_not_sent_to_reconnect(self):
         """_repair_identity asking OnlyFans who she is and being refused the
         same way is proof the session is not at fault. Raising "reconnect the

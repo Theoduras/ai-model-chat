@@ -1302,6 +1302,145 @@ for _key, _base in _BASE_TIERS.items():
                                    'monthly_equiv': round(_annual_price / 12, 2)}
 del _key, _base, _annual_price
 
+# The homepage feature matrix. Every row resolves itself from a tier's
+# capabilities so the marketing copy cannot drift from what the plan actually
+# unlocks; detail() returns the per-tier line, or None when the tier lacks it.
+G1 = 'Persona & chat'
+G2 = 'Funnel, selling & platforms'
+G3 = 'Team & support'
+
+FEATURE_ROWS = [
+    (G1, 'AI persona builder',
+     lambda c: 'Visual builder: voice, backstory, archetype, warmth, escalation',
+     'Fill in a form \u2014 name, age, backstory, archetype, warmth, escalation '
+     'pace \u2014 and the system prompt behind every reply is written for you. '
+     'No prompt engineering, no code.'),
+    (G1, 'How many personas',
+     lambda c: ('Unlimited personas' if c['personas'] is None
+                else f"{c['personas']} persona" + ('' if c['personas'] == 1 else 's')),
+     'Every persona is her own character, with her own voice, photos, funnel and '
+     'connected account. Your plan sets how many you can run at once.'),
+    (G1, 'AI persona generation',
+     lambda c: 'Generate backstory, speech style, interests and triggers',
+     'Stuck on a backstory or a speech style? Generate it and keep editing what '
+     'you like. Interests and conversion triggers come out of the same pass.'),
+    (G1, 'AI image generation',
+     lambda c: ('Unlimited generations' if c['image_generations_month'] is None
+                else f"{c['image_generations_month']} generations a month"),
+     'Create on-brand photos of your persona from a description \u2014 her look, '
+     'her outfit, the setting \u2014 without booking a shoot.'),
+    (G1, 'Photo library',
+     lambda c: 'Unlimited uploads, SFW and NSFW sets, per-photo tagging',
+     'Upload your own sets and tag them SFW or NSFW. The funnel then picks the '
+     'right photo for the right moment in the conversation.'),
+    (G1, 'Outfit locking + media tagging',
+     lambda c: 'Keep her in one outfit per set and tag media for the funnel'
+     if c['outfit_lock'] else (False, 'Pro and up'),
+     'Pin a persona to one outfit so a whole set stays consistent, and tag media '
+     'so she never sends a fan the same photo twice.'),
+    (G1, 'Live chat engine',
+     lambda c: 'Memory of the fan, in-character replies, tone matching',
+     'She remembers what a fan told her, answers in character and matches his '
+     'tone, so the conversation reads like a person rather than a bot.'),
+    (G1, 'Test chat + shareable landing page',
+     lambda c: 'Talk to her yourself and send fans a hosted landing page',
+     'Talk to her yourself before any fan does, and send fans a hosted page '
+     'where they can start chatting straight away.'),
+    (G2, 'Funnel phases',
+     lambda c: (f"Up to {c['phases_max']} phases with per-phase photo rates"
+                if c['phases_max'] > 3
+                else f"Up to {c['phases_max']} phases + CTA"),
+     'The conversation moves through phases \u2014 warm, engage, tease, offer, '
+     'close \u2014 and you set the pace and the photo rate for each one.'),
+    (G2, 'Scheduled follow-ups',
+     lambda c: 'Win back fans who go quiet, on your schedule'
+     if c['scheduled_followups'] else (False, 'Pro and up'),
+     'Fans who go quiet get a message back in their inbox on the schedule you '
+     'choose, written in her voice rather than a template.'),
+    (G2, 'PPV engine',
+     lambda c: 'Price ladders, per-fan pricing and timed re-offers'
+     if c['platforms'] != [] else (False, 'Needs a connected platform'),
+     'Price ladders, per-fan pricing and timed re-offers: she prices the unlock '
+     'to the fan in front of her, and follows up when he hesitates.'),
+    (G2, 'Connected platforms',
+     lambda c: ((False, 'Needs a paid plan')
+                if c['platforms'] == [] else
+                'Fanvue, OnlyFans, Telegram, X and Threads'
+                if c['platforms'] is None else
+                ' or '.join(PLATFORM_NAMES.get(p, p.title())
+                            for p in c['platforms'])),
+     'Connect her account and she chats there directly \u2014 same persona, same '
+     'funnel, on every platform your plan covers.'),
+    (G2, 'Growth planner',
+     lambda c: 'Plan, draft and schedule posts that feed the funnel'
+     if c['platforms'] != [] else (False, 'Needs a connected platform'),
+     'Plan, draft and schedule the posts that pull new followers into the '
+     'funnel, without leaving the dashboard.'),
+    (G2, 'PPV reconciliation',
+     lambda c: 'Match sent PPVs against Fanvue earnings'
+     if c['ppv_reconcile'] else (False, 'Agency only'),
+     'Every PPV she sends is matched against your Fanvue earnings, so you can '
+     'see what actually converted instead of guessing.'),
+    (G2, 'Conversation + revenue analytics',
+     lambda c: 'Funnel stage per fan, conversion and revenue reporting'
+     if c['analytics'] else (False, 'Agency only'),
+     'See which funnel stage every fan sits in, where conversations stall, and '
+     'what each persona earns you per month.'),
+    (G3, 'Team seats',
+     lambda c: (f"{c['seats']} seats with roles" if c['seats'] > 1
+                else '1 seat'),
+     'Invite chatters or managers with their own logins and roles, instead of '
+     'passing one password around the team.'),
+    (G3, 'Support',
+     lambda c: {'demo': 'Email support', 'starter': 'Email support',
+                'pro': 'Priority support'}.get(c['_key'], 'Dedicated support'),
+     'How you reach us and how fast we come back to you \u2014 from email on '
+     'Starter to a named contact on Agency.'),
+]
+
+FEATURE_TIER_ORDER = DEFAULT_TIER_ORDER
+
+
+def _feature_id(label):
+    """Stable per-feature key for the inline page editor. Must stay inside
+    [A-Za-z0-9_-] — api_site_content_set drops anything else."""
+    return 'feat-' + re.sub(r'-+', '-', re.sub(r'[^a-z0-9]+', '-',
+                                               label.lower())).strip('-')
+
+
+def _feature_matrix():
+    out = {}
+    for key in FEATURE_TIER_ORDER:
+        tier = _BASE_TIERS[key]
+        caps = {**tier['capabilities'], '_key': key}
+        rows = []
+        for group, label, detail, explain in FEATURE_ROWS:
+            text = detail(caps)
+            included = not isinstance(text, tuple)
+            if not included:
+                text = text[1]
+            rows.append({'group': group, 'label': label,
+                         'id': _feature_id(label), 'explain': explain,
+                         'detail': text or '', 'included': included and bool(text)})
+        plats = caps['platforms']
+        out[key] = {'name': tier['name'], 'price': tier['price'],
+                    'blurb': tier['blurb'], 'features': rows,
+                    'highlights': [
+                        {'value': ('\u221e' if caps['personas'] is None
+                                   else str(caps['personas'])),
+                         'label': 'Personas'},
+                        {'value': ('5' if plats is None else str(len(plats))),
+                         'label': 'Platforms'},
+                        {'value': str(caps['phases_max']),
+                         'label': 'Funnel phases'},
+                        {'value': ('\u221e' if caps['image_generations_month'] is None
+                                   else str(caps['image_generations_month'])),
+                         'label': 'AI images / mo'},
+                        {'value': str(caps['seats']), 'label': 'Team seats'},
+                    ]}
+    return out
+
+
 OXAPAY_API = 'https://api.oxapay.com/v1/payment/invoice'
 STRIPE_API = 'https://api.stripe.com/v1'
 # Software as a service (SaaS) — business use. Required by Managed Payments.
@@ -2067,8 +2206,9 @@ FORGOT_PASSWORD_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UT
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
 <link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Reset your password</title>
-<style>""" + ACCOUNT_CSS + """</style></head><body data-page="login"><div class="wrap"><div class="card">
-<h1>Reset your password</h1><p class="sub">Enter your account email and we'll send a reset link.</p>
+<script src="/js/page-editor.js" defer></script>
+<style>""" + ACCOUNT_CSS + """</style></head><body data-page="forgot"><div class="wrap"><div class="card">
+<h1 data-edit-id="h1">Reset your password</h1><p class="sub" data-edit-id="sub">Enter your account email and we'll send a reset link.</p>
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
 {% if sent %}<div class="sub" style="margin-bottom:18px">If an account exists for {{ email }}, a reset link has been sent.
 {% if reset_link %}<br><br>SMTP isn't configured, so here's the link directly: <a href="{{ reset_link }}">{{ reset_link }}</a>{% endif %}
@@ -2076,7 +2216,7 @@ FORGOT_PASSWORD_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UT
 {% else %}
 <form method="post">
 <label>Email</label><input type="email" name="email" required autocomplete="email" value="{{ email or '' }}">
-<button type="submit">Send reset link</button></form>
+<button type="submit"><span data-edit-id="submit-text">Send reset link</span></button></form>
 {% endif %}
 <div class="alt"><a href="/login">Back to sign in</a></div>
 </div></div></body></html>"""
@@ -2085,12 +2225,13 @@ RESET_PASSWORD_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
 <link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Choose a new password</title>
-<style>""" + ACCOUNT_CSS + """</style></head><body data-page="login"><div class="wrap"><div class="card">
-<h1>Choose a new password</h1>
+<script src="/js/page-editor.js" defer></script>
+<style>""" + ACCOUNT_CSS + """</style></head><body data-page="reset"><div class="wrap"><div class="card">
+<h1 data-edit-id="h1">Choose a new password</h1>
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
 <form method="post">
 <label>New password</label><input type="password" name="password" required autocomplete="new-password" placeholder="At least 8 characters">
-<button type="submit">Set new password</button></form>
+<button type="submit"><span data-edit-id="submit-text">Set new password</span></button></form>
 <div class="alt"><a href="/login">Back to sign in</a></div>
 </div></div></body></html>"""
 
@@ -2131,7 +2272,7 @@ plan is active{% if user.expires_at %} until {{ user.expires_at[:10] }}{% endif 
 <button type="button" class="active" data-set-period="month">Monthly</button>
 <button type="button" data-set-period="year">Annual <span class="save">Save {{ annual_save_pct }}%</span></button>
 </div>
-<p class="permo" style="margin:2px 0 10px">All prices exclude VAT — any VAT due is added at checkout. Card plans renew automatically and can be cancelled any time from your account. Crypto payments are one-off — you re-pay when the plan runs out.</p>
+<p class="permo" style="margin:2px 0 10px" data-edit-id="vat-note">All prices exclude VAT — any VAT due is added at checkout. Card plans renew automatically and can be cancelled any time from your account. Crypto payments are one-off — you re-pay when the plan runs out.</p>
 {% set pay_slots = [(1 if stripe_enabled else 0) + (1 if oxapay_enabled else 0)
                     + (1 if dev_mode else 0), 1]|max %}
 <div class="tiers" role="radiogroup" aria-label="Plans">
@@ -2258,6 +2399,7 @@ DEMO_ENDS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png">
 <title>This is where the demo ends</title>
 <script src="/js/analytics.js" defer></script>
+<script src="/js/page-editor.js" defer></script>
 <style>""" + ACCOUNT_CSS + """
 .lockart{width:64px;height:64px;border-radius:18px;display:flex;align-items:center;justify-content:center;
   background:var(--grad);background-size:300% 100%;margin:0 auto 18px}
@@ -2274,18 +2416,18 @@ DEMO_ENDS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 </style></head><body data-page="demo-ends"><div class="wrap"><div class="card" style="text-align:center">
 <div class="lockart"><svg viewBox="0 0 24 24" aria-hidden="true">
 <rect x="4" y="10.5" width="16" height="10" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></svg></div>
-<h1 style="margin-bottom:6px">This is where the demo ends</h1>
-<p class="sub">Connecting {{ platform_name }} is the paid half of Velvetfunnel. The demo
+<h1 style="margin-bottom:6px" data-edit-id="h1">This is where the demo ends</h1>
+<p class="sub" data-edit-id="sub">Connecting {{ platform_name }} is the paid half of Velvetfunnel. The demo
 gives you the persona, the funnel and the whole builder, with nothing capped &mdash; it
 stops at the moment she would start talking to your real fans and taking their money.</p>
 <ul class="steps">
-<li>Build as many personas as you like in here. Nothing runs out.</li>
-<li>Starter connects her to Fanvue and turns on the full PPV engine.</li>
-<li>{{ currency }}{{ starter_price }}/month, excl. VAT. Cancel any time.</li>
+<li data-edit-id="step-1">Build as many personas as you like in here. Nothing runs out.</li>
+<li data-edit-id="step-2">Starter connects her to Fanvue and turns on the full PPV engine.</li>
+<li>{{ currency }}{{ starter_price }}<span data-edit-id="step-3">/month, excl. VAT. Cancel any time.</span></li>
 </ul>
-<a class="btn" href="/register">Create your own account</a>
-<a class="ghostbtn" href="/pricing">See what the plans cost</a>
-<p class="kept">The demo is a shared account, so build in your own to keep your work.</p>
+<a class="btn" href="/register"><span data-edit-id="cta-primary">Create your own account</span></a>
+<a class="ghostbtn" href="/pricing"><span data-edit-id="cta-secondary">See what the plans cost</span></a>
+<p class="kept" data-edit-id="kept">The demo is a shared account, so build in your own to keep your work.</p>
 </div></div></body></html>"""
 
 
@@ -3582,6 +3724,13 @@ def api_pricing():
                     'custom': CUSTOM_TIER, 'currency': CURRENCY_SYMBOL})
 
 
+@app.route('/api/features')
+def api_features():
+    """Public: the homepage feature matrix, resolved per tier."""
+    return jsonify({'order': FEATURE_TIER_ORDER, 'tiers': _feature_matrix(),
+                    'currency': CURRENCY_SYMBOL})
+
+
 @app.route('/pricing')
 def pricing():
     user = _current_user() or {'email': '', 'status': 'unpaid', 'tier': '',
@@ -4119,7 +4268,8 @@ def landing():
 # Inline text/image editing for the plain marketing pages (not the persona
 # landing page, not the dashboard) — see js/page-editor.js. One JSON blob per
 # page, keyed by the data-edit-id an operator clicked on.
-SITE_CONTENT_PAGES = {'home', 'login', 'register', 'pricing'}
+SITE_CONTENT_PAGES = {'home', 'login', 'register', 'pricing', 'landing',
+                      'blog', 'blogpost', 'demo-ends', 'forgot', 'reset'}
 
 
 @app.route('/api/site-content/<page>')
@@ -16700,6 +16850,19 @@ class _OnlyFansPlatform(_Platform):
         """
         if not (_of_direct() and self.connected(persona)):
             return ''
+        account = _of_account(persona)
+        # A session opened before the exit address was fixed is bound to
+        # whichever pool address Cloud Run happened to use that minute, and
+        # every request for it now leaves from a different one. OnlyFans
+        # refuses that, and it reads as a dead session — which it is, in the
+        # only sense that matters: no amount of waiting repairs it.
+        if (os.getenv('ONLYFANS_PROXY_TEMPLATE') or '').strip() and account:
+            if not (of_session.get(account) or {}).get('proxy'):
+                return ('Her session was captured before this deployment had a '
+                        'fixed exit address, so it is bound to an address her '
+                        'requests no longer come from — OnlyFans refuses it '
+                        'whatever we sign. Reconnect the account and the new '
+                        'session keeps the fixed address.')
         waiting = (OF.held() or {}).get(_of_account(persona))
         if waiting:
             return ('OnlyFans refused her last request, so the rest are being '
@@ -16755,6 +16918,47 @@ OF_CAPTURE_EVERY = 600
 OF_SAMPLE_STALE = 900
 
 
+_of_signin_seen = [0.0]
+# How long after the last thing she did in the sign-in window the repair keeps
+# out of the way. Longer than a page load, shorter than the attempt's own life.
+OF_SIGNIN_QUIET = 300
+
+
+def _of_signin_active():
+    return time.time() - _of_signin_seen[0] < OF_SIGNIN_QUIET
+
+
+def _of_egress_ip(account=''):
+    """The address OnlyFans sees us from, and whether it is the fixed one.
+
+    A session is bound to the IP it was opened on, so a sign-in in one service
+    and a request from another is refused however well it is signed — which is
+    indistinguishable from a dead session unless something actually looks.
+    """
+    import urllib.request as _req
+    out = {'proxy_configured': bool((os.getenv('ONLYFANS_PROXY_TEMPLATE') or '').strip())}
+    proxy = _of_proxy_for(account, '') if account else \
+        (os.getenv('ONLYFANS_PROXY_TEMPLATE') or '').strip()
+    out['proxy'] = of_session._proxy_label(proxy) if proxy else ''
+    for label, through in (('direct', ''), ('proxy', proxy)):
+        if label == 'proxy' and not proxy:
+            continue
+        try:
+            opener = OF._opener(through) if hasattr(OF, '_opener') else _req.build_opener()
+            with opener.open('https://api.ipify.org?format=json', timeout=8) as r:
+                out[label] = json.loads(r.read().decode())['ip']
+        except Exception as e:
+            out[label] = 'failed: ' + str(e)[:120]
+    return out
+
+
+def _of_signin_touch():
+    """Called from the connect routes. The repair opens browsers of its own,
+    and this service holds one instance: a derivation launching Chrome beside
+    her sign-in window is how the window came to disappear under her."""
+    _of_signin_seen[0] = time.time()
+
+
 def _of_autocapture(force=False):
     """Get a signature off OnlyFans' own page when there is no usable one.
 
@@ -16782,6 +16986,10 @@ def _of_autocapture(force=False):
         # A stored sample that is ours keeps proven() lying, and the capture
         # below is the only thing that can replace it.
         of_rules.drop_sample()
+    if _of_signin_active():
+        of_trace.note('repair', 'a sign-in is open, so the repair is waiting '
+                      'rather than opening a browser beside it')
+        return False
     try:
         build = _of_browser_build()
         if not (build.get('up') and build.get('signing_capture')):
@@ -16912,6 +17120,10 @@ def _of_collect_signatures(want):
     conn = _of_conn()
     if not hasattr(conn, 'sample_now'):
         return 0
+    if _of_signin_active():
+        of_trace.note('repair', 'a sign-in is open, so signatures are not being '
+                      'collected beside it')
+        return 0
     added = 0
     for _ in range(max(0, min(int(want), OF_COLLECT_MAX))):
         try:
@@ -16971,6 +17183,25 @@ def _of_solve_recipe(param, sample):
     of_trace.note('repair', 'solved the signing rules from %d captured '
                   'signatures, revision %s'
                   % (len(signatures), rules.get('revision') or ''))
+    # Which of them the solved recipe actually reproduces, split by whether
+    # anyone was signed in. A recipe solved from visitor signatures alone is
+    # the case we cannot tell from "signing works" without saying so: the
+    # solver drops signatures it cannot fit rather than failing on them.
+    hers = [sig for sig in signatures
+            if str(sig.get('user_id') or '0') not in ('', '0')]
+    if not hers:
+        of_trace.note('repair', 'every signature it solved from was taken with '
+                      'nobody signed in, so this proves signing for a visitor '
+                      'and cannot speak for her own requests', 'warning')
+    else:
+        fit = [sig for sig in hers if of_rules.verify(sig, rules) is True]
+        of_trace.note('repair', 'it reproduces %d of %d signatures OnlyFans made '
+                      'while signed in%s' % (
+                          len(fit), len(hers),
+                          ', so signing is right for her requests too and a '
+                          'refusal is her session' if len(fit) == len(hers) else
+                          ' — signing is right for a visitor and wrong for her'),
+                      '' if len(fit) == len(hers) else 'warning')
     logger.info('solved OnlyFans signing rules from %d signatures (revision %s)',
                 len(signatures), rules.get('revision') or '')
     return True
@@ -17091,6 +17322,7 @@ if _of_direct():
     of_rules.cache_hooks(lambda: _get_setting('onlyfans_rules_cache') or '',
                          lambda v: _set_setting('onlyfans_rules_cache', v))
     of_rules.override_hooks(lambda: _get_setting('onlyfans_rules_override') or '')
+    of_rules.signature_hooks(_of_signatures)
     of_rules.sample_hooks(lambda: _get_setting('onlyfans_rules_sample') or '',
                           lambda v: _set_setting('onlyfans_rules_sample', v))
     of_session.store_hooks(lambda a: _get_setting(f'onlyfans_vault_{a}') or '',
@@ -17118,6 +17350,17 @@ if _of_direct():
 
     of_rules.signer_hooks(_of_page_sign)
 
+    _of_transport_state = ['']
+
+    def _of_transport_note(state, why):
+        """Say which way requests are leaving, once per change rather than per
+        request. Whether her own browser carries them decides whether signing
+        matters at all, and it was readable only from the code before."""
+        if _of_transport_state[0] == state:
+            return
+        _of_transport_state[0] = state
+        of_trace.note('transport', why, '' if state == 'page' else 'warning')
+
     def _of_page_request(account, session, method, path, body):
         """Make the whole request in her browser, not just the signature.
 
@@ -17130,11 +17373,16 @@ if _of_direct():
         """
         conn = _of_conn()
         if not hasattr(conn, 'request_for'):
+            _of_transport_note('local', 'this browser service cannot carry whole '
+                               'requests, so we sign them here')
             return None
         # Asked before every request, so it has to be the cached answer: a
         # browser service that is down answers a request by timing out, and
         # three of those in front of every round is slower than not having it.
         if conn is not of_connect and not _of_browser_build().get('page_requests'):
+            _of_transport_note('local', 'the browser service is on a build that '
+                               'cannot carry whole requests, so we sign them here '
+                               '— redeploy it and her own page signs instead')
             return None
         try:
             got = conn.request_for(account, session, method, path, body,
@@ -17144,7 +17392,12 @@ if _of_direct():
                           % (method, path[:60], str(e)[:140]), 'warning')
             return None
         if not got.get('status'):
+            _of_transport_note('local', 'her browser did not answer, so this '
+                               'request was signed here instead')
             return None
+        _of_transport_note('page', 'her requests are going out through her own '
+                           'browser — OnlyFans signs them, so a rotation cannot '
+                           'stop them')
         return got
 
     OF.transport_hooks(_of_page_request)
@@ -17302,6 +17555,10 @@ def _of_browser_build():
             info['page_requests'] = bool(health.get('page_requests'))
             info['build'] = health.get('build') or ''
             info['mine'] = of_trace.build_id()
+            # What her page is actually doing over there. A signer that died
+            # reads as "her browser answered nothing" from this side, which
+            # names the symptom and not one cause.
+            info['signers'] = health.get('signers') or []
         except Exception as e:
             info['error'] = str(e)[:120]
     _of_build_cache.update({'at': now, 'info': info})
@@ -17354,6 +17611,7 @@ def onlyfans_connect_page():
 @platform_scoped
 def api_onlyfans_connect_browser():
     """Open a browser on onlyfans.com for this creator to sign in through."""
+    _of_signin_touch()
     d = request.json or {}
     persona = (d.get('persona') or '').strip()
     if not persona:
@@ -17390,6 +17648,7 @@ def api_onlyfans_connect_frame():
     """The browser as it looks right now. Polled a few times a second while the
     creator is typing, so it answers with the last frame rather than waiting for
     a fresh one."""
+    _of_signin_touch()
     try:
         attempt = _of_conn().get((request.args.get('attempt') or '').strip(), frame=True) \
             if _of_direct() else None
@@ -17414,6 +17673,7 @@ def api_onlyfans_connect_frame():
 @platform_scoped
 def api_onlyfans_connect_input():
     """One click, keystroke or scroll, forwarded to the browser."""
+    _of_signin_touch()
     d = request.json or {}
     kind = (d.get('kind') or '').strip()
     if kind not in of_connect.INPUT_KINDS:
@@ -17483,6 +17743,7 @@ def _of_adopt_direct(attempt):
 @app.route('/api/onlyfans/connect/start', methods=['POST'])
 @platform_scoped
 def api_onlyfans_connect_start():
+    _of_signin_touch()
     d = request.json or {}
     persona = (d.get('persona') or '').strip()
     if not persona:
@@ -17540,6 +17801,7 @@ def api_onlyfans_connect_status():
 @platform_scoped
 def api_onlyfans_connect_code():
     """The 2FA code, or word that the browser face check is finished."""
+    _of_signin_touch()
     d = request.json or {}
     persona = (d.get('persona') or '').strip()
     attempt = _of_attempt(persona)
@@ -17800,6 +18062,67 @@ def api_onlyfans_signing_collect():
     return jsonify({'ok': True, 'added': added, 'held': held, 'need': need,
                     'revision': revision, 'errors': errors,
                     'rules': of_rules.state()})
+
+
+@app.route('/api/onlyfans/transport/test', methods=['POST'])
+@operator_only
+def api_onlyfans_transport_test():
+    """Does a request go out through her own browser, and does it work?
+
+    The signing panel answers a different question — whether our arithmetic
+    matches OnlyFans'. When her page carries the whole request there is no
+    arithmetic involved at all, so this is the one that says whether chat and
+    PPV can work right now.
+    """
+    if not _of_direct():
+        return jsonify({'ok': False, 'error': 'not running the direct transport'}), 400
+    persona = ((request.json or {}).get('persona') or '').strip()
+    account = _of_account(persona) or next(iter(_of_connected_accounts()), '')
+    if not account:
+        return jsonify({'ok': False, 'error': 'no account connected'}), 400
+    build = _of_browser_build()
+    conn = _of_conn()
+    ready = bool(hasattr(conn, 'request_for')
+                 and (conn is of_connect or build.get('page_requests')))
+    out = {'ok': True, 'ready': ready, 'account': account,
+           'browser': bool(build.get('up')), 'build': build.get('build', '')}
+    if not ready:
+        out['problem'] = ('the browser service cannot carry whole requests on '
+                          'this build, so every request is signed here and a '
+                          'rotation stops her — redeploy it')
+        return jsonify(out)
+    session = of_session.get(account)
+    try:
+        got = conn.request_for(account, session, 'GET', '/api2/v2/users/me',
+                               None, proxy=_of_proxy_for(account, '')) or {}
+    except Exception as e:
+        out['error'] = str(e)[:300]
+        return jsonify(out)
+    body = got.get('body') if isinstance(got.get('body'), dict) else {}
+    out['status'] = got.get('status')
+    out['username'] = str(body.get('username') or '')
+    out['worked'] = bool(out['username'])
+    out['signers'] = _of_browser_build().get('signers') or []
+    if not out['worked'] and got.get('status'):
+        out['problem'] = ('her page answered %s — the request left through her '
+                          'browser, so this is her session or the page, not '
+                          'signing' % got['status'])
+    elif not out['worked']:
+        # No status at all: the page never answered, which is a browser that
+        # never opened or one that died holding the request. The service's own
+        # account of its signers is the only thing that separates those.
+        hers = next((sig for sig in out['signers']
+                     if sig.get('account') == account), {})
+        out['problem'] = ('her browser never answered. ' + (
+            'Her signer is not open: ' + (hers.get('fatal') or hers.get('error')
+                                          or 'no reason recorded')
+            if hers and not hers.get('live') else
+            'Her signer says it is open, so the request timed out inside it'
+            if hers else
+            'No signer exists for her, so the browser could not be started — '
+            'the usual cause is the service running out of memory while a '
+            'sign-in browser is also open'))
+    return jsonify(out)
 
 
 @app.route('/api/onlyfans/signing/test', methods=['POST'])
@@ -18139,6 +18462,23 @@ def api_diag():
                 out['probe'] = _of_conn().probe_now(proxy=_of_proxy_for('', ''))
             except Exception as e:
                 out['probe'] = {'error': str(e)[:200]}
+        # Everything the signing repair reasons from, in one paste, so a
+        # rotation can be diagnosed and solved offline (of_replay.py) rather
+        # than through a deploy and a sign-in. No credentials: a signature is a
+        # hash of a path, a timestamp and an account id.
+        if request.args.get('egress'):
+            out['egress'] = _of_egress_ip(request.args.get('account') or '')
+        if request.args.get('export'):
+            out['export'] = {
+                'sample': of_rules.sample(),
+                'signatures': _of_signatures(),
+                'rules': of_rules.rules(),
+                'override': of_rules.override(),
+                'state': of_rules.state(),
+                'sources': {of_rules.label_of(url): of_rules._candidates.get(url)
+                            for url in of_rules.RULES_SOURCES
+                            if of_rules._candidates.get(url)},
+            }
         try:
             out['onlyfans'] = _of_watch_payload(
                 int(request.args.get('after') or 0),
