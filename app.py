@@ -10384,7 +10384,13 @@ def api_x_callback():
         with urllib.request.urlopen(req, timeout=10) as r:
             token_data = json.loads(r.read())
     except url_error.HTTPError as e:
-        err = json.loads(e.read()).get('error_description', str(e))
+        try:
+            err = json.loads(e.read()).get('error_description', str(e))
+        except Exception:
+            err = str(e)
+        if 'authorization header' in err.lower() and 'Authorization' not in _x_token_headers():
+            err += (' — your X app is a confidential client, so paste its '
+                    'Client Secret in the connect panel and authorize again')
         return jsonify({'ok': False, 'error': f'X token exchange failed: {err}'}), 400
 
     # Get user info
