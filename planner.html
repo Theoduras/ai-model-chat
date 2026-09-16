@@ -127,6 +127,8 @@
                 style="color:var(--err); border-color:var(--err);"
                 onclick="plDeletePost(this)">Delete</button>
         <button type="button" class="btn btn-ghost" onclick="plClose()">Close</button>
+        <button type="button" class="btn btn-secondary" id="pl-m-now"
+                onclick="plSave(this, true)">Post now</button>
         <button type="button" class="btn btn-primary" id="pl-m-save" onclick="plSave(this)">Save changes</button>
       </div>
     </div>
@@ -709,6 +711,7 @@ function plNew() {
   const save = document.getElementById('pl-m-save');
   save.style.display = '';
   save.textContent = 'Add to the week';
+  document.getElementById('pl-m-now').style.display = '';
 
   plRenderChans();
   plRenderFanvue('', 0);
@@ -827,6 +830,10 @@ function plEdit(kind, idx) {
     (kind === 'queued' && row.status !== 'sending') ? '' : 'none';
   const save = document.getElementById('pl-m-save');
   save.style.display = editable ? '' : 'none';
+  // An existing row already has a slot; Post now belongs to something being
+  // written, not to moving a booked post forward.
+  document.getElementById('pl-m-now').style.display =
+    (kind === 'proposed' && plOpen.publishable) ? '' : 'none';
   save.textContent = kind === 'proposed'
     ? (publishable ? 'Queue it' : 'Add to the week') : 'Save changes';
 
@@ -1041,12 +1048,18 @@ function plCopy(btn) {
   else { ta.select(); document.execCommand('copy'); done(); }
 }
 
-async function plSave(btn) {
+async function plSave(btn, now) {
   if (!plOpen) return;
   const text = document.getElementById('pl-m-text').value.trim();
-  const at = fromLocalInput(document.getElementById('pl-m-when').value);
+  // Posting now still writes a row, so the week shows what went out and when;
+  // it just does not wait for the slot.
+  const at = now ? Math.floor(Date.now() / 1000)
+                 : fromLocalInput(document.getElementById('pl-m-when').value);
   if (!text) { alert('Nothing to post.'); return; }
   if (!at) { alert('That is not a time.'); return; }
+  if (now && !confirm('Post this to '
+      + plOpenChans().map(p => PL_LABELS[p] || p).join(' and ')
+      + ' right now?')) return;
 
   const fv = plFanvueFields();
   if (fv && fv.price_cents && !plPickedMedia.length) {
@@ -1059,14 +1072,14 @@ async function plSave(btn) {
 
   btn.disabled = true;
   const was = btn.textContent;
-  btn.textContent = 'saving…';
+  btn.textContent = now ? 'posting…' : 'saving…';
   try {
     let res;
     if (plOpen.kind === 'new') {
       res = await fetch('/api/growth/queue', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ persona: plSlug, platforms: plChans, text: text,
-                               run_at: at, media_ids: plPickedMedia,
+                               run_at: at, now: !!now, media_ids: plPickedMedia,
                                ...(fv || {}) })
       });
     } else if (plOpen.kind === 'proposed') {
@@ -1077,14 +1090,14 @@ async function plSave(btn) {
       res = await fetch('/api/growth/queue', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ persona: plSlug, platform: plOpen.platform, text: text,
-                               run_at: at, media_ids: plPickedMedia,
+                               run_at: at, now: !!now, media_ids: plPickedMedia,
                                ...(fv || {}) })
       });
     } else {
       res = await fetch('/api/growth/queue', {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ persona: plSlug, id: plOpen.id, text: text,
-                               run_at: at, media_ids: plPickedMedia,
+                               run_at: at, now: !!now, media_ids: plPickedMedia,
                                ...(fv || {}) })
       });
     }
@@ -1098,6 +1111,9 @@ async function plSave(btn) {
     // Queued, but it cannot go out as things stand — said now rather than at
     // the slot, where it would just be a failed row.
     if (d.warning) alert(d.warning);
+    if (now && (d.sent || []).length) {
+      alert('Posted to ' + d.sent.map(x => PL_LABELS[x.platform] || x.platform).join(' and ') + '.');
+    }
     if (plOpen.kind === 'proposed') plProposed.splice(plOpen.idx, 1);
     plClose();
     plLoadQueue();

@@ -7183,6 +7183,46 @@ def _growth_remote_rows(persona, since, until, rows):
     return out, ''
 
 
+def _growth_send_now(persona, queued):
+    """Publish rows that were just queued, instead of waiting for their slot.
+    Goes through claim_post/finish_post exactly as the worker does, so a post
+    the worker is already holding is never sent twice and the row ends in the
+    same states the calendar knows how to draw."""
+    from db import SessionLocal, ScheduledPost, claim_post, finish_post, post_media_ids
+    sent, failed = [], []
+    sdb = SessionLocal()
+    try:
+        for q in queued:
+            plat = q['platform']
+            if q['status'] != 'queued':
+                failed.append({'platform': plat,
+                               'error': 'This channel has no posting API, so it '
+                                        'stays on the calendar to post by hand.'})
+                continue
+            row = sdb.query(ScheduledPost).filter(ScheduledPost.id == q['id']).first()
+            if not row or not claim_post(sdb, row.id):
+                failed.append({'platform': plat, 'error': 'It is already on its way.'})
+                continue
+            try:
+                posted_id = _growth_publish(persona, plat, row.text, row.media_id or '',
+                                            audience=row.audience or '',
+                                            price_cents=int(row.price_cents or 0),
+                                            media_ids=post_media_ids(row))
+                finish_post(sdb, row.id, external_id=posted_id)
+                sent.append({'platform': plat, 'id': row.id, 'external_id': posted_id})
+                logger.info('QUEUE posted now [%s/%s] id=%s', persona, plat, posted_id)
+            except Exception as e:
+                # No retry ladder here: someone is watching this one, and a row
+                # that quietly retries in ten minutes is not "post now".
+                finish_post(sdb, row.id, error=str(e))
+                failed.append({'platform': plat, 'error': str(e)[:200]})
+                logger.warning('QUEUE post-now failed [%s/%s]: %s', persona, plat, str(e)[:200])
+            sdb.commit()
+    finally:
+        sdb.close()
+    return sent, failed
+
+
 def _growth_scope_warning(persona, platforms):
     """Whether this connection can actually publish what is being queued. A
     Fanvue post needs write:post, which every connection made before feed
@@ -7377,9 +7417,13 @@ def api_growth_queue():
         logger.info('QUEUE added [%s] %s for %s: %s', persona,
                     ','.join(q['platform'] for q in queued), run_at.isoformat(),
                     (data.get('text') or '')[:60])
+        sent = []
+        if data.get('now'):
+            sent, now_failed = _growth_send_now(persona, queued)
+            failed = failed + now_failed
         return jsonify({'ok': True, 'id': queued[0]['id'], 'queued': queued,
-                        'failed': failed,
-                        'warning': _growth_scope_warning(persona, wanted),
+                        'sent': sent, 'failed': failed,
+                        'warning': '' if sent else _growth_scope_warning(persona, wanted),
                         'queue': _growth_queue_rows(persona)})
 
     if request.method == 'PATCH':
