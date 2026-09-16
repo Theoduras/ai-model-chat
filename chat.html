@@ -150,9 +150,12 @@ const ONLY = params.get('only') === '1';
 // The dashboard embeds this as the creator's own test chat and wants the
 // picker, which an embed otherwise hides.
 const PICKER = params.get('picker') === '1';
+// A direct shareable link (embed-setup's "Direct link") wants the same
+// clean, rail-free chrome as an iframed embed, but is opened top-level.
+const EMBED = params.get('embed') === '1';
 let PFX = 'persona_' + persona + '_';
 
-if (window.self !== window.top && !PICKER) { document.body.classList.add('embed'); }
+if ((EMBED || window.self !== window.top) && !PICKER) { document.body.classList.add('embed'); }
 if (DEMO) document.body.classList.add('demo');
 
 function applyPersonaConfig(cfg) {
