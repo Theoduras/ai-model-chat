@@ -17369,6 +17369,45 @@ def api_onlyfans_signing_capture():
     return jsonify({'ok': True, 'rules': of_rules.state()})
 
 
+def _of_signed_in_signature(account):
+    """Do we sign a request as *her* the way OnlyFans' own page does?
+
+    The oracle is captured with nobody signed in, so it proves the rules for a
+    visitor. A refusal of every signed-in request while that proof holds is
+    precisely the case it cannot speak to -- and the page can, by signing the
+    same path with her id beside us. Carries no credentials: an id and two
+    hashes.
+    """
+    if not (_of_direct() and account):
+        return {'checked': False}
+    conn = _of_conn()
+    if not hasattr(conn, 'sign_now'):
+        return {'checked': False}
+    user_id = str((of_session.get(account) or {}).get('user_id') or '')
+    if not user_id:
+        return {'checked': False}
+    path = '/api2/v2/users/me'
+    try:
+        theirs = conn.sign_now(path, user_id=user_id,
+                              proxy=_of_proxy_for('', '')) or {}
+    except Exception as e:
+        return {'checked': False, 'error': str(e)[:160]}
+    if not (theirs.get('sign') and theirs.get('time')):
+        return {'checked': False, 'error': 'the page signed nothing'}
+    ours, _ = of_rules.sign(path, user_id, when=int(theirs['time']))
+    same = ours == theirs['sign']
+    return {'checked': True, 'same': same, 'user_id': user_id,
+            'ours': ours, 'theirs': theirs['sign'],
+            'note': ('our signature for her own request matches the one '
+                     "OnlyFans' page makes, so signing is right for a signed-in "
+                     'request too — what OnlyFans refuses is the session'
+                     if same else
+                     'our signature for her own request differs from the one '
+                     "OnlyFans' page makes, though both match when nobody is "
+                     'signed in — the rules are wrong for a signed-in request, '
+                     'and her session is not the problem')}
+
+
 @app.route('/api/onlyfans/signing/collect', methods=['POST'])
 @operator_only
 def api_onlyfans_signing_collect():
@@ -17431,7 +17470,12 @@ def api_onlyfans_signing_test():
             live = {'ok': False, 'error': str(e)[:300]}
     build = _of_browser_build()
     can_capture = bool(build.get('up') and build.get('signing_capture'))
+    signed_in = _of_signed_in_signature(account)
+    if signed_in.get('checked'):
+        of_trace.note('repair', signed_in['note'],
+                      '' if signed_in.get('same') else 'warning')
     return jsonify({'ok': True, 'has_sample': bool(want), 'candidates': rows,
+                    'signed_in': signed_in,
                     'sample_age': of_rules.sample_age(), 'can_capture': can_capture,
                     'server_call': live, 'rules': of_rules.state()})
 

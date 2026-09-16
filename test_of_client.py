@@ -380,14 +380,28 @@ class ProvenRulesRefusalTest(unittest.TestCase):
         of_rules.proven = self.proven
         of_rules.stale_response = self.stale
 
-    def test_the_account_is_marked_expired_so_the_watcher_stops(self):
+    def test_a_dead_session_is_reported_as_one(self):
         of_session.put('acct-p', dict(SESSION))
         with mock.patch.object(of_client, '_once',
                                side_effect=of_client.OnlyFansError(400, 'nope')), \
-                mock.patch.object(of_client, '_repair_identity', return_value=False):
-            with self.assertRaises(of_client.SignatureRefused):
+                mock.patch.object(of_client, '_repair_identity', return_value='dead'):
+            with self.assertRaises(of_client.SignatureRefused) as caught:
                 of_client.call('acct-p', 'GET', '/api2/v2/users/me')
-        self.assertFalse(of_session.live('acct-p'))
+        self.assertIn('Reconnect', str(caught.exception))
+
+    def test_a_session_just_cleared_is_not_sent_to_reconnect(self):
+        """_repair_identity asking OnlyFans who she is and being refused the
+        same way is proof the session is not at fault. Raising "reconnect the
+        account" there cost her a working session to tell her nothing."""
+        of_session.put('acct-q', dict(SESSION))
+        with mock.patch.object(of_client, '_once',
+                               side_effect=of_client.OnlyFansError(400, 'nope')), \
+                mock.patch.object(of_client, '_repair_identity',
+                                  return_value='refused'):
+            with self.assertRaises(of_client.SigningStale) as caught:
+                of_client.call('acct-q', 'GET', '/api2/v2/users/me')
+        self.assertIn('not the problem', str(caught.exception))
+        self.assertTrue(of_session.live('acct-q'))
 
 
 class StaleSigningRefusalTest(unittest.TestCase):

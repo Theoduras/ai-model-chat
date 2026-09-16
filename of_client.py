@@ -295,7 +295,12 @@ def _repair_identity(account, session):
     `auth_id` cookie, taken at a moment when our own /users/me could not be
     signed. Now that the rules are proven, that request works, so ask it once:
     a different id is the bug and is worth fixing in place, and no answer at all
-    means the session really is dead. Returns True when the caller should retry.
+    means the session really is dead.
+
+    Returns 'retry' when the caller should try again, 'dead' when the session is
+    the problem, and 'refused' when it is provably not -- the three are not
+    interchangeable, and collapsing the last two into False is what sent a
+    creator to reconnect a session this function had just cleared.
     """
     _wait_turn(account)
     try:
@@ -308,20 +313,22 @@ def _repair_identity(account, session):
             # her the session she has for nothing.
             logger.warning('OnlyFans refuses even /users/me while the rules are '
                            'proven current — not blaming the session for %s', account)
-            return False
+            return 'refused'
         of_session.mark_expired(account, 'OnlyFans refused this session while the '
                                          'signing rules were current: ' + str(e.detail)[:120])
-        return False
+        return 'dead'
     if not (isinstance(who, dict) and who.get('id')):
         of_session.mark_expired(account, 'OnlyFans did not say who this session is')
-        return False
+        return 'dead'
     of_session.update(account, verified=True, user_id=str(who['id']))
     if str(who['id']) == str(session.get('user_id') or ''):
-        return False
+        # /users/me answered, so nothing here is broken enough to explain the
+        # refusal that got us here. Not the session either.
+        return 'refused'
     logger.warning('OnlyFans session for %s had the wrong user id (%s, really %s) — fixed',
                    account, session.get('user_id'), who['id'])
     session['user_id'] = str(who['id'])
-    return True
+    return 'retry'
 
 
 def call(account, method, path, body=None):
@@ -384,15 +391,29 @@ def _attempts(account, method, path, body, session):
                     if attempt < OF_MAX_RETRIES - 1 and not proven_retried:
                         proven_retried = True
                         continue
-                    if _repair_identity(account, session):
+                    outcome = _repair_identity(account, session)
+                    if outcome == 'retry':
                         continue
-                    # Rules the oracle proves current, and OnlyFans still
-                    # refuses: whatever is being rejected, it is not the
-                    # signature. That is a revoked session, and recording it as
-                    # one is what stops the watcher and puts the reconnect in
-                    # front of the creator -- without it the same refusal was
-                    # repeated every minute for as long as the account lived.
-                    of_session.mark_expired(account, e.detail)
+                    if outcome == 'refused':
+                        # Everything we can check says this is fine: the rules
+                        # reproduce a signature OnlyFans made, and the session
+                        # answers for itself. Whatever is being rejected is
+                        # something every request carries, and a reconnect
+                        # would cost her a working session to find that out.
+                        #
+                        # The proof is worth reading closely: it is a signature
+                        # from a page with nobody signed in, so it proves the
+                        # rules for a logged-out request. This refusal is what
+                        # it looks like when that proof does not carry over.
+                        raise SigningStale(
+                            e.code, 'OnlyFans refuses her requests while the rules '
+                                    'reproduce a signature from its own logged-out '
+                                    'page — so the rules are right for a visitor and '
+                                    'something about a signed-in request is not. Her '
+                                    'session is not the problem and reconnecting will '
+                                    'not fix it.') from None
+                    # The session answered for nobody, or was refused on its
+                    # own: _repair_identity has already recorded that.
                     raise SignatureRefused(
                         e.code, 'the signing rules reproduce OnlyFans\' own signature, '
                                 'so this is not a rotation — OnlyFans is refusing this '
