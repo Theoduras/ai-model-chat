@@ -58,6 +58,10 @@ SITES = {
     'tiktok': {'url': 'https://www.tiktok.com/login', 'origin': 'https://www.tiktok.com',
                'prefix': 'ttc_'},
 }
+# How long to let a single-page app draw before reading what it landed on.
+# Reddit renders nothing at domcontentloaded, so without this every sign-in
+# reports an empty page and says nothing about whether it was let in.
+LANDING_RENDER_WAIT = int(os.getenv('LANDING_RENDER_WAIT', '12'))
 VIEWPORT = {'width': 900, 'height': 700}
 FRAME_QUALITY = 55
 # Everything _apply knows how to do. The route rejects anything else, so the two
@@ -377,9 +381,19 @@ class Attempt:
         """
         title = url = text = ''
         try:
+            # domcontentloaded fires before a single-page app has drawn
+            # anything, so reading straight away reports an empty page whether
+            # it went on to be the login form or a block notice. Wait for the
+            # body to say something, briefly, rather than reporting nothing.
+            deadline = time.time() + LANDING_RENDER_WAIT
+            while time.time() < deadline:
+                text = ' '.join((page.inner_text('body') or '').split())
+                if text:
+                    break
+                page.wait_for_timeout(500)
             url = page.url or ''
             title = (page.title() or '')[:120]
-            text = ' '.join((page.inner_text('body') or '').split())[:400]
+            text = text[:400]
         except Exception as e:
             text = f'<could not read the page: {str(e)[:120]}>'
         self.landed = {'url': url[:200], 'title': title, 'text': text}
