@@ -41,6 +41,7 @@
     <span class="url">onlyfans.com</span>
     <span class="state" id="state">opening…</span>
     <span class="state" id="lag" title="round trip · frame age · picture quality · relay build"></span>
+    <button onclick="openLink()">Paste a link</button>
     <button onclick="cancel()">Cancel</button>
   </header>
   <div id="stage">
@@ -103,6 +104,18 @@ const TITLES = {discord: 'Discord', instagram: 'Instagram', reddit: 'Reddit',
 document.title = 'Connect ' + TITLES[site];
 document.querySelector('.url').textContent = SITES[site].host;
 $('foot').innerHTML = SITES[site].foot;
+
+// A sign-in link emailed to the operator opens in whatever browser their mail
+// client hands it to, which signs them in there and not in this window — and a
+// one-time link is spent either way. Pasting it in is the only way that path
+// reaches this browser.
+async function openLink(){
+  const url = prompt('Paste the sign-in link from the email:', '');
+  if(!url) return;
+  const r = await post(API + '/input', {persona: persona, attempt: attempt,
+                                        kind: 'goto', url: url.trim()});
+  if(r && r.error) alert(r.error);
+}
 
 async function post(url, body){
   const r = await fetch(url, {method: 'POST',

@@ -19536,7 +19536,7 @@ def api_onlyfans_connect_input():
         return jsonify({'ok': False, 'error': 'that sign-in is no longer open'}), 404
     try:
         attempt.act(kind, x=d.get('x'), y=d.get('y'), text=d.get('text'),
-                    key=d.get('key'), dy=d.get('dy'),
+                    key=d.get('key'), dy=d.get('dy'), url=d.get('url'),
                     points=(d.get('points') or [])[:60])
     except _OF_UNREACHABLE:
         return _of_busy()
@@ -21714,7 +21714,7 @@ def api_discord_connect_input():
         return jsonify({'ok': False, 'error': 'no such sign-in'}), 404
     try:
         attempt.act(kind, x=d.get('x'), y=d.get('y'), text=d.get('text'),
-                    key=d.get('key'), dy=d.get('dy'),
+                    key=d.get('key'), dy=d.get('dy'), url=d.get('url'),
                     points=(d.get('points') or [])[:60])
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)[:200]}), 400
@@ -22149,7 +22149,7 @@ def api_instagram_connect_input():
         return jsonify({'ok': False, 'error': 'no such sign-in'}), 404
     try:
         attempt.act(kind, x=d.get('x'), y=d.get('y'), text=d.get('text'),
-                    key=d.get('key'), dy=d.get('dy'),
+                    key=d.get('key'), dy=d.get('dy'), url=d.get('url'),
                     points=(d.get('points') or [])[:60])
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)[:200]}), 400
@@ -22383,6 +22383,10 @@ def _rd_signin_state(persona, adopt=False):
         _rd_adopt(attempt)
         failed = _get_setting(f'reddit_adopt_error_{persona}') or ''
     refused = held.get('login_errors') or []
+    said = held.get('refusal') or {}
+    if said:
+        failed = failed or ('Reddit said: \u201c' + str(said.get('text') or '')[:200]
+                            + '\u201d')
     landed = held.get('landed') or {}
     if landed and not held.get('blocked_by'):
         failed = failed or (f"The sign-in browser landed on {landed.get('url', '')} "
@@ -23091,7 +23095,14 @@ def api_reddit_connect():
         cookie = (body.get('cookie') or '').strip()
         if not cookie:
             return jsonify({'error': 'Paste her Reddit cookie to connect.'}), 400
-        session = {'cookie': cookie, 'bearer': (body.get('bearer') or '').strip(),
+        # A session signed in on the operator's own machine and carried over by
+        # hand is the way in when Reddit refuses the hosted window. The bearer
+        # is optional and separate because the cookie alone is a working
+        # account for posting and comments -- it is only chat that cannot be
+        # reached without the token.
+        session = {'cookie': cookie,
+                   'bearer': re.sub(r'^Bearer\s+', '',
+                                    (body.get('bearer') or '').strip(), flags=re.I),
                    'proxy': _rd_proxy_for(persona)}
         try:
             who = RR.Rest(session).me() or {}
@@ -23319,7 +23330,7 @@ def api_reddit_connect_input():
         return jsonify({'ok': False, 'error': 'no such sign-in'}), 404
     try:
         attempt.act(kind, x=d.get('x'), y=d.get('y'), text=d.get('text'),
-                    key=d.get('key'), dy=d.get('dy'),
+                    key=d.get('key'), dy=d.get('dy'), url=d.get('url'),
                     points=(d.get('points') or [])[:60])
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)[:200]}), 400
@@ -23713,7 +23724,7 @@ def api_tiktok_connect_input():
         return jsonify({'ok': False, 'error': 'no such sign-in'}), 404
     try:
         attempt.act(kind, x=d.get('x'), y=d.get('y'), text=d.get('text'),
-                    key=d.get('key'), dy=d.get('dy'),
+                    key=d.get('key'), dy=d.get('dy'), url=d.get('url'),
                     points=(d.get('points') or [])[:60])
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)[:200]}), 400

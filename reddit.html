@@ -79,16 +79,31 @@
       window before closing it</strong>: chat needs a token Reddit only issues to the
       page, and without it she can post and comment but not answer DMs.</span>
     <details style="margin-top:12px;">
-      <summary class="hint" style="cursor:pointer;">Paste a cookie instead</summary>
-      <div class="row-inline" style="margin-top:10px;">
-        <div class="field" style="flex:2;">
+      <summary class="hint" style="cursor:pointer;">Sign in on your own browser instead</summary>
+      <div style="margin-top:10px;">
+        <span class="hint" style="display:block; margin-bottom:10px;">
+          When Reddit refuses the hosted window, sign in as her on your own
+          machine and bring the session over. In that tab press F12 &rarr;
+          <b>Network</b>, reload, click any request to reddit.com, and copy two
+          things from <b>Request Headers</b>: the whole <code>cookie</code> line,
+          and the <code>authorization</code> line without the leading
+          <code>Bearer&nbsp;</code>. The token is what chat needs &mdash; without it
+          she posts and comments but cannot answer DMs.
+        </span>
+        <div class="field full">
+          <label>Cookie header</label>
           <input type="password" id="rd-cookie" autocomplete="new-password" spellcheck="false"
-                 placeholder="paste the full Cookie header from a signed-in tab">
-          <span class="hint">Only needed if this deployment has no sign-in browser.
-            Stored encrypted and never shown again. A cookie alone gets posting and
-            comments, not chat.</span>
+                 placeholder="reddit_session=...; token_v2=...; loid=...">
         </div>
-        <button class="btn-ai" onclick="connect()">Use cookie</button>
+        <div class="field full">
+          <label>Bearer token (for chat)</label>
+          <input type="password" id="rd-bearer" autocomplete="new-password" spellcheck="false"
+                 placeholder="eyJhbGciOi... — the authorization header, without 'Bearer '">
+        </div>
+        <span class="hint">Both are stored encrypted and never shown again.</span>
+        <div class="row-inline" style="margin-top:10px;">
+          <button class="btn-ai" onclick="connect()">Use this session</button>
+        </div>
       </div>
     </details>
     <div id="account-status" class="hint" style="margin-top:10px;"></div>
@@ -330,8 +345,10 @@ async function connect(){
   note(box,'Connecting…');
   try{
     await api('/api/reddit/connect',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({persona:slug(),cookie:cookie})});
+      body:JSON.stringify({persona:slug(),cookie:cookie,
+                           bearer:(el('rd-bearer').value||'').replace(/^Bearer\s+/i,'').trim()})});
     el('rd-cookie').value='';
+    el('rd-bearer').value='';
     await loadStatus();
   }catch(e){note(box,e.message,true);}
 }

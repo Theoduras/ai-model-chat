@@ -94,7 +94,8 @@ INPUT_WAIT = float(os.getenv('CONNECT_INPUT_WAIT', '0.05'))
 FRAME_EVERY = float(os.getenv('CONNECT_FRAME_EVERY', '0.18'))
 # Everything _apply knows how to do. The route rejects anything else, so the two
 # have to be read from the same place.
-INPUT_KINDS = ('click', 'move', 'down', 'up', 'type', 'key', 'scroll', 'back')
+INPUT_KINDS = ('click', 'move', 'down', 'up', 'type', 'key', 'scroll', 'back',
+               'goto')
 # How long a half-finished sign-in is kept alive. Long enough to find a phone
 # and read a code out of it, short enough that an abandoned tab does not hold a
 # browser and an IP for the rest of the day.
@@ -207,6 +208,9 @@ class Attempt:
     exit_error = ''
     blocked_by = ''
     landed = {}
+    refusal = {}
+    _last_text = ''
+    _text_at = 0.0
     _sampled = False
     # Same reason: an attempt assembled field by field rather than constructed
     # still has to be able to say which site it is for.
@@ -285,6 +289,7 @@ class Attempt:
                 'proxy_set': bool(self.proxy),
                 'blocked_by': getattr(self, 'blocked_by', ''),
                 'landed': getattr(self, 'landed', {}),
+                'refusal': getattr(self, 'refusal', {}),
                 'driver': DRIVER_NAME,
                 'signing_sample': self.signing_sample}
 
@@ -445,6 +450,44 @@ class Attempt:
                      'attention required', 'verify you are human',
                      'enable javascript and cookies')
 
+    # Words that mean the site has said no. Matched against the page itself,
+    # because every one of these arrives as an ordinary 200 with the reason
+    # drawn on screen -- there is no status code to filter on.
+    REFUSAL_WORDS = ('an error occurred', 'blocked by network security',
+                     'you have been blocked', 'attention required',
+                     'verify you are human', 'try again later',
+                     'incorrect username or password', 'too many requests',
+                     'bad request', 'something went wrong')
+
+    def _watch_page_text(self, page):
+        """Read what the page is saying, on the loop, and log it when it changes.
+
+        The message that matters appears after the operator clicks Log In, not
+        when the page loads, so reading once after navigation cannot catch it.
+        This runs on the driver thread, where calling into the browser is
+        legal -- doing it from a response handler raises and silently takes
+        the handler with it.
+        """
+        now = time.time()
+        if now - getattr(self, '_text_at', 0) < 1.0:
+            return
+        self._text_at = now
+        try:
+            text = ' '.join((page.inner_text('body') or '').split())[:600]
+        except Exception:
+            return
+        if not text or text == getattr(self, '_last_text', ''):
+            return
+        self._last_text = text
+        low = text.lower()
+        hit = next((w for w in self.REFUSAL_WORDS if w in low), '')
+        if hit:
+            self.refusal = {'said': hit, 'text': text[:400], 'url': (page.url or '')[:160]}
+            logger.warning('of-connect %s refused: %r on %s :: %s', self.id, hit,
+                           (page.url or '')[:120], text[:400])
+        else:
+            logger.info('of-connect %s page now: %s', self.id, text[:200])
+
     def _note_landing(self, page):
         """What the sign-in actually landed on, said out loud every time.
 
@@ -572,6 +615,7 @@ class Attempt:
             if quit_now:
                 break
             self._capture(page)
+            self._watch_page_text(page)
             if self.state == 'signin' and time.time() - last_check > POLL_SECONDS:
                 last_check = time.time()
                 self._try_capture_session(page, context)
@@ -651,6 +695,25 @@ class Attempt:
             page.mouse.wheel(0, float(kw.get('dy') or 0))
         elif kind == 'back':
             page.go_back()
+        elif kind == 'goto':
+            # A sign-in link emailed to the operator opens in whatever browser
+            # their mail client hands it to, which signs them in there and not
+            # here -- and a one-time link is spent either way. Pasting it in is
+            # the only way that path reaches this window.
+            #
+            # Held to the site being signed in to: this window will follow a
+            # link the operator pastes, and an attempt is a browser holding
+            # credentials, so it does not follow one anywhere else.
+            url = str(kw.get('url') or '').strip()[:2000]
+            host = urllib.parse.urlsplit(url).hostname or ''
+            allowed = urllib.parse.urlsplit(self._site['origin']).hostname or ''
+            root = '.'.join(allowed.split('.')[-2:])
+            if not url.startswith('https://') or not (host == allowed
+                                                      or host.endswith('.' + root)
+                                                      or host == root):
+                raise ConnectError(f'That link is not on {root}, so this window '
+                                   f'will not open it.')
+            page.goto(url, wait_until='domcontentloaded', timeout=60000)
 
     def _watch_signing(self, page):
         """Keep the newest request OnlyFans' own page signed.
@@ -929,21 +992,24 @@ class Attempt:
             """
             try:
                 url = response.url or ''
-                if 'reddit.com' not in url or response.status < 400:
+                if 'reddit.com' not in url:
                     return
                 if not any(hit in url for hit in ('login', 'oauth', 'token',
-                                                  'gql', 'api/')):
+                                                  'gql', 'register', 'svc/')):
                     return
-                body = ''
-                try:
-                    body = (response.text() or '')[:300]
-                except Exception:
-                    pass
+                # Not filtered on status: Reddit answers a refused login with
+                # 200 and the reason in the body, so the status that looks like
+                # success is exactly the one worth reading.
+                #
+                # And nothing here calls back into the sync API -- reading
+                # response.text() from inside an event handler raises, which
+                # took the whole handler down and is why this logged nothing at
+                # all while the operator watched the login fail. What the page
+                # says is read from the page instead, in _watch_page_text.
                 self.login_errors = (getattr(self, 'login_errors', []) + [{
-                    'url': url.split('?')[0][:160], 'status': response.status,
-                    'body': body}])[-6:]
-                logger.warning('reddit sign-in refused: %s -> %s %s',
-                               url.split('?')[0][:120], response.status, body[:200])
+                    'url': url.split('?')[0][:160], 'status': response.status}])[-8:]
+                logger.warning('reddit sign-in answered: %s -> %s',
+                               url.split('?')[0][:120], response.status)
             except Exception:
                 pass
 
