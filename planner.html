@@ -964,10 +964,10 @@ function plSetRating(r) {
 async function plWrite(btn) {
   if (!plOpen) return;
   const ta = document.getElementById('pl-m-text');
-  const idea = plOpen.kind === 'proposed'
-    ? ta.value.trim()
-    : (prompt('What should she write about instead?', '') || '').trim();
-  if (!idea) return;
+  // No angle is the ordinary case: the picture is the subject, and with no
+  // picture she picks something herself. Only a proposal arrives with an angle
+  // already in the box.
+  const idea = plOpen.kind === 'proposed' ? ta.value.trim() : '';
   btn.disabled = true;
   const was = btn.textContent;
   btn.textContent = 'writing…';
