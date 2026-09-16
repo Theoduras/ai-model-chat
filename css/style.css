@@ -3739,3 +3739,20 @@ body.embedding .form-area { padding: 0; overflow: hidden; }
   .pl-vault-grid { grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); }
   .pl-vault-item .pl-thumb { height: 84px; }
 }
+
+/* SFW / NSFW for the next draft, sitting beside Write it. */
+.pl-rating { display: inline-flex; border: 1px solid var(--border-soft); border-radius: var(--r-md); overflow: hidden; }
+.pl-rating button {
+  background: transparent;
+  border: none;
+  border-left: 1px solid var(--border-soft);
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  padding: 0 10px;
+  cursor: pointer;
+}
+.pl-rating button:first-child { border-left: none; }
+.pl-rating button:hover { color: var(--text); }
+.pl-rating button.on { background: var(--accent); color: #fff; }

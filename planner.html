@@ -86,6 +86,11 @@
         <textarea id="pl-m-text" rows="5" oninput="plCount()"></textarea>
         <div style="margin-top:6px; display:flex; gap:6px;">
           <button type="button" class="btn-ai" id="pl-m-write" onclick="plWrite(this)">✨ Write it</button>
+          <span class="pl-rating" id="pl-m-rating">
+            <button type="button" class="on" data-r="" onclick="plSetRating('')" title="Whatever this persona is set to">Auto</button>
+            <button type="button" data-r="sfw" onclick="plSetRating('sfw')">SFW</button>
+            <button type="button" data-r="nsfw" onclick="plSetRating('nsfw')">NSFW</button>
+          </span>
           <button type="button" class="btn-section-save" id="pl-m-copy" style="margin-left:0;" onclick="plCopy(this)">Copy</button>
         </div>
         <span class="hint" id="pl-m-hint" style="margin-top:6px;"></span>
@@ -191,6 +196,7 @@ let plOpen = null;        // the card the modal is editing
 let plVault = [];         // the persona's media library
 let plPickedMedia = '';   // what the open editor has attached
 let plChans = [];         // channels ticked on a brand-new post
+let plRating = '';        // '', 'sfw' or 'nsfw' for the next draft
 let plRemote = [];        // posts Fanvue already has booked — read-only
 let plFvVault = null;     // her Fanvue vault, fetched the first time it is needed
 let plFvVaultError = '';
@@ -693,6 +699,7 @@ function plNew() {
 
   plRenderChans();
   plRenderFanvue('', 0);
+  plSetRating('');
   plCount();
   plRenderMedia();
   document.getElementById('pl-modal').classList.add('open');
@@ -815,6 +822,7 @@ function plEdit(kind, idx) {
   plChans = [];
   plRenderChans();
   plRenderFanvue(row.audience || '', row.price_cents || 0);
+  plSetRating('');
   plCount();
   plRenderMedia();
   document.getElementById('pl-modal').classList.add('open');
@@ -908,7 +916,8 @@ function plRenderMedia() {
             + 'use it. Untick them to pick from the vault.' : '')
       : !plOpen.publishable
         ? 'This channel has no posting API — download the file and post it yourself.'
-        : plMediaHint(picked);
+        : plMediaHint(picked) + ' Write it reads this picture and writes about '
+          + 'what is in it.';
 }
 
 function plPickMedia(id) {
@@ -942,6 +951,16 @@ function plCount() {
   el.className = 'pl-count' + (n > cap ? ' over' : '');
 }
 
+// Which level the next draft is written at. A channel with its own rules — a
+// TikTok caption — stays safe for work whatever is picked here; the server has
+// the last word on that.
+function plSetRating(r) {
+  plRating = r;
+  document.querySelectorAll('#pl-m-rating button').forEach(b => {
+    b.classList.toggle('on', (b.dataset.r || '') === r);
+  });
+}
+
 async function plWrite(btn) {
   if (!plOpen) return;
   const ta = document.getElementById('pl-m-text');
@@ -955,7 +974,9 @@ async function plWrite(btn) {
   try {
     const res = await fetch('/api/growth/drafts', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ persona: plSlug, idea: idea, platforms: [plOpen.platform] })
+      body: JSON.stringify({ persona: plSlug, idea: idea,
+                             platforms: [plOpen.platform],
+                             rating: plRating, media_id: plPickedMedia })
     });
     const d = await res.json();
     const draft = (d.drafts || [])[0];

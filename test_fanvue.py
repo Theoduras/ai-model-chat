@@ -368,6 +368,18 @@ def test_planner_posts():
           'Fanvue vault' in app._growth_media_check('lilly', 'x', 'fv:abc')[1],
           app._growth_media_check('lilly', 'x', 'fv:abc'))
 
+    sfw = app._content_level_note('lilith', 'x', 'sfw')
+    check('asking for SFW says so plainly', 'safe for work' in sfw, sfw)
+    check('and a locked channel cannot be talked out of it',
+          'safe for work' in app._content_level_note('lilith', 'tiktok', 'nsfw'),
+          app._content_level_note('lilith', 'tiktok', 'nsfw'))
+    check('a draft with no picture says nothing about one',
+          app._draft_media_note(False) == '')
+    check('and one with a picture tells her to write about it',
+          'what is actually in it' in app._draft_media_note(True))
+    check('no media id means no picture to fetch',
+          app._draft_media_bytes('lilith', '') == (None, ''))
+
     check('reading posts names read:post',
           app._fv_scope_for_path('/v1/posts?size=50') == 'read:post',
           app._fv_scope_for_path('/v1/posts?size=50'))

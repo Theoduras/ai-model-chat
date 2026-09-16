@@ -7325,10 +7325,63 @@ def _content_level_for(persona, platform):
                                 cfg.get('nsfw_enabled'), cfg.get('nsfw_level'))
 
 
-def _content_level_note(persona, platform):
+def _content_level_note(persona, platform, rating=''):
+    """The content level this draft is written at. `rating` is the creator
+    asking for this one draft to be safe for work or not, whatever the persona's
+    standing setting says — except on a channel whose own rules bar it, where
+    the floor still wins and asking cannot lift it."""
     enabled, level = _content_level_for(persona, platform)
+    rating = str(rating or '').strip().lower()
+    if rating == 'sfw':
+        enabled = False
+    elif rating == 'nsfw' and growth.base_platform(platform) not in growth.SFW_LOCKED:
+        enabled = True
+        level = level if enabled and level in growth.RATING_LEVELS else level
     clause = growth.content_level_clause(enabled, level)
-    return f'\n\nContent level: {clause}' if clause else ''
+    if not clause:
+        return ('\n\nContent level: keep it completely safe for work — flirty is '
+                'fine, sexual is not.')
+    return f'\n\nContent level: {clause}'
+
+
+def _draft_media_bytes(persona, media_id):
+    """The picture a draft is being written about, as (bytes, mime), or
+    (None, ''). A Fanvue vault item is fetched by its thumbnail — the full file
+    can be a video or hundreds of megabytes, and a frame is enough to write a
+    caption from."""
+    if not media_id:
+        return None, ''
+    uuid = _fv_media_id(media_id)
+    try:
+        if uuid:
+            scope = _fanvue_scope(persona)
+            m = _fanvue_call(persona, 'GET',
+                             f'{scope}/media/{uuid}?variants={FV_MEDIA_VARIANTS}') or {}
+            url = _fv_media_thumb(m)
+            if not url:
+                return None, ''
+            req = urllib.request.Request(url, headers={'User-Agent': 'ai-model-chat'})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                return r.read(), (r.headers.get('Content-Type') or 'image/jpeg')
+        media = _media_row(persona, media_id)
+        if not media:
+            return None, ''
+        blob, mime = _media_bytes(media)
+        # Gemini reads stills. A clip's caption is written from its words alone.
+        return (blob, mime) if str(mime or '').startswith('image/') else (None, '')
+    except Exception as e:
+        logging.info('draft: no picture for %s/%s: %s', persona, media_id, str(e)[:120])
+        return None, ''
+
+
+def _draft_media_note(has_image):
+    if not has_image:
+        return ''
+    return ('\n\nThe picture going out with this post is attached. Write about '
+            'what is actually in it — what you are wearing, doing, where you are '
+            '— so the words and the image are one post rather than two. Never '
+            'describe it like a caption writer looking at a photo; you were '
+            'there.')
 
 
 def _draft_link(persona, platform):
@@ -7600,6 +7653,13 @@ def api_growth_drafts():
     # so "write me everything" does not quietly cost an extra model call.
     wanted = [p for p in wanted if p in growth.POST_PLATFORMS] or growth.default_platforms()
     series = data.get('series')
+    # 'sfw' or 'nsfw' asks for this one draft at that level; '' keeps whatever
+    # the persona is already set to.
+    rating = str(data.get('rating') or '').strip().lower()
+    if rating not in ('sfw', 'nsfw'):
+        rating = ''
+    picture, pic_mime = _draft_media_bytes(persona, str(data.get('media_id') or '').strip())
+    media_note = _draft_media_note(bool(picture))
 
     out = []
     for plat in wanted:
@@ -7611,7 +7671,8 @@ def api_growth_drafts():
             f'{idea}. It must be {spec["brief"]}. Stay under {spec["cap"]} '
             'characters. Return only the post itself, no preamble and no quotes.'
             + _series_note(series)
-            + _content_level_note(persona, plat)
+            + media_note
+            + _content_level_note(persona, plat, rating)
             + _no_repeat_block(persona, base))
         # X and Threads render a bare link as clickable, so it rides in the
         # caption; Instagram and TikTok already say "link in bio" in their own
@@ -7626,8 +7687,9 @@ def api_growth_drafts():
             instruction += growth.OVERLAY_BRIEF
 
         def write(extra=''):
-            raw = _persona_text(persona, instruction + extra,
-                                max_tokens=500, temperature=1.0)
+            raw = _persona_text(persona, instruction + extra, max_tokens=500,
+                                temperature=1.0,
+                                image=(picture, pic_mime) if picture else None)
             head, body = growth.split_overlay(raw) if overlay_wanted else ('', raw)
             return head, growth.trim_to(body, max(budget, 0))
 
@@ -7652,6 +7714,7 @@ def api_growth_drafts():
                     'link': '' if inline else link, 'overlay': overlay,
                     'cap': spec['cap'], 'publishable': plat in growth.PUBLISHABLE})
     return jsonify({'ok': True, 'persona': persona, 'idea': idea, 'drafts': out,
+                    'rating': rating, 'saw_media': bool(picture),
                     'beta': _growth_on(persona)})
 
 
@@ -9490,7 +9553,8 @@ def _fan_memory_block(mem, persona=None):
         "detail at a time, and never the same one two messages running.\n\n")
 
 
-def _persona_text(persona, instruction, history=None, max_tokens=1024, temperature=0.9):
+def _persona_text(persona, instruction, history=None, max_tokens=1024,
+                  temperature=0.9, image=None):
     """Generate an in-character message for a persona via Gemini.
 
     Returns '' when there is no Gemini to ask. Every caller already treats an
@@ -9506,7 +9570,15 @@ def _persona_text(persona, instruction, history=None, max_tokens=1024, temperatu
     for m in (history or [])[-20:]:
         contents.append({'role': 'model' if m['role'] in ('bot', 'model') else 'user',
                          'parts': [{'text': m['content']}]})
-    contents.append({'role': 'user', 'parts': [{'text': instruction}]})
+    parts = [{'text': instruction}]
+    # A picture rides with the instruction so the model writes about what is
+    # actually in the frame rather than about the idea in the abstract.
+    if image and image[0]:
+        import base64
+        parts.append({'inline_data': {
+            'mime_type': image[1] or 'image/jpeg',
+            'data': base64.b64encode(image[0]).decode()}})
+    contents.append({'role': 'user', 'parts': parts})
     cfg = _no_thinking(types.GenerateContentConfig(
         system_instruction=system_prompt, temperature=temperature,
         max_output_tokens=max_tokens))
