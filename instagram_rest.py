@@ -28,6 +28,11 @@ logger = logging.getLogger(__name__)
 INSTAGRAM_WEB = os.getenv('INSTAGRAM_WEB_BASE', 'https://www.instagram.com')
 INSTAGRAM_API = f'{INSTAGRAM_WEB}/api/v1'
 INSTAGRAM_TIMEOUT = 30
+# A photo or a reel's video is the one call carrying real file bytes over an
+# extra network hop (app -> residential proxy -> Instagram) instead of a few
+# hundred bytes of JSON, and 30s was timing out on it well before the small
+# configure/me() calls ever would.
+INSTAGRAM_UPLOAD_TIMEOUT = int(os.getenv('INSTAGRAM_UPLOAD_TIMEOUT', '120'))
 # Instagram's web app itself, not something scraped per account — every
 # signed-out visitor gets the same one, so a default is safe to ship.
 DEFAULT_APP_ID = os.getenv('INSTAGRAM_APP_ID', '936619743392459')
@@ -121,7 +126,7 @@ class Rest:
 
     def call(self, method, url, body=None, headers=None, raw=False, retries=1):
         """One request. `body` is JSON unless `raw` — an upload sends bytes and
-        signs its own content headers instead."""
+        signs its own content headers instead, and gets the longer timeout."""
         if not self.configured():
             raise InstagramApiError(0, 'No Instagram session for this persona')
         self._wait()
@@ -131,8 +136,9 @@ class Rest:
             req.add_header(key, value)
         if not raw and body is not None:
             req.add_header('Content-Type', 'application/json')
+        timeout = INSTAGRAM_UPLOAD_TIMEOUT if raw else INSTAGRAM_TIMEOUT
         try:
-            with _opener(self.proxy).open(req, timeout=INSTAGRAM_TIMEOUT) as resp:
+            with _opener(self.proxy).open(req, timeout=timeout) as resp:
                 out = resp.read()
                 if not out:
                     return {}
