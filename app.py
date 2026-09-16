@@ -5083,6 +5083,15 @@ def discord_page():
     return send_from_directory(BASE_DIR, 'discord.html')
 
 
+@app.route('/reddit')
+def reddit_page():
+    # Same reasoning as /discord and /instagram: every /api/reddit/* call is
+    # persona-scoped, so the page behind them is too.
+    if not _current_user():
+        return redirect('/login?next=/reddit')
+    return send_from_directory(BASE_DIR, 'reddit.html')
+
+
 @app.route('/instagram')
 def instagram_page():
     # Same reasoning as /discord: every /api/instagram/* call is persona-scoped
@@ -5732,6 +5741,8 @@ INBOX_PLATFORMS = {
     # conversations she is in, so both belong in the one inbox.
     'discord':  {'label': 'Discord',  'prefixes': ('dc:', 'dcg:'),
                  'trace_keys': ('discord_trace_%s',)},
+    'reddit':   {'label': 'Reddit',   'prefixes': ('rd:',),
+                 'trace_keys': ('reddit_trace_%s',)},
     'telegram': {'label': 'Telegram', 'prefixes': ('tg:', 'tgu:'),
                  'trace_keys': ('tg_trace_%s', 'tg_trace_platform')},
     'x':        {'label': 'X',        'prefixes': ('',),
@@ -7974,6 +7985,9 @@ def _growth_queue_rows(persona, limit=50, since=None, until=None):
                  'media_ids': post_media_ids(r),
                  'audience': r.audience or '',
                  'ig_kind': r.ig_kind or '',
+                 'rd_sub': r.rd_sub or '',
+                 'rd_flair': r.rd_flair or '',
+                 'rd_kind': r.rd_kind or '',
                  'price_cents': int(r.price_cents or 0),
                  'run_at': int(r.run_at.replace(tzinfo=timezone.utc).timestamp())
                  if r.run_at else 0}
@@ -8039,7 +8053,11 @@ def _growth_send_now(persona, queued):
                 posted_id = _growth_publish(persona, plat, row.text, row.media_id or '',
                                             audience=row.audience or '',
                                             price_cents=int(row.price_cents or 0),
-                                            media_ids=post_media_ids(row))
+                                            media_ids=post_media_ids(row),
+                                            ig_kind=row.ig_kind or '',
+                                            rd_sub=row.rd_sub or '',
+                                            rd_flair=row.rd_flair or '',
+                                            rd_kind=row.rd_kind or '')
                 finish_post(sdb, row.id, external_id=posted_id)
                 sent.append({'platform': plat, 'id': row.id, 'external_id': posted_id})
                 logger.info('QUEUE posted now [%s/%s] id=%s', persona, plat, posted_id)
@@ -8133,6 +8151,66 @@ def _growth_ig_kind(persona, platform, data, media_ids, current=None):
     if kind == 'reel' and first != 'video':
         return '', 'A reel needs a video file.'
     return kind, ''
+
+
+def _growth_rd_targets(persona, platform, data, media_ids, current=None):
+    """Where a queued Reddit post is going, as one target per subreddit.
+
+    Reddit is the only channel here where one planned post is several posts:
+    the same set goes to three or four subreddits, each wanting its own flair
+    and -- if it is not to read as the same thing spammed four times -- its own
+    title. So this returns a list, the caller writes a row per entry, and each
+    row is an ordinary queued post from then on. Returns (targets, error).
+    """
+    if growth.normalise_source(platform) != 'reddit':
+        return [], ''
+    body = data.get('reddit') or {}
+    kind = (body.get('kind') or (current or {}).get('rd_kind') or '').strip().lower()
+    if not kind:
+        kind = 'image' if media_ids else 'text'
+    if kind not in RD_KINDS:
+        return [], 'Pick an image, video, text or link post.'
+    if kind in ('image', 'video') and not media_ids:
+        return [], 'A Reddit image or video post needs a file attached.'
+    if kind in ('image', 'video') and len(media_ids) > 1:
+        return [], ('Reddit takes one file per submission here. Queue the rest '
+                    'as their own posts.')
+    known = {row['sub'].lower(): row for row in _rd_subs(persona)}
+    asked = body.get('subs') or []
+    if not asked and current and current.get('rd_sub'):
+        asked = [{'sub': current['rd_sub'], 'flair': current.get('rd_flair') or ''}]
+    targets = []
+    for entry in asked[:20]:
+        if isinstance(entry, str):
+            entry = {'sub': entry}
+        if not isinstance(entry, dict):
+            continue
+        sub = str(entry.get('sub') or '').lstrip('/').removeprefix('r/').strip()[:64]
+        if not sub:
+            continue
+        held = known.get(sub.lower(), {})
+        targets.append({
+            'sub': sub,
+            'flair': str(entry.get('flair') or held.get('flair') or '')[:64],
+            'kind': kind,
+            'title': growth.trim_post('reddit', entry.get('title')
+                                      or data.get('text')
+                                      or (current or {}).get('text'))})
+    if not targets:
+        return [], 'Pick at least one subreddit.'
+    if any(not t['title'] for t in targets):
+        return [], 'Every subreddit needs a title.'
+    return targets, ''
+
+
+def _growth_rd_stagger(data):
+    """Minutes between one subreddit and the next. Reddit's own spam filters
+    read a burst of identical-looking submissions as exactly that, so the
+    default spaces them out rather than firing them together."""
+    try:
+        return max(0, min(int((data.get('reddit') or {}).get('stagger_min') or 20), 240))
+    except (TypeError, ValueError):
+        return 20
 
 
 def _fv_media_id(media_id):
@@ -8263,13 +8341,27 @@ def api_growth_queue():
                 if why:
                     failed.append({'platform': plat, 'error': why})
                     continue
-                row = queue_post(sdb, persona, plat, text, run_at,
-                                 media_ids[0] if media_ids else '',
-                                 growth.queue_status_for(plat),
-                                 audience=audience, price_cents=price,
-                                 media_ids=media_ids, ig_kind=ig_kind)
-                queued.append({'platform': plat, 'id': row.id,
-                               'status': growth.queue_status_for(plat)})
+                rd_targets, why = _growth_rd_targets(persona, plat, data, media_ids)
+                if why:
+                    failed.append({'platform': plat, 'error': why})
+                    continue
+                slots = [(text, run_at, '', '', '')]
+                if rd_targets:
+                    stagger = _growth_rd_stagger(data)
+                    slots = [(t['title'], run_at + timedelta(minutes=stagger * n),
+                              t['sub'], t['flair'], t['kind'])
+                             for n, t in enumerate(rd_targets)]
+                for slot_text, slot_at, rd_sub, rd_flair, rd_kind in slots:
+                    row = queue_post(sdb, persona, plat, slot_text, slot_at,
+                                     media_ids[0] if media_ids else '',
+                                     growth.queue_status_for(plat),
+                                     audience=audience, price_cents=price,
+                                     media_ids=media_ids, ig_kind=ig_kind,
+                                     rd_sub=rd_sub, rd_flair=rd_flair,
+                                     rd_kind=rd_kind)
+                    queued.append({'platform': plat, 'id': row.id,
+                                   'sub': rd_sub,
+                                   'status': growth.queue_status_for(plat)})
             sdb.commit()
         finally:
             sdb.close()
@@ -8344,13 +8436,35 @@ def api_growth_queue():
                                                {'ig_kind': row.ig_kind})
                 if why:
                     return jsonify({'ok': False, 'error': why}), 400
+            rd_sub = rd_flair = rd_kind = None
+            if growth.normalise_source(row.platform) == 'reddit':
+                at_ids = media_ids if media_ids is not None else post_media_ids(row)
+                targets, why = _growth_rd_targets(
+                    persona, row.platform, data, at_ids,
+                    {'rd_sub': row.rd_sub, 'rd_flair': row.rd_flair,
+                     'rd_kind': row.rd_kind, 'text': row.text})
+                if why:
+                    return jsonify({'ok': False, 'error': why}), 400
+                if len(targets) > 1:
+                    # One row is one subreddit. Splitting it here would silently
+                    # create posts the creator never saw queued.
+                    return jsonify({'ok': False,
+                                    'error': 'A queued Reddit post goes to one '
+                                             'subreddit. Queue the others as '
+                                             'their own posts.'}), 400
+                rd_sub = targets[0]['sub']
+                rd_flair = targets[0]['flair']
+                rd_kind = targets[0]['kind']
+                if text is None and targets[0]['title'] != (row.text or ''):
+                    text = targets[0]['title']
             if (text is None and run_at is None and media_ids is None
-                    and audience is None and ig_kind is None):
+                    and audience is None and ig_kind is None and rd_sub is None):
                 return jsonify({'ok': False, 'error': 'Nothing to change.'}), 400
             done = update_post(sdb, persona, post_id, text=text, run_at=run_at,
                                media_id=media_id, media_ids=media_ids,
                                audience=audience, price_cents=price,
-                               ig_kind=ig_kind)
+                               ig_kind=ig_kind, rd_sub=rd_sub,
+                               rd_flair=rd_flair, rd_kind=rd_kind)
             sdb.commit()
         finally:
             sdb.close()
@@ -8881,7 +8995,7 @@ GROWTH_QUEUE_STALE_HRS = 6
 
 
 def _growth_publish(persona, platform, text, media_id='', audience='', price_cents=0,
-                    media_ids=None, ig_kind=''):
+                    media_ids=None, ig_kind='', rd_sub='', rd_flair='', rd_kind=''):
     """Put one post out and write it into the content register. Returns the id
     the channel gave it; raises on failure, because only the caller knows
     whether this attempt is worth another one."""
@@ -8966,6 +9080,27 @@ def _growth_publish(persona, platform, text, media_id='', audience='', price_cen
                                + (f': {e.detail[:160]}' if e.detail else '.'))
         posted_id = str(((result or {}).get('media') or {}).get('pk') or '')
         _ig_log_post(persona, ig_kind or 'post', text)
+    elif plat == 'reddit':
+        # Reddit's `text` is the title, not a caption: it is the whole post
+        # above the image, and it is what a subreddit's rules are written
+        # about. A crosspost reaches this one row at a time, each with its own
+        # subreddit, flair and title, so nothing fans out from in here.
+        if not rd_sub:
+            raise RuntimeError('that Reddit post has no subreddit on it')
+        kind = rd_kind or ('image' if rows else 'text')
+        blob = mime = None
+        cover = None
+        if kind in ('image', 'video'):
+            if not rows:
+                raise RuntimeError('Reddit needs a photo or video attached')
+            blob, mime = _media_bytes(rows[0])
+            if growth.media_kind(mime) == 'video':
+                kind = 'video'
+                cover = _media_poster(rows[0])
+        result = _rd_submit(persona, rd_sub, kind, text, blob, mime,
+                            body='', url='', flair=rd_flair, cover=cover)
+        posted = ((result or {}).get('json') or {}).get('data') or {}
+        posted_id = str(posted.get('name') or posted.get('id') or '')
     else:
         raise ValueError(f'{plat} posts have to go out by hand')
     _content_register_add(persona, plat, text)
@@ -9001,7 +9136,10 @@ def _growth_queue_round():
                                             audience=audience,
                                             price_cents=price_cents,
                                             media_ids=media_ids,
-                                            ig_kind=row.ig_kind or '')
+                                            ig_kind=row.ig_kind or '',
+                                            rd_sub=row.rd_sub or '',
+                                            rd_flair=row.rd_flair or '',
+                                            rd_kind=row.rd_kind or '')
                 finish_post(sdb, post_id, external_id=posted_id)
                 logger.info('QUEUE posted [%s/%s] id=%s %s',
                             persona, platform, posted_id, text[:60])
@@ -21966,6 +22104,1003 @@ def api_instagram_post_now():
         return jsonify({'ok': False, 'error': str(e)[:250]}), 400
     except Exception as e:
         logger.exception('instagram post-now failed')
+        return jsonify({'ok': False, 'error': str(e)[:250]}), 400
+    return jsonify({'ok': True, **result})
+
+
+# ── Reddit ────────────────────────────────────────────────────────────────────
+#
+# Built the same way Discord is, and for the same reason: there is no honest
+# app API here either. Reddit's Data API stopped taking new registrations
+# freely in late 2025 and has never been able to reach Reddit Chat at all, so
+# this drives a real signed-in account through the same hosted browser --
+# posting and comments through reddit_rest.py, chat through reddit_chat.py.
+#
+# Unlike Instagram this is a full platform: DMs run the shared reply round
+# behind a _Platform adapter, so Reddit gets the funnel, the nudges and the
+# win-back ladder without a second copy of any of them.
+#
+# Reddit's terms do not allow an automated client either. The same care applies
+# as Discord's: one socket per account, the fingerprint her own sign-in
+# captured, and never a reconnect at a credential Reddit has already refused.
+
+import reddit_rest as RR
+import reddit_chat as RC
+
+
+def _rd_fernet():
+    """Her Reddit session is a password to a whole account, so it is never
+    stored in the clear. Same derivation as Instagram's, different salt."""
+    import base64
+    from cryptography.fernet import Fernet
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+    raw = (os.getenv('REDDIT_SESSION_KEY') or '').strip()
+    if raw:
+        return Fernet(raw.encode())
+    secret = (os.getenv('SECRET_KEY') or '').strip()
+    if not secret:
+        raise RuntimeError('no REDDIT_SESSION_KEY and no SECRET_KEY, so a '
+                           'Reddit session cannot be encrypted. Set one before '
+                           'connecting.')
+    derived = HKDF(algorithm=hashes.SHA256(), length=32,
+                   salt=b'reddit-session', info=b'v1').derive(secret.encode())
+    return Fernet(base64.urlsafe_b64encode(derived))
+
+
+def _rd_account(persona):
+    try:
+        return json.loads(_get_setting(f'reddit_account_{persona}') or '{}')
+    except Exception:
+        return {}
+
+
+def _rd_save_account(persona, **fields):
+    held = _rd_account(persona)
+    held.update(fields)
+    _set_setting(f'reddit_account_{persona}', json.dumps(held))
+    return held
+
+
+def _rd_session(persona):
+    """The cookie, bearer token, modhash and chat handshake captured at
+    sign-in, kept as one encrypted blob because a call needs them together."""
+    blob = _rd_account(persona).get('session') or ''
+    if not blob:
+        return {}
+    try:
+        return json.loads(_rd_fernet().decrypt(blob.encode()).decode())
+    except Exception:
+        logger.warning('reddit session for %s could not be decrypted', persona)
+        return {}
+
+
+def _rd_set_session(persona, session):
+    if not session:
+        _rd_save_account(persona, session='')
+        return
+    blob = _rd_fernet().encrypt(json.dumps(session).encode()).decode()
+    _rd_save_account(persona, session=blob, user_id=str(session.get('user_id') or ''),
+                     username=session.get('username') or '',
+                     chat_ready=bool(session.get('bearer')),
+                     connected_at=int(time.time()))
+
+
+def _rd_rest(persona):
+    return RR.Rest(_rd_session(persona))
+
+
+def _rd_proxy_for(persona, country=''):
+    """Reddit's own pool, kept apart from Instagram's and OnlyFans' for the
+    same reason those are kept apart from each other: turning one off should
+    not silently move another account onto a datacentre IP."""
+    template = (os.getenv('REDDIT_PROXY_TEMPLATE') or '').strip()
+    if not template:
+        return ''
+    country = (country or os.getenv('REDDIT_PROXY_COUNTRY') or 'nl').lower()[:2]
+    return template.replace('{country}', country).replace('{session}', persona)
+
+
+def _rd_conn():
+    import of_browser as _ofb
+    import of_connect as _ofc
+    return _ofb.remote() or _ofc
+
+
+def _rd_account_id(persona):
+    """Keyed apart from OnlyFans' `of_…`, Discord's `dc_…` and Instagram's
+    `ig_…`, so a half-finished sign-in on one never evicts another."""
+    return f'rd_{persona}'
+
+
+_RD_WAITING = {
+    'awaiting_cookies': 'The browser is open and waiting for the sign-in to '
+                        'finish. Nothing is wrong yet.',
+    'unverified': 'Signed in, but her chat token was not seen. Open Reddit '
+                  'chat once in that window before closing it.',
+    'captured': 'Signed in — storing her account now.',
+}
+
+
+def _rd_signin_state(persona, adopt=False):
+    attempt_id = _get_setting(f'reddit_attempt_{persona}') or ''
+    failed = _get_setting(f'reddit_adopt_error_{persona}') or ''
+    if not attempt_id:
+        return {'open': False, 'why': failed}
+    try:
+        attempt = _rd_conn().get(attempt_id)
+    except Exception:
+        return {'open': False, 'why': failed}
+    if not attempt:
+        return {'open': False, 'why': failed or
+                'That sign-in window is no longer open. Start it again.'}
+    held = attempt.status()
+    if adopt and held.get('state') == 'connected':
+        _rd_adopt(attempt)
+        failed = _get_setting(f'reddit_adopt_error_{persona}') or ''
+    return {'open': True, 'state': held.get('state') or '',
+            'why': failed or _RD_WAITING.get(held.get('capture_note') or '', ''),
+            'error': held.get('error') or ''}
+
+
+def _rd_adopt(attempt):
+    """Take the session off a finished sign-in and store it.
+
+    A capture with no bearer token is still kept: posting and commenting go
+    through the cookie, and throwing the whole sign-in away for the sake of the
+    half only chat needs would cost her the other half too.
+    """
+    persona = attempt.status().get('persona') or ''
+    try:
+        session = _rd_conn().claim(attempt) or {}
+    except Exception as e:
+        _set_setting(f'reddit_adopt_error_{persona}', str(e)[:200])
+        return False
+    if not session.get('cookie'):
+        _set_setting(f'reddit_adopt_error_{persona}',
+                     'the sign-in finished but handed back no usable session')
+        return False
+    _rd_set_session(persona, session)
+    _set_setting(f'reddit_attempt_{persona}', '')
+    _set_setting(f'reddit_adopt_error_{persona}', '')
+    _rd_connect(persona)
+    return True
+
+
+# ── Her target subreddits ────────────────────────────────────────────────────
+
+def _rd_subs(persona):
+    """Where she posts, and with which flair. Kept in the console rather than
+    the persona config: a subreddit list is operational -- it changes when a
+    sub bans her or a new one starts converting -- and not part of who she is."""
+    rows = _dc_json(f'reddit_subs_{persona}', [])
+    out = []
+    for row in rows if isinstance(rows, list) else []:
+        if isinstance(row, dict) and row.get('sub'):
+            out.append({'sub': str(row['sub']).lstrip('/').removeprefix('r/')[:64],
+                        'flair': str(row.get('flair') or '')[:64],
+                        'flair_text': str(row.get('flair_text') or '')[:80],
+                        'nsfw': bool(row.get('nsfw', True))})
+    return out
+
+
+def _rd_cta_link(persona, fan_id):
+    """Tracked redirect through our own server, same shape as Discord's.
+
+    Reddit filters known paysite domains in DMs, so what this resolves to is
+    her profile or linktree rather than a direct unlock link -- the offer stage
+    still runs, it just lands one hop earlier.
+    """
+    base = (os.getenv('PUBLIC_BASE_URL') or _get_setting('public_base_url') or '').rstrip('/')
+    if base:
+        return f'{base}/go/rd/{persona}/{fan_id}'
+    cta_state = _plat_cta(PLAT_REDDIT, persona)
+    fan_cta = cta_state.get(str(fan_id)) or {}
+    override = _dc_json(f'reddit_cta_{persona}', {})
+    return (fan_cta.get('target') or override.get('url')
+            or _phases_cta(persona).get('cta_url') or '').strip()
+
+
+@app.route('/go/rd/<persona>/<fan_id>')
+def reddit_cta_click(persona, fan_id):
+    if not re.match(r'^[a-z0-9_-]+$', persona or ''):
+        return redirect('/')
+    state = _plat_cta(PLAT_REDDIT, persona)
+    fan = state.get(str(fan_id)) or {}
+    override = _dc_json(f'reddit_cta_{persona}', {})
+    target = (fan.get('target') or override.get('url')
+              or _phases_cta(persona).get('cta_url') or '').strip()
+    if not target:
+        return redirect('/')
+    if fan and not fan.get('clicked'):
+        fan['clicked'] = int(time.time())
+        state[str(fan_id)] = fan
+        _set_setting(PLAT_REDDIT.k('cta', persona), json.dumps(state))
+    _record_click(persona, 'reddit', fan.get('kind') or 'paid', target,
+                  PLAT_REDDIT.fan_key(fan_id))
+    return redirect(target, code=302)
+
+
+# ── The adapter ──────────────────────────────────────────────────────────────
+
+class _RedditPlatform(_Platform):
+    slug = 'reddit'
+    label = 'Reddit'
+    prefix = 'reddit'
+    fan_prefix = 'rd:'
+    has_lists = False
+    # DMs get the funnel. A public comment thread never reaches this round at
+    # all, so turning it on here cannot put a pitch under one of her posts.
+    has_funnels = True
+    # Reddit fans go quiet for weeks and come back, which is exactly what the
+    # ladder is for.
+    has_winback = True
+    # No paywall and no payment webhook, so the tier/bandit/ledger engine can't
+    # verify a sale here -- send a plain CTA nudge instead.
+    has_ppv = False
+    has_cta = True
+
+    def connected(self, persona):
+        return bool(_rd_session(persona).get('cookie'))
+
+    def scope(self, persona):
+        return ''
+
+    def me(self, persona):
+        return RC.me(persona) or str(_rd_session(persona).get('user_id') or '')
+
+    def acting_as(self, persona):
+        return _rd_account(persona).get('username', '')
+
+    def chats(self, persona, scope):
+        return RC.chats(persona)
+
+    def read_chat(self, chat):
+        return RC.user_of_chat(chat)
+
+    def online(self, chat, grace):
+        return RC.chat_online(chat, grace)
+
+    def messages(self, persona, fan_id, want):
+        return RC.messages(persona, fan_id, want)
+
+    def text_of(self, msg):
+        return RC.text_of(msg)
+
+    def msg_id(self, msg):
+        return RC.msg_id(msg)
+
+    def msg_time(self, msg):
+        return RC.msg_time(msg)
+
+    def msg_age(self, msg):
+        return RC.msg_age_minutes(msg)
+
+    def direction(self, msg, fan_id, me_id, recent_out=()):
+        return RC.direction_of(msg, fan_id, me_id, recent_out)
+
+    def import_history(self, persona, fan_id, handle, me_id):
+        """Read a conversation we are meeting part-way through, so she does not
+        introduce herself to someone she has been talking to for a week."""
+        rows = []
+        for m in RC.history(persona, fan_id):
+            text = RC.text_of(m)
+            if text:
+                rows.append(('out' if m.get('out') else 'in', text))
+        fan_key = self.fan_key(fan_id)
+        for direction, text in rows:
+            _log_x_message(persona, fan_key, handle, direction, text)
+        return len(rows), [t for d, t in rows if d == 'in']
+
+    def send_text(self, persona, scope, fan_id, text):
+        RC.send(persona, fan_id, text)
+
+    def send_ppv(self, persona, scope, fan_id, caption, media, price_cents):
+        """Unreachable from the auto-reply engine now that has_ppv is False --
+        Reddit sends a plain CTA nudge instead. Left in place as a fallback for
+        anything still calling it directly."""
+        url = _rd_cta_link(persona, fan_id)
+        if not url:
+            raise RC.RedditChatError(
+                'No link is set for this persona, so there is nowhere to send '
+                'her Reddit fans. Set one in the funnel settings.')
+        sent = RC.send(persona, fan_id, f'{caption}\n{url}'.strip())
+        mid = str((sent or {}).get('message_id') or (sent or {}).get('msg_id') or '')
+        if not mid:
+            import uuid
+            return f'link:{uuid.uuid4().hex}'
+        return f'rd:{fan_id}:{mid}'
+
+    def winback_link(self, persona, fan_id):
+        return _rd_cta_link(persona, fan_id)
+
+    def typing(self, persona, scope, fan_id):
+        try:
+            RC.typing(persona, fan_id)
+        except Exception as e:
+            logger.debug('reddit typing indicator failed: %s', str(e)[:120])
+
+    def webhook_state(self, persona):
+        """Nothing is delivered to us here -- the socket is the delivery. What
+        matters is whether one is open."""
+        live = RC.runner(persona)
+        state = live.state() if live else {}
+        ready = bool(state.get('connected'))
+        return {'ready': ready, 'url': '', 'watcher': True,
+                'last_error': state.get('error') or '',
+                'problem': '' if ready else
+                'Her Reddit chat connection is down, so nothing new is being '
+                'picked up. Reconnect the account.'}
+
+    def reachable(self, persona):
+        if not self.connected(persona):
+            return ''
+        if not _rd_session(persona).get('bearer'):
+            return ('Her Reddit sign-in captured no chat token, so posting and '
+                    'comments work but chat cannot connect. Reconnect the '
+                    'account and open Reddit chat once in that window.')
+        live = RC.runner(persona)
+        if not live:
+            return ''
+        state = live.state()
+        if state.get('stopped'):
+            return ('Reddit refused her chat credentials, so nothing can be '
+                    'sent or read there. The account has to be reconnected.')
+        if not state.get('connected'):
+            return ('Her Reddit chat connection has dropped and is being '
+                    'retried, so new messages are only picked up once it is back.')
+        return ''
+
+
+PLAT_REDDIT = _RedditPlatform()
+PLATFORMS['reddit'] = PLAT_REDDIT
+
+
+# ── Running Reddit ───────────────────────────────────────────────────────────
+#
+# Same split as Discord's, for the same reason: a round reads the database,
+# asks Gemini and sleeps its way through human pacing, and doing that on the
+# socket's event loop would stall the ping until Reddit dropped the connection.
+# An event only marks a persona due; the worker below picks it up.
+
+REDDIT_QUIET_SECONDS = int(os.getenv('REDDIT_QUIET_SECONDS', '12'))
+REDDIT_SWEEP_SECONDS = int(os.getenv('REDDIT_SWEEP_SECONDS', '120'))
+REDDIT_COMMENT_SECONDS = int(os.getenv('REDDIT_COMMENT_SECONDS', '300'))
+
+_rd_due = {}
+_rd_due_lock = threading.Lock()
+_rd_last_sweep = [0.0]
+_rd_last_comments = [0.0]
+
+
+def _reddit_wake(persona, delay=0.0):
+    if not persona:
+        return
+    with _rd_due_lock:
+        _rd_due[persona] = max(_rd_due.get(persona, 0), time.time() + delay)
+
+
+def _rd_on_dm(persona, fan_id):
+    _reddit_wake(persona, REDDIT_QUIET_SECONDS)
+
+
+def _rd_on_typing(persona, fan_id):
+    _reddit_wake(persona, REDDIT_QUIET_SECONDS)
+
+
+def _rd_on_trace(persona, stage, detail='', fan=''):
+    try:
+        with app.app_context(), PLAT_REDDIT.tracing():
+            _fv_trace(persona, stage, detail, fan=fan)
+    except Exception:
+        pass
+
+
+def _rd_connect(persona):
+    """Bring this persona's chat socket up, or leave the one that is already up
+    alone. Two live sessions on one account is the loudest thing it can do, so
+    `register` reuses rather than replaces.
+
+    A session with no bearer token cannot reach chat at all. That is not a
+    failure worth retrying every two minutes, so nothing is started for it --
+    posting and comments run off the cookie regardless.
+    """
+    session = _rd_session(persona)
+    if not (session.get('cookie') and session.get('bearer')):
+        return None
+    live = RC.register(persona, session, on_dm=_rd_on_dm, on_typing=_rd_on_typing,
+                       on_trace=_rd_on_trace)
+    live.configure({'dm': _dc_json(f'reddit_dm_{persona}', {})})
+    if not live.alive() and not live.stopped:
+        live.start()
+    return live
+
+
+def _reddit_worker(tick=2.0):
+    """Answer every persona a message has marked due, sweep them all on an
+    interval as the backup, keep the sockets up, and work the comment queue."""
+    import time as _t
+    from concurrent.futures import ThreadPoolExecutor
+    pool = ThreadPoolExecutor(max_workers=max(1, int(os.getenv('REDDIT_WORKERS', '4'))),
+                              thread_name_prefix='reddit')
+    pending = set()
+
+    def _one(persona):
+        try:
+            _plat_round_now(PLAT_REDDIT, persona)
+        except Exception as e:
+            logger.exception('reddit round failed for %s', persona)
+            try:
+                with app.app_context(), PLAT_REDDIT.tracing():
+                    _fv_trace(persona, 'error', f'round failed: {str(e)[:200]}')
+            except Exception:
+                pass
+        finally:
+            with _rd_due_lock:
+                pending.discard(persona)
+
+    while True:
+        try:
+            now = _t.time()
+            with _rd_due_lock:
+                due = {p for p, at in _rd_due.items() if at <= now}
+                for p in due:
+                    _rd_due.pop(p, None)
+            if now - _rd_last_sweep[0] >= REDDIT_SWEEP_SECONDS:
+                _rd_last_sweep[0] = now
+                with app.app_context():
+                    for persona in _fanvue_enabled_list(plat=PLAT_REDDIT):
+                        _rd_connect(persona)
+                    due |= set(_fanvue_enabled_list(plat=PLAT_REDDIT))
+            if now - _rd_last_comments[0] >= REDDIT_COMMENT_SECONDS:
+                _rd_last_comments[0] = now
+                with app.app_context():
+                    for persona in _fanvue_enabled_list(plat=PLAT_REDDIT):
+                        try:
+                            _rd_comment_round(persona)
+                        except Exception:
+                            logger.exception('reddit comment round failed for %s', persona)
+            for persona in due:
+                with app.app_context():
+                    if not PLAT_REDDIT.connected(persona):
+                        continue
+                with _rd_due_lock:
+                    if persona in pending:
+                        continue
+                    pending.add(persona)
+                pool.submit(_one, persona)
+        except Exception:
+            logger.exception('reddit worker tick failed')
+        _t.sleep(tick)
+
+
+# ── Comments on her own posts ────────────────────────────────────────────────
+#
+# Deliberately not the shared round, for the same reason Discord's server
+# channels are not. That round is built around one fan she is working towards
+# something with: it counts their messages, remembers them, nudges them when
+# they go quiet and eventually offers them something. All of that is wrong in
+# a comment thread anyone can read, and a subreddit is the fastest place on the
+# internet to lose an account over a link. So nothing here carries an offer,
+# a CTA or a URL -- ever.
+
+RD_COMMENT_LOG_CAP = 40
+
+
+def _rd_replies_cfg(persona):
+    held = _dc_json(f'reddit_replies_{persona}', {})
+    return {'enabled': bool(held.get('enabled')),
+            'own_posts': bool(held.get('own_posts', True)),
+            'mentions': bool(held.get('mentions', True)),
+            'max_per_round': max(1, min(int(held.get('max_per_round') or 5), 25)),
+            'posts_scanned': max(1, min(int(held.get('posts_scanned') or 10), 50))}
+
+
+def _rd_comment_reply(persona, author, text, where):
+    """One in-character reply to a public comment. The instruction says outright
+    that there is nothing to sell here, because the persona prompt's own
+    conversion rules would otherwise leak into a thread."""
+    instruction = (
+        f'A Reddit user called {author or "someone"} left this comment on your '
+        f'post in r/{where}: "{text[:500]}"\n\n'
+        'Reply in character, as one short comment. This is a public subreddit '
+        'thread, not a DM: never mention subscribing, paying, a link, your '
+        'page, DMs, or anything you sell. No emoji spam and no hashtags. Two '
+        'sentences at most. Return only the reply itself, no preamble and no '
+        f'quotes. {NO_PLACEHOLDER_RULE}')
+    out = _persona_text(persona, instruction, history=None, max_tokens=300,
+                        temperature=1.0)
+    return growth.trim_to(_strip_placeholders(out or ''), 400)
+
+
+def _rd_comment_round(persona):
+    cfg = _rd_replies_cfg(persona)
+    if not cfg['enabled'] or not PLAT_REDDIT.connected(persona):
+        return 0
+    rest = _rd_rest(persona)
+    me = (_rd_account(persona).get('username') or '').lower()
+    seen = set(_dc_json(f'reddit_seen_comments_{persona}', []))
+    answered = 0
+    targets = []
+    if cfg['own_posts']:
+        try:
+            for post in rest.my_posts(limit=cfg['posts_scanned']):
+                for row in rest.post_comments(post.get('id') or ''):
+                    targets.append((row, post.get('subreddit') or ''))
+        except RR.RedditApiError as e:
+            _plat_trace(PLAT_REDDIT, persona, 'error',
+                        f'could not read her posts: {str(e)[:160]}')
+    if cfg['mentions']:
+        try:
+            for row in rest.inbox_mentions():
+                targets.append((row, row.get('subreddit') or ''))
+        except RR.RedditApiError:
+            pass
+    read = []
+    for row, where in targets:
+        if answered >= cfg['max_per_round']:
+            break
+        name = row.get('name') or f't1_{row.get("id") or ""}'
+        author = (row.get('author') or '').lower()
+        body = (row.get('body') or '').strip()
+        if not body or name in seen or author == me or author in ('automoderator', '[deleted]'):
+            continue
+        seen.add(name)
+        read.append(name)
+        reply = _rd_comment_reply(persona, row.get('author') or '', body, where)
+        if not reply:
+            continue
+        try:
+            rest.comment(name, reply)
+        except RR.RedditApiError as e:
+            _plat_trace(PLAT_REDDIT, persona, 'error',
+                        f'Reddit refused a comment reply: {str(e)[:160]}')
+            continue
+        answered += 1
+        _plat_trace(PLAT_REDDIT, persona, 'sent',
+                    f'→ (r/{where}) {reply[:120]}')
+    if read:
+        rest.mark_read(read)
+    _set_setting(f'reddit_seen_comments_{persona}',
+                 json.dumps(list(seen)[-600:]))
+    return answered
+
+
+_reddit_worker_started = [False]
+
+
+def _start_reddit_worker():
+    if _reddit_worker_started[0]:
+        return
+    _reddit_worker_started[0] = True
+    threading.Thread(target=_reddit_worker, daemon=True).start()
+
+
+def _rd_boot():
+    """Bring up every persona that has Reddit switched on, once, at startup."""
+    try:
+        with app.app_context():
+            for persona in _fanvue_enabled_list(plat=PLAT_REDDIT):
+                _rd_connect(persona)
+    except Exception:
+        logger.exception('reddit boot failed')
+
+
+if _worker_enabled('REDDIT_WORKER'):
+    _start_reddit_worker()
+if _worker_enabled('REDDIT_AUTOSTART'):
+    threading.Thread(target=_rd_boot, daemon=True).start()
+
+
+# ── Posting ──────────────────────────────────────────────────────────────────
+
+RD_KINDS = ('image', 'video', 'text', 'link')
+RD_POST_LOG_CAP = 20
+
+
+def _rd_title(persona, sub, brief):
+    """A title in her own voice when the creator did not write one, to the same
+    Reddit brief the growth planner already writes to -- flat, no emoji, no
+    sales language, the sort a real person types."""
+    spec = growth.POST_PLATFORMS['reddit']
+    extra = f' {brief}' if brief else ''
+    instruction = (
+        f'Write ONE Reddit post title for r/{sub}, in character. It must be '
+        f'{spec["brief"]}.{extra} Stay under {spec["cap"]} characters. Return '
+        f'only the title itself, no preamble and no quotes. {NO_PLACEHOLDER_RULE}')
+    text = _persona_text(persona, instruction, history=None, max_tokens=300,
+                         temperature=1.0)
+    return growth.trim_to(_strip_placeholders(text or ''), spec['cap'])
+
+
+def _rd_flair_for(persona, sub):
+    for row in _rd_subs(persona):
+        if row['sub'].lower() == str(sub).lower():
+            return row['flair'], row['nsfw']
+    return '', True
+
+
+def _rd_submit(persona, sub, kind, title, blob=None, mime='', body='', url='',
+               flair='', nsfw=None, cover=None):
+    """One submission, whichever kind it is. Shared by the console's Post now
+    and by the content planner's queue, so the two cannot drift."""
+    kind = (kind or 'image').strip().lower()
+    if kind not in RD_KINDS:
+        raise ValueError('kind must be image, video, text or link')
+    sub = str(sub or '').lstrip('/').removeprefix('r/').strip()
+    if not sub:
+        raise ValueError('Pick a subreddit first.')
+    title = (title or '').strip()[:growth.POST_PLATFORMS['reddit']['cap']]
+    if not title:
+        raise ValueError('A Reddit post needs a title.')
+    held_flair, held_nsfw = _rd_flair_for(persona, sub)
+    flair = flair or held_flair
+    nsfw = held_nsfw if nsfw is None else bool(nsfw)
+    rest = _rd_rest(persona)
+    if not rest.configured():
+        raise ValueError('Reddit is not connected for this persona.')
+    try:
+        if kind == 'text':
+            out = rest.submit_text(sub, title, body, flair, nsfw)
+        elif kind == 'link':
+            if not url:
+                raise ValueError('A link post needs a URL.')
+            out = rest.submit_link(sub, title, url, flair, nsfw)
+        elif kind == 'video':
+            if not blob:
+                raise ValueError('A video post needs a video file.')
+            out = rest.submit_video(sub, title, blob, mime or 'video/mp4',
+                                    cover, 'image/jpeg', flair, nsfw)
+        else:
+            if not blob:
+                raise ValueError('An image post needs a photo.')
+            out = rest.submit_image(sub, title, blob, mime or 'image/jpeg',
+                                    flair, nsfw)
+    except RR.RedditApiError as e:
+        raise ValueError('Reddit would not accept that post'
+                         + (f': {e.detail[:160]}' if e.detail else '.'))
+    _rd_log_post(persona, sub, kind, title)
+    return out
+
+
+def _rd_log_post(persona, sub, kind, title):
+    rows = _dc_json(f'reddit_posts_{persona}', [])
+    rows.append({'sub': sub, 'kind': kind, 'title': title[:200],
+                 'at': int(time.time())})
+    _set_setting(f'reddit_posts_{persona}', json.dumps(rows[-RD_POST_LOG_CAP:]))
+
+
+def _rd_posts(persona):
+    return _dc_json(f'reddit_posts_{persona}', [])
+
+
+def _rd_post_now(persona, sub, kind, media, title, brief='', body='', url='',
+                 flair='', cover=''):
+    kind = (kind or 'image').strip().lower()
+    blob = mime = None
+    if kind in ('image', 'video'):
+        raw, media_kind = _ig_media_bytes(media)
+        if kind == 'video' and media_kind != 'video':
+            raise ValueError('A video post needs a video file.')
+        if kind == 'image' and media_kind != 'image':
+            raise ValueError('An image post needs a photo.')
+        blob = raw
+        mime = (media.split(';')[0].replace('data:', '')
+                if isinstance(media, str) else '') or ''
+    cover_bytes = None
+    if cover:
+        try:
+            cover_bytes, _ = _ig_media_bytes(cover)
+        except ValueError:
+            cover_bytes = None
+    title = (title or '').strip()
+    if not title:
+        title = _rd_title(persona, sub, brief)
+    out = _rd_submit(persona, sub, kind, title, blob, mime, body, url, flair,
+                     cover=cover_bytes)
+    return {'sub': sub, 'kind': kind, 'title': title, 'result': out}
+
+
+# ── Reddit API ───────────────────────────────────────────────────────────────
+
+@app.route('/api/reddit/auto', methods=['GET', 'POST'])
+@platform_scoped
+def api_reddit_auto():
+    return _plat_auto_api(PLAT_REDDIT)
+
+
+@app.route('/api/reddit/auto-run', methods=['POST'])
+@platform_scoped
+def api_reddit_auto_run():
+    return _plat_auto_run_api(PLAT_REDDIT)
+
+
+@app.route('/api/reddit/ppv', methods=['GET', 'POST'])
+@platform_scoped
+def api_reddit_ppv():
+    return _plat_ppv_api(PLAT_REDDIT)
+
+
+@app.route('/api/reddit/dm-send', methods=['POST'])
+@platform_scoped
+def api_reddit_dm_send():
+    """Send one DM by hand from the console inbox, the way Discord's does."""
+    data = request.json or {}
+    persona = (data.get('persona') or '').strip()
+    fan_key = str(data.get('fan') or '').strip()
+    text = (data.get('text') or '').strip()
+    if not (persona and fan_key and text):
+        return jsonify({'ok': False, 'error': 'persona, fan and text are required'}), 400
+    if not fan_key.startswith('rd:'):
+        return jsonify({'ok': False, 'error': 'Only a Reddit DM can be answered by hand'}), 400
+    try:
+        RC.send(persona, fan_key[3:], text)
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:250]}), 400
+    handle = _inbox_handle(persona, fan_key)
+    _log_x_message(persona, fan_key, handle, 'out', text)
+    _plat_trace(PLAT_REDDIT, persona, 'sent', f'→ (by hand) {text[:120]}', fan_key)
+    return jsonify({'ok': True, 'sent': text})
+
+
+@app.route('/api/reddit/stats')
+@platform_scoped
+def api_reddit_stats():
+    persona = request_persona()
+    convos = 0
+    try:
+        from db import SessionLocal, list_conversations
+        s = SessionLocal()
+        try:
+            convos = len(list_conversations(
+                s, persona, INBOX_PLATFORMS['reddit']['prefixes']))
+        finally:
+            s.close()
+    except Exception as e:
+        logger.debug('reddit stats conversations failed for %s: %s', persona, str(e)[:120])
+    fans = _plat_cta(PLAT_REDDIT, persona)
+    sent = sum(1 for f in fans.values() if isinstance(f, dict) and f.get('target'))
+    opened = sum(1 for f in fans.values() if isinstance(f, dict) and f.get('clicked'))
+    return jsonify({'conversations': convos, 'subs': len(_rd_subs(persona)),
+                    'drops_sent': sent, 'drops_opened': opened,
+                    'posts': len(_rd_posts(persona))})
+
+
+@app.route('/api/reddit/trace', methods=['GET', 'DELETE'])
+@platform_scoped
+def api_reddit_trace():
+    out = _plat_trace_api(PLAT_REDDIT)
+    if request.method == 'DELETE':
+        return out
+    persona = request_persona()
+    live = RC.runner(persona)
+    body = out.get_json()
+    body['state'] = live.state() if live else {}
+    body['signin'] = _rd_signin_state(persona, adopt=True)
+    body['account'] = _rd_account(persona)
+    body['posts'] = _rd_posts(persona)
+    return jsonify(body)
+
+
+@app.route('/api/reddit/status')
+@platform_scoped
+def api_reddit_status():
+    persona = request_persona()
+    signin = _rd_signin_state(persona, adopt=True)
+    held = _rd_session(persona)
+    live = RC.runner(persona)
+    return jsonify({'connected': bool(held.get('cookie')),
+                    'chat_ready': bool(held.get('bearer')),
+                    'signin': signin,
+                    'username': held.get('username') or '',
+                    'user_id': held.get('user_id') or '',
+                    'state': live.state() if live else {},
+                    'reachable': PLAT_REDDIT.reachable(persona),
+                    'subs': _rd_subs(persona),
+                    'replies': _rd_replies_cfg(persona),
+                    'posts': _rd_posts(persona)})
+
+
+@app.route('/api/reddit/connect', methods=['GET', 'POST', 'DELETE'])
+@platform_scoped
+def api_reddit_connect():
+    persona = request_persona()
+    if request.method == 'DELETE':
+        live = RC.runner(persona)
+        if live:
+            live.stop()
+        _rd_set_session(persona, {})
+        return jsonify({'connected': False})
+    if request.method == 'POST':
+        body = request.get_json(silent=True) or {}
+        cookie = (body.get('cookie') or '').strip()
+        if not cookie:
+            return jsonify({'error': 'Paste her Reddit cookie to connect.'}), 400
+        session = {'cookie': cookie, 'bearer': (body.get('bearer') or '').strip(),
+                   'proxy': _rd_proxy_for(persona)}
+        try:
+            who = RR.Rest(session).me() or {}
+        except RR.RedditApiError as e:
+            return jsonify({'error': 'Reddit would not accept that cookie'
+                                     + (f': {e.detail[:160]}' if e.detail else '.')}), 400
+        if not who.get('name'):
+            return jsonify({'error': 'That cookie is not signed in to Reddit.'}), 400
+        session['user_id'] = str(who.get('id') or '')
+        session['username'] = who.get('name') or ''
+        session['modhash'] = who.get('modhash') or ''
+        _rd_set_session(persona, session)
+        _rd_connect(persona)
+    held = _rd_session(persona)
+    return jsonify({'connected': bool(held.get('cookie')),
+                    'chat_ready': bool(held.get('bearer')),
+                    'username': held.get('username') or '',
+                    'user_id': held.get('user_id') or ''})
+
+
+@app.route('/api/reddit/subreddits', methods=['GET', 'POST'])
+@platform_scoped
+def api_reddit_subreddits():
+    persona = request_persona()
+    if request.method == 'POST':
+        body = request.get_json(silent=True) or {}
+        rows = []
+        for entry in (body.get('subs') or [])[:60]:
+            if not isinstance(entry, dict) or not entry.get('sub'):
+                continue
+            rows.append({'sub': str(entry['sub']).lstrip('/').removeprefix('r/')[:64],
+                         'flair': str(entry.get('flair') or '')[:64],
+                         'flair_text': str(entry.get('flair_text') or '')[:80],
+                         'nsfw': bool(entry.get('nsfw', True))})
+        _set_setting(f'reddit_subs_{persona}', json.dumps(rows))
+    return jsonify({'subs': _rd_subs(persona)})
+
+
+@app.route('/api/reddit/flairs')
+@platform_scoped
+def api_reddit_flairs():
+    """What flairs a subreddit offers. Most NSFW subs auto-remove a post without
+    one, so this is not a nicety -- a post with the wrong flair is a post nobody
+    ever sees."""
+    persona = request_persona()
+    sub = (request.args.get('sub') or '').strip()
+    if not sub:
+        return jsonify({'flairs': []})
+    try:
+        return jsonify({'flairs': _rd_rest(persona).flairs(sub)})
+    except RR.RedditApiError as e:
+        return jsonify({'flairs': [], 'error': str(e.detail or e)[:200]}), 200
+
+
+@app.route('/api/reddit/replies', methods=['GET', 'POST'])
+@platform_scoped
+def api_reddit_replies():
+    persona = request_persona()
+    if request.method == 'POST':
+        body = request.get_json(silent=True) or {}
+        _set_setting(f'reddit_replies_{persona}', json.dumps({
+            'enabled': bool(body.get('enabled')),
+            'own_posts': bool(body.get('own_posts', True)),
+            'mentions': bool(body.get('mentions', True)),
+            'max_per_round': max(1, min(int(body.get('max_per_round') or 5), 25)),
+            'posts_scanned': max(1, min(int(body.get('posts_scanned') or 10), 50))}))
+    return jsonify(_rd_replies_cfg(persona))
+
+
+@app.route('/api/reddit/replies-run', methods=['POST'])
+@platform_scoped
+def api_reddit_replies_run():
+    persona = request_persona()
+    try:
+        answered = _rd_comment_round(persona)
+    except Exception as e:
+        logger.exception('reddit comment round failed')
+        return jsonify({'ok': False, 'error': str(e)[:250]}), 400
+    return jsonify({'ok': True, 'answered': answered})
+
+
+@app.route('/reddit/connect')
+def reddit_connect_page():
+    if not _current_user():
+        return redirect('/login?next=/reddit')
+    return send_from_directory(BASE_DIR, 'of_connect.html')
+
+
+@app.route('/api/reddit/connect/browser', methods=['POST'])
+@platform_scoped
+def api_reddit_connect_browser():
+    persona = request_persona()
+    d = request.json or {}
+
+    def _side(value, fallback, low, high):
+        try:
+            return max(low, min(int(value), high))
+        except (TypeError, ValueError):
+            return fallback
+
+    viewport = {'width': _side(d.get('width'), 1000, 600, 1600),
+                'height': _side(d.get('height'), 760, 500, 1200)}
+    try:
+        attempt = _rd_conn().start(
+            persona, _rd_account_id(persona),
+            proxy=_rd_proxy_for(persona), viewport=viewport, site='reddit')
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]}), 400
+    _set_setting(f'reddit_attempt_{persona}', attempt.id)
+    return jsonify({'ok': True, 'attempt': attempt.status()})
+
+
+@app.route('/api/reddit/connect/frame')
+@platform_scoped
+def api_reddit_connect_frame():
+    persona = request_persona()
+    attempt_id = (request.args.get('attempt')
+                  or _get_setting(f'reddit_attempt_{persona}') or '')
+    attempt = _rd_conn().get(attempt_id, frame=True) if attempt_id else None
+    if not attempt:
+        return jsonify({'ok': False, 'error': 'no such sign-in'}), 404
+    status = attempt.status()
+    if status.get('state') == 'connected' and not _rd_session(persona).get('cookie'):
+        if not _rd_adopt(attempt):
+            status = dict(status, state='failed',
+                          error=_get_setting(f'reddit_adopt_error_{persona}') or
+                          'the sign-in finished but could not be stored')
+    return jsonify({'ok': True, 'attempt': status, 'frame': attempt.snapshot()})
+
+
+@app.route('/api/reddit/connect/input', methods=['POST'])
+@platform_scoped
+def api_reddit_connect_input():
+    persona = request_persona()
+    d = request.json or {}
+    import of_connect as _ofc
+    kind = (d.get('kind') or '').strip()
+    if kind not in _ofc.INPUT_KINDS:
+        return jsonify({'ok': False, 'error': 'unknown input'}), 400
+    attempt_id = (d.get('attempt')
+                  or _get_setting(f'reddit_attempt_{persona}') or '')
+    attempt = _rd_conn().get(attempt_id) if attempt_id else None
+    if not attempt:
+        return jsonify({'ok': False, 'error': 'no such sign-in'}), 404
+    try:
+        attempt.act(kind, x=d.get('x'), y=d.get('y'), text=d.get('text'),
+                    key=d.get('key'), dy=d.get('dy'),
+                    points=(d.get('points') or [])[:60])
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]}), 400
+    return jsonify({'ok': True})
+
+
+@app.route('/api/reddit/connect/cancel', methods=['POST'])
+@platform_scoped
+def api_reddit_connect_cancel():
+    persona = request_persona()
+    attempt_id = _get_setting(f'reddit_attempt_{persona}') or ''
+    if attempt_id:
+        try:
+            _rd_conn().cancel(attempt_id)
+        except Exception:
+            pass
+    _set_setting(f'reddit_attempt_{persona}', '')
+    return jsonify({'ok': True})
+
+
+@app.route('/api/reddit/post-now', methods=['POST'])
+@platform_scoped
+def api_reddit_post_now():
+    persona = request_persona()
+    d = request.json or {}
+    try:
+        result = _rd_post_now(persona, (d.get('sub') or '').strip(),
+                              d.get('kind'), d.get('media') or '',
+                              d.get('title') or '',
+                              (d.get('brief') or '').strip()[:400],
+                              d.get('body') or '', (d.get('url') or '').strip(),
+                              (d.get('flair') or '').strip(),
+                              d.get('cover') or '')
+    except ValueError as e:
+        return jsonify({'ok': False, 'error': str(e)[:250]}), 400
+    except Exception as e:
+        logger.exception('reddit post-now failed')
         return jsonify({'ok': False, 'error': str(e)[:250]}), 400
     return jsonify({'ok': True, **result})
 

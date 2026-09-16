@@ -1128,6 +1128,14 @@ class ScheduledPost(Base):
     # Instagram alone has three places a post can land. Empty means a feed
     # post, which is what every other channel's single destination amounts to.
     ig_kind = Column(String(8), default='')        # '' | post | story | reel
+    # Reddit needs a destination the other channels do not have: which
+    # subreddit, which flair (most NSFW subs auto-remove a post without one)
+    # and which submission kind. A crosspost is several rows rather than a list
+    # in one -- each subreddit gets its own slot, title and flair, which is
+    # also what keeps a fan-out from reading as the same post spammed six times.
+    rd_sub = Column(String(64), default='')
+    rd_flair = Column(String(64), default='')
+    rd_kind = Column(String(8), default='')        # '' | image | video | text | link
     created_at = Column(DateTime, default=_now)
 
 
@@ -1136,13 +1144,15 @@ Index('ix_scheduled_persona', ScheduledPost.persona, ScheduledPost.run_at)
 
 
 def queue_post(session, persona, platform, text, run_at, media_id='', status='queued',
-               audience='', price_cents=0, media_ids=None, ig_kind=''):
+               audience='', price_cents=0, media_ids=None, ig_kind='',
+               rd_sub='', rd_flair='', rd_kind=''):
     ids = [str(m) for m in (media_ids or []) if m] or ([media_id] if media_id else [])
     row = ScheduledPost(persona=persona, platform=platform, text=text,
                         run_at=run_at, media_id=(ids[0] if ids else ''), status=status,
                         media_ids=','.join(ids),
                         audience=audience or '', price_cents=int(price_cents or 0),
-                        ig_kind=ig_kind or '')
+                        ig_kind=ig_kind or '', rd_sub=rd_sub or '',
+                        rd_flair=rd_flair or '', rd_kind=rd_kind or '')
     session.add(row)
     session.flush()
     return row
@@ -1238,7 +1248,8 @@ def post_media_ids(row):
 
 
 def update_post(session, persona, post_id, text=None, run_at=None, media_id=None,
-                audience=None, price_cents=None, media_ids=None, ig_kind=None):
+                audience=None, price_cents=None, media_ids=None, ig_kind=None,
+                rd_sub=None, rd_flair=None, rd_kind=None):
     """Edit a post that has not gone out yet. Like cancel_post, only a `queued`
     row is the caller's to touch: once the worker has claimed it the send may
     already be away, and once it has posted the text is history rather than a
@@ -1267,6 +1278,12 @@ def update_post(session, persona, post_id, text=None, run_at=None, media_id=None
         fields['price_cents'] = int(price_cents or 0)
     if ig_kind is not None:
         fields['ig_kind'] = ig_kind or ''
+    if rd_sub is not None:
+        fields['rd_sub'] = rd_sub or ''
+    if rd_flair is not None:
+        fields['rd_flair'] = rd_flair or ''
+    if rd_kind is not None:
+        fields['rd_kind'] = rd_kind or ''
     if not fields:
         return False
     n = (session.query(ScheduledPost)

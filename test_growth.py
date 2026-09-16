@@ -260,8 +260,9 @@ print()
 print('by-hand queue rows')
 check('a publishable channel waits on the scheduler', G.queue_status_for('x') == 'queued')
 check('threads too', G.queue_status_for('threads') == 'queued')
-check('a by-hand channel waits on the creator',
-      [G.queue_status_for(p) for p in ('instagram', 'tiktok', 'reddit')] == ['manual'] * 3)
+check('a by-hand channel waits on the creator', G.queue_status_for('tiktok') == 'manual')
+check('Instagram and Reddit publish themselves now',
+      [G.queue_status_for(p) for p in ('instagram', 'reddit')] == ['queued'] * 2)
 check('manual is a real state', 'manual' in G.QUEUE_STATES)
 check('both editable states can still be touched',
       set(G.EDITABLE_STATES) == {'queued', 'manual'})
@@ -446,12 +447,12 @@ print('media rules')
 check('X takes both', G.media_ok('x', 'image') and G.media_ok('x', 'video'))
 check('Threads takes both', G.media_ok('threads', 'image') and G.media_ok('threads', 'video'))
 check('TikTok is video only', G.media_ok('tiktok', 'video') and not G.media_ok('tiktok', 'image'))
-check('Reddit is a still', G.media_ok('reddit', 'image') and not G.media_ok('reddit', 'video'))
+check('Reddit takes both', G.media_ok('reddit', 'image') and G.media_ok('reddit', 'video'))
 check('an unknown channel takes nothing', not G.media_ok('myspace', 'image'))
 check('a good pairing has no complaint', G.media_reject('x', 'video') == '')
 check('a bad one says what the channel takes',
-      'video' in G.media_reject('reddit', 'video')
-      and 'Reddit' in G.media_reject('reddit', 'video'))
+      'image' in G.media_reject('tiktok', 'image')
+      and 'TikTok' in G.media_reject('tiktok', 'image'))
 check('an unknown kind is refused', G.media_reject('x', 'gif') != '')
 check('the two publishable channels differ in how they get it',
       G.media_how('x') == 'upload' and G.media_how('threads') == 'fetch')

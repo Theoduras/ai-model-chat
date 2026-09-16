@@ -453,7 +453,7 @@ POST_PLATFORMS = {
 
 # What the platform can actually publish on its own. The rest are written here
 # and posted by hand, which is why they are generated but never queued.
-PUBLISHABLE = ('x', 'threads', 'fanvue', 'instagram')
+PUBLISHABLE = ('x', 'threads', 'fanvue', 'instagram', 'reddit')
 
 # A variant is a second way to write for a channel that already exists, not a
 # channel of its own, so anything keyed per channel — the content level, the
@@ -499,12 +499,13 @@ MEDIA_SUPPORT = {
     'x':         {'kinds': ('image', 'video'), 'how': 'upload', 'max': 4},
     'threads':   {'kinds': ('image', 'video'), 'how': 'fetch',  'max': 20},
     'fanvue':    {'kinds': ('image', 'video'), 'how': 'upload', 'max': 20},
-    # No posting API, so media here is something the creator downloads and
-    # uploads by hand. Reddit takes a still; a video post there is a different
-    # submission type we do not write.
-    'instagram': {'kinds': ('image', 'video'), 'how': 'by-hand', 'max': 10},
+    # Instagram and Reddit are signed-in accounts rather than app-registered
+    # ones, so the bytes go up the same way -- what differs is only which
+    # undocumented endpoint takes them. TikTok still has no path in, so a post
+    # there stays something the creator uploads by hand.
+    'instagram': {'kinds': ('image', 'video'), 'how': 'upload', 'max': 10},
     'tiktok':    {'kinds': ('video',),         'how': 'by-hand', 'max': 1},
-    'reddit':    {'kinds': ('image',),         'how': 'by-hand', 'max': 20},
+    'reddit':    {'kinds': ('image', 'video'), 'how': 'upload', 'max': 20},
 }
 
 MEDIA_KINDS = ('image', 'video')
