@@ -265,6 +265,7 @@
       <button class="btn-ai" onclick="refreshRules()">Refresh signing rules</button>
       <button class="btn-ai" style="background:var(--surface); color:var(--text-2);" onclick="testSigning()">Test signing</button>
       <button class="btn-ai" onclick="captureSignature()">Capture signature</button>
+      <button class="btn-ai" style="background:var(--surface); color:var(--text-2);" onclick="collectSignatures()">Collect signatures</button>
     </div>
     <div class="result-box" id="signing-test"></div>
     <p class="hint" style="margin-top:14px;">If no published set works, paste a current one
@@ -715,6 +716,20 @@ async function saveOverride(clear){
   else ok(box,r.verified?'Saved — it matches OnlyFans\u2019 own signature.'
     :'Saved. No captured signature to check it against yet.');
   showRules(r.rules);
+}
+
+async function collectSignatures(){
+  const box=document.getElementById('signing-test');
+  box.textContent='Collecting signatures\u2026 one page load each, this takes a few minutes.';
+  try{
+    const r=await (await fetch('/api/onlyfans/signing/collect',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({count:12})})).json();
+    if(!r.ok){ err(box,r.error||'Could not collect signatures.'); return; }
+    box.textContent='Held '+r.held+' of the '+r.need+' signatures needed to solve '
+      +'revision '+(r.revision||'?')+' ('+r.added+' new).'
+      +(r.held>=r.need?' Solving \u2014 watch the repair lines.':' Run it again.')
+      +(r.errors&&r.errors.length?' Last error: '+r.errors[0]:'');
+  }catch(e){ err(box,'The server did not answer: '+e); }
 }
 
 // ── Live watcher ─────────────────────────────────────────────────────────────

@@ -349,6 +349,36 @@ class OracleTest(unittest.TestCase):
                                         self.sample, bases=[RULES]), {})
 
 
+class MirrorSchemaTest(unittest.TestCase):
+    """The mirrors agree on the arithmetic and disagree on the spelling."""
+
+    def test_camel_case_and_split_format(self):
+        got = of_rules._normalise({'staticParam': 'P', 'checksumIndexes': [1, 2],
+                                   'checksumConstant': -34, 'start': '61583',
+                                   'end': '6a452ef4'})
+        self.assertTrue(of_rules._valid(got))
+        self.assertEqual(got['format'], '61583:{}:{:x}:6a452ef4')
+        self.assertEqual(of_rules._revision_of(got), 61583)
+
+    def test_prefix_suffix_and_hyphenated_token(self):
+        got = of_rules._normalise({'static_param': 'P', 'checksum_indexes': [1],
+                                   'checksum_constant': 1, 'prefix': '6799',
+                                   'suffix': '63d3c870', 'app-token': 'tok'})
+        self.assertEqual(got['format'], '6799:{}:{:x}:63d3c870')
+        self.assertEqual(got['app_token'], 'tok')
+
+    def test_a_missing_app_token_falls_back_rather_than_failing(self):
+        got = of_rules._normalise({'static_param': 'P', 'checksum_indexes': [1],
+                                   'first_param': '37764', 'last_param': 'ab'})
+        self.assertEqual(got['app_token'], of_rules.DEFAULT_APP_TOKEN)
+        self.assertTrue(of_rules._valid(got))
+
+    def test_our_own_spelling_is_left_alone(self):
+        canonical = dict(RULES)
+        self.assertEqual(of_rules._normalise(canonical)['format'],
+                         canonical['format'])
+
+
 class RotationTest(unittest.TestCase):
     def test_recognises_a_rotation(self):
         self.assertTrue(of_rules.stale_response(400, 'Please refresh the page'))

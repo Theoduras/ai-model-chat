@@ -16367,6 +16367,7 @@ def _of_autocapture(force=False):
     if not sample.get('sign'):
         return False
     of_rules.put_sample(sample)
+    _of_keep_signature(sample)
     logger.info('captured a signature automatically; rule sets can be checked again')
     if of_rules.proven() is not True:
         _of_derive_rules(sample, force=force)
@@ -16433,6 +16434,81 @@ def _of_derive_rules(sample, force=False):
     return True
 
 
+OF_SIGNATURES_KEY = 'onlyfans_signatures'
+# Rather more than the 42 the system needs: signatures are cheap to keep and a
+# rotation part-way through a collection throws half of them away.
+OF_SIGNATURES_MAX = 150
+
+
+def _of_signatures(revision=''):
+    """Captured signatures, newest last, optionally one rotation's worth.
+
+    Mixing rotations is the one thing that makes the solver quietly wrong, so
+    the revision each signature carries is what selects them, not their age.
+    """
+    try:
+        kept = json.loads(_get_setting(OF_SIGNATURES_KEY) or '[]')
+    except Exception:
+        return []
+    kept = [s for s in kept if isinstance(s, dict) and s.get('sign')]
+    if revision:
+        kept = [s for s in kept
+                if str(s['sign']).split(':')[0] == str(revision)]
+    return kept
+
+
+def _of_keep_signature(sample):
+    """Remember one genuine signature. Ours are refused: a signature we made is
+    our own arithmetic coming back, and solving from it recovers what we
+    already believe rather than what OnlyFans is doing."""
+    if not (isinstance(sample, dict) and sample.get('sign')) or of_rules.ours(sample):
+        return False
+    kept = _of_signatures()
+    if any(s.get('sign') == sample['sign'] for s in kept):
+        return False
+    kept.append({k: sample.get(k) for k in ('path', 'time', 'user_id', 'sign')})
+    _set_setting(OF_SIGNATURES_KEY, json.dumps(kept[-OF_SIGNATURES_MAX:]))
+    return True
+
+
+def _of_solve_recipe(param, sample):
+    """Recover the checksum recipe from signatures when nobody publishes it.
+
+    Every captured signature is one linear equation in the 40 index counts and
+    the constant, so enough of them determine the recipe outright. What the
+    solver returns is still put to the oracle before it is adopted.
+    """
+    revision = str(sample.get('sign') or '').split(':')[0]
+    signatures = _of_signatures(revision)
+    if not any(of_solve.param_fits(param, s) for s in signatures):
+        of_trace.note('repair', 'the captured param does not reproduce the '
+                      'digest in any signature we hold, so it is not the one '
+                      'OnlyFans is hashing', 'warning')
+        return False
+    need = of_solve.DIGEST_LEN + 2
+    if len(signatures) < need:
+        of_trace.note('repair', 'the param is right and the recipe is not '
+                      'published; %d of the %d signatures needed to solve for '
+                      'it are held — collect more on the signing panel'
+                      % (len(signatures), need))
+        return False
+    rules = of_solve.rules_from(param, signatures, base=of_rules.rules())
+    if of_rules.verify(sample, rules) is not True:
+        of_trace.note('repair', 'solved a recipe from %d signatures and it does '
+                      'not reproduce them — the signature is not built the way '
+                      'we think, so a rule set has to be pasted in'
+                      % len(signatures), 'warning')
+        return False
+    _set_setting('onlyfans_rules_override', json.dumps(rules))
+    of_rules.refresh()
+    of_trace.note('repair', 'solved the signing rules from %d captured '
+                  'signatures, revision %s'
+                  % (len(signatures), rules.get('revision') or ''))
+    logger.info('solved OnlyFans signing rules from %d signatures (revision %s)',
+                len(signatures), rules.get('revision') or '')
+    return True
+
+
 def _of_capture_param_rules(sample):
     """Last resort: read static_param off the plaintext OnlyFans hashes.
 
@@ -16464,9 +16540,9 @@ def _of_capture_param_rules(sample):
     rules = of_rules.solve(param, sample)
     if of_rules.verify(sample, rules) is not True:
         of_trace.note('repair', 'the captured param does not reproduce the '
-                      'signature — the checksum recipe rotated too, so a rule '
-                      'set has to be pasted in', 'warning')
-        return False
+                      'signature under any published checksum recipe — '
+                      'solving for the recipe instead')
+        return _of_solve_recipe(param, sample)
     _set_setting('onlyfans_rules_override', json.dumps(rules))
     of_rules.refresh()
     of_trace.note('repair', 'adopted rules from the hashed plaintext, revision '
@@ -16540,6 +16616,7 @@ if _of_direct():
     import of_connect
     import of_events
     import of_rules
+    import of_solve
     import of_trace
     of_trace.install()
     import of_session
@@ -17189,6 +17266,38 @@ def api_onlyfans_signing_capture():
                         'error': 'the page made no signed request in time' + detail}), 502
     of_rules.put_sample(sample)
     return jsonify({'ok': True, 'rules': of_rules.state()})
+
+
+@app.route('/api/onlyfans/signing/collect', methods=['POST'])
+@operator_only
+def api_onlyfans_signing_collect():
+    """Gather signatures until there are enough to solve the recipe from.
+
+    One page load is one signature and the solver needs 42 of them, so at the
+    repair's own pace that is seven hours. This is the same capture in a loop,
+    asked for outright.
+    """
+    if not _of_direct():
+        return jsonify({'ok': False, 'error': 'not running the direct transport'}), 400
+    want = max(1, min(int((request.json or {}).get('count') or 12), 60))
+    conn, added, errors = _of_conn(), 0, []
+    for _ in range(want):
+        try:
+            got = conn.sample_now(proxy=_of_proxy_for('', '')) or {}
+        except Exception as e:
+            errors.append(str(e)[:120])
+            break
+        if got.get('sign') and _of_keep_signature(got):
+            added += 1
+            of_rules.put_sample(got)
+    revision = str((of_rules.sample() or {}).get('sign') or '').split(':')[0]
+    held = len(_of_signatures(revision))
+    need = of_solve.DIGEST_LEN + 2
+    if held >= need:
+        _of_autocapture(force=True)
+    return jsonify({'ok': True, 'added': added, 'held': held, 'need': need,
+                    'revision': revision, 'errors': errors,
+                    'rules': of_rules.state()})
 
 
 @app.route('/api/onlyfans/signing/test', methods=['POST'])

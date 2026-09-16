@@ -377,6 +377,18 @@ class StaleSigningRefusalTest(unittest.TestCase):
     def tearDown(self):
         of_rules.proven = self.proven
 
+    def test_a_401_that_says_access_denied_is_signing_too(self):
+        """Observed live: "Access denied." on every request through a rotation.
+        It reads as a revoked session, so the account was marked expired and
+        its watcher stopped for the rest of the outage."""
+        of_session.put('acct-d', dict(SESSION))
+        denied = of_client.OnlyFansError(
+            401, '{"error":{"code":0,"message":"Access denied."}}')
+        with mock.patch.object(of_client, '_once', side_effect=denied):
+            with self.assertRaises(of_client.SigningStale):
+                of_client.call('acct-d', 'GET', '/api2/v2/users/me')
+        self.assertTrue(of_session.live('acct-d'))
+
     def test_a_blank_401_is_blamed_on_signing_not_the_session(self):
         of_session.put('acct-s', dict(SESSION))
         with mock.patch.object(of_client, '_once',
