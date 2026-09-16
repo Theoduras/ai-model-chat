@@ -20,8 +20,15 @@
     .warn-box { border: 1px solid #b45309; background: #78350f22; color: var(--text-2);
                 border-radius: 10px; padding: 12px 14px; font-size: 0.82rem; line-height: 1.5; }
     .rd-preview { max-width: 220px; max-height: 220px; border-radius: 10px; margin-top: 8px; display: none; }
-    .rd-sub-row { display: flex; gap: 8px; align-items: flex-end; margin-bottom: 10px; flex-wrap: wrap; }
-    .rd-sub-row .field { margin: 0; }
+    .row-inline { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+    .row-inline .field { flex: 1; min-width: 160px; }
+    .sub-row { display: grid; grid-template-columns: 1.2fr 1.2fr auto auto; gap: 8px;
+               align-items: center; margin-bottom: 8px; }
+    .sub-row input[type=text], .sub-row select { margin: 0; }
+    .nsfw-cell { display: flex; align-items: center; gap: 6px; font-size: 0.78rem; color: var(--text-3); white-space: nowrap; }
+    .trace-line { font-family: ui-monospace, monospace; font-size: 0.76rem; padding: 4px 0;
+                  border-bottom: 1px solid var(--border); color: var(--text-2); }
+    .trace-line .st { color: var(--accent); margin-right: 8px; }
   </style>
 </head>
 <body class="page-dashboard">
@@ -327,19 +334,17 @@ async function disconnect(){
 
 function drawSubs(){
   el('sub-list').innerHTML=subs.map((row,i)=>
-    '<div class="rd-sub-row">'
-    +'<div class="field"><label>Subreddit</label>'
-    +'<input type="text" value="'+esc(row.sub)+'" placeholder="gonewild" '
-    +'onchange="editSub('+i+',\'sub\',this.value)" onblur="loadFlairs('+i+')"></div>'
-    +'<div class="field"><label>Flair</label><select id="sub-flair-'+i+'" '
-    +'onchange="editSub('+i+',\'flair\',this.value)">'
-    +'<option value="'+esc(row.flair)+'">'+esc(row.flair_text||row.flair||'— none —')+'</option>'
-    +'</select></div>'
-    +'<div class="field nowrap"><label class="switch"><input type="checkbox" '
-    +(row.nsfw?'checked':'')+' onchange="editSub('+i+',\'nsfw\',this.checked)"><span>NSFW</span></label></div>'
-    +'<button class="btn-ai" style="background:var(--surface); color:var(--text-2);" '
-    +'onclick="dropSub('+i+')">Remove</button></div>').join('')
-    ||'<span class="hint">No subreddits yet. She has nowhere to post.</span>';
+    '<div class="sub-row">'
+    +'<input type="text" value="'+esc(row.sub)+'" placeholder="subreddit, e.g. gonewild" '
+    +'onchange="editSub('+i+',\'sub\',this.value)" onblur="loadFlairs('+i+')">'
+    +'<select id="sub-flair-'+i+'" onchange="editSub('+i+',\'flair\',this.value)">'
+    +'<option value="'+esc(row.flair)+'">'+esc(row.flair_text||row.flair||'— flair —')+'</option>'
+    +'</select>'
+    +'<label class="nsfw-cell"><input type="checkbox" '+(row.nsfw?'checked':'')
+    +' onchange="editSub('+i+',\'nsfw\',this.checked)"> adult</label>'
+    +'<button class="btn-ai" style="background:var(--surface); color:var(--text-2); padding:4px 10px;" '
+    +'onclick="dropSub('+i+')">remove</button></div>').join('')
+    ||'<span class="hint">No subreddits yet, so she has nowhere to post.</span>';
   subs.forEach((row,i)=>loadFlairs(i));
 }
 
