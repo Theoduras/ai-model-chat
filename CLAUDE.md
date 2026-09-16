@@ -212,6 +212,14 @@ Stay completely in character. Never mention being an AI.
   speaks to `oauth.reddit.com` with a bearer and no cookie. That is the only
   path worth extending. It also fixes the ToS posture — a declared app under
   Reddit's developer terms, rather than a client its terms forbid.
+- Devvit (Reddit's Developer Platform, developers.reddit.com) is **not** an
+  option for this and was checked: a Devvit app can only be installed into
+  communities the developer *fully moderates*. It cannot post into a subreddit
+  she does not own, which is the entire job. It is worth revisiting only if a
+  persona ever runs her own subreddit — there it needs no auth at all, fires on
+  a CommentCreate trigger rather than polling, and can act as her via
+  `runAs: 'USER'` — but it is TypeScript on Reddit's infrastructure, so it
+  would be a second codebase calling back into this one for the reply text.
 - The two fallbacks stay because they are the only things that can carry a chat
   token: the hosted window, and a session pasted in by hand. Both expire, both
   need a per-persona residential proxy (`_rd_proxy_for`), and an OAuth session
