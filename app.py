@@ -17155,6 +17155,13 @@ class _Platform:
     # are spent. Off unless a platform says otherwise, so no existing one
     # changes behaviour by the ladder merely existing.
     has_winback = False
+    # Whether the paid-tier/bandit/ledger engine (_fv_maybe_ppv) runs for this
+    # platform. Only a platform with a real paywall to verify a sale against
+    # should leave this True.
+    has_ppv = True
+    # Whether a lightweight, no-paywall link nudge runs instead, when has_ppv
+    # is False.
+    has_cta = False
 
     def k(self, name, persona=''):
         return f'{self.prefix}_{name}_{persona}' if persona else f'{self.prefix}_{name}'
@@ -17289,6 +17296,15 @@ def _plat_winback(plat, persona):
         return {}
 
 
+def _plat_cta(plat, persona):
+    """Per-fan CTA nudge state: {fan: {'sent','clicked','count','target','kind'}}."""
+    try:
+        held = json.loads(_get_setting(plat.k('cta', persona)) or '{}')
+        return held if isinstance(held, dict) else {}
+    except Exception:
+        return {}
+
+
 def _plat_auto_round(plat, persona):
     with plat.tracing():
         return _plat_round_body(plat, persona)
@@ -17320,7 +17336,7 @@ def _plat_round_body(plat, persona):
     # go out one at a time, in order, as the conversation deepens.
     ppv_sets = _fanvue_ppv_sets(persona, plat=plat)
     ppv_cfg = _fanvue_ppv(persona, plat=plat)
-    ppv_on = bool(ppv_cfg.get('enabled', True)) and bool(ppv_sets)
+    ppv_on = plat.has_ppv and bool(ppv_cfg.get('enabled', True)) and bool(ppv_sets)
     ppv_tz = ppv_cfg.get('tz_offset') or 0
     ppv_state_key = plat.k('ppv_state', persona)
     ppv_paid_key = plat.k('ppv_testpaid', persona)
@@ -17593,6 +17609,24 @@ def _plat_round_body(plat, persona):
         pcfg = load_persona_config(persona)
         lim = reply_length_limits(pcfg)
         may_ask = question_allowed(pcfg, history)
+
+        # A plain CTA-destination nudge, for a platform with no paywall to run
+        # the PPV/bandit ledger against (Telegram's own pattern, mirrored here).
+        cta_choice = None
+        if plat.has_cta and not ppv_on:
+            cta_cfg = _phases_cta(persona)
+            cta_state = _plat_cta(plat, persona)
+            fan_cta = cta_state.get(fan_uuid) or {}
+            exchanged = _fanvue_msg_count(persona, fan_key)
+            cta_asked = _cta_asked(text)
+            cta_due = cta_asked or (not fan_cta.get('sent') and exchanged >= ppv_first_after)
+            if cta_due and not _funnel_pitching_paused(persona, fan_key):
+                choice = _cta_choice(persona, fan_cta, cta_cfg)
+                if choice.get('url'):
+                    cta_choice = choice
+                elif not fan_cta.get('sent'):
+                    logger.warning('%s [%s] CTA due for %s but no link is configured',
+                                   plat.label, persona, who)
         instruction = (
             f"Reply to this {plat.label} fan in-character. You have the full earlier "
             "conversation above — USE it: do not re-ask anything they already told "
@@ -17608,7 +17642,9 @@ def _plat_round_body(plat, persona):
             + _fv_queued_hint(persona, fan_uuid, fan_key, ppv_sets if ppv_on else [],
                               ppv_state_key, text, ppv_tz)
             + "Their latest message: "
-            f"\"{text}\"")
+            f"\"{text}\""
+            + (' Do NOT paste a link or URL yourself, and don\'t name the site '
+               'by name — a link is appended after your message.' if cta_choice else ''))
         if fcfg and assignment:
             try:
                 instruction += _fv_funnel_steer(persona, fan_uuid, handle, fan_type,
@@ -17624,6 +17660,19 @@ def _plat_round_body(plat, persona):
             _fv_trace(persona, 'error', f'{who}: the model returned nothing — no reply sent',
                       fan=fan_key)
             continue
+
+        if cta_choice:
+            link = _dc_cta_link(persona, fan_uuid)
+            label = growth.cta_suffix(cta_choice) or 'come see'
+            reply = f'{reply}\n\n{label} → {link}'
+            fan_cta['target'] = cta_choice['url']
+            fan_cta['kind'] = cta_choice.get('kind', '')
+            fan_cta['sent'] = int(time.time())
+            fan_cta['count'] = int(fan_cta.get('count', 0)) + 1
+            cta_state[fan_uuid] = fan_cta
+            _set_setting(plat.k('cta', persona), json.dumps(cta_state))
+            _fv_trace(persona, 'cta', f'{who}: CTA nudge ({fan_cta["kind"]}) sent',
+                      fan=fan_key)
 
         # Mark cursor BEFORE sending to prevent duplicate replies on retry
         cursor[fan_uuid] = msg_id
@@ -20469,58 +20518,40 @@ def _dc_chime_spend(persona, channel_id, cap):
 
 
 def _dc_cta_link(persona, fan_id):
-    """The paid link, routed through our own redirect so a click is countable.
-    Same shape as X's, because it answers the same question."""
-    cta = dict(_phases_cta(persona))
-    override = _dc_json(f'discord_cta_{persona}', {})
-    target = (override.get('url') or cta.get('cta_url') or '').strip()
-    if not target:
-        return ''
+    """Tracked redirect through our own server so a click is countable. The
+    destination itself is resolved at click time from the fan's recorded CTA
+    choice — this only names the fan. Same shape as Telegram's own."""
     base = (os.getenv('PUBLIC_BASE_URL') or _get_setting('public_base_url') or '').rstrip('/')
-    return f'{base}/go/dc/{persona}/{fan_id}' if base else target
+    if base:
+        return f'{base}/go/dc/{persona}/{fan_id}'
+    # No tracking possible — fall back to whatever is configured directly.
+    cta_state = _plat_cta(PLAT_DISCORD, persona)
+    fan_cta = cta_state.get(str(fan_id)) or {}
+    override = _dc_json(f'discord_cta_{persona}', {})
+    return (fan_cta.get('target') or override.get('url')
+            or _phases_cta(persona).get('cta_url') or '').strip()
 
 
 @app.route('/go/dc/<persona>/<fan_id>')
 def discord_cta_click(persona, fan_id):
-    """Tracked CTA redirect for Discord DMs.
-
-    A click is recorded against the drop as having been *opened*, never as
-    having been paid: nothing here can see a purchase, and marking one would
-    make every revenue figure downstream a lie.
-    """
+    """Tracked CTA redirect for Discord DMs, resolved from the fan's recorded
+    CTA choice — falling back to a raw configured link if none was recorded."""
     if not re.match(r'^[a-z0-9_-]+$', persona or ''):
         return redirect('/')
+    state = _plat_cta(PLAT_DISCORD, persona)
+    fan = state.get(str(fan_id)) or {}
     override = _dc_json(f'discord_cta_{persona}', {})
-    url = (override.get('url') or _phases_cta(persona).get('cta_url') or '').strip()
-    if not url:
+    target = (fan.get('target') or override.get('url')
+              or _phases_cta(persona).get('cta_url') or '').strip()
+    if not target:
         return redirect('/')
-    try:
-        _dc_mark_opened(persona, fan_id)
-    except Exception:
-        logger.debug('discord click could not be recorded for %s', fan_id)
-    _record_click(persona, 'discord', 'paid', url, PLAT_DISCORD.fan_key(fan_id))
-    return redirect(url, code=302)
-
-
-def _dc_mark_opened(persona, fan_id):
-    """Mark this fan's newest drop as opened.
-
-    Opened, not paid: nothing here can see a purchase, and writing one would
-    make every revenue figure downstream a lie. It is also the state the
-    retry-with-discount logic already reads to tell "saw it and passed" from
-    "never looked", so a Discord drop gets that behaviour for free.
-    """
-    from db import SessionLocal, PpvDrop, mark_ppv_read
-    s = SessionLocal()
-    try:
-        row = (s.query(PpvDrop)
-               .filter(PpvDrop.persona == persona, PpvDrop.fan_uuid == str(fan_id))
-               .order_by(PpvDrop.created_at.desc()).first())
-        if row is not None:
-            mark_ppv_read(s, row.id)
-            s.commit()
-    finally:
-        s.close()
+    if fan and not fan.get('clicked'):
+        fan['clicked'] = int(time.time())
+        state[str(fan_id)] = fan
+        _set_setting(PLAT_DISCORD.k('cta', persona), json.dumps(state))
+    _record_click(persona, 'discord', fan.get('kind') or 'paid', target,
+                  PLAT_DISCORD.fan_key(fan_id))
+    return redirect(target, code=302)
 
 
 class _DiscordPlatform(_Platform):
@@ -20536,6 +20567,10 @@ class _DiscordPlatform(_Platform):
     # ladder is for. It only ever runs in a DM — a channel never reaches this
     # round.
     has_winback = True
+    # No paywall and no payment webhook, so the tier/bandit/ledger engine
+    # can't verify a sale here — send a plain CTA nudge instead (has_cta).
+    has_ppv = False
+    has_cta = True
 
     def connected(self, persona):
         return bool(_dc_token(persona))
@@ -20593,9 +20628,9 @@ class _DiscordPlatform(_Platform):
         DG.send(persona, fan_id, text)
 
     def send_ppv(self, persona, scope, fan_id, caption, media, price_cents):
-        """Discord has no paywall, so the drop is the caption and a tracked link
-        to the page that does. It still returns a real message id, so the drop
-        is recorded and settled like any other."""
+        """Unreachable from the auto-reply engine now that has_ppv is False —
+        Discord sends a plain CTA nudge instead (see _plat_round_body). Left
+        in place as a fallback for anything that still calls it directly."""
         url = _dc_cta_link(persona, fan_id)
         if not url:
             raise DR.DiscordApiError(

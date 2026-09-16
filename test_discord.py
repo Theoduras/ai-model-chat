@@ -277,29 +277,32 @@ def test_a_whole_dm_round():
     check('the same message is not answered again', len(runner.rest.sent) == before)
 
 
-def test_a_click_is_recorded_as_opened_not_paid():
+def test_a_click_is_recorded_as_clicked_not_paid():
     """Nothing in a redirect can see a purchase. Writing one would make every
-    revenue figure downstream a lie."""
-    import db
-    marked = []
-    db_session = type('S', (), {'commit': lambda self: None, 'close': lambda self: None,
-                                'query': lambda self, m: self})()
-    db_session.filter = lambda *a: db_session
-    db_session.order_by = lambda *a: db_session
-    db_session.first = lambda: type('R', (), {'id': 'drop1'})()
-    app_db = __import__('db')
-    real_session, real_mark = app_db.SessionLocal, app_db.mark_ppv_read
-    app_db.SessionLocal = lambda: db_session
-    app_db.mark_ppv_read = lambda s, drop_id, when=None: marked.append(drop_id)
-    try:
-        app._dc_mark_opened('lilly', '77')
-    finally:
-        app_db.SessionLocal, app_db.mark_ppv_read = real_session, real_mark
-    check('the newest drop is marked opened', marked == ['drop1'], marked)
+    revenue figure downstream a lie — the click just flips 'clicked' on the
+    fan's own recorded CTA choice."""
+    store = {'discord_cta_lilly': json.dumps({'77': {'target': 'https://paid.example/lilly',
+                                                       'kind': 'trial'}})}
+    app._get_setting = lambda k, d=None: store.get(k, d)
+    app._set_setting = lambda k, v: store.__setitem__(k, v)
+    app._dc_json = lambda k, d=None: d
+    app._phases_cta = lambda slug: {'cta_url': ''}
+    recorded = []
+    app._record_click = lambda persona, source, kind, target, fan_key='': (
+        recorded.append((persona, source, kind, target, fan_key)))
+
+    with app.app.test_client() as c:
+        resp = c.get('/go/dc/lilly/77')
+    check('it redirects to the fan\'s recorded target',
+          resp.status_code == 302 and resp.location == 'https://paid.example/lilly', resp.location)
+    check('the click is recorded with the recorded kind',
+          recorded == [('lilly', 'discord', 'trial', 'https://paid.example/lilly', 'dc:77')],
+          recorded)
+    check('and the fan is marked clicked, once',
+          json.loads(store['discord_cta_lilly'])['77'].get('clicked'), store)
     import inspect
     check('and the redirect path cannot mark one paid',
-          'paid_at' not in inspect.getsource(app._dc_mark_opened)
-          and 'paid_at' not in inspect.getsource(app.discord_cta_click))
+          'paid_at' not in inspect.getsource(app.discord_cta_click))
 
 
 def test_a_channel_reply():
@@ -544,7 +547,7 @@ if __name__ == '__main__':
                test_a_guild_channel_is_never_imported,
                test_the_fingerprint_agrees_with_itself,
                test_a_whole_dm_round,
-               test_a_click_is_recorded_as_opened_not_paid,
+               test_a_click_is_recorded_as_clicked_not_paid,
                test_a_channel_reply,
                test_posting_on_a_schedule,
                test_the_winback_ladder,
