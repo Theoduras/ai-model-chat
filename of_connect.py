@@ -93,6 +93,10 @@ class ConnectError(RuntimeError):
     pass
 
 
+# Which driver _driver() found, for the diagnostics. Filled on first use.
+DRIVER_NAME = ''
+
+
 def _driver():
     """Playwright, patched if the patched build is installed.
 
@@ -101,11 +105,19 @@ def _driver():
     Doing the same from an init script does not work: the script is itself
     visible to the page.
     """
+    global DRIVER_NAME
     try:
         from patchright.sync_api import sync_playwright
+        DRIVER_NAME = 'patchright'
         return sync_playwright
     except ImportError:
         from playwright.sync_api import sync_playwright
+        # Worth saying out loud: unpatched Playwright is visible to every
+        # anti-bot edge going, and a sign-in that gets a block page on a good
+        # residential IP is usually this rather than the address.
+        DRIVER_NAME = 'playwright'
+        logger.warning('patchright is not installed, so the sign-in browser is '
+                       'driveable but detectable')
         return sync_playwright
 
 
@@ -157,6 +169,7 @@ class Attempt:
     login_errors = ()
     exit_ip = ''
     exit_error = ''
+    blocked_by = ''
     _sampled = False
     # Same reason: an attempt assembled field by field rather than constructed
     # still has to be able to say which site it is for.
@@ -226,6 +239,8 @@ class Attempt:
                 'login_errors': getattr(self, 'login_errors', []),
                 'exit_ip': getattr(self, 'exit_ip', ''),
                 'proxy_set': bool(self.proxy),
+                'blocked_by': getattr(self, 'blocked_by', ''),
+                'driver': DRIVER_NAME,
                 'signing_sample': self.signing_sample}
 
     def snapshot(self):
@@ -331,6 +346,39 @@ class Attempt:
         context = pw.chromium.launch_persistent_context(self._profile, **opts)
         return None, context
 
+    # What an anti-bot edge puts on the page when it turns the browser away.
+    # It arrives as an ordinary 200, so nothing raises and nothing is logged
+    # unless the page itself is read.
+    BLOCK_MARKERS = ('blocked by network security', 'you have been blocked',
+                     'attention required', 'verify you are human',
+                     'enable javascript and cookies')
+
+    def _note_block_page(self, page):
+        """Did the page that loaded turn out to be a block page?
+
+        A refusal served as a 200 is the case every other diagnostic here
+        misses: the navigation succeeds, no response is 4xx, and the only
+        evidence is what the page says. When it is a block, the address is
+        worth having too -- a block on a good residential IP means the browser
+        was fingerprinted rather than the address.
+        """
+        try:
+            text = (page.inner_text('body') or '')[:2000].lower()
+        except Exception:
+            return
+        hit = next((m for m in self.BLOCK_MARKERS if m in text), '')
+        if not hit:
+            return
+        self.blocked_by = hit
+        self._note_exit_ip(page)
+        logger.warning('of-connect %s was shown a block page (%r) at %s, driver=%s, '
+                       'proxy=%s', self.id, hit, self.exit_ip or '?',
+                       DRIVER_NAME or '?', 'set' if self.proxy else 'NOT set')
+        try:
+            page.goto(self._site['url'], wait_until='domcontentloaded', timeout=60000)
+        except Exception:
+            pass
+
     def _note_exit_ip(self, page):
         """The address the site sees, measured from inside this browser.
 
@@ -378,6 +426,7 @@ class Attempt:
                            self.id, str(e)[:160])
             self._note_exit_ip(page)
             page.goto(self._site['url'], wait_until='domcontentloaded', timeout=60000)
+        self._note_block_page(page)
         # What the window is told to scale by has to be the size of the frames
         # it actually gets. Sizing the window rather than overriding the
         # viewport means the page is a little smaller than we asked for -- the
