@@ -97,6 +97,7 @@
           <span class="pl-count" id="pl-m-media-note"></span>
         </label>
         <div class="pl-picked" id="pl-m-picked"></div>
+        <div id="pl-m-browse" style="margin:8px 0 2px;"></div>
         <div class="pl-strip" id="pl-m-strip"></div>
         <span class="hint" id="pl-m-media-hint" style="margin-top:6px;"></span>
       </div>
@@ -123,6 +124,28 @@
         <button type="button" class="btn btn-ghost" onclick="plClose()">Close</button>
         <button type="button" class="btn btn-primary" id="pl-m-save" onclick="plSave(this)">Save changes</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="pl-vault" onclick="if(event.target===this)plVaultClose()">
+  <div class="modal pl-vault-modal">
+    <div class="modal-header">
+      <h2>Fanvue vault</h2>
+      <button class="modal-close" onclick="plVaultClose()" aria-label="Close">&times;</button>
+    </div>
+    <div class="pl-vault-bar">
+      <input type="search" id="pl-v-q" placeholder="Search by name…" oninput="plVaultDraw()">
+      <select id="pl-v-folder" onchange="plVaultReload()"><option value="">All folders</option></select>
+      <select id="pl-v-type" onchange="plVaultReload()">
+        <option value="">Images and video</option>
+        <option value="image">Images</option>
+        <option value="video">Video</option>
+      </select>
+    </div>
+    <div class="modal-body pl-vault-body">
+      <div class="pl-vault-grid" id="pl-v-grid"></div>
+      <div class="pl-vault-foot" id="pl-v-foot"></div>
     </div>
   </div>
 </div>
@@ -171,6 +194,9 @@ let plChans = [];         // channels ticked on a brand-new post
 let plRemote = [];        // posts Fanvue already has booked — read-only
 let plFvVault = null;     // her Fanvue vault, fetched the first time it is needed
 let plFvVaultError = '';
+let plFvItems = [];       // what the vault overlay has loaded
+let plFvPage = 1, plFvHasMore = false, plFvLoading = false;
+let plFvFolder = '', plFvType = '';
 
 function esc(s) {
   return String(s == null ? '' : s)
@@ -276,22 +302,133 @@ function plFanvueOnly() {
   return chans.length === 1 && chans[0] === 'fanvue';
 }
 
+async function plFvFetch(page) {
+  const q = new URLSearchParams({ persona: plSlug, page: String(page) });
+  if (plFvFolder) q.set('folder', plFvFolder);
+  if (plFvType) q.set('type', plFvType);
+  const d = await (await fetch('/api/fanvue/media?' + q)).json();
+  plFvVaultError = (d && d.error) || '';
+  plFvHasMore = !!(d && d.has_more);
+  return ((d && d.media) || []).map(m => ({
+    id: 'fv:' + m.uuid,
+    kind: String(m.mediaType || '').toLowerCase() === 'video' ? 'video' : 'image',
+    thumb: m.thumb || '',
+    purpose: m.name || ''
+  }));
+}
+
+// Everything loaded so far, so a pick made in the overlay still resolves to a
+// thumbnail once the overlay is gone.
+function plFvRemember(items) {
+  items.forEach(m => {
+    if (!(plFvVault || []).some(x => x.id === m.id)) plFvVault.push(m);
+  });
+}
+
 async function plLoadFvVault() {
   if (plFvVault || !plSlug) return;
   plFvVault = [];
   try {
-    const d = await (await fetch('/api/fanvue/media?persona='
-      + encodeURIComponent(plSlug))).json();
-    plFvVaultError = (d && d.error) || '';
-    plFvVault = ((d && d.media) || []).map(m => ({
-      id: 'fv:' + m.uuid,
-      kind: String(m.mediaType || '').toLowerCase() === 'video' ? 'video' : 'image',
-      thumb: m.thumb || '',
-      purpose: m.name || ''
-    }));
+    plFvRemember(await plFvFetch(1));
   } catch (e) { plFvVaultError = 'Could not read the Fanvue vault.'; }
   plRenderMedia();
 }
+
+// ── The vault overlay ────────────────────────────────────────────────────────
+// The strip under the editor shows the first page. This is the whole vault:
+// folders, kinds and a name search, so a picture can be found rather than
+// scrolled past.
+async function plVaultOpen() {
+  if (!plSlug) return;
+  plFvItems = [];
+  plFvPage = 1;
+  document.getElementById('pl-v-q').value = '';
+  document.getElementById('pl-vault').classList.add('open');
+  plVaultLoadFolders();
+  plVaultReload();
+}
+
+function plVaultClose() {
+  document.getElementById('pl-vault').classList.remove('open');
+}
+
+async function plVaultLoadFolders() {
+  const sel = document.getElementById('pl-v-folder');
+  if (sel.dataset.slug === plSlug) return;
+  try {
+    const d = await (await fetch('/api/fanvue/folders?persona='
+      + encodeURIComponent(plSlug))).json();
+    sel.innerHTML = '<option value="">All folders</option>'
+      + (d.folders || []).map(f => '<option value="' + esc(f.name) + '">'
+        + esc(f.name) + (f.count == null ? '' : ' (' + f.count + ')')
+        + '</option>').join('');
+    sel.dataset.slug = plSlug;
+  } catch (e) { /* the folder filter is a convenience; the grid still loads */ }
+}
+
+async function plVaultReload() {
+  plFvFolder = document.getElementById('pl-v-folder').value;
+  plFvType = document.getElementById('pl-v-type').value;
+  plFvItems = [];
+  plFvPage = 1;
+  plFvLoading = true;
+  plVaultDraw();
+  try {
+    plFvItems = await plFvFetch(1);
+    plFvRemember(plFvItems);
+  } catch (e) { plFvVaultError = 'Could not read the Fanvue vault.'; }
+  plFvLoading = false;
+  plVaultDraw();
+}
+
+async function plVaultMore(btn) {
+  btn.disabled = true;
+  btn.textContent = 'loading…';
+  try {
+    const more = await plFvFetch(plFvPage + 1);
+    plFvPage += 1;
+    plFvItems = plFvItems.concat(more);
+    plFvRemember(more);
+  } catch (e) { plFvVaultError = 'Could not read the rest of the vault.'; }
+  plVaultDraw();
+}
+
+// The search is over what has been loaded, because Fanvue's media list takes no
+// query of its own — so the footer says how much of the vault it has seen.
+function plVaultDraw() {
+  const q = document.getElementById('pl-v-q').value.trim().toLowerCase();
+  const shown = q
+    ? plFvItems.filter(m => (m.purpose || '').toLowerCase().indexOf(q) !== -1)
+    : plFvItems;
+  const grid = document.getElementById('pl-v-grid');
+  grid.innerHTML = shown.length
+    ? shown.map(m => '<button type="button" class="pl-vault-item'
+        + (m.id === plPickedMedia ? ' on' : '')
+        + '" onclick="plVaultPick(\'' + esc(m.id) + '\')">'
+        + plMediaThumb(m)
+        + '<span class="pl-vault-name">' + esc(m.purpose || 'untitled') + '</span>'
+        + '</button>').join('')
+    : '<span class="hint">' + (plFvLoading ? 'Reading her vault…'
+        : plFvVaultError ? esc(plFvVaultError)
+        : q ? 'Nothing loaded matches that. Load more, or clear the search.'
+        : 'Nothing here. Upload to Fanvue and it shows up.') + '</span>';
+
+  const foot = document.getElementById('pl-v-foot');
+  const count = shown.length + (q && shown.length !== plFvItems.length
+    ? ' of ' + plFvItems.length : '');
+  foot.innerHTML = (plFvItems.length
+      ? '<span class="hint">' + count + ' shown</span>' : '')
+    + (plFvHasMore && !plFvLoading
+        ? '<button type="button" class="btn btn-ghost" onclick="plVaultMore(this)">Load more</button>'
+        : '');
+}
+
+function plVaultPick(id) {
+  plPickedMedia = id;
+  plVaultClose();
+  plRenderMedia();
+}
+
 
 function plShiftWeek(n) {
   const d = new Date(plWeekStart * 1000);
@@ -746,6 +883,11 @@ function plRenderMedia() {
           + ' will take. Add photos and clips in the persona editor.'
         : 'These channels take different kinds of media, so no one file suits '
           + 'them all. Post them separately to attach something.');
+  // The strip is the first page; the whole vault, with its folders, is a click
+  // away rather than an endless scroll inside the editor.
+  document.getElementById('pl-m-browse').innerHTML = fvOnly
+    ? '<button type="button" class="btn-section-save" style="margin-left:0;"'
+      + ' onclick="plVaultOpen()">Browse the vault</button>' : '';
   document.getElementById('pl-m-strip').innerHTML = usable.length
     ? usable.map(m => '<button type="button" class="pl-pick'
         + (m.id === plPickedMedia ? ' on' : '') + '" title="' + esc(m.purpose || m.kind)

@@ -3685,3 +3685,57 @@ body.embedding .form-area { padding: 0; overflow: hidden; }
   padding: 1px 5px; border-radius: 3px;
   background: rgba(0, 0, 0, 0.62); color: #fff;
 }
+
+/* The Fanvue vault browser: the whole vault at a glance, rather than the first
+   page squeezed into the editor's strip. */
+.pl-vault-modal { max-width: 880px; }
+.pl-vault-bar {
+  display: flex;
+  gap: 8px;
+  padding: 14px 22px;
+  border-bottom: 1px solid var(--border-soft);
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.pl-vault-bar input[type="search"] { flex: 1 1 200px; min-width: 0; }
+.pl-vault-bar select { flex: 0 1 auto; }
+.pl-vault-body { min-height: 220px; }
+.pl-vault-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(116px, 1fr));
+  gap: 10px;
+}
+.pl-vault-item {
+  background: transparent;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--r-md);
+  padding: 6px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+}
+.pl-vault-item:hover { border-color: var(--border); }
+.pl-vault-item.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.pl-vault-item .pl-thumb { width: 100%; height: 104px; }
+.pl-vault-item .pl-thumb img,
+.pl-vault-item .pl-thumb video { width: 100%; height: 100%; object-fit: cover; }
+.pl-vault-name {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pl-vault-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 14px;
+}
+@media (max-width: 560px) {
+  .pl-vault-grid { grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); }
+  .pl-vault-item .pl-thumb { height: 84px; }
+}
