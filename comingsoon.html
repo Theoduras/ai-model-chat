@@ -230,7 +230,43 @@ body.kbd .site-nav{display:none}
 .features-cta a{display:inline-block;text-decoration:none;font-weight:600;font-size:14px;padding:13px 26px;border-radius:9999px;
   color:#fff;background:var(--grad);background-size:300% 100%;animation:sweep 6s linear infinite;box-shadow:0 10px 26px #ff2d7833}
 @keyframes sweep{to{background-position:300% 0}}
-@keyframes riseIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+@keyframes riseIn{from{opacity:0;transform:translateY(14px) scale(.985)}to{opacity:1;transform:none}}
+@keyframes rowIn{from{opacity:0;transform:translateX(-10px)}to{opacity:1;transform:none}}
+@keyframes popIn{0%{opacity:0;transform:scale(.4) rotate(-25deg)}70%{transform:scale(1.15) rotate(3deg)}100%{opacity:1;transform:none}}
+@keyframes floatGlow{0%,100%{transform:translateX(-50%) translateY(0);opacity:.85}50%{transform:translateX(-50%) translateY(18px);opacity:1}}
+@keyframes shimmer{to{background-position:-200% 0}}
+.features::before{animation:floatGlow 11s ease-in-out infinite}
+.feature-group li{animation:rowIn .34s cubic-bezier(.22,1,.36,1) both}
+.feature-group .mark{animation:popIn .4s cubic-bezier(.34,1.56,.64,1) both;transition:transform .2s}
+.feature-group li:hover .mark{transform:scale(1.15) rotate(-6deg)}
+.feature-group li{transition:background .2s,padding-left .2s;border-radius:8px}
+.feature-group li:hover{background:var(--hover);padding-left:6px}
+.feature-group li.off:hover .tag{background:#ff5c3826}
+.feature-group .tag{transition:background .2s}
+.hl{animation:riseIn .45s cubic-bezier(.22,1,.36,1) both;transition:transform .25s,border-color .25s,box-shadow .25s}
+.hl:hover{transform:translateY(-4px);border-color:var(--hair-strong);box-shadow:0 16px 34px rgba(0,0,0,.16)}
+.hl::after{animation:sweep 5s linear infinite}
+.hl .v{display:inline-block;transition:transform .2s}
+.hl:hover .v{transform:scale(1.08)}
+.sec-eyebrow{animation:riseIn .5s ease both}
+.sec-head h2 em{animation:sweep 7s linear infinite}
+.tier-toggle button{transform:translateZ(0)}
+.tier-toggle button:active{transform:scale(.95)}
+.tier-toggle button:not(.on):hover{background:var(--hover)}
+.features-cta a{transition:transform .2s,box-shadow .2s}
+.features-cta a:hover{transform:translateY(-2px) scale(1.03);box-shadow:0 16px 34px #ff2d7855}
+.feature-group h3 .gi{transition:transform .3s}
+.feature-group:hover h3 .gi{transform:rotate(8deg) scale(1.08)}
+/* Scroll reveal: sections rise in the first time they come into view. */
+.reveal{opacity:0;transform:translateY(26px);transition:opacity .7s cubic-bezier(.22,1,.36,1),transform .7s cubic-bezier(.22,1,.36,1)}
+.reveal.in{opacity:1;transform:none}
+.tier-card{animation:riseIn .5s cubic-bezier(.22,1,.36,1) both}
+.tier-card:hover{box-shadow:0 22px 48px rgba(0,0,0,.16)}
+.tier-card li{transition:color .2s,transform .2s}
+.tier-card li:hover{color:var(--text);transform:translateX(3px)}
+.tier-card a{transition:transform .2s,box-shadow .2s,border-color .2s}
+.tier-card a:hover{transform:translateY(-2px)}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}.reveal{opacity:1;transform:none}}
 @media(max-width:900px){.features{padding:74px 22px 10px}.feature-groups{column-count:1}
   .sec-head h2{font-size:30px}.hl{flex-basis:calc(50% - 10px)}.tier-toggle button{padding:9px 14px}}
 /* ── Pricing ── */
@@ -348,6 +384,20 @@ fetch('/api/features')
     function esc(v){ return String(v).replace(/[&<>]/g, function(c){
       return { '&':'&amp;', '<':'&lt;', '>':'&gt;' }[c]; }); }
 
+    // Numbers roll up to their value each time the tier changes.
+    function countUp(){
+      hlRow.querySelectorAll('.v').forEach(function(el){
+        var target = parseInt(el.getAttribute('data-to'), 10);
+        if (isNaN(target) || target > 400) return;
+        var t0 = performance.now(), dur = 620;
+        (function step(now){
+          var k = Math.min(1, (now - t0) / dur);
+          el.textContent = Math.round(target * (1 - Math.pow(1 - k, 3)));
+          if (k < 1) requestAnimationFrame(step);
+        })(t0);
+      });
+    }
+
     function render(){
       var t = d.tiers[cur];
       if (!t) return;
@@ -358,10 +408,12 @@ fetch('/api/features')
       note.innerHTML = '<b>' + esc(t.name) + '</b> — ' + esc(t.blurb) +
         (t.price ? ' ' + cursym + t.price + '/month, excl. VAT.' : ' Free, by invitation.');
 
-      hlRow.innerHTML = (t.highlights || []).map(function(h){
-        return '<div class="hl"><div class="v">' + esc(h.value) + '</div>' +
+      hlRow.innerHTML = (t.highlights || []).map(function(h, i){
+        return '<div class="hl" style="animation-delay:' + (i * 60) + 'ms">' +
+               '<div class="v" data-to="' + esc(h.value) + '">' + esc(h.value) + '</div>' +
                '<div class="l">' + esc(h.label) + '</div></div>';
       }).join('');
+      countUp();
 
       var groups = [];
       t.features.forEach(function(f){
@@ -371,12 +423,15 @@ fetch('/api/features')
       });
       wrap.innerHTML = groups.map(function(g, i){
         var on = g.items.filter(function(f){ return f.included; }).length;
-        return '<div class="feature-group" style="animation-delay:' + (i * 55) + 'ms">' +
+        var n = 0;
+        return '<div class="feature-group" style="animation-delay:' + (i * 70) + 'ms">' +
           '<h3><span class="gi">' + (ICONS[g.name] || '\u25c6') + '</span>' + esc(g.name) +
           '<span class="cnt">' + on + '/' + g.items.length + '</span></h3><ul>' +
           g.items.map(function(f){
-            return '<li class="' + (f.included ? '' : 'off') + '">' +
-              '<span class="mark">' + (f.included ? '\u2713' : '\u2715') + '</span>' +
+            var delay = (i * 70) + (++n * 45);
+            return '<li class="' + (f.included ? '' : 'off') + '" style="animation-delay:' + delay + 'ms">' +
+              '<span class="mark" style="animation-delay:' + (delay + 90) + 'ms">' +
+              (f.included ? '\u2713' : '\u2715') + '</span>' +
               '<span><span class="label">' + esc(f.label) +
               (f.included ? '' : '<span class="tag">Upgrade</span>') + '</span>' +
               (f.detail ? '<span class="detail">' + esc(f.detail) + '</span>' : '') +
@@ -400,6 +455,16 @@ fetch('/api/features')
     render();
   })
   .catch(function(){});
+
+(function(){
+  var io = new IntersectionObserver(function(entries){
+    entries.forEach(function(e){
+      if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+    });
+  }, { threshold: .12, rootMargin: '0px 0px -60px 0px' });
+  document.querySelectorAll('.sec-head, .tier-toggle, .feature-note, .hl-row, .feature-groups, .features-cta, .tier-grid')
+    .forEach(function(el){ el.classList.add('reveal'); io.observe(el); });
+})();
 </script>
 
 <section class="pricing" id="pricing">
