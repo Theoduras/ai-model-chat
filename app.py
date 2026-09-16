@@ -8786,8 +8786,9 @@ _X_403_HINTS = (
     ('unsupported authentication', 'reconnect the account with OAuth 2.0'),
     # X answers a write from a read-only app with the bare word "Forbidden" and
     # no JSON, so the token looks fine and only the app's permission is wrong.
-    ('forbidden', 'set your X app to Read and write in the developer portal, '
-                  'then reconnect the account so the token picks it up'),
+    ('forbidden', 'the app is read-only or not attached to a Project in the '
+                  'developer portal — check the consent screen offers "Post '
+                  'and repost for you", and reconnect after changing it'),
 )
 
 
