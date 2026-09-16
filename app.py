@@ -1836,6 +1836,22 @@ def user_capabilities(user):
     return caps
 
 
+def _planner_platforms(user):
+    """The posting channels this plan covers. The manual ones — Instagram,
+    TikTok, Reddit — are named by no tier, so they ride with the paid set
+    rather than being free for everyone."""
+    # The planner is open to operators with no account of their own, like the
+    # other consoles; a plan can only gate someone who has one.
+    if (user or {}).get('is_admin') or (not user and _is_operator()):
+        return None
+    allowed = user_capabilities(user).get('platforms')
+    return None if allowed is None else set(allowed)
+
+
+def _planner_allows(allowed, platform):
+    return allowed is None or growth.base_platform(platform) in allowed
+
+
 def _is_demo(user):
     """On the free demo — the plan that stops at every platform connection."""
     return (user or {}).get('tier') == DEMO_TIER_KEY and not (user or {}).get('is_admin')
@@ -8085,12 +8101,20 @@ def api_growth_queue():
         # single-channel callers that predate this.
         asked = data.get('platforms') or ([data.get('platform')]
                                           if data.get('platform') else [])
-        wanted, seen = [], set()
+        user = _current_user()
+        allowed = _planner_platforms(user)
+        wanted, seen, locked = [], set(), []
         for p in asked:
             plat = growth.base_platform(p)
-            if plat in growth.POST_PLATFORMS and plat not in seen:
-                seen.add(plat)
+            if plat not in growth.POST_PLATFORMS or plat in seen:
+                continue
+            seen.add(plat)
+            if _planner_allows(allowed, plat):
                 wanted.append(plat)
+            else:
+                locked.append(plat)
+        if not wanted and locked:
+            return _cap_denied('platform', user, {'platform': locked[0]})
         if not wanted:
             return jsonify({'ok': False, 'error': 'Pick at least one channel.'}), 400
 
@@ -8425,6 +8449,7 @@ def api_growth_plan():
         return jsonify({'error': 'Invalid slug'}), 400
     now = int(time.time())
     action = (data.get('action') or 'preview').strip()
+    allowed = _planner_platforms(_current_user())
 
     if action == 'queue':
         wanted = []
@@ -8432,6 +8457,8 @@ def api_growth_plan():
             plat = growth.normalise_source(s.get('platform'))
             at = int(s.get('at') or 0)
             if plat not in growth.PUBLISHABLE or at <= now:
+                continue
+            if not _planner_allows(allowed, plat):
                 continue
             kind = s.get('kind') if s.get('kind') in growth.MIX_BRIEF else 'value'
             idea = (s.get('idea') or '').strip()[:200]
@@ -8486,7 +8513,11 @@ def api_growth_plan():
     start = int(data.get('start') or 0) or (now - now % 86400)
     # Today is planned from now on, not from this morning.
     picked = [growth.normalise_source(p) for p in (data.get('platforms') or [])]
-    picked = [p for p in picked if p in growth.POST_PLATFORMS]
+    picked = [p for p in picked
+              if p in growth.POST_PLATFORMS and _planner_allows(allowed, p)]
+    if not picked:
+        return jsonify({'ok': False,
+                        'error': 'None of those channels are on your plan.'}), 402
     slots = growth.series_plan([s for s in growth.plan_week(start, days, platforms=picked)
                                 if s['at'] > now])
     if data.get('cross') and len(picked) > 1:

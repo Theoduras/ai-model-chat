@@ -3697,6 +3697,13 @@ body.embedding .form-area { padding: 0; overflow: hidden; }
 /* A channel with no posting API still earns a slot on the calendar; it just
    says so, so nobody waits on a post that was always going out by hand. */
 .pl-chan-pick .by-hand { font-size: 0.62rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px; }
+.pl-chan-pick.is-locked { opacity: 0.5; text-decoration: none; }
+.pl-chan-pick.is-locked input { cursor: default; }
+.pl-chan-pick .pl-lock {
+  font-size: 0.62rem; color: var(--text-muted); text-transform: uppercase;
+  letter-spacing: 0.4px; border: 1px solid var(--border); border-radius: 999px;
+  padding: 0 6px;
+}
 
 .pl-picked { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; min-height: 30px; }
 .pl-strip {
