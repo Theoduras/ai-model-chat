@@ -36,6 +36,10 @@ discord.html                    — Discord console (connect, channels, chime-in
 instagram_rest.py                — Instagram REST (upload + configure Post/Story/Reel)
 instagram_stub.py                — Offline Instagram transport (tests only)
 instagram.html                   — Instagram console (connect, post now — no DMs/funnel)
+reddit_rest.py                   — Reddit REST (S3 media lease, submit, comments, flairs)
+reddit_chat.py                   — Reddit Chat gateway (Sendbird socket, DMs only)
+reddit_stub.py                   — Offline Reddit transports (tests only)
+reddit.html                      — Reddit console (connect, subreddits, post, DMs, comments)
 admin.html                      — Visual persona builder UI (creator-facing)
 index.html                      — Fan chat UI (embeds as iframe in profile.html)
 chat.html                       — Standalone fan chat (mobile hamburger link)
@@ -189,6 +193,29 @@ Stay completely in character. Never mention being an AI.
   full of people is not a fan being worked towards something, so it never runs
   the funnel, never nudges, and never carries an offer. A paid link only ever
   goes out in a DM.
+- Reddit is built the same way Discord is, and for the same reason: Reddit's
+  Data API has needed manual approval for new access since late 2025 and has
+  never been able to reach Reddit Chat at all. So her account is connected
+  through the same hosted sign-in browser (`of_connect.SITES['reddit']`,
+  `/reddit/connect`), posting and comments go through `reddit_rest.py`, and
+  chat is a Sendbird socket in `reddit_chat.py` that mirrors
+  `discord_gateway.py`'s public surface so one `_Platform` adapter reads both.
+  The sign-in captures the bearer token and the chat handshake off the page —
+  captured, never guessed, exactly as Discord's build is. A capture without the
+  bearer is still kept: posting works off the cookie, and she is reported as
+  posting-only rather than broken.
+- Reddit's two carve-outs are not optional. A public comment thread never runs
+  the funnel and never carries a link, a CTA or a URL — a subreddit is the
+  fastest place to lose an account over one, and `_rd_comment_round` is
+  deliberately outside the shared round for that reason, the same way
+  `_dc_channel_round` is. And a Sendbird group channel is dropped at the
+  dispatcher, so a room full of people never reaches the reply round. In a DM
+  the funnel runs in full, but the offer is her profile or linktree rather than
+  a direct unlock link: Reddit filters known paysite domains.
+- One planned Reddit post is several posts. The planner writes one
+  `ScheduledPost` row per subreddit, each with its own title, flair and slot,
+  staggered by default — the same words in four subreddits at once is what a
+  spam filter is built to catch.
 - Instagram is built the same way Discord is — a real signed-in account
   through the same hosted sign-in browser (`of_connect.SITES['instagram']`,
   `/instagram/connect`), because Meta's Graph API needs a Business/Creator
