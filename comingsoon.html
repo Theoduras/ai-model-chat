@@ -182,15 +182,16 @@ body.kbd .site-nav{display:none}
   background-clip:text;color:transparent}
 .sec-head p{color:var(--text-soft);font-size:16px;line-height:1.65}
 
-.tier-toggle{display:flex;justify-content:center;gap:4px;margin:0 auto 22px;background:var(--field);
+.tier-toggle{position:relative;display:flex;justify-content:center;gap:4px;margin:0 auto 22px;background:var(--field);
   border:1px solid var(--field-border);border-radius:9999px;padding:5px;width:max-content;max-width:100%;flex-wrap:wrap}
-.tier-toggle button{position:relative;border:0;background:transparent;color:var(--text-soft);
+.tier-toggle .pill{position:absolute;top:5px;bottom:5px;left:5px;border-radius:9999px;background:var(--grad);
+  background-size:300% 100%;box-shadow:0 8px 22px #ff2d7840;transition:transform .38s cubic-bezier(.22,1,.36,1),width .38s cubic-bezier(.22,1,.36,1)}
+.tier-toggle button{position:relative;z-index:1;border:0;background:transparent;color:var(--text-soft);
   font:600 14px 'Inter',system-ui,sans-serif;padding:10px 20px;border-radius:9999px;cursor:pointer;
-  transition:color .2s,background .3s,box-shadow .2s;display:flex;align-items:baseline;gap:7px}
+  transition:color .25s;display:flex;align-items:baseline;gap:7px}
 .tier-toggle button:hover{color:var(--text)}
 .tier-toggle button .tprice{font-size:12px;font-weight:500;opacity:.75}
-.tier-toggle button.on{background:var(--grad);background-size:300% 100%;color:#fff;
-  box-shadow:0 8px 22px #ff2d7840;animation:sweep 6s linear infinite}
+.tier-toggle button.on{color:#fff}
 .tier-toggle button.on .tprice{opacity:.9}
 
 .feature-note{text-align:center;color:var(--text-soft);font-size:14px;margin:0 auto 26px;max-width:620px}
@@ -250,8 +251,6 @@ body.kbd .site-nav{display:none}
 .hl:hover .v{transform:scale(1.08)}
 .sec-eyebrow{animation:riseIn .5s ease both}
 .sec-head h2 em{animation:sweep 7s linear infinite}
-.tier-toggle button{transform:translateZ(0)}
-.tier-toggle button:active{transform:scale(.95)}
 .tier-toggle button:not(.on):hover{background:var(--hover)}
 .features-cta a{transition:transform .2s,box-shadow .2s}
 .features-cta a:hover{transform:translateY(-2px) scale(1.03);box-shadow:0 16px 34px #ff2d7855}
@@ -398,12 +397,20 @@ fetch('/api/features')
       });
     }
 
+    function movePill(){
+      var btn = toggle.querySelector('button.on'), pill = toggle.querySelector('.pill');
+      if (!btn || !pill) return;
+      pill.style.width = btn.offsetWidth + 'px';
+      pill.style.transform = 'translateX(' + btn.offsetLeft + 'px)';
+    }
+
     function render(){
       var t = d.tiers[cur];
       if (!t) return;
-      Array.prototype.forEach.call(toggle.children, function(b){
+      Array.prototype.forEach.call(toggle.querySelectorAll('button'), function(b){
         b.classList.toggle('on', b.getAttribute('data-tier') === cur);
       });
+      movePill();
 
       note.innerHTML = '<b>' + esc(t.name) + '</b> — ' + esc(t.blurb) +
         (t.price ? ' ' + cursym + t.price + '/month, excl. VAT.' : ' Free, by invitation.');
@@ -440,7 +447,7 @@ fetch('/api/features')
       }).join('');
     }
 
-    toggle.innerHTML = '';
+    toggle.innerHTML = '<span class="pill"></span>';
     d.order.forEach(function(key){
       var t = d.tiers[key];
       if (!t) return;
@@ -453,6 +460,7 @@ fetch('/api/features')
       toggle.appendChild(b);
     });
     render();
+    window.addEventListener('resize', movePill);
   })
   .catch(function(){});
 
