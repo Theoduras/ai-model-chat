@@ -207,7 +207,8 @@ let plOpen = null;        // the card the modal is editing
 let plVault = [];         // the persona's media library
 let plPickedMedia = [];   // what the open editor has attached, in order
 let plChans = [];         // channels ticked on a brand-new post
-let plPlanChans = PL_PLATFORMS.slice();  // channels the next plan covers
+let plCaps = null;        // this account's plan capabilities, from /api/me
+let plPlanChans = [];     // channels the next plan covers
 let plRating = '';        // '', 'sfw' or 'nsfw' for the next draft
 let plRemote = [];        // posts Fanvue already has booked — read-only
 let plFvVault = null;     // her Fanvue vault, fetched the first time it is needed
@@ -223,12 +224,22 @@ function esc(s) {
 }
 
 // The cadence puts posts at hours of her day, so every boundary is local.
-function plMonday(d) {
+function plDayStart(d) {
   const x = new Date(d);
   x.setHours(0, 0, 0, 0);
-  x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
   return Math.floor(x.getTime() / 1000);
 }
+
+// A channel the plan covers. null platforms means every channel; the manual
+// ones are named by no tier, so they ride with the rest of the paid set.
+function plAllowed(p) {
+  if (!plCaps) return true;
+  if (plCaps.is_admin) return true;
+  const list = plCaps.platforms;
+  if (list === null || list === undefined) return true;
+  return list.indexOf(p) !== -1;
+}
+function plAllowedPlatforms() { return PL_PLATFORMS.filter(plAllowed); }
 function dayLabel(ts) {
   return new Date(ts * 1000).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' });
 }
@@ -268,7 +279,13 @@ function statTile(label, value) {
 // ── Loading ──────────────────────────────────────────────────────────────────
 
 async function plInit() {
-  plWeekStart = plMonday(new Date());
+  plWeekStart = plDayStart(new Date());
+  try {
+    const me = await (await fetch('/api/me')).json();
+    plCaps = { platforms: (me.capabilities || {}).platforms,
+               is_admin: !!(me.is_admin || (!me.signed_in && me.is_operator)) };
+  } catch (e) { plCaps = null; }
+  plPlanChans = plAllowedPlatforms();
   const wanted = new URLSearchParams(location.search).get('persona') || '';
   let list = [];
   try {
@@ -462,7 +479,7 @@ function plVaultPick(id) {
 function plShiftWeek(n) {
   const d = new Date(plWeekStart * 1000);
   d.setDate(d.getDate() + 7 * n);
-  plWeekStart = plMonday(d);
+  plWeekStart = plDayStart(d);
   // Proposals belong to the week they were planned for.
   plProposed = [];
   plPlanMeta = null;
@@ -654,6 +671,7 @@ function plPlanClose() { document.getElementById('pl-planbar').hidden = true; }
 
 function plRenderPlanChans() {
   document.getElementById('pl-plan-chans').innerHTML = PL_PLATFORMS.map(p => {
+    if (!plAllowed(p)) return plLockedChan(p);
     const on = plPlanChans.indexOf(p) !== -1;
     return '<label class="pl-chan-pick' + (on ? ' on' : '') + '">'
       + '<input type="checkbox"' + (on ? ' checked' : '')
@@ -664,7 +682,16 @@ function plRenderPlanChans() {
   }).join('');
 }
 
+// A channel above this plan: shown so the creator can see what upgrading buys,
+// never tickable.
+function plLockedChan(p) {
+  return '<a class="pl-chan-pick is-locked" href="/pricing" title="Not on your plan">'
+    + '<input type="checkbox" disabled>' + esc(PL_LABELS[p])
+    + '<span class="pl-lock">Pro</span></a>';
+}
+
 function plTogglePlanChan(p) {
+  if (!plAllowed(p)) return;
   const i = plPlanChans.indexOf(p);
   if (i === -1) plPlanChans.push(p); else plPlanChans.splice(i, 1);
   plRenderPlanChans();
@@ -733,8 +760,10 @@ function plNew() {
   let at = Math.floor(soon.getTime() / 1000);
   // Opened on a week that is not this one, the post belongs to that week.
   if (at < plWeekStart || at >= plWeekStart + 7 * 86400) at = plWeekStart + 9 * 3600;
-  plOpen = { kind: 'new', idx: -1, id: '', platform: 'x', at: at, publishable: true };
-  plChans = ['x'];
+  const first = plAllowedPlatforms()[0] || 'x';
+  plOpen = { kind: 'new', idx: -1, id: '', platform: first, at: at,
+             publishable: PL_PUBLISHABLE.indexOf(first) !== -1 };
+  plChans = [first];
   plPickedMedia = [];
 
   document.getElementById('pl-m-title').textContent = 'New post';
@@ -798,6 +827,7 @@ function plRenderChans() {
   field.hidden = !plOpen || plOpen.kind !== 'new';
   if (field.hidden) return;
   document.getElementById('pl-m-chans').innerHTML = Object.keys(PL_LABELS).map(p => {
+    if (!plAllowed(p)) return plLockedChan(p);
     const on = plChans.indexOf(p) !== -1;
     const hand = PL_PUBLISHABLE.indexOf(p) === -1;
     return '<label class="pl-chan-pick' + (on ? ' on' : '') + '">'
@@ -817,10 +847,11 @@ function plRenderChans() {
 }
 
 function plToggleChan(p) {
+  if (!plAllowed(p)) return;
   const i = plChans.indexOf(p);
   if (i === -1) plChans.push(p); else plChans.splice(i, 1);
   // The media strip and the counter follow the strictest channel ticked.
-  plOpen.platform = plChans[0] || 'x';
+  plOpen.platform = plChans[0] || plAllowedPlatforms()[0] || 'x';
   plOpen.publishable = plChans.every(c => PL_PUBLISHABLE.indexOf(c) !== -1);
   plRenderChans();
   plRenderFanvue();
