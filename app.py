@@ -21005,10 +21005,85 @@ def api_discord_ppv_reset():
     return _plat_ppv_reset_api(PLAT_DISCORD)
 
 
+@app.route('/api/discord/dm-send', methods=['POST'])
+@platform_scoped
+def api_discord_dm_send():
+    """Send one DM by hand from the console inbox, the way Fanvue's does.
+
+    Guarded to `dc:` keys: a `dcg:` thread is a server channel, and a room full
+    of people is not somewhere the operator types into from here.
+    """
+    data = request.json or {}
+    persona = (data.get('persona') or '').strip()
+    fan_key = str(data.get('fan') or '').strip()
+    text = (data.get('text') or '').strip()
+    if not (persona and fan_key and text):
+        return jsonify({'ok': False, 'error': 'persona, fan and text are required'}), 400
+    if not fan_key.startswith('dc:'):
+        return jsonify({'ok': False, 'error': 'Only a Discord DM can be answered by hand'}), 400
+    try:
+        DG.send(persona, fan_key[3:], text)
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:250]}), 400
+    handle = _inbox_handle(persona, fan_key)
+    _log_x_message(persona, fan_key, handle, 'out', text)
+    _plat_trace(PLAT_DISCORD, persona, 'sent', f'→ (by hand) {text[:120]}', fan_key)
+    return jsonify({'ok': True, 'sent': text})
+
+
+@app.route('/api/discord/stats')
+@platform_scoped
+def api_discord_stats():
+    """The three numbers the console's tiles show, read from where they live.
+
+    Conversations come from the shared message log, the unprompted budget from
+    the chime ledger, and the drops from the PPV ledger — nothing is counted a
+    second time just to be displayed.
+    """
+    persona = request_persona()
+    convos = 0
+    try:
+        from db import SessionLocal, list_conversations
+        s = SessionLocal()
+        try:
+            convos = len(list_conversations(
+                s, persona, INBOX_PLATFORMS['discord']['prefixes']))
+        finally:
+            s.close()
+    except Exception as e:
+        logger.debug('discord stats conversations failed for %s: %s', persona, str(e)[:120])
+    cap = _dc_chime(persona)['daily_cap']
+    today = time.strftime('%Y-%m-%d')
+    spent = sum(int((row or {}).get('n') or 0)
+                for row in _dc_json(f'discord_chime_state_{persona}', {}).values()
+                if isinstance(row, dict) and row.get('day') == today)
+    fans = _dc_cta_fans(persona)
+    sent = sum(int(f.get('cta_count') or 0) for f in fans.values())
+    opened = sum(int(f.get('cta_clicked') or 0) for f in fans.values())
+    return jsonify({'conversations': convos,
+                    'chime_left': max(0, cap * max(1, len(_dc_guilds(persona))) - spent),
+                    'drops_sent': sent, 'drops_opened': opened})
+
+
 @app.route('/api/discord/trace', methods=['GET', 'DELETE'])
 @platform_scoped
 def api_discord_trace():
-    return _plat_trace_api(PLAT_DISCORD)
+    """The shared trace, plus the two things only Discord has.
+
+    Her console has to tell a stored token apart from a live gateway socket, and
+    has to show a sign-in that stalled — neither of which any other platform has
+    a notion of, so neither belongs in the shared payload.
+    """
+    out = _plat_trace_api(PLAT_DISCORD)
+    if request.method == 'DELETE':
+        return out
+    persona = request_persona()
+    live = DG.runner(persona)
+    body = out.get_json()
+    body['state'] = live.state() if live else {}
+    body['signin'] = _dc_signin_state(persona, adopt=True)
+    body['account'] = _dc_account(persona)
+    return jsonify(body)
 
 
 @app.route('/api/discord/connect', methods=['GET', 'POST', 'DELETE'])

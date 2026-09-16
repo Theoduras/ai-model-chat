@@ -26,7 +26,6 @@
     .trace-line { font-family: ui-monospace, monospace; font-size: 0.76rem; padding: 4px 0;
                   border-bottom: 1px solid var(--border); color: var(--text-2); }
     .trace-line .st { color: var(--accent); margin-right: 8px; }
-    .problems li { font-size: 0.82rem; color: var(--text-2); margin-bottom: 4px; }
   </style>
 </head>
 <body class="page-dashboard">
@@ -45,7 +44,7 @@
 <div class="fv-scroll">
 <div class="fv-wrap">
 
-  <div class="warn-box">
+  <div class="warn-box" data-tab="settings">
     <strong>Read this before connecting an account.</strong>
     This drives a real Discord account, not a bot application. Discord's terms do not
     allow that, and accounts found doing it are terminated — sometimes along with other
@@ -53,7 +52,7 @@
     servers she was actually invited to, and keep the chime-in rate low.
   </div>
 
-  <div class="form-section">
+  <div class="form-section" data-tab="settings" id="sec-account">
     <div class="section-title">Persona &amp; Discord account</div>
     <div class="field full">
       <label>Choose a model (persona)</label>
@@ -88,7 +87,7 @@
     <div id="account-status" class="hint" style="margin-top:10px;"></div>
   </div>
 
-  <div class="form-section">
+  <div class="form-section" data-tab="settings" id="sec-replies">
     <div class="section-title">Replying</div>
     <div class="row-inline">
       <div class="field nowrap">
@@ -128,7 +127,7 @@
     <div id="auto-status" class="hint" style="margin-top:10px;"></div>
   </div>
 
-  <div class="form-section">
+  <div class="form-section" data-tab="settings" id="sec-channels">
     <div class="section-title">Channels she may speak in</div>
     <span class="hint">Nothing here means she says nothing in public anywhere — being in a
       server is not permission to talk in it. Right-click a channel in Discord with
@@ -142,7 +141,7 @@
     <div id="guild-status" class="hint" style="margin-top:10px;"></div>
   </div>
 
-  <div class="form-section">
+  <div class="form-section" data-tab="settings" id="sec-chime">
     <div class="section-title">Joining in unprompted</div>
     <span class="hint">Answering a mention is free. This is the only thing she does without
       being spoken to, so it is the only thing here that costs money on a quiet server —
@@ -166,7 +165,7 @@
     <div id="chime-status" class="hint" style="margin-top:10px;"></div>
   </div>
 
-  <div class="form-section">
+  <div class="form-section" data-tab="settings" id="sec-posting">
     <div class="section-title">Posting on a schedule</div>
     <span class="hint">She posts into the channels ticked <em>scheduled</em> above, on a
       clock rather than in answer to anyone. It draws on the same daily budget as joining
@@ -191,7 +190,7 @@
     <div id="post-status" class="hint" style="margin-top:10px;"></div>
   </div>
 
-  <div class="form-section">
+  <div class="form-section" data-tab="settings" id="sec-conversion">
     <div class="section-title">The offer</div>
     <span class="hint">Discord has no paid messages, so an offer is her paid link, sent in a
       DM and never in a channel. Clicks are counted; a click is not a sale.</span>
@@ -204,9 +203,8 @@
     <div class="row-inline"><button class="btn-ai" onclick="saveAuto()">Save</button></div>
   </div>
 
-  <div class="form-section">
+  <div class="form-section" data-tab="advanced" id="sec-log">
     <div class="section-title">What she has been doing</div>
-    <ul id="problems" class="problems" style="margin:0 0 12px; padding-left:18px;"></ul>
     <div id="trace" style="max-height:340px; overflow:auto;"></div>
     <div class="row-inline" style="margin-top:12px;">
       <button class="btn-ai" style="background:var(--surface); color:var(--text-2);"
@@ -227,7 +225,7 @@ function slug(){return el('persona').value;}
 async function api(path,opts){const r=await fetch(path,opts);let j={};try{j=await r.json();}catch(e){}
   if(!r.ok) throw new Error(j.error||('request failed ('+r.status+')'));return j;}
 
-let channels=[];
+let channels=[], mounted=false;
 
 async function init(){
   const list=await (await fetch('/api/personas')).json();
@@ -239,7 +237,7 @@ async function init(){
 
 async function loadAll(){
   await Promise.all([loadStatus(),loadAuto(),loadChime()]);
-  await loadTrace();
+  if(mounted) PlatformConsole.reset();
 }
 
 async function loadStatus(){
@@ -394,21 +392,110 @@ async function saveChime(quiet){
   }catch(e){note(box,e.message,true);}
 }
 
-async function loadTrace(){
-  const t=await api('/api/discord/trace?persona='+encodeURIComponent(slug()));
-  el('problems').innerHTML=(t.problems||[]).map(p=>'<li>'+esc(p)+'</li>').join('');
+// The Advanced tab's full log. The shell polls the same endpoint once and hands
+// the payload back here, so the page never asks twice.
+function renderFullLog(t){
   const rows=(t.rows||[]).slice().reverse();
   el('trace').innerHTML=rows.map(r=>'<div class="trace-line"><span class="st">'
     +esc(r.stage||'')+'</span>'+esc(r.detail||'')+'</div>').join('')
     ||'<span class="hint">Nothing yet.</span>';
 }
 
+function loadTrace(){ return PlatformConsole.refresh(); }
+
 async function clearTrace(){
   await api('/api/discord/trace?persona='+encodeURIComponent(slug()),{method:'DELETE'});
-  await loadTrace();
+  loadTrace();
 }
 
-init();
+// Which panel answers a given problem line. Same shape as Telegram's TG_FIX:
+// the wording comes from the shared trace, so most of these are shared too.
+const DC_FIX=[
+  [/not connected for this persona|Sign in to Discord/i,{tab:'settings',focus:'sec-account',label:'Sign her in'}],
+  [/token|gateway|socket|4004|signed out/i,           {tab:'settings',focus:'sec-account',label:'Open the account'}],
+  [/Auto-reply is off/i,                              {tab:'settings',focus:'sec-replies',label:'Turn her on'}],
+  [/channel|server/i,                                 {tab:'settings',focus:'sec-channels',label:'Check her channels'}],
+  [/chime|join in|unprompted/i,                       {tab:'settings',focus:'sec-chime',label:'Check joining in'}],
+  [/post/i,                                           {tab:'settings',focus:'sec-posting',label:'Check scheduled posts'}],
+  [/offer|PPV|link/i,                                 {tab:'settings',focus:'sec-conversion',label:'Check the offer'}],
+  [/only replying|never replying/i,                   {tab:'settings',focus:'sec-replies',label:'Check who she answers'}],
+  [/No activity recorded/i,                           {tab:'inbox',   focus:'',            label:'Open the inbox'}],
+];
+
+// Discord's "connected" has two halves: a token we hold, and a socket that is
+// actually up. A token with a dead gateway is stored, not answering, and the
+// hero has to say which — the same distinction Telegram draws between its bot
+// and her real account.
+function discordHealth(d){
+  const st=d.state||{}, si=d.signin||{}, acc=d.account||{};
+  const who=st.username||acc.username||'her account';
+  const rows=[];
+  rows.push({state:d.connected?(st.connected?'ok':'warn'):'bad',
+    label:!d.connected?'No account signed in'
+      :(st.connected?('Her account is online as '+who):'Signed in, but the socket is down'),
+    hint:!d.connected?(si.open?'A sign-in window is open — finish it there.'
+                              :'Sign in to Discord under Settings.')
+      :(st.connected?'The gateway is connected, so she sees messages as they arrive.'
+                    :(st.error||si.error||'Her token is stored but nothing is connected. It also stops after a redeploy.'))});
+  rows.push({state:d.enabled?'ok':'warn', label:d.enabled?'Replies are on':'Replies are off',
+    hint:d.enabled?'She answers DMs, and answers a mention in an allowed channel.'
+                  :'Fans can write, but nothing will answer them.'});
+  rows.push({state:channels.length?'ok':'warn',
+    label:channels.length?(channels.length+' channel(s) allowed'):'Silent in public',
+    hint:channels.length?'She may speak in those channels, and nowhere else.'
+                        :'Being in a server is not permission to talk in it. DMs still work.'});
+  return rows;
+}
+
+async function dcStats(s){
+  try{
+    const d=await (await fetch('/api/discord/stats?persona='+encodeURIComponent(s))).json();
+    return [{value:d.conversations||0, label:'conversations'},
+            {value:d.chime_left||0,    label:'chime-ins left'},
+            {value:d.drops_sent||0,    label:'links sent'},
+            {value:d.drops_opened||0,  label:'links opened'}];
+  }catch(e){ return []; }
+}
+
+PlatformConsole.register({
+  platform:'discord',
+  persona:slug,
+  statusUrl:s=>'/api/discord/trace?persona='+encodeURIComponent(s),
+  emptyHint:'They appear as soon as somebody messages her on Discord.',
+  sendUrl:'/api/discord/dm-send',
+  read:d=>{
+    const st=d.state||{}, si=d.signin||{}, acc=d.account||{};
+    const up=d.connected&&st.connected;
+    return {
+      live: !!(up&&d.enabled),
+      broken: !d.connected,
+      title: !d.connected?(si.open?'Finish the sign-in that is open':'No Discord account is connected')
+        : !st.connected?'Signed in, but not connected'
+        : d.enabled?'Her Discord account is answering'
+        :'Connected, replies switched off',
+      sub: !d.connected?(si.open?(si.error||si.why||'Sign in on the window that opened.')
+                                :'Sign her in under Settings. She drives a real account, not a bot.')
+        : !st.connected?(st.error||si.error||'Her token is stored but the gateway is down. It also stops after a redeploy.')
+        : d.enabled?('Online as '+(st.username||acc.username||'her account')
+                     +' — '+channels.length+' channel(s) allowed, DMs always.')
+        :'Fans can write to her; nothing will answer.',
+      health: discordHealth(d),
+      steps: [
+        {label:'Connect',     done:!!d.connected,                      tab:'settings', focus:'sec-account'},
+        {label:'Reply rules', done:!!d.enabled,                        tab:'settings', focus:'sec-replies'},
+        {label:'Channels',    done:channels.length>0,                  tab:'settings', focus:'sec-channels'},
+        {label:'Live',        done:!!(up&&!(d.problems||[]).length),   tab:'overview'},
+      ],
+    };
+  },
+  fixTab:p=>{ const hit=DC_FIX.find(([re])=>re.test(p)); return hit?hit[1]:{tab:'settings',label:'Open settings'}; },
+  stats:dcStats,
+  onStatus:renderFullLog,
+});
+
+init().then(()=>{ PlatformConsole.mount('.fv-wrap'); mounted=true; });
+// The shell polls the trace; the account panel's own pill and the channel list
+// come from a different endpoint, so they still need their own slow tick.
 setInterval(()=>{if(el('persona').value)loadStatus();},20000);
 </script>
 </body>

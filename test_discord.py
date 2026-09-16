@@ -501,6 +501,40 @@ def test_posting_on_a_schedule():
           app._dc_post_round('lilly') == 0)
 
 
+def test_the_console_has_what_it_draws():
+    """The console is the shared shell, so the endpoints it registers against
+    have to exist and answer in the shape the shell reads."""
+    rules = {str(r) for r in app.app.url_map.iter_rules()}
+    check('the inbox can be replied to by hand',
+          '/api/discord/dm-send' in rules)
+    check('and the hero has numbers to put in its tiles',
+          '/api/discord/stats' in rules)
+
+    app.request_persona = lambda: 'lilly'
+    send = app.app.view_functions['api_discord_dm_send'].__wrapped__
+    with app.app.test_request_context(
+            '/api/discord/dm-send',
+            json={'persona': 'lilly', 'fan': 'dcg:1:2', 'text': 'hi'}):
+        body, code = send()
+    check('a server channel is not somewhere to type into by hand', code == 400)
+
+    trace = app.app.view_functions['api_discord_trace'].__wrapped__
+    with app.app.test_request_context('/api/discord/trace?persona=lilly'):
+        seen = trace().get_json()
+    for key in ('connected', 'enabled', 'running', 'problems', 'rows'):
+        check('the shell still reads %s off the trace' % key, key in seen)
+    check('and a stored token is told apart from a live socket',
+          'state' in seen and 'signin' in seen)
+
+    page = open('discord.html').read()
+    check('the page registers with the shell rather than drawing its own',
+          'PlatformConsole.register(' in page and "mount('.fv-wrap')" in page)
+    for sec in ('sec-account', 'sec-replies', 'sec-channels', 'sec-chime',
+                'sec-posting', 'sec-conversion'):
+        check('%s is a panel a problem can be routed to' % sec,
+              'id="%s"' % sec in page)
+
+
 if __name__ == '__main__':
     for fn in (test_adapter_shape, test_a_dm_is_taken, test_the_mention_gate,
                test_chiming_in_is_capped, test_the_daily_cap_survives_a_restart,
@@ -514,7 +548,8 @@ if __name__ == '__main__':
                test_a_channel_reply,
                test_posting_on_a_schedule,
                test_the_winback_ladder,
-               test_signing_in_through_the_browser):
+               test_signing_in_through_the_browser,
+               test_the_console_has_what_it_draws):
         restore()
         fn()
     restore()
