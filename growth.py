@@ -436,6 +436,13 @@ POST_PLATFORMS = {
         'brief': ('a curiosity caption of 300-400 characters that withholds the '
                   'payoff, reads as a diary entry, and never names a paid site'),
     },
+    'fanvue': {
+        'label': 'Fanvue',
+        'cap': 5000,
+        'brief': ('a post for people who already subscribe: no hook written at '
+                  'strangers, no "link in bio", no explaining who you are. Talk '
+                  'about what is in front of them and what else is waiting'),
+    },
     'reddit': {
         'label': 'Reddit',
         'cap': 300,
@@ -446,7 +453,7 @@ POST_PLATFORMS = {
 
 # What the platform can actually publish on its own. The rest are written here
 # and posted by hand, which is why they are generated but never queued.
-PUBLISHABLE = ('x', 'threads')
+PUBLISHABLE = ('x', 'threads', 'fanvue')
 
 # A variant is a second way to write for a channel that already exists, not a
 # channel of its own, so anything keyed per channel — the content level, the
@@ -489,6 +496,7 @@ def wants_overlay(platform):
 MEDIA_SUPPORT = {
     'x':         {'kinds': ('image', 'video'), 'how': 'upload', 'max': 1},
     'threads':   {'kinds': ('image', 'video'), 'how': 'fetch',  'max': 1},
+    'fanvue':    {'kinds': ('image', 'video'), 'how': 'upload', 'max': 1},
     # No posting API, so media here is something the creator downloads and
     # uploads by hand. Reddit takes a still; a video post there is a different
     # submission type we do not write.
@@ -778,6 +786,7 @@ def queue_stats(rows, now=0):
 WEEKLY_CADENCE = {
     'x':         {'per_day': 2,  'hours': (9, 20)},
     'threads':   {'per_day': 1,  'hours': (12,)},
+    'fanvue':    {'per_day': 1,  'hours': (11,)},
     'instagram': {'per_day': 1,  'hours': (18,)},
     'tiktok':    {'per_day': 1,  'hours': (19,)},
     'reddit':    {'per_week': 3, 'hours': (21,)},

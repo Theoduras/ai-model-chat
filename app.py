@@ -6990,12 +6990,68 @@ def _growth_queue_rows(persona, limit=50, since=None, until=None):
                  'error': r.error or '',
                  'external_id': r.external_id or '',
                  'media_id': r.media_id or '',
+                 'audience': r.audience or '',
+                 'price_cents': int(r.price_cents or 0),
                  'run_at': int(r.run_at.replace(tzinfo=timezone.utc).timestamp())
                  if r.run_at else 0}
                 for r in list_posts(sdb, persona, limit=limit,
                                     since=since, until=until)]
     finally:
         sdb.close()
+
+
+def _growth_remote_rows(persona, since, until, rows):
+    """What the Fanvue feed already has booked in this window, so the week does
+    not plan on top of posts made in the Fanvue app itself. Anything we queued
+    ourselves is dropped — it is already on the calendar as the real row.
+
+    Returns (rows, error). A Fanvue outage or a missing scope costs the mirror,
+    never the planner: the queue is ours and renders without it."""
+    if not (since or until):
+        return [], ''
+    try:
+        posts = _fv_posts(persona, since, until)
+    except Exception as e:
+        logging.info('planner: no Fanvue mirror for %s: %s', persona, str(e)[:200])
+        return [], str(e)[:200]
+    ours = {r['external_id'] for r in rows if r.get('external_id')}
+    out = []
+    for post in posts:
+        uid = str((post or {}).get('uuid') or '')
+        if not uid or uid in ours:
+            continue
+        live = str(post.get('publishedAt') or '')
+        when = live or str(post.get('publishAt') or '') or str(post.get('createdAt') or '')
+        out.append({'external_id': uid, 'platform': 'fanvue',
+                    'text': str(post.get('text') or ''),
+                    'status': 'posted' if live else 'scheduled',
+                    'price_cents': int(post.get('price') or 0),
+                    'audience': str(post.get('audience') or ''),
+                    'read_only': True, 'run_at': _fv_epoch(when)})
+    out.sort(key=lambda r: r['run_at'])
+    return out, ''
+
+
+def _growth_post_extras(platform, data, media_id, current=None):
+    """The audience and price a Fanvue feed post carries, or empty for every
+    other channel. Returns (audience, price_cents, error)."""
+    if growth.normalise_source(platform) != 'fanvue':
+        return '', 0, ''
+    cur = current or {}
+    audience = _fv_audience(data.get('audience') or cur.get('audience') or '')
+    raw = data.get('price_cents', cur.get('price_cents'))
+    try:
+        price = int(raw or 0)
+    except (TypeError, ValueError):
+        return '', 0, 'That price is not a number.'
+    if price < 0:
+        return '', 0, 'A price cannot be negative.'
+    if price and not media_id:
+        return '', 0, 'A paid Fanvue post needs media behind the price.'
+    if price and price < FV_POST_PRICE_MIN:
+        return '', 0, (f'Fanvue will not take a price under '
+                       f'${FV_POST_PRICE_MIN / 100:.2f}.')
+    return audience, price, ''
 
 
 def _growth_media_check(persona, platform, media_id):
@@ -7090,8 +7146,13 @@ def api_growth_queue():
                 if why:
                     failed.append({'platform': plat, 'error': why})
                     continue
+                audience, price, why = _growth_post_extras(plat, data, media_id)
+                if why:
+                    failed.append({'platform': plat, 'error': why})
+                    continue
                 row = queue_post(sdb, persona, plat, text, run_at, media_id,
-                                 growth.queue_status_for(plat))
+                                 growth.queue_status_for(plat),
+                                 audience=audience, price_cents=price)
                 queued.append({'platform': plat, 'id': row.id,
                                'status': growth.queue_status_for(plat)})
             sdb.commit()
@@ -7142,10 +7203,21 @@ def api_growth_queue():
                 media_id, why = _growth_media_check(persona, row.platform, wanted)
                 if why:
                     return jsonify({'ok': False, 'error': why}), 400
-            if text is None and run_at is None and media_id is None:
+            audience = price = None
+            if (('audience' in data or 'price_cents' in data)
+                    and growth.normalise_source(row.platform) == 'fanvue'):
+                at_media = media_id if media_id is not None else (row.media_id or '')
+                audience, price, why = _growth_post_extras(
+                    row.platform, data, at_media,
+                    {'audience': row.audience, 'price_cents': row.price_cents})
+                if why:
+                    return jsonify({'ok': False, 'error': why}), 400
+            if (text is None and run_at is None and media_id is None
+                    and audience is None):
                 return jsonify({'ok': False, 'error': 'Nothing to change.'}), 400
             done = update_post(sdb, persona, post_id, text=text, run_at=run_at,
-                               media_id=media_id)
+                               media_id=media_id, audience=audience,
+                               price_cents=price)
             sdb.commit()
         finally:
             sdb.close()
@@ -7188,10 +7260,12 @@ def api_growth_queue():
         since=_growth_naive_utc(since) if since else None,
         until=_growth_naive_utc(until) if until else None)
     stats = growth.queue_stats(rows, now=int(time.time()))
+    remote, remote_error = _growth_remote_rows(persona, since, until, rows)
     return jsonify({'ok': True, 'persona': persona, 'beta': _growth_on(persona),
                     'worker_on': _worker_enabled('GROWTH_QUEUE_WORKER'),
                     'stale_hours': GROWTH_QUEUE_STALE_HRS,
-                    'queue': rows, **stats})
+                    'queue': rows, 'remote': remote,
+                    'remote_error': remote_error, **stats})
 
 
 def _growth_channel_link(persona, channel, bot=None):
@@ -7571,7 +7645,7 @@ GROWTH_QUEUE_RETRY_MINS = 10
 GROWTH_QUEUE_STALE_HRS = 6
 
 
-def _growth_publish(persona, platform, text, media_id=''):
+def _growth_publish(persona, platform, text, media_id='', audience='', price_cents=0):
     """Put one post out and write it into the content register. Returns the id
     the channel gave it; raises on failure, because only the caller knows
     whether this attempt is worth another one."""
@@ -7588,7 +7662,18 @@ def _growth_publish(persona, platform, text, media_id=''):
         why = growth.media_reject(plat, media.get('kind'))
         if why:
             raise RuntimeError(why)
-    if plat == 'x':
+    if plat == 'fanvue':
+        uuids = []
+        if media:
+            blob, mime = _media_bytes(media)
+            kind = growth.media_kind(mime)
+            ext = (mime.split('/')[-1] or 'bin').split(';')[0]
+            uuids.append(_fv_upload_media(
+                persona, blob, kind, f'{media_id or kind}.{ext}',
+                content_type=mime or 'application/octet-stream'))
+        posted_id = _fv_create_post(persona, text, media_uuids=uuids,
+                                    price_cents=price_cents, audience=audience)
+    elif plat == 'x':
         body = {'text': text}
         if media:
             blob, mime = _media_bytes(media)
@@ -7614,6 +7699,7 @@ def _growth_queue_round():
             post_id, persona = row.id, row.persona
             platform, text = row.platform, row.text
             media_id = row.media_id or ''
+            audience, price_cents = row.audience or '', int(row.price_cents or 0)
             if not _growth_on(persona):
                 continue
             late = (now - row.run_at).total_seconds() if row.run_at else 0
@@ -7627,7 +7713,9 @@ def _growth_queue_round():
             if not claim_post(sdb, post_id):
                 continue
             try:
-                posted_id = _growth_publish(persona, platform, text, media_id)
+                posted_id = _growth_publish(persona, platform, text, media_id,
+                                            audience=audience,
+                                            price_cents=price_cents)
                 finish_post(sdb, post_id, external_id=posted_id)
                 logger.info('QUEUE posted [%s/%s] id=%s %s',
                             persona, platform, posted_id, text[:60])
@@ -11011,9 +11099,11 @@ FANVUE_REQUIRED_SCOPES = 'openid read:self read:chat write:chat'
 # token is still better than no connection, so they sit above the floor.
 FANVUE_CORE_SCOPES = FANVUE_REQUIRED_SCOPES + ' offline offline_access'
 FANVUE_SCOPES = (FANVUE_CORE_SCOPES + ' read:fan read:media write:media '
-                 'read:creator read:agency '
+                 'read:creator read:agency write:creator '
                  # /earnings backs the purchase reconciler.
-                 'read:insights')
+                 'read:insights '
+                 # Feed posts planned in the content planner.
+                 'read:post write:post')
 
 
 # What each optional permission actually buys, so a refusal can be described by
@@ -11027,12 +11117,16 @@ FANVUE_SCOPE_FEATURES = {
     'write:media': 'uploading media to the vault',
     'read:fan': "reading a fan's profile details",
     'read:creator': 'reading the creator profile',
+    'write:creator': 'planning Fanvue posts on an agency login',
+    'read:post': 'showing what is already booked on the Fanvue feed in the planner',
+    'write:post': 'posting to the Fanvue feed from the content planner',
     'offline': 'staying connected without reauthorizing',
     'offline_access': 'staying connected without reauthorizing',
 }
 # Missing these costs a side feature; anything else missing degrades the chat
 # itself and is worth shouting about.
-FANVUE_OPTIONAL_SCOPES = {'read:agency', 'read:insights', 'write:media', 'read:creator'}
+FANVUE_OPTIONAL_SCOPES = {'read:agency', 'read:insights', 'write:media', 'read:creator',
+                          'write:creator', 'read:post', 'write:post'}
 
 
 def _fanvue_app():
@@ -11237,18 +11331,24 @@ _FV_PATH_SCOPES = (
     ('/insights', 'read:insights'),
     ('/earnings', 'read:insights'),
     ('/users/me', 'read:self'),
+    ('/posts', 'read:post'),
     ('/creators', 'read:creator'),
 )
 
 
-def _fv_scope_for_path(path):
+def _fv_scope_for_path(path, method='GET'):
     p = (path or '').split('?')[0]
+    # Posts are the one family we call on v1; everything else is still v0.
+    if p.startswith('/v1/'):
+        p = p[3:]
     # A creator-scoped call carries the real endpoint after the uuid.
     if p.startswith('/creators/'):
         rest = p.split('/', 3)
         p = '/' + rest[3] if len(rest) > 3 else p
     for prefix, scope in _FV_PATH_SCOPES:
         if p.startswith(prefix):
+            if prefix == '/posts' and str(method).upper() != 'GET':
+                return 'write:post'
             return scope
     return ''
 
@@ -11299,16 +11399,16 @@ def _fanvue_call(persona, method, path, body=None):
             if new:
                 return _fanvue_api(method, path, new, body=body)
         if e.code == 403:
-            raise _fanvue_scope_hint(e, t, path)
+            raise _fanvue_scope_hint(e, t, path, method)
         raise
 
 
-def _fanvue_scope_hint(e, tokens, path):
+def _fanvue_scope_hint(e, tokens, path, method='GET'):
     """Say which permission a 403 is probably about. The connection can succeed
     with fewer scopes than we asked for — every call needing a missing one then
     fails identically, and nothing on screen connects that to the scope."""
     granted = (tokens.get('scope') or '').split()
-    need = _fv_scope_for_path(path)
+    need = _fv_scope_for_path(path, method)
     if need and granted and need not in granted:
         detail = (getattr(e, 'detail', '') or 'Forbidden').rstrip('.')
         e.detail = (f'{detail} — this connection was not granted "{need}" '
@@ -12102,6 +12202,101 @@ def _fv_record_drop(persona, fan_uuid, chosen, idx, price, media_uuids,
 
 # Fanvue serves media only through variant URLs, and only when the request asks
 # for them by name. blurred is what a locked item may legitimately show.
+# ── Fanvue feed posts ─────────────────────────────────────────────────────────
+# Posts are the one family we call on v1 — v0 has no cursor and pages the feed
+# by offset, which drifts under the writes the planner itself is making.
+FV_POST_AUDIENCES = ('subscribers', 'followers-and-subscribers')
+FV_POST_AUDIENCE_DEFAULT = 'followers-and-subscribers'
+FV_POST_CAP = 5000
+# Fanvue's floor for a paid post, in cents.
+FV_POST_PRICE_MIN = 300
+FV_POSTS_PAGE = 50
+FV_POSTS_MAX_PAGES = 10
+
+
+def _fv_post_path(persona, suffix=''):
+    """An agency login posts as the creator it has selected; a single account
+    posts as itself."""
+    return f'/v1{_fanvue_scope(persona)}/posts{suffix}'
+
+
+def _fv_audience(value):
+    v = str(value or '').strip()
+    return v if v in FV_POST_AUDIENCES else FV_POST_AUDIENCE_DEFAULT
+
+
+def _fv_iso(ts):
+    return datetime.fromtimestamp(int(ts), timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+
+def _fv_epoch(value):
+    """An epoch from a Fanvue ISO timestamp, or 0. Fanvue writes UTC with a
+    trailing Z, which fromisoformat only learned in 3.11."""
+    raw = str(value or '').strip()
+    if not raw:
+        return 0
+    try:
+        dt = datetime.fromisoformat(raw.replace('Z', '+00:00'))
+    except ValueError:
+        return 0
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return int(dt.timestamp())
+
+
+def _fv_posts(persona, start=0, end=0, size=FV_POSTS_PAGE,
+              max_pages=FV_POSTS_MAX_PAGES):
+    """Every post on the creator's feed in a window, drafts and scheduled ones
+    included. The cursor carries the filters the first page was cut under, so
+    later pages send nothing but the cursor."""
+    q = {'size': str(int(size)), 'includeUnpublished': 'true'}
+    if start:
+        q['startDate'] = _fv_iso(start)
+    if end:
+        q['endDate'] = _fv_iso(end)
+    path = _fv_post_path(persona) + '?' + urllib.parse.urlencode(q)
+    rows, seen = [], set()
+    for _ in range(max_pages):
+        res = _fanvue_call(persona, 'GET', path) or {}
+        for row in _fv_list(res):
+            uid = str((row or {}).get('uuid') or '')
+            if uid and uid not in seen:
+                seen.add(uid)
+                rows.append(row)
+        cursor = str(res.get('nextCursor') or res.get('next_cursor') or '')
+        if not cursor:
+            break
+        path = _fv_post_path(persona) + '?' + urllib.parse.urlencode(
+            {'size': str(int(size)), 'cursor': cursor})
+    return rows
+
+
+def _fv_create_post(persona, text, media_uuids=(), price_cents=0, audience='',
+                    publish_at=None):
+    """Put one post on the creator's feed, returning the uuid Fanvue gave it.
+    Without `publish_at` it goes live now — the planner's own queue holds the
+    slot, so handing Fanvue a schedule as well would give the post two owners."""
+    media = [u for u in (media_uuids or []) if u]
+    body = {'audience': _fv_audience(audience)}
+    text = str(text or '')[:FV_POST_CAP]
+    if text:
+        body['text'] = text
+    if media:
+        body['mediaUuids'] = media
+    price = int(price_cents or 0)
+    if price:
+        if not media:
+            raise RuntimeError('a paid Fanvue post needs media behind the price')
+        if price < FV_POST_PRICE_MIN:
+            raise RuntimeError(
+                f'Fanvue will not take a price under ${FV_POST_PRICE_MIN / 100:.2f}')
+        body['price'] = price
+    if publish_at:
+        body['publishAt'] = _fv_iso(publish_at)
+    res = _fanvue_call(persona, 'POST', _fv_post_path(persona), body=body) or {}
+    return str(res.get('uuid') or '')
+
+
 FV_MEDIA_VARIANTS = 'main,thumbnail,thumbnail_gallery,blurred'
 
 

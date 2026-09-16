@@ -1063,6 +1063,10 @@ class ScheduledPost(Base):
     # One item from the persona's library. A reference rather than a copy, so
     # editing the photo edits every post still waiting to use it.
     media_id = Column(String(32), default='')
+    # Fanvue feed posts carry a visibility and an optional unlock price; every
+    # other channel ignores both.
+    audience = Column(String(40), default='')
+    price_cents = Column(Integer, default=0)
     created_at = Column(DateTime, default=_now)
 
 
@@ -1070,9 +1074,11 @@ Index('ix_scheduled_due', ScheduledPost.status, ScheduledPost.run_at)
 Index('ix_scheduled_persona', ScheduledPost.persona, ScheduledPost.run_at)
 
 
-def queue_post(session, persona, platform, text, run_at, media_id='', status='queued'):
+def queue_post(session, persona, platform, text, run_at, media_id='', status='queued',
+               audience='', price_cents=0):
     row = ScheduledPost(persona=persona, platform=platform, text=text,
-                        run_at=run_at, media_id=media_id or '', status=status)
+                        run_at=run_at, media_id=media_id or '', status=status,
+                        audience=audience or '', price_cents=int(price_cents or 0))
     session.add(row)
     session.flush()
     return row
@@ -1157,7 +1163,8 @@ def delete_post(session, persona, post_id):
     return bool(n)
 
 
-def update_post(session, persona, post_id, text=None, run_at=None, media_id=None):
+def update_post(session, persona, post_id, text=None, run_at=None, media_id=None,
+                audience=None, price_cents=None):
     """Edit a post that has not gone out yet. Like cancel_post, only a `queued`
     row is the caller's to touch: once the worker has claimed it the send may
     already be away, and once it has posted the text is history rather than a
@@ -1174,6 +1181,10 @@ def update_post(session, persona, post_id, text=None, run_at=None, media_id=None
         fields['run_at'] = run_at
     if media_id is not None:
         fields['media_id'] = media_id
+    if audience is not None:
+        fields['audience'] = audience
+    if price_cents is not None:
+        fields['price_cents'] = int(price_cents or 0)
     if not fields:
         return False
     n = (session.query(ScheduledPost)

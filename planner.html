@@ -101,6 +101,18 @@
         <span class="hint" id="pl-m-media-hint" style="margin-top:6px;"></span>
       </div>
 
+      <div class="field" style="margin-top:14px;" id="pl-m-fanvue-field" hidden>
+        <label for="pl-m-audience">Who sees it on Fanvue</label>
+        <select id="pl-m-audience">
+          <option value="followers-and-subscribers">Followers and subscribers</option>
+          <option value="subscribers">Subscribers only</option>
+        </select>
+        <label for="pl-m-price" style="margin-top:10px;">Unlock price</label>
+        <input type="number" id="pl-m-price" min="0" step="0.01" placeholder="0.00">
+        <span class="hint" style="margin-top:6px;">Leave it empty for a free post.
+          A price needs media behind it, and Fanvue's floor is $3.00.</span>
+      </div>
+
       <div class="modal-footer" style="margin-top:18px;">
         <button type="button" class="btn btn-ghost" id="pl-m-cancel"
                 style="color:var(--err); border-color:var(--err); margin-right:auto;"
@@ -118,20 +130,23 @@
 <script>
 // The caps mirror growth.POST_PLATFORMS. The server trims to them on every
 // write, so this copy only decides when the counter turns red.
-const PL_CAPS = { x: 280, threads: 500, instagram: 2200, tiktok: 2200, reddit: 300 };
-const PL_LABELS = { x: 'X', threads: 'Threads', instagram: 'Instagram', tiktok: 'TikTok', reddit: 'Reddit' };
-const PL_PUBLISHABLE = ['x', 'threads'];
+const PL_CAPS = { x: 280, threads: 500, fanvue: 5000, instagram: 2200, tiktok: 2200, reddit: 300 };
+const PL_LABELS = { x: 'X', threads: 'Threads', fanvue: 'Fanvue', instagram: 'Instagram', tiktok: 'TikTok', reddit: 'Reddit' };
+const PL_PUBLISHABLE = ['x', 'threads', 'fanvue'];
 // Mirrors growth.MEDIA_SUPPORT. The server checks it again on every write; this
 // copy only decides which thumbnails are worth offering.
 const PL_MEDIA = {
   x:         ['image', 'video'],
   threads:   ['image', 'video'],
+  fanvue:    ['image', 'video'],
   instagram: ['image', 'video'],
   tiktok:    ['video'],
   reddit:    ['image']
 };
 // Where a creator connects each publishable channel, for the prompt below.
-const PL_CONNECT_AT = { x: '/xbot', threads: '/threads' };
+const PL_CONNECT_AT = { x: '/xbot', threads: '/threads', fanvue: '/fanvue' };
+// Fanvue's floor for a paid post, in cents. The server checks it again.
+const PL_FV_PRICE_MIN = 300;
 let plConn = {};
 const PL_KIND = { value: 'worth reading', tease: 'tease', cta: 'ask' };
 const PL_STATUS = {
@@ -153,6 +168,7 @@ let plOpen = null;        // the card the modal is editing
 let plVault = [];         // the persona's media library
 let plPickedMedia = '';   // what the open editor has attached
 let plChans = [];         // channels ticked on a brand-new post
+let plRemote = [];        // posts Fanvue already has booked — read-only
 
 function esc(s) {
   return String(s == null ? '' : s)
@@ -274,6 +290,7 @@ async function plLoadQueue() {
     return;
   }
   plQueue = d.queue || [];
+  plRemote = d.remote || [];
   try {
     const ov = await (await fetch('/api/platforms/overview')).json();
     plConn = ((ov.personas || {})[plSlug]) || {};
@@ -335,7 +352,7 @@ function plRender(d) {
   const queueable = plProposed.filter(s => s.publishable && s.at > Date.now() / 1000).length;
   document.getElementById('pl-bulk').innerHTML = queueable
     ? '<button type="button" class="btn btn-primary" onclick="plQueueWeek(this)">Queue the '
-      + queueable + ' X and Threads post' + (queueable === 1 ? '' : 's') + '</button>'
+      + queueable + ' ' + plAutoChannels() + ' post' + (queueable === 1 ? '' : 's') + '</button>'
       + (plPlanMeta && plPlanMeta.upcoming > plPlanMeta.cap
          ? '<span class="hint" style="margin-left:10px;">Only the first ' + plPlanMeta.cap
            + ' go in one round — plan again once those have gone out.</span>' : '')
@@ -351,6 +368,12 @@ function plRender(d) {
   plProposed.forEach((s, i) => cards.push({
     kind: 'proposed', at: s.at, platform: s.platform, publishable: s.publishable,
     text: s.idea, job: s.kind, idx: i
+  }));
+  // Posts made in the Fanvue app itself. Shown so the week is planned around
+  // them, never edited from here — they are not ours to change.
+  plRemote.forEach(r => cards.push({
+    kind: 'remote', at: r.run_at, platform: r.platform, status: r.status,
+    text: r.text, price: r.price_cents
   }));
   cards.sort((a, b) => a.at - b.at);
 
@@ -370,7 +393,29 @@ function plRender(d) {
   document.getElementById('pl-grid').innerHTML = html;
 }
 
+// The channels the proposals on screen can actually post to, named so the bulk
+// button says what it is about to queue rather than naming a fixed pair.
+function plAutoChannels() {
+  const names = [];
+  plProposed.forEach(s => {
+    if (!s.publishable) return;
+    const n = PL_LABELS[s.platform] || s.platform;
+    if (names.indexOf(n) === -1) names.push(n);
+  });
+  if (!names.length) return '';
+  if (names.length === 1) return names[0];
+  return names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
+}
+
 function plCard(c) {
+  if (c.kind === 'remote') {
+    const price = c.price ? ' · $' + (c.price / 100).toFixed(2) : '';
+    return '<div class="pl-card is-remote" title="Made in Fanvue — edit it there">'
+      + '<span class="pl-card-top"><span class="pl-when">' + hourLabel(c.at) + '</span>'
+      + '<span class="pl-chan">' + esc(PL_LABELS[c.platform] || c.platform) + '</span>'
+      + '<span class="pl-flag">' + esc((c.status === 'posted' ? 'on Fanvue' : 'scheduled') + price) + '</span></span>'
+      + '<span class="pl-text">' + esc(c.text || 'no caption') + '</span></div>';
+  }
   const manual = c.kind === 'proposed' ? !c.publishable : c.status === 'manual';
   const cls = 'pl-card ' + (c.kind === 'proposed'
     ? (manual ? 'is-proposed is-manual' : 'is-proposed')
@@ -480,9 +525,35 @@ function plNew() {
   save.textContent = 'Add to the week';
 
   plRenderChans();
+  plRenderFanvue('', 0);
   plCount();
   plRenderMedia();
   document.getElementById('pl-modal').classList.add('open');
+}
+
+// The audience and the price are Fanvue's alone, so the field only exists while
+// Fanvue is one of the channels this post is going to.
+function plRenderFanvue(audience, priceCents) {
+  const on = plOpen && (plOpen.kind === 'new'
+    ? plChans.indexOf('fanvue') !== -1 : plOpen.platform === 'fanvue');
+  document.getElementById('pl-m-fanvue-field').hidden = !on;
+  if (!on) return;
+  if (audience !== undefined) {
+    document.getElementById('pl-m-audience').value = audience || 'followers-and-subscribers';
+  }
+  if (priceCents !== undefined) {
+    document.getElementById('pl-m-price').value = priceCents ? (priceCents / 100).toFixed(2) : '';
+  }
+}
+
+// What the two Fanvue boxes say right now, or null when they are not showing.
+function plFanvueFields() {
+  if (document.getElementById('pl-m-fanvue-field').hidden) return null;
+  const dollars = parseFloat(document.getElementById('pl-m-price').value);
+  return {
+    audience: document.getElementById('pl-m-audience').value,
+    price_cents: isNaN(dollars) || dollars <= 0 ? 0 : Math.round(dollars * 100)
+  };
 }
 
 function plRenderChans() {
@@ -515,6 +586,7 @@ function plToggleChan(p) {
   plOpen.platform = plChans[0] || 'x';
   plOpen.publishable = plChans.every(c => PL_PUBLISHABLE.indexOf(c) !== -1);
   plRenderChans();
+  plRenderFanvue();
   plCount();
   plRenderMedia();
 }
@@ -575,6 +647,7 @@ function plEdit(kind, idx) {
   plPickedMedia = row.media_id || '';
   plChans = [];
   plRenderChans();
+  plRenderFanvue(row.audience || '', row.price_cents || 0);
   plCount();
   plRenderMedia();
   document.getElementById('pl-modal').classList.add('open');
@@ -716,6 +789,15 @@ async function plSave(btn) {
   if (!text) { alert('Nothing to post.'); return; }
   if (!at) { alert('That is not a time.'); return; }
 
+  const fv = plFanvueFields();
+  if (fv && fv.price_cents && !plPickedMedia) {
+    alert('A paid Fanvue post needs media behind the price.'); return;
+  }
+  if (fv && fv.price_cents && fv.price_cents < PL_FV_PRICE_MIN) {
+    alert('Fanvue will not take a price under $' + (PL_FV_PRICE_MIN / 100).toFixed(2) + '.');
+    return;
+  }
+
   btn.disabled = true;
   const was = btn.textContent;
   btn.textContent = 'saving…';
@@ -725,7 +807,8 @@ async function plSave(btn) {
       res = await fetch('/api/growth/queue', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ persona: plSlug, platforms: plChans, text: text,
-                               run_at: at, media_id: plPickedMedia })
+                               run_at: at, media_id: plPickedMedia,
+                               ...(fv || {}) })
       });
     } else if (plOpen.kind === 'proposed') {
       if (!plOpen.written) {
@@ -735,13 +818,15 @@ async function plSave(btn) {
       res = await fetch('/api/growth/queue', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ persona: plSlug, platform: plOpen.platform, text: text,
-                               run_at: at, media_id: plPickedMedia })
+                               run_at: at, media_id: plPickedMedia,
+                               ...(fv || {}) })
       });
     } else {
       res = await fetch('/api/growth/queue', {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ persona: plSlug, id: plOpen.id, text: text,
-                               run_at: at, media_id: plPickedMedia })
+                               run_at: at, media_id: plPickedMedia,
+                               ...(fv || {}) })
       });
     }
     const d = await res.json();

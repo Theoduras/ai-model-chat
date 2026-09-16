@@ -3581,6 +3581,16 @@ body.embedding .form-area { padding: 0; overflow: hidden; }
   border-left-color: var(--accent-line);
 }
 .pl-card.is-manual { border-left-color: var(--text-muted); }
+/* Made in the Fanvue app, shown so the week is planned around it. Not a button:
+   nothing here can change it. */
+.pl-card.is-remote {
+  border-left-color: var(--text-muted);
+  border-style: dotted;
+  border-left-style: solid;
+  opacity: 0.6;
+  cursor: default;
+}
+.pl-card.is-remote:hover { transform: none; box-shadow: none; border-color: var(--border-soft); }
 
 .pl-card-top { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
 .pl-when { font-size: 0.7rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }

@@ -295,6 +295,85 @@ def test_api_errors():
         app._fanvue_tokens = orig_tokens
 
 
+def test_planner_posts():
+    """The planner reads and writes the Fanvue feed on v1, where the list is cut
+    by an opaque cursor rather than a page number."""
+    calls = []
+
+    pages = [
+        {'data': [{'uuid': 'p1', 'text': 'one', 'publishedAt': '2026-09-14T09:00:00Z'},
+                  {'uuid': 'p2', 'text': 'two', 'publishAt': '2026-09-15T11:00:00Z'}],
+         'nextCursor': 'CUR2'},
+        {'data': [{'uuid': 'p2'}, {'uuid': 'p3', 'text': 'three'}], 'nextCursor': None},
+    ]
+
+    def fake_call(persona, method, path, body=None):
+        calls.append((method, path, body))
+        if method == 'GET':
+            return pages[min(len([c for c in calls if c[0] == 'GET']) - 1,
+                             len(pages) - 1)]
+        return {'uuid': 'new-post'}
+
+    orig_call, orig_scope = app._fanvue_call, app._fanvue_scope
+    try:
+        app._fanvue_call = fake_call
+        app._fanvue_scope = lambda p: ''
+
+        rows = app._fv_posts('lilly', 1757800000, 1758400000)
+        check('every page is collected once', [r['uuid'] for r in rows] == ['p1', 'p2', 'p3'],
+              [r['uuid'] for r in rows])
+        check('the window is asked for on the first page',
+              'startDate=2025-09-13T21' in calls[0][1]
+              and 'endDate=' in calls[0][1]
+              and 'includeUnpublished=true' in calls[0][1],
+              calls[0][1])
+        check('and later pages carry the cursor alone',
+              'cursor=CUR2' in calls[1][1] and 'startDate' not in calls[1][1], calls[1][1])
+        check('posts are read on v1', calls[0][1].startswith('/v1/posts?'), calls[0][1])
+
+        calls.clear()
+        uid = app._fv_create_post('lilly', 'hi', media_uuids=['m1'],
+                                  price_cents=500, audience='subscribers')
+        body = calls[0][2]
+        check('the new post comes back by uuid', uid == 'new-post', uid)
+        check('the audience is sent', body['audience'] == 'subscribers', body)
+        check('the price rides with its media',
+              body['price'] == 500 and body['mediaUuids'] == ['m1'], body)
+        check('and no publishAt, because the queue holds the slot',
+              'publishAt' not in body, body)
+
+        for why, kwargs in (('a price with no media', {'price_cents': 500}),
+                            ('a price under the floor',
+                             {'media_uuids': ['m1'], 'price_cents': 100})):
+            try:
+                app._fv_create_post('lilly', 'hi', **kwargs)
+                check(why + ' is refused', False, 'no error')
+            except RuntimeError as e:
+                check(why + ' is refused', True, str(e))
+
+        body = None
+        calls.clear()
+        app._fv_create_post('lilly', 'hi', audience='nonsense')
+        check('an audience Fanvue does not know falls back to the open one',
+              calls[0][2]['audience'] == 'followers-and-subscribers', calls[0][2])
+    finally:
+        app._fanvue_call, app._fanvue_scope = orig_call, orig_scope
+
+    check('reading posts names read:post',
+          app._fv_scope_for_path('/v1/posts?size=50') == 'read:post',
+          app._fv_scope_for_path('/v1/posts?size=50'))
+    check('writing one names write:post',
+          app._fv_scope_for_path('/v1/posts', 'POST') == 'write:post',
+          app._fv_scope_for_path('/v1/posts', 'POST'))
+    check('and an agency login is still about posts',
+          app._fv_scope_for_path('/v1/creators/abc-123/posts') == 'read:post',
+          app._fv_scope_for_path('/v1/creators/abc-123/posts'))
+    check('a Fanvue timestamp reads back as an epoch',
+          app._fv_epoch('2026-09-14T09:00:00Z') == 1789376400,
+          app._fv_epoch('2026-09-14T09:00:00Z'))
+    check('and a missing one is zero, not a crash', app._fv_epoch(None) == 0)
+
+
 def test_chat_lists():
     """The picker said "no lists on this account" for an account full of them:
     smart lists carry a string id, and only `uuid` was ever read."""
@@ -900,7 +979,7 @@ def test_a_tag_only_reply_is_never_sent_as_a_blank():
 if __name__ == '__main__':
     for fn in (test_direction, test_import, test_identity_never_crosses,
                test_placeholders, test_pacing, test_backlog,
-               test_scopes, test_api_errors, test_chat_lists,
+               test_scopes, test_api_errors, test_planner_posts, test_chat_lists,
                test_scope_reporting, test_funnels_off_changes_nothing,
                test_guardrails_can_stop_a_drop,
                test_price_cap_holds_rather_than_discounts,
