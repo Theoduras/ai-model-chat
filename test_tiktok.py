@@ -1,18 +1,16 @@
-"""Regression tests for the TikTok poster.
+"""Regression tests for TikTok posting.
 
-Everything here runs against the stub transport: no session, no network. What
-is checked is the part that cannot be checked against a real account safely —
-that a video and a set of photos never go out as one post, that a blank
-caption is written rather than posted empty, that a reply is drafted before it
-is sent, and that the captured session round-trips through encryption the same
-way Instagram's does.
+Everything here runs against the stub transport: no token, no network. What is
+checked is the part that cannot be checked against a real account safely — that
+a blank caption is written rather than posted empty, that a video is what goes
+up, that the rotating refresh token is stored and a network blip does not cost
+her the connection, and that the planner's own branch reaches the same call.
 
 Run with: python test_tiktok.py
 """
 import base64
 import json
 import os
-import threading
 
 os.environ.setdefault('GEMINI_API_KEY', 'test')
 os.environ.setdefault('DISCORD_WORKER', '0')
@@ -21,6 +19,7 @@ os.environ.setdefault('SECRET_KEY', 'test-secret-for-tiktok')
 
 import app
 import growth
+import tiktok_oauth as TO
 import tiktok_rest as TR
 import tiktok_stub as TS
 
@@ -39,29 +38,36 @@ def check(name, ok, detail=''):
         FAILURES.append(name)
 
 
-_PNG = base64.b64encode(b'not really a png, just bytes').decode()
-_IMAGE_URL = f'data:image/png;base64,{_PNG}'
-_VIDEO_URL = f'data:video/mp4;base64,{_PNG}'
-_SESSION = {'cookie': 'sessionid=abc; tt_csrf_token=xyz; msToken=mmm',
-            'csrftoken': 'xyz', 'sec_uid': 'sec-lilith', 'user_id': '42'}
+_BYTES = base64.b64encode(b'not really an mp4, just bytes').decode()
+_VIDEO_URL = f'data:video/mp4;base64,{_BYTES}'
+_IMAGE_URL = f'data:image/png;base64,{_BYTES}'
+_SESSION = {'refresh_token': 'r1', 'access_token': 'a1',
+            'access_expires': 9e12, 'open_id': 'oid', 'username': 'lilith'}
 
 
-def _stub(fake):
+def _store():
+    held = {}
+    app._get_setting = lambda k: held.get(k, '')
+    app._set_setting = lambda k, v: held.__setitem__(k, v)
+    return held
+
+
+def test_a_video_is_what_goes_up():
+    fake = TS.FakeRest()
     app._tt_rest = lambda persona: fake
     app._tt_caption = lambda persona, brief: 'whatever'
 
-
-def test_a_video_and_photos_never_ride_in_one_post():
-    fake = TS.FakeRest()
-    _stub(fake)
+    result = app._tt_post_now('lilly', [_VIDEO_URL], 'hello')
+    check('a video posts', result['publish_id'] and fake.posted[-1]['bytes'] > 0, fake.posted)
+    check('and its bytes reach the transport, not a placeholder',
+          fake.uploaded[-1] == base64.b64decode(_BYTES))
 
     threw = ''
     try:
-        app._tt_post_now('lilly', [_VIDEO_URL, _IMAGE_URL], '')
+        app._tt_post_now('lilly', [_IMAGE_URL], 'hello')
     except ValueError as e:
         threw = str(e)
-    check('a video plus a photo is refused rather than half-posted',
-          'not both' in threw, threw)
+    check('a photo is refused rather than half-posted', 'video' in threw.lower(), threw)
 
     threw = ''
     try:
@@ -70,18 +76,27 @@ def test_a_video_and_photos_never_ride_in_one_post():
         threw = str(e)
     check('a post with nothing attached is refused', 'Attach' in threw, threw)
 
+    threw = ''
+    try:
+        app._tt_post_now('lilly', [_VIDEO_URL, _VIDEO_URL], '')
+    except ValueError as e:
+        threw = str(e)
+    check('two videos in one post are refused', 'one video' in threw, threw)
 
-def test_each_kind_reaches_its_own_call():
+
+def test_the_mode_follows_the_apps_audit():
     fake = TS.FakeRest()
-    _stub(fake)
+    app._tt_rest = lambda persona: fake
+    app._tt_caption = lambda persona, brief: 'whatever'
 
-    result = app._tt_post_now('lilly', [_VIDEO_URL], 'hello')
-    check('one video goes out as a video post', result['kind'] == 'video', fake.posted)
+    app.TO.direct_post = lambda: False
+    result = app._tt_post_now('lilly', [_VIDEO_URL], 'hi')
+    check('unaudited, a post goes to her drafts', result['mode'] == 'inbox', result)
 
-    result = app._tt_post_now('lilly', [_IMAGE_URL, _IMAGE_URL], 'hello')
-    check('several stills go out as one photo post', result['kind'] == 'photo', fake.posted)
-    check('and every still reaches the transport, not just the first',
-          fake.posted[-1]['stills'] == 2, fake.posted[-1])
+    app.TO.direct_post = lambda: True
+    result = app._tt_post_now('lilly', [_VIDEO_URL], 'hi')
+    check('audited, the same call publishes', result['mode'] == 'direct', result)
+    app.TO.direct_post = TO.direct_post
 
 
 def test_a_blank_caption_is_written_not_left_empty():
@@ -98,192 +113,172 @@ def test_a_blank_caption_is_written_not_left_empty():
           result['caption'] == 'the creator wrote this', result)
 
 
-def test_a_caption_is_trimmed_to_tiktoks_cap():
-    check('the planner and the console write to the same TikTok cap',
-          growth.POST_PLATFORMS['tiktok']['cap'] == TR.CAPTION_CAP)
-    check('TikTok stays locked safe for work whatever the persona allows',
-          'tiktok' in growth.SFW_LOCKED)
-
-
 def test_not_connected_refuses_before_touching_the_network():
-    app._tt_session = lambda p: {}
+    _store()
     threw = ''
     try:
         app._tt_post_now('lilly', [_VIDEO_URL], 'hi')
     except ValueError as e:
         threw = str(e)
-    check('posting without a session says so instead of calling TikTok',
+    check('posting without a connection says so instead of calling TikTok',
           'not connected' in threw.lower(), threw)
 
 
 def test_the_session_round_trips_through_encryption():
-    store = {}
-    app._get_setting = lambda k: store.get(k, '')
-    app._set_setting = lambda k, v: store.__setitem__(k, v)
-
+    held = _store()
     app._tt_set_session('lilly', _SESSION)
-    check('the stored blob is not the session in the clear',
-          'sessionid=abc' not in json.dumps(store), store)
+    check('the stored blob is not the token in the clear',
+          'r1' not in json.dumps(held), held)
     check('and it comes back out whole', app._tt_session('lilly') == _SESSION)
-
     app._tt_set_session('lilly', {})
     check('disconnecting leaves nothing to decrypt', app._tt_session('lilly') == {})
 
-    check('the app keys TikTok accounts apart from Instagram and Discord',
-          app._tt_account_id('lilly') == 'tt_lilly')
+
+def test_a_refreshed_token_is_stored_with_the_new_refresh_token():
+    """TikTok rotates the refresh token on every refresh. Keeping the old one
+    means the connection dies inside a day."""
+    _store()
+    stale = dict(_SESSION, access_expires=0)
+    app._tt_set_session('lilly', stale)
+    auth = TS.FakeAuth()
+    app.TO = auth
+    app.TO.TikTokAuthError = TS.FakeAuth.TikTokAuthError
+
+    fresh = app._tt_fresh_token('lilly', app._tt_session('lilly'))
+    check('a fresh access token comes back', fresh['access_token'] == 'access-1', fresh)
+    check('and the rotated refresh token is what is kept',
+          app._tt_session('lilly')['refresh_token'] == 'refresh-1',
+          app._tt_session('lilly'))
+    check('a token still good is not refreshed again',
+          app._tt_fresh_token('lilly', app._tt_session('lilly'))['access_token'] == 'access-1'
+          and auth.calls == 1, auth.calls)
+    app.TO = TO
 
 
-def test_signing_in_through_the_browser():
-    """The sign-in relay, driven as TikTok. Nothing here opens a browser."""
-    import of_connect
+def test_a_blip_keeps_the_connection_and_a_refusal_ends_it():
+    _store()
+    app._tt_set_session('lilly', dict(_SESSION, access_expires=0))
+    app.TO = TS.FakeAuth(fail='timed out', fatal=False)
+    app.TO.TikTokAuthError = TS.FakeAuth.TikTokAuthError
+    threw = ''
+    try:
+        app._tt_fresh_token('lilly', app._tt_session('lilly'))
+    except ValueError as e:
+        threw = str(e)
+    check('a network failure says so', 'Could not reach' in threw, threw)
+    check('and leaves her refresh token alone',
+          app._tt_session('lilly').get('refresh_token') == 'r1')
 
-    check('tiktok is a site the relay knows', 'tiktok' in of_connect.SITES)
-    check('and it opens TikTok, not Instagram or OnlyFans',
-          of_connect.SITES['tiktok']['url'].startswith('https://www.tiktok.com'))
-
-    made = of_connect.Attempt.__new__(of_connect.Attempt)
-    made.site = 'tiktok'
-    made._site = of_connect.SITES['tiktok']
-    made.proxy = ''
-    made.account = 'tt_lilly'
-    made.capture_note = ''
-    made.result = {}
-    made.probes = 0
-    made.state = 'signin'
-    made.page_url = ''
-    made.cookie_names = []
-    made.user_agent = ''
-    made._done = threading.Event()
-    made._pending_session = None
-    made._tt_device_id = '7100000000000000000'
-
-    class Context:
-        def __init__(self, cookies):
-            self._cookies = cookies
-
-        def cookies(self, origin):
-            return self._cookies
-
-    class Page:
-        def __init__(self, who):
-            self.who = who
-
-        def evaluate(self, js, args=None):
-            if 'navigator.userAgent' in js:
-                return 'Mozilla/5.0 test'
-            if 'user/detail' in js:
-                return {'userInfo': {'user': {'secUid': 'sec-lilith'}}}
-            return self.who
-
-    made._capture_tiktok(Page(None), Context([{'name': 'tt_csrf_token', 'value': 'xyz'}]))
-    check('no sessionid cookie yet means the sign-in is not finished',
-          made.state == 'signin' and made.capture_note == 'awaiting_cookies')
-
-    cookies = [{'name': 'sessionid', 'value': 'abc'},
-               {'name': 'tt_csrf_token', 'value': 'xyz'},
-               {'name': 'msToken', 'value': 'mmm'},
-               {'name': 'uid_tt', 'value': '42'}]
-    made._capture_tiktok(Page({'data': {'user_id_str': '42', 'username': 'lilith'}}),
-                         Context(cookies))
-    check('a verified fetch finishes the sign-in', made.state == 'connected')
-    check('and marks the capture as verified', made.capture_note == 'captured')
-    held = made._pending_session or {}
-    check('the cookie header carries every cookie the browser held',
-          'sessionid=abc' in held.get('cookie', '') and 'msToken=mmm' in held.get('cookie', ''),
-          held)
-    check('the csrf token is kept on its own too, for the header every write needs',
-          held.get('csrftoken') == 'xyz')
-    check('the browser-minted msToken is kept — it cannot be made up later',
-          held.get('ms_token') == 'mmm')
-    check('so is the device id the page was minted with',
-          held.get('device_id') == '7100000000000000000')
-    check('and her secUid, which is how her own posts are read back',
-          held.get('sec_uid') == 'sec-lilith')
-    check('claim hands it over exactly once',
-          of_connect.claim(made) == held and of_connect.claim(made) is None)
-
-    made.capture_note = ''
-    made.state = 'signin'
-    made._capture_tiktok(Page(None), Context(cookies))
-    check('a signed-in cookie with no working fetch still finishes, unverified',
-          made.state == 'connected' and made.capture_note == 'unverified')
+    app.TO = TS.FakeAuth(fail='invalid_grant', fatal=True)
+    app.TO.TikTokAuthError = TS.FakeAuth.TikTokAuthError
+    threw = ''
+    try:
+        app._tt_fresh_token('lilly', app._tt_session('lilly'))
+    except ValueError as e:
+        threw = str(e)
+    check('a refusal TikTok calls final ends the connection',
+          'Connect her account again' in threw, threw)
+    check('and clears the session, so the console stops offering to post',
+          app._tt_session('lilly') == {})
+    app.TO = TO
 
 
-def test_replies_are_drafted_in_her_voice_and_sent_only_when_asked():
-    fake = TS.FakeRest()
-    app._tt_rest = lambda persona: fake
-    app._persona_text = lambda *a, **k: 'haha thank you'
-
-    draft = app._tt_reply_draft('lilly', 'you look great', 'gym day')
-    check('a draft comes back in her voice', draft == 'haha thank you', draft)
-    check('drafting sends nothing', fake.replied == [])
-
-    fake.reply('7', 'haha thank you', '99')
-    check('sending is the separate step', fake.replied[-1]['reply_id'] == '99')
+def test_the_signed_state_is_what_names_the_persona():
+    state = TO.sign_state('lilly')
+    check('a state round trips', TO.read_state(state) == 'lilly')
+    check('a tampered state names nobody', TO.read_state('nova:' + state.split(':', 1)[1]) == '')
+    check('so does a malformed one', TO.read_state('nonsense') == '')
 
 
-def test_the_planner_can_publish_tiktok_itself():
+def test_the_scope_asked_for_follows_the_audit():
+    check('unaudited asks only for the inbox scope',
+          'video.upload' in TO.SCOPE_BASE and 'video.publish' not in TO.SCOPE_BASE)
+    check('audited asks for publishing too', 'video.publish' in TO.SCOPE_DIRECT)
+    check('an unconfigured service refuses to build a sign-in link',
+          not TO.configured())
+
+
+def test_the_transport_chunks_the_way_tiktok_asks():
+    rest = TR.Rest({'access_token': 't'})
+    check('a small video goes up whole, in one chunk',
+          rest._chunking(2 * 1024 * 1024) == (2 * 1024 * 1024, 1))
+    check('so does one just inside the single-chunk limit',
+          rest._chunking(TR.CHUNK_MAX) == (TR.CHUNK_MAX, 1))
+    size = TR.CHUNK_MAX * 3 + 100
+    chunk, count = rest._chunking(size)
+    check('a bigger one is split', chunk == TR.CHUNK_MAX and count == 3, (chunk, count))
+    check('no token means no call at all',
+          not TR.Rest({}).configured())
+
+
+def test_the_planner_publishes_a_tiktok_video_itself():
     check('tiktok is a channel the planner publishes rather than hands over',
           'tiktok' in growth.PUBLISHABLE)
     spec = growth.MEDIA_SUPPORT['tiktok']
-    check('and it takes the bytes itself now, not by hand', spec['how'] == 'upload')
-    check('a photo post may carry several stills', spec['max'] > 1)
-    check('both kinds are allowed, because TikTok takes both',
-          set(spec['kinds']) == {'image', 'video'})
-    check('a set of stills passes the queue\'s own media check',
-          not growth.media_set_reject('tiktok', ['image', 'image']),
-          growth.media_set_reject('tiktok', ['image', 'image']))
+    check('and it hands over the bytes itself', spec['how'] == 'upload')
+    check('one clip per post', spec['max'] == 1 and spec['kinds'] == ('video',))
+    check('TikTok stays locked safe for work', 'tiktok' in growth.SFW_LOCKED)
+
+    fake = TS.FakeRest()
+    app._tt_rest = lambda persona: fake
+    app._media_row = lambda persona, mid: {'id': mid, 'kind': 'video'}
+    app._media_bytes = lambda row: (b'clip-bytes', 'video/mp4')
+    app._content_register_add = lambda *a, **k: None
+    app._tt_log_post = lambda *a, **k: None
+    posted = app._growth_publish('lilly', 'tiktok', 'a caption', media_ids=['vid'])
+    check('the queue reaches the same call the console does',
+          posted == fake.posted[-1]['publish_id'], fake.posted)
+    check('carrying the caption the planner wrote',
+          fake.posted[-1]['caption'] == 'a caption')
+
+    app._media_bytes = lambda row: (b'still-bytes', 'image/png')
+    app._media_row = lambda persona, mid: {'id': mid, 'kind': 'image'}
+    threw = ''
+    try:
+        app._growth_publish('lilly', 'tiktok', 'a caption', media_ids=['img'])
+    except Exception as e:
+        threw = str(e)
+    check('a planned still is refused before it reaches TikTok',
+          'video' in threw.lower(), threw)
 
 
 def test_the_routes_exist():
     rules = {str(r) for r in app.app.url_map.iter_rules()}
-    for path in ('/api/tiktok/status', '/api/tiktok/connect',
-                 '/api/tiktok/connect/browser', '/api/tiktok/connect/frame',
-                 '/api/tiktok/connect/input', '/api/tiktok/connect/cancel',
-                 '/api/tiktok/post-now', '/api/tiktok/feed', '/api/tiktok/reply',
-                 '/tiktok', '/tiktok/connect'):
+    for path in ('/tiktok', '/tiktok/oauth/start', '/tiktok/oauth/callback',
+                 '/api/tiktok/status', '/api/tiktok/connect', '/api/tiktok/post-now'):
         check('%s is registered' % path, path in rules)
+    for gone in ('/tiktok/connect', '/api/tiktok/connect/browser',
+                 '/api/tiktok/feed', '/api/tiktok/reply'):
+        check('%s is gone with the browser transport' % gone, gone not in rules)
 
 
 def test_the_console_has_what_it_draws():
     page = open('tiktok.html').read()
-    for sec in ('sec-account', 'sec-posting', 'sec-comments'):
+    for sec in ('sec-account', 'sec-posting'):
         check('%s is a panel on the page' % sec, 'id="%s"' % sec in page)
     check('the post-now call reaches the posting endpoint',
           '/api/tiktok/post-now' in page)
-    check('the comments panel reads her own posts back',
-          '/api/tiktok/feed' in page)
-    check('the connect popup reaches the same relay OnlyFans and Instagram use',
-          '/tiktok/connect?site=tiktok' in page)
-
-
-def test_the_transport_signs_its_upload_calls():
-    """The upload gateway is AWS-shaped, so a wrong signature is the one
-    failure that looks like a dead session instead of a bad request."""
-    headers = TR._sig_v4('GET', 'https://vod.example/top/v1?Action=ApplyUploadInner',
-                         b'', {'access_key_id': 'AK', 'secret_acess_key': 'SK',
-                               'session_token': 'ST'})
-    check('the call carries an Authorization header',
-          headers['Authorization'].startswith('AWS4-HMAC-SHA256 Credential=AK/'))
-    check('and the session token the credentials came with',
-          headers['x-amz-security-token'] == 'ST')
-    check('an unsigned deployment is visible rather than silently broken',
-          TR.SIGNER_URL == '' or isinstance(TR.SIGNER_URL, str))
+    check('connecting goes through TikTok\'s own approval page',
+          '/tiktok/oauth/start' in page)
+    check('nothing is left of the sign-in relay', 'site=tiktok' not in page)
+    check('the console says where a post actually lands',
+          'drafts' in page)
 
 
 if __name__ == '__main__':
-    for fn in (test_a_video_and_photos_never_ride_in_one_post,
-               test_each_kind_reaches_its_own_call,
+    for fn in (test_a_video_is_what_goes_up,
+               test_the_mode_follows_the_apps_audit,
                test_a_blank_caption_is_written_not_left_empty,
-               test_a_caption_is_trimmed_to_tiktoks_cap,
                test_not_connected_refuses_before_touching_the_network,
                test_the_session_round_trips_through_encryption,
-               test_signing_in_through_the_browser,
-               test_replies_are_drafted_in_her_voice_and_sent_only_when_asked,
-               test_the_planner_can_publish_tiktok_itself,
+               test_a_refreshed_token_is_stored_with_the_new_refresh_token,
+               test_a_blip_keeps_the_connection_and_a_refusal_ends_it,
+               test_the_signed_state_is_what_names_the_persona,
+               test_the_scope_asked_for_follows_the_audit,
+               test_the_transport_chunks_the_way_tiktok_asks,
+               test_the_planner_publishes_a_tiktok_video_itself,
                test_the_routes_exist,
-               test_the_console_has_what_it_draws,
-               test_the_transport_signs_its_upload_calls):
+               test_the_console_has_what_it_draws):
         restore()
         try:
             fn()

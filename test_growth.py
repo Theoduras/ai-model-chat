@@ -446,8 +446,8 @@ print()
 print('media rules')
 check('X takes both', G.media_ok('x', 'image') and G.media_ok('x', 'video'))
 check('Threads takes both', G.media_ok('threads', 'image') and G.media_ok('threads', 'video'))
-check('TikTok takes both, as a clip or a photo post',
-      G.media_ok('tiktok', 'video') and G.media_ok('tiktok', 'image'))
+check('TikTok takes a clip, and a still is not offered there',
+      G.media_ok('tiktok', 'video') and not G.media_ok('tiktok', 'image'))
 check('Reddit takes both', G.media_ok('reddit', 'image') and G.media_ok('reddit', 'video'))
 check('an unknown channel takes nothing', not G.media_ok('myspace', 'image'))
 check('a good pairing has no complaint', G.media_reject('x', 'video') == '')
@@ -471,8 +471,8 @@ check('a set inside the cap is fine', G.media_set_reject('x', ['image'] * 4) == 
 check('one over it is not', 'at most 4' in G.media_set_reject('x', ['image'] * 5))
 check('a single-file channel says so', 'one file' in G.media_set_reject('x', ['video'] * 2)
       or 'video' in G.media_set_reject('x', ['video'] * 2))
-check('a clip never rides with stills on TikTok either',
-      'video' in G.media_set_reject('tiktok', ['image', 'video']))
+check('TikTok takes one file per post',
+      'one file' in G.media_set_reject('tiktok', ['video'] * 2))
 check('a clip never rides with stills',
       'video' in G.media_set_reject('fanvue', ['image', 'video']))
 check('and one file alone is never a set problem',
@@ -480,10 +480,10 @@ check('and one file alone is never a set problem',
 check('the carousel channels take more than one',
       G.media_max('fanvue') > 1 and G.media_max('threads') > 1
       and G.media_max('reddit') > 1 and G.media_max('instagram') > 1)
-check('a TikTok photo post carries a set', G.media_max('tiktok') > 1)
+check('a TikTok post is one clip', G.media_max('tiktok') == 1)
 
-check('every publishable channel can carry a still',
-      all(G.media_ok(p, 'image') for p in G.PUBLISHABLE))
+check('every publishable channel but TikTok can carry a still',
+      all(G.media_ok(p, 'image') for p in G.PUBLISHABLE if p != 'tiktok'))
 
 def test_nothing_failed():
     assert not FAILURES, FAILURES

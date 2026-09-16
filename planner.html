@@ -202,12 +202,12 @@ const PL_MEDIA = {
   threads:   ['image', 'video'],
   fanvue:    ['image', 'video'],
   instagram: ['image', 'video'],
-  tiktok:    ['image', 'video'],
+  tiktok:    ['video'],
   reddit:    ['image', 'video']
 };
 // Where a creator connects each publishable channel, for the prompt below.
 // Mirrors growth.MEDIA_SUPPORT's max. The server checks it again on every write.
-const PL_MEDIA_MAX = { x: 4, threads: 20, fanvue: 20, instagram: 10, tiktok: 35, reddit: 20 };
+const PL_MEDIA_MAX = { x: 4, threads: 20, fanvue: 20, instagram: 10, tiktok: 1, reddit: 20 };
 const PL_CONNECT_AT = { x: '/xbot', threads: '/threads', fanvue: '/fanvue',
                         instagram: '/instagram', reddit: '/reddit',
                         tiktok: '/tiktok' };

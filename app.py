@@ -9122,26 +9122,23 @@ def _growth_publish(persona, platform, text, media_id='', audience='', price_cen
         posted_id = str(posted.get('name') or posted.get('id') or '')
     elif plat == 'tiktok':
         if not rows:
-            raise RuntimeError('TikTok needs a video or a photo attached')
-        blobs = [_media_bytes(row) for row in rows]
-        kinds = {growth.media_kind(mime) for _, mime in blobs}
-        if 'video' in kinds and len(blobs) > 1:
-            raise RuntimeError('a TikTok post is one video or a set of photos, '
-                               'not both')
+            raise RuntimeError('TikTok needs a video attached')
+        blob, mime = _media_bytes(rows[0])
+        if growth.media_kind(mime) != 'video':
+            raise RuntimeError('TikTok takes a video. A photo post there has to '
+                               'be pulled from a verified domain, which is not '
+                               'set up.')
         try:
             rest = _tt_rest(persona)
         except ValueError as e:
             raise RuntimeError(str(e))
         try:
-            if 'video' in kinds:
-                result = rest.post_video(blobs[0][0], text)
-            else:
-                result = rest.post_photos([blob for blob, _ in blobs], text)
+            result = rest.post_video(blob, text, direct=TO.direct_post())
         except TR.TikTokApiError as e:
-            raise RuntimeError('TikTok would not accept that post'
+            raise RuntimeError('TikTok would not accept that video'
                                + (f': {e.detail[:160]}' if e.detail else '.'))
-        posted_id = str(result.get('item_id') or '')
-        _tt_log_post(persona, result.get('kind') or 'video', text)
+        posted_id = str(result.get('publish_id') or '')
+        _tt_log_post(persona, result.get('mode') or 'inbox', text)
     else:
         raise ValueError(f'{plat} posts have to go out by hand')
     _content_register_add(persona, plat, text)
@@ -22225,6 +22222,7 @@ def api_instagram_post_now():
 
 import reddit_rest as RR
 import tiktok_rest as TR
+import tiktok_oauth as TO
 import reddit_chat as RC
 import reddit_oauth as RO
 
@@ -23518,36 +23516,33 @@ def api_reddit_post_now():
     return jsonify({'ok': True, **result})
 
 
-# ── TikTok: videos, photo posts and comment replies ──────────────────────────
+# ── TikTok: posting through TikTok's own API ─────────────────────────────────
 #
-# Built the same way Instagram is, for the same reason: TikTok's Content
-# Posting API needs a developer app that passes a separate audit, and until it
-# does every post it makes is visible only to the creator — and it has no
-# comment API at all, so answering the people under her videos is not
-# something any official client can do. So this drives a real signed-in
-# account through the same hosted browser and posts through tiktok_rest.py the
-# way Instagram posts through instagram_rest.py.
+# Connected as a registered app, the same answer Reddit arrived at. The console
+# drove a real signed-in browser first; it could not work, because every
+# tiktok.com web call carries a signature its own JavaScript computes and a
+# stored cookie cannot carry, and because the sign-in burned the account's SMS
+# quota before it ever got in.
 #
-# Unlike Discord there is no DM here and no funnel: TikTok's terms bar
-# directing anyone to adult content at all, which is why growth.SFW_LOCKED
-# holds it safe for work, and why a reply is drafted for the creator to send
-# rather than sent by a loop of its own.
-
-
-def _tt_proxy_for(persona, country=''):
-    """TikTok's own pool, kept apart from Instagram's and OnlyFans' for the
-    same reason those are kept apart: turning one off must not reach the
-    others' stored sessions."""
-    template = (os.getenv('TIKTOK_PROXY_TEMPLATE') or '').strip()
-    if not template:
-        return ''
-    country = (country or os.getenv('TIKTOK_PROXY_COUNTRY') or 'nl').lower()[:2]
-    return template.replace('{country}', country).replace('{session}', persona)
+# Posting is all that is wanted here and posting is documented, so this is
+# tiktok_oauth.py plus tiktok_rest.py: the operator approves once per persona,
+# TikTok hands back a refresh token, and a video goes up from the console or
+# from the content planner's queue.
+#
+# By default a video lands in her TikTok drafts and she taps publish -- that is
+# what an unaudited app is allowed to do, and she picks the privacy herself.
+# TIKTOK_DIRECT_POST=1 switches the same code to publishing straight to her
+# profile, and is only worth setting once TikTok has audited the app: before
+# that a direct post is visible to nobody but her.
+#
+# No DMs, no funnel, no comment replies: TikTok has no comment API at all, and
+# TikTok's terms bar pointing anyone at adult content, which is why
+# growth.SFW_LOCKED holds this channel safe for work.
 
 
 def _tt_fernet():
-    """Her TikTok session is a password to a whole account, so it is never
-    stored in the clear. Same derivation as Instagram's, different salt."""
+    """Her TikTok refresh token is the whole connection, so it is never stored
+    in the clear. Same derivation as Reddit's, different salt."""
     import base64
     from cryptography.fernet import Fernet
     from cryptography.hazmat.primitives import hashes
@@ -23580,8 +23575,6 @@ def _tt_save_account(persona, **fields):
 
 
 def _tt_session(persona):
-    """The cookies, CSRF token, device id and msToken captured at sign-in, kept
-    as one encrypted blob because a write call needs all of them together."""
     blob = _tt_account(persona).get('session') or ''
     if not blob:
         return {}
@@ -23597,83 +23590,77 @@ def _tt_set_session(persona, session):
         _tt_save_account(persona, session='')
         return
     blob = _tt_fernet().encrypt(json.dumps(session).encode()).decode()
-    _tt_save_account(persona, session=blob, user_id=str(session.get('user_id') or ''),
+    _tt_save_account(persona, session=blob,
+                     open_id=str(session.get('open_id') or ''),
                      username=session.get('username') or '',
                      connected_at=int(time.time()))
 
 
-def _tt_conn():
-    import of_browser as _ofb
-    import of_connect as _ofc
-    return _ofb.remote() or _ofc
+_TT_TOKEN_LOCKS = {}
+_TT_TOKEN_GUARD = threading.Lock()
 
 
-def _tt_account_id(persona):
-    return f'tt_{persona}'
+def _tt_token_lock(persona):
+    with _TT_TOKEN_GUARD:
+        return _TT_TOKEN_LOCKS.setdefault(persona, threading.Lock())
 
 
-_TT_WAITING = {
-    'awaiting_cookies': 'The browser is open and waiting for the sign-in to '
-                        'finish. Nothing is wrong yet.',
-    'captured': 'Signed in — storing her account now.',
-}
+def _tt_fresh_token(persona, session):
+    """An access token good for the next minute, minted from her refresh token.
+
+    Same rule as Reddit's: a refusal TikTok calls final clears the connection
+    so the console says so plainly, and a network failure does not, because
+    losing her refresh token to a blip would mean approving again for nothing.
+
+    Unlike Reddit's, TikTok's refresh token rotates on every use -- the one
+    that comes back has to be stored or the connection dies within the day.
+    """
+    if not session.get('refresh_token'):
+        return session
+    if session.get('access_token') and float(session.get('access_expires') or 0) > time.time() + 60:
+        return session
+    with _tt_token_lock(persona):
+        session = _tt_session(persona)
+        if not session.get('refresh_token'):
+            return session
+        if session.get('access_token') and float(session.get('access_expires') or 0) > time.time() + 60:
+            return session
+        try:
+            token, rotated, ttl = TO.refresh(session.get('refresh_token') or '')
+        except TO.TikTokAuthError as e:
+            if e.fatal:
+                logger.warning('tiktok refused %s\'s refresh token: %s', persona, e.detail)
+                _tt_set_session(persona, {})
+                raise ValueError('TikTok has ended this connection. Connect her '
+                                 'account again.')
+            logger.warning('tiktok token refresh for %s failed: %s', persona, e.detail)
+            raise ValueError('Could not reach TikTok to refresh her token.')
+        session = dict(session, access_token=token, refresh_token=rotated,
+                       access_expires=time.time() + max(int(ttl) - 60, 60))
+        _tt_set_session(persona, session)
+        return session
 
 
-def _tt_signin_state(persona, adopt=False):
-    attempt_id = _get_setting(f'tiktok_attempt_{persona}') or ''
-    failed = _get_setting(f'tiktok_adopt_error_{persona}') or ''
-    if not attempt_id:
-        return {'open': False, 'why': failed}
-    try:
-        attempt = _tt_conn().get(attempt_id)
-    except Exception:
-        return {'open': False, 'why': failed}
-    if not attempt:
-        return {'open': False, 'why': failed or
-                'That sign-in window is no longer open. Start it again.'}
-    held = attempt.status()
-    if adopt and held.get('state') == 'connected':
-        _tt_adopt(attempt)
-        failed = _get_setting(f'tiktok_adopt_error_{persona}') or ''
-    return {'open': True, 'state': held.get('state') or '',
-            'why': failed or _TT_WAITING.get(held.get('capture_note') or '', ''),
-            'error': held.get('error') or ''}
-
-
-def _tt_adopt(attempt):
-    """Take the session off a finished sign-in and store it."""
-    persona = attempt.status().get('persona') or ''
-    try:
-        session = _tt_conn().claim(attempt) or {}
-    except Exception as e:
-        _set_setting(f'tiktok_adopt_error_{persona}', str(e)[:200])
-        return False
-    if 'sessionid' not in (session.get('cookie') or ''):
-        _set_setting(f'tiktok_adopt_error_{persona}',
-                     'the sign-in finished but handed back no usable session')
-        return False
-    _tt_set_session(persona, session)
-    _set_setting(f'tiktok_attempt_{persona}', '')
-    _set_setting(f'tiktok_adopt_error_{persona}', '')
-    return True
+def _tt_connected(session):
+    return bool((session or {}).get('refresh_token'))
 
 
 def _tt_rest(persona):
     session = _tt_session(persona)
-    if 'sessionid' not in (session.get('cookie') or ''):
+    if not _tt_connected(session):
         raise ValueError('TikTok is not connected for this persona.')
-    return TR.Rest(session)
+    return TR.Rest(_tt_fresh_token(persona, session))
 
 
 def _tt_caption(persona, brief):
     """A caption in her own voice when the creator did not write one, to the
     same TikTok brief the growth planner already writes captions to. Safe for
-    work whatever her content level says — growth.SFW_LOCKED is a policy floor
+    work whatever her content level says -- growth.SFW_LOCKED is a policy floor
     on this channel, not a default."""
     spec = growth.POST_PLATFORMS['tiktok']
     extra = f' {brief}' if brief else ''
     instruction = (
-        f'Write ONE TikTok caption for a post she is about to put up, in '
+        f'Write ONE TikTok caption for a video she is about to post, in '
         f'character. It must be {spec["brief"]}.{extra} Keep it safe for work: '
         f'nothing explicit, and never name or link a paid site. Stay under '
         f'{spec["cap"]} characters. Return only the caption itself, no preamble '
@@ -23683,46 +23670,40 @@ def _tt_caption(persona, brief):
     return growth.trim_to(_strip_placeholders(text or ''), spec['cap'])
 
 
-def _tt_post_now(persona, media, caption, brief='', schedule_at=0):
-    """One post, from the console. A single video, or up to TikTok's limit of
-    stills as a photo post — the two are one route there, told apart by what
-    was attached."""
+def _tt_post_now(persona, media, caption, brief=''):
+    """One video, from the console. TikTok takes a clip here: a photo post has
+    to be pulled from a public URL on a domain verified with TikTok, which is a
+    separate piece of setup and not what this is for."""
     rest = _tt_rest(persona)
     items = media if isinstance(media, list) else [media]
-    # The same data-URL read Instagram's console does — an upload or an AI
-    # generation, decoded and typed. One reader, because it is about the data
-    # URL the browser hands over, not about the channel it is going to.
     blobs = [_ig_media_bytes(one) for one in items if one]
     if not blobs:
-        raise ValueError('Attach a video or at least one photo first.')
-    kinds = {kind for _, kind in blobs}
-    if 'video' in kinds and len(blobs) > 1:
-        raise ValueError('A TikTok post is either one video or a set of photos, '
-                         'not both.')
+        raise ValueError('Attach a video first.')
+    if len(blobs) > 1:
+        raise ValueError('TikTok takes one video per post.')
+    blob, kind = blobs[0]
+    if kind != 'video':
+        raise ValueError('TikTok takes a video here. Photo posts are not '
+                         'connected yet.')
     caption = (caption or '').strip()[:growth.POST_PLATFORMS['tiktok']['cap']]
     if not caption:
         caption = _tt_caption(persona, brief)
     try:
-        if 'video' in kinds:
-            result = rest.post_video(blobs[0][0], caption, schedule_at)
-        else:
-            result = rest.post_photos([blob for blob, _ in blobs], caption,
-                                      schedule_at)
+        result = rest.post_video(blob, caption, direct=TO.direct_post())
     except TR.TikTokApiError as e:
-        raise ValueError('TikTok would not accept that post'
+        raise ValueError('TikTok would not accept that video'
                          + (f': {e.detail[:160]}' if e.detail else '.'))
-    kind = result.get('kind') or ('video' if 'video' in kinds else 'photo')
-    _tt_log_post(persona, kind, caption)
-    return {'kind': kind, 'caption': caption, 'item_id': result.get('item_id') or '',
-            'result': result.get('result') or {}}
+    _tt_log_post(persona, result.get('mode') or 'inbox', caption)
+    return {'mode': result.get('mode') or 'inbox', 'caption': caption,
+            'publish_id': result.get('publish_id') or ''}
 
 
 TT_POST_LOG_CAP = 20
 
 
-def _tt_log_post(persona, kind, caption):
+def _tt_log_post(persona, mode, caption):
     rows = _dc_json(f'tiktok_posts_{persona}', [])
-    rows.append({'kind': kind, 'caption': caption[:200], 'at': int(time.time())})
+    rows.append({'kind': mode, 'caption': caption[:200], 'at': int(time.time())})
     _set_setting(f'tiktok_posts_{persona}', json.dumps(rows[-TT_POST_LOG_CAP:]))
 
 
@@ -23730,167 +23711,104 @@ def _tt_posts(persona):
     return _dc_json(f'tiktok_posts_{persona}', [])
 
 
-def _tt_reply_draft(persona, comment, caption=''):
-    """What she would say back to one comment. Drafted, never sent: a room of
-    strangers under a public video is not a fan being worked towards
-    something, so the same rule Discord's channel round follows holds here —
-    no funnel, no nudge, and no offer."""
-    about = f' The post they are commenting on says: "{caption[:200]}".' if caption else ''
-    instruction = (
-        f'Someone commented "{(comment or "")[:300]}" on her TikTok.{about} '
-        f'Write her reply as one line of under 120 characters, in character, '
-        f'warm and safe for work. Never mention a paid site, a subscription or '
-        f'a link, and never ask them to message her. Return only the reply. '
-        f'{NO_PLACEHOLDER_RULE}')
-    text = _persona_text(persona, instruction, history=None, max_tokens=200,
-                         temperature=1.0)
-    return growth.trim_to(_strip_placeholders(text or ''), 150)
-
-
 @app.route('/tiktok')
 def tiktok_page():
-    # Same reasoning as /instagram: every /api/tiktok/* call is persona-scoped
-    # and the console is useless signed out.
+    # Same reasoning as /reddit: every /api/tiktok/* call is persona-scoped and
+    # the console is useless signed out.
     if not _current_user():
         return redirect('/login?next=/tiktok')
     return send_from_directory(BASE_DIR, 'tiktok.html')
 
 
-@app.route('/tiktok/connect')
-def tiktok_connect_page():
-    if not _current_user():
-        return redirect('/login?next=/tiktok')
-    return send_from_directory(BASE_DIR, 'of_connect.html')
+@app.route('/tiktok/oauth/start')
+@platform_scoped
+def tiktok_oauth_start():
+    persona = request_persona()
+    if not TO.configured():
+        return ('This service has no TikTok app configured yet. '
+                'TIKTOK_CLIENT_KEY, TIKTOK_CLIENT_SECRET and '
+                'TIKTOK_REDIRECT_URI have to be set on it first.'), 503
+    return redirect(TO.authorize_url(TO.sign_state(persona)))
 
 
-@app.route('/api/tiktok/connect', methods=['GET', 'POST', 'DELETE'])
+@app.route('/tiktok/oauth/callback')
+def tiktok_oauth_callback():
+    """TikTok sends the operator back here with an approval code.
+
+    No @platform_scoped and no persona parameter -- which persona this is for
+    comes out of the signed state, because an unsigned one would let anyone who
+    can reach this URL attach their own TikTok account to someone else's
+    persona.
+    """
+    def done(message, ok=False):
+        return render_template_string(
+            '<!doctype html><meta charset=utf-8>'
+            '<body style="font:15px system-ui;padding:40px;background:#111;color:#eee">'
+            '<p>{{ m }}</p><p><a style="color:#8ab4f8" href="/tiktok">'
+            'Back to the TikTok console</a></p></body>', m=message), (200 if ok else 400)
+
+    if request.args.get('error'):
+        return done('TikTok did not approve that connection (%s).'
+                    % str(request.args.get('error_description')
+                          or request.args['error'])[:120])
+    persona = TO.read_state(request.args.get('state') or '')
+    if not persona:
+        return done('That sign-in link was not one this app handed out, or it '
+                    'has expired. Start again from the TikTok console.')
+    code = (request.args.get('code') or '').strip()
+    if not code:
+        return done('TikTok sent no approval code back.')
+    try:
+        token, refresh_token, ttl, open_id = TO.exchange(code)
+    except TO.TikTokAuthError as e:
+        logger.warning('tiktok oauth exchange failed for %s: %s', persona, e.detail)
+        return done('TikTok would not issue a token: %s' % (e.detail[:160] or 'no detail'))
+    if not refresh_token:
+        return done('TikTok issued a token that cannot be refreshed. Connect '
+                    'again from the console.')
+    held = {'refresh_token': refresh_token, 'access_token': token,
+            'access_expires': time.time() + max(int(ttl) - 60, 60),
+            'open_id': open_id}
+    try:
+        who = TR.Rest(held).creator_info() or {}
+    except TR.TikTokApiError as e:
+        # An approval that cannot post is worth keeping -- the scope may simply
+        # not be granted yet -- but the console has to say what is missing.
+        logger.warning('tiktok creator_info failed for %s: %s', persona, e.detail)
+        who = {}
+    held['username'] = who.get('username') or ''
+    _tt_set_session(persona, held)
+    return done('Connected as @%s. %s' % (
+        held['username'] or 'her account',
+        'Posts go straight to her profile.' if TO.direct_post()
+        else 'Posts land in her TikTok drafts, ready for her to publish.'), ok=True)
+
+
+@app.route('/api/tiktok/connect', methods=['GET', 'DELETE'])
 @platform_scoped
 def api_tiktok_connect():
     persona = request_persona()
     if request.method == 'DELETE':
+        held = _tt_session(persona)
+        if held.get('refresh_token'):
+            TO.revoke(held['refresh_token'])
         _tt_set_session(persona, {})
         return jsonify({'connected': False})
-    if request.method == 'POST':
-        body = request.get_json(silent=True) or {}
-        cookie = (body.get('cookie') or '').strip()
-        if 'sessionid' not in cookie:
-            return jsonify({'error': 'Paste the full Cookie header from a '
-                                     'signed-in TikTok tab — it has to contain '
-                                     'sessionid.'}), 400
-        session = {'cookie': cookie, 'proxy': _tt_proxy_for(persona),
-                   'device_id': (body.get('device_id') or '').strip()}
-        try:
-            who = TR.Rest(session).me()
-        except TR.TikTokApiError as e:
-            return jsonify({'error': 'TikTok would not accept that cookie'
-                                     + (f': {e.detail[:160]}' if e.detail else '.')}), 400
-        session.update({'user_id': who.get('user_id') or '',
-                        'username': who.get('username') or '',
-                        'sec_uid': who.get('sec_uid') or ''})
-        _tt_set_session(persona, session)
     held = _tt_session(persona)
-    return jsonify({'connected': 'sessionid' in (held.get('cookie') or ''),
-                    'username': held.get('username') or '',
-                    'user_id': held.get('user_id') or ''})
+    return jsonify({'connected': _tt_connected(held),
+                    'username': held.get('username') or ''})
 
 
 @app.route('/api/tiktok/status')
 @platform_scoped
 def api_tiktok_status():
     persona = request_persona()
-    signin = _tt_signin_state(persona, adopt=True)
     held = _tt_session(persona)
-    return jsonify({'connected': 'sessionid' in (held.get('cookie') or ''),
-                    'signin': signin,
+    return jsonify({'connected': _tt_connected(held),
+                    'app_ready': TO.configured(),
+                    'mode': 'direct' if TO.direct_post() else 'inbox',
                     'username': held.get('username') or '',
-                    'user_id': held.get('user_id') or '',
-                    'signer': bool(TR.SIGNER_URL),
                     'posts': _tt_posts(persona)})
-
-
-@app.route('/api/tiktok/connect/browser', methods=['POST'])
-@platform_scoped
-def api_tiktok_connect_browser():
-    persona = request_persona()
-    d = request.json or {}
-
-    def _side(value, fallback, low, high):
-        try:
-            return max(low, min(int(value), high))
-        except (TypeError, ValueError):
-            return fallback
-
-    viewport = {'width': _side(d.get('width'), 1000, 600, 1600),
-                'height': _side(d.get('height'), 760, 500, 1200)}
-    try:
-        attempt = _tt_conn().start(
-            persona, _tt_account_id(persona),
-            proxy=_tt_proxy_for(persona), viewport=viewport, site='tiktok')
-    except Exception as e:
-        return jsonify({'ok': False, 'error': str(e)[:200]}), 400
-    _set_setting(f'tiktok_attempt_{persona}', attempt.id)
-    return jsonify({'ok': True, 'attempt': attempt.status()})
-
-
-@app.route('/api/tiktok/connect/frame')
-@platform_scoped
-def api_tiktok_connect_frame():
-    persona = request_persona()
-    attempt_id = (request.args.get('attempt')
-                  or _get_setting(f'tiktok_attempt_{persona}') or '')
-    _held_from = time.time()
-    attempt = _tt_conn().get(attempt_id, frame=True, since=_signin_since(),
-                                          quality=_signin_quality(),
-                                          wait=_signin_wait()) \
-        if attempt_id else None
-    held = round(time.time() - _held_from, 3)
-    if not attempt:
-        return jsonify({'ok': False, 'error': 'no such sign-in'}), 404
-    status = attempt.status()
-    if status.get('state') == 'connected' and not _tt_session(persona).get('cookie'):
-        if not _tt_adopt(attempt):
-            status = dict(status, state='failed',
-                          error=_get_setting(f'tiktok_adopt_error_{persona}') or
-                          'the sign-in finished but could not be stored')
-    return jsonify({'ok': True, 'attempt': status, 'held': held,
-                    'frame': attempt.snapshot(_signin_since())})
-
-
-@app.route('/api/tiktok/connect/input', methods=['POST'])
-@platform_scoped
-def api_tiktok_connect_input():
-    persona = request_persona()
-    d = request.json or {}
-    import of_connect as _ofc
-    kind = (d.get('kind') or '').strip()
-    if kind not in _ofc.INPUT_KINDS:
-        return jsonify({'ok': False, 'error': 'unknown input'}), 400
-    attempt_id = (d.get('attempt')
-                  or _get_setting(f'tiktok_attempt_{persona}') or '')
-    attempt = _tt_conn().get(attempt_id) if attempt_id else None
-    if not attempt:
-        return jsonify({'ok': False, 'error': 'no such sign-in'}), 404
-    try:
-        attempt.act(kind, x=d.get('x'), y=d.get('y'), text=d.get('text'),
-                    key=d.get('key'), dy=d.get('dy'), url=d.get('url'),
-                    points=(d.get('points') or [])[:60])
-    except Exception as e:
-        return jsonify({'ok': False, 'error': str(e)[:200]}), 400
-    return jsonify({'ok': True})
-
-
-@app.route('/api/tiktok/connect/cancel', methods=['POST'])
-@platform_scoped
-def api_tiktok_connect_cancel():
-    persona = request_persona()
-    attempt_id = _get_setting(f'tiktok_attempt_{persona}') or ''
-    if attempt_id:
-        try:
-            _tt_conn().cancel(attempt_id)
-        except Exception:
-            pass
-    _set_setting(f'tiktok_attempt_{persona}', '')
-    return jsonify({'ok': True})
 
 
 @app.route('/api/tiktok/post-now', methods=['POST'])
@@ -23902,7 +23820,7 @@ def api_tiktok_post_now():
     if isinstance(media, str):
         media = [media]
     try:
-        result = _tt_post_now(persona, media[:TR.PHOTO_MAX], d.get('caption') or '',
+        result = _tt_post_now(persona, media[:1], d.get('caption') or '',
                               (d.get('brief') or '').strip()[:400])
     except ValueError as e:
         return jsonify({'ok': False, 'error': str(e)[:250]}), 400
@@ -23910,57 +23828,6 @@ def api_tiktok_post_now():
         logger.exception('tiktok post-now failed')
         return jsonify({'ok': False, 'error': str(e)[:250]}), 400
     return jsonify({'ok': True, **result})
-
-
-@app.route('/api/tiktok/feed')
-@platform_scoped
-def api_tiktok_feed():
-    """Her own recent posts and, for one of them, the comments under it. The
-    console reads both from here so a creator never leaves the page to answer
-    somebody."""
-    persona = request_persona()
-    item_id = (request.args.get('item') or '').strip()
-    try:
-        rest = _tt_rest(persona)
-        posts = rest.posts(count=12)
-        comments = rest.comments(item_id) if item_id else []
-    except ValueError as e:
-        return jsonify({'ok': False, 'error': str(e)[:250]}), 400
-    except TR.TikTokApiError as e:
-        return jsonify({'ok': False, 'error': ('TikTok would not answer'
-                        + (f': {e.detail[:160]}' if e.detail else '.'))}), 400
-    return jsonify({'ok': True, 'posts': posts, 'comments': comments,
-                    'item': item_id})
-
-
-@app.route('/api/tiktok/reply', methods=['POST'])
-@platform_scoped
-def api_tiktok_reply():
-    """Draft a reply to one comment, or send the one she has in front of her.
-    Drafting and sending are one route on purpose: the creator reads what is
-    about to go out under her own name before it does."""
-    persona = request_persona()
-    d = request.json or {}
-    item_id = (d.get('item') or '').strip()
-    comment_id = (d.get('comment') or '').strip()
-    text = (d.get('text') or '').strip()
-    if not item_id:
-        return jsonify({'ok': False, 'error': 'which post is this about?'}), 400
-    if not text:
-        draft = _tt_reply_draft(persona, d.get('comment_text') or '',
-                                d.get('caption') or '')
-        if not draft:
-            return jsonify({'ok': False, 'error': 'She could not think of a '
-                                                  'reply — write one yourself.'}), 400
-        return jsonify({'ok': True, 'draft': draft})
-    try:
-        sent = _tt_rest(persona).reply(item_id, text[:150], comment_id)
-    except ValueError as e:
-        return jsonify({'ok': False, 'error': str(e)[:250]}), 400
-    except TR.TikTokApiError as e:
-        return jsonify({'ok': False, 'error': ('TikTok would not post that reply'
-                        + (f': {e.detail[:160]}' if e.detail else '.'))}), 400
-    return jsonify({'ok': True, 'sent': sent})
 
 
 # ── Error handler ─────────────────────────────────────────────────────────────

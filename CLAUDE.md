@@ -28,7 +28,7 @@ kept as a secondary target and still works, but is not where the app is deployed
 app.py                          — Flask server, Gemini API, multi-persona, builder API
 onlyfans.py                     — OnlyFansAPI transport (OnlyFans chat)
 onlyfans.html                   — OnlyFans console (connect, auto-reply, PPV)
-of_connect.py                   — Hosted sign-in browser (OnlyFans, Discord and Instagram)
+of_connect.py                   — Hosted sign-in browser (OnlyFans, Discord, Instagram)
 discord_gateway.py              — Discord user-account gateway, gates and caches
 discord_rest.py                 — Discord REST, rate limits, client fingerprint
 discord_stub.py                 — Offline Discord transport (tests only)
@@ -41,9 +41,10 @@ reddit_rest.py                   — Reddit REST (S3 media lease, submit, commen
 reddit_chat.py                   — Reddit Chat gateway (Sendbird socket, DMs only)
 reddit_stub.py                   — Offline Reddit transports (tests only)
 reddit.html                      — Reddit console (connect, subreddits, post, DMs, comments)
-tiktok_rest.py                   — TikTok REST (upload + post video/photos, comments, replies)
+tiktok_oauth.py                  — TikTok OAuth (approve once, rotating refresh token)
+tiktok_rest.py                   — TikTok Content Posting API (init, upload, status)
 tiktok_stub.py                   — Offline TikTok transport (tests only)
-tiktok.html                      — TikTok console (connect, post now, answer comments)
+tiktok.html                      — TikTok console (connect, post a video)
 admin.html                      — Visual persona builder UI (creator-facing)
 index.html                      — Fan chat UI (embeds as iframe in profile.html)
 chat.html                       — Standalone fan chat (mobile hamburger link)
@@ -263,19 +264,35 @@ Stay completely in character. Never mention being an AI.
   scheduler yet, just `_ig_post_now` triggered from the console. Instagram's
   terms do not allow an automated client either, so the same care applies —
   an account that can be lost, not the creator's only one.
-- TikTok is built the same way Instagram is, and for the same reason: its
-  Content Posting API needs a developer app that passes a separate audit, posts
-  privately until it does, and has no comment API at all. So it is a real
-  signed-in account through the hosted sign-in browser
-  (`of_connect.SITES['tiktok']`, `/tiktok/connect`), posting and replying
-  through `tiktok_rest.py`. It posts one video or a set of stills — never both
-  — and it is not a `_Platform` adapter either: no DMs, no funnel, and a reply
-  to a comment is drafted for the creator to send, never sent by a loop. The
-  one thing a captured session cannot carry is TikTok's per-request signature,
-  which its own JavaScript computes; `TIKTOK_SIGNER_URL` points at something
-  that mints one, and without it some calls answer with an empty 200. TikTok
-  bars pointing anyone at adult content at all, so `growth.SFW_LOCKED` holds
-  this channel safe for work and no paid link ever rides on it.
+- TikTok is a **registered app**, the same answer Reddit arrived at, and for
+  the same kind of reason. It started out as a signed-in account through the
+  hosted browser; that cannot work, because every tiktok.com web call carries a
+  signature its own JavaScript computes over the query string and the user
+  agent, which a captured cookie cannot carry — calls come back as empty 200s —
+  and the sign-in burned the account's SMS quota before it ever got in. Posting
+  is all that is wanted here and posting is documented, so it is
+  `tiktok_oauth.py` (Login Kit, `/tiktok/oauth/start` → `/tiktok/oauth/callback`)
+  plus `tiktok_rest.py` speaking the Content Posting API with a bearer token.
+- **What an unaudited app may do decides the shape of it.** Direct Post — up on
+  her profile — needs TikTok to audit the app, and until it does every post is
+  SELF_ONLY and only five accounts a day may post at all. Uploading to her inbox
+  needs no audit: the video lands in her TikTok drafts and she taps publish,
+  picking the privacy herself. So inbox is the default and `TIKTOK_DIRECT_POST=1`
+  is the switch, one env var and one re-approval, the day the audit clears. The
+  console and the planner both say which of the two is live, because "posted"
+  and "in her drafts" are not the same claim.
+- TikTok's refresh token **rotates on every refresh**, unlike Reddit's. The one
+  that comes back is stored or the connection dies within the day. The
+  fatal-vs-blip rule is Reddit's exactly: only a refusal TikTok calls final
+  (400/401/403) clears the session, because losing a token to a network blip
+  means approving again for nothing.
+- It is not a `_Platform` adapter and will not become one: no DMs, no funnel, no
+  comment replies — TikTok has no comment API at all. Posting is one video; a
+  photo post can only be pulled from a URL on a domain verified with TikTok,
+  which is setup nobody has done, so `growth.MEDIA_SUPPORT['tiktok']` offers a
+  clip only rather than failing at a slot. TikTok bars pointing anyone at adult
+  content, so `growth.SFW_LOCKED` holds this channel safe for work and no paid
+  link ever rides on it.
 
 ---
 

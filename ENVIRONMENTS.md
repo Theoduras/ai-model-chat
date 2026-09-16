@@ -319,12 +319,58 @@ needs re-pasting.
 A persona connected this way needs **no proxy**; `_rd_proxy_for` returns `''`
 for her deliberately. The pools below only matter for the two fallbacks.
 
-### Reddit, Instagram and TikTok pools
+### TikTok's app (the way TikTok is connected)
+
+TikTok is not signed in through a browser either. Every tiktok.com web call
+carries a signature its own JavaScript computes, which a stored cookie cannot
+carry, so the calls came back as empty 200s — and the sign-in itself burned the
+account's SMS quota before it ever got in. Posting is all that is wanted, and
+posting is documented, so TikTok is a registered app like Reddit.
+
+**What an unaudited app may do** decides the shape of this. Publishing straight
+to her profile (Direct Post) needs TikTok to audit the app; until that passes
+every post it makes is SELF_ONLY — visible to nobody but her — and at most five
+accounts a day may post at all. Uploading to her inbox needs no audit: the
+finished video lands in her TikTok drafts and she taps publish in the app,
+picking the privacy herself. Inbox is therefore the default, and the day the
+audit clears is the day `TIKTOK_DIRECT_POST=1` goes on the service.
+
+Set up once, for every persona:
+
+1. At <https://developers.tiktok.com> register an app, and add **Login Kit** and
+   the **Content Posting API** to it.
+2. Scopes: `user.info.basic` and `video.upload`. Add `video.publish` only once
+   the app is audited — an unaudited app holding it still cannot post publicly.
+3. Redirect URI: the service URL plus `/tiktok/oauth/callback`, exactly, the
+   same character-for-character rule Reddit has.
+4. Put the client key and secret on the **app** service (not the browser one):
+
+```bash
+gcloud run services update ai-model-chat-dev --region europe-west4 \
+  --update-env-vars \
+  'TIKTOK_CLIENT_KEY=...,TIKTOK_CLIENT_SECRET=...,TIKTOK_REDIRECT_URI=https://.../tiktok/oauth/callback'
+```
+
+Then per persona: `/tiktok` → **Connect with TikTok** → approve. TikTok's
+refresh token lasts a year and **rotates on every refresh**, which the app
+stores for her; nothing needs re-pasting unless she revokes the app herself.
+
+When the audit passes, add `TIKTOK_DIRECT_POST=1` and have her approve once more
+— the new scope is only granted at approval time. Nothing else changes: the same
+code publishes instead of drafting.
+
+Photo posts are not connected. TikTok will only take photos by pulling them from
+a URL on a domain verified in the developer portal; a video goes up as bytes and
+needs none of that, which is why the planner offers TikTok a clip only.
+
+### Reddit and Instagram pools
 
 Each has its own template, read by both the sign-in browser and the REST side:
-`REDDIT_PROXY_TEMPLATE`, `INSTAGRAM_PROXY_TEMPLATE`, `TIKTOK_PROXY_TEMPLATE`.
-They are kept apart from OnlyFans' so turning one pool off does not move
-another account onto a datacentre IP.
+`REDDIT_PROXY_TEMPLATE`, `INSTAGRAM_PROXY_TEMPLATE`. They are kept apart from
+OnlyFans' so turning one pool off does not move another account onto a
+datacentre IP. TikTok needs none: a declared app calling
+`open.tiktokapis.com` with a bearer token has nothing to hide, and a pool would
+only add a way for a post to fail.
 
 Reddit refuses a sign-in from Google's ranges and shows only its generic
 "Server error. Try again later." banner for it, so a residential pool is not

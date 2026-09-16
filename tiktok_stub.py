@@ -1,10 +1,9 @@
-"""A stand-in for TikTok's REST side, for driving app.py's posting and reply
-logic without a real session or network call.
+"""A stand-in for TikTok's Content Posting API, for driving app.py's posting
+logic without a token or a network call.
 
 Used by test_tiktok.py. Not imported by the app.
 """
 import itertools
-import time
 
 _ids = itertools.count(1)
 
@@ -12,47 +11,54 @@ _ids = itertools.count(1)
 class FakeRest:
     """Records what would have gone out, and answers like TikTok does."""
 
-    def __init__(self, user_id='1', username='lilith'):
-        self.user_id = str(user_id)
+    def __init__(self, username='lilith', privacy=('PUBLIC_TO_EVERYONE', 'SELF_ONLY')):
         self.username = username
-        self.sec_uid = 'sec-' + self.username
+        self.privacy_options = list(privacy)
         self.posted = []
-        self.replied = []
-        self.feed = []
-        self.threads = {}
+        self.uploaded = []
 
     def configured(self):
         return True
 
-    def held(self):
-        return 0
+    def creator_info(self):
+        return {'username': self.username, 'nickname': self.username,
+                'privacy_options': list(self.privacy_options),
+                'max_seconds': 600, 'comment_off': False,
+                'duet_off': False, 'stitch_off': False}
 
-    def me(self):
-        return {'user_id': self.user_id, 'username': self.username,
-                'sec_uid': self.sec_uid}
-
-    def _record(self, kind, caption, stills=0):
-        row = {'item_id': str(next(_ids)), 'kind': kind, 'caption': caption,
-               'stills': stills, 'at': time.time()}
+    def post_video(self, blob, caption='', direct=False, privacy=''):
+        if not blob:
+            raise ValueError('that video has no bytes')
+        row = {'publish_id': 'pub_%d' % next(_ids),
+               'mode': 'direct' if direct else 'inbox',
+               'caption': caption, 'bytes': len(blob),
+               'privacy': privacy}
         self.posted.append(row)
+        self.uploaded.append(blob)
         return row
 
-    def post_video(self, media_bytes, caption='', schedule_at=0):
-        return self._record('video', caption)
+    def status(self, publish_id):
+        return {'status': 'PUBLISH_COMPLETE', 'fail_reason': '', 'post_ids': []}
 
-    def post_photos(self, images, caption='', schedule_at=0):
-        if not images:
-            raise ValueError('a photo post needs at least one still')
-        return self._record('photo', caption, len(images))
 
-    def posts(self, count=12, cursor=0):
-        return self.feed[:count]
+class FakeAuth:
+    """A stand-in for tiktok_oauth, for the refresh rules."""
 
-    def comments(self, item_id, count=20, cursor=0):
-        return (self.threads.get(str(item_id)) or [])[:count]
+    class TikTokAuthError(Exception):
+        def __init__(self, detail='', fatal=False):
+            super().__init__(detail)
+            self.detail = detail
+            self.fatal = fatal
 
-    def reply(self, item_id, text, reply_id=''):
-        row = {'id': str(next(_ids)), 'item_id': str(item_id),
-               'reply_id': str(reply_id), 'text': text}
-        self.replied.append(row)
-        return {'id': row['id'], 'text': text}
+    def __init__(self, fail=None, fatal=False):
+        self.fail = fail
+        self.fatal = fatal
+        self.calls = 0
+
+    def refresh(self, refresh_token):
+        self.calls += 1
+        if self.fail:
+            raise self.TikTokAuthError(self.fail, fatal=self.fatal)
+        # TikTok rotates the refresh token on every refresh; a caller that
+        # keeps the old one is connected for exactly one more day.
+        return 'access-%d' % self.calls, 'refresh-%d' % self.calls, 86400

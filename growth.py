@@ -504,7 +504,10 @@ MEDIA_SUPPORT = {
     # only which undocumented endpoint takes them. A TikTok post is one clip or
     # a set of stills, never a mix: the two are one route there.
     'instagram': {'kinds': ('image', 'video'), 'how': 'upload', 'max': 10},
-    'tiktok':    {'kinds': ('image', 'video'), 'how': 'upload', 'max': 35},
+    # TikTok's API takes a video's bytes, but a photo post there can only be
+    # pulled from a URL on a domain verified with TikTok -- setup we do not
+    # have, so a still is not offered rather than failing at its slot.
+    'tiktok':    {'kinds': ('video',),         'how': 'upload', 'max': 1},
     # Parked: the transport posts, but nothing can sign her in. Reddit killed
     # self-serve app creation, and it refuses the hosted browser outright. So a
     # planned Reddit post goes back to the creator rather than failing in a
