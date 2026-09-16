@@ -10,7 +10,7 @@ is only the session their browser was issued.
 Playwright's sync API belongs to the thread that created it, so each attempt
 owns a thread and is spoken to through a queue. The dashboard polls frames over
 plain HTTP rather than a websocket, because Flask serves this app and a JPEG
-every 250ms is enough to type a password into.
+every 50ms is enough to type a password into.
 """
 import hashlib
 import base64
@@ -961,7 +961,7 @@ def get(attempt_id, frame=False):
         attempt = _attempts.get(attempt_id)
     # The creator sees a miss as 'that sign-in is no longer open', and the only
     # way to tell which of the three ways it went is to have said so at the
-    # time. Once, though: the window polls a frame four times a second and its
+    # time. Once, though: the window polls a frame twenty times a second and its
     # status alongside, so a sign-in that ended left seventy identical lines a
     # second in the log everyone reads to find out what happened.
     if not attempt and attempt_id and _say_missed(attempt_id):

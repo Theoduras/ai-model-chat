@@ -134,7 +134,7 @@ async function poll(){
   if (a.state === 'connected') return done(a);
   if (a.state === 'failed' || a.state === 'expired')
     return fail(a.error || 'The sign-in timed out. Start it again.');
-  timer = setTimeout(poll, 250);
+  timer = setTimeout(poll, 50);
 }
 
 // Keep polling, more slowly, and say so. The picture stays on screen: it is
