@@ -1283,8 +1283,8 @@ _BASE_TIERS = {
                         'image_generations_month': None,
                     }},
     'starter': {'name': 'Starter', 'price': 49,
-                'blurb': 'One persona on Fanvue or OnlyFans, fully monetised.',
-                'features': ['1 AI persona', 'Fanvue or OnlyFans chat',
+                'blurb': 'One persona on Fanvue, fully monetised.',
+                'features': ['1 AI persona', 'Fanvue chat',
                              'Full PPV engine — ladders, per-fan pricing, '
                              'timed re-offers',
                              'Up to 3 funnel phases + CTA',
@@ -1293,7 +1293,7 @@ _BASE_TIERS = {
                 'capabilities': {
                     'personas': 1,
                     'seats': 1,
-                    'platforms': ['fanvue', 'onlyfans'],
+                    'platforms': ['fanvue'],
                     'phases_max': 3,
                     'outfit_lock': False,
                     'scheduled_followups': False,
@@ -1613,7 +1613,7 @@ def _current_user():
                 and expires_at < datetime.now(timezone.utc).replace(tzinfo=None)):
             status = 'expired'
         return {'id': u.id, 'email': u.email, 'name': u.name, 'tier': tier,
-                'status': status, 'role': role,
+                'status': status, 'role': role, 'avatar': bool(u.avatar),
                 'workspace_id': ws.id if ws is not None else u.id,
                 'workspace_name': (ws.name if ws is not None else '') or owner.email,
                 'workspace_owner_id': owner.id,
@@ -2533,7 +2533,9 @@ td{padding:8px 0;border-bottom:1px solid var(--border);color:var(--text-2)}
 </style></head><body><div class="wrap">
 <div class="bar"><span>My account</span><a href="/logout">Sign out</a></div>
 <div class="card">
-<h1>{{ user.name or user.email }}</h1><p class="sub">{{ user.email }}</p>
+<div style="display:flex;align-items:center;gap:13px">
+{% if user.avatar %}<img src="/account/avatar" alt="" style="width:52px;height:52px;border-radius:50%;object-fit:cover;flex:0 0 auto">{% endif %}
+<div><h1>{{ user.name or user.email }}</h1><p class="sub">{{ user.email }}</p></div></div>
 <div class="row"><span>Plan</span><span>{{ tiers[user.tier].name if user.tier in tiers else '—' }}</span></div>
 <div class="row"><span>Status</span><span class="pill {{ user.status }}">{{ user.status }}</span></div>
 <div class="row"><span>{{ 'Renews' if user.status == 'active' else 'Expired' }}</span>
@@ -2581,6 +2583,12 @@ document.getElementById('portal').addEventListener('click', async function(e){
 </div></body></html>"""
 
 
+# Neutral silhouette, so the form has something round to show before an upload.
+_AVATAR_PLACEHOLDER = (
+    "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 76 76'>"
+    "<rect width='76' height='76' fill='%2327272a'/><circle cx='38' cy='30' r='13'"
+    " fill='%2352525b'/><path d='M12 76a26 26 0 0 1 52 0Z' fill='%2352525b'/></svg>")
+
 PROFILE_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
@@ -2590,6 +2598,9 @@ textarea{width:100%;background:var(--surface);border:1px solid var(--border);bor
 textarea:focus{border-color:#7c3aed}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
 .ghost{display:block;text-align:center;margin-top:12px;color:#71717a;font-size:.85rem;text-decoration:none}
+.pic{display:flex;align-items:center;gap:14px;margin-bottom:18px}
+.pic-img{width:76px;height:76px;border-radius:50%;object-fit:cover;background:var(--surface);border:1px solid var(--border);flex:0 0 auto}
+.pic-btn{background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:9px;padding:8px 13px;font-size:.82rem;cursor:pointer;margin:0 6px 0 0;width:auto}
 </style></head><body><div class="wrap">
 <div class="bar"><a href="/account">← My account</a><a href="/logout">Sign out</a></div>
 <div class="card">
@@ -2598,6 +2609,17 @@ textarea:focus{border-color:#7c3aed}
 {% if saved %}<div class="ok">Profile saved.</div>{% endif %}
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
 <form method="post">
+<label>Profile picture</label>
+<div class="pic">
+<img class="pic-img" id="pic-img" alt="" src="{{ '/account/avatar' if user.avatar else PLACEHOLDER }}">
+<div>
+<button type="button" class="pic-btn" onclick="document.getElementById('pic-file').click()">Upload</button>
+<button type="button" class="pic-btn" id="pic-remove" onclick="clearPic()"
+        style="{{ '' if user.avatar else 'display:none' }}">Remove</button>
+<input type="file" id="pic-file" accept="image/*" style="display:none" onchange="pickPic(this)">
+<input type="hidden" name="avatar" id="pic-data">
+<input type="hidden" name="avatar_clear" id="pic-clear">
+</div></div>
 <label>Your name</label><input type="text" name="name" value="{{ p.name }}" autocomplete="name">
 <label>Brand / creator name</label><input type="text" name="brand" value="{{ p.brand }}" placeholder="The name fans know you by">
 <div class="two"><div><label>Country</label><input type="text" name="country" value="{{ p.country }}"></div>
@@ -2608,7 +2630,40 @@ textarea:focus{border-color:#7c3aed}
 <button type="submit">{{ 'Save and continue' if not user.onboarded else 'Save changes' }}</button>
 </form>
 {% if not user.onboarded %}<a class="ghost" href="/dashboard">Skip for now</a>{% endif %}
-</div></div></body></html>"""
+</div></div>
+<script>
+var PLACEHOLDER = document.getElementById('pic-img').getAttribute('src');
+// Sized down here so the row stays small: the picture is stored as a data URL.
+function pickPic(input) {
+  var file = input.files && input.files[0];
+  input.value = '';
+  if (!file) return;
+  var reader = new FileReader();
+  reader.onload = function (e) {
+    var img = new Image();
+    img.onload = function () {
+      var side = Math.min(img.width, img.height), c = document.createElement('canvas');
+      c.width = c.height = 256;
+      c.getContext('2d').drawImage(img, (img.width - side) / 2, (img.height - side) / 2,
+                                   side, side, 0, 0, 256, 256);
+      var url = c.toDataURL('image/jpeg', 0.85);
+      document.getElementById('pic-data').value = url;
+      document.getElementById('pic-clear').value = '';
+      document.getElementById('pic-img').src = url;
+      document.getElementById('pic-remove').style.display = '';
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+function clearPic() {
+  document.getElementById('pic-data').value = '';
+  document.getElementById('pic-clear').value = '1';
+  document.getElementById('pic-img').src = PLACEHOLDER;
+  document.getElementById('pic-remove').style.display = 'none';
+}
+</script>
+</body></html>"""
 
 
 ADMIN_USERS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
@@ -3397,6 +3452,12 @@ def account_profile():
         if request.method == 'POST':
             for f in fields:
                 setattr(u, f, (request.form.get(f) or '').strip()[:500])
+            if request.form.get('avatar_clear'):
+                u.avatar = ''
+            else:
+                pic = (request.form.get('avatar') or '').strip()
+                if pic.startswith('data:image/'):
+                    u.avatar = pic
             first_time = u.onboarded_at is None
             if first_time:
                 u.onboarded_at = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -3406,10 +3467,26 @@ def account_profile():
                 return redirect('/dashboard')
             saved = True
         p = {f: (getattr(u, f) or '') for f in fields}
-        view = dict(user, onboarded=u.onboarded_at is not None)
+        view = dict(user, onboarded=u.onboarded_at is not None,
+                    avatar=bool(u.avatar))
     finally:
         s.close()
-    return render_template_string(PROFILE_HTML, user=view, p=p, saved=saved)
+    return render_template_string(PROFILE_HTML, user=view, p=p, saved=saved,
+                                  PLACEHOLDER=_AVATAR_PLACEHOLDER)
+
+
+@app.route('/account/avatar')
+def account_avatar():
+    user = _current_user()
+    if not user:
+        return ('', 404)
+    from db import User
+    s = _db_session()
+    try:
+        u = s.get(User, user['id'])
+        return _serve_data_url(u.avatar if u else '')
+    finally:
+        s.close()
 
 
 @app.route('/api/me')
@@ -3430,6 +3507,7 @@ def api_me():
         sdb.close()
     return jsonify({'signed_in': True, 'id': user['id'], 'email': user['email'],
                     'name': user.get('name', ''), 'tier': user.get('tier', ''),
+                    'avatar': '/account/avatar' if user.get('avatar') else '',
                     'status': user.get('status'),
                     'is_admin': bool(user.get('is_admin')),
                     'is_operator': _is_operator(),

@@ -509,6 +509,8 @@ class User(Base):
     phone = Column(String(40), default='')
     website = Column(String(255), default='')
     bio = Column(Text, default='')
+    # Data URL, sized down in the browser before it is posted.
+    avatar = Column(Text, default='')
     onboarded_at = Column(DateTime)
 
     # Guided persona setup, keyed by persona slug:

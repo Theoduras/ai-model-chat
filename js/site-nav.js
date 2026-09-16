@@ -131,10 +131,14 @@
     var pill = accountHost();
     hosts().forEach(function (host) {
       host.classList.add('sn-links');
-      if (host.matches('[data-site-nav="inline"]')) host.classList.add('sn-inline');
+      // Inline hosts are the app's own chrome (dashboard, consoles): the
+      // marketing links belong to the marketing pages only.
+      var inline = host.matches('[data-site-nav="inline"]');
+      if (inline) host.classList.add('sn-inline');
+      var links = inline ? [] : PAGE_LINKS;
       // Only ever replace our own links: a page's theme toggle and its own
       // entries (comingsoon.html's Pricing) share this container.
-      fill(host, pill ? PAGE_LINKS : PAGE_LINKS.concat(account));
+      fill(host, pill ? links : links.concat(account));
     });
     if (pill) fill(pill, account);
   }

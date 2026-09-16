@@ -172,17 +172,9 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18" stroke-linecap="round"/></svg>
           <span>Landing page</span>
         </button>
-        <button type="button" class="sb-item" data-search="profile" onclick="openEmbedded('/account/profile', this)">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><path d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.5 20.1a7.5 7.5 0 0 1 15 0A17.9 17.9 0 0 1 12 21.75c-2.68 0-5.22-.58-7.5-1.63Z" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          <span>Profile</span>
-        </button>
 
-        <button type="button" class="sb-item" data-role-area="platforms" data-search="connect a platform accounts" onclick="openPlatformHub(this)">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><path d="M9 12h6M12 9v6" stroke-linecap="round"/><circle cx="12" cy="12" r="9"/></svg>
-          <span>Connect a platform</span>
-        </button>
 
-        <div class="sb-group" id="sb-group-platforms">
+        <div class="sb-group" id="sb-group-platforms" data-role-area="platforms">
           <button type="button" class="sb-item sb-item-toggle" data-search="platforms telegram fanvue threads x bot" onclick="toggleSbGroup('platforms')">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><rect x="3" y="4" width="7" height="7" rx="1.3"/><rect x="14" y="4" width="7" height="7" rx="1.3"/><rect x="3" y="14" width="7" height="7" rx="1.3"/><rect x="14" y="14" width="7" height="7" rx="1.3"/></svg>
             <span>Platforms</span>
@@ -485,7 +477,14 @@ async function identifyUser() {
     if (tierEl) tierEl.textContent = me.is_admin ? 'Admin'
       : (me.seat_role && me.seat_role !== 'owner') ? (me.workspace_name + ' \u00b7 ' + me.seat_role)
       : (me.tier ? me.tier + ' Plan' : 'Creator');
-    if (avEl) avEl.textContent = label.slice(0, 2).toUpperCase();
+    if (avEl) {
+      if (me.avatar) {
+        avEl.innerHTML = '<img src="' + me.avatar + '" alt="" ' +
+          'style="width:100%;height:100%;object-fit:cover;border-radius:inherit;">';
+      } else {
+        avEl.textContent = label.slice(0, 2).toUpperCase();
+      }
+    }
   } catch (e) {
     CURRENT_UID = 'anon';
   }
@@ -553,10 +552,10 @@ function applyEntitlements(me) {
   // The demo's whole point is the wall it puts in front of Fanvue, so the
   // sidebar says so rather than leaving the greyed-out row to explain itself.
   if (demo) {
-    const hub = document.querySelector('[data-role-area="platforms"]');
-    if (hub) {
-      hub.onclick = () => { window.location = '/demo-ends?from=fanvue'; };
-      hub.classList.add('locked');
+    const group = document.querySelector('#sb-group-platforms .sb-item-toggle');
+    if (group) {
+      group.onclick = () => { window.location = '/demo-ends?from=fanvue'; };
+      group.classList.add('locked');
     }
   }
 
@@ -1226,7 +1225,30 @@ function showPersonaBrowser() {
 // over automatically.
 // Platform links: the operator gets the full console page, a creator gets the
 // guided connect wizard — the console pages are admin-only server-side.
+// Every workspace tool reads from a persona, so with none created they all land
+// here instead of on an empty console.
+function needsPersona() {
+  if (Object.keys(personas).length) return false;
+  if (window.PlatformSetup && PlatformSetup.running()) PlatformSetup.close();
+  currentSlug = null;
+  clearSbActive();
+  document.body.classList.remove('embedding');
+  document.body.classList.remove('browsing');
+  document.getElementById('action-bar').style.display = 'none';
+  document.getElementById('form-area').innerHTML =
+    '<div class="empty-state"><div class="es-card">'
+    + '<div class="es-eyebrow">One step first</div>'
+    + '<h2 class="es-title">Create a persona to use this</h2>'
+    + '<p class="es-sub">The chat, the planner, your landing page and every platform '
+    + 'connection all run on a persona &mdash; her voice, her photos and her funnel. '
+    + 'Build one and they all open up.</p>'
+    + '<button class="btn btn-primary" onclick="newPersona()">+ New Persona</button>'
+    + '</div></div>';
+  return true;
+}
+
 function openPlatform(platform, navEl) {
+  if (needsPersona()) return;
   if (document.body.classList.contains('is-admin')) {
     return openEmbedded('/' + (platform === 'x' ? 'xbot' : platform), navEl);
   }
@@ -1244,28 +1266,21 @@ function openPlatform(platform, navEl) {
   PlatformSetup.open(platform, null);
 }
 
-function openPlatformHub(navEl) {
-  if (document.body.classList.contains('is-admin')) {
-    return openEmbedded('/telegram', navEl);
-  }
-  currentSlug = null;
-  document.querySelectorAll('.persona-item').forEach(el => el.classList.remove('active'));
-  clearSbActive();
-  if (navEl) navEl.classList.add('active');
-  document.body.classList.remove('browsing');
-  document.body.classList.remove('embedding');
-  PlatformSetup.hub();
-}
 
 // The planner is its own page, embedded so it keeps the dashboard's sidebar and
 // topbar around it. openEmbedded clears currentSlug, so the slug is read first
 // and handed over in the URL.
 function openPlanner(navEl) {
+  if (needsPersona()) return;
   const slug = currentSlug;
   openEmbedded('/planner' + (slug ? '?persona=' + encodeURIComponent(slug) : ''), navEl);
 }
 
+// Tools that read a persona; the account, team and admin pages do not.
+const PERSONA_PAGES = ['/', '/landing', '/planner'];
+
 function openEmbedded(url, navEl) {
+  if (PERSONA_PAGES.indexOf(url.split('?')[0]) !== -1 && needsPersona()) return;
   if (window.PlatformSetup && PlatformSetup.running()) PlatformSetup.close();
   currentSlug = null;
   document.querySelectorAll('.persona-item').forEach(el => el.classList.remove('active'));
