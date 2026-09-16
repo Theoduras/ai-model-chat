@@ -1141,9 +1141,14 @@ def healthz():
     except Exception:
         backend = 'unknown'
     warns = _persistence_warnings()
+    import of_connect as _ofc
     return jsonify({
         'status': 'ok',
         'db': backend,
+        # The sign-in relay this build carries. The browser service reports its
+        # own at /health, and the two being different is itself the answer to
+        # why a sign-in window behaves like an older one.
+        'relay': _ofc.RELAY_VERSION,
         'secret_key_set': bool((os.getenv('SECRET_KEY') or '').strip()),
         'google_login': bool(_google_oauth_config()[0]),
         'payments_oxapay': bool(_oxapay_key()),
@@ -19384,6 +19389,19 @@ def _of_proxy_for(persona, country=''):
     return template.replace('{country}', country).replace('{session}', persona)
 
 
+def _signin_quality():
+    """What the sign-in window says a frame is worth to it, 0 for "you decide".
+
+    The window is the only side that knows how long the last frame took to
+    arrive, so on a slow link it is the one that asks for a coarser picture
+    rather than us guessing at a number that suits everybody.
+    """
+    try:
+        return max(0, min(int(request.args.get('q') or 0), 100))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _signin_since():
     """The frame the sign-in window is already showing, off its own request.
 
@@ -19467,7 +19485,8 @@ def api_onlyfans_connect_frame():
     _of_signin_touch()
     try:
         attempt = _of_conn().get((request.args.get('attempt') or '').strip(), frame=True,
-                                 since=_signin_since()) if _of_direct() else None
+                                 since=_signin_since(),
+                                 quality=_signin_quality()) if _of_direct() else None
     except _OF_UNREACHABLE:
         return _of_busy()
     if not attempt:
@@ -21649,7 +21668,8 @@ def api_discord_connect_frame():
     persona = request_persona()
     attempt_id = (request.args.get('attempt')
                   or _get_setting(f'discord_attempt_{persona}') or '')
-    attempt = _dc_conn().get(attempt_id, frame=True, since=_signin_since()) \
+    attempt = _dc_conn().get(attempt_id, frame=True, since=_signin_since(),
+                                          quality=_signin_quality()) \
         if attempt_id else None
     if not attempt:
         return jsonify({'ok': False, 'error': 'no such sign-in'}), 404
@@ -22082,7 +22102,8 @@ def api_instagram_connect_frame():
     persona = request_persona()
     attempt_id = (request.args.get('attempt')
                   or _get_setting(f'instagram_attempt_{persona}') or '')
-    attempt = _ig_conn().get(attempt_id, frame=True, since=_signin_since()) \
+    attempt = _ig_conn().get(attempt_id, frame=True, since=_signin_since(),
+                                          quality=_signin_quality()) \
         if attempt_id else None
     if not attempt:
         return jsonify({'ok': False, 'error': 'no such sign-in'}), 404
@@ -23250,7 +23271,8 @@ def api_reddit_connect_frame():
     persona = request_persona()
     attempt_id = (request.args.get('attempt')
                   or _get_setting(f'reddit_attempt_{persona}') or '')
-    attempt = _rd_conn().get(attempt_id, frame=True, since=_signin_since()) \
+    attempt = _rd_conn().get(attempt_id, frame=True, since=_signin_since(),
+                                          quality=_signin_quality()) \
         if attempt_id else None
     if not attempt:
         return jsonify({'ok': False, 'error': 'no such sign-in'}), 404
@@ -23642,7 +23664,8 @@ def api_tiktok_connect_frame():
     persona = request_persona()
     attempt_id = (request.args.get('attempt')
                   or _get_setting(f'tiktok_attempt_{persona}') or '')
-    attempt = _tt_conn().get(attempt_id, frame=True, since=_signin_since()) \
+    attempt = _tt_conn().get(attempt_id, frame=True, since=_signin_since(),
+                                          quality=_signin_quality()) \
         if attempt_id else None
     if not attempt:
         return jsonify({'ok': False, 'error': 'no such sign-in'}), 404

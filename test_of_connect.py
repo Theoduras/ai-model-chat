@@ -269,6 +269,38 @@ class StillPageTest(unittest.TestCase):
         self.assertEqual(page.taken, 1)
 
 
+class QualityTest(unittest.TestCase):
+    """The window is the side that knows how slow the link is, so it is the
+    side that asks for a coarser picture."""
+
+    def test_the_window_can_ask_for_a_cheaper_frame(self):
+        a = bare_attempt()
+        a.frame = b'a picture'
+        a.ask_quality(25)
+        self.assertEqual(a.quality, 25)
+        self.assertEqual(a.frame, b'', 'the old frame would have been kept at '
+                                       'the old size until the page changed')
+
+    def test_an_absurd_ask_is_clamped_rather_than_obeyed(self):
+        a = bare_attempt()
+        a.ask_quality(1)
+        self.assertEqual(a.quality, of_connect.QUALITY_FLOOR)
+        a.ask_quality(1000)
+        self.assertEqual(a.quality, of_connect.QUALITY_CEILING)
+        a.ask_quality('nonsense')
+        self.assertEqual(a.quality, of_connect.QUALITY_CEILING)
+
+    def test_the_same_ask_does_not_throw_the_frame_away(self):
+        a = bare_attempt()
+        a.frame = b'a picture'
+        a.ask_quality(a.quality)
+        self.assertEqual(a.frame, b'a picture')
+
+    def test_the_status_says_which_relay_is_answering(self):
+        a = bare_attempt()
+        self.assertEqual(a.status()['relay'], of_connect.RELAY_VERSION)
+
+
 class FramePollTest(unittest.TestCase):
     """The relay polls for a picture several times a second; the page behind it
     is screenshotted five times a second at most. A poll that already has the

@@ -67,6 +67,15 @@ VIEWPORT = {'width': 900, 'height': 700}
 # carries the whole picture, several times a second, so this is the difference
 # between a window that keeps up and one that is always a second behind.
 FRAME_QUALITY = int(os.getenv('CONNECT_FRAME_QUALITY', '45'))
+# Bumped whenever the relay's own behaviour changes. The window shows it and
+# so does each service's health, because "is the fix deployed" is otherwise a
+# guess: the app and the browser service deploy separately and either can be
+# the old one.
+RELAY_VERSION = '3'
+# What the window may ask a frame to be worth. A creator on a slow link is
+# better served by a coarser picture that keeps up than a sharp one that is
+# always a second behind; below this it stops being a page you can read.
+QUALITY_FLOOR, QUALITY_CEILING = 25, 70
 # How long the browser thread waits for an input before going back to taking
 # the next picture. It used to wait a quarter of a second, which is also how
 # long the creator waited to see the result of what they last did.
@@ -181,6 +190,10 @@ class Attempt:
     # What the site answered when it refused a sign-in, and the address this
     # browser was seen at. Replaced, never mutated, so a default is safe to share.
     login_errors = ()
+    # What a frame is currently worth to the window watching. Same reasoning as
+    # the two above: status() reads it, so an attempt built without going
+    # through __init__ must not trip over it.
+    quality = FRAME_QUALITY
     exit_ip = ''
     exit_error = ''
     blocked_by = ''
@@ -205,6 +218,7 @@ class Attempt:
         self.error = ''
         self.frame = b''
         self.frame_at = 0.0
+        self.quality = FRAME_QUALITY
         self.signing_sample = {}
         self.result = {}
         self.touched = time.time()
@@ -249,7 +263,8 @@ class Attempt:
                 'width': self.viewport['width'], 'height': self.viewport['height'],
                 'expires_in': max(0, int(ATTEMPT_TTL - (time.time() - self.started))),
                 'result': self.result, 'probes': self.probes,
-                'frame_at': round(self.frame_at, 3),
+                'frame_at': round(self.frame_at, 3), 'quality': self.quality,
+                'relay': RELAY_VERSION,
                 'capture_note': self.capture_note, 'page_url': self.page_url,
                 'cookie_names': self.cookie_names,
                 'login_errors': list(getattr(self, 'login_errors', [])),
@@ -259,6 +274,20 @@ class Attempt:
                 'landed': getattr(self, 'landed', {}),
                 'driver': DRIVER_NAME,
                 'signing_sample': self.signing_sample}
+
+    def ask_quality(self, quality):
+        """What the window says a frame is worth to it right now. It is the
+        one side that knows how long the last one took to arrive."""
+        try:
+            want = int(quality)
+        except (TypeError, ValueError):
+            return
+        want = max(QUALITY_FLOOR, min(want, QUALITY_CEILING))
+        if want != self.quality:
+            self.quality = want
+            # The next shot has to count as new, or the window sits on the old
+            # one at the old size and nothing it asked for happens.
+            self.frame = b''
 
     def snapshot(self, since=0.0):
         """The latest frame as a data URL, or '' before the first one.
@@ -640,7 +669,7 @@ class Attempt:
         if time.time() - self.frame_at < FRAME_EVERY:
             return
         try:
-            shot = page.screenshot(type='jpeg', quality=FRAME_QUALITY,
+            shot = page.screenshot(type='jpeg', quality=self.quality,
                                    timeout=5000)
         except Exception:
             return
@@ -1463,7 +1492,7 @@ def _say_missed(attempt_id):
     return True
 
 
-def get(attempt_id, frame=False, since=0.0):
+def get(attempt_id, frame=False, since=0.0, quality=0):
     # `frame` is for the browser service, which fetches the picture in the same
     # round trip rather than a second one. In this process it is already here.
     with _lock:
@@ -1476,6 +1505,8 @@ def get(attempt_id, frame=False, since=0.0):
     if not attempt and attempt_id and _say_missed(attempt_id):
         logger.info('of-connect %s asked for and not here; holding %s',
                     attempt_id, sorted(_attempts))
+    if attempt and quality:
+        attempt.ask_quality(quality)
     return attempt
 
 

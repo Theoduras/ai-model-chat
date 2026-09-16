@@ -97,6 +97,10 @@ def service():
     def health():
         display = os.environ.get('DISPLAY') or ''
         return jsonify({'ok': True, 'browser': of_connect.available(),
+                        # Which relay this service is running, so "is the fix
+                        # deployed" is one call rather than a guess -- the app
+                        # and this deploy separately and either can be behind.
+                        'relay': getattr(of_connect, 'RELAY_VERSION', '0'),
                         'guarded': bool(TOKEN), 'display': display,
                         'headless': not display,
                         'browser_path': of_connect.browser_path(),
@@ -248,8 +252,11 @@ def service():
         out = {'ok': True, 'attempt': attempt.status()}
         # The frame poll wants both and would otherwise ask twice; an input
         # wants neither picture nor the 35KB of it.
+        if request.args.get('quality'):
+            attempt.ask_quality(request.args.get('quality'))
         if request.args.get('frame'):
             out['frame'] = attempt.snapshot(request.args.get('since') or 0)
+            out['attempt'] = attempt.status()
         return jsonify(out)
 
     @api.route('/session/<attempt_id>/frame')
@@ -310,6 +317,11 @@ class _Handle:
 
     def status(self):
         return self._status
+
+    def ask_quality(self, quality):
+        # The service was told in the same call that fetched the frame; this is
+        # here so a handle and a real attempt answer to the same thing.
+        return None
 
     def snapshot(self, since=0.0):
         # Already here when the caller asked for it up front -- the service
@@ -380,7 +392,7 @@ class Remote:
                                           'the browser service did not start a sign-in')
         return _Handle(self, out['attempt'])
 
-    def get(self, attempt_id, frame=False, since=0.0):
+    def get(self, attempt_id, frame=False, since=0.0, quality=0):
         """The attempt, or None if the service says there is no such sign-in.
 
         Raises Unreachable if it could not be asked. None has to mean one thing
@@ -390,6 +402,8 @@ class Remote:
             return None
         try:
             query = f'?frame=1&since={since}' if frame else ''
+            if frame and quality:
+                query += f'&quality={int(quality)}'
             out = self.call('GET', f'/session/{attempt_id}' + query)
         except Unreachable:
             raise
