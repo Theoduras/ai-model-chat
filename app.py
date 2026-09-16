@@ -4985,6 +4985,23 @@ def _inbox_fan_events(platform, persona, fan_key):
     return out
 
 
+def _inbox_handle(persona, fan_key):
+    """The name already stored for this fan, so a hand-sent message does not
+    overwrite it with a blank."""
+    try:
+        from db import SessionLocal, list_x_messages
+        s = SessionLocal()
+        try:
+            for m in list_x_messages(s, persona, fan_key, limit=50):
+                if m.x_username:
+                    return m.x_username
+        finally:
+            s.close()
+    except Exception:
+        pass
+    return ''
+
+
 @app.route('/api/inbox')
 @platform_scoped
 def api_inbox():
@@ -16694,6 +16711,31 @@ def api_fanvue_lists():
                     'exclude_lists': _fv_clean_lists(opts.get('exclude_lists'))})
 
 
+@app.route('/api/fanvue/dm-send', methods=['POST'])
+@platform_scoped
+def api_fanvue_dm_send():
+    """Send one message by hand from the console inbox — the creator taking a
+    conversation over from the bot. The X console does the same thing at
+    /api/x/dm-send; one inbox, one gesture, whichever platform it is."""
+    data = request.json or {}
+    persona = (data.get('persona') or '').strip()
+    fan_key = str(data.get('fan') or '').strip()
+    text = (data.get('text') or '').strip()
+    if not (persona and fan_key and text):
+        return jsonify({'ok': False, 'error': 'persona, fan and text are required'}), 400
+    if not fan_key.startswith('fv:'):
+        return jsonify({'ok': False, 'error': 'That fan is not on Fanvue'}), 400
+    fan_uuid = fan_key[3:]
+    try:
+        _fv_send_text(persona, _fanvue_scope(persona), fan_uuid, text)
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:250]}), 400
+    handle = _inbox_handle(persona, fan_key)
+    _log_x_message(persona, fan_key, handle, 'out', text)
+    _fv_trace(persona, 'sent', f'→ (by hand) {text[:120]}', fan_key)
+    return jsonify({'ok': True, 'sent': text})
+
+
 @app.route('/api/fanvue/trace', methods=['GET', 'DELETE'])
 @platform_scoped
 def api_fanvue_trace():
@@ -21064,6 +21106,37 @@ def api_x_settings():
     _set_setting(f'x_behavior_{persona}', json.dumps(opts))
     return jsonify({'ok': True,
                     'settings': {**opts, 'daily': _x_daily_counts(persona)}})
+
+
+@app.route('/api/telegram/dm-send', methods=['POST'])
+@platform_scoped
+def api_telegram_dm_send():
+    """The console inbox's manual send, as on Fanvue and X. A 'tgu:' fan is on
+    her real account, so that one goes out through MTProto rather than the bot."""
+    data = request.json or {}
+    persona = (data.get('persona') or '').strip()
+    fan_key = str(data.get('fan') or '').strip()
+    text = (data.get('text') or '').strip()
+    if not (persona and fan_key and text):
+        return jsonify({'ok': False, 'error': 'persona, fan and text are required'}), 400
+    if not fan_key.startswith(('tg:', 'tgu:')):
+        return jsonify({'ok': False, 'error': 'That fan is not on Telegram'}), 400
+    chat_id = fan_key.split(':', 1)[1]
+    try:
+        if fan_key.startswith('tgu:'):
+            acct = _tgu_accounts().get(persona) or {}
+            if not acct.get('session'):
+                return jsonify({'ok': False, 'error': 'Her Telegram account is not signed in.'}), 400
+            api_id, api_hash = _tgu_app_creds()
+            _tgu_import().send_message(api_id, api_hash, acct['session'], int(chat_id), text)
+        else:
+            _tg_send(persona, chat_id, text)
+    except Exception as e:
+        return jsonify({'ok': False, 'error': f'{e.__class__.__name__}: {str(e)[:250]}'}), 400
+    handle = _inbox_handle(persona, fan_key)
+    _log_x_message(persona, fan_key, handle, 'out', text)
+    _tg_trace(persona, 'sent', f'→ (by hand) {text[:120]}', fan_key)
+    return jsonify({'ok': True, 'sent': text})
 
 
 @app.route('/api/telegram/trace')

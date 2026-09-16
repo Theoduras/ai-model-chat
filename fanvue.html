@@ -510,6 +510,7 @@ PlatformConsole.register({
   persona:persona,
   statusUrl:slug=>'/api/fanvue/trace?persona='+encodeURIComponent(slug),
   emptyHint:'They appear as soon as a fan writes to her on Fanvue.',
+  sendUrl:'/api/fanvue/dm-send',
   // The guide borrows the console's own controls; polling into nodes that have
   // been moved into it is pointless work and a source of flicker.
   paused:()=>document.body.classList.contains('fg-open')
