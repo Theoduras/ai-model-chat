@@ -197,6 +197,18 @@ Stay completely in character. Never mention being an AI.
   full of people is not a fan being worked towards something, so it never runs
   the funnel, never nudges, and never carries an offer. A paid link only ever
   goes out in a DM.
+- **Reddit is parked.** The sidebar says Coming soon, `growth.PUBLISHABLE` no
+  longer carries it, and a planned Reddit post goes back to the creator as a
+  `manual` row. Everything else is built and tested and stays in the tree —
+  only the way in is missing, and it is missing at Reddit's end, not ours.
+  Reddit shut down self-serve app creation (the create button on
+  `/prefs/apps` silently refreshes), Data API access is now a manual approval
+  at <https://developers.reddit.com/app-registration>, and Devvit cannot
+  stand in: its apps install only into communities you fully moderate, and
+  `runAs: 'USER'` states plainly that it needs "an explicit manual action,
+  e.g. from a button" and forbids automated actions. Unpark it by getting an
+  approved `client_id` and putting Reddit back in `PUBLISHABLE` and the
+  sidebar.
 - Reddit is the one platform here that is **not** a driven browser, and it got
   there the hard way. It started out like Discord — hosted sign-in
   (`of_connect.SITES['reddit']`), cookie, bearer, a Sendbird socket for chat —

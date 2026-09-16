@@ -445,9 +445,12 @@ def test_one_planned_post_fans_out_to_one_row_per_subreddit():
     targets, why = app._growth_rd_targets('lilly', 'x', data, ['img'])
     check('no other channel carries a subreddit at all', (targets, why) == ([], ''))
 
-    check('reddit is a channel the planner publishes to itself',
-          'reddit' in growth.PUBLISHABLE
-          and growth.queue_status_for('reddit') == 'queued')
+    # Parked: the fan-out above still works and is still tested, but nothing
+    # can sign her in, so a planned Reddit post goes back to the creator rather
+    # than failing in a worker she never sees.
+    check('reddit is parked, so a planned post waits for the creator',
+          'reddit' not in growth.PUBLISHABLE
+          and growth.queue_status_for('reddit') == 'manual')
 
 
 def test_the_queue_hands_the_target_to_the_publisher():
