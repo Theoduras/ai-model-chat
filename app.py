@@ -5083,6 +5083,14 @@ def fanvue_page():
         return redirect('/dashboard')
     return send_from_directory(BASE_DIR, 'fanvue.html')
 
+@app.route('/embed-setup')
+def embed_setup_page():
+    # Same reasoning as /fanvue: it only reads /api/personas, which is
+    # already scoped to the caller's own personas.
+    if not (_is_operator() or _current_user()):
+        return redirect('/dashboard')
+    return send_from_directory(BASE_DIR, 'embed-setup.html')
+
 @app.route('/threads')
 def threads_page():
     # Open to creators like /fanvue: every /api/threads/* call that acts on a

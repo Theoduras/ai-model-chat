@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Embed Widget</title>
+  <meta name="robots" content="noindex,nofollow">
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <script src="/js/theme.js"></script>
+  <link rel="stylesheet" href="/css/style.css">
+  <script src="/js/devnav.js" defer></script>
+  <style>
+    .es-wrap { max-width: 720px; margin: 0 auto; padding: 28px 24px 80px; display: flex; flex-direction: column; gap: 20px; }
+    .note { background: var(--bg); border: 1px solid #2a2a30; color: var(--text-3); border-radius: 8px; padding: 10px 12px; font-size: 0.8rem; line-height: 1.55; }
+    .es-snippet { width: 100%; min-height: 108px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; }
+    .es-row { display: flex; gap: 10px; flex-wrap: wrap; }
+    .es-row .field { flex: 1; min-width: 160px; }
+    @media (max-width: 640px) { .es-wrap { padding: 18px 14px 70px; } }
+  </style>
+<link rel="stylesheet" href="/css/site-nav.css">
+<script src="/js/site-nav.js" defer></script>
+</head>
+<body class="page-dashboard">
+
+<header>
+  <div style="display:flex; align-items:center; gap:10px;">
+    <h1>Embed Widget</h1>
+    <span class="badge">🔗</span>
+  </div>
+  <div style="display:flex; align-items:center; gap:16px;">
+    <nav data-site-nav="inline" class="sn-links sn-inline"></nav>
+    <a href="/dashboard" style="color:var(--text-muted); font-size:0.8rem; text-decoration:none;">← Dashboard</a>
+  </div>
+</header>
+
+<div class="es-wrap">
+
+  <div class="note">
+    This puts a floating <b>"Chat with my AI companion"</b> bubble on a page you
+    paste it into — your own site, a link-in-bio page, a landing page builder.
+    It opens the same persona chat you use here, clearly labelled as AI. It's
+    for pages you control; it isn't a way to run this chat inside another
+    platform's own inbox (a dating app's messages, for example), which that
+    platform's terms wouldn't allow.
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">Widget settings</div>
+    <div class="es-row">
+      <div class="field">
+        <label>Persona</label>
+        <select id="persona" onchange="renderSnippet()"></select>
+      </div>
+      <div class="field">
+        <label>Theme</label>
+        <select id="theme" onchange="renderSnippet()">
+          <option value="dark">Dark</option>
+          <option value="light">Light</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Bubble position</label>
+        <select id="position" onchange="renderSnippet()">
+          <option value="right">Bottom right</option>
+          <option value="left">Bottom left</option>
+        </select>
+      </div>
+    </div>
+    <div class="field full" style="margin-top:12px;">
+      <label>Bubble label</label>
+      <input type="text" id="label" value="Chat with my AI companion" oninput="renderSnippet()">
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">Paste this on your page</div>
+    <span class="hint" style="display:block; margin-bottom:10px;">Drop it anywhere in the page's HTML, ideally just before <code>&lt;/body&gt;</code>.</span>
+    <textarea class="es-snippet" id="snippet" readonly onclick="this.select()"></textarea>
+    <button class="btn-ai" style="margin-top:12px;" onclick="copySnippet()">Copy snippet</button>
+    <div id="copy-status" style="margin-top:8px;"></div>
+  </div>
+
+</div>
+
+<script>
+function esc(s){ return (s||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+async function getJSON(url){
+  const r = await fetch(url, { headers: { 'Accept': 'application/json' } });
+  const t = await r.text();
+  try { return JSON.parse(t); }
+  catch (e) { throw new Error(r.status === 200 ? 'unexpected response' : 'HTTP ' + r.status); }
+}
+
+function ok(box, msg){ box.innerHTML = '<span class="hint" style="color:#4ade80;">✓ ' + esc(msg) + '</span>'; }
+
+function renderSnippet(){
+  const persona = document.getElementById('persona').value;
+  const theme = document.getElementById('theme').value;
+  const position = document.getElementById('position').value;
+  const label = document.getElementById('label').value.trim() || 'Chat with my AI companion';
+  const attrs = [
+    'src="' + location.origin + '/js/companion-widget.js"',
+    'data-persona="' + esc(persona) + '"',
+    'data-theme="' + esc(theme) + '"',
+    'data-position="' + esc(position) + '"',
+    'data-label="' + esc(label) + '"',
+    'defer',
+  ];
+  document.getElementById('snippet').value = '<script ' + attrs.join('\n        ') + '><' + '/script>';
+}
+
+function copySnippet(){
+  const el = document.getElementById('snippet');
+  el.select();
+  document.execCommand('copy');
+  ok(document.getElementById('copy-status'), 'Snippet copied.');
+}
+
+async function init(){
+  const params = new URLSearchParams(location.search);
+  const wanted = params.get('persona') || '';
+  const sel = document.getElementById('persona');
+  try {
+    const list = await getJSON('/api/personas');
+    if (Array.isArray(list) && list.length) {
+      sel.innerHTML = list.map(p => '<option value="' + esc(p.slug) + '">' + esc(p.name || p.slug) + '</option>').join('');
+      if (wanted && list.some(p => p.slug === wanted)) sel.value = wanted;
+    } else {
+      sel.innerHTML = '<option value="">No personas found</option>';
+    }
+  } catch (e) {
+    sel.innerHTML = '<option value="">Could not load personas (' + esc(e.message) + ')</option>';
+  }
+  renderSnippet();
+}
+
+init();
+</script>
+
+</body>
+</html>
