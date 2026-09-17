@@ -1575,6 +1575,11 @@ def _db_session():
 # The owner's account, promoted automatically so admin works with no config.
 # ADMIN_EMAILS overrides this entirely when set (comma-separated).
 DEFAULT_ADMIN_EMAILS = 'jeffrey.kluijtmans@gmail.com'
+# The one account that is ever promoted to super_admin. Fixed in code, not
+# through ADMIN_EMAILS: a super admin can rewrite what every role is allowed
+# to touch, so who holds it is not something an env var should be able to
+# widen.
+SUPER_ADMIN_EMAIL = 'jeffrey.kluijtmans@gmail.com'
 
 
 def _bootstrap_admins():
@@ -1599,7 +1604,13 @@ def _current_user():
                 and u.expires_at < datetime.now(timezone.utc).replace(tzinfo=None)):
             u.status = 'expired'
             s.commit()
-        if u.role != 'admin' and u.email in _bootstrap_admins():
+        if u.email == SUPER_ADMIN_EMAIL:
+            if u.role != 'super_admin':
+                u.role = 'super_admin'
+                s.commit()
+                logger.info('SUPER ADMIN BOOTSTRAPPED: %s', u.email)
+                _claim_house_personas()
+        elif u.role != 'admin' and u.email in _bootstrap_admins():
             u.role = 'admin'
             s.commit()
             logger.info('ADMIN BOOTSTRAPPED from ADMIN_EMAILS: %s', u.email)
@@ -1624,7 +1635,8 @@ def _current_user():
                 'workspace_name': (ws.name if ws is not None else '') or owner.email,
                 'workspace_owner_id': owner.id,
                 'seat_role': seat_role,
-                'is_admin': role == 'admin',
+                'is_admin': role in ('admin', 'super_admin'),
+                'is_super_admin': role == 'super_admin',
                 'stripe_customer_id': u.stripe_customer_id or '',
                 'stripe_subscription_id': u.stripe_subscription_id or '',
                 'grandfathered_until': (grandfathered.isoformat()
@@ -1993,14 +2005,135 @@ _PLATFORM_PATHS = {
 _PLATFORM_PAGES = {'/telegram': 'telegram', '/xbot': 'x', '/fanvue': 'fanvue',
                    '/onlyfans': 'onlyfans', '/threads': 'threads',
                    '/discord': 'discord'}
-# Seat roles that may not reach a path at all. Owners and admins never appear
-# here; they are filtered out before the map is consulted.
-_ROLE_DENY = {
-    '/api/personas': ('chatter',),
-    '/api/platforms': ('chatter',),
-    '/api/generate': ('chatter',),
-    '/api/config': ('chatter', 'manager'),
+# Seat roles that can be restricted at all. Owner/admin/super_admin never
+# appear here — they are filtered out before this is consulted — and support
+# is handled separately by the read-only check just below, not by feature.
+_RESTRICTABLE_SEATS = ('manager', 'chatter')
+# Core dashboard features a restricted seat can be denied, mapped from the
+# same path prefixes _require_entitlement already inspects.
+_FEATURE_PATHS = {
+    '/api/personas': 'personas',
+    '/api/generate': 'generate',
+    '/api/config': 'config',
+    # The status listing behind the platform tiles, not any one platform's own
+    # API — those are gated individually via the nested 'platforms' dict below.
+    '/api/platforms': 'platforms_overview',
+    '/api/visitors': 'analytics',
 }
+_SEAT_FEATURES = ('personas', 'generate', 'config', 'analytics', 'team',
+                  'platforms_overview')
+_SEAT_PLATFORMS = ('discord', 'fanvue', 'onlyfans', 'telegram', 'threads', 'x')
+# What each seat may do before a super admin changes anything. These reproduce
+# the fixed role rules the matrix replaced, so an install that never opens the
+# permissions page behaves exactly as it did.
+_DEFAULT_SEAT_PERMISSIONS = {
+    'manager': {'personas': True, 'generate': True, 'config': False,
+                'analytics': True, 'team': True, 'platforms_overview': True,
+                'platforms': {p: True for p in _SEAT_PLATFORMS}},
+    # A chatter's job is the inbox, so the platforms themselves stay open by
+    # default — the fixed rules this replaced never denied them one. Only the
+    # overview listing behind the tiles was out of reach, and stays that way.
+    'chatter': {'personas': False, 'generate': False, 'config': False,
+                'analytics': True, 'team': False, 'platforms_overview': False,
+                'platforms': {p: True for p in _SEAT_PLATFORMS}},
+}
+SEAT_PERMISSIONS_SETTING = 'seat_permissions'
+# The matrix is read on every gated request but changed by hand once in a while,
+# so it is held briefly rather than fetched each time. The TTL rather than an
+# explicit flush is deliberate: another Cloud Run instance can be the one that
+# saved it, and nothing tells this process that happened.
+_SEAT_PERM_TTL = 30.0
+_seat_perm_cache = {'at': 0.0, 'value': None}
+
+
+def _merge_seat_permissions(stored):
+    """Defaults with the stored matrix laid over them, so a key added to the
+    code later is not read as denied for everyone already saved."""
+    out = {}
+    for role, base in _DEFAULT_SEAT_PERMISSIONS.items():
+        row = dict(base)
+        row['platforms'] = dict(base['platforms'])
+        saved = (stored or {}).get(role) or {}
+        for feat in _SEAT_FEATURES:
+            if feat in saved:
+                row[feat] = bool(saved[feat])
+        for plat in _SEAT_PLATFORMS:
+            if plat in (saved.get('platforms') or {}):
+                row['platforms'][plat] = bool(saved['platforms'][plat])
+        out[role] = row
+    return out
+
+
+def seat_permissions(fresh=False):
+    """What each restrictable seat role may reach, super admin's edits included."""
+    now = time.time()
+    if not fresh and _seat_perm_cache['value'] is not None \
+            and now - _seat_perm_cache['at'] < _SEAT_PERM_TTL:
+        return _seat_perm_cache['value']
+    stored = {}
+    try:
+        from db import get_app_setting
+        s = _db_session()
+        try:
+            raw = get_app_setting(s, SEAT_PERMISSIONS_SETTING) or ''
+        finally:
+            s.close()
+        if raw:
+            stored = json.loads(raw)
+    except Exception:
+        logger.exception('SEAT PERMISSIONS READ FAILED')
+        # A database that cannot answer must not hand a seat more than it had,
+        # so fall back to the defaults rather than to an empty matrix.
+        stored = {}
+    value = _merge_seat_permissions(stored)
+    _seat_perm_cache.update(at=now, value=value)
+    return value
+
+
+def save_seat_permissions(matrix):
+    from db import set_app_setting
+    s = _db_session()
+    try:
+        set_app_setting(s, SEAT_PERMISSIONS_SETTING, json.dumps(matrix))
+        s.commit()
+    finally:
+        s.close()
+    _seat_perm_cache.update(at=time.time(), value=_merge_seat_permissions(matrix))
+
+
+def _seat_denied_areas(seat):
+    """Feature keys this seat may not reach, for hiding the nav it cannot use."""
+    row = seat_permissions().get(seat)
+    if not row:
+        return []
+    hidden = [f for f in _SEAT_FEATURES if not row.get(f)]
+    # The sidebar group is called 'platforms'; the matrix key names the API
+    # behind it. Hide the group only when nothing inside it is left either.
+    if 'platforms_overview' in hidden and not any(row['platforms'].values()):
+        hidden.append('platforms')
+    return hidden
+
+
+def hidden_areas_for(user):
+    if user.get('is_admin'):
+        return []
+    seat = user.get('seat_role') or 'owner'
+    if seat not in _RESTRICTABLE_SEATS:
+        return []
+    return _seat_denied_areas(seat)
+
+
+def hidden_platforms_for(user):
+    """Platforms this seat may not open, so the sidebar drops them rather than
+    offering a tile that answers 404. A platform the plan itself does not cover
+    is a different thing and stays visible, locked behind its tier."""
+    if user.get('is_admin'):
+        return []
+    seat = user.get('seat_role') or 'owner'
+    if seat not in _RESTRICTABLE_SEATS:
+        return []
+    row = (seat_permissions().get(seat) or {}).get('platforms') or {}
+    return [p for p in _SEAT_PLATFORMS if not row.get(p)]
 
 
 def _longest_prefix(mapping, path):
@@ -2048,9 +2181,15 @@ def _require_entitlement(path, method, user, wants_json):
         return None
 
     seat = user.get('seat_role') or 'owner'
-    if seat not in ('owner', 'admin', 'support'):
-        denied = _longest_prefix(_ROLE_DENY, path) or ()
-        if seat in denied:
+    if seat in _RESTRICTABLE_SEATS:
+        row = seat_permissions().get(seat) or {}
+        feature = _longest_prefix(_FEATURE_PATHS, path)
+        platform = (_longest_prefix(_PLATFORM_PATHS, path)
+                    or _PLATFORM_PAGES.get(path))
+        denied = (feature and not row.get(feature))
+        if not denied and platform in _SEAT_PLATFORMS:
+            denied = not (row.get('platforms') or {}).get(platform)
+        if denied:
             logger.warning('ROLE DENIED user=%s role=%s path=%s',
                            user['email'], seat, path)
             return (jsonify({'error': 'Your role cannot do this',
@@ -2721,7 +2860,7 @@ a.email{color:#a78bfa;text-decoration:none;font-weight:500}
 </style></head><body><div class="wrap wide" style="max-width:1100px">
 <div class="bar"><span>Admin · {{ users|length }} user{{ '' if users|length == 1 else 's' }}</span>
 <a href="/admin/trials">Trial links</a>
-<span><a href="/admin/demos">Demo accounts</a> &nbsp; <a href="/dashboard">Dashboard</a> &nbsp; <a href="/logout">Sign out</a></span></div>
+<span>{% if super_admin %}<a href="/admin/permissions">Permissions</a> &nbsp; {% endif %}<a href="/admin/demos">Demo accounts</a> &nbsp; <a href="/dashboard">Dashboard</a> &nbsp; <a href="/logout">Sign out</a></span></div>
 <div class="card"><div class="scroll"><table>
 <tr><th>Email</th><th>Name</th><th>Role</th><th>Team</th><th>Plan</th><th>Status</th><th>Renews</th><th>Joined</th></tr>
 {% for u in users %}<tr>
@@ -2974,7 +3113,91 @@ def admin_users():
                 'created': _fmt_date(u.created_at)})
     finally:
         s.close()
-    return render_template_string(ADMIN_USERS_HTML, users=rows)
+    return render_template_string(
+        ADMIN_USERS_HTML, users=rows,
+        super_admin=bool((_current_user() or {}).get('is_super_admin')))
+
+
+ADMIN_PERMISSIONS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Permissions</title>
+<style>""" + ACCOUNT_CSS + """
+table{width:100%;border-collapse:collapse;font-size:.88rem}
+th{text-align:left;color:var(--text-muted);font-weight:500;padding:8px 10px;border-bottom:1px solid var(--border)}
+th.role{text-align:center;width:120px;text-transform:capitalize}
+td{padding:9px 10px;border-bottom:1px solid var(--border);color:var(--text-2)}
+td.tick{text-align:center}
+input[type=checkbox]{width:17px;height:17px;accent-color:#7c3aed;cursor:pointer}
+tr.group td{color:var(--text-muted);font-size:.75rem;letter-spacing:.06em;text-transform:uppercase;padding-top:16px}
+.how{font-size:.85rem;color:var(--text-muted);line-height:1.6;margin-bottom:14px}
+.saved{background:#14321f;color:#86efac;padding:8px 12px;border-radius:8px;font-size:.85rem;margin-bottom:14px}
+button{width:auto;padding:12px 24px}
+</style></head><body><div class="wrap wide" style="max-width:760px">
+<div class="bar"><span>Admin &middot; permissions</span>
+<span><a href="/admin/users">All users</a> &nbsp; <a href="/dashboard">Dashboard</a> &nbsp; <a href="/logout">Sign out</a></span></div>
+{% if saved %}<div class="saved">Saved. Seats pick this up within a minute.</div>{% endif %}
+<div class="card">
+<p class="how">What a manager and a chatter seat may reach. Owners, admins and
+the super admin are never restricted, and a support seat stays read-only
+whatever is ticked here.</p>
+<form method="post" action="/admin/permissions"><table>
+<tr><th>Area</th>{% for r in roles %}<th class="role">{{ r }}</th>{% endfor %}</tr>
+{% for key, label in features %}<tr><td>{{ label }}</td>
+{% for r in roles %}<td class="tick"><input type="checkbox" name="{{ r }}__{{ key }}" {{ 'checked' if perms[r][key] }}></td>{% endfor %}
+</tr>{% endfor %}
+<tr class="group"><td colspan="{{ roles|length + 1 }}">Platforms</td></tr>
+{% for p in platforms %}<tr><td>{{ p }}</td>
+{% for r in roles %}<td class="tick"><input type="checkbox" name="{{ r }}__platform__{{ p }}" {{ 'checked' if perms[r]['platforms'][p] }}></td>{% endfor %}
+</tr>{% endfor %}
+</table>
+<div style="margin-top:18px"><button type="submit">Save permissions</button></div>
+</form></div></div></body></html>"""
+
+_FEATURE_LABELS = (
+    ('personas', 'Personas \u2014 create and edit'),
+    ('generate', 'Generate images'),
+    ('config', 'App configuration'),
+    ('analytics', 'Analytics'),
+    ('team', 'Team and seats'),
+    ('platforms_overview', 'Platforms overview'),
+)
+
+
+def _require_super_admin():
+    """None when the caller holds the super admin account, else the response to
+    send instead. A plain admin is refused: this page decides what admins'
+    seats may do."""
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    if not (_current_user() or {}).get('is_super_admin'):
+        logger.warning('SUPER ADMIN DENIED path=%s', request.path)
+        return ('Not found', 404)
+    return None
+
+
+@app.route('/admin/permissions', methods=['GET', 'POST'])
+def admin_permissions():
+    blocked = _require_super_admin()
+    if blocked:
+        return blocked
+    saved = False
+    if request.method == 'POST':
+        matrix = {}
+        for role in _RESTRICTABLE_SEATS:
+            row = {f: bool(request.form.get(role + '__' + f))
+                   for f in _SEAT_FEATURES}
+            row['platforms'] = {p: bool(request.form.get(role + '__platform__' + p))
+                                for p in _SEAT_PLATFORMS}
+            matrix[role] = row
+        save_seat_permissions(matrix)
+        logger.info('SEAT PERMISSIONS SAVED by=%s', _current_user()['email'])
+        saved = True
+    return render_template_string(
+        ADMIN_PERMISSIONS_HTML, roles=_RESTRICTABLE_SEATS,
+        features=_FEATURE_LABELS, platforms=_SEAT_PLATFORMS,
+        perms=seat_permissions(fresh=True), saved=saved)
 
 
 def _ua_label(ua):
@@ -3543,8 +3766,11 @@ def api_me():
                     'avatar': '/account/avatar' if user.get('avatar') else '',
                     'status': user.get('status'),
                     'is_admin': bool(user.get('is_admin')),
+                    'is_super_admin': bool(user.get('is_super_admin')),
                     'is_operator': _is_operator(),
                     'seat_role': user.get('seat_role') or 'owner',
+                    'hidden_areas': hidden_areas_for(user),
+                    'hidden_platforms': hidden_platforms_for(user),
                     'workspace_id': user.get('workspace_id') or '',
                     'workspace_name': user.get('workspace_name') or '',
                     'capabilities': caps,

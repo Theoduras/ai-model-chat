@@ -526,9 +526,9 @@ async function identifyUser() {
   lsPurgeLegacy();
 }
 
-// Seat roles that may not open the persona editor or platform settings. Mirrors
-// _ROLE_DENY in app.py, which is the half that actually enforces it.
-const ROLE_HIDDEN = { chatter: ['personas', 'platforms', 'generate', 'config'] };
+// What this seat may not reach comes from the server, which is also the half
+// that enforces it (seat_permissions in app.py), so a super admin's change to
+// the matrix shows up here without a second copy of the rules to keep in step.
 
 // Greys a nav item out in place and sends its click somewhere that explains
 // what it costs — the demo has its own page for that, everyone else gets pricing.
@@ -553,7 +553,7 @@ function applyEntitlements(me) {
   if (tier) document.body.classList.add('tier-' + tier);
   Object.keys(caps).forEach(k => { if (caps[k]) document.body.classList.add('cap-' + k); });
 
-  const hidden = ROLE_HIDDEN[seat] || [];
+  const hidden = me.hidden_areas || [];
   hidden.forEach(area => {
     document.querySelectorAll('[data-role-area="' + area + '"]').forEach(el => el.remove());
   });
@@ -561,7 +561,8 @@ function applyEntitlements(me) {
   // Seats are the owner's to manage, and a one-seat plan has nothing to show.
   const team = document.getElementById('sb-team');
   const seats = (me.usage || {}).seats;
-  if (team && seat === 'owner' && seats && seats.limit !== 1) {
+  if (team && seat === 'owner' && seats && seats.limit !== 1
+      && hidden.indexOf('team') === -1) {
     team.hidden = false;
     const n = document.getElementById('sb-team-count');
     if (n) n.textContent = seats.used + ' / ' + (seats.limit === null ? '\u221e' : seats.limit);
@@ -575,6 +576,9 @@ function applyEntitlements(me) {
   // can actually use.
   const allowed = caps.platforms;
   const demo = tier === 'demo';
+  (me.hidden_platforms || []).forEach(key => {
+    document.querySelectorAll('[data-platform="' + key + '"]').forEach(el => el.remove());
+  });
   document.querySelectorAll('[data-platform]').forEach(el => {
     const key = el.dataset.platform;
     if (allowed === null || allowed === undefined || allowed.indexOf(key) !== -1) return;
