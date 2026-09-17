@@ -12,6 +12,10 @@
   <script src="/js/chat-view.js"></script>
   <script src="/js/console-shell.js"></script>
   <style>
+  /* Shared bot token and the MTProto app credentials are the operator's, not
+     the creator's — the sections stay in the markup and are hidden instead. */
+  body:not(.is-operator) #sec-platform,
+  body:not(.is-operator) #tgu-apicreds { display:none !important; }
     .xbot-scroll { flex: 1; min-height: 0; overflow-y: auto; }
     .xbot-wrap { max-width: 760px; margin: 0 auto; padding: 28px 24px 80px; display: flex; flex-direction: column; gap: 20px; }
     .result-box { margin-top: 12px; font-size: 0.82rem; display: flex; flex-direction: column; gap: 8px; }
@@ -99,7 +103,7 @@
 
       <div id="mode-hosted" style="margin-top:16px;">
         <p class="hint" style="display:block; margin-bottom:12px;">One click. You get a personal link on <b id="plat-handle">our bot</b> — put it in your bio, and anyone who opens it lands in a private chat with your persona. Nothing to install, no token to manage.</p>
-        <div id="plat-missing" class="note" style="display:none; border-color:#7f1d1d; color:#fca5a5;">The platform bot isn't set up on this server yet — see <b>Platform bot</b> at the bottom of this page.</div>
+        <div id="plat-missing" class="note" style="display:none; border-color:#7f1d1d; color:#fca5a5;"></div>
         <button class="btn-ai" id="hosted-btn" onclick="connectHosted()">Connect with our bot →</button>
         <div id="hosted-out" style="display:none; margin-top:16px;">
           <div class="field full">
@@ -171,17 +175,19 @@
     <span class="hint" style="display:block; margin-bottom:10px;">Signs in as an actual Telegram account instead of a bot. It shows up as a person, fans can message it without pressing START, and it can open conversations itself. Needs its own phone number.</span>
     <div class="note" style="border-color:#7f1d1d; color:#fca5a5; margin-bottom:14px;">⚠ Automating a user account is against the spirit of Telegram’s terms. Accounts that message people who haven’t written first get rate-limited or banned — use a number you can afford to lose, and keep the volume low.</div>
 
-    <div class="row-inline">
-      <div class="field">
-        <label>api_id <span style="font-weight:400;color:var(--text-muted);">(my.telegram.org)</span></label>
-        <input type="text" id="tgu-api-id" autocomplete="off" spellcheck="false">
+    <div id="tgu-apicreds">
+      <div class="row-inline">
+        <div class="field">
+          <label>api_id <span style="font-weight:400;color:var(--text-muted);">(my.telegram.org)</span></label>
+          <input type="text" id="tgu-api-id" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="field">
+          <label>api_hash</label>
+          <input type="password" id="tgu-api-hash" placeholder="••••••••" autocomplete="off" spellcheck="false">
+        </div>
       </div>
-      <div class="field">
-        <label>api_hash</label>
-        <input type="password" id="tgu-api-hash" placeholder="••••••••" autocomplete="off" spellcheck="false">
-      </div>
+      <button class="btn-ai" style="background:var(--border); margin-top:12px;" onclick="saveTguConfig()">Save API credentials</button>
     </div>
-    <button class="btn-ai" style="background:var(--border); margin-top:12px;" onclick="saveTguConfig()">Save API credentials</button>
 
     <div class="field full" style="margin-top:16px;">
       <label>Phone number <span style="font-weight:400;color:var(--text-muted);">(with country code)</span></label>
@@ -343,7 +349,7 @@
 </div>
 
 <script>
-let connStatus = {}, platform = {};
+let connStatus = {}, platform = {}, isOperator = false;
 function esc(s){ return (s||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function persona(){ return document.getElementById('persona').value; }
 function busy(box,msg){ box.innerHTML='<span class="hint">'+esc(msg)+'</span>'; }
@@ -376,11 +382,21 @@ async function init(){
   }catch(e){
     document.getElementById('persona').innerHTML='<option value="">Could not load personas ('+esc(e.message)+')</option>';
   }
-  try{ connStatus=await getJSON('/api/telegram/status'); }catch(e){ connStatus={}; }
   try{
-    platform=await getJSON('/api/telegram/platform');
-    if(platform.base_url) document.getElementById('plat-base').value=platform.base_url;
-  }catch(e){ platform={}; }
+    isOperator=((await getJSON('/api/me'))||{}).is_operator===true;
+  }catch(e){ isOperator=false; }
+  document.body.classList.toggle('is-operator', isOperator);
+  try{ connStatus=await getJSON('/api/telegram/status'); }catch(e){ connStatus={}; }
+  // The token-bearing platform config is operator-only; a creator gets the
+  // non-secret summary the status call carries instead of a 401.
+  if(isOperator){
+    try{
+      platform=await getJSON('/api/telegram/platform');
+      if(platform.base_url) document.getElementById('plat-base').value=platform.base_url;
+    }catch(e){ platform={}; }
+  } else {
+    platform=connStatus._platform||{};
+  }
   renderPlatform();
   updateConn();
 }
@@ -393,7 +409,11 @@ function renderPlatform(){
   } else { pill.className='conn-pill err'; pill.textContent='Not configured'; }
   document.getElementById('plat-handle').textContent =
     platform.username ? '@'+platform.username : 'our bot';
-  document.getElementById('plat-missing').style.display = platform.configured?'none':'block';
+  const miss=document.getElementById('plat-missing');
+  miss.innerHTML = isOperator
+    ? "The platform bot isn't set up on this server yet — see <b>Platform bot</b> at the bottom of this page."
+    : "One-click connect isn't available yet — ask your operator to set up the shared bot. You can still use your own bot above.";
+  miss.style.display = platform.configured?'none':'block';
   document.getElementById('hosted-btn').disabled = !platform.configured;
 }
 
@@ -723,9 +743,11 @@ let tguStatus = {};
 
 async function loadTgu(){
   try{
-    const cfg=await getJSON('/api/tguser/config');
-    if(cfg.api_id && !document.getElementById('tgu-api-id').value)
-      document.getElementById('tgu-api-id').value=cfg.api_id;
+    if(isOperator){
+      const cfg=await getJSON('/api/tguser/config');
+      if(cfg.api_id && !document.getElementById('tgu-api-id').value)
+        document.getElementById('tgu-api-id').value=cfg.api_id;
+    }
     tguStatus=await getJSON('/api/tguser/status');
   }catch(e){ tguStatus={}; }
   renderTgu();

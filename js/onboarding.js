@@ -466,14 +466,15 @@
       '<div class="ob-nxt-d">Open the full builder to adjust anything you set up here.</div></a>';
   }
 
-  // Fanvue has its own console, the rest run the connect wizard on the persona
+  // Fanvue and Threads have their own consoles and no wizard steps, the rest
+  // run the connect wizard on the persona
   // just built — the same split the sidebar makes. A platform with no card is a
   // platform the sidebar is not offering yet, and it is skipped rather than
   // pointed at a console that says Coming soon.
   function connectCard(key) {
     var p = PLATFORM_CARDS[key];
     if (!p) return '';
-    var go = key === 'fanvue'
+    var go = (key === 'fanvue' || key === 'threads')
       ? "openPlatform('" + key + "')"
       : "PlatformSetup.open('" + key + "','" + esc(state.slug) + "')";
     return '<a class="ob-nxt-c" href="#" onclick="' + go + ';return false;">' +

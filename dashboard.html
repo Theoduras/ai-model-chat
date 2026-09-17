@@ -1295,18 +1295,14 @@ function needsPersona() {
 
 function openPlatform(platform, navEl) {
   if (needsPersona()) return;
-  if (document.body.classList.contains('is-admin')) {
-    return openEmbedded('/' + (platform === 'x' ? 'xbot' : platform), navEl);
-  }
-  // Fanvue's console (/fanvue) already scopes every call to the caller's own
-  // personas, unlike the raw xbot/threads consoles — so creators get the same
-  // page admins use instead of a "coming soon" placeholder.
-  if (platform === 'fanvue') return openEmbedded('/fanvue', navEl);
-  if (platform === 'onlyfans') return openEmbedded('/onlyfans', navEl);
-  if (platform === 'discord') return openEmbedded('/discord', navEl);
-  if (platform === 'instagram') return openEmbedded('/instagram', navEl);
-  if (platform === 'reddit') return openEmbedded('/reddit', navEl);
-  if (platform === 'tiktok') return openEmbedded('/tiktok', navEl);
+  // Every console below scopes its own calls to the caller's personas, so a
+  // creator gets the same page an admin does. /xbot is still operator-only at
+  // the route, so a non-operator clicking it is redirected server-side.
+  const CONSOLES = {x: '/xbot', fanvue: '/fanvue', onlyfans: '/onlyfans',
+                    telegram: '/telegram', threads: '/threads',
+                    discord: '/discord', instagram: '/instagram',
+                    reddit: '/reddit', tiktok: '/tiktok'};
+  if (CONSOLES[platform]) return openEmbedded(CONSOLES[platform], navEl);
   currentSlug = null;
   document.querySelectorAll('.persona-item').forEach(el => el.classList.remove('active'));
   clearSbActive();

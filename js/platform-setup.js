@@ -14,8 +14,10 @@
   var PLATFORMS = {
     telegram: { label: 'Telegram', icon: '💬', ready: true },
     x:        { label: '𝕏',        icon: '𝕏',  ready: false },
-    fanvue:   { label: 'Fanvue',   icon: '💎', ready: false },
-    threads:  { label: 'Threads',  icon: '@',  ready: false },
+    // console: no wizard steps, but the sidebar opens the page for every tier,
+    // so the hub links there rather than contradicting it with Coming soon.
+    fanvue:   { label: 'Fanvue',   icon: '💎', ready: false, console: true },
+    threads:  { label: 'Threads',  icon: '@',  ready: false, console: true },
   };
 
   var STAGES = [
@@ -578,14 +580,17 @@
         return '<tr><th>' + esc(p.name) + '</th>' + keys.map(function (k) {
           var meta = PLATFORMS[k];
           var st = (state.overview[p.slug] || {})[k] || {};
-          if (!meta.ready) return '<td><span class="ps-chip soon">Coming soon</span></td>';
+          if (!meta.ready && !meta.console)
+            return '<td><span class="ps-chip soon">Coming soon</span></td>';
           var cls = st.connected ? 'on' : '';
           var label = st.connected
             ? 'Connected' + (st.username ? ' · @' + esc(st.username) : '')
-            : 'Not connected';
+            : (meta.console ? 'Open console' : 'Not connected');
+          var go = meta.console
+            ? 'openPlatform(\'' + k + '\')'
+            : 'PlatformSetup.open(\'' + k + '\',\'' + esc(p.slug) + '\')';
           return '<td><button type="button" class="ps-chip ' + cls + '" ' +
-            'onclick="PlatformSetup.open(\'' + k + '\',\'' + esc(p.slug) + '\')">' +
-            label + '</button></td>';
+            'onclick="' + go + '">' + label + '</button></td>';
         }).join('') + '</tr>';
       }).join('');
 

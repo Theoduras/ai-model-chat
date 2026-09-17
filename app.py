@@ -2043,7 +2043,6 @@ _OPEN_PATHS = ('/login', '/register', '/logout', '/pricing', '/billing',
 _CAP_PATHS = {
     '/api/fanvue/ppv-stats': 'analytics',
     '/api/fanvue/reconcile': 'ppv_reconcile',
-    '/api/telegram/stats': 'analytics',
     '/api/visitors': 'analytics',
     '/api/xlog': 'analytics',
 }
@@ -5463,7 +5462,11 @@ def threads_page():
 
 @app.route('/telegram')
 def telegram_page():
-    if not _is_operator():
+    # Open to creators like /fanvue and /threads: every /api/telegram/* call a
+    # creator can reach is platform_scoped or filtered by owned_slugs(), the
+    # shared bot token and operator tooling stay operator_only, and the
+    # entitlement before_request (subscription + platforms) has already run.
+    if not (_is_operator() or _current_user()):
         return redirect('/dashboard')
     return send_from_directory(BASE_DIR, 'telegram.html')
 
@@ -26374,6 +26377,12 @@ def api_telegram_status():
             'cta_url': bot.get('cta_url', ''),
             'cta_label': bot.get('cta_label', ''),
         }
+    # Whether the shared bot exists at all, without its token: the console needs
+    # it to know if one-click connect is available, and /api/telegram/platform
+    # (which carries the token) stays operator-only.
+    out['_platform'] = {'configured': bool(plat.get('bot_token')),
+                        'username': plat.get('username', ''),
+                        'webhook_set': bool(plat.get('webhook_set'))}
     return jsonify(out)
 
 
@@ -26549,7 +26558,7 @@ def api_telegram_dm_send():
 
 
 @app.route('/api/telegram/trace')
-@operator_only
+@platform_scoped
 def api_telegram_trace():
     """Recent Telegram activity for a persona plus a verdict on the setup, so a
     bot that has gone quiet can be diagnosed without digging through logs."""
@@ -26563,6 +26572,10 @@ def api_telegram_trace():
     try:
         shared = json.loads(_get_setting('tg_trace_platform') or '[]')
     except Exception:
+        shared = []
+    # The shared platform trace is every persona's traffic, so a creator only
+    # ever sees their own rows.
+    if not _is_operator():
         shared = []
     rows = sorted(own + shared, key=lambda r: r.get('at', 0))[-TG_TRACE_MAX:]
 
@@ -26675,16 +26688,17 @@ def api_telegram_trace():
 
 
 @app.route('/api/telegram/trace', methods=['DELETE'])
-@operator_only
+@platform_scoped
 def api_telegram_trace_clear():
     persona = (request.args.get('persona') or '').strip()
     _set_setting(f'tg_trace_{persona}', '[]')
-    _set_setting('tg_trace_platform', '[]')
+    if _is_operator():
+        _set_setting('tg_trace_platform', '[]')
     return jsonify({'ok': True})
 
 
 @app.route('/api/telegram/stats')
-@operator_only
+@platform_scoped
 def api_telegram_stats():
     """Funnel numbers for the connected bot: fans, CTAs sent, clicks."""
     persona = (request.args.get('persona') or '').strip()
