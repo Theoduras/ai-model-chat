@@ -1807,6 +1807,57 @@ UNLIMITED_CAPS = {k: (None if not isinstance(v, bool) else True)
                   for k, v in DENIED_CAPS.items()}
 
 
+TIER_CAPS_SETTING = 'tier_capabilities'
+# Capability keys a super admin may move, split by how they are edited.
+_TIER_FLAGS = (('outfit_lock', 'Outfit locking'),
+               ('scheduled_followups', 'Scheduled follow-ups'),
+               ('analytics', 'Analytics'),
+               ('ppv_reconcile', 'PPV reconciliation'))
+_TIER_LIMITS = (('personas', 'Personas'), ('seats', 'Team seats'),
+                ('phases_max', 'Funnel phases'),
+                ('image_generations_month', 'AI images a month'))
+_tier_caps_cache = {'at': 0.0, 'value': None}
+
+
+def editable_tiers():
+    """The plans the permissions page edits: the monthly bases, in sale order.
+    The annual twins resolve through their sibling, so they are not listed."""
+    return [k for k in DEFAULT_TIER_ORDER if k in _BASE_TIERS]
+
+
+def tier_overrides(fresh=False):
+    now = time.time()
+    if not fresh and _tier_caps_cache['value'] is not None \
+            and now - _tier_caps_cache['at'] < _SEAT_PERM_TTL:
+        return _tier_caps_cache['value']
+    value = {}
+    try:
+        from db import get_app_setting
+        s = _db_session()
+        try:
+            raw = get_app_setting(s, TIER_CAPS_SETTING) or ''
+        finally:
+            s.close()
+        if raw:
+            value = json.loads(raw)
+    except Exception:
+        logger.exception('TIER CAPS READ FAILED')
+        value = {}
+    _tier_caps_cache.update(at=now, value=value)
+    return value
+
+
+def save_tier_overrides(matrix):
+    from db import set_app_setting
+    s = _db_session()
+    try:
+        set_app_setting(s, TIER_CAPS_SETTING, json.dumps(matrix))
+        s.commit()
+    finally:
+        s.close()
+    _tier_caps_cache.update(at=time.time(), value=matrix)
+
+
 def tier_capabilities(tier_key):
     """What a plan may do. The annual twins are generated from the same base,
     so they must resolve to the same capabilities as their monthly sibling."""
@@ -1815,7 +1866,11 @@ def tier_capabilities(tier_key):
         key[:-len(ANNUAL_SUFFIX)] if key.endswith(ANNUAL_SUFFIX) else key)
     if not base:
         return dict(DENIED_CAPS)
-    return {**DENIED_CAPS, **base.get('capabilities', {})}
+    caps = {**DENIED_CAPS, **base.get('capabilities', {})}
+    # A super admin's edits sit on top of what the plan ships with, so a limit
+    # can be moved without a deploy and the code keeps the fallback.
+    name = base.get('key') or next((k for k, v in _BASE_TIERS.items() if v is base), '')
+    return {**caps, **(tier_overrides().get(name) or {})}
 
 
 def _is_grandfathered(user):
@@ -3129,6 +3184,8 @@ th.role{text-align:center;width:120px;text-transform:capitalize}
 td{padding:9px 10px;border-bottom:1px solid var(--border);color:var(--text-2)}
 td.tick{text-align:center}
 input[type=checkbox]{width:17px;height:17px;accent-color:#7c3aed;cursor:pointer}
+input[type=text]{width:72px;text-align:center;background:var(--surface);border:1px solid var(--border);border-radius:7px;padding:5px;color:var(--text);font-family:var(--font);font-size:.85rem}
+h2{font-size:1rem;color:var(--text)}
 tr.group td{color:var(--text-muted);font-size:.75rem;letter-spacing:.06em;text-transform:uppercase;padding-top:16px}
 .how{font-size:.85rem;color:var(--text-muted);line-height:1.6;margin-bottom:14px}
 .saved{background:#14321f;color:#86efac;padding:8px 12px;border-radius:8px;font-size:.85rem;margin-bottom:14px}
@@ -3138,10 +3195,29 @@ button{width:auto;padding:12px 24px}
 <span><a href="/admin/users">All users</a> &nbsp; <a href="/dashboard">Dashboard</a> &nbsp; <a href="/logout">Sign out</a></span></div>
 {% if saved %}<div class="saved">Saved. Seats pick this up within a minute.</div>{% endif %}
 <div class="card">
-<p class="how">What a manager and a chatter seat may reach. Owners, admins and
-the super admin are never restricted, and a support seat stays read-only
-whatever is ticked here.</p>
-<form method="post" action="/admin/permissions"><table>
+<p class="how">Plans decide what an account has bought. Seats decide what a
+team member inside it may touch &mdash; owners, admins and the super admin are
+never restricted, and a support seat stays read-only whatever is ticked.</p>
+<form method="post" action="/admin/permissions">
+<h2 style="margin:0 0 4px">Plans</h2>
+<p class="how">What each plan includes. A blank limit means no limit.</p>
+<table>
+<tr><th>Capability</th>{% for t in tiers %}<th class="role">{{ tier_names[t] }}</th>{% endfor %}</tr>
+{% for key, label in tier_flags %}<tr><td>{{ label }}</td>
+{% for t in tiers %}<td class="tick"><input type="checkbox" name="tier__{{ t }}__{{ key }}" {{ 'checked' if caps[t][key] }}></td>{% endfor %}
+</tr>{% endfor %}
+{% for key, label in tier_limits %}<tr><td>{{ label }}</td>
+{% for t in tiers %}<td class="tick"><input type="text" inputmode="numeric" name="tier__{{ t }}__{{ key }}" value="{{ '' if caps[t][key] is none else caps[t][key] }}" placeholder="∞"></td>{% endfor %}
+</tr>{% endfor %}
+<tr class="group"><td colspan="{{ tiers|length + 1 }}">Platforms &mdash; none ticked means every platform</td></tr>
+{% for p in platforms %}<tr><td>{{ p }}</td>
+{% for t in tiers %}<td class="tick"><input type="checkbox" name="tier__{{ t }}__platform__{{ p }}" {{ 'checked' if caps[t]['platforms'] and p in caps[t]['platforms'] }}></td>{% endfor %}
+</tr>{% endfor %}
+</table>
+<h2 style="margin:28px 0 4px">Seats</h2>
+<p class="how">What a manager and a chatter seat may reach, inside whatever the
+plan above already allows.</p>
+<table>
 <tr><th>Area</th>{% for r in roles %}<th class="role">{{ r }}</th>{% endfor %}</tr>
 {% for key, label in features %}<tr><td>{{ label }}</td>
 {% for r in roles %}<td class="tick"><input type="checkbox" name="{{ r }}__{{ key }}" {{ 'checked' if perms[r][key] }}></td>{% endfor %}
@@ -3192,12 +3268,34 @@ def admin_permissions():
                                 for p in _SEAT_PLATFORMS}
             matrix[role] = row
         save_seat_permissions(matrix)
-        logger.info('SEAT PERMISSIONS SAVED by=%s', _current_user()['email'])
+        tiers = {}
+        for t in editable_tiers():
+            row = {k: bool(request.form.get('tier__%s__%s' % (t, k)))
+                   for k, _ in _TIER_FLAGS}
+            for k, _ in _TIER_LIMITS:
+                raw = (request.form.get('tier__%s__%s' % (t, k)) or '').strip()
+                # Blank is the unlimited marker the rest of the code already
+                # reads as None; anything unparseable leaves the plan's own
+                # value in place rather than silently becoming zero.
+                if raw == '':
+                    row[k] = None
+                elif raw.isdigit():
+                    row[k] = int(raw)
+            picked = [p for p in _SEAT_PLATFORMS
+                      if request.form.get('tier__%s__platform__%s' % (t, p))]
+            row['platforms'] = picked or None
+            tiers[t] = row
+        save_tier_overrides(tiers)
+        logger.info('PERMISSIONS SAVED by=%s', _current_user()['email'])
         saved = True
     return render_template_string(
         ADMIN_PERMISSIONS_HTML, roles=_RESTRICTABLE_SEATS,
         features=_FEATURE_LABELS, platforms=_SEAT_PLATFORMS,
-        perms=seat_permissions(fresh=True), saved=saved)
+        perms=seat_permissions(fresh=True), saved=saved,
+        tiers=editable_tiers(), tier_flags=_TIER_FLAGS,
+        tier_limits=_TIER_LIMITS,
+        tier_names={t: _BASE_TIERS[t]['name'] for t in editable_tiers()},
+        caps={t: tier_capabilities(t) for t in editable_tiers()})
 
 
 def _ua_label(ua):
