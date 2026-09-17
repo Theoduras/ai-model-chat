@@ -587,6 +587,12 @@ function applyEntitlements(me) {
     el.parentNode.appendChild(el);
   });
 
+  // Moving the locked ones to the end can leave a platform that does not exist
+  // yet sitting above one that does, so the Coming soon rows are put back last.
+  document.querySelectorAll('.sb-children').forEach(group => {
+    group.querySelectorAll('.sb-soon').forEach(el => group.appendChild(el));
+  });
+
   // The demo's whole point is the wall it puts in front of Fanvue, so the
   // sidebar says so rather than leaving the greyed-out row to explain itself.
   if (demo) {

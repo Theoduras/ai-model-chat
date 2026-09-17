@@ -2056,10 +2056,12 @@ _PLATFORM_PATHS = {
     '/api/x': 'x', '/api/xlog': 'x',
     '/api/fanvue': 'fanvue', '/api/threads': 'threads',
     '/api/onlyfans': 'onlyfans', '/api/discord': 'discord',
+    '/api/instagram': 'instagram', '/api/tiktok': 'tiktok',
 }
 _PLATFORM_PAGES = {'/telegram': 'telegram', '/xbot': 'x', '/fanvue': 'fanvue',
                    '/onlyfans': 'onlyfans', '/threads': 'threads',
-                   '/discord': 'discord'}
+                   '/discord': 'discord', '/instagram': 'instagram',
+                   '/tiktok': 'tiktok'}
 # Seat roles that can be restricted at all. Owner/admin/super_admin never
 # appear here — they are filtered out before this is consulted — and support
 # is handled separately by the read-only check just below, not by feature.
@@ -2077,7 +2079,8 @@ _FEATURE_PATHS = {
 }
 _SEAT_FEATURES = ('personas', 'generate', 'config', 'analytics', 'team',
                   'platforms_overview')
-_SEAT_PLATFORMS = ('discord', 'fanvue', 'onlyfans', 'telegram', 'threads', 'x')
+_SEAT_PLATFORMS = ('fanvue', 'onlyfans', 'telegram', 'x', 'threads',
+                   'instagram', 'tiktok', 'discord')
 # What each seat may do before a super admin changes anything. These reproduce
 # the fixed role rules the matrix replaced, so an install that never opens the
 # permissions page behaves exactly as it did.
