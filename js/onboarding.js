@@ -448,8 +448,6 @@
                 desc: 'Point a Telegram account at her so she replies to real fans.' },
     fanvue:   { label: 'Fanvue', icon: '\ud83d\udc8e',
                 desc: 'Connect her Fanvue account and she starts answering subscribers.' },
-    onlyfans: { label: 'OnlyFans', icon: '\ud83d\udd35',
-                desc: 'Connect her OnlyFans account and she starts answering subscribers.' },
     x:        { label: '\ud835\udd4f', icon: '\ud835\udd4f',
                 desc: 'Reply to mentions and DMs in her voice.' },
     threads:  { label: 'Threads', icon: '@',
@@ -468,12 +466,14 @@
       '<div class="ob-nxt-d">Open the full builder to adjust anything you set up here.</div></a>';
   }
 
-  // Fanvue and OnlyFans have their own consoles, the rest run the connect
-  // wizard on the persona just built — the same split the sidebar makes.
+  // Fanvue has its own console, the rest run the connect wizard on the persona
+  // just built — the same split the sidebar makes. A platform with no card is a
+  // platform the sidebar is not offering yet, and it is skipped rather than
+  // pointed at a console that says Coming soon.
   function connectCard(key) {
     var p = PLATFORM_CARDS[key];
     if (!p) return '';
-    var go = (key === 'fanvue' || key === 'onlyfans')
+    var go = key === 'fanvue'
       ? "openPlatform('" + key + "')"
       : "PlatformSetup.open('" + key + "','" + esc(state.slug) + "')";
     return '<a class="ob-nxt-c" href="#" onclick="' + go + ';return false;">' +
