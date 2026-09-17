@@ -175,9 +175,19 @@
   // A step that borrows no controls is explanation only — hiding all of it
   // behind a disclosure would leave the step empty.
   function explainHtml(step) {
-    if (!(step.fields || []).length) return '<div class="fg-explain">' + step.body + '</div>';
+    if (!(step.fields || []).length) return '<div class="fg-explain">' + fill(step.body) + '</div>';
     return '<details class="fg-more"><summary>What every field here does</summary>' +
-      '<div class="fg-explain">' + step.body + '</div></details>';
+      '<div class="fg-explain">' + fill(step.body) + '</div></details>';
+  }
+
+  // A guide's copy says how many stages it has. Writing the number into the
+  // text means a guide that gains a stage starts lying, so it is a token the
+  // frame fills from the stage list itself.
+  var WORDS = ['no', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight'];
+  function fill(text) {
+    if (text == null) return text;
+    return String(text).replace(/\{stages\}/g,
+      WORDS[STAGES.length] || String(STAGES.length));
   }
 
   function progress() {
@@ -337,7 +347,7 @@
         stepPills() +
         '<div class="form-section" id="fg-step">' +
           '<div class="section-title">' + esc(step.title) + '</div>' +
-          (step.sub ? '<span class="hint fg-sub">' + esc(step.sub) + '</span>' : '') +
+          (step.sub ? '<span class="hint fg-sub">' + esc(fill(step.sub)) + '</span>' : '') +
           (gated ? '' : doHtml(step)) +
           '<div id="fg-step-body"></div>' +
           (gated ? '' : checkHtml(step)) +
@@ -386,7 +396,7 @@
     e.dlg.innerHTML =
       '<button class="obt-close" type="button" onclick="' + NS + '.tourEnd()" aria-label="Close">✕</button>' +
       '<div class="obt-title">' + esc(item.title) + '</div>' +
-      '<div class="obt-body">' + item.body + '</div>' +
+      '<div class="obt-body">' + fill(item.body) + '</div>' +
       '<div class="obt-foot">' +
         '<span class="obt-count">' + (tour.i + 1) + ' of ' + tour.items.length + '</span>' +
         (tour.i > 0 ? '<button class="btn btn-ghost" type="button" onclick="' + NS + '.tourGo(' +

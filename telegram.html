@@ -11,6 +11,8 @@
   <script src="/js/devnav.js" defer></script>
   <script src="/js/chat-view.js"></script>
   <script src="/js/console-shell.js"></script>
+  <script src="/js/console-guide.js" defer></script>
+  <script src="/js/telegram-guide.js" defer></script>
   <style>
   /* Shared bot token and the MTProto app credentials are the operator's, not
      the creator's — the sections stay in the markup and are hidden instead. */
@@ -73,6 +75,7 @@
   </div>
   <div style="display:flex; align-items:center; gap:16px;">
     <nav data-site-nav="inline" class="sn-links sn-inline"></nav>
+    <button class="btn-ai" style="padding:5px 12px; font-size:0.75rem;" onclick="TelegramGuide.open()">📘 Setup guide</button>
     <a href="/dashboard" style="color:var(--text-muted); font-size:0.8rem; text-decoration:none;">← Dashboard</a>
   </div>
 </header>
@@ -687,7 +690,8 @@ PlatformConsole.register({
   statusUrl:slug=>'/api/telegram/trace?persona='+encodeURIComponent(slug),
   emptyHint:'They appear as soon as somebody messages her on Telegram.',
   sendUrl:'/api/telegram/dm-send',
-  paused:()=>!(document.getElementById('tg-trace-live')||{checked:true}).checked,
+  paused:()=>document.body.classList.contains('fg-open')
+    || !(document.getElementById('tg-trace-live')||{checked:true}).checked,
   read:d=>{
     const personal=d.personal||{};
     const up=personal.connected ? personal.running : d.connected;

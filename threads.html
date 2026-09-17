@@ -11,6 +11,8 @@
   <script src="/js/devnav.js" defer></script>
   <script src="/js/chat-view.js"></script>
   <script src="/js/console-shell.js"></script>
+  <script src="/js/console-guide.js" defer></script>
+  <script src="/js/threads-guide.js" defer></script>
   <style>
     .xbot-scroll { flex: 1; min-height: 0; overflow-y: auto; }
     .xbot-wrap { max-width: 760px; margin: 0 auto; padding: 28px 24px 80px; display: flex; flex-direction: column; gap: 20px; }
@@ -88,6 +90,7 @@
   </div>
   <div style="display:flex; align-items:center; gap:16px;">
     <nav data-site-nav="inline" class="sn-links sn-inline"></nav>
+    <button class="btn-ai" style="padding:5px 12px; font-size:0.75rem;" onclick="ThreadsGuide.open()">📘 Setup guide</button>
     <a href="/dashboard" style="color:var(--text-muted); font-size:0.8rem; text-decoration:none;">← Dashboard</a>
   </div>
 </header>
@@ -168,21 +171,21 @@
   <div id="sec-compose" class="form-section" data-tab="settings">
     <div class="section-title">📝 Compose</div>
     <span class="hint" style="display:block; margin-bottom:14px;">Post straight away, or put it on the calendar below. Leave the text empty and the persona writes it from the topic.</span>
-    <div class="field full">
+    <div class="field full" id="th-topic-field">
       <label>Topic / vibe <span style="font-weight:400;color:var(--text-muted);">(optional)</span></label>
       <input type="text" id="post-topic" placeholder="e.g. lazy Sunday, gym day, new photoset teaser…">
     </div>
-    <div class="field full">
+    <div class="field full" id="th-text-field">
       <label>Text <span class="counter" id="post-count">0 / 500</span></label>
       <textarea id="post-text" rows="3" maxlength="500" placeholder="Leave empty to let the persona write it from the topic above." oninput="countText()"></textarea>
       <button class="btn-ai" style="background:var(--border); margin-top:8px;" onclick="writeForMe(this)">✨ Write it for me</button>
     </div>
-    <div class="field full">
+    <div class="field full" id="th-media-field">
       <label>Photos &amp; videos <span style="font-weight:400;color:var(--text-muted);">(optional — from this persona's library)</span></label>
       <div class="media-strip" id="post-media-strip"><span class="hint">Nothing in this persona's library yet.</span></div>
       <span class="hint">Click to pick. One posts on its own, several post as a carousel (max 20).</span>
     </div>
-    <div class="row-inline">
+    <div class="row-inline" id="th-when-row">
       <div class="field" style="max-width:220px;">
         <label>Who can reply</label>
         <select id="post-reply-control">
@@ -196,7 +199,7 @@
         <input type="datetime-local" id="post-when">
       </div>
     </div>
-    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:14px;">
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:14px;" id="th-post-btns">
       <button class="btn-ai" onclick="postNow()">Post now</button>
       <button class="btn-ai" style="background:var(--border);" onclick="schedulePost()">📅 Schedule</button>
       <button class="btn-ai" style="background:var(--border);" onclick="runPublish(true)">Preview draft</button>
@@ -663,6 +666,7 @@ function threadsHealth(t){
 PlatformConsole.register({
   platform:'threads',
   persona:persona,
+  paused:()=>document.body.classList.contains('fg-open'),
   statusUrl:s=>'/api/threads/status?persona='+encodeURIComponent(s),
   emptyHint:'No Threads DMs yet — she answers them as they arrive.',
   read:d=>{

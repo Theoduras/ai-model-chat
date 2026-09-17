@@ -35,7 +35,7 @@
     {
       stage: 'connect', nav: 'How it works',
       title: 'What you are about to set up',
-      sub: 'Four stages. You do each one right here — this is the console, not a copy of it.',
+      sub: '{stages} stages. You do each one right here — this is the console, not a copy of it.',
       fields: [],
       do: [
         'Connect her Fanvue account, so she can read her inbox and send as herself.',
@@ -377,7 +377,7 @@
 
     { anchor: '.cn-tabs', placement: 'bottom',
       title: 'Where you are',
-      body: 'Four stages, in the same tab bar the console itself uses. Each tab counts the steps you have done in it, and clicking one jumps straight there — the pills underneath are the steps inside the stage you are on.' },
+      body: '{stages} stages, in the same tab bar the console itself uses. Each tab counts the steps you have done in it, and clicking one jumps straight there — the pills underneath are the steps inside the stage you are on.' },
 
     { anchor: '.fg-foot', placement: 'top',
       title: 'Continue, or skip ahead',

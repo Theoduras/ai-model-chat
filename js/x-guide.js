@@ -7,14 +7,21 @@
     { key: 'connect', label: 'Connect', icon: '🔌' },
     { key: 'voice',   label: 'Her voice', icon: '🗣' },
     { key: 'reach',   label: 'Who she talks to', icon: '👥' },
+    { key: 'hand',    label: 'By hand',   icon: '🔧' },
     { key: 'live',    label: 'Go live', icon: '◎' }
   ];
+
+  function dl(rows) {
+    return '<dl class="fg-dl">' + rows.map(function (r) {
+      return '<dt>' + r[0] + '</dt><dd>' + r[1] + '</dd>';
+    }).join('') + '</dl>';
+  }
 
   var STEPS = [
     {
       stage: 'connect', nav: 'How it works',
       title: 'What you are about to set up',
-      sub: 'Four stages. You do each one right here — this is the console, not a copy of it.',
+      sub: '{stages} stages. You do each one right here — this is the console, not a copy of it.',
       fields: [],
       do: [
         'Connect her X account, so she can read her DMs and post as herself.',
@@ -139,6 +146,129 @@
         'skipped, and says so in the log. They reset at midnight UTC.</p>'
     },
     {
+      stage: 'hand', nav: 'Post something',
+      title: 'Writing a post by hand',
+      sub: 'Everything so far was her answering. This is her starting the conversation.',
+      needs: 'connected',
+      fields: ['sec-post'],
+      do: [
+        'Optionally write a <b>topic</b> — leave it blank and she picks one herself.',
+        'Press <b>Preview draft</b> and read it.',
+        'Press <b>Post now</b> only once you are happy with the words.'
+      ],
+      check: 'The result box shows the posted tweet, and it is on her timeline.',
+      body:
+        '<p>Writes an original post in her voice and puts it on her account. Nothing on this ' +
+        'page posts on a schedule \u2014 for that, use the planner, which writes one row per slot ' +
+        'and fires them server-side.</p>' +
+        dl([
+          ['Topic / vibe',
+           'A one-line brief \u2014 "lazy Sunday", "new photoset teaser", "gym day". Left blank, ' +
+           'she picks something from her persona, which is fine for filler and rarely the ' +
+           'best post of the week.'],
+          ['Preview draft',
+           'Writes it and shows it to you without posting. Free, and worth pressing every ' +
+           'time \u2014 the difference between her voice and something almost her voice is ' +
+           'easiest to catch here.'],
+          ['Post now',
+           'Posts it as her, immediately. There is no undo in this console; delete it on X if ' +
+           'it was wrong.']
+        ])
+    },
+    {
+      stage: 'hand', nav: 'Work a thread',
+      title: 'Replying to the comments under a post',
+      sub: 'Hers or anyone\'s \u2014 this is where a post turns into conversations.',
+      needs: 'connected',
+      fields: ['sec-comments'],
+      do: [
+        'Paste a <b>post URL or tweet ID</b>, or skip the field entirely.',
+        'Pick <b>How many</b> \u2014 start at 3.',
+        'Press <b>Preview drafts</b> and read all of them.',
+        'Then <b>Reply for real</b>, or <b>Reply on my recent posts</b> to work her own timeline.'
+      ],
+      check: 'The result box lists the replies she sent, and they read like her.',
+      body:
+        '<p>A post with comments under it is the cheapest reach there is: the people commenting ' +
+        'are already engaged, and a reply from her puts her in front of everyone else reading ' +
+        'the thread.</p>' +
+        dl([
+          ['Post URL or tweet ID',
+           'Any post \u2014 hers, or somebody else\'s whose comments are worth answering. Note ' +
+           'that X may block replying where she is neither the author nor mentioned; if the ' +
+           'Overview says feed commenting is paused, that is the app\'s access level, not a ' +
+           'bug, and it is raised in the X developer portal.'],
+          ['How many',
+           'How many comments she answers in one pass. Three is a sensible first go: enough to ' +
+           'see the pattern, small enough to undo by hand.'],
+          ['Preview drafts',
+           'Writes every reply and shows them without sending. Always do this the first time ' +
+           'on an unfamiliar thread.'],
+          ['Reply on my recent posts',
+           'Ignores the URL field and answers new comments across her own latest posts. This ' +
+           'is the one to press regularly \u2014 it is the maintenance that keeps her threads ' +
+           'looking alive.']
+        ])
+    },
+    {
+      stage: 'hand', nav: 'Open a DM',
+      title: 'Starting one conversation by hand',
+      sub: 'The same thing cold outreach does, one person at a time and with your eyes on it.',
+      needs: 'connected',
+      fields: ['sec-dm'],
+      do: [
+        'Put a <b>@handle</b> or profile URL in the target field.',
+        'Add a <b>note</b> \u2014 why her, what she liked \u2014 so the opener is not generic.',
+        'Press <b>Preview opener</b> and read it.',
+        'Press <b>Send DM</b> if it is right.'
+      ],
+      check: 'The result box shows the message that went out.',
+      body:
+        '<p>This is the manual version of the cold-outreach stage: one person, one opener, ' +
+        'checked before it goes. Worth using on somebody who matters rather than leaving it ' +
+        'to the automatic pass.</p>' +
+        dl([
+          ['Target @handle or profile URL',
+           'Either form works. X only lets a DM through if that account accepts DMs from ' +
+           'people it does not follow \u2014 a failure here is usually their setting, not ours.'],
+          ['Context / note',
+           'What she should seem to already know: "liked 3 of my posts", "into gaming". This ' +
+           'is the difference between an opener that reads as noticed and one that reads as ' +
+           'a mail-merge.'],
+          ['Preview opener',
+           'Writes it without sending. Always press it before sending to somebody you care ' +
+           'about reaching.']
+        ]) +
+        '<p class="fg-note">Once she has sent the first message, the ordinary reply loop takes ' +
+        'the conversation over \u2014 you do not have to keep coming back here.</p>'
+    },
+    {
+      stage: 'hand', nav: 'Follow and unfollow',
+      title: 'The follow button, and the log underneath everything',
+      sub: 'A follow is often the cheapest way to get noticed.',
+      needs: 'connected',
+      fields: ['sec-follow', 'sec-log'],
+      do: [
+        'Paste a <b>@handle</b> and press <b>Follow</b>.',
+        'Use <b>Unfollow</b> to tidy up afterwards.',
+        'Read the activity log underneath to see what the automatic passes have been doing.'
+      ],
+      check: 'The result box confirms it, and the log shows her recent rounds.',
+      body:
+        dl([
+          ['Follow / Unfollow',
+           'Follows or unfollows as her, one account at a time. A follow often puts her in ' +
+           'somebody\'s notifications where a DM would not arrive at all. Follow-churn \u2014 ' +
+           'following hundreds and unfollowing them a day later \u2014 is a well-known spam ' +
+           'signal, so use it deliberately.'],
+          ['Activity log',
+           'Everything auto-chat and gathering have done, newest last. If a round did less ' +
+           'than you asked for, the reason is here rather than in the Overview tab.']
+        ]) +
+        '<p>The rest of the <b>Advanced</b> tab is exactly these hand-tools. Nothing there ' +
+        'needs setting for her to run \u2014 it is where you go to do one thing yourself.</p>'
+    },
+    {
       stage: 'live', nav: 'Watch the first round',
       title: 'Before you leave her to it',
       sub: 'One round with your eyes on it is worth a day of guessing.',
@@ -174,7 +304,7 @@
 
     { anchor: '.cn-tabs', placement: 'bottom',
       title: 'Where you are',
-      body: 'Four stages, in the same tab bar the console itself uses. Each tab counts the steps you have done in it, and clicking one jumps straight there — the pills underneath are the steps inside the stage you are on.' },
+      body: '{stages} stages, in the same tab bar the console itself uses. Each tab counts the steps you have done in it, and clicking one jumps straight there — the pills underneath are the steps inside the stage you are on.' },
 
     { anchor: '.fg-foot', placement: 'top',
       title: 'Continue, or skip ahead',
