@@ -17,10 +17,10 @@
 (function () {
 
   var STAGES = [
-    { key: 'connect', label: 'Connect' },
-    { key: 'content', label: 'PPV content' },
-    { key: 'auto',    label: 'Auto-reply' },
-    { key: 'live',    label: 'Go live' }
+    { key: 'connect', label: 'Connect', icon: '🔌' },
+    { key: 'content', label: 'PPV content', icon: '💎' },
+    { key: 'auto',    label: 'Auto-reply', icon: '💬' },
+    { key: 'live',    label: 'Go live', icon: '◎' }
   ];
 
   function dl(rows) {
@@ -363,23 +363,23 @@
   // The intro tour explains the frame the wizard puts people inside, exactly as
   // Onboarding's does. It runs once per creator, not once per visit.
   var TOUR = [
-    { anchor: '.ob-stepwrap', placement: 'right',
+    { anchor: '#fg-step', placement: 'top',
       title: 'One thing at a time',
       body: 'Setup is split into a handful of short steps. Each one covers a single part of the Fanvue console and hands you the real controls for it — what you change here is changed for real.' },
 
-    { anchor: '.fg-do', placement: 'right',
+    { anchor: '.fg-do', placement: 'bottom',
       title: 'What to do here',
       body: 'Every step opens with the moves for it, in the order you meet them — work down the list. The line under the box below tells you how to know it worked.' },
 
-    { anchor: '#fg-step-body', placement: 'right',
+    { anchor: '#fg-step-body', placement: 'bottom',
       title: 'This is the actual setting',
       body: 'Whatever appears in this box is the console\'s own field, moved here for this step. Fill it in and save it with the button in the step — the same button you would press on the full page.' },
 
-    { anchor: '.ob-rail', placement: 'right',
+    { anchor: '.cn-tabs', placement: 'bottom',
       title: 'Where you are',
-      body: 'Four stages. The bar shows how far along you are, and you can jump back to any step you have already passed by clicking it.' },
+      body: 'Four stages, in the same tab bar the console itself uses. Each tab counts the steps you have done in it, and clicking one jumps straight there — the pills underneath are the steps inside the stage you are on.' },
 
-    { anchor: '.ob-foot', placement: 'top',
+    { anchor: '.fg-foot', placement: 'top',
       title: 'Continue, or skip ahead',
       body: 'Continue moves on to the next step. If you would rather see every setting at once, "Skip guide" hands you the full console — and you can come back to this guide any time.' }
   ];

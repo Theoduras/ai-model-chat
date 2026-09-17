@@ -74,7 +74,10 @@
     return !!state.seen[s.nav];
   }
 
+  // Most consoles say "connected" with a green pill next to the account
+  // dropdown; one that says it some other way passes its own reader in.
   function connected() {
+    if (cfg.connected) { try { return !!cfg.connected(); } catch (e) { return false; } }
     var p = byId('conn-pill');
     return !!(p && p.classList.contains('ok'));
   }
@@ -182,54 +185,98 @@
     STEPS.forEach(function (s, i) { if (isDone(i)) n++; });
     return Math.round(n / STEPS.length * 100);
   }
-  function stageState(key) {
+  function stageSteps(key) {
     var mine = [];
     STEPS.forEach(function (s, i) { if (s.stage === key) mine.push(i); });
-    if (STEPS[state.idx] && STEPS[state.idx].stage === key) return 'now';
-    return mine.every(isDone) ? 'done' : 'todo';
+    return mine;
   }
 
-  function railHtml() {
-    return STAGES.map(function (st, n) {
-      var stt = stageState(st.key);
-      var mine = [];
-      STEPS.forEach(function (s, i) { if (s.stage === st.key) mine.push(i); });
-      var open = STEPS[state.idx].stage === st.key;
-      return '<div class="ob-rstage">' +
-        '<div class="ob-rstage-t' + (open ? ' on' : '') + '">' +
-          '<span class="ob-rnum ' + stt + '">' + (stt === 'done' ? '✓' : (n + 1)) + '</span>' +
-          esc(st.label) + '</div>' +
-        (open ? '<div class="ob-rsteps">' + mine.map(function (i) {
-          var cls = i === state.idx ? 'on' : (isDone(i) ? 'done' : '');
-          return '<div class="ob-rstep ' + cls + '" onclick="' + NS + '.goto(' + i + ')">' +
-            (isDone(i) && i !== state.idx ? '<span class="ob-rcheck">✓</span>'
-                                          : '<span class="ob-rdot"></span>') +
-            esc(STEPS[i].nav) + '</div>';
-        }).join('') + '</div>' : '') +
-      '</div>';
-    }).join('');
+  // The wizard is drawn in the console's own language: the segmented tab bar
+  // js/console-shell.js uses for Overview/Inbox/Settings/Advanced, the same
+  // workflow pill chain under it, and the page's .form-section cards. One tab
+  // per stage — clicking a stage opens the first step in it you have not done.
+  function stageTabs() {
+    return '<div class="cn-tabs" role="tablist">' + STAGES.map(function (st, n) {
+      var mine = stageSteps(st.key);
+      var got = mine.filter(isDone).length;
+      var all = got === mine.length;
+      var on = STEPS[state.idx] && STEPS[state.idx].stage === st.key;
+      return '<button class="cn-tab' + (on ? ' on' : '') + '" role="tab" type="button" ' +
+        'onclick="' + NS + '.gotoStage(\'' + st.key + '\')">' +
+        '<span class="cn-tab-ic">' + (st.icon || (n + 1)) + '</span>' + esc(st.label) +
+        '<span class="cn-tab-badge' + (all ? ' ok' : got ? '' : ' none') + '">' +
+          (all ? '\u2713' : got + '/' + mine.length) + '</span></button>';
+    }).join('') + '</div>';
+  }
+
+  function stepPills() {
+    var mine = stageSteps(STEPS[state.idx].stage);
+    if (mine.length < 2) return '';
+    return '<div class="cn-steps">' + mine.map(function (i, n) {
+      var cls = i === state.idx ? ' now' : (isDone(i) ? ' done' : '');
+      return '<button class="cn-step' + cls + '" type="button" onclick="' + NS +
+        '.goto(' + i + ')"><span class="cn-step-n">' +
+        (isDone(i) && i !== state.idx ? '\u2713' : (n + 1)) + '</span>' +
+        esc(STEPS[i].nav) + '</button>';
+    }).join('') + '</div>';
+  }
+
+  // The same read-out the Overview tab opens with: one line on where setup
+  // stands, and the dot that colours it.
+  function heroHtml() {
+    var pct = progress();
+    var live = pct === 100;
+    var step = STEPS[Math.min(state.idx, STEPS.length - 1)];
+    return '<div class="cn-hero ' + (live ? 'live' : connected() ? 'warn' : 'off') + '">' +
+      '<span class="cn-hero-dot"></span>' +
+      '<div class="cn-hero-txt">' +
+        '<div class="cn-hero-title">' + esc(cfg.railTitle) + ' \u00b7 ' + pct + '% done</div>' +
+        '<div class="cn-hero-sub">' + (live
+          ? 'Every step is done. Anything here can still be changed.'
+          : 'Step ' + (state.idx + 1) + ' of ' + STEPS.length + ' \u00b7 ' + esc(step.nav)) +
+        '</div></div>' +
+      '<div class="fg-bar"><i style="width:' + pct + '%"></i></div></div>';
+  }
+
+  function footHtml() {
+    return '<div class="fg-foot">' +
+      (state.idx > 0 ? '<button class="btn btn-ghost" onclick="' + NS + '.back()">\u2190 Back</button>' : '') +
+      '<button class="btn btn-primary" onclick="' + NS + '.next()">' +
+        (state.idx === STEPS.length - 1 ? 'Finish \u2713' : 'Continue \u2192') + '</button>' +
+      '<span class="fg-count">Step ' + (state.idx + 1) + ' of ' + STEPS.length + '</span>' +
+      '<div class="fg-alt">' +
+        '<button class="fg-skip" type="button" onclick="' + NS + '.tourReplay()">' +
+          '<span aria-hidden="true">\u25ce</span>Show me around</button>' +
+        '<button class="fg-skip" type="button" onclick="' + NS + '.close()">' +
+          '<span aria-hidden="true">\u2699</span>Skip guide</button>' +
+        '<button class="fg-skip fg-danger-btn" type="button" onclick="' + NS + '.resetAsk()">' +
+          '<span aria-hidden="true">\u21ba</span>Start over</button>' +
+      '</div></div>';
   }
 
   function doneHtml() {
     var d = cfg.done || {};
-    return '<div class="ob-done">' +
-      '<div class="ob-seal">✓</div>' +
-      '<h2 class="ob-done-h">She\'s set up.</h2>' +
-      '<p class="ob-done-s">' + esc(d.sub || '') + '</p>' +
-      '<div class="ob-nxt">' +
-        '<a class="ob-nxt-c" href="#" onclick="' + NS + '.close();return false;">' +
-          '<div class="ob-nxt-i">⚙️</div><div class="ob-nxt-t">Open the full console</div>' +
-          '<div class="ob-nxt-d">Every setting on one page, to fine-tune what you just set up.</div></a>' +
-        '<a class="ob-nxt-c" href="#" onclick="' + NS + '.jump(\'' + esc(d.logId || '') + '\');return false;">' +
-          '<div class="ob-nxt-i">🩺</div><div class="ob-nxt-t">Watch the log</div>' +
-          '<div class="ob-nxt-d">' + esc(d.logDesc || 'See what she does, as it happens.') + '</div></a>' +
-        '<a class="ob-nxt-c" href="#" onclick="' + NS + '.replay();return false;">' +
-          '<div class="ob-nxt-i">📘</div><div class="ob-nxt-t">Read it again</div>' +
-          '<div class="ob-nxt-d">Walk the steps from the top. Everything you set up stays as it is.</div></a>' +
-        '<a class="ob-nxt-c" href="#" onclick="' + NS + '.resetAsk();return false;">' +
-          '<div class="ob-nxt-i">↺</div><div class="ob-nxt-t">Start over</div>' +
-          '<div class="ob-nxt-d">' + esc(d.resetDesc || '') + '</div></a>' +
-      '</div></div>';
+    var card = function (icon, title, desc, call) {
+      return '<a class="fg-nxt-c" href="#" onclick="' + NS + '.' + call + ';return false;">' +
+        '<div class="fg-nxt-i">' + icon + '</div><div class="fg-nxt-t">' + esc(title) + '</div>' +
+        '<div class="fg-nxt-d">' + esc(desc) + '</div></a>';
+    };
+    return '<div class="fg-page">' +
+      '<div class="cn-hero live"><span class="cn-hero-dot"></span><div class="cn-hero-txt">' +
+        '<div class="cn-hero-title">She\'s set up.</div>' +
+        '<div class="cn-hero-sub">' + esc(d.sub || '') + '</div></div></div>' +
+      '<div class="form-section">' +
+        '<div class="section-title">Where to next</div>' +
+        '<div class="fg-nxt">' +
+          card('\u2699\ufe0f', 'Open the full console',
+               'Every setting on one page, to fine-tune what you just set up.', 'close()') +
+          card('\ud83e\ude7a', 'Watch the log',
+               d.logDesc || 'See what she does, as it happens.',
+               'jump(\'' + esc(d.logId || '') + '\')') +
+          card('\ud83d\udcd8', 'Read it again',
+               'Walk the steps from the top. Everything you set up stays as it is.', 'replay()') +
+          card('\u21ba', 'Start over', d.resetDesc || '', 'resetAsk()') +
+        '</div></div></div>';
   }
 
   function personaName() {
@@ -246,16 +293,15 @@
     var li = function (rows) {
       return (rows || []).map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('');
     };
-    return '<div class="ob-rail">' +
-        '<div class="ob-rail-h">' + esc(cfg.railTitle) + '</div>' +
-        '<div class="ob-rail-p">Starting over</div>' +
-      '</div>' +
-      '<div class="ob-stepwrap">' +
-        '<div class="ob-crumb">Start over</div>' +
-        '<h2 class="ob-step-h">Erase ' + esc(personaName()) + '\'s ' + esc(r.what || 'setup') + '?</h2>' +
-        '<p class="ob-step-s">This cannot be undone. It touches this model only — your other ' +
-          'models keep everything they have.</p>' +
-        '<div class="ob-card fg-two">' +
+    return '<div class="fg-page">' +
+      '<div class="cn-hero off"><span class="cn-hero-dot"></span><div class="cn-hero-txt">' +
+        '<div class="cn-hero-title">Erase ' + esc(personaName()) + '\'s ' +
+          esc(r.what || 'setup') + '?</div>' +
+        '<div class="cn-hero-sub">This cannot be undone. It touches this model only \u2014 ' +
+          'your other models keep everything they have.</div></div></div>' +
+      '<div class="form-section">' +
+        '<div class="section-title">What goes, what stays</div>' +
+        '<div class="fg-two">' +
           '<div><b class="fg-bad">Erased</b><ul class="fg-list">' + li(r.erased) + '</ul></div>' +
           '<div><b class="fg-ok">Kept</b><ul class="fg-list">' + li(r.kept) + '</ul></div>' +
         '</div>' +
@@ -264,12 +310,12 @@
             esc(r.dropLabel) + ' <span>' + esc(r.dropNote || '') + '</span></label>'
           : '') +
         '<div id="fg-reset-log" class="fg-check fg-plain"></div>' +
-        '<div class="ob-foot">' +
-          '<button class="btn btn-ghost" onclick="' + NS + '.resetCancel()">Cancel</button>' +
-          '<button class="btn btn-primary fg-erase" id="fg-reset-go" onclick="' + NS + '.resetRun()">' +
-            'Erase everything</button>' +
-        '</div>' +
-      '</div>';
+      '</div>' +
+      '<div class="fg-foot">' +
+        '<button class="btn btn-ghost" onclick="' + NS + '.resetCancel()">Cancel</button>' +
+        '<button class="btn btn-primary fg-erase" id="fg-reset-go" onclick="' + NS + '.resetRun()">' +
+          'Erase everything</button>' +
+      '</div></div>';
   }
 
   function render() {
@@ -277,58 +323,31 @@
     if (!shell) return;
     unmount();
 
-    if (state.confirming) {
-      shell.innerHTML = '<div class="ob-split">' + resetHtml() + '</div>';
-      return;
-    }
-    if (state.finished && state.idx >= STEPS.length) {
-      shell.innerHTML = '<div class="ob-split">' + doneHtml() + '</div>';
-      return;
-    }
+    if (state.confirming) { shell.innerHTML = resetHtml(); return; }
+    if (state.finished && state.idx >= STEPS.length) { shell.innerHTML = doneHtml(); return; }
+
     var step = STEPS[state.idx];
-    var stage = STAGES.filter(function (s) { return s.key === step.stage; })[0];
-    var inStage = STEPS.filter(function (s) { return s.stage === step.stage; });
-    var pct = progress();
     // Nothing to do and nothing to confirm until the account is connected.
     var gated = step.needs === 'connected' && !connected();
 
     shell.innerHTML =
-      '<div class="ob-split">' +
-        '<div class="ob-rail">' +
-          '<div class="ob-rail-h">' + esc(cfg.railTitle) + '</div>' +
-          '<div class="ob-rail-p">' + pct + '% done</div>' +
-          '<div class="ob-mini"><i style="width:' + pct + '%"></i></div>' +
-          railHtml() +
-        '</div>' +
-        '<div class="ob-stepwrap">' +
-          '<div class="ob-crumb">Stage ' + (STAGES.indexOf(stage) + 1) + ' · Step ' +
-            (inStage.indexOf(step) + 1) + ' of ' + inStage.length + '</div>' +
-          '<h2 class="ob-step-h">' + esc(step.title) + '</h2>' +
-          (step.sub ? '<p class="ob-step-s">' + esc(step.sub) + '</p>' : '') +
+      '<div class="fg-page">' +
+        heroHtml() +
+        stageTabs() +
+        stepPills() +
+        '<div class="form-section" id="fg-step">' +
+          '<div class="section-title">' + esc(step.title) + '</div>' +
+          (step.sub ? '<span class="hint fg-sub">' + esc(step.sub) + '</span>' : '') +
           (gated ? '' : doHtml(step)) +
-          '<div class="ob-card" id="fg-step-body"></div>' +
+          '<div id="fg-step-body"></div>' +
           (gated ? '' : checkHtml(step)) +
           explainHtml(step) +
-          '<div class="ob-foot">' +
-            (state.idx > 0 ? '<button class="btn btn-ghost" onclick="' + NS + '.back()">← Back</button>' : '') +
-            '<button class="btn btn-primary" onclick="' + NS + '.next()">' +
-              (state.idx === STEPS.length - 1 ? 'Finish ✓' : 'Continue →') + '</button>' +
-            '<span class="ob-saved">Step ' + (state.idx + 1) + ' of ' + STEPS.length + '</span>' +
-            '<div class="ob-alt">' +
-              '<button class="ob-skip" type="button" onclick="' + NS + '.tourReplay()">' +
-                '<span class="ob-skip-icon" aria-hidden="true">◎</span>Show me around</button>' +
-              '<button class="ob-skip" type="button" onclick="' + NS + '.close()">' +
-                '<span class="ob-skip-icon" aria-hidden="true">⚙</span>Skip guide</button>' +
-              '<button class="ob-skip fg-danger-btn" type="button" onclick="' + NS + '.resetAsk()">' +
-                '<span class="ob-skip-icon" aria-hidden="true">↺</span>Start over</button>' +
-            '</div>' +
-          '</div>' +
         '</div>' +
+        footHtml() +
       '</div>';
 
     mountFields(step);
-    var w = shell.querySelector('.ob-stepwrap');
-    if (w) w.scrollTop = 0;
+    shell.scrollTop = 0;
   }
 
   // ---- intro coach-marks -------------------------------------------------
@@ -432,6 +451,14 @@
       try { localStorage.setItem(cfg.storageKey + 'Opened', '1'); } catch (e) {}
     },
     replay: function () { state.idx = 0; state.finished = false; save(); render(); },
+    // A stage tab opens the first step in it still to do, or its last step
+    // once the whole stage is done.
+    gotoStage: function (key) {
+      var mine = stageSteps(key);
+      if (!mine.length) return;
+      var next = mine.filter(function (i) { return !isDone(i); })[0];
+      api.goto(next === undefined ? mine[mine.length - 1] : next);
+    },
     goto: function (i) {
       state.idx = Math.max(0, Math.min(STEPS.length - 1, i));
       markSeen(state.idx);
@@ -553,22 +580,51 @@
       // The wizard takes the console's slot under the page header, not the
       // whole viewport — same as the persona wizard inside the dashboard.
       '#fg-shell{flex:1;min-height:0;display:none;background:var(--bg);}',
-      '#fg-shell.on{display:flex;flex-direction:column;}',
+      '#fg-shell.on{display:block;overflow-y:auto;}',
       'body.fg-open ' + SCROLL + '{display:none;}',
-      '#fg-shell .ob-split{flex:1;min-height:0;}',
+      'body.fg-embedded > header{display:none;}',
+      // Same column the console itself is set in, so leaving the guide does not
+      // move anything sideways.
+      '.fg-page{max-width:760px;margin:0 auto;padding:28px 24px 80px;',
+      'display:flex;flex-direction:column;gap:20px;}',
+      '@media (max-width:640px){.fg-page{padding:18px 14px 70px;gap:16px;}',
+      // Four stage labels do not fit a phone. Let them size to their words and
+      // let the bar scroll, rather than squeeze until they overlap.
+      '.fg-page .cn-tab{flex:0 0 auto;min-width:0;}}',
+      // The hero carries the progress bar the left rail used to.
+      '.fg-bar{margin-left:auto;flex-shrink:0;width:104px;height:5px;border-radius:9999px;',
+      'background:var(--surface-2);overflow:hidden;}',
+      '.fg-bar i{display:block;height:100%;background:var(--grad);background-size:300% 100%;}',
+      '@media (max-width:640px){.fg-bar{display:none;}}',
+      '.cn-tab-badge.ok{background:var(--ok);color:#04240f;}',
+      '.cn-tab-badge.none{background:var(--surface-2);color:var(--text-muted);}',
+      '.cn-tab.on .cn-tab-badge.none{background:var(--surface);color:var(--text-3);}',
+      // A step title is a sentence, not a label, so it keeps the section header's
+      // accent bar and colour without the console's uppercase tracking.
+      '#fg-step > .section-title{text-transform:none;letter-spacing:0;font-size:1rem;}',
+      '.fg-sub{display:block;margin:-4px 0 4px;max-width:64ch;}',
       // Borrowed console nodes carry their own margins from the page; inside a
       // step they are the only thing in the card.
+      '#fg-step-body{display:flex;flex-direction:column;gap:16px;}',
       '#fg-step-body > *{margin-top:0;}',
+      '#fg-step-body > .form-section{background:transparent;border:0;padding:0;box-shadow:none;}',
       '#fg-step-body:empty{display:none;}',
-      'body.fg-embedded > header{display:none;}',
-      '.fg-do{list-style:none;counter-reset:fgdo;margin:0 0 18px;padding:0;max-width:64ch;}',
+      '.fg-foot{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}',
+      '.fg-count{font-size:.74rem;color:var(--text-muted);}',
+      '.fg-alt{margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}',
+      '.fg-skip{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;min-height:36px;',
+      'background:var(--panel);border:1px solid var(--border);border-radius:var(--r);',
+      'cursor:pointer;font-family:var(--font);font-size:.78rem;font-weight:500;',
+      'color:var(--text-2);white-space:nowrap;}',
+      '.fg-skip:hover{background:var(--surface);border-color:var(--accent-line);color:var(--text);}',
+      '.fg-do{list-style:none;counter-reset:fgdo;margin:0;padding:0;max-width:64ch;}',
       '.fg-do li{counter-increment:fgdo;position:relative;padding-left:30px;margin-bottom:7px;',
       'font-size:.86rem;line-height:1.5;color:var(--text-2);}',
       '.fg-do li::before{content:counter(fgdo);position:absolute;left:0;top:0;width:20px;height:20px;',
       'border-radius:50%;background:var(--accent-soft);color:var(--accent);font-size:.7rem;',
       'font-weight:700;display:flex;align-items:center;justify-content:center;}',
-      '.fg-check{font-size:.8rem;line-height:1.5;color:var(--text-muted);margin:14px 0 0;max-width:64ch;}',
-      '.fg-check:not(:empty)::before{content:"✓ ";color:var(--text-3);}',
+      '.fg-check{font-size:.8rem;line-height:1.5;color:var(--text-muted);margin:0;max-width:64ch;}',
+      '.fg-check:not(:empty)::before{content:"\u2713 ";color:var(--text-3);}',
       '.fg-check.ok{color:var(--ok);}',
       '.fg-check.ok::before{color:var(--ok);}',
       '.fg-check.fg-plain::before{content:"";}',
@@ -578,8 +634,7 @@
       '.fg-bad{color:#fb7185;}',
       '.fg-ok{color:var(--ok);}',
       '.fg-list{margin:8px 0 0;padding-left:18px;font-size:.82rem;line-height:1.6;color:var(--text-2);}',
-      '.fg-drop{display:block;margin-top:14px;font-size:.82rem;font-weight:400;',
-      'color:var(--text-2);cursor:pointer;}',
+      '.fg-drop{display:block;font-size:.82rem;font-weight:400;color:var(--text-2);cursor:pointer;}',
       '.fg-drop input{width:auto;margin-right:7px;}',
       '.fg-drop span{color:var(--text-muted);font-weight:400;}',
       // Continue and "erase everything" must never look like the same button.
@@ -587,13 +642,13 @@
       '.fg-erase:hover{background:#b91c1c;border-color:#b91c1c;}',
       '.fg-erase[disabled]{opacity:.6;cursor:default;}',
       '.fg-danger-btn:hover{border-color:#fb7185;color:#fb7185;}',
-      '.fg-more{max-width:64ch;margin-top:18px;}',
+      '.fg-more{max-width:64ch;}',
       '.fg-more > summary{cursor:pointer;font-size:.78rem;color:var(--text-muted);list-style:none;',
       'display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:var(--r);',
       'border:1px solid var(--border);background:var(--panel);}',
       '.fg-more > summary::-webkit-details-marker{display:none;}',
-      '.fg-more > summary::before{content:"▸";font-size:.7rem;}',
-      '.fg-more[open] > summary::before{content:"▾";}',
+      '.fg-more > summary::before{content:"\u25b8";font-size:.7rem;}',
+      '.fg-more[open] > summary::before{content:"\u25be";}',
       '.fg-more > summary:hover{color:var(--text-2);border-color:var(--accent-line);}',
       '.fg-explain{font-size:.86rem;line-height:1.62;color:var(--text-2);max-width:64ch;margin-top:14px;}',
       '.fg-explain p{margin:0 0 10px;}',
@@ -603,6 +658,17 @@
       '.fg-dl dt{font-weight:600;color:var(--text);margin-top:12px;}',
       '.fg-dl dt:first-child{margin-top:0;}',
       '.fg-dl dd{margin:2px 0 0;color:var(--text-2);}',
+      // The done card's onward links, in the same shape as the console's
+      // health cards.
+      '.fg-nxt{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:12px;}',
+      '.fg-nxt-c{background:var(--panel);border:1px solid var(--border);border-radius:var(--r);',
+      'padding:17px;text-decoration:none;color:inherit;}',
+      '.fg-nxt-c:hover{border-color:var(--accent-line);}',
+      '.fg-nxt-i{width:31px;height:31px;border-radius:var(--r-sm);background:var(--accent-soft);',
+      'border:1px solid var(--accent-line);display:flex;align-items:center;justify-content:center;',
+      'margin-bottom:10px;font-size:.9rem;}',
+      '.fg-nxt-t{font-size:.84rem;font-weight:600;margin-bottom:4px;}',
+      '.fg-nxt-d{font-size:.73rem;color:var(--text-muted);line-height:1.5;}',
       '.obt-body code{background:var(--surface);padding:1px 5px;border-radius:var(--r-sm);}'
     ].join('');
     document.head.appendChild(css);
