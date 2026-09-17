@@ -608,6 +608,9 @@
       '#fg-step-body{display:flex;flex-direction:column;gap:16px;}',
       '#fg-step-body > *{margin-top:0;}',
       '#fg-step-body > .form-section{background:transparent;border:0;padding:0;box-shadow:none;}',
+      // A step that borrows a whole console section already says what it is in its
+      // own title, so the section keeps its controls and loses its header.
+      '#fg-step-body > .form-section > .section-title{display:none;}',
       '#fg-step-body:empty{display:none;}',
       '.fg-foot{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}',
       '.fg-count{font-size:.74rem;color:var(--text-muted);}',

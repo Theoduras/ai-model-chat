@@ -11,6 +11,8 @@
   <script src="/js/devnav.js" defer></script>
   <script src="/js/chat-view.js"></script>
   <script src="/js/console-shell.js"></script>
+  <script src="/js/console-guide.js" defer></script>
+  <script src="/js/discord-guide.js" defer></script>
   <style>
     .fv-scroll { flex: 1; min-height: 0; overflow-y: auto; }
     .fv-wrap { max-width: 760px; margin: 0 auto; padding: 28px 24px 80px; display: flex; flex-direction: column; gap: 20px; }
@@ -37,6 +39,7 @@
   </div>
   <div style="display:flex; align-items:center; gap:16px;">
     <nav data-site-nav="inline" class="sn-links sn-inline"></nav>
+    <button class="btn-ai" style="padding:5px 12px; font-size:0.75rem;" onclick="DiscordGuide.open()">📘 Setup guide</button>
     <a href="/dashboard" style="color:var(--text-muted); font-size:0.8rem; text-decoration:none;">← Dashboard</a>
   </div>
 </header>
@@ -44,7 +47,7 @@
 <div class="fv-scroll">
 <div class="fv-wrap">
 
-  <div class="warn-box" data-tab="settings">
+  <div class="warn-box" data-tab="settings" id="dc-warn">
     <strong>Read this before connecting an account.</strong>
     This drives a real Discord account, not a bot application. Discord's terms do not
     allow that, and accounts found doing it are terminated — sometimes along with other
@@ -54,7 +57,7 @@
 
   <div class="form-section" data-tab="settings" id="sec-account">
     <div class="section-title">Persona &amp; Discord account</div>
-    <div class="field full">
+    <div class="field full" id="dc-account-row">
       <label>Choose a model (persona)</label>
       <div class="row-inline">
         <div class="field" style="margin:0;">
@@ -63,16 +66,16 @@
         <span class="conn-pill" id="conn-pill">—</span>
       </div>
     </div>
-    <div class="row-inline">
+    <div class="row-inline" id="dc-signin-row">
       <button class="btn-ai" onclick="startSignin()">Sign in to Discord</button>
       <button class="btn-ai" style="background:var(--surface); color:var(--text-2);"
               onclick="disconnect()">Disconnect</button>
     </div>
-    <span class="hint">A real Discord login page opens in a window. Sign in there as you
+    <span class="hint" id="dc-signin-hint">A real Discord login page opens in a window. Sign in there as you
       would on your own laptop — the human check, 2FA and any emailed code all happen on
       Discord's own page. Nothing you type reaches us; what comes back is the session her
       browser was already using.</span>
-    <details style="margin-top:12px;">
+    <details style="margin-top:12px;" id="dc-token-details">
       <summary class="hint" style="cursor:pointer;">Paste a token instead</summary>
       <div class="row-inline" style="margin-top:10px;">
         <div class="field" style="flex:2;">
@@ -89,14 +92,14 @@
 
   <div class="form-section" data-tab="settings" id="sec-replies">
     <div class="section-title">Replying</div>
-    <div class="row-inline">
+    <div class="row-inline" id="dc-auto-row">
       <div class="field nowrap">
         <label class="switch"><input type="checkbox" id="auto-enabled"><span>Auto-reply is on</span></label>
         <span class="hint">She answers DMs, and answers when she is @mentioned in an
           allowed channel.</span>
       </div>
     </div>
-    <div class="row-inline">
+    <div class="row-inline" id="dc-pace-row">
       <div class="field"><label>Most replies per round</label>
         <input type="number" id="reply-limit" min="1" max="30" value="10"></div>
       <div class="field"><label>Typing speed (chars/sec)</label>
@@ -104,7 +107,7 @@
       <div class="field"><label>Reaction rate (%)</label>
         <input type="number" id="react-rate" min="0" max="100" value="25"></div>
     </div>
-    <div class="row-inline">
+    <div class="row-inline" id="dc-human-row">
       <div class="field nowrap">
         <label class="switch"><input type="checkbox" id="humanize" checked><span>Human pacing</span></label>
         <span class="hint">Reads for a moment, shows as typing, splits a long reply across
@@ -119,7 +122,7 @@
         <label class="switch"><input type="checkbox" id="dm-friends"><span>Accept friend requests</span></label>
       </div>
     </div>
-    <div class="row-inline">
+    <div class="row-inline" id="dc-auto-save">
       <button class="btn-ai" onclick="saveAuto()">Save</button>
       <button class="btn-ai" style="background:var(--surface); color:var(--text-2);"
               onclick="runNow()">Run a round now</button>
@@ -460,6 +463,7 @@ async function dcStats(s){
 PlatformConsole.register({
   platform:'discord',
   persona:slug,
+  paused:()=>document.body.classList.contains('fg-open'),
   statusUrl:s=>'/api/discord/trace?persona='+encodeURIComponent(s),
   emptyHint:'They appear as soon as somebody messages her on Discord.',
   sendUrl:'/api/discord/dm-send',

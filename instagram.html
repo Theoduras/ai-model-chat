@@ -11,6 +11,8 @@
   <script src="/js/devnav.js" defer></script>
   <script src="/js/chat-view.js"></script>
   <script src="/js/console-shell.js"></script>
+  <script src="/js/console-guide.js" defer></script>
+  <script src="/js/instagram-guide.js" defer></script>
   <style>
     .fv-scroll { flex: 1; min-height: 0; overflow-y: auto; }
     .fv-wrap { max-width: 760px; margin: 0 auto; padding: 28px 24px 80px; display: flex; flex-direction: column; gap: 20px; }
@@ -31,6 +33,7 @@
   </div>
   <div style="display:flex; align-items:center; gap:16px;">
     <nav data-site-nav="inline" class="sn-links sn-inline"></nav>
+    <button class="btn-ai" style="padding:5px 12px; font-size:0.75rem;" onclick="InstagramGuide.open()">📘 Setup guide</button>
     <a href="/dashboard" style="color:var(--text-muted); font-size:0.8rem; text-decoration:none;">← Dashboard</a>
   </div>
 </header>
@@ -38,7 +41,7 @@
 <div class="fv-scroll">
 <div class="fv-wrap">
 
-  <div class="warn-box" data-tab="settings">
+  <div class="warn-box" data-tab="settings" id="ig-warn">
     <strong>Read this before connecting an account.</strong>
     This drives a real Instagram account through a real sign-in, not Meta's official
     posting API — the Graph API cannot post Stories at all and needs a Business account
@@ -49,7 +52,7 @@
 
   <div class="form-section" data-tab="settings" id="sec-account">
     <div class="section-title">Persona &amp; Instagram account</div>
-    <div class="field full">
+    <div class="field full" id="ig-account-row">
       <label>Choose a model (persona)</label>
       <div class="row-inline">
         <div class="field" style="margin:0;">
@@ -58,16 +61,16 @@
         <span class="conn-pill" id="conn-pill">—</span>
       </div>
     </div>
-    <div class="row-inline">
+    <div class="row-inline" id="ig-signin-row">
       <button class="btn-ai" onclick="startSignin()">Sign in to Instagram</button>
       <button class="btn-ai" style="background:var(--surface); color:var(--text-2);"
               onclick="disconnect()">Disconnect</button>
     </div>
-    <span class="hint">A real Instagram login page opens in a window. Sign in there as you
+    <span class="hint" id="ig-signin-hint">A real Instagram login page opens in a window. Sign in there as you
       would on your own phone — the human check, 2FA and any emailed code all happen on
       Instagram's own page. Nothing you type reaches us; what comes back is the session
       her browser was already using.</span>
-    <details style="margin-top:12px;">
+    <details style="margin-top:12px;" id="ig-cookie-details">
       <summary class="hint" style="cursor:pointer;">Paste a cookie instead</summary>
       <div class="row-inline" style="margin-top:10px;">
         <div class="field" style="flex:2;">
@@ -86,7 +89,7 @@
     <div class="section-title">Post now</div>
     <span class="hint">Stories, feed posts and Reels only — no DMs, no scheduling yet. A
       Reel needs a video file; Stories and posts can be a photo or a video.</span>
-    <div class="row-inline" style="margin-top:12px;">
+    <div class="row-inline" style="margin-top:12px;" id="ig-kind-row">
       <div class="field"><label>What to post</label>
         <select id="ig-kind" onchange="onKindChange()">
           <option value="post">Feed post</option>
@@ -95,7 +98,7 @@
         </select>
       </div>
     </div>
-    <div class="row-inline">
+    <div class="row-inline" id="ig-media-row">
       <div class="field">
         <label>Photo or video</label>
         <input type="file" id="ig-file" accept="image/*,video/*" onchange="onFilePicked(event)">
@@ -104,15 +107,15 @@
               onclick="generateImage()">Generate a photo with AI</button>
     </div>
     <img id="ig-preview" class="ig-preview" alt="">
-    <div class="field full">
+    <div class="field full" id="ig-caption-field">
       <label>Caption</label>
       <textarea id="ig-caption" rows="3" placeholder="Leave empty and she writes one herself"></textarea>
     </div>
-    <div class="field full">
+    <div class="field full" id="ig-brief-field">
       <label>What she should post about (optional, only used if the caption is empty)</label>
       <input type="text" id="ig-brief" placeholder="whatever she is up to that day — gym, work, the game she is playing">
     </div>
-    <div class="row-inline">
+    <div class="row-inline" id="ig-post-row">
       <button class="btn-ai" onclick="postNow()">Post now</button>
     </div>
     <div id="post-status" class="hint" style="margin-top:10px;"></div>
@@ -295,6 +298,7 @@ async function igStats(s){
 PlatformConsole.register({
   platform:'instagram',
   persona:slug,
+  paused:()=>document.body.classList.contains('fg-open'),
   statusUrl:s=>'/api/instagram/status?persona='+encodeURIComponent(s),
   emptyHint:'Nothing posted yet — post once from Settings.',
   read:d=>{
