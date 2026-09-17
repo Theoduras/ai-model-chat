@@ -174,10 +174,15 @@
   }
   // A step that borrows no controls is explanation only — hiding all of it
   // behind a disclosure would leave the step empty.
+  // A step's copy is usually a string built once. A step that draws something
+  // reflecting live state gives a function instead, so it is built per render.
+  function bodyHtml(step) {
+    return fill(typeof step.body === 'function' ? step.body() : step.body);
+  }
   function explainHtml(step) {
-    if (!(step.fields || []).length) return '<div class="fg-explain">' + fill(step.body) + '</div>';
+    if (!(step.fields || []).length) return '<div class="fg-explain">' + bodyHtml(step) + '</div>';
     return '<details class="fg-more"><summary>What every field here does</summary>' +
-      '<div class="fg-explain">' + fill(step.body) + '</div></details>';
+      '<div class="fg-explain">' + bodyHtml(step) + '</div></details>';
   }
 
   // A guide's copy says how many stages it has. Writing the number into the
@@ -191,13 +196,31 @@
   }
 
   function progress() {
+    var live = walk();
+    if (!live.length) return 100;
     var n = 0;
-    STEPS.forEach(function (s, i) { if (isDone(i)) n++; });
-    return Math.round(n / STEPS.length * 100);
+    live.forEach(function (i) { if (isDone(i)) n++; });
+    return Math.round(n / live.length * 100);
   }
+  // A step can take itself out of the walk — Telegram's two connect routes are
+  // alternatives, so the one you did not choose is not a step you skipped, it
+  // is a step that does not exist for you. Indices stay stable either way, so
+  // nothing else in here has to know.
+  function hidden(i) {
+    var s = STEPS[i];
+    if (!s || !s.hidden) return false;
+    try { return !!s.hidden(); } catch (e) { return false; }
+  }
+  function walk() {
+    var out = [];
+    for (var i = 0; i < STEPS.length; i++) if (!hidden(i)) out.push(i);
+    return out;
+  }
+  function posOf(i) { return walk().indexOf(i); }
+
   function stageSteps(key) {
     var mine = [];
-    STEPS.forEach(function (s, i) { if (s.stage === key) mine.push(i); });
+    STEPS.forEach(function (s, i) { if (s.stage === key && !hidden(i)) mine.push(i); });
     return mine;
   }
 
@@ -243,17 +266,19 @@
         '<div class="cn-hero-title">' + esc(cfg.railTitle) + ' \u00b7 ' + pct + '% done</div>' +
         '<div class="cn-hero-sub">' + (live
           ? 'Every step is done. Anything here can still be changed.'
-          : 'Step ' + (state.idx + 1) + ' of ' + STEPS.length + ' \u00b7 ' + esc(step.nav)) +
+          : 'Step ' + (posOf(state.idx) + 1) + ' of ' + walk().length +
+            ' \u00b7 ' + esc(step.nav)) +
         '</div></div>' +
       '<div class="fg-bar"><i style="width:' + pct + '%"></i></div></div>';
   }
 
   function footHtml() {
+    var live = walk(), at = posOf(state.idx);
     return '<div class="fg-foot">' +
-      (state.idx > 0 ? '<button class="btn btn-ghost" onclick="' + NS + '.back()">\u2190 Back</button>' : '') +
+      (at > 0 ? '<button class="btn btn-ghost" onclick="' + NS + '.back()">\u2190 Back</button>' : '') +
       '<button class="btn btn-primary" onclick="' + NS + '.next()">' +
-        (state.idx === STEPS.length - 1 ? 'Finish \u2713' : 'Continue \u2192') + '</button>' +
-      '<span class="fg-count">Step ' + (state.idx + 1) + ' of ' + STEPS.length + '</span>' +
+        (at === live.length - 1 ? 'Finish \u2713' : 'Continue \u2192') + '</button>' +
+      '<span class="fg-count">Step ' + (at + 1) + ' of ' + live.length + '</span>' +
       '<div class="fg-alt">' +
         '<button class="fg-skip" type="button" onclick="' + NS + '.tourReplay()">' +
           '<span aria-hidden="true">\u25ce</span>Show me around</button>' +
@@ -446,8 +471,9 @@
       }
     },
     firstUnfinished: function () {
-      for (var i = 0; i < STEPS.length; i++) if (!isDone(i)) return i;
-      return 0;
+      var live = walk();
+      for (var n = 0; n < live.length; n++) if (!isDone(live[n])) return live[n];
+      return live[0] || 0;
     },
     // Closing hands the console back with every borrowed control returned to
     // its own place, so the page is exactly as it would have been.
@@ -470,22 +496,37 @@
       api.goto(next === undefined ? mine[mine.length - 1] : next);
     },
     goto: function (i) {
-      state.idx = Math.max(0, Math.min(STEPS.length - 1, i));
+      var live = walk();
+      i = Math.max(0, Math.min(STEPS.length - 1, i));
+      // Landing on a step that has hidden itself (a route you switched away
+      // from) moves on to the next one that is really there.
+      if (hidden(i)) {
+        var fwd = live.filter(function (n) { return n >= i; });
+        i = fwd.length ? fwd[0] : (live[live.length - 1] || 0);
+      }
+      state.idx = i;
       markSeen(state.idx);
       render();
     },
+    // Re-draw the step in place, for a control in a step's own copy that
+    // changes what the rest of the walk looks like.
+    rerender: function () { render(); },
     next: function () {
       markSeen(state.idx);
-      if (state.idx === STEPS.length - 1) {
+      var live = walk(), at = posOf(state.idx);
+      if (at >= live.length - 1) {
         state.finished = true;
         state.idx = STEPS.length;
         save();
         render();
         return;
       }
-      api.goto(state.idx + 1);
+      api.goto(live[at + 1]);
     },
-    back: function () { api.goto(state.idx - 1); },
+    back: function () {
+      var live = walk(), at = posOf(state.idx);
+      if (at > 0) api.goto(live[at - 1]);
+    },
     // Leave the wizard and land on a control in the console behind it.
     jump: function (id) {
       api.close();
@@ -673,6 +714,18 @@
       '.fg-dl dd{margin:2px 0 0;color:var(--text-2);}',
       // The done card's onward links, in the same shape as the console's
       // health cards.
+      // A choice a step asks for outright, rather than a field it borrows.
+      '.fg-picks{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:12px;}',
+      '.fg-pick{text-align:left;font:inherit;cursor:pointer;background:var(--panel);',
+      'border:1px solid var(--border);border-radius:var(--r);padding:16px;color:inherit;}',
+      '.fg-pick:hover{border-color:var(--accent-line);}',
+      '.fg-pick.on{border-color:var(--accent);background:var(--accent-soft);}',
+      '.fg-pick-i{width:31px;height:31px;border-radius:var(--r-sm);background:var(--surface);',
+      'border:1px solid var(--border);display:flex;align-items:center;justify-content:center;',
+      'margin-bottom:10px;font-size:.9rem;}',
+      '.fg-pick.on .fg-pick-i{background:var(--accent-soft);border-color:var(--accent-line);}',
+      '.fg-pick-t{font-size:.86rem;font-weight:600;margin-bottom:4px;color:var(--text);}',
+      '.fg-pick-d{font-size:.76rem;color:var(--text-muted);line-height:1.5;}',
       '.fg-nxt{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:12px;}',
       '.fg-nxt-c{background:var(--panel);border:1px solid var(--border);border-radius:var(--r);',
       'padding:17px;text-decoration:none;color:inherit;}',

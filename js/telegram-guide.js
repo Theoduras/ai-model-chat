@@ -26,6 +26,51 @@
     return !!(e && e.checked);
   }
 
+  // Which of the two connections this model is being set up on. The two are
+  // genuinely alternatives with different risk, so the wizard asks rather than
+  // walking everyone past both \u2014 and 'both' is a real answer, because a bot for
+  // the fans who arrive by link and an account for the ones she reaches out to
+  // is a reasonable way to run her.
+  var ROUTE_KEY = 'tgGuideRoute';
+  var Route = {
+    get: function () {
+      try { return localStorage.getItem(ROUTE_KEY) || ''; } catch (e) { return ''; }
+    },
+    set: function (v) {
+      try { localStorage.setItem(ROUTE_KEY, v); } catch (e) {}
+      window.TelegramGuide.rerender();
+    },
+    has: function (v) {
+      var r = Route.get();
+      return r === v || r === 'both';
+    }
+  };
+  window.TelegramRoute = Route;
+
+  function choiceCards() {
+    var r = Route.get();
+    var card = function (key, icon, title, desc) {
+      return '<button type="button" class="fg-pick' + (r === key ? ' on' : '') +
+        '" onclick="TelegramRoute.set(\'' + key + '\')">' +
+        '<div class="fg-pick-i">' + icon + '</div>' +
+        '<div class="fg-pick-t">' + title + (r === key ? ' \u2713' : '') + '</div>' +
+        '<div class="fg-pick-d">' + desc + '</div></button>';
+    };
+    return '<div class="fg-picks">' +
+      card('bot', '\ud83e\udd16', 'A bot',
+           'Within Telegram\'s rules. Carries a bot label and a START button, and can never ' +
+           'message anyone first.') +
+      card('user', '\ud83d\udc64', 'A real account',
+           'Looks like a person and can open a conversation. Needs its own phone number, and ' +
+           'it is what Telegram bans for.') +
+      card('both', '\u267b\ufe0f', 'Both',
+           'A bot for fans who arrive by link, an account for the ones she reaches out to. ' +
+           'Two connections, one set of settings.') +
+      '</div>' +
+      (r ? '' : '<p class="fg-check fg-plain fg-bad" style="margin-top:14px;">' +
+                'Pick one to carry on \u2014 it decides which connect step comes next.</p>');
+  }
+
   var STEPS = [
     {
       stage: 'connect', nav: 'How it works',
@@ -33,7 +78,7 @@
       sub: '{stages} stages. You do each one right here — this is the console, not a copy of it.',
       fields: [],
       do: [
-        'Choose how she appears on Telegram: as a bot, or as a real account.',
+        'Choose how she appears on Telegram: as a bot, as a real account, or both.',
         'Set how she writes and how fast she follows up.',
         'Give her outfits and photos, so she has something to send.',
         'Decide who she talks to, and read the click numbers.',
@@ -45,25 +90,61 @@
         'she answers in her voice, follows up when they go quiet, and sends your funnel link ' +
         'once the conversation has earned it. Unlike a public feed, every Telegram ' +
         'conversation here is a private chat, so the funnel runs in all of them.</p>' +
-        '<p>The first choice is the big one:</p>' +
-        dl([
-          ['A bot',
-           'Carries a "bot" label, fans have to press <b>START</b> before it can write to them, ' +
-           'and it can never message anyone first. It is also entirely within Telegram\'s ' +
-           'rules, which is why it is the recommended path.'],
-          ['A real account',
-           'Looks like a person, needs no START, and can open a conversation itself. It also ' +
-           'needs its own phone number and it is against the spirit of Telegram\'s terms — ' +
-           'accounts that message strangers get rate-limited or banned.']
-        ]) +
+        '<p>The first choice is the big one, and the next step is nothing but that choice: ' +
+        'she can run on a <b>bot</b>, on a <b>real account</b>, or on both at once. They are ' +
+        'not the same product \u2014 one is inside Telegram\'s rules and cannot message anyone ' +
+        'first, the other looks like a person and can.</p>' +
         '<p>Everything after the connect stage is shared: the voice settings, the media and ' +
-        'the fan list apply to whichever of the two she is running on.</p>' +
+        'the fan list apply to whichever of the two a conversation is on.</p>' +
         '<p class="fg-note">The reply loop runs on the server, so she keeps answering with ' +
         'this tab closed. That needs a host that stays awake — it runs on Cloud Run and is ' +
         'off on Vercel.</p>'
     },
     {
+      stage: 'connect', nav: 'Bot or account?',
+      title: 'Choose how she appears on Telegram',
+      sub: 'The two routes are not the same product. Pick one \u2014 or both.',
+      fields: [],
+      do: [
+        'Read the comparison below.',
+        'Press the one you want. The next step is the one you picked.',
+        'You can come back and change it, or add the second route, at any time.'
+      ],
+      check: 'One of the three is ticked.',
+      done: function () { return !!Route.get(); },
+      body: function () {
+        return choiceCards() +
+        '<p style="margin-top:18px;">Side by side:</p>' +
+        dl([
+          ['Who she looks like',
+           '<b>Bot:</b> a bot \u2014 Telegram puts the label on it and there is no hiding it. ' +
+           '<b>Account:</b> a person, with her name and photo and nothing marking her out.'],
+          ['How a conversation starts',
+           '<b>Bot:</b> the fan must press <b>START</b> first. Nothing reaches them before ' +
+           'that, ever. <b>Account:</b> no START, and she can write to someone who has never ' +
+           'written to her.'],
+          ['What it costs to set up',
+           '<b>Bot:</b> one click on the shared bot, or a token from @BotFather. ' +
+           '<b>Account:</b> its own phone number, api_id and api_hash from my.telegram.org, ' +
+           'and a login code every time the session dies.'],
+          ['The risk',
+           '<b>Bot:</b> none worth naming \u2014 this is what the Bot API is for. ' +
+           '<b>Account:</b> automating a user account is against the spirit of Telegram\'s ' +
+           'terms, and accounts that message people who have not written first get ' +
+           'rate-limited or banned. Use a number you can afford to lose.'],
+          ['Reach',
+           '<b>Bot:</b> as far as her link travels \u2014 bio, link tree, X, anywhere. ' +
+           '<b>Account:</b> the same, plus anyone she can find a handle for. That extra reach ' +
+           'is exactly the part that carries the risk.']
+        ]) +
+        '<p class="fg-note">If you are unsure, take the bot. It is the recommended route, it ' +
+        'takes one click, and you can add the account later without redoing anything else ' +
+        '\u2014 the voice, media and fan settings are shared by both.</p>';
+      }
+    },
+    {
       stage: 'connect', nav: 'Connect a bot',
+      hidden: function () { return !Route.has('bot'); },
       title: 'The bot route — one click, or your own bot',
       sub: 'The safe option, and the one most creators should take.',
       fields: ['sec-bot'],
@@ -103,9 +184,10 @@
         'share link matters more here than on any other platform.</p>'
     },
     {
-      stage: 'connect', nav: 'Or a real account',
+      stage: 'connect', nav: 'Connect an account',
+      hidden: function () { return !Route.has('user'); },
       title: 'The account route — no bot label, no START',
-      sub: 'More reach, more risk, its own phone number. Skip this step if the bot is enough.',
+      sub: 'More reach, more risk, and its own phone number.',
       fields: ['sec-account'],
       do: [
         'Read the warning. This is a real account doing something Telegram does not sanction.',
@@ -141,8 +223,9 @@
            'every send here is an unsolicited message. Use it sparingly, on people who expect ' +
            'to hear from her.']
         ]) +
-        '<p class="fg-note">You do not need both routes. If the bot is connected and working, ' +
-        'this whole section can stay empty.</p>'
+        '<p class="fg-note">Running this alongside the bot is fine and is what <b>Both</b> ' +
+        'sets up: the two connections are independent, and every setting after this stage ' +
+        'applies to whichever one a given conversation is on.</p>'
     },
 
     {
@@ -386,6 +469,7 @@
       erased: [
         'Replies, switched off and back to their defaults',
         'Typing pace and the follow-up delay',
+        'Which route you chose \u2014 bot, real account or both',
         'The activity log'
       ],
       kept: [
@@ -402,6 +486,10 @@
           }],
           ['Clearing the activity log', function () {
             return http.del('/api/telegram/trace?persona=' + encodeURIComponent(slug));
+          }],
+          ['Forgetting which route you chose', function () {
+            try { localStorage.removeItem(ROUTE_KEY); } catch (e) {}
+            return Promise.resolve({ ok: true });
           }]
         ];
       }
