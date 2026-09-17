@@ -537,6 +537,12 @@ fetch('/api/features')
   <div class="tier-grid" id="tier-grid">Loading plans…</div>
 </section>
 
+<footer style="text-align:center;padding:32px 24px;">
+  <a href="/privacy" style="color:inherit;text-decoration:none;opacity:.7;">Privacy Statement</a>
+  <span style="opacity:.4;margin:0 10px;">·</span>
+  <a href="/tos" style="color:inherit;text-decoration:none;opacity:.7;">Terms and Conditions</a>
+</footer>
+
 <script>
 fetch('/api/pricing')
   .then(function(r){ return r.ok ? r.json() : null; })
