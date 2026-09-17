@@ -66,9 +66,7 @@
       card('both', '\u267b\ufe0f', 'Both',
            'A bot for fans who arrive by link, an account for the ones she reaches out to. ' +
            'Two connections, one set of settings.') +
-      '</div>' +
-      (r ? '' : '<p class="fg-check fg-plain fg-bad" style="margin-top:14px;">' +
-                'Pick one to carry on \u2014 it decides which connect step comes next.</p>');
+      '</div>';
   }
 
   var STEPS = [
@@ -106,16 +104,19 @@
       sub: 'The two routes are not the same product. Pick one \u2014 or both.',
       fields: [],
       do: [
-        'Read the comparison below.',
         'Press the one you want. The next step is the one you picked.',
+        'Unsure? Open <b>More about this</b> underneath for the two side by side.',
         'You can come back and change it, or add the second route, at any time.'
       ],
-      check: 'One of the three is ticked.',
+      check: 'One of the three is ticked. It decides which connect step comes next.',
       done: function () { return !!Route.get(); },
+      render: function (card) {
+        var box = document.createElement('div');
+        box.innerHTML = choiceCards();
+        card.appendChild(box.firstChild);
+      },
       body: function () {
-        return choiceCards() +
-        '<p style="margin-top:18px;">Side by side:</p>' +
-        dl([
+        return dl([
           ['Who she looks like',
            '<b>Bot:</b> a bot \u2014 Telegram puts the label on it and there is no hiding it. ' +
            '<b>Account:</b> a person, with her name and photo and nothing marking her out.'],

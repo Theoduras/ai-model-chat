@@ -152,6 +152,12 @@
       take(node);
       card.appendChild(node);
     });
+    // A step that asks for something the console has no field for — Telegram's
+    // bot-or-account choice — draws it here rather than in the explainer, so the
+    // thing you act on sits above the line that tells you it worked. Nothing has
+    // to be torn down: render() replaces the shell wholesale and unmount()
+    // rescues only the borrowed nodes.
+    if (step.render) { try { step.render(card); } catch (e) {} }
     if (!card.children.length) card.style.display = 'none';
     else card.style.display = '';
   }
@@ -179,9 +185,16 @@
   function bodyHtml(step) {
     return fill(typeof step.body === 'function' ? step.body() : step.body);
   }
+  // A step with controls folds its reference away — the controls are the step.
+  // A step that is nothing but explanation keeps it open, because folding it
+  // would leave an empty card.
   function explainHtml(step) {
-    if (!(step.fields || []).length) return '<div class="fg-explain">' + bodyHtml(step) + '</div>';
-    return '<details class="fg-more"><summary>What every field here does</summary>' +
+    var fields = (step.fields || []).length;
+    if (!fields && !step.render) {
+      return '<div class="fg-explain">' + bodyHtml(step) + '</div>';
+    }
+    return '<details class="fg-more"><summary>' +
+      (fields ? 'What every field here does' : 'More about this') + '</summary>' +
       '<div class="fg-explain">' + bodyHtml(step) + '</div></details>';
   }
 
@@ -272,6 +285,15 @@
       '<div class="fg-bar"><i style="width:' + pct + '%"></i></div></div>';
   }
 
+  // The label goes on a span so a phone can drop to the glyph alone; title and
+  // aria-label keep it named either way.
+  function alt(call, icon, label, cls) {
+    return '<button class="fg-skip' + (cls || '') + '" type="button" title="' + label +
+      '" aria-label="' + label + '" onclick="' + NS + '.' + call + '">' +
+      '<span aria-hidden="true">' + icon + '</span>' +
+      '<span class="fg-skip-t">' + label + '</span></button>';
+  }
+
   function footHtml() {
     var live = walk(), at = posOf(state.idx);
     return '<div class="fg-foot">' +
@@ -280,12 +302,9 @@
         (at === live.length - 1 ? 'Finish \u2713' : 'Continue \u2192') + '</button>' +
       '<span class="fg-count">Step ' + (at + 1) + ' of ' + live.length + '</span>' +
       '<div class="fg-alt">' +
-        '<button class="fg-skip" type="button" onclick="' + NS + '.tourReplay()">' +
-          '<span aria-hidden="true">\u25ce</span>Show me around</button>' +
-        '<button class="fg-skip" type="button" onclick="' + NS + '.close()">' +
-          '<span aria-hidden="true">\u2699</span>Skip guide</button>' +
-        '<button class="fg-skip fg-danger-btn" type="button" onclick="' + NS + '.resetAsk()">' +
-          '<span aria-hidden="true">\u21ba</span>Start over</button>' +
+        alt('tourReplay()', '\u25ce', 'Show me around') +
+        alt('close()', '\u2699', 'Skip guide') +
+        alt('resetAsk()', '\u21ba', 'Start over', ' fg-danger-btn') +
       '</div></div>';
   }
 
@@ -634,14 +653,27 @@
       '#fg-shell.on{display:block;overflow-y:auto;}',
       'body.fg-open ' + SCROLL + '{display:none;}',
       'body.fg-embedded > header{display:none;}',
-      // Same column the console itself is set in, so leaving the guide does not
-      // move anything sideways.
-      '.fg-page{max-width:760px;margin:0 auto;padding:28px 24px 80px;',
-      'display:flex;flex-direction:column;gap:20px;}',
-      '@media (max-width:640px){.fg-page{padding:18px 14px 70px;gap:16px;}',
-      // Four stage labels do not fit a phone. Let them size to their words and
-      // let the bar scroll, rather than squeeze until they overlap.
-      '.fg-page .cn-tab{flex:0 0 auto;min-width:0;}}',
+      // The console's own column, until there is room for more: the prose here
+      // keeps its own 64ch measure, so the extra width goes to the card grids
+      // and the borrowed controls rather than to longer lines.
+      '.fg-page{width:100%;max-width:760px;margin:0 auto;padding:22px 24px 0;',
+      'display:flex;flex-direction:column;gap:14px;}',
+      '@media (min-width:1100px){.fg-page{max-width:960px;}}',
+      '@media (max-width:640px){.fg-page{padding:16px 14px 0;gap:12px;}}',
+      // The chrome above a step was spending more height than the step. The
+      // tab bar's own bottom margin is double-spacing inside a gapped column.
+      '.fg-page .cn-tabs{margin:0;}',
+      '.fg-page .cn-hero{padding:14px 18px;}',
+      '.fg-page .cn-hero-title{font-size:.98rem;}',
+      '#fg-step{gap:14px;}',
+      // Stage tabs and step pills are one scrolling ribbon at every width.
+      // Left to wrap, a four-step stage breaks its labels over two lines.
+      '.fg-page .cn-tabs,.fg-page .cn-steps{scrollbar-width:none;}',
+      '.fg-page .cn-tabs::-webkit-scrollbar,',
+      '.fg-page .cn-steps::-webkit-scrollbar{display:none;}',
+      '.fg-page .cn-tab{flex:0 0 auto;min-width:0;}',
+      '.fg-page .cn-steps{flex-wrap:nowrap;overflow-x:auto;}',
+      '.fg-page .cn-step{flex:0 0 auto;white-space:nowrap;}',
       // The hero carries the progress bar the left rail used to.
       '.fg-bar{margin-left:auto;flex-shrink:0;width:104px;height:5px;border-radius:9999px;',
       'background:var(--surface-2);overflow:hidden;}',
@@ -662,8 +694,15 @@
       // A step that borrows a whole console section already says what it is in its
       // own title, so the section keeps its controls and loses its header.
       '#fg-step-body > .form-section > .section-title{display:none;}',
+      // The console's own hint text has no measure of its own — it never needed
+      // one in a 760px column. Give it one, now that the wizard can be wider.
+      '#fg-step-body .hint,#fg-step-body label{max-width:76ch;}',
       '#fg-step-body:empty{display:none;}',
-      '.fg-foot{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}',
+      // Continue never scrolls away, which is what stops a long step mattering
+      // and what makes the empty space under a short one harmless.
+      '.fg-foot{position:sticky;bottom:0;z-index:2;margin-top:6px;',
+      'display:flex;align-items:center;gap:10px;flex-wrap:wrap;',
+      'padding:12px 0;background:var(--bg);border-top:1px solid var(--border-soft);}',
       '.fg-count{font-size:.74rem;color:var(--text-muted);}',
       '.fg-alt{margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}',
       '.fg-skip{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;min-height:36px;',
@@ -671,6 +710,15 @@
       'cursor:pointer;font-family:var(--font);font-size:.78rem;font-weight:500;',
       'color:var(--text-2);white-space:nowrap;}',
       '.fg-skip:hover{background:var(--surface);border-color:var(--accent-line);color:var(--text);}',
+      // On a phone the three secondary buttons eat a whole row on their own.
+      // Keep all three reachable by dropping to their glyphs.
+      '@media (max-width:640px){.fg-skip{padding:8px 11px;gap:0;}',
+      '.fg-skip .fg-skip-t{display:none;}',
+      // The hero already says which step this is; the footer repeating it is
+      // what pushes the buttons onto a second row.
+      '.fg-count{display:none;}',
+      // Two card columns on a phone is four words a line. One is readable.
+      '.fg-page .fg-picks,.fg-page .fg-nxt,.fg-page .fg-two{grid-template-columns:1fr;}}',
       '.fg-do{list-style:none;counter-reset:fgdo;margin:0;padding:0;max-width:64ch;}',
       '.fg-do li{counter-increment:fgdo;position:relative;padding-left:30px;margin-bottom:7px;',
       'font-size:.86rem;line-height:1.5;color:var(--text-2);}',
