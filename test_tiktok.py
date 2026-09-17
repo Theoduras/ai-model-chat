@@ -212,8 +212,12 @@ def test_the_transport_chunks_the_way_tiktok_asks():
 
 
 def test_the_planner_publishes_a_tiktok_video_itself():
-    check('tiktok is a channel the planner publishes rather than hands over',
-          'tiktok' in growth.PUBLISHABLE)
+    # Parked, so a planned TikTok post goes back to the creator rather than
+    # firing at a channel the console is not offering yet. The publishing path
+    # below is what unparking switches back on, so it is still tested.
+    check('a parked TikTok post waits on the creator',
+          'tiktok' not in growth.PUBLISHABLE
+          and growth.queue_status_for('tiktok') == 'manual')
     spec = growth.MEDIA_SUPPORT['tiktok']
     check('and it hands over the bytes itself', spec['how'] == 'upload')
     check('one clip per post', spec['max'] == 1 and spec['kinds'] == ('video',))

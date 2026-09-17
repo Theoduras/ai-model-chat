@@ -198,6 +198,19 @@ Stay completely in character. Never mention being an AI.
   full of people is not a fan being worked towards something, so it never runs
   the funnel, never nudges, and never carries an offer. A paid link only ever
   goes out in a DM.
+- **TikTok is parked too.** The sidebar says Coming soon, `growth.PUBLISHABLE`
+  no longer carries it, and a planned TikTok post goes back to the creator as a
+  `manual` row rather than firing at a channel the console is not offering. The
+  app, the OAuth and the Content Posting transport are all built and tested and
+  stay in the tree; unpark it by putting `tiktok` back in `PUBLISHABLE`, in
+  `PL_PUBLISHABLE` in `planner.html`, and restoring the sidebar item.
+- **OnlyFans is parked in the UI.** The sidebar says Coming soon and the
+  onboarding's done card no longer offers it, so nobody is pointed at a
+  connection they are not meant to make yet. Nothing else changed: the console,
+  `onlyfans.py`, the hosted sign-in and the reply loop all stay in the tree and
+  `/onlyfans` still serves, the same way Reddit's does. Unpark it by restoring
+  the sidebar item (`data-platform="onlyfans"` with its `openPlatform` handler)
+  and the `onlyfans` entry in `PLATFORM_CARDS` in `js/onboarding.js`.
 - **Reddit is parked.** The sidebar says Coming soon, `growth.PUBLISHABLE` no
   longer carries it, and a planned Reddit post goes back to the creator as a
   `manual` row. Everything else is built and tested and stays in the tree —

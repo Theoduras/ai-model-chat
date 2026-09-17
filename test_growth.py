@@ -260,9 +260,10 @@ print()
 print('by-hand queue rows')
 check('a publishable channel waits on the scheduler', G.queue_status_for('x') == 'queued')
 check('threads too', G.queue_status_for('threads') == 'queued')
-check('Instagram, Reddit and TikTok publish themselves now',
-      [G.queue_status_for(p) for p in ('instagram', 'tiktok')] == ['queued'] * 2
-      and G.queue_status_for('reddit') == 'manual')
+check('Instagram publishes itself now',
+      G.queue_status_for('instagram') == 'queued')
+check('a parked channel goes back to the creator as a manual row',
+      [G.queue_status_for(p) for p in ('reddit', 'tiktok')] == ['manual'] * 2)
 check('manual is a real state', 'manual' in G.QUEUE_STATES)
 check('both editable states can still be touched',
       set(G.EDITABLE_STATES) == {'queued', 'manual'})
@@ -482,8 +483,8 @@ check('the carousel channels take more than one',
       and G.media_max('reddit') > 1 and G.media_max('instagram') > 1)
 check('a TikTok post is one clip', G.media_max('tiktok') == 1)
 
-check('every publishable channel but TikTok can carry a still',
-      all(G.media_ok(p, 'image') for p in G.PUBLISHABLE if p != 'tiktok'))
+check('every publishable channel can carry a still',
+      all(G.media_ok(p, 'image') for p in G.PUBLISHABLE))
 
 def test_nothing_failed():
     assert not FAILURES, FAILURES

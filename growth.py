@@ -453,7 +453,7 @@ POST_PLATFORMS = {
 
 # What the platform can actually publish on its own. The rest are written here
 # and posted by hand, which is why they are generated but never queued.
-PUBLISHABLE = ('x', 'threads', 'fanvue', 'instagram', 'tiktok')
+PUBLISHABLE = ('x', 'threads', 'fanvue', 'instagram')
 
 # A variant is a second way to write for a channel that already exists, not a
 # channel of its own, so anything keyed per channel — the content level, the
