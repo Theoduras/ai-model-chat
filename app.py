@@ -5481,6 +5481,16 @@ def blog_page():
     return send_from_directory(BASE_DIR, 'blog.html')
 
 
+@app.route('/privacy', methods=['GET'])
+def privacy_page():
+    return send_from_directory(BASE_DIR, 'privacy.html')
+
+
+@app.route('/tos', methods=['GET'])
+def tos_page():
+    return send_from_directory(BASE_DIR, 'tos.html')
+
+
 @app.route('/blog/<slug>', methods=['GET'])
 def blog_post_page(slug):
     # The post is picked from the path client-side, so every slug serves the
