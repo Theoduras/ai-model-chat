@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Generation Studio</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <script src="/js/theme.js"></script>
+  <link rel="stylesheet" href="/css/style.css">
+  <script src="/js/devnav.js" defer></script>
+  <style>
+    .fv-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+    .fv-wrap { max-width: 900px; margin: 0 auto; padding: 28px 24px 80px;
+               display: flex; flex-direction: column; gap: 20px; }
+    .note-box { border: 1px solid var(--border); background: var(--surface); color: var(--text-2);
+                border-radius: 10px; padding: 12px 14px; font-size: 0.82rem; line-height: 1.5; }
+    .note-box b { color: var(--text); }
+  </style>
+</head>
+<body class="page-dashboard">
+
+<header>
+  <div style="display:flex; align-items:center; gap:10px;">
+    <h1>Generation Studio</h1>
+    <span class="badge">Admin testing</span>
+  </div>
+  <div style="display:flex; align-items:center; gap:16px;">
+    <nav data-site-nav="inline" class="sn-links sn-inline"></nav>
+    <a href="/dashboard" style="color:var(--text-muted); font-size:0.8rem; text-decoration:none;">← Dashboard</a>
+  </div>
+</header>
+
+<div class="fv-scroll">
+<div class="fv-wrap">
+
+  <div class="note-box" id="intro">
+    Internal testing surface for NSFW photo and video generation. It is not offered
+    to creators yet, and an admin account generates on <b>unlimited credits</b> — the
+    credit prices shown are what a creator's plan would be charged.
+  </div>
+
+  <div class="form-section">
+    <div class="section-title">Persona</div>
+    <div class="field full">
+      <label>Whose photos are we generating?</label>
+      <select id="persona" onchange="loadPersona()"></select>
+      <span class="hint" id="persona-hint"></span>
+    </div>
+  </div>
+
+  <div class="vault" id="gen-panel">
+    <div class="vault-head">
+      <span class="vault-title">Generate <span id="gen-balance" class="vault-sel"></span></span>
+    </div>
+
+    <div class="gen-form">
+      <label class="gen-f"><span>Shot</span>
+        <select id="gen-shot" onchange="genQuote()"></select></label>
+      <label class="gen-f"><span>Model</span>
+        <select id="gen-model" onchange="genQuote()"></select></label>
+      <label class="gen-f"><span>Size</span>
+        <select id="gen-res" onchange="genQuote()"></select></label>
+      <label class="gen-f"><span>How many</span>
+        <select id="gen-batch" onchange="genQuote()">
+          <option value="1">1</option><option value="2">2</option>
+          <option value="4" selected>4</option><option value="6">6</option>
+        </select></label>
+      <label class="gen-f gen-wide"><span>Her face</span>
+        <select id="gen-ref" onchange="genQuote()"></select></label>
+    </div>
+    <div class="gen-go">
+      <button type="button" class="btn-ai" id="gen-run-btn" onclick="runGeneration()">
+        Generate <span id="gen-cost"></span></button>
+      <span class="hint" id="gen-status" style="margin:0;"></span>
+    </div>
+    <span class="hint">Pick one of her existing photos under <b>Her face</b> and every
+      generation comes back as the same woman. New shots wait below for three days —
+      keep the ones worth keeping, the rest delete themselves.</span>
+
+    <div class="gen-staging" id="gen-staging"></div>
+  </div>
+
+  <div class="vault" id="vault-panel">
+    <div class="vault-head">
+      <span class="vault-title">Kept photos <span id="vault-count"></span></span>
+      <div class="vault-tools">
+        <span class="hint" style="margin:0;">▶ turns a photo into a clip</span>
+      </div>
+    </div>
+    <div class="vault-grid" id="vault-grid"></div>
+    <span class="hint">Everything here is approved: uploads plus whatever was kept from a
+      generation. A clip can only start from one of these — its first frame is what keeps
+      the face consistent, so there is no text-to-video.</span>
+  </div>
+
+</div>
+</div>
+
+<script src="/js/site-nav.js" defer></script>
+<script>
+function el(id){ return document.getElementById(id); }
+function esc(s){ return (s||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function slug(){ return (el('persona')||{}).value || ''; }
+
+// Every control quotes its own price before it is clicked: a button that spends
+// credits without saying how many is the one thing this panel must not be.
+let genPrices = null;      // the server's price table
+let genCredits = null;     // null = unlimited, which is every admin
+let genAllowedShots = [];  // resolved server side from the persona's NSFW level
+let mediaVault = [];
+let genJobs = [];
+let genTimer = null;
+
+const GEN_SHOT_LABELS = {
+  portrait: 'Portrait', half: 'Waist up', full: 'Full body',
+  candid: 'Candid', mirror: 'Mirror selfie', lingerie: 'Lingerie',
+  implied: 'Implied nude', sheer: 'Sheer robe', bedroom: 'Bedroom',
+  topless: 'Topless', nude: 'Nude', explicit: 'Explicit',
+};
+const GEN_RES_LABELS = {
+  '768x1024': 'Small', '1024x1024': 'Square',
+  '1024x1536': 'Portrait', '1536x2048': 'Large',
+};
+
+async function init() {
+  try {
+    const list = await (await fetch('/api/personas')).json();
+    const rows = Array.isArray(list) ? list : (list.personas || []);
+    el('persona').innerHTML = rows.map(p =>
+      `<option value="${esc(p.slug)}">${esc(p.name || p.slug)}</option>`).join('');
+    if (!el('persona').options.length) {
+      el('persona-hint').textContent = 'Create a persona first — generation needs one to look like.';
+      return;
+    }
+  } catch (e) {
+    el('persona-hint').textContent = 'Could not load personas.';
+    return;
+  }
+  await loadCredits();
+  await loadPersona();
+}
+
+async function loadCredits() {
+  try {
+    const res = await fetch('/api/credits');
+    if (!res.ok) return;
+    const d = await res.json();
+    genPrices = d.prices;
+    genCredits = d.unlimited ? null : d.balance;
+    const e = el('gen-balance');
+    if (e) {
+      e.textContent = d.unlimited
+        ? '· unlimited (admin)'
+        : `· ${d.balance.toLocaleString()} credits — about ${d.equivalents.photos.toLocaleString()} photos or ${d.equivalents.clips} clips`;
+      e.style.minWidth = '0';
+    }
+  } catch (e) {}
+}
+
+async function loadPersona() {
+  if (!slug()) return;
+  try {
+    const d = await (await fetch('/api/personas/' + encodeURIComponent(slug()) + '/media')).json();
+    mediaVault = d.vault || [];
+    genAllowedShots = d.shots || [];
+    el('persona-hint').textContent =
+      `NSFW level: ${d.nsfw_level || 'sfw'} — that is what decides which shots are offered.`;
+  } catch (e) { mediaVault = []; genAllowedShots = []; }
+  renderVault();
+  renderGenForm();
+  pollGenJobs();
+}
+
+function renderGenForm() {
+  if (!genPrices) return;
+  const opt = (v, label, sel) =>
+    `<option value="${v}"${v === sel ? ' selected' : ''}>${esc(label)}</option>`;
+
+  const shot = el('gen-shot');
+  if (shot) {
+    const keep = shot.value;
+    shot.innerHTML = genAllowedShots.map(s =>
+      opt(s, GEN_SHOT_LABELS[s] || s, keep)).join('')
+      || '<option value="">This persona has NSFW off</option>';
+  }
+  const model = el('gen-model');
+  if (model && !model.options.length) {
+    model.innerHTML = Object.keys(genPrices.images).map(m =>
+      opt(m, genPrices.labels[m] || m, genPrices.defaults.model)).join('');
+  }
+  const res = el('gen-res');
+  if (res && !res.options.length) {
+    res.innerHTML = genPrices.resolutions.map(r =>
+      opt(r, `${GEN_RES_LABELS[r] || r} (${r})`, genPrices.defaults.resolution)).join('');
+  }
+  const ref = el('gen-ref');
+  if (ref) {
+    const keep = ref.value;
+    const photos = mediaVault.filter(v => v.kind !== 'video');
+    ref.innerHTML = '<option value="">A brand new face</option>' +
+      photos.map((v, i) => opt(v.id, `Photo ${i + 1}${v.purpose ? ' — ' + v.purpose : ''}`, keep)).join('');
+  }
+  genQuote();
+}
+
+function genQuote() {
+  if (!genPrices) return;
+  const row = genPrices.images[el('gen-model').value] || {};
+  let per = row[el('gen-res').value];
+  if (per === undefined) return;
+  if (el('gen-ref').value) per += genPrices.addons.faceswap;   // the identity pass
+  const total = per * parseInt(el('gen-batch').value || '1', 10);
+
+  el('gen-cost').textContent = `· ${total} credit${total === 1 ? '' : 's'}`;
+  const short = genCredits !== null && genCredits < total;
+  el('gen-run-btn').classList.toggle('gen-low', short);
+  if (short) setGenStatus(`Only ${genCredits} credits left.`, false);
+  return total;
+}
+
+function setGenStatus(msg, ok) {
+  const e = el('gen-status');
+  if (!e) return;
+  e.textContent = msg || '';
+  e.style.color = ok === true ? 'var(--ok)' : ok === false ? 'var(--err)' : '#5a5a63';
+}
+
+async function runGeneration() {
+  if (!slug()) return;
+  const btn = el('gen-run-btn');
+  btn.disabled = true;
+  setGenStatus('Sending…', null);
+  try {
+    const res = await fetch('/api/generate/job', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        persona: slug(), kind: 'image',
+        shot: el('gen-shot').value,
+        model: el('gen-model').value,
+        resolution: el('gen-res').value,
+        batch: parseInt(el('gen-batch').value || '1', 10),
+        reference_media: el('gen-ref').value || '',
+      }),
+    });
+    const d = await res.json();
+    if (!d.ok) throw new Error(d.error || 'Generation failed');
+    setGenStatus(`Running — ${d.credits} credits`, null);
+    loadCredits();
+    pollGenJobs();
+  } catch (e) { setGenStatus('✗ ' + e.message, false); }
+  finally { btn.disabled = false; }
+}
+
+async function animateMedia(id) {
+  const secs = genPrices ? genPrices.defaults.video_duration : 5;
+  const resv = genPrices ? genPrices.defaults.video_resolution : '720p';
+  const cost = genPrices ? genPrices.videos[resv][secs] : '?';
+  if (!confirm(`Animate this photo into a ${secs}s ${resv} clip for ${cost} credits?`)) return;
+  setGenStatus('Sending…', null);
+  try {
+    const res = await fetch('/api/generate/job', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ persona: slug(), kind: 'video',
+                             resolution: resv, seconds: secs, reference_media: id }),
+    });
+    const d = await res.json();
+    if (!d.ok) throw new Error(d.error || 'Generation failed');
+    setGenStatus(`Clip running — ${d.credits} credits. It takes a few minutes.`, null);
+    loadCredits();
+    pollGenJobs();
+  } catch (e) { setGenStatus('✗ ' + e.message, false); }
+}
+
+async function pollGenJobs() {
+  if (!slug()) return;
+  try {
+    const res = await fetch('/api/generate/jobs?persona=' + encodeURIComponent(slug()));
+    if (!res.ok) return;
+    genJobs = (await res.json()).jobs || [];
+  } catch (e) { return; }
+  renderGenStaging();
+
+  // Poll only while something is in flight, so an idle tab is not hitting the
+  // server every three seconds forever.
+  clearTimeout(genTimer);
+  if (genJobs.some(j => j.status === 'queued' || j.status === 'running')) {
+    genTimer = setTimeout(pollGenJobs, 3000);
+  }
+}
+
+function genTtl(iso) {
+  if (!iso) return '';
+  const hours = Math.round((new Date(iso) - Date.now()) / 3600000);
+  if (hours <= 0) return 'gone soon';
+  if (hours < 24) return hours + 'h left';
+  return Math.round(hours / 24) + 'd left';
+}
+
+function renderGenStaging() {
+  const box = el('gen-staging');
+  if (!box) return;
+  const cards = [];
+  genJobs.forEach(job => {
+    if (job.status === 'queued' || job.status === 'running') {
+      cards.push(`<div class="gen-card gen-pending">Generating
+        ${job.kind === 'video' ? 'a clip' : 'photos'}…</div>`);
+      return;
+    }
+    if (job.status === 'failed') {
+      cards.push(`<div class="gen-card gen-failed gen-pending">✗ ${esc(job.error || 'failed')}
+        <br><span style="opacity:.7">${job.credits} credits refunded</span></div>`);
+      return;
+    }
+    job.media.filter(m => !m.approved).forEach(m => {
+      const thumb = m.kind === 'video'
+        ? `<video src="${m.url}" muted playsinline preload="metadata" controls></video>`
+        : `<img src="${m.url}" alt="">`;
+      cards.push(`
+        <div class="gen-card">
+          ${thumb}
+          <span class="gen-ttl">${esc(genTtl(m.expires_at))}</span>
+          <div class="gen-acts">
+            <button type="button" class="gen-keep" onclick="keepGenerated('${m.id}', true)">Keep</button>
+            <button type="button" class="gen-drop" onclick="keepGenerated('${m.id}', false)">Drop</button>
+          </div>
+        </div>`);
+    });
+  });
+  box.innerHTML = cards.join('');
+}
+
+async function keepGenerated(id, keep) {
+  try {
+    const res = await fetch('/api/generate/keep', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keep: keep, media_ids: [id] }),
+    });
+    const d = await res.json();
+    if (!d.ok) throw new Error(d.error || 'Could not save that');
+    setGenStatus(keep ? '✓ Kept — it is in the vault now' : 'Dropped', keep ? true : null);
+    await loadPersona();
+  } catch (e) { setGenStatus('✗ ' + e.message, false); }
+}
+
+function renderVault() {
+  const grid = el('vault-grid');
+  if (!grid) return;
+  grid.innerHTML = mediaVault.length ? mediaVault.map(v => {
+    const thumb = v.kind === 'video'
+      ? `<video src="${v.thumb}" muted playsinline preload="metadata"></video>
+         <span class="vault-kind">video</span>`
+      : `<img src="${v.thumb}" alt="" draggable="false">`;
+    return `
+      <div class="vault-item">
+        ${thumb}
+        ${v.kind === 'video' ? '' : `<button type="button" class="vault-anim"
+          title="Animate this photo into a short clip"
+          onclick="animateMedia('${v.id}')">▶</button>`}
+      </div>`;
+  }).join('') : '<div class="vault-empty">Nothing kept yet — generate some shots above.</div>';
+  el('vault-count').textContent = mediaVault.length ? `(${mediaVault.length})` : '';
+}
+
+init();
+</script>
+</body>
+</html>

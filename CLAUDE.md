@@ -26,6 +26,7 @@ kept as a secondary target and still works, but is not where the app is deployed
 
 ```
 app.py                          — Flask server, Gemini API, multi-persona, builder API
+studio.html                     — Generation studio (admin-only while in testing)
 imagegen.py                     — NSFW image/video generation (Runware, ModelsLab)
 credits.py                      — Credit pricing, tier packs, margin floor
 storage.py                      — GCS for generated media (staging vs kept)
@@ -82,6 +83,7 @@ requirements.txt                — Python deps: flask, google-genai, python-dot
 | `GET /api/personas/{slug}` | — | Get persona config + prompt |
 | `POST /api/personas/{slug}` | JSON | Save config and regenerate system prompt |
 | `POST /api/personas/{slug}/preview` | JSON | Preview generated prompt without saving |
+| `GET /studio` | — | Generation studio (admin only) |
 | `GET /api/credits` | — | Balance, tier-resolved packs, generation price table |
 | `POST /api/credits/checkout` | JSON | Buy a top-up pack (Stripe or Oxapay) |
 | `POST /api/generate/job` | JSON | Submit an image or video generation |
@@ -200,6 +202,15 @@ Stay completely in character. Never mention being an AI.
   the new-device code are Discord's to handle; what comes back is the token
   plus the build and capabilities that account really identified with. Those
   two are what the gateway must then claim to be — captured, never guessed.
+- **Generation is admin-only while it is in testing.** `/studio` and every
+  `/api/generate/*` route go through `_require_admin`, which 404s rather than
+  403s so the surface is not discoverable; the sidebar item carries
+  `admin-only` and sits under Developers. An admin holds `UNLIMITED_CAPS`, so
+  `credits_month` is None and nothing is charged or written to the ledger —
+  the credit prices the studio shows are what a creator's plan *would* pay.
+  Credit top-up checkout is admin-gated too: nobody should buy credits for a
+  feature that is not offered yet. Open it to creators by dropping those
+  `_require_admin` calls and the `admin-only` class on the sidebar item.
 - **NSFW generation never runs on Google.** Imagen and `gemini-2.5-flash-image`
   refuse explicit content at any safety level, so `/api/generate/image` stays as
   the SFW path and everything explicit goes through `imagegen.py` to a managed

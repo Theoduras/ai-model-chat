@@ -1406,7 +1406,7 @@ FEATURE_ROWS = [
      'you like. Interests and conversion triggers come out of the same pass.'),
     (G1, 'AI photo and video generation',
      lambda c: ('Unlimited credits' if c['credits_month'] is None
-                else f"{c['credits_month']:,} credits a month, top up any time"),
+                else f"{c['credits_month']:,} generation credits a month"),
      'Create on-brand photos and short clips of your persona \u2014 her look, '
      'her outfit, the setting \u2014 without booking a shoot.'),
     (G1, 'Photo library',
@@ -2032,8 +2032,11 @@ def _credit_balance(user, session_db=None):
 
 
 def _credits_denied(need, have):
+    # Top-up checkout is admin-only while generation is in testing, so only tell
+    # a caller to buy credits if buying is actually open to them.
+    can_buy = bool((_current_user() or {}).get('is_admin'))
     return jsonify({'ok': False, 'error': 'Not enough credits.',
-                    'need': need, 'have': have, 'buy_credits': True}), 402
+                    'need': need, 'have': have, 'buy_credits': can_buy}), 402
 
 
 def _spend_credits(user, amount, source, note=''):
@@ -4585,9 +4588,10 @@ def api_credits():
 
 @app.route('/api/credits/history')
 def api_credits_history():
+    blocked = _require_admin()
+    if blocked:
+        return blocked
     user = _current_user()
-    if not user:
-        return jsonify({'error': 'Sign in required'}), 401
     from db import credit_history
     s = _db_session()
     try:
@@ -4605,10 +4609,14 @@ def api_credits_history():
 def api_credits_checkout():
     """Buy a top-up pack. Rides the same Payment row, the same two providers
     and the same two webhooks as a subscription — `kind` is the only thing that
-    tells them apart, so Oxapay keeps working untouched."""
+    tells them apart, so Oxapay keeps working untouched.
+
+    Admin-only for now: the packs are priced for a generation feature that is
+    still in testing, so nobody should be able to buy credits for it yet."""
+    blocked = _require_admin()
+    if blocked:
+        return blocked
     user = _current_user()
-    if not user:
-        return jsonify({'error': 'Sign in required'}), 401
     body = request.get_json(silent=True) or {}
     try:
         size = int(body.get('credits') or 0)
@@ -5555,6 +5563,16 @@ def api_landing_get():
 @app.route('/landing')
 def landing():
     return send_from_directory(BASE_DIR, 'landingpage.html')
+
+
+@app.route('/studio')
+def studio():
+    """Generation studio. Admin-only while the feature is being tested: it is
+    not offered to creators yet, and an admin generates on unlimited credits."""
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    return send_from_directory(BASE_DIR, 'studio.html')
 
 
 # Inline text/image editing for the plain marketing pages (not the persona
@@ -27862,9 +27880,10 @@ def _persona_config(slug):
 def api_generate_job():
     """Submit a generation. Quotes it, reserves the credits, then calls the
     provider — in that order, so an unaffordable job never costs an API call."""
+    blocked = _require_admin()
+    if blocked:
+        return blocked
     user = _current_user()
-    if not user:
-        return jsonify({'ok': False, 'error': 'Sign in required'}), 401
     body = request.get_json(silent=True) or {}
     slug = (body.get('persona') or '').strip().lower()
     if not re.match(r'^[a-z0-9_-]+$', slug or ''):
@@ -28073,9 +28092,10 @@ def _gen_worker():
 
 @app.route('/api/generate/job/<job_id>')
 def api_generate_job_status(job_id):
+    blocked = _require_admin()
+    if blocked:
+        return blocked
     user = _current_user()
-    if not user:
-        return jsonify({'error': 'Sign in required'}), 401
     from db import get_generation
     s = _db_session()
     try:
@@ -28089,9 +28109,10 @@ def api_generate_job_status(job_id):
 
 @app.route('/api/generate/jobs')
 def api_generate_jobs():
+    blocked = _require_admin()
+    if blocked:
+        return blocked
     user = _current_user()
-    if not user:
-        return jsonify({'error': 'Sign in required'}), 401
     slug = (request.args.get('persona') or '').strip().lower()
     from db import list_generations
     s = _db_session()
@@ -28127,9 +28148,10 @@ def api_generate_keep():
     """Keep or drop a staged generation. Keeping promotes it out of the staging
     prefix so the lifecycle rule stops watching it, and approves it — which is
     the moment it becomes something a fan can be sent."""
+    blocked = _require_admin()
+    if blocked:
+        return blocked
     user = _current_user()
-    if not user:
-        return jsonify({'ok': False, 'error': 'Sign in required'}), 401
     body = request.get_json(silent=True) or {}
     keep = bool(body.get('keep'))
     ids = [str(i) for i in (body.get('media_ids') or []) if i][:50]
