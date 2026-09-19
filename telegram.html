@@ -283,7 +283,53 @@
           </div>
         </div>
         <div class="vault-grid" id="vault-grid"></div>
-        <span class="hint">Every photo you upload or generate lands here. Select some and add them to an outfit — the same photo can be used in more than one. Drop files anywhere on the vault to upload.</span>
+        <span class="hint">Every photo you upload or keep lands here. Select some and add them to an outfit — the same photo can be used in more than one. Drop files anywhere on the vault to upload.</span>
+      </div>
+
+      <div class="vault" id="gen-panel" style="margin-top:10px;">
+        <div class="vault-head">
+          <span class="vault-title">Generate <span id="gen-balance" class="vault-sel"></span></span>
+          <div class="vault-tools">
+            <button type="button" class="btn-ai" id="gen-buy-btn" onclick="openCreditPacks()">Buy credits</button>
+          </div>
+        </div>
+
+        <div class="gen-form">
+          <label class="gen-f"><span>Shot</span>
+            <select id="gen-shot" onchange="genQuote()"></select></label>
+          <label class="gen-f"><span>Model</span>
+            <select id="gen-model" onchange="genQuote()"></select></label>
+          <label class="gen-f"><span>Size</span>
+            <select id="gen-res" onchange="genQuote()"></select></label>
+          <label class="gen-f"><span>How many</span>
+            <select id="gen-batch" onchange="genQuote()">
+              <option value="1">1</option><option value="2">2</option>
+              <option value="4" selected>4</option><option value="6">6</option>
+            </select></label>
+          <label class="gen-f gen-wide"><span>Her face</span>
+            <select id="gen-ref" onchange="genQuote()"></select></label>
+        </div>
+        <div class="gen-go">
+          <button type="button" class="btn-ai" id="gen-run-btn" onclick="runGeneration()">
+            Generate <span id="gen-cost"></span></button>
+          <span class="hint" id="gen-status" style="margin:0;"></span>
+        </div>
+        <span class="hint">Pick one of her existing photos under <b>Her face</b> and every
+          generation comes back as the same woman. New shots wait here for three days —
+          keep the ones you want, the rest delete themselves.</span>
+
+        <div class="gen-staging" id="gen-staging"></div>
+      </div>
+
+      <div id="credit-packs" class="gen-packs" style="display:none;">
+        <div class="gen-packs-inner">
+          <div class="vault-head">
+            <span class="vault-title">Buy credits</span>
+            <button type="button" class="btn-ai vault-danger" onclick="closeCreditPacks()">Close</button>
+          </div>
+          <div class="gen-pack-grid" id="gen-pack-grid"></div>
+          <span class="hint" id="gen-pack-hint"></span>
+        </div>
       </div>
 
       <div id="outfit-list" style="display:flex;flex-direction:column;gap:8px;"></div>
@@ -878,9 +924,282 @@ async function loadMedia() {
     mediaItems = data.items || [];
     mediaVault = data.vault || data.items || [];
     mediaLinks = data.links || [];
+    genAllowedShots = data.shots || [];
     renderVault();
     renderOutfits();
+    loadCredits();
+    renderGenForm();
+    pollGenJobs();
   } catch(e) { setMediaStatus('Could not load media', false); }
+}
+
+// ── Generate ────────────────────────────────────────────────────────────────
+// Every control quotes its own price before it is clicked, because a button
+// that spends money without saying how much is the one thing this panel must
+// not be.
+
+let genPrices = null;     // the server's price table
+let genCredits = null;    // null = unlimited (admin / grandfathered)
+let genPacks = [];
+let genJobs = [];
+let genTimer = null;
+
+const GEN_SHOT_LABELS = {
+  portrait: 'Portrait', half: 'Waist up', full: 'Full body',
+  candid: 'Candid', mirror: 'Mirror selfie', lingerie: 'Lingerie',
+  implied: 'Implied nude', sheer: 'Sheer robe', bedroom: 'Bedroom',
+  topless: 'Topless', nude: 'Nude', explicit: 'Explicit',
+};
+const GEN_RES_LABELS = {
+  '768x1024': 'Small', '1024x1024': 'Square',
+  '1024x1536': 'Portrait', '1536x2048': 'Large',
+};
+
+async function loadCredits() {
+  try {
+    const res = await fetch('/api/credits');
+    if (!res.ok) return;
+    const d = await res.json();
+    genPrices = d.prices;
+    genCredits = d.unlimited ? null : d.balance;
+    genPacks = d.packs || [];
+    const el = document.getElementById('gen-balance');
+    if (el) {
+      el.textContent = d.unlimited
+        ? '(unlimited)'
+        : `${d.balance.toLocaleString()} credits — about ${d.equivalents.photos.toLocaleString()} photos or ${d.equivalents.clips} clips`;
+      el.style.minWidth = '0';
+    }
+  } catch (e) {}
+}
+
+// Resolved server side from the persona's own NSFW setting, so the picker can
+// never offer a rung the submit would refuse.
+let genAllowedShots = [];
+
+function renderGenForm() {
+  if (!genPrices) return;
+  const opt = (v, label, sel) =>
+    `<option value="${v}"${v === sel ? ' selected' : ''}>${esc(label)}</option>`;
+
+  const shot = document.getElementById('gen-shot');
+  if (shot) {
+    const keep = shot.value;
+    shot.innerHTML = genAllowedShots.map(s =>
+      opt(s, GEN_SHOT_LABELS[s] || s, keep)).join('');
+  }
+  const model = document.getElementById('gen-model');
+  if (model && !model.options.length) {
+    model.innerHTML = Object.keys(genPrices.images).map(m =>
+      opt(m, genPrices.labels[m] || m, genPrices.defaults.model)).join('');
+  }
+  const res = document.getElementById('gen-res');
+  if (res && !res.options.length) {
+    res.innerHTML = genPrices.resolutions.map(r =>
+      opt(r, `${GEN_RES_LABELS[r] || r} (${r})`, genPrices.defaults.resolution)).join('');
+  }
+  const ref = document.getElementById('gen-ref');
+  if (ref) {
+    const keep = ref.value;
+    const photos = mediaVault.filter(v => v.kind !== 'video');
+    ref.innerHTML = '<option value="">A brand new face</option>' +
+      photos.map((v, i) => opt(v.id, `Photo ${i + 1}${v.purpose ? ' — ' + v.purpose : ''}`, keep)).join('');
+  }
+  genQuote();
+}
+
+function genQuote() {
+  if (!genPrices) return;
+  const model = (document.getElementById('gen-model') || {}).value;
+  const res = (document.getElementById('gen-res') || {}).value;
+  const batch = parseInt((document.getElementById('gen-batch') || {}).value || '1', 10);
+  const ref = (document.getElementById('gen-ref') || {}).value;
+  const row = (genPrices.images[model] || {});
+  let per = row[res];
+  if (per === undefined) return;
+  if (ref) per += genPrices.addons.faceswap;   // the identity pass
+  const total = per * batch;
+
+  const cost = document.getElementById('gen-cost');
+  if (cost) cost.textContent = `· ${total} credit${total === 1 ? '' : 's'}`;
+  const short = genCredits !== null && genCredits < total;
+  const btn = document.getElementById('gen-run-btn');
+  if (btn) btn.classList.toggle('gen-low', short);
+  const status = document.getElementById('gen-status');
+  if (status && short) {
+    status.textContent = `You have ${genCredits} — top up to run this.`;
+    status.style.color = 'var(--err)';
+  } else if (status && status.style.color === 'var(--err)' &&
+             status.textContent.indexOf('top up') >= 0) {
+    status.textContent = '';
+  }
+  return total;
+}
+
+function setGenStatus(msg, ok) {
+  const el = document.getElementById('gen-status');
+  if (!el) return;
+  el.textContent = msg || '';
+  el.style.color = ok === true ? 'var(--ok)' : ok === false ? 'var(--err)' : '#5a5a63';
+}
+
+async function runGeneration() {
+  if (!currentSlug) return;
+  const btn = document.getElementById('gen-run-btn');
+  const body = {
+    persona: currentSlug, kind: 'image',
+    shot: (document.getElementById('gen-shot') || {}).value,
+    model: (document.getElementById('gen-model') || {}).value,
+    resolution: (document.getElementById('gen-res') || {}).value,
+    batch: parseInt((document.getElementById('gen-batch') || {}).value || '1', 10),
+    reference_media: (document.getElementById('gen-ref') || {}).value || '',
+  };
+  if (btn) btn.disabled = true;
+  setGenStatus('Sending…', null);
+  try {
+    const res = await fetch('/api/generate/job', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const d = await res.json();
+    if (res.status === 402) { setGenStatus(d.error, false); openCreditPacks(); return; }
+    if (!d.ok) throw new Error(d.error || 'Generation failed');
+    if (d.balance !== null && d.balance !== undefined) genCredits = d.balance;
+    setGenStatus(`Running — ${d.credits} credits`, null);
+    loadCredits();
+    pollGenJobs();
+  } catch (e) { setGenStatus('✗ ' + e.message, false); }
+  finally { if (btn) btn.disabled = false; }
+}
+
+async function animateMedia(id) {
+  if (!currentSlug) return;
+  const secs = genPrices ? genPrices.defaults.video_duration : 5;
+  const resv = genPrices ? genPrices.defaults.video_resolution : '720p';
+  const cost = genPrices ? genPrices.videos[resv][secs] : '?';
+  if (!confirm(`Animate this photo into a ${secs}s ${resv} clip for ${cost} credits?`)) return;
+  setGenStatus('Sending…', null);
+  try {
+    const res = await fetch('/api/generate/job', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ persona: currentSlug, kind: 'video',
+                             resolution: resv, seconds: secs,
+                             reference_media: id }),
+    });
+    const d = await res.json();
+    if (res.status === 402) { setGenStatus(d.error, false); openCreditPacks(); return; }
+    if (!d.ok) throw new Error(d.error || 'Generation failed');
+    setGenStatus(`Clip running — ${d.credits} credits. It takes a few minutes.`, null);
+    loadCredits();
+    pollGenJobs();
+  } catch (e) { setGenStatus('✗ ' + e.message, false); }
+}
+
+async function pollGenJobs() {
+  if (!currentSlug || !document.getElementById('gen-staging')) return;
+  try {
+    const res = await fetch('/api/generate/jobs?persona=' + encodeURIComponent(currentSlug));
+    if (!res.ok) return;
+    genJobs = (await res.json()).jobs || [];
+  } catch (e) { return; }
+  renderGenStaging();
+
+  // Keep polling only while something is actually in flight, so an idle tab
+  // is not hitting the server every three seconds forever.
+  const busy = genJobs.some(j => j.status === 'queued' || j.status === 'running');
+  clearTimeout(genTimer);
+  if (busy) genTimer = setTimeout(pollGenJobs, 3000);
+}
+
+function genTtl(iso) {
+  if (!iso) return '';
+  const hours = Math.round((new Date(iso) - Date.now()) / 3600000);
+  if (hours <= 0) return 'gone soon';
+  if (hours < 24) return hours + 'h left';
+  return Math.round(hours / 24) + 'd left';
+}
+
+function renderGenStaging() {
+  const box = document.getElementById('gen-staging');
+  if (!box) return;
+  const cards = [];
+  genJobs.forEach(job => {
+    if (job.status === 'queued' || job.status === 'running') {
+      cards.push(`<div class="gen-card gen-pending">Generating
+        ${job.kind === 'video' ? 'a clip' : 'photos'}…</div>`);
+      return;
+    }
+    if (job.status === 'failed') {
+      cards.push(`<div class="gen-card gen-failed gen-pending">✗ ${esc(job.error || 'failed')}
+        <br><span style="opacity:.7">${job.credits} credits refunded</span></div>`);
+      return;
+    }
+    job.media.filter(m => !m.approved).forEach(m => {
+      const thumb = m.kind === 'video'
+        ? `<video src="${m.url}" muted playsinline preload="metadata"></video>`
+        : `<img src="${m.url}" alt="">`;
+      cards.push(`
+        <div class="gen-card">
+          ${thumb}
+          <span class="gen-ttl">${esc(genTtl(m.expires_at))}</span>
+          <div class="gen-acts">
+            <button type="button" class="gen-keep" onclick="keepGenerated('${m.id}', true)">Keep</button>
+            <button type="button" class="gen-drop" onclick="keepGenerated('${m.id}', false)">Drop</button>
+          </div>
+        </div>`);
+    });
+  });
+  box.innerHTML = cards.join('');
+}
+
+async function keepGenerated(id, keep) {
+  try {
+    const res = await fetch('/api/generate/keep', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keep: keep, media_ids: [id] }),
+    });
+    const d = await res.json();
+    if (!d.ok) throw new Error(d.error || 'Could not save that');
+    setGenStatus(keep ? '✓ Kept — it is in the vault now' : 'Dropped', keep ? true : null);
+    await loadMedia();
+  } catch (e) { setGenStatus('✗ ' + e.message, false); }
+}
+
+function openCreditPacks() {
+  const box = document.getElementById('credit-packs');
+  const grid = document.getElementById('gen-pack-grid');
+  if (!box || !grid) return;
+  grid.innerHTML = genPacks.map(p => `
+    <div class="gen-pack" onclick="buyCredits(${p.credits})">
+      <b>${p.credits.toLocaleString()}</b>
+      <span>$${p.price_usd}</span>
+      <span>${(p.per_credit * 100).toFixed(1)}¢ a credit</span>
+      ${p.save_pct ? `<em>save ${p.save_pct}%</em>` : ''}
+    </div>`).join('');
+  const hint = document.getElementById('gen-pack-hint');
+  if (hint) {
+    hint.textContent = genPacks.some(p => p.save_pct)
+      ? 'Your plan already discounts these. Credits you buy never expire.'
+      : 'Credits you buy never expire. They get cheaper on a higher plan.';
+  }
+  box.style.display = 'flex';
+}
+
+function closeCreditPacks() {
+  const box = document.getElementById('credit-packs');
+  if (box) box.style.display = 'none';
+}
+
+async function buyCredits(size) {
+  try {
+    const res = await fetch('/api/credits/checkout', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ credits: size, provider: 'stripe' }),
+    });
+    const d = await res.json();
+    if (!d.payment_url) throw new Error(d.error || 'Could not start checkout');
+    window.location.href = d.payment_url;
+  } catch (e) { setGenStatus('✗ ' + e.message, false); }
 }
 
 // An outfit's photos come from its links, in link order — one vault photo can
@@ -1071,6 +1390,9 @@ function vaultThumbTag(it) {
            ondragend="onPhotoDragEnd(event)">
         ${vaultThumbTag(v)}
         ${badge}
+        ${v.kind === 'video' ? '' : `<button type="button" class="vault-anim"
+          title="Animate this photo into a short clip"
+          onclick="event.stopPropagation();animateMedia('${v.id}')">▶</button>`}
         <button type="button" class="rm" title="Delete from vault"
           onclick="event.stopPropagation();vaultDeleteOne('${v.id}')">×</button>
       </div>`;

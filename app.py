@@ -21,6 +21,9 @@ from dotenv import load_dotenv
 from utils import (platform_scoped, operator_only, _is_operator,
                    owned_slugs, request_persona)
 import growth
+import credits as CR
+import imagegen
+import storage
 from google import genai
 from google.genai import types
 
@@ -1274,7 +1277,7 @@ _BASE_TIERS = {
                                  'Chat with her yourself to test the persona',
                                  'All 10 funnel phases with photo rates',
                                  'Outfit locking + media tagging',
-                                 'Unlimited AI image generations',
+                                 'Unlimited AI photo and video generation',
                                  'No platform connection \u2014 Fanvue needs a paid plan'],
                     'capabilities': {
                         'personas': None,
@@ -1285,7 +1288,7 @@ _BASE_TIERS = {
                         'scheduled_followups': True,
                         'analytics': False,
                         'ppv_reconcile': False,
-                        'image_generations_month': None,
+                        'credits_month': None,
                     }},
     'starter': {'name': 'Starter', 'price': 49,
                 'blurb': 'One persona on Fanvue, fully monetised.',
@@ -1293,7 +1296,7 @@ _BASE_TIERS = {
                              'Full PPV engine — ladders, per-fan pricing, '
                              'timed re-offers',
                              'Up to 3 funnel phases + CTA',
-                             '15 AI image generations a month',
+                             '600 generation credits a month',
                              'Unlimited photo uploads', 'Email support'],
                 'capabilities': {
                     'personas': 1,
@@ -1304,7 +1307,7 @@ _BASE_TIERS = {
                     'scheduled_followups': False,
                     'analytics': False,
                     'ppv_reconcile': False,
-                    'image_generations_month': 15,
+                    'credits_month': 600,
                 }},
     'pro': {'name': 'Pro', 'price': 149,
             'blurb': 'Five personas, every platform.',
@@ -1313,7 +1316,7 @@ _BASE_TIERS = {
                          'Outfit locking + media tagging',
                          'Up to 10 funnel phases with photo rates',
                          'Scheduled follow-ups',
-                         '75 AI image generations a month',
+                         '2,500 generation credits a month',
                          'Priority support'],
             'capabilities': {
                 'personas': 5,
@@ -1324,7 +1327,7 @@ _BASE_TIERS = {
                 'scheduled_followups': True,
                 'analytics': False,
                 'ppv_reconcile': False,
-                'image_generations_month': 75,
+                'credits_month': 2500,
             }},
     'agency': {'name': 'Agency', 'price': 349,
                'blurb': 'Fifteen personas and a team to run them.',
@@ -1333,7 +1336,7 @@ _BASE_TIERS = {
                             'Outfit locking + media tagging',
                             'Conversation and revenue analytics',
                             'PPV reconciliation against Fanvue earnings',
-                            '225 AI image generations a month',
+                            '7,500 generation credits a month',
                             'Dedicated support'],
                'capabilities': {
                    'personas': 15,
@@ -1344,7 +1347,7 @@ _BASE_TIERS = {
                    'scheduled_followups': True,
                    'analytics': True,
                    'ppv_reconcile': True,
-                   'image_generations_month': 225,
+                   'credits_month': 7500,
                }},
 }
 DEFAULT_TIER_ORDER = ['starter', 'pro', 'agency']
@@ -1401,10 +1404,10 @@ FEATURE_ROWS = [
      lambda c: 'Generate backstory, speech style, interests and triggers',
      'Stuck on a backstory or a speech style? Generate it and keep editing what '
      'you like. Interests and conversion triggers come out of the same pass.'),
-    (G1, 'AI image generation',
-     lambda c: ('Unlimited generations' if c['image_generations_month'] is None
-                else f"{c['image_generations_month']} generations a month"),
-     'Create on-brand photos of your persona from a description \u2014 her look, '
+    (G1, 'AI photo and video generation',
+     lambda c: ('Unlimited credits' if c['credits_month'] is None
+                else f"{c['credits_month']:,} credits a month, top up any time"),
+     'Create on-brand photos and short clips of your persona \u2014 her look, '
      'her outfit, the setting \u2014 without booking a shoot.'),
     (G1, 'Photo library',
      lambda c: 'Unlimited uploads, SFW and NSFW sets, per-photo tagging',
@@ -1510,9 +1513,9 @@ def _feature_matrix():
                          'label': 'Platforms'},
                         {'value': str(caps['phases_max']),
                          'label': 'Funnel phases'},
-                        {'value': ('\u221e' if caps['image_generations_month'] is None
-                                   else str(caps['image_generations_month'])),
-                         'label': 'AI images / mo'},
+                        {'value': ('\u221e' if caps['credits_month'] is None
+                                   else f"{caps['credits_month']:,}"),
+                         'label': 'Credits / mo'},
                         {'value': str(caps['seats']), 'label': 'Team seats'},
                     ]}
     return out
@@ -1801,7 +1804,7 @@ def _activate_plan(session_db, user_row, tier_key, days=None):
 DENIED_CAPS = {'personas': 0, 'seats': 0, 'platforms': [], 'phases_max': 0,
                'outfit_lock': False, 'scheduled_followups': False,
                'analytics': False, 'ppv_reconcile': False,
-               'image_generations_month': 0}
+               'credits_month': 0}
 # None means "no limit" throughout, for both counts and the platform allow-list.
 UNLIMITED_CAPS = {k: (None if not isinstance(v, bool) else True)
                   for k, v in DENIED_CAPS.items()}
@@ -1815,7 +1818,7 @@ _TIER_FLAGS = (('outfit_lock', 'Outfit locking'),
                ('ppv_reconcile', 'PPV reconciliation'))
 _TIER_LIMITS = (('personas', 'Personas'), ('seats', 'Team seats'),
                 ('phases_max', 'Funnel phases'),
-                ('image_generations_month', 'AI images a month'))
+                ('credits_month', 'Generation credits a month'))
 _tier_caps_cache = {'at': 0.0, 'value': None}
 
 
@@ -1993,16 +1996,65 @@ def _usage_period():
     return datetime.now(timezone.utc).strftime('%Y-%m')
 
 
-def _image_quota(user):
-    """(used, limit) for this month. limit None means unlimited."""
-    limit = user_capabilities(user).get('image_generations_month')
-    if limit is None:
-        return 0, None
-    from db import get_usage
+def _period_end():
+    """Midnight on the first of next month, when a monthly grant lapses."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    year, month = (now.year + 1, 1) if now.month == 12 else (now.year, now.month + 1)
+    return now.replace(year=year, month=month, day=1, hour=0, minute=0,
+                       second=0, microsecond=0)
+
+
+def _grant_monthly_credits(session_db, user):
+    """Post this period's allowance if it has not been posted. Keyed on the
+    period, so it runs off the first credit read of the month and there is no
+    cron that can miss it."""
+    allowance = user_capabilities(user).get('credits_month')
+    if allowance is None:
+        return
+    from db import credit_grant
+    credit_grant(session_db, _workspace_id(user), int(allowance),
+                 _usage_period(), _period_end(), note=(user.get('tier') or ''))
+
+
+def _credit_balance(user, session_db=None):
+    """Spendable credits, allowance granted on the way past. None means
+    unlimited — an admin or a grandfathered account, which never spends."""
+    if user_capabilities(user).get('credits_month') is None:
+        return None
+    from db import credit_balance
+    s = session_db or _db_session()
+    try:
+        _grant_monthly_credits(s, user)
+        return credit_balance(s, _workspace_id(user))
+    finally:
+        if session_db is None:
+            s.close()
+
+
+def _credits_denied(need, have):
+    return jsonify({'ok': False, 'error': 'Not enough credits.',
+                    'need': need, 'have': have, 'buy_credits': True}), 402
+
+
+def _spend_credits(user, amount, source, note=''):
+    """Reserve credits for a job. False means the balance will not cover it and
+    nothing was posted, so the caller must not call the provider."""
+    if user_capabilities(user).get('credits_month') is None:
+        return True
+    from db import credit_debit
     s = _db_session()
     try:
-        return get_usage(s, _workspace_id(user), 'image_generations',
-                         _usage_period()), int(limit)
+        _grant_monthly_credits(s, user)
+        return credit_debit(s, _workspace_id(user), int(amount), source, note)
+    finally:
+        s.close()
+
+
+def _refund_credits(workspace_id, source, note=''):
+    from db import credit_refund
+    s = _db_session()
+    try:
+        return credit_refund(s, workspace_id, source, note)
     finally:
         s.close()
 
@@ -4350,7 +4402,8 @@ def _checkout_oxapay(user, tier_key, tier, order_id, base):
         'lifetime': 60,
         'order_id': order_id,
         'email': user['email'],
-        'description': f'{tier["name"]} plan — {tier["days"]} days',
+        'description': (f'{tier["name"]} plan — {tier["days"]} days'
+                        if tier.get('days') else tier['name']),
         'callback_url': f'{base}/api/billing/webhook',
         'return_url': f'{base}/billing/return',
     }).encode()
@@ -4510,6 +4563,146 @@ def api_billing_checkout():
     return jsonify({'payment_url': pay_url, 'track_id': track_id})
 
 
+@app.route('/api/credits')
+def api_credits():
+    """Balance, the tier-resolved pack menu and the price table the Generate
+    panel quotes from. One call, because the panel needs all three to render a
+    button that knows what it costs."""
+    user = _current_user()
+    if not user:
+        return jsonify({'error': 'Sign in required'}), 401
+    balance = _credit_balance(user)
+    return jsonify({
+        'balance': balance,
+        'unlimited': balance is None,
+        'monthly': user_capabilities(user).get('credits_month'),
+        'equivalents': CR.equivalents(balance or 0),
+        'packs': CR.packs_for(user.get('tier')),
+        'prices': CR.price_table(),
+        'period_end': _period_end().isoformat(),
+    })
+
+
+@app.route('/api/credits/history')
+def api_credits_history():
+    user = _current_user()
+    if not user:
+        return jsonify({'error': 'Sign in required'}), 401
+    from db import credit_history
+    s = _db_session()
+    try:
+        rows = credit_history(s, _workspace_id(user))
+        return jsonify({'rows': [
+            {'delta': r.delta, 'kind': r.kind, 'note': r.note,
+             'at': r.created_at.isoformat() if r.created_at else '',
+             'expires_at': r.expires_at.isoformat() if r.expires_at else ''}
+            for r in rows]})
+    finally:
+        s.close()
+
+
+@app.route('/api/credits/checkout', methods=['POST'])
+def api_credits_checkout():
+    """Buy a top-up pack. Rides the same Payment row, the same two providers
+    and the same two webhooks as a subscription — `kind` is the only thing that
+    tells them apart, so Oxapay keeps working untouched."""
+    user = _current_user()
+    if not user:
+        return jsonify({'error': 'Sign in required'}), 401
+    body = request.get_json(silent=True) or {}
+    try:
+        size = int(body.get('credits') or 0)
+    except (TypeError, ValueError):
+        size = 0
+    price = CR.pack_price_usd(size, user.get('tier')) if size else None
+    if price is None:
+        return jsonify({'error': 'Unknown credit pack'}), 400
+
+    provider = (body.get('provider') or '').strip().lower()
+    if provider not in _CHECKOUT_PROVIDERS:
+        return jsonify({'error': 'Unknown payment method'}), 400
+    _, key_fn = _CHECKOUT_PROVIDERS[provider]
+    if not key_fn():
+        logger.error('Credit checkout via %s with no key configured', provider)
+        return jsonify({'error': 'Payments are not configured yet.'}), 503
+
+    from db import Payment
+    order_id = f'{user["id"]}-c{secrets.token_hex(6)}'
+    base = _callback_origin()
+    pack = {'name': f'{size:,} credits', 'price': price, 'credits': size,
+            'days': 0}
+    if provider == 'stripe':
+        pay_url, track_id = _checkout_stripe_credits(user, pack, order_id, base)
+    else:
+        pay_url, track_id = _checkout_oxapay(user, 'credits', pack, order_id, base)
+    if not pay_url:
+        return jsonify({'error': 'Could not reach the payment provider.'}), 502
+
+    s = _db_session()
+    try:
+        s.add(Payment(user_id=user['id'], tier=(user.get('tier') or ''),
+                      kind='credits', credits=size, provider=provider,
+                      amount=str(price), currency=CURRENCY, order_id=order_id,
+                      track_id=track_id, status='pending'))
+        s.commit()
+    finally:
+        s.close()
+    logger.info('CREDIT CHECKOUT [%s] user=%s credits=%s price=%s order=%s',
+                provider, user['email'], size, price, order_id)
+    return jsonify({'payment_url': pay_url, 'track_id': track_id})
+
+
+def _checkout_stripe_credits(user, pack, order_id, base):
+    """A one-off Stripe payment, not a subscription: credits are bought, not
+    billed monthly, so `mode` is payment and nothing here touches the plan."""
+    form = {
+        'mode': 'payment',
+        'success_url': f'{base}/billing/return?session_id={{CHECKOUT_SESSION_ID}}',
+        'cancel_url': f'{base}/admin',
+        'client_reference_id': order_id,
+        'line_items[0][quantity]': '1',
+        'metadata[order_id]': order_id,
+        'metadata[kind]': 'credits',
+        'metadata[credits]': str(pack['credits']),
+        'metadata[user_id]': user['id'],
+        'line_items[0][price_data][currency]': CURRENCY.lower(),
+        'line_items[0][price_data][unit_amount]':
+            str(int(round(pack['price'] * 100))),
+        'line_items[0][price_data][product_data][name]': pack['name'],
+        'line_items[0][price_data][product_data][tax_code]': STRIPE_TAX_CODE,
+    }
+    if user.get('stripe_customer_id'):
+        form['customer'] = user['stripe_customer_id']
+    else:
+        form['customer_email'] = user['email']
+    payload = _stripe_post('/checkout/sessions', form)
+    if not payload:
+        return None, None
+    pay_url = payload.get('url')
+    if not pay_url:
+        logger.error('Stripe returned no url for credits: %s', str(payload)[:300])
+        return None, None
+    return pay_url, str(payload.get('id') or '')
+
+
+def _credit_payment_paid(session_db, pay):
+    """Post the bought credits for a paid pack. Idempotent on the payment id,
+    so a redelivered webhook cannot credit twice."""
+    from db import User, Workspace, credit_purchase
+    u = session_db.get(User, pay.user_id)
+    if not u:
+        return
+    # Only a workspace owner is ever billed, so the workspace credits land in
+    # is the one this user owns — the same id _workspace_id resolves in session.
+    row = session_db.query(Workspace).filter(Workspace.owner_id == u.id).first()
+    ws = row.id if row else u.id
+    posted = credit_purchase(session_db, ws, int(pay.credits or 0), pay.id,
+                             note=f'{pay.credits} credit pack')
+    logger.info('CREDITS %s user=%s amount=%s order=%s',
+                'ADDED' if posted else 'ALREADY RECORDED',
+                u.email, pay.credits, pay.order_id)
+
+
 @app.route('/api/billing/dev-activate', methods=['POST'])
 def api_billing_dev_activate():
     """Activate a plan without payment. Requires DEV_FAKE_PAYMENTS=1."""
@@ -4575,6 +4768,12 @@ def api_billing_webhook():
             logger.warning('Oxapay webhook for unknown order %s', order_id)
             return ('ok', 200)
         pay.status = status
+        if status.lower() == 'paid' and pay.kind == 'credits':
+            if not pay.paid_at:
+                pay.paid_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            _credit_payment_paid(s, pay)
+            s.commit()
+            return ('ok', 200)
         if status.lower() == 'paid' and not pay.paid_at:
             now = datetime.now(timezone.utc).replace(tzinfo=None)
             pay.paid_at = now
@@ -4674,6 +4873,12 @@ def _stripe_checkout_completed(obj):
         # 100%-off coupon, which is still a live subscription.
         paid = obj.get('payment_status') in ('paid', 'no_payment_required')
         pay.status = 'paid' if paid else (obj.get('payment_status') or pay.status)
+        if paid and pay.kind == 'credits':
+            if not pay.paid_at:
+                pay.paid_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            _credit_payment_paid(s, pay)
+            s.commit()
+            return ('ok', 200)
         if paid and not pay.paid_at:
             now = datetime.now(timezone.utc).replace(tzinfo=None)
             pay.paid_at = now
@@ -7507,28 +7712,24 @@ def api_generate_image():
     """Generate a photorealistic image of a fictional person via Google Imagen.
     Reuse the same `appearance` text across shots to keep the same person."""
     me = _current_user()
-    used, limit = _image_quota(me)
-    if limit is not None and used >= limit:
-        return _cap_denied('image_generations_month', me,
-                           {'used': used, 'limit': limit})
+    balance = _credit_balance(me)
+    price = CR.GOOGLE_IMAGE_CREDITS
+    if balance is not None and balance < price:
+        return _credits_denied(price, balance)
 
     # The route has several success returns and a failed generation should not
-    # cost the creator an allowance, so the meter runs on the way out and only
-    # when an image actually came back.
-    if limit is not None:
+    # cost the creator credits, so the charge runs on the way out and only when
+    # an image actually came back.
+    if balance is not None:
+        source = 'google-' + secrets.token_hex(6)
+
         @after_this_request
         def _meter(response):
             try:
                 if (response.get_json(silent=True) or {}).get('ok') is True:
-                    from db import bump_usage
-                    sdb = _db_session()
-                    try:
-                        bump_usage(sdb, _workspace_id(me), 'image_generations',
-                                   _usage_period())
-                    finally:
-                        sdb.close()
+                    _spend_credits(me, price, source, note='Imagen generation')
             except Exception:
-                logger.exception('image usage metering failed')
+                logger.exception('image credit charge failed')
             return response
 
     if client is None:
@@ -10088,9 +10289,18 @@ def _fan_set_outfit_lock(persona, chat_id, outfit_num):
                  json.dumps({'outfit': outfit_num, 'ts': int(time.time())}))
 
 
+def _approved_only(rows):
+    """Drop generations the creator has not kept yet. A staged generation is
+    unreviewed by definition, and nothing unreviewed may reach a fan — so every
+    send path filters here rather than trusting each caller to remember.
+    `approved` is NULL on rows that predate the column, which are uploads and
+    therefore fine; only an explicit False is held back."""
+    return [r for r in (rows or []) if getattr(r, 'approved', None) is not False]
+
+
 def _pick_phase_photo(media_rows, outfits, sent_ids, locked_outfit=None):
     """Pick a random photo, respecting outfit lock and avoiding duplicates."""
-    available = [r for r in media_rows if r.id not in sent_ids]
+    available = [r for r in _approved_only(media_rows) if r.id not in sent_ids]
     if not available:
         return None
     if locked_outfit is not None:
@@ -10138,7 +10348,10 @@ def api_persona_media_list(slug):
     outfits = _outfits(slug)
     s = SessionLocal()
     try:
-        rows = list_persona_media(s, slug)
+        # A staged generation is not vault content yet: it lives in the Generate
+        # panel until the creator keeps it, so it must not appear here and be
+        # dragged into an outfit before anyone has looked at it.
+        rows = _approved_only(list_persona_media(s, slug))
         links = list_media_links(s, slug)
         by_media = {}
         for l in links:
@@ -10165,8 +10378,13 @@ def api_persona_media_list(slug):
         # `items` keeps the old shape so anything still reading it works.
         items = [dict(v, outfit=(v['outfits'][0] if v['outfits'] else ''))
                  for v in vault]
+        # The shot list is the persona's own NSFW setting resolved server side:
+        # the picker must not offer a rung the submit would refuse.
+        level = _persona_nsfw_level(_persona_config(slug))
         return jsonify({'items': items, 'vault': vault,
-                        'links': placements, 'outfits': outfits})
+                        'links': placements, 'outfits': outfits,
+                        'nsfw_level': level,
+                        'shots': imagegen.shots_for_level(level)})
     finally:
         s.close()
 
@@ -10359,6 +10577,15 @@ def api_persona_media_image(slug, media_id):
         row = get_persona_media(s, media_id)
         if not row or row.slug != slug:
             return ('', 404)
+        path = getattr(row, 'gcs_path', '') or ''
+        if not row.image_data and path:
+            # Signed rather than proxied: the bytes never pass through the app,
+            # which is what makes serving a clip from here affordable.
+            try:
+                return redirect(storage.signed_url(path))
+            except Exception:
+                logger.exception('signed url failed for media %s', media_id)
+                return ('', 502)
         # An externally hosted item is a redirect, so a platform fetching this
         # URL still lands on the file rather than on nothing.
         if not row.image_data and row.source_url:
@@ -10406,6 +10633,7 @@ def _pick_media(rows, outfits=None, purpose='', lighting='', location='', outfit
     `exclude` is the set of media IDs this fan has already been sent."""
     outfits = outfits or []
     exclude = exclude or set()
+    rows = _approved_only(rows)
     want_outfit = str(outfit).strip().lower().replace('outfit ', '')
     best, best_score = None, -1
     for r in rows:
@@ -10767,7 +10995,9 @@ def _media_row(persona, media_id):
         return {'id': row.id, 'kind': row.kind or 'image',
                 'mime': row.mime or '', 'source_url': row.source_url or '',
                 'data': row.image_data or '', 'slug': row.slug,
-                'poster': getattr(row, 'poster_data', '') or ''}
+                'poster': getattr(row, 'poster_data', '') or '',
+                'gcs_path': getattr(row, 'gcs_path', '') or '',
+                'poster_gcs_path': getattr(row, 'poster_gcs_path', '') or ''}
     finally:
         s.close()
 
@@ -10781,6 +11011,11 @@ def _media_bytes(media):
         header, b64 = data.split(',', 1)
         mime = header.split(';')[0].replace('data:', '') or media.get('mime') or ''
         return base64.b64decode(b64), (mime or 'application/octet-stream')
+    # Generated media lives in the bucket rather than the column: a clip does
+    # not fit in a text field, so anything this pipeline made comes from here.
+    path = media.get('gcs_path') or ''
+    if path:
+        return storage.get(path), (media.get('mime') or 'application/octet-stream')
     url = media.get('source_url') or ''
     if not url:
         raise RuntimeError('that media item has neither bytes nor a URL')
@@ -10796,12 +11031,18 @@ def _media_poster(media):
     nothing server-side can open a video."""
     import base64
     data = (media or {}).get('poster') or ''
-    if not data.startswith('data:'):
-        return None
-    try:
-        return base64.b64decode(data.split(',', 1)[1])
-    except Exception:
-        return None
+    if data.startswith('data:'):
+        try:
+            return base64.b64decode(data.split(',', 1)[1])
+        except Exception:
+            return None
+    path = (media or {}).get('poster_gcs_path') or ''
+    if path:
+        try:
+            return storage.get(path)
+        except Exception:
+            return None
+    return None
 
 
 def _media_public_url(media):
@@ -27535,6 +27776,405 @@ def _x_worker():
                 pool.submit(_one, persona)
         except Exception:
             logger.exception('x worker tick failed')
+
+
+# ── AI generation jobs ────────────────────────────────────────────────────────
+# A provider takes minutes and answers by polling, so the request that starts a
+# generation cannot be the one that finishes it. Credits are reserved at submit
+# and refunded in full if the job never produces anything — a failure the
+# creator did not cause must not cost her.
+
+def _gen_reference(slug, media_id):
+    """The approved vault photo a generation is conditioned on, as base64.
+    Returns (b64, mime, row) — the row so a video can inherit its tags."""
+    import base64
+    if not media_id:
+        return '', '', None
+    media = _media_row(slug, media_id)
+    if not media:
+        raise imagegen.GenerationError('That reference photo is not in this vault.')
+    data, mime = _media_bytes(media)
+    return base64.b64encode(data).decode(), mime, media
+
+
+def _gen_spec(slug, body, user):
+    """Validate a generation request into a spec the provider and the price
+    table both understand. Anything unpriced or above the persona's own NSFW
+    level is refused here, before a provider is ever called."""
+    kind = (body.get('kind') or 'image').strip().lower()
+    if kind not in ('image', 'video'):
+        raise imagegen.GenerationError('Unknown generation kind.')
+
+    cfg = _persona_config(slug) or {}
+    level = _persona_nsfw_level(cfg)
+    spec = {'kind': kind, 'slug': slug,
+            'reference_media': (body.get('reference_media') or '').strip(),
+            'addons': []}
+
+    if kind == 'image':
+        shot = (body.get('shot') or 'portrait').strip().lower()
+        if not imagegen.shot_allowed(shot, level):
+            raise imagegen.GenerationError(
+                f'This persona is set to "{level}", which does not allow that shot.')
+        model = (body.get('model') or CR.DEFAULT_IMAGE_MODEL).strip().lower()
+        resolution = (body.get('resolution') or CR.DEFAULT_RESOLUTION).strip()
+        if model not in CR.IMAGE_MODELS or resolution not in CR.RESOLUTIONS:
+            raise imagegen.GenerationError('Unknown model or resolution.')
+        batch = max(1, min(8, int(body.get('batch') or 1)))
+        spec.update({'shot': shot, 'model': model, 'resolution': resolution,
+                     'batch': batch, 'outfit': body.get('outfit') or {}})
+        if spec['reference_media']:
+            # Two mechanisms, because one is not enough: the reference steers
+            # the generation, the faceswap corrects whatever it still drifts
+            # on — and a full-body NSFW pose is exactly where it drifts.
+            spec['addons'].append('faceswap')
+    else:
+        resolution = (body.get('resolution') or CR.DEFAULT_VIDEO_RESOLUTION).strip()
+        seconds = int(body.get('seconds') or CR.DEFAULT_VIDEO_DURATION)
+        if resolution not in CR.VIDEO_RESOLUTIONS or seconds not in CR.VIDEO_DURATIONS:
+            raise imagegen.GenerationError('Unknown video resolution or duration.')
+        if not spec['reference_media']:
+            raise imagegen.GenerationError(
+                'Pick an approved photo to animate — a clip starts from one.')
+        spec.update({'resolution': resolution, 'seconds': seconds,
+                     'motion': (body.get('motion') or '')[:300]})
+    return spec
+
+
+def _persona_nsfw_level(cfg):
+    """How explicit this persona is allowed to be, from her builder config. The
+    creator's own setting is the ceiling; nothing offers a shot above it."""
+    if not cfg.get('nsfw') and not cfg.get('nsfw_enabled'):
+        return 'sfw'
+    level = str(cfg.get('nsfw_level') or cfg.get('nsfw_permission') or
+                'suggestive').strip().lower()
+    return level if level in imagegen.LEVEL_ORDER else 'suggestive'
+
+
+def _persona_config(slug):
+    try:
+        return load_persona_config(slug) or {}
+    except Exception:
+        return {}
+
+
+@app.route('/api/generate/job', methods=['POST'])
+def api_generate_job():
+    """Submit a generation. Quotes it, reserves the credits, then calls the
+    provider — in that order, so an unaffordable job never costs an API call."""
+    user = _current_user()
+    if not user:
+        return jsonify({'ok': False, 'error': 'Sign in required'}), 401
+    body = request.get_json(silent=True) or {}
+    slug = (body.get('persona') or '').strip().lower()
+    if not re.match(r'^[a-z0-9_-]+$', slug or ''):
+        return jsonify({'ok': False, 'error': 'Invalid persona'}), 400
+    mine = owned_slugs()
+    if mine is not None and slug not in mine:
+        return jsonify({'ok': False, 'error': 'Not your persona'}), 403
+
+    try:
+        spec = _gen_spec(slug, body, user)
+        price = CR.quote(spec)
+    except (imagegen.GenerationError, CR.PricingError) as e:
+        return jsonify({'ok': False, 'error': str(e)[:300]}), 400
+
+    balance = _credit_balance(user)
+    if balance is not None and balance < price:
+        return _credits_denied(price, balance)
+
+    from db import queue_generation, update_generation
+    s = _db_session()
+    try:
+        job = queue_generation(s, _workspace_id(user), slug, spec['kind'],
+                               json.dumps(spec), price, imagegen.provider_name())
+        job_id = job.id
+    finally:
+        s.close()
+
+    if not _spend_credits(user, price, job_id, note=f"{spec['kind']} generation"):
+        _set_job_failed(job_id, 'Not enough credits.')
+        return _credits_denied(price, _credit_balance(user) or 0)
+
+    workspace = _workspace_id(user)
+    threading.Thread(target=_gen_start, args=(job_id, slug, spec, workspace),
+                     daemon=True).start()
+    return jsonify({'ok': True, 'job': job_id, 'credits': price,
+                    'balance': (balance - price) if balance is not None else None})
+
+
+def _set_job_failed(job_id, message):
+    from db import update_generation
+    s = _db_session()
+    try:
+        update_generation(s, job_id, status='failed', error=str(message)[:500])
+    finally:
+        s.close()
+
+
+def _gen_start(job_id, slug, spec, workspace):
+    """Hand the job to the provider. Runs off-request because a submit can take
+    tens of seconds, and the creator should see a queued card immediately."""
+    with app.app_context():
+        from db import update_generation
+        try:
+            provider = imagegen.get_provider()
+            call = dict(spec)
+            ref_b64, ref_mime, _row = _gen_reference(slug, spec.get('reference_media'))
+            if ref_b64:
+                call['reference_b64'] = ref_b64
+                call['reference_mime'] = ref_mime
+            if spec['kind'] == 'image':
+                cfg = _persona_config(slug)
+                call['prompt'] = imagegen.build_prompt(
+                    _appearance_from_config(cfg), spec.get('shot'),
+                    spec.get('outfit'), bool(ref_b64))
+                provider_job, result = provider.submit_image(call)
+            else:
+                call['prompt'] = imagegen.build_video_prompt(spec.get('motion', ''))
+                provider_job, result = provider.submit_video(call)
+        except imagegen.GenerationError as e:
+            logger.warning('generation submit failed job=%s: %s', job_id, e)
+            _gen_fail(job_id, workspace, str(e))
+            return
+        except Exception as e:
+            logger.exception('generation submit crashed job=%s', job_id)
+            _gen_fail(job_id, workspace, str(e)[:200] or 'generation failed')
+            return
+
+        s = _db_session()
+        try:
+            update_generation(s, job_id, status='running',
+                              provider_job_id=provider_job or '')
+        finally:
+            s.close()
+        if result.status == 'done':
+            _gen_finish(job_id, slug, spec, workspace, result.urls)
+        elif result.status == 'failed':
+            _gen_fail(job_id, workspace, result.error or 'generation failed')
+
+
+def _gen_fail(job_id, workspace, message):
+    _set_job_failed(job_id, message)
+    _refund_credits(workspace, job_id, note='generation failed')
+
+
+def _gen_finish(job_id, slug, spec, workspace, urls):
+    """Pull the results off the provider's CDN into our own bucket and put them
+    in the vault, unapproved. Their URLs are short lived, so this cannot wait."""
+    from db import (SessionLocal, PersonaMedia, update_generation)
+    made = []
+    for url in urls:
+        try:
+            data, mime = imagegen.fetch_result(url)
+        except imagegen.GenerationError as e:
+            logger.warning('generation result download failed job=%s: %s', job_id, e)
+            continue
+        try:
+            path = storage.put(slug, data, mime)
+        except Exception:
+            logger.exception('generation upload failed job=%s', job_id)
+            continue
+        s = SessionLocal()
+        try:
+            row = PersonaMedia(
+                slug=slug, kind=spec['kind'], mime=mime, image_data='',
+                gcs_path=path, expires_at=storage.staging_expiry(),
+                approved=False,
+                outfit=(spec.get('outfit') or {}).get('name', '') or '',
+                purpose=spec.get('shot', '') or '')
+            s.add(row)
+            s.commit()
+            made.append(row.id)
+        finally:
+            s.close()
+
+    s = _db_session()
+    try:
+        if made:
+            update_generation(s, job_id, status='done',
+                              result_media_ids=','.join(made))
+        else:
+            update_generation(s, job_id, status='failed',
+                              error='the provider returned nothing usable')
+    finally:
+        s.close()
+    if not made:
+        _refund_credits(workspace, job_id, note='no usable result')
+
+
+def _gen_poll_round():
+    """Advance every open job. Also the sweeper: a job whose thread died leaves
+    a reservation behind, and credits nobody can spend are credits stolen."""
+    from db import SessionLocal, open_generations, update_generation
+    s = SessionLocal()
+    try:
+        jobs = [(j.id, j.slug, j.spec_json, j.provider, j.provider_job_id,
+                 j.workspace_id, j.created_at, j.status)
+                for j in open_generations(s)]
+    finally:
+        s.close()
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    for (job_id, slug, spec_json, provider_name, provider_job, workspace,
+         created_at, status) in jobs:
+        age = (now - created_at).total_seconds() if created_at else 0
+        if age > GEN_JOB_TIMEOUT:
+            logger.warning('generation job %s timed out after %.0fs', job_id, age)
+            _gen_fail(job_id, workspace, 'the provider never finished')
+            continue
+        if not provider_job:
+            # Submitted but never acknowledged: the thread died before it could
+            # record a provider id, so there is nothing left to poll for.
+            if age > GEN_SUBMIT_GRACE:
+                _gen_fail(job_id, workspace, 'the generation never started')
+            continue
+        try:
+            spec = json.loads(spec_json or '{}')
+            result = imagegen.get_provider(provider_name).poll(provider_job)
+        except imagegen.GenerationError as e:
+            if e.fatal:
+                _gen_fail(job_id, workspace, str(e))
+            continue
+        except Exception:
+            logger.exception('generation poll crashed job=%s', job_id)
+            continue
+        if result.status == 'done' and result.urls:
+            _gen_finish(job_id, slug, spec, workspace, result.urls)
+        elif result.status == 'failed':
+            _gen_fail(job_id, workspace, result.error or 'generation failed')
+
+
+GEN_JOB_TIMEOUT = int(os.getenv('GEN_JOB_TIMEOUT', '1800'))
+GEN_SUBMIT_GRACE = int(os.getenv('GEN_SUBMIT_GRACE', '120'))
+
+
+def _gen_worker():
+    import time as _t
+    # The staging auto-delete is a bucket lifecycle rule, not something this
+    # loop does: a worker that is not running must not be the reason a
+    # generation outlives its three days.
+    if storage.enabled():
+        try:
+            if storage.ensure_lifecycle():
+                logger.info('installed the %s-day staging lifecycle rule on %s',
+                            storage.STAGING_DAYS, storage.bucket_name())
+        except Exception:
+            logger.exception('could not set the staging lifecycle rule — '
+                             'generated media will not expire on its own')
+    while True:
+        _t.sleep(10)
+        try:
+            with app.app_context():
+                _gen_poll_round()
+        except Exception:
+            logger.exception('generation poll tick failed')
+
+
+@app.route('/api/generate/job/<job_id>')
+def api_generate_job_status(job_id):
+    user = _current_user()
+    if not user:
+        return jsonify({'error': 'Sign in required'}), 401
+    from db import get_generation
+    s = _db_session()
+    try:
+        job = get_generation(s, job_id)
+        if not job or job.workspace_id != _workspace_id(user):
+            return jsonify({'error': 'Unknown job'}), 404
+        return jsonify(_job_json(job, s))
+    finally:
+        s.close()
+
+
+@app.route('/api/generate/jobs')
+def api_generate_jobs():
+    user = _current_user()
+    if not user:
+        return jsonify({'error': 'Sign in required'}), 401
+    slug = (request.args.get('persona') or '').strip().lower()
+    from db import list_generations
+    s = _db_session()
+    try:
+        rows = list_generations(s, _workspace_id(user), slug or None)
+        return jsonify({'jobs': [_job_json(j, s) for j in rows]})
+    finally:
+        s.close()
+
+
+def _job_json(job, session_db):
+    from db import get_persona_media
+    ids = [i for i in (job.result_media_ids or '').split(',') if i]
+    media = []
+    for mid in ids:
+        row = get_persona_media(session_db, mid)
+        if not row:
+            continue
+        media.append({
+            'id': row.id, 'kind': row.kind or 'image',
+            'url': f'/api/personas/{row.slug}/media/{row.id}/image',
+            'approved': row.approved is not False,
+            'expires_at': row.expires_at.isoformat() if row.expires_at else '',
+        })
+    return {'id': job.id, 'kind': job.kind, 'status': job.status,
+            'credits': job.credits, 'error': job.error or '',
+            'persona': job.slug, 'media': media,
+            'created_at': job.created_at.isoformat() if job.created_at else ''}
+
+
+@app.route('/api/generate/keep', methods=['POST'])
+def api_generate_keep():
+    """Keep or drop a staged generation. Keeping promotes it out of the staging
+    prefix so the lifecycle rule stops watching it, and approves it — which is
+    the moment it becomes something a fan can be sent."""
+    user = _current_user()
+    if not user:
+        return jsonify({'ok': False, 'error': 'Sign in required'}), 401
+    body = request.get_json(silent=True) or {}
+    keep = bool(body.get('keep'))
+    ids = [str(i) for i in (body.get('media_ids') or []) if i][:50]
+    if not ids:
+        return jsonify({'ok': False, 'error': 'Nothing selected'}), 400
+
+    from db import (SessionLocal, get_persona_media, delete_persona_media,
+                    delete_media_links)
+    mine = owned_slugs()
+    done = []
+    s = SessionLocal()
+    try:
+        for mid in ids:
+            row = get_persona_media(s, mid)
+            if not row or (mine is not None and row.slug not in mine):
+                continue
+            if keep:
+                try:
+                    row.gcs_path = storage.promote(row.gcs_path or '')
+                except Exception:
+                    logger.exception('promote failed for media %s', mid)
+                    continue
+                row.expires_at = None
+                row.approved = True
+                s.commit()
+            else:
+                path = row.gcs_path or ''
+                # Links first: a leftover link would point at a photo that is
+                # gone. delete_persona_media does not commit on its own.
+                delete_media_links(s, mid)
+                delete_persona_media(s, mid)
+                s.commit()
+                if path:
+                    storage.delete(path)
+            done.append(mid)
+    finally:
+        s.close()
+    return jsonify({'ok': True, 'kept' if keep else 'dropped': done})
+
+
+_gen_worker_started = [False]
+
+if _worker_enabled('GEN_WORKER') and not _gen_worker_started[0]:
+    _gen_worker_started[0] = True
+    threading.Thread(target=_gen_worker, daemon=True).start()
 
 
 _growth_queue_started = [False]

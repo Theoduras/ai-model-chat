@@ -26,6 +26,10 @@ kept as a secondary target and still works, but is not where the app is deployed
 
 ```
 app.py                          — Flask server, Gemini API, multi-persona, builder API
+imagegen.py                     — NSFW image/video generation (Runware, ModelsLab)
+credits.py                      — Credit pricing, tier packs, margin floor
+storage.py                      — GCS for generated media (staging vs kept)
+test_credits.py                 — Pricing and ledger tests (python test_credits.py)
 onlyfans.py                     — OnlyFansAPI transport (OnlyFans chat)
 onlyfans.html                   — OnlyFans console (connect, auto-reply, PPV)
 of_connect.py                   — Hosted sign-in browser (OnlyFans, Discord, Instagram)
@@ -78,6 +82,12 @@ requirements.txt                — Python deps: flask, google-genai, python-dot
 | `GET /api/personas/{slug}` | — | Get persona config + prompt |
 | `POST /api/personas/{slug}` | JSON | Save config and regenerate system prompt |
 | `POST /api/personas/{slug}/preview` | JSON | Preview generated prompt without saving |
+| `GET /api/credits` | — | Balance, tier-resolved packs, generation price table |
+| `POST /api/credits/checkout` | JSON | Buy a top-up pack (Stripe or Oxapay) |
+| `POST /api/generate/job` | JSON | Submit an image or video generation |
+| `GET /api/generate/job/{id}` | — | Poll one generation |
+| `GET /api/generate/jobs?persona=` | — | Recent generations, with staged media |
+| `POST /api/generate/keep` | JSON | Keep (promote + approve) or drop staged media |
 
 ---
 
@@ -190,6 +200,35 @@ Stay completely in character. Never mention being an AI.
   the new-device code are Discord's to handle; what comes back is the token
   plus the build and capabilities that account really identified with. Those
   two are what the gateway must then claim to be — captured, never guessed.
+- **NSFW generation never runs on Google.** Imagen and `gemini-2.5-flash-image`
+  refuse explicit content at any safety level, so `/api/generate/image` stays as
+  the SFW path and everything explicit goes through `imagegen.py` to a managed
+  provider (Runware primary, ModelsLab fallback). No self-hosted GPU: a worker
+  that has to stay up is more expensive than the feature is worth.
+- Identity is never left to the prompt. A still is conditioned on an approved
+  vault photo *and* faceswapped from the same photo — a full-body NSFW pose is
+  exactly where a reference alone drifts. **A clip is only ever generated from
+  an already-approved still** (`kind='video'` requires `reference_media`), so
+  the first frame carries the identity and there is nothing to correct. There
+  is no text-to-video path, and the Animate button lives on a vault item rather
+  than a prompt box for that reason.
+- A generation lands in `staging/` unapproved and is **invisible to every send
+  path** — `_approved_only` filters `_pick_media`, `_pick_phase_photo` and the
+  vault listing, so nothing unreviewed can reach a fan. Keeping it promotes it
+  to `kept/` and sets `approved`. The three-day purge is a **bucket lifecycle
+  rule**, installed at boot by `_gen_worker`, never a loop: a worker that is
+  not running must not be why a generation outlives its window.
+- **Credits are pegged to provider cost** — `credits.CREDIT_COST_USD`, one
+  number — so margin is identical whatever is generated and a new model is a
+  table entry, not a pricing decision. `credits.py` asserts at import that every
+  pack clears `MIN_MARGIN_MULTIPLE` times cost, and `test_credits.py` walks the
+  matrix, so a discount that would lose money fails the build. The ledger is
+  append-only (`CreditLedger`): balance is the sum of rows, never a counter,
+  because people buy these. A spend drains the expiring monthly allowance before
+  anything purchased, and a refund returns credits to the bucket they left.
+- A credit top-up rides the same `Payment` row, providers and webhooks as a
+  subscription — `kind` is the only thing that tells them apart, so Oxapay keeps
+  working and a redelivered webhook cannot credit twice.
 - Fanvue, OnlyFans and Discord DMs share one reply engine through the platform
   adapters (`_Platform` in `app.py`): a platform says where its state is keyed,
   how a chat reads, and how a message goes out. New platform work belongs in an
@@ -377,3 +416,4 @@ When building new features, tackle in this order:
 - [ ] Persona prompt loads correctly from file
 - [ ] No API keys or secrets in committed files
 - [ ] `Dockerfile` still builds if deps or entrypoint changed
+- [ ] `python test_credits.py` passes — it is what stops a pack being sold below cost

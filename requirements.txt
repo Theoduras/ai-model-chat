@@ -10,3 +10,5 @@ cryptography
 playwright
 patchright
 aiohttp
+google-cloud-storage
+requests

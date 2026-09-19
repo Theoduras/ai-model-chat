@@ -166,6 +166,18 @@ class PersonaMedia(Base):
     purpose = Column(String(60), default='')
     position = Column(Integer, default=0)   # manual sort order within an outfit
     created_at = Column(DateTime, default=_now)
+    # Generated media lives in GCS rather than image_data: a clip does not fit
+    # in a text column. Uploads keep using image_data, so both are read through
+    # _media_bytes and neither knows about the other.
+    gcs_path = Column(String(400), default='')
+    poster_gcs_path = Column(String(400), default='')
+    # Set while a generation sits in the staging prefix. The bucket's lifecycle
+    # rule is what actually deletes it; this is for showing a countdown and for
+    # filtering, never for enforcement.
+    expires_at = Column(DateTime)
+    # False until the creator keeps it. An unreviewed generation must never be
+    # picked for a fan, so every send path filters on this.
+    approved = Column(Boolean, default=True)
 
 
 Index('ix_media_slug_purpose', PersonaMedia.slug, PersonaMedia.purpose)
@@ -537,6 +549,10 @@ class Payment(Base):
     id = Column(String(32), primary_key=True, default=_uid)
     user_id = Column(String(32), ForeignKey('users.id'), nullable=False, index=True)
     tier = Column(String(32), nullable=False)
+    # A credits checkout reuses this whole table and both webhooks; `tier` then
+    # records the tier the pack was priced at rather than one being bought.
+    kind = Column(String(16), default='subscription')  # subscription | credits
+    credits = Column(Integer, default=0)
     provider = Column(String(16), default='oxapay')  # oxapay | stripe
     amount = Column(String(32), default='')
     currency = Column(String(16), default='USD')
@@ -710,6 +726,60 @@ Index('ix_usage_unique', UsageCounter.workspace_id, UsageCounter.metric,
       UsageCounter.period, unique=True)
 
 
+class CreditLedger(Base):
+    """Every credit movement, append-only. The balance is the sum of the rows,
+    never a column: people pay for these, so a mutable counter that a crash or a
+    race can corrupt is not an option — with a ledger, any disputed balance can
+    be reconstructed from what actually happened."""
+    __tablename__ = 'credit_ledger'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    workspace_id = Column(String(32), nullable=False, index=True)
+    delta = Column(Integer, nullable=False)        # + granted/bought, - spent
+    kind = Column(String(16), nullable=False)      # grant|purchase|spend|refund|adjust
+    # What caused it: 'YYYY-MM' for a grant, a Payment id, a GenerationJob id.
+    source = Column(String(64), default='', index=True)
+    # Monthly grants expire at the end of their period; bought credits never do.
+    expires_at = Column(DateTime)
+    note = Column(String(200), default='')
+    created_at = Column(DateTime, default=_now, index=True)
+
+
+Index('ix_credit_ws_created', CreditLedger.workspace_id, CreditLedger.created_at)
+# One grant per workspace per period, and one purchase per payment: the guard
+# against a replayed webhook or a double-fired monthly grant is the database's,
+# not the caller's.
+Index('ix_credit_source_kind', CreditLedger.workspace_id, CreditLedger.kind,
+      CreditLedger.source, unique=True,
+      sqlite_where=CreditLedger.kind.in_(('grant', 'purchase')),
+      postgresql_where=CreditLedger.kind.in_(('grant', 'purchase')))
+
+
+class GenerationJob(Base):
+    """One AI image or video generation. Providers take minutes and answer by
+    polling, so the request that starts one cannot be the request that finishes
+    it."""
+    __tablename__ = 'generation_jobs'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    workspace_id = Column(String(32), nullable=False, index=True)
+    slug = Column(String(64), nullable=False, index=True)
+    kind = Column(String(8), default='image')      # image | video
+    provider = Column(String(24), default='')
+    provider_job_id = Column(String(200), default='', index=True)
+    spec_json = Column(Text, default='{}')
+    status = Column(String(12), default='queued')  # queued|running|done|failed
+    credits = Column(Integer, default=0)           # reserved at submit
+    result_media_ids = Column(Text, default='')    # CSV of PersonaMedia ids
+    error = Column(String(500), default='')
+    created_at = Column(DateTime, default=_now, index=True)
+    started_at = Column(DateTime)
+    finished_at = Column(DateTime)
+
+
+Index('ix_genjob_status_created', GenerationJob.status, GenerationJob.created_at)
+
+
 class DemoEvent(Base):
     """What a demo account did: when it started, every time it hit the paywall
     the demo puts in front of Fanvue, and the moment it turned into a paying
@@ -853,6 +923,172 @@ def bump_usage(session, workspace_id, metric, period, by=1):
     row.updated_at = _now()
     session.commit()
     return int(row.count)
+
+
+# ── Credits ───────────────────────────────────────────────────────────────────
+
+def credit_balance(session, workspace_id, at=None):
+    """Spendable credits: every row that has not expired. An expired monthly
+    grant is left in place rather than deleted — the history is the point."""
+    now = at or _now()
+    total = (session.query(func.coalesce(func.sum(CreditLedger.delta), 0))
+             .filter(CreditLedger.workspace_id == workspace_id,
+                     or_(CreditLedger.expires_at.is_(None),
+                         CreditLedger.expires_at > now))
+             .scalar())
+    return int(total or 0)
+
+
+def credit_post(session, workspace_id, delta, kind, source='', expires_at=None,
+                note=''):
+    """Append one movement. Returns the row, or None when a unique grant or
+    purchase for this source already exists — that duplicate is the whole
+    defence against a replayed webhook, so it is a no-op and not an error."""
+    if kind in ('grant', 'purchase'):
+        dupe = session.query(CreditLedger).filter(
+            CreditLedger.workspace_id == workspace_id,
+            CreditLedger.kind == kind,
+            CreditLedger.source == (source or '')).first()
+        if dupe:
+            return None
+    row = CreditLedger(workspace_id=workspace_id, delta=int(delta), kind=kind,
+                       source=(source or '')[:64], expires_at=expires_at,
+                       note=(note or '')[:200])
+    session.add(row)
+    try:
+        session.commit()
+    except Exception:
+        session.rollback()
+        if kind in ('grant', 'purchase'):
+            return None
+        raise
+    return row
+
+
+def credit_grant(session, workspace_id, amount, period, expires_at, note=''):
+    """The monthly allowance. Keyed on the period so firing twice is harmless."""
+    return credit_post(session, workspace_id, abs(int(amount)), 'grant',
+                       source=period, expires_at=expires_at, note=note)
+
+
+def credit_purchase(session, workspace_id, amount, payment_id, note=''):
+    return credit_post(session, workspace_id, abs(int(amount)), 'purchase',
+                       source=payment_id, note=note)
+
+
+def expiring_balance(session, workspace_id, at=None):
+    """The part of the balance that lapses at period end, and when. A spend has
+    to be charged against this first — otherwise an unexpiring row cancels a
+    bought credit and the allowance silently lapses unused, which is the
+    creator paying twice for the same generation."""
+    now = at or _now()
+    rows = (session.query(CreditLedger)
+            .filter(CreditLedger.workspace_id == workspace_id,
+                    CreditLedger.expires_at.isnot(None),
+                    CreditLedger.expires_at > now).all())
+    total = sum(int(r.delta) for r in rows)
+    soonest = min((r.expires_at for r in rows if r.delta > 0), default=None)
+    return max(0, total), soonest
+
+
+def credit_debit(session, workspace_id, amount, source, note=''):
+    """Reserve credits for a job. Returns False without posting anything when
+    the balance will not cover it, so an unaffordable job never reaches the
+    provider.
+
+    The charge is split so it drains the expiring allowance before anything
+    bought: the expiring part carries the grant's own expiry, so when the month
+    turns, the grant and what it paid for lapse together and the purchased
+    balance is left whole."""
+    amount = abs(int(amount))
+    if amount and credit_balance(session, workspace_id) < amount:
+        return False
+    if not amount:
+        return True
+    expiring, when = expiring_balance(session, workspace_id)
+    from_grant = min(amount, expiring) if when else 0
+    if from_grant:
+        credit_post(session, workspace_id, -from_grant, 'spend', source=source,
+                    expires_at=when, note=note)
+    if amount - from_grant:
+        credit_post(session, workspace_id, -(amount - from_grant), 'spend',
+                    source=source, note=note)
+    return True
+
+
+def credit_refund(session, workspace_id, source, note=''):
+    """Give back whatever was reserved against `source`, once. A job that fails
+    or is swept must not cost anything, and a double refund must not pay out.
+
+    Each refund row mirrors the expiry of the spend it reverses, so credits
+    come back into the bucket they left — refunding an allowance charge as a
+    permanent credit would mint balance out of a failed job."""
+    rows = (session.query(CreditLedger)
+            .filter(CreditLedger.workspace_id == workspace_id,
+                    CreditLedger.source == source,
+                    CreditLedger.kind.in_(('spend', 'refund'))).all())
+    owed = {}
+    for r in rows:
+        owed[r.expires_at] = owed.get(r.expires_at, 0) + int(r.delta)
+    total = 0
+    for expires_at, delta in owed.items():
+        if delta >= 0:
+            continue
+        credit_post(session, workspace_id, -delta, 'refund', source=source,
+                    expires_at=expires_at, note=note)
+        total += -delta
+    return total
+
+
+def credit_history(session, workspace_id, limit=50):
+    return (session.query(CreditLedger)
+            .filter(CreditLedger.workspace_id == workspace_id)
+            .order_by(CreditLedger.created_at.desc()).limit(limit).all())
+
+
+# ── Generation jobs ───────────────────────────────────────────────────────────
+
+def queue_generation(session, workspace_id, slug, kind, spec_json, credits=0,
+                     provider=''):
+    row = GenerationJob(workspace_id=workspace_id, slug=slug, kind=kind,
+                        spec_json=spec_json, credits=int(credits or 0),
+                        provider=provider or '')
+    session.add(row)
+    session.commit()
+    return row
+
+
+def get_generation(session, job_id):
+    return session.query(GenerationJob).filter(GenerationJob.id == job_id).first()
+
+
+def list_generations(session, workspace_id, slug=None, limit=40):
+    q = session.query(GenerationJob).filter(
+        GenerationJob.workspace_id == workspace_id)
+    if slug:
+        q = q.filter(GenerationJob.slug == slug)
+    return q.order_by(GenerationJob.created_at.desc()).limit(limit).all()
+
+
+def open_generations(session, limit=50):
+    """Jobs the poller still owes an answer for."""
+    return (session.query(GenerationJob)
+            .filter(GenerationJob.status.in_(('queued', 'running')))
+            .order_by(GenerationJob.created_at).limit(limit).all())
+
+
+def update_generation(session, job_id, **fields):
+    row = get_generation(session, job_id)
+    if not row:
+        return None
+    for key, value in fields.items():
+        setattr(row, key, value)
+    if fields.get('status') in ('done', 'failed') and not row.finished_at:
+        row.finished_at = _now()
+    if fields.get('status') == 'running' and not row.started_at:
+        row.started_at = _now()
+    session.commit()
+    return row
 
 
 def _sync_columns(table_name, model):
@@ -1628,7 +1864,9 @@ def init_db():
                          ('referral_clicks', ReferralClick),
                          ('referral_earnings', ReferralEarning),
                          ('trial_invites', TrialInvite),
-                         ('trial_redemptions', TrialRedemption)):
+                         ('trial_redemptions', TrialRedemption),
+                         ('credit_ledger', CreditLedger),
+                         ('generation_jobs', GenerationJob)):
         try:
             _sync_columns(table, model)
         except Exception:
