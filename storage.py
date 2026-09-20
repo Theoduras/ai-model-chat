@@ -21,10 +21,13 @@ there `purge_staging()` does it and the cron has to call it — see
 `_gen_ensure_lifecycle` in app.py.
 """
 import json
+import logging
 import os
 import urllib.parse
 import uuid
 from datetime import datetime, timedelta, timezone
+
+logger = logging.getLogger('storage')
 
 STAGING_PREFIX = 'staging'
 KEPT_PREFIX = 'kept'
@@ -188,16 +191,62 @@ def promote(path):
     return dest
 
 
+_signer = {'checked': False, 'email': '', 'creds': None}
+
+
+def _iam_signer():
+    """Cloud Run's credentials come from the metadata server and carry no
+    private key, so the library cannot sign a URL with them on its own. Passing
+    the service account's own email and a fresh access token makes it sign
+    through the IAM signBlob API instead, which needs
+    roles/iam.serviceAccountTokenCreator on itself."""
+    if not _signer['checked']:
+        _signer['checked'] = True
+        try:
+            import google.auth
+            from google.auth.transport.requests import Request
+            creds, _ = google.auth.default()
+            creds.refresh(Request())
+            email = getattr(creds, 'service_account_email', '')
+            if not email or email == 'default':
+                # Compute credentials report 'default' rather than the address
+                # signBlob needs; the metadata server knows the real one.
+                import requests
+                email = requests.get(
+                    'http://metadata.google.internal/computeMetadata/v1/'
+                    'instance/service-accounts/default/email',
+                    headers={'Metadata-Flavor': 'Google'}, timeout=3).text.strip()
+            if email and email != 'default':
+                _signer.update(email=email, creds=creds)
+        except Exception:
+            logger.exception('could not prepare an IAM signer')
+    return _signer['email'], _signer['creds']
+
+
 def signed_url(path, ttl=None):
-    """A time-boxed read URL, or None when the backend cannot mint one. A
-    private Blob object is 403 to anyone without the store token, and that
-    token must never reach a browser, so there the caller serves the bytes
-    itself rather than redirecting."""
+    """A time-boxed read URL, or None when the backend cannot mint one — the
+    caller then serves the bytes itself. A private Blob object is 403 to anyone
+    without the store token, and that token must never reach a browser. On GCS
+    signing can fail for want of a key or the IAM role, and a redirect that
+    cannot be built is not worth a 502 on an image that is right there."""
     if backend() == 'blob':
         return None
-    return _bucket().blob(path).generate_signed_url(
-        version='v4', expiration=timedelta(seconds=ttl or signed_url_ttl()),
-        method='GET')
+    blob = _bucket().blob(path)
+    expiry = timedelta(seconds=ttl or signed_url_ttl())
+    try:
+        return blob.generate_signed_url(version='v4', expiration=expiry,
+                                        method='GET')
+    except Exception:
+        email, creds = _iam_signer()
+        if not email:
+            return None
+        try:
+            return blob.generate_signed_url(
+                version='v4', expiration=expiry, method='GET',
+                service_account_email=email, access_token=creds.token)
+        except Exception:
+            logger.exception('could not sign a URL for %s', path)
+            return None
 
 
 def purge_staging(days=STAGING_DAYS):

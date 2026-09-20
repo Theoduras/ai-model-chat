@@ -46,6 +46,20 @@ gcloud run services update ai-model-chat-dev --region europe-west4 \
   --update-env-vars GCS_BUCKET=ai-model-chat-media,RUNWARE_API_KEY=<key>
 ```
 
+A signed URL is what keeps a clip off the app's own bandwidth, and Cloud Run's
+credentials come from the metadata server with no private key to sign one
+with. Signing then has to go through IAM, which the service account must be
+allowed to ask of itself:
+
+```
+gcloud iam service-accounts add-iam-policy-binding <the same service account> \
+  --member serviceAccount:<the same service account> \
+  --role roles/iam.serviceAccountTokenCreator
+```
+
+Without it the app serves the bytes itself instead of redirecting — correct,
+but it pays for every byte twice and a long clip can outlast the request.
+
 The bucket wants the same region as the service, or every read pays egress.
 `objectAdmin` is not enough on its own to write the staging lifecycle rule —
 that needs `storage.buckets.update`, so `_gen_ensure_lifecycle` logs a warning
