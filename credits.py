@@ -400,6 +400,14 @@ def _imagegen_takes_duration(model):
         return True
 
 
+def _imagegen_rungs(model):
+    try:
+        import imagegen
+        return imagegen.model_rungs(model) or list(VIDEO_RESOLUTIONS)
+    except Exception:
+        return list(VIDEO_RESOLUTIONS)
+
+
 def price_table():
     """The whole menu, for the UI's live cost estimate."""
     return {
@@ -413,7 +421,8 @@ def price_table():
         'default_swap_model': DEFAULT_SWAP_MODEL,
         # What each swap model lets the operator choose. A model that runs the
         # length of the clip it is given has no seconds to offer.
-        'swap_model_caps': {m: {'duration': _imagegen_takes_duration(m)}
+        'swap_model_caps': {m: {'duration': _imagegen_takes_duration(m),
+                                'resolutions': _imagegen_rungs(m)}
                             for m in SWAP_MODELS},
         'video_rates': VIDEO_RATE_PER_SECOND,
         'video_max_seconds': VIDEO_MAX_SECONDS,

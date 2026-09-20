@@ -1030,10 +1030,18 @@ function renderSwapOut() {
     el('gen-smodel-note').textContent = SWAP_NOTES[swapModel()] || '';
   }
   const rungs = genPrices.video_resolutions || ['480p', '720p', '1080p'];
+  const caps = (genPrices.swap_model_caps || {})[swapModel()] || {};
+  const served = caps.resolutions || rungs;
   const cap = genSwap ? rungs.indexOf(genSwap.resolution) : rungs.length - 1;
-  const allowed = rungs.slice(0, (cap < 0 ? rungs.length : cap) + 1);
-  if (sres.dataset.cap !== String(cap)) {
-    sres.dataset.cap = String(cap);
+  // Capped by the clip and by the model both, and never empty: a source below
+  // everything this model serves runs at the lowest rung it does serve, so
+  // that is the one offered rather than a choice that cannot be honoured.
+  let allowed = rungs.slice(0, (cap < 0 ? rungs.length : cap) + 1)
+                     .filter(r => served.includes(r));
+  if (!allowed.length) allowed = [served[0]];
+  const key = swapModel() + ':' + cap;
+  if (sres.dataset.cap !== key) {
+    sres.dataset.cap = key;
     sres.innerHTML = allowed.map(r =>
       opt(r, r, allowed[allowed.length - 1])).join('');
   }

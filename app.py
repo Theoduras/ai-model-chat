@@ -28048,6 +28048,10 @@ def _gen_spec(slug, body, user):
             if (CR.VIDEO_RESOLUTIONS.index(resolution)
                     > CR.VIDEO_RESOLUTIONS.index(source_rung)):
                 resolution = source_rung
+            # And up again to the lowest rung this model serves: a phone clip's
+            # short side is often under 720, which one of them does not offer
+            # at all. Priced at what will run, not at what was asked for.
+            resolution = imagegen.rung_for(model, resolution)
             spec['source_path'] = src['path']
             spec['source_id'] = source_id
             spec['source_width'] = src['width']

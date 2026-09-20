@@ -125,11 +125,31 @@ MODEL_VIDEO_FIELDS = {
 # referenceImages takes up to 30 and referenceVideos up to 10, nested.
 MAX_VIDEO_REFERENCES = 30
 
-# For the models that take a rung by name. A provider that spells them
-# differently is an entry here rather than a branch in the request builder.
+# For the models that take a rung by name, in ascending order. A provider that
+# spells them differently, or serves fewer of them, is an entry here rather
+# than a branch in the request builder. This model has no 480p at all, and a
+# phone clip's short side is often below 720: such a source runs at the lowest
+# rung the model does serve, and is billed at that rung because that is what
+# the provider charges for it.
 MODEL_RESOLUTION_VALUES = {
-    'p-video-replace': {'480p': '480p', '720p': '720p', '1080p': '1080p'},
+    'p-video-replace': (('720p', '720p'), ('1080p', '1080p')),
 }
+
+
+def model_rungs(model_key):
+    """The rungs a model serves, lowest first, or None when it takes pixels
+    and any rung is as good as another."""
+    rows = MODEL_RESOLUTION_VALUES.get(model_key)
+    return [key for key, _ in rows] if rows else None
+
+
+def rung_for(model_key, resolution):
+    """The rung this model will actually run, given the one asked for: its
+    own lowest when the source sits below everything it serves."""
+    rungs = model_rungs(model_key)
+    if not rungs:
+        return resolution
+    return resolution if resolution in rungs else rungs[0]
 
 
 def _video_fields(model_key):
@@ -747,10 +767,10 @@ class RunwareProvider(Provider):
             # It takes a rung by name and no length at all: the output runs as
             # long as the clip it was given. Sending either of the others is
             # refused outright, which is the model saying what it is.
-            rungs = MODEL_RESOLUTION_VALUES.get(model_key) or {}
-            rung = rungs.get(spec.get('resolution'))
-            if rung:
-                task['resolution'] = rung
+            wanted = rung_for(model_key, spec.get('resolution'))
+            spelling = dict(MODEL_RESOLUTION_VALUES.get(model_key) or ())
+            if spelling.get(wanted):
+                task['resolution'] = spelling[wanted]
             if spec.get('fps'):
                 task['fps'] = int(spec['fps'])
         else:
