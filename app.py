@@ -28073,12 +28073,16 @@ def _gen_spec(slug, body, user):
                 if not src:
                     raise imagegen.GenerationError(
                         'That motion clip is no longer there. Upload it again.')
-                model = CR.EXPLICIT_SWAP_MODEL
+                # Wan 2.7 is the one model that takes a reference video as
+                # motion guidance while still conditioning on her photo, which
+                # is what this job needs -- the explicit swap model is a true
+                # replace on an existing clip and takes no motion guidance at
+                # all.
+                model = CR.VIDEO_EDIT_MODEL
                 spec['source_path'] = src['path']
                 spec['source_id'] = drive_id
                 spec['source_width'] = src['width']
                 spec['source_height'] = src['height']
-                spec['animate_mode'] = 'animate'
                 seconds = imagegen.video_seconds(model, src['seconds'])
             else:
                 allowed = imagegen.model_durations(model)
@@ -28598,7 +28602,8 @@ def api_generate_job():
     s = _db_session()
     try:
         job = queue_generation(s, _workspace_id(user), slug, spec['kind'],
-                               json.dumps(spec), price, imagegen.provider_name())
+                               json.dumps(spec), price,
+                               imagegen.provider_name_for(spec))
         job_id = job.id
     finally:
         s.close()
@@ -28644,7 +28649,7 @@ def _gen_start(job_id, slug, spec, workspace):
     with app.app_context():
         from db import update_generation
         try:
-            provider = imagegen.get_provider()
+            provider = imagegen.provider_for(spec)
             call = dict(spec)
             call['negative'] = imagegen.merge_negative(spec.get('negative_extra'))
             ref_b64, ref_mime, _row = _gen_reference(slug, spec.get('reference_media'))

@@ -1043,14 +1043,16 @@ function setMoney(credits) {
   el('gen-money').textContent = cash;
 }
 
-// Two models take an input clip and do opposite things with it, so this is a
-// real choice. The server accepts only these two for a swap, which is why the
+// These models take an input clip and do different things with it, so this is
+// a real choice. The server accepts only these for a swap, which is why the
 // panel cannot quote a model that will not run.
 const SWAP_NOTES = {
   'p-video-replace': 'Keeps your clip exactly as it is — same motion, timing, ' +
     'camera, lighting and background — and changes only who is in it.',
   'wan-2-7': 'Regenerates the clip from her reference photos in a similar ' +
     'motion. A new video that resembles yours, not your video with her in it.',
+  'ml-face-swap': 'Same as the replace above — keeps your clip, swaps only ' +
+    'who is in it — on the one provider that will also run this explicit.',
 };
 
 function swapModels() {

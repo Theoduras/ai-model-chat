@@ -12,8 +12,11 @@ Two providers, same shape:
                (the NSFW-tuned SDXL checkpoints this needs) and video on the
                same key. Images answer synchronously; video is submitted and
                polled.
-    ModelsLab  fallback. An explicitly uncensored endpoint plus faceswap and
-               image-to-video. Everything is submit-then-poll.
+    ModelsLab  fallback, and also where the explicit swap runs: Runware has no
+               Wan animate/replace variant in its catalogue, so the one true
+               (not regenerated) explicit-capable replace goes here instead of
+               the configured default. An explicitly uncensored endpoint plus
+               faceswap and image-to-video. Everything is submit-then-poll.
 
 Identity is never left to the prompt. A still is conditioned on an approved
 reference photo and then faceswapped from the same photo, and a clip is only
@@ -73,11 +76,6 @@ RUNWARE_VIDEO_MODELS = {
     # on camera, which is what a swap has always meant here.
     'p-video-replace': os.getenv('RW_MODEL_VIDEO_REPLACE',
                                  'prunaai:p-video@replace'),
-    # The same job as the replace above, from the Wan family -- which is the
-    # one family measured to serve explicit work on this provider. It does
-    # motion transfer as well, chosen by a mode rather than by a model.
-    'wan-2-2-animate': os.getenv('RW_MODEL_WAN_ANIMATE',
-                                 'alibaba:wan@2.2-animate'),
 }
 DEFAULT_VIDEO_MODEL = 'wan-2-5'
 
@@ -86,14 +84,19 @@ DEFAULT_VIDEO_MODEL = 'wan-2-5'
 # one finds nothing.
 VIDEO_EDIT_MODEL = 'wan-2-7'
 
-# Both take an input clip, and they do opposite things with it: replace keeps
-# the video and changes the person, Wan 2.7 regenerates the video from her
+# They do different things with the clip they are given: replace keeps the
+# video and changes the person, Wan 2.7 regenerates the video from her
 # references. The picker offers both because only the operator can say which
 # one this clip wants.
-SWAP_MODELS = ('p-video-replace', 'wan-2-2-animate', 'wan-2-7')
+#
+# Runware has no Wan animate/replace variant -- its catalogue carries only
+# base Wan generation models (3.0, 2.7, 2.6, ...), confirmed by querying its
+# own model list. A true, explicit-capable replace instead goes to ModelsLab,
+# whose face-swap endpoint is uncensored and swaps rather than regenerates.
+SWAP_MODELS = ('p-video-replace', 'ml-face-swap', 'wan-2-7')
 DEFAULT_SWAP_MODEL = 'p-video-replace'
 # The one that serves explicit work and still replaces rather than regenerates.
-EXPLICIT_SWAP_MODEL = 'wan-2-2-animate'
+EXPLICIT_SWAP_MODEL = 'ml-face-swap'
 
 # Only 4.5 serves explicit work. 5.0 Pro returns `invalidProviderContent` —
 # ByteDance's own moderation, not a setting — so an explicit shot is pinned to
@@ -120,10 +123,6 @@ MODEL_VIDEO_FIELDS = {
     # `inputs.video`, where Wan calls the same thing a reference video: one is
     # the subject of the edit, the other is something to take guidance from,
     # and the models are right to spell them differently.
-    # Same nesting as Wan 2.7 plus one key of its own. `advancedFeatures` is a
-    # fourth spelling of provider options after `inputs`, `settings` and the
-    # flat payload, which is why none of this is a branch in the builder.
-    'wan-2-2-animate': {'shape': 'animate'},
     'p-video-replace': {'shape': os.getenv('RW_REPLACE_SHAPE', 'replace'),
                         'in_source': os.getenv('RW_REPLACE_VIDEO_KEY', 'video'),
                         'in_refs': os.getenv('RW_REPLACE_REF_KEY',
@@ -176,6 +175,15 @@ MODELSLAB_MODELS = {
     'qwen': os.getenv('ML_MODEL_QWEN', 'qwen-image'),
 }
 MODELSLAB_VIDEO_MODEL = os.getenv('ML_MODEL_VIDEO', 'wan2.2')
+
+# The explicit-capable replace: swaps the face into an existing clip rather
+# than regenerating it, unlike everything Runware serves. Path, model id and
+# field names are all env-settable for the same reason the Runware swap
+# fields are -- a wrong one is the one failure that looks like success.
+MODELSLAB_FACESWAP_PATH = os.getenv('ML_FACESWAP_PATH', 'video/face_swap')
+MODELSLAB_FACESWAP_MODEL = os.getenv('ML_MODEL_FACESWAP', 'video-face-swap')
+MODELSLAB_FACESWAP_VIDEO_FIELD = os.getenv('ML_FACESWAP_VIDEO_FIELD', 'init_video')
+MODELSLAB_FACESWAP_FACE_FIELD = os.getenv('ML_FACESWAP_FACE_FIELD', 'target_image')
 
 # Dimensions are per model, not global: Seedream refuses anything under
 # 3,686,400 pixels, and the Google models take only sizes from their own list.
@@ -230,10 +238,15 @@ def model_durations(model_key):
     return list(MODEL_VIDEO_DURATIONS.get(model_key) or ()) or None
 
 
+# ModelsLab's face swap is not a Runware model, so it carries no entry in
+# MODEL_VIDEO_FIELDS -- it is never told a duration either, for the same
+# reason p-video-replace is not: the output runs as long as the source clip.
+_NO_DURATION_MODELS = frozenset({'ml-face-swap'})
+
 MODEL_VIDEO_SECONDS = {
     'wan-2-5': (3, 10),
     'seedance-2-5': (3, 10),
-    'wan-2-2-animate': (1, 60),
+    'ml-face-swap': (1, 60),
     'wan-2-7': (2, 15),
     # The source clip's own length, whatever it is: this model is never told a
     # duration, so nothing here may shorten what it will be billed for.
@@ -244,7 +257,9 @@ MODEL_VIDEO_SECONDS = {
 def takes_duration(model_key):
     """Whether a model can be told how long to run. One that cannot runs the
     length of the clip it is given, so nothing may quote it anything else."""
-    return _video_fields(model_key).get('shape') not in ('replace', 'animate')
+    if model_key in _NO_DURATION_MODELS:
+        return False
+    return _video_fields(model_key).get('shape') not in ('replace',)
 
 
 def wants_face_only(model_key):
@@ -256,7 +271,9 @@ def wants_face_only(model_key):
     for it to average her face towards. One that regenerates the whole clip
     needs both.
     """
-    return _video_fields(model_key).get('shape') in ('replace', 'animate')
+    if model_key == 'ml-face-swap':
+        return True
+    return _video_fields(model_key).get('shape') in ('replace',)
 
 
 # A model asking for a clean portrait is not helped by thirty of them, and each
@@ -966,14 +983,7 @@ class RunwareProvider(Provider):
             'includeCost': True,
             'deliveryMethod': 'async',
         }
-        if shape == 'animate':
-            # One model, two jobs: `replace` puts her into the clip's action,
-            # `animate` makes her photo perform the clip's motion. The caller
-            # says which, because the model cannot tell from the inputs.
-            mode = spec.get('animate_mode') or (
-                'replace' if spec.get('kind') == 'swap' else 'animate')
-            task['advancedFeatures'] = {'wanAnimate': {'mode': mode}}
-        elif shape == 'replace':
+        if shape == 'replace':
             # It takes a rung by name and no length at all: the output runs as
             # long as the clip it was given. Sending either of the others is
             # refused outright, which is the model saying what it is.
@@ -1005,7 +1015,7 @@ class RunwareProvider(Provider):
             if not refs:
                 raise GenerationError(
                     'a swap needs at least one approved photo of her to swap in')
-            if fields.get('shape') in ('inputs', 'replace', 'animate'):
+            if fields.get('shape') in ('inputs', 'replace'):
                 # A model that edits the clip takes it as a single `video`; one
                 # that takes guidance from it takes a list of reference videos.
                 src_key = fields.get('in_source') or 'referenceVideos'
@@ -1017,7 +1027,7 @@ class RunwareProvider(Provider):
             else:
                 task[fields['source']] = source
                 task[fields['refs']] = list(refs)[:MAX_REFERENCES]
-        elif spec.get('source_url') and shape == 'animate':
+        elif spec.get('source_url') and shape == 'inputs':
             # A Video job that carries a clip is motion transfer: her photo is
             # the subject, the clip is only where the movement comes from.
             refs = spec.get('reference_urls') or []
@@ -1041,7 +1051,7 @@ class RunwareProvider(Provider):
             first = {'inputImage': _data_uri(frame, spec.get('reference_mime'))}
             # Mutually exclusive with the reference inputs above, which is why
             # this is the whole of `inputs` rather than another key in it.
-            if shape in ('inputs', 'replace', 'animate'):
+            if shape in ('inputs', 'replace'):
                 task['inputs'] = {'frameImages': [first]}
             else:
                 task[_RW['frame_images']] = [first]
@@ -1145,6 +1155,8 @@ class ModelsLabProvider(Provider):
         return str(body.get('id') or ''), self._read(body)
 
     def submit_video(self, spec):
+        if spec.get('kind') == 'swap':
+            return self._submit_face_swap(spec)
         width, height = VIDEO_PX.get(spec.get('resolution'), VIDEO_PX['720p'])
         if not spec.get('reference_url'):
             raise GenerationError('a video needs an approved still as its first frame')
@@ -1156,6 +1168,27 @@ class ModelsLabProvider(Provider):
             'width': width, 'height': height,
             'num_frames': int(spec.get('seconds') or 5) * 16,
             'safety_checker': 'no',
+        })
+        return str(body.get('id') or ''), self._read(body)
+
+    def _submit_face_swap(self, spec):
+        source = spec.get('source_url')
+        if not source:
+            raise GenerationError('a swap needs the clip it is swapping into')
+        refs = spec.get('reference_urls') or []
+        if spec.get('reference_b64'):
+            refs = [_data_uri(spec['reference_b64'],
+                              spec.get('reference_mime'))] + list(refs)
+        if not refs:
+            raise GenerationError(
+                'a swap needs at least one approved photo of her to swap in')
+        body = self._send(MODELSLAB_FACESWAP_PATH, {
+            'model_id': MODELSLAB_FACESWAP_MODEL,
+            MODELSLAB_FACESWAP_VIDEO_FIELD: source,
+            # Only the first face: a swap conditions on one identity, and more
+            # references here would only give it something to average towards.
+            MODELSLAB_FACESWAP_FACE_FIELD: refs[0],
+            'watermark': 'no',
         })
         return str(body.get('id') or ''), self._read(body)
 
@@ -1180,6 +1213,20 @@ def get_provider(name=None):
     if cls is None:
         raise GenerationError(f'unknown generation provider {name!r}')
     return cls()
+
+
+def provider_name_for(spec):
+    """Which provider a job actually runs on. Almost always the configured
+    default -- except the explicit replace, which Runware has no model for at
+    all, so that one job always goes to ModelsLab regardless of the setting."""
+    if (spec.get('kind') == 'swap'
+            and (spec.get('model') or DEFAULT_SWAP_MODEL) == EXPLICIT_SWAP_MODEL):
+        return 'modelslab'
+    return provider_name()
+
+
+def provider_for(spec):
+    return get_provider(provider_name_for(spec))
 
 
 def configured():
