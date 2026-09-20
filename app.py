@@ -28028,6 +28028,35 @@ VIDEO_SOURCE_PREFIX = 'staging/video-source'
 VIDEO_SOURCE_MAX_BYTES = 200 * 1024 * 1024
 
 
+VIDEO_SOURCE_MIMES_BY_EXT = {'.mp4': 'video/mp4', '.mov': 'video/quicktime'}
+
+
+def _stored_size(path):
+    try:
+        return storage.size_of(path)
+    except Exception:
+        return 0
+
+
+def _measure_stored_clip(path):
+    """Duration and size of a clip already in the bucket, without pulling the
+    whole file back through the server — which is the entire point of having
+    uploaded it directly.
+
+    The header is at the front of a file written for streaming and at the back
+    of one written straight out of a camera or an editor, so both ends are
+    tried before giving up.
+    """
+    for start, length in ((0, 1 << 20), (-(4 << 20), 4 << 20)):
+        chunk = storage.read_range(path, start, length)
+        if not chunk:
+            continue
+        seconds, width, height = _mp4_dimensions(chunk)
+        if seconds:
+            return seconds, width, height
+    return 0, 0, 0
+
+
 VIDEO_SOURCE_MAX_SECONDS = 30
 VIDEO_SOURCE_MIMES = {'video/mp4': '.mp4', 'video/quicktime': '.mov'}
 
@@ -28071,26 +28100,36 @@ def _mp4_dimensions(data):
                     return hit
         return None
 
+    def scan(name):
+        # A ranged read starts mid-file, so the atom tree above has nothing to
+        # walk from. Finding the header by name is what is left; the caller
+        # only ever passes a chunk it already believes holds one.
+        i = data.find(name)
+        return (i + 4, len(data)) if i >= 0 else None
+
     seconds, width, height = 0, 0, 0
-    mvhd = find(data, 0, len(data), [b'moov', b'mvhd'])
+    mvhd = find(data, 0, len(data), [b'moov', b'mvhd']) or scan(b'mvhd')
     if mvhd:
         b = mvhd[0]
-        version = data[b]
-        if version == 1:
+        version = data[b] if b < len(data) else 0
+        if version == 1 and b + 32 <= len(data):
             scale, dur = struct.unpack('>IQ', data[b + 20:b + 32])
-        else:
+        elif b + 20 <= len(data):
             scale, dur = struct.unpack('>II', data[b + 12:b + 20])
+        else:
+            scale, dur = 0, 0
         if scale:
             seconds = int(math.ceil(dur / float(scale)))
-    tkhd = find(data, 0, len(data), [b'moov', b'trak', b'tkhd'])
+    tkhd = find(data, 0, len(data), [b'moov', b'trak', b'tkhd']) or scan(b'tkhd')
     if tkhd:
         b = tkhd[0]
-        off = 36 if data[b] == 1 else 24
+        off = 36 if (b < len(data) and data[b] == 1) else 24
         # The last eight bytes of tkhd are width and height as 16.16 fixed
         # point. A sound track carries zeroes there, which is how a clip whose
         # first track is audio reports nothing rather than nonsense.
-        w, h = struct.unpack('>II', data[b + off + 52:b + off + 60])
-        width, height = w >> 16, h >> 16
+        if b + off + 60 <= len(data):
+            w, h = struct.unpack('>II', data[b + off + 52:b + off + 60])
+            width, height = w >> 16, h >> 16
     return seconds, width, height
 
 
@@ -28103,6 +28142,38 @@ def _video_rung(height):
     if h >= 720:
         return '720p'
     return '480p'
+
+
+@app.route('/api/personas/<slug>/video-source/ticket', methods=['POST'])
+def api_persona_video_ticket(slug):
+    """Mint a URL the browser uploads the clip straight to.
+
+    Cloud Run refuses a body over 32 MiB before the app sees it, so a clip of
+    any real length cannot come through here at all. The bytes go to the bucket
+    instead and this only ever handles the path. Returns {ok: False} with no
+    error when no ticket can be minted — on Vercel Blob, or on a bucket with no
+    CORS for this origin — and the caller falls back to posting the file.
+    """
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    if not re.match(r'^[a-z0-9_-]+$', slug or ''):
+        return jsonify({'ok': False, 'error': 'Invalid persona'}), 400
+    mine = owned_slugs()
+    if mine is not None and slug not in mine:
+        return jsonify({'ok': False, 'error': 'Not your persona'}), 403
+
+    body = request.get_json(silent=True) or {}
+    mime = str(body.get('mime') or '').strip().lower()
+    if mime not in VIDEO_SOURCE_MIMES:
+        return jsonify({'ok': False, 'error': 'Upload an MP4 or a MOV.'}), 415
+
+    path = storage.reserve(slug, mime, prefix=VIDEO_SOURCE_PREFIX)
+    url = storage.signed_upload_url(path, mime)
+    if not url:
+        return jsonify({'ok': False, 'direct': True}), 200
+    return jsonify({'ok': True, 'upload_url': url, 'path': path,
+                    'headers': {'Content-Type': mime}})
 
 
 @app.route('/api/personas/<slug>/video-source', methods=['POST'])
@@ -28133,7 +28204,16 @@ def api_persona_video_source(slug):
     body = request.get_json(silent=True) or {}
     upload = request.files.get('file') or request.files.get('video')
     poster = str(body.get('poster') or request.form.get('poster') or '')
-    if upload is not None:
+    stored = str(body.get('path') or '').strip()
+    data = b''
+    if stored:
+        # An upload that went straight to the bucket. The path has to be one
+        # this server handed out for this persona, or a caller could name any
+        # object in the bucket and have us measure and serve it.
+        if not stored.startswith(f'{VIDEO_SOURCE_PREFIX}/{slug}/'):
+            return jsonify({'ok': False, 'error': 'Unknown upload.'}), 400
+        mime = VIDEO_SOURCE_MIMES_BY_EXT.get(stored[-4:].lower(), 'video/mp4')
+    elif upload is not None:
         data = upload.read()
         mime = (upload.mimetype or '').lower()
     else:
@@ -28155,27 +28235,37 @@ def api_persona_video_source(slug):
         # set. Re-encoding to MP4 is a one-line job for the creator.
         return jsonify({'ok': False,
                         'error': 'Upload an MP4 or a MOV.'}), 415
-    if len(data) > VIDEO_SOURCE_MAX_BYTES:
+    size = len(data) if not stored else _stored_size(stored)
+    if size > VIDEO_SOURCE_MAX_BYTES:
+        if stored:
+            storage.delete(stored)
         mb = VIDEO_SOURCE_MAX_BYTES // (1024 * 1024)
         return jsonify({'ok': False,
                         'error': f'That clip is over {mb}MB. Trim it first.'}), 413
 
     try:
-        seconds, width, height = _mp4_dimensions(data)
+        seconds, width, height = (_measure_stored_clip(stored) if stored
+                                  else _mp4_dimensions(data))
     except Exception:
+        logger.exception('could not measure a clip slug=%s', slug)
         seconds, width, height = 0, 0, 0
     if not seconds:
+        if stored:
+            storage.delete(stored)
         return jsonify({'ok': False,
                         'error': 'That file has no readable duration. '
                                  'Re-export it as an MP4.'}), 400
     if seconds > VIDEO_SOURCE_MAX_SECONDS:
+        if stored:
+            storage.delete(stored)
         return jsonify({'ok': False,
                         'error': f'That clip runs {seconds}s. The limit is '
                                  f'{VIDEO_SOURCE_MAX_SECONDS}s — trim it and '
                                  'upload again.'}), 413
 
     try:
-        path = storage.put(slug, data, mime, prefix=VIDEO_SOURCE_PREFIX)
+        path = stored or storage.put(slug, data, mime,
+                                     prefix=VIDEO_SOURCE_PREFIX)
         poster_path = ''
         if poster.startswith('data:image/'):
             import base64
@@ -28193,7 +28283,7 @@ def api_persona_video_source(slug):
     try:
         row = VideoSource(slug=slug, gcs_path=path, poster_gcs_path=poster_path,
                           mime=mime, seconds=seconds, width=width, height=height,
-                          size_bytes=len(data))
+                          size_bytes=size)
         s.add(row)
         s.commit()
         source_id = row.id

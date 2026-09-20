@@ -249,6 +249,83 @@ def signed_url(path, ttl=None):
             return None
 
 
+def signed_upload_url(path, mime, ttl=None):
+    """A time-boxed PUT URL the browser uploads to directly, or None when the
+    backend cannot mint one.
+
+    Cloud Run refuses a request body over 32 MiB before it reaches the app, so
+    a clip of any real length cannot be posted through the server at all. This
+    is the way around that: the bytes go from the browser to the bucket and the
+    server only ever sees the path. The bucket must allow the site's origin in
+    its CORS config for a browser to use it; a caller that gets None here posts
+    through the server instead and lives with the cap.
+    """
+    if backend() != 'gcs':
+        return None
+    blob = _bucket().blob(path)
+    expiry = timedelta(seconds=ttl or signed_url_ttl())
+    kw = dict(version='v4', expiration=expiry, method='PUT',
+              content_type=mime or 'application/octet-stream')
+    try:
+        return blob.generate_signed_url(**kw)
+    except Exception:
+        email, creds = _iam_signer()
+        if not email:
+            return None
+        try:
+            return blob.generate_signed_url(service_account_email=email,
+                                            access_token=creds.token, **kw)
+        except Exception:
+            logger.exception('could not sign an upload URL for %s', path)
+            return None
+
+
+def reserve(slug, mime, prefix=STAGING_PREFIX):
+    """The path an upload will land at, without uploading anything. The naming
+    has to match put() exactly, because the two are the same object seen from
+    either end."""
+    ext = _EXT.get((mime or '').lower(), '.bin')
+    return f'{prefix}/{slug}/{uuid.uuid4().hex}{ext}'
+
+
+def read_range(path, start, length):
+    """Some bytes out of a stored object. `start` may be negative, meaning that
+    many bytes from the end — which is where an MP4 written without faststart
+    keeps the header we need to read."""
+    if backend() == 'blob':
+        import requests
+        if start < 0:
+            rng = f'bytes={start}'
+        else:
+            rng = f'bytes={start}-{start + length - 1}'
+        resp = requests.get(_blob_url(path), timeout=120,
+                            headers={'authorization': 'Bearer ' + _blob_token(),
+                                     'range': rng})
+        if resp.status_code >= 400:
+            raise RuntimeError(f'blob range read failed ({resp.status_code})')
+        return resp.content
+    blob = _bucket().blob(path)
+    if start < 0:
+        blob.reload()
+        size = int(blob.size or 0)
+        start = max(0, size + start)
+        length = min(length, size - start)
+        if length <= 0:
+            return b''
+    return blob.download_as_bytes(start=start, end=start + length - 1)
+
+
+def size_of(path):
+    if backend() == 'blob':
+        import requests
+        resp = requests.get(_blob_url(path), timeout=60, stream=True,
+                            headers={'authorization': 'Bearer ' + _blob_token()})
+        return int(resp.headers.get('content-length') or 0)
+    blob = _bucket().blob(path)
+    blob.reload()
+    return int(blob.size or 0)
+
+
 def purge_staging(days=STAGING_DAYS):
     """Delete staged objects past their window. Only Blob needs this — GCS has
     a lifecycle rule doing it for free — so it is a no-op elsewhere, and it is
