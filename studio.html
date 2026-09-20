@@ -22,6 +22,26 @@
        to the stylesheet every creator console loads. The .vault-* rules it sits
        on top of are already shared, and are left alone. */
 
+    /* Make and Rating pick the variant; the model picker is deliberately a
+       quiet row of chips under them, because the mode is the decision and the
+       model is a detail of it. */
+    .gen-toggles { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 12px; }
+    .gen-seg { display: flex; flex-direction: column; gap: 4px; }
+    .gen-seg > span { font-size: 0.7rem; color: var(--text-muted); letter-spacing: .02em; }
+    .gen-seg div { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+    .gen-seg button {
+      border: none; background: var(--surface); color: var(--text-2); cursor: pointer;
+      font: inherit; font-size: 0.75rem; padding: 6px 14px;
+    }
+    .gen-seg button[aria-pressed="true"] { background: var(--accent); color: var(--text); font-weight: 600; }
+
+    .gen-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+    .gen-chip {
+      border: 1px solid var(--border); background: var(--surface); color: var(--text-2);
+      border-radius: 999px; cursor: pointer; font: inherit; font-size: 0.72rem; padding: 4px 12px;
+    }
+    .gen-chip[aria-pressed="true"] { border-color: var(--accent); color: var(--text); font-weight: 600; }
+
     .gen-form {
       display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
       gap: 8px; margin-bottom: 10px;
@@ -125,11 +145,24 @@
       <span class="vault-title">Generate <span id="gen-balance" class="vault-sel"></span></span>
     </div>
 
-    <div class="gen-form">
+    <div class="gen-toggles">
+      <label class="gen-seg"><span>Make</span>
+        <div>
+          <button type="button" id="make-image" aria-pressed="true" onclick="setMake('image')">Photos</button>
+          <button type="button" id="make-video" aria-pressed="false" onclick="setMake('video')">Video</button>
+        </div></label>
+      <label class="gen-seg"><span>Rating</span>
+        <div>
+          <button type="button" id="rate-sfw" aria-pressed="true" onclick="setRating('sfw')">Safe</button>
+          <button type="button" id="rate-nsfw" aria-pressed="false" onclick="setRating('nsfw')">Explicit</button>
+        </div></label>
+    </div>
+    <div class="gen-chips" id="gen-models"></div>
+    <input type="hidden" id="gen-model">
+
+    <div class="gen-form" id="gen-image-form">
       <label class="gen-f"><span>Shot</span>
         <select id="gen-shot" onchange="genQuote()"></select></label>
-      <label class="gen-f"><span>Model</span>
-        <select id="gen-model" onchange="genQuote()"></select></label>
       <label class="gen-f"><span>Size</span>
         <select id="gen-res" onchange="genQuote()"></select></label>
       <label class="gen-f"><span>How many</span>
@@ -145,6 +178,11 @@
         <textarea id="gen-prompt" rows="2" placeholder="leaning against the window, morning light, looking away from the camera"></textarea></label>
       <label class="gen-f gen-wide"><span>Keep out of the shot</span>
         <textarea id="gen-negative" rows="2" placeholder="sunglasses, jewellery, other people"></textarea></label>
+    </div>
+    <div class="note-box" id="gen-video-note" style="display:none">
+      A clip always starts from a photo that is already kept, so its first frame
+      carries her face. Pick one below and press <b>▶</b> — there is no
+      text-to-video here on purpose.
     </div>
     <div class="gen-engines" id="gen-engines"></div>
     <div class="gen-go">
@@ -190,6 +228,11 @@ let genAllowedShots = [];  // resolved server side from the persona's NSFW level
 let mediaVault = [];
 let genJobs = [];
 let genTimer = null;
+// The two toggles pick one of four variants. Rating filters the shot list
+// rather than being sent on its own: the server derives explicit from the shot
+// it is given, and two sources for one fact is how they drift apart.
+let genMake = 'image';
+let genRating = 'sfw';
 
 const GEN_SHOT_LABELS = {
   portrait: 'Portrait', half: 'Waist up', full: 'Full body',
@@ -257,22 +300,68 @@ async function loadPersona() {
   pollGenJobs();
 }
 
+function setMake(v) {
+  genMake = v;
+  el('make-image').setAttribute('aria-pressed', String(v === 'image'));
+  el('make-video').setAttribute('aria-pressed', String(v === 'video'));
+  renderGenForm();
+}
+
+function setRating(v) {
+  genRating = v;
+  el('rate-sfw').setAttribute('aria-pressed', String(v === 'sfw'));
+  el('rate-nsfw').setAttribute('aria-pressed', String(v === 'nsfw'));
+  renderGenForm();
+}
+
+// Shots this persona may ask for, narrowed to the rating on screen. A persona
+// set to SFW simply has no explicit half, so the toggle cannot conjure one.
+function shotsForRating() {
+  const explicitShots = (genEngines && genEngines.nsfw_shots) || [];
+  return genAllowedShots.filter(sh =>
+    genRating === 'nsfw' ? explicitShots.includes(sh) : !explicitShots.includes(sh));
+}
+
+function renderModelChips() {
+  const box = el('gen-models');
+  const hidden = el('gen-model');
+  if (!box || !genPrices) return;
+  if (genMake === 'video') {
+    const name = (genEngines && genEngines.video) || 'the video model';
+    box.innerHTML = `<button type="button" class="gen-chip" aria-pressed="true" disabled>${esc(name)}</button>`;
+    return;
+  }
+  const keys = Object.keys(genPrices.images);
+  if (!keys.includes(hidden.value)) hidden.value = genPrices.defaults.model;
+  box.innerHTML = keys.map(m =>
+    `<button type="button" class="gen-chip" aria-pressed="${m === hidden.value}"
+             onclick="pickModel('${m}')">${esc(genPrices.labels[m] || m)}</button>`).join('');
+}
+
+function pickModel(key) {
+  el('gen-model').value = key;
+  renderModelChips();
+  genQuote();
+}
+
 function renderGenForm() {
   if (!genPrices) return;
   const opt = (v, label, sel) =>
     `<option value="${v}"${v === sel ? ' selected' : ''}>${esc(label)}</option>`;
 
+  const video = genMake === 'video';
+  el('gen-image-form').style.display = video ? 'none' : '';
+  el('gen-video-note').style.display = video ? '' : 'none';
+  el('gen-run-btn').style.display = video ? 'none' : '';
+  renderModelChips();
+  if (video) { showEngines(); return; }
+
   const shot = el('gen-shot');
   if (shot) {
     const keep = shot.value;
-    shot.innerHTML = genAllowedShots.map(s =>
-      opt(s, GEN_SHOT_LABELS[s] || s, keep)).join('')
-      || '<option value="">This persona has NSFW off</option>';
-  }
-  const model = el('gen-model');
-  if (model && !model.options.length) {
-    model.innerHTML = Object.keys(genPrices.images).map(m =>
-      opt(m, genPrices.labels[m] || m, genPrices.defaults.model)).join('');
+    const shots = shotsForRating();
+    shot.innerHTML = shots.map(s => opt(s, GEN_SHOT_LABELS[s] || s, keep)).join('')
+      || `<option value="">Nothing ${genRating === 'nsfw' ? 'explicit' : 'safe'} is allowed for this persona</option>`;
   }
   const res = el('gen-res');
   if (res && !res.options.length) {
