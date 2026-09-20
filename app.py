@@ -3913,7 +3913,6 @@ def api_me():
         return jsonify({'signed_in': False, 'is_operator': _is_operator(),
                         'capabilities': dict(DENIED_CAPS)}), 200
     caps = user_capabilities(user)
-    used, limit = _image_quota(user)
     from db import count_team_members
     sdb = _db_session()
     try:
@@ -3937,7 +3936,8 @@ def api_me():
                     'usage': {'personas': {'used': _persona_count(user),
                                            'limit': caps.get('personas')},
                               'seats': {'used': seats, 'limit': caps.get('seats')},
-                              'images': {'used': used, 'limit': limit}},
+                              'credits': {'balance': _credit_balance(user),
+                                          'limit': caps.get('credits_month')}},
                     'setup': _get_setup(user['id'])}), 200
 
 

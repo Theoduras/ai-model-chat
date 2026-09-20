@@ -620,12 +620,16 @@ function renderPlanPanel(me) {
   const row = (label, o) => o
     ? '<div class="sb-plan-row"><span>' + label + '</span><span>' + o.used + ' / ' + cap(o.limit) + '</span></div>'
     : '';
+  const creditRow = o => o
+    ? '<div class="sb-plan-row"><span>Credits</span><span>' + cap(o.balance)
+      + ' / ' + cap(o.limit) + '</span></div>'
+    : '';
   const name = me.is_admin ? 'Admin' : ((me.tier || 'No plan').replace('_annual', ' (annual)'));
   const legacy = me.grandfathered
     ? '<div style="margin-top:6px">On your original terms &mdash; no plan limits yet.</div>' : '';
   el.innerHTML = '<div class="sb-plan-tier"></div>'
     + row('Personas', u.personas) + row('Seats', u.seats)
-    + row('Images this month', u.images) + legacy
+    + creditRow(u.credits) + legacy
     + (me.is_admin ? '' : '<div style="margin-top:6px"><a href="/pricing">Change plan</a></div>');
   el.querySelector('.sb-plan-tier').textContent = name.charAt(0).toUpperCase() + name.slice(1);
   el.hidden = false;
