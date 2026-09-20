@@ -4586,6 +4586,7 @@ def api_credits():
         'equivalents': CR.equivalents(balance or 0),
         'packs': CR.packs_for(user.get('tier')),
         'prices': CR.price_table(),
+        'engines': imagegen.engine_report(),
         'period_end': _period_end().isoformat(),
     })
 
@@ -27839,6 +27840,8 @@ def _gen_spec(slug, body, user):
     level = _persona_nsfw_level(cfg)
     spec = {'kind': kind, 'slug': slug,
             'reference_media': (body.get('reference_media') or '').strip(),
+            'prompt_extra': (body.get('prompt') or '').strip()[:600],
+            'negative_extra': (body.get('negative') or '').strip()[:600],
             'addons': []}
 
     if kind == 'image':
@@ -27966,6 +27969,7 @@ def _gen_start(job_id, slug, spec, workspace):
         try:
             provider = imagegen.get_provider()
             call = dict(spec)
+            call['negative'] = imagegen.merge_negative(spec.get('negative_extra'))
             ref_b64, ref_mime, _row = _gen_reference(slug, spec.get('reference_media'))
             if ref_b64:
                 call['reference_b64'] = ref_b64
@@ -27974,10 +27978,12 @@ def _gen_start(job_id, slug, spec, workspace):
                 cfg = _persona_config(slug)
                 call['prompt'] = imagegen.build_prompt(
                     _appearance_from_config(cfg), spec.get('shot'),
-                    spec.get('outfit'), bool(ref_b64))
+                    spec.get('outfit'), bool(ref_b64),
+                    extra=spec.get('prompt_extra', ''))
                 provider_job, result = provider.submit_image(call)
             else:
-                call['prompt'] = imagegen.build_video_prompt(spec.get('motion', ''))
+                call['prompt'] = imagegen.build_video_prompt(
+                    spec.get('motion', '') or spec.get('prompt_extra', ''))
                 provider_job, result = provider.submit_video(call)
         except imagegen.GenerationError as e:
             logger.warning('generation submit failed job=%s: %s', job_id, e)

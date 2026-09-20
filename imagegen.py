@@ -134,7 +134,15 @@ def shot_allowed(shot, level):
     return shot in shots_for_level(level)
 
 
-def build_prompt(appearance, shot, outfit=None, has_reference=False):
+def merge_negative(extra=''):
+    """The creator's additions are added to the baseline, never swapped for it:
+    the baseline is what keeps a generation off anything underage, and a text
+    box is not somewhere that should be editable."""
+    extra = (extra or '').strip().strip(',')
+    return (NEGATIVE_PROMPT + ', ' + extra) if extra else NEGATIVE_PROMPT
+
+
+def build_prompt(appearance, shot, outfit=None, has_reference=False, extra=''):
     """The positive prompt for one generation.
 
     With a reference photo the prompt describes what changes, not who she is —
@@ -164,9 +172,27 @@ def build_prompt(appearance, shot, outfit=None, has_reference=False):
         lock = (' She is ' + ', '.join(bits) + '.') if bits else ''
         tail = ''
 
+    # The creator's own words go last, where a diffusion prompt weights them
+    # least — they refine the shot, they do not get to replace who she is.
+    extra = (' ' + extra.strip()) if (extra or '').strip() else ''
     return (lead + lock + tail +
             ' Shot on a phone camera, natural skin texture and lighting, '
-            'sharp focus, realistic. Fictional adult woman, 25 years old.')
+            'sharp focus, realistic. Fictional adult woman, 25 years old.' + extra)
+
+
+def engine_report():
+    """Which provider model does what, for the studio to show. A creator
+    picking 'Realistic (fast)' should be able to see the checkpoint behind it,
+    because that is what they are describing a prompt to."""
+    provider = (os.getenv('IMAGEGEN_PROVIDER') or 'runware').strip().lower()
+    if provider != 'runware':
+        return {'provider': provider, 'images': dict(MODELSLAB_MODELS),
+                'video': MODELSLAB_VIDEO_MODEL, 'identity': {}}
+    identity = {}
+    for key, pair in RUNWARE_IP_ADAPTERS.items():
+        identity[key] = {'reference': pair['base'], 'face': pair.get('face', '')}
+    return {'provider': 'runware', 'images': dict(RUNWARE_MODELS),
+            'video': RUNWARE_VIDEO_MODEL, 'identity': identity}
 
 
 def build_video_prompt(motion=''):

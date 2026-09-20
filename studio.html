@@ -33,6 +33,18 @@
       color: var(--text-2); font-size: 0.75rem; padding: 7px 8px; width: 100%;
     }
     .gen-wide { grid-column: span 2; }
+    .gen-f textarea {
+      font: inherit; resize: vertical; padding: 7px 9px; border-radius: 8px;
+      border: 1px solid var(--line); background: var(--card); color: var(--text);
+    }
+    .gen-engines {
+      font-size: 0.68rem; color: var(--text-muted); margin: -4px 0 10px;
+      line-height: 1.6;
+    }
+    .gen-engines b { color: var(--text); font-weight: 600; }
+    .gen-engines code {
+      font-size: 0.95em; opacity: .8;
+    }
     .gen-go { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
     .gen-go .btn-ai:disabled { opacity: .45; cursor: not-allowed; }
     #gen-cost { opacity: .75; font-weight: 400; }
@@ -127,7 +139,12 @@
         </select></label>
       <label class="gen-f gen-wide"><span>Her face</span>
         <select id="gen-ref" onchange="genQuote()"></select></label>
+      <label class="gen-f gen-wide"><span>Add to the prompt</span>
+        <textarea id="gen-prompt" rows="2" placeholder="leaning against the window, morning light, looking away from the camera"></textarea></label>
+      <label class="gen-f gen-wide"><span>Keep out of the shot</span>
+        <textarea id="gen-negative" rows="2" placeholder="sunglasses, jewellery, other people"></textarea></label>
     </div>
+    <div class="gen-engines" id="gen-engines"></div>
     <div class="gen-go">
       <button type="button" class="btn-ai" id="gen-run-btn" onclick="runGeneration()">
         Generate <span id="gen-cost"></span></button>
@@ -165,6 +182,7 @@ function slug(){ return (el('persona')||{}).value || ''; }
 // Every control quotes its own price before it is clicked: a button that spends
 // credits without saying how many is the one thing this panel must not be.
 let genPrices = null;      // the server's price table
+let genEngines = null;     // which provider model is behind each picker entry
 let genCredits = null;     // null = unlimited, which is every admin
 let genAllowedShots = [];  // resolved server side from the persona's NSFW level
 let mediaVault = [];
@@ -206,6 +224,7 @@ async function loadCredits() {
     if (!res.ok) return;
     const d = await res.json();
     genPrices = d.prices;
+    genEngines = d.engines || null;
     genCredits = d.unlimited ? null : d.balance;
     const e = el('gen-balance');
     if (e) {
@@ -263,6 +282,29 @@ function renderGenForm() {
   genQuote();
 }
 
+// What is actually running, named. A creator writing a prompt is writing it
+// for a specific checkpoint, and the identity pass is two more models again —
+// none of which the picker's friendly labels admit to.
+function showEngines() {
+  const box = el('gen-engines');
+  if (!box || !genEngines) return;
+  const key = el('gen-model').value;
+  const rows = [
+    ['Image', genEngines.images[key] || '—',
+     genPrices.labels[key] || key]];
+  const id = (genEngines.identity || {})[key];
+  if (el('gen-ref').value && id) {
+    rows.push(['Her face', id.reference, 'holds her body and styling']);
+    if (id.face) rows.push(['', id.face, 'the faceswap pass over the result']);
+  } else if (el('gen-ref').value) {
+    rows.push(['Her face', 'seed image', 'no adapter for this model — the pose follows the reference']);
+  }
+  if (genEngines.video) rows.push(['Clips', genEngines.video, 'animates a kept photo']);
+  box.innerHTML = `<b>${esc(genEngines.provider)}</b> · ` + rows.map(([what, model, note]) =>
+    `${what ? esc(what) + ' ' : ''}<code>${esc(model)}</code>${note ? ' — ' + esc(note) : ''}`
+  ).join('<br>');
+}
+
 function genQuote() {
   if (!genPrices) return;
   const row = genPrices.images[el('gen-model').value] || {};
@@ -272,6 +314,7 @@ function genQuote() {
   const total = per * parseInt(el('gen-batch').value || '1', 10);
 
   el('gen-cost').textContent = `· ${total} credit${total === 1 ? '' : 's'}`;
+  showEngines();
   const short = genCredits !== null && genCredits < total;
   el('gen-run-btn').classList.toggle('gen-low', short);
   if (short) setGenStatus(`Only ${genCredits} credits left.`, false);
@@ -300,6 +343,8 @@ async function runGeneration() {
         resolution: el('gen-res').value,
         batch: parseInt(el('gen-batch').value || '1', 10),
         reference_media: el('gen-ref').value || '',
+        prompt: el('gen-prompt').value.trim(),
+        negative: el('gen-negative').value.trim(),
       }),
     });
     const d = await res.json();
