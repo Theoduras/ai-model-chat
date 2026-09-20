@@ -188,9 +188,13 @@ def engine_report():
                 'video': MODELSLAB_VIDEO_MODEL}
     return {
         'provider': 'runware',
-        'sfw': {'model': RUNWARE_MODELS['seedream-4-5'],
+        # `key` is the credits.IMAGE_MODELS key, so the studio can name the
+        # pinned model in a creator's words rather than printing an air id.
+        'sfw': {'key': 'seedream-4-5',
+                'model': RUNWARE_MODELS['seedream-4-5'],
                 'identity': 'reference images', 'passes': 1},
-        'nsfw': {'model': RUNWARE_MODELS[EXPLICIT_MODEL],
+        'nsfw': {'key': EXPLICIT_MODEL,
+                 'model': RUNWARE_MODELS[EXPLICIT_MODEL],
                  'identity': 'reference images', 'passes': 1},
         'loras': {},
         'nsfw_shots': [k for k, v in SHOT_LEVEL.items() if v != 'sfw'],
