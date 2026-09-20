@@ -782,10 +782,15 @@ document.addEventListener('keydown', e => {
   else if (!el('gen-vault').hidden) closeVault();
 });
 
+// Module scope, not inside renderGenForm: the swap panel's own selects are
+// built from outside it, and a local one is a ReferenceError that takes the
+// whole form down with it.
+function opt(v, label, sel) {
+  return `<option value="${v}"${v === sel ? ' selected' : ''}>${esc(label)}</option>`;
+}
+
 function renderGenForm() {
   if (!genPrices) return;
-  const opt = (v, label, sel) =>
-    `<option value="${v}"${v === sel ? ' selected' : ''}>${esc(label)}</option>`;
 
   const video = genMake === 'video';
   const swap = genMake === 'swap';
@@ -794,8 +799,8 @@ function renderGenForm() {
   el('gen-swap-form').style.display = swap ? 'flex' : 'none';
   el('gen-image-out').style.display = genMake === 'image' ? '' : 'none';
   el('gen-video-out').style.display = video ? '' : 'none';
-  // A swap runs the length of its source and comes out at its source's size,
-  // so there is nothing to pick and nothing to contradict the price.
+  // The uploaded clip is the ceiling for a swap's length and size, not the
+  // value: both are picked here, within what the file can carry.
   el('gen-swap-out').style.display = swap ? '' : 'none';
   // A clip is animated from a kept photo, so the video form has no button of
   // its own; a swap starts from an upload and does.
