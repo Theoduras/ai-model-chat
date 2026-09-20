@@ -50,10 +50,20 @@ IMAGE_PRICES = {
     'nano-banana-pro': {'2k': 69, '4k': 138},
 }
 
+# Video, priced per second against a measured clip. A 5s 720p clip on Wan 2.5
+# costs $0.4538, which is 46 credits a second — the old table charged 30 a
+# second and so sold every clip below cost. The floor assertion never caught it
+# because it only walks the packs, not the generation table.
+#
+# Only 720p is measured. 480p is deliberately charged at the same rate rather
+# than guessed lower, because a guess that is too low loses money on every clip
+# and nothing would report it; 1080p keeps the old table's 2.5x shape. Measure
+# both and bring them down.
+VIDEO_RATE_PER_SECOND = {'480p': 46, '720p': 46, '1080p': 115}
+
 VIDEO_PRICES = {
-    '480p':  {3: 30, 5: 50, 10: 100},
-    '720p':  {3: 90, 5: 150, 10: 300},
-    '1080p': {3: 225, 5: 375, 10: 750},
+    res: {secs: rate * secs for secs in (3, 5, 10)}
+    for res, rate in VIDEO_RATE_PER_SECOND.items()
 }
 
 # The legacy Google/Imagen path is priced from the same peg (~$0.02 a call), so

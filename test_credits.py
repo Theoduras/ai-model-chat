@@ -105,8 +105,11 @@ def test_prices_track_cost():
     check('holding her face is free — identity is inside the one call',
           CR.quote({'kind': 'image', 'model': 'seedream-4-5', 'resolution': '2k'}) ==
           IMAGE_BASE)
-    check('a 720p 5s clip is 150 credits',
-          CR.quote({'kind': 'video', 'resolution': '720p', 'seconds': 5}) == 150)
+    check('a 720p 5s clip is priced at the measured per-second rate',
+          CR.quote({'kind': 'video', 'resolution': '720p', 'seconds': 5}) == 46 * 5)
+    check('a clip never sells under what the provider charges',
+          CR.quote({'kind': 'video', 'resolution': '720p', 'seconds': 5})
+          * CR.CREDIT_COST_USD >= 0.4538)
     check('the legacy Google path is priced too, so it is not a free bypass',
           CR.GOOGLE_IMAGE_CREDITS > 0)
 
