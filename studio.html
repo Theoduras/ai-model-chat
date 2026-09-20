@@ -11,7 +11,7 @@
   <script src="/js/devnav.js" defer></script>
   <style>
     .fv-scroll { flex: 1; min-height: 0; overflow-y: auto; }
-    .fv-wrap { max-width: 1400px; margin: 0 auto; padding: 28px 24px 80px;
+    .fv-wrap { max-width: none; margin: 0; padding: 24px 28px 72px;
                display: flex; flex-direction: column; gap: 20px; }
     .note-box { border: 1px solid var(--border); background: var(--surface); color: var(--text-2);
                 border-radius: 10px; padding: 12px 14px; font-size: 0.82rem; line-height: 1.5; }
@@ -59,6 +59,7 @@
     .gen-chip[aria-pressed="true"] small { color: var(--text-2); }
 
     .gen-refs { display: flex; gap: 6px; flex-wrap: wrap; }
+    .gen-f > span small { color: var(--text-3); margin-left: 5px; }
     .gen-ref-t {
       position: relative; width: 50px; height: 64px; padding: 0; overflow: hidden; cursor: pointer;
       border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface);
@@ -197,9 +198,14 @@
         <label class="gen-f"><span>Whose photos are we generating?</span>
           <select id="persona" onchange="loadPersona()"></select></label>
         <div class="gen-f">
-          <span>Her face and body</span>
+          <span>Her face <small id="gen-face-count"></small></span>
           <div class="gen-refs" id="gen-refs"></div>
           <input type="hidden" id="gen-ref">
+        </div>
+        <div class="gen-f">
+          <span>Her body <small id="gen-body-count"></small></span>
+          <div class="gen-refs" id="gen-refs-body"></div>
+          <span class="hint" id="gen-refs-note" style="margin:0;"></span>
         </div>
         <span class="hint" id="persona-hint" style="margin:0;"></span>
       </div>
@@ -230,8 +236,6 @@
         <div class="gen-form">
           <label class="gen-f"><span>Scene</span>
             <select id="gen-shot" onchange="genQuote()"></select></label>
-          <label class="gen-f" id="gen-lora-wrap" style="display:none"><span>Explicit model</span>
-            <select id="gen-lora" onchange="genQuote()"></select></label>
         </div>
         <label class="gen-f"><span>Add to the prompt</span>
           <textarea id="gen-prompt" rows="5" placeholder="leaning against the window, morning light, looking away from the camera"></textarea></label>
@@ -305,10 +309,7 @@ const GEN_SHOT_LABELS = {
   implied: 'Implied nude', sheer: 'Sheer robe', bedroom: 'Bedroom',
   topless: 'Topless', nude: 'Nude', explicit: 'Explicit',
 };
-const GEN_RES_LABELS = {
-  '768x1024': 'Small', '1024x1024': 'Square',
-  '1024x1536': 'Portrait', '1536x2048': 'Large',
-};
+const GEN_RES_LABELS = { '2k': '2K', '4k': '4K' };
 
 async function init() {
   try {
@@ -335,11 +336,6 @@ async function loadCredits() {
     const d = await res.json();
     genPrices = d.prices;
     genEngines = d.engines || null;
-    const lo = el('gen-lora');
-    if (lo && genEngines && !lo.options.length) {
-      lo.innerHTML = Object.entries(genEngines.loras || {}).map(
-        ([k, v]) => `<option value="${k}">${esc(v.label)}</option>`).join('');
-    }
     genCredits = d.unlimited ? null : d.balance;
     const e = el('gen-balance');
     if (e) {
@@ -361,6 +357,7 @@ async function loadPersona() {
   } catch (e) { mediaVault = []; genAllowedShots = []; }
   renderVault();
   renderGenForm();
+  loadReferences();
   pollGenJobs();
 }
 
@@ -408,35 +405,84 @@ function renderModelChips() {
   }).join('');
   if (note) {
     note.textContent = genRating === 'nsfw'
-      ? 'Explicit shots add a second pass over her face, which is why they cost more.'
-      : 'Prices are per photo, before the face passes.';
+      ? 'Explicit stills are pinned to one checkpoint whatever is picked here — Result names it.'
+      : 'Prices are per photo. Holding her face costs nothing on top.';
   }
-}
-
-// The reference is a photo, so it is picked as a photo. The caption is the
-// purpose it was filed under, which is how a body shot is told from a face one.
-function renderRefs() {
-  const box = el('gen-refs');
-  const hidden = el('gen-ref');
-  if (!box) return;
-  const photos = mediaVault.filter(v => v.kind !== 'video');
-  if (!photos.some(v => v.id === hidden.value)) hidden.value = '';
-  box.innerHTML = `<button type="button" class="gen-ref-t gen-ref-none" aria-pressed="${!hidden.value}"
-      onclick="pickRef('')">A new face</button>` + photos.map(v =>
-    `<button type="button" class="gen-ref-t" aria-pressed="${v.id === hidden.value}"
-       onclick="pickRef('${v.id}')" title="${esc(v.purpose || 'Her photo')}">
-       <img src="${v.thumb}" alt="">${v.purpose ? `<em>${esc(v.purpose)}</em>` : ''}</button>`).join('');
-}
-
-function pickRef(id) {
-  el('gen-ref').value = id;
-  renderRefs();
-  genQuote();
 }
 
 function pickModel(key) {
   el('gen-model').value = key;
   renderModelChips();
+  loadReferences();
+  genQuote();
+}
+
+// Face and body are separate slot groups over the same vault, saved per model
+// on the server: one decides who she is, the other decides her build. Both are
+// resolved at generate time, so a picked photo is in every shot until it is
+// unpicked, not just this one.
+let genRefs = { face: [], body: [], cap: 14 };
+
+async function loadReferences() {
+  const model = el('gen-model').value || (genPrices && genPrices.defaults.model);
+  if (!slug() || !model) return;
+  try {
+    const res = await fetch(`/api/personas/${encodeURIComponent(slug())}/references` +
+                            `?model=${encodeURIComponent(model)}`);
+    if (!res.ok) throw new Error('references');
+    const d = await res.json();
+    genRefs = { face: d.face || [], body: d.body || [], cap: d.cap || 14 };
+  } catch (e) { genRefs = { face: [], body: [], cap: genRefs.cap }; }
+  renderRefs();
+}
+
+async function saveRefs(role) {
+  try {
+    const res = await fetch(`/api/personas/${encodeURIComponent(slug())}/references`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: el('gen-model').value, role: role,
+                             media_ids: genRefs[role] }),
+    });
+    const d = await res.json();
+    if (!d.ok) throw new Error(d.error || 'Could not save that');
+    genRefs[role] = d.media_ids || genRefs[role];
+    renderRefs();
+  } catch (e) { setGenStatus('✗ ' + e.message, false); }
+}
+
+// The cap belongs to the model, and the route truncates past it silently, so
+// the picker refuses the click rather than dropping a photo the creator chose.
+function toggleRef(role, id) {
+  const list = genRefs[role] || [];
+  const at = list.indexOf(id);
+  if (at >= 0) list.splice(at, 1);
+  else if (list.length >= genRefs.cap) {
+    setGenStatus(`${genRefs.cap} photos is the limit for one group.`, false);
+    return;
+  } else list.push(id);
+  genRefs[role] = list;
+  renderRefs();
+  saveRefs(role);
+}
+
+function renderRefs() {
+  const photos = mediaVault.filter(v => v.kind !== 'video');
+  const tiles = (role) => photos.map(v =>
+    `<button type="button" class="gen-ref-t" aria-pressed="${genRefs[role].includes(v.id)}"
+       onclick="toggleRef('${role}', '${v.id}')" title="${esc(v.purpose || 'Her photo')}">
+       <img src="${v.thumb}" alt="">${v.purpose ? `<em>${esc(v.purpose)}</em>` : ''}</button>`).join('')
+    || '<span class="hint" style="margin:0;">Nothing kept yet.</span>';
+
+  el('gen-refs').innerHTML = tiles('face');
+  el('gen-refs-body').innerHTML = tiles('body');
+  el('gen-face-count').textContent = `${genRefs.face.length} of ${genRefs.cap}`;
+  el('gen-body-count').textContent = `${genRefs.body.length} of ${genRefs.cap}`;
+  el('gen-refs-note').textContent =
+    'Saved against this model, so switching models starts a fresh set.';
+
+  // The first face photo also rides this job on its own, which is what the
+  // engine line and the quote read.
+  el('gen-ref').value = genRefs.face[0] || '';
   genQuote();
 }
 
@@ -483,8 +529,8 @@ function renderGenForm() {
 }
 
 // What is actually running, named. A creator writing a prompt is writing it
-// for a specific checkpoint, and the identity pass is two more models again —
-// none of which the picker's friendly labels admit to.
+// for a specific checkpoint, and explicit stills are pinned to one regardless
+// of the picker, so the panel says which.
 function genExplicit() {
   return (genEngines && genEngines.nsfw_shots || []).includes(el('gen-shot').value);
 }
@@ -492,24 +538,21 @@ function genExplicit() {
 function showEngines() {
   const box = el('gen-engines');
   if (!box || !genEngines) return;
-  const wrap = el('gen-lora-wrap');
-  const explicit = genExplicit();
-  // The picker goes away with the LoRAs themselves: no entries, no control.
-  const hasLoras = !!(genEngines.loras && Object.keys(genEngines.loras).length);
-  if (wrap) wrap.style.display = explicit && hasLoras ? '' : 'none';
-
-  const e = explicit ? genEngines.nsfw : genEngines.sfw;
-  const rows = [['Image', e.model, explicit ? 'with the explicit model below' : '']];
+  if (genMake === 'video') {
+    box.innerHTML = `<b>${esc(genEngines.provider)}</b><br>Clip <code>${esc(genEngines.video || '')}</code>`;
+    return;
+  }
+  const e = (genExplicit() ? genEngines.nsfw : genEngines.sfw) || {};
+  const rows = [['Image', e.model, e.passes === 1 ? 'one pass' : '']];
   if (el('gen-ref').value) {
-    rows.push(['Her face', e.identity,
-               explicit ? 'holds her body and styling' : 'identity, one pass']);
-    if (explicit && e.restore) {
-      rows.push(['Face pass', e.restore.adapter,
-                 'a second pass on ' + e.restore.model + ' — this shot costs two']);
-    }
+    rows.push(['Her face', e.identity || 'reference images', 'inside the same call, at no extra cost']);
+  }
+  if (genRefs.body.length) {
+    rows.push(['Her body', e.identity || 'reference images',
+               `${genRefs.body.length} reference${genRefs.body.length === 1 ? '' : 's'}, same call`]);
   }
   box.innerHTML = `<b>${esc(genEngines.provider)}</b><br>` + rows.map(([what, model, note]) =>
-    `${esc(what)} <code>${esc(model)}</code>${note ? ' — ' + esc(note) : ''}`
+    `${esc(what)} <code>${esc(model || '')}</code>${note ? ' — ' + esc(note) : ''}`
   ).join('<br>');
 }
 
@@ -531,10 +574,11 @@ function genQuote() {
   const row = genPrices.images[el('gen-model').value] || {};
   let per = row[el('gen-res').value];
   if (per === undefined) return;
+  const addons = genPrices.addons || {};
   if (el('gen-ref').value) {
     per += genExplicit()
-      ? genPrices.addons.reference + genPrices.addons.restore
-      : genPrices.addons.identity;
+      ? (addons.reference || 0) + (addons.restore || 0)
+      : (addons.identity || 0);
   }
   const batch = parseInt(el('gen-batch').value || '1', 10);
   const total = per * batch;
@@ -575,7 +619,6 @@ async function runGeneration() {
         resolution: el('gen-res').value,
         batch: parseInt(el('gen-batch').value || '1', 10),
         reference_media: el('gen-ref').value || '',
-        lora: el('gen-lora').value || '',
         prompt: el('gen-prompt').value.trim(),
         negative: el('gen-negative').value.trim(),
       }),
