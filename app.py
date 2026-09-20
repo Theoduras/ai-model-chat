@@ -28029,9 +28029,18 @@ def _gen_spec(slug, body, user):
             resolution = _video_rung(src['height'])
             spec['source_path'] = src['path']
             spec['source_id'] = source_id
+            spec['source_width'] = src['width']
+            spec['source_height'] = src['height']
         elif not spec['reference_media']:
             raise imagegen.GenerationError(
                 'Pick an approved photo to animate — a clip starts from one.')
+        # A model serves a fixed set of sizes, so the size actually run is the
+        # nearest one to the source rather than the rung asked for. Price it
+        # off that: billing a 480p rung for a clip run at 720p loses the
+        # difference on every swap.
+        _, snapped_h = imagegen.video_size(model, spec.get('source_width'),
+                                           spec.get('source_height'), resolution)
+        resolution = _video_rung(snapped_h)
         spec.update({'resolution': resolution, 'seconds': seconds,
                      'model': model, 'explicit': level != 'sfw',
                      'motion': (body.get('motion') or '')[:300]})
@@ -28219,7 +28228,11 @@ def api_persona_video_source(slug):
 
     return jsonify({'ok': True, 'id': source_id, 'source': source_id,
                     'seconds': seconds, 'width': width, 'height': height,
-                    'resolution': _video_rung(height),
+                    # The rung the swap will actually be run and billed at, not
+                    # the file's own, so the studio quotes what it charges.
+                    'resolution': _video_rung(
+                        imagegen.video_size(CR.VIDEO_EDIT_MODEL, width, height,
+                                            _video_rung(height))[1]),
                     'url': storage.signed_url(path) or '',
                     'poster_url': (storage.signed_url(poster_path) or '')
                                   if poster_path else ''})

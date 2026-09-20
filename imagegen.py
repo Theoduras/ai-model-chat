@@ -114,6 +114,36 @@ VIDEO_PX = {
     '1080p': (1080, 1920),
 }
 
+# Wan 2.7 takes a fixed set of sizes and refuses anything else outright, so a
+# phone clip's own 480p dimensions are not a size it can be asked for. Snapping
+# is the only option a swap has: the source is whatever the creator filmed.
+MODEL_VIDEO_SIZES = {
+    'wan-2-7': ((1280, 720), (720, 1280), (960, 960), (1088, 832), (832, 1088),
+                (1920, 1080), (1080, 1920), (1440, 1440), (1632, 1248),
+                (1248, 1632)),
+}
+
+
+def video_size(model_key, width=0, height=0, resolution=None):
+    """The size to ask a model for, given the source's own.
+
+    Aspect ratio first and pixel count second: a portrait clip sent at a
+    landscape size comes back letterboxed or cropped through her face, which is
+    worse than a rung either side of what was asked for.
+    """
+    import math
+    fallback = VIDEO_PX.get(resolution) or VIDEO_PX['720p']
+    sizes = MODEL_VIDEO_SIZES.get(model_key)
+    if not sizes:
+        return fallback
+    w, h = int(width or 0), int(height or 0)
+    if w <= 0 or h <= 0:
+        w, h = fallback
+    ratio = w / float(h)
+    return min(sizes, key=lambda s: (round(abs(math.log(s[0] / float(s[1])
+                                                        / ratio)), 3),
+                                     abs(s[0] * s[1] - w * h)))
+
 
 # ── Prompts ───────────────────────────────────────────────────────────────────
 # The framing vocabulary the SFW path already uses, plus the explicit rungs it
@@ -528,11 +558,13 @@ class RunwareProvider(Provider):
         return task['taskUUID'], Result('done', urls, cost=cost or None)
 
     def submit_video(self, spec):
-        width, height = VIDEO_PX.get(spec.get('resolution'), VIDEO_PX['720p'])
         task_uuid = str(uuid.uuid4())
         model_key = spec.get('model') or DEFAULT_VIDEO_MODEL
         if spec.get('kind') == 'swap':
             model_key = VIDEO_EDIT_MODEL
+        width, height = video_size(model_key, spec.get('source_width'),
+                                   spec.get('source_height'),
+                                   spec.get('resolution'))
         task = {
             'taskType': _RW['video_task'],
             'taskUUID': task_uuid,
