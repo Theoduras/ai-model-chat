@@ -279,8 +279,20 @@
       <div id="gen-image-form" style="display:flex; flex-direction:column; gap:11px;">
         <div class="gen-form">
           <label class="gen-f"><span>Scene</span>
+            <select id="gen-scene"></select></label>
+          <label class="gen-f"><span>Shot</span>
             <select id="gen-shot" onchange="genQuote()"></select></label>
         </div>
+        <div class="gen-form">
+          <label class="gen-f"><span>Style</span>
+            <select id="gen-style"></select></label>
+          <label class="gen-f"><span>Camera</span>
+            <select id="gen-camera"></select></label>
+          <label class="gen-f"><span>Lighting</span>
+            <select id="gen-lighting"></select></label>
+        </div>
+        <label class="gen-f"><span>Direction</span>
+          <input id="gen-direction" maxlength="300" placeholder="looking back over her shoulder, phone in one hand"></label>
         <label class="gen-f"><span>Add to the prompt</span>
           <textarea id="gen-prompt" rows="5" placeholder="leaning against the window, morning light, looking away from the camera"></textarea></label>
         <label class="gen-f"><span>Keep out of the shot</span>
@@ -365,6 +377,8 @@ let genEngines = null;     // which provider model is behind each picker entry
 let genCredits = null;     // null = unlimited, which is every admin
 let genRate = null;        // what a credit costs this tier in cash
 let genAllowedShots = [];  // resolved server side from the persona's NSFW level
+let genScenes = [];        // scene builder vocabulary, already gated server side
+let genStyles = [], genCameras = [], genLighting = [];
 let mediaVault = [];
 let genJobs = [];
 let genTimer = null;
@@ -424,9 +438,13 @@ async function loadPersona() {
     const d = await (await fetch('/api/personas/' + encodeURIComponent(slug()) + '/media')).json();
     mediaVault = d.vault || [];
     genAllowedShots = d.shots || [];
+    genScenes = d.scenes || [];
+    genStyles = d.styles || [];
+    genCameras = d.cameras || [];
+    genLighting = d.lighting || [];
     el('persona-hint').textContent =
       `NSFW level: ${d.nsfw_level || 'sfw'} — that is what decides which shots are offered.`;
-  } catch (e) { mediaVault = []; genAllowedShots = []; }
+  } catch (e) { mediaVault = []; genAllowedShots = []; genScenes = []; }
   renderVault();
   renderGenForm();
   loadReferences();
@@ -684,12 +702,42 @@ function renderGenForm() {
     shot.innerHTML = shots.map(s => opt(s, GEN_SHOT_LABELS[s] || s, keep)).join('')
       || `<option value="">Nothing ${genRating === 'nsfw' ? 'explicit' : 'safe'} is allowed for this persona</option>`;
   }
+  const scene = el('gen-scene');
+  if (scene) {
+    const keep = scene.value;
+    // The scene list arrives gated to this persona already; the rating toggle
+    // only hides the explicit half, and picking a scene never touches the shot.
+    const offered = genRating === 'nsfw' ? genScenes : genScenes.filter(sc => sc.level === 'sfw');
+    scene.innerHTML = `<option value="">Anywhere</option>` +
+      offered.map(sc => opt(sc.key, prettyKey(sc.key), keep)).join('');
+  }
+  fillVocab('gen-style', genStyles);
+  fillVocab('gen-camera', genCameras);
+  fillVocab('gen-lighting', genLighting);
+
   const res = el('gen-res');
   if (res && !res.options.length) {
     res.innerHTML = genPrices.resolutions.map(r =>
       opt(r, `${GEN_RES_LABELS[r] || r} (${r})`, genPrices.defaults.resolution)).join('');
   }
   genQuote();
+}
+
+function prettyKey(k) {
+  const t = String(k).replace(/-/g, ' ');
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
+// 'any' and 'auto' mean "let the model decide", so they lead the list however
+// the server happened to sort it.
+function fillVocab(id, keys) {
+  const sel = el(id);
+  if (!sel || !keys.length) return;
+  const first = keys.filter(k => k === 'any' || k === 'auto');
+  const rest = keys.filter(k => k !== 'any' && k !== 'auto');
+  const keep = sel.value || first[0] || '';
+  sel.innerHTML = first.concat(rest).map(k =>
+    `<option value="${k}"${k === keep ? ' selected' : ''}>${esc(prettyKey(k))}</option>`).join('');
 }
 
 // What is actually running, named. A creator writing a prompt is writing it
@@ -804,6 +852,11 @@ async function runGeneration() {
         reference_media: el('gen-ref').value || '',
         prompt: el('gen-prompt').value.trim(),
         negative: el('gen-negative').value.trim(),
+        scene: el('gen-scene').value,
+        style: el('gen-style').value,
+        camera: el('gen-camera').value,
+        lighting: el('gen-lighting').value,
+        direction: el('gen-direction').value.trim(),
       }),
     });
     const d = await res.json();

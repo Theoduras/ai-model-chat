@@ -212,8 +212,8 @@ footer a:hover{opacity:1}
       <h1>{{ p.h1_pre }} <u>{{ p.h1_accent }}</u></h1>
       {% for para in p.lede %}<p class="lede">{{ para }}</p>{% endfor %}
       <div class="hero-cta">
-        <a class="btn btn-primary" href="/register">{{ p.cta_primary }}</a>
-        <a class="btn btn-ghost" href="#how">See how it works</a>
+        <a class="btn btn-primary" data-cta-start href="/register">{{ p.cta_primary }}</a>
+        <a class="btn btn-ghost" href="#features">See how it works</a>
       </div>
       <p class="note">{{ p.hero_note }}</p>
     </div>
@@ -322,7 +322,7 @@ footer a:hover{opacity:1}
     <h2>{{ p.close_h2 }}</h2>
     <p>{{ p.close_sub }}</p>
     <div class="hero-cta">
-      <a class="btn btn-primary" href="/register">{{ p.cta_primary }}</a>
+      <a class="btn btn-primary" data-cta-start href="/register">{{ p.cta_primary }}</a>
       <a class="btn btn-ghost" href="/#pricing">See pricing</a>
     </div>
   </div>
@@ -335,6 +335,17 @@ footer a:hover{opacity:1}
 </footer>
 
 <script>
+// Signed-out visitors need an account first; a signed-in creator already has
+// one, so the same button takes them to the plans instead.
+fetch('/api/me', { credentials: 'same-origin' })
+  .then(function (r) { return r.json(); })
+  .then(function (me) {
+    if (!me || !me.signed_in) return;
+    document.querySelectorAll('[data-cta-start]').forEach(function (a) {
+      a.setAttribute('href', '/#pricing');
+    });
+  })
+  .catch(function () {});
 (function(){
   var nav = document.getElementById('site-nav');
   function onScroll(){ nav.classList.toggle('scrolled', window.scrollY > 12); }

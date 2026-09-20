@@ -12,7 +12,33 @@
   // outer page only. Same guard as js/devnav.js.
   if (window.self !== window.top) return;
 
+  // One "Features" dropdown over every public platform and tool page. The
+  // pages are otherwise only reachable from the homepage footer, and a menu
+  // is the link a visitor actually follows.
+  var FEATURES = [
+    { group: 'Platforms', items: [
+      { href: '/telegram-ai-chatbot', label: 'Telegram AI chatbot' },
+      { href: '/discord-ai-chatbot', label: 'Discord AI chatbot' },
+      { href: '/x-ai-bot', label: 'X (Twitter) AI bot' },
+      { href: '/instagram-posting-automation', label: 'Instagram posting' },
+      { href: '/threads-auto-reply', label: 'Threads auto-reply' },
+      { href: '/reddit-posting-bot', label: 'Reddit posting bot', soon: true },
+      { href: '/tiktok-posting-automation', label: 'TikTok posting', soon: true },
+    ] },
+    { group: 'Paid pages', items: [
+      { href: '/fanvue-ai-chatter', label: 'Fanvue AI chatter' },
+      { href: '/onlyfans-ai-chatbot', label: 'OnlyFans AI chatbot', soon: true },
+      { href: '/fansly-ai-chatbot', label: 'Fansly AI chatbot', soon: true },
+      { href: '/velvetchat-share-link', label: 'Your own chat page' },
+    ] },
+    { group: 'Tools', items: [
+      { href: '/ai-content-planner', label: 'AI content planner' },
+      { href: '/ai-image-generator', label: 'AI image generator', soon: true },
+    ] },
+  ];
+
   var PAGE_LINKS = [
+    { menu: 'Features', groups: FEATURES },
     { href: '/#pricing', label: 'Pricing' },
     { href: '/blog', label: 'Blog', keep: true },
   ];
@@ -65,8 +91,29 @@
     return path === href || (href !== '/' && path.indexOf(href) === 0);
   }
 
+  function menuHtml(i) {
+    var open = i.groups.some(function (g) {
+      return g.items.some(function (it) { return isCurrent(it.href); });
+    });
+    return '<div class="sn-menu' + (open ? ' sn-menu-here' : '') + '" data-sn>' +
+      '<button type="button" class="sn-menu-btn" aria-expanded="false">' +
+      '<span class="sn-label">' + i.menu + '</span>' +
+      '<svg class="sn-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+      'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+      '<path d="m6 9 6 6 6-6"/></svg></button>' +
+      '<div class="sn-menu-panel">' + i.groups.map(function (g) {
+        return '<div class="sn-menu-group"><span class="sn-menu-label">' + g.group + '</span>' +
+          g.items.map(function (it) {
+            return '<a href="' + it.href + '"' +
+              (isCurrent(it.href) ? ' aria-current="page"' : '') + '>' + it.label +
+              (it.soon ? '<i class="sn-soon">Soon</i>' : '') + '</a>';
+          }).join('') + '</div>';
+      }).join('') + '</div></div>';
+  }
+
   function linksHtml(items) {
     return items.map(function (i) {
+      if (i.menu) return menuHtml(i);
       return '<a data-sn href="' + i.href + '"' +
         (i.cta ? ' class="sn-cta"' : '') +
         (i.keep ? ' data-keep' : '') +
@@ -125,8 +172,27 @@
   }
 
   function fill(host, items) {
-    [].slice.call(host.querySelectorAll('a[data-sn]')).forEach(function (el) { el.remove(); });
+    [].slice.call(host.querySelectorAll('[data-sn]')).forEach(function (el) { el.remove(); });
     host.insertAdjacentHTML('beforeend', linksHtml(items));
+    [].slice.call(host.querySelectorAll('.sn-menu')).forEach(wireMenu);
+  }
+
+  // Click to open, because the bar is reachable on touch as well as hover.
+  function wireMenu(menu) {
+    var btn = menu.querySelector('.sn-menu-btn');
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      var open = menu.classList.toggle('open');
+      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+    document.addEventListener('click', function (e) {
+      if (!menu.contains(e.target)) shut();
+    });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') shut(); });
+    function shut() {
+      menu.classList.remove('open');
+      btn.setAttribute('aria-expanded', 'false');
+    }
   }
 
   function paint(account) {
