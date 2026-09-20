@@ -7703,8 +7703,6 @@ def _appearance_from_config(cfg):
         value = str(cfg.get(key) or '').strip()
         if value and value.lower() != 'any':
             tail.append(phrase.format(value.lower()))
-    if cfg.get('location'):
-        tail.append(f"from {cfg['location']}")
     for key in ('style', 'archetype'):
         value = str(cfg.get(key) or '').strip()
         if value:
@@ -28468,6 +28466,29 @@ def api_persona_references(slug):
         s.close()
     return jsonify({'ok': True, 'model': model_key, 'role': role,
                     'media_ids': kept})
+
+
+@app.route('/api/generate/models')
+def api_generate_models():
+    """What the provider actually calls its models.
+
+    Every model id here came off documentation, and a wrong one is only found
+    when a priced job fails at submit. This asks the provider instead, so an id
+    is looked up rather than guessed and then set with the matching env var.
+    """
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    query = (request.args.get('q') or '').strip()
+    category = (request.args.get('category') or 'video').strip() or None
+    try:
+        return jsonify({'ok': True, 'query': query,
+                        'models': imagegen.search_models(query, category)})
+    except imagegen.GenerationError as e:
+        return jsonify({'ok': False, 'error': str(e)[:800]}), 200
+    except Exception as e:
+        logger.exception('model search failed')
+        return jsonify({'ok': False, 'error': str(e)[:300]}), 200
 
 
 @app.route('/api/generate/prompt/options')

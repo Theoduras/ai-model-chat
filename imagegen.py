@@ -269,6 +269,33 @@ def video_seconds(model_key, seconds):
     return max(lo, min(hi, int(seconds or 0) or lo))
 
 
+def search_models(query, category='video', limit=20):
+    """Ask the provider which models it has, by name.
+
+    Every model id in this file was read off documentation; three of them were
+    wrong, and a wrong one fails as `Invalid value for 'model'` after the job
+    has been priced. The provider knows its own catalogue, so ask it.
+    """
+    provider = get_provider('runware')
+    task = {'taskType': 'modelSearch',
+            'taskUUID': str(uuid.uuid4()),
+            'search': str(query or '')[:80],
+            'limit': max(1, min(int(limit or 20), 50))}
+    if category:
+        task['category'] = category
+    rows = provider._send([task])
+    out = []
+    for row in rows:
+        for hit in (row.get('results') or [row]):
+            air = hit.get('air') or hit.get('model') or hit.get('id')
+            if air:
+                out.append({'air': air,
+                            'name': hit.get('name') or hit.get('title') or '',
+                            'type': hit.get('type') or hit.get('category') or '',
+                            'version': str(hit.get('version') or '')})
+    return out
+
+
 def video_size(model_key, width=0, height=0, resolution=None):
     """The size to ask a model for, given the source's own.
 
