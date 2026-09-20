@@ -149,6 +149,91 @@ def test_prices_track_cost():
           CR.GOOGLE_IMAGE_CREDITS > 0)
 
 
+def test_job_quotes():
+    """Every combination the five job tiles can produce has a price, and none
+    of them sells under what the provider bills. The picker reads its options
+    out of the same tables this walks, so an option that appears there and
+    cannot be quoted fails here rather than at submit."""
+    print('video jobs')
+    missing, under = [], []
+    for job, models in CR.JOB_MODELS.items():
+        for model in models:
+            rungs = CR._imagegen_rungs(model)
+            durations = CR._imagegen_durations(model) or [
+                CR.VIDEO_SECONDS_MIN, 5, CR.VIDEO_MAX_SECONDS]
+            for aspect in CR.ASPECTS:
+                for res in rungs:
+                    for secs in durations:
+                        for addons in ((), ('audio',)):
+                            spec = {'job': job, 'model': model,
+                                    'resolution': res, 'seconds': secs,
+                                    'aspect': aspect, 'addons': addons}
+                            try:
+                                price = CR.quote(spec)
+                            except CR.PricingError:
+                                missing.append((job, model, aspect, res, secs,
+                                                addons))
+                                continue
+                            cost = (CR.video_cost_usd(model, res, secs) or 0) \
+                                + sum(CR.ADDON_COST_USD.get(a, 0) for a in addons)
+                            if price * CR.CREDIT_COST_USD + 1e-9 < cost:
+                                under.append((job, model, aspect, res, secs,
+                                              addons, price))
+    check('every job / model / aspect / rung / duration is priced',
+          not missing, str(missing[:6]))
+    check('no job / model / aspect / rung / duration sells under cost',
+          not under, str(under[:6]))
+
+    check('the import-time generation floor walked a real table',
+          len(CR.generation_margin_report()) > 0)
+
+    check('a frame shape costs nothing — the same pixels, a different crop',
+          len({CR.quote({'job': 'reel', 'resolution': '720p', 'seconds': 5,
+                         'aspect': a}) for a in CR.ASPECTS}) == 1)
+
+    check('sound is flat per clip, not per second',
+          CR.quote({'job': 'reel', 'resolution': '720p', 'seconds': 10,
+                    'addons': ('audio',)}) -
+          CR.quote({'job': 'reel', 'resolution': '720p', 'seconds': 10}) ==
+          CR.quote({'job': 'reel', 'resolution': '720p', 'seconds': 3,
+                    'addons': ('audio',)}) -
+          CR.quote({'job': 'reel', 'resolution': '720p', 'seconds': 3}) ==
+          CR.ADDON_PRICES['audio'])
+
+    check('sound never sells under what a pass costs us',
+          CR.ADDON_PRICES['audio'] * CR.CREDIT_COST_USD >=
+          CR.ADDON_COST_USD['audio'])
+
+    # A model that does not serve a job must not be quotable on it: the picker
+    # offers the job's own list, so anything else arrived from a hand-made
+    # request and would be billed on a model that never ran.
+    for job, model in (('reel', 'p-video-replace'), ('extend', 'wan-2-5'),
+                       ('multiref', 'seedance-2-5'), ('nonesuch', 'wan-2-7')):
+        try:
+            CR.quote({'job': job, 'model': model, 'resolution': '720p',
+                      'seconds': 5})
+            check(f'{model} is refused on the {job} job', False)
+        except CR.PricingError:
+            check(f'{model} is refused on the {job} job', True)
+
+    check('a swap job is priced for the clip it was handed, not a default',
+          CR.quote({'job': 'swap', 'resolution': '720p', 'seconds': 7}) ==
+          CR.quote({'kind': 'swap', 'model': CR.DEFAULT_SWAP_MODEL,
+                    'resolution': '720p', 'seconds': 7}))
+    try:
+        CR.quote({'job': 'swap', 'resolution': '720p'})
+        check('a swap with no measured duration is refused', False)
+    except CR.PricingError:
+        check('a swap with no measured duration is refused', True)
+
+    check('every job the studio can show names at least one model',
+          all(CR.JOB_MODELS[j] for j in CR.JOB_MODELS))
+    check('a reel is safe work only, so a prompt-only clip claims nobody',
+          CR.JOB_RATINGS['reel'] == ('sfw',))
+    check('every job the picker offers has a kind the quote understands',
+          set(CR.JOB_KINDS.values()) <= {'video', 'swap'})
+
+
 def test_ledger():
     print('ledger')
     db.init_db()
@@ -204,7 +289,8 @@ def test_equivalents():
 
 if __name__ == '__main__':
     for fn in (test_margin_floor, test_tier_discount, test_quote_covers_everything,
-               test_prices_track_cost, test_ledger, test_equivalents):
+               test_prices_track_cost, test_job_quotes, test_ledger,
+               test_equivalents):
         fn()
     print()
     if FAILURES:

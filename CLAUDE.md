@@ -235,11 +235,39 @@ Stay completely in character. Never mention being an AI.
   that has to stay up is more expensive than the feature is worth.
 - Identity is never left to the prompt. A still is conditioned on an approved
   vault photo *and* faceswapped from the same photo — a full-body NSFW pose is
-  exactly where a reference alone drifts. **A clip is only ever generated from
-  an already-approved still** (`kind='video'` requires `reference_media`), so
-  the first frame carries the identity and there is nothing to correct. There
-  is no text-to-video path, and the Animate button lives on a vault item rather
-  than a prompt box for that reason.
+  exactly where a reference alone drifts. **A clip that claims to be her is
+  only ever generated from an already-approved still**, so the first frame
+  carries the identity and there is nothing to correct. The one exception is
+  the safe-work **Reel** job, which may run from a prompt alone: a prompt-only
+  clip makes no claim to be anybody, carries no identity lock, and is the
+  reason Reel is SFW-only in `imagegen.VIDEO_JOBS`. Every other video job —
+  Animate, Extend, Multi-reference, Swap — still needs her: an approved still,
+  an approved clip, or her reference slots. All of them land unapproved in
+  `staging/` either way, so nothing reaches a fan unreviewed.
+- **The video surface is five jobs, not a model picker.** `imagegen.VIDEO_JOBS`
+  is the one table that says what each job needs, which models serve it, and
+  which prompt clauses are forced on; `credits.JOB_MODELS` mirrors it so the
+  picker and the price table read one list, and `SWAP_MODELS` and friends are
+  derived aliases over it. The model is a consequence of the job — an admin can
+  override it, but only within the job's own list, because a model moved after
+  the quote is a model the creator was charged for and never ran. An explicit
+  swap carries `imagegen.PRESERVE_CLAUSE` ahead of the creator's own words when
+  the model regenerates rather than replaces; that text is not creator-editable.
+- **An extension is its own clip, not a longer one.** Joining one onto its
+  source needs ffmpeg, which the image does not have, so `extend` delivers each
+  generation as a separate vault clip chained by `PersonaMedia.parent_media`.
+  Its `longer` mode asks for the model's own ceiling in one pass rather than
+  stitching. The frame it continues from is captured **client-side** — a canvas
+  seek in `studio.html` — for the same reason: there is nothing on the server
+  that can decode a video.
+- **Audio is provider-side only**, for the same missing ffmpeg: either the
+  generation task emits it (`RW_VIDEO_AUDIO_FLAG`/`RW_VIDEO_AUDIO_FIELD`) or a
+  follow-on video-to-audio task returns a muxed clip (`RW_AUDIO_ROUTE=task`).
+  A model that does not know the audio fields has them dropped by `_send`'s
+  refused-parameter retry and still returns the clip, silent. **None of the
+  audio model ids, the audio field names or a video-concat task is verified
+  against the live catalogue** — run `imagegen.search_models('audio')` the
+  moment a Runware key is reachable and correct the env defaults.
 - A generation lands in `staging/` unapproved and is **invisible to every send
   path** — `_approved_only` filters `_pick_media`, `_pick_phase_photo` and the
   vault listing, so nothing unreviewed can reach a fan. Keeping it promotes it

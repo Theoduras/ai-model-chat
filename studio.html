@@ -217,6 +217,35 @@
     }
     .anim-pick img { width: 100%; height: 100%; object-fit: cover; display: block; }
     .anim-pick[aria-pressed="true"] { border-color: var(--accent, #ff6b4a); }
+
+    /* The job tiles. What a creator wants comes first; which model serves it
+       is an advanced override further down. */
+    .gen-jobs {
+      display: grid; gap: 8px; margin-bottom: 14px;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    }
+    .gen-job {
+      display: flex; flex-direction: column; gap: 3px; text-align: left;
+      padding: 10px 12px; border-radius: var(--r-sm); cursor: pointer;
+      border: 1px solid var(--line, #2a2a31); background: #ffffff08;
+      color: inherit; font: inherit;
+    }
+    .gen-job b { font-size: 0.86rem; }
+    .gen-job small { color: var(--text-muted); font-size: 0.68rem; line-height: 1.3; }
+    .gen-job[aria-pressed="true"] {
+      border-color: var(--accent, #ff6b4a); background: #ff6b4a14;
+    }
+    .gen-job[disabled] { opacity: 0.4; cursor: not-allowed; }
+
+    /* Collapsed by default: the job already chose a model, and the override is
+       there for when an admin disagrees with it. */
+    .gen-adv summary {
+      cursor: pointer; font-size: 0.72rem; color: var(--text-muted);
+      list-style: none;
+    }
+    .gen-adv summary::-webkit-details-marker { display: none; }
+    .gen-adv summary::before { content: "▸ "; }
+    .gen-adv[open] summary::before { content: "▾ "; }
   </style>
 </head>
 <body class="page-dashboard">
@@ -243,30 +272,30 @@
   </div>
 
   <div class="gen-toggles">
-    <label class="gen-seg"><span>Make</span>
-      <div>
-        <button type="button" id="make-image" aria-pressed="true" onclick="setMake('image')">Photos</button>
-        <button type="button" id="make-video" aria-pressed="false" onclick="setMake('video')">Video</button>
-        <button type="button" id="make-swap" aria-pressed="false" onclick="setMake('swap')">Swap into a video</button>
-      </div></label>
     <label class="gen-seg"><span>Rating</span>
       <div>
         <button type="button" id="rate-sfw" aria-pressed="true" onclick="setRating('sfw')">Safe</button>
         <button type="button" id="rate-nsfw" aria-pressed="false" onclick="setRating('nsfw')">Explicit</button>
       </div></label>
-    <span class="hint" style="margin:0; align-self:flex-end;">These two swap the panels below.
-      Rating narrows the shots this persona already allows; it is never sent on its own.</span>
+    <span class="hint" style="margin:0; align-self:flex-end;">Pick what you want made.
+      Rating narrows the jobs and the shots this persona allows; it is never sent on its own.</span>
   </div>
+
+  <div class="gen-jobs" id="gen-jobs"></div>
 
   <div class="gen-cols">
     <div class="gen-col">
 
       <div class="gen-panel">
-        <div class="gen-head"><b>1</b><h2>Model</h2></div>
-        <div class="gen-chips gen-stack" id="gen-models"></div>
+        <div class="gen-head"><b>1</b><h2>Engine</h2></div>
+        <span class="hint" id="gen-job-note" style="margin:0;"></span>
+        <details class="gen-adv" id="gen-adv">
+          <summary id="gen-adv-summary">Advanced — choose the model</summary>
+          <div class="gen-chips gen-stack" id="gen-models" style="margin-top:8px;"></div>
+          <span class="hint" id="gen-model-note" style="margin:0;"></span>
+        </details>
         <input type="hidden" id="gen-model">
         <input type="hidden" id="gen-vmodel">
-        <span class="hint" id="gen-model-note" style="margin:0;"></span>
       </div>
 
       <div class="gen-panel">
@@ -311,6 +340,19 @@
             <select id="gen-vres" onchange="genQuote()"></select></label>
           <label class="gen-f"><span>Seconds</span>
             <select id="gen-vsecs" onchange="genQuote()"></select></label>
+        </div>
+        <div id="gen-shape-out" style="display:none; flex-direction:column; gap:10px; margin-top:10px;">
+          <div class="gen-f"><span>Frame shape</span>
+            <div class="gen-chips" id="gen-aspects"></div>
+            <span class="hint" style="margin:0;" id="gen-aspect-note"></span>
+          </div>
+          <div class="gen-f"><span>Sound</span>
+            <div class="gen-chips" id="gen-audio-modes"></div>
+            <input id="gen-audio-prompt" maxlength="300" style="display:none"
+                   oninput="genQuote()"
+                   placeholder="what you want to hear">
+            <span class="hint" style="margin:0;" id="gen-audio-note"></span>
+          </div>
         </div>
       </div>
     </div>
@@ -374,6 +416,41 @@
         <label class="gen-f"><span>Motion</span>
           <input id="gen-swap-motion" maxlength="300" placeholder="keep her hair down, match the original lighting"></label>
         <span class="hint" style="margin:0;" id="gen-swap-limits"></span>
+      </div>
+
+      <div id="gen-reel-form" style="display:none; flex-direction:column; gap:11px;">
+        <label class="gen-f"><span>What happens in it</span>
+          <textarea id="gen-reel-prompt" rows="4"
+            placeholder="she walks through a night market, neon signs behind her, looking back once"></textarea></label>
+        <div class="gen-f"><span>Start from a photo (optional)</span>
+          <div class="anim-strip" id="gen-reel-photo"></div>
+          <span class="hint" style="margin:0;">A reel may run from the words alone.
+            With no photo it is not a clip of her, and it still lands unapproved
+            in staging like everything else.</span></div>
+      </div>
+
+      <div id="gen-extend-form" style="display:none; flex-direction:column; gap:11px;">
+        <div class="gen-f"><span>Clip to carry on from</span>
+          <div class="anim-strip" id="gen-extend-clip"></div></div>
+        <div class="gen-f"><span>How</span>
+          <div class="gen-chips" id="gen-extend-modes"></div>
+          <span class="hint" style="margin:0;" id="gen-extend-note"></span></div>
+        <label class="gen-f"><span>Motion</span>
+          <input id="gen-extend-motion" maxlength="300"
+                 placeholder="she keeps walking, the camera stays with her"></label>
+        <video id="gen-extend-player" muted playsinline preload="metadata" crossorigin="anonymous"
+               style="display:none; width:100%; max-height:200px; border-radius:10px; background:#000;"></video>
+      </div>
+
+      <div id="gen-multiref-form" style="display:none; flex-direction:column; gap:11px;">
+        <div class="gen-f"><span>Scene, outfit or setting</span>
+          <div class="anim-strip" id="gen-scene-refs"></div>
+          <span class="hint" style="margin:0;" id="gen-scene-note">Pick the kept
+            photos that say where she is and what she is wearing. Her own face
+            references come from the slots above — these never replace them.</span></div>
+        <label class="gen-f"><span>What happens in it</span>
+          <input id="gen-multiref-motion" maxlength="300"
+                 placeholder="she turns slowly, the light moves across her"></label>
       </div>
 
       <div id="gen-video-drive" style="display:none; flex-direction:column; gap:8px;">
@@ -473,10 +550,19 @@ let genStyles = [], genCameras = [], genLighting = [];
 let mediaVault = [];
 let genJobs = [];
 let genTimer = null;
-// The two toggles pick one of four variants. Rating filters the shot list
-// rather than being sent on its own: the server derives explicit from the shot
-// it is given, and two sources for one fact is how they drift apart.
+// The job is what the creator picked; genMake is the shape it settles into,
+// and every panel that predates the jobs still reads that. Rating filters the
+// job tiles and the shot list rather than being sent on its own: the server
+// derives explicit from the shot it is given, and two sources for one fact is
+// how they drift apart.
+let genJob = 'image';
 let genMake = 'image';
+let genAspect = '';
+let genAudio = { mode: '' };
+let genExtendMode = 'continue';
+let genExtendClip = '';       // the vault clip an extension carries on from
+let genSceneRefs = [];        // the Multi-reference job's scene photographs
+let genReelPick = '';         // the optional photo a reel starts from
 let genSwap = null;       // the uploaded clip: {source, url, seconds, width, height}
 let genDrive = null;      // the Video tab's optional motion clip, same shape
 // 32 MB is the host's own request ceiling, not the route's, so it is policed
@@ -550,18 +636,67 @@ async function loadPersona() {
   pollGenJobs();
 }
 
-function setMake(v) {
-  genMake = v;
-  el('make-image').setAttribute('aria-pressed', String(v === 'image'));
-  el('make-video').setAttribute('aria-pressed', String(v === 'video'));
-  el('make-swap').setAttribute('aria-pressed', String(v === 'swap'));
+// Photos is a job like the rest of them here: the tile row is the one place a
+// creator says what they want, and hiding the photo panel behind a different
+// control would be two ways of asking the same question.
+const PHOTO_JOB = { key: 'image', label: 'Photos', note: 'Stills from a prompt, her references held.' };
+
+function jobRow(key) {
+  if (key === 'image') return PHOTO_JOB;
+  return { key: key,
+           label: ((genPrices && genPrices.job_labels) || {})[key] || key,
+           note: ((genPrices && genPrices.job_notes) || {})[key] || '' };
+}
+
+// A job the rating does not serve is shown disabled rather than removed: the
+// tile is the map of what this surface does, and a map that changes shape
+// under you is worse than one with a greyed-out road.
+function jobServes(key) {
+  if (key === 'image') return true;
+  const r = ((genPrices && genPrices.job_ratings) || {})[key] || ['sfw', 'nsfw'];
+  return r.includes(genRating === 'nsfw' ? 'nsfw' : 'sfw');
+}
+
+function jobKeys() {
+  return ['image'].concat(((genPrices && genPrices.jobs) || []));
+}
+
+function jobKind(key) {
+  if (key === 'image') return 'image';
+  return (((genPrices && genPrices.job_kinds) || {})[key]) || 'video';
+}
+
+function renderJobTiles() {
+  const box = el('gen-jobs');
+  if (!box) return;
+  box.innerHTML = jobKeys().map(key => {
+    const row = jobRow(key);
+    const ok = jobServes(key);
+    return `<button type="button" class="gen-job" aria-pressed="${key === genJob}"
+      ${ok ? '' : 'disabled title="Not offered at this rating"'}
+      onclick="setJob('${key}')"><b>${esc(row.label)}</b>
+      <small>${esc(row.note)}</small></button>`;
+  }).join('');
+}
+
+function setJob(v) {
+  genJob = v;
+  genMake = jobKind(v) === 'swap' ? 'swap'
+          : jobKind(v) === 'image' ? 'image' : 'video';
   renderGenForm();
+}
+
+function setMake(v) {
+  setJob(v === 'video' ? 'animate' : v);
 }
 
 function setRating(v) {
   genRating = v;
   el('rate-sfw').setAttribute('aria-pressed', String(v === 'sfw'));
   el('rate-nsfw').setAttribute('aria-pressed', String(v === 'nsfw'));
+  // A job this rating does not serve cannot stay selected, or the panel would
+  // be quoting something the server is about to refuse.
+  if (!jobServes(genJob)) return setJob(jobKeys().find(jobServes) || 'image');
   renderGenForm();
 }
 
@@ -576,12 +711,22 @@ function shotsForRating() {
 // `prices.videos` arrives either flat (resolution first) or keyed by model.
 // The rate moved under this panel once already, so it is always read, never
 // assumed and never cached.
+// The models the current job serves, in the table's own order, cut to the
+// rating on screen. The job is the question; this is only what answers it.
 function videoModels() {
-  const v = (genPrices && genPrices.videos) || {};
-  const first = v[Object.keys(v)[0]];
-  if (!first) return [];
-  const inner = first[Object.keys(first)[0]];
-  return inner && typeof inner === 'object' ? Object.keys(v) : [];
+  const byJob = (genPrices && genPrices.job_models) || {};
+  const list = byJob[genJob];
+  if (!list) {
+    const v = (genPrices && genPrices.videos) || {};
+    const first = v[Object.keys(v)[0]];
+    if (!first) return [];
+    const inner = first[Object.keys(first)[0]];
+    return inner && typeof inner === 'object' ? Object.keys(v) : [];
+  }
+  const want = genRating === 'nsfw' ? 'nsfw' : 'sfw';
+  const rt = (genPrices && genPrices.video_ratings) || {};
+  const serves = list.filter(m => (rt[m] || ['sfw']).includes(want));
+  return serves.length ? serves : list;
 }
 
 function videoModel() {
@@ -878,16 +1023,30 @@ function opt(v, label, sel) {
 function renderGenForm() {
   if (!genPrices) return;
 
+  renderJobTiles();
   const video = genMake === 'video';
   const swap = genMake === 'swap';
+  const animate = genJob === 'animate';
   el('gen-image-form').style.display = genMake === 'image' ? '' : 'none';
-  el('gen-video-form').style.display = video ? 'flex' : 'none';
-  if (video) renderAnimPhotos();
-  el('gen-video-note').style.display = video ? '' : 'none';
+  el('gen-video-form').style.display = animate ? 'flex' : 'none';
+  if (animate) renderAnimPhotos();
+  el('gen-video-note').style.display = animate ? '' : 'none';
   el('gen-swap-form').style.display = swap ? 'flex' : 'none';
+  el('gen-reel-form').style.display = genJob === 'reel' ? 'flex' : 'none';
+  el('gen-extend-form').style.display = genJob === 'extend' ? 'flex' : 'none';
+  el('gen-multiref-form').style.display = genJob === 'multiref' ? 'flex' : 'none';
+  if (genJob === 'reel') renderReelPhotos();
+  if (genJob === 'extend') renderExtendClips();
+  if (genJob === 'multiref') renderSceneRefs();
   el('gen-image-out').style.display = genMake === 'image' ? '' : 'none';
+  // Every generated clip is told its own length; only a swap runs the length
+  // of the clip it was handed, and that panel has a seconds row of its own.
   el('gen-video-out').style.display = video ? '' : 'none';
-  el('gen-video-drive').style.display = video ? 'flex' : 'none';
+  el('gen-shape-out').style.display = video || swap ? 'flex' : 'none';
+  el('gen-video-drive').style.display = animate ? 'flex' : 'none';
+  renderAspects();
+  renderAudioModes();
+  if (genJob === 'extend') renderExtendModes();
   // The uploaded clip is the ceiling for a swap's length and size, not the
   // value: both are picked here, within what the file can carry.
   el('gen-swap-out').style.display = swap ? '' : 'none';
@@ -895,7 +1054,17 @@ function renderGenForm() {
   // stay as a one-click shortcut, but a clip driven by an uploaded motion file
   // has no vault item to press, so the panel needs a way in of its own.
   el('gen-run-btn').style.display = '';
-  el('gen-prompt-head').textContent = swap ? 'Her clip' : 'Prompt';
+  el('gen-prompt-head').textContent =
+    swap ? 'Her clip' : genJob === 'extend' ? 'The clip to continue'
+    : genJob === 'multiref' ? 'Her, and where' : 'Prompt';
+  const note = el('gen-job-note');
+  if (note) note.textContent = jobRow(genJob).note;
+  const summary = el('gen-adv-summary');
+  if (summary) {
+    summary.textContent = genMake === 'image'
+      ? 'Advanced — choose the model'
+      : `Advanced — running on ${videoLabel(genMake === 'swap' ? swapModel() : videoModel())}`;
+  }
   if (swap) renderSwapForm();
 
   const vres = el('gen-vres');
@@ -945,6 +1114,118 @@ function renderGenForm() {
       opt(r, `${GEN_RES_LABELS[r] || r} (${r})`, genPrices.defaults.resolution)).join('');
   }
   genQuote();
+}
+
+// Frame shape. Hidden for a model that inherits the source's frame: a picker
+// in front of one of those is a control that changes nothing, which reads as a
+// promise the clip will not keep.
+function aspectModel() {
+  return genMake === 'swap' ? swapModel() : videoModel();
+}
+
+function aspectOffered() {
+  const caps = (genPrices && genPrices.swap_model_caps) || {};
+  return (caps[aspectModel()] || {}).aspect !== false;
+}
+
+function currentAspect() {
+  const list = (genPrices && genPrices.aspects) || [];
+  if (!list.includes(genAspect)) {
+    genAspect = (genPrices && genPrices.default_aspect) || list[0] || '';
+  }
+  return genAspect;
+}
+
+function renderAspects() {
+  const box = el('gen-aspects');
+  const note = el('gen-aspect-note');
+  if (!box || !genPrices) return;
+  const offered = aspectOffered();
+  box.style.display = offered ? '' : 'none';
+  const chosen = currentAspect();
+  box.innerHTML = (genPrices.aspects || []).map(a =>
+    `<button type="button" class="gen-chip" aria-pressed="${a === chosen}"
+       onclick="pickAspect('${a}')">${esc(a)}</button>`).join('');
+  if (note) {
+    note.textContent = offered
+      ? 'Costs the same whichever you pick — the same pixels, a different crop.'
+      : `${videoLabel(aspectModel())} keeps the frame of the clip you upload, so there is nothing to choose.`;
+  }
+}
+
+function pickAspect(a) {
+  genAspect = a;
+  renderGenForm();
+}
+
+const AUDIO_LABELS = {
+  ambience: 'Room tone', moaning: 'Breathing & moaning',
+  speech: 'She says a line', custom: 'Describe it',
+};
+const AUDIO_PLACEHOLDERS = {
+  speech: 'the line she says, in her own voice',
+  custom: 'rain on the window, a television two rooms away',
+};
+
+function renderAudioModes() {
+  const box = el('gen-audio-modes');
+  const note = el('gen-audio-note');
+  const field = el('gen-audio-prompt');
+  if (!box || !genPrices) return;
+  const modes = genPrices.audio_modes || [];
+  box.innerHTML = [''].concat(modes).map(m =>
+    `<button type="button" class="gen-chip" aria-pressed="${m === (genAudio.mode || '')}"
+       onclick="pickAudio('${m}')">${esc(m ? (AUDIO_LABELS[m] || m) : 'Silent')}</button>`).join('');
+  const typed = genAudio.mode === 'speech' || genAudio.mode === 'custom';
+  field.style.display = typed ? '' : 'none';
+  if (typed) field.placeholder = AUDIO_PLACEHOLDERS[genAudio.mode] || '';
+  if (note) {
+    const cost = (genPrices.addons || {}).audio;
+    note.textContent = !genAudio.mode
+      ? 'No sound. Nothing is added to the price.'
+      : genAudio.mode === 'speech'
+        ? `Her voice comes from her persona, not from here. ${cost || 0} credits a clip.`
+        : `${cost || 0} credits a clip, whatever its length. A model that cannot make sound still returns the clip.`;
+  }
+}
+
+function pickAudio(mode) {
+  genAudio = { mode: mode };
+  renderGenForm();
+}
+
+function audioPayload() {
+  if (!genAudio.mode) return null;
+  return { mode: genAudio.mode, prompt: (el('gen-audio-prompt') || {}).value || '' };
+}
+
+const EXTEND_LABELS = {
+  continue: 'Carry on', longer: 'Run longer', loop: 'Loop back',
+};
+const EXTEND_NOTES = {
+  continue: 'Starts at the last frame of the clip you picked and keeps going.',
+  longer: 'One generation at the model’s own ceiling, from that last frame.',
+  loop: 'Starts at the last frame and arrives back at the first, so it loops.',
+};
+
+function renderExtendModes() {
+  const box = el('gen-extend-modes');
+  const note = el('gen-extend-note');
+  if (!box || !genPrices) return;
+  const modes = genPrices.extend_modes || ['continue'];
+  if (!modes.includes(genExtendMode)) genExtendMode = modes[0];
+  box.innerHTML = modes.map(m =>
+    `<button type="button" class="gen-chip" aria-pressed="${m === genExtendMode}"
+       onclick="pickExtendMode('${m}')">${esc(EXTEND_LABELS[m] || m)}</button>`).join('');
+  if (note) {
+    note.textContent = (EXTEND_NOTES[genExtendMode] || '') +
+      ' Each extension is its own clip in the vault, chained to the one it continues.';
+  }
+}
+
+function pickExtendMode(m) {
+  genExtendMode = m;
+  renderGenForm();
 }
 
 function prettyKey(k) {
@@ -1078,11 +1359,15 @@ function swapMaxSeconds() {
 
 // A swap is priced per second at its own rung, both of which the server
 // measured off the file. Nothing the panel sends can change either.
+function audioCredits() {
+  return genAudio.mode ? (((genPrices && genPrices.addons) || {}).audio || 0) : 0;
+}
+
 function swapPrice() {
   if (!genSwap) return undefined;
   const rates = ((genPrices && genPrices.video_rates) || {})[swapModel()] || {};
   const rate = rates[swapResolution()];
-  return rate ? rate * swapSeconds() : undefined;
+  return rate ? rate * swapSeconds() + audioCredits() : undefined;
 }
 
 // Every whole second the model takes, since a swap is priced per second.
@@ -1100,6 +1385,16 @@ function secondsRange() {
 function lockVideoSeconds() {
   const vsecs = el('gen-vsecs');
   if (!vsecs) return;
+  if (genJob === 'extend' && genExtendMode === 'longer') {
+    vsecs.disabled = true;
+    const max = (genPrices && genPrices.video_max_seconds) || 15;
+    if (vsecs.dataset.model !== 'ceiling') {
+      vsecs.dataset.model = 'ceiling';
+      vsecs.innerHTML = opt(String(max), max + 's — as long as it goes', '');
+    }
+    return;
+  }
+  if (vsecs.dataset.model === 'ceiling') vsecs.dataset.model = '';
   const locked = !!genDrive && !modelTakesDuration(videoModelNow());
   vsecs.disabled = locked;
   if (locked && vsecs.dataset.model !== 'driven') {
@@ -1176,6 +1471,12 @@ function videoModelNow() {
 
 function videoSecondsNow() {
   if (genDrive && !modelTakesDuration(videoModelNow())) return genDrive.seconds;
+  // `longer` is not a length the creator picks: it is the model's own
+  // ceiling, asked for in one pass because nothing here can stitch two clips
+  // together. Quoted at what the server will actually run.
+  if (genJob === 'extend' && genExtendMode === 'longer') {
+    return (genPrices && genPrices.video_max_seconds) || 15;
+  }
   return parseInt((el('gen-vsecs') || {}).value
                   || (genPrices ? genPrices.defaults.video_duration : 5), 10);
 }
@@ -1281,7 +1582,7 @@ async function togglePromptBuilder() {
   if (!open || genBuilder) { if (open) renderBuilder(); return; }
   try {
     const res = await fetch('/api/generate/prompt/options?persona=' +
-      encodeURIComponent(slug()) + '&kind=' + (genMake === 'video' ? 'video' : 'image') +
+      encodeURIComponent(slug()) + '&kind=' + (genMake === 'image' ? 'image' : 'video') +
       '&rating=' + genRating);
     const d = await res.json();
     if (!d.ok) throw new Error(d.error || 'could not load the questions');
@@ -1308,19 +1609,49 @@ async function runPromptBuilder() {
     const res = await fetch('/api/generate/prompt', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ persona: slug(), rating: genRating,
-                             kind: genMake === 'video' ? 'video' : 'image',
+                             kind: genMake === 'image' ? 'image' : 'video',
                              answers: genAnswers }),
     });
     const d = await res.json();
     if (!d.ok) throw new Error(d.error || 'could not write it');
-    const field = el(genMake === 'swap' ? 'gen-swap-motion'
-                    : genMake === 'video' ? 'gen-video-motion' : 'gen-prompt');
-    field.value = d.prompt;
+    const field = el(promptFieldId());
+    if (field) field.value = d.prompt;
     el('gen-builder-note').textContent =
       d.engine === 'gemini' ? 'Written — edit it before you generate.'
                             : 'Built — edit it before you generate.';
     genQuote();
   } catch (e) { el('gen-builder-note').textContent = '✗ ' + e.message; }
+}
+
+// What this job is still missing, said plainly, or '' when it is ready. One
+// place, so the button text and the submit guard can never disagree.
+function jobBlocker() {
+  if (genJob === 'swap') return genSwap ? '' : 'Upload a clip first';
+  if (genJob === 'animate') return animPhoto() ? '' : 'Keep a photo first';
+  if (genJob === 'extend') return genExtendClip ? '' : 'Keep a clip first';
+  if (genJob === 'multiref') return genSceneRefs.length ? '' : 'Pick a scene photo';
+  if (genJob === 'reel') {
+    const typed = ((el('gen-reel-prompt') || {}).value || '').trim();
+    return (typed || genReelPick) ? '' : 'Write a prompt or pick a photo';
+  }
+  return '';
+}
+
+const JOB_VERBS = {
+  reel: 'Make the reel', swap: 'Swap her in', animate: 'Animate her',
+  extend: 'Extend it', multiref: 'Generate',
+};
+
+// Where the prompt builder writes. Each job has exactly one free-text field,
+// and a builder that writes into a hidden one is a builder that did nothing.
+const JOB_PROMPT_FIELDS = {
+  image: 'gen-prompt', swap: 'gen-swap-motion', animate: 'gen-video-motion',
+  reel: 'gen-reel-prompt', extend: 'gen-extend-motion',
+  multiref: 'gen-multiref-motion',
+};
+
+function promptFieldId() {
+  return JOB_PROMPT_FIELDS[genJob] || 'gen-prompt';
 }
 
 function genQuote() {
@@ -1339,9 +1670,10 @@ function genQuote() {
     if (cost) cost.textContent = total === undefined ? '' : `${total} cr`;
     setMoney(total || 0);
     const cash = cashFor(total);
-    btn.disabled = !genSwap;
-    btn.textContent = total === undefined
-      ? 'Upload a clip first'
+    const blocked = jobBlocker();
+    btn.disabled = !!blocked;
+    btn.textContent = (blocked || total === undefined)
+      ? (blocked || 'Upload a clip first')
       : `Swap her in · ${total} credit${total === 1 ? '' : 's'}` + (cash ? ` · ${cash}` : '');
     btn.classList.toggle('gen-low', genCredits !== null && genCredits < (total || 0));
     showEngines();
@@ -1352,25 +1684,29 @@ function genQuote() {
     const resv = (el('gen-vres') || {}).value || genPrices.defaults.video_resolution;
     const secs = videoSecondsNow();
     const rates = (genPrices.video_rates || {})[videoModelNow()] || {};
-    const per = rates[resv] ? rates[resv] * secs : undefined;
+    const per = rates[resv] ? rates[resv] * secs + audioCredits() : undefined;
     const btn = el('gen-run-btn');
+    const shape = aspectOffered() ? `, ${currentAspect()}` : '';
     if (what) {
       what.textContent = genDrive
-        ? `${secs}s driven clip, ${resv}` : `One ${secs}s clip, ${resv}`;
+        ? `${secs}s driven clip, ${resv}${shape}`
+        : `One ${secs}s clip, ${resv}${shape}`;
     }
     if (cost) cost.textContent = per === undefined ? '' : `${per} cr`;
     setMoney(per);
     lockVideoSeconds();
     const cash = cashFor(per);
-    btn.disabled = !animPhoto();
-    btn.textContent = !animPhoto()
-      ? 'Keep a photo first'
-      : `Animate her · ${per} credit${per === 1 ? '' : 's'}` + (cash ? ` · ${cash}` : '');
+    const blocked = jobBlocker();
+    btn.disabled = !!blocked;
+    btn.textContent = blocked ||
+      `${JOB_VERBS[genJob] || 'Generate'} · ${per} credit${per === 1 ? '' : 's'}` +
+      (cash ? ` · ${cash}` : '');
     btn.classList.toggle('gen-low', genCredits !== null && genCredits < (per || 0));
     el('gen-video-note').textContent = genDrive
       ? `Her photo will perform that clip's motion, for its whole ${genDrive.seconds}s.`
-      : 'A clip always starts from a photo that is already kept, so its first '
-        + 'frame carries her face — there is no text-to-video here on purpose.';
+      : 'An animate always starts from a photo that is already kept, so its '
+        + 'first frame carries her face. A safe-work reel is the one job that '
+        + 'may run from the words alone — and it claims to be nobody.';
     showEngines();
     return per;
   }
@@ -1421,11 +1757,9 @@ function setGenStatus(msg, ok) {
 
 async function runGeneration() {
   if (!slug()) return;
-  if (genMake === 'swap') return runSwap();
-  if (genMake === 'video') {
-    if (!animPhoto()) return setGenStatus('✗ Keep a photo first — a clip starts from one.', false);
-    return animateMedia(animPhoto());
-  }
+  const blocked = jobBlocker();
+  if (blocked) return setGenStatus('✗ ' + blocked, false);
+  if (genMake !== 'image') return runVideoJob();
   const btn = el('gen-run-btn');
   btn.disabled = true;
   setGenStatus('Sending…', null);
@@ -1457,51 +1791,86 @@ async function runGeneration() {
   finally { btn.disabled = false; }
 }
 
-async function runSwap() {
-  if (!genSwap) return;
+// One submit for all five video jobs. The job decides what the payload
+// carries; the server validates the same table this read its options from.
+async function jobPayload() {
+  const base = {
+    persona: slug(), job: genJob, rating: genRating,
+    model: genMake === 'swap' ? swapModel() : videoModel(),
+    aspect: currentAspect(),
+    audio: audioPayload(),
+  };
+  if (genJob === 'swap') {
+    return Object.assign(base, {
+      source: genSwap.id, resolution: swapResolution(),
+      seconds: swapSeconds(), motion: el('gen-swap-motion').value.trim(),
+    });
+  }
+  const resv = (el('gen-vres') || {}).value || genPrices.defaults.video_resolution;
+  Object.assign(base, { resolution: resv, seconds: videoSecondsNow() });
+  if (genJob === 'reel') {
+    return Object.assign(base, {
+      prompt: (el('gen-reel-prompt').value || '').trim(),
+      reference_media: genReelPick || '',
+    });
+  }
+  if (genJob === 'multiref') {
+    return Object.assign(base, {
+      scene_media: genSceneRefs.slice(),
+      motion: (el('gen-multiref-motion').value || '').trim(),
+    });
+  }
+  if (genJob === 'extend') {
+    const clip = vaultClips().find(v => v.id === genExtendClip);
+    if (!clip) throw new Error('That clip is no longer in the vault.');
+    setGenStatus('Reading the last frame…', null);
+    const frame = await clipFrame(clip.thumb, 'last');
+    if (!frame) throw new Error('That clip’s last frame could not be read here.');
+    const payload = Object.assign(base, {
+      parent_media: clip.id, extend_mode: genExtendMode, frame: frame,
+      motion: (el('gen-extend-motion').value || '').trim(),
+    });
+    if (genExtendMode === 'loop') {
+      const first = await clipFrame(clip.thumb, 'first');
+      if (!first) throw new Error('That clip’s opening frame could not be read here.');
+      payload.closing_frame = first;
+    }
+    return payload;
+  }
+  return Object.assign(base, {
+    reference_media: animPhoto(),
+    motion: (el('gen-video-motion') || {}).value || '',
+    source: genDrive ? genDrive.id : '',
+  });
+}
+
+async function runVideoJob() {
   const btn = el('gen-run-btn');
   btn.disabled = true;
   setGenStatus('Sending…', null);
   try {
+    const body = await jobPayload();
     const res = await fetch('/api/generate/job', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        persona: slug(), kind: 'swap', source: genSwap.id, model: swapModel(),
-        rating: genRating,
-        resolution: swapResolution(), seconds: swapSeconds(),
-        motion: el('gen-swap-motion').value.trim(),
-      }),
+      body: JSON.stringify(body),
     });
     const d = await res.json();
     if (!d.ok) throw new Error(d.error || 'Generation failed');
-    setGenStatus(`Swap running — ${d.credits} credits. It takes a few minutes.`, null);
+    setGenStatus(`Running — ${d.credits} credits. It takes a few minutes.`, null);
     loadCredits();
     pollGenJobs();
   } catch (e) { setGenStatus('✗ ' + e.message, false); }
-  finally { btn.disabled = false; }
+  finally { btn.disabled = false; genQuote(); }
 }
 
-// Only ever called from the Video panel, which has already shown the price and
-// which photo is selected, so there is nothing left to confirm.
-async function animateMedia(id) {
-  const secs = videoSecondsNow();
-  const resv = (el('gen-vres') || {}).value || (genPrices ? genPrices.defaults.video_resolution : '720p');
-  setGenStatus('Sending…', null);
-  try {
-    const res = await fetch('/api/generate/job', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ persona: slug(), kind: 'video', model: videoModel(),
-                             rating: genRating,
-                             resolution: resv, seconds: secs, reference_media: id,
-                             motion: (el('gen-video-motion') || {}).value || '',
-                             source: genDrive ? genDrive.id : '' }),
-    });
-    const d = await res.json();
-    if (!d.ok) throw new Error(d.error || 'Generation failed');
-    setGenStatus(`Clip running — ${d.credits} credits. It takes a few minutes.`, null);
-    loadCredits();
-    pollGenJobs();
-  } catch (e) { setGenStatus('✗ ' + e.message, false); }
+// The vault's play button is a shortcut into the Animate job rather than a
+// second way to submit one: the panel is what shows the price, and a click
+// that spends credits without showing one is the thing this surface must not do.
+function animateMedia(id) {
+  genAnimPick = id;
+  setJob('animate');
+  setGenStatus('Ready — check the price and press Animate her.', null);
+  el('gen-run-btn').scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 async function pollGenJobs() {
@@ -1607,6 +1976,114 @@ function pickAnimPhoto(id) {
 
 function animPhoto() {
   return genAnimPick;
+}
+
+// A reel may start from a photo or from nothing, so this picker toggles rather
+// than insisting: clicking the chosen one clears it.
+function renderReelPhotos() {
+  const box = el('gen-reel-photo');
+  if (!box) return;
+  const photos = animPhotos();
+  box.innerHTML = photos.length ? photos.map(v => `
+    <button type="button" class="anim-pick" aria-pressed="${v.id === genReelPick}"
+            title="${esc(v.outfit || v.purpose || 'kept photo')}"
+            onclick="pickReelPhoto('${v.id}')">
+      <img src="${v.thumb}" alt="" draggable="false"></button>`).join('')
+    : '<span class="hint" style="margin:0;">No kept photos — a reel can still run from the words alone.</span>';
+}
+
+function pickReelPhoto(id) {
+  genReelPick = genReelPick === id ? '' : id;
+  renderGenForm();
+}
+
+// The clips an extension can carry on from: kept clips only, because the
+// frame it starts at has to be one somebody approved.
+function vaultClips() {
+  return (mediaVault || []).filter(v => isClip(v.kind));
+}
+
+function renderExtendClips() {
+  const box = el('gen-extend-clip');
+  if (!box) return;
+  const clips = vaultClips();
+  if (!clips.some(v => v.id === genExtendClip)) {
+    genExtendClip = clips.length ? clips[0].id : '';
+  }
+  box.innerHTML = clips.length ? clips.map(v => `
+    <button type="button" class="anim-pick" aria-pressed="${v.id === genExtendClip}"
+            title="${esc(v.outfit || v.purpose || 'kept clip')}"
+            onclick="pickExtendClip('${v.id}')">
+      <video src="${v.thumb}" muted playsinline preload="metadata"></video></button>`).join('')
+    : '<span class="hint" style="margin:0;">Keep a clip first — an extension carries on from one.</span>';
+  const player = el('gen-extend-player');
+  const chosen = clips.find(v => v.id === genExtendClip);
+  if (player) {
+    player.style.display = chosen ? '' : 'none';
+    if (chosen && player.src !== chosen.thumb) player.src = chosen.thumb;
+  }
+}
+
+function pickExtendClip(id) {
+  genExtendClip = id;
+  renderGenForm();
+}
+
+// The frames an extension starts and ends at, read in the browser. There is no
+// ffmpeg on the server, so this is the only place the last frame of a clip can
+// be got at — the same canvas trick the swap panel already uses to measure an
+// upload before sending it.
+function clipFrame(src, at) {
+  return new Promise((resolve) => {
+    const v = document.createElement('video');
+    v.preload = 'auto';
+    v.muted = true;
+    v.playsInline = true;
+    v.crossOrigin = 'anonymous';
+    let done = false;
+    const give = (out) => { if (!done) { done = true; resolve(out); } };
+    const grab = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        const scale = Math.min(1, 1280 / Math.max(v.videoWidth || 1, v.videoHeight || 1));
+        canvas.width = Math.max(16, Math.round((v.videoWidth || 720) * scale));
+        canvas.height = Math.max(16, Math.round((v.videoHeight || 1280) * scale));
+        canvas.getContext('2d').drawImage(v, 0, 0, canvas.width, canvas.height);
+        give(canvas.toDataURL('image/jpeg', 0.86));
+      } catch (e) { give(''); }
+    };
+    v.onloadedmetadata = () => {
+      // A seek exactly to the duration lands past the last frame on most
+      // decoders and paints nothing, so it stops just short of the end.
+      const want = at === 'last'
+        ? Math.max(0, (v.duration || 0) - 0.08) : 0;
+      v.currentTime = want;
+    };
+    v.onseeked = grab;
+    v.onerror = () => give('');
+    setTimeout(() => give(''), 8000);
+    v.src = src;
+  });
+}
+
+function renderSceneRefs() {
+  const box = el('gen-scene-refs');
+  if (!box) return;
+  const photos = animPhotos();
+  genSceneRefs = genSceneRefs.filter(id => photos.some(v => v.id === id));
+  box.innerHTML = photos.length ? photos.map(v => `
+    <button type="button" class="anim-pick" aria-pressed="${genSceneRefs.includes(v.id)}"
+            title="${esc(v.outfit || v.purpose || 'kept photo')}"
+            onclick="toggleSceneRef('${v.id}')">
+      <img src="${v.thumb}" alt="" draggable="false"></button>`).join('')
+    : '<span class="hint" style="margin:0;">Keep a photo of the scene or outfit first.</span>';
+}
+
+function toggleSceneRef(id) {
+  const at = genSceneRefs.indexOf(id);
+  if (at >= 0) genSceneRefs.splice(at, 1);
+  else genSceneRefs.push(id);
+  renderGenForm();
 }
 
 function renderVault() {

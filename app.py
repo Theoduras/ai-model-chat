@@ -11111,6 +11111,7 @@ def _media_row(persona, media_id):
                 'data': row.image_data or '', 'slug': row.slug,
                 'poster': getattr(row, 'poster_data', '') or '',
                 'gcs_path': getattr(row, 'gcs_path', '') or '',
+                'approved': row.approved is not False,
                 'poster_gcs_path': getattr(row, 'poster_gcs_path', '') or ''}
     finally:
         s.close()
@@ -27948,11 +27949,116 @@ def _gen_reference_urls(slug, model_key, role=None):
     return out
 
 
+# The frame a browser captured off a clip, for the Extend job. There is no
+# ffmpeg in the image, so the last frame of an existing clip cannot be read
+# server side at all -- the studio seeks a canvas to it and posts the pixels,
+# the same way it already measures an uploaded clip before sending it.
+GEN_FRAME_MAX_BYTES = 4 * 1024 * 1024
+
+
+def _gen_frame(raw):
+    """(b64, mime) for a data-URI frame from the browser, or (None, '')."""
+    raw = (raw or '').strip()
+    if not raw.startswith('data:image/'):
+        return None, ''
+    try:
+        header, b64 = raw.split(',', 1)
+    except ValueError:
+        return None, ''
+    if len(b64) > GEN_FRAME_MAX_BYTES:
+        return None, ''
+    mime = header[5:].split(';')[0] or 'image/jpeg'
+    return b64, mime
+
+
+def _gen_video_model(job, level, asked):
+    """The model a video job runs on.
+
+    The job names its own models, safe work first; the rating picks within
+    that list. An override is honoured only inside the list, so the advanced
+    picker can choose between a replace and a regeneration but cannot reach a
+    model that will refuse this rating — the creator would be charged for a
+    model that never ran, and read the substitution as the picker having lied.
+    """
+    models = list(CR.JOB_MODELS.get(job) or ())
+    if not models:
+        raise imagegen.GenerationError('Unknown video job.')
+    serves = [m for m in models
+              if level == 'sfw'
+              or 'nsfw' in CR.VIDEO_MODEL_RATINGS.get(m, ('sfw',))]
+    asked = (asked or '').strip().lower()
+    if asked in serves:
+        return asked
+    return serves[0] if serves else models[0]
+
+
+def _gen_audio(body, cfg):
+    """The audio ask, validated against the presets. Returns None when none was
+    asked for — sound is an add-on, so an empty one must not be charged."""
+    audio = body.get('audio') or {}
+    mode = str(audio.get('mode') or '').strip().lower()
+    if not mode or mode == 'none':
+        return None
+    if mode not in imagegen.AUDIO_MODES:
+        raise imagegen.GenerationError('Unknown audio preset.')
+    text = str(audio.get('prompt') or '').strip()[:300]
+    if mode in ('speech', 'custom') and not text:
+        raise imagegen.GenerationError(
+            'Write the line she says.' if mode == 'speech'
+            else 'Describe the sound you want.')
+    # Her voice is the persona's own builder field, never something the
+    # browser sends: a spoken clip must not be able to invent how she sounds.
+    return {'mode': mode, 'prompt': text,
+            'voice': str(cfg.get('voice') or '').strip()[:200]}
+
+
+def _gen_media_urls(slug, media_ids):
+    """Vault photos as something the provider can fetch, in the order given.
+
+    The same resolution `_gen_reference_urls` does, but over an explicit list
+    rather than a model's saved slots: the Multi-reference job's scene photos
+    are picked per generation, not configured once.
+    """
+    import base64
+    out = []
+    for media_id in list(media_ids or [])[:imagegen.MAX_VIDEO_REFERENCES]:
+        media = _media_row(slug, media_id)
+        if not media:
+            continue
+        url = None
+        if media.get('gcs_path'):
+            try:
+                url = storage.signed_url(media['gcs_path'])
+            except Exception:
+                url = None
+        if not url:
+            try:
+                data, mime = _media_bytes(media)
+            except Exception:
+                continue
+            url = 'data:%s;base64,%s' % (mime or 'image/jpeg',
+                                         base64.b64encode(data).decode())
+        out.append(url)
+    return out
+
+
 def _gen_spec(slug, body, user):
     """Validate a generation request into a spec the provider and the price
     table both understand. Anything unpriced or above the persona's own NSFW
     level is refused here, before a provider is ever called."""
     kind = (body.get('kind') or 'image').strip().lower()
+    # The job is what the creator asked for; the kind is the shape it settles
+    # into for pricing. A request that names only a kind is the old surface,
+    # so it is read as the job that kind used to mean.
+    job = (body.get('job') or '').strip().lower()
+    if job:
+        if job not in CR.JOB_MODELS:
+            raise imagegen.GenerationError('Unknown video job.')
+        kind = CR.JOB_KINDS[job]
+    elif kind == 'swap':
+        job = 'swap'
+    elif kind == 'video':
+        job = 'animate'
     if kind not in ('image', 'video', 'swap'):
         raise imagegen.GenerationError('Unknown generation kind.')
 
@@ -27961,7 +28067,7 @@ def _gen_spec(slug, body, user):
     # persona's nsfw_level is a chat setting -- how far she flirts with a fan --
     # and has no business gating what her operator may produce.
     level = 'sfw' if (body.get('rating') or '').strip().lower() == 'sfw' else 'explicit'
-    spec = {'kind': kind, 'slug': slug,
+    spec = {'kind': kind, 'slug': slug, 'job': job,
             'reference_media': (body.get('reference_media') or '').strip(),
             'prompt_extra': (body.get('prompt') or '').strip()[:600],
             'negative_extra': (body.get('negative') or '').strip()[:600],
@@ -28005,103 +28111,154 @@ def _gen_spec(slug, body, user):
         # with two sources is one that drifts. Identity carries no add-on now —
         # Seedream conditions on the reference inside the call it already bills.
         spec['explicit'] = imagegen.SHOT_LEVEL.get(shot, 'sfw') != 'sfw'
+        return spec
+
+    # ── Video ────────────────────────────────────────────────────────────────
+    if level != 'sfw' and 'nsfw' not in CR.JOB_RATINGS.get(job, ('sfw', 'nsfw')):
+        raise imagegen.GenerationError(
+            f'{CR.JOB_LABELS.get(job, job)} is a safe-work job — switch the '
+            'studio to Safe first.')
+
+    resolution = (body.get('resolution') or CR.DEFAULT_VIDEO_RESOLUTION).strip()
+    seconds = int(body.get('seconds') or CR.DEFAULT_VIDEO_DURATION)
+    # Any whole number in range, not only the three presets: the price is
+    # per second, so a length the picker does not list still has one.
+    if resolution not in CR.VIDEO_RESOLUTIONS or not (
+            CR.VIDEO_SECONDS_MIN <= seconds <= CR.VIDEO_MAX_SECONDS):
+        raise imagegen.GenerationError('Unknown video resolution or duration.')
+    aspect = (body.get('aspect') or imagegen.DEFAULT_ASPECT).strip()
+    if aspect not in imagegen.ASPECTS:
+        raise imagegen.GenerationError('Unknown frame shape.')
+    model = _gen_video_model(job, level, body.get('model'))
+    audio = _gen_audio(body, cfg)
+    if audio:
+        spec['audio'] = audio
+        spec['voice'] = audio.get('voice') or ''
+        spec['addons'].append('audio')
+
+    if job == 'swap':
+        source_id = str(body.get('source') or body.get('source_media')
+                        or body.get('id') or '').strip()
+        src = _video_source_row(slug, source_id)
+        if not src:
+            raise imagegen.GenerationError(
+                'Upload the clip you want her swapped into first.')
+        # The clip is the ceiling, not the value: the operator picks the
+        # length and the rung, and neither may exceed what was uploaded --
+        # a 480p source run at 1080p rates is 2.5x for detail nobody filmed.
+        # A model with no duration runs the whole clip whatever the
+        # picker says, so it is billed for the whole clip: quoting a trim
+        # it will not perform is charging for a clip nobody gets.
+        asked = (body.get('seconds') if imagegen.takes_duration(model)
+                 else src['seconds'])
+        seconds = imagegen.video_seconds(model, asked or src['seconds'])
+        source_rung = _video_rung(src['height'], src['width'])
+        if (CR.VIDEO_RESOLUTIONS.index(resolution)
+                > CR.VIDEO_RESOLUTIONS.index(source_rung)):
+            resolution = source_rung
+        # And up again to the lowest rung this model serves: a phone clip's
+        # short side is often under 720, which one of them does not offer
+        # at all. Priced at what will run, not at what was asked for.
+        resolution = imagegen.rung_for(model, resolution)
+        spec['source_path'] = src['path']
+        spec['source_id'] = source_id
+        spec['source_width'] = src['width']
+        spec['source_height'] = src['height']
+    elif job == 'reel':
+        # The one video path that may run from a prompt alone, and therefore
+        # the one that claims to be nobody. It still lands unapproved in
+        # staging, so nothing here can reach a fan unreviewed.
+        if not spec['reference_media'] and not spec['prompt_extra']:
+            raise imagegen.GenerationError(
+                'A reel needs a prompt, a photo, or both.')
+        if spec['reference_media'] and not _media_row(slug, spec['reference_media']):
+            raise imagegen.GenerationError('That photo is not in this vault.')
+    elif job == 'extend':
+        mode = (body.get('extend_mode') or 'continue').strip().lower()
+        if mode not in imagegen.EXTEND_MODES:
+            raise imagegen.GenerationError('Unknown extend mode.')
+        parent_id = str(body.get('parent_media') or '').strip()
+        parent = _media_row(slug, parent_id)
+        if not parent or parent.get('kind') != 'video':
+            raise imagegen.GenerationError(
+                'Pick a clip from the vault to carry on from.')
+        frame_b64, frame_mime = _gen_frame(body.get('frame'))
+        if not frame_b64:
+            raise imagegen.GenerationError(
+                "That clip's last frame could not be read. Open it once and "
+                'try again.')
+        spec.update({'extend_mode': mode, 'parent_media': parent_id,
+                     'frame_b64': frame_b64, 'frame_mime': frame_mime})
+        if mode == 'loop':
+            close_b64, close_mime = _gen_frame(body.get('closing_frame'))
+            if not close_b64:
+                raise imagegen.GenerationError(
+                    "A loop needs the clip's opening frame to return to.")
+            spec.update({'closing_b64': close_b64, 'closing_mime': close_mime})
+        if mode == 'longer':
+            # One generation at the model's own ceiling. There is no ffmpeg in
+            # the image, so a longer clip cannot be stitched out of two -- it
+            # is asked for in one pass or not at all.
+            seconds = imagegen.video_seconds(model, CR.VIDEO_MAX_SECONDS)
+    elif job == 'multiref':
+        ids = [str(i) for i in (body.get('scene_media') or []) if i]
+        kept = [i for i in ids[:imagegen.MAX_VIDEO_REFERENCES]
+                if _media_row(slug, i)]
+        if not kept:
+            raise imagegen.GenerationError(
+                'Pick at least one scene or outfit photo to place her in.')
+        spec['scene_media'] = kept
+    elif not spec['reference_media']:
+        raise imagegen.GenerationError(
+            'Pick an approved photo to animate — a clip starts from one.')
     else:
-        resolution = (body.get('resolution') or CR.DEFAULT_VIDEO_RESOLUTION).strip()
-        seconds = int(body.get('seconds') or CR.DEFAULT_VIDEO_DURATION)
-        # Any whole number in range, not only the three presets: the price is
-        # per second, so a length the picker does not list still has one.
-        if resolution not in CR.VIDEO_RESOLUTIONS or not (
-                CR.VIDEO_SECONDS_MIN <= seconds <= CR.VIDEO_MAX_SECONDS):
-            raise imagegen.GenerationError('Unknown video resolution or duration.')
-        model = (body.get('model') or CR.DEFAULT_VIDEO_MODEL).strip().lower()
-        # A swap's models are their own set -- one of them does not generate
-        # video at all -- and the swap branch below validates against it.
-        if model not in CR.VIDEO_MODELS and kind != 'swap':
-            raise imagegen.GenerationError('Unknown video model.')
-        # Same rule as the image side: a model that cannot serve this persona's
-        # rating is moved before the quote, never silently at the provider.
-        if level != 'sfw' and 'nsfw' not in CR.VIDEO_MODEL_RATINGS.get(model, ('sfw',)):
-            model = CR.VIDEO_EDIT_MODEL
-        if kind == 'swap':
-            # Both swap models take an input clip and do opposite things with
-            # it, so the picker's choice stands -- but only within that pair.
-            model = (body.get('model') or '').strip().lower()
-            if model not in CR.SWAP_MODELS:
-                model = CR.DEFAULT_SWAP_MODEL
-            if (level != 'sfw'
-                    and 'nsfw' not in CR.VIDEO_MODEL_RATINGS.get(model, ('sfw',))):
-                # The default swap model is the safe-work one, so an explicit
-                # persona moves to the explicit replace rather than to a model
-                # whose safety check will refuse her every time.
-                model = CR.EXPLICIT_SWAP_MODEL
-            source_id = str(body.get('source') or body.get('source_media')
-                            or body.get('id') or '').strip()
-            src = _video_source_row(slug, source_id)
+        # An optional clip turns an Animate into motion transfer: her
+        # photo stays the subject and the upload only supplies movement.
+        drive_id = str(body.get('source') or '').strip()
+        if drive_id:
+            src = _video_source_row(slug, drive_id)
             if not src:
                 raise imagegen.GenerationError(
-                    'Upload the clip you want her swapped into first.')
-            # The clip is the ceiling, not the value: the operator picks the
-            # length and the rung, and neither may exceed what was uploaded --
-            # a 480p source run at 1080p rates is 2.5x for detail nobody filmed.
-            # A model with no duration runs the whole clip whatever the
-            # picker says, so it is billed for the whole clip: quoting a trim
-            # it will not perform is charging for a clip nobody gets.
-            asked = (body.get('seconds') if imagegen.takes_duration(model)
-                     else src['seconds'])
-            seconds = imagegen.video_seconds(model, asked or src['seconds'])
-            source_rung = _video_rung(src['height'], src['width'])
-            if (CR.VIDEO_RESOLUTIONS.index(resolution)
-                    > CR.VIDEO_RESOLUTIONS.index(source_rung)):
-                resolution = source_rung
-            # And up again to the lowest rung this model serves: a phone clip's
-            # short side is often under 720, which one of them does not offer
-            # at all. Priced at what will run, not at what was asked for.
-            resolution = imagegen.rung_for(model, resolution)
+                    'That motion clip is no longer there. Upload it again.')
+            # Wan 2.7 is the one model that takes a reference video as
+            # motion guidance while still conditioning on her photo, which
+            # is what this job needs -- the explicit swap model is a true
+            # replace on an existing clip and takes no motion guidance at
+            # all.
+            model = CR.VIDEO_EDIT_MODEL
             spec['source_path'] = src['path']
-            spec['source_id'] = source_id
+            spec['source_id'] = drive_id
             spec['source_width'] = src['width']
             spec['source_height'] = src['height']
-        elif not spec['reference_media']:
-            raise imagegen.GenerationError(
-                'Pick an approved photo to animate — a clip starts from one.')
+            seconds = imagegen.video_seconds(model, src['seconds'])
         else:
-            # An optional clip turns a Video job into motion transfer: her
-            # photo stays the subject and the upload only supplies movement.
-            drive_id = str(body.get('source') or '').strip()
-            if drive_id:
-                src = _video_source_row(slug, drive_id)
-                if not src:
-                    raise imagegen.GenerationError(
-                        'That motion clip is no longer there. Upload it again.')
-                # Wan 2.7 is the one model that takes a reference video as
-                # motion guidance while still conditioning on her photo, which
-                # is what this job needs -- the explicit swap model is a true
-                # replace on an existing clip and takes no motion guidance at
-                # all.
-                model = CR.VIDEO_EDIT_MODEL
-                spec['source_path'] = src['path']
-                spec['source_id'] = drive_id
-                spec['source_width'] = src['width']
-                spec['source_height'] = src['height']
-                seconds = imagegen.video_seconds(model, src['seconds'])
-            else:
-                allowed = imagegen.model_durations(model)
-                if allowed and seconds not in allowed:
-                    raise imagegen.GenerationError(
-                        f'{CR.MODEL_LABELS.get(model, model)} makes clips of '
-                        + ', '.join(f'{n}s' for n in allowed) + '.')
-        # A model serves a fixed set of sizes, so the size actually run is the
-        # nearest one to the source rather than the rung asked for. Price it
-        # off that: billing a 480p rung for a clip run at 720p loses the
-        # difference on every swap.
-        snapped_w, snapped_h = imagegen.video_size(
-            model, spec.get('source_width'), spec.get('source_height'), resolution)
-        resolution = _video_rung(snapped_h, snapped_w)
-        spec.update({'resolution': resolution, 'seconds': seconds,
-                     'model': model, 'explicit': level != 'sfw',
-                     'motion': (body.get('motion') or '')[:300]})
-    return spec
+            allowed = imagegen.model_durations(model)
+            if allowed and seconds not in allowed:
+                raise imagegen.GenerationError(
+                    f'{CR.MODEL_LABELS.get(model, model)} makes clips of '
+                    + ', '.join(f'{n}s' for n in allowed) + '.')
 
+    if job != 'swap':
+        allowed = imagegen.model_durations(model)
+        if allowed and seconds not in allowed:
+            # Snapped rather than refused: a job whose length the creator did
+            # not choose -- an extension at the ceiling, a reel at a default --
+            # must not fail because this model prices by preset.
+            seconds = min(allowed, key=lambda n: (abs(n - seconds), -n))
+
+    # A model serves a fixed set of sizes, so the size actually run is the
+    # nearest one to the source rather than the rung asked for. Price it
+    # off that: billing a 480p rung for a clip run at 720p loses the
+    # difference on every swap. With no source, the asked-for aspect is what
+    # picks within the rung.
+    snapped_w, snapped_h = imagegen.video_size(
+        model, spec.get('source_width'), spec.get('source_height'), resolution,
+        aspect)
+    resolution = _video_rung(snapped_h, snapped_w)
+    spec.update({'resolution': resolution, 'seconds': seconds,
+                 'aspect': aspect, 'model': model, 'explicit': level != 'sfw',
+                 'motion': (body.get('motion') or '')[:300]})
+    return spec
 
 # Under staging/ deliberately: that is the one prefix both the GCS
 # lifecycle rule and the Blob purge already sweep, so an uploaded clip
@@ -28677,11 +28834,45 @@ def _gen_start(job_id, slug, spec, workspace):
                     banned=banned)
                 provider_job, result = provider.submit_image(call)
             else:
+                job = spec.get('job') or (
+                    'swap' if spec['kind'] == 'swap' else 'animate')
                 motion = spec.get('motion', '') or spec.get('prompt_extra', '')
-                call['prompt'] = (imagegen.build_swap_prompt(motion)
-                                  if spec['kind'] == 'swap'
-                                  else imagegen.build_video_prompt(motion))
-                # A swap always carries a clip; a Video job carries one only
+                if job == 'swap':
+                    call['prompt'] = imagegen.build_swap_prompt(
+                        motion,
+                        preserve=imagegen.preserves_source(job, spec.get('model')))
+                elif job == 'reel':
+                    call['prompt'] = imagegen.build_reel_prompt(
+                        spec.get('prompt_extra') or motion,
+                        has_photo=bool(spec.get('reference_media')))
+                elif job == 'extend':
+                    call['prompt'] = imagegen.build_extend_prompt(
+                        spec.get('extend_mode'), motion)
+                    # The frame came off a canvas in the browser: there is no
+                    # ffmpeg here to read the last frame of a clip with.
+                    call['reference_b64'] = spec.get('frame_b64') or ''
+                    call['reference_mime'] = spec.get('frame_mime') or 'image/jpeg'
+                    call['closing_b64'] = spec.get('closing_b64') or ''
+                    call['closing_mime'] = spec.get('closing_mime') or 'image/jpeg'
+                elif job == 'multiref':
+                    scenes = _gen_media_urls(slug, spec.get('scene_media'))
+                    if not scenes:
+                        raise imagegen.GenerationError(
+                            'Those scene photos are no longer in the vault.')
+                    call['scene_urls'] = scenes
+                    refs = _gen_reference_urls(slug, spec.get('model'))
+                    if not refs:
+                        refs = _gen_reference_urls(slug, imagegen.EXPLICIT_MODEL)
+                    if not refs:
+                        raise imagegen.GenerationError(
+                            'Fill her face reference slots first — a '
+                            'multi-reference clip is her plus a scene.')
+                    call['reference_urls'] = refs
+                    call['prompt'] = imagegen.build_multiref_prompt(
+                        spec.get('prompt_extra') or motion, len(scenes))
+                else:
+                    call['prompt'] = imagegen.build_video_prompt(motion)
+                # A swap always carries a clip; an Animate carries one only
                 # when it is motion transfer. Both resolve it the same way.
                 if spec.get('source_path'):
                     url = storage.signed_url(spec['source_path'])
@@ -28771,11 +28962,63 @@ def _gen_refund_short_clip(job_id, workspace, spec, data, mime):
                    '(%s credits returned)', job_id, billed, got, back)
 
 
+# How long to wait on the follow-on audio task before handing back the silent
+# clip. A clip with no sound is a disappointment; a clip that never arrives is
+# a refund, so the wait is bounded and the failure is always the silent one.
+GEN_AUDIO_POLLS = int(os.getenv('GEN_AUDIO_POLLS', '20'))
+GEN_AUDIO_POLL_SECONDS = int(os.getenv('GEN_AUDIO_POLL_SECONDS', '6'))
+
+
+def _gen_audio_urls(job_id, spec, urls):
+    """Run the follow-on video-to-audio task, where that is the configured
+    route, and hand back the muxed clips.
+
+    Only with a worker: without one the request is the only thread there is,
+    and freezing a creator's submit for a minute of polling is worse than a
+    silent clip. Any failure returns the original url for the same reason --
+    the clip is already paid for and already good.
+    """
+    if not spec.get('audio') or imagegen.AUDIO_ROUTE != 'task':
+        return urls
+    if not GEN_HAS_WORKER:
+        logger.info('generation job=%s: no worker, so the clip stays silent',
+                    job_id)
+        return urls
+    import time as _t
+    try:
+        provider = imagegen.get_provider('runware')
+    except imagegen.GenerationError as e:
+        logger.warning('generation job=%s audio provider unavailable: %s',
+                       job_id, e)
+        return urls
+    out = []
+    for url in urls:
+        muxed = url
+        try:
+            task_id, result = provider.submit_audio(url, spec)
+            for _ in range(GEN_AUDIO_POLLS):
+                if result.status in ('done', 'failed'):
+                    break
+                _t.sleep(GEN_AUDIO_POLL_SECONDS)
+                result = provider.poll(task_id)
+            if result.status == 'done' and result.urls:
+                muxed = result.urls[0]
+            else:
+                logger.warning('generation job=%s audio pass gave nothing: %s',
+                               job_id, result.error or result.status)
+        except Exception as e:
+            logger.warning('generation job=%s audio pass failed: %s',
+                           job_id, str(e)[:200])
+        out.append(muxed)
+    return out
+
+
 def _gen_finish(job_id, slug, spec, workspace, urls):
     """Pull the results off the provider's CDN into our own bucket and put them
     in the vault, unapproved. Their URLs are short lived, so this cannot wait."""
     from db import (SessionLocal, PersonaMedia, update_generation)
     made = []
+    urls = _gen_audio_urls(job_id, spec, urls)
     for url in urls:
         try:
             data, mime = imagegen.fetch_result(url)
@@ -28800,7 +29043,10 @@ def _gen_finish(job_id, slug, spec, workspace, urls):
                 approved=False,
                 outfit=(spec.get('outfit') or {}).get('name', '') or '',
                 purpose=spec.get('shot', '') or '',
-                source='generated', approved_for_training=False)
+                source='generated', approved_for_training=False,
+                # An extension is its own clip -- nothing here can join it onto
+                # the one it continues -- so the chain is what says it is one.
+                parent_media=spec.get('parent_media') or '')
             s.add(row)
             s.commit()
             made.append(row.id)
@@ -28990,7 +29236,11 @@ def _job_json(job, session_db):
             'approved': row.approved is not False,
             'expires_at': row.expires_at.isoformat() if row.expires_at else '',
         })
-    return {'id': job.id, 'kind': job.kind, 'status': job.status,
+    try:
+        job_name = (json.loads(job.spec_json or '{}') or {}).get('job') or ''
+    except ValueError:
+        job_name = ''
+    return {'id': job.id, 'kind': job.kind, 'job': job_name, 'status': job.status,
             'credits': job.credits, 'error': job.error or '',
             'persona': job.slug, 'media': media,
             'created_at': job.created_at.isoformat() if job.created_at else ''}

@@ -19,10 +19,15 @@ Two providers, same shape:
                faceswap and image-to-video. Everything is submit-then-poll.
 
 Identity is never left to the prompt. A still is conditioned on an approved
-reference photo and then faceswapped from the same photo, and a clip is only
-ever generated from an already-approved still — see `video_spec_from_media`.
-There is no text-to-video path here on purpose: a clip whose first frame we did
-not approve is a clip of someone else.
+reference photo and then faceswapped from the same photo, and a clip that
+claims to be her is only ever generated from an already-approved still. The one
+exception is a safe-for-work reel, which may run from a prompt alone and
+therefore carries no identity claim at all — it still lands unapproved in
+staging like everything else.
+
+`VIDEO_JOBS` is the table that says what each video job is: which models serve
+it, what it needs as input, and which prompt clauses are forced on. The model
+is a consequence of the job rather than something a creator is asked to pick.
 
 The Runware payload field names are gathered in `_RW` so a smoke test against a
 live key can correct them in one place.
@@ -84,19 +89,110 @@ DEFAULT_VIDEO_MODEL = 'wan-2-5'
 # one finds nothing.
 VIDEO_EDIT_MODEL = 'wan-2-7'
 
-# They do different things with the clip they are given: replace keeps the
-# video and changes the person, Wan 2.7 regenerates the video from her
-# references. The picker offers both because only the operator can say which
-# one this clip wants.
+# ── The job table ─────────────────────────────────────────────────────────────
+# What a creator actually wants, and the one place each of those wants is
+# described. The surface used to ask "which model?" and then hide most of what
+# each model could do behind that answer; here the job is the question and the
+# model is a consequence of it, which is why nothing below needs a second list.
 #
-# Runware has no Wan animate/replace variant -- its catalogue carries only
-# base Wan generation models (3.0, 2.7, 2.6, ...), confirmed by querying its
-# own model list. A true, explicit-capable replace instead goes to ModelsLab,
-# whose face-swap endpoint is uncensored and swaps rather than regenerates.
-SWAP_MODELS = ('p-video-replace', 'ml-face-swap', 'wan-2-7')
-DEFAULT_SWAP_MODEL = 'p-video-replace'
+# `models`   the models that serve this job, safe-work first and explicit
+#            second, so a rating picks within the list rather than off it.
+# `needs`    what the job cannot run without: a source clip, her references, a
+#            first frame.
+# `kind`     which priced shape the job settles into. Only a swap is billed for
+#            the clip it was handed; everything else is a generated clip.
+# `ratings`  which ratings may ask for it at all. A reel is safe work by
+#            construction -- it may run from a prompt alone, so it carries no
+#            claim to be her and must not be used to make one.
+# `clause`   a prompt clause forced on regardless of what the creator typed.
+# `modes`    the sub-choices a job offers, where it has any.
+#
+# Runware has no Wan animate/replace variant -- its catalogue carries only base
+# Wan generation models (3.0, 2.7, 2.6, ...), confirmed by querying its own
+# model list. A true, explicit-capable replace instead goes to ModelsLab, whose
+# face-swap endpoint is uncensored and swaps rather than regenerates.
+VIDEO_JOBS = {
+    'reel': {'models': ('wan-2-5', 'seedance-2-5'), 'needs': (),
+             'kind': 'video', 'ratings': ('sfw',),
+             'label': 'Reel',
+             'note': 'A prompt, a photo, or both, as a short clip.'},
+    'swap': {'models': ('p-video-replace', 'ml-face-swap', 'wan-2-7'),
+             'needs': ('source', 'refs'), 'kind': 'swap',
+             'clause': 'preserve',
+             'label': 'Swap',
+             'note': 'Her into a clip you upload. Everything else untouched.'},
+    'animate': {'models': ('wan-2-7', 'wan-2-5'), 'needs': ('first_frame',),
+                'kind': 'video',
+                'label': 'Animate',
+                'note': 'An approved still becomes a clip.'},
+    'extend': {'models': ('wan-2-7',), 'needs': ('first_frame',),
+               'kind': 'video', 'modes': ('continue', 'longer', 'loop'),
+               'label': 'Extend',
+               'note': 'Carry on from a clip you already have.'},
+    'multiref': {'models': ('wan-2-7',), 'needs': ('refs',), 'kind': 'video',
+                 'label': 'Multi-reference',
+                 'note': 'Her identity refs plus a separate scene or outfit.'},
+}
+
+# Every job's own longest clip, for the Extend job's `longer` mode: it asks for
+# the model's ceiling rather than a number of its own, so a model whose range
+# widens needs no second edit here.
+EXTEND_MODES = VIDEO_JOBS['extend']['modes']
+
+# Derived aliases, so the swap path, the price table and the studio keep
+# working off the same table rather than a second copy of it.
+SWAP_MODELS = VIDEO_JOBS['swap']['models']
+DEFAULT_SWAP_MODEL = SWAP_MODELS[0]
 # The one that serves explicit work and still replaces rather than regenerates.
 EXPLICIT_SWAP_MODEL = 'ml-face-swap'
+
+
+def job_models(job):
+    """The models that serve a job, in the table's own order."""
+    return list((VIDEO_JOBS.get(job) or {}).get('models') or ())
+
+
+def job_kind(job):
+    """Which priced shape a job settles into: `swap` is billed for the clip it
+    was handed, everything else is a generated clip."""
+    return (VIDEO_JOBS.get(job) or {}).get('kind') or 'video'
+
+
+def job_ratings(job):
+    return list((VIDEO_JOBS.get(job) or {}).get('ratings') or ('sfw', 'nsfw'))
+
+
+def jobs_for_rating(rating):
+    want = 'nsfw' if rating == 'nsfw' else 'sfw'
+    return [j for j in VIDEO_JOBS if want in job_ratings(j)]
+
+
+def job_needs(job, what):
+    return what in ((VIDEO_JOBS.get(job) or {}).get('needs') or ())
+
+
+# The clause a swap cannot be talked out of. A regenerating model is being
+# asked to reproduce a clip it did not make, and the one thing that must change
+# is the only thing a creator's own wording tends to leave vague -- so this
+# leads the prompt and the creator's words follow it.
+PRESERVE_CLAUSE = (
+    'Keep the source video identical in every respect — same setting, same '
+    'background, same motion and timing, same camera movement and framing, '
+    'same lighting, same colour grade, same style and quality. Change only '
+    'the person: her face, her body, her hair. Nothing else in the frame may '
+    'change.')
+
+
+def preserves_source(job, model_key):
+    """Whether this job's prompt carries the locked preservation clause.
+
+    Only where the model regenerates: one that replaces the person in the clip
+    it was given keeps the setting and the camera by construction, so telling
+    it to is spending prompt on something already true.
+    """
+    spec = VIDEO_JOBS.get(job) or {}
+    return (spec.get('clause') == 'preserve'
+            and _video_fields(model_key).get('shape') != 'replace')
 
 # Only 4.5 serves explicit work. 5.0 Pro returns `invalidProviderContent` —
 # ByteDance's own moderation, not a setting — so an explicit shot is pinned to
@@ -204,11 +300,39 @@ RESOLUTION_PX = {
 def dimensions(model_key, resolution):
     sizes = MODEL_PX.get(model_key) or RESOLUTION_PX
     return sizes.get(resolution) or sizes.get('2k') or RESOLUTION_PX['2k']
+# Frame shape and pixel count are separate axes: a rung says how much detail a
+# clip is billed for, an aspect says what shape it is. A reel and a 16:9 cut of
+# the same scene cost the same, so the rung alone could never express the one
+# thing a creator most wants to choose.
+ASPECTS = ('9:16', '4:5', '1:1', '16:9')
+DEFAULT_ASPECT = '9:16'
+
 VIDEO_PX = {
-    '480p': (480, 854),
-    '720p': (720, 1280),
-    '1080p': (1080, 1920),
+    '9:16': {'480p': (480, 854), '720p': (720, 1280), '1080p': (1080, 1920)},
+    '4:5':  {'480p': (480, 600), '720p': (720, 900), '1080p': (1080, 1350)},
+    '1:1':  {'480p': (480, 480), '720p': (720, 720), '1080p': (1080, 1080)},
+    '16:9': {'480p': (854, 480), '720p': (1280, 720), '1080p': (1920, 1080)},
 }
+
+
+def video_px(aspect, resolution):
+    """The pixel size of one (aspect, rung) pair. Both fall back rather than
+    raise: a picker that gains an option before the server does should make a
+    plainer clip, not a failed generation the creator already paid for."""
+    row = VIDEO_PX.get(aspect) or VIDEO_PX[DEFAULT_ASPECT]
+    return row.get(resolution) or row['720p']
+
+
+def takes_aspect(model_key):
+    """Whether a model can be asked for a frame shape at all.
+
+    One that replaces the person in an existing clip inherits the source's
+    frame, so an aspect picker in front of it is a control that changes
+    nothing -- which is worse than no control, because it reads as a promise.
+    """
+    if model_key in _NO_DURATION_MODELS:
+        return False
+    return _video_fields(model_key).get('shape') != 'replace'
 
 # Wan 2.7 takes a fixed set of sizes and refuses anything else outright, so a
 # phone clip's own 480p dimensions are not a size it can be asked for. Snapping
@@ -313,15 +437,19 @@ def search_models(query, category='video', limit=20):
     return out
 
 
-def video_size(model_key, width=0, height=0, resolution=None):
+def video_size(model_key, width=0, height=0, resolution=None, aspect=None):
     """The size to ask a model for, given the source's own.
 
     Aspect ratio first and pixel count second: a portrait clip sent at a
     landscape size comes back letterboxed or cropped through her face, which is
     worse than a rung either side of what was asked for.
+
+    With no source, the asked-for aspect is the shape: that is the whole point
+    of the picker, and a job with nothing to inherit from has nothing else to
+    go on.
     """
     import math
-    fallback = VIDEO_PX.get(resolution) or VIDEO_PX['720p']
+    fallback = video_px(aspect or DEFAULT_ASPECT, resolution)
     w, h = int(width or 0), int(height or 0)
     sizes = MODEL_VIDEO_SIZES.get(model_key)
     if not sizes:
@@ -716,13 +844,20 @@ def engine_report():
     }
 
 
-def build_swap_prompt(motion=''):
+def build_swap_prompt(motion='', preserve=False):
     """Instruction text for an edit, not for a still coming to life: the model
-    is being told whose face to carry over, and what to leave alone."""
+    is being told whose face to carry over, and what to leave alone.
+
+    `preserve` adds the locked clause, which is ours and not the creator's:
+    her own words are appended after it, where they can refine the swap but
+    cannot talk the model out of keeping the clip.
+    """
     base = ('Replace the woman in the reference video with the woman in the '
             'reference images, keeping her face and body consistent with them. '
             'Keep the original motion, framing, pacing and lighting exactly as '
             'they are in the video.')
+    if preserve:
+        base = base + ' ' + PRESERVE_CLAUSE
     return (base + ' ' + motion.strip()) if motion.strip() else base
 
 
@@ -730,6 +865,109 @@ def build_video_prompt(motion=''):
     base = ('She moves naturally and subtly — a slow breath, a small shift of '
             'weight, hair settling. The camera holds nearly still.')
     return (motion.strip() + ' ' + base) if motion.strip() else base
+
+
+def build_reel_prompt(prompt='', has_photo=False):
+    """A safe-work reel. It may run from a prompt alone, which is the one video
+    path here that makes no claim to be anybody -- so nothing in this wording
+    describes a person, and a photo, when there is one, is what does."""
+    text = (prompt or '').strip()
+    lead = ('The woman in the reference photograph, filmed in a short vertical '
+            'clip.' if has_photo else 'A short, natural-looking clip.')
+    tail = ('Shot on a phone, natural light, handheld and unstyled, realistic '
+            'motion.')
+    return ' '.join(part for part in (lead, text, tail) if part)
+
+
+def build_multiref_prompt(prompt='', scenes=0):
+    """Her identity references and a separate scene or outfit reference, named
+    by position: the model is told which photographs say who she is and which
+    say where she is, because nothing else in the payload distinguishes them."""
+    text = (prompt or '').strip()
+    which = ('the last photograph' if scenes == 1
+             else f'the last {scenes} photographs')
+    lead = ('The woman in the first photographs — identical face, hair and '
+            f'features — in the setting, outfit and styling of {which}.'
+            if scenes else
+            'The woman in the reference photographs — identical face, hair and '
+            'features.')
+    tail = ('She moves naturally. Photorealistic, natural skin texture and '
+            'lighting.')
+    return ' '.join(part for part in (lead, text, tail) if part)
+
+
+def build_extend_prompt(mode='continue', motion=''):
+    """Continue a clip from its own last frame. The model is being asked to
+    carry on rather than to start, which is a different instruction from an
+    animate -- and a loop additionally has to arrive somewhere exact."""
+    lead = {
+        'continue': ('Continue this shot from the frame given. The same woman, '
+                     'the same setting and the same camera — the motion simply '
+                     'carries on.'),
+        'longer': ('Continue this shot from the frame given, at length. The '
+                   'same woman, the same setting and the same camera '
+                   'throughout.'),
+        'loop': ('Continue this shot from the first frame given and arrive '
+                 'back at the closing frame given, so the clip loops '
+                 'seamlessly. The same woman, setting and camera throughout.'),
+    }.get(mode, 'Continue this shot from the frame given.')
+    motion = (motion or '').strip()
+    return (lead + ' ' + motion) if motion else lead
+
+
+# ── Audio ─────────────────────────────────────────────────────────────────────
+# Provider-side only. There is no ffmpeg in the image, so nothing here can mux
+# an uploaded track onto a clip -- sound either comes out of the generation or
+# it comes out of a second provider task that returns a clip already carrying
+# it. Both are named the way every other model id in this file is: from the
+# environment, because none of this is verified against the live catalogue.
+AUDIO_MODES = ('ambience', 'moaning', 'speech', 'custom')
+
+AUDIO_PROMPTS = {
+    'ambience': ('natural room tone for this scene — the quiet of the room, '
+                 'fabric and movement, nothing musical and no speech'),
+    'moaning': ('her breathing and soft moaning, in time with what is on '
+                'screen, no words and no music'),
+}
+
+# Which route a clip gets its sound by. `native` asks the generation task for
+# it; `task` runs a second video-to-audio task over the finished clip and takes
+# back a muxed file. Native is the default because it is one call and one bill.
+AUDIO_ROUTE = os.getenv('RW_AUDIO_ROUTE', 'native').strip().lower()
+
+# The generation task's own audio parameters. Neither is in `_NEVER_STRIP`, so
+# a model that does not know them has them dropped by the refused-parameter
+# retry and still returns the clip -- silent, which is the right failure.
+RW_VIDEO_AUDIO_FLAG = os.getenv('RW_VIDEO_AUDIO_FLAG', 'generateAudio')
+RW_VIDEO_AUDIO_FIELD = os.getenv('RW_VIDEO_AUDIO_FIELD', 'audioPrompt')
+
+# The follow-on route: a task type and a model id, both guesses until
+# `search_models('audio')` is run against a live key.
+RW_AUDIO_TASK = os.getenv('RW_AUDIO_TASK', 'videoToAudio')
+RW_MODEL_AUDIO = os.getenv('RW_MODEL_AUDIO', 'runware:400@1')
+
+
+def audio_prompt(audio, voice=''):
+    """What to ask for, from the preset the creator picked.
+
+    `speech` is the only one that carries her: the line is the creator's and
+    the voice is the persona's own builder field, so a spoken clip does not
+    invent a way for her to sound.
+    """
+    audio = audio or {}
+    mode = (audio.get('mode') or '').strip().lower()
+    if mode not in AUDIO_MODES:
+        return ''
+    text = (audio.get('prompt') or '').strip()
+    if mode == 'custom':
+        return text
+    if mode == 'speech':
+        if not text:
+            return ''
+        voice = (voice or audio.get('voice') or '').strip()
+        said = f'She says, clearly and in sync: "{text}"'
+        return f'{said} Her voice: {voice}.' if voice else said
+    return AUDIO_PROMPTS.get(mode, '')
 
 
 # ── Provider interface ────────────────────────────────────────────────────────
@@ -873,6 +1111,31 @@ _NEVER_STRIP = frozenset({'taskType', 'taskUUID', 'model', 'positivePrompt',
                           'video'})
 
 
+def _strip_param(tasks, key):
+    """Drop one refused parameter from every task, wherever it sits.
+
+    A nested one is refused by name exactly as a top-level one is, and reading
+    only the top level turned a model that simply does not know an optional
+    key -- an audio field, a frame position -- into a hard failure. Nothing
+    that carries the clip or her face can be reached this way: `_NEVER_STRIP`
+    is checked before this is called.
+    """
+    gone = False
+    for task in tasks:
+        if task.pop(key, None) is not None:
+            gone = True
+        inputs = task.get('inputs')
+        if not isinstance(inputs, dict):
+            continue
+        if inputs.pop(key, None) is not None:
+            gone = True
+        for value in inputs.values():
+            for row in (value if isinstance(value, list) else ()):
+                if isinstance(row, dict) and row.pop(key, None) is not None:
+                    gone = True
+    return gone
+
+
 class RunwareProvider(Provider):
     name = 'runware'
 
@@ -919,7 +1182,7 @@ class RunwareProvider(Provider):
                     f'The provider said: {err}', fatal=True)
             if not key:
                 break
-            if not any(t.pop(key, None) is not None for t in tasks):
+            if not _strip_param(tasks, key):
                 break
         raise failure
 
@@ -964,14 +1227,25 @@ class RunwareProvider(Provider):
             return task['taskUUID'], Result('running')
         return task['taskUUID'], Result('done', urls, cost=cost or None)
 
+    def _refs(self, spec):
+        """Her reference photographs, inlined frame first when one was sent."""
+        refs = list(spec.get('reference_urls') or [])
+        if spec.get('reference_b64'):
+            refs = [_data_uri(spec['reference_b64'],
+                              spec.get('reference_mime'))] + refs
+        return refs
+
     def submit_video(self, spec):
         task_uuid = str(uuid.uuid4())
+        job = spec.get('job') or ('swap' if spec.get('kind') == 'swap'
+                                  else 'animate')
         model_key = spec.get('model') or DEFAULT_VIDEO_MODEL
-        if spec.get('kind') == 'swap' and model_key not in SWAP_MODELS:
+        if job == 'swap' and model_key not in SWAP_MODELS:
             model_key = DEFAULT_SWAP_MODEL
         width, height = video_size(model_key, spec.get('source_width'),
                                    spec.get('source_height'),
-                                   spec.get('resolution'))
+                                   spec.get('resolution'),
+                                   spec.get('aspect'))
         shape = _video_fields(model_key).get('shape')
         task = {
             'taskType': _RW['video_task'],
@@ -1003,15 +1277,15 @@ class RunwareProvider(Provider):
         # wasted round trip on every single clip.
         if shape == 'flat':
             task['checkNSFW'] = False
-        if spec.get('kind') == 'swap':
+
+        cap = MODEL_REF_CAP.get(model_key, MAX_VIDEO_REFERENCES)
+
+        if job == 'swap':
             source = spec.get('source_url')
             if not source:
                 raise GenerationError('a swap needs the clip it is swapping into')
             fields = _video_fields(model_key)
-            refs = spec.get('reference_urls') or []
-            if spec.get('reference_b64'):
-                refs = [_data_uri(spec['reference_b64'],
-                                  spec.get('reference_mime'))] + list(refs)
+            refs = self._refs(spec)
             if not refs:
                 raise GenerationError(
                     'a swap needs at least one approved photo of her to swap in')
@@ -1019,7 +1293,6 @@ class RunwareProvider(Provider):
                 # A model that edits the clip takes it as a single `video`; one
                 # that takes guidance from it takes a list of reference videos.
                 src_key = fields.get('in_source') or 'referenceVideos'
-                cap = MODEL_REF_CAP.get(model_key, MAX_VIDEO_REFERENCES)
                 task['inputs'] = {
                     src_key: source if src_key == 'video' else [source],
                     (fields.get('in_refs') or 'referenceImages'):
@@ -1027,34 +1300,78 @@ class RunwareProvider(Provider):
             else:
                 task[fields['source']] = source
                 task[fields['refs']] = list(refs)[:MAX_REFERENCES]
+        elif job == 'multiref':
+            # Her identity references first and the scene references after,
+            # because the prompt names them by position -- the payload has no
+            # other way to say which photograph is which.
+            refs = self._refs(spec)
+            scenes = list(spec.get('scene_urls') or [])
+            if not refs:
+                raise GenerationError(
+                    'a multi-reference clip needs at least one photo of her')
+            if not scenes:
+                raise GenerationError(
+                    'a multi-reference clip needs a scene or outfit reference')
+            # Her own photographs keep their places when the cap bites: losing
+            # a scene reference makes a plainer clip, losing an identity one
+            # makes a stranger.
+            keep = max(1, cap - len(scenes))
+            merged = list(refs)[:keep] + scenes
+            task['inputs'] = {'referenceImages': merged[:cap]}
+        elif job == 'extend':
+            frame = spec.get('reference_b64')
+            if not frame:
+                raise GenerationError(
+                    'an extension needs the last frame of the clip it continues')
+            frames = [{'inputImage': _data_uri(frame, spec.get('reference_mime')),
+                       'frame': 'first'}]
+            if spec.get('closing_b64'):
+                # A loop has to arrive somewhere exact, so the source's own
+                # opening frame is pinned as the closing one.
+                frames.append({
+                    'inputImage': _data_uri(spec['closing_b64'],
+                                            spec.get('closing_mime')),
+                    'frame': 'last'})
+            if shape in ('inputs', 'replace'):
+                task['inputs'] = {'frameImages': frames}
+            else:
+                task[_RW['frame_images']] = frames
         elif spec.get('source_url') and shape == 'inputs':
-            # A Video job that carries a clip is motion transfer: her photo is
-            # the subject, the clip is only where the movement comes from.
-            refs = spec.get('reference_urls') or []
-            if spec.get('reference_b64'):
-                refs = [_data_uri(spec['reference_b64'],
-                                  spec.get('reference_mime'))] + list(refs)
+            # A clip that carries a source clip is motion transfer: her photo
+            # is the subject, the clip is only where the movement comes from.
+            refs = self._refs(spec)
             if not refs:
                 raise GenerationError(
                     'a clip driven by a video still needs a photo of her')
             task['inputs'] = {
                 'referenceVideos': [spec['source_url']],
-                'referenceImages': list(refs)[:MODEL_REF_CAP.get(
-                    model_key, MAX_VIDEO_REFERENCES)]}
+                'referenceImages': list(refs)[:cap]}
         else:
             frame = spec.get('reference_b64')
             if not frame:
-                # Enforced here as well as in the UI: identity comes from the
-                # first frame, so a clip without one is not this feature.
-                raise GenerationError(
-                    'a video needs an approved still as its first frame')
-            first = {'inputImage': _data_uri(frame, spec.get('reference_mime'))}
-            # Mutually exclusive with the reference inputs above, which is why
-            # this is the whole of `inputs` rather than another key in it.
-            if shape in ('inputs', 'replace'):
-                task['inputs'] = {'frameImages': [first]}
+                if job != 'reel':
+                    # Enforced here as well as in the UI: identity comes from
+                    # the first frame, so a clip without one is not this
+                    # feature. A reel is the exception -- it claims to be
+                    # nobody, so it may run from its prompt alone.
+                    raise GenerationError(
+                        'a video needs an approved still as its first frame')
             else:
-                task[_RW['frame_images']] = [first]
+                first = {'inputImage': _data_uri(frame, spec.get('reference_mime'))}
+                # Mutually exclusive with the reference inputs above, which is
+                # why this is the whole of `inputs` rather than another key.
+                if shape in ('inputs', 'replace'):
+                    task['inputs'] = {'frameImages': [first]}
+                else:
+                    task[_RW['frame_images']] = [first]
+
+        # Sound on the generation itself, where the model emits it in one pass.
+        # A model that does not know these drops them through the refused-
+        # parameter retry and still returns the clip, silent.
+        want_audio = audio_prompt(spec.get('audio'), spec.get('voice'))
+        if want_audio and AUDIO_ROUTE == 'native' and shape != 'replace':
+            task[RW_VIDEO_AUDIO_FLAG] = True
+            task[RW_VIDEO_AUDIO_FIELD] = want_audio[:600]
 
         try:
             data = self._send([task], timeout=VIDEO_TIMEOUT)
@@ -1070,10 +1387,34 @@ class RunwareProvider(Provider):
             # Keys only: the values are her photographs and a signed clip URL.
             # Which fields went out is the whole question when a model refuses
             # one of them, and the payload is gone by the time anyone looks.
-            logger.warning('runware video refused model=%s fields=%s',
-                           model_key, sorted(task))
+            logger.warning('runware video refused job=%s model=%s fields=%s',
+                           job, model_key, sorted(task))
             raise
         urls = [d.get('videoURL') for d in data if d.get('videoURL')]
+        if urls:
+            return task_uuid, Result('done', urls)
+        return task_uuid, Result('running')
+
+    def submit_audio(self, video_url, spec):
+        """The follow-on route: a second task over a finished clip that hands
+        back a muxed file. Used only when `RW_AUDIO_ROUTE` is set to `task` —
+        the task type and the model id are both guesses until they are checked
+        against a live catalogue, which is why neither is a literal here."""
+        prompt = audio_prompt(spec.get('audio'), spec.get('voice'))
+        if not prompt:
+            raise GenerationError('no audio was asked for', fatal=True)
+        task_uuid = str(uuid.uuid4())
+        task = {'taskType': RW_AUDIO_TASK,
+                'taskUUID': task_uuid,
+                'model': RW_MODEL_AUDIO,
+                _RW['prompt']: prompt[:600],
+                'inputs': {'video': video_url},
+                _RW['output']: 'URL',
+                'includeCost': True,
+                'deliveryMethod': 'async'}
+        data = self._send([task], timeout=VIDEO_TIMEOUT)
+        urls = [d.get('videoURL') or d.get('audioURL') for d in data
+                if d.get('videoURL') or d.get('audioURL')]
         if urls:
             return task_uuid, Result('done', urls)
         return task_uuid, Result('running')
@@ -1155,9 +1496,9 @@ class ModelsLabProvider(Provider):
         return str(body.get('id') or ''), self._read(body)
 
     def submit_video(self, spec):
-        if spec.get('kind') == 'swap':
+        if spec.get('job') == 'swap' or spec.get('kind') == 'swap':
             return self._submit_face_swap(spec)
-        width, height = VIDEO_PX.get(spec.get('resolution'), VIDEO_PX['720p'])
+        width, height = video_px(spec.get('aspect'), spec.get('resolution'))
         if not spec.get('reference_url'):
             raise GenerationError('a video needs an approved still as its first frame')
         body = self._send('video/img2video', {
@@ -1219,7 +1560,7 @@ def provider_name_for(spec):
     """Which provider a job actually runs on. Almost always the configured
     default -- except the explicit replace, which Runware has no model for at
     all, so that one job always goes to ModelsLab regardless of the setting."""
-    if (spec.get('kind') == 'swap'
+    if ((spec.get('job') == 'swap' or spec.get('kind') == 'swap')
             and (spec.get('model') or DEFAULT_SWAP_MODEL) == EXPLICIT_SWAP_MODEL):
         return 'modelslab'
     return provider_name()

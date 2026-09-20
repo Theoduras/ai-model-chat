@@ -185,6 +185,10 @@ class PersonaMedia(Base):
     tags = Column(String(300), default='')
     approved_for_training = Column(Boolean, default=True)
     source = Column(String(12), default='upload')   # upload | generated
+    # The clip an extension continues. There is no ffmpeg in the image, so an
+    # extension cannot be joined onto its source: it is delivered as its own
+    # vault clip and this is what says which clip it carries on from.
+    parent_media = Column(String(32), default='')
 
 
 Index('ix_media_slug_purpose', PersonaMedia.slug, PersonaMedia.purpose)

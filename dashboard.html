@@ -1865,6 +1865,11 @@ function renderForm(slug, cfg) {
           <input id="f-phone-model" value="${esc(cfg.phone_model || '')}" placeholder="black iPhone 15 Pro">
           <span class="hint">Only used in selfies, where it is actually in shot.</span>
         </div>
+        <div class="field">
+          <label>Her voice</label>
+          <input id="f-voice" value="${esc(cfg.voice || '')}" placeholder="soft, low, slight West Country accent">
+          <span class="hint">How she sounds when a generated clip has her speak.</span>
+        </div>
       </div>
 
       <div class="field full">
@@ -2410,7 +2415,8 @@ function collectConfig() {
     appearance: v('f-appearance'), body_type: v('f-body-type'),
     chest_size: v('f-chest-size'), hair_colour: v('f-hair-colour'),
     eye_colour: v('f-eye-colour'), style: v('f-style'),
-    phone_model: v('f-phone-model'), banned_terms: v('f-banned-terms'),
+    phone_model: v('f-phone-model'), voice: v('f-voice'),
+    banned_terms: v('f-banned-terms'),
     nsfw_enabled: document.getElementById('f-nsfw')?.checked || false,
     nsfw_level: v('f-nsfw-level'), conversion_triggers: v('f-triggers'),
     avatar: v('f-avatar'), avatar_from_photo: avatarFromPhoto, platforms: collectPlatforms(),

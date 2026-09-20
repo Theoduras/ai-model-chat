@@ -11,6 +11,14 @@ import.
 import math
 import os
 
+# The job table, and with it the aspect and audio vocabularies, live in
+# imagegen beside the per-model payload differences they describe. Imported
+# rather than restated: two lists of what a job may be is how a picker starts
+# offering something nothing can price. This costs nothing at import -- the
+# provider stack itself (requests, the endpoints) is loaded lazily inside
+# imagegen's own functions, so `python test_credits.py` still needs no network.
+import imagegen as _IG
+
 # What one credit is allowed to cost us at the provider. Every generation is
 # priced at ceil(provider_cost / CREDIT_COST_USD), so rounding always favours us.
 CREDIT_COST_USD = 0.002
@@ -67,16 +75,39 @@ IMAGE_PRICES = {
 VIDEO_MODELS = ('wan-2-5', 'wan-2-7', 'seedance-2-5')
 DEFAULT_VIDEO_MODEL = 'wan-2-5'
 
+# The five video jobs, mirrored from imagegen so the picker and the price
+# table read one list. A job names its own models; a model is never the
+# question a creator is asked.
+JOB_MODELS = {job: tuple(row['models']) for job, row in _IG.VIDEO_JOBS.items()}
+JOB_KINDS = {job: _IG.job_kind(job) for job in _IG.VIDEO_JOBS}
+JOB_RATINGS = {job: tuple(_IG.job_ratings(job)) for job in _IG.VIDEO_JOBS}
+JOB_LABELS = {job: row.get('label') or job.title()
+              for job, row in _IG.VIDEO_JOBS.items()}
+JOB_NOTES = {job: row.get('note') or ''
+             for job, row in _IG.VIDEO_JOBS.items()}
+JOB_NEEDS = {job: tuple(row.get('needs') or ())
+             for job, row in _IG.VIDEO_JOBS.items()}
+DEFAULT_JOB = 'reel'
+
+# Frame shape is free: a 9:16 reel and a 16:9 cut of the same scene run the
+# same pixels through the same model, so the picker changes what a clip looks
+# like without changing what it costs.
+ASPECTS = tuple(_IG.ASPECTS)
+DEFAULT_ASPECT = _IG.DEFAULT_ASPECT
+AUDIO_MODES = tuple(_IG.AUDIO_MODES)
+EXTEND_MODES = tuple(_IG.EXTEND_MODES)
+
 # Wan 2.7 is the only video model that takes an input clip, so a face swap into
 # an uploaded video is always priced and run on it whatever the picker says.
 VIDEO_EDIT_MODEL = 'wan-2-7'
 
-# The two models a swap may run on. They do opposite things with the clip they
-# are given: replace keeps the video and changes who is in it, Wan 2.7
-# regenerates the video from her references in a similar motion. Both are
-# offered because only the operator can say which one a given clip wants.
-SWAP_MODELS = ('p-video-replace', 'ml-face-swap', 'wan-2-7')
-DEFAULT_SWAP_MODEL = 'p-video-replace'
+# The models a swap may run on, read off the job table rather than restated.
+# They do opposite things with the clip they are given: replace keeps the video
+# and changes who is in it, Wan 2.7 regenerates the video from her references
+# in a similar motion. Both are offered because only the operator can say which
+# one a given clip wants.
+SWAP_MODELS = JOB_MODELS['swap']
+DEFAULT_SWAP_MODEL = SWAP_MODELS[0]
 # Where an explicit persona goes: the only model that both replaces rather
 # than regenerates and serves explicit work. It runs on ModelsLab, not
 # Runware -- see imagegen.provider_name_for.
@@ -164,9 +195,21 @@ GOOGLE_IMAGE_CREDITS = 10
 # Add-ons, in the same measured slices. Identity is no longer one of them:
 # Seedream conditions on reference images inside the one call it already
 # charges for, so holding her face now costs nothing on top.
+# Audio is flat per clip rather than per second: the provider bills a
+# video-to-audio pass by the call, and a model that emits sound in the same
+# pass bills nothing extra at all. Priced as if it always costs us the dearer
+# of the two, because the cheaper case cannot be told apart at quote time.
 ADDON_PRICES = {
     'upscale': 2,
     'nsfw_check': 1,
+    'audio': 50,
+}
+
+# What an add-on costs us, where it costs anything. Unmeasured and therefore
+# deliberately high, the same as every other guess in this file: a guess that
+# is too low loses money on every clip and nothing reports it.
+ADDON_COST_USD = {
+    'audio': 0.10,
 }
 
 # Human labels for the model picker. Closed video models (Kling, Veo, Seedance)
@@ -289,6 +332,27 @@ def video_price(resolution, seconds, addons=(), model=None):
     return rate * secs + sum(_addon(a) for a in addons)
 
 
+def job_price(job, resolution, seconds, addons=(), model=None):
+    """Credits for one video job. The job decides which of the two shapes it
+    is priced as: a swap is billed for the clip it was handed, everything else
+    for the clip it will make. Aspect is not an argument because it is not a
+    cost -- the same pixels through the same model come out a different shape
+    for the same money."""
+    models = JOB_MODELS.get(job)
+    if models is None:
+        raise PricingError(f'unknown video job {job!r}')
+    if model is not None and model not in models:
+        raise PricingError(f'{model!r} does not serve the {job} job')
+    model = model or models[0]
+    if JOB_KINDS.get(job) == 'swap':
+        # No default duration here, unlike a generated clip: a swap is billed
+        # for the clip it was handed, so a spec carrying no measured duration
+        # is one we cannot price rather than one we guess at.
+        return swap_price(resolution, seconds, addons, model)
+    return video_price(resolution, seconds or DEFAULT_VIDEO_DURATION,
+                       addons, model)
+
+
 def swap_price(resolution, seconds, addons=(), model=None):
     model = model if model in SWAP_MODELS else DEFAULT_SWAP_MODEL
     rates = VIDEO_RATE_PER_SECOND.get(model) or {}
@@ -311,8 +375,16 @@ def quote(spec):
 
     spec: {kind: image|video, model, resolution, seconds, batch, addons[]}
     """
-    kind = (spec or {}).get('kind') or 'image'
+    spec = spec or {}
+    job = (spec.get('job') or '').strip().lower()
     addons = tuple(spec.get('addons') or ())
+    # A job names its own models, so it is the stricter of the two routes and
+    # takes precedence: a model that does not serve the job asked for is a
+    # spec we refuse to quote rather than one we quietly reprice.
+    if job:
+        return job_price(job, spec.get('resolution') or DEFAULT_VIDEO_RESOLUTION,
+                         spec.get('seconds'), addons, spec.get('model'))
+    kind = spec.get('kind') or 'image'
     if kind == 'swap':
         # No default duration here, unlike a generated clip: a swap is billed
         # for the clip it was handed, so a spec that carries no measured
@@ -403,29 +475,51 @@ def equivalents(credits):
 
 
 def _imagegen_takes_duration(model):
-    # Imported here rather than at module scope: credits.py is the one module
-    # test_credits.py loads on its own, and it must not need the provider stack.
     try:
-        import imagegen
-        return bool(imagegen.takes_duration(model))
+        return bool(_IG.takes_duration(model))
+    except Exception:
+        return True
+
+
+def _imagegen_takes_aspect(model):
+    try:
+        return bool(_IG.takes_aspect(model))
     except Exception:
         return True
 
 
 def _imagegen_durations(model):
     try:
-        import imagegen
-        return imagegen.model_durations(model)
+        return _IG.model_durations(model)
     except Exception:
         return None
 
 
 def _imagegen_rungs(model):
     try:
-        import imagegen
-        return imagegen.model_rungs(model) or list(VIDEO_RESOLUTIONS)
+        return _IG.model_rungs(model) or list(VIDEO_RESOLUTIONS)
     except Exception:
         return list(VIDEO_RESOLUTIONS)
+
+
+def model_caps(model):
+    """What a model lets the operator choose. One that runs the length and the
+    frame of the clip it was given has neither to offer, and a picker in front
+    of it would be a control that changes nothing."""
+    return {'duration': _imagegen_takes_duration(model),
+            'aspect': _imagegen_takes_aspect(model),
+            'resolutions': _imagegen_rungs(model),
+            'durations': _imagegen_durations(model)}
+
+
+def all_video_models():
+    """Every model any job can reach, generated and swap alike."""
+    seen = list(VIDEO_MODELS)
+    for models in JOB_MODELS.values():
+        for m in models:
+            if m not in seen:
+                seen.append(m)
+    return seen
 
 
 def price_table():
@@ -439,17 +533,33 @@ def price_table():
         'video_edit_model': VIDEO_EDIT_MODEL,
         'swap_models': list(SWAP_MODELS),
         'default_swap_model': DEFAULT_SWAP_MODEL,
-        # What each swap model lets the operator choose. A model that runs the
-        # length of the clip it is given has no seconds to offer.
-        'swap_model_caps': {m: {'duration': _imagegen_takes_duration(m),
-                                'resolutions': _imagegen_rungs(m)}
-                            for m in SWAP_MODELS},
+        # The five jobs, and what each one is made of. Everything the studio
+        # renders comes from here rather than a list in the page: a job that
+        # gains a model or a mode gains it in one place.
+        'jobs': list(JOB_MODELS),
+        'job_models': {j: list(m) for j, m in JOB_MODELS.items()},
+        'job_kinds': dict(JOB_KINDS),
+        'job_ratings': {j: list(r) for j, r in JOB_RATINGS.items()},
+        'job_labels': dict(JOB_LABELS),
+        'job_notes': dict(JOB_NOTES),
+        'job_needs': {j: list(n) for j, n in JOB_NEEDS.items()},
+        'default_job': DEFAULT_JOB,
+        'aspects': list(ASPECTS),
+        'default_aspect': DEFAULT_ASPECT,
+        'audio_modes': list(AUDIO_MODES),
+        'extend_modes': list(EXTEND_MODES),
+        # What each model lets the operator choose. A model that runs the
+        # length and the frame of the clip it is given has neither to offer.
+        # Still called swap_model_caps because it is the same map the swap
+        # panel already read; it now covers every model a job can reach.
+        'swap_model_caps': {m: model_caps(m) for m in all_video_models()},
         'explicit_swap_model': EXPLICIT_SWAP_MODEL,
         # The lengths each video model actually serves, so the picker cannot
         # offer one the provider will refuse.
         'video_model_durations': {m: _imagegen_durations(m)
                                   for m in VIDEO_MODELS},
         'video_rates': VIDEO_RATE_PER_SECOND,
+        'video_px': _IG.VIDEO_PX,
         'video_max_seconds': VIDEO_MAX_SECONDS,
         'addons': ADDON_PRICES,
         'labels': MODEL_LABELS,
@@ -482,6 +592,50 @@ def margin_report():
     return rows
 
 
+def generation_margin_report():
+    """Credits against provider cost for every generation the picker can ask
+    for. The pack floor never saw this table, which is how a clip came to be
+    sold at 30 credits a second while costing 46 — so it is walked too."""
+    rows = []
+    for job, models in JOB_MODELS.items():
+        for model in models:
+            rungs = _imagegen_rungs(model)
+            for res in rungs:
+                for secs in sorted(set(VIDEO_DURATIONS +
+                                       (VIDEO_SECONDS_MIN, VIDEO_MAX_SECONDS))):
+                    for addons in ((), ('audio',)):
+                        try:
+                            price = job_price(job, res, secs, addons, model)
+                        except PricingError:
+                            continue
+                        cost = (video_cost_usd(model, res, secs) or 0) + sum(
+                            ADDON_COST_USD.get(a, 0) for a in addons)
+                        rows.append({'job': job, 'model': model,
+                                     'resolution': res, 'seconds': secs,
+                                     'addons': addons, 'credits': price,
+                                     'sells_for': price * CREDIT_COST_USD,
+                                     'cost_usd': cost})
+    return rows
+
+
+def _assert_generation_floor():
+    """A generation may never sell under what it costs us. Unlike the pack
+    floor this is a 1x test, not a margin one: the margin is taken when the
+    credits are bought, and taking it twice would price us out of our own
+    table."""
+    for row in generation_margin_report():
+        if row['sells_for'] + 1e-9 < row['cost_usd']:
+            raise AssertionError(
+                f"{row['job']} on {row['model']} at {row['resolution']} for "
+                f"{row['seconds']}s{' + ' + ', '.join(row['addons']) if row['addons'] else ''} "
+                f"sells for ${row['sells_for']:.4f} and costs ${row['cost_usd']:.4f}")
+    for name, cost in ADDON_COST_USD.items():
+        price = ADDON_PRICES.get(name)
+        if price is None or price * CREDIT_COST_USD + 1e-9 < cost:
+            raise AssertionError(
+                f'add-on {name!r} sells for {price} credits and costs ${cost}')
+
+
 def _assert_floor():
     floor = MIN_MARGIN_MULTIPLE * CREDIT_COST_USD
     for row in margin_report():
@@ -497,3 +651,4 @@ def _assert_floor():
 
 
 _assert_floor()
+_assert_generation_floor()
