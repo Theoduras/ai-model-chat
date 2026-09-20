@@ -1137,6 +1137,23 @@ def _noindex_fan_pages(resp):
     return resp
 
 
+# A deploy changes these files in place under the same URLs, so a browser
+# holding last week's copy keeps calling an API that has moved on -- which reads
+# as a broken feature, not a stale tab. Revalidation rather than no-store: the
+# ETag makes the common case a 304 with no body.
+_REVALIDATE_PREFIXES = ('/js/', '/css/')
+
+
+@app.after_request
+def _revalidate_app_shell(resp):
+    if request.method not in ('GET', 'HEAD'):
+        return resp
+    if ((resp.mimetype or '').startswith('text/html')
+            or (request.path or '/').startswith(_REVALIDATE_PREFIXES)):
+        resp.headers['Cache-Control'] = 'no-cache, must-revalidate'
+    return resp
+
+
 @app.route('/healthz')
 def healthz():
     """Reports whether account storage is durable. Names no credentials —
