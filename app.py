@@ -10411,7 +10411,15 @@ def api_persona_media_list(slug):
         return jsonify({'items': items, 'vault': vault,
                         'links': placements, 'outfits': outfits,
                         'nsfw_level': level,
-                        'shots': imagegen.shots_for_level(level)})
+                        'shots': imagegen.shots_for_level(level),
+                        # The scene builder's vocabulary, resolved to this
+                        # persona's ceiling for the same reason the shots are.
+                        'scenes': [{'key': k, 'level': imagegen.SCENES[k][0],
+                                    'text': imagegen.SCENES[k][1]}
+                                   for k in imagegen.scenes_for_level(level)],
+                        'styles': sorted(imagegen.STYLES),
+                        'cameras': sorted(imagegen.CAMERAS),
+                        'lighting': sorted(imagegen.LIGHTING)})
     finally:
         s.close()
 
@@ -27886,6 +27894,21 @@ def _gen_spec(slug, body, user):
             'negative_extra': (body.get('negative') or '').strip()[:600],
             'addons': []}
 
+    # Scene builder fields. Unknown keys fall back to nothing rather than
+    # erroring: a picker that gains an option before the server does should
+    # make a plainer photo, not a failed generation the creator paid for.
+    scene = (body.get('scene') or '').strip().lower()
+    if not imagegen.scene_allowed(scene, level):
+        raise imagegen.GenerationError(
+            f'This persona is set to "{level}", which does not allow that scene.')
+    spec.update({
+        'scene': scene if scene in imagegen.SCENES else '',
+        'style': (body.get('style') or '').strip().lower(),
+        'camera': (body.get('camera') or '').strip().lower(),
+        'lighting': (body.get('lighting') or '').strip().lower(),
+        'direction': (body.get('direction') or '').strip()[:300],
+    })
+
     if kind == 'image':
         shot = (body.get('shot') or 'portrait').strip().lower()
         if not imagegen.shot_allowed(shot, level):
@@ -28077,10 +28100,18 @@ def _gen_start(job_id, slug, spec, workspace):
                 refs = _gen_reference_urls(slug, spec.get('model'))
                 if refs:
                     call['reference_urls'] = refs
+                banned = cfg.get('banned_terms') or []
+                if isinstance(banned, str):
+                    banned = [t for t in re.split(r'[,\n]', banned) if t.strip()]
                 call['prompt'] = imagegen.build_prompt(
                     _appearance_from_config(cfg), spec.get('shot'),
                     spec.get('outfit'), bool(ref_b64 or refs),
-                    extra=spec.get('prompt_extra', ''))
+                    extra=spec.get('prompt_extra', ''),
+                    style=spec.get('style', ''), scene=spec.get('scene', ''),
+                    camera=spec.get('camera', ''),
+                    lighting=spec.get('lighting', ''),
+                    direction=spec.get('direction', ''),
+                    banned=banned)
                 provider_job, result = provider.submit_image(call)
             else:
                 call['prompt'] = imagegen.build_video_prompt(

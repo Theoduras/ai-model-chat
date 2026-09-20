@@ -28,6 +28,7 @@ import base64
 import json
 import logging
 import os
+import re
 import uuid
 
 logger = logging.getLogger(__name__)
@@ -132,6 +133,89 @@ SHOT_LEVEL = {
 }
 LEVEL_ORDER = ('sfw', 'suggestive', 'moderate', 'explicit')
 
+# The scene builder. `shot` says how close the camera is and how much is on
+# show; everything below says what the picture is of. They are separate axes
+# because a creator changing the scene should not have to re-pick the framing.
+#
+# Scenes carry their own level and are gated by it exactly as shots are: the
+# persona's NSFW setting is the ceiling for both, so nothing here can be used
+# to ask for something the shot list would have refused.
+
+STYLES = {
+    'any': '',
+    'pov-selfie': 'shot as a POV selfie, arm visible, phone held close',
+    'mirror-selfie': 'a mirror selfie, phone visible in the reflection',
+    'candid': 'candid and unposed, as if caught mid-moment',
+    'photoshoot': 'a styled photoshoot frame, deliberate posing',
+}
+
+SCENES = {
+    # Safe for work.
+    'bedroom': ('sfw', 'in her bedroom'),
+    'bathroom': ('sfw', 'in the bathroom'),
+    'hotel': ('sfw', 'in a hotel room'),
+    'living-room': ('sfw', 'in her living room'),
+    'kitchen': ('sfw', 'in the kitchen'),
+    'poolside': ('sfw', 'poolside'),
+    'beach': ('sfw', 'on a beach'),
+    'cafe': ('sfw', 'in a cafe'),
+    'gym': ('sfw', 'at the gym'),
+    'car': ('sfw', 'in her car'),
+    'fitting-room': ('sfw', 'in a fitting room'),
+    'street': ('sfw', 'on a city street'),
+    'rooftop-bar': ('sfw', 'at a rooftop bar'),
+    # Tease and setup.
+    'lingerie-tease': ('suggestive', 'in lingerie, teasing the camera'),
+    'shower': ('suggestive', 'in the steamy shower'),
+    'bath': ('suggestive', 'in a bubble bath'),
+    'undressing': ('suggestive', 'undressing, caught part-way'),
+    'activewear': ('suggestive', 'in yoga activewear, stretching'),
+    'just-woke-up': ('suggestive', 'just woken up, sheets tangled'),
+    'towel-drop': ('suggestive', 'a towel slipping'),
+    'vanity': ('suggestive', 'at her vanity'),
+    'walk-in-closet': ('suggestive', 'in her walk-in closet'),
+    # Explicit.
+    'exposed': ('explicit', 'lying back, exposed'),
+    'solo-touch': ('explicit', 'touching herself'),
+    'bent-over': ('explicit', 'bent over, looking back'),
+    'nipple-play': ('explicit', 'hands at her chest'),
+    'aftermath': ('explicit', 'afterwards, flushed and tousled'),
+}
+
+CAMERAS = {
+    'auto': '',
+    'flash': 'harsh direct flash',
+    'night-mode': 'phone night mode, slight grain',
+    '35mm': 'shot on 35mm film',
+    'film-grain': 'visible film grain',
+}
+
+LIGHTING = {
+    'auto': '',
+    'warm-low': 'warm low light',
+    'daylight': 'flat daylight',
+    'morning-sun': 'morning sun through a window',
+    'golden-hour': 'golden hour light',
+    'dusk-neon': 'dusk, neon spill',
+    'candlelight': 'candlelight',
+    'studio': 'studio lighting',
+    'shower-light': 'diffused light through steam',
+}
+
+
+def scenes_for_level(level):
+    """The scenes a persona at this NSFW level may ask for."""
+    try:
+        ceiling = LEVEL_ORDER.index(level or 'sfw')
+    except ValueError:
+        ceiling = 0
+    return [k for k, (lvl, _) in SCENES.items()
+            if LEVEL_ORDER.index(lvl) <= ceiling]
+
+
+def scene_allowed(scene, level):
+    return not scene or scene in scenes_for_level(level)
+
 NEGATIVE_PROMPT = (
     'deformed, disfigured, extra limbs, extra fingers, fused fingers, '
     'mutated hands, bad anatomy, bad proportions, watermark, text, logo, '
@@ -161,7 +245,9 @@ def merge_negative(extra=''):
     return (NEGATIVE_PROMPT + ', ' + extra) if extra else NEGATIVE_PROMPT
 
 
-def build_prompt(appearance, shot, outfit=None, has_reference=False, extra=''):
+def build_prompt(appearance, shot, outfit=None, has_reference=False, extra='',
+                 style='', scene='', camera='', lighting='', direction='',
+                 banned=()):
     """The positive prompt for one generation.
 
     With a reference photo the prompt describes what changes, not who she is —
@@ -191,12 +277,31 @@ def build_prompt(appearance, shot, outfit=None, has_reference=False, extra=''):
         lock = (' She is ' + ', '.join(bits) + '.') if bits else ''
         tail = ''
 
+    # Scene, style, camera and lighting sit between the subject and the
+    # creator's own words: specific enough to steer the shot, general enough
+    # that none of them competes with the reference for who she is.
+    scene_bits = [SCENES.get(scene, ('', ''))[1], STYLES.get(style, ''),
+                  CAMERAS.get(camera, ''), LIGHTING.get(lighting, '')]
+    scene_text = ', '.join(b for b in scene_bits if b)
+    scene_text = (' ' + scene_text[0].upper() + scene_text[1:] + '.') if scene_text else ''
+    direction = (' ' + direction.strip()) if (direction or '').strip() else ''
+
     # The creator's own words go last, where a diffusion prompt weights them
     # least — they refine the shot, they do not get to replace who she is.
     extra = (' ' + extra.strip()) if (extra or '').strip() else ''
-    return (lead + lock + tail +
-            ' Shot on a phone camera, natural skin texture and lighting, '
-            'sharp focus, realistic. Fictional adult woman, 25 years old.' + extra)
+    prompt = (lead + lock + tail + scene_text +
+              ' Shot on a phone camera, natural skin texture and lighting, '
+              'sharp focus, realistic. Fictional adult woman, 25 years old.' +
+              direction + extra)
+
+    # A character's banned terms are struck from the finished prompt rather
+    # than trusted to the negative: a word the creator has forbidden should not
+    # reach the model at all, whichever field it was typed into.
+    for term in (banned or ()):
+        term = (term or '').strip()
+        if term:
+            prompt = re.sub(re.escape(term), '', prompt, flags=re.I)
+    return re.sub(r'\s{2,}', ' ', prompt).strip()
 
 
 def engine_report():
