@@ -72,6 +72,50 @@
     }
     .gen-ref-none { display: flex; align-items: center; justify-content: center; font-size: 0.58rem; line-height: 1.2; color: var(--text-muted); padding: 4px; }
 
+    /* The vault picker and the full-size view. Both are this page's own: the
+       studio is the only console that picks reference photos. */
+    .gen-modal {
+      position: fixed; inset: 0; z-index: 60; display: flex; align-items: center;
+      justify-content: center; padding: 24px; background: #000000cc;
+    }
+    .gen-modal[hidden] { display: none; }
+    .gen-sheet {
+      background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-lg);
+      width: min(900px, 100%); max-height: 86vh; display: flex; flex-direction: column;
+      box-shadow: var(--shadow-lg);
+    }
+    .gen-sheet header {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 14px 18px; border-bottom: 1px solid var(--border-soft); background: none;
+    }
+    .gen-sheet h3 { margin: 0; font-size: 0.95rem; }
+    .gen-sheet-body { padding: 16px 18px; overflow-y: auto; }
+    .gen-sheet footer {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 12px 18px; border-top: 1px solid var(--border-soft);
+    }
+    .gen-pick {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 10px;
+    }
+    .gen-pick .gen-ref-t { width: 100%; height: 136px; }
+    .gen-lightbox {
+      position: fixed; inset: 0; z-index: 70; display: flex; align-items: center;
+      justify-content: center; padding: 32px; background: #000000e8; cursor: zoom-out;
+    }
+    .gen-lightbox[hidden] { display: none; }
+    .gen-lightbox img, .gen-lightbox video { max-width: 100%; max-height: 100%; border-radius: var(--r); }
+    .gen-ref-x {
+      position: absolute; top: 2px; right: 2px; width: 17px; height: 17px; padding: 0;
+      border: none; border-radius: 50%; background: #000000c0; color: var(--text);
+      font-size: 0.6rem; line-height: 1; cursor: pointer; opacity: 0; transition: opacity .15s;
+    }
+    .gen-ref-t:hover .gen-ref-x, .gen-ref-x:focus { opacity: 1; }
+    .gen-add {
+      border: 1px dashed var(--border); background: var(--surface); color: var(--text-muted);
+      border-radius: var(--r-sm); width: 50px; height: 64px; cursor: pointer; font: inherit;
+      font-size: 0.6rem; line-height: 1.25;
+    }
+
     .gen-quote { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 10px 11px; display: flex; flex-direction: column; gap: 7px; }
     .gen-q-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 0.78rem; color: var(--text-2); }
     .gen-q-row b { font-family: var(--display); font-size: 1.05rem; color: var(--text); }
@@ -282,6 +326,31 @@
 </div>
 </div>
 
+<div class="gen-modal" id="gen-vault" hidden onclick="if(event.target===this) closeVault()">
+  <div class="gen-sheet" role="dialog" aria-modal="true" aria-labelledby="gen-vault-title">
+    <header>
+      <h3 id="gen-vault-title">Her photos</h3>
+      <button type="button" class="btn btn-ghost" onclick="closeVault()" aria-label="Close">&times;</button>
+    </header>
+    <div class="gen-sheet-body">
+      <div class="gen-pick" id="gen-vault-grid"></div>
+    </div>
+    <footer>
+      <label class="btn btn-ghost" style="cursor:pointer;">
+        Upload photos
+        <input type="file" id="gen-upload" accept="image/*" multiple
+               style="display:none" onchange="uploadRefs(this.files)">
+      </label>
+      <span class="hint" id="gen-vault-status" style="margin:0;"></span>
+      <button type="button" class="btn-ai" onclick="closeVault()">Done</button>
+    </footer>
+  </div>
+</div>
+
+<div class="gen-lightbox" id="gen-lightbox" hidden onclick="closeLightbox()">
+  <img id="gen-lightbox-img" src="" alt="">
+</div>
+
 <script src="/js/site-nav.js" defer></script>
 <script>
 function el(id){ return document.getElementById(id); }
@@ -394,26 +463,28 @@ function renderModelChips() {
     if (note) note.textContent = 'A clip runs on one model, so there is nothing to choose here.';
     return;
   }
-  const pinned = genRating === 'nsfw' && genEngines && genEngines.nsfw
-    ? genEngines.nsfw.key : '';
-  const keys = Object.keys(genPrices.images);
-  // An explicit rating is pinned at the provider, so the picker stops offering
-  // a choice it would override: pick 5.0 Pro, switch to explicit, and 4.5 is
-  // what runs either way.
-  if (pinned && keys.includes(pinned)) hidden.value = pinned;
-  else if (!keys.includes(hidden.value)) hidden.value = genPrices.defaults.model;
+  // A model that cannot serve this rating is not offered at all. The server
+  // would move it before quoting, and a swap nobody asked for reads as the
+  // picker having lied.
+  const want = genRating === 'nsfw' ? 'nsfw' : 'sfw';
+  const ratings = genPrices.ratings || {};
+  const keys = Object.keys(genPrices.images)
+    .filter(m => (ratings[m] || ['sfw']).includes(want));
+  if (!keys.includes(hidden.value)) {
+    hidden.value = keys.includes(genPrices.defaults.model)
+      ? genPrices.defaults.model : (keys[0] || '');
+  }
   const res = (el('gen-res') || {}).value || genPrices.defaults.resolution;
   box.innerHTML = keys.map(m => {
     const price = (genPrices.images[m] || {})[res];
-    const off = pinned && m !== pinned;
     return `<button type="button" class="gen-chip" aria-pressed="${m === hidden.value}"
-             ${off ? 'disabled' : `onclick="pickModel('${m}')"`}>${esc(genPrices.labels[m] || m)}
-             <small>${off ? 'not explicit' : (price === undefined ? '' : price + ' cr')}</small></button>`;
-  }).join('');
+             onclick="pickModel('${m}')">${esc(genPrices.labels[m] || m)}
+             <small>${price === undefined ? '' : price + ' cr'}</small></button>`;
+  }).join('') || '<span class="hint" style="margin:0;">No model serves that rating.</span>';
   if (note) {
-    const label = pinned ? (genPrices.labels[pinned] || pinned) : '';
-    note.textContent = pinned
-      ? `Explicit stills always run on ${label}, so the others are off here.`
+    const only = genPrices.labels[keys[0]] || keys[0];
+    note.textContent = keys.length === 1
+      ? `${only} is the only model that serves ${want === 'nsfw' ? 'explicit' : 'safe'} work.`
       : 'Prices are per photo. Holding her face costs nothing on top.';
   }
 }
@@ -474,25 +545,107 @@ function toggleRef(role, id) {
 }
 
 function renderRefs() {
-  const photos = mediaVault.filter(v => v.kind !== 'video');
-  const tiles = (role) => photos.map(v =>
-    `<button type="button" class="gen-ref-t" aria-pressed="${genRefs[role].includes(v.id)}"
-       onclick="toggleRef('${role}', '${v.id}')" title="${esc(v.purpose || 'Her photo')}">
-       <img src="${v.thumb}" alt="">${v.purpose ? `<em>${esc(v.purpose)}</em>` : ''}</button>`).join('')
-    || '<span class="hint" style="margin:0;">Nothing kept yet.</span>';
+  const byId = {};
+  mediaVault.forEach(v => { byId[v.id] = v; });
 
-  el('gen-refs').innerHTML = tiles('face');
-  el('gen-refs-body').innerHTML = tiles('body');
+  const group = (role) => (genRefs[role] || []).map(id => {
+    const v = byId[id];
+    if (!v) return '';
+    return `<span class="gen-ref-t" role="img" aria-label="${esc(v.purpose || 'Her photo')}"
+       onclick="openLightbox('${v.thumb}')" title="Click to see it full size">
+       <img src="${v.thumb}" alt="">${v.purpose ? `<em>${esc(v.purpose)}</em>` : ''}
+       <button type="button" class="gen-ref-x" aria-label="Remove from this group"
+         onclick="event.stopPropagation(); toggleRef('${role}', '${v.id}')">&times;</button></span>`;
+  }).join('') +
+    `<button type="button" class="gen-add" onclick="openVault('${role}')">+ Add</button>`;
+
+  el('gen-refs').innerHTML = group('face');
+  el('gen-refs-body').innerHTML = group('body');
   el('gen-face-count').textContent = `${genRefs.face.length} of ${genRefs.cap}`;
   el('gen-body-count').textContent = `${genRefs.body.length} of ${genRefs.cap}`;
   el('gen-refs-note').textContent =
     'Saved against this model, so switching models starts a fresh set.';
+
+  if (!el('gen-vault').hidden) renderVaultPicker();
 
   // The first face photo also rides this job on its own, which is what the
   // engine line and the quote read.
   el('gen-ref').value = genRefs.face[0] || '';
   genQuote();
 }
+
+let vaultRole = 'face';
+
+function openVault(role) {
+  vaultRole = role;
+  el('gen-vault').hidden = false;
+  setVaultStatus('');
+  renderVaultPicker();
+}
+
+function closeVault() { el('gen-vault').hidden = true; }
+
+function setVaultStatus(msg, bad) {
+  const e = el('gen-vault-status');
+  e.textContent = msg || '';
+  e.style.color = bad ? 'var(--err)' : '';
+}
+
+function renderVaultPicker() {
+  const photos = mediaVault.filter(v => v.kind !== 'video');
+  const chosen = genRefs[vaultRole] || [];
+  el('gen-vault-title').textContent =
+    `${vaultRole === 'face' ? 'Her face' : 'Her body'} — ${chosen.length} of ${genRefs.cap}`;
+  el('gen-vault-grid').innerHTML = photos.map(v =>
+    `<button type="button" class="gen-ref-t" aria-pressed="${chosen.includes(v.id)}"
+       onclick="toggleRef('${vaultRole}', '${v.id}')" title="${esc(v.purpose || 'Her photo')}">
+       <img src="${v.thumb}" alt="">${v.purpose ? `<em>${esc(v.purpose)}</em>` : ''}</button>`).join('')
+    || '<span class="hint" style="margin:0;">Nothing in the vault yet — upload a photo below.</span>';
+}
+
+// An upload lands in the vault as an approved photo, which is what makes it
+// pickable at all; it is not added to the open group until it is clicked.
+async function uploadRefs(files) {
+  const list = [...(files || [])];
+  if (!list.length || !slug()) return;
+  setVaultStatus(`Uploading ${list.length} photo${list.length === 1 ? '' : 's'}…`);
+  let failed = 0;
+  for (const file of list) {
+    try {
+      const image = await new Promise((ok, no) => {
+        const r = new FileReader();
+        r.onload = () => ok(r.result);
+        r.onerror = () => no(new Error('Could not read that file'));
+        r.readAsDataURL(file);
+      });
+      const res = await fetch('/api/personas/' + encodeURIComponent(slug()) + '/media', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: image, mime: file.type, purpose: vaultRole }),
+      });
+      const d = await res.json();
+      if (!d.ok) throw new Error(d.error || 'Upload refused');
+    } catch (e) { failed += 1; setVaultStatus('✗ ' + e.message, true); }
+  }
+  el('gen-upload').value = '';
+  await loadPersona();
+  if (!failed) setVaultStatus('Uploaded — click one to put it in this group.');
+}
+
+function openLightbox(src) {
+  el('gen-lightbox-img').src = src;
+  el('gen-lightbox').hidden = false;
+}
+
+function closeLightbox() {
+  el('gen-lightbox').hidden = true;
+  el('gen-lightbox-img').src = '';
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (!el('gen-lightbox').hidden) closeLightbox();
+  else if (!el('gen-vault').hidden) closeVault();
+});
 
 function renderGenForm() {
   if (!genPrices) return;
@@ -705,7 +858,7 @@ function renderGenStaging() {
         ? `<video src="${m.url}" muted playsinline preload="metadata" controls></video>`
         : `<img src="${m.url}" alt="">`;
       cards.push(`
-        <div class="gen-card">
+        <div class="gen-card" onclick="openLightbox('${m.url}')">
           ${thumb}
           <span class="gen-ttl">${esc(genTtl(m.expires_at))}</span>
           <div class="gen-acts">
@@ -740,7 +893,7 @@ function renderVault() {
          <span class="vault-kind">video</span>`
       : `<img src="${v.thumb}" alt="" draggable="false">`;
     return `
-      <div class="vault-item">
+      <div class="vault-item" onclick="openLightbox('${v.thumb}')">
         ${thumb}
         ${v.kind === 'video' ? '' : `<button type="button" class="vault-anim"
           title="Animate this photo into a short clip"
