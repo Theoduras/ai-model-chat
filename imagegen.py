@@ -124,6 +124,19 @@ MODEL_VIDEO_SIZES = {
 }
 
 
+# Seconds a model will accept. Wan 2.7 refuses anything outside 2-15 outright,
+# and a swap's length comes from the file rather than a picker, so the ask is
+# clamped to the model's own range instead of failing at the provider.
+MODEL_VIDEO_SECONDS = {
+    'wan-2-7': (2, 15),
+}
+
+
+def video_seconds(model_key, seconds):
+    lo, hi = MODEL_VIDEO_SECONDS.get(model_key, (1, 30))
+    return max(lo, min(hi, int(seconds or 0) or lo))
+
+
 def video_size(model_key, width=0, height=0, resolution=None):
     """The size to ask a model for, given the source's own.
 
@@ -574,7 +587,7 @@ class RunwareProvider(Provider):
             _RW['negative']: spec.get('negative') or NEGATIVE_PROMPT,
             'width': width,
             'height': height,
-            'duration': int(spec.get('seconds') or 5),
+            'duration': video_seconds(model_key, spec.get('seconds') or 5),
             _RW['output']: 'URL',
             'includeCost': True,
             'checkNSFW': False,

@@ -28028,7 +28028,7 @@ def _gen_spec(slug, body, user):
             # The clip decides both, not the picker: a swap runs the length of
             # its source and comes out at its source's size, so quoting anything
             # else would bill for a clip nobody asked for.
-            seconds = src['seconds']
+            seconds = imagegen.video_seconds(model, src['seconds'])
             resolution = _video_rung(src['height'])
             spec['source_path'] = src['path']
             spec['source_id'] = source_id
@@ -28057,7 +28057,7 @@ VIDEO_SOURCE_PREFIX = 'staging/video-source'
 VIDEO_SOURCE_MAX_BYTES = 200 * 1024 * 1024
 
 
-VIDEO_SOURCE_MAX_SECONDS = 30
+VIDEO_SOURCE_MAX_SECONDS = CR.VIDEO_MAX_SECONDS
 VIDEO_SOURCE_MIMES = {'video/mp4': '.mp4', 'video/quicktime': '.mov'}
 
 
@@ -28069,7 +28069,6 @@ def _mp4_dimensions(data):
     and runs thirty is a clip we pay for ten times over. Walking the atom tree
     for mvhd and tkhd is the whole of what we need, and it is exact.
     """
-    import math
     import struct
 
     def atoms(buf, start, stop):
@@ -28110,7 +28109,10 @@ def _mp4_dimensions(data):
         else:
             scale, dur = struct.unpack('>II', data[b + 12:b + 20])
         if scale:
-            seconds = int(math.ceil(dur / float(scale)))
+            # Nearest, not ceil: a 15.02s clip is a 15s clip, and rounding it to
+            # 16 puts it outside what the model accepts for a fiftieth of a
+            # second nobody filmed.
+            seconds = int(dur / float(scale) + 0.5)
     tkhd = find(data, 0, len(data), [b'moov', b'trak', b'tkhd'])
     if tkhd:
         b = tkhd[0]

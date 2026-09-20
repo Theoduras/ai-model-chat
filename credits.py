@@ -77,7 +77,9 @@ VIDEO_RATE_PER_SECOND = {
 # A swap runs the length of the clip it is given, so it is priced per second
 # from the same rates rather than off the fixed durations a generated clip
 # offers. The cap matches what the upload route will take.
-VIDEO_MAX_SECONDS = 30
+# Wan 2.7's own ceiling. A longer upload cannot be swapped, so it is refused
+# at the upload rather than truncated after it is paid for.
+VIDEO_MAX_SECONDS = 15
 
 VIDEO_PRICES = {
     model: {res: {secs: rate * secs for secs in VIDEO_DURATIONS}
