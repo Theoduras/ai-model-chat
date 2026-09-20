@@ -61,8 +61,8 @@ def test_quote_covers_everything():
     missing = []
     for model in CR.IMAGE_MODELS:
         for res in CR.RESOLUTIONS:
-            for addons in ((), ('identity',), ('reference', 'restore'),
-                           ('identity', 'upscale')):
+            for addons in ((), ('upscale',), ('nsfw_check',),
+                           ('upscale', 'nsfw_check')):
                 try:
                     CR.quote({'kind': 'image', 'model': model, 'resolution': res,
                               'addons': addons, 'batch': 4})
@@ -88,20 +88,23 @@ def test_quote_covers_everything():
             check(f'unpriced spec {bad.get("kind")} is refused', True)
 
 
+IMAGE_BASE = 20
+
+
 def test_prices_track_cost():
     print('prices track cost')
     check('a credit is the rounded-up cost slice',
           CR.credits_for_cost(0.0013) == 1 and CR.credits_for_cost(0.0021) == 2)
     check('batch multiplies, add-ons are per image',
-          CR.quote({'kind': 'image', 'model': 'sdxl',
-                    'resolution': '1024x1536', 'addons': ('identity',),
-                    'batch': 4}) == 20)
-    check('an explicit shot is priced for both of its passes',
-          CR.quote({'kind': 'image', 'model': 'flux-dev',
-                    'resolution': '1024x1024',
-                    'addons': ('reference', 'restore')}) >
-          CR.quote({'kind': 'image', 'model': 'flux-dev',
-                    'resolution': '1024x1024'}))
+          CR.quote({'kind': 'image', 'model': 'seedream-4-5',
+                    'resolution': '2k', 'addons': ('upscale',),
+                    'batch': 4}) == (20 + 2) * 4)
+    check('4k costs what 2k costs, because the provider bills them the same',
+          CR.quote({'kind': 'image', 'model': 'seedream-4-5', 'resolution': '4k'}) ==
+          CR.quote({'kind': 'image', 'model': 'seedream-4-5', 'resolution': '2k'}))
+    check('holding her face is free — identity is inside the one call',
+          CR.quote({'kind': 'image', 'model': 'seedream-4-5', 'resolution': '2k'}) ==
+          IMAGE_BASE)
     check('a 720p 5s clip is 150 credits',
           CR.quote({'kind': 'video', 'resolution': '720p', 'seconds': 5}) == 150)
     check('the legacy Google path is priced too, so it is not a free bypass',

@@ -221,12 +221,18 @@ class ModelReferenceSet(Base):
     model_key = Column(String(64), nullable=False, index=True)
     media_id = Column(String(32), ForeignKey('persona_media.id'),
                       nullable=False, index=True)
+    # Face and body are separate groups: a face reference is there to hold her
+    # identity, a body reference to hold her shape and styling. They are filled
+    # from different photos and a generation weights them differently, so one
+    # flat list could not say which a photo was chosen to be.
+    role = Column(String(8), default='face')        # face | body
     slot_index = Column(Integer, default=0)
     created_at = Column(DateTime, default=_now)
 
 
 Index('ix_modelref_slug_model', ModelReferenceSet.slug,
-      ModelReferenceSet.model_key, ModelReferenceSet.slot_index)
+      ModelReferenceSet.model_key, ModelReferenceSet.role,
+      ModelReferenceSet.slot_index)
 
 
 class AudioReference(Base):
@@ -1137,24 +1143,31 @@ def update_generation(session, job_id, **fields):
 
 # ── Model reference sets and audio ────────────────────────────────────────────
 
-def model_references(session, slug, model_key):
-    """The gallery photos assigned to one model, in slot order."""
-    return (session.query(ModelReferenceSet)
-            .filter(ModelReferenceSet.slug == slug,
-                    ModelReferenceSet.model_key == model_key)
-            .order_by(ModelReferenceSet.slot_index).all())
+def model_references(session, slug, model_key, role=None):
+    """The gallery photos assigned to one model, in slot order. Without a role
+    this returns both groups, face first, which is the order a generation wants
+    them in."""
+    q = (session.query(ModelReferenceSet)
+         .filter(ModelReferenceSet.slug == slug,
+                 ModelReferenceSet.model_key == model_key))
+    if role:
+        q = q.filter(ModelReferenceSet.role == role)
+    return q.order_by(ModelReferenceSet.role.desc(),
+                      ModelReferenceSet.slot_index).all()
 
 
-def set_model_references(session, slug, model_key, media_ids):
-    """Replace the whole set for one model. Replacing rather than merging keeps
-    slot order the caller's to decide, and `cap` is enforced by the caller that
-    knows the model — this only stores what it is given."""
+def set_model_references(session, slug, model_key, media_ids, role='face'):
+    """Replace one group for one model. Replacing rather than merging keeps slot
+    order the caller's to decide, and the per-model cap is enforced by the
+    caller that knows the model — this only stores what it is given."""
     (session.query(ModelReferenceSet)
      .filter(ModelReferenceSet.slug == slug,
-             ModelReferenceSet.model_key == model_key).delete())
+             ModelReferenceSet.model_key == model_key,
+             ModelReferenceSet.role == role).delete())
     for index, media_id in enumerate(media_ids):
         session.add(ModelReferenceSet(slug=slug, model_key=model_key,
-                                      media_id=media_id, slot_index=index))
+                                      media_id=media_id, role=role,
+                                      slot_index=index))
     session.commit()
     return len(media_ids)
 

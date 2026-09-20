@@ -38,45 +38,27 @@ MODELSLAB_ENDPOINT = 'https://modelslab.com/api/v6'
 TIMEOUT = 60
 
 # Credit model keys (credits.IMAGE_MODELS) to each provider's model id.
+#
+# Seedream replaced the Flux/SDXL family here. It is a closed API model, which
+# decides most of what follows: no LoRA exists for its architecture, `strength`
+# and `checkNSFW` are rejected outright, and moderation is ByteDance's rather
+# than ours. What it does carry is native multi-reference conditioning, which
+# is the identity mechanism Flux needed three models and two passes to fake.
 RUNWARE_MODELS = {
-    'flux-krea': os.getenv('RW_MODEL_FLUX_KREA', 'runware:107@1'),
-    'flux-dev': os.getenv('RW_MODEL_FLUX_DEV', 'runware:101@1'),
-    'flux-schnell': os.getenv('RW_MODEL_FLUX_SCHNELL', 'runware:100@1'),
-    'sdxl': os.getenv('RW_MODEL_SDXL', 'civitai:573152@926965'),
+    'seedream-4-5': os.getenv('RW_MODEL_SEEDREAM_45', 'bytedance:seedream@4.5'),
+    'seedream-5-pro': os.getenv('RW_MODEL_SEEDREAM_5PRO', 'bytedance:seedream@5.0-pro'),
 }
 RUNWARE_VIDEO_MODEL = os.getenv('RW_MODEL_VIDEO', 'runware:201@1')
 
-# Explicit content comes from a LoRA on Flux rather than a second checkpoint
-# family. All three are offered so they can be compared on the same prompt and
-# the same reference; none of them is obviously the best.
-NSFW_LORAS = {
-    'general': {'air': 'civitai:655753@733658', 'label': 'NSFW FLUX (general nudity)'},
-    'uncensored': {'air': 'civitai:1082334@1215286', 'label': 'Uncensored AI (female character)'},
-    'acts': {'air': 'civitai:656365@734619', 'label': 'Explicit acts'},
-}
-DEFAULT_NSFW_LORA = 'general'
-LORA_WEIGHT = 0.9
+# Only 4.5 serves explicit work. 5.0 Pro returns `invalidProviderContent` —
+# ByteDance's own moderation, not a setting — so an explicit shot is pinned to
+# 4.5 rather than left to the picker.
+EXPLICIT_MODEL = 'seedream-4-5'
 
-# Identity, and why it is shaped the way it is.
-#
-# PuLID is the strongest face mechanism Runware offers, and it refuses to share
-# a request with anything else: not `lora`, not `ipAdapters`, not even
-# `seedImage`. So a clothed shot uses it alone, and an explicit shot — which
-# needs the LoRA — cannot use it at all.
-#
-# An explicit shot is therefore two passes. The first makes the picture on Flux
-# with the LoRA, holding her body and styling with the Flux IP-Adapter. The
-# second is a low-strength img2img on SDXL, where the Plus-Face adapter exists,
-# and its only job is to put her face back. Crossing architectures for the
-# second pass is not elegant; it is the only mechanism the provider allows that
-# restores a face onto an image it did not generate.
-PULID_MODELS = ('runware:100@1', 'runware:101@1', 'runware:107@1')
-FLUX_IP_ADAPTER = 'runware:56@4'
-SDXL_FACE_ADAPTER = 'runware:55@3'
-RESTORE_MODEL = os.getenv('RW_MODEL_RESTORE', 'civitai:573152@926965')
-RESTORE_STRENGTH = float(os.getenv('RW_RESTORE_STRENGTH', '0.35'))
-IP_WEIGHT_BASE = 0.7
-IP_WEIGHT_FACE = 0.9
+# Identity is one reference-conditioned call. `referenceImages` is the field
+# Seedream accepts; `seedImage` with a strength is refused by the architecture.
+REFERENCE_FIELD = 'referenceImages'
+MAX_REFERENCES = 14
 
 MODELSLAB_MODELS = {
     'sdxl': os.getenv('ML_MODEL_SDXL', 'uncensored-flux-lora'),
@@ -86,11 +68,11 @@ MODELSLAB_MODELS = {
 }
 MODELSLAB_VIDEO_MODEL = os.getenv('ML_MODEL_VIDEO', 'wan2.2')
 
+# Seedream refuses anything under 3,686,400 pixels, so the old 768x1024 rungs
+# are gone rather than rounded up: every tier here is a size it will serve.
 RESOLUTION_PX = {
-    '768x1024': (768, 1024),
-    '1024x1024': (1024, 1024),
-    '1024x1536': (1024, 1536),
-    '1536x2048': (1536, 2048),
+    '2k': (1664, 2432),
+    '4k': (3072, 4096),
 }
 VIDEO_PX = {
     '480p': (480, 854),
@@ -199,21 +181,18 @@ def build_prompt(appearance, shot, outfit=None, has_reference=False, extra=''):
 
 def engine_report():
     """Which provider model does what, for the studio to show. A creator picking
-    a shot should be able to see the checkpoint, the LoRA and whether the shot
-    is going to cost two passes."""
+    a shot should be able to see the checkpoint and where identity comes from."""
     provider = (os.getenv('IMAGEGEN_PROVIDER') or 'runware').strip().lower()
     if provider != 'runware':
         return {'provider': provider, 'sfw': {}, 'nsfw': {}, 'loras': {},
                 'video': MODELSLAB_VIDEO_MODEL}
     return {
         'provider': 'runware',
-        'sfw': {'model': RUNWARE_MODELS['flux-krea'], 'identity': 'PuLID',
-                'passes': 1},
-        'nsfw': {'model': RUNWARE_MODELS['flux-dev'],
-                 'identity': FLUX_IP_ADAPTER,
-                 'restore': {'model': RESTORE_MODEL, 'adapter': SDXL_FACE_ADAPTER},
-                 'passes': 2},
-        'loras': {k: dict(v) for k, v in NSFW_LORAS.items()},
+        'sfw': {'model': RUNWARE_MODELS['seedream-4-5'],
+                'identity': 'reference images', 'passes': 1},
+        'nsfw': {'model': RUNWARE_MODELS[EXPLICIT_MODEL],
+                 'identity': 'reference images', 'passes': 1},
+        'loras': {},
         'nsfw_shots': [k for k, v in SHOT_LEVEL.items() if v != 'sfw'],
         'video': RUNWARE_VIDEO_MODEL,
     }
@@ -326,11 +305,14 @@ class RunwareProvider(Provider):
             raise GenerationError('RUNWARE_API_KEY is not set')
 
     def _headers(self):
-        return {'Authorization': 'Bearer ' + self.key,
-                'Content-Type': 'application/json'}
+        return {'Content-Type': 'application/json'}
 
     def _send(self, tasks):
-        body = _post(RUNWARE_ENDPOINT, tasks, self._headers())
+        # Runware authenticates with a task at the head of the body. A bearer
+        # header comes back 401 invalidApiKey however good the key is.
+        body = _post(RUNWARE_ENDPOINT,
+                     [{'taskType': 'authentication', 'apiKey': self.key}] + tasks,
+                     self._headers())
         err = _error_text(body)
         if err:
             raise GenerationError(err)
@@ -345,87 +327,39 @@ class RunwareProvider(Provider):
             _RW['negative']: spec.get('negative') or NEGATIVE_PROMPT,
             'width': width,
             'height': height,
-            'steps': int(spec.get('steps') or 28),
-            'CFGScale': float(spec.get('cfg') or 6.0),
             _RW['output']: 'URL',
             _RW['format']: 'JPEG',
             'includeCost': True,
-            # The safety checker is what we are here to not have. A generation
-            # this platform exists to make must not be silently blanked by it.
-            'checkNSFW': False,
         }
 
     def submit_image(self, spec):
         width, height = RESOLUTION_PX.get(spec.get('resolution'),
-                                          RESOLUTION_PX['1024x1536'])
-        explicit = bool(spec.get('explicit'))
-        model = RUNWARE_MODELS.get(spec.get('model')) or RUNWARE_MODELS['flux-krea']
-        if explicit:
-            # The LoRA only exists for Flux dev, so an explicit shot ignores the
-            # quality picker rather than loading a LoRA against a checkpoint it
-            # was not trained on.
-            model = RUNWARE_MODELS['flux-dev']
-        guide = None
-        if spec.get('reference_b64'):
-            guide = _data_uri(spec['reference_b64'], spec.get('reference_mime'))
+                                          RESOLUTION_PX['2k'])
+        model_key = spec.get('model') or 'seedream-4-5'
+        if spec.get('explicit'):
+            model_key = EXPLICIT_MODEL
+        model = RUNWARE_MODELS.get(model_key) or RUNWARE_MODELS['seedream-4-5']
 
         task = self._base_task(spec, model, width, height)
         task[_RW['results']] = int(spec.get('batch') or 1)
         if spec.get('seed') is not None:
             task['seed'] = int(spec['seed'])
 
-        if explicit:
-            lora = NSFW_LORAS.get(spec.get('lora') or DEFAULT_NSFW_LORA)
-            task[_RW['lora']] = [{'model': (lora or NSFW_LORAS[DEFAULT_NSFW_LORA])['air'],
-                                  'weight': LORA_WEIGHT}]
-            if guide:
-                task[_RW['adapters']] = [{'model': FLUX_IP_ADAPTER,
-                                          'guideImage': guide,
-                                          'weight': IP_WEIGHT_BASE}]
-        elif guide and model in PULID_MODELS:
-            task[_RW['pulid']] = {'inputImages': [guide]}
-        elif guide:
-            task[_RW['seed_image']] = guide
-            task['strength'] = float(spec.get('strength') or 0.72)
+        # Identity is native here: the reference goes in as a reference, and
+        # the same one call comes back as the same woman. No LoRA, no adapter
+        # and no second pass — none of which this architecture accepts anyway.
+        refs = spec.get('reference_urls') or []
+        if spec.get('reference_b64'):
+            refs = [_data_uri(spec['reference_b64'], spec.get('reference_mime'))] + list(refs)
+        if refs:
+            task[REFERENCE_FIELD] = list(refs)[:MAX_REFERENCES]
 
         data = self._send([task])
         urls = [d.get('imageURL') for d in data if d.get('imageURL')]
         cost = sum(float(d.get('cost') or 0) for d in data)
         if not urls:
             return task['taskUUID'], Result('running')
-
-        if explicit and guide:
-            urls, restored_cost = self._restore_faces(spec, urls, guide,
-                                                      width, height)
-            cost += restored_cost
         return task['taskUUID'], Result('done', urls, cost=cost or None)
-
-    def _restore_faces(self, spec, urls, guide, width, height):
-        """Put her face back onto an explicit generation.
-
-        PuLID cannot run beside the LoRA that made these, and it refuses a seed
-        image besides, so the restore is a low-strength img2img on SDXL — the
-        one architecture with a Plus-Face adapter. A pass that fails leaves the
-        image it was given rather than losing the generation outright.
-        """
-        out, cost = [], 0.0
-        for url in urls:
-            task = self._base_task(spec, RESTORE_MODEL, width, height)
-            task[_RW['results']] = 1
-            task[_RW['seed_image']] = url
-            task['strength'] = RESTORE_STRENGTH
-            task[_RW['adapters']] = [{'model': SDXL_FACE_ADAPTER,
-                                      'guideImage': guide,
-                                      'weight': IP_WEIGHT_FACE}]
-            try:
-                rows = self._send([task])
-            except GenerationError:
-                logger.exception('face restore failed, keeping the first pass')
-                out.append(url)
-                continue
-            cost += sum(float(r.get('cost') or 0) for r in rows)
-            out.append(next((r['imageURL'] for r in rows if r.get('imageURL')), url))
-        return out, cost
 
     def submit_video(self, spec):
         width, height = VIDEO_PX.get(spec.get('resolution'), VIDEO_PX['720p'])

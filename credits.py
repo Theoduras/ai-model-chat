@@ -19,26 +19,26 @@ CREDIT_COST_USD = 0.002
 # month of invoices.
 MIN_MARGIN_MULTIPLE = 4.0
 
-IMAGE_MODELS = ('flux-krea', 'flux-dev', 'flux-schnell', 'sdxl')
-RESOLUTIONS = ('768x1024', '1024x1024', '1024x1536', '1536x2048')
+IMAGE_MODELS = ('seedream-4-5', 'seedream-5-pro')
+RESOLUTIONS = ('2k', '4k')
 VIDEO_RESOLUTIONS = ('480p', '720p', '1080p')
 VIDEO_DURATIONS = (3, 5, 10)
 
-DEFAULT_IMAGE_MODEL = 'flux-krea'
-DEFAULT_RESOLUTION = '1024x1536'
+DEFAULT_IMAGE_MODEL = 'seedream-4-5'
+DEFAULT_RESOLUTION = '2k'
 DEFAULT_VIDEO_RESOLUTION = '720p'
 DEFAULT_VIDEO_DURATION = 5
 
-# Credits per generation, by model and resolution. Every number here is the
-# rounded-up credit slice of a cost measured against the live provider at
-# 1024x1024 / 28 steps, scaled by pixel count — not a list price.
+# Credits per generation, by model and resolution. Measured against the live
+# provider, not a list price: Seedream bills $0.04 a still whatever the size,
+# so 4k costs the same as 2k and both round to 20 credits at CREDIT_COST_USD.
 #
-#   flux-krea / flux-dev   $0.0045    sdxl  $0.0013    flux-schnell  ~$0.0015
+# That is five times what the old Flux rung cost. It buys native identity —
+# a reference-conditioned single call, where Flux needed an adapter, a LoRA and
+# a second restore pass to hold the same face.
 IMAGE_PRICES = {
-    'flux-krea':    {'768x1024': 3, '1024x1024': 3, '1024x1536': 4, '1536x2048': 7},
-    'flux-dev':     {'768x1024': 3, '1024x1024': 3, '1024x1536': 4, '1536x2048': 7},
-    'flux-schnell': {'768x1024': 1, '1024x1024': 1, '1024x1536': 2, '1536x2048': 3},
-    'sdxl':         {'768x1024': 1, '1024x1024': 1, '1024x1536': 1, '1536x2048': 2},
+    'seedream-4-5':   {'2k': 20, '4k': 20},
+    'seedream-5-pro': {'2k': 20, '4k': 20},
 }
 
 VIDEO_PRICES = {
@@ -51,14 +51,10 @@ VIDEO_PRICES = {
 # it cannot be used as a free way around the credit system.
 GOOGLE_IMAGE_CREDITS = 10
 
-# Add-ons, in the same measured slices. Identity is not one mechanism but
-# three, and they do not cost the same: PuLID carries a clothed shot on its own
-# ($0.0060), an explicit shot holds the body with the Flux IP-Adapter ($0.0013)
-# and then pays a second pass on SDXL to put her face back ($0.0026).
+# Add-ons, in the same measured slices. Identity is no longer one of them:
+# Seedream conditions on reference images inside the one call it already
+# charges for, so holding her face now costs nothing on top.
 ADDON_PRICES = {
-    'identity': 4,
-    'reference': 1,
-    'restore': 2,
     'upscale': 2,
     'nsfw_check': 1,
 }
@@ -67,10 +63,8 @@ ADDON_PRICES = {
 # are deliberately absent everywhere in this file: they are moderated and cannot
 # serve this feature, so nothing may offer them for an NSFW slot.
 MODEL_LABELS = {
-    'flux-krea': 'Most realistic',
-    'flux-dev': 'Highest detail',
-    'flux-schnell': 'Fast draft',
-    'sdxl': 'Cheapest',
+    'seedream-4-5': 'Seedream 4.5',
+    'seedream-5-pro': 'Seedream 5.0 Pro (safe only)',
 }
 
 # Included allowance per calendar month, keyed on the tier keys in app.TIERS.
@@ -186,7 +180,7 @@ def packs_for(tier):
 def equivalents(credits):
     """What a balance is worth in the two things creators actually make, for the
     'about 4,200 photos or 28 clips' line in the header."""
-    photo = image_price(DEFAULT_IMAGE_MODEL, DEFAULT_RESOLUTION, ('identity',))
+    photo = image_price(DEFAULT_IMAGE_MODEL, DEFAULT_RESOLUTION)
     clip = video_price(DEFAULT_VIDEO_RESOLUTION, DEFAULT_VIDEO_DURATION)
     n = max(0, int(credits or 0))
     return {'photos': n // photo, 'clips': n // clip}
