@@ -601,19 +601,42 @@ def _post(url, payload, headers, timeout=TIMEOUT):
     return body
 
 
+# A provider whose own worker crashes answers with its stack rather than a
+# sentence. This one is worth translating: the module it fails to import is the
+# model's content check, so the crash is how a refusal reaches us.
+_PROVIDER_CRASH_HINTS = (
+    ("'safety' module is not available",
+     'the model refused this clip at its own safety check'),
+)
+
+
 def _error_text(body):
     # 800, not 300: a provider that refuses a parameter answers with the list of
     # the ones it does take, and that list is the only way to learn the right
     # field name. Cutting it mid-word threw away the answer.
     if not isinstance(body, dict):
         return ''
+    # Some answers nest the whole thing one level down, and an error there is
+    # still an error: reading only the top level reported nothing at all.
+    if 'errors' not in body and isinstance(body.get('response'), dict):
+        body = body['response']
     errs = body.get('errors') or body.get('error') or body.get('message')
     if isinstance(errs, list) and errs:
-        first = errs[0]
-        if isinstance(first, dict):
-            return str(first.get('message') or first.get('error') or first)[:800]
-        return str(first)[:800]
-    return str(errs)[:800] if errs else ''
+        errs = errs[0]
+    if isinstance(errs, dict):
+        text = (errs.get('message') or errs.get('errorMessage')
+                or errs.get('error') or '')
+        if not text:
+            detail = errs.get('additionalDetails') or {}
+            inner = (detail.get('responseContent') if isinstance(detail, dict)
+                     else '') or ''
+            text = ' '.join(filter(None, (errs.get('errorCode') or '', inner)))
+        errs = text or errs
+    text = str(errs)[:800] if errs else ''
+    for needle, plain in _PROVIDER_CRASH_HINTS:
+        if needle in text:
+            return f'{plain} ({text[:200]})'
+    return text
 
 
 # ── Runware ───────────────────────────────────────────────────────────────────
@@ -688,7 +711,7 @@ class RunwareProvider(Provider):
             else:
                 err = _error_text(body)
                 if not err:
-                    return body.get('data') or []
+                    return body.get('data') or (body.get('response') or {}).get('data') or []
                 failure = GenerationError(err)
             hit = _UNSUPPORTED_PARAM.search(err)
             key = hit.group(1) if hit else None
@@ -854,7 +877,10 @@ class RunwareProvider(Provider):
             if url:
                 urls.append(url)
             state = (row.get('status') or '').lower()
-            if state in ('error', 'failed'):
+            # A row carrying an error is finished whether or not it also
+            # carries a status: waiting on one that has already failed spends
+            # the job's whole timeout to report that nothing ever happened.
+            if state in ('error', 'failed') or row.get('errors') or row.get('errorCode'):
                 return Result('failed', error=_error_text(row) or 'generation failed')
             if state in ('success', 'done', 'completed'):
                 status = 'done'
