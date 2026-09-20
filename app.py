@@ -4586,6 +4586,10 @@ def api_credits():
         'equivalents': CR.equivalents(balance or 0),
         'packs': CR.packs_for(user.get('tier')),
         'prices': CR.price_table(),
+        # What a credit costs this tier in cash, so the studio can show a price
+        # beside a credit count without doing pack arithmetic of its own.
+        'credit_rate': {'usd': round(CR.credit_rate_usd(user.get('tier')), 5),
+                        'eur_per_usd': CR.eur_per_usd()},
         'engines': imagegen.engine_report(),
         'period_end': _period_end().isoformat(),
     })

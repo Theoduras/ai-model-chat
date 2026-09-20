@@ -9,6 +9,7 @@ number to move; every pack rate follows it and the margin floor re-asserts at
 import.
 """
 import math
+import os
 
 # What one credit is allowed to cost us at the provider. Every generation is
 # priced at ceil(provider_cost / CREDIT_COST_USD), so rounding always favours us.
@@ -204,6 +205,33 @@ def packs_for(tier):
             'save_pct': int(round((1 - price / full) * 100)) if full > price else 0,
         })
     return out
+
+
+def credit_rate_usd(tier):
+    """What one credit costs this tier in cash, for showing a price beside a
+    credit count. It is the smallest pack's rate — the marginal price of buying
+    more — rather than an average over packs nobody bought, so "20 credits"
+    reads as what the next twenty would actually cost."""
+    return pack_price_usd(PACK_SIZES[0], tier) / PACK_SIZES[0]
+
+
+# Euros are shown only when a rate is configured. A hard-coded one would be
+# wrong within a week and wrong silently, which is worse than showing dollars.
+def eur_per_usd():
+    raw = (os.getenv('EUR_PER_USD') or '').strip()
+    try:
+        rate = float(raw)
+    except ValueError:
+        return None
+    return rate if rate > 0 else None
+
+
+def cash_for_credits(credits, tier):
+    """A credit count priced in cash: {usd, eur}. `eur` is None unless a rate
+    is set."""
+    usd = round(max(0, int(credits or 0)) * credit_rate_usd(tier), 2)
+    rate = eur_per_usd()
+    return {'usd': usd, 'eur': round(usd * rate, 2) if rate else None}
 
 
 def equivalents(credits):
