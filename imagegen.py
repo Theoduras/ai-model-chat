@@ -58,6 +58,19 @@ RUNWARE_MODELS = {
 SFW_ONLY_MODELS = ('nano-banana-pro', 'nano-banana-2')
 RUNWARE_VIDEO_MODEL = os.getenv('RW_MODEL_VIDEO', 'runware:201@1')
 
+# Video models, keyed the same way the image ones are.
+RUNWARE_VIDEO_MODELS = {
+    'wan-2-5': os.getenv('RW_MODEL_WAN_25', 'runware:201@1'),
+    'wan-2-7': os.getenv('RW_MODEL_WAN_27', 'alibaba:wan@2.7'),
+    'seedance-2-5': os.getenv('RW_MODEL_SEEDANCE_25', 'bytedance:seedance@2.5'),
+}
+DEFAULT_VIDEO_MODEL = 'wan-2-5'
+
+# Swapping someone into an uploaded clip is video-to-video, which only Wan 2.7
+# carries. It is not a separate "video edit" model, which is why searching for
+# one finds nothing.
+VIDEO_EDIT_MODEL = 'wan-2-7'
+
 # Only 4.5 serves explicit work. 5.0 Pro returns `invalidProviderContent` —
 # ByteDance's own moderation, not a setting — so an explicit shot is pinned to
 # 4.5 rather than left to the picker.
@@ -491,10 +504,14 @@ class RunwareProvider(Provider):
     def submit_video(self, spec):
         width, height = VIDEO_PX.get(spec.get('resolution'), VIDEO_PX['720p'])
         task_uuid = str(uuid.uuid4())
+        model_key = spec.get('model') or DEFAULT_VIDEO_MODEL
+        if spec.get('kind') == 'swap':
+            model_key = VIDEO_EDIT_MODEL
         task = {
             'taskType': _RW['video_task'],
             'taskUUID': task_uuid,
-            'model': RUNWARE_VIDEO_MODEL,
+            'model': (RUNWARE_VIDEO_MODELS.get(model_key)
+                      or RUNWARE_VIDEO_MODELS[DEFAULT_VIDEO_MODEL]),
             _RW['prompt']: spec.get('prompt') or build_video_prompt(),
             _RW['negative']: spec.get('negative') or NEGATIVE_PROMPT,
             'width': width,
@@ -505,13 +522,28 @@ class RunwareProvider(Provider):
             'checkNSFW': False,
             'deliveryMethod': 'async',
         }
-        frame = spec.get('reference_b64')
-        if not frame:
-            # Enforced here as well as in the UI: identity comes from the first
-            # frame, so a clip without one is not this feature.
-            raise GenerationError('a video needs an approved still as its first frame')
-        task[_RW['frame_images']] = [{'inputImage':
-                                      _data_uri(frame, spec.get('reference_mime'))}]
+        if spec.get('kind') == 'swap':
+            source = spec.get('source_url')
+            if not source:
+                raise GenerationError('a swap needs the clip it is swapping into')
+            task['inputVideo'] = source
+            refs = spec.get('reference_urls') or []
+            if spec.get('reference_b64'):
+                refs = [_data_uri(spec['reference_b64'],
+                                  spec.get('reference_mime'))] + list(refs)
+            if not refs:
+                raise GenerationError(
+                    'a swap needs at least one approved photo of her to swap in')
+            task[REFERENCE_FIELD] = list(refs)[:MAX_REFERENCES]
+        else:
+            frame = spec.get('reference_b64')
+            if not frame:
+                # Enforced here as well as in the UI: identity comes from the
+                # first frame, so a clip without one is not this feature.
+                raise GenerationError(
+                    'a video needs an approved still as its first frame')
+            task[_RW['frame_images']] = [{'inputImage':
+                                          _data_uri(frame, spec.get('reference_mime'))}]
 
         data = self._send([task])
         urls = [d.get('videoURL') for d in data if d.get('videoURL')]

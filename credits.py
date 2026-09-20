@@ -50,20 +50,34 @@ IMAGE_PRICES = {
     'nano-banana-pro': {'2k': 69, '4k': 138},
 }
 
-# Video, priced per second against a measured clip. A 5s 720p clip on Wan 2.5
-# costs $0.4538, which is 46 credits a second — the old table charged 30 a
-# second and so sold every clip below cost. The floor assertion never caught it
-# because it only walks the packs, not the generation table.
+# Video, priced per second against a measured clip, per model. A 5s 720p clip
+# on Wan 2.5 costs $0.4538, which is 46 credits a second — the old table charged
+# 30 a second and so sold every clip below cost. The floor assertion never
+# caught it because it only walks the packs, not the generation table.
 #
-# Only 720p is measured. 480p is deliberately charged at the same rate rather
-# than guessed lower, because a guess that is too low loses money on every clip
-# and nothing would report it; 1080p keeps the old table's 2.5x shape. Measure
-# both and bring them down.
-VIDEO_RATE_PER_SECOND = {'480p': 46, '720p': 46, '1080p': 115}
+# Wan 2.7 measured $0.5038 on the same clip, so 52. Seedance 2.5 refused the
+# probe at ByteDance's moderation end before it billed anything, so its rate is
+# a deliberate over-estimate: a guess that is too low loses money on every clip
+# and nothing reports it. Only 720p is measured; 480p is charged at the same
+# rate for the same reason, and 1080p keeps the old table's 2.5x shape. Measure
+# them and bring these down.
+VIDEO_MODELS = ('wan-2-5', 'wan-2-7', 'seedance-2-5')
+DEFAULT_VIDEO_MODEL = 'wan-2-5'
+
+# Wan 2.7 is the only video model that takes an input clip, so a face swap into
+# an uploaded video is always priced and run on it whatever the picker says.
+VIDEO_EDIT_MODEL = 'wan-2-7'
+
+VIDEO_RATE_PER_SECOND = {
+    'wan-2-5':      {'480p': 46, '720p': 46, '1080p': 115},
+    'wan-2-7':      {'480p': 52, '720p': 52, '1080p': 130},
+    'seedance-2-5': {'480p': 60, '720p': 60, '1080p': 150},
+}
 
 VIDEO_PRICES = {
-    res: {secs: rate * secs for secs in (3, 5, 10)}
-    for res, rate in VIDEO_RATE_PER_SECOND.items()
+    model: {res: {secs: rate * secs for secs in VIDEO_DURATIONS}
+            for res, rate in rates.items()}
+    for model, rates in VIDEO_RATE_PER_SECOND.items()
 }
 
 # The legacy Google/Imagen path is priced from the same peg (~$0.02 a call), so
@@ -86,6 +100,9 @@ MODEL_LABELS = {
     'seedream-5-pro': 'Seedream 5.0 Pro',
     'nano-banana-pro': 'Nano Banana Pro',
     'nano-banana-2': 'Nano Banana 2',
+    'wan-2-5': 'Wan 2.5',
+    'wan-2-7': 'Wan 2.7',
+    'seedance-2-5': 'Seedance 2.5',
 }
 
 # Which ratings each model actually serves, measured against the provider
@@ -103,9 +120,25 @@ MODEL_RATINGS = {
 }
 
 
+# Video, measured the same way. Wan 2.7 served the explicit probe; Seedance 2.5
+# refused it at ByteDance's end. Wan 2.5 has not been probed explicit, so it is
+# offered safe-for-work only rather than assumed permissive.
+VIDEO_MODEL_RATINGS = {
+    'wan-2-5': ('sfw',),
+    'wan-2-7': ('sfw', 'nsfw'),
+    'seedance-2-5': ('sfw',),
+}
+
+
 def models_for_rating(rating):
     want = 'nsfw' if rating == 'nsfw' else 'sfw'
     return [m for m in IMAGE_MODELS if want in MODEL_RATINGS.get(m, ('sfw',))]
+
+
+def video_models_for_rating(rating):
+    want = 'nsfw' if rating == 'nsfw' else 'sfw'
+    return [m for m in VIDEO_MODELS
+            if want in VIDEO_MODEL_RATINGS.get(m, ('sfw',))]
 
 # Included allowance per calendar month, keyed on the tier keys in app.TIERS.
 MONTHLY_CREDITS = {
@@ -152,11 +185,13 @@ def image_price(model, resolution, addons=(), batch=1):
     return per * max(1, int(batch))
 
 
-def video_price(resolution, seconds, addons=()):
+def video_price(resolution, seconds, addons=(), model=None):
+    model = model or DEFAULT_VIDEO_MODEL
     try:
-        base = VIDEO_PRICES[resolution][int(seconds)]
+        base = VIDEO_PRICES[model][resolution][int(seconds)]
     except (KeyError, ValueError, TypeError):
-        raise PricingError(f'no price for video {resolution!r} at {seconds!r}s')
+        raise PricingError(
+            f'no price for video {model!r} {resolution!r} at {seconds!r}s')
     return base + sum(_addon(a) for a in addons)
 
 
@@ -174,9 +209,13 @@ def quote(spec):
     """
     kind = (spec or {}).get('kind') or 'image'
     addons = tuple(spec.get('addons') or ())
-    if kind == 'video':
+    if kind in ('video', 'swap'):
+        model = spec.get('model')
+        if kind == 'swap' or model not in VIDEO_PRICES:
+            model = VIDEO_EDIT_MODEL if kind == 'swap' else DEFAULT_VIDEO_MODEL
         return video_price(spec.get('resolution') or DEFAULT_VIDEO_RESOLUTION,
-                           spec.get('seconds') or DEFAULT_VIDEO_DURATION, addons)
+                           spec.get('seconds') or DEFAULT_VIDEO_DURATION,
+                           addons, model)
     if kind != 'image':
         raise PricingError(f'unknown generation kind {kind!r}')
     return image_price(spec.get('model') or DEFAULT_IMAGE_MODEL,
@@ -258,6 +297,10 @@ def price_table():
     return {
         'images': IMAGE_PRICES,
         'videos': VIDEO_PRICES,
+        'video_labels': {m: MODEL_LABELS.get(m, m) for m in VIDEO_MODELS},
+        'video_ratings': {m: list(r) for m, r in VIDEO_MODEL_RATINGS.items()},
+        'video_models': list(VIDEO_MODELS),
+        'video_edit_model': VIDEO_EDIT_MODEL,
         'addons': ADDON_PRICES,
         'labels': MODEL_LABELS,
         'ratings': {m: list(r) for m, r in MODEL_RATINGS.items()},
@@ -269,6 +312,7 @@ def price_table():
             'resolution': DEFAULT_RESOLUTION,
             'video_resolution': DEFAULT_VIDEO_RESOLUTION,
             'video_duration': DEFAULT_VIDEO_DURATION,
+            'video_model': DEFAULT_VIDEO_MODEL,
         },
     }
 

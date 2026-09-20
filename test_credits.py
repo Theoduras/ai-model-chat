@@ -68,12 +68,14 @@ def test_quote_covers_everything():
                               'addons': addons, 'batch': 4})
                 except CR.PricingError:
                     missing.append((model, res, addons))
-    for res in CR.VIDEO_RESOLUTIONS:
-        for secs in CR.VIDEO_DURATIONS:
-            try:
-                CR.quote({'kind': 'video', 'resolution': res, 'seconds': secs})
-            except CR.PricingError:
-                missing.append((res, secs))
+    for model in CR.VIDEO_MODELS:
+        for res in CR.VIDEO_RESOLUTIONS:
+            for secs in CR.VIDEO_DURATIONS:
+                try:
+                    CR.quote({'kind': 'video', 'model': model,
+                              'resolution': res, 'seconds': secs})
+                except CR.PricingError:
+                    missing.append((model, res, secs))
     check('every model / resolution / duration the UI offers is priced',
           not missing, str(missing))
 
@@ -107,9 +109,19 @@ def test_prices_track_cost():
           IMAGE_BASE)
     check('a 720p 5s clip is priced at the measured per-second rate',
           CR.quote({'kind': 'video', 'resolution': '720p', 'seconds': 5}) == 46 * 5)
-    check('a clip never sells under what the provider charges',
-          CR.quote({'kind': 'video', 'resolution': '720p', 'seconds': 5})
-          * CR.CREDIT_COST_USD >= 0.4538)
+    # What a 5s 720p clip actually billed on the provider, per model. Seedance
+    # refused the probe before it billed, so it is held to the dearer of the
+    # two that did.
+    measured = {'wan-2-5': 0.4538, 'wan-2-7': 0.5038, 'seedance-2-5': 0.5038}
+    for model, cost in measured.items():
+        check(f'a {model} clip never sells under what the provider charges',
+              CR.quote({'kind': 'video', 'model': model,
+                        'resolution': '720p', 'seconds': 5})
+              * CR.CREDIT_COST_USD >= cost)
+    check('a swap is priced on the only model that can run one',
+          CR.quote({'kind': 'swap', 'resolution': '720p', 'seconds': 5}) ==
+          CR.quote({'kind': 'video', 'model': CR.VIDEO_EDIT_MODEL,
+                    'resolution': '720p', 'seconds': 5}))
     check('the legacy Google path is priced too, so it is not a free bypass',
           CR.GOOGLE_IMAGE_CREDITS > 0)
 

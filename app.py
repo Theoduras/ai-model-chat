@@ -27933,7 +27933,7 @@ def _gen_spec(slug, body, user):
     table both understand. Anything unpriced or above the persona's own NSFW
     level is refused here, before a provider is ever called."""
     kind = (body.get('kind') or 'image').strip().lower()
-    if kind not in ('image', 'video'):
+    if kind not in ('image', 'video', 'swap'):
         raise imagegen.GenerationError('Unknown generation kind.')
 
     cfg = _persona_config(slug) or {}
@@ -27987,12 +27987,110 @@ def _gen_spec(slug, body, user):
         seconds = int(body.get('seconds') or CR.DEFAULT_VIDEO_DURATION)
         if resolution not in CR.VIDEO_RESOLUTIONS or seconds not in CR.VIDEO_DURATIONS:
             raise imagegen.GenerationError('Unknown video resolution or duration.')
-        if not spec['reference_media']:
+        model = (body.get('model') or CR.DEFAULT_VIDEO_MODEL).strip().lower()
+        if model not in CR.VIDEO_MODELS:
+            raise imagegen.GenerationError('Unknown video model.')
+        # Same rule as the image side: a model that cannot serve this persona's
+        # rating is moved before the quote, never silently at the provider.
+        if level != 'sfw' and 'nsfw' not in CR.VIDEO_MODEL_RATINGS.get(model, ('sfw',)):
+            model = CR.VIDEO_EDIT_MODEL
+        if kind == 'swap':
+            # Only one model takes an input clip, so a swap is always run on it
+            # whatever the picker had selected.
+            model = CR.VIDEO_EDIT_MODEL
+            source = (body.get('source') or '').strip()
+            if not _gen_source_ok(slug, source):
+                raise imagegen.GenerationError(
+                    'Upload the clip you want her swapped into first.')
+            spec['source_path'] = source
+        elif not spec['reference_media']:
             raise imagegen.GenerationError(
                 'Pick an approved photo to animate — a clip starts from one.')
         spec.update({'resolution': resolution, 'seconds': seconds,
+                     'model': model, 'explicit': level != 'sfw',
                      'motion': (body.get('motion') or '')[:300]})
     return spec
+
+
+# Under staging/ deliberately: that is the one prefix both the GCS
+# lifecycle rule and the Blob purge already sweep, so an uploaded clip
+# expires in three days without a second cleanup path to forget.
+VIDEO_SOURCE_PREFIX = 'staging/video-source'
+VIDEO_SOURCE_MAX_BYTES = 64 * 1024 * 1024
+
+
+def _gen_source_ok(slug, path):
+    """A swap source is a path we wrote ourselves, for this persona. Taking a
+    caller-supplied URL here would let anyone point the provider at anything."""
+    return bool(path) and path.startswith(f'{VIDEO_SOURCE_PREFIX}/{slug}/')
+
+
+@app.route('/api/personas/<slug>/video-source', methods=['POST'])
+def api_persona_video_source(slug):
+    """Take the clip a creator wants her swapped into.
+
+    Body: {video: data URL, seconds, width, height, poster}
+    Returns {source, url, seconds} — `source` is the opaque handle the job API
+    wants back, never a URL the caller can choose.
+
+    The bytes go to staging so the three-day purge sweeps them: an uploaded
+    clip is working material, not vault media, and nothing should keep it.
+    Duration and size come from the browser's own <video> element because
+    there is no ffprobe in the image; they are advisory, and the price is
+    quoted from what the creator picked rather than from what they claim.
+    """
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    if not re.match(r'^[a-z0-9_-]+$', slug or ''):
+        return jsonify({'ok': False, 'error': 'Invalid persona'}), 400
+    mine = owned_slugs()
+    if mine is not None and slug not in mine:
+        return jsonify({'ok': False, 'error': 'Not your persona'}), 403
+
+    body = request.get_json(silent=True) or {}
+    video = str(body.get('video') or '')
+    if not video.startswith('data:video/'):
+        return jsonify({'ok': False, 'error': 'Send the clip as a data URL.'}), 400
+    header, _, b64 = video.partition(',')
+    mime = header.split(';')[0].replace('data:', '') or 'video/mp4'
+    import base64
+    try:
+        data = base64.b64decode(b64, validate=False)
+    except Exception:
+        return jsonify({'ok': False, 'error': 'That file did not decode.'}), 400
+    if len(data) > VIDEO_SOURCE_MAX_BYTES:
+        mb = VIDEO_SOURCE_MAX_BYTES // (1024 * 1024)
+        return jsonify({'ok': False,
+                        'error': f'That clip is over {mb}MB. Trim it first.'}), 413
+
+    try:
+        path = storage.put(slug, data, mime, prefix=VIDEO_SOURCE_PREFIX)
+    except Exception as e:
+        logger.exception('video source upload failed slug=%s', slug)
+        return jsonify({'ok': False, 'error': str(e)[:200] or 'upload failed'}), 502
+
+    seconds = max(1, min(60, int(float(body.get('seconds') or 5))))
+    return jsonify({'ok': True, 'source': path,
+                    'url': storage.signed_url(path) or '',
+                    'seconds': seconds,
+                    'width': int(body.get('width') or 0),
+                    'height': int(body.get('height') or 0)})
+
+
+def _gen_source_data_uri(path):
+    """Fallback when the backend cannot mint a signed URL: hand the provider the
+    bytes. Large, but a swap that cannot reach its own source is just a failure
+    the creator already paid for."""
+    import base64
+    try:
+        data = storage.get(path)
+    except Exception:
+        return None
+    if not data:
+        return None
+    mime = 'video/webm' if path.endswith('.webm') else 'video/mp4'
+    return 'data:%s;base64,%s' % (mime, base64.b64encode(data).decode())
 
 
 def _persona_nsfw_level(cfg):
@@ -28168,6 +28266,18 @@ def _gen_start(job_id, slug, spec, workspace):
             else:
                 call['prompt'] = imagegen.build_video_prompt(
                     spec.get('motion', '') or spec.get('prompt_extra', ''))
+                if spec['kind'] == 'swap':
+                    url = storage.signed_url(spec['source_path'])
+                    if not url:
+                        url = _gen_source_data_uri(spec['source_path'])
+                    if not url:
+                        raise imagegen.GenerationError(
+                            'That uploaded clip is no longer there. Upload it again.')
+                    call['source_url'] = url
+                    refs = (_gen_reference_urls(slug, spec.get('model'))
+                            or _gen_reference_urls(slug, imagegen.EXPLICIT_MODEL))
+                    if refs:
+                        call['reference_urls'] = refs
                 provider_job, result = provider.submit_video(call)
         except imagegen.GenerationError as e:
             logger.warning('generation submit failed job=%s: %s', job_id, e)
