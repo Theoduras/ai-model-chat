@@ -1,7 +1,9 @@
-from flask import Flask, request, jsonify, send_from_directory, session, redirect, url_for, render_template_string, Response, after_this_request, g
+from flask import Flask, request, jsonify, send_from_directory, session, redirect, url_for, render_template, render_template_string, Response, after_this_request, g
 from flask import has_request_context
 import os
 import sys
+import functools
+import platform_pages
 import copy
 import json
 import re
@@ -1002,6 +1004,7 @@ _PUBLIC_PAGES = [('/', '1.0', 'weekly'),
                  ('/login', '0.3', 'monthly'),
                  ('/blog', '0.7', 'weekly')]
 _PUBLIC_PAGES += [(f'/blog/{slug}', '0.5', 'monthly') for slug in _BLOG_SLUGS]
+_PUBLIC_PAGES += [(f'/{slug}', '0.8', 'monthly') for slug in platform_pages.PAGES]
 
 # Crawling these wastes budget and can leak a creator's funnel into search.
 # The fan pages (/landing, /profile, /chat.html) are deliberately absent: they
@@ -2017,7 +2020,12 @@ _PAID_API = ('/api/telegram', '/api/tguser', '/api/x', '/api/xlog', '/api/thread
 # Fan-facing and auth/billing routes stay open. So are inbound webhooks: they
 # arrive from the platform, not a signed-in creator, and carry their own signed
 # proof of origin — a sign-in redirect would just look like a failure to Fanvue.
-_OPEN_PATHS = ('/login', '/register', '/logout', '/pricing', '/billing',
+_OPEN_PATHS = (
+               # Public marketing pages. These share a prefix with the signed-in
+               # consoles (/telegram-ai-chatbot vs /telegram), and _PAID_PAGES
+               # matches on prefix, so they have to be named before it.
+               tuple('/' + s for s in platform_pages.PAGES) +
+               ('/login', '/register', '/logout', '/pricing', '/billing',
                '/demo-ends',
                '/auth/google', '/join/', '/api/workspaces',
                '/account', '/api/billing', '/healthz', '/go/', '/webhooks/',
@@ -2035,7 +2043,7 @@ _OPEN_PATHS = ('/login', '/register', '/logout', '/pricing', '/billing',
                # verify token, or a signed_request checked against the app
                # secret — so a sign-in redirect would only look like an outage.
                '/api/threads/webhook', '/api/threads/uninstall',
-               '/api/threads/delete', '/api/threads/deletion-status')
+               '/api/threads/delete', '/api/threads/deletion-status'))
 
 
 # Longest prefix wins in every map below, so a specific path can carry a
@@ -5492,6 +5500,18 @@ def privacy_page():
 @app.route('/tos', methods=['GET'])
 def tos_page():
     return send_from_directory(BASE_DIR, 'tos.html')
+
+
+# One public marketing page per platform. Registered by slug rather than with a
+# converter, so these can never shadow an existing single-segment route.
+def _platform_marketing_page(slug):
+    return render_template('platform.html', p=platform_pages.PAGES[slug])
+
+
+for _pp_slug in platform_pages.PAGES:
+    app.add_url_rule('/' + _pp_slug, endpoint='platform_page_' + _pp_slug.replace('-', '_'),
+                     view_func=functools.partial(_platform_marketing_page, _pp_slug),
+                     methods=['GET'])
 
 
 @app.route('/blog/<slug>', methods=['GET'])
