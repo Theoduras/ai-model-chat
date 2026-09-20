@@ -198,6 +198,23 @@ def takes_duration(model_key):
     return _video_fields(model_key).get('shape') != 'replace'
 
 
+def wants_face_only(model_key):
+    """Whether a model should be sent her face references and nothing else.
+
+    One that replaces the person in a clip takes wardrobe, build and setting
+    from the source, so a body reference adds no information it can use -- and
+    a body shot cropped below the neck, or of anyone else, is a second identity
+    for it to average her face towards. One that regenerates the whole clip
+    needs both.
+    """
+    return _video_fields(model_key).get('shape') == 'replace'
+
+
+# A model asking for a clean portrait is not helped by thirty of them, and each
+# extra one is another chance to pull her face towards an average.
+MODEL_REF_CAP = {'p-video-replace': 4}
+
+
 def video_seconds(model_key, seconds):
     lo, hi = MODEL_VIDEO_SECONDS.get(model_key, (1, 30))
     return max(lo, min(hi, int(seconds or 0) or lo))
@@ -762,10 +779,11 @@ class RunwareProvider(Provider):
                 # A model that edits the clip takes it as a single `video`; one
                 # that takes guidance from it takes a list of reference videos.
                 src_key = fields.get('in_source') or 'referenceVideos'
+                cap = MODEL_REF_CAP.get(model_key, MAX_VIDEO_REFERENCES)
                 task['inputs'] = {
                     src_key: source if src_key == 'video' else [source],
                     (fields.get('in_refs') or 'referenceImages'):
-                        list(refs)[:MAX_VIDEO_REFERENCES]}
+                        list(refs)[:cap]}
             else:
                 task[fields['source']] = source
                 task[fields['refs']] = list(refs)[:MAX_REFERENCES]

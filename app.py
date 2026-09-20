@@ -27912,7 +27912,7 @@ def _gen_reference(slug, media_id):
     return base64.b64encode(data).decode(), mime, media
 
 
-def _gen_reference_urls(slug, model_key):
+def _gen_reference_urls(slug, model_key, role=None):
     """The face and body references configured for this model, as something the
     provider can fetch. A signed URL is preferred — fourteen photos inlined as
     data URIs is a request nobody should send — but a backend that cannot mint
@@ -27922,7 +27922,8 @@ def _gen_reference_urls(slug, model_key):
     from db import SessionLocal, model_references
     s = SessionLocal()
     try:
-        ids = [r.media_id for r in model_references(s, slug, model_key or '')]
+        ids = [r.media_id for r in model_references(s, slug, model_key or '',
+                                                    role=role)]
     finally:
         s.close()
 
@@ -28472,8 +28473,21 @@ def _gen_start(job_id, slug, spec, workspace):
                         raise imagegen.GenerationError(
                             'That uploaded clip is no longer there. Upload it again.')
                     call['source_url'] = url
-                    refs = (_gen_reference_urls(slug, spec.get('model'))
-                            or _gen_reference_urls(slug, imagegen.EXPLICIT_MODEL))
+                    # Face only for a model that replaces the person in a
+                    # clip: it takes her build and wardrobe from the source, so
+                    # a body reference is a second identity rather than more
+                    # information about this one.
+                    role = 'face' if imagegen.wants_face_only(spec.get('model')) else None
+                    # The swap models carry no reference set of their own, so
+                    # they borrow the photo model's -- deliberately, and said
+                    # out loud in the log rather than left as a fallback.
+                    ref_model = spec.get('model')
+                    refs = _gen_reference_urls(slug, ref_model, role=role)
+                    if not refs:
+                        ref_model = imagegen.EXPLICIT_MODEL
+                        refs = _gen_reference_urls(slug, ref_model, role=role)
+                    logger.info('swap job=%s refs=%d role=%s from=%s',
+                                job_id, len(refs), role or 'face+body', ref_model)
                     if refs:
                         call['reference_urls'] = refs
                 provider_job, result = provider.submit_video(call)
@@ -28503,6 +28517,42 @@ def _gen_fail(job_id, workspace, message):
     _refund_credits(workspace, job_id, note='generation failed')
 
 
+def _gen_refund_short_clip(job_id, workspace, spec, data, mime):
+    """Hand back the seconds a clip was quoted for but did not come with.
+
+    A model that takes no duration decides the length itself, and it may cap
+    below the source it was given: a 14s clip can come back 5s. The quote was
+    made from the source, because that is all there is to quote from, so the
+    difference has to be returned once the real length is known. Measured from
+    the bytes rather than trusted from the provider, the same as an upload is.
+    """
+    if spec.get('kind') != 'swap' or not (mime or '').startswith('video/'):
+        return
+    model = spec.get('model')
+    if imagegen.takes_duration(model):
+        return
+    try:
+        got, _, _ = _mp4_dimensions(data)
+    except Exception:
+        return
+    billed = int(spec.get('seconds') or 0)
+    if not got or got >= billed:
+        return
+    rate = (CR.VIDEO_RATE_PER_SECOND.get(model) or {}).get(spec.get('resolution'))
+    if not rate:
+        return
+    from db import SessionLocal, credit_refund_part
+    s = SessionLocal()
+    try:
+        back = credit_refund_part(s, workspace, job_id, rate * (billed - got),
+                                  note=f'clip ran {got}s of {billed}s quoted')
+        s.commit()
+    finally:
+        s.close()
+    logger.warning('generation job=%s quoted %ss, provider returned %ss '
+                   '(%s credits returned)', job_id, billed, got, back)
+
+
 def _gen_finish(job_id, slug, spec, workspace, urls):
     """Pull the results off the provider's CDN into our own bucket and put them
     in the vault, unapproved. Their URLs are short lived, so this cannot wait."""
@@ -28514,6 +28564,7 @@ def _gen_finish(job_id, slug, spec, workspace, urls):
         except imagegen.GenerationError as e:
             logger.warning('generation result download failed job=%s: %s', job_id, e)
             continue
+        _gen_refund_short_clip(job_id, workspace, spec, data, mime)
         try:
             path = storage.put(slug, data, mime)
         except Exception:
