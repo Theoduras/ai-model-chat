@@ -59,6 +59,39 @@
   border-color:var(--accent,#ff5c38)}
 .sn-links a.sn-cta:hover{filter:brightness(1.08);background:var(--accent,#ff5c38)}
 
+/* The Features dropdown. The button is styled as a nav link so the bar reads
+   as one row; the panel is absolutely positioned off it. */
+.sn-menu{position:relative;display:inline-flex}
+.sn-menu-btn{display:inline-flex;align-items:center;gap:5px;
+  font-family:inherit;font-size:13px;font-weight:600;padding:9px 14px;
+  border-radius:9999px;white-space:nowrap;transition:all .2s;cursor:pointer;
+  color:inherit;opacity:.72;background:none;border:1px solid rgba(128,128,128,.38)}
+.sn-menu-btn:hover,.sn-menu.open .sn-menu-btn,.sn-menu-here .sn-menu-btn{
+  opacity:1;border-color:rgba(128,128,128,.7)}
+.sn-menu-btn:hover{background:color-mix(in srgb, currentColor 8%, transparent)}
+.sn-caret{width:13px;height:13px;transition:transform .2s}
+.sn-menu.open .sn-caret{transform:rotate(180deg)}
+.sn-menu-panel{display:none;position:absolute;top:calc(100% + 10px);left:0;z-index:1001;
+  min-width:520px;padding:16px;border-radius:18px;
+  grid-template-columns:repeat(3,minmax(150px,1fr));gap:6px 18px;
+  background:var(--nav-bg,rgba(127,127,127,.12));
+  backdrop-filter:blur(18px) saturate(180%);-webkit-backdrop-filter:blur(18px) saturate(180%);
+  box-shadow:0 18px 44px rgba(0,0,0,.28),0 1px 0 rgba(128,128,128,.25)}
+.sn-menu.open .sn-menu-panel{display:grid}
+.sn-menu-group{display:flex;flex-direction:column;gap:2px}
+.sn-menu-label{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  opacity:.5;padding:4px 10px 6px}
+.sn-links .sn-menu-panel a{display:flex;align-items:center;gap:8px;justify-content:flex-start;
+  padding:8px 10px;border:0;border-radius:10px;font-size:13px;font-weight:600;opacity:.8}
+.sn-links .sn-menu-panel a:hover{opacity:1;border:0}
+.sn-soon{font-style:normal;font-size:10px;font-weight:700;letter-spacing:.04em;
+  text-transform:uppercase;opacity:.55;border:1px solid rgba(128,128,128,.45);
+  border-radius:9999px;padding:1px 6px}
+
+@media(max-width:820px){
+  .sn-menu-panel{min-width:300px;grid-template-columns:1fr}
+}
+
 /* Inline mode: the links sit inside a page's own header, so they carry no
    positioning of their own. */
 .sn-inline .sn-links a{padding:7px 14px;font-size:13px}
@@ -72,6 +105,7 @@
      viewport; the brand still links home and the blog is one tap from there.
      The account links keep their own button, so this is the left pill only. */
   .site-nav .sn-links a:not(.sn-cta):not([data-keep]){display:none}
+  .site-nav .sn-menu{display:none}
 
   /* The account pill collapses to one round button with a dropdown. */
   .sn-account{top:16px;right:14px;padding:0;gap:6px}
