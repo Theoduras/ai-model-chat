@@ -27,6 +27,46 @@ delivered there rather than to the custom domain. The app prints a
 `CONFIG WARNING` at startup while it is unset, and the Fanvue page shows the
 URL each subscription actually points at.
 
+## Generation (images and video)
+
+Two variables on the service, plus a bucket. Without them `/studio` loads and
+prices correctly but every submit fails: `storage.enabled()` is false and
+`imagegen` has no key.
+
+```
+gcloud storage buckets create gs://ai-model-chat-media \
+  --location europe-west4 --uniform-bucket-level-access
+
+gcloud storage buckets add-iam-policy-binding gs://ai-model-chat-media \
+  --member serviceAccount:$(gcloud run services describe ai-model-chat-dev \
+    --region europe-west4 --format 'value(spec.template.spec.serviceAccountName)') \
+  --role roles/storage.objectAdmin
+
+gcloud run services update ai-model-chat-dev --region europe-west4 \
+  --update-env-vars GCS_BUCKET=ai-model-chat-media,RUNWARE_API_KEY=<key>
+```
+
+The bucket wants the same region as the service, or every read pays egress.
+`objectAdmin` is not enough on its own to write the staging lifecycle rule —
+that needs `storage.buckets.update`, so `_gen_ensure_lifecycle` logs a warning
+and carries on if the binding is only object-level. Either grant
+`roles/storage.admin` instead, or set the rule by hand once:
+
+```
+gcloud storage buckets update gs://ai-model-chat-media \
+  --lifecycle-file=- <<'JSON'
+{"rule":[{"action":{"type":"Delete"},
+          "condition":{"age":3,"matchesPrefix":["staging/"]}}]}
+JSON
+```
+
+That rule is the three-day auto-delete on unreviewed generations. A missing
+rule means generated media never expires — Cloud Run has a worker, so nothing
+else sweeps it.
+
+Runware bills from a prepaid wallet. An empty wallet comes back as an
+insufficient-credits error on every submit, which reads like a broken key.
+
 ## Running the growth layer
 
 The social-to-subscriber layer (free-trial links, source attribution, the
