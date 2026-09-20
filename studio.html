@@ -450,7 +450,9 @@ let genTimer = null;
 let genMake = 'image';
 let genSwap = null;       // the uploaded clip: {source, url, seconds, width, height}
 let genDrive = null;      // the Video tab's optional motion clip, same shape
-const SWAP_LIMITS = { mb: 200, types: ['video/mp4', 'video/quicktime'] };
+// 32 MB is the host's own request ceiling, not the route's, so it is policed
+// in decimal megabytes: a file of 32 MiB plus multipart framing is over it.
+const SWAP_LIMITS = { mb: 32, types: ['video/mp4', 'video/quicktime'] };
 let genRating = 'sfw';
 
 const GEN_SHOT_LABELS = {
@@ -1178,7 +1180,7 @@ function renderSwapForm() {
     (total === undefined ? '' : ` — ${total} credits${cash ? ', ' + cash : ''}`);
 }
 
-// Only to catch a long clip before a 200MB upload rather than after it; the
+// Only to catch a long clip before the upload rather than after it; the
 // server measures the file itself and its numbers are the ones that count.
 function readClipSeconds(file) {
   return new Promise((resolve) => {
@@ -1198,7 +1200,7 @@ async function uploadSwapSource(file, into) {
     setGenStatus('✗ That file type is not accepted. Use an MP4 or a MOV.', false);
     return;
   }
-  if (file.size > SWAP_LIMITS.mb * 1024 * 1024) {
+  if (file.size > SWAP_LIMITS.mb * 1000 * 1000) {
     setGenStatus(`✗ That clip is over ${SWAP_LIMITS.mb} MB. Trim it first.`, false);
     return;
   }
