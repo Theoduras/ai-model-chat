@@ -27830,6 +27830,42 @@ def _gen_reference(slug, media_id):
     return base64.b64encode(data).decode(), mime, media
 
 
+def _gen_reference_urls(slug, model_key):
+    """The face and body references configured for this model, as something the
+    provider can fetch. A signed URL is preferred — fourteen photos inlined as
+    data URIs is a request nobody should send — but a backend that cannot mint
+    one falls back to the bytes rather than silently dropping the reference,
+    which would quietly cost the creator her identity lock."""
+    import base64
+    from db import SessionLocal, model_references
+    s = SessionLocal()
+    try:
+        ids = [r.media_id for r in model_references(s, slug, model_key or '')]
+    finally:
+        s.close()
+
+    out = []
+    for media_id in ids[:imagegen.MAX_REFERENCES]:
+        media = _media_row(slug, media_id)
+        if not media:
+            continue
+        url = None
+        if getattr(media, 'gcs_path', ''):
+            try:
+                url = storage.signed_url(media.gcs_path)
+            except Exception:
+                url = None
+        if not url:
+            try:
+                data, mime = _media_bytes(media)
+            except Exception:
+                continue
+            url = 'data:%s;base64,%s' % (mime or 'image/jpeg',
+                                         base64.b64encode(data).decode())
+        out.append(url)
+    return out
+
+
 def _gen_spec(slug, body, user):
     """Validate a generation request into a spec the provider and the price
     table both understand. Anything unpriced or above the persona's own NSFW
@@ -27890,6 +27926,56 @@ def _persona_config(slug):
         return load_persona_config(slug) or {}
     except Exception:
         return {}
+
+
+@app.route('/api/personas/<slug>/references', methods=['GET', 'POST'])
+def api_persona_references(slug):
+    """The face and body reference slots for one model.
+
+    GET  ?model=seedream-4-5       -> {face: [media_id], body: [media_id], cap}
+    POST {model, role, media_ids}  -> replaces that one group
+    """
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    if not re.match(r'^[a-z0-9_-]+$', slug or ''):
+        return jsonify({'ok': False, 'error': 'Invalid persona'}), 400
+    mine = owned_slugs()
+    if mine is not None and slug not in mine:
+        return jsonify({'ok': False, 'error': 'Not your persona'}), 403
+
+    from db import SessionLocal, model_references, set_model_references
+    cap = imagegen.MAX_REFERENCES
+
+    if request.method == 'GET':
+        model_key = (request.args.get('model') or CR.DEFAULT_IMAGE_MODEL).strip()
+        s = SessionLocal()
+        try:
+            out = {role: [r.media_id for r in
+                          model_references(s, slug, model_key, role)]
+                   for role in ('face', 'body')}
+        finally:
+            s.close()
+        return jsonify(dict(out, model=model_key, cap=cap))
+
+    body = request.get_json(silent=True) or {}
+    model_key = (body.get('model') or CR.DEFAULT_IMAGE_MODEL).strip()
+    role = (body.get('role') or 'face').strip().lower()
+    if model_key not in CR.IMAGE_MODELS or role not in ('face', 'body'):
+        return jsonify({'ok': False, 'error': 'Unknown model or role'}), 400
+
+    # The cap is the model's, so it is enforced here rather than in the store:
+    # a slot list longer than the provider accepts fails at the provider, after
+    # the credits are already reserved.
+    ids = [str(i) for i in (body.get('media_ids') or []) if i][:cap]
+    s = SessionLocal()
+    try:
+        kept = [mid for mid in ids if _media_row(slug, mid)]
+        set_model_references(s, slug, model_key, kept, role=role)
+    finally:
+        s.close()
+    return jsonify({'ok': True, 'model': model_key, 'role': role,
+                    'media_ids': kept})
 
 
 @app.route('/api/generate/job', methods=['POST'])
@@ -27977,9 +28063,12 @@ def _gen_start(job_id, slug, spec, workspace):
                 call['reference_mime'] = ref_mime
             if spec['kind'] == 'image':
                 cfg = _persona_config(slug)
+                refs = _gen_reference_urls(slug, spec.get('model'))
+                if refs:
+                    call['reference_urls'] = refs
                 call['prompt'] = imagegen.build_prompt(
                     _appearance_from_config(cfg), spec.get('shot'),
-                    spec.get('outfit'), bool(ref_b64),
+                    spec.get('outfit'), bool(ref_b64 or refs),
                     extra=spec.get('prompt_extra', ''))
                 provider_job, result = provider.submit_image(call)
             else:
