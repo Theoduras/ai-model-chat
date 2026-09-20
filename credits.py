@@ -24,7 +24,10 @@ IMAGE_MODELS = ('seedream-4-5', 'seedream-5-pro',
                 'nano-banana-pro', 'nano-banana-2')
 RESOLUTIONS = ('2k', '4k')
 VIDEO_RESOLUTIONS = ('480p', '720p', '1080p')
+# The presets the picker offers. Any whole number in VIDEO_SECONDS_RANGE is
+# priced and accepted -- these are the three worth one click.
 VIDEO_DURATIONS = (3, 5, 10)
+VIDEO_SECONDS_MIN = 2
 
 DEFAULT_IMAGE_MODEL = 'seedream-4-5'
 DEFAULT_RESOLUTION = '2k'
@@ -243,20 +246,26 @@ def image_price(model, resolution, addons=(), batch=1):
 
 
 def video_price(resolution, seconds, addons=(), model=None):
+    """Per second at the model's rung, so any length in range has a price --
+    the three presets are no longer the only lengths a clip may be."""
     model = model or DEFAULT_VIDEO_MODEL
+    rates = VIDEO_RATE_PER_SECOND.get(model) or {}
+    rate = rates.get(resolution)
     try:
-        base = VIDEO_PRICES[model][resolution][int(seconds)]
-    except (KeyError, ValueError, TypeError):
+        secs = int(seconds)
+    except (ValueError, TypeError):
+        secs = 0
+    if not rate or not VIDEO_SECONDS_MIN <= secs <= VIDEO_MAX_SECONDS:
         raise PricingError(
             f'no price for video {model!r} {resolution!r} at {seconds!r}s')
-    return base + sum(_addon(a) for a in addons)
+    return rate * secs + sum(_addon(a) for a in addons)
 
 
 def swap_price(resolution, seconds, addons=()):
     rates = VIDEO_RATE_PER_SECOND.get(VIDEO_EDIT_MODEL) or {}
     rate = rates.get(resolution)
     secs = int(seconds or 0)
-    if not rate or not 1 <= secs <= VIDEO_MAX_SECONDS:
+    if not rate or not VIDEO_SECONDS_MIN <= secs <= VIDEO_MAX_SECONDS:
         raise PricingError(f'no price for a swap at {resolution!r} / {seconds!r}s')
     return rate * secs + sum(_addon(a) for a in addons)
 
@@ -381,6 +390,7 @@ def price_table():
         'resolutions': list(RESOLUTIONS),
         'video_resolutions': list(VIDEO_RESOLUTIONS),
         'video_durations': list(VIDEO_DURATIONS),
+        'video_seconds_min': VIDEO_SECONDS_MIN,
         'defaults': {
             'model': DEFAULT_IMAGE_MODEL,
             'resolution': DEFAULT_RESOLUTION,

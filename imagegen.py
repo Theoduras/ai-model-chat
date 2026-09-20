@@ -79,6 +79,20 @@ EXPLICIT_MODEL = 'seedream-4-5'
 # Identity is one reference-conditioned call. `referenceImages` is the field
 # Seedream accepts; `seedImage` with a strength is refused by the architecture.
 REFERENCE_FIELD = 'referenceImages'
+
+# The two fields a swap lives or dies by, per model and settable from the
+# environment: a model that names them differently is then a service env var
+# rather than a deploy, and a wrong name is the one failure that looks like
+# success -- the task still runs, just without her or the clip in it.
+MODEL_VIDEO_FIELDS = {
+    'wan-2-7': {'source': os.getenv('RW_VIDEO_SOURCE_FIELD', 'inputVideo'),
+                'refs': os.getenv('RW_VIDEO_REF_FIELD', 'referenceImages')},
+}
+
+
+def _video_fields(model_key):
+    return MODEL_VIDEO_FIELDS.get(model_key,
+                                  {'source': 'inputVideo', 'refs': REFERENCE_FIELD})
 MAX_REFERENCES = 14
 
 MODELSLAB_MODELS = {
@@ -152,10 +166,32 @@ def video_size(model_key, width=0, height=0, resolution=None):
     w, h = int(width or 0), int(height or 0)
     if w <= 0 or h <= 0:
         w, h = fallback
+    # The rung is what was asked for and paid for, so it filters rather than
+    # merely nudges; the source's shape then picks within it.
+    rung = [s for s in sizes if size_rung(s[1], s[0]) == resolution]
+    if not rung:
+        # The rung asked for does not exist on this model, so take the cheapest
+        # one it does have rather than the nearest to the source: an absent
+        # rung must never resolve upwards into a dearer clip.
+        for r in ('480p', '720p', '1080p'):
+            rung = [s for s in sizes if size_rung(s[1], s[0]) == r]
+            if rung:
+                break
     ratio = w / float(h)
-    return min(sizes, key=lambda s: (round(abs(math.log(s[0] / float(s[1])
-                                                        / ratio)), 3),
-                                     abs(s[0] * s[1] - w * h)))
+    return min(rung, key=lambda s: (round(abs(math.log(s[0] / float(s[1])
+                                                       / ratio)), 3),
+                                    abs(s[0] * s[1] - w * h)))
+
+
+def size_rung(height, width=0):
+    """The priced rung of a size, off its short side when both are known."""
+    h, w = int(height or 0), int(width or 0)
+    short = min(h, w) if w else h
+    if short >= 1080:
+        return '1080p'
+    if short >= 720:
+        return '720p'
+    return '480p'
 
 
 # ── Prompts ───────────────────────────────────────────────────────────────────
@@ -449,15 +485,18 @@ def _post(url, payload, headers, timeout=TIMEOUT):
 
 
 def _error_text(body):
+    # 800, not 300: a provider that refuses a parameter answers with the list of
+    # the ones it does take, and that list is the only way to learn the right
+    # field name. Cutting it mid-word threw away the answer.
     if not isinstance(body, dict):
         return ''
     errs = body.get('errors') or body.get('error') or body.get('message')
     if isinstance(errs, list) and errs:
         first = errs[0]
         if isinstance(first, dict):
-            return str(first.get('message') or first.get('error') or first)[:300]
-        return str(first)[:300]
-    return str(errs)[:300] if errs else ''
+            return str(first.get('message') or first.get('error') or first)[:800]
+        return str(first)[:800]
+    return str(errs)[:800] if errs else ''
 
 
 # ── Runware ───────────────────────────────────────────────────────────────────
@@ -482,6 +521,14 @@ _RW = {
 
 
 _UNSUPPORTED_PARAM = re.compile(r"Unsupported use of '([A-Za-z0-9_]+)' parameter")
+
+# Dropping one of these and resending does not degrade the generation, it
+# replaces it: a swap with no input clip and no reference is a stranger's video
+# that bills and reports success. A refusal naming one of them is a wrong field
+# name for that model, and the only safe answer is to fail the job.
+_NEVER_STRIP = frozenset({'taskType', 'taskUUID', 'model', 'positivePrompt',
+                          'inputVideo', 'referenceImages', 'frameImages',
+                          'inputImages', 'video', 'duration'})
 
 
 class RunwareProvider(Provider):
@@ -523,7 +570,12 @@ class RunwareProvider(Provider):
                 failure = GenerationError(err)
             hit = _UNSUPPORTED_PARAM.search(err)
             key = hit.group(1) if hit else None
-            if not key or key in ('taskType', 'taskUUID', 'model'):
+            if key in _NEVER_STRIP:
+                raise GenerationError(
+                    f'This model refused {key!r}, which carries the clip or her '
+                    f'face — running without it would generate someone else. '
+                    f'The provider said: {err}', fatal=True)
+            if not key:
                 break
             if not any(t.pop(key, None) is not None for t in tasks):
                 break
@@ -597,7 +649,8 @@ class RunwareProvider(Provider):
             source = spec.get('source_url')
             if not source:
                 raise GenerationError('a swap needs the clip it is swapping into')
-            task['inputVideo'] = source
+            fields = _video_fields(model_key)
+            task[fields['source']] = source
             refs = spec.get('reference_urls') or []
             if spec.get('reference_b64'):
                 refs = [_data_uri(spec['reference_b64'],
@@ -605,7 +658,7 @@ class RunwareProvider(Provider):
             if not refs:
                 raise GenerationError(
                     'a swap needs at least one approved photo of her to swap in')
-            task[REFERENCE_FIELD] = list(refs)[:MAX_REFERENCES]
+            task[fields['refs']] = list(refs)[:MAX_REFERENCES]
         else:
             frame = spec.get('reference_b64')
             if not frame:
@@ -616,7 +669,15 @@ class RunwareProvider(Provider):
             task[_RW['frame_images']] = [{'inputImage':
                                           _data_uri(frame, spec.get('reference_mime'))}]
 
-        data = self._send([task])
+        try:
+            data = self._send([task])
+        except GenerationError:
+            # Keys only: the values are her photographs and a signed clip URL.
+            # Which fields went out is the whole question when a model refuses
+            # one of them, and the payload is gone by the time anyone looks.
+            logger.warning('runware video refused model=%s fields=%s',
+                           model_key, sorted(task))
+            raise
         urls = [d.get('videoURL') for d in data if d.get('videoURL')]
         if urls:
             return task_uuid, Result('done', urls)

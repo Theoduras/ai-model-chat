@@ -267,9 +267,11 @@
               <option value="4" selected>4</option><option value="6">6</option>
             </select></label>
         </div>
-        <div id="gen-swap-out" style="display:none">
-          <span class="hint" style="margin:0;">Your clip decides the length and the size,
-            so there is nothing to choose here.</span>
+        <div class="gen-form" id="gen-swap-out" style="display:none">
+          <label class="gen-f"><span>Clip size</span>
+            <select id="gen-sres" onchange="genQuote()"></select></label>
+          <label class="gen-f"><span>Seconds</span>
+            <select id="gen-ssecs" onchange="genQuote()"></select></label>
         </div>
         <div class="gen-form" id="gen-video-out" style="display:none">
           <label class="gen-f"><span>Clip size</span>
@@ -808,10 +810,10 @@ function renderGenForm() {
   }
   const vsecs = el('gen-vsecs');
   if (vsecs && !vsecs.options.length) {
-    const row = videoTable(videoModel())[genPrices.defaults.video_resolution] || {};
-    vsecs.innerHTML = Object.keys(row).map(s =>
-      opt(s, s + 's', String(genPrices.defaults.video_duration))).join('');
+    vsecs.innerHTML = secondsRange().map(n =>
+      opt(String(n), n + 's', String(genPrices.defaults.video_duration))).join('');
   }
+  renderSwapOut();
 
   renderModelChips();
   renderRefs();
@@ -901,9 +903,9 @@ function providerCost() {
     ((genCosts.measured[kind] || {})[model] || []).includes(key);
   if (genMake === 'swap') {
     if (!genSwap) return null;
-    const per = (genCosts.video_per_second[swapModel()] || {})[genSwap.resolution];
+    const per = (genCosts.video_per_second[swapModel()] || {})[swapResolution()];
     return per === undefined ? null
-      : { usd: per * genSwap.seconds, measured: seen('videos', swapModel(), genSwap.resolution) };
+      : { usd: per * swapSeconds(), measured: seen('videos', swapModel(), swapResolution()) };
   }
   if (genMake === 'video') {
     const resv = (el('gen-vres') || {}).value || genPrices.defaults.video_resolution;
@@ -956,11 +958,52 @@ function swapMaxSeconds() {
 function swapPrice() {
   if (!genSwap) return undefined;
   const rates = ((genPrices && genPrices.video_rates) || {})[swapModel()] || {};
-  const rate = rates[genSwap.resolution];
-  return rate ? rate * genSwap.seconds : undefined;
+  const rate = rates[swapResolution()];
+  return rate ? rate * swapSeconds() : undefined;
+}
+
+// Every whole second the model takes, since a swap is priced per second.
+function secondsRange() {
+  const lo = (genPrices && genPrices.video_seconds_min) || 2;
+  const out = [];
+  for (let n = lo; n <= swapMaxSeconds(); n++) out.push(n);
+  return out;
+}
+
+// The uploaded clip is the ceiling for both: a rung above what was filmed is
+// 2.5x the price for detail the source never had.
+function renderSwapOut() {
+  const box = el('gen-swap-out');
+  const sres = el('gen-sres'), ssecs = el('gen-ssecs');
+  if (!box || !sres || !ssecs || !genPrices) return;
+  const rungs = genPrices.video_resolutions || ['480p', '720p', '1080p'];
+  const cap = genSwap ? rungs.indexOf(genSwap.resolution) : rungs.length - 1;
+  const allowed = rungs.slice(0, (cap < 0 ? rungs.length : cap) + 1);
+  if (sres.dataset.cap !== String(cap)) {
+    sres.dataset.cap = String(cap);
+    sres.innerHTML = allowed.map(r =>
+      opt(r, r, allowed[allowed.length - 1])).join('');
+  }
+  if (!ssecs.options.length || ssecs.dataset.clip !== String(genSwap && genSwap.seconds)) {
+    ssecs.dataset.clip = String(genSwap && genSwap.seconds);
+    ssecs.innerHTML = secondsRange().map(n =>
+      opt(String(n), n + 's' + (genSwap && n === genSwap.seconds ? ' · the whole clip' : ''),
+          String(genSwap ? Math.min(genSwap.seconds, swapMaxSeconds()) : 5))).join('');
+  }
+  sres.disabled = ssecs.disabled = !genSwap;
+}
+
+function swapSeconds() {
+  const v = parseInt((el('gen-ssecs') || {}).value || '0', 10);
+  return v || (genSwap ? genSwap.seconds : 0);
+}
+
+function swapResolution() {
+  return (el('gen-sres') || {}).value || (genSwap ? genSwap.resolution : '720p');
 }
 
 function renderSwapForm() {
+  renderSwapOut();
   el('gen-swap-limits').textContent =
     `Up to ${SWAP_LIMITS.mb} MB and ${swapMaxSeconds()} seconds, as MP4 or MOV. ` +
     'Her face comes from the reference slots above, so there is nothing to pick here. ' +
@@ -972,8 +1015,11 @@ function renderSwapForm() {
   if (player.src !== genSwap.url) player.src = genSwap.url || '';
   const total = swapPrice();
   const cash = cashFor(total);
+  const trimmed = swapSeconds() < genSwap.seconds
+    ? `, trimmed to ${swapSeconds()}s` : '';
   el('gen-swap-meta').textContent =
-    `${genSwap.seconds}s, ${genSwap.resolution} (${genSwap.width}×${genSwap.height})` +
+    `Your clip: ${genSwap.seconds}s, ${genSwap.resolution} ` +
+    `(${genSwap.width}×${genSwap.height})${trimmed}` +
     (total === undefined ? '' : ` — ${total} credits${cash ? ', ' + cash : ''}`);
 }
 
@@ -1037,7 +1083,7 @@ function genQuote() {
     renderSwapForm();
     if (what) {
       what.textContent = genSwap
-        ? `${genSwap.seconds}s swap, ${genSwap.resolution}` : 'Upload a clip to swap her into';
+        ? `${swapSeconds()}s swap, ${swapResolution()}` : 'Upload a clip to swap her into';
     }
     if (cost) cost.textContent = total === undefined ? '' : `${total} cr`;
     setMoney(total || 0);
@@ -1054,7 +1100,8 @@ function genQuote() {
   if (genMake === 'video') {
     const resv = (el('gen-vres') || {}).value || genPrices.defaults.video_resolution;
     const secs = (el('gen-vsecs') || {}).value || String(genPrices.defaults.video_duration);
-    const per = (videoTable(videoModel())[resv] || {})[secs];
+    const rates = (genPrices.video_rates || {})[videoModel()] || {};
+    const per = rates[resv] ? rates[resv] * parseInt(secs, 10) : undefined;
     if (what) what.textContent = `One ${secs}s clip, ${resv}`;
     if (cost) cost.textContent = per === undefined ? '' : `${per} cr`;
     setMoney(per);
@@ -1150,6 +1197,7 @@ async function runSwap() {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         persona: slug(), kind: 'swap', source: genSwap.id,
+        resolution: swapResolution(), seconds: swapSeconds(),
         motion: el('gen-swap-motion').value.trim(),
       }),
     });
@@ -1165,7 +1213,8 @@ async function runSwap() {
 async function animateMedia(id) {
   const secs = (el('gen-vsecs') || {}).value || (genPrices ? genPrices.defaults.video_duration : 5);
   const resv = (el('gen-vres') || {}).value || (genPrices ? genPrices.defaults.video_resolution : '720p');
-  const cost = genPrices ? (videoTable(videoModel())[resv] || {})[secs] : '?';
+  const rates = (genPrices && genPrices.video_rates[videoModel()]) || {};
+  const cost = rates[resv] ? rates[resv] * parseInt(secs, 10) : '?';
   if (!confirm(`Animate this photo into a ${secs}s ${resv} clip for ${cost} credits?`)) return;
   setGenStatus('Sending…', null);
   try {

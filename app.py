@@ -28005,8 +28005,10 @@ def _gen_spec(slug, body, user):
     else:
         resolution = (body.get('resolution') or CR.DEFAULT_VIDEO_RESOLUTION).strip()
         seconds = int(body.get('seconds') or CR.DEFAULT_VIDEO_DURATION)
-        if resolution not in CR.VIDEO_RESOLUTIONS or (
-                kind != 'swap' and seconds not in CR.VIDEO_DURATIONS):
+        # Any whole number in range, not only the three presets: the price is
+        # per second, so a length the picker does not list still has one.
+        if resolution not in CR.VIDEO_RESOLUTIONS or not (
+                CR.VIDEO_SECONDS_MIN <= seconds <= CR.VIDEO_MAX_SECONDS):
             raise imagegen.GenerationError('Unknown video resolution or duration.')
         model = (body.get('model') or CR.DEFAULT_VIDEO_MODEL).strip().lower()
         if model not in CR.VIDEO_MODELS:
@@ -28025,11 +28027,15 @@ def _gen_spec(slug, body, user):
             if not src:
                 raise imagegen.GenerationError(
                     'Upload the clip you want her swapped into first.')
-            # The clip decides both, not the picker: a swap runs the length of
-            # its source and comes out at its source's size, so quoting anything
-            # else would bill for a clip nobody asked for.
-            seconds = imagegen.video_seconds(model, src['seconds'])
-            resolution = _video_rung(src['height'])
+            # The clip is the ceiling, not the value: the operator picks the
+            # length and the rung, and neither may exceed what was uploaded --
+            # a 480p source run at 1080p rates is 2.5x for detail nobody filmed.
+            seconds = imagegen.video_seconds(
+                model, body.get('seconds') or src['seconds'])
+            source_rung = _video_rung(src['height'], src['width'])
+            if (CR.VIDEO_RESOLUTIONS.index(resolution)
+                    > CR.VIDEO_RESOLUTIONS.index(source_rung)):
+                resolution = source_rung
             spec['source_path'] = src['path']
             spec['source_id'] = source_id
             spec['source_width'] = src['width']
@@ -28041,9 +28047,9 @@ def _gen_spec(slug, body, user):
         # nearest one to the source rather than the rung asked for. Price it
         # off that: billing a 480p rung for a clip run at 720p loses the
         # difference on every swap.
-        _, snapped_h = imagegen.video_size(model, spec.get('source_width'),
-                                           spec.get('source_height'), resolution)
-        resolution = _video_rung(snapped_h)
+        snapped_w, snapped_h = imagegen.video_size(
+            model, spec.get('source_width'), spec.get('source_height'), resolution)
+        resolution = _video_rung(snapped_h, snapped_w)
         spec.update({'resolution': resolution, 'seconds': seconds,
                      'model': model, 'explicit': level != 'sfw',
                      'motion': (body.get('motion') or '')[:300]})
@@ -28125,15 +28131,15 @@ def _mp4_dimensions(data):
     return seconds, width, height
 
 
-def _video_rung(height):
+def _video_rung(height, width=0):
     """Which priced rung a clip's own size falls into. Rounded down, so a clip
-    between two rungs is billed at the one it actually fits."""
-    h = int(height or 0)
-    if h >= 1080:
-        return '1080p'
-    if h >= 720:
-        return '720p'
-    return '480p'
+    between two rungs is billed at the one it actually fits.
+
+    Off the short side when both are known: 720p names a 720x1280 clip held
+    upright as readily as a 1280x720 one, and reading a portrait clip's 1280
+    height as the rung billed every phone video a tier high.
+    """
+    return imagegen.size_rung(int(height or 0), int(width or 0))
 
 
 @app.route('/api/personas/<slug>/video-source', methods=['POST'])
@@ -28235,9 +28241,7 @@ def api_persona_video_source(slug):
                     'seconds': seconds, 'width': width, 'height': height,
                     # The rung the swap will actually be run and billed at, not
                     # the file's own, so the studio quotes what it charges.
-                    'resolution': _video_rung(
-                        imagegen.video_size(CR.VIDEO_EDIT_MODEL, width, height,
-                                            _video_rung(height))[1]),
+                    'resolution': _video_rung(height, width),
                     'url': storage.signed_url(path) or '',
                     'poster_url': (storage.signed_url(poster_path) or '')
                                   if poster_path else ''})
