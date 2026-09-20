@@ -85,6 +85,56 @@ VIDEO_PRICES = {
     for model, rates in VIDEO_RATE_PER_SECOND.items()
 }
 
+# What the provider actually bills us, in USD. The credit tables above are
+# derived from these by ceil(cost / CREDIT_COST_USD) and then rounded up again
+# where a figure is a guess, so credits * CREDIT_COST_USD reads high and cannot
+# be used to answer "what did that cost me". This is the number to show an
+# operator before they press Generate.
+#
+# `PROVIDER_COST_MEASURED` names the rungs that came off a live bill. Everything
+# else is an over-estimate carried from the credit table's own reasoning: a
+# guess that is too low loses money quietly, so the guesses are deliberately
+# high. Measure one and move its key into the measured set.
+PROVIDER_COST_USD = {
+    'seedream-4-5':    {'2k': 0.04, '4k': 0.04},
+    'seedream-5-pro':  {'2k': 0.04, '4k': 0.04},
+    'nano-banana-2':   {'2k': 0.10255, '4k': 0.2051},
+    'nano-banana-pro': {'2k': 0.138, '4k': 0.276},
+}
+
+VIDEO_COST_USD_PER_SECOND = {
+    'wan-2-5':      {'480p': 0.09076, '720p': 0.09076, '1080p': 0.2269},
+    'wan-2-7':      {'480p': 0.10076, '720p': 0.10076, '1080p': 0.2519},
+    'seedance-2-5': {'480p': 0.12, '720p': 0.12, '1080p': 0.30},
+}
+
+PROVIDER_COST_MEASURED = {
+    'images': {'seedream-4-5': ('2k', '4k'),
+               'nano-banana-2': ('2k',),
+               'nano-banana-pro': ('2k',)},
+    'videos': {'wan-2-5': ('720p',), 'wan-2-7': ('720p',)},
+}
+
+
+def image_cost_usd(model, resolution, batch=1):
+    row = PROVIDER_COST_USD.get(model) or {}
+    per = row.get(resolution)
+    return None if per is None else per * max(1, int(batch))
+
+
+def video_cost_usd(model, resolution, seconds):
+    row = VIDEO_COST_USD_PER_SECOND.get(model) or {}
+    per = row.get(resolution)
+    return None if per is None else per * max(1, int(seconds or 0))
+
+
+def cost_table():
+    """The provider-cost menu. Admin only: it is our margin written out."""
+    return {'images': PROVIDER_COST_USD,
+            'video_per_second': VIDEO_COST_USD_PER_SECOND,
+            'measured': PROVIDER_COST_MEASURED}
+
+
 # The legacy Google/Imagen path is priced from the same peg (~$0.02 a call), so
 # it cannot be used as a free way around the credit system.
 GOOGLE_IMAGE_CREDITS = 10

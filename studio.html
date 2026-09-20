@@ -331,6 +331,8 @@
       <div class="gen-quote">
         <div class="gen-q-row"><span id="gen-quote-what"></span><b id="gen-cost"></b></div>
         <div class="gen-q-row"><span id="gen-money-what"></span><span id="gen-money"></span></div>
+        <div class="gen-q-row" id="gen-paid-row" style="display:none;">
+          <span>What this costs us</span><span id="gen-paid"></span></div>
         <div class="gen-engines" id="gen-engines"></div>
       </div>
       <div class="gen-go">
@@ -396,6 +398,7 @@ let genPrices = null;      // the server's price table
 let genEngines = null;     // which provider model is behind each picker entry
 let genCredits = null;     // null = unlimited, which is every admin
 let genRate = null;        // what a credit costs this tier in cash
+let genCosts = null;       // what the provider bills us — admin only, null otherwise
 let genAllowedShots = [];  // resolved server side from the persona's NSFW level
 let genScenes = [];        // scene builder vocabulary, already gated server side
 let genStyles = [], genCameras = [], genLighting = [];
@@ -444,6 +447,7 @@ async function loadCredits() {
     genPrices = d.prices;
     genEngines = d.engines || null;
     genRate = d.credit_rate || null;
+    genCosts = d.provider_costs || null;
     genCredits = d.unlimited ? null : d.balance;
     const e = el('gen-balance');
     if (e) {
@@ -889,7 +893,47 @@ function showEngines() {
   ).join('<br>');
 }
 
+// The provider's own bill, not a credit price: credits round up twice on the
+// way from cost, so they cannot be read back as what a generation cost us.
+function providerCost() {
+  if (!genCosts) return null;
+  const seen = (kind, model, key) =>
+    ((genCosts.measured[kind] || {})[model] || []).includes(key);
+  if (genMake === 'swap') {
+    if (!genSwap) return null;
+    const per = (genCosts.video_per_second[swapModel()] || {})[genSwap.resolution];
+    return per === undefined ? null
+      : { usd: per * genSwap.seconds, measured: seen('videos', swapModel(), genSwap.resolution) };
+  }
+  if (genMake === 'video') {
+    const resv = (el('gen-vres') || {}).value || genPrices.defaults.video_resolution;
+    const secs = parseInt((el('gen-vsecs') || {}).value
+                          || genPrices.defaults.video_duration, 10);
+    const per = (genCosts.video_per_second[videoModel()] || {})[resv];
+    return per === undefined ? null
+      : { usd: per * secs, measured: seen('videos', videoModel(), resv) };
+  }
+  const model = el('gen-model').value, res = el('gen-res').value;
+  const per = (genCosts.images[model] || {})[res];
+  if (per === undefined) return null;
+  const batch = parseInt(el('gen-batch').value || '1', 10);
+  return { usd: per * batch, measured: seen('images', model, res) };
+}
+
+function setProviderCost() {
+  const row = el('gen-paid-row');
+  if (!row) return;
+  const c = providerCost();
+  row.style.display = c ? 'flex' : 'none';
+  if (!c) return;
+  const eur = genRate && genRate.eur_per_usd
+    ? ' · \u20ac' + (c.usd * genRate.eur_per_usd).toFixed(2) : '';
+  el('gen-paid').textContent =
+    '$' + c.usd.toFixed(2) + eur + (c.measured ? '' : ' (estimate)');
+}
+
 function setMoney(credits) {
+  setProviderCost();
   const cash = cashFor(credits);
   el('gen-money-what').textContent = !cash ? ''
     : genCredits === null ? "What a creator's plan pays" : 'In money';

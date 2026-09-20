@@ -4611,6 +4611,9 @@ def api_credits():
         'equivalents': CR.equivalents(balance or 0),
         'packs': CR.packs_for(user.get('tier')),
         'prices': CR.price_table(),
+        # Admin only: this is what the provider bills us, which is the margin
+        # written out. A creator is quoted credits and cash, never this.
+        'provider_costs': CR.cost_table() if user.get('is_admin') else None,
         # What a credit costs this tier in cash, so the studio can show a price
         # beside a credit count without doing pack arithmetic of its own.
         'credit_rate': {'usd': round(CR.credit_rate_usd(user.get('tier')), 5),
