@@ -1137,7 +1137,7 @@ function renderSwapForm() {
     (total === undefined ? '' : ` — ${total} credits${cash ? ', ' + cash : ''}`);
 }
 
-// Only to catch a long clip before a 200MB upload rather than after it; the
+// Only to catch a long clip before the upload rather than after it; the
 // server measures the file itself and its numbers are the ones that count.
 function readClipSeconds(file) {
   return new Promise((resolve) => {
