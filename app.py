@@ -7638,20 +7638,50 @@ def api_generate_persona():
 
 
 def _appearance_from_config(cfg):
-    """Build a fixed physical-appearance description so multiple photos of a
-    persona depict the same fictional person."""
+    """A fixed physical description, so every photo of a persona is the same
+    fictional woman.
+
+    `appearance` stays the override: a creator who has written one has said
+    more than the dropdowns can, and composing over the top of it would fight
+    her own words. Everything else is built from the character fields.
+    """
     if cfg.get('appearance'):
         return cfg['appearance']
-    name = cfg.get('name', '')
-    age = cfg.get('age', '24')
-    archetype = cfg.get('archetype', '')
-    location = cfg.get('location', '')
-    bits = [f"a {age}-year-old woman"]
-    if location:
-        bits.append(f"from {location}")
-    if archetype:
-        bits.append(f"with a {archetype.lower().split('/')[0].strip()} look")
-    return ', '.join(bits)
+
+    age = str(cfg.get('age') or '24').strip()
+    bits = []
+    for key in ('body_type', 'chest_size'):
+        value = str(cfg.get(key) or '').strip()
+        # "Any" is the builder's way of saying the creator did not choose, so
+        # it must not reach the prompt as a description.
+        if value and value.lower() != 'any':
+            bits.append(value.lower())
+    bits.append(f'{age}-year-old woman')
+
+    tail = []
+    for key, phrase in (('hair_colour', '{} hair'), ('eye_colour', '{} eyes')):
+        value = str(cfg.get(key) or '').strip()
+        if value and value.lower() != 'any':
+            tail.append(phrase.format(value.lower()))
+    if cfg.get('location'):
+        tail.append(f"from {cfg['location']}")
+    for key in ('style', 'archetype'):
+        value = str(cfg.get(key) or '').strip()
+        if value:
+            tail.append(f"a {value.lower().split('/')[0].strip()} look")
+            break
+
+    return ' '.join(('a ' + ' '.join(bits),
+                     ('with ' + ', '.join(tail)) if tail else '')).strip()
+
+
+def _prop_from_config(cfg, style):
+    """Her phone, named only where it is actually in the picture. A selfie that
+    invents a different handset every shot reads as a different person's."""
+    if style not in ('pov-selfie', 'mirror-selfie'):
+        return ''
+    phone = str(cfg.get('phone_model') or '').strip()
+    return f'holding a {phone}' if phone else ''
 
 
 _SHOT_FRAMING = {
@@ -28110,7 +28140,9 @@ def _gen_start(job_id, slug, spec, workspace):
                     style=spec.get('style', ''), scene=spec.get('scene', ''),
                     camera=spec.get('camera', ''),
                     lighting=spec.get('lighting', ''),
-                    direction=spec.get('direction', ''),
+                    direction=' '.join(filter(None, (
+                        _prop_from_config(cfg, spec.get('style', '')),
+                        spec.get('direction', '')))),
                     banned=banned)
                 provider_job, result = provider.submit_image(call)
             else:
