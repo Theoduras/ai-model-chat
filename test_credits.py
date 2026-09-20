@@ -122,6 +122,17 @@ def test_prices_track_cost():
           CR.quote({'kind': 'swap', 'resolution': '720p', 'seconds': 5}) ==
           CR.quote({'kind': 'video', 'model': CR.VIDEO_EDIT_MODEL,
                     'resolution': '720p', 'seconds': 5}))
+    check('a swap is billed for every second of the clip it was given',
+          CR.quote({'kind': 'swap', 'resolution': '720p', 'seconds': 7}) ==
+          CR.VIDEO_RATE_PER_SECOND[CR.VIDEO_EDIT_MODEL]['720p'] * 7)
+    for bad in ({'kind': 'swap', 'resolution': '720p',
+                 'seconds': CR.VIDEO_MAX_SECONDS + 1},
+                {'kind': 'swap', 'resolution': '720p', 'seconds': 0}):
+        try:
+            CR.quote(bad)
+            check(f'a swap of {bad["seconds"]}s is refused', False)
+        except CR.PricingError:
+            check(f'a swap of {bad["seconds"]}s is refused', True)
     check('the legacy Google path is priced too, so it is not a free bypass',
           CR.GOOGLE_IMAGE_CREDITS > 0)
 

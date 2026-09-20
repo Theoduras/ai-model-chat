@@ -27985,7 +27985,8 @@ def _gen_spec(slug, body, user):
     else:
         resolution = (body.get('resolution') or CR.DEFAULT_VIDEO_RESOLUTION).strip()
         seconds = int(body.get('seconds') or CR.DEFAULT_VIDEO_DURATION)
-        if resolution not in CR.VIDEO_RESOLUTIONS or seconds not in CR.VIDEO_DURATIONS:
+        if resolution not in CR.VIDEO_RESOLUTIONS or (
+                kind != 'swap' and seconds not in CR.VIDEO_DURATIONS):
             raise imagegen.GenerationError('Unknown video resolution or duration.')
         model = (body.get('model') or CR.DEFAULT_VIDEO_MODEL).strip().lower()
         if model not in CR.VIDEO_MODELS:
@@ -27998,11 +27999,19 @@ def _gen_spec(slug, body, user):
             # Only one model takes an input clip, so a swap is always run on it
             # whatever the picker had selected.
             model = CR.VIDEO_EDIT_MODEL
-            source = (body.get('source') or '').strip()
-            if not _gen_source_ok(slug, source):
+            source_id = str(body.get('source') or body.get('source_media')
+                            or body.get('id') or '').strip()
+            src = _video_source_row(slug, source_id)
+            if not src:
                 raise imagegen.GenerationError(
                     'Upload the clip you want her swapped into first.')
-            spec['source_path'] = source
+            # The clip decides both, not the picker: a swap runs the length of
+            # its source and comes out at its source's size, so quoting anything
+            # else would bill for a clip nobody asked for.
+            seconds = src['seconds']
+            resolution = _video_rung(src['height'])
+            spec['source_path'] = src['path']
+            spec['source_id'] = source_id
         elif not spec['reference_media']:
             raise imagegen.GenerationError(
                 'Pick an approved photo to animate — a clip starts from one.')
@@ -28016,28 +28025,101 @@ def _gen_spec(slug, body, user):
 # lifecycle rule and the Blob purge already sweep, so an uploaded clip
 # expires in three days without a second cleanup path to forget.
 VIDEO_SOURCE_PREFIX = 'staging/video-source'
-VIDEO_SOURCE_MAX_BYTES = 64 * 1024 * 1024
+VIDEO_SOURCE_MAX_BYTES = 200 * 1024 * 1024
 
 
-def _gen_source_ok(slug, path):
-    """A swap source is a path we wrote ourselves, for this persona. Taking a
-    caller-supplied URL here would let anyone point the provider at anything."""
-    return bool(path) and path.startswith(f'{VIDEO_SOURCE_PREFIX}/{slug}/')
+VIDEO_SOURCE_MAX_SECONDS = 30
+VIDEO_SOURCE_MIMES = {'video/mp4': '.mp4', 'video/quicktime': '.mov'}
+
+
+def _mp4_dimensions(data):
+    """Duration in seconds and pixel size, read out of an MP4/MOV's own header.
+
+    There is no ffprobe in the image and the duration decides the price, so it
+    cannot be taken from the browser: a clip that claims to be three seconds
+    and runs thirty is a clip we pay for ten times over. Walking the atom tree
+    for mvhd and tkhd is the whole of what we need, and it is exact.
+    """
+    import math
+    import struct
+
+    def atoms(buf, start, stop):
+        i = start
+        while i + 8 <= stop:
+            size = struct.unpack('>I', buf[i:i + 8][:4])[0]
+            name = buf[i + 4:i + 8]
+            head = 8
+            if size == 1:
+                if i + 16 > stop:
+                    return
+                size = struct.unpack('>Q', buf[i + 8:i + 16])[0]
+                head = 16
+            elif size == 0:
+                size = stop - i
+            if size < head:
+                return
+            yield name, i + head, min(i + size, stop)
+            i += size
+
+    def find(buf, start, stop, path):
+        for name, body, tail in atoms(buf, start, stop):
+            if name == path[0]:
+                if len(path) == 1:
+                    return body, tail
+                hit = find(buf, body, tail, path[1:])
+                if hit:
+                    return hit
+        return None
+
+    seconds, width, height = 0, 0, 0
+    mvhd = find(data, 0, len(data), [b'moov', b'mvhd'])
+    if mvhd:
+        b = mvhd[0]
+        version = data[b]
+        if version == 1:
+            scale, dur = struct.unpack('>IQ', data[b + 20:b + 32])
+        else:
+            scale, dur = struct.unpack('>II', data[b + 12:b + 20])
+        if scale:
+            seconds = int(math.ceil(dur / float(scale)))
+    tkhd = find(data, 0, len(data), [b'moov', b'trak', b'tkhd'])
+    if tkhd:
+        b = tkhd[0]
+        off = 36 if data[b] == 1 else 24
+        # The last eight bytes of tkhd are width and height as 16.16 fixed
+        # point. A sound track carries zeroes there, which is how a clip whose
+        # first track is audio reports nothing rather than nonsense.
+        w, h = struct.unpack('>II', data[b + off + 52:b + off + 60])
+        width, height = w >> 16, h >> 16
+    return seconds, width, height
+
+
+def _video_rung(height):
+    """Which priced rung a clip's own size falls into. Rounded down, so a clip
+    between two rungs is billed at the one it actually fits."""
+    h = int(height or 0)
+    if h >= 1080:
+        return '1080p'
+    if h >= 720:
+        return '720p'
+    return '480p'
 
 
 @app.route('/api/personas/<slug>/video-source', methods=['POST'])
 def api_persona_video_source(slug):
     """Take the clip a creator wants her swapped into.
 
-    Body: {video: data URL, seconds, width, height, poster}
-    Returns {source, url, seconds} — `source` is the opaque handle the job API
-    wants back, never a URL the caller can choose.
+    Accepts a multipart upload (field `file`, which is what a 200MB clip should
+    ever be sent as) or a JSON body with {video: data URL}. An optional
+    `poster` data URL is stored as the preview frame, because there is no
+    browser here to pull one out of the file.
 
-    The bytes go to staging so the three-day purge sweeps them: an uploaded
-    clip is working material, not vault media, and nothing should keep it.
-    Duration and size come from the browser's own <video> element because
-    there is no ffprobe in the image; they are advisory, and the price is
-    quoted from what the creator picked rather than from what they claim.
+    Returns {id, seconds, width, height, url, poster_url}. `id` names a row,
+    never a path or a URL: the job API takes the id and reads the duration it
+    prices from the row, so nothing a caller sends can decide what a swap costs.
+
+    The bytes go to staging so the existing three-day sweep clears them. An
+    uploaded clip is working material, not vault media.
     """
     blocked = _require_admin()
     if blocked:
@@ -28049,33 +28131,97 @@ def api_persona_video_source(slug):
         return jsonify({'ok': False, 'error': 'Not your persona'}), 403
 
     body = request.get_json(silent=True) or {}
-    video = str(body.get('video') or '')
-    if not video.startswith('data:video/'):
-        return jsonify({'ok': False, 'error': 'Send the clip as a data URL.'}), 400
-    header, _, b64 = video.partition(',')
-    mime = header.split(';')[0].replace('data:', '') or 'video/mp4'
-    import base64
-    try:
-        data = base64.b64decode(b64, validate=False)
-    except Exception:
-        return jsonify({'ok': False, 'error': 'That file did not decode.'}), 400
+    upload = request.files.get('file') or request.files.get('video')
+    poster = str(body.get('poster') or request.form.get('poster') or '')
+    if upload is not None:
+        data = upload.read()
+        mime = (upload.mimetype or '').lower()
+    else:
+        video = str(body.get('video') or '')
+        if not video.startswith('data:video/'):
+            return jsonify({'ok': False,
+                            'error': 'Send the clip as a file or a data URL.'}), 400
+        header, _, b64 = video.partition(',')
+        mime = header.split(';')[0].replace('data:', '').lower()
+        import base64
+        try:
+            data = base64.b64decode(b64, validate=False)
+        except Exception:
+            return jsonify({'ok': False, 'error': 'That file did not decode.'}), 400
+
+    if mime not in VIDEO_SOURCE_MIMES:
+        # WebM is deliberately out: its duration lives in an EBML header this
+        # does not parse, and a duration we cannot read is a price we cannot
+        # set. Re-encoding to MP4 is a one-line job for the creator.
+        return jsonify({'ok': False,
+                        'error': 'Upload an MP4 or a MOV.'}), 415
     if len(data) > VIDEO_SOURCE_MAX_BYTES:
         mb = VIDEO_SOURCE_MAX_BYTES // (1024 * 1024)
         return jsonify({'ok': False,
                         'error': f'That clip is over {mb}MB. Trim it first.'}), 413
 
     try:
+        seconds, width, height = _mp4_dimensions(data)
+    except Exception:
+        seconds, width, height = 0, 0, 0
+    if not seconds:
+        return jsonify({'ok': False,
+                        'error': 'That file has no readable duration. '
+                                 'Re-export it as an MP4.'}), 400
+    if seconds > VIDEO_SOURCE_MAX_SECONDS:
+        return jsonify({'ok': False,
+                        'error': f'That clip runs {seconds}s. The limit is '
+                                 f'{VIDEO_SOURCE_MAX_SECONDS}s — trim it and '
+                                 'upload again.'}), 413
+
+    try:
         path = storage.put(slug, data, mime, prefix=VIDEO_SOURCE_PREFIX)
+        poster_path = ''
+        if poster.startswith('data:image/'):
+            import base64
+            head, _, pb64 = poster.partition(',')
+            poster_path = storage.put(
+                slug, base64.b64decode(pb64, validate=False),
+                head.split(';')[0].replace('data:', '') or 'image/jpeg',
+                prefix=VIDEO_SOURCE_PREFIX)
     except Exception as e:
         logger.exception('video source upload failed slug=%s', slug)
         return jsonify({'ok': False, 'error': str(e)[:200] or 'upload failed'}), 502
 
-    seconds = max(1, min(60, int(float(body.get('seconds') or 5))))
-    return jsonify({'ok': True, 'source': path,
+    from db import SessionLocal, VideoSource
+    s = SessionLocal()
+    try:
+        row = VideoSource(slug=slug, gcs_path=path, poster_gcs_path=poster_path,
+                          mime=mime, seconds=seconds, width=width, height=height,
+                          size_bytes=len(data))
+        s.add(row)
+        s.commit()
+        source_id = row.id
+    finally:
+        s.close()
+
+    return jsonify({'ok': True, 'id': source_id, 'source': source_id,
+                    'seconds': seconds, 'width': width, 'height': height,
+                    'resolution': _video_rung(height),
                     'url': storage.signed_url(path) or '',
-                    'seconds': seconds,
-                    'width': int(body.get('width') or 0),
-                    'height': int(body.get('height') or 0)})
+                    'poster_url': (storage.signed_url(poster_path) or '')
+                                  if poster_path else ''})
+
+
+def _video_source_row(slug, source_id):
+    from db import SessionLocal, VideoSource
+    if not source_id:
+        return None
+    s = SessionLocal()
+    try:
+        row = s.query(VideoSource).filter_by(id=source_id, slug=slug).first()
+        if not row:
+            return None
+        return {'path': row.gcs_path, 'seconds': int(row.seconds or 0),
+                'width': int(row.width or 0), 'height': int(row.height or 0),
+                'mime': row.mime or 'video/mp4'}
+    finally:
+        s.close()
 
 
 def _gen_source_data_uri(path):
@@ -28089,7 +28235,7 @@ def _gen_source_data_uri(path):
         return None
     if not data:
         return None
-    mime = 'video/webm' if path.endswith('.webm') else 'video/mp4'
+    mime = 'video/quicktime' if path.endswith('.mov') else 'video/mp4'
     return 'data:%s;base64,%s' % (mime, base64.b64encode(data).decode())
 
 

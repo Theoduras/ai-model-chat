@@ -74,6 +74,11 @@ VIDEO_RATE_PER_SECOND = {
     'seedance-2-5': {'480p': 60, '720p': 60, '1080p': 150},
 }
 
+# A swap runs the length of the clip it is given, so it is priced per second
+# from the same rates rather than off the fixed durations a generated clip
+# offers. The cap matches what the upload route will take.
+VIDEO_MAX_SECONDS = 30
+
 VIDEO_PRICES = {
     model: {res: {secs: rate * secs for secs in VIDEO_DURATIONS}
             for res, rate in rates.items()}
@@ -195,6 +200,15 @@ def video_price(resolution, seconds, addons=(), model=None):
     return base + sum(_addon(a) for a in addons)
 
 
+def swap_price(resolution, seconds, addons=()):
+    rates = VIDEO_RATE_PER_SECOND.get(VIDEO_EDIT_MODEL) or {}
+    rate = rates.get(resolution)
+    secs = int(seconds or 0)
+    if not rate or not 1 <= secs <= VIDEO_MAX_SECONDS:
+        raise PricingError(f'no price for a swap at {resolution!r} / {seconds!r}s')
+    return rate * secs + sum(_addon(a) for a in addons)
+
+
 def _addon(name):
     try:
         return ADDON_PRICES[name]
@@ -209,10 +223,16 @@ def quote(spec):
     """
     kind = (spec or {}).get('kind') or 'image'
     addons = tuple(spec.get('addons') or ())
-    if kind in ('video', 'swap'):
+    if kind == 'swap':
+        # No default duration here, unlike a generated clip: a swap is billed
+        # for the clip it was handed, so a spec that carries no measured
+        # duration is one we cannot price rather than one we guess at.
+        return swap_price(spec.get('resolution') or DEFAULT_VIDEO_RESOLUTION,
+                          spec.get('seconds'), addons)
+    if kind == 'video':
         model = spec.get('model')
-        if kind == 'swap' or model not in VIDEO_PRICES:
-            model = VIDEO_EDIT_MODEL if kind == 'swap' else DEFAULT_VIDEO_MODEL
+        if model not in VIDEO_PRICES:
+            model = DEFAULT_VIDEO_MODEL
         return video_price(spec.get('resolution') or DEFAULT_VIDEO_RESOLUTION,
                            spec.get('seconds') or DEFAULT_VIDEO_DURATION,
                            addons, model)
@@ -301,6 +321,8 @@ def price_table():
         'video_ratings': {m: list(r) for m, r in VIDEO_MODEL_RATINGS.items()},
         'video_models': list(VIDEO_MODELS),
         'video_edit_model': VIDEO_EDIT_MODEL,
+        'video_rates': VIDEO_RATE_PER_SECOND,
+        'video_max_seconds': VIDEO_MAX_SECONDS,
         'addons': ADDON_PRICES,
         'labels': MODEL_LABELS,
         'ratings': {m: list(r) for m, r in MODEL_RATINGS.items()},

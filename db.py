@@ -235,6 +235,28 @@ Index('ix_modelref_slug_model', ModelReferenceSet.slug,
       ModelReferenceSet.slot_index)
 
 
+class VideoSource(Base):
+    """A clip a creator uploaded to be swapped into.
+
+    The row exists for one reason: the price of a swap is per second, so the
+    duration has to be a number the server measured, not one the browser sent
+    with the submit. It is read out of the file's own header at upload and
+    pinned here; the submit only names the row.
+    """
+    __tablename__ = 'video_sources'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    slug = Column(String(64), nullable=False, index=True)
+    gcs_path = Column(String(400), nullable=False)
+    poster_gcs_path = Column(String(400), default='')
+    mime = Column(String(60), default='video/mp4')
+    seconds = Column(Integer, default=0)
+    width = Column(Integer, default=0)
+    height = Column(Integer, default=0)
+    size_bytes = Column(Integer, default=0)
+    created_at = Column(DateTime, default=_now)
+
+
 class AudioReference(Base):
     """Voice or ambience a video model can be conditioned on.
 
@@ -1983,7 +2005,8 @@ def init_db():
                          ('credit_ledger', CreditLedger),
                          ('generation_jobs', GenerationJob),
                          ('model_reference_sets', ModelReferenceSet),
-                         ('audio_references', AudioReference)):
+                         ('audio_references', AudioReference),
+                         ('video_sources', VideoSource)):
         try:
             _sync_columns(table, model)
         except Exception:
