@@ -11,7 +11,7 @@
   <script src="/js/devnav.js" defer></script>
   <style>
     .fv-scroll { flex: 1; min-height: 0; overflow-y: auto; }
-    .fv-wrap { max-width: 900px; margin: 0 auto; padding: 28px 24px 80px;
+    .fv-wrap { max-width: 1400px; margin: 0 auto; padding: 28px 24px 80px;
                display: flex; flex-direction: column; gap: 20px; }
     .note-box { border: 1px solid var(--border); background: var(--surface); color: var(--text-2);
                 border-radius: 10px; padding: 12px 14px; font-size: 0.82rem; line-height: 1.5; }
@@ -42,6 +42,42 @@
     }
     .gen-chip[aria-pressed="true"] { border-color: var(--accent); color: var(--text); font-weight: 600; }
 
+    /* Option C: the toggles pick the variant, then the job runs down a column
+       of numbered panels and out to the result on the right. */
+    .gen-cols { display: grid; grid-template-columns: 300px minmax(0, 1fr) 352px; gap: 16px; align-items: start; }
+    .gen-col { display: flex; flex-direction: column; gap: 16px; }
+    .gen-panel { background: var(--panel); border: 1px solid var(--border); border-radius: var(--r); padding: 14px; display: flex; flex-direction: column; gap: 11px; }
+    .gen-panel h2 { margin: 0; font-size: 0.85rem; font-weight: 600; }
+    .gen-head { display: flex; align-items: baseline; gap: 8px; }
+    .gen-head b { font-family: var(--display); font-size: 0.75rem; color: var(--accent); }
+    .gen-panel .gen-form { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); margin-bottom: 0; }
+    .gen-panel .gen-go { margin-bottom: 0; }
+
+    .gen-chips.gen-stack { flex-direction: column; margin: 0; }
+    .gen-stack .gen-chip { display: flex; justify-content: space-between; gap: 8px; border-radius: var(--r-sm); padding: 8px 11px; text-align: left; }
+    .gen-chip small { color: var(--text-muted); }
+    .gen-chip[aria-pressed="true"] small { color: var(--text-2); }
+
+    .gen-refs { display: flex; gap: 6px; flex-wrap: wrap; }
+    .gen-ref-t {
+      position: relative; width: 50px; height: 64px; padding: 0; overflow: hidden; cursor: pointer;
+      border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface);
+    }
+    .gen-ref-t img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .gen-ref-t[aria-pressed="true"] { border-color: var(--accent); }
+    .gen-ref-t em {
+      position: absolute; left: 3px; bottom: 3px; font-style: normal; font-size: 0.55rem;
+      color: var(--text-2); background: #000000b3; border-radius: 4px; padding: 1px 5px;
+    }
+    .gen-ref-none { display: flex; align-items: center; justify-content: center; font-size: 0.58rem; line-height: 1.2; color: var(--text-muted); padding: 4px; }
+
+    .gen-quote { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 10px 11px; display: flex; flex-direction: column; gap: 7px; }
+    .gen-q-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 0.78rem; color: var(--text-2); }
+    .gen-q-row b { font-family: var(--display); font-size: 1.05rem; color: var(--text); }
+    .gen-quote .gen-engines { margin: 0; }
+
+    @media (max-width: 1180px) { .gen-cols { grid-template-columns: 1fr; } }
+
     .gen-form {
       display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
       gap: 8px; margin-bottom: 10px;
@@ -67,7 +103,6 @@
     }
     .gen-go { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
     .gen-go .btn-ai:disabled { opacity: .45; cursor: not-allowed; }
-    #gen-cost { opacity: .75; font-weight: 400; }
     .gen-low { color: var(--err); }
 
     .gen-staging {
@@ -117,6 +152,7 @@
     <span class="badge">Admin testing</span>
   </div>
   <div style="display:flex; align-items:center; gap:16px;">
+    <span id="gen-balance" class="hint" style="margin:0;"></span>
     <nav data-site-nav="inline" class="sn-links sn-inline"></nav>
     <a href="/dashboard" style="color:var(--text-muted); font-size:0.8rem; text-decoration:none;">← Dashboard</a>
   </div>
@@ -131,70 +167,99 @@
     credit prices shown are what a creator's plan would be charged.
   </div>
 
-  <div class="form-section">
-    <div class="section-title">Persona</div>
-    <div class="field full">
-      <label>Whose photos are we generating?</label>
-      <select id="persona" onchange="loadPersona()"></select>
-      <span class="hint" id="persona-hint"></span>
-    </div>
+  <div class="gen-toggles">
+    <label class="gen-seg"><span>Make</span>
+      <div>
+        <button type="button" id="make-image" aria-pressed="true" onclick="setMake('image')">Photos</button>
+        <button type="button" id="make-video" aria-pressed="false" onclick="setMake('video')">Video</button>
+      </div></label>
+    <label class="gen-seg"><span>Rating</span>
+      <div>
+        <button type="button" id="rate-sfw" aria-pressed="true" onclick="setRating('sfw')">Safe</button>
+        <button type="button" id="rate-nsfw" aria-pressed="false" onclick="setRating('nsfw')">Explicit</button>
+      </div></label>
+    <span class="hint" style="margin:0; align-self:flex-end;">These two swap the panels below.
+      Rating narrows the shots this persona already allows; it is never sent on its own.</span>
   </div>
 
-  <div class="vault" id="gen-panel">
-    <div class="vault-head">
-      <span class="vault-title">Generate <span id="gen-balance" class="vault-sel"></span></span>
+  <div class="gen-cols">
+    <div class="gen-col">
+
+      <div class="gen-panel">
+        <div class="gen-head"><b>1</b><h2>Model</h2></div>
+        <div class="gen-chips gen-stack" id="gen-models"></div>
+        <input type="hidden" id="gen-model">
+        <span class="hint" id="gen-model-note" style="margin:0;"></span>
+      </div>
+
+      <div class="gen-panel">
+        <div class="gen-head"><b>2</b><h2>Character</h2></div>
+        <label class="gen-f"><span>Whose photos are we generating?</span>
+          <select id="persona" onchange="loadPersona()"></select></label>
+        <div class="gen-f">
+          <span>Her face and body</span>
+          <div class="gen-refs" id="gen-refs"></div>
+          <input type="hidden" id="gen-ref">
+        </div>
+        <span class="hint" id="persona-hint" style="margin:0;"></span>
+      </div>
+
+      <div class="gen-panel">
+        <div class="gen-head"><b>3</b><h2>Output</h2></div>
+        <div class="gen-form" id="gen-image-out">
+          <label class="gen-f"><span>Size</span>
+            <select id="gen-res" onchange="genQuote()"></select></label>
+          <label class="gen-f"><span>How many</span>
+            <select id="gen-batch" onchange="genQuote()">
+              <option value="1">1</option><option value="2">2</option>
+              <option value="4" selected>4</option><option value="6">6</option>
+            </select></label>
+        </div>
+        <div class="gen-form" id="gen-video-out" style="display:none">
+          <label class="gen-f"><span>Clip size</span>
+            <select id="gen-vres" onchange="genQuote()"></select></label>
+          <label class="gen-f"><span>Seconds</span>
+            <select id="gen-vsecs" onchange="genQuote()"></select></label>
+        </div>
+      </div>
     </div>
 
-    <div class="gen-toggles">
-      <label class="gen-seg"><span>Make</span>
-        <div>
-          <button type="button" id="make-image" aria-pressed="true" onclick="setMake('image')">Photos</button>
-          <button type="button" id="make-video" aria-pressed="false" onclick="setMake('video')">Video</button>
-        </div></label>
-      <label class="gen-seg"><span>Rating</span>
-        <div>
-          <button type="button" id="rate-sfw" aria-pressed="true" onclick="setRating('sfw')">Safe</button>
-          <button type="button" id="rate-nsfw" aria-pressed="false" onclick="setRating('nsfw')">Explicit</button>
-        </div></label>
+    <div class="gen-panel">
+      <div class="gen-head"><b>4</b><h2>Prompt</h2></div>
+      <div id="gen-image-form" style="display:flex; flex-direction:column; gap:11px;">
+        <div class="gen-form">
+          <label class="gen-f"><span>Scene</span>
+            <select id="gen-shot" onchange="genQuote()"></select></label>
+          <label class="gen-f" id="gen-lora-wrap" style="display:none"><span>Explicit model</span>
+            <select id="gen-lora" onchange="genQuote()"></select></label>
+        </div>
+        <label class="gen-f"><span>Add to the prompt</span>
+          <textarea id="gen-prompt" rows="5" placeholder="leaning against the window, morning light, looking away from the camera"></textarea></label>
+        <label class="gen-f"><span>Keep out of the shot</span>
+          <textarea id="gen-negative" rows="3" placeholder="sunglasses, jewellery, other people"></textarea></label>
+        <span class="hint" style="margin:0;">The safety baseline is added to every negative prompt and cannot be edited away.</span>
+      </div>
+      <div class="note-box" id="gen-video-note" style="display:none">
+        A clip always starts from a photo that is already kept, so its first frame
+        carries her face. Pick one below and press <b>&#9654;</b> &mdash; there is no
+        text-to-video here on purpose.
+      </div>
     </div>
-    <div class="gen-chips" id="gen-models"></div>
-    <input type="hidden" id="gen-model">
 
-    <div class="gen-form" id="gen-image-form">
-      <label class="gen-f"><span>Shot</span>
-        <select id="gen-shot" onchange="genQuote()"></select></label>
-      <label class="gen-f"><span>Size</span>
-        <select id="gen-res" onchange="genQuote()"></select></label>
-      <label class="gen-f"><span>How many</span>
-        <select id="gen-batch" onchange="genQuote()">
-          <option value="1">1</option><option value="2">2</option>
-          <option value="4" selected>4</option><option value="6">6</option>
-        </select></label>
-      <label class="gen-f gen-wide"><span>Her face</span>
-        <select id="gen-ref" onchange="genQuote()"></select></label>
-      <label class="gen-f gen-wide" id="gen-lora-wrap" style="display:none"><span>Explicit model</span>
-        <select id="gen-lora" onchange="genQuote()"></select></label>
-      <label class="gen-f gen-wide"><span>Add to the prompt</span>
-        <textarea id="gen-prompt" rows="2" placeholder="leaning against the window, morning light, looking away from the camera"></textarea></label>
-      <label class="gen-f gen-wide"><span>Keep out of the shot</span>
-        <textarea id="gen-negative" rows="2" placeholder="sunglasses, jewellery, other people"></textarea></label>
+    <div class="gen-panel">
+      <div class="gen-head"><b>5</b><h2>Result</h2></div>
+      <div class="gen-quote">
+        <div class="gen-q-row"><span id="gen-quote-what"></span><b id="gen-cost"></b></div>
+        <div class="gen-engines" id="gen-engines"></div>
+      </div>
+      <div class="gen-go">
+        <button type="button" class="btn-ai" id="gen-run-btn" onclick="runGeneration()">Generate</button>
+        <span class="hint" id="gen-status" style="margin:0;"></span>
+      </div>
+      <div class="gen-staging" id="gen-staging"></div>
+      <span class="hint" style="margin:0;">Nothing here can reach a fan. Keep moves a shot into
+        the vault and approves it; the rest delete themselves in three days.</span>
     </div>
-    <div class="note-box" id="gen-video-note" style="display:none">
-      A clip always starts from a photo that is already kept, so its first frame
-      carries her face. Pick one below and press <b>▶</b> — there is no
-      text-to-video here on purpose.
-    </div>
-    <div class="gen-engines" id="gen-engines"></div>
-    <div class="gen-go">
-      <button type="button" class="btn-ai" id="gen-run-btn" onclick="runGeneration()">
-        Generate <span id="gen-cost"></span></button>
-      <span class="hint" id="gen-status" style="margin:0;"></span>
-    </div>
-    <span class="hint">Pick one of her existing photos under <b>Her face</b> and every
-      generation comes back as the same woman. New shots wait below for three days —
-      keep the ones worth keeping, the rest delete themselves.</span>
-
-    <div class="gen-staging" id="gen-staging"></div>
   </div>
 
   <div class="vault" id="vault-panel">
@@ -279,9 +344,8 @@ async function loadCredits() {
     const e = el('gen-balance');
     if (e) {
       e.textContent = d.unlimited
-        ? '· unlimited (admin)'
-        : `· ${d.balance.toLocaleString()} credits — about ${d.equivalents.photos.toLocaleString()} photos or ${d.equivalents.clips} clips`;
-      e.style.minWidth = '0';
+        ? 'Unlimited credits — admin'
+        : `${d.balance.toLocaleString()} credits — about ${d.equivalents.photos.toLocaleString()} photos or ${d.equivalents.clips} clips`;
     }
   } catch (e) {}
 }
@@ -325,17 +389,49 @@ function shotsForRating() {
 function renderModelChips() {
   const box = el('gen-models');
   const hidden = el('gen-model');
+  const note = el('gen-model-note');
   if (!box || !genPrices) return;
   if (genMake === 'video') {
     const name = (genEngines && genEngines.video) || 'the video model';
     box.innerHTML = `<button type="button" class="gen-chip" aria-pressed="true" disabled>${esc(name)}</button>`;
+    if (note) note.textContent = 'A clip runs on one model, so there is nothing to choose here.';
     return;
   }
   const keys = Object.keys(genPrices.images);
   if (!keys.includes(hidden.value)) hidden.value = genPrices.defaults.model;
-  box.innerHTML = keys.map(m =>
-    `<button type="button" class="gen-chip" aria-pressed="${m === hidden.value}"
-             onclick="pickModel('${m}')">${esc(genPrices.labels[m] || m)}</button>`).join('');
+  const res = (el('gen-res') || {}).value || genPrices.defaults.resolution;
+  box.innerHTML = keys.map(m => {
+    const price = (genPrices.images[m] || {})[res];
+    return `<button type="button" class="gen-chip" aria-pressed="${m === hidden.value}"
+             onclick="pickModel('${m}')">${esc(genPrices.labels[m] || m)}
+             <small>${price === undefined ? '' : price + ' cr'}</small></button>`;
+  }).join('');
+  if (note) {
+    note.textContent = genRating === 'nsfw'
+      ? 'Explicit shots add a second pass over her face, which is why they cost more.'
+      : 'Prices are per photo, before the face passes.';
+  }
+}
+
+// The reference is a photo, so it is picked as a photo. The caption is the
+// purpose it was filed under, which is how a body shot is told from a face one.
+function renderRefs() {
+  const box = el('gen-refs');
+  const hidden = el('gen-ref');
+  if (!box) return;
+  const photos = mediaVault.filter(v => v.kind !== 'video');
+  if (!photos.some(v => v.id === hidden.value)) hidden.value = '';
+  box.innerHTML = `<button type="button" class="gen-ref-t gen-ref-none" aria-pressed="${!hidden.value}"
+      onclick="pickRef('')">A new face</button>` + photos.map(v =>
+    `<button type="button" class="gen-ref-t" aria-pressed="${v.id === hidden.value}"
+       onclick="pickRef('${v.id}')" title="${esc(v.purpose || 'Her photo')}">
+       <img src="${v.thumb}" alt="">${v.purpose ? `<em>${esc(v.purpose)}</em>` : ''}</button>`).join('');
+}
+
+function pickRef(id) {
+  el('gen-ref').value = id;
+  renderRefs();
+  genQuote();
 }
 
 function pickModel(key) {
@@ -352,9 +448,24 @@ function renderGenForm() {
   const video = genMake === 'video';
   el('gen-image-form').style.display = video ? 'none' : '';
   el('gen-video-note').style.display = video ? '' : 'none';
+  el('gen-image-out').style.display = video ? 'none' : '';
+  el('gen-video-out').style.display = video ? '' : 'none';
   el('gen-run-btn').style.display = video ? 'none' : '';
+
+  const vres = el('gen-vres');
+  if (vres && !vres.options.length) {
+    vres.innerHTML = Object.keys(genPrices.videos).map(r =>
+      opt(r, r, genPrices.defaults.video_resolution)).join('');
+  }
+  const vsecs = el('gen-vsecs');
+  if (vsecs && !vsecs.options.length) {
+    const row = genPrices.videos[genPrices.defaults.video_resolution] || {};
+    vsecs.innerHTML = Object.keys(row).map(s =>
+      opt(s, s + 's', String(genPrices.defaults.video_duration))).join('');
+  }
+
   renderModelChips();
-  if (video) { showEngines(); return; }
+  renderRefs();
 
   const shot = el('gen-shot');
   if (shot) {
@@ -367,13 +478,6 @@ function renderGenForm() {
   if (res && !res.options.length) {
     res.innerHTML = genPrices.resolutions.map(r =>
       opt(r, `${GEN_RES_LABELS[r] || r} (${r})`, genPrices.defaults.resolution)).join('');
-  }
-  const ref = el('gen-ref');
-  if (ref) {
-    const keep = ref.value;
-    const photos = mediaVault.filter(v => v.kind !== 'video');
-    ref.innerHTML = '<option value="">A brand new face</option>' +
-      photos.map((v, i) => opt(v.id, `Photo ${i + 1}${v.purpose ? ' — ' + v.purpose : ''}`, keep)).join('');
   }
   genQuote();
 }
@@ -390,7 +494,9 @@ function showEngines() {
   if (!box || !genEngines) return;
   const wrap = el('gen-lora-wrap');
   const explicit = genExplicit();
-  if (wrap) wrap.style.display = explicit ? '' : 'none';
+  // The picker goes away with the LoRAs themselves: no entries, no control.
+  const hasLoras = !!(genEngines.loras && Object.keys(genEngines.loras).length);
+  if (wrap) wrap.style.display = explicit && hasLoras ? '' : 'none';
 
   const e = explicit ? genEngines.nsfw : genEngines.sfw;
   const rows = [['Image', e.model, explicit ? 'with the explicit model below' : '']];
@@ -409,6 +515,19 @@ function showEngines() {
 
 function genQuote() {
   if (!genPrices) return;
+  const what = el('gen-quote-what');
+  const cost = el('gen-cost');
+
+  if (genMake === 'video') {
+    const resv = (el('gen-vres') || {}).value || genPrices.defaults.video_resolution;
+    const secs = (el('gen-vsecs') || {}).value || String(genPrices.defaults.video_duration);
+    const per = (genPrices.videos[resv] || {})[secs];
+    if (what) what.textContent = `One ${secs}s clip, ${resv}`;
+    if (cost) cost.textContent = per === undefined ? '' : `${per} cr`;
+    showEngines();
+    return per;
+  }
+
   const row = genPrices.images[el('gen-model').value] || {};
   let per = row[el('gen-res').value];
   if (per === undefined) return;
@@ -417,9 +536,16 @@ function genQuote() {
       ? genPrices.addons.reference + genPrices.addons.restore
       : genPrices.addons.identity;
   }
-  const total = per * parseInt(el('gen-batch').value || '1', 10);
+  const batch = parseInt(el('gen-batch').value || '1', 10);
+  const total = per * batch;
 
-  el('gen-cost').textContent = `· ${total} credit${total === 1 ? '' : 's'}`;
+  if (what) {
+    what.textContent = `${batch} photo${batch === 1 ? '' : 's'}, ` +
+      (GEN_RES_LABELS[el('gen-res').value] || el('gen-res').value);
+  }
+  if (cost) cost.textContent = `${total} credit${total === 1 ? '' : 's'}`;
+  el('gen-run-btn').textContent = `Generate · ${total} credit${total === 1 ? '' : 's'}`;
+  renderModelChips();
   showEngines();
   const short = genCredits !== null && genCredits < total;
   el('gen-run-btn').classList.toggle('gen-low', short);
@@ -464,8 +590,8 @@ async function runGeneration() {
 }
 
 async function animateMedia(id) {
-  const secs = genPrices ? genPrices.defaults.video_duration : 5;
-  const resv = genPrices ? genPrices.defaults.video_resolution : '720p';
+  const secs = (el('gen-vsecs') || {}).value || (genPrices ? genPrices.defaults.video_duration : 5);
+  const resv = (el('gen-vres') || {}).value || (genPrices ? genPrices.defaults.video_resolution : '720p');
   const cost = genPrices ? genPrices.videos[resv][secs] : '?';
   if (!confirm(`Animate this photo into a ${secs}s ${resv} clip for ${cost} credits?`)) return;
   setGenStatus('Sending…', null);
