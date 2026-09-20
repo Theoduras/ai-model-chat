@@ -217,6 +217,7 @@
       <div>
         <button type="button" id="make-image" aria-pressed="true" onclick="setMake('image')">Photos</button>
         <button type="button" id="make-video" aria-pressed="false" onclick="setMake('video')">Video</button>
+        <button type="button" id="make-swap" aria-pressed="false" onclick="setMake('swap')">Swap into a video</button>
       </div></label>
     <label class="gen-seg"><span>Rating</span>
       <div>
@@ -234,6 +235,7 @@
         <div class="gen-head"><b>1</b><h2>Model</h2></div>
         <div class="gen-chips gen-stack" id="gen-models"></div>
         <input type="hidden" id="gen-model">
+        <input type="hidden" id="gen-vmodel">
         <span class="hint" id="gen-model-note" style="margin:0;"></span>
       </div>
 
@@ -265,6 +267,10 @@
               <option value="4" selected>4</option><option value="6">6</option>
             </select></label>
         </div>
+        <div id="gen-swap-out" style="display:none">
+          <span class="hint" style="margin:0;" id="gen-swap-out-note">The clip you upload decides
+            the length and the size, so there is nothing to choose here.</span>
+        </div>
         <div class="gen-form" id="gen-video-out" style="display:none">
           <label class="gen-f"><span>Clip size</span>
             <select id="gen-vres" onchange="genQuote()"></select></label>
@@ -275,7 +281,7 @@
     </div>
 
     <div class="gen-panel">
-      <div class="gen-head"><b>4</b><h2>Prompt</h2></div>
+      <div class="gen-head"><b>4</b><h2 id="gen-prompt-head">Prompt</h2></div>
       <div id="gen-image-form" style="display:flex; flex-direction:column; gap:11px;">
         <div class="gen-form">
           <label class="gen-f"><span>Scene</span>
@@ -299,6 +305,21 @@
           <textarea id="gen-negative" rows="3" placeholder="sunglasses, jewellery, other people"></textarea></label>
         <span class="hint" style="margin:0;">The safety baseline is added to every negative prompt and cannot be edited away.</span>
       </div>
+      <div id="gen-swap-form" style="display:none; flex-direction:column; gap:11px;">
+        <label class="gen-f"><span>Upload</span>
+          <input type="file" id="gen-swap-file" accept="video/mp4,video/quicktime,video/webm"
+                 onchange="uploadSwapSource(this.files[0])"></label>
+        <div id="gen-swap-have" style="display:none; gap:10px; align-items:center;">
+          <img id="gen-swap-poster" alt="" style="width:96px; border-radius:8px;">
+          <span class="hint" style="margin:0;" id="gen-swap-meta"></span>
+        </div>
+        <label class="gen-f"><span>Whose face</span>
+          <select id="gen-swap-ref" onchange="genQuote()"></select></label>
+        <label class="gen-f"><span>Direction</span>
+          <input id="gen-swap-direction" maxlength="300" placeholder="keep her hair down, match the original lighting"></label>
+        <span class="hint" style="margin:0;" id="gen-swap-limits"></span>
+      </div>
+
       <div class="note-box" id="gen-video-note" style="display:none">
         A clip always starts from a photo that is already kept, so its first frame
         carries her face. Pick one below and press <b>&#9654;</b> &mdash; there is no
@@ -386,6 +407,11 @@ let genTimer = null;
 // rather than being sent on its own: the server derives explicit from the shot
 // it is given, and two sources for one fact is how they drift apart.
 let genMake = 'image';
+let genSwap = null;        // the uploaded clip: {id, seconds, width, height, poster_url}
+// Provisional until the upload route is settled, so they live here rather than
+// in copy: the panel reads them out.
+const SWAP_LIMITS = { seconds: 30, mb: 200,
+                      types: ['video/mp4', 'video/quicktime', 'video/webm'] };
 let genRating = 'sfw';
 
 const GEN_SHOT_LABELS = {
@@ -455,6 +481,7 @@ function setMake(v) {
   genMake = v;
   el('make-image').setAttribute('aria-pressed', String(v === 'image'));
   el('make-video').setAttribute('aria-pressed', String(v === 'video'));
+  el('make-swap').setAttribute('aria-pressed', String(v === 'swap'));
   renderGenForm();
 }
 
@@ -473,17 +500,83 @@ function shotsForRating() {
     genRating === 'nsfw' ? explicitShots.includes(sh) : !explicitShots.includes(sh));
 }
 
-function renderModelChips() {
-  const box = el('gen-models');
-  const hidden = el('gen-model');
-  const note = el('gen-model-note');
-  if (!box || !genPrices) return;
-  if (genMake === 'video') {
+// `prices.videos` arrives either flat (resolution first) or keyed by model.
+// The rate moved under this panel once already, so it is always read, never
+// assumed and never cached.
+function videoModels() {
+  const v = (genPrices && genPrices.videos) || {};
+  const first = v[Object.keys(v)[0]];
+  if (!first) return [];
+  const inner = first[Object.keys(first)[0]];
+  return inner && typeof inner === 'object' ? Object.keys(v) : [];
+}
+
+function videoModel() {
+  const models = videoModels();
+  const hidden = el('gen-vmodel');
+  if (!models.length) return '';
+  const want = genRating === 'nsfw' ? 'nsfw' : 'sfw';
+  const rt = (genPrices && genPrices.video_ratings) || {};
+  const offered = models.filter(m => (rt[m] || ['sfw']).includes(want));
+  if (!offered.includes(hidden.value)) hidden.value = offered[0] || '';
+  return hidden.value;
+}
+
+function videoTable(model) {
+  const v = (genPrices && genPrices.videos) || {};
+  const models = videoModels();
+  if (!models.length) return v;
+  return v[model] || v[models[0]] || {};
+}
+
+// What a second of clip costs at this size, read off the longest duration the
+// table lists rather than a rate of our own.
+function videoPerSecond(model, resolution) {
+  const row = videoTable(model)[resolution] || {};
+  const secs = Object.keys(row).map(Number).filter(n => n > 0).sort((a, b) => b - a);
+  return secs.length ? row[String(secs[0])] / secs[0] : 0;
+}
+
+function videoModelChips(box, note) {
+  const models = videoModels();
+  if (!models.length) {
     const name = (genEngines && genEngines.video) || 'the video model';
     box.innerHTML = `<button type="button" class="gen-chip" aria-pressed="true" disabled>${esc(name)}</button>`;
     if (note) note.textContent = 'A clip runs on one model, so there is nothing to choose here.';
     return;
   }
+  const want = genRating === 'nsfw' ? 'nsfw' : 'sfw';
+  const rt = (genPrices && genPrices.video_ratings) || {};
+  const offered = models.filter(m => (rt[m] || ['sfw']).includes(want));
+  const chosen = videoModel();
+  const resv = swapResolution() ||
+    (el('gen-vres') || {}).value || genPrices.defaults.video_resolution;
+  box.innerHTML = offered.map(m => {
+    const rate = videoPerSecond(m, resv);
+    const label = (genPrices.labels || {})[m] || m;
+    return `<button type="button" class="gen-chip" aria-pressed="${m === chosen}"
+      onclick="pickVideoModel('${m}')"><span>${esc(label)}</span>` +
+      (rate ? `<small>${Math.round(rate)} cr/s</small>` : '') + `</button>`;
+  }).join('');
+  if (note) {
+    note.textContent = offered.length === 1
+      ? `${(genPrices.labels || {})[offered[0]] || offered[0]} is the only model that serves ` +
+        `${want === 'nsfw' ? 'explicit' : 'safe'} clips.`
+      : 'Priced by the second, so a longer clip costs proportionally more.';
+  }
+}
+
+function pickVideoModel(key) {
+  el('gen-vmodel').value = key;
+  renderGenForm();
+}
+
+function renderModelChips() {
+  const box = el('gen-models');
+  const hidden = el('gen-model');
+  const note = el('gen-model-note');
+  if (!box || !genPrices) return;
+  if (genMake !== 'image') return videoModelChips(box, note);
   // A model that cannot serve this rating is not offered at all. The server
   // would move it before quoting, and a swap nobody asked for reads as the
   // picker having lied.
@@ -674,20 +767,27 @@ function renderGenForm() {
     `<option value="${v}"${v === sel ? ' selected' : ''}>${esc(label)}</option>`;
 
   const video = genMake === 'video';
-  el('gen-image-form').style.display = video ? 'none' : '';
+  const swap = genMake === 'swap';
+  el('gen-image-form').style.display = genMake === 'image' ? '' : 'none';
   el('gen-video-note').style.display = video ? '' : 'none';
-  el('gen-image-out').style.display = video ? 'none' : '';
+  el('gen-swap-form').style.display = swap ? 'flex' : 'none';
+  el('gen-image-out').style.display = genMake === 'image' ? '' : 'none';
   el('gen-video-out').style.display = video ? '' : 'none';
+  el('gen-swap-out').style.display = swap ? '' : 'none';
+  // A clip is animated from a kept photo, so the video form has no button of
+  // its own; a swap starts from an upload and does.
   el('gen-run-btn').style.display = video ? 'none' : '';
+  el('gen-prompt-head').textContent = swap ? 'Her clip' : 'Prompt';
+  if (swap) renderSwapForm();
 
   const vres = el('gen-vres');
   if (vres && !vres.options.length) {
-    vres.innerHTML = Object.keys(genPrices.videos).map(r =>
+    vres.innerHTML = Object.keys(videoTable(videoModel())).map(r =>
       opt(r, r, genPrices.defaults.video_resolution)).join('');
   }
   const vsecs = el('gen-vsecs');
   if (vsecs && !vsecs.options.length) {
-    const row = genPrices.videos[genPrices.defaults.video_resolution] || {};
+    const row = videoTable(videoModel())[genPrices.defaults.video_resolution] || {};
     vsecs.innerHTML = Object.keys(row).map(s =>
       opt(s, s + 's', String(genPrices.defaults.video_duration))).join('');
   }
@@ -750,8 +850,12 @@ function genExplicit() {
 function showEngines() {
   const box = el('gen-engines');
   if (!box || !genEngines) return;
-  if (genMake === 'video') {
-    box.innerHTML = `<b>${esc(genEngines.provider)}</b><br>Clip <code>${esc(genEngines.video || '')}</code>`;
+  if (genMake !== 'image') {
+    const chosen = videoModel();
+    const name = chosen ? ((genPrices.labels || {})[chosen] || chosen) : (genEngines.video || '');
+    box.innerHTML = `<b>${esc(genEngines.provider)}</b><br>` +
+      (genMake === 'swap' ? 'Swap' : 'Clip') + ` <code>${esc(name)}</code>` +
+      (genMake === 'swap' ? '<br>Her face <code>reference images</code> — her face slots for this model' : '');
     return;
   }
   const e = (genExplicit() ? genEngines.nsfw : genEngines.sfw) || {};
@@ -775,15 +879,100 @@ function setMoney(credits) {
   el('gen-money').textContent = cash;
 }
 
+// The price table is keyed by the sizes we sell, so an uploaded clip is quoted
+// at the rung it fits into rather than at its exact pixel height.
+function swapResolution() {
+  if (genMake !== 'swap' || !genSwap) return '';
+  const rungs = Object.keys(videoTable(videoModel()));
+  const short = Math.min(genSwap.width || 0, genSwap.height || 0);
+  const num = r => parseInt(r, 10) || 0;
+  const fits = rungs.filter(r => num(r) >= short).sort((a, b) => num(a) - num(b));
+  return fits[0] || rungs.sort((a, b) => num(b) - num(a))[0] || '';
+}
+
+function renderSwapForm() {
+  el('gen-swap-limits').textContent =
+    `Up to ${SWAP_LIMITS.seconds} seconds and ${SWAP_LIMITS.mb} MB, as MP4, MOV or WebM. ` +
+    'The clip is never shown to a fan until you keep the result.';
+  const have = el('gen-swap-have');
+  have.style.display = genSwap ? 'flex' : 'none';
+  if (genSwap) {
+    el('gen-swap-poster').src = genSwap.poster_url || '';
+    el('gen-swap-meta').textContent =
+      `${Math.ceil(genSwap.seconds)}s, ${genSwap.width}×${genSwap.height} — a swap is priced ` +
+      'by the second, rounded up.';
+  }
+  const ref = el('gen-swap-ref');
+  const keep = ref.value;
+  const stills = mediaVault.filter(m => m.kind !== 'video');
+  ref.innerHTML = '<option value="">Her face references</option>' +
+    stills.map(m => `<option value="${m.id}"${m.id === keep ? ' selected' : ''}>` +
+      `${esc(m.purpose || 'vault photo')} — ${esc(String(m.id))}</option>`).join('');
+}
+
+async function uploadSwapSource(file) {
+  if (!file || !slug()) return;
+  if (!SWAP_LIMITS.types.includes(file.type)) {
+    setGenStatus('✗ That file type is not accepted. Use MP4, MOV or WebM.', false);
+    return;
+  }
+  if (file.size > SWAP_LIMITS.mb * 1024 * 1024) {
+    setGenStatus(`✗ That clip is over ${SWAP_LIMITS.mb} MB.`, false);
+    return;
+  }
+  setGenStatus('Uploading…', null);
+  try {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch('/api/personas/' + encodeURIComponent(slug()) + '/video-source',
+                            { method: 'POST', body: form });
+    const d = await res.json();
+    if (!res.ok || d.error) throw new Error(d.error || 'Upload failed');
+    if (d.seconds > SWAP_LIMITS.seconds) {
+      genSwap = null;
+      throw new Error(`That clip is ${Math.round(d.seconds)}s, over the ${SWAP_LIMITS.seconds}s limit.`);
+    }
+    genSwap = d;
+    setGenStatus('Clip uploaded.', true);
+  } catch (e) { genSwap = null; setGenStatus('✗ ' + e.message, false); }
+  renderGenForm();
+}
+
 function genQuote() {
   if (!genPrices) return;
   const what = el('gen-quote-what');
   const cost = el('gen-cost');
 
+  if (genMake === 'swap') {
+    const btn = el('gen-run-btn');
+    if (!genSwap) {
+      if (what) what.textContent = 'Upload a clip to see the price';
+      if (cost) cost.textContent = '';
+      setMoney(0);
+      btn.textContent = 'Generate';
+      btn.disabled = true;
+      showEngines();
+      return 0;
+    }
+    const resv = swapResolution();
+    const secs = Math.ceil(genSwap.seconds || 0);
+    const total = Math.round(videoPerSecond(videoModel(), resv) * secs);
+    if (what) what.textContent = `${secs}s swap, ${resv}`;
+    if (cost) cost.textContent = `${total} cr`;
+    setMoney(total);
+    const cash = cashFor(total);
+    btn.disabled = false;
+    btn.textContent = `Swap her in · ${total} credit${total === 1 ? '' : 's'}` +
+      (cash ? ` · ${cash}` : '');
+    btn.classList.toggle('gen-low', genCredits !== null && genCredits < total);
+    showEngines();
+    return total;
+  }
+
   if (genMake === 'video') {
     const resv = (el('gen-vres') || {}).value || genPrices.defaults.video_resolution;
     const secs = (el('gen-vsecs') || {}).value || String(genPrices.defaults.video_duration);
-    const per = (genPrices.videos[resv] || {})[secs];
+    const per = (videoTable(videoModel())[resv] || {})[secs];
     if (what) what.textContent = `One ${secs}s clip, ${resv}`;
     if (cost) cost.textContent = per === undefined ? '' : `${per} cr`;
     setMoney(per);
@@ -837,6 +1026,7 @@ function setGenStatus(msg, ok) {
 
 async function runGeneration() {
   if (!slug()) return;
+  if (genMake === 'swap') return runSwap();
   const btn = el('gen-run-btn');
   btn.disabled = true;
   setGenStatus('Sending…', null);
@@ -868,16 +1058,42 @@ async function runGeneration() {
   finally { btn.disabled = false; }
 }
 
+async function runSwap() {
+  if (!genSwap) return;
+  const btn = el('gen-run-btn');
+  btn.disabled = true;
+  setGenStatus('Sending…', null);
+  try {
+    const payload = { persona: slug(), kind: 'swap', model: videoModel(),
+                      source_media: genSwap.id,
+                      direction: el('gen-swap-direction').value.trim() };
+    // Sent only when a specific still was chosen: left out, the server uses her
+    // face reference group, which is the setup a creator has already done.
+    const ref = el('gen-swap-ref').value;
+    if (ref) payload.reference_media = ref;
+    const res = await fetch('/api/generate/job', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const d = await res.json();
+    if (!d.ok) throw new Error(d.error || 'Generation failed');
+    setGenStatus(`Swap running — ${d.credits} credits. It takes a few minutes.`, null);
+    loadCredits();
+    pollGenJobs();
+  } catch (e) { setGenStatus('✗ ' + e.message, false); }
+  finally { btn.disabled = false; }
+}
+
 async function animateMedia(id) {
   const secs = (el('gen-vsecs') || {}).value || (genPrices ? genPrices.defaults.video_duration : 5);
   const resv = (el('gen-vres') || {}).value || (genPrices ? genPrices.defaults.video_resolution : '720p');
-  const cost = genPrices ? genPrices.videos[resv][secs] : '?';
+  const cost = genPrices ? (videoTable(videoModel())[resv] || {})[secs] : '?';
   if (!confirm(`Animate this photo into a ${secs}s ${resv} clip for ${cost} credits?`)) return;
   setGenStatus('Sending…', null);
   try {
     const res = await fetch('/api/generate/job', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ persona: slug(), kind: 'video',
+      body: JSON.stringify({ persona: slug(), kind: 'video', model: videoModel(),
                              resolution: resv, seconds: secs, reference_media: id }),
     });
     const d = await res.json();
