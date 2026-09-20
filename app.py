@@ -27856,11 +27856,20 @@ def _gen_spec(slug, body, user):
         batch = max(1, min(8, int(body.get('batch') or 1)))
         spec.update({'shot': shot, 'model': model, 'resolution': resolution,
                      'batch': batch, 'outfit': body.get('outfit') or {}})
+        explicit = imagegen.SHOT_LEVEL.get(shot, 'sfw') != 'sfw'
+        spec['explicit'] = explicit
+        if explicit:
+            lora = (body.get('lora') or imagegen.DEFAULT_NSFW_LORA).strip()
+            if lora not in imagegen.NSFW_LORAS:
+                raise imagegen.GenerationError('Unknown NSFW model.')
+            spec['lora'] = lora
         if spec['reference_media']:
-            # Two mechanisms, because one is not enough: the reference steers
-            # the generation, the faceswap corrects whatever it still drifts
-            # on — and a full-body NSFW pose is exactly where it drifts.
-            spec['addons'].append('faceswap')
+            # An explicit shot cannot use PuLID — it will not share a request
+            # with the LoRA — so it holds her body with the Flux adapter and
+            # buys a second pass to put her face back. A clothed shot needs
+            # neither and uses PuLID alone.
+            spec['addons'].extend(('reference', 'restore') if explicit
+                                  else ('identity',))
     else:
         resolution = (body.get('resolution') or CR.DEFAULT_VIDEO_RESOLUTION).strip()
         seconds = int(body.get('seconds') or CR.DEFAULT_VIDEO_DURATION)

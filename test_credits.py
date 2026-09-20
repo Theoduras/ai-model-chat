@@ -61,7 +61,8 @@ def test_quote_covers_everything():
     missing = []
     for model in CR.IMAGE_MODELS:
         for res in CR.RESOLUTIONS:
-            for addons in ((), ('faceswap',), ('faceswap', 'upscale')):
+            for addons in ((), ('identity',), ('reference', 'restore'),
+                           ('identity', 'upscale')):
                 try:
                     CR.quote({'kind': 'image', 'model': model, 'resolution': res,
                               'addons': addons, 'batch': 4})
@@ -93,8 +94,14 @@ def test_prices_track_cost():
           CR.credits_for_cost(0.0013) == 1 and CR.credits_for_cost(0.0021) == 2)
     check('batch multiplies, add-ons are per image',
           CR.quote({'kind': 'image', 'model': 'sdxl',
-                    'resolution': '1024x1536', 'addons': ('faceswap',),
-                    'batch': 4}) == 12)
+                    'resolution': '1024x1536', 'addons': ('identity',),
+                    'batch': 4}) == 20)
+    check('an explicit shot is priced for both of its passes',
+          CR.quote({'kind': 'image', 'model': 'flux-dev',
+                    'resolution': '1024x1024',
+                    'addons': ('reference', 'restore')}) >
+          CR.quote({'kind': 'image', 'model': 'flux-dev',
+                    'resolution': '1024x1024'}))
     check('a 720p 5s clip is 150 credits',
           CR.quote({'kind': 'video', 'resolution': '720p', 'seconds': 5}) == 150)
     check('the legacy Google path is priced too, so it is not a free bypass',

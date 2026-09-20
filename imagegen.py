@@ -37,28 +37,45 @@ MODELSLAB_ENDPOINT = 'https://modelslab.com/api/v6'
 
 TIMEOUT = 60
 
-# Credit model keys (credits.IMAGE_MODELS) to each provider's model id. The
-# SDXL slot points at an NSFW-capable community checkpoint, which is the whole
-# reason for being on this provider rather than Google.
+# Credit model keys (credits.IMAGE_MODELS) to each provider's model id.
 RUNWARE_MODELS = {
-    'sdxl': os.getenv('RW_MODEL_SDXL', 'civitai:573152@926965'),
-    'flux-schnell': os.getenv('RW_MODEL_FLUX_SCHNELL', 'runware:100@1'),
+    'flux-krea': os.getenv('RW_MODEL_FLUX_KREA', 'runware:107@1'),
     'flux-dev': os.getenv('RW_MODEL_FLUX_DEV', 'runware:101@1'),
-    'qwen': os.getenv('RW_MODEL_QWEN', 'runware:108@1'),
+    'flux-schnell': os.getenv('RW_MODEL_FLUX_SCHNELL', 'runware:100@1'),
+    'sdxl': os.getenv('RW_MODEL_SDXL', 'civitai:573152@926965'),
 }
 RUNWARE_VIDEO_MODEL = os.getenv('RW_MODEL_VIDEO', 'runware:201@1')
 
-# Identity is carried by IP-Adapters, not by img2img: a seed image reproduces
-# the reference's whole composition, which is the opposite of what a new pose
-# is for. The base adapter holds body and styling, the Plus-Face one is the
-# faceswap pass the add-on charges for. Keyed by architecture because an
-# adapter only loads against the family it was trained on.
-RUNWARE_IP_ADAPTERS = {
-    'sdxl': {'base': 'runware:55@1', 'face': 'runware:55@3'},
-    'flux-schnell': {'base': 'runware:56@4'},
-    'flux-dev': {'base': 'runware:56@4'},
+# Explicit content comes from a LoRA on Flux rather than a second checkpoint
+# family. All three are offered so they can be compared on the same prompt and
+# the same reference; none of them is obviously the best.
+NSFW_LORAS = {
+    'general': {'air': 'civitai:655753@733658', 'label': 'NSFW FLUX (general nudity)'},
+    'uncensored': {'air': 'civitai:1082334@1215286', 'label': 'Uncensored AI (female character)'},
+    'acts': {'air': 'civitai:656365@734619', 'label': 'Explicit acts'},
 }
-IP_WEIGHT_BASE = 0.6
+DEFAULT_NSFW_LORA = 'general'
+LORA_WEIGHT = 0.9
+
+# Identity, and why it is shaped the way it is.
+#
+# PuLID is the strongest face mechanism Runware offers, and it refuses to share
+# a request with anything else: not `lora`, not `ipAdapters`, not even
+# `seedImage`. So a clothed shot uses it alone, and an explicit shot — which
+# needs the LoRA — cannot use it at all.
+#
+# An explicit shot is therefore two passes. The first makes the picture on Flux
+# with the LoRA, holding her body and styling with the Flux IP-Adapter. The
+# second is a low-strength img2img on SDXL, where the Plus-Face adapter exists,
+# and its only job is to put her face back. Crossing architectures for the
+# second pass is not elegant; it is the only mechanism the provider allows that
+# restores a face onto an image it did not generate.
+PULID_MODELS = ('runware:100@1', 'runware:101@1', 'runware:107@1')
+FLUX_IP_ADAPTER = 'runware:56@4'
+SDXL_FACE_ADAPTER = 'runware:55@3'
+RESTORE_MODEL = os.getenv('RW_MODEL_RESTORE', 'civitai:573152@926965')
+RESTORE_STRENGTH = float(os.getenv('RW_RESTORE_STRENGTH', '0.35'))
+IP_WEIGHT_BASE = 0.7
 IP_WEIGHT_FACE = 0.9
 
 MODELSLAB_MODELS = {
@@ -181,18 +198,25 @@ def build_prompt(appearance, shot, outfit=None, has_reference=False, extra=''):
 
 
 def engine_report():
-    """Which provider model does what, for the studio to show. A creator
-    picking 'Realistic (fast)' should be able to see the checkpoint behind it,
-    because that is what they are describing a prompt to."""
+    """Which provider model does what, for the studio to show. A creator picking
+    a shot should be able to see the checkpoint, the LoRA and whether the shot
+    is going to cost two passes."""
     provider = (os.getenv('IMAGEGEN_PROVIDER') or 'runware').strip().lower()
     if provider != 'runware':
-        return {'provider': provider, 'images': dict(MODELSLAB_MODELS),
-                'video': MODELSLAB_VIDEO_MODEL, 'identity': {}}
-    identity = {}
-    for key, pair in RUNWARE_IP_ADAPTERS.items():
-        identity[key] = {'reference': pair['base'], 'face': pair.get('face', '')}
-    return {'provider': 'runware', 'images': dict(RUNWARE_MODELS),
-            'video': RUNWARE_VIDEO_MODEL, 'identity': identity}
+        return {'provider': provider, 'sfw': {}, 'nsfw': {}, 'loras': {},
+                'video': MODELSLAB_VIDEO_MODEL}
+    return {
+        'provider': 'runware',
+        'sfw': {'model': RUNWARE_MODELS['flux-krea'], 'identity': 'PuLID',
+                'passes': 1},
+        'nsfw': {'model': RUNWARE_MODELS['flux-dev'],
+                 'identity': FLUX_IP_ADAPTER,
+                 'restore': {'model': RESTORE_MODEL, 'adapter': SDXL_FACE_ADAPTER},
+                 'passes': 2},
+        'loras': {k: dict(v) for k, v in NSFW_LORAS.items()},
+        'nsfw_shots': [k for k, v in SHOT_LEVEL.items() if v != 'sfw'],
+        'video': RUNWARE_VIDEO_MODEL,
+    }
 
 
 def build_video_prompt(motion=''):
@@ -284,6 +308,8 @@ _RW = {
     'negative': 'negativePrompt',
     'seed_image': 'seedImage',
     'adapters': 'ipAdapters',
+    'pulid': 'puLID',
+    'lora': 'lora',
     'frame_images': 'frameImages',
     'results': 'numberResults',
     'output': 'outputType',
@@ -310,21 +336,17 @@ class RunwareProvider(Provider):
             raise GenerationError(err)
         return body.get('data') or []
 
-    def submit_image(self, spec):
-        width, height = RESOLUTION_PX.get(spec.get('resolution'),
-                                          RESOLUTION_PX['1024x1536'])
-        task_uuid = str(uuid.uuid4())
-        task = {
+    def _base_task(self, spec, model, width, height):
+        return {
             'taskType': _RW['image_task'],
-            'taskUUID': task_uuid,
-            'model': RUNWARE_MODELS.get(spec.get('model'), RUNWARE_MODELS['sdxl']),
+            'taskUUID': str(uuid.uuid4()),
+            'model': model,
             _RW['prompt']: spec.get('prompt') or '',
             _RW['negative']: spec.get('negative') or NEGATIVE_PROMPT,
             'width': width,
             'height': height,
-            'steps': int(spec.get('steps') or 30),
+            'steps': int(spec.get('steps') or 28),
             'CFGScale': float(spec.get('cfg') or 6.0),
-            _RW['results']: int(spec.get('batch') or 1),
             _RW['output']: 'URL',
             _RW['format']: 'JPEG',
             'includeCost': True,
@@ -332,32 +354,78 @@ class RunwareProvider(Provider):
             # this platform exists to make must not be silently blanked by it.
             'checkNSFW': False,
         }
+
+    def submit_image(self, spec):
+        width, height = RESOLUTION_PX.get(spec.get('resolution'),
+                                          RESOLUTION_PX['1024x1536'])
+        explicit = bool(spec.get('explicit'))
+        model = RUNWARE_MODELS.get(spec.get('model')) or RUNWARE_MODELS['flux-krea']
+        if explicit:
+            # The LoRA only exists for Flux dev, so an explicit shot ignores the
+            # quality picker rather than loading a LoRA against a checkpoint it
+            # was not trained on.
+            model = RUNWARE_MODELS['flux-dev']
+        guide = None
+        if spec.get('reference_b64'):
+            guide = _data_uri(spec['reference_b64'], spec.get('reference_mime'))
+
+        task = self._base_task(spec, model, width, height)
+        task[_RW['results']] = int(spec.get('batch') or 1)
         if spec.get('seed') is not None:
             task['seed'] = int(spec['seed'])
-        ref = spec.get('reference_b64')
-        if ref:
-            guide = _data_uri(ref, spec.get('reference_mime'))
-            adapters = RUNWARE_IP_ADAPTERS.get(spec.get('model') or 'sdxl')
-            if adapters:
-                stack = [{'model': adapters['base'], 'guideImage': guide,
-                          'weight': IP_WEIGHT_BASE}]
-                if 'face' in adapters and 'faceswap' in (spec.get('addons') or ()):
-                    stack.append({'model': adapters['face'], 'guideImage': guide,
-                                  'weight': IP_WEIGHT_FACE})
-                task[_RW['adapters']] = stack
-            else:
-                # No adapter for this family, so the reference can only be held
-                # as a seed image. It constrains the pose; it is the fallback.
-                task[_RW['seed_image']] = guide
-                task['strength'] = float(spec.get('strength') or 0.72)
+
+        if explicit:
+            lora = NSFW_LORAS.get(spec.get('lora') or DEFAULT_NSFW_LORA)
+            task[_RW['lora']] = [{'model': (lora or NSFW_LORAS[DEFAULT_NSFW_LORA])['air'],
+                                  'weight': LORA_WEIGHT}]
+            if guide:
+                task[_RW['adapters']] = [{'model': FLUX_IP_ADAPTER,
+                                          'guideImage': guide,
+                                          'weight': IP_WEIGHT_BASE}]
+        elif guide and model in PULID_MODELS:
+            task[_RW['pulid']] = {'inputImages': [guide]}
+        elif guide:
+            task[_RW['seed_image']] = guide
+            task['strength'] = float(spec.get('strength') or 0.72)
 
         data = self._send([task])
         urls = [d.get('imageURL') for d in data if d.get('imageURL')]
-        cost = sum(float(d.get('cost') or 0) for d in data) or None
-        if urls:
-            # Runware answers image tasks inline, so there is nothing to poll.
-            return task_uuid, Result('done', urls, cost=cost)
-        return task_uuid, Result('running')
+        cost = sum(float(d.get('cost') or 0) for d in data)
+        if not urls:
+            return task['taskUUID'], Result('running')
+
+        if explicit and guide:
+            urls, restored_cost = self._restore_faces(spec, urls, guide,
+                                                      width, height)
+            cost += restored_cost
+        return task['taskUUID'], Result('done', urls, cost=cost or None)
+
+    def _restore_faces(self, spec, urls, guide, width, height):
+        """Put her face back onto an explicit generation.
+
+        PuLID cannot run beside the LoRA that made these, and it refuses a seed
+        image besides, so the restore is a low-strength img2img on SDXL — the
+        one architecture with a Plus-Face adapter. A pass that fails leaves the
+        image it was given rather than losing the generation outright.
+        """
+        out, cost = [], 0.0
+        for url in urls:
+            task = self._base_task(spec, RESTORE_MODEL, width, height)
+            task[_RW['results']] = 1
+            task[_RW['seed_image']] = url
+            task['strength'] = RESTORE_STRENGTH
+            task[_RW['adapters']] = [{'model': SDXL_FACE_ADAPTER,
+                                      'guideImage': guide,
+                                      'weight': IP_WEIGHT_FACE}]
+            try:
+                rows = self._send([task])
+            except GenerationError:
+                logger.exception('face restore failed, keeping the first pass')
+                out.append(url)
+                continue
+            cost += sum(float(r.get('cost') or 0) for r in rows)
+            out.append(next((r['imageURL'] for r in rows if r.get('imageURL')), url))
+        return out, cost
 
     def submit_video(self, spec):
         width, height = VIDEO_PX.get(spec.get('resolution'), VIDEO_PX['720p'])

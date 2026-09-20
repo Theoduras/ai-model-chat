@@ -139,6 +139,8 @@
         </select></label>
       <label class="gen-f gen-wide"><span>Her face</span>
         <select id="gen-ref" onchange="genQuote()"></select></label>
+      <label class="gen-f gen-wide" id="gen-lora-wrap" style="display:none"><span>Explicit model</span>
+        <select id="gen-lora" onchange="genQuote()"></select></label>
       <label class="gen-f gen-wide"><span>Add to the prompt</span>
         <textarea id="gen-prompt" rows="2" placeholder="leaning against the window, morning light, looking away from the camera"></textarea></label>
       <label class="gen-f gen-wide"><span>Keep out of the shot</span>
@@ -225,6 +227,11 @@ async function loadCredits() {
     const d = await res.json();
     genPrices = d.prices;
     genEngines = d.engines || null;
+    const lo = el('gen-lora');
+    if (lo && genEngines && !lo.options.length) {
+      lo.innerHTML = Object.entries(genEngines.loras || {}).map(
+        ([k, v]) => `<option value="${k}">${esc(v.label)}</option>`).join('');
+    }
     genCredits = d.unlimited ? null : d.balance;
     const e = el('gen-balance');
     if (e) {
@@ -285,23 +292,29 @@ function renderGenForm() {
 // What is actually running, named. A creator writing a prompt is writing it
 // for a specific checkpoint, and the identity pass is two more models again —
 // none of which the picker's friendly labels admit to.
+function genExplicit() {
+  return (genEngines && genEngines.nsfw_shots || []).includes(el('gen-shot').value);
+}
+
 function showEngines() {
   const box = el('gen-engines');
   if (!box || !genEngines) return;
-  const key = el('gen-model').value;
-  const rows = [
-    ['Image', genEngines.images[key] || '—',
-     genPrices.labels[key] || key]];
-  const id = (genEngines.identity || {})[key];
-  if (el('gen-ref').value && id) {
-    rows.push(['Her face', id.reference, 'holds her body and styling']);
-    if (id.face) rows.push(['', id.face, 'the faceswap pass over the result']);
-  } else if (el('gen-ref').value) {
-    rows.push(['Her face', 'seed image', 'no adapter for this model — the pose follows the reference']);
+  const wrap = el('gen-lora-wrap');
+  const explicit = genExplicit();
+  if (wrap) wrap.style.display = explicit ? '' : 'none';
+
+  const e = explicit ? genEngines.nsfw : genEngines.sfw;
+  const rows = [['Image', e.model, explicit ? 'with the explicit model below' : '']];
+  if (el('gen-ref').value) {
+    rows.push(['Her face', e.identity,
+               explicit ? 'holds her body and styling' : 'identity, one pass']);
+    if (explicit && e.restore) {
+      rows.push(['Face pass', e.restore.adapter,
+                 'a second pass on ' + e.restore.model + ' — this shot costs two']);
+    }
   }
-  if (genEngines.video) rows.push(['Clips', genEngines.video, 'animates a kept photo']);
-  box.innerHTML = `<b>${esc(genEngines.provider)}</b> · ` + rows.map(([what, model, note]) =>
-    `${what ? esc(what) + ' ' : ''}<code>${esc(model)}</code>${note ? ' — ' + esc(note) : ''}`
+  box.innerHTML = `<b>${esc(genEngines.provider)}</b><br>` + rows.map(([what, model, note]) =>
+    `${esc(what)} <code>${esc(model)}</code>${note ? ' — ' + esc(note) : ''}`
   ).join('<br>');
 }
 
@@ -310,7 +323,11 @@ function genQuote() {
   const row = genPrices.images[el('gen-model').value] || {};
   let per = row[el('gen-res').value];
   if (per === undefined) return;
-  if (el('gen-ref').value) per += genPrices.addons.faceswap;   // the identity pass
+  if (el('gen-ref').value) {
+    per += genExplicit()
+      ? genPrices.addons.reference + genPrices.addons.restore
+      : genPrices.addons.identity;
+  }
   const total = per * parseInt(el('gen-batch').value || '1', 10);
 
   el('gen-cost').textContent = `· ${total} credit${total === 1 ? '' : 's'}`;
@@ -343,6 +360,7 @@ async function runGeneration() {
         resolution: el('gen-res').value,
         batch: parseInt(el('gen-batch').value || '1', 10),
         reference_media: el('gen-ref').value || '',
+        lora: el('gen-lora').value || '',
         prompt: el('gen-prompt').value.trim(),
         negative: el('gen-negative').value.trim(),
       }),

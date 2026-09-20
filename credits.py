@@ -19,23 +19,26 @@ CREDIT_COST_USD = 0.002
 # month of invoices.
 MIN_MARGIN_MULTIPLE = 4.0
 
-IMAGE_MODELS = ('sdxl', 'flux-schnell', 'flux-dev', 'qwen')
+IMAGE_MODELS = ('flux-krea', 'flux-dev', 'flux-schnell', 'sdxl')
 RESOLUTIONS = ('768x1024', '1024x1024', '1024x1536', '1536x2048')
 VIDEO_RESOLUTIONS = ('480p', '720p', '1080p')
 VIDEO_DURATIONS = (3, 5, 10)
 
-DEFAULT_IMAGE_MODEL = 'sdxl'
+DEFAULT_IMAGE_MODEL = 'flux-krea'
 DEFAULT_RESOLUTION = '1024x1536'
 DEFAULT_VIDEO_RESOLUTION = '720p'
 DEFAULT_VIDEO_DURATION = 5
 
-# Credits per generation, by model and resolution. Derived from provider list
-# prices at ~30 steps; see the plan for the underlying dollar figures.
+# Credits per generation, by model and resolution. Every number here is the
+# rounded-up credit slice of a cost measured against the live provider at
+# 1024x1024 / 28 steps, scaled by pixel count — not a list price.
+#
+#   flux-krea / flux-dev   $0.0045    sdxl  $0.0013    flux-schnell  ~$0.0015
 IMAGE_PRICES = {
+    'flux-krea':    {'768x1024': 3, '1024x1024': 3, '1024x1536': 4, '1536x2048': 7},
+    'flux-dev':     {'768x1024': 3, '1024x1024': 3, '1024x1536': 4, '1536x2048': 7},
+    'flux-schnell': {'768x1024': 1, '1024x1024': 1, '1024x1536': 2, '1536x2048': 3},
     'sdxl':         {'768x1024': 1, '1024x1024': 1, '1024x1536': 1, '1536x2048': 2},
-    'flux-schnell': {'768x1024': 2, '1024x1024': 2, '1024x1536': 3, '1536x2048': 5},
-    'flux-dev':     {'768x1024': 6, '1024x1024': 8, '1024x1536': 11, '1536x2048': 23},
-    'qwen':         {'768x1024': 8, '1024x1024': 10, '1024x1536': 15, '1536x2048': 30},
 }
 
 VIDEO_PRICES = {
@@ -48,11 +51,14 @@ VIDEO_PRICES = {
 # it cannot be used as a free way around the credit system.
 GOOGLE_IMAGE_CREDITS = 10
 
+# Add-ons, in the same measured slices. Identity is not one mechanism but
+# three, and they do not cost the same: PuLID carries a clothed shot on its own
+# ($0.0060), an explicit shot holds the body with the Flux IP-Adapter ($0.0013)
+# and then pays a second pass on SDXL to put her face back ($0.0026).
 ADDON_PRICES = {
-    # Two IP-Adapter passes, not one: the reference adapter and the Plus-Face
-    # one are billed separately by the provider and together cost more than a
-    # whole SDXL generation, so a single credit here would sell them at a loss.
-    'faceswap': 2,
+    'identity': 4,
+    'reference': 1,
+    'restore': 2,
     'upscale': 2,
     'nsfw_check': 1,
 }
@@ -61,10 +67,10 @@ ADDON_PRICES = {
 # are deliberately absent everywhere in this file: they are moderated and cannot
 # serve this feature, so nothing may offer them for an NSFW slot.
 MODEL_LABELS = {
-    'sdxl': 'Realistic (fast)',
-    'flux-schnell': 'Realistic+ (fast)',
+    'flux-krea': 'Most realistic',
     'flux-dev': 'Highest detail',
-    'qwen': 'Highest detail (alt)',
+    'flux-schnell': 'Fast draft',
+    'sdxl': 'Cheapest',
 }
 
 # Included allowance per calendar month, keyed on the tier keys in app.TIERS.
@@ -180,7 +186,7 @@ def packs_for(tier):
 def equivalents(credits):
     """What a balance is worth in the two things creators actually make, for the
     'about 4,200 photos or 28 clips' line in the header."""
-    photo = image_price(DEFAULT_IMAGE_MODEL, DEFAULT_RESOLUTION, ('faceswap',))
+    photo = image_price(DEFAULT_IMAGE_MODEL, DEFAULT_RESOLUTION, ('identity',))
     clip = video_price(DEFAULT_VIDEO_RESOLUTION, DEFAULT_VIDEO_DURATION)
     n = max(0, int(credits or 0))
     return {'photos': n // photo, 'clips': n // clip}
