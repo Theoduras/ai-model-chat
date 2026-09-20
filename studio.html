@@ -209,7 +209,7 @@
   <div class="note-box" id="intro">
     Internal testing surface for NSFW photo and video generation. It is not offered
     to creators yet, and an admin account generates on <b>unlimited credits</b> — the
-    credit prices shown are what a creator's plan would be charged.
+    credit and cash prices shown are what a creator's plan would be charged.
   </div>
 
   <div class="gen-toggles">
@@ -298,6 +298,7 @@
       <div class="gen-head"><b>5</b><h2>Result</h2></div>
       <div class="gen-quote">
         <div class="gen-q-row"><span id="gen-quote-what"></span><b id="gen-cost"></b></div>
+        <div class="gen-q-row"><span id="gen-money-what"></span><span id="gen-money"></span></div>
         <div class="gen-engines" id="gen-engines"></div>
       </div>
       <div class="gen-go">
@@ -362,6 +363,7 @@ function slug(){ return (el('persona')||{}).value || ''; }
 let genPrices = null;      // the server's price table
 let genEngines = null;     // which provider model is behind each picker entry
 let genCredits = null;     // null = unlimited, which is every admin
+let genRate = null;        // what a credit costs this tier in cash
 let genAllowedShots = [];  // resolved server side from the persona's NSFW level
 let mediaVault = [];
 let genJobs = [];
@@ -405,12 +407,13 @@ async function loadCredits() {
     const d = await res.json();
     genPrices = d.prices;
     genEngines = d.engines || null;
+    genRate = d.credit_rate || null;
     genCredits = d.unlimited ? null : d.balance;
     const e = el('gen-balance');
     if (e) {
       e.textContent = d.unlimited
         ? 'Unlimited credits — admin'
-        : `${d.balance.toLocaleString()} credits — about ${d.equivalents.photos.toLocaleString()} photos or ${d.equivalents.clips} clips`;
+        : `${d.balance.toLocaleString()} credits${cashFor(d.balance) ? ' (' + cashFor(d.balance) + ')' : ''} — about ${d.equivalents.photos.toLocaleString()} photos or ${d.equivalents.clips} clips`;
     }
   } catch (e) {}
 }
@@ -717,6 +720,13 @@ function showEngines() {
   ).join('<br>');
 }
 
+function setMoney(credits) {
+  const cash = cashFor(credits);
+  el('gen-money-what').textContent = !cash ? ''
+    : genCredits === null ? "What a creator's plan pays" : 'In money';
+  el('gen-money').textContent = cash;
+}
+
 function genQuote() {
   if (!genPrices) return;
   const what = el('gen-quote-what');
@@ -728,6 +738,7 @@ function genQuote() {
     const per = (genPrices.videos[resv] || {})[secs];
     if (what) what.textContent = `One ${secs}s clip, ${resv}`;
     if (cost) cost.textContent = per === undefined ? '' : `${per} cr`;
+    setMoney(per);
     showEngines();
     return per;
   }
@@ -749,13 +760,24 @@ function genQuote() {
       (GEN_RES_LABELS[el('gen-res').value] || el('gen-res').value);
   }
   if (cost) cost.textContent = `${total} credit${total === 1 ? '' : 's'}`;
-  el('gen-run-btn').textContent = `Generate · ${total} credit${total === 1 ? '' : 's'}`;
+  setMoney(total);
+  const cash = cashFor(total);
+  el('gen-run-btn').textContent = `Generate · ${total} credit${total === 1 ? '' : 's'}` +
+    (cash ? ` · ${cash}` : '');
   renderModelChips();
   showEngines();
   const short = genCredits !== null && genCredits < total;
   el('gen-run-btn').classList.toggle('gen-low', short);
   if (short) setGenStatus(`Only ${genCredits} credits left.`, false);
   return total;
+}
+
+function cashFor(credits) {
+  if (!genRate || !genRate.usd || !credits) return '';
+  const usd = credits * genRate.usd;
+  const money = (n, sym) => sym + (n < 100 ? n.toFixed(2) : Math.round(n).toLocaleString());
+  const out = money(usd, '$');
+  return genRate.eur_per_usd ? `${out} · ${money(usd * genRate.eur_per_usd, '\u20ac')}` : out;
 }
 
 function setGenStatus(msg, ok) {
