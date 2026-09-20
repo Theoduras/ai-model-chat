@@ -72,10 +72,29 @@ ADDON_PRICES = {
 # serve this feature, so nothing may offer them for an NSFW slot.
 MODEL_LABELS = {
     'seedream-4-5': 'Seedream 4.5',
-    'seedream-5-pro': 'Seedream 5.0 Pro (safe only)',
-    'nano-banana-pro': 'Nano Banana Pro (safe only)',
-    'nano-banana-2': 'Nano Banana 2 (safe only)',
+    'seedream-5-pro': 'Seedream 5.0 Pro',
+    'nano-banana-pro': 'Nano Banana Pro',
+    'nano-banana-2': 'Nano Banana 2',
 }
+
+# Which ratings each model actually serves, measured against the provider
+# rather than assumed. The picker filters on this: a model that would be moved
+# to another one at submit should never have been offered in the first place,
+# because the creator reads the swap as the model having lied.
+#
+# Only Seedream 4.5 serves explicit work. 5.0 Pro refuses it at ByteDance's
+# end, and the Google models refuse it at any safety level.
+MODEL_RATINGS = {
+    'seedream-4-5': ('sfw', 'nsfw'),
+    'seedream-5-pro': ('sfw',),
+    'nano-banana-pro': ('sfw',),
+    'nano-banana-2': ('sfw',),
+}
+
+
+def models_for_rating(rating):
+    want = 'nsfw' if rating == 'nsfw' else 'sfw'
+    return [m for m in IMAGE_MODELS if want in MODEL_RATINGS.get(m, ('sfw',))]
 
 # Included allowance per calendar month, keyed on the tier keys in app.TIERS.
 MONTHLY_CREDITS = {
@@ -203,6 +222,7 @@ def price_table():
         'videos': VIDEO_PRICES,
         'addons': ADDON_PRICES,
         'labels': MODEL_LABELS,
+        'ratings': {m: list(r) for m, r in MODEL_RATINGS.items()},
         'resolutions': list(RESOLUTIONS),
         'video_resolutions': list(VIDEO_RESOLUTIONS),
         'video_durations': list(VIDEO_DURATIONS),

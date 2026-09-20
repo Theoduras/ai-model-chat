@@ -27891,11 +27891,12 @@ def _gen_spec(slug, body, user):
         resolution = (body.get('resolution') or CR.DEFAULT_RESOLUTION).strip()
         if model not in CR.IMAGE_MODELS or resolution not in CR.RESOLUTIONS:
             raise imagegen.GenerationError('Unknown model or resolution.')
-        # A safe-work model cannot serve an explicit shot, and the provider
-        # would substitute silently. Move it here instead, before the quote, so
-        # the creator is charged for the model that actually runs.
+        # A model that cannot serve this rating is moved before the quote, not
+        # after: the provider would substitute silently and the creator would
+        # be charged for a model that never ran. CR.MODEL_RATINGS is the one
+        # source of truth — the picker filters on the same map.
         if (imagegen.SHOT_LEVEL.get(shot, 'sfw') != 'sfw'
-                and model in imagegen.SFW_ONLY_MODELS):
+                and 'nsfw' not in CR.MODEL_RATINGS.get(model, ('sfw',))):
             model = imagegen.EXPLICIT_MODEL
         batch = max(1, min(8, int(body.get('batch') or 1)))
         spec.update({'shot': shot, 'model': model, 'resolution': resolution,
