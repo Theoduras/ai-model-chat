@@ -227,6 +227,13 @@ Stay completely in character. Never mention being an AI.
   minute-granularity pinger if that matters. The staging lifecycle rule moved
   out of the worker into `_gen_ensure_lifecycle` for the same reason: the one
   host with no worker was the one host where generated media never expired.
+- Storage has two backends behind one interface in `storage.py`, chosen by
+  whichever is configured: GCS on Cloud Run, Vercel Blob on Vercel, which has
+  no GCP credentials at all. Two things differ and both are handled there — a
+  private Blob object is 403 without the store token, so `signed_url` returns
+  None and the media route proxies the bytes rather than leaking that token to
+  a browser; and Blob has no lifecycle rules, so `purge_staging()` carries the
+  three-day window and `/api/generate/tick` is what calls it.
 - `api/requirements.txt` is the Vercel dependency set and wins over the root
   one for that entrypoint. It drops playwright, patchright, telethon and
   gunicorn — the always-on host's stacks, all imported lazily, none of which a

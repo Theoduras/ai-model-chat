@@ -10601,13 +10601,21 @@ def api_persona_media_image(slug, media_id):
             return ('', 404)
         path = getattr(row, 'gcs_path', '') or ''
         if not row.image_data and path:
-            # Signed rather than proxied: the bytes never pass through the app,
-            # which is what makes serving a clip from here affordable.
+            # Redirect to a signed URL where the backend can mint one, so the
+            # bytes never pass through the app — that is what makes serving a
+            # clip affordable. A private Blob store cannot, and its token must
+            # not reach a browser, so there we proxy instead.
             try:
-                return redirect(storage.signed_url(path))
+                url = storage.signed_url(path)
+                if url:
+                    return redirect(url)
+                data = storage.get(path)
             except Exception:
-                logger.exception('signed url failed for media %s', media_id)
+                logger.exception('could not serve media %s', media_id)
                 return ('', 502)
+            return app.response_class(
+                data, mimetype=row.mime or 'application/octet-stream',
+                headers={'Cache-Control': 'private, max-age=300'})
         # An externally hosted item is a redirect, so a platform fetching this
         # URL still lands on the file rather than on nothing.
         if not row.image_data and row.source_url:
@@ -28300,7 +28308,13 @@ def api_generate_tick():
     except Exception:
         logger.exception('generation tick failed')
         return jsonify({'ok': False}), 500
-    return jsonify({'ok': True, 'advanced': n})
+    # Only a backend with no lifecycle rule of its own does anything here.
+    purged = 0
+    try:
+        purged = storage.purge_staging() if storage.enabled() else 0
+    except Exception:
+        logger.exception('staging purge failed')
+    return jsonify({'ok': True, 'advanced': n, 'purged': purged})
 
 
 _gen_worker_started = [False]
