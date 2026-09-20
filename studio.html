@@ -304,6 +304,22 @@
         </div>
         <label class="gen-f"><span>Direction</span>
           <input id="gen-direction" maxlength="300" placeholder="looking back over her shoulder, phone in one hand"></label>
+        <div class="gen-f" style="gap:6px;">
+          <button type="button" class="btn-ai" id="gen-build-btn"
+                  style="align-self:flex-start;" onclick="togglePromptBuilder()">
+            Build a prompt</button>
+          <div id="gen-builder" style="display:none; flex-direction:column; gap:9px;
+               border:1px solid var(--line); border-radius:10px; padding:11px;">
+            <div id="gen-builder-qs" style="display:flex; flex-direction:column; gap:9px;"></div>
+            <label style="display:flex; gap:6px; align-items:center; font-size:.82rem;">
+              <input type="checkbox" id="gen-builder-adv" onchange="renderBuilder()">
+              More detail</label>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <button type="button" class="btn-ai" onclick="runPromptBuilder()">Write it</button>
+              <span class="hint" style="margin:0;" id="gen-builder-note"></span>
+            </div>
+          </div>
+        </div>
         <label class="gen-f"><span>Add to the prompt</span>
           <textarea id="gen-prompt" rows="5" placeholder="leaning against the window, morning light, looking away from the camera"></textarea></label>
         <label class="gen-f"><span>Keep out of the shot</span>
@@ -322,6 +338,15 @@
         <label class="gen-f"><span>Motion</span>
           <input id="gen-swap-motion" maxlength="300" placeholder="keep her hair down, match the original lighting"></label>
         <span class="hint" style="margin:0;" id="gen-swap-limits"></span>
+      </div>
+
+      <div id="gen-video-drive" style="display:none; flex-direction:column; gap:8px;">
+        <label class="gen-f"><span>Motion clip (optional)</span>
+          <input type="file" id="gen-drive-file" accept="video/mp4,video/quicktime"
+                 onchange="uploadSwapSource(this.files[0], 'drive')"></label>
+        <span class="hint" style="margin:0;" id="gen-drive-note">Upload a clip and
+          her photo performs its motion instead of being animated freely. The clip
+          only supplies movement — it is never shown to a fan.</span>
       </div>
 
       <div class="note-box" id="gen-video-note" style="display:none">
@@ -416,7 +441,8 @@ let genTimer = null;
 // rather than being sent on its own: the server derives explicit from the shot
 // it is given, and two sources for one fact is how they drift apart.
 let genMake = 'image';
-let genSwap = null;        // the uploaded clip: {source, url, seconds, width, height}
+let genSwap = null;       // the uploaded clip: {source, url, seconds, width, height}
+let genDrive = null;      // the Video tab's optional motion clip, same shape
 const SWAP_LIMITS = { mb: 200, types: ['video/mp4', 'video/quicktime'] };
 let genRating = 'sfw';
 
@@ -476,7 +502,9 @@ async function loadPersona() {
     genCameras = d.cameras || [];
     genLighting = d.lighting || [];
     el('persona-hint').textContent =
-      `NSFW level: ${d.nsfw_level || 'sfw'} — that is what decides which shots are offered.`;
+      'The Safe / Explicit toggle above decides what is offered here. Her NSFW '
+      + 'level is a chat setting — how far she flirts with a fan — and does not '
+      + 'limit what you can generate.';
   } catch (e) { mediaVault = []; genAllowedShots = []; genScenes = []; }
   renderVault();
   renderGenForm();
@@ -819,6 +847,7 @@ function renderGenForm() {
   el('gen-swap-form').style.display = swap ? 'flex' : 'none';
   el('gen-image-out').style.display = genMake === 'image' ? '' : 'none';
   el('gen-video-out').style.display = video ? '' : 'none';
+  el('gen-video-drive').style.display = video ? 'flex' : 'none';
   // The uploaded clip is the ceiling for a swap's length and size, not the
   // value: both are picked here, within what the file can carry.
   el('gen-swap-out').style.display = swap ? '' : 'none';
@@ -834,9 +863,15 @@ function renderGenForm() {
       opt(r, r, genPrices.defaults.video_resolution)).join('');
   }
   const vsecs = el('gen-vsecs');
-  if (vsecs && !vsecs.options.length) {
-    vsecs.innerHTML = secondsRange().map(n =>
-      opt(String(n), n + 's', String(genPrices.defaults.video_duration))).join('');
+  if (vsecs && vsecs.dataset.model !== videoModel()) {
+    vsecs.dataset.model = videoModel();
+    // Each model's own lengths: one that makes 3, 5 or 10 second clips must
+    // not be offered 7, which it refuses.
+    const fixed = (genPrices.video_model_durations || {})[videoModel()];
+    const list = fixed || secondsRange();
+    const keep = list.includes(parseInt(vsecs.value, 10))
+      ? vsecs.value : String(genPrices.defaults.video_duration);
+    vsecs.innerHTML = list.map(n => opt(String(n), n + 's', keep)).join('');
   }
   renderSwapOut();
 
@@ -1112,7 +1147,9 @@ function readClipSeconds(file) {
   });
 }
 
-async function uploadSwapSource(file) {
+// The swap panel and the Video tab's motion clip are the same upload to the
+// same row and the same three-day sweep; only where the id lands differs.
+async function uploadSwapSource(file, into) {
   if (!file || !slug()) return;
   if (!SWAP_LIMITS.types.includes(file.type)) {
     setGenStatus('✗ That file type is not accepted. Use an MP4 or a MOV.', false);
@@ -1143,10 +1180,70 @@ async function uploadSwapSource(file) {
         : `The upload failed (${res.status}).`);
     }
     if (!d.ok) throw new Error(d.error || 'Upload failed');
-    genSwap = d;
+    if (into === 'drive') {
+      genDrive = d;
+      el('gen-drive-note').textContent =
+        `${d.seconds}s of motion — her photo will perform it.`;
+    } else {
+      genSwap = d;
+    }
     setGenStatus('Clip uploaded.', true);
   } catch (e) { genSwap = null; setGenStatus('✗ ' + e.message, false); }
   renderGenForm();
+}
+
+// The guided prompt builder. The questions and the wording both come from the
+// server: her NSFW level decides which options exist, and an explicit prompt is
+// assembled there rather than written by Gemini, which refuses this content.
+let genBuilder = null;
+const genAnswers = {};
+
+async function togglePromptBuilder() {
+  const box = el('gen-builder');
+  const open = box.style.display === 'none';
+  box.style.display = open ? 'flex' : 'none';
+  if (!open || genBuilder) { if (open) renderBuilder(); return; }
+  try {
+    const res = await fetch('/api/generate/prompt/options?persona=' +
+      encodeURIComponent(slug()) + '&kind=' + (genMake === 'video' ? 'video' : 'image') +
+      '&rating=' + genRating);
+    const d = await res.json();
+    if (!d.ok) throw new Error(d.error || 'could not load the questions');
+    genBuilder = d;
+    renderBuilder();
+  } catch (e) { setGenStatus('✗ ' + e.message, false); }
+}
+
+function renderBuilder() {
+  if (!genBuilder) return;
+  const adv = el('gen-builder-adv').checked;
+  el('gen-builder-qs').innerHTML = genBuilder.questions
+    .filter(q => adv || !q.advanced)
+    .map(q => `<label class="gen-f"><span>${esc(q.label)}</span>
+        <select onchange="genAnswers['${q.id}'] = this.value">
+          ${opt('', '—', genAnswers[q.id] || '')}
+          ${q.options.map(o => opt(o.id, o.label, genAnswers[q.id] || '')).join('')}
+        </select></label>`).join('');
+}
+
+async function runPromptBuilder() {
+  el('gen-builder-note').textContent = 'Writing…';
+  try {
+    const res = await fetch('/api/generate/prompt', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ persona: slug(), rating: genRating,
+                             kind: genMake === 'video' ? 'video' : 'image',
+                             answers: genAnswers }),
+    });
+    const d = await res.json();
+    if (!d.ok) throw new Error(d.error || 'could not write it');
+    const field = genMake === 'swap' ? el('gen-swap-motion') : el('gen-prompt');
+    field.value = d.prompt;
+    el('gen-builder-note').textContent =
+      d.engine === 'gemini' ? 'Written — edit it before you generate.'
+                            : 'Built — edit it before you generate.';
+    genQuote();
+  } catch (e) { el('gen-builder-note').textContent = '✗ ' + e.message; }
 }
 
 function genQuote() {
@@ -1240,7 +1337,7 @@ async function runGeneration() {
     const res = await fetch('/api/generate/job', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        persona: slug(), kind: 'image',
+        persona: slug(), kind: 'image', rating: genRating,
         shot: el('gen-shot').value,
         model: el('gen-model').value,
         resolution: el('gen-res').value,
@@ -1274,6 +1371,7 @@ async function runSwap() {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         persona: slug(), kind: 'swap', source: genSwap.id, model: swapModel(),
+        rating: genRating,
         resolution: swapResolution(), seconds: swapSeconds(),
         motion: el('gen-swap-motion').value.trim(),
       }),
@@ -1298,7 +1396,9 @@ async function animateMedia(id) {
     const res = await fetch('/api/generate/job', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ persona: slug(), kind: 'video', model: videoModel(),
-                             resolution: resv, seconds: secs, reference_media: id }),
+                             rating: genRating,
+                             resolution: resv, seconds: secs, reference_media: id,
+                             source: genDrive ? genDrive.id : '' }),
     });
     const d = await res.json();
     if (!d.ok) throw new Error(d.error || 'Generation failed');

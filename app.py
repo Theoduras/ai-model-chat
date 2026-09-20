@@ -10475,9 +10475,10 @@ def api_persona_media_list(slug):
         # `items` keeps the old shape so anything still reading it works.
         items = [dict(v, outfit=(v['outfits'][0] if v['outfits'] else ''))
                  for v in vault]
-        # The shot list is the persona's own NSFW setting resolved server side:
-        # the picker must not offer a rung the submit would refuse.
-        level = _persona_nsfw_level(_persona_config(slug))
+        # The whole vocabulary: the studio's Safe/Explicit toggle narrows it,
+        # not the persona's chat setting, which says how far she flirts rather
+        # than what her operator may generate.
+        level = 'explicit'
         return jsonify({'items': items, 'vault': vault,
                         'links': placements, 'outfits': outfits,
                         'nsfw_level': level,
@@ -27958,7 +27959,10 @@ def _gen_spec(slug, body, user):
         raise imagegen.GenerationError('Unknown generation kind.')
 
     cfg = _persona_config(slug) or {}
-    level = _persona_nsfw_level(cfg)
+    # The studio's own Safe/Explicit toggle decides what may be generated. The
+    # persona's nsfw_level is a chat setting -- how far she flirts with a fan --
+    # and has no business gating what her operator may produce.
+    level = 'sfw' if (body.get('rating') or '').strip().lower() == 'sfw' else 'explicit'
     spec = {'kind': kind, 'slug': slug,
             'reference_media': (body.get('reference_media') or '').strip(),
             'prompt_extra': (body.get('prompt') or '').strip()[:600],
@@ -27971,7 +27975,7 @@ def _gen_spec(slug, body, user):
     scene = (body.get('scene') or '').strip().lower()
     if not imagegen.scene_allowed(scene, level):
         raise imagegen.GenerationError(
-            f'This persona is set to "{level}", which does not allow that scene.')
+            'That scene is explicit — switch the studio to Explicit first.')
     spec.update({
         'scene': scene if scene in imagegen.SCENES else '',
         'style': (body.get('style') or '').strip().lower(),
@@ -28028,7 +28032,10 @@ def _gen_spec(slug, body, user):
                 model = CR.DEFAULT_SWAP_MODEL
             if (level != 'sfw'
                     and 'nsfw' not in CR.VIDEO_MODEL_RATINGS.get(model, ('sfw',))):
-                model = CR.DEFAULT_SWAP_MODEL
+                # The default swap model is the safe-work one, so an explicit
+                # persona moves to the explicit replace rather than to a model
+                # whose safety check will refuse her every time.
+                model = CR.EXPLICIT_SWAP_MODEL
             source_id = str(body.get('source') or body.get('source_media')
                             or body.get('id') or '').strip()
             src = _video_source_row(slug, source_id)
@@ -28059,6 +28066,28 @@ def _gen_spec(slug, body, user):
         elif not spec['reference_media']:
             raise imagegen.GenerationError(
                 'Pick an approved photo to animate — a clip starts from one.')
+        else:
+            # An optional clip turns a Video job into motion transfer: her
+            # photo stays the subject and the upload only supplies movement.
+            drive_id = str(body.get('source') or '').strip()
+            if drive_id:
+                src = _video_source_row(slug, drive_id)
+                if not src:
+                    raise imagegen.GenerationError(
+                        'That motion clip is no longer there. Upload it again.')
+                model = CR.EXPLICIT_SWAP_MODEL
+                spec['source_path'] = src['path']
+                spec['source_id'] = drive_id
+                spec['source_width'] = src['width']
+                spec['source_height'] = src['height']
+                spec['animate_mode'] = 'animate'
+                seconds = imagegen.video_seconds(model, src['seconds'])
+            else:
+                allowed = imagegen.model_durations(model)
+                if allowed and seconds not in allowed:
+                    raise imagegen.GenerationError(
+                        f'{CR.MODEL_LABELS.get(model, model)} makes clips of '
+                        + ', '.join(f'{n}s' for n in allowed) + '.')
         # A model serves a fixed set of sizes, so the size actually run is the
         # nearest one to the source rather than the rung asked for. Price it
         # off that: billing a 480p rung for a clip run at 720p loses the
@@ -28294,16 +28323,6 @@ def _gen_source_data_uri(path):
     return 'data:%s;base64,%s' % (mime, base64.b64encode(data).decode())
 
 
-def _persona_nsfw_level(cfg):
-    """How explicit this persona is allowed to be, from her builder config. The
-    creator's own setting is the ceiling; nothing offers a shot above it."""
-    if not cfg.get('nsfw') and not cfg.get('nsfw_enabled'):
-        return 'sfw'
-    level = str(cfg.get('nsfw_level') or cfg.get('nsfw_permission') or
-                'suggestive').strip().lower()
-    return level if level in imagegen.LEVEL_ORDER else 'suggestive'
-
-
 def _persona_config(slug):
     try:
         return load_persona_config(slug) or {}
@@ -28359,6 +28378,83 @@ def api_persona_references(slug):
         s.close()
     return jsonify({'ok': True, 'model': model_key, 'role': role,
                     'media_ids': kept})
+
+
+@app.route('/api/generate/prompt/options')
+def api_generate_prompt_options():
+    """The questions the prompt builder asks, already cut to this persona's
+    NSFW level. Filtered server-side: an option she is not set for is not in
+    the payload, so nothing in the browser can ask for it."""
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    slug = (request.args.get('persona') or '').strip().lower()
+    if not re.match(r'^[a-z0-9_-]+$', slug or ''):
+        return jsonify({'ok': False, 'error': 'Invalid persona'}), 400
+    mine = owned_slugs()
+    if mine is not None and slug not in mine:
+        return jsonify({'ok': False, 'error': 'Not your persona'}), 403
+    kind = 'video' if (request.args.get('kind') or '') == 'video' else 'image'
+    level = ('sfw' if (request.args.get('rating') or '') == 'sfw'
+             else 'explicit')
+    return jsonify({'ok': True, 'level': level, 'kind': kind,
+                    'questions': imagegen.prompt_questions(level, kind)})
+
+
+@app.route('/api/generate/prompt', methods=['POST'])
+def api_generate_prompt():
+    """Turn the guided answers into a prompt.
+
+    Two engines on purpose. Safe work goes to Gemini to be written as one
+    natural line; explicit work never can -- Google refuses this content at any
+    safety level, so it is assembled from the vocabulary instead. Gemini
+    failing or declining falls back to the same assembler, because a builder
+    that returns nothing is one nobody uses.
+    """
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    body = request.get_json(silent=True) or {}
+    slug = str(body.get('persona') or '').strip().lower()
+    if not re.match(r'^[a-z0-9_-]+$', slug or ''):
+        return jsonify({'ok': False, 'error': 'Invalid persona'}), 400
+    mine = owned_slugs()
+    if mine is not None and slug not in mine:
+        return jsonify({'ok': False, 'error': 'Not your persona'}), 403
+
+    kind = 'video' if body.get('kind') == 'video' else 'image'
+    answers = body.get('answers') or {}
+    cfg = _persona_config(slug)
+    level = 'sfw' if body.get('rating') == 'sfw' else 'explicit'
+    appearance = _appearance_from_config(cfg)
+    built = imagegen.build_generated_prompt(answers, appearance, level, kind)
+    if not built:
+        return jsonify({'ok': False,
+                        'error': 'Pick at least one answer first.'}), 400
+
+    prompt, engine = built, 'vocabulary'
+    if level == 'sfw' and client is not None:
+        try:
+            resp = client.models.generate_content(
+                model=MODEL_NAME,
+                contents=[{'role': 'user', 'parts': [{'text': built}]}],
+                config=types.GenerateContentConfig(
+                    system_instruction=(
+                        'Rewrite these photo direction notes as one flowing '
+                        'sentence of image-generation prompt. Keep every '
+                        'detail. Add nothing that is not in the notes: no '
+                        'names, no ages, no brands. Reply with the sentence '
+                        'and nothing else.'),
+                    temperature=0.7),
+            )
+            written = (_gemini_text(resp) or '').strip()
+            if written:
+                prompt, engine = written[:600], 'gemini'
+        except Exception as e:
+            logger.info('prompt builder fell back to the vocabulary: %s',
+                        str(e)[:120])
+    return jsonify({'ok': True, 'prompt': prompt, 'engine': engine,
+                    'level': level})
 
 
 @app.route('/api/generate/job', methods=['POST'])
@@ -28469,7 +28565,9 @@ def _gen_start(job_id, slug, spec, workspace):
                 call['prompt'] = (imagegen.build_swap_prompt(motion)
                                   if spec['kind'] == 'swap'
                                   else imagegen.build_video_prompt(motion))
-                if spec['kind'] == 'swap':
+                # A swap always carries a clip; a Video job carries one only
+                # when it is motion transfer. Both resolve it the same way.
+                if spec.get('source_path'):
                     url = storage.signed_url(spec['source_path'])
                     if not url:
                         url = _gen_source_data_uri(spec['source_path'])

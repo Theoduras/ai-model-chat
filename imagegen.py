@@ -73,6 +73,11 @@ RUNWARE_VIDEO_MODELS = {
     # on camera, which is what a swap has always meant here.
     'p-video-replace': os.getenv('RW_MODEL_VIDEO_REPLACE',
                                  'prunaai:p-video@replace'),
+    # The same job as the replace above, from the Wan family -- which is the
+    # one family measured to serve explicit work on this provider. It does
+    # motion transfer as well, chosen by a mode rather than by a model.
+    'wan-2-2-animate': os.getenv('RW_MODEL_WAN_ANIMATE',
+                                 'alibaba:wan@2.2-animate'),
 }
 DEFAULT_VIDEO_MODEL = 'wan-2-5'
 
@@ -85,8 +90,10 @@ VIDEO_EDIT_MODEL = 'wan-2-7'
 # the video and changes the person, Wan 2.7 regenerates the video from her
 # references. The picker offers both because only the operator can say which
 # one this clip wants.
-SWAP_MODELS = ('p-video-replace', 'wan-2-7')
+SWAP_MODELS = ('p-video-replace', 'wan-2-2-animate', 'wan-2-7')
 DEFAULT_SWAP_MODEL = 'p-video-replace'
+# The one that serves explicit work and still replaces rather than regenerates.
+EXPLICIT_SWAP_MODEL = 'wan-2-2-animate'
 
 # Only 4.5 serves explicit work. 5.0 Pro returns `invalidProviderContent` —
 # ByteDance's own moderation, not a setting — so an explicit shot is pinned to
@@ -113,6 +120,10 @@ MODEL_VIDEO_FIELDS = {
     # `inputs.video`, where Wan calls the same thing a reference video: one is
     # the subject of the edit, the other is something to take guidance from,
     # and the models are right to spell them differently.
+    # Same nesting as Wan 2.7 plus one key of its own. `advancedFeatures` is a
+    # fourth spelling of provider options after `inputs`, `settings` and the
+    # flat payload, which is why none of this is a branch in the builder.
+    'wan-2-2-animate': {'shape': 'animate'},
     'p-video-replace': {'shape': os.getenv('RW_REPLACE_SHAPE', 'replace'),
                         'in_source': os.getenv('RW_REPLACE_VIDEO_KEY', 'video'),
                         'in_refs': os.getenv('RW_REPLACE_REF_KEY',
@@ -204,7 +215,25 @@ MODEL_VIDEO_SIZES = {
 # Seconds a model will accept. Wan 2.7 refuses anything outside 2-15 outright,
 # and a swap's length comes from the file rather than a picker, so the ask is
 # clamped to the model's own range instead of failing at the provider.
+# The durations a model serves. The two that price by preset take those
+# presets and nothing between them: offering 7s to one of them is offering a
+# length the provider refuses.
+MODEL_VIDEO_DURATIONS = {
+    'wan-2-5': (3, 5, 10),
+    'seedance-2-5': (3, 5, 10),
+}
+
+
+def model_durations(model_key):
+    """The discrete lengths a model serves, or None when it takes any whole
+    number in its range."""
+    return list(MODEL_VIDEO_DURATIONS.get(model_key) or ()) or None
+
+
 MODEL_VIDEO_SECONDS = {
+    'wan-2-5': (3, 10),
+    'seedance-2-5': (3, 10),
+    'wan-2-2-animate': (1, 60),
     'wan-2-7': (2, 15),
     # The source clip's own length, whatever it is: this model is never told a
     # duration, so nothing here may shorten what it will be billed for.
@@ -215,7 +244,7 @@ MODEL_VIDEO_SECONDS = {
 def takes_duration(model_key):
     """Whether a model can be told how long to run. One that cannot runs the
     length of the clip it is given, so nothing may quote it anything else."""
-    return _video_fields(model_key).get('shape') != 'replace'
+    return _video_fields(model_key).get('shape') not in ('replace', 'animate')
 
 
 def wants_face_only(model_key):
@@ -227,7 +256,7 @@ def wants_face_only(model_key):
     for it to average her face towards. One that regenerates the whole clip
     needs both.
     """
-    return _video_fields(model_key).get('shape') == 'replace'
+    return _video_fields(model_key).get('shape') in ('replace', 'animate')
 
 
 # A model asking for a clean portrait is not helped by thirty of them, and each
@@ -414,6 +443,130 @@ NEGATIVE_PROMPT = (
     'signature, blurry, low quality, jpeg artifacts, cartoon, anime, '
     'illustration, 3d render, doll, plastic skin, child, teen, underage'
 )
+
+
+# ── Guided prompt builder ─────────────────────────────────────────────────────
+# The vocabulary a creator assembles a prompt from, instead of typing one. Every
+# option is ours and carries the fragment it contributes, which is what makes
+# this safe to offer at all: nothing here can name a real person, imply anyone
+# under age, or describe an act nobody agreed to, and free text still passes
+# through the persona's banned terms on the way out.
+#
+# Each option is gated by the same LEVEL_ORDER ceiling the shots and scenes use,
+# so a persona set to suggestive is never offered explicit wording.
+PROMPT_QUESTIONS = (
+    {'id': 'position', 'label': 'Position', 'advanced': False, 'options': (
+        ('standing', 'Standing', 'sfw', 'standing'),
+        ('sitting', 'Sitting', 'sfw', 'sitting, weight on one hip'),
+        ('leaning', 'Leaning', 'sfw', 'leaning against the wall'),
+        ('lying-front', 'Lying on her front', 'suggestive',
+         'lying on her front, propped on her elbows'),
+        ('lying-back', 'Lying on her back', 'suggestive', 'lying on her back'),
+        ('kneeling', 'Kneeling', 'suggestive', 'kneeling, back arched'),
+        ('on-all-fours', 'On all fours', 'moderate', 'on all fours, arched'),
+        ('straddling', 'Straddling', 'explicit', 'straddling, knees apart'),
+    )},
+    {'id': 'action', 'label': 'What she is doing', 'advanced': False, 'options': (
+        ('still', 'Holding the pose', 'sfw', 'holding still, looking at the camera'),
+        ('glance', 'Looking back', 'sfw', 'glancing back over her shoulder'),
+        ('undressing', 'Undressing', 'suggestive', 'slipping one strap off her shoulder'),
+        ('touching', 'Touching herself', 'moderate',
+         'one hand on her own body, unhurried'),
+        ('explicit-touch', 'Explicit', 'explicit', 'touching herself explicitly'),
+    )},
+    {'id': 'wardrobe', 'label': 'Wearing', 'advanced': False, 'options': (
+        ('casual', 'Casual', 'sfw', 'an oversized shirt'),
+        ('dress', 'Dressed up', 'sfw', 'a fitted dress'),
+        ('lingerie', 'Lingerie', 'suggestive', 'matching lingerie'),
+        ('sheer', 'Sheer', 'suggestive', 'a sheer slip'),
+        ('topless', 'Topless', 'moderate', 'topless'),
+        ('nude', 'Nude', 'moderate', 'nude'),
+    )},
+    {'id': 'setting', 'label': 'Where', 'advanced': False, 'options': (
+        ('bedroom', 'Bedroom', 'sfw', 'in her bedroom, unmade bed'),
+        ('bathroom', 'Bathroom', 'sfw', 'in the bathroom, mirror behind her'),
+        ('kitchen', 'Kitchen', 'sfw', 'in the kitchen, morning light'),
+        ('hotel', 'Hotel room', 'sfw', 'a hotel room, curtains half drawn'),
+        ('shower', 'Shower', 'suggestive', 'in the shower, water on the glass'),
+    )},
+    {'id': 'camera', 'label': 'Camera', 'advanced': False, 'options': (
+        ('phone', 'Phone selfie', 'sfw', 'shot on a phone, held at arm length'),
+        ('eye', 'Eye level', 'sfw', 'eye level, 35mm'),
+        ('above', 'From above', 'sfw', 'shot from above, looking up at the lens'),
+        ('low', 'From below', 'sfw', 'low angle'),
+        ('mirror', 'Mirror', 'sfw', 'mirror selfie, phone visible'),
+    )},
+    {'id': 'lighting', 'label': 'Light', 'advanced': True, 'options': (
+        ('warm', 'Warm lamp', 'sfw', 'warm lamplight'),
+        ('window', 'Window light', 'sfw', 'soft window light'),
+        ('neon', 'Neon', 'sfw', 'neon spill, dusk'),
+        ('candle', 'Candlelight', 'sfw', 'candlelight'),
+    )},
+    {'id': 'mood', 'label': 'Mood', 'advanced': True, 'options': (
+        ('playful', 'Playful', 'sfw', 'playful, half smiling'),
+        ('sleepy', 'Sleepy', 'sfw', 'sleepy, just woken up'),
+        ('bored', 'Deadpan', 'sfw', 'deadpan, unimpressed'),
+        ('intense', 'Intense', 'suggestive', 'holding the look, unsmiling'),
+    )},
+    {'id': 'pacing', 'label': 'Pacing', 'advanced': True, 'video': True, 'options': (
+        ('still', 'Almost still', 'sfw', 'barely moving, a slow breath'),
+        ('slow', 'Slow', 'sfw', 'one slow, deliberate movement'),
+        ('turn', 'Turns to camera', 'sfw', 'turning towards the camera'),
+    )},
+)
+
+
+def prompt_questions(level, kind='image'):
+    """The questions to ask, with the options this persona's level allows.
+
+    Filtered rather than merely hidden: a level she is not set to is not in the
+    payload at all, so nothing in the browser can ask for it.
+    """
+    try:
+        ceiling = LEVEL_ORDER.index(level or 'sfw')
+    except ValueError:
+        ceiling = 0
+    out = []
+    for q in PROMPT_QUESTIONS:
+        if q.get('video') and kind != 'video':
+            continue
+        options = [{'id': oid, 'label': label, 'level': lvl}
+                   for oid, label, lvl, _ in q['options']
+                   if LEVEL_ORDER.index(lvl) <= ceiling]
+        if options:
+            out.append({'id': q['id'], 'label': q['label'],
+                        'advanced': bool(q.get('advanced')), 'options': options})
+    return out
+
+
+def prompt_fragments(answers, level, kind='image'):
+    """The chosen fragments, in question order, dropping anything above her
+    level — the ceiling is enforced here and not only where the list is
+    built, because answers arrive from a browser."""
+    try:
+        ceiling = LEVEL_ORDER.index(level or 'sfw')
+    except ValueError:
+        ceiling = 0
+    picked = []
+    for q in PROMPT_QUESTIONS:
+        if q.get('video') and kind != 'video':
+            continue
+        want = (answers or {}).get(q['id'])
+        for oid, _label, lvl, fragment in q['options']:
+            if oid == want and LEVEL_ORDER.index(lvl) <= ceiling:
+                picked.append(fragment)
+    return picked
+
+
+def build_generated_prompt(answers, appearance='', level='sfw', kind='image'):
+    """Assemble a prompt from the guided answers. Deterministic, and the only
+    path an explicit prompt ever takes — Google refuses this content at any
+    safety level, so it cannot be written there."""
+    parts = prompt_fragments(answers, level, kind)
+    if not parts:
+        return ''
+    body = ', '.join(parts)
+    return f'{appearance.strip()}, {body}'.strip(' ,') if appearance else body
 
 
 def shots_for_level(level):
@@ -786,7 +939,14 @@ class RunwareProvider(Provider):
             'includeCost': True,
             'deliveryMethod': 'async',
         }
-        if shape == 'replace':
+        if shape == 'animate':
+            # One model, two jobs: `replace` puts her into the clip's action,
+            # `animate` makes her photo perform the clip's motion. The caller
+            # says which, because the model cannot tell from the inputs.
+            mode = spec.get('animate_mode') or (
+                'replace' if spec.get('kind') == 'swap' else 'animate')
+            task['advancedFeatures'] = {'wanAnimate': {'mode': mode}}
+        elif shape == 'replace':
             # It takes a rung by name and no length at all: the output runs as
             # long as the clip it was given. Sending either of the others is
             # refused outright, which is the model saying what it is.
@@ -818,7 +978,7 @@ class RunwareProvider(Provider):
             if not refs:
                 raise GenerationError(
                     'a swap needs at least one approved photo of her to swap in')
-            if fields.get('shape') in ('inputs', 'replace'):
+            if fields.get('shape') in ('inputs', 'replace', 'animate'):
                 # A model that edits the clip takes it as a single `video`; one
                 # that takes guidance from it takes a list of reference videos.
                 src_key = fields.get('in_source') or 'referenceVideos'
@@ -830,6 +990,20 @@ class RunwareProvider(Provider):
             else:
                 task[fields['source']] = source
                 task[fields['refs']] = list(refs)[:MAX_REFERENCES]
+        elif spec.get('source_url') and shape == 'animate':
+            # A Video job that carries a clip is motion transfer: her photo is
+            # the subject, the clip is only where the movement comes from.
+            refs = spec.get('reference_urls') or []
+            if spec.get('reference_b64'):
+                refs = [_data_uri(spec['reference_b64'],
+                                  spec.get('reference_mime'))] + list(refs)
+            if not refs:
+                raise GenerationError(
+                    'a clip driven by a video still needs a photo of her')
+            task['inputs'] = {
+                'referenceVideos': [spec['source_url']],
+                'referenceImages': list(refs)[:MODEL_REF_CAP.get(
+                    model_key, MAX_VIDEO_REFERENCES)]}
         else:
             frame = spec.get('reference_b64')
             if not frame:
@@ -840,7 +1014,7 @@ class RunwareProvider(Provider):
             first = {'inputImage': _data_uri(frame, spec.get('reference_mime'))}
             # Mutually exclusive with the reference inputs above, which is why
             # this is the whole of `inputs` rather than another key in it.
-            if shape in ('inputs', 'replace'):
+            if shape in ('inputs', 'replace', 'animate'):
                 task['inputs'] = {'frameImages': [first]}
             else:
                 task[_RW['frame_images']] = [first]

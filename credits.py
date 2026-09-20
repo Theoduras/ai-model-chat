@@ -75,8 +75,11 @@ VIDEO_EDIT_MODEL = 'wan-2-7'
 # are given: replace keeps the video and changes who is in it, Wan 2.7
 # regenerates the video from her references in a similar motion. Both are
 # offered because only the operator can say which one a given clip wants.
-SWAP_MODELS = ('p-video-replace', 'wan-2-7')
+SWAP_MODELS = ('p-video-replace', 'wan-2-2-animate', 'wan-2-7')
 DEFAULT_SWAP_MODEL = 'p-video-replace'
+# Where an explicit persona goes: the only model that both replaces rather
+# than regenerates and serves explicit work.
+EXPLICIT_SWAP_MODEL = 'wan-2-2-animate'
 
 VIDEO_RATE_PER_SECOND = {
     'wan-2-5':      {'480p': 46, '720p': 46, '1080p': 115},
@@ -85,6 +88,7 @@ VIDEO_RATE_PER_SECOND = {
     # Unmeasured, so deliberately high: a guess under cost loses money on every
     # clip and nothing reports it. Measure it and bring this down.
     'p-video-replace': {'480p': 60, '720p': 60, '1080p': 150},
+    'wan-2-2-animate': {'480p': 60, '720p': 60, '1080p': 150},
 }
 
 # A swap runs the length of the clip it is given, so it is priced per second
@@ -122,6 +126,7 @@ VIDEO_COST_USD_PER_SECOND = {
     'wan-2-7':      {'480p': 0.10076, '720p': 0.10076, '1080p': 0.2519},
     'seedance-2-5': {'480p': 0.12, '720p': 0.12, '1080p': 0.30},
     'p-video-replace': {'480p': 0.12, '720p': 0.12, '1080p': 0.30},
+    'wan-2-2-animate': {'480p': 0.12, '720p': 0.12, '1080p': 0.30},
 }
 
 PROVIDER_COST_MEASURED = {
@@ -175,6 +180,7 @@ MODEL_LABELS = {
     'wan-2-7': 'Wan 2.7',
     'seedance-2-5': 'Seedance 2.5',
     'p-video-replace': 'Replace her in the clip',
+    'wan-2-2-animate': 'Replace her in the clip — explicit',
 }
 
 # Which ratings each model actually serves, measured against the provider
@@ -199,10 +205,13 @@ VIDEO_MODEL_RATINGS = {
     'wan-2-5': ('sfw',),
     'wan-2-7': ('sfw', 'nsfw'),
     'seedance-2-5': ('sfw',),
-    # Unproven: the model has not been put to an explicit clip yet. A refusal
-    # fails the job and refunds rather than falling back, so the first explicit
-    # swap is what settles this rather than a guess that silently downgrades.
-    'p-video-replace': ('sfw', 'nsfw'),
+    # Settled by the provider, not assumed: an explicit clip came back as a
+    # crash whose own traceback could not be deserialized because the safety
+    # module raised it. The crash is the refusal, so this model is safe work.
+    'p-video-replace': ('sfw',),
+    # The Wan family is the one measured to serve explicit work here, and 2.2
+    # Animate replaces rather than regenerates.
+    'wan-2-2-animate': ('sfw', 'nsfw'),
 }
 
 
@@ -400,6 +409,14 @@ def _imagegen_takes_duration(model):
         return True
 
 
+def _imagegen_durations(model):
+    try:
+        import imagegen
+        return imagegen.model_durations(model)
+    except Exception:
+        return None
+
+
 def _imagegen_rungs(model):
     try:
         import imagegen
@@ -424,6 +441,11 @@ def price_table():
         'swap_model_caps': {m: {'duration': _imagegen_takes_duration(m),
                                 'resolutions': _imagegen_rungs(m)}
                             for m in SWAP_MODELS},
+        'explicit_swap_model': EXPLICIT_SWAP_MODEL,
+        # The lengths each video model actually serves, so the picker cannot
+        # offer one the provider will refuse.
+        'video_model_durations': {m: _imagegen_durations(m)
+                                  for m in VIDEO_MODELS},
         'video_rates': VIDEO_RATE_PER_SECOND,
         'video_max_seconds': VIDEO_MAX_SECONDS,
         'addons': ADDON_PRICES,
