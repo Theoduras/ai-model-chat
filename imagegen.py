@@ -462,19 +462,29 @@ class RunwareProvider(Provider):
         # lists here means a new model id is a new refusal, so the refusal
         # itself is read: drop the key it names and send the task again.
         for _ in range(4):
-            body = _post(RUNWARE_ENDPOINT,
-                         [{'taskType': 'authentication', 'apiKey': self.key}] + tasks,
-                         self._headers())
-            err = _error_text(body)
-            if not err:
-                return body.get('data') or []
+            # A rejected parameter comes back as HTTP 400, which _post raises
+            # rather than returns, so the refusal has to be read off both.
+            try:
+                body = _post(RUNWARE_ENDPOINT,
+                             [{'taskType': 'authentication', 'apiKey': self.key}] + tasks,
+                             self._headers())
+            except GenerationError as e:
+                # Kept whole: a network failure is fatal=False, and rebuilding
+                # it here would turn a job that should be retried into one that
+                # is written off.
+                failure, err = e, str(e)
+            else:
+                err = _error_text(body)
+                if not err:
+                    return body.get('data') or []
+                failure = GenerationError(err)
             hit = _UNSUPPORTED_PARAM.search(err)
             key = hit.group(1) if hit else None
             if not key or key in ('taskType', 'taskUUID', 'model'):
                 break
             if not any(t.pop(key, None) is not None for t in tasks):
                 break
-        raise GenerationError(err)
+        raise failure
 
     def _base_task(self, spec, model, width, height):
         return {
