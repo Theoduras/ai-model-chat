@@ -10575,11 +10575,13 @@ def api_persona_media_update(slug, media_id):
 def api_persona_media_delete(slug, media_id):
     if not re.match(r'^[a-z0-9_-]+$', slug):
         return jsonify({'error': 'Invalid slug'}), 400
-    from db import SessionLocal, delete_persona_media, delete_media_links
+    from db import (SessionLocal, delete_persona_media, delete_media_links,
+                    drop_model_references)
     s = SessionLocal()
     try:
         # Links first: a leftover link would point at a photo that is gone.
         delete_media_links(s, media_id)
+        drop_model_references(s, media_id)
         row = delete_persona_media(s, media_id)
         if not row or row.slug != slug:
             s.rollback()
@@ -28043,7 +28045,8 @@ def _gen_finish(job_id, slug, spec, workspace, urls):
                 gcs_path=path, expires_at=storage.staging_expiry(),
                 approved=False,
                 outfit=(spec.get('outfit') or {}).get('name', '') or '',
-                purpose=spec.get('shot', '') or '')
+                purpose=spec.get('shot', '') or '',
+                source='generated', approved_for_training=False)
             s.add(row)
             s.commit()
             made.append(row.id)
@@ -28255,7 +28258,7 @@ def api_generate_keep():
         return jsonify({'ok': False, 'error': 'Nothing selected'}), 400
 
     from db import (SessionLocal, get_persona_media, delete_persona_media,
-                    delete_media_links)
+                    delete_media_links, drop_model_references)
     mine = owned_slugs()
     done = []
     s = SessionLocal()
@@ -28278,6 +28281,7 @@ def api_generate_keep():
                 # Links first: a leftover link would point at a photo that is
                 # gone. delete_persona_media does not commit on its own.
                 delete_media_links(s, mid)
+                drop_model_references(s, mid)
                 delete_persona_media(s, mid)
                 s.commit()
                 if path:

@@ -178,6 +178,13 @@ class PersonaMedia(Base):
     # False until the creator keeps it. An unreviewed generation must never be
     # picked for a fan, so every send path filters on this.
     approved = Column(Boolean, default=True)
+    # Gallery fields. `approved_for_training` starts true because an upload is
+    # approved on arrival; a generation clears it alongside `approved`, so
+    # nothing unreviewed can become training material either.
+    is_favourite = Column(Boolean, default=False)
+    tags = Column(String(300), default='')
+    approved_for_training = Column(Boolean, default=True)
+    source = Column(String(12), default='upload')   # upload | generated
 
 
 Index('ix_media_slug_purpose', PersonaMedia.slug, PersonaMedia.purpose)
@@ -198,6 +205,43 @@ class MediaOutfitLink(Base):
 
 Index('ix_link_slug_outfit', MediaOutfitLink.slug, MediaOutfitLink.outfit,
       MediaOutfitLink.position)
+
+
+class ModelReferenceSet(Base):
+    """Which gallery photos drive a persona on one generation model.
+
+    References are model-scoped, not global: a slot filled on Seedream is not a
+    slot on Wan, and every model caps how many it will accept. A global list
+    could not express either, which is why this is its own table rather than a
+    column."""
+    __tablename__ = 'model_reference_sets'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    slug = Column(String(64), nullable=False, index=True)
+    model_key = Column(String(64), nullable=False, index=True)
+    media_id = Column(String(32), ForeignKey('persona_media.id'),
+                      nullable=False, index=True)
+    slot_index = Column(Integer, default=0)
+    created_at = Column(DateTime, default=_now)
+
+
+Index('ix_modelref_slug_model', ModelReferenceSet.slug,
+      ModelReferenceSet.model_key, ModelReferenceSet.slot_index)
+
+
+class AudioReference(Base):
+    """Voice or ambience a video model can be conditioned on.
+
+    Deliberately not part of the media vault: audio is never training material
+    and never reaches a fan, so it has no approval or staging lifecycle."""
+    __tablename__ = 'audio_references'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    slug = Column(String(64), nullable=False, index=True)
+    gcs_path = Column(String(400), default='')
+    fmt = Column(String(8), default='mp3')          # mp3 | wav
+    size_bytes = Column(Integer, default=0)
+    created_at = Column(DateTime, default=_now)
 Index('ix_link_media_outfit', MediaOutfitLink.media_id, MediaOutfitLink.outfit,
       unique=True)
 
@@ -1091,6 +1135,64 @@ def update_generation(session, job_id, **fields):
     return row
 
 
+# ── Model reference sets and audio ────────────────────────────────────────────
+
+def model_references(session, slug, model_key):
+    """The gallery photos assigned to one model, in slot order."""
+    return (session.query(ModelReferenceSet)
+            .filter(ModelReferenceSet.slug == slug,
+                    ModelReferenceSet.model_key == model_key)
+            .order_by(ModelReferenceSet.slot_index).all())
+
+
+def set_model_references(session, slug, model_key, media_ids):
+    """Replace the whole set for one model. Replacing rather than merging keeps
+    slot order the caller's to decide, and `cap` is enforced by the caller that
+    knows the model — this only stores what it is given."""
+    (session.query(ModelReferenceSet)
+     .filter(ModelReferenceSet.slug == slug,
+             ModelReferenceSet.model_key == model_key).delete())
+    for index, media_id in enumerate(media_ids):
+        session.add(ModelReferenceSet(slug=slug, model_key=model_key,
+                                      media_id=media_id, slot_index=index))
+    session.commit()
+    return len(media_ids)
+
+
+def drop_model_references(session, media_id):
+    """Every model slot holding this photo. Called when the photo is deleted:
+    a slot pointing at a gone photo is a generation that fails at the provider."""
+    n = (session.query(ModelReferenceSet)
+         .filter(ModelReferenceSet.media_id == media_id).delete())
+    session.commit()
+    return n
+
+
+def list_audio_references(session, slug):
+    return (session.query(AudioReference)
+            .filter(AudioReference.slug == slug)
+            .order_by(AudioReference.created_at).all())
+
+
+def add_audio_reference(session, slug, gcs_path, fmt='mp3', size_bytes=0):
+    row = AudioReference(slug=slug, gcs_path=gcs_path, fmt=fmt,
+                         size_bytes=int(size_bytes or 0))
+    session.add(row)
+    session.commit()
+    return row
+
+
+def delete_audio_reference(session, audio_id):
+    row = (session.query(AudioReference)
+           .filter(AudioReference.id == audio_id).first())
+    if not row:
+        return None
+    path = row.gcs_path or ''
+    session.delete(row)
+    session.commit()
+    return path
+
+
 def _sync_columns(table_name, model):
     """create_all() only creates whole tables, so a model column added — or
     widened — after the table exists needs an explicit ALTER. Postgres enforces
@@ -1866,7 +1968,9 @@ def init_db():
                          ('trial_invites', TrialInvite),
                          ('trial_redemptions', TrialRedemption),
                          ('credit_ledger', CreditLedger),
-                         ('generation_jobs', GenerationJob)):
+                         ('generation_jobs', GenerationJob),
+                         ('model_reference_sets', ModelReferenceSet),
+                         ('audio_references', AudioReference)):
         try:
             _sync_columns(table, model)
         except Exception:
