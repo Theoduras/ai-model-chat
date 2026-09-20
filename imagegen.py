@@ -107,7 +107,10 @@ REFERENCE_FIELD = 'referenceImages'
 # name; the older ones have never refused the flat shape, so they keep it until
 # one does.
 MODEL_VIDEO_FIELDS = {
-    'p-video-replace': {'shape': os.getenv('RW_REPLACE_SHAPE', 'inputs')},
+    # Its own shape, not Wan's: no duration (the source decides the length --
+    # which is the whole point of a replace), no width/height (a `resolution`
+    # string instead), and no negative prompt.
+    'p-video-replace': {'shape': os.getenv('RW_REPLACE_SHAPE', 'replace')},
     'wan-2-7': {'shape': os.getenv('RW_VIDEO_SHAPE', 'inputs'),
                 'source': os.getenv('RW_VIDEO_SOURCE_FIELD', 'inputVideo'),
                 'refs': os.getenv('RW_VIDEO_REF_FIELD', 'referenceImages')},
@@ -115,6 +118,12 @@ MODEL_VIDEO_FIELDS = {
 
 # referenceImages takes up to 30 and referenceVideos up to 10, nested.
 MAX_VIDEO_REFERENCES = 30
+
+# For the models that take a rung by name. A provider that spells them
+# differently is an entry here rather than a branch in the request builder.
+MODEL_RESOLUTION_VALUES = {
+    'p-video-replace': {'480p': '480p', '720p': '720p', '1080p': '1080p'},
+}
 
 
 def _video_fields(model_key):
@@ -171,7 +180,16 @@ MODEL_VIDEO_SIZES = {
 # clamped to the model's own range instead of failing at the provider.
 MODEL_VIDEO_SECONDS = {
     'wan-2-7': (2, 15),
+    # The source clip's own length, whatever it is: this model is never told a
+    # duration, so nothing here may shorten what it will be billed for.
+    'p-video-replace': (1, 60),
 }
+
+
+def takes_duration(model_key):
+    """Whether a model can be told how long to run. One that cannot runs the
+    length of the clip it is given, so nothing may quote it anything else."""
+    return _video_fields(model_key).get('shape') != 'replace'
 
 
 def video_seconds(model_key, seconds):
@@ -582,9 +600,14 @@ _UNSUPPORTED_PARAM = re.compile(r"Unsupported use of '([A-Za-z0-9_]+)' parameter
 # replaces it: a swap with no input clip and no reference is a stranger's video
 # that bills and reports success. A refusal naming one of them is a wrong field
 # name for that model, and the only safe answer is to fail the job.
+# Only the keys whose loss changes *who* is in the clip. `duration` was here
+# and should not have been: a length is a parameter, not an identity, and
+# guarding it turned a model that simply has no duration -- because its output
+# runs as long as the source -- into a hard failure.
 _NEVER_STRIP = frozenset({'taskType', 'taskUUID', 'model', 'positivePrompt',
                           'inputs', 'inputVideo', 'referenceImages',
-                          'frameImages', 'inputImages', 'video', 'duration'})
+                          'referenceVideos', 'frameImages', 'inputImages',
+                          'video'})
 
 
 class RunwareProvider(Provider):
@@ -686,23 +709,36 @@ class RunwareProvider(Provider):
         width, height = video_size(model_key, spec.get('source_width'),
                                    spec.get('source_height'),
                                    spec.get('resolution'))
+        shape = _video_fields(model_key).get('shape')
         task = {
             'taskType': _RW['video_task'],
             'taskUUID': task_uuid,
             'model': (RUNWARE_VIDEO_MODELS.get(model_key)
                       or RUNWARE_VIDEO_MODELS[DEFAULT_VIDEO_MODEL]),
             _RW['prompt']: spec.get('prompt') or build_video_prompt(),
-            _RW['negative']: spec.get('negative') or NEGATIVE_PROMPT,
-            'width': width,
-            'height': height,
-            'duration': video_seconds(model_key, spec.get('seconds') or 5),
             _RW['output']: 'URL',
             'includeCost': True,
             'deliveryMethod': 'async',
         }
-        # The newer models refuse it by name; the retry in _send would strip it
-        # anyway, at the price of a wasted round trip on every single clip.
-        if _video_fields(model_key).get('shape') != 'inputs':
+        if shape == 'replace':
+            # It takes a rung by name and no length at all: the output runs as
+            # long as the clip it was given. Sending either of the others is
+            # refused outright, which is the model saying what it is.
+            rungs = MODEL_RESOLUTION_VALUES.get(model_key) or {}
+            rung = rungs.get(spec.get('resolution'))
+            if rung:
+                task['resolution'] = rung
+            if spec.get('fps'):
+                task['fps'] = int(spec['fps'])
+        else:
+            task[_RW['negative']] = spec.get('negative') or NEGATIVE_PROMPT
+            task['width'] = width
+            task['height'] = height
+            task['duration'] = video_seconds(model_key, spec.get('seconds') or 5)
+        # Only the older flat payload takes it; every newer model refuses it by
+        # name. The retry in _send would strip it anyway, at the price of a
+        # wasted round trip on every single clip.
+        if shape == 'flat':
             task['checkNSFW'] = False
         if spec.get('kind') == 'swap':
             source = spec.get('source_url')
@@ -716,7 +752,7 @@ class RunwareProvider(Provider):
             if not refs:
                 raise GenerationError(
                     'a swap needs at least one approved photo of her to swap in')
-            if fields.get('shape') == 'inputs':
+            if fields.get('shape') in ('inputs', 'replace'):
                 task['inputs'] = {
                     'referenceVideos': [source],
                     'referenceImages': list(refs)[:MAX_VIDEO_REFERENCES]}
@@ -733,7 +769,7 @@ class RunwareProvider(Provider):
             first = {'inputImage': _data_uri(frame, spec.get('reference_mime'))}
             # Mutually exclusive with the reference inputs above, which is why
             # this is the whole of `inputs` rather than another key in it.
-            if _video_fields(model_key).get('shape') == 'inputs':
+            if shape in ('inputs', 'replace'):
                 task['inputs'] = {'frameImages': [first]}
             else:
                 task[_RW['frame_images']] = [first]

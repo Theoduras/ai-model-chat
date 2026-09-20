@@ -982,6 +982,12 @@ function swapModels() {
          [(genPrices && genPrices.video_edit_model) || 'wan-2-7'];
 }
 
+// True when the seconds list was replaced by a single locked entry, so a
+// switch back to a model that does take a duration rebuilds the full range.
+function picksBefore(ssecs) {
+  return ssecs.dataset.clip === 'locked' && swapTakesDuration();
+}
+
 function swapModel() {
   const picked = (el('gen-smodel') || {}).value;
   if (picked && swapModels().includes(picked)) return picked;
@@ -1031,16 +1037,32 @@ function renderSwapOut() {
     sres.innerHTML = allowed.map(r =>
       opt(r, r, allowed[allowed.length - 1])).join('');
   }
-  if (!ssecs.options.length || ssecs.dataset.clip !== String(genSwap && genSwap.seconds)) {
+  if (picksBefore(ssecs) || !ssecs.options.length
+      || ssecs.dataset.clip !== String(genSwap && genSwap.seconds)) {
     ssecs.dataset.clip = String(genSwap && genSwap.seconds);
     ssecs.innerHTML = secondsRange().map(n =>
       opt(String(n), n + 's' + (genSwap && n === genSwap.seconds ? ' · the whole clip' : ''),
           String(genSwap ? Math.min(genSwap.seconds, swapMaxSeconds()) : 5))).join('');
   }
-  sres.disabled = ssecs.disabled = !genSwap;
+  const picks = swapTakesDuration();
+  sres.disabled = !genSwap;
+  ssecs.disabled = !genSwap || !picks;
+  if (!picks && genSwap) {
+    ssecs.innerHTML = opt(String(genSwap.seconds),
+                          genSwap.seconds + 's — the whole clip', '');
+    ssecs.dataset.clip = 'locked';
+  }
+}
+
+// A model with no duration runs the whole clip, so that is what is quoted:
+// the panel must never price a trim the provider will not perform.
+function swapTakesDuration() {
+  const caps = (genPrices && genPrices.swap_model_caps) || {};
+  return (caps[swapModel()] || {}).duration !== false;
 }
 
 function swapSeconds() {
+  if (!swapTakesDuration()) return genSwap ? genSwap.seconds : 0;
   const v = parseInt((el('gen-ssecs') || {}).value || '0', 10);
   return v || (genSwap ? genSwap.seconds : 0);
 }

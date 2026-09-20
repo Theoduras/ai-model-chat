@@ -28037,8 +28037,12 @@ def _gen_spec(slug, body, user):
             # The clip is the ceiling, not the value: the operator picks the
             # length and the rung, and neither may exceed what was uploaded --
             # a 480p source run at 1080p rates is 2.5x for detail nobody filmed.
-            seconds = imagegen.video_seconds(
-                model, body.get('seconds') or src['seconds'])
+            # A model with no duration runs the whole clip whatever the
+            # picker says, so it is billed for the whole clip: quoting a trim
+            # it will not perform is charging for a clip nobody gets.
+            asked = (body.get('seconds') if imagegen.takes_duration(model)
+                     else src['seconds'])
+            seconds = imagegen.video_seconds(model, asked or src['seconds'])
             source_rung = _video_rung(src['height'], src['width'])
             if (CR.VIDEO_RESOLUTIONS.index(resolution)
                     > CR.VIDEO_RESOLUTIONS.index(source_rung)):

@@ -390,6 +390,16 @@ def equivalents(credits):
     return {'photos': n // photo, 'clips': n // clip}
 
 
+def _imagegen_takes_duration(model):
+    # Imported here rather than at module scope: credits.py is the one module
+    # test_credits.py loads on its own, and it must not need the provider stack.
+    try:
+        import imagegen
+        return bool(imagegen.takes_duration(model))
+    except Exception:
+        return True
+
+
 def price_table():
     """The whole menu, for the UI's live cost estimate."""
     return {
@@ -401,6 +411,10 @@ def price_table():
         'video_edit_model': VIDEO_EDIT_MODEL,
         'swap_models': list(SWAP_MODELS),
         'default_swap_model': DEFAULT_SWAP_MODEL,
+        # What each swap model lets the operator choose. A model that runs the
+        # length of the clip it is given has no seconds to offer.
+        'swap_model_caps': {m: {'duration': _imagegen_takes_duration(m)}
+                            for m in SWAP_MODELS},
         'video_rates': VIDEO_RATE_PER_SECOND,
         'video_max_seconds': VIDEO_MAX_SECONDS,
         'addons': ADDON_PRICES,
