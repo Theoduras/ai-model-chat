@@ -24,7 +24,10 @@ IMAGE_MODELS = ('seedream-4-5', 'seedream-5-pro',
                 'nano-banana-pro', 'nano-banana-2')
 RESOLUTIONS = ('2k', '4k')
 VIDEO_RESOLUTIONS = ('480p', '720p', '1080p')
+# The presets the picker offers. Any whole number in VIDEO_SECONDS_RANGE is
+# priced and accepted -- these are the three worth one click.
 VIDEO_DURATIONS = (3, 5, 10)
+VIDEO_SECONDS_MIN = 2
 
 DEFAULT_IMAGE_MODEL = 'seedream-4-5'
 DEFAULT_RESOLUTION = '2k'
@@ -68,22 +71,90 @@ DEFAULT_VIDEO_MODEL = 'wan-2-5'
 # an uploaded video is always priced and run on it whatever the picker says.
 VIDEO_EDIT_MODEL = 'wan-2-7'
 
+# The two models a swap may run on. They do opposite things with the clip they
+# are given: replace keeps the video and changes who is in it, Wan 2.7
+# regenerates the video from her references in a similar motion. Both are
+# offered because only the operator can say which one a given clip wants.
+SWAP_MODELS = ('p-video-replace', 'wan-2-2-animate', 'wan-2-7')
+DEFAULT_SWAP_MODEL = 'p-video-replace'
+# Where an explicit persona goes: the only model that both replaces rather
+# than regenerates and serves explicit work.
+EXPLICIT_SWAP_MODEL = 'wan-2-2-animate'
+
 VIDEO_RATE_PER_SECOND = {
     'wan-2-5':      {'480p': 46, '720p': 46, '1080p': 115},
     'wan-2-7':      {'480p': 52, '720p': 52, '1080p': 130},
     'seedance-2-5': {'480p': 60, '720p': 60, '1080p': 150},
+    # Unmeasured, so deliberately high: a guess under cost loses money on every
+    # clip and nothing reports it. Measure it and bring this down.
+    'p-video-replace': {'480p': 60, '720p': 60, '1080p': 150},
+    'wan-2-2-animate': {'480p': 60, '720p': 60, '1080p': 150},
 }
 
 # A swap runs the length of the clip it is given, so it is priced per second
 # from the same rates rather than off the fixed durations a generated clip
 # offers. The cap matches what the upload route will take.
-VIDEO_MAX_SECONDS = 30
+# Wan 2.7's own ceiling. A longer upload cannot be swapped, so it is refused
+# at the upload rather than truncated after it is paid for.
+VIDEO_MAX_SECONDS = 15
 
 VIDEO_PRICES = {
     model: {res: {secs: rate * secs for secs in VIDEO_DURATIONS}
             for res, rate in rates.items()}
     for model, rates in VIDEO_RATE_PER_SECOND.items()
 }
+
+# What the provider actually bills us, in USD. The credit tables above are
+# derived from these by ceil(cost / CREDIT_COST_USD) and then rounded up again
+# where a figure is a guess, so credits * CREDIT_COST_USD reads high and cannot
+# be used to answer "what did that cost me". This is the number to show an
+# operator before they press Generate.
+#
+# `PROVIDER_COST_MEASURED` names the rungs that came off a live bill. Everything
+# else is an over-estimate carried from the credit table's own reasoning: a
+# guess that is too low loses money quietly, so the guesses are deliberately
+# high. Measure one and move its key into the measured set.
+PROVIDER_COST_USD = {
+    'seedream-4-5':    {'2k': 0.04, '4k': 0.04},
+    'seedream-5-pro':  {'2k': 0.04, '4k': 0.04},
+    'nano-banana-2':   {'2k': 0.10255, '4k': 0.2051},
+    'nano-banana-pro': {'2k': 0.138, '4k': 0.276},
+}
+
+VIDEO_COST_USD_PER_SECOND = {
+    'wan-2-5':      {'480p': 0.09076, '720p': 0.09076, '1080p': 0.2269},
+    'wan-2-7':      {'480p': 0.10076, '720p': 0.10076, '1080p': 0.2519},
+    'seedance-2-5': {'480p': 0.12, '720p': 0.12, '1080p': 0.30},
+    'p-video-replace': {'480p': 0.12, '720p': 0.12, '1080p': 0.30},
+    'wan-2-2-animate': {'480p': 0.12, '720p': 0.12, '1080p': 0.30},
+}
+
+PROVIDER_COST_MEASURED = {
+    'images': {'seedream-4-5': ('2k', '4k'),
+               'nano-banana-2': ('2k',),
+               'nano-banana-pro': ('2k',)},
+    'videos': {'wan-2-5': ('720p',), 'wan-2-7': ('720p',)},
+}
+
+
+def image_cost_usd(model, resolution, batch=1):
+    row = PROVIDER_COST_USD.get(model) or {}
+    per = row.get(resolution)
+    return None if per is None else per * max(1, int(batch))
+
+
+def video_cost_usd(model, resolution, seconds):
+    row = VIDEO_COST_USD_PER_SECOND.get(model) or {}
+    per = row.get(resolution)
+    return None if per is None else per * max(1, int(seconds or 0))
+
+
+def cost_table():
+    """The provider-cost menu. Admin only: it is our margin written out."""
+    return {'images': PROVIDER_COST_USD,
+            'video_per_second': VIDEO_COST_USD_PER_SECOND,
+            'measured': PROVIDER_COST_MEASURED}
+
 
 # The legacy Google/Imagen path is priced from the same peg (~$0.02 a call), so
 # it cannot be used as a free way around the credit system.
@@ -108,6 +179,8 @@ MODEL_LABELS = {
     'wan-2-5': 'Wan 2.5',
     'wan-2-7': 'Wan 2.7',
     'seedance-2-5': 'Seedance 2.5',
+    'p-video-replace': 'Replace her in the clip',
+    'wan-2-2-animate': 'Replace her in the clip — explicit',
 }
 
 # Which ratings each model actually serves, measured against the provider
@@ -132,6 +205,13 @@ VIDEO_MODEL_RATINGS = {
     'wan-2-5': ('sfw',),
     'wan-2-7': ('sfw', 'nsfw'),
     'seedance-2-5': ('sfw',),
+    # Settled by the provider, not assumed: an explicit clip came back as a
+    # crash whose own traceback could not be deserialized because the safety
+    # module raised it. The crash is the refusal, so this model is safe work.
+    'p-video-replace': ('sfw',),
+    # The Wan family is the one measured to serve explicit work here, and 2.2
+    # Animate replaces rather than regenerates.
+    'wan-2-2-animate': ('sfw', 'nsfw'),
 }
 
 
@@ -191,20 +271,27 @@ def image_price(model, resolution, addons=(), batch=1):
 
 
 def video_price(resolution, seconds, addons=(), model=None):
+    """Per second at the model's rung, so any length in range has a price --
+    the three presets are no longer the only lengths a clip may be."""
     model = model or DEFAULT_VIDEO_MODEL
+    rates = VIDEO_RATE_PER_SECOND.get(model) or {}
+    rate = rates.get(resolution)
     try:
-        base = VIDEO_PRICES[model][resolution][int(seconds)]
-    except (KeyError, ValueError, TypeError):
+        secs = int(seconds)
+    except (ValueError, TypeError):
+        secs = 0
+    if not rate or not VIDEO_SECONDS_MIN <= secs <= VIDEO_MAX_SECONDS:
         raise PricingError(
             f'no price for video {model!r} {resolution!r} at {seconds!r}s')
-    return base + sum(_addon(a) for a in addons)
+    return rate * secs + sum(_addon(a) for a in addons)
 
 
-def swap_price(resolution, seconds, addons=()):
-    rates = VIDEO_RATE_PER_SECOND.get(VIDEO_EDIT_MODEL) or {}
+def swap_price(resolution, seconds, addons=(), model=None):
+    model = model if model in SWAP_MODELS else DEFAULT_SWAP_MODEL
+    rates = VIDEO_RATE_PER_SECOND.get(model) or {}
     rate = rates.get(resolution)
     secs = int(seconds or 0)
-    if not rate or not 1 <= secs <= VIDEO_MAX_SECONDS:
+    if not rate or not VIDEO_SECONDS_MIN <= secs <= VIDEO_MAX_SECONDS:
         raise PricingError(f'no price for a swap at {resolution!r} / {seconds!r}s')
     return rate * secs + sum(_addon(a) for a in addons)
 
@@ -228,7 +315,7 @@ def quote(spec):
         # for the clip it was handed, so a spec that carries no measured
         # duration is one we cannot price rather than one we guess at.
         return swap_price(spec.get('resolution') or DEFAULT_VIDEO_RESOLUTION,
-                          spec.get('seconds'), addons)
+                          spec.get('seconds'), addons, spec.get('model'))
     if kind == 'video':
         model = spec.get('model')
         if model not in VIDEO_PRICES:
@@ -312,6 +399,32 @@ def equivalents(credits):
     return {'photos': n // photo, 'clips': n // clip}
 
 
+def _imagegen_takes_duration(model):
+    # Imported here rather than at module scope: credits.py is the one module
+    # test_credits.py loads on its own, and it must not need the provider stack.
+    try:
+        import imagegen
+        return bool(imagegen.takes_duration(model))
+    except Exception:
+        return True
+
+
+def _imagegen_durations(model):
+    try:
+        import imagegen
+        return imagegen.model_durations(model)
+    except Exception:
+        return None
+
+
+def _imagegen_rungs(model):
+    try:
+        import imagegen
+        return imagegen.model_rungs(model) or list(VIDEO_RESOLUTIONS)
+    except Exception:
+        return list(VIDEO_RESOLUTIONS)
+
+
 def price_table():
     """The whole menu, for the UI's live cost estimate."""
     return {
@@ -321,6 +434,18 @@ def price_table():
         'video_ratings': {m: list(r) for m, r in VIDEO_MODEL_RATINGS.items()},
         'video_models': list(VIDEO_MODELS),
         'video_edit_model': VIDEO_EDIT_MODEL,
+        'swap_models': list(SWAP_MODELS),
+        'default_swap_model': DEFAULT_SWAP_MODEL,
+        # What each swap model lets the operator choose. A model that runs the
+        # length of the clip it is given has no seconds to offer.
+        'swap_model_caps': {m: {'duration': _imagegen_takes_duration(m),
+                                'resolutions': _imagegen_rungs(m)}
+                            for m in SWAP_MODELS},
+        'explicit_swap_model': EXPLICIT_SWAP_MODEL,
+        # The lengths each video model actually serves, so the picker cannot
+        # offer one the provider will refuse.
+        'video_model_durations': {m: _imagegen_durations(m)
+                                  for m in VIDEO_MODELS},
         'video_rates': VIDEO_RATE_PER_SECOND,
         'video_max_seconds': VIDEO_MAX_SECONDS,
         'addons': ADDON_PRICES,
@@ -329,6 +454,7 @@ def price_table():
         'resolutions': list(RESOLUTIONS),
         'video_resolutions': list(VIDEO_RESOLUTIONS),
         'video_durations': list(VIDEO_DURATIONS),
+        'video_seconds_min': VIDEO_SECONDS_MIN,
         'defaults': {
             'model': DEFAULT_IMAGE_MODEL,
             'resolution': DEFAULT_RESOLUTION,

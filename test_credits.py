@@ -81,7 +81,9 @@ def test_quote_covers_everything():
 
     for bad in ({'kind': 'image', 'model': 'nope', 'resolution': '1024x1024'},
                 {'kind': 'video', 'resolution': '4k', 'seconds': 5},
-                {'kind': 'video', 'resolution': '720p', 'seconds': 7},
+                # Not a duration: any whole number in range is priced now,
+                # since a clip is billed per second rather than by preset.
+                {'kind': 'video', 'resolution': '720p', 'seconds': 99},
                 {'kind': 'hologram'}):
         try:
             CR.quote(bad)
@@ -118,13 +120,23 @@ def test_prices_track_cost():
               CR.quote({'kind': 'video', 'model': model,
                         'resolution': '720p', 'seconds': 5})
               * CR.CREDIT_COST_USD >= cost)
-    check('a swap is priced on the only model that can run one',
+    check('a swap is priced on the model it will actually run on',
+          all(CR.quote({'kind': 'swap', 'model': m,
+                        'resolution': '720p', 'seconds': 5}) ==
+              CR.VIDEO_RATE_PER_SECOND[m]['720p'] * 5
+              for m in CR.SWAP_MODELS))
+    check('a swap on no model named is priced on the default one',
           CR.quote({'kind': 'swap', 'resolution': '720p', 'seconds': 5}) ==
-          CR.quote({'kind': 'video', 'model': CR.VIDEO_EDIT_MODEL,
+          CR.quote({'kind': 'swap', 'model': CR.DEFAULT_SWAP_MODEL,
                     'resolution': '720p', 'seconds': 5}))
     check('a swap is billed for every second of the clip it was given',
           CR.quote({'kind': 'swap', 'resolution': '720p', 'seconds': 7}) ==
-          CR.VIDEO_RATE_PER_SECOND[CR.VIDEO_EDIT_MODEL]['720p'] * 7)
+          CR.VIDEO_RATE_PER_SECOND[CR.DEFAULT_SWAP_MODEL]['720p'] * 7)
+    for m in CR.SWAP_MODELS:
+        cost = CR.VIDEO_COST_USD_PER_SECOND[m]['720p'] * 5
+        check(f'a swap on {m} never sells under what the provider charges',
+              CR.quote({'kind': 'swap', 'model': m, 'resolution': '720p',
+                        'seconds': 5}) * CR.CREDIT_COST_USD >= cost)
     for bad in ({'kind': 'swap', 'resolution': '720p',
                  'seconds': CR.VIDEO_MAX_SECONDS + 1},
                 {'kind': 'swap', 'resolution': '720p', 'seconds': 0}):

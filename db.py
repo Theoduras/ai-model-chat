@@ -1088,6 +1088,39 @@ def credit_debit(session, workspace_id, amount, source, note=''):
     return True
 
 
+def credit_refund_part(session, workspace_id, source, amount, note=''):
+    """Give back part of what was reserved against `source`.
+
+    For a job that delivered less than it was quoted -- a model that decides
+    the output length itself, handed a longer clip than it will produce. The
+    whole reservation is not owed back, but the difference is, and it returns
+    to the bucket it left for the same reason a full refund does.
+    """
+    amount = int(amount or 0)
+    if amount <= 0:
+        return 0
+    rows = (session.query(CreditLedger)
+            .filter(CreditLedger.workspace_id == workspace_id,
+                    CreditLedger.source == source,
+                    CreditLedger.kind.in_(('spend', 'refund'))).all())
+    owed = {}
+    for r in rows:
+        owed[r.expires_at] = owed.get(r.expires_at, 0) + int(r.delta)
+    given = 0
+    # Soonest-expiring first, mirroring the order a spend drains them in.
+    for expires_at in sorted(owed, key=lambda e: (e is None, e)):
+        if given >= amount:
+            break
+        outstanding = -owed[expires_at]
+        if outstanding <= 0:
+            continue
+        give = min(outstanding, amount - given)
+        credit_post(session, workspace_id, give, 'refund', source=source,
+                    expires_at=expires_at, note=note)
+        given += give
+    return given
+
+
 def credit_refund(session, workspace_id, source, note=''):
     """Give back whatever was reserved against `source`, once. A job that fails
     or is swept must not cost anything, and a double refund must not pay out.
@@ -2027,6 +2060,12 @@ def init_db():
         s = SessionLocal()
         try:
             if backfill_media_links(s):
+                s.commit()
+            # Swapped clips were stored under their job's kind, which nothing
+            # that renders or sends media recognises: they showed as a blank
+            # card. Their bytes were always video.
+            if s.query(PersonaMedia).filter_by(kind='swap').update(
+                    {'kind': 'video'}, synchronize_session=False):
                 s.commit()
         finally:
             s.close()

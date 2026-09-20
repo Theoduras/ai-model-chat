@@ -267,9 +267,14 @@
               <option value="4" selected>4</option><option value="6">6</option>
             </select></label>
         </div>
-        <div id="gen-swap-out" style="display:none">
-          <span class="hint" style="margin:0;">Your clip decides the length and the size,
-            so there is nothing to choose here.</span>
+        <div class="gen-form" id="gen-swap-out" style="display:none">
+          <label class="gen-f"><span>What to do with the clip</span>
+            <select id="gen-smodel" onchange="genQuote()"></select></label>
+          <label class="gen-f"><span>Clip size</span>
+            <select id="gen-sres" onchange="genQuote()"></select></label>
+          <label class="gen-f"><span>Seconds</span>
+            <select id="gen-ssecs" onchange="genQuote()"></select></label>
+          <span class="hint" style="margin:0;" id="gen-smodel-note"></span>
         </div>
         <div class="gen-form" id="gen-video-out" style="display:none">
           <label class="gen-f"><span>Clip size</span>
@@ -299,6 +304,22 @@
         </div>
         <label class="gen-f"><span>Direction</span>
           <input id="gen-direction" maxlength="300" placeholder="looking back over her shoulder, phone in one hand"></label>
+        <div class="gen-f" style="gap:6px;">
+          <button type="button" class="btn-ai" id="gen-build-btn"
+                  style="align-self:flex-start;" onclick="togglePromptBuilder()">
+            Build a prompt</button>
+          <div id="gen-builder" style="display:none; flex-direction:column; gap:9px;
+               border:1px solid var(--line); border-radius:10px; padding:11px;">
+            <div id="gen-builder-qs" style="display:flex; flex-direction:column; gap:9px;"></div>
+            <label style="display:flex; gap:6px; align-items:center; font-size:.82rem;">
+              <input type="checkbox" id="gen-builder-adv" onchange="renderBuilder()">
+              More detail</label>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <button type="button" class="btn-ai" onclick="runPromptBuilder()">Write it</button>
+              <span class="hint" style="margin:0;" id="gen-builder-note"></span>
+            </div>
+          </div>
+        </div>
         <label class="gen-f"><span>Add to the prompt</span>
           <textarea id="gen-prompt" rows="5" placeholder="leaning against the window, morning light, looking away from the camera"></textarea></label>
         <label class="gen-f"><span>Keep out of the shot</span>
@@ -319,6 +340,15 @@
         <span class="hint" style="margin:0;" id="gen-swap-limits"></span>
       </div>
 
+      <div id="gen-video-drive" style="display:none; flex-direction:column; gap:8px;">
+        <label class="gen-f"><span>Motion clip (optional)</span>
+          <input type="file" id="gen-drive-file" accept="video/mp4,video/quicktime"
+                 onchange="uploadSwapSource(this.files[0], 'drive')"></label>
+        <span class="hint" style="margin:0;" id="gen-drive-note">Upload a clip and
+          her photo performs its motion instead of being animated freely. The clip
+          only supplies movement — it is never shown to a fan.</span>
+      </div>
+
       <div class="note-box" id="gen-video-note" style="display:none">
         A clip always starts from a photo that is already kept, so its first frame
         carries her face. Pick one below and press <b>&#9654;</b> &mdash; there is no
@@ -331,6 +361,8 @@
       <div class="gen-quote">
         <div class="gen-q-row"><span id="gen-quote-what"></span><b id="gen-cost"></b></div>
         <div class="gen-q-row"><span id="gen-money-what"></span><span id="gen-money"></span></div>
+        <div class="gen-q-row" id="gen-paid-row" style="display:none;">
+          <span>What this costs us</span><span id="gen-paid"></span></div>
         <div class="gen-engines" id="gen-engines"></div>
       </div>
       <div class="gen-go">
@@ -382,6 +414,8 @@
 
 <div class="gen-lightbox" id="gen-lightbox" hidden onclick="closeLightbox()">
   <img id="gen-lightbox-img" src="" alt="">
+  <video id="gen-lightbox-video" src="" controls autoplay playsinline hidden
+         onclick="event.stopPropagation()"></video>
 </div>
 
 <script src="/js/site-nav.js" defer></script>
@@ -396,6 +430,7 @@ let genPrices = null;      // the server's price table
 let genEngines = null;     // which provider model is behind each picker entry
 let genCredits = null;     // null = unlimited, which is every admin
 let genRate = null;        // what a credit costs this tier in cash
+let genCosts = null;       // what the provider bills us — admin only, null otherwise
 let genAllowedShots = [];  // resolved server side from the persona's NSFW level
 let genScenes = [];        // scene builder vocabulary, already gated server side
 let genStyles = [], genCameras = [], genLighting = [];
@@ -406,8 +441,11 @@ let genTimer = null;
 // rather than being sent on its own: the server derives explicit from the shot
 // it is given, and two sources for one fact is how they drift apart.
 let genMake = 'image';
-let genSwap = null;        // the uploaded clip: {source, url, seconds, width, height}
-const SWAP_LIMITS = { mb: 200, types: ['video/mp4', 'video/quicktime'] };
+let genSwap = null;       // the uploaded clip: {source, url, seconds, width, height}
+let genDrive = null;      // the Video tab's optional motion clip, same shape
+// 32 MB is the host's own request ceiling, not the route's, so it is policed
+// in decimal megabytes: a file of 32 MiB plus multipart framing is over it.
+const SWAP_LIMITS = { mb: 32, types: ['video/mp4', 'video/quicktime'] };
 let genRating = 'sfw';
 
 const GEN_SHOT_LABELS = {
@@ -444,6 +482,7 @@ async function loadCredits() {
     genPrices = d.prices;
     genEngines = d.engines || null;
     genRate = d.credit_rate || null;
+    genCosts = d.provider_costs || null;
     genCredits = d.unlimited ? null : d.balance;
     const e = el('gen-balance');
     if (e) {
@@ -465,7 +504,9 @@ async function loadPersona() {
     genCameras = d.cameras || [];
     genLighting = d.lighting || [];
     el('persona-hint').textContent =
-      `NSFW level: ${d.nsfw_level || 'sfw'} — that is what decides which shots are offered.`;
+      'The Safe / Explicit toggle above decides what is offered here. Her NSFW '
+      + 'level is a chat setting — how far she flirts with a fan — and does not '
+      + 'limit what you can generate.';
   } catch (e) { mediaVault = []; genAllowedShots = []; genScenes = []; }
   renderVault();
   renderGenForm();
@@ -760,14 +801,29 @@ async function uploadRefs(files) {
   if (!failed) setVaultStatus('Uploaded — click one to put it in this group.');
 }
 
-function openLightbox(src) {
-  el('gen-lightbox-img').src = src;
+// A swap's rows were written under its job's kind before that was fixed,
+// so both spellings mean a clip until the backfill has run everywhere.
+function isClip(kind) {
+  return kind === 'video' || kind === 'swap';
+}
+
+function openLightbox(src, kind) {
+  const img = el('gen-lightbox-img'), player = el('gen-lightbox-video');
+  const clip = isClip(kind);
+  img.hidden = clip;
+  img.src = clip ? '' : src;
+  if (player) {
+    player.hidden = !clip;
+    player.src = clip ? src : '';
+  }
   el('gen-lightbox').hidden = false;
 }
 
 function closeLightbox() {
   el('gen-lightbox').hidden = true;
   el('gen-lightbox-img').src = '';
+  const player = el('gen-lightbox-video');
+  if (player) { player.pause(); player.src = ''; }
 }
 
 document.addEventListener('keydown', e => {
@@ -776,10 +832,15 @@ document.addEventListener('keydown', e => {
   else if (!el('gen-vault').hidden) closeVault();
 });
 
+// Module scope, not inside renderGenForm: the swap panel's own selects are
+// built from outside it, and a local one is a ReferenceError that takes the
+// whole form down with it.
+function opt(v, label, sel) {
+  return `<option value="${v}"${v === sel ? ' selected' : ''}>${esc(label)}</option>`;
+}
+
 function renderGenForm() {
   if (!genPrices) return;
-  const opt = (v, label, sel) =>
-    `<option value="${v}"${v === sel ? ' selected' : ''}>${esc(label)}</option>`;
 
   const video = genMake === 'video';
   const swap = genMake === 'swap';
@@ -788,8 +849,9 @@ function renderGenForm() {
   el('gen-swap-form').style.display = swap ? 'flex' : 'none';
   el('gen-image-out').style.display = genMake === 'image' ? '' : 'none';
   el('gen-video-out').style.display = video ? '' : 'none';
-  // A swap runs the length of its source and comes out at its source's size,
-  // so there is nothing to pick and nothing to contradict the price.
+  el('gen-video-drive').style.display = video ? 'flex' : 'none';
+  // The uploaded clip is the ceiling for a swap's length and size, not the
+  // value: both are picked here, within what the file can carry.
   el('gen-swap-out').style.display = swap ? '' : 'none';
   // A clip is animated from a kept photo, so the video form has no button of
   // its own; a swap starts from an upload and does.
@@ -803,11 +865,17 @@ function renderGenForm() {
       opt(r, r, genPrices.defaults.video_resolution)).join('');
   }
   const vsecs = el('gen-vsecs');
-  if (vsecs && !vsecs.options.length) {
-    const row = videoTable(videoModel())[genPrices.defaults.video_resolution] || {};
-    vsecs.innerHTML = Object.keys(row).map(s =>
-      opt(s, s + 's', String(genPrices.defaults.video_duration))).join('');
+  if (vsecs && vsecs.dataset.model !== videoModel()) {
+    vsecs.dataset.model = videoModel();
+    // Each model's own lengths: one that makes 3, 5 or 10 second clips must
+    // not be offered 7, which it refuses.
+    const fixed = (genPrices.video_model_durations || {})[videoModel()];
+    const list = fixed || secondsRange();
+    const keep = list.includes(parseInt(vsecs.value, 10))
+      ? vsecs.value : String(genPrices.defaults.video_duration);
+    vsecs.innerHTML = list.map(n => opt(String(n), n + 's', keep)).join('');
   }
+  renderSwapOut();
 
   renderModelChips();
   renderRefs();
@@ -889,18 +957,78 @@ function showEngines() {
   ).join('<br>');
 }
 
+// The provider's own bill, not a credit price: credits round up twice on the
+// way from cost, so they cannot be read back as what a generation cost us.
+function providerCost() {
+  if (!genCosts) return null;
+  const seen = (kind, model, key) =>
+    ((genCosts.measured[kind] || {})[model] || []).includes(key);
+  if (genMake === 'swap') {
+    if (!genSwap) return null;
+    const per = (genCosts.video_per_second[swapModel()] || {})[swapResolution()];
+    return per === undefined ? null
+      : { usd: per * swapSeconds(), measured: seen('videos', swapModel(), swapResolution()) };
+  }
+  if (genMake === 'video') {
+    const resv = (el('gen-vres') || {}).value || genPrices.defaults.video_resolution;
+    const secs = parseInt((el('gen-vsecs') || {}).value
+                          || genPrices.defaults.video_duration, 10);
+    const per = (genCosts.video_per_second[videoModel()] || {})[resv];
+    return per === undefined ? null
+      : { usd: per * secs, measured: seen('videos', videoModel(), resv) };
+  }
+  const model = el('gen-model').value, res = el('gen-res').value;
+  const per = (genCosts.images[model] || {})[res];
+  if (per === undefined) return null;
+  const batch = parseInt(el('gen-batch').value || '1', 10);
+  return { usd: per * batch, measured: seen('images', model, res) };
+}
+
+function setProviderCost() {
+  const row = el('gen-paid-row');
+  if (!row) return;
+  const c = providerCost();
+  row.style.display = c ? 'flex' : 'none';
+  if (!c) return;
+  const eur = genRate && genRate.eur_per_usd
+    ? ' · \u20ac' + (c.usd * genRate.eur_per_usd).toFixed(2) : '';
+  el('gen-paid').textContent =
+    '$' + c.usd.toFixed(2) + eur + (c.measured ? '' : ' (estimate)');
+}
+
 function setMoney(credits) {
+  setProviderCost();
   const cash = cashFor(credits);
   el('gen-money-what').textContent = !cash ? ''
     : genCredits === null ? "What a creator's plan pays" : 'In money';
   el('gen-money').textContent = cash;
 }
 
-// One model takes an input clip, so a swap always runs on it whatever the
-// picker says. The server forces the same thing; this is so the panel does not
-// quote a model that will not run.
+// Two models take an input clip and do opposite things with it, so this is a
+// real choice. The server accepts only these two for a swap, which is why the
+// panel cannot quote a model that will not run.
+const SWAP_NOTES = {
+  'p-video-replace': 'Keeps your clip exactly as it is — same motion, timing, ' +
+    'camera, lighting and background — and changes only who is in it.',
+  'wan-2-7': 'Regenerates the clip from her reference photos in a similar ' +
+    'motion. A new video that resembles yours, not your video with her in it.',
+};
+
+function swapModels() {
+  return (genPrices && genPrices.swap_models) ||
+         [(genPrices && genPrices.video_edit_model) || 'wan-2-7'];
+}
+
+// True when the seconds list was replaced by a single locked entry, so a
+// switch back to a model that does take a duration rebuilds the full range.
+function picksBefore(ssecs) {
+  return ssecs.dataset.clip === 'locked' && swapTakesDuration();
+}
+
 function swapModel() {
-  return (genPrices && genPrices.video_edit_model) || videoModel();
+  const picked = (el('gen-smodel') || {}).value;
+  if (picked && swapModels().includes(picked)) return picked;
+  return (genPrices && genPrices.default_swap_model) || swapModels()[0];
 }
 
 function swapMaxSeconds() {
@@ -912,11 +1040,84 @@ function swapMaxSeconds() {
 function swapPrice() {
   if (!genSwap) return undefined;
   const rates = ((genPrices && genPrices.video_rates) || {})[swapModel()] || {};
-  const rate = rates[genSwap.resolution];
-  return rate ? rate * genSwap.seconds : undefined;
+  const rate = rates[swapResolution()];
+  return rate ? rate * swapSeconds() : undefined;
+}
+
+// Every whole second the model takes, since a swap is priced per second.
+function secondsRange() {
+  const lo = (genPrices && genPrices.video_seconds_min) || 2;
+  const out = [];
+  for (let n = lo; n <= swapMaxSeconds(); n++) out.push(n);
+  return out;
+}
+
+// The uploaded clip is the ceiling for both: a rung above what was filmed is
+// 2.5x the price for detail the source never had.
+function renderSwapOut() {
+  const box = el('gen-swap-out');
+  const sres = el('gen-sres'), ssecs = el('gen-ssecs');
+  if (!box || !sres || !ssecs || !genPrices) return;
+  const smodel = el('gen-smodel');
+  if (smodel && !smodel.options.length) {
+    smodel.innerHTML = swapModels().map(m =>
+      opt(m, videoLabel(m), genPrices.default_swap_model)).join('');
+  }
+  if (el('gen-smodel-note')) {
+    el('gen-smodel-note').textContent = SWAP_NOTES[swapModel()] || '';
+  }
+  const rungs = genPrices.video_resolutions || ['480p', '720p', '1080p'];
+  const caps = (genPrices.swap_model_caps || {})[swapModel()] || {};
+  const served = caps.resolutions || rungs;
+  const cap = genSwap ? rungs.indexOf(genSwap.resolution) : rungs.length - 1;
+  // Capped by the clip and by the model both, and never empty: a source below
+  // everything this model serves runs at the lowest rung it does serve, so
+  // that is the one offered rather than a choice that cannot be honoured.
+  let allowed = rungs.slice(0, (cap < 0 ? rungs.length : cap) + 1)
+                     .filter(r => served.includes(r));
+  if (!allowed.length) allowed = [served[0]];
+  const key = swapModel() + ':' + cap;
+  if (sres.dataset.cap !== key) {
+    sres.dataset.cap = key;
+    sres.innerHTML = allowed.map(r =>
+      opt(r, r, allowed[allowed.length - 1])).join('');
+  }
+  if (picksBefore(ssecs) || !ssecs.options.length
+      || ssecs.dataset.clip !== String(genSwap && genSwap.seconds)) {
+    ssecs.dataset.clip = String(genSwap && genSwap.seconds);
+    ssecs.innerHTML = secondsRange().map(n =>
+      opt(String(n), n + 's' + (genSwap && n === genSwap.seconds ? ' · the whole clip' : ''),
+          String(genSwap ? Math.min(genSwap.seconds, swapMaxSeconds()) : 5))).join('');
+  }
+  const picks = swapTakesDuration();
+  sres.disabled = !genSwap;
+  ssecs.disabled = !genSwap || !picks;
+  if (!picks && genSwap) {
+    ssecs.innerHTML = opt(String(genSwap.seconds),
+                          genSwap.seconds + 's — the whole clip', '');
+    ssecs.dataset.clip = 'locked';
+  }
+}
+
+// A model with no duration runs the whole clip, so that is what is quoted:
+// the panel must never price a trim the provider will not perform.
+function swapTakesDuration() {
+  const caps = (genPrices && genPrices.swap_model_caps) || {};
+  return (caps[swapModel()] || {}).duration !== false;
+}
+
+function swapSeconds() {
+  if (!swapTakesDuration()) return genSwap ? genSwap.seconds : 0;
+  const v = parseInt((el('gen-ssecs') || {}).value || '0', 10);
+  return v || (genSwap ? genSwap.seconds : 0);
+}
+
+function swapResolution() {
+  return (el('gen-sres') || {}).value || (genSwap ? genSwap.resolution : '720p');
 }
 
 function renderSwapForm() {
+  renderSwapOut();
   el('gen-swap-limits').textContent =
     `Up to ${SWAP_LIMITS.mb} MB and ${swapMaxSeconds()} seconds, as MP4 or MOV. ` +
     'Her face comes from the reference slots above, so there is nothing to pick here. ' +
@@ -928,12 +1129,15 @@ function renderSwapForm() {
   if (player.src !== genSwap.url) player.src = genSwap.url || '';
   const total = swapPrice();
   const cash = cashFor(total);
+  const trimmed = swapSeconds() < genSwap.seconds
+    ? `, trimmed to ${swapSeconds()}s` : '';
   el('gen-swap-meta').textContent =
-    `${genSwap.seconds}s, ${genSwap.resolution} (${genSwap.width}×${genSwap.height})` +
+    `Your clip: ${genSwap.seconds}s, ${genSwap.resolution} ` +
+    `(${genSwap.width}×${genSwap.height})${trimmed}` +
     (total === undefined ? '' : ` — ${total} credits${cash ? ', ' + cash : ''}`);
 }
 
-// Only to catch a long clip before a 200MB upload rather than after it; the
+// Only to catch a long clip before the upload rather than after it; the
 // server measures the file itself and its numbers are the ones that count.
 function readClipSeconds(file) {
   return new Promise((resolve) => {
@@ -945,13 +1149,15 @@ function readClipSeconds(file) {
   });
 }
 
-async function uploadSwapSource(file) {
+// The swap panel and the Video tab's motion clip are the same upload to the
+// same row and the same three-day sweep; only where the id lands differs.
+async function uploadSwapSource(file, into) {
   if (!file || !slug()) return;
   if (!SWAP_LIMITS.types.includes(file.type)) {
     setGenStatus('✗ That file type is not accepted. Use an MP4 or a MOV.', false);
     return;
   }
-  if (file.size > SWAP_LIMITS.mb * 1024 * 1024) {
+  if (file.size > SWAP_LIMITS.mb * 1000 * 1000) {
     setGenStatus(`✗ That clip is over ${SWAP_LIMITS.mb} MB. Trim it first.`, false);
     return;
   }
@@ -966,12 +1172,80 @@ async function uploadSwapSource(file) {
     form.append('file', file);
     const res = await fetch('/api/personas/' + encodeURIComponent(slug()) + '/video-source',
                             { method: 'POST', body: form });
-    const d = await res.json();
+    // A body too large for the host never reaches Flask, so the reply is not
+    // JSON and reads as a parse error unless it is handled here.
+    const body = await res.text();
+    let d = {};
+    try { d = JSON.parse(body); } catch (e) {
+      throw new Error(res.status === 413
+        ? 'That clip was too large for the server to accept. Trim it and try again.'
+        : `The upload failed (${res.status}).`);
+    }
     if (!d.ok) throw new Error(d.error || 'Upload failed');
-    genSwap = d;
+    if (into === 'drive') {
+      genDrive = d;
+      el('gen-drive-note').textContent =
+        `${d.seconds}s of motion — her photo will perform it.`;
+    } else {
+      genSwap = d;
+    }
     setGenStatus('Clip uploaded.', true);
   } catch (e) { genSwap = null; setGenStatus('✗ ' + e.message, false); }
   renderGenForm();
+}
+
+// The guided prompt builder. The questions and the wording both come from the
+// server: her NSFW level decides which options exist, and an explicit prompt is
+// assembled there rather than written by Gemini, which refuses this content.
+let genBuilder = null;
+const genAnswers = {};
+
+async function togglePromptBuilder() {
+  const box = el('gen-builder');
+  const open = box.style.display === 'none';
+  box.style.display = open ? 'flex' : 'none';
+  if (!open || genBuilder) { if (open) renderBuilder(); return; }
+  try {
+    const res = await fetch('/api/generate/prompt/options?persona=' +
+      encodeURIComponent(slug()) + '&kind=' + (genMake === 'video' ? 'video' : 'image') +
+      '&rating=' + genRating);
+    const d = await res.json();
+    if (!d.ok) throw new Error(d.error || 'could not load the questions');
+    genBuilder = d;
+    renderBuilder();
+  } catch (e) { setGenStatus('✗ ' + e.message, false); }
+}
+
+function renderBuilder() {
+  if (!genBuilder) return;
+  const adv = el('gen-builder-adv').checked;
+  el('gen-builder-qs').innerHTML = genBuilder.questions
+    .filter(q => adv || !q.advanced)
+    .map(q => `<label class="gen-f"><span>${esc(q.label)}</span>
+        <select onchange="genAnswers['${q.id}'] = this.value">
+          ${opt('', '—', genAnswers[q.id] || '')}
+          ${q.options.map(o => opt(o.id, o.label, genAnswers[q.id] || '')).join('')}
+        </select></label>`).join('');
+}
+
+async function runPromptBuilder() {
+  el('gen-builder-note').textContent = 'Writing…';
+  try {
+    const res = await fetch('/api/generate/prompt', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ persona: slug(), rating: genRating,
+                             kind: genMake === 'video' ? 'video' : 'image',
+                             answers: genAnswers }),
+    });
+    const d = await res.json();
+    if (!d.ok) throw new Error(d.error || 'could not write it');
+    const field = genMake === 'swap' ? el('gen-swap-motion') : el('gen-prompt');
+    field.value = d.prompt;
+    el('gen-builder-note').textContent =
+      d.engine === 'gemini' ? 'Written — edit it before you generate.'
+                            : 'Built — edit it before you generate.';
+    genQuote();
+  } catch (e) { el('gen-builder-note').textContent = '✗ ' + e.message; }
 }
 
 function genQuote() {
@@ -985,7 +1259,7 @@ function genQuote() {
     renderSwapForm();
     if (what) {
       what.textContent = genSwap
-        ? `${genSwap.seconds}s swap, ${genSwap.resolution}` : 'Upload a clip to swap her into';
+        ? `${swapSeconds()}s swap, ${swapResolution()}` : 'Upload a clip to swap her into';
     }
     if (cost) cost.textContent = total === undefined ? '' : `${total} cr`;
     setMoney(total || 0);
@@ -1002,7 +1276,8 @@ function genQuote() {
   if (genMake === 'video') {
     const resv = (el('gen-vres') || {}).value || genPrices.defaults.video_resolution;
     const secs = (el('gen-vsecs') || {}).value || String(genPrices.defaults.video_duration);
-    const per = (videoTable(videoModel())[resv] || {})[secs];
+    const rates = (genPrices.video_rates || {})[videoModel()] || {};
+    const per = rates[resv] ? rates[resv] * parseInt(secs, 10) : undefined;
     if (what) what.textContent = `One ${secs}s clip, ${resv}`;
     if (cost) cost.textContent = per === undefined ? '' : `${per} cr`;
     setMoney(per);
@@ -1064,7 +1339,7 @@ async function runGeneration() {
     const res = await fetch('/api/generate/job', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        persona: slug(), kind: 'image',
+        persona: slug(), kind: 'image', rating: genRating,
         shot: el('gen-shot').value,
         model: el('gen-model').value,
         resolution: el('gen-res').value,
@@ -1097,7 +1372,9 @@ async function runSwap() {
     const res = await fetch('/api/generate/job', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        persona: slug(), kind: 'swap', source: genSwap.id,
+        persona: slug(), kind: 'swap', source: genSwap.id, model: swapModel(),
+        rating: genRating,
+        resolution: swapResolution(), seconds: swapSeconds(),
         motion: el('gen-swap-motion').value.trim(),
       }),
     });
@@ -1113,14 +1390,17 @@ async function runSwap() {
 async function animateMedia(id) {
   const secs = (el('gen-vsecs') || {}).value || (genPrices ? genPrices.defaults.video_duration : 5);
   const resv = (el('gen-vres') || {}).value || (genPrices ? genPrices.defaults.video_resolution : '720p');
-  const cost = genPrices ? (videoTable(videoModel())[resv] || {})[secs] : '?';
+  const rates = (genPrices && genPrices.video_rates[videoModel()]) || {};
+  const cost = rates[resv] ? rates[resv] * parseInt(secs, 10) : '?';
   if (!confirm(`Animate this photo into a ${secs}s ${resv} clip for ${cost} credits?`)) return;
   setGenStatus('Sending…', null);
   try {
     const res = await fetch('/api/generate/job', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ persona: slug(), kind: 'video', model: videoModel(),
-                             resolution: resv, seconds: secs, reference_media: id }),
+                             rating: genRating,
+                             resolution: resv, seconds: secs, reference_media: id,
+                             source: genDrive ? genDrive.id : '' }),
     });
     const d = await res.json();
     if (!d.ok) throw new Error(d.error || 'Generation failed');
@@ -1171,11 +1451,12 @@ function renderGenStaging() {
       return;
     }
     job.media.filter(m => !m.approved).forEach(m => {
-      const thumb = m.kind === 'video'
+      const clip = isClip(m.kind);
+      const thumb = clip
         ? `<video src="${m.url}" muted playsinline preload="metadata" controls></video>`
         : `<img src="${m.url}" alt="">`;
       cards.push(`
-        <div class="gen-card" onclick="openLightbox('${m.url}')">
+        <div class="gen-card" onclick="openLightbox('${m.url}', '${m.kind}')">
           ${thumb}
           <span class="gen-ttl">${esc(genTtl(m.expires_at))}</span>
           <div class="gen-acts">
@@ -1205,14 +1486,15 @@ function renderVault() {
   const grid = el('vault-grid');
   if (!grid) return;
   grid.innerHTML = mediaVault.length ? mediaVault.map(v => {
-    const thumb = v.kind === 'video'
+    const clip = isClip(v.kind);
+    const thumb = clip
       ? `<video src="${v.thumb}" muted playsinline preload="metadata"></video>
          <span class="vault-kind">video</span>`
       : `<img src="${v.thumb}" alt="" draggable="false">`;
     return `
-      <div class="vault-item" onclick="openLightbox('${v.thumb}')">
+      <div class="vault-item" onclick="openLightbox('${v.thumb}', '${v.kind}')">
         ${thumb}
-        ${v.kind === 'video' ? '' : `<button type="button" class="vault-anim"
+        ${clip ? '' : `<button type="button" class="vault-anim"
           title="Animate this photo into a short clip"
           onclick="animateMedia('${v.id}')">▶</button>`}
       </div>`;
