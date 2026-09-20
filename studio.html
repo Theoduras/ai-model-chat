@@ -966,7 +966,15 @@ async function uploadSwapSource(file) {
     form.append('file', file);
     const res = await fetch('/api/personas/' + encodeURIComponent(slug()) + '/video-source',
                             { method: 'POST', body: form });
-    const d = await res.json();
+    // A body too large for the host never reaches Flask, so the reply is not
+    // JSON and reads as a parse error unless it is handled here.
+    const body = await res.text();
+    let d = {};
+    try { d = JSON.parse(body); } catch (e) {
+      throw new Error(res.status === 413
+        ? 'That clip was too large for the server to accept. Trim it and try again.'
+        : `The upload failed (${res.status}).`);
+    }
     if (!d.ok) throw new Error(d.error || 'Upload failed');
     genSwap = d;
     setGenStatus('Clip uploaded.', true);
