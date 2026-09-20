@@ -71,10 +71,20 @@ DEFAULT_VIDEO_MODEL = 'wan-2-5'
 # an uploaded video is always priced and run on it whatever the picker says.
 VIDEO_EDIT_MODEL = 'wan-2-7'
 
+# The two models a swap may run on. They do opposite things with the clip they
+# are given: replace keeps the video and changes who is in it, Wan 2.7
+# regenerates the video from her references in a similar motion. Both are
+# offered because only the operator can say which one a given clip wants.
+SWAP_MODELS = ('p-video-replace', 'wan-2-7')
+DEFAULT_SWAP_MODEL = 'p-video-replace'
+
 VIDEO_RATE_PER_SECOND = {
     'wan-2-5':      {'480p': 46, '720p': 46, '1080p': 115},
     'wan-2-7':      {'480p': 52, '720p': 52, '1080p': 130},
     'seedance-2-5': {'480p': 60, '720p': 60, '1080p': 150},
+    # Unmeasured, so deliberately high: a guess under cost loses money on every
+    # clip and nothing reports it. Measure it and bring this down.
+    'p-video-replace': {'480p': 60, '720p': 60, '1080p': 150},
 }
 
 # A swap runs the length of the clip it is given, so it is priced per second
@@ -111,6 +121,7 @@ VIDEO_COST_USD_PER_SECOND = {
     'wan-2-5':      {'480p': 0.09076, '720p': 0.09076, '1080p': 0.2269},
     'wan-2-7':      {'480p': 0.10076, '720p': 0.10076, '1080p': 0.2519},
     'seedance-2-5': {'480p': 0.12, '720p': 0.12, '1080p': 0.30},
+    'p-video-replace': {'480p': 0.12, '720p': 0.12, '1080p': 0.30},
 }
 
 PROVIDER_COST_MEASURED = {
@@ -163,6 +174,7 @@ MODEL_LABELS = {
     'wan-2-5': 'Wan 2.5',
     'wan-2-7': 'Wan 2.7',
     'seedance-2-5': 'Seedance 2.5',
+    'p-video-replace': 'Replace her in the clip',
 }
 
 # Which ratings each model actually serves, measured against the provider
@@ -187,6 +199,10 @@ VIDEO_MODEL_RATINGS = {
     'wan-2-5': ('sfw',),
     'wan-2-7': ('sfw', 'nsfw'),
     'seedance-2-5': ('sfw',),
+    # Unproven: the model has not been put to an explicit clip yet. A refusal
+    # fails the job and refunds rather than falling back, so the first explicit
+    # swap is what settles this rather than a guess that silently downgrades.
+    'p-video-replace': ('sfw', 'nsfw'),
 }
 
 
@@ -261,8 +277,9 @@ def video_price(resolution, seconds, addons=(), model=None):
     return rate * secs + sum(_addon(a) for a in addons)
 
 
-def swap_price(resolution, seconds, addons=()):
-    rates = VIDEO_RATE_PER_SECOND.get(VIDEO_EDIT_MODEL) or {}
+def swap_price(resolution, seconds, addons=(), model=None):
+    model = model if model in SWAP_MODELS else DEFAULT_SWAP_MODEL
+    rates = VIDEO_RATE_PER_SECOND.get(model) or {}
     rate = rates.get(resolution)
     secs = int(seconds or 0)
     if not rate or not VIDEO_SECONDS_MIN <= secs <= VIDEO_MAX_SECONDS:
@@ -289,7 +306,7 @@ def quote(spec):
         # for the clip it was handed, so a spec that carries no measured
         # duration is one we cannot price rather than one we guess at.
         return swap_price(spec.get('resolution') or DEFAULT_VIDEO_RESOLUTION,
-                          spec.get('seconds'), addons)
+                          spec.get('seconds'), addons, spec.get('model'))
     if kind == 'video':
         model = spec.get('model')
         if model not in VIDEO_PRICES:
@@ -382,6 +399,8 @@ def price_table():
         'video_ratings': {m: list(r) for m, r in VIDEO_MODEL_RATINGS.items()},
         'video_models': list(VIDEO_MODELS),
         'video_edit_model': VIDEO_EDIT_MODEL,
+        'swap_models': list(SWAP_MODELS),
+        'default_swap_model': DEFAULT_SWAP_MODEL,
         'video_rates': VIDEO_RATE_PER_SECOND,
         'video_max_seconds': VIDEO_MAX_SECONDS,
         'addons': ADDON_PRICES,

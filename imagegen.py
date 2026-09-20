@@ -63,6 +63,11 @@ RUNWARE_VIDEO_MODELS = {
     'wan-2-5': os.getenv('RW_MODEL_WAN_25', 'runware:201@1'),
     'wan-2-7': os.getenv('RW_MODEL_WAN_27', 'alibaba:wan@2.7'),
     'seedance-2-5': os.getenv('RW_MODEL_SEEDANCE_25', 'bytedance:seedance@2.5'),
+    # Character replacement rather than generation: it keeps the source clip's
+    # motion, timing, camera, lighting and background and changes only who is
+    # on camera, which is what a swap has always meant here.
+    'p-video-replace': os.getenv('RW_MODEL_VIDEO_REPLACE',
+                                 'prunaai:p-video@replace'),
 }
 DEFAULT_VIDEO_MODEL = 'wan-2-5'
 
@@ -70,6 +75,13 @@ DEFAULT_VIDEO_MODEL = 'wan-2-5'
 # carries. It is not a separate "video edit" model, which is why searching for
 # one finds nothing.
 VIDEO_EDIT_MODEL = 'wan-2-7'
+
+# Both take an input clip, and they do opposite things with it: replace keeps
+# the video and changes the person, Wan 2.7 regenerates the video from her
+# references. The picker offers both because only the operator can say which
+# one this clip wants.
+SWAP_MODELS = ('p-video-replace', 'wan-2-7')
+DEFAULT_SWAP_MODEL = 'p-video-replace'
 
 # Only 4.5 serves explicit work. 5.0 Pro returns `invalidProviderContent` —
 # ByteDance's own moderation, not a setting — so an explicit shot is pinned to
@@ -90,6 +102,7 @@ REFERENCE_FIELD = 'referenceImages'
 # name; the older ones have never refused the flat shape, so they keep it until
 # one does.
 MODEL_VIDEO_FIELDS = {
+    'p-video-replace': {'shape': os.getenv('RW_REPLACE_SHAPE', 'inputs')},
     'wan-2-7': {'shape': os.getenv('RW_VIDEO_SHAPE', 'inputs'),
                 'source': os.getenv('RW_VIDEO_SOURCE_FIELD', 'inputVideo'),
                 'refs': os.getenv('RW_VIDEO_REF_FIELD', 'referenceImages')},
@@ -170,10 +183,13 @@ def video_size(model_key, width=0, height=0, resolution=None):
     """
     import math
     fallback = VIDEO_PX.get(resolution) or VIDEO_PX['720p']
+    w, h = int(width or 0), int(height or 0)
     sizes = MODEL_VIDEO_SIZES.get(model_key)
     if not sizes:
-        return fallback
-    w, h = int(width or 0), int(height or 0)
+        # No fixed list to snap to, so the source's own shape is the right
+        # answer: a clip whose person is replaced should come out the shape it
+        # went in, and the rung default would letterbox a landscape one.
+        return (w, h) if w > 0 and h > 0 else fallback
     if w <= 0 or h <= 0:
         w, h = fallback
     # The rung is what was asked for and paid for, so it filters rather than
@@ -645,8 +661,8 @@ class RunwareProvider(Provider):
     def submit_video(self, spec):
         task_uuid = str(uuid.uuid4())
         model_key = spec.get('model') or DEFAULT_VIDEO_MODEL
-        if spec.get('kind') == 'swap':
-            model_key = VIDEO_EDIT_MODEL
+        if spec.get('kind') == 'swap' and model_key not in SWAP_MODELS:
+            model_key = DEFAULT_SWAP_MODEL
         width, height = video_size(model_key, spec.get('source_width'),
                                    spec.get('source_height'),
                                    spec.get('resolution'))

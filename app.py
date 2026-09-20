@@ -28011,16 +28011,23 @@ def _gen_spec(slug, body, user):
                 CR.VIDEO_SECONDS_MIN <= seconds <= CR.VIDEO_MAX_SECONDS):
             raise imagegen.GenerationError('Unknown video resolution or duration.')
         model = (body.get('model') or CR.DEFAULT_VIDEO_MODEL).strip().lower()
-        if model not in CR.VIDEO_MODELS:
+        # A swap's models are their own set -- one of them does not generate
+        # video at all -- and the swap branch below validates against it.
+        if model not in CR.VIDEO_MODELS and kind != 'swap':
             raise imagegen.GenerationError('Unknown video model.')
         # Same rule as the image side: a model that cannot serve this persona's
         # rating is moved before the quote, never silently at the provider.
         if level != 'sfw' and 'nsfw' not in CR.VIDEO_MODEL_RATINGS.get(model, ('sfw',)):
             model = CR.VIDEO_EDIT_MODEL
         if kind == 'swap':
-            # Only one model takes an input clip, so a swap is always run on it
-            # whatever the picker had selected.
-            model = CR.VIDEO_EDIT_MODEL
+            # Both swap models take an input clip and do opposite things with
+            # it, so the picker's choice stands -- but only within that pair.
+            model = (body.get('model') or '').strip().lower()
+            if model not in CR.SWAP_MODELS:
+                model = CR.DEFAULT_SWAP_MODEL
+            if (level != 'sfw'
+                    and 'nsfw' not in CR.VIDEO_MODEL_RATINGS.get(model, ('sfw',))):
+                model = CR.DEFAULT_SWAP_MODEL
             source_id = str(body.get('source') or body.get('source_media')
                             or body.get('id') or '').strip()
             src = _video_source_row(slug, source_id)

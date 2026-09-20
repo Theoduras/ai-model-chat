@@ -268,10 +268,13 @@
             </select></label>
         </div>
         <div class="gen-form" id="gen-swap-out" style="display:none">
+          <label class="gen-f"><span>What to do with the clip</span>
+            <select id="gen-smodel" onchange="genQuote()"></select></label>
           <label class="gen-f"><span>Clip size</span>
             <select id="gen-sres" onchange="genQuote()"></select></label>
           <label class="gen-f"><span>Seconds</span>
             <select id="gen-ssecs" onchange="genQuote()"></select></label>
+          <span class="hint" style="margin:0;" id="gen-smodel-note"></span>
         </div>
         <div class="gen-form" id="gen-video-out" style="display:none">
           <label class="gen-f"><span>Clip size</span>
@@ -947,11 +950,25 @@ function setMoney(credits) {
   el('gen-money').textContent = cash;
 }
 
-// One model takes an input clip, so a swap always runs on it whatever the
-// picker says. The server forces the same thing; this is so the panel does not
-// quote a model that will not run.
+// Two models take an input clip and do opposite things with it, so this is a
+// real choice. The server accepts only these two for a swap, which is why the
+// panel cannot quote a model that will not run.
+const SWAP_NOTES = {
+  'p-video-replace': 'Keeps your clip exactly as it is — same motion, timing, ' +
+    'camera, lighting and background — and changes only who is in it.',
+  'wan-2-7': 'Regenerates the clip from her reference photos in a similar ' +
+    'motion. A new video that resembles yours, not your video with her in it.',
+};
+
+function swapModels() {
+  return (genPrices && genPrices.swap_models) ||
+         [(genPrices && genPrices.video_edit_model) || 'wan-2-7'];
+}
+
 function swapModel() {
-  return (genPrices && genPrices.video_edit_model) || videoModel();
+  const picked = (el('gen-smodel') || {}).value;
+  if (picked && swapModels().includes(picked)) return picked;
+  return (genPrices && genPrices.default_swap_model) || swapModels()[0];
 }
 
 function swapMaxSeconds() {
@@ -981,6 +998,14 @@ function renderSwapOut() {
   const box = el('gen-swap-out');
   const sres = el('gen-sres'), ssecs = el('gen-ssecs');
   if (!box || !sres || !ssecs || !genPrices) return;
+  const smodel = el('gen-smodel');
+  if (smodel && !smodel.options.length) {
+    smodel.innerHTML = swapModels().map(m =>
+      opt(m, videoLabel(m), genPrices.default_swap_model)).join('');
+  }
+  if (el('gen-smodel-note')) {
+    el('gen-smodel-note').textContent = SWAP_NOTES[swapModel()] || '';
+  }
   const rungs = genPrices.video_resolutions || ['480p', '720p', '1080p'];
   const cap = genSwap ? rungs.indexOf(genSwap.resolution) : rungs.length - 1;
   const allowed = rungs.slice(0, (cap < 0 ? rungs.length : cap) + 1);
@@ -1201,7 +1226,7 @@ async function runSwap() {
     const res = await fetch('/api/generate/job', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        persona: slug(), kind: 'swap', source: genSwap.id,
+        persona: slug(), kind: 'swap', source: genSwap.id, model: swapModel(),
         resolution: swapResolution(), seconds: swapSeconds(),
         motion: el('gen-swap-motion').value.trim(),
       }),
