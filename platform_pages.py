@@ -59,7 +59,7 @@ PAGES = {
             'The full funnel runs here. She warms fans up, remembers past chats, attaches a preview '
             'photo when a fan asks to see more, and sends your paid link once the fan is ready.',
         ],
-        'cta_primary': 'Start free',
+        'cta_primary': 'Start now',
         'hero_note': 'Live in minutes. Create the bot with BotFather, paste the token, and she is running.',
         'route_title': 'The route, end to end',
         'route': [
@@ -142,7 +142,7 @@ PAGES = {
             'Fanvue inbox, reading incoming messages and replying in character, so a fan who just '
             'paid gets the same voice they were talking to an hour ago.',
         ],
-        'cta_primary': 'Start free',
+        'cta_primary': 'Start now',
         'hero_note': 'Runs server side, through deploys, with no open tab and no browser running.',
         'route_title': 'Where Fanvue sits',
         'route': [
@@ -225,7 +225,7 @@ PAGES = {
             'The full funnel runs in DMs. In public server channels she does the opposite: she '
             'chimes in on the conversation and nothing else, with no funnel, no nudge and no link.',
         ],
-        'cta_primary': 'Start free',
+        'cta_primary': 'Start now',
         'hero_note': 'Sign in as her once in a hosted browser. No token pasting, no bot application to register.',
         'route_title': 'The route, end to end',
         'route': [
@@ -309,7 +309,7 @@ PAGES = {
             'that builds reach, and private DMs that convert it. Everything runs server side, so it '
             'keeps working with the tab closed.',
         ],
-        'cta_primary': 'Start free',
+        'cta_primary': 'Start now',
         'hero_note': 'Posts, replies, DMs and follows all run from one console, on every account you own.',
         'route_title': 'The route, end to end',
         'route': [
@@ -392,7 +392,7 @@ PAGES = {
             'There is no DM automation and no funnel here on purpose. Instagram fills the funnel and '
             'hands fans over through your bio link. The conversation happens on Telegram, Discord or X.',
         ],
-        'cta_primary': 'Start free',
+        'cta_primary': 'Start now',
         'hero_note': 'A real signed-in account, not a Business API app. Stories work, which the official API cannot do.',
         'route_title': 'The route, end to end',
         'route': [
@@ -475,7 +475,7 @@ PAGES = {
             'Replies are what keep a Threads post alive. Answering them within minutes, every time, '
             'is the part no creator does by hand for long.',
         ],
-        'cta_primary': 'Start free',
+        'cta_primary': 'Start now',
         'hero_note': 'Public reach only. Threads has no DMs, so the funnel runs on Telegram, Discord or X.',
         'route_title': 'The route, end to end',
         'route': [
@@ -557,7 +557,7 @@ PAGES = {
             'It is the one channel nobody can suspend. Share the link where a paysite URL would get '
             'filtered, or embed the chat straight into your own site and keep the traffic.',
         ],
-        'cta_primary': 'Start free',
+        'cta_primary': 'Start now',
         'hero_note': 'A direct link to share, or an embed snippet to paste. Both take about a minute.',
         'route_title': 'The route, end to end',
         'route': [
@@ -639,7 +639,7 @@ PAGES = {
             'X, Threads, Instagram and Fanvue publish automatically. Channels with no posting API '
             'stay on the calendar as a reminder to post by hand, so nothing quietly disappears.',
         ],
-        'cta_primary': 'Start free',
+        'cta_primary': 'Start now',
         'hero_note': 'Plan the week in one click, then edit anything you do not like before it goes out.',
         'route_title': 'The route, end to end',
         'route': [
@@ -722,7 +722,7 @@ PAGES = {
             'Short clips work the same way with one rule: a clip is only ever animated from a photo '
             'you already kept, so its first frame carries her face and there is nothing to correct.',
         ],
-        'cta_primary': 'Start free',
+        'cta_primary': 'Start now',
         'hero_note': 'In testing with a small group. Everything below is built and running on the platform now.',
         'route_title': 'The route, end to end',
         'route': [
@@ -805,7 +805,7 @@ PAGES = {
             'When it opens, it works the way Fanvue already does: the same persona, the same memory '
             'and the same funnel keep running inside your subscriber inbox after a fan pays.',
         ],
-        'cta_primary': 'Start free',
+        'cta_primary': 'Start now',
         'hero_note': 'Not connectable yet. Start on Fanvue or your own Velvetchat page and switch the destination later.',
         'route_title': 'Where OnlyFans will sit',
         'route': [
@@ -888,7 +888,7 @@ PAGES = {
             'her memory and the funnel that warms fans up are not tied to any one paid page, so a '
             'funnel you build today points at Fansly the day it opens.',
         ],
-        'cta_primary': 'Start free',
+        'cta_primary': 'Start now',
         'hero_note': 'Not connectable yet. Everything you build now carries over when it is.',
         'route_title': 'Where Fansly will sit',
         'route': [
@@ -972,7 +972,7 @@ PAGES = {
             'When it opens, it is a registered Reddit app with a token that does not expire, which is '
             'the shape worth having on a platform that removes accounts for looking automated.',
         ],
-        'cta_primary': 'Start free',
+        'cta_primary': 'Start now',
         'hero_note': 'Not connectable yet. A planned Reddit post stays on your calendar as a manual row in the meantime.',
         'route_title': 'How a Reddit post works',
         'route': [
@@ -1056,7 +1056,7 @@ PAGES = {
             'in the platform. The dashboard shows it as coming soon rather than offering a connection '
             'before the release is ready.',
         ],
-        'cta_primary': 'Start free',
+        'cta_primary': 'Start now',
         'hero_note': 'Not connectable yet. A planned TikTok post stays on your calendar as a manual row in the meantime.',
         'route_title': 'How a TikTok post works',
         'route': [
