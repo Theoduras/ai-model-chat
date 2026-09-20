@@ -389,6 +389,8 @@
 
 <div class="gen-lightbox" id="gen-lightbox" hidden onclick="closeLightbox()">
   <img id="gen-lightbox-img" src="" alt="">
+  <video id="gen-lightbox-video" src="" controls autoplay playsinline hidden
+         onclick="event.stopPropagation()"></video>
 </div>
 
 <script src="/js/site-nav.js" defer></script>
@@ -769,14 +771,29 @@ async function uploadRefs(files) {
   if (!failed) setVaultStatus('Uploaded — click one to put it in this group.');
 }
 
-function openLightbox(src) {
-  el('gen-lightbox-img').src = src;
+// A swap's rows were written under its job's kind before that was fixed,
+// so both spellings mean a clip until the backfill has run everywhere.
+function isClip(kind) {
+  return kind === 'video' || kind === 'swap';
+}
+
+function openLightbox(src, kind) {
+  const img = el('gen-lightbox-img'), player = el('gen-lightbox-video');
+  const clip = isClip(kind);
+  img.hidden = clip;
+  img.src = clip ? '' : src;
+  if (player) {
+    player.hidden = !clip;
+    player.src = clip ? src : '';
+  }
   el('gen-lightbox').hidden = false;
 }
 
 function closeLightbox() {
   el('gen-lightbox').hidden = true;
   el('gen-lightbox-img').src = '';
+  const player = el('gen-lightbox-video');
+  if (player) { player.pause(); player.src = ''; }
 }
 
 document.addEventListener('keydown', e => {
@@ -1302,11 +1319,12 @@ function renderGenStaging() {
       return;
     }
     job.media.filter(m => !m.approved).forEach(m => {
-      const thumb = m.kind === 'video'
+      const clip = isClip(m.kind);
+      const thumb = clip
         ? `<video src="${m.url}" muted playsinline preload="metadata" controls></video>`
         : `<img src="${m.url}" alt="">`;
       cards.push(`
-        <div class="gen-card" onclick="openLightbox('${m.url}')">
+        <div class="gen-card" onclick="openLightbox('${m.url}', '${m.kind}')">
           ${thumb}
           <span class="gen-ttl">${esc(genTtl(m.expires_at))}</span>
           <div class="gen-acts">
@@ -1336,14 +1354,15 @@ function renderVault() {
   const grid = el('vault-grid');
   if (!grid) return;
   grid.innerHTML = mediaVault.length ? mediaVault.map(v => {
-    const thumb = v.kind === 'video'
+    const clip = isClip(v.kind);
+    const thumb = clip
       ? `<video src="${v.thumb}" muted playsinline preload="metadata"></video>
          <span class="vault-kind">video</span>`
       : `<img src="${v.thumb}" alt="" draggable="false">`;
     return `
-      <div class="vault-item" onclick="openLightbox('${v.thumb}')">
+      <div class="vault-item" onclick="openLightbox('${v.thumb}', '${v.kind}')">
         ${thumb}
-        ${v.kind === 'video' ? '' : `<button type="button" class="vault-anim"
+        ${clip ? '' : `<button type="button" class="vault-anim"
           title="Animate this photo into a short clip"
           onclick="animateMedia('${v.id}')">▶</button>`}
       </div>`;

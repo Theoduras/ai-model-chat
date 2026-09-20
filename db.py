@@ -2028,6 +2028,12 @@ def init_db():
         try:
             if backfill_media_links(s):
                 s.commit()
+            # Swapped clips were stored under their job's kind, which nothing
+            # that renders or sends media recognises: they showed as a blank
+            # card. Their bytes were always video.
+            if s.query(PersonaMedia).filter_by(kind='swap').update(
+                    {'kind': 'video'}, synchronize_session=False):
+                s.commit()
         finally:
             s.close()
     except Exception:

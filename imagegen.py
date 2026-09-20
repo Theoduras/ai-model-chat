@@ -38,6 +38,11 @@ MODELSLAB_ENDPOINT = 'https://modelslab.com/api/v6'
 
 TIMEOUT = 60
 
+# A video submit is not an image call: the provider fetches and validates the
+# source clip before it acknowledges the task, which a 60s read timeout cuts
+# off mid-ingest.
+VIDEO_TIMEOUT = int(os.getenv('RW_VIDEO_TIMEOUT', '180'))
+
 # Credit model keys (credits.IMAGE_MODELS) to each provider's model id.
 #
 # Seedream replaced the Flux/SDXL family here. It is a closed API model, which
@@ -473,6 +478,13 @@ class GenerationError(RuntimeError):
         self.fatal = fatal
 
 
+class ProviderUnreachable(GenerationError):
+    """The one ambiguous failure: the request left and no answer came back.
+    The task may well have been accepted and be running, so a caller holding a
+    taskUUID of its own can adopt it rather than write the job off. A refusal,
+    a 429 or a 5xx is not this — there the task certainly never started."""
+
+
 class Result:
     """What a finished job produced. `urls` are the provider's, short-lived —
     the caller downloads them into our own storage before they expire."""
@@ -503,7 +515,7 @@ def _post(url, payload, headers, timeout=TIMEOUT):
         resp = requests.post(url, json=payload, headers=headers, timeout=timeout)
     except Exception as e:
         # A network failure is not a refusal: the job may well still be running.
-        raise GenerationError(f'{url} unreachable: {e}', fatal=False)
+        raise ProviderUnreachable(f'{url} unreachable: {e}', fatal=False)
     if resp.status_code in (401, 402, 403):
         raise GenerationError(f'provider rejected the key ({resp.status_code})',
                               fatal=True)
@@ -578,7 +590,7 @@ class RunwareProvider(Provider):
     def _headers(self):
         return {'Content-Type': 'application/json'}
 
-    def _send(self, tasks):
+    def _send(self, tasks, timeout=TIMEOUT):
         # Runware authenticates with a task at the head of the body. A bearer
         # header comes back 401 invalidApiKey however good the key is.
         #
@@ -593,7 +605,7 @@ class RunwareProvider(Provider):
             try:
                 body = _post(RUNWARE_ENDPOINT,
                              [{'taskType': 'authentication', 'apiKey': self.key}] + tasks,
-                             self._headers())
+                             self._headers(), timeout=timeout)
             except GenerationError as e:
                 # Kept whole: a network failure is fatal=False, and rebuilding
                 # it here would turn a job that should be retried into one that
@@ -719,7 +731,15 @@ class RunwareProvider(Provider):
                 task[_RW['frame_images']] = [first]
 
         try:
-            data = self._send([task])
+            data = self._send([task], timeout=VIDEO_TIMEOUT)
+        except ProviderUnreachable as e:
+            # The taskUUID is ours and went out with the request, so the poller
+            # can ask after it: either the provider took the task and will hand
+            # back the clip, or it never registered and the first poll fails it.
+            # Refunding here would drop a clip we may already be paying for.
+            logger.warning('runware video submit unanswered, adopting %s: %s',
+                           task_uuid, e)
+            return task_uuid, Result('running')
         except GenerationError:
             # Keys only: the values are her photographs and a signed clip URL.
             # Which fields went out is the whole question when a model refuses

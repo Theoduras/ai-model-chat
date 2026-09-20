@@ -28517,8 +28517,12 @@ def _gen_finish(job_id, slug, spec, workspace, urls):
             continue
         s = SessionLocal()
         try:
+            # From the bytes, not from the job: a swap's *job* is a swap, but
+            # its *result* is a video, and every consumer -- the vault, the
+            # lightbox, every send path -- asks whether this is a video.
+            kind = 'video' if (mime or '').startswith('video/') else 'image'
             row = PersonaMedia(
-                slug=slug, kind=spec['kind'], mime=mime, image_data='',
+                slug=slug, kind=kind, mime=mime, image_data='',
                 gcs_path=path, expires_at=storage.staging_expiry(),
                 approved=False,
                 outfit=(spec.get('outfit') or {}).get('name', '') or '',
