@@ -28449,8 +28449,10 @@ def _gen_start(job_id, slug, spec, workspace):
                     banned=banned)
                 provider_job, result = provider.submit_image(call)
             else:
-                call['prompt'] = imagegen.build_video_prompt(
-                    spec.get('motion', '') or spec.get('prompt_extra', ''))
+                motion = spec.get('motion', '') or spec.get('prompt_extra', '')
+                call['prompt'] = (imagegen.build_swap_prompt(motion)
+                                  if spec['kind'] == 'swap'
+                                  else imagegen.build_video_prompt(motion))
                 if spec['kind'] == 'swap':
                     url = storage.signed_url(spec['source_path'])
                     if not url:

@@ -84,15 +84,25 @@ REFERENCE_FIELD = 'referenceImages'
 # environment: a model that names them differently is then a service env var
 # rather than a deploy, and a wrong name is the one failure that looks like
 # success -- the task still runs, just without her or the clip in it.
+#
+# `shape` is which of the two payloads a model speaks. The newer models take
+# their media nested under one `inputs` object and refuse the flat fields by
+# name; the older ones have never refused the flat shape, so they keep it until
+# one does.
 MODEL_VIDEO_FIELDS = {
-    'wan-2-7': {'source': os.getenv('RW_VIDEO_SOURCE_FIELD', 'inputVideo'),
+    'wan-2-7': {'shape': os.getenv('RW_VIDEO_SHAPE', 'inputs'),
+                'source': os.getenv('RW_VIDEO_SOURCE_FIELD', 'inputVideo'),
                 'refs': os.getenv('RW_VIDEO_REF_FIELD', 'referenceImages')},
 }
+
+# referenceImages takes up to 30 and referenceVideos up to 10, nested.
+MAX_VIDEO_REFERENCES = 30
 
 
 def _video_fields(model_key):
     return MODEL_VIDEO_FIELDS.get(model_key,
-                                  {'source': 'inputVideo', 'refs': REFERENCE_FIELD})
+                                  {'shape': 'flat', 'source': 'inputVideo',
+                                   'refs': REFERENCE_FIELD})
 MAX_REFERENCES = 14
 
 MODELSLAB_MODELS = {
@@ -419,6 +429,16 @@ def engine_report():
     }
 
 
+def build_swap_prompt(motion=''):
+    """Instruction text for an edit, not for a still coming to life: the model
+    is being told whose face to carry over, and what to leave alone."""
+    base = ('Replace the woman in the reference video with the woman in the '
+            'reference images, keeping her face and body consistent with them. '
+            'Keep the original motion, framing, pacing and lighting exactly as '
+            'they are in the video.')
+    return (base + ' ' + motion.strip()) if motion.strip() else base
+
+
 def build_video_prompt(motion=''):
     base = ('She moves naturally and subtly — a slow breath, a small shift of '
             'weight, hair settling. The camera holds nearly still.')
@@ -527,8 +547,8 @@ _UNSUPPORTED_PARAM = re.compile(r"Unsupported use of '([A-Za-z0-9_]+)' parameter
 # that bills and reports success. A refusal naming one of them is a wrong field
 # name for that model, and the only safe answer is to fail the job.
 _NEVER_STRIP = frozenset({'taskType', 'taskUUID', 'model', 'positivePrompt',
-                          'inputVideo', 'referenceImages', 'frameImages',
-                          'inputImages', 'video', 'duration'})
+                          'inputs', 'inputVideo', 'referenceImages',
+                          'frameImages', 'inputImages', 'video', 'duration'})
 
 
 class RunwareProvider(Provider):
@@ -642,15 +662,17 @@ class RunwareProvider(Provider):
             'duration': video_seconds(model_key, spec.get('seconds') or 5),
             _RW['output']: 'URL',
             'includeCost': True,
-            'checkNSFW': False,
             'deliveryMethod': 'async',
         }
+        # The newer models refuse it by name; the retry in _send would strip it
+        # anyway, at the price of a wasted round trip on every single clip.
+        if _video_fields(model_key).get('shape') != 'inputs':
+            task['checkNSFW'] = False
         if spec.get('kind') == 'swap':
             source = spec.get('source_url')
             if not source:
                 raise GenerationError('a swap needs the clip it is swapping into')
             fields = _video_fields(model_key)
-            task[fields['source']] = source
             refs = spec.get('reference_urls') or []
             if spec.get('reference_b64'):
                 refs = [_data_uri(spec['reference_b64'],
@@ -658,7 +680,13 @@ class RunwareProvider(Provider):
             if not refs:
                 raise GenerationError(
                     'a swap needs at least one approved photo of her to swap in')
-            task[fields['refs']] = list(refs)[:MAX_REFERENCES]
+            if fields.get('shape') == 'inputs':
+                task['inputs'] = {
+                    'referenceVideos': [source],
+                    'referenceImages': list(refs)[:MAX_VIDEO_REFERENCES]}
+            else:
+                task[fields['source']] = source
+                task[fields['refs']] = list(refs)[:MAX_REFERENCES]
         else:
             frame = spec.get('reference_b64')
             if not frame:
@@ -666,8 +694,13 @@ class RunwareProvider(Provider):
                 # first frame, so a clip without one is not this feature.
                 raise GenerationError(
                     'a video needs an approved still as its first frame')
-            task[_RW['frame_images']] = [{'inputImage':
-                                          _data_uri(frame, spec.get('reference_mime'))}]
+            first = {'inputImage': _data_uri(frame, spec.get('reference_mime'))}
+            # Mutually exclusive with the reference inputs above, which is why
+            # this is the whole of `inputs` rather than another key in it.
+            if _video_fields(model_key).get('shape') == 'inputs':
+                task['inputs'] = {'frameImages': [first]}
+            else:
+                task[_RW['frame_images']] = [first]
 
         try:
             data = self._send([task])
