@@ -438,6 +438,9 @@ _RW = {
 }
 
 
+_UNSUPPORTED_PARAM = re.compile(r"Unsupported use of '([A-Za-z0-9_]+)' parameter")
+
+
 class RunwareProvider(Provider):
     name = 'runware'
 
@@ -452,13 +455,26 @@ class RunwareProvider(Provider):
     def _send(self, tasks):
         # Runware authenticates with a task at the head of the body. A bearer
         # header comes back 401 invalidApiKey however good the key is.
-        body = _post(RUNWARE_ENDPOINT,
-                     [{'taskType': 'authentication', 'apiKey': self.key}] + tasks,
-                     self._headers())
-        err = _error_text(body)
-        if err:
-            raise GenerationError(err)
-        return body.get('data') or []
+        #
+        # Every model carries its own parameter allow-list and rejects the
+        # whole task for one key it does not know -- Wan 2.7 refuses
+        # `checkNSFW`, Seedance refuses `negativePrompt`. Hard-coding those
+        # lists here means a new model id is a new refusal, so the refusal
+        # itself is read: drop the key it names and send the task again.
+        for _ in range(4):
+            body = _post(RUNWARE_ENDPOINT,
+                         [{'taskType': 'authentication', 'apiKey': self.key}] + tasks,
+                         self._headers())
+            err = _error_text(body)
+            if not err:
+                return body.get('data') or []
+            hit = _UNSUPPORTED_PARAM.search(err)
+            key = hit.group(1) if hit else None
+            if not key or key in ('taskType', 'taskUUID', 'model'):
+                break
+            if not any(t.pop(key, None) is not None for t in tasks):
+                break
+        raise GenerationError(err)
 
     def _base_task(self, spec, model, width, height):
         return {
