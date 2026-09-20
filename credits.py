@@ -19,7 +19,8 @@ CREDIT_COST_USD = 0.002
 # month of invoices.
 MIN_MARGIN_MULTIPLE = 4.0
 
-IMAGE_MODELS = ('seedream-4-5', 'seedream-5-pro')
+IMAGE_MODELS = ('seedream-4-5', 'seedream-5-pro',
+                'nano-banana-pro', 'nano-banana-2')
 RESOLUTIONS = ('2k', '4k')
 VIDEO_RESOLUTIONS = ('480p', '720p', '1080p')
 VIDEO_DURATIONS = (3, 5, 10)
@@ -36,9 +37,16 @@ DEFAULT_VIDEO_DURATION = 5
 # That is five times what the old Flux rung cost. It buys native identity —
 # a reference-conditioned single call, where Flux needed an adapter, a LoRA and
 # a second restore pass to hold the same face.
+# Seedream bills flat by size; the Google models do not, so their tiers differ.
+# Measured at 2k: Nano Banana 2 $0.10255, Nano Banana Pro $0.138. The 4k figure
+# came back before the provider reported a cost, so 4k is priced at twice 2k —
+# a deliberate over-estimate, because the floor protects us only while the
+# price is above the cost. Measure it and bring these down.
 IMAGE_PRICES = {
-    'seedream-4-5':   {'2k': 20, '4k': 20},
-    'seedream-5-pro': {'2k': 20, '4k': 20},
+    'seedream-4-5':    {'2k': 20, '4k': 20},
+    'seedream-5-pro':  {'2k': 20, '4k': 20},
+    'nano-banana-2':   {'2k': 52, '4k': 104},
+    'nano-banana-pro': {'2k': 69, '4k': 138},
 }
 
 VIDEO_PRICES = {
@@ -65,6 +73,8 @@ ADDON_PRICES = {
 MODEL_LABELS = {
     'seedream-4-5': 'Seedream 4.5',
     'seedream-5-pro': 'Seedream 5.0 Pro (safe only)',
+    'nano-banana-pro': 'Nano Banana Pro (safe only)',
+    'nano-banana-2': 'Nano Banana 2 (safe only)',
 }
 
 # Included allowance per calendar month, keyed on the tier keys in app.TIERS.

@@ -47,7 +47,14 @@ TIMEOUT = 60
 RUNWARE_MODELS = {
     'seedream-4-5': os.getenv('RW_MODEL_SEEDREAM_45', 'bytedance:seedream@4.5'),
     'seedream-5-pro': os.getenv('RW_MODEL_SEEDREAM_5PRO', 'bytedance:seedream@5.0-pro'),
+    'nano-banana-pro': os.getenv('RW_MODEL_NANO_BANANA_PRO', 'google:4@2'),
+    'nano-banana-2': os.getenv('RW_MODEL_NANO_BANANA_2', 'google:4@3'),
 }
+
+# Google's image models, whatever Runware calls them, refuse explicit content
+# at any safety level. They are safe-work rungs only, and an explicit shot is
+# moved off them before it is priced rather than after it is refused.
+SFW_ONLY_MODELS = ('nano-banana-pro', 'nano-banana-2')
 RUNWARE_VIDEO_MODEL = os.getenv('RW_MODEL_VIDEO', 'runware:201@1')
 
 # Only 4.5 serves explicit work. 5.0 Pro returns `invalidProviderContent` —
@@ -68,12 +75,25 @@ MODELSLAB_MODELS = {
 }
 MODELSLAB_VIDEO_MODEL = os.getenv('ML_MODEL_VIDEO', 'wan2.2')
 
-# Seedream refuses anything under 3,686,400 pixels, so the old 768x1024 rungs
-# are gone rather than rounded up: every tier here is a size it will serve.
+# Dimensions are per model, not global: Seedream refuses anything under
+# 3,686,400 pixels, and the Google models take only sizes from their own list.
+# A tier is therefore a name for "about this big on whichever model is running",
+# and RESOLUTION_PX is the fallback for anything not listed.
+MODEL_PX = {
+    'seedream-4-5':    {'2k': (1664, 2432), '4k': (3072, 4096)},
+    'seedream-5-pro':  {'2k': (1664, 2432), '4k': (3072, 4096)},
+    'nano-banana-pro': {'2k': (1696, 2528), '4k': (3392, 5096)},
+    'nano-banana-2':   {'2k': (1696, 2528), '4k': (3392, 5096)},
+}
 RESOLUTION_PX = {
     '2k': (1664, 2432),
     '4k': (3072, 4096),
 }
+
+
+def dimensions(model_key, resolution):
+    sizes = MODEL_PX.get(model_key) or RESOLUTION_PX
+    return sizes.get(resolution) or sizes.get('2k') or RESOLUTION_PX['2k']
 VIDEO_PX = {
     '480p': (480, 854),
     '720p': (720, 1280),
@@ -337,12 +357,11 @@ class RunwareProvider(Provider):
         }
 
     def submit_image(self, spec):
-        width, height = RESOLUTION_PX.get(spec.get('resolution'),
-                                          RESOLUTION_PX['2k'])
         model_key = spec.get('model') or 'seedream-4-5'
         if spec.get('explicit'):
             model_key = EXPLICIT_MODEL
         model = RUNWARE_MODELS.get(model_key) or RUNWARE_MODELS['seedream-4-5']
+        width, height = dimensions(model_key, spec.get('resolution'))
 
         task = self._base_task(spec, model, width, height)
         task[_RW['results']] = int(spec.get('batch') or 1)
