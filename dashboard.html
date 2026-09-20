@@ -1832,6 +1832,49 @@ function renderForm(slug, cfg) {
       </div>
 
       <div class="field full">
+        <label>Appearance</label>
+        <textarea id="f-appearance" rows="2" placeholder="a tall redhead with freckles and a gap-toothed smile">${esc(cfg.appearance || '')}</textarea>
+        <span class="hint">Write this and it replaces the boxes below — they only build a
+          description when this is empty. Either way it is what every generated photo
+          of her is built from, so she stays the same woman shot to shot.</span>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label>Body type</label>
+          <select id="f-body-type">${opt(['Any', 'Petite', 'Slim', 'Athletic', 'Curvy', 'BBW'], cfg.body_type)}</select>
+        </div>
+        <div class="field">
+          <label>Chest size</label>
+          <select id="f-chest-size">${opt(['Any', 'Small', 'Medium', 'Large', 'Very large'], cfg.chest_size)}</select>
+        </div>
+        <div class="field">
+          <label>Hair colour</label>
+          <input id="f-hair-colour" value="${esc(cfg.hair_colour || '')}" placeholder="jet black">
+        </div>
+        <div class="field">
+          <label>Eye colour</label>
+          <input id="f-eye-colour" value="${esc(cfg.eye_colour || '')}" placeholder="green">
+        </div>
+        <div class="field">
+          <label>Style</label>
+          <input id="f-style" value="${esc(cfg.style || '')}" placeholder="streetwear">
+        </div>
+        <div class="field">
+          <label>Her phone</label>
+          <input id="f-phone-model" value="${esc(cfg.phone_model || '')}" placeholder="black iPhone 15 Pro">
+          <span class="hint">Only used in selfies, where it is actually in shot.</span>
+        </div>
+      </div>
+
+      <div class="field full">
+        <label>Never in her photos</label>
+        <input id="f-banned-terms" value="${esc(cfg.banned_terms || '')}" placeholder="tattoos, piercings, glasses">
+        <span class="hint">Comma separated. These are struck out of every generation prompt,
+          whichever box they were typed into.</span>
+      </div>
+
+      <div class="field full">
         <label style="display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px;">
           <span>Backstory</span>
           <span style="display:flex; gap:6px;">
@@ -2364,6 +2407,10 @@ function collectConfig() {
     spicy_cta: v('f-spicy-cta'),
     spicy_release_after: parseInt(v('f-spicy-release')) || 0,
     interests: v('f-interests'), flirt_pace: v('f-flirt'),
+    appearance: v('f-appearance'), body_type: v('f-body-type'),
+    chest_size: v('f-chest-size'), hair_colour: v('f-hair-colour'),
+    eye_colour: v('f-eye-colour'), style: v('f-style'),
+    phone_model: v('f-phone-model'), banned_terms: v('f-banned-terms'),
     nsfw_enabled: document.getElementById('f-nsfw')?.checked || false,
     nsfw_level: v('f-nsfw-level'), conversion_triggers: v('f-triggers'),
     avatar: v('f-avatar'), avatar_from_photo: avatarFromPhoto, platforms: collectPlatforms(),
