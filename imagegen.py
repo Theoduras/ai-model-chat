@@ -109,8 +109,14 @@ REFERENCE_FIELD = 'referenceImages'
 MODEL_VIDEO_FIELDS = {
     # Its own shape, not Wan's: no duration (the source decides the length --
     # which is the whole point of a replace), no width/height (a `resolution`
-    # string instead), and no negative prompt.
-    'p-video-replace': {'shape': os.getenv('RW_REPLACE_SHAPE', 'replace')},
+    # string instead), and no negative prompt. It also names the clip it edits
+    # `inputs.video`, where Wan calls the same thing a reference video: one is
+    # the subject of the edit, the other is something to take guidance from,
+    # and the models are right to spell them differently.
+    'p-video-replace': {'shape': os.getenv('RW_REPLACE_SHAPE', 'replace'),
+                        'in_source': os.getenv('RW_REPLACE_VIDEO_KEY', 'video'),
+                        'in_refs': os.getenv('RW_REPLACE_REF_KEY',
+                                             'referenceImages')},
     'wan-2-7': {'shape': os.getenv('RW_VIDEO_SHAPE', 'inputs'),
                 'source': os.getenv('RW_VIDEO_SOURCE_FIELD', 'inputVideo'),
                 'refs': os.getenv('RW_VIDEO_REF_FIELD', 'referenceImages')},
@@ -753,9 +759,13 @@ class RunwareProvider(Provider):
                 raise GenerationError(
                     'a swap needs at least one approved photo of her to swap in')
             if fields.get('shape') in ('inputs', 'replace'):
+                # A model that edits the clip takes it as a single `video`; one
+                # that takes guidance from it takes a list of reference videos.
+                src_key = fields.get('in_source') or 'referenceVideos'
                 task['inputs'] = {
-                    'referenceVideos': [source],
-                    'referenceImages': list(refs)[:MAX_VIDEO_REFERENCES]}
+                    src_key: source if src_key == 'video' else [source],
+                    (fields.get('in_refs') or 'referenceImages'):
+                        list(refs)[:MAX_VIDEO_REFERENCES]}
             else:
                 task[fields['source']] = source
                 task[fields['refs']] = list(refs)[:MAX_REFERENCES]
