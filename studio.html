@@ -287,6 +287,22 @@
 
     <div class="gen-panel">
       <div class="gen-head"><b>4</b><h2 id="gen-prompt-head">Prompt</h2></div>
+        <div class="gen-f" style="gap:6px;">
+          <button type="button" class="btn-ai" id="gen-build-btn"
+                  style="align-self:flex-start;" onclick="togglePromptBuilder()">
+            Build a prompt</button>
+          <div id="gen-builder" style="display:none; flex-direction:column; gap:9px;
+               border:1px solid var(--line); border-radius:10px; padding:11px;">
+            <div id="gen-builder-qs" style="display:flex; flex-direction:column; gap:9px;"></div>
+            <label style="display:flex; gap:6px; align-items:center; font-size:.82rem;">
+              <input type="checkbox" id="gen-builder-adv" onchange="renderBuilder()">
+              More detail</label>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <button type="button" class="btn-ai" onclick="runPromptBuilder()">Write it</button>
+              <span class="hint" style="margin:0;" id="gen-builder-note"></span>
+            </div>
+          </div>
+        </div>
       <div id="gen-image-form" style="display:flex; flex-direction:column; gap:11px;">
         <div class="gen-form">
           <label class="gen-f"><span>Scene</span>
@@ -304,27 +320,18 @@
         </div>
         <label class="gen-f"><span>Direction</span>
           <input id="gen-direction" maxlength="300" placeholder="looking back over her shoulder, phone in one hand"></label>
-        <div class="gen-f" style="gap:6px;">
-          <button type="button" class="btn-ai" id="gen-build-btn"
-                  style="align-self:flex-start;" onclick="togglePromptBuilder()">
-            Build a prompt</button>
-          <div id="gen-builder" style="display:none; flex-direction:column; gap:9px;
-               border:1px solid var(--line); border-radius:10px; padding:11px;">
-            <div id="gen-builder-qs" style="display:flex; flex-direction:column; gap:9px;"></div>
-            <label style="display:flex; gap:6px; align-items:center; font-size:.82rem;">
-              <input type="checkbox" id="gen-builder-adv" onchange="renderBuilder()">
-              More detail</label>
-            <div style="display:flex; gap:8px; align-items:center;">
-              <button type="button" class="btn-ai" onclick="runPromptBuilder()">Write it</button>
-              <span class="hint" style="margin:0;" id="gen-builder-note"></span>
-            </div>
-          </div>
-        </div>
         <label class="gen-f"><span>Add to the prompt</span>
           <textarea id="gen-prompt" rows="5" placeholder="leaning against the window, morning light, looking away from the camera"></textarea></label>
         <label class="gen-f"><span>Keep out of the shot</span>
           <textarea id="gen-negative" rows="3" placeholder="sunglasses, jewellery, other people"></textarea></label>
         <span class="hint" style="margin:0;">The safety baseline is added to every negative prompt and cannot be edited away.</span>
+      </div>
+      <div id="gen-video-form" style="display:none; flex-direction:column; gap:11px;">
+        <label class="gen-f"><span>Photo to animate</span>
+          <select id="gen-anim-photo" onchange="genQuote()"></select></label>
+        <label class="gen-f"><span>Motion</span>
+          <input id="gen-video-motion" maxlength="300"
+                 placeholder="she turns towards the camera and smiles"></label>
       </div>
       <div id="gen-swap-form" style="display:none; flex-direction:column; gap:11px;">
         <label class="gen-f"><span>Upload</span>
@@ -843,6 +850,8 @@ function renderGenForm() {
   const video = genMake === 'video';
   const swap = genMake === 'swap';
   el('gen-image-form').style.display = genMake === 'image' ? '' : 'none';
+  el('gen-video-form').style.display = video ? 'flex' : 'none';
+  if (video) renderAnimPhotos();
   el('gen-video-note').style.display = video ? '' : 'none';
   el('gen-swap-form').style.display = swap ? 'flex' : 'none';
   el('gen-image-out').style.display = genMake === 'image' ? '' : 'none';
@@ -851,9 +860,10 @@ function renderGenForm() {
   // The uploaded clip is the ceiling for a swap's length and size, not the
   // value: both are picked here, within what the file can carry.
   el('gen-swap-out').style.display = swap ? '' : 'none';
-  // A clip is animated from a kept photo, so the video form has no button of
-  // its own; a swap starts from an upload and does.
-  el('gen-run-btn').style.display = video ? 'none' : '';
+  // Every panel submits from the same button now. The vault's play buttons
+  // stay as a one-click shortcut, but a clip driven by an uploaded motion file
+  // has no vault item to press, so the panel needs a way in of its own.
+  el('gen-run-btn').style.display = '';
   el('gen-prompt-head').textContent = swap ? 'Her clip' : 'Prompt';
   if (swap) renderSwapForm();
 
@@ -1052,6 +1062,22 @@ function secondsRange() {
 
 // The uploaded clip is the ceiling for both: a rung above what was filmed is
 // 2.5x the price for detail the source never had.
+// A driven clip runs its source's length, so the picker stops being a choice
+// and says so, exactly as the swap panel's does.
+function lockVideoSeconds() {
+  const vsecs = el('gen-vsecs');
+  if (!vsecs) return;
+  const locked = !!genDrive && !modelTakesDuration(videoModelNow());
+  vsecs.disabled = locked;
+  if (locked && vsecs.dataset.model !== 'driven') {
+    vsecs.dataset.model = 'driven';
+    vsecs.innerHTML = opt(String(genDrive.seconds),
+                          genDrive.seconds + 's — the whole clip', '');
+  } else if (!locked && vsecs.dataset.model === 'driven') {
+    vsecs.dataset.model = '';
+  }
+}
+
 function renderSwapOut() {
   const box = el('gen-swap-out');
   const sres = el('gen-sres'), ssecs = el('gen-ssecs');
@@ -1099,9 +1125,26 @@ function renderSwapOut() {
 
 // A model with no duration runs the whole clip, so that is what is quoted:
 // the panel must never price a trim the provider will not perform.
-function swapTakesDuration() {
+function modelTakesDuration(model) {
   const caps = (genPrices && genPrices.swap_model_caps) || {};
-  return (caps[swapModel()] || {}).duration !== false;
+  return (caps[model] || {}).duration !== false;
+}
+
+function swapTakesDuration() {
+  return modelTakesDuration(swapModel());
+}
+
+// The Video tab runs the explicit animate model when it is given a motion
+// clip, and that model is told no length: it produces the clip's own.
+function videoModelNow() {
+  return genDrive ? ((genPrices && genPrices.explicit_swap_model) || videoModel())
+                  : videoModel();
+}
+
+function videoSecondsNow() {
+  if (genDrive && !modelTakesDuration(videoModelNow())) return genDrive.seconds;
+  return parseInt((el('gen-vsecs') || {}).value
+                  || (genPrices ? genPrices.defaults.video_duration : 5), 10);
 }
 
 function swapSeconds() {
@@ -1237,7 +1280,8 @@ async function runPromptBuilder() {
     });
     const d = await res.json();
     if (!d.ok) throw new Error(d.error || 'could not write it');
-    const field = genMake === 'swap' ? el('gen-swap-motion') : el('gen-prompt');
+    const field = el(genMake === 'swap' ? 'gen-swap-motion'
+                    : genMake === 'video' ? 'gen-video-motion' : 'gen-prompt');
     field.value = d.prompt;
     el('gen-builder-note').textContent =
       d.engine === 'gemini' ? 'Written — edit it before you generate.'
@@ -1273,12 +1317,27 @@ function genQuote() {
 
   if (genMake === 'video') {
     const resv = (el('gen-vres') || {}).value || genPrices.defaults.video_resolution;
-    const secs = (el('gen-vsecs') || {}).value || String(genPrices.defaults.video_duration);
-    const rates = (genPrices.video_rates || {})[videoModel()] || {};
-    const per = rates[resv] ? rates[resv] * parseInt(secs, 10) : undefined;
-    if (what) what.textContent = `One ${secs}s clip, ${resv}`;
+    const secs = videoSecondsNow();
+    const rates = (genPrices.video_rates || {})[videoModelNow()] || {};
+    const per = rates[resv] ? rates[resv] * secs : undefined;
+    const btn = el('gen-run-btn');
+    if (what) {
+      what.textContent = genDrive
+        ? `${secs}s driven clip, ${resv}` : `One ${secs}s clip, ${resv}`;
+    }
     if (cost) cost.textContent = per === undefined ? '' : `${per} cr`;
     setMoney(per);
+    lockVideoSeconds();
+    const cash = cashFor(per);
+    btn.disabled = !animPhoto();
+    btn.textContent = !animPhoto()
+      ? 'Keep a photo first'
+      : `Animate her · ${per} credit${per === 1 ? '' : 's'}` + (cash ? ` · ${cash}` : '');
+    btn.classList.toggle('gen-low', genCredits !== null && genCredits < (per || 0));
+    el('gen-video-note').textContent = genDrive
+      ? `Her photo will perform that clip's motion, for its whole ${genDrive.seconds}s.`
+      : 'A clip always starts from a photo that is already kept, so its first '
+        + 'frame carries her face — there is no text-to-video here on purpose.';
     showEngines();
     return per;
   }
@@ -1330,6 +1389,10 @@ function setGenStatus(msg, ok) {
 async function runGeneration() {
   if (!slug()) return;
   if (genMake === 'swap') return runSwap();
+  if (genMake === 'video') {
+    if (!animPhoto()) return setGenStatus('✗ Keep a photo first — a clip starts from one.', false);
+    return animateMedia(animPhoto(), true);
+  }
   const btn = el('gen-run-btn');
   btn.disabled = true;
   setGenStatus('Sending…', null);
@@ -1385,12 +1448,15 @@ async function runSwap() {
   finally { btn.disabled = false; }
 }
 
-async function animateMedia(id) {
-  const secs = (el('gen-vsecs') || {}).value || (genPrices ? genPrices.defaults.video_duration : 5);
+// `quoted` means the panel has already shown the price, so the confirm would
+// only ask the same question twice; the vault's play button has shown nothing.
+async function animateMedia(id, quoted) {
+  const secs = videoSecondsNow();
   const resv = (el('gen-vres') || {}).value || (genPrices ? genPrices.defaults.video_resolution : '720p');
-  const rates = (genPrices && genPrices.video_rates[videoModel()]) || {};
-  const cost = rates[resv] ? rates[resv] * parseInt(secs, 10) : '?';
-  if (!confirm(`Animate this photo into a ${secs}s ${resv} clip for ${cost} credits?`)) return;
+  const rates = (genPrices && genPrices.video_rates[videoModelNow()]) || {};
+  const cost = rates[resv] ? rates[resv] * secs : '?';
+  if (!quoted &&
+      !confirm(`Animate this photo into a ${secs}s ${resv} clip for ${cost} credits?`)) return;
   setGenStatus('Sending…', null);
   try {
     const res = await fetch('/api/generate/job', {
@@ -1398,6 +1464,7 @@ async function animateMedia(id) {
       body: JSON.stringify({ persona: slug(), kind: 'video', model: videoModel(),
                              rating: genRating,
                              resolution: resv, seconds: secs, reference_media: id,
+                             motion: (el('gen-video-motion') || {}).value || '',
                              source: genDrive ? genDrive.id : '' }),
     });
     const d = await res.json();
@@ -1478,6 +1545,30 @@ async function keepGenerated(id, keep) {
     setGenStatus(keep ? '✓ Kept — it is in the vault now' : 'Dropped', keep ? true : null);
     await loadPersona();
   } catch (e) { setGenStatus('✗ ' + e.message, false); }
+}
+
+// The kept photos a clip can start from — the same list the vault's play
+// buttons are drawn from, so the two can never disagree about what is animatable.
+function animPhotos() {
+  return (mediaVault || []).filter(v => !isClip(v.kind));
+}
+
+function renderAnimPhotos() {
+  const sel = el('gen-anim-photo');
+  if (!sel) return;
+  const photos = animPhotos();
+  const keep = sel.value;
+  if (sel.dataset.count !== String(photos.length)) {
+    sel.dataset.count = String(photos.length);
+    sel.innerHTML = photos.length
+      ? photos.map((v, i) => opt(v.id, v.outfit || v.purpose || ('Photo ' + (i + 1)),
+                                 keep || photos[0].id)).join('')
+      : opt('', 'Keep a photo first — a clip starts from one', '');
+  }
+}
+
+function animPhoto() {
+  return (el('gen-anim-photo') || {}).value || '';
 }
 
 function renderVault() {
