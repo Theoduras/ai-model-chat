@@ -394,18 +394,26 @@ function renderModelChips() {
     if (note) note.textContent = 'A clip runs on one model, so there is nothing to choose here.';
     return;
   }
+  const pinned = genRating === 'nsfw' && genEngines && genEngines.nsfw
+    ? genEngines.nsfw.key : '';
   const keys = Object.keys(genPrices.images);
-  if (!keys.includes(hidden.value)) hidden.value = genPrices.defaults.model;
+  // An explicit rating is pinned at the provider, so the picker stops offering
+  // a choice it would override: pick 5.0 Pro, switch to explicit, and 4.5 is
+  // what runs either way.
+  if (pinned && keys.includes(pinned)) hidden.value = pinned;
+  else if (!keys.includes(hidden.value)) hidden.value = genPrices.defaults.model;
   const res = (el('gen-res') || {}).value || genPrices.defaults.resolution;
   box.innerHTML = keys.map(m => {
     const price = (genPrices.images[m] || {})[res];
+    const off = pinned && m !== pinned;
     return `<button type="button" class="gen-chip" aria-pressed="${m === hidden.value}"
-             onclick="pickModel('${m}')">${esc(genPrices.labels[m] || m)}
-             <small>${price === undefined ? '' : price + ' cr'}</small></button>`;
+             ${off ? 'disabled' : `onclick="pickModel('${m}')"`}>${esc(genPrices.labels[m] || m)}
+             <small>${off ? 'not explicit' : (price === undefined ? '' : price + ' cr')}</small></button>`;
   }).join('');
   if (note) {
-    note.textContent = genRating === 'nsfw'
-      ? 'Explicit stills are pinned to one checkpoint whatever is picked here — Result names it.'
+    const label = pinned ? (genPrices.labels[pinned] || pinned) : '';
+    note.textContent = pinned
+      ? `Explicit stills always run on ${label}, so the others are off here.`
       : 'Prices are per photo. Holding her face costs nothing on top.';
   }
 }
