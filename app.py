@@ -3293,7 +3293,7 @@ plan above already allows.</p>
 
 _FEATURE_LABELS = (
     ('personas', 'Personas \u2014 create and edit'),
-    ('generate', 'Generate images'),
+    ('generate', 'Generation studio \u2014 images and video'),
     ('config', 'App configuration'),
     ('analytics', 'Analytics'),
     ('team', 'Team and seats'),

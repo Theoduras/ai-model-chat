@@ -46,7 +46,7 @@ RUNWARE_MODELS = {
     'flux-dev': os.getenv('RW_MODEL_FLUX_DEV', 'runware:101@1'),
     'qwen': os.getenv('RW_MODEL_QWEN', 'runware:108@1'),
 }
-RUNWARE_VIDEO_MODEL = os.getenv('RW_MODEL_VIDEO', 'wan:2@2')
+RUNWARE_VIDEO_MODEL = os.getenv('RW_MODEL_VIDEO', 'runware:201@1')
 
 # Identity is carried by IP-Adapters, not by img2img: a seed image reproduces
 # the reference's whole composition, which is the opposite of what a new pose
