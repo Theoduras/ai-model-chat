@@ -94,7 +94,7 @@ def test_prices_track_cost():
     check('batch multiplies, add-ons are per image',
           CR.quote({'kind': 'image', 'model': 'sdxl',
                     'resolution': '1024x1536', 'addons': ('faceswap',),
-                    'batch': 4}) == 8)
+                    'batch': 4}) == 12)
     check('a 720p 5s clip is 150 credits',
           CR.quote({'kind': 'video', 'resolution': '720p', 'seconds': 5}) == 150)
     check('the legacy Google path is priced too, so it is not a free bypass',

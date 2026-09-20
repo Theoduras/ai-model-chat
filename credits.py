@@ -49,7 +49,10 @@ VIDEO_PRICES = {
 GOOGLE_IMAGE_CREDITS = 10
 
 ADDON_PRICES = {
-    'faceswap': 1,
+    # Two IP-Adapter passes, not one: the reference adapter and the Plus-Face
+    # one are billed separately by the provider and together cost more than a
+    # whole SDXL generation, so a single credit here would sell them at a loss.
+    'faceswap': 2,
     'upscale': 2,
     'nsfw_check': 1,
 }

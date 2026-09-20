@@ -41,12 +41,25 @@ TIMEOUT = 60
 # SDXL slot points at an NSFW-capable community checkpoint, which is the whole
 # reason for being on this provider rather than Google.
 RUNWARE_MODELS = {
-    'sdxl': os.getenv('RW_MODEL_SDXL', 'civitai:257749@290640'),
+    'sdxl': os.getenv('RW_MODEL_SDXL', 'civitai:573152@926965'),
     'flux-schnell': os.getenv('RW_MODEL_FLUX_SCHNELL', 'runware:100@1'),
     'flux-dev': os.getenv('RW_MODEL_FLUX_DEV', 'runware:101@1'),
     'qwen': os.getenv('RW_MODEL_QWEN', 'runware:108@1'),
 }
 RUNWARE_VIDEO_MODEL = os.getenv('RW_MODEL_VIDEO', 'wan:2@2')
+
+# Identity is carried by IP-Adapters, not by img2img: a seed image reproduces
+# the reference's whole composition, which is the opposite of what a new pose
+# is for. The base adapter holds body and styling, the Plus-Face one is the
+# faceswap pass the add-on charges for. Keyed by architecture because an
+# adapter only loads against the family it was trained on.
+RUNWARE_IP_ADAPTERS = {
+    'sdxl': {'base': 'runware:55@1', 'face': 'runware:55@3'},
+    'flux-schnell': {'base': 'runware:56@4'},
+    'flux-dev': {'base': 'runware:56@4'},
+}
+IP_WEIGHT_BASE = 0.6
+IP_WEIGHT_FACE = 0.9
 
 MODELSLAB_MODELS = {
     'sdxl': os.getenv('ML_MODEL_SDXL', 'uncensored-flux-lora'),
@@ -244,6 +257,7 @@ _RW = {
     'prompt': 'positivePrompt',
     'negative': 'negativePrompt',
     'seed_image': 'seedImage',
+    'adapters': 'ipAdapters',
     'frame_images': 'frameImages',
     'results': 'numberResults',
     'output': 'outputType',
@@ -296,8 +310,20 @@ class RunwareProvider(Provider):
             task['seed'] = int(spec['seed'])
         ref = spec.get('reference_b64')
         if ref:
-            task[_RW['seed_image']] = _data_uri(ref, spec.get('reference_mime'))
-            task['strength'] = float(spec.get('strength') or 0.72)
+            guide = _data_uri(ref, spec.get('reference_mime'))
+            adapters = RUNWARE_IP_ADAPTERS.get(spec.get('model') or 'sdxl')
+            if adapters:
+                stack = [{'model': adapters['base'], 'guideImage': guide,
+                          'weight': IP_WEIGHT_BASE}]
+                if 'face' in adapters and 'faceswap' in (spec.get('addons') or ()):
+                    stack.append({'model': adapters['face'], 'guideImage': guide,
+                                  'weight': IP_WEIGHT_FACE})
+                task[_RW['adapters']] = stack
+            else:
+                # No adapter for this family, so the reference can only be held
+                # as a seed image. It constrains the pose; it is the fallback.
+                task[_RW['seed_image']] = guide
+                task['strength'] = float(spec.get('strength') or 0.72)
 
         data = self._send([task])
         urls = [d.get('imageURL') for d in data if d.get('imageURL')]
