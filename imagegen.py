@@ -193,8 +193,12 @@ def video_size(model_key, width=0, height=0, resolution=None):
     if not sizes:
         # No fixed list to snap to, so the source's own shape is the right
         # answer: a clip whose person is replaced should come out the shape it
-        # went in, and the rung default would letterbox a landscape one.
-        return (w, h) if w > 0 and h > 0 else fallback
+        # went in, and the rung default would letterbox a landscape one. Held
+        # to a multiple of 16, because a phone crop is any width it likes --
+        # 406 is a real one -- and an encoder takes macroblocks or nothing.
+        if w > 0 and h > 0:
+            return _macroblock(w), _macroblock(h)
+        return fallback
     if w <= 0 or h <= 0:
         w, h = fallback
     # The rung is what was asked for and paid for, so it filters rather than
@@ -212,6 +216,10 @@ def video_size(model_key, width=0, height=0, resolution=None):
     return min(rung, key=lambda s: (round(abs(math.log(s[0] / float(s[1])
                                                        / ratio)), 3),
                                     abs(s[0] * s[1] - w * h)))
+
+
+def _macroblock(px, block=16):
+    return max(block, int(round(px / float(block))) * block)
 
 
 def size_rung(height, width=0):
