@@ -7,6 +7,12 @@
       "includeFiles": "{*.py,*.html,*.json,css/**,js/**,personas/**,templates/**}"
     }
   },
+  "crons": [
+    {
+      "path": "/api/generate/tick",
+      "schedule": "0 * * * *"
+    }
+  ],
   "rewrites": [
     {
       "source": "/(.*)",

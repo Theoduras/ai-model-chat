@@ -2085,6 +2085,10 @@ _OPEN_PATHS = ('/login', '/register', '/logout', '/pricing', '/billing',
                # a webhook.
                '/api/fanvue/oauth-redirect', '/api/x/oauth-redirect',
                '/api/threads/oauth-redirect',
+               # The generation sweeper, called by a scheduler rather than a
+               # browser. It carries its own proof (CRON_SECRET) and has no
+               # session to offer, so a sign-in check would only ever 401 it.
+               '/api/generate/tick',
                # Meta posts these itself: the webhook, and the two callbacks it
                # requires an app to expose. Each carries its own proof — the
                # verify token, or a signed_request checked against the app
@@ -27916,9 +27920,24 @@ def api_generate_job():
         return _credits_denied(price, _credit_balance(user) or 0)
 
     workspace = _workspace_id(user)
-    threading.Thread(target=_gen_start, args=(job_id, slug, spec, workspace),
-                     daemon=True).start()
+    if GEN_HAS_WORKER:
+        threading.Thread(target=_gen_start, args=(job_id, slug, spec, workspace),
+                         daemon=True).start()
+    else:
+        # No worker to hand it to, and a thread here would be frozen with the
+        # response. Submit on the request instead: an image provider answers
+        # inline anyway, and a video submit only has to come back with an id.
+        _gen_start(job_id, slug, spec, workspace)
+
+    s = _db_session()
+    try:
+        from db import get_generation
+        job = get_generation(s, job_id)
+        payload = _job_json(job, s) if job else {'id': job_id, 'status': 'queued'}
+    finally:
+        s.close()
     return jsonify({'ok': True, 'job': job_id, 'credits': price,
+                    'status': payload.get('status'), 'result': payload,
                     'balance': (balance - price) if balance is not None else None})
 
 
@@ -28022,65 +28041,115 @@ def _gen_finish(job_id, slug, spec, workspace, urls):
         _refund_credits(workspace, job_id, note='no usable result')
 
 
-def _gen_poll_round():
-    """Advance every open job. Also the sweeper: a job whose thread died leaves
-    a reservation behind, and credits nobody can spend are credits stolen."""
-    from db import SessionLocal, open_generations, update_generation
+def _gen_row(job):
+    return (job.id, job.slug, job.spec_json, job.provider, job.provider_job_id,
+            job.workspace_id, job.created_at)
+
+
+def _gen_advance(row):
+    """Move one open job forward: poll the provider, or fail and refund it if
+    it has run out of time. Written against a plain tuple rather than a live
+    row so the caller's session can be closed first — a provider poll is a
+    network round trip and must not hold one open."""
+    (job_id, slug, spec_json, provider_name, provider_job,
+     workspace, created_at) = row
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    age = (now - created_at).total_seconds() if created_at else 0
+    if age > GEN_JOB_TIMEOUT:
+        logger.warning('generation job %s timed out after %.0fs', job_id, age)
+        _gen_fail(job_id, workspace, 'the provider never finished')
+        return
+    if not provider_job:
+        # Submitted but never acknowledged: whatever was submitting died before
+        # it could record a provider id, so there is nothing left to poll for.
+        if age > GEN_SUBMIT_GRACE:
+            _gen_fail(job_id, workspace, 'the generation never started')
+        return
+    try:
+        spec = json.loads(spec_json or '{}')
+        result = imagegen.get_provider(provider_name).poll(provider_job)
+    except imagegen.GenerationError as e:
+        if e.fatal:
+            _gen_fail(job_id, workspace, str(e))
+        return
+    except Exception:
+        logger.exception('generation poll crashed job=%s', job_id)
+        return
+    if result.status == 'done' and result.urls:
+        _gen_finish(job_id, slug, spec, workspace, result.urls)
+    elif result.status == 'failed':
+        _gen_fail(job_id, workspace, result.error or 'generation failed')
+
+
+def _gen_advance_open(workspace_id=None, job_id=None):
+    """Advance the open jobs a reader is about to look at. On a host with no
+    background worker this is what moves a generation along at all: the studio
+    polls every few seconds, so the browser drives its own jobs. Scoped to one
+    workspace (or one job) so a read stays quick and one creator's poll is not
+    made to wait on everybody else's queue."""
+    from db import SessionLocal, GenerationJob
     s = SessionLocal()
     try:
-        jobs = [(j.id, j.slug, j.spec_json, j.provider, j.provider_job_id,
-                 j.workspace_id, j.created_at, j.status)
-                for j in open_generations(s)]
+        q = s.query(GenerationJob).filter(
+            GenerationJob.status.in_(('queued', 'running')))
+        if job_id:
+            q = q.filter(GenerationJob.id == job_id)
+        if workspace_id:
+            q = q.filter(GenerationJob.workspace_id == workspace_id)
+        rows = [_gen_row(j) for j in q.order_by(GenerationJob.created_at).limit(12)]
     finally:
         s.close()
+    for row in rows:
+        _gen_advance(row)
+    return len(rows)
 
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-    for (job_id, slug, spec_json, provider_name, provider_job, workspace,
-         created_at, status) in jobs:
-        age = (now - created_at).total_seconds() if created_at else 0
-        if age > GEN_JOB_TIMEOUT:
-            logger.warning('generation job %s timed out after %.0fs', job_id, age)
-            _gen_fail(job_id, workspace, 'the provider never finished')
-            continue
-        if not provider_job:
-            # Submitted but never acknowledged: the thread died before it could
-            # record a provider id, so there is nothing left to poll for.
-            if age > GEN_SUBMIT_GRACE:
-                _gen_fail(job_id, workspace, 'the generation never started')
-            continue
-        try:
-            spec = json.loads(spec_json or '{}')
-            result = imagegen.get_provider(provider_name).poll(provider_job)
-        except imagegen.GenerationError as e:
-            if e.fatal:
-                _gen_fail(job_id, workspace, str(e))
-            continue
-        except Exception:
-            logger.exception('generation poll crashed job=%s', job_id)
-            continue
-        if result.status == 'done' and result.urls:
-            _gen_finish(job_id, slug, spec, workspace, result.urls)
-        elif result.status == 'failed':
-            _gen_fail(job_id, workspace, result.error or 'generation failed')
+
+def _gen_poll_round():
+    """Advance every open job. Also the sweeper: a job whose submit died leaves
+    a reservation behind, and credits nobody can spend are credits stolen."""
+    from db import SessionLocal, open_generations
+    s = SessionLocal()
+    try:
+        rows = [_gen_row(j) for j in open_generations(s)]
+    finally:
+        s.close()
+    for row in rows:
+        _gen_advance(row)
+    return len(rows)
 
 
 GEN_JOB_TIMEOUT = int(os.getenv('GEN_JOB_TIMEOUT', '1800'))
 GEN_SUBMIT_GRACE = int(os.getenv('GEN_SUBMIT_GRACE', '120'))
 
+# Whether anything advances a generation on its own. False on Vercel, where a
+# lambda is frozen the moment it answers: a submit handed to a thread would
+# never finish, and a job nothing polls sits queued forever holding the
+# creator's credits. Everything that the worker would have done off-request is
+# done on-request instead — see _gen_start's caller and _gen_advance_open.
+GEN_HAS_WORKER = _worker_enabled('GEN_WORKER')
+
+_gen_lifecycle_done = [False]
+
+
+def _gen_ensure_lifecycle():
+    """Install the staging auto-delete rule, once per process. It used to hang
+    off the worker's startup, which meant the one host with no worker was the
+    one host where generated media never expired."""
+    if _gen_lifecycle_done[0] or not storage.enabled():
+        return
+    _gen_lifecycle_done[0] = True
+    try:
+        if storage.ensure_lifecycle():
+            logger.info('installed the %s-day staging lifecycle rule on %s',
+                        storage.STAGING_DAYS, storage.bucket_name())
+    except Exception:
+        logger.exception('could not set the staging lifecycle rule — '
+                         'generated media will not expire on its own')
+
 
 def _gen_worker():
     import time as _t
-    # The staging auto-delete is a bucket lifecycle rule, not something this
-    # loop does: a worker that is not running must not be the reason a
-    # generation outlives its three days.
-    if storage.enabled():
-        try:
-            if storage.ensure_lifecycle():
-                logger.info('installed the %s-day staging lifecycle rule on %s',
-                            storage.STAGING_DAYS, storage.bucket_name())
-        except Exception:
-            logger.exception('could not set the staging lifecycle rule — '
-                             'generated media will not expire on its own')
+    _gen_ensure_lifecycle()
     while True:
         _t.sleep(10)
         try:
@@ -28097,6 +28166,8 @@ def api_generate_job_status(job_id):
         return blocked
     user = _current_user()
     from db import get_generation
+    if not GEN_HAS_WORKER:
+        _gen_advance_open(workspace_id=_workspace_id(user), job_id=job_id)
     s = _db_session()
     try:
         job = get_generation(s, job_id)
@@ -28115,6 +28186,8 @@ def api_generate_jobs():
     user = _current_user()
     slug = (request.args.get('persona') or '').strip().lower()
     from db import list_generations
+    if not GEN_HAS_WORKER:
+        _gen_advance_open(workspace_id=_workspace_id(user))
     s = _db_session()
     try:
         rows = list_generations(s, _workspace_id(user), slug or None)
@@ -28190,6 +28263,44 @@ def api_generate_keep():
     finally:
         s.close()
     return jsonify({'ok': True, 'kept' if keep else 'dropped': done})
+
+
+def _cron_authorised():
+    """A cron endpoint is reachable from the open internet, so it is not open.
+
+    Vercel signs its own cron calls with CRON_SECRET as a bearer token, which
+    is the same shape an external pinger would use, so one check covers both.
+    With no secret set the route stays shut rather than falling open.
+    """
+    secret = (os.getenv('CRON_SECRET') or '').strip()
+    if not secret:
+        return False
+    sent = (request.headers.get('Authorization') or '').strip()
+    if sent.lower().startswith('bearer '):
+        sent = sent[7:].strip()
+    else:
+        sent = (request.args.get('key') or '').strip()
+    return hmac.compare_digest(sent, secret)
+
+
+@app.route('/api/generate/tick', methods=['GET', 'POST'])
+def api_generate_tick():
+    """One round of what the worker loop does, driven by a scheduler instead.
+
+    On a host with no always-on process the studio's own polling advances the
+    jobs somebody is watching; this covers the rest — a job whose tab was
+    closed, and the timeouts that release reserved credits. Without it a
+    generation that dies quietly holds those credits forever.
+    """
+    if not _cron_authorised():
+        return ('', 404)
+    _gen_ensure_lifecycle()
+    try:
+        n = _gen_poll_round()
+    except Exception:
+        logger.exception('generation tick failed')
+        return jsonify({'ok': False}), 500
+    return jsonify({'ok': True, 'advanced': n})
 
 
 _gen_worker_started = [False]

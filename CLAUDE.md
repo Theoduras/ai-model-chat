@@ -66,7 +66,8 @@ templates/profile.html          — Jinja2 template variant (unused currently)
 .env                            — API keys (never commit)
 Dockerfile                      — Cloud Run image (the real deployment)
 api/index.py                    — Vercel entrypoint (secondary host)
-vercel.json                     — Vercel routing config (secondary host)
+api/requirements.txt            — Vercel deps (trimmed; wins over the root file)
+vercel.json                     — Vercel routing + cron config (secondary host)
 requirements.txt                — Python deps: flask, google-genai, python-dotenv, google-auth
 ```
 
@@ -90,6 +91,7 @@ requirements.txt                — Python deps: flask, google-genai, python-dot
 | `GET /api/generate/job/{id}` | — | Poll one generation |
 | `GET /api/generate/jobs?persona=` | — | Recent generations, with staged media |
 | `POST /api/generate/keep` | JSON | Keep (promote + approve) or drop staged media |
+| `GET /api/generate/tick` | — | Cron sweeper: advance jobs, refund dead ones (`CRON_SECRET`) |
 
 ---
 
@@ -211,6 +213,25 @@ Stay completely in character. Never mention being an AI.
   Credit top-up checkout is admin-gated too: nobody should buy credits for a
   feature that is not offered yet. Open it to creators by dropping those
   `_require_admin` calls and the `admin-only` class on the sidebar item.
+- **Generation works on Vercel as well as Cloud Run, by doing on-request what
+  the worker does off-request.** `GEN_HAS_WORKER` (from `_worker_enabled`) is
+  the switch. With a worker, a submit goes to a thread and `_gen_worker` polls.
+  Without one — Vercel freezes a lambda the moment it answers, so a thread
+  never finishes and a job nothing polls holds the creator's credits forever —
+  the submit runs inline on the request, and `_gen_advance_open` moves the
+  jobs a reader is about to look at, so the studio's own polling drives them.
+  `/api/generate/tick` is the sweeper for jobs with no tab open on them: it is
+  in `_OPEN_PATHS` because a scheduler has no session, carries `CRON_SECRET`
+  instead, and stays shut when that is unset. `vercel.json` has the `crons`
+  entry; on Hobby that fires once a day, which only delays a refund, so set a
+  minute-granularity pinger if that matters. The staging lifecycle rule moved
+  out of the worker into `_gen_ensure_lifecycle` for the same reason: the one
+  host with no worker was the one host where generated media never expired.
+- `api/requirements.txt` is the Vercel dependency set and wins over the root
+  one for that entrypoint. It drops playwright, patchright, telethon and
+  gunicorn — the always-on host's stacks, all imported lazily, none of which a
+  lambda can use — to stay under the 250 MB unzipped limit. Adding a root
+  dependency that `app.py` imports at module level means adding it here too.
 - **NSFW generation never runs on Google.** Imagen and `gemini-2.5-flash-image`
   refuse explicit content at any safety level, so `/api/generate/image` stays as
   the SFW path and everything explicit goes through `imagegen.py` to a managed

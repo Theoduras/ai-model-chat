@@ -1,0 +1,18 @@
+# Vercel installs the requirements.txt next to the entrypoint in preference to
+# the one at the root, so this is the Vercel-only dependency set. It exists
+# because the root file carries the browser and Telegram stacks that only the
+# always-on host uses, and a lambda has a 250 MB unzipped limit to stay under.
+#
+# Dropped here on purpose: playwright and patchright (the hosted sign-in
+# browser, which needs an always-on host anyway), telethon (the Telegram user
+# client, same), gunicorn (Vercel serves the app itself).
+flask
+google-genai
+python-dotenv
+google-auth
+sqlalchemy
+psycopg2-binary
+cryptography
+aiohttp
+google-cloud-storage
+requests
