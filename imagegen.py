@@ -453,7 +453,6 @@ class RunwareProvider(Provider):
             'taskUUID': str(uuid.uuid4()),
             'model': model,
             _RW['prompt']: spec.get('prompt') or '',
-            _RW['negative']: spec.get('negative') or NEGATIVE_PROMPT,
             'width': width,
             'height': height,
             _RW['output']: 'URL',
