@@ -10,7 +10,7 @@
   "crons": [
     {
       "path": "/api/generate/tick",
-      "schedule": "0 * * * *"
+      "schedule": "0 4 * * *"
     }
   ],
   "rewrites": [
