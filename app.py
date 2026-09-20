@@ -10465,6 +10465,10 @@ def api_persona_media_list(slug):
                 'location': (o or {}).get('location', ''),
                 'lighting': (o or {}).get('lighting', ''),
                 'thumb': f'/api/personas/{slug}/media/{r.id}/image',
+                # Set on an extension: the clip it carries on from. There is no
+                # ffmpeg here to join the two, so the chain is the only thing
+                # that says these are one shot rather than two.
+                'parent_media': getattr(r, 'parent_media', '') or '',
             })
 
         # One entry per placement, which is what the outfit strips render.
@@ -10689,8 +10693,16 @@ def api_persona_media_image(slug, media_id):
             # bytes never pass through the app — that is what makes serving a
             # clip affordable. A private Blob store cannot, and its token must
             # not reach a browser, so there we proxy instead.
+            #
+            # `?inline=1` opts out of the redirect. One caller needs it: the
+            # Extend job reads a clip's last frame onto a canvas, and a canvas
+            # fed a cross-origin video is tainted — toDataURL throws and the
+            # job cannot start. A signed GCS URL is cross-origin, so that one
+            # surface takes the bytes through here instead. Nothing that merely
+            # plays a clip should, which is why this is a flag and not the rule.
+            inline = bool(request.args.get('inline'))
             try:
-                url = storage.signed_url(path)
+                url = None if inline else storage.signed_url(path)
                 if url:
                     return redirect(url)
                 data = storage.get(path)
@@ -28182,6 +28194,10 @@ def _gen_spec(slug, body, user):
         if not parent or parent.get('kind') != 'video':
             raise imagegen.GenerationError(
                 'Pick a clip from the vault to carry on from.')
+        if not parent.get('approved'):
+            raise imagegen.GenerationError(
+                'Keep that clip first — an extension carries on from an '
+                'approved one.')
         frame_b64, frame_mime = _gen_frame(body.get('frame'))
         if not frame_b64:
             raise imagegen.GenerationError(
@@ -28203,7 +28219,7 @@ def _gen_spec(slug, body, user):
     elif job == 'multiref':
         ids = [str(i) for i in (body.get('scene_media') or []) if i]
         kept = [i for i in ids[:imagegen.MAX_VIDEO_REFERENCES]
-                if _media_row(slug, i)]
+                if (_media_row(slug, i) or {}).get('approved')]
         if not kept:
             raise imagegen.GenerationError(
                 'Pick at least one scene or outfit photo to place her in.')

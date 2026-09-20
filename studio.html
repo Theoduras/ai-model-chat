@@ -438,7 +438,7 @@
         <label class="gen-f"><span>Motion</span>
           <input id="gen-extend-motion" maxlength="300"
                  placeholder="she keeps walking, the camera stays with her"></label>
-        <video id="gen-extend-player" muted playsinline preload="metadata" crossorigin="anonymous"
+        <video id="gen-extend-player" muted playsinline preload="metadata"
                style="display:none; width:100%; max-height:200px; border-radius:10px; background:#000;"></video>
       </div>
 
@@ -1283,19 +1283,23 @@ function providerCost() {
   if (!genCosts) return null;
   const seen = (kind, model, key) =>
     ((genCosts.measured[kind] || {})[model] || []).includes(key);
+  // Sound is a second call to the provider, so it is a second cost. Reading
+  // only the per-second rate under-reported every clip that carries one.
+  const audioUsd = genAudio.mode ? ((genCosts.addons || {}).audio || 0) : 0;
   if (genMake === 'swap') {
     if (!genSwap) return null;
     const per = (genCosts.video_per_second[swapModel()] || {})[swapResolution()];
     return per === undefined ? null
-      : { usd: per * swapSeconds(), measured: seen('videos', swapModel(), swapResolution()) };
+      : { usd: per * swapSeconds() + audioUsd,
+          measured: seen('videos', swapModel(), swapResolution()) && !audioUsd };
   }
   if (genMake === 'video') {
     const resv = (el('gen-vres') || {}).value || genPrices.defaults.video_resolution;
-    const secs = parseInt((el('gen-vsecs') || {}).value
-                          || genPrices.defaults.video_duration, 10);
-    const per = (genCosts.video_per_second[videoModel()] || {})[resv];
+    const secs = videoSecondsNow();
+    const per = (genCosts.video_per_second[videoModelNow()] || {})[resv];
     return per === undefined ? null
-      : { usd: per * secs, measured: seen('videos', videoModel(), resv) };
+      : { usd: per * secs + audioUsd,
+          measured: seen('videos', videoModelNow(), resv) && !audioUsd };
   }
   const model = el('gen-model').value, res = el('gen-res').value;
   const per = (genCosts.images[model] || {})[res];
@@ -1824,14 +1828,14 @@ async function jobPayload() {
     const clip = vaultClips().find(v => v.id === genExtendClip);
     if (!clip) throw new Error('That clip is no longer in the vault.');
     setGenStatus('Reading the last frame…', null);
-    const frame = await clipFrame(clip.thumb, 'last');
+    const frame = await clipFrame(inlineSrc(clip.thumb), 'last');
     if (!frame) throw new Error('That clip’s last frame could not be read here.');
     const payload = Object.assign(base, {
       parent_media: clip.id, extend_mode: genExtendMode, frame: frame,
       motion: (el('gen-extend-motion').value || '').trim(),
     });
     if (genExtendMode === 'loop') {
-      const first = await clipFrame(clip.thumb, 'first');
+      const first = await clipFrame(inlineSrc(clip.thumb), 'first');
       if (!first) throw new Error('That clip’s opening frame could not be read here.');
       payload.closing_frame = first;
     }
@@ -2003,6 +2007,15 @@ function vaultClips() {
   return (mediaVault || []).filter(v => isClip(v.kind));
 }
 
+// The Extend job reads a clip's pixels onto a canvas, and a canvas fed a
+// cross-origin video is tainted — a signed GCS URL is cross-origin, so the
+// frame would never come back. `?inline=1` takes the bytes through the app
+// instead. Only this panel uses it: streaming every vault thumbnail through
+// the server would undo the reason the redirect is there at all.
+function inlineSrc(url) {
+  return url + (url.includes('?') ? '&' : '?') + 'inline=1';
+}
+
 function renderExtendClips() {
   const box = el('gen-extend-clip');
   if (!box) return;
@@ -2014,13 +2027,14 @@ function renderExtendClips() {
     <button type="button" class="anim-pick" aria-pressed="${v.id === genExtendClip}"
             title="${esc(v.outfit || v.purpose || 'kept clip')}"
             onclick="pickExtendClip('${v.id}')">
-      <video src="${v.thumb}" muted playsinline preload="metadata"></video></button>`).join('')
+      <video src="${inlineSrc(v.thumb)}" muted playsinline preload="metadata"></video></button>`).join('')
     : '<span class="hint" style="margin:0;">Keep a clip first — an extension carries on from one.</span>';
   const player = el('gen-extend-player');
   const chosen = clips.find(v => v.id === genExtendClip);
   if (player) {
     player.style.display = chosen ? '' : 'none';
-    if (chosen && player.src !== chosen.thumb) player.src = chosen.thumb;
+    const want = chosen ? inlineSrc(chosen.thumb) : '';
+    if (chosen && !player.src.endsWith(want)) player.src = want;
   }
 }
 
@@ -2039,7 +2053,6 @@ function clipFrame(src, at) {
     v.preload = 'auto';
     v.muted = true;
     v.playsInline = true;
-    v.crossOrigin = 'anonymous';
     let done = false;
     const give = (out) => { if (!done) { done = true; resolve(out); } };
     const grab = () => {
@@ -2091,9 +2104,12 @@ function renderVault() {
   if (!grid) return;
   grid.innerHTML = mediaVault.length ? mediaVault.map(v => {
     const clip = isClip(v.kind);
+    const parent = v.parent_media
+      ? `<span class="vault-kind" style="left:4px; right:auto;"
+              title="Continues another clip">&#8627;</span>` : '';
     const thumb = clip
       ? `<video src="${v.thumb}" muted playsinline preload="metadata"></video>
-         <span class="vault-kind">video</span>`
+         <span class="vault-kind">video</span>${parent}`
       : `<img src="${v.thumb}" alt="" draggable="false">`;
     return `
       <div class="vault-item" onclick="openLightbox('${v.thumb}', '${v.kind}')">

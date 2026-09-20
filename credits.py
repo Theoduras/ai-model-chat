@@ -185,6 +185,7 @@ def cost_table():
     """The provider-cost menu. Admin only: it is our margin written out."""
     return {'images': PROVIDER_COST_USD,
             'video_per_second': VIDEO_COST_USD_PER_SECOND,
+            'addons': ADDON_COST_USD,
             'measured': PROVIDER_COST_MEASURED}
 
 
