@@ -8,6 +8,7 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <script src="/js/theme.js"></script>
   <link rel="stylesheet" href="/css/style.css">
+<link rel="stylesheet" href="/css/lazy.css">
   <script src="/js/devnav.js" defer></script>
   <link rel="stylesheet" href="/css/site-nav.css">
   <script src="/js/site-nav.js" defer></script>
@@ -691,7 +692,7 @@ function vwViewDraw() {
   el('vw-stage').innerHTML =
     (m.kind === 'video'
       ? '<video src="' + esc(m.thumb) + '" controls autoplay playsinline></video>'
-      : '<img src="' + esc(m.thumb) + '" alt="">')
+      : '<img loading="lazy" decoding="async" src="' + esc(m.thumb) + '" alt="">')
     + '<button type="button" class="vw-close" onclick="vwViewClose()">×</button>'
     + (vwViewIdx > 0 ? '<button type="button" class="vw-nav prev" onclick="vwStep(-1)">‹</button>' : '')
     + (vwViewIdx < all.length - 1 ? '<button type="button" class="vw-nav next" onclick="vwStep(1)">›</button>' : '')

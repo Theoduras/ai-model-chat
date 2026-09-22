@@ -8,6 +8,7 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <script src="/js/theme.js"></script>
   <link rel="stylesheet" href="/css/style.css">
+<link rel="stylesheet" href="/css/lazy.css">
   <script src="/js/devnav.js" defer></script>
   <script src="/js/chat-view.js"></script>
   <script src="/js/console-shell.js"></script>
@@ -184,7 +185,7 @@
       <button class="btn-ai" id="rd-gen-btn" style="background:var(--surface); color:var(--text-2);"
               onclick="generateImage()">Generate a photo with AI</button>
     </div>
-    <img id="rd-preview" class="rd-preview" alt="">
+    <img decoding="async" id="rd-preview" class="rd-preview" alt="">
     <div class="field full">
       <label>Title</label>
       <input type="text" id="rd-title" maxlength="300"

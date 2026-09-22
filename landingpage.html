@@ -11,6 +11,7 @@
   <title>Creator Profile</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
   <link rel="stylesheet" href="/css/style.css">
+<link rel="stylesheet" href="/css/lazy.css">
   <script src="/js/devnav.js" defer></script>
 <link rel="stylesheet" href="/css/site-nav.css">
 <script src="/js/site-nav.js" defer></script>
@@ -96,7 +97,7 @@
     <button class="drawer-close" onclick="closeChat()" aria-label="Close chat">
       <i class="fa-solid fa-xmark"></i>
     </button>
-    <iframe id="chat-iframe" title="Chat" allow="autoplay"></iframe>
+    <iframe loading="lazy" id="chat-iframe" title="Chat" allow="autoplay"></iframe>
   </div>
 
   <!-- Floating chat button -->
@@ -209,7 +210,7 @@
               <div class="cover-label">${data.cover_label || 'COVER PHOTO'}</div>`;
           } else {
             coverPhoto.innerHTML = `
-              <img src="${data.cover_image}" alt="Profile cover" style="width:100%;height:100%;object-fit:contain;border-radius:28px;display:block;">
+              <img loading="lazy" decoding="async" src="${data.cover_image}" alt="Profile cover" style="width:100%;height:100%;object-fit:contain;border-radius:28px;display:block;">
               <div class="cover-label">${data.cover_label || 'COVER PHOTO'}</div>`;
           }
         } else {

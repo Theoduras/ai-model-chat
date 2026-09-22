@@ -8,6 +8,7 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <script src="/js/theme.js"></script>
   <link rel="stylesheet" href="/css/style.css">
+<link rel="stylesheet" href="/css/lazy.css">
   <script src="/js/devnav.js" defer></script>
   <script src="/js/chat-view.js"></script>
   <script src="/js/console-shell.js"></script>
@@ -957,7 +958,7 @@ function outfitBlock(o) {
           ${galleryImages.length ? `<div class="outfit-seed">
             <span class="outfit-seed-label">From Photos tab:</span>
             ${galleryImages.map((src, i) => `
-              <img src="${src}" class="outfit-seed-img" title="Add this photo to the outfit"
+              <img loading="lazy" decoding="async" src="${src}" class="outfit-seed-img" title="Add this photo to the outfit"
                    onclick="useGalleryPhoto(${o.n}, ${i})">`).join('')}
           </div>` : `<span class="hint">Add a photo in the Photos tab, or upload one here, to generate a matching set.</span>`}
           <div class="outfit-gen-row">
@@ -1050,7 +1051,7 @@ function vaultThumbTag(it) {
   return (it.kind === 'video')
     ? `<video src="${it.thumb}" muted playsinline preload="metadata" draggable="false"></video>
        <span class="vault-kind">video</span>`
-    : `<img src="${it.thumb}" alt="" draggable="false">`;
+    : `<img loading="lazy" decoding="async" src="${it.thumb}" alt="" draggable="false">`;
 }
 
   const grid = document.getElementById('vault-grid');

@@ -8,6 +8,7 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <script src="/js/theme.js"></script>
   <link rel="stylesheet" href="/css/style.css">
+<link rel="stylesheet" href="/css/lazy.css">
   <script src="/js/devnav.js" defer></script>
   <script src="/js/console-guide.js" defer></script>
   <script src="/js/fanvue-guide.js" defer></script>
@@ -1340,7 +1341,7 @@ async function previewMedia(uuid){
     try{d=await fetch('/api/fanvue/media-item?persona='+encodeURIComponent(persona())+'&uuid='+encodeURIComponent(uuid)).then(r=>r.json());}catch(e){}
   }
   const url=d.url||'', type=d.mediaType||m.mediaType;
-  if(type==='image'&&url){body.innerHTML='<img src="'+esc(url)+'" style="max-width:90vw;max-height:80vh;border-radius:10px;">';}
+  if(type==='image'&&url){body.innerHTML='<img loading="lazy" decoding="async" src="'+esc(url)+'" style="max-width:90vw;max-height:80vh;border-radius:10px;">';}
   else if(type==='video'&&url){body.innerHTML='<video src="'+esc(url)+'" controls autoplay style="max-width:90vw;max-height:80vh;border-radius:10px;"></video>';}
   else if(type==='audio'&&url){body.innerHTML='<div style="padding:40px;text-align:center;"><div style="font-size:3rem;">🎵</div><audio src="'+esc(url)+'" controls autoplay style="margin-top:16px;"></audio></div>';}
   else{

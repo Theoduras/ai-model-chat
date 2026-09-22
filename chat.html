@@ -8,6 +8,7 @@
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="stylesheet" href="/css/style.css">
+<link rel="stylesheet" href="/css/lazy.css">
   <!-- Not deferred: theme.js sets data-theme before first paint, otherwise the
        page flashes dark for a user who chose light. -->
   <script src="/js/theme.js"></script>
@@ -52,7 +53,7 @@
 
   <header class="header">
     <div class="header-avatar-wrap" onclick="openProfile()" style="cursor:pointer;" title="View profile">
-      <img id="header-avatar" src="https://picsum.photos/id/1011/48/48" alt="">
+      <img decoding="async" id="header-avatar" src="https://picsum.photos/id/1011/48/48" alt="">
       <div class="online-dot"></div>
     </div>
     <div class="header-info">
@@ -71,7 +72,7 @@
 
   <main class="chat-window" id="chat" role="log" aria-live="polite" aria-label="Chat messages">
     <div class="typing-row" id="typing-row" aria-hidden="true">
-      <img class="msg-av" id="typing-av" src="https://picsum.photos/id/1011/48/48" alt="">
+      <img loading="lazy" decoding="async" class="msg-av" id="typing-av" src="https://picsum.photos/id/1011/48/48" alt="">
       <div class="typing-bubble">
         <div class="typing-dot"></div>
         <div class="typing-dot"></div>
@@ -124,7 +125,7 @@
       </div>
     </div>
     <div class="profile-gallery" id="profile-gallery">
-      <img id="profile-photo" src="" alt="" onclick="toggleProfileFullscreen()">
+      <img decoding="async" id="profile-photo" src="" alt="" onclick="toggleProfileFullscreen()">
       <button class="pg-nav prev" id="pg-prev" onclick="profileStep(-1)" aria-label="Previous">‹</button>
       <button class="pg-nav next" id="pg-next" onclick="profileStep(1)" aria-label="Next">›</button>
       <div class="pg-thumbs" id="pg-dots"></div>
@@ -246,7 +247,7 @@ function renderProfileGallery() {
   document.getElementById('pg-next').style.display = multi ? 'flex' : 'none';
   document.getElementById('pg-dots').innerHTML = multi
     ? imgs.map((src, i) => '<button type="button" class="pg-thumb' + (i === profileIdx ? ' active' : '') +
-        '" onclick="profileGo(' + i + ')"><img src="' + src.replace(/"/g, '&quot;') + '" alt=""></button>').join('')
+        '" onclick="profileGo(' + i + ')"><img loading="lazy" decoding="async" src="' + src.replace(/"/g, '&quot;') + '" alt=""></button>').join('')
     : '';
 }
 
@@ -278,7 +279,7 @@ function renderRail(list) {
     item.onclick = () => switchPersona(p.slug);
     const name = cfg.name || p.name || p.slug;
     const av = p.avatar
-      ? '<img class="rail-avatar" src="/api/personas/' + p.slug + '/avatar" alt="">'
+      ? '<img loading="lazy" decoding="async" class="rail-avatar" src="/api/personas/' + p.slug + '/avatar" alt="">'
       : '<div class="rail-avatar">' + name.slice(0,2).toUpperCase() + '</div>';
     const meta = [cfg.location, cfg.age].filter(Boolean).join(' · ');
     item.innerHTML = av +
@@ -417,7 +418,7 @@ function insertMsg(text, isUser, photo) {
   }
   const bub = document.createElement('div');
   bub.className = 'bubble';
-  bub.innerHTML = (photo ? '<img class="bubble-photo" src="' + photo + '" alt="">' : '')
+  bub.innerHTML = (photo ? '<img loading="lazy" decoding="async" class="bubble-photo" src="' + photo + '" alt="">' : '')
     + bubbleHTML(text) + '<span class="bubble-time">' + ts() + '</span>';
   row.appendChild(bub);
   chatEl.insertBefore(row, typingRow);

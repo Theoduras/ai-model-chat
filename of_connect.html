@@ -34,6 +34,7 @@
     .done { color: #4ade80; }
     .bad { color: #fb7185; }
   </style>
+  <link rel="stylesheet" href="/css/lazy.css">
 </head>
 <body>
   <header>
@@ -45,7 +46,7 @@
     <button onclick="cancel()">Cancel</button>
   </header>
   <div id="stage">
-    <img id="frame" alt="">
+    <img decoding="async" id="frame" alt="">
     <div id="veil">Starting a browser on your account's own address…</div>
   </div>
   <footer id="foot">

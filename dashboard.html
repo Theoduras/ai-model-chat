@@ -8,6 +8,7 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <script src="/js/theme.js"></script>
   <link rel="stylesheet" href="/css/style.css">
+<link rel="stylesheet" href="/css/lazy.css">
   <script src="/js/devnav.js" defer></script>
   <script src="/js/examples.js" defer></script>
 <script src="/js/onboarding.js" defer></script>
@@ -332,7 +333,7 @@
     <div class="preview-chat" id="preview-chat">
       <div class="header">
         <div class="header-avatar-wrap">
-          <img id="pc-avatar" src="" alt="" style="display:none;">
+          <img decoding="async" id="pc-avatar" src="" alt="" style="display:none;">
           <div id="pc-avatar-fallback" class="pc-av-fallback" style="display:none;">AI</div>
           <div class="online-dot"></div>
         </div>
@@ -535,7 +536,7 @@ async function identifyUser() {
       : (me.tier ? me.tier + ' Plan' : 'Creator');
     if (avEl) {
       if (me.avatar) {
-        avEl.innerHTML = '<img src="' + me.avatar + '" alt="" ' +
+        avEl.innerHTML = '<img loading="lazy" decoding="async" src="' + me.avatar + '" alt="" ' +
           'style="width:100%;height:100%;object-fit:cover;border-radius:inherit;">';
       } else {
         avEl.textContent = label.slice(0, 2).toUpperCase();
@@ -1046,7 +1047,7 @@ function buildPersonaItem(p) {
   el.onclick = () => loadPersona(p.slug);
   const initials = (p.name || p.slug).slice(0,2).toUpperCase();
   const avatarHtml = p.avatar
-    ? '<img src="' + avatarSrc(p) + '" style="width:36px;height:36px;border-radius:50%;object-fit:cover;">'
+    ? '<img loading="lazy" decoding="async" src="' + avatarSrc(p) + '" style="width:36px;height:36px;border-radius:50%;object-fit:cover;">'
     : '<div class="persona-avatar">' + initials + '</div>';
   const tag = p.premade ? '<span class="persona-tag">original</span>' : '';
   const delBtn = p.premade ? ''
@@ -1381,7 +1382,7 @@ function openEmbedded(url, navEl) {
   document.body.classList.remove('browsing');
   document.body.classList.add('embedding');
   document.getElementById('form-area').innerHTML =
-    '<iframe class="sb-frame" src="' + url + '" title="Embedded page"></iframe>';
+    '<iframe loading="lazy" class="sb-frame" src="' + url + '" title="Embedded page"></iframe>';
   saveView({ kind: 'embed', url: url });
 }
 
@@ -1436,7 +1437,7 @@ window.addEventListener('message', function (e) {
 
 function personaThumb(p, size) {
   return p.avatar
-    ? '<img src="' + avatarSrc(p) + '" style="width:100%;height:100%;object-fit:cover;">'
+    ? '<img loading="lazy" decoding="async" src="' + avatarSrc(p) + '" style="width:100%;height:100%;object-fit:cover;">'
     : '<div class="pg-initials" style="font-size:' + Math.round(size * 0.32) + 'px;">' + esc((p.name || p.slug).slice(0,2).toUpperCase()) + '</div>';
 }
 
@@ -1631,7 +1632,7 @@ const EX_SECTIONS = [
 
 function pcAvatarHtml(cfg) {
   const src = (cfg.avatar || '').trim();
-  if (src) return '<img class="msg-av" src="' + esc(src) + '" alt="">';
+  if (src) return '<img loading="lazy" decoding="async" class="msg-av" src="' + esc(src) + '" alt="">';
   const initials = esc((cfg.name || 'AI').slice(0, 2).toUpperCase());
   return '<div class="msg-av pc-av-fallback">' + initials + '</div>';
 }
@@ -1833,7 +1834,7 @@ function renderForm(slug, cfg) {
           <label>Profile Picture</label>
           <div class="avatar-block">
           <div id="avatar-preview" style="width:88px;height:88px;border-radius:50%;background:var(--surface);border:2px dashed var(--text-muted);display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;flex:0 0 auto;" onclick="document.getElementById('f-avatar-input').click()">
-            ${cfg.avatar ? '<img src="' + esc(cfg.avatar) + '" style="width:100%;height:100%;object-fit:cover;">' : '<span style="font-size:28px;color:var(--text-muted);">+</span>'}
+            ${cfg.avatar ? '<img loading="lazy" decoding="async" src="' + esc(cfg.avatar) + '" style="width:100%;height:100%;object-fit:cover;">' : '<span style="font-size:28px;color:var(--text-muted);">+</span>'}
           </div>
           <input type="file" id="f-avatar-input" accept="image/*" style="display:none;" onchange="handleAvatarUpload(this)">
           <div class="avatar-actions">
@@ -2582,7 +2583,7 @@ function renderGallery() {
   galleryImages.forEach((src, i) => {
     const cell = document.createElement('div');
     cell.className = 'photo-cell';
-    cell.innerHTML = '<img src="' + src + '" alt="photo ' + (i+1) + '">' +
+    cell.innerHTML = '<img loading="lazy" decoding="async" src="' + src + '" alt="photo ' + (i+1) + '">' +
       '<button type="button" class="photo-del" title="Remove" onclick="removePhoto(' + i + ')">✕</button>' +
       (i === 0 ? '<span class="photo-badge">profile</span>' : '');
     grid.appendChild(cell);
@@ -2604,7 +2605,7 @@ function setAvatar(dataUrl) {
   if (!field || !prev) return;
   field.value = dataUrl;
   prev.innerHTML = dataUrl
-    ? '<img src="' + dataUrl + '" style="width:100%;height:100%;object-fit:cover;">'
+    ? '<img loading="lazy" decoding="async" src="' + dataUrl + '" style="width:100%;height:100%;object-fit:cover;">'
     : '<span style="font-size:28px;color:var(--text-muted);">+</span>';
 }
 
@@ -2727,7 +2728,7 @@ function renderNsfwGallery() {
   nsfwGalleryImages.forEach((src, i) => {
     const cell = document.createElement('div');
     cell.className = 'photo-cell';
-    cell.innerHTML = '<img src="' + src + '" alt="nsfw photo ' + (i+1) + '">' +
+    cell.innerHTML = '<img loading="lazy" decoding="async" src="' + src + '" alt="nsfw photo ' + (i+1) + '">' +
       '<button type="button" class="photo-del" title="Remove" onclick="removeNsfwPhoto(' + i + ')">✕</button>' +
       (i === 0 ? '<span class="photo-badge">18+</span>' : '');
     grid.appendChild(cell);

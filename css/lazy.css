@@ -1,0 +1,20 @@
+/* Space is reserved before a lazily-loaded asset arrives, so decoding it never
+   reflows what is already on screen. */
+
+img, video, iframe {
+  background-color: rgba(255, 255, 255, 0.04);
+}
+
+/* An <img> with no src yet is a placeholder box, not a broken-image glyph. */
+img:not([src]), img[src=""] {
+  visibility: hidden;
+}
+
+/* Chat photos arrive at unknown sizes; object-fit crops into the reserved box. */
+.bubble-photo { aspect-ratio: 3 / 4; }
+
+/* Thumbnails whose grid cell does not already fix a height. */
+.pl-slot-thumb, .outfit-seed-img { aspect-ratio: 1 / 1; object-fit: cover; }
+
+/* Avatars are always square, whatever the source image is. */
+.msg-av, .rail-avatar { aspect-ratio: 1 / 1; object-fit: cover; }

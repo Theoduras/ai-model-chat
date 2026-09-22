@@ -8,6 +8,7 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <script src="/js/theme.js"></script>
   <link rel="stylesheet" href="/css/style.css">
+<link rel="stylesheet" href="/css/lazy.css">
   <script src="/js/devnav.js" defer></script>
   <style>
     .fv-scroll { flex: 1; min-height: 0; overflow-y: auto; }
@@ -526,7 +527,7 @@
 </div>
 
 <div class="gen-lightbox" id="gen-lightbox" hidden onclick="closeLightbox()">
-  <img id="gen-lightbox-img" src="" alt="">
+  <img decoding="async" id="gen-lightbox-img" src="" alt="">
   <video id="gen-lightbox-video" src="" controls autoplay playsinline hidden
          onclick="event.stopPropagation()"></video>
 </div>
@@ -904,7 +905,7 @@ function renderRefs() {
     if (!v) return '';
     return `<span class="gen-ref-t" role="img" aria-label="${esc(v.purpose || 'Her photo')}"
        onclick="openLightbox('${v.thumb}')" title="Click to see it full size">
-       <img src="${v.thumb}" alt="">${v.purpose ? `<em>${esc(v.purpose)}</em>` : ''}
+       <img loading="lazy" decoding="async" src="${v.thumb}" alt="">${v.purpose ? `<em>${esc(v.purpose)}</em>` : ''}
        <button type="button" class="gen-ref-x" aria-label="Remove from this group"
          onclick="event.stopPropagation(); toggleRef('${role}', '${v.id}')">&times;</button></span>`;
   }).join('') +
@@ -950,7 +951,7 @@ function renderVaultPicker() {
   el('gen-vault-grid').innerHTML = photos.map(v =>
     `<button type="button" class="gen-ref-t" aria-pressed="${chosen.includes(v.id)}"
        onclick="toggleRef('${vaultRole}', '${v.id}')" title="${esc(v.purpose || 'Her photo')}">
-       <img src="${v.thumb}" alt="">${v.purpose ? `<em>${esc(v.purpose)}</em>` : ''}</button>`).join('')
+       <img loading="lazy" decoding="async" src="${v.thumb}" alt="">${v.purpose ? `<em>${esc(v.purpose)}</em>` : ''}</button>`).join('')
     || '<span class="hint" style="margin:0;">Nothing in the vault yet — upload a photo below.</span>';
 }
 
@@ -1921,7 +1922,7 @@ function renderGenStaging() {
       const clip = isClip(m.kind);
       const thumb = clip
         ? `<video src="${m.url}" muted playsinline preload="metadata" controls></video>`
-        : `<img src="${m.url}" alt="">`;
+        : `<img loading="lazy" decoding="async" src="${m.url}" alt="">`;
       cards.push(`
         <div class="gen-card" onclick="openLightbox('${m.url}', '${m.kind}')">
           ${thumb}
@@ -1968,7 +1969,7 @@ function renderAnimPhotos() {
     <button type="button" class="anim-pick" aria-pressed="${v.id === genAnimPick}"
             title="${esc(v.outfit || v.purpose || 'kept photo')}"
             onclick="pickAnimPhoto('${v.id}')">
-      <img src="${v.thumb}" alt="" draggable="false"></button>`).join('')
+      <img loading="lazy" decoding="async" src="${v.thumb}" alt="" draggable="false"></button>`).join('')
     : '<span class="hint" style="margin:0;">Keep a photo first — a clip starts from one.</span>';
 }
 
@@ -1992,7 +1993,7 @@ function renderReelPhotos() {
     <button type="button" class="anim-pick" aria-pressed="${v.id === genReelPick}"
             title="${esc(v.outfit || v.purpose || 'kept photo')}"
             onclick="pickReelPhoto('${v.id}')">
-      <img src="${v.thumb}" alt="" draggable="false"></button>`).join('')
+      <img loading="lazy" decoding="async" src="${v.thumb}" alt="" draggable="false"></button>`).join('')
     : '<span class="hint" style="margin:0;">No kept photos — a reel can still run from the words alone.</span>';
 }
 
@@ -2088,7 +2089,7 @@ function renderSceneRefs() {
     <button type="button" class="anim-pick" aria-pressed="${genSceneRefs.includes(v.id)}"
             title="${esc(v.outfit || v.purpose || 'kept photo')}"
             onclick="toggleSceneRef('${v.id}')">
-      <img src="${v.thumb}" alt="" draggable="false"></button>`).join('')
+      <img loading="lazy" decoding="async" src="${v.thumb}" alt="" draggable="false"></button>`).join('')
     : '<span class="hint" style="margin:0;">Keep a photo of the scene or outfit first.</span>';
 }
 
@@ -2110,7 +2111,7 @@ function renderVault() {
     const thumb = clip
       ? `<video src="${v.thumb}" muted playsinline preload="metadata"></video>
          <span class="vault-kind">video</span>${parent}`
-      : `<img src="${v.thumb}" alt="" draggable="false">`;
+      : `<img loading="lazy" decoding="async" src="${v.thumb}" alt="" draggable="false">`;
     return `
       <div class="vault-item" onclick="openLightbox('${v.thumb}', '${v.kind}')">
         ${thumb}

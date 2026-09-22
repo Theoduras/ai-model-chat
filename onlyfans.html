@@ -8,6 +8,7 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <script src="/js/theme.js"></script>
   <link rel="stylesheet" href="/css/style.css">
+<link rel="stylesheet" href="/css/lazy.css">
   <script src="/js/devnav.js" defer></script>
   <script src="/js/chat-view.js"></script>
   <script src="/js/console-shell.js"></script>
@@ -972,7 +973,7 @@ function renderGrid(){
   const chosen=new Set(theTier().media_uuids||[]);
   grid.innerHTML=mediaItems.map(m=>
     '<div class="cell'+(chosen.has(m.id)?' sel':'')+'" onclick="toggleMedia(\''+esc(m.id)+'\')">'+
-    (m.thumb?'<img src="'+esc(m.thumb)+'" alt="">':'')+
+    (m.thumb?'<img loading="lazy" decoding="async" src="'+esc(m.thumb)+'" alt="">':'')+
     '<span class="kind">'+(m.type==='video'?'🎬':m.type==='audio'?'🎵':'🖼️')+'</span></div>').join('');
 }
 

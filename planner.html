@@ -8,6 +8,7 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <script src="/js/theme.js"></script>
   <link rel="stylesheet" href="/css/style.css">
+<link rel="stylesheet" href="/css/lazy.css">
   <script src="/js/devnav.js" defer></script>
   <link rel="stylesheet" href="/css/site-nav.css">
   <script src="/js/site-nav.js" defer></script>
@@ -738,7 +739,7 @@ function plSlotMediaRow(c) {
   return '<span class="pl-slot-media" role="button" tabindex="0"'
     + ' title="Pick the photo or clip for this post"'
     + ' onclick="event.stopPropagation(); plSlotMediaOpen(' + c.idx + ')">'
-    + (m ? '<img class="pl-slot-thumb" src="' + esc(m.kind === 'video' ? (m.poster || m.thumb) : m.thumb) + '" alt="">' : '')
+    + (m ? '<img loading="lazy" decoding="async" class="pl-slot-thumb" src="' + esc(m.kind === 'video' ? (m.poster || m.thumb) : m.thumb) + '" alt="">' : '')
     + '<span' + (warn ? ' class="pl-slot-warn"' : '') + '>'
     + (m ? esc((m.purpose || (m.kind === 'video' ? 'clip' : 'photo')).slice(0, 18))
            + (warn ? ' · explicit' : (slot.media_override ? ' · forced' : ''))
