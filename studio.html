@@ -320,6 +320,7 @@
           <span class="hint" id="gen-refs-note" style="margin:0;"></span>
         </div>
         <span class="hint" id="persona-hint" style="margin:0;"></span>
+        <div class="note-box" id="gen-character" hidden></div>
       </div>
 
       <div class="gen-panel">
@@ -622,6 +623,34 @@ async function loadCredits() {
   } catch (e) {}
 }
 
+// The linked character, and which of her approved views this shot will send.
+// A still generates from her photos whenever the character is complete.
+async function loadCharacterBadge() {
+  const box = el('gen-character');
+  if (!box || !slug()) return;
+  const shot = (el('gen-shot') || {}).value || '';
+  const scene = (el('gen-scene') || {}).value || '';
+  let c = null;
+  try {
+    const d = await (await fetch('/api/personas/' + encodeURIComponent(slug()) + '/character?shot='
+      + encodeURIComponent(shot) + '&scene=' + encodeURIComponent(scene))).json();
+    c = d.character;
+  } catch (e) {}
+  box.hidden = !c;
+  if (!c) return;
+  const views = c.shot_views || [];
+  const missing = views.filter(v => !v.approved);
+  box.innerHTML = `<b>${esc(c.name)}</b> · ` + (c.status === 'complete'
+      ? 'photos sent with this shot: ' + (views.filter(v => v.approved).map(v => esc(v.label)).join(', ') || '—')
+      : 'character not complete yet, so her photos are not used. <a href="/characters?id=' + esc(c.id) + '">Finish it</a>')
+    + (c.status === 'complete' && missing.length
+      ? `<br>Missing: ${missing.map(v => esc(v.label)).join(', ')} — the result may not match her exactly.` : '')
+    + '<br><small>Safe-work shots never receive an explicit photo.</small>';
+}
+document.addEventListener('change', e => {
+  if (e.target && (e.target.id === 'gen-shot' || e.target.id === 'gen-scene')) loadCharacterBadge();
+});
+
 async function loadPersona() {
   if (!slug()) return;
   try {
@@ -637,6 +666,7 @@ async function loadPersona() {
       + 'level is a chat setting — how far she flirts with a fan — and does not '
       + 'limit what you can generate.';
   } catch (e) { mediaVault = []; genAllowedShots = []; genScenes = []; }
+  loadCharacterBadge();
   renderVault();
   renderGenForm();
   loadReferences();

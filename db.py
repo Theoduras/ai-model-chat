@@ -284,6 +284,73 @@ class AudioReference(Base):
     fmt = Column(String(8), default='mp3')          # mp3 | wav
     size_bytes = Column(Integer, default=0)
     created_at = Column(DateTime, default=_now)
+
+
+class Character(Base):
+    """The fixed look of one model: a checked face and a set of body views that
+    every generation for her linked persona is conditioned on."""
+    __tablename__ = 'characters'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    workspace_id = Column(String(32), nullable=False, index=True)
+    owner_id = Column(String(32), index=True)
+    # Storage path segment and the job slug. A character may exist before it
+    # has a persona, and a generation job cannot be stored without a slug.
+    key = Column(String(64), nullable=False, unique=True)
+    # The linked persona. Unique: one character per persona, one persona per
+    # character.
+    slug = Column(String(64), unique=True)
+    name = Column(String(120), default='')
+    age = Column(Integer, default=24)
+    body_type = Column(String(16), default='female')
+    nsfw_level = Column(String(12), default='sfw')
+    sheet_json = Column(Text, default='{}')
+    notes = Column(String(400), default='')
+    status = Column(String(12), default='draft')      # draft | complete
+    version = Column(Integer, default=0)
+    attested_at = Column(DateTime)
+    created_at = Column(DateTime, default=_now)
+    updated_at = Column(DateTime, default=_now, onupdate=_now)
+
+
+class CharacterImage(Base):
+    """A reference or the approved image for one view of a character.
+
+    Deliberately not PersonaMedia: these are identity material, anatomical
+    close-ups included, and keeping them out of the vault makes it structural
+    that no send, post or pick can ever reach one."""
+    __tablename__ = 'character_images'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    character_id = Column(String(32), nullable=False, index=True)
+    view = Column(String(32), default='')             # '' = general reference
+    role = Column(String(12), default='reference')    # reference | candidate | canonical
+    source = Column(String(12), default='upload')     # upload | generated
+    rating = Column(String(12), default='sfw')        # the view's, never the client's
+    gcs_path = Column(String(400), default='')
+    mime = Column(String(60), default='image/jpeg')
+    checks_json = Column(Text, default='')
+    job_id = Column(String(32), default='')
+    expires_at = Column(DateTime)
+    created_at = Column(DateTime, default=_now)
+
+
+Index('ix_charimg_char_view', CharacterImage.character_id, CharacterImage.view,
+      CharacterImage.role)
+
+
+class CharacterVersion(Base):
+    """Each approval freezes the approved set, so a generation can record which
+    look it was made from and an edit never silently rewrites that history."""
+    __tablename__ = 'character_versions'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    character_id = Column(String(32), nullable=False, index=True)
+    number = Column(Integer, nullable=False)
+    snapshot_json = Column(Text, default='{}')
+    created_at = Column(DateTime, default=_now)
+
+
 Index('ix_link_media_outfit', MediaOutfitLink.media_id, MediaOutfitLink.outfit,
       unique=True)
 
@@ -2073,7 +2140,10 @@ def init_db():
                          ('generation_jobs', GenerationJob),
                          ('model_reference_sets', ModelReferenceSet),
                          ('audio_references', AudioReference),
-                         ('video_sources', VideoSource)):
+                         ('video_sources', VideoSource),
+                         ('characters', Character),
+                         ('character_images', CharacterImage),
+                         ('character_versions', CharacterVersion)):
         try:
             _sync_columns(table, model)
         except Exception:

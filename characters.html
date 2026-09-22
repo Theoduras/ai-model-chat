@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Characters</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <script src="/js/theme.js"></script>
+  <link rel="stylesheet" href="/css/style.css">
+  <script src="/js/devnav.js" defer></script>
+  <style>
+    .ch-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+    .ch-wrap { padding: 24px 28px 72px; display: flex; flex-direction: column; gap: 20px; }
+    .ch-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; }
+    .ch-row { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
+    .ch-grow { flex: 1 1 520px; min-width: 0; }
+    .ch-side { flex: 0 1 330px; min-width: 280px; display: flex; flex-direction: column; gap: 16px; }
+    .ch-h1 { margin: 0; font-size: 1.6rem; font-weight: 600; }
+    .ch-h2 { margin: 0 0 12px; font-size: 0.95rem; font-weight: 700; }
+    .ch-muted { color: var(--text-muted); font-size: 0.82rem; margin: 4px 0 0; }
+    .ch-label { display: flex; flex-direction: column; gap: 5px; font-size: 0.78rem; font-weight: 600; color: var(--text-2); }
+    .ch-label select, .ch-label input { height: 40px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border);
+      background: var(--bg, var(--surface-2)); color: var(--text); font: inherit; font-weight: 500; }
+    .ch-grid3 { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 14px 18px; }
+    .ch-grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .btn { height: 42px; padding: 0 18px; border-radius: 10px; border: 1px solid var(--border); background: transparent;
+      color: var(--text); font: inherit; font-weight: 600; cursor: pointer; }
+    .btn:disabled { opacity: .45; cursor: not-allowed; }
+    .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .chips { display: flex; gap: 8px; flex-wrap: wrap; }
+    .chip { height: 36px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--border); background: transparent;
+      color: var(--text); font: inherit; font-size: 0.82rem; cursor: pointer; }
+    .chip[aria-pressed="true"] { background: var(--text); color: var(--surface); font-weight: 700; }
+    .steps { list-style: none; margin: 0; padding: 0; display: flex; gap: 8px; flex-wrap: wrap; }
+    .steps button { height: 34px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--border); background: transparent;
+      color: var(--text-muted); font: inherit; font-size: 0.8rem; cursor: pointer; }
+    .steps button.done { color: var(--ok); }
+    .steps button[aria-current="step"] { background: var(--text); color: var(--surface); font-weight: 700; }
+    .ch-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 18px; }
+    .ch-item { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; overflow: hidden;
+      cursor: pointer; text-align: left; color: var(--text); font: inherit; padding: 0; }
+    .ch-thumb { height: 240px; background: var(--surface-2); display: flex; align-items: center; justify-content: center; position: relative; }
+    .ch-thumb img { width: 100%; height: 100%; object-fit: cover; }
+    .ch-badge { position: absolute; top: 10px; left: 10px; padding: 3px 10px; border-radius: 999px; background: var(--surface);
+      font-size: 0.72rem; font-weight: 700; }
+    .ch-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
+    .bar { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+    .bar > div { height: 6px; background: var(--accent); }
+    .bar.full > div { background: var(--ok); }
+    .opts { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
+    .opt { border: 2px solid var(--border); border-radius: 14px; overflow: hidden; background: var(--surface); padding: 0;
+      color: var(--text); font: inherit; cursor: pointer; text-align: left; }
+    .opt[aria-pressed="true"] { border-color: var(--accent); }
+    .opt img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; display: block; background: var(--surface-2); }
+    .opt span { display: block; padding: 10px 12px; font-size: 0.82rem; font-weight: 600; }
+    .drop { border: 2px dashed var(--border); border-radius: 14px; padding: 16px; display: flex; flex-direction: column;
+      gap: 10px; align-items: center; justify-content: center; text-align: center; font-size: 0.82rem; }
+    .attest { display: flex; gap: 8px; align-items: flex-start; font-size: 0.75rem; color: var(--text-2); text-align: left; }
+    .attest input { width: 18px; height: 18px; margin: 0; flex-shrink: 0; }
+    .checks { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    .checks th { text-align: left; font-size: 0.7rem; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted);
+      padding: 8px 10px; }
+    .checks td { border-top: 1px solid var(--border); padding: 8px 10px; }
+    .checks input { width: 20px; height: 20px; }
+    .tag { padding: 2px 10px; border-radius: 999px; font-size: 0.72rem; font-weight: 700; white-space: nowrap; }
+    .tag.match, .tag.adult { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+    .tag.differs, .tag.uncertain { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+    .tag.minor { background: color-mix(in srgb, var(--err) 18%, transparent); color: var(--err); }
+    .views { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
+    .view { display: flex; gap: 12px; align-items: center; padding: 10px 12px; border-radius: 12px; background: var(--surface-2);
+      border: 1px solid transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+    .view[aria-pressed="true"] { border-color: var(--accent); }
+    .view .vt { width: 48px; height: 60px; border-radius: 8px; background: var(--border); flex-shrink: 0; overflow: hidden; }
+    .view .vt img { width: 100%; height: 100%; object-fit: cover; }
+    .blur img { filter: blur(14px); }
+    .dot { width: 10px; height: 10px; border-radius: 5px; flex-shrink: 0; background: var(--text-muted); }
+    .dot.ok { background: var(--ok); } .dot.review { background: var(--warn); }
+    .refs { display: flex; gap: 8px; flex-wrap: wrap; }
+    .ref { width: 64px; height: 64px; border-radius: 8px; overflow: hidden; position: relative; background: var(--surface-2); }
+    .ref img { width: 100%; height: 100%; object-fit: cover; }
+    .ref button { position: absolute; top: 2px; right: 2px; width: 22px; height: 22px; border-radius: 11px; border: 0;
+      background: rgba(0,0,0,.6); color: #fff; cursor: pointer; font-size: 12px; }
+    .msg { font-size: 0.82rem; min-height: 1.2em; }
+    .msg.err { color: var(--err); } .msg.ok { color: var(--ok); }
+    .nsfw-closed { border-radius: 12px; background: var(--surface-2); padding: 36px; text-align: center; color: var(--text-muted);
+      font-size: 0.82rem; }
+    [hidden] { display: none !important; }
+    @media (max-width: 640px) { .ch-wrap { padding: 16px; } .ch-grid2 { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body class="page-dashboard">
+
+<header>
+  <div style="display:flex; align-items:center; gap:10px;">
+    <h1>Characters</h1>
+    <span class="badge">Admin testing</span>
+  </div>
+  <div style="display:flex; align-items:center; gap:16px;">
+    <nav data-site-nav="inline" class="sn-links sn-inline"></nav>
+    <a href="/dashboard" style="color:var(--text-muted); font-size:0.8rem; text-decoration:none;">← Dashboard</a>
+  </div>
+</header>
+
+<div class="ch-scroll">
+<div class="ch-wrap">
+
+  <!-- List -->
+  <section id="list-view">
+    <div style="display:flex; justify-content:space-between; align-items:flex-end; gap:16px; flex-wrap:wrap; margin-bottom:18px;">
+      <div>
+        <h2 class="ch-h1">Characters</h2>
+        <p class="ch-muted">The fixed look of each model. A linked character drives every photo made for her persona.</p>
+      </div>
+      <button type="button" class="btn btn-primary" onclick="newCharacter()">New character</button>
+    </div>
+    <div class="chips" id="filters" style="margin-bottom:18px;"></div>
+    <div class="ch-list" id="cards"></div>
+    <p class="ch-muted" id="list-empty" hidden>No characters yet.</p>
+  </section>
+
+  <!-- Editor -->
+  <section id="edit-view" hidden>
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:18px;">
+      <div class="ch-muted" style="margin:0;"><a href="#" onclick="showList();return false;" style="color:inherit;">Characters</a> / <span id="crumb"></span></div>
+      <ol class="steps" id="steps"></ol>
+    </div>
+    <p class="msg" id="msg"></p>
+
+    <!-- 1 Describe -->
+    <div class="ch-row" data-step="describe">
+      <div class="ch-card ch-grow">
+        <h2 class="ch-h1">Describe her face</h2>
+        <p class="ch-muted" style="margin-bottom:18px;">Pick each feature from the list. Nothing else can be generated until the face is approved.</p>
+        <div class="ch-grid3" id="face-features"></div>
+      </div>
+      <div class="ch-side">
+        <div class="ch-card" style="display:flex; flex-direction:column; gap:14px;">
+          <h2 class="ch-h2" style="margin:0;">Basics</h2>
+          <label class="ch-label">Name <input id="f-name" type="text" maxlength="80"></label>
+          <label class="ch-label">Age <input id="f-age" type="number" min="18" max="80"></label>
+          <p class="ch-muted" style="margin-top:-8px;">Must be 18 or over. Every prompt states she is a fictional adult of this age.</p>
+          <div class="ch-label">Explicitness level <div class="chips" id="level-chips"></div>
+            <span class="ch-muted" style="margin:0; font-weight:400;">Sets which body views are required.</span></div>
+          <label class="ch-label">Persona <select id="f-persona" onchange="linkPersona(this.value)"></select></label>
+          <label class="ch-label">Notes (optional) <input id="f-notes" type="text" maxlength="400"></label>
+          <button type="button" class="btn" onclick="saveSheet()">Save</button>
+        </div>
+        <div class="ch-card" style="display:flex; flex-direction:column; gap:12px;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <span style="font-weight:600;">Options per try</span>
+            <div class="chips" id="batch-chips"></div>
+          </div>
+          <button type="button" class="btn btn-primary" id="gen-face" onclick="generate('face_front')">Generate face options</button>
+          <span class="ch-muted" style="text-align:center; margin:0;">Front-facing · neutral · studio light · ears visible</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2 Pick -->
+    <div data-step="pick" hidden>
+      <div style="display:flex; justify-content:space-between; align-items:flex-end; gap:12px; flex-wrap:wrap; margin-bottom:16px;">
+        <div>
+          <h2 class="ch-h1">Pick her face</h2>
+          <p class="ch-muted">Unpicked options are deleted automatically after 3 days. Uploaded faces are used as references for the next try.</p>
+        </div>
+        <div style="display:flex; gap:10px;">
+          <button type="button" class="btn" onclick="go('describe')">Edit description</button>
+          <button type="button" class="btn" onclick="generate('face_front')">Regenerate</button>
+        </div>
+      </div>
+      <div class="opts" id="face-opts"></div>
+      <div class="ch-card" style="margin-top:18px; display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+        <span id="pick-summary" class="ch-muted" style="margin:0;"></span>
+        <button type="button" class="btn btn-primary" id="to-check" onclick="go('check')" disabled>Check features</button>
+      </div>
+    </div>
+
+    <!-- 3 Check -->
+    <div class="ch-row" data-step="check" hidden>
+      <div class="ch-side" style="flex-basis:340px;">
+        <div class="opt" style="cursor:default;"><img id="check-img" alt="Selected face option"></div>
+        <div>
+          <span style="font-size:0.8rem; font-weight:700; color:var(--text-2);">Optional extra angles</span>
+          <div class="chips" style="margin-top:8px;">
+            <button type="button" class="chip" onclick="openView('face_three_quarter')">+ Three-quarter</button>
+            <button type="button" class="chip" onclick="openView('face_profile')">+ Profile</button>
+            <button type="button" class="chip" onclick="openView('face_smile')">+ Smiling</button>
+          </div>
+        </div>
+      </div>
+      <div class="ch-card ch-grow" style="padding:0; overflow:hidden;">
+        <div style="padding:20px 22px; display:flex; justify-content:space-between; align-items:center; gap:12px; border-bottom:1px solid var(--border);">
+          <div>
+            <h2 class="ch-h1" style="font-size:1.3rem;">Check every feature</h2>
+            <p class="ch-muted">Tick each one you agree matches. Approve unlocks when all are ticked and the adult-appearance check passes.</p>
+          </div>
+          <span id="check-count" style="font-weight:700;"></span>
+        </div>
+        <div style="padding:10px 22px; display:flex; gap:10px; align-items:center; border-bottom:1px solid var(--border);">
+          <span style="font-weight:600; font-size:0.85rem;">Adult appearance</span>
+          <span id="age-tag" class="tag uncertain">Not checked</span>
+          <span id="age-note" class="ch-muted" style="margin:0;"></span>
+        </div>
+        <div style="overflow-x:auto;">
+          <table class="checks">
+            <thead><tr><th>Feature</th><th>You chose</th><th>Auto-check</th><th style="text-align:center;">OK</th></tr></thead>
+            <tbody id="check-rows"></tbody>
+          </table>
+        </div>
+        <div style="padding:14px 22px; border-top:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+          <button type="button" class="btn" onclick="go('pick')">Back to options</button>
+          <div style="display:flex; gap:10px; flex-wrap:wrap;">
+            <button type="button" class="btn" id="run-check" onclick="runCheck()">Run automatic check</button>
+            <button type="button" class="btn" onclick="tickMatches()">Tick all matches</button>
+            <button type="button" class="btn btn-primary" id="approve-face" onclick="approveFace()" disabled>Approve face</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4 Body -->
+    <div class="ch-row" data-step="body" hidden>
+      <div class="ch-grow" style="display:flex; flex-direction:column; gap:16px;">
+        <div>
+          <h2 class="ch-h1">Body views</h2>
+          <p class="ch-muted" id="body-summary"></p>
+        </div>
+        <div class="ch-card">
+          <h2 class="ch-h2" style="color:var(--text-muted); text-transform:uppercase; letter-spacing:.06em; font-size:0.75rem;">SFW</h2>
+          <div class="views" id="sfw-views"></div>
+        </div>
+        <div class="ch-card" id="nsfw-card">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:12px;">
+            <div>
+              <h2 class="ch-h2" style="margin:0; color:var(--text-muted); text-transform:uppercase; letter-spacing:.06em; font-size:0.75rem;">NSFW</h2>
+              <span class="ch-muted" id="nsfw-summary"></span>
+            </div>
+            <button type="button" class="btn" id="nsfw-toggle" aria-expanded="false" onclick="toggleNsfw()">Show NSFW views</button>
+          </div>
+          <div class="nsfw-closed" id="nsfw-closed">Hidden and blurred until you open this section.</div>
+          <div class="views blur" id="nsfw-views" hidden></div>
+        </div>
+        <div class="ch-card" id="view-panel" hidden>
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
+            <div>
+              <h2 class="ch-h2" style="margin:0;" id="vp-title"></h2>
+              <span class="ch-muted" id="vp-sub"></span>
+            </div>
+            <div style="display:flex; gap:8px;">
+              <button type="button" class="btn" id="vp-check" onclick="runViewCheck()" hidden>Run adult check</button>
+              <button type="button" class="btn btn-primary" id="vp-gen" onclick="generate(selView)">Generate</button>
+            </div>
+          </div>
+          <div class="ch-grid3" id="vp-features" style="margin-bottom:14px;"></div>
+          <div class="opts" id="vp-opts"></div>
+          <div style="margin-top:14px;">
+            <span style="font-size:0.8rem; font-weight:700; color:var(--text-2);">References for this view</span>
+            <div class="refs" id="vp-refs" style="margin-top:8px;"></div>
+          </div>
+        </div>
+      </div>
+      <div class="ch-side">
+        <div class="ch-card">
+          <h2 class="ch-h2">Full body features</h2>
+          <div class="ch-grid2" id="body-features"></div>
+          <button type="button" class="btn" style="margin-top:12px; width:100%;" onclick="saveSheet()">Save features</button>
+        </div>
+        <div class="ch-card" style="display:flex; flex-direction:column; gap:10px;">
+          <h2 class="ch-h2" style="margin:0;">Your references</h2>
+          <span class="ch-muted" style="margin:0;">Optional. General references apply to every view; view references attach to the view that is open. Any view upload can be approved as its final photo, except faces.</span>
+          <div class="refs" id="general-refs"></div>
+          <label class="attest"><input type="checkbox" id="attest">I have the rights to these images, and anyone shown is 18+ and agreed to their likeness being used for AI generation.</label>
+          <div style="display:flex; gap:8px; flex-wrap:wrap;">
+            <button type="button" class="btn" onclick="pickUpload('')">Add general reference</button>
+            <button type="button" class="btn" id="add-view-ref" onclick="pickUpload(selView)" disabled>Add to open view</button>
+          </div>
+          <input type="file" id="upload" accept="image/jpeg,image/png,image/webp" multiple hidden onchange="uploadFiles(this)">
+        </div>
+      </div>
+    </div>
+  </section>
+
+</div>
+</div>
+
+<script>
+const el = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const LEVEL_LABEL = {sfw: 'SFW', moderate: 'Topless', explicit: 'Explicit'};
+let chars = [], filter = 'all', cur = null, cat = null, personas = [];
+let step = 'describe', batch = 4, pickedFace = '', selView = '', nsfwOpen = false, uploadView = '';
+let confirmed = new Set();
+
+async function api(url, opts) {
+  const r = await fetch(url, opts && opts.body ? Object.assign({method: 'POST',
+    headers: {'Content-Type': 'application/json'}}, opts, {body: JSON.stringify(opts.body)}) : opts);
+  let data = {};
+  try { data = await r.json(); } catch (e) {}
+  if (!r.ok || data.ok === false) throw new Error(data.error || ('Request failed (' + r.status + ')'));
+  return data;
+}
+function say(text, kind) { const m = el('msg'); m.textContent = text || ''; m.className = 'msg ' + (kind || ''); }
+
+// ── List ────────────────────────────────────────────────────────────────────
+async function loadList() {
+  chars = (await api('/api/characters')).characters || [];
+  renderList();
+}
+function renderList() {
+  const n = {all: chars.length, linked: chars.filter(c => c.persona).length,
+             unlinked: chars.filter(c => !c.persona && c.status === 'complete').length,
+             drafts: chars.filter(c => c.status !== 'complete').length};
+  el('filters').innerHTML = [['all', 'All'], ['linked', 'Linked'], ['unlinked', 'Unlinked'], ['drafts', 'Drafts']]
+    .map(([k, l]) => `<button type="button" class="chip" aria-pressed="${filter === k}" onclick="filter='${k}';renderList()">${l} · ${n[k]}</button>`).join('');
+  const shown = chars.filter(c => filter === 'all' || (filter === 'linked' && c.persona) ||
+    (filter === 'unlinked' && !c.persona && c.status === 'complete') || (filter === 'drafts' && c.status !== 'complete'));
+  el('list-empty').hidden = shown.length > 0;
+  el('cards').innerHTML = shown.map(c => {
+    const pct = c.required ? Math.round(100 * c.approved_required / c.required) : 0;
+    const status = c.status === 'complete'
+      ? `Complete · ${c.approved_required} of ${c.required} required views`
+      : (c.face_url ? `Face approved · ${c.approved_required} of ${c.required} required views` : 'Face not approved yet');
+    return `<button type="button" class="ch-item" onclick="openCharacter('${c.id}')">
+      <div class="ch-thumb">${c.face_url ? `<img src="${esc(c.face_url)}" alt="">` : ''}
+        <span class="ch-badge">${LEVEL_LABEL[c.nsfw_level] || c.nsfw_level}</span></div>
+      <div class="ch-body"><strong>${esc(c.name)}</strong>
+        <span class="ch-muted" style="margin:0;">${c.persona ? 'Linked to ' + esc(c.persona) : 'Not linked'}</span>
+        <div class="bar ${pct === 100 ? 'full' : ''}"><div style="width:${pct}%"></div></div>
+        <span class="ch-muted" style="margin:0;">${status} · v${c.version}</span></div></button>`;
+  }).join('');
+}
+function showList() {
+  el('edit-view').hidden = true; el('list-view').hidden = false;
+  history.replaceState(null, '', '/characters');
+  loadList();
+}
+async function newCharacter(persona) {
+  try {
+    const d = await api('/api/characters', {body: persona ? {persona} : {}});
+    await openCharacter(d.character.id);
+  } catch (e) { alert(e.message); }
+}
+
+// ── Editor ──────────────────────────────────────────────────────────────────
+async function openCharacter(id) {
+  cur = (await api('/api/characters/' + id)).character;
+  cat = await api('/api/characters/catalogue?level=' + cur.nsfw_level);
+  el('list-view').hidden = true; el('edit-view').hidden = false;
+  history.replaceState(null, '', '/characters?id=' + id);
+  const canon = canonOf('face_front');
+  go(canon ? 'body' : (images('face_front', 'candidate').length ? 'pick' : 'describe'));
+}
+function images(view, role) { return (cur.images || []).filter(i => i.view === view && (!role || i.role === role)); }
+function canonOf(view) { return images(view, 'canonical')[0]; }
+function viewDef(key) { return cat.views.find(v => v.key === key); }
+async function reload() {
+  cur = (await api('/api/characters/' + cur.id)).character;
+  cat = await api('/api/characters/catalogue?level=' + cur.nsfw_level);
+  render();
+}
+
+function go(s) {
+  if (s !== 'describe' && s !== 'pick' && !canonOf('face_front') && s !== 'check') s = 'describe';
+  if (s === 'body' && !canonOf('face_front')) s = 'describe';
+  step = s; render();
+}
+function render() {
+  el('crumb').textContent = cur.name;
+  const faceDone = !!canonOf('face_front');
+  const done = {describe: images('face_front').length > 0 || faceDone, pick: faceDone, check: faceDone, body: cur.status === 'complete'};
+  el('steps').innerHTML = [['describe', '1 Describe'], ['pick', '2 Pick'], ['check', '3 Check'], ['body', '4 Body']]
+    .map(([k, l]) => `<li><button type="button" class="${done[k] ? 'done' : ''}" ${step === k ? 'aria-current="step"' : ''}
+      ${(k === 'body' && !faceDone) || (k === 'check' && !pickedFace && !faceDone) ? 'disabled' : ''}
+      onclick="go('${k}')">${l}${done[k] && step !== k ? ' ✓' : ''}</button></li>`).join('');
+  document.querySelectorAll('[data-step]').forEach(n => n.hidden = n.dataset.step !== step);
+  ({describe: renderDescribe, pick: renderPick, check: renderCheck, body: renderBody})[step]();
+}
+
+function featureSelect(f) {
+  const v = (cur.sheet || {})[f.key] || '';
+  return `<label class="ch-label">${esc(f.label)}<select data-feature="${f.key}">
+    <option value="">Choose…</option>${f.options.map(o => `<option ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select></label>`;
+}
+function collectSheet() {
+  const sheet = Object.assign({}, cur.sheet || {});
+  document.querySelectorAll('[data-feature]').forEach(s => {
+    if (s.value) sheet[s.dataset.feature] = s.value; else delete sheet[s.dataset.feature];
+  });
+  return sheet;
+}
+async function saveSheet(extra) {
+  try {
+    const body = Object.assign({sheet: collectSheet(), name: el('f-name').value, age: +el('f-age').value,
+      notes: el('f-notes').value}, extra || {});
+    const d = await api('/api/characters/' + cur.id, {method: 'PUT', body});
+    cur = d.character;
+    cat = await api('/api/characters/catalogue?level=' + cur.nsfw_level);
+    say((d.warnings || []).join(' ') || 'Saved.', (d.warnings || []).length ? '' : 'ok');
+    render();
+    return true;
+  } catch (e) { say(e.message, 'err'); return false; }
+}
+
+function renderDescribe() {
+  el('face-features').innerHTML = cat.features.filter(f => f.group === 'face').map(featureSelect).join('');
+  el('f-name').value = cur.name; el('f-age').value = cur.age; el('f-notes').value = cur.notes || '';
+  el('level-chips').innerHTML = cat.levels.map(l => `<button type="button" class="chip" aria-pressed="${cur.nsfw_level === l.key}"
+    onclick="saveSheet({nsfw_level:'${l.key}'})">${l.label}</button>`).join('');
+  el('batch-chips').innerHTML = cat.batch.map(n => `<button type="button" class="chip" aria-pressed="${batch === n}"
+    onclick="batch=${n};renderDescribe()">${n}</button>`).join('');
+  el('gen-face').textContent = `Generate ${batch} face options`;
+  const sel = el('f-persona');
+  sel.innerHTML = `<option value="">Not linked — link later</option>` + personas.map(p =>
+    `<option value="${esc(p.slug)}" ${cur.persona === p.slug ? 'selected' : ''}>${esc(p.name || p.slug)}</option>`).join('');
+}
+async function linkPersona(slug) {
+  try {
+    if (cur.persona && slug) await api('/api/characters/' + cur.id + '/link', {body: {persona: ''}});
+    await api('/api/characters/' + cur.id + '/link', {body: {persona: slug}});
+    cur.persona = slug; say(slug ? 'Linked to ' + slug + '.' : 'Unlinked.', 'ok');
+  } catch (e) { say(e.message, 'err'); renderDescribe(); }
+}
+
+async function generate(view) {
+  if (step === 'describe' && !(await saveSheet())) return;
+  say('Generating… this usually takes under a minute.');
+  try {
+    const d = await api('/api/characters/' + cur.id + '/generate', {body: {view, batch}});
+    await waitJob(d.job);
+    await reload();
+    if (view === 'face_front') go('pick');
+    say('New options are ready.', 'ok');
+  } catch (e) { say(e.message, 'err'); }
+}
+async function waitJob(id) {
+  for (let i = 0; i < 120; i++) {
+    const j = await api('/api/generate/job/' + id);
+    if (j.status === 'done') return j;
+    if (j.status === 'failed') throw new Error(j.error || 'Generation failed. Your credits were returned.');
+    await new Promise(r => setTimeout(r, 4000));
+  }
+  throw new Error('Still running — check back in a minute.');
+}
+
+function renderPick() {
+  const opts = images('face_front', 'candidate').concat(images('face_front', 'canonical'));
+  if (!opts.find(o => o.id === pickedFace)) pickedFace = (canonOf('face_front') || {}).id || '';
+  const refs = images('face_front', 'reference');
+  el('face-opts').innerHTML = opts.map((o, i) => `<button type="button" class="opt" aria-pressed="${o.id === pickedFace}"
+      onclick="pickedFace='${o.id}';confirmed=new Set();renderPick()"><img src="${esc(o.url)}" alt="Face option ${i + 1}">
+      <span>${o.role === 'canonical' ? 'Approved' : 'Option ' + (i + 1)}${o.id === pickedFace ? ' · Selected' : ''}</span></button>`).join('') +
+    `<div class="drop"><strong>Use your own photo</strong><span class="ch-muted" style="margin:0;">Added as a face reference for the next try</span>
+      ${refs.length ? `<div class="refs">${refs.map(refTile).join('')}</div>` : ''}
+      <label class="attest"><input type="checkbox" id="attest-face">I have the rights to this image, and anyone shown is 18+ and agreed to their likeness being used.</label>
+      <button type="button" class="btn" onclick="pickUpload('face_front', 'attest-face')">Choose file</button></div>`;
+  el('pick-summary').textContent = pickedFace ? 'Selected — next, confirm it feature by feature.' : 'Select one option.';
+  el('to-check').disabled = !pickedFace;
+}
+
+function renderCheck() {
+  const img = (cur.images || []).find(i => i.id === pickedFace) || canonOf('face_front');
+  if (!img) return go('pick');
+  pickedFace = img.id;
+  el('check-img').src = img.url;
+  const checks = img.checks || {};
+  const age = checks.age || '';
+  el('age-tag').className = 'tag ' + (age || 'uncertain');
+  el('age-tag').textContent = age ? age[0].toUpperCase() + age.slice(1) : 'Not checked';
+  el('age-note').textContent = checks.age_note || '';
+  const face = cat.features.filter(f => f.group === 'face' && cur.sheet[f.key]);
+  el('check-rows').innerHTML = face.map(f => {
+    const r = ((checks.features || {})[f.key] || {});
+    const res = r.result || '';
+    return `<tr><td style="font-weight:600;">${esc(f.label)}</td><td>${esc(cur.sheet[f.key])}</td>
+      <td>${res ? `<span class="tag ${res}" title="${esc(r.observed || '')}">${res === 'match' ? 'Matches' : res === 'differs' ? 'Differs' : 'Unsure'}</span>` : '<span class="ch-muted">—</span>'}
+        ${r.observed ? `<div class="ch-muted" style="margin:2px 0 0;">${esc(r.observed)}</div>` : ''}</td>
+      <td style="text-align:center;"><input type="checkbox" aria-label="Confirm ${esc(f.label)}" ${confirmed.has(f.key) ? 'checked' : ''}
+        onchange="this.checked?confirmed.add('${f.key}'):confirmed.delete('${f.key}');updateApprove()"></td></tr>`;
+  }).join('') || `<tr><td colspan="4" class="ch-muted">Describe her face first.</td></tr>`;
+  updateApprove();
+}
+function updateApprove() {
+  const img = (cur.images || []).find(i => i.id === pickedFace) || {};
+  const face = cat.features.filter(f => f.group === 'face' && cur.sheet[f.key]);
+  const n = face.filter(f => confirmed.has(f.key)).length;
+  el('check-count').textContent = `${n} of ${face.length} confirmed`;
+  const ageOk = (img.checks || {}).age === 'adult';
+  el('approve-face').disabled = img.role === 'canonical' || !face.length || n < face.length || !ageOk;
+  el('approve-face').textContent = img.role === 'canonical' ? 'Face approved' : 'Approve face';
+}
+function tickMatches() {
+  const img = (cur.images || []).find(i => i.id === pickedFace) || {};
+  Object.entries((img.checks || {}).features || {}).forEach(([k, r]) => { if (r.result === 'match') confirmed.add(k); });
+  renderCheck();
+}
+async function runCheck() {
+  el('run-check').disabled = true; say('Checking…');
+  try { await api(`/api/characters/${cur.id}/images/${pickedFace}/check`, {body: {}}); await reload(); say('Check done.', 'ok'); }
+  catch (e) { say(e.message, 'err'); }
+  el('run-check').disabled = false;
+}
+async function approveFace() {
+  try {
+    await api(`/api/characters/${cur.id}/images/${pickedFace}/approve`, {body: {confirmed: [...confirmed]}});
+    await reload(); say('Face approved.', 'ok'); go('body');
+  } catch (e) { say(e.message, 'err'); }
+}
+
+// ── Body ────────────────────────────────────────────────────────────────────
+function viewState(key) {
+  if (canonOf(key)) return 'ok';
+  return images(key, 'candidate').length ? 'review' : '';
+}
+function viewTile(v) {
+  const c = canonOf(v.key);
+  const locked = v.depends.some(d => !canonOf(d));
+  return `<button type="button" class="view" aria-pressed="${selView === v.key}" onclick="openView('${v.key}')">
+    <div class="vt">${c ? `<img src="${esc(c.url)}" alt="">` : ''}</div>
+    <div style="flex:1; min-width:0;"><div style="font-weight:700; font-size:0.85rem;">${esc(v.label)}</div>
+      <div class="ch-muted" style="margin:2px 0 0;">${v.required ? 'Required' : 'Optional'}${locked ? ' · locked' : ''}</div></div>
+    <span class="dot ${viewState(v.key)}"></span></button>`;
+}
+function renderBody() {
+  const sfw = cat.views.filter(v => v.group !== 'nsfw' && v.key !== 'face_front');
+  const nsfw = cat.views.filter(v => v.group === 'nsfw');
+  const req = cat.views.filter(v => v.required);
+  el('body-summary').textContent = `Level: ${LEVEL_LABEL[cur.nsfw_level]} · ${req.filter(v => canonOf(v.key)).length} of ${req.length} required views approved · version ${cur.version}`;
+  el('sfw-views').innerHTML = sfw.map(viewTile).join('');
+  el('nsfw-card').hidden = !nsfw.length;
+  el('nsfw-summary').textContent = `${nsfw.length} views · ${nsfw.filter(v => v.required).length} required at this level · ${nsfw.filter(v => canonOf(v.key)).length} approved`;
+  el('nsfw-views').innerHTML = nsfw.map(viewTile).join('');
+  el('nsfw-views').hidden = !nsfwOpen; el('nsfw-closed').hidden = nsfwOpen;
+  el('nsfw-toggle').textContent = nsfwOpen ? 'Hide NSFW views' : 'Show NSFW views';
+  el('nsfw-toggle').setAttribute('aria-expanded', nsfwOpen);
+  el('body-features').innerHTML = cat.features.filter(f => f.group === 'body').map(featureSelect).join('');
+  el('general-refs').innerHTML = images('', 'reference').map(refTile).join('');
+  renderViewPanel();
+}
+function toggleNsfw() { nsfwOpen = !nsfwOpen; renderBody(); }
+function openView(key) {
+  selView = key;
+  if (step !== 'body') { step = 'body'; render(); } else renderBody();
+  el('view-panel').scrollIntoView({behavior: 'smooth', block: 'nearest'});
+}
+function refTile(i) {
+  return `<div class="ref"><img src="${esc(i.url)}" alt=""><button type="button" aria-label="Remove reference" onclick="removeImage('${i.id}')">×</button></div>`;
+}
+function renderViewPanel() {
+  const v = selView && viewDef(selView);
+  el('view-panel').hidden = !v; el('add-view-ref').disabled = !v;
+  if (!v) return;
+  const nsfw = v.group === 'nsfw';
+  el('vp-title').textContent = v.label;
+  const waiting = v.depends.filter(d => !canonOf(d)).map(d => viewDef(d).label);
+  el('vp-sub').textContent = (v.required ? 'Required' : 'Optional') + (waiting.length ? ' · approve ' + waiting.join(' and ') + ' first' : '');
+  el('vp-gen').disabled = waiting.length > 0;
+  el('vp-gen').textContent = `Generate ${batch}`;
+  el('vp-check').hidden = v.key !== 'body_front';
+  const groups = v.uses.filter(g => g !== 'face' && g !== 'body');
+  el('vp-features').innerHTML = cat.features.filter(f => groups.includes(f.group)).map(featureSelect).join('') +
+    (groups.length ? `<div style="align-self:end;"><button type="button" class="btn" onclick="saveSheet()">Save</button></div>` : '');
+  const opts = images(v.key, 'candidate').concat(images(v.key, 'canonical'), v.group === 'face' ? [] : images(v.key, 'reference'));
+  el('vp-opts').className = 'opts' + (nsfw ? ' blur' : '');
+  el('vp-opts').innerHTML = opts.map(o => {
+    const age = (o.checks || {}).age;
+    return `<div class="opt" style="cursor:default;" onclick="this.parentNode.classList.remove('blur')">
+      <img src="${esc(o.url)}" alt="${esc(v.label)} option"><span>${o.role === 'canonical' ? 'Approved' : o.source === 'upload' ? 'Your upload' : 'Generated'}
+      ${v.key === 'body_front' && o.role !== 'canonical' ? ` · <span class="tag ${age || 'uncertain'}">${age || 'not checked'}</span>` : ''}</span>
+      ${o.role !== 'canonical' ? `<div style="display:flex; gap:6px; padding:0 12px 12px;">
+        <button type="button" class="btn btn-primary" style="height:36px;" onclick="approveView('${o.id}')">Approve</button>
+        ${v.key === 'body_front' ? `<button type="button" class="btn" style="height:36px;" onclick="runViewCheck('${o.id}')">Check</button>` : ''}
+        <button type="button" class="btn" style="height:36px;" onclick="removeImage('${o.id}')">Delete</button></div>` : ''}</div>`;
+  }).join('') || '<p class="ch-muted">No options yet. Generate some, or upload one below.</p>';
+  el('vp-refs').innerHTML = images(v.key, 'reference').map(refTile).join('') || '<span class="ch-muted">None.</span>';
+}
+async function runViewCheck(id) {
+  const target = id || (images('body_front', 'candidate')[0] || {}).id;
+  if (!target) return say('Generate or upload a full-body option first.', 'err');
+  say('Checking…');
+  try { await api(`/api/characters/${cur.id}/images/${target}/check`, {body: {}}); await reload(); say('Check done.', 'ok'); }
+  catch (e) { say(e.message, 'err'); }
+}
+async function approveView(id) {
+  try { await api(`/api/characters/${cur.id}/images/${id}/approve`, {body: {}}); await reload(); say('Approved.', 'ok'); }
+  catch (e) { say(e.message, 'err'); }
+}
+async function removeImage(id) {
+  if (!confirm('Delete this image?')) return;
+  try { cur = (await api(`/api/characters/${cur.id}/images/${id}`, {method: 'DELETE'})).character; render(); }
+  catch (e) { say(e.message, 'err'); }
+}
+
+let attestBox = 'attest';
+function pickUpload(view, box) {
+  attestBox = box || 'attest';
+  if (!el(attestBox).checked) return say('Tick the rights and consent box first.', 'err');
+  uploadView = view || ''; el('upload').click();
+}
+async function uploadFiles(input) {
+  const files = [...input.files]; input.value = '';
+  for (const f of files) {
+    const data = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(f); });
+    try { await api(`/api/characters/${cur.id}/images`, {body: {view: uploadView, image: data, attest: el(attestBox).checked}}); }
+    catch (e) { say(e.message, 'err'); return; }
+  }
+  await reload(); say(files.length + ' uploaded.', 'ok');
+}
+
+(async function init() {
+  try {
+    const list = await (await fetch('/api/personas')).json();
+    personas = Array.isArray(list) ? list : (list.personas || []);
+  } catch (e) {}
+  const q = new URLSearchParams(location.search);
+  try {
+    if (q.get('persona') && q.get('new')) return await newCharacter(q.get('persona'));
+    if (q.get('id')) return await openCharacter(q.get('id'));
+  } catch (e) { alert(e.message); }
+  loadList();
+})();
+</script>
+</body>
+</html>

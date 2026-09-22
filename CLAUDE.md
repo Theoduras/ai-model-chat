@@ -27,6 +27,9 @@ kept as a secondary target and still works, but is not where the app is deployed
 ```
 app.py                          — Flask server, Gemini API, multi-persona, builder API
 studio.html                     — Generation studio (admin-only while in testing)
+characters.py                   — Character catalogue: views, features, level rules, prompts
+characters.html                 — Character builder (face, checks, body views; admin-only)
+test_characters.py              — SFW/NSFW separation and validation tests
 imagegen.py                     — NSFW image/video generation (Runware, ModelsLab)
 credits.py                      — Credit pricing, tier packs, margin floor
 storage.py                      — GCS for generated media (staging vs kept)
@@ -92,6 +95,11 @@ requirements.txt                — Python deps: flask, google-genai, python-dot
 | `GET /api/generate/jobs?persona=` | — | Recent generations, with staged media |
 | `POST /api/generate/keep` | JSON | Keep (promote + approve) or drop staged media |
 | `GET /api/generate/tick` | — | Cron sweeper: advance jobs, refund dead ones (`CRON_SECRET`) |
+| `GET /characters` | — | Character builder (admin only) |
+| `GET/POST /api/characters` | JSON | List / create a character (`persona` creates it linked) |
+| `POST /api/characters/{id}/generate` | JSON | Generate options for one view |
+| `POST /api/characters/{id}/images/{img}/approve` | JSON | Make an image a view's approved photo; bumps the version |
+| `GET /api/personas/{slug}/character` | — | Linked character, and which views a `shot`/`scene` sends |
 
 ---
 
@@ -268,6 +276,16 @@ Stay completely in character. Never mention being an AI.
   audio model ids, the audio field names or a video-concat task is verified
   against the live catalogue** — run `imagegen.search_models('audio')` the
   moment a Runware key is reachable and correct the env defaults.
+- **A character is identity material, never vault media.** `CharacterImage` is
+  its own table so no send, post or pick path can reach one. Once a linked
+  character is complete, every still for that persona carries its approved
+  views as references and its features as prompt text, both cut to the shot's
+  level by `characters.views_for_job` / `describe`: a safe-work shot never gets
+  an explicit photo or word. The face and full-body photos need a confident
+  "adult" from the vision check (SFW images only — nothing explicit goes to
+  Google) and the face needs every feature ticked. Each approval saves a
+  `CharacterVersion`; jobs record `character_version`. Face uploads are
+  references only; stacked youth-leaning choices are refused in `characters.validate`.
 - A generation lands in `staging/` unapproved and is **invisible to every send
   path** — `_approved_only` filters `_pick_media`, `_pick_phase_photo` and the
   vault listing, so nothing unreviewed can reach a fan. Keeping it promotes it

@@ -764,7 +764,7 @@ def merge_negative(extra=''):
 
 def build_prompt(appearance, shot, outfit=None, has_reference=False, extra='',
                  style='', scene='', camera='', lighting='', direction='',
-                 banned=()):
+                 banned=(), age=None):
     """The positive prompt for one generation.
 
     With a reference photo the prompt describes what changes, not who she is —
@@ -808,7 +808,8 @@ def build_prompt(appearance, shot, outfit=None, has_reference=False, extra='',
     extra = (' ' + extra.strip()) if (extra or '').strip() else ''
     prompt = (lead + lock + tail + scene_text +
               ' Shot on a phone camera, natural skin texture and lighting, '
-              'sharp focus, realistic. Fictional adult woman, 25 years old.' +
+              'sharp focus, realistic. Fictional adult woman, '
+              f'{max(18, int(age or 25))} years old.' +
               direction + extra)
 
     # A character's banned terms are struck from the finished prompt rather
