@@ -780,6 +780,9 @@ function plSlotMediaDraw() {
   const q = document.getElementById('pl-sm-q').value.trim().toLowerCase();
   const rating = document.getElementById('pl-sm-rating').value;
   const shown = plVault.filter(m => {
+    // Held back from posts in the vault: not on offer here at all, since the
+    // server refuses it anyway.
+    if (m.no_posts) return false;
     if (rating === 'unrated' && m.rating) return false;
     if (rating && rating !== 'unrated' && m.rating !== rating) return false;
     if (q && (m.purpose || '').toLowerCase().indexOf(q) === -1) return false;

@@ -14,51 +14,106 @@
   <style>
     /* The body is height-locked by .page-dashboard so it fits the dashboard's
        iframe; that means this page has to carry its own scroller, the way
-       .pl-scroll does for the planner. */
+       .pl-scroll does for the planner. Everything else here is the persona
+       browser's own .pg-* vocabulary, so the two pages read as one product. */
     .vw-scroll { flex:1; min-height:0; overflow-y:auto; }
-    .vw-wrap { max-width: 1100px; margin: 0 auto; padding: 18px 16px 60px; }
-    .vw-bar { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:16px; }
-    /* The console stylesheet stretches a bare select to the row; these sit in a
-       toolbar, so they size to themselves. */
-    .vw-bar select, .vw-bar input[type="search"] {
-      width:auto; flex:0 0 auto; min-width:140px; margin:0;
-      padding:7px 10px; border-radius:9px; border:1px solid var(--border);
-      background:var(--surface); color:var(--text); font-size:0.82rem; }
-    .vw-bar #vw-persona { min-width:180px; }
-    .vw-bar #vw-q { min-width:200px; }
-    .vw-grid { display:grid; gap:14px;
-      grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); }
-    .vw-item { border:1px solid var(--border); border-radius:12px; overflow:hidden;
-      background:var(--surface); display:flex; flex-direction:column; }
-    .vw-thumb { position:relative; aspect-ratio:3/4; background:#0002; }
-    .vw-thumb img, .vw-thumb video { width:100%; height:100%; object-fit:cover; display:block; }
-    .vw-kind { position:absolute; top:5px; right:5px; font-size:0.62rem; padding:2px 6px;
-      border-radius:6px; background:#000a; color:#fff; letter-spacing:.04em; }
-    .vw-meta { padding:8px 9px 10px; display:flex; flex-direction:column; gap:7px; }
-    .vw-name { font-size:0.76rem; color:var(--text); overflow:hidden;
+    .vw-wrap { max-width:1280px; margin:0 auto; padding:22px 24px 80px; }
+    .vw-wrap .pg-head-l h2, .vw-wrap .pg-head-l .btn { white-space:nowrap; }
+    .vw-wrap .pg-grid { grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); }
+
+    .vw-tile-img { position:relative; aspect-ratio:3/4; background:var(--surface); }
+    .vw-tile-img img, .vw-tile-img video { width:100%; height:100%; object-fit:cover; display:block; }
+    .vw-badges { position:absolute; top:8px; left:8px; display:flex; gap:4px; flex-wrap:wrap; }
+    .vw-b { font-size:0.58rem; font-weight:700; letter-spacing:.05em; padding:2px 6px;
+      border-radius:5px; color:#fff; }
+    .vw-b.sfw { background:#1f9d55dd; } .vw-b.nsfw { background:#d6336cdd; }
+    .vw-b.none { background:#f0932bdd; } .vw-b.off { background:#00000099; }
+    .vw-card-foot { padding:10px 12px 12px; display:flex; align-items:center; gap:8px; }
+    .vw-card-name { flex:1; min-width:0; font-size:0.8rem; overflow:hidden;
       text-overflow:ellipsis; white-space:nowrap; }
-    .vw-sub { font-size:0.68rem; color:var(--text-muted); }
-    .vw-rate { display:flex; gap:0; border:1px solid var(--border); border-radius:8px;
-      overflow:hidden; }
-    .vw-rate button { flex:1; border:0; background:transparent; color:var(--text-muted);
-      font-size:0.68rem; font-weight:600; padding:4px 0; cursor:pointer; letter-spacing:.04em; }
-    .vw-rate button.on-sfw { background:#1f9d5522; color:#1f9d55; }
-    .vw-rate button.on-nsfw { background:#d6336c22; color:#d6336c; }
-    .vw-row { display:flex; gap:6px; align-items:center; justify-content:space-between; }
-    .vw-del { border:0; background:transparent; color:var(--text-muted); cursor:pointer;
-      font-size:0.68rem; padding:2px 4px; }
-    .vw-del:hover { color:#d6336c; }
-    .vw-empty, .vw-note { color:var(--text-muted); font-size:0.82rem; padding:22px 0; }
-    .vw-unrated { outline:1px dashed #f0932b88; outline-offset:-1px; }
+    .vw-unrated { box-shadow:inset 0 0 0 1px #f0932b66; }
+
+    /* Selection */
+    /* The shared .pg-star/.pg-del both anchor top-right, so the three corner
+       controls are re-spaced here rather than stacked on each other. */
+    .pg-card .vw-tile-img .vw-check { right:9px; top:13px; }
+    .pg-card .vw-tile-img .pg-star { right:45px; }
+    .pg-card .vw-tile-img .pg-del { right:81px; }
+    .vw-check { position:absolute; top:8px; right:8px; width:22px; height:22px;
+      border-radius:6px; border:2px solid #fff; background:#0006; cursor:pointer;
+      display:flex; align-items:center; justify-content:center; color:#fff;
+      font-size:0.72rem; font-weight:700; }
+    .pg-card.is-picked .vw-check { background:var(--accent); border-color:var(--accent); }
+    .pg-card.is-picked { outline:2px solid var(--accent); outline-offset:1px; }
+    .vw-selbar { position:sticky; top:0; z-index:5; display:flex; flex-wrap:wrap; gap:8px;
+      align-items:center; margin-bottom:14px; padding:10px 12px; border-radius:var(--r-md);
+      background:var(--panel); border:1px solid var(--border-soft); box-shadow:var(--shadow-sm); }
+    .vw-selbar strong { font-size:0.82rem; }
+    .vw-selbar .sp { margin-left:auto; }
+
+    /* Rows (list view) */
+    .vw-row-thumb { width:48px; height:48px; border-radius:8px; overflow:hidden; flex-shrink:0;
+      background:var(--surface); }
+    .vw-row-thumb img, .vw-row-thumb video { width:100%; height:100%; object-fit:cover; }
+
+    /* Viewer */
+    .vw-view { position:fixed; inset:0; z-index:3000; background:#000000e8;
+      display:none; align-items:stretch; }
+    .vw-view.open { display:flex; }
+    .vw-stage { flex:1; min-width:0; display:flex; align-items:center; justify-content:center;
+      position:relative; padding:20px; }
+    .vw-stage img, .vw-stage video { max-width:100%; max-height:100%; object-fit:contain;
+      border-radius:8px; }
+    .vw-nav { position:absolute; top:50%; transform:translateY(-50%); width:44px; height:44px;
+      border-radius:50%; border:0; background:#ffffff22; color:#fff; font-size:1.3rem;
+      cursor:pointer; }
+    .vw-nav:hover { background:#ffffff38; }
+    .vw-nav.prev { left:14px; } .vw-nav.next { right:14px; }
+    .vw-side { width:320px; flex-shrink:0; background:var(--panel); color:var(--text);
+      overflow-y:auto; padding:18px; display:flex; flex-direction:column; gap:16px; }
+    .vw-side h3 { font-size:0.95rem; font-weight:600; margin:0; }
+    .vw-side .vw-sec { display:flex; flex-direction:column; gap:7px; }
+    .vw-side .vw-lab { font-size:0.68rem; text-transform:uppercase; letter-spacing:.07em;
+      color:var(--text-muted); }
+    .vw-seg { display:flex; border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+    .vw-seg button { flex:1; border:0; background:transparent; color:var(--text-muted);
+      padding:6px 0; font-size:0.72rem; font-weight:600; cursor:pointer; }
+    .vw-seg button.on-sfw { background:#1f9d5522; color:#1f9d55; }
+    .vw-seg button.on-nsfw { background:#d6336c22; color:#d6336c; }
+    .vw-tog { display:flex; align-items:center; gap:8px; padding:7px 9px; border-radius:8px;
+      border:1px solid var(--border); background:transparent; color:var(--text-2);
+      font-size:0.76rem; cursor:pointer; text-align:left; width:100%; font-family:var(--font); }
+    .vw-tog.on { border-color:var(--accent-line); color:var(--text); font-weight:600; }
+    .vw-tog .tick { width:14px; color:var(--accent); }
+    .vw-fold { display:flex; flex-wrap:wrap; gap:6px; }
+    .vw-fchip { font-size:0.72rem; padding:4px 9px; border-radius:9999px; cursor:pointer;
+      border:1px solid var(--border); background:transparent; color:var(--text-muted);
+      font-family:var(--font); }
+    .vw-fchip.on { background:var(--accent); border-color:transparent; color:#fff; font-weight:600; }
+    .vw-vname { width:100%; padding:7px 9px; border-radius:8px; border:1px solid var(--border);
+      background:var(--surface); color:var(--text); font-size:0.8rem; font-family:var(--font); }
+    .vw-close { position:absolute; top:14px; right:14px; width:36px; height:36px; border:0;
+      border-radius:50%; background:#ffffff22; color:#fff; font-size:1.2rem; cursor:pointer; }
+    .vw-count { position:absolute; bottom:16px; left:50%; transform:translateX(-50%);
+      color:#fff9; font-size:0.74rem; }
+
+    /* Pager */
     .vw-pager { display:flex; flex-wrap:wrap; gap:6px; align-items:center;
-      justify-content:center; padding:22px 0 4px; }
+      justify-content:center; padding:24px 0 4px; }
     .vw-pager button { min-width:30px; padding:5px 9px; border-radius:8px; cursor:pointer;
       border:1px solid var(--border); background:var(--surface); color:var(--text);
-      font-size:0.76rem; font-weight:600; }
+      font-size:0.76rem; font-weight:600; font-family:var(--font); }
     .vw-pager button:disabled { opacity:.4; cursor:default; }
-    .vw-pager button.on { background:var(--accent, #6c5ce7); border-color:transparent; color:#fff; }
+    .vw-pager button.on { background:var(--accent); border-color:transparent; color:#fff; }
     .vw-pager .vw-gap { color:var(--text-muted); font-size:0.76rem; padding:0 2px; }
     .vw-pager .vw-of { color:var(--text-muted); font-size:0.72rem; margin-left:8px; }
+    .vw-note { color:var(--text-muted); font-size:0.82rem; padding:10px 0; }
+
+    @media (max-width: 760px) {
+      .vw-view { flex-direction:column; }
+      .vw-side { width:auto; max-height:52%; }
+      .vw-wrap { padding:18px 16px 64px; }
+    }
   </style>
 </head>
 <body class="page-dashboard">
@@ -66,7 +121,7 @@
 <header>
   <div style="display:flex; align-items:center; gap:10px;">
     <h1>Content Vault</h1>
-    <span class="badge" id="vw-count"></span>
+    <span class="badge" id="vw-count-badge"></span>
   </div>
   <div style="display:flex; align-items:center; gap:16px;">
     <nav data-site-nav="inline" class="sn-links sn-inline"></nav>
@@ -76,46 +131,47 @@
 
 <div class="vw-scroll">
 <div class="vw-wrap">
-  <div class="vw-bar">
-    <select id="vw-persona" onchange="vwPick(this.value)"></select>
-    <input type="search" id="vw-q" placeholder="Search by name…" oninput="vwRefilter()">
-    <select id="vw-rating" onchange="vwRefilter()">
-      <option value="">All ratings</option>
-      <option value="sfw">Safe for work</option>
-      <option value="nsfw">Explicit</option>
-      <option value="unrated">Unrated</option>
-    </select>
-    <select id="vw-type" onchange="vwRefilter()">
-      <option value="">Photos and clips</option>
-      <option value="image">Photos</option>
-      <option value="video">Clips</option>
-    </select>
-    <label class="btn btn-secondary" style="cursor:pointer; margin-left:auto;">
-      Upload<input type="file" accept="image/*,video/*" hidden onchange="vwUpload(this)">
-    </label>
-  </div>
+  <div id="vw-head"></div>
   <div class="vw-note" id="vw-note" hidden></div>
-  <div class="vw-grid" id="vw-grid"></div>
+  <div id="vw-selbar"></div>
+  <div id="vw-status"></div>
+  <div id="vw-body"></div>
   <div class="vw-pager" id="vw-pager"></div>
 </div>
 </div>
 
+<div class="vw-view" id="vw-view" onclick="if(event.target===this)vwViewClose()">
+  <div class="vw-stage" id="vw-stage"></div>
+  <div class="vw-side" id="vw-side"></div>
+</div>
+
+<input type="file" id="vw-file" accept="image/*,video/*" multiple hidden onchange="vwUpload(this)">
+
 <script>
 let vwSlug = '';
 let vwItems = [];
-const VW_PER_PAGE = 48;
+let vwFolders = [];      // the creator's own folders
+let vwOutfits = [];      // the six outfit slots, shown in the same list
+let vwPicked = new Set();
+let vwLastPicked = -1;
+let vwViewIdx = -1;
+let vwMenu = '';
+let vwQuery = '';
+let vwFilter = { rating: [], type: [], folder: [], flag: [] };
+let vwSort = 'new';
+let vwView = 'cards';
 let vwPage = 1;
+let vwFocusPending = null;
+const VW_PER_PAGE = 48;
 
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g,
     c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
+function el(id) { return document.getElementById(id); }
+function note(msg) { const n = el('vw-note'); n.textContent = msg || ''; n.hidden = !msg; }
 
-function note(msg) {
-  const el = document.getElementById('vw-note');
-  el.textContent = msg || '';
-  el.hidden = !msg;
-}
+// ── Loading ──────────────────────────────────────────────────────────────────
 
 async function vwInit() {
   let list = [];
@@ -125,43 +181,212 @@ async function vwInit() {
     return;
   }
   const wanted = new URLSearchParams(location.search).get('persona') || '';
-  const sel = document.getElementById('vw-persona');
-  sel.innerHTML = list.map(p =>
-    '<option value="' + esc(p.slug) + '">' + esc(p.name || p.slug) + '</option>').join('');
   vwSlug = list.some(p => p.slug === wanted) ? wanted : list[0].slug;
-  sel.value = vwSlug;
+  window.vwPersonas = list;
   vwLoad();
 }
 
-function vwPick(slug) { vwSlug = slug; vwLoad(); }
+function vwPick(slug) { vwSlug = slug; vwPicked.clear(); vwLoad(); }
 
 async function vwLoad() {
   if (!vwSlug) return;
+  const q = encodeURIComponent(vwSlug);
   try {
-    const d = await (await fetch('/api/personas/' + encodeURIComponent(vwSlug) + '/media')).json();
-    vwItems = (d && d.vault) || [];
+    const [m, f] = await Promise.all([
+      (await fetch('/api/personas/' + q + '/media')).json(),
+      (await fetch('/api/personas/' + q + '/folders')).json()
+    ]);
+    vwItems = (m && m.vault) || [];
+    vwOutfits = ((m && m.outfits) || []).filter(o => o && o.name);
+    vwFolders = (f && f.folders) || [];
     note('');
   } catch (e) { vwItems = []; note('Could not read the vault.'); }
   vwPage = 1;
   vwDraw();
 }
 
-function vwFiltered() {
-  const q = (document.getElementById('vw-q').value || '').trim().toLowerCase();
-  const rating = document.getElementById('vw-rating').value;
-  const type = document.getElementById('vw-type').value;
-  return vwItems.filter(m => {
-    if (type && (m.kind || 'image') !== type) return false;
-    if (rating === 'unrated' && m.rating) return false;
-    if (rating && rating !== 'unrated' && m.rating !== rating) return false;
-    if (q && (m.purpose || '').toLowerCase().indexOf(q) === -1
-          && (m.outfit || '').toLowerCase().indexOf(q) === -1) return false;
-    return true;
-  });
+// Every folder the creator can file into: their own, plus the six outfit slots,
+// which stay real outfits underneath so the chat keeps working.
+function vwAllFolders() {
+  return vwFolders.map(n => ({ name: n, outfit: '' }))
+    .concat(vwOutfits.map(o => ({ name: o.name, outfit: String(o.n) })));
+}
+function vwFoldersOf(m) {
+  return (m.folders || []).concat(
+    (m.outfits || []).map(n => (vwOutfits.find(o => String(o.n) === String(n)) || {}).name)
+      .filter(Boolean));
 }
 
-// Anything that changes which items match starts the creator at the top again;
-// rating one or deleting one leaves them where they were reading.
+// ── Filtering ────────────────────────────────────────────────────────────────
+
+function vwFiltered() {
+  const q = vwQuery.trim().toLowerCase();
+  const f = vwFilter;
+  const rows = vwItems.filter(m => {
+    if (f.rating.length && f.rating.indexOf(m.rating || 'unrated') === -1) return false;
+    if (f.type.length && f.type.indexOf(m.kind || 'image') === -1) return false;
+    if (f.folder.length) {
+      const mine = vwFoldersOf(m);
+      if (!f.folder.some(n => mine.indexOf(n) !== -1)) return false;
+    }
+    if (f.flag.indexOf('fav') !== -1 && !m.favourite) return false;
+    if (f.flag.indexOf('no_posts') !== -1 && !m.no_posts) return false;
+    if (f.flag.indexOf('no_dms') !== -1 && !m.no_dms) return false;
+    if (q && (m.purpose || '').toLowerCase().indexOf(q) === -1
+          && vwFoldersOf(m).join(' ').toLowerCase().indexOf(q) === -1) return false;
+    return true;
+  });
+  if (vwSort === 'name') {
+    rows.sort((a, b) => (a.purpose || '').localeCompare(b.purpose || ''));
+  } else if (vwSort === 'old') {
+    rows.reverse();
+  }
+  return rows;
+}
+
+function vwFilterCount() {
+  return vwFilter.rating.length + vwFilter.type.length
+       + vwFilter.folder.length + vwFilter.flag.length;
+}
+function vwToggleFilter(cat, val) {
+  const list = vwFilter[cat];
+  const i = list.indexOf(val);
+  if (i === -1) list.push(val); else list.splice(i, 1);
+  vwPage = 1;
+  vwDraw();
+}
+function vwClearFilter() {
+  vwFilter = { rating: [], type: [], folder: [], flag: [] };
+  vwQuery = '';
+  vwPage = 1;
+  vwDraw();
+}
+function vwSetQuery(v, caret) { vwQuery = v; vwPage = 1; vwFocusPending = caret; vwDraw(); }
+function vwSetSort(v) { vwSort = v; vwMenu = ''; vwDraw(); }
+function vwSetView(v) { vwView = v; vwDraw(); }
+function vwToggleMenu(name) { vwMenu = vwMenu === name ? '' : name; vwDraw(); }
+document.addEventListener('click', () => { if (vwMenu) { vwMenu = ''; vwDraw(); } });
+
+// ── Toolbar, built on the persona browser's own classes ──────────────────────
+
+function vwOptRow(cat, value, label) {
+  const on = vwFilter[cat].indexOf(value) !== -1;
+  return '<button type="button" class="pg-opt' + (on ? ' on' : '') + '" role="menuitemcheckbox"'
+    + ' aria-checked="' + on + '" onclick="event.stopPropagation();vwToggleFilter(\'' + cat + '\','
+    + JSON.stringify(value).replace(/"/g, '&quot;') + ')">'
+    + '<span class="pg-tick" aria-hidden="true">' + (on ? '✓' : '') + '</span>' + esc(label) + '</button>';
+}
+
+function vwHead() {
+  const n = vwFilterCount();
+  const folders = vwAllFolders();
+  const filterPop =
+    '<div class="pg-opt-h">Rating</div>'
+    + vwOptRow('rating', 'sfw', 'Safe for work')
+    + vwOptRow('rating', 'nsfw', 'Explicit')
+    + vwOptRow('rating', 'unrated', 'Unrated')
+    + '<div class="pg-opt-h">Type</div>'
+    + vwOptRow('type', 'image', 'Photos') + vwOptRow('type', 'video', 'Clips')
+    + (folders.length ? '<div class="pg-opt-h">Folders</div>'
+        + folders.map(f => vwOptRow('folder', f.name, f.name + (f.outfit ? ' · outfit' : ''))).join('') : '')
+    + '<div class="pg-opt-h">Other</div>'
+    + vwOptRow('flag', 'fav', 'Favourites only')
+    + vwOptRow('flag', 'no_posts', 'Held back from posts')
+    + vwOptRow('flag', 'no_dms', 'Held back from DMs')
+    + (n ? '<button type="button" class="pg-opt pg-opt-clear" onclick="event.stopPropagation();vwClearFilter()">Clear all filters</button>' : '');
+
+  const SORTS = { new: 'Newest first', old: 'Oldest first', name: 'Name' };
+  const sortPop = Object.keys(SORTS).map(k =>
+    '<button type="button" class="pg-opt' + (vwSort === k ? ' on' : '') + '" role="menuitemradio"'
+    + ' onclick="event.stopPropagation();vwSetSort(\'' + k + '\')">'
+    + '<span class="pg-tick">' + (vwSort === k ? '✓' : '') + '</span>' + SORTS[k] + '</button>').join('');
+
+  const people = (window.vwPersonas || []);
+  return '<div class="pg-head">'
+    + '<div class="pg-head-l" style="display:flex;align-items:center;gap:10px;">'
+      + '<h2 style="font-size:1.1rem;font-weight:600;">Her vault</h2>'
+      + (people.length > 1
+          ? '<select class="pg-ctl" style="padding:0 10px;" onchange="vwPick(this.value)">'
+            + people.map(p => '<option value="' + esc(p.slug) + '"' + (p.slug === vwSlug ? ' selected' : '') + '>'
+              + esc(p.name || p.slug) + '</option>').join('') + '</select>' : '')
+      + '<button type="button" class="btn btn-primary" onclick="document.getElementById(\'vw-file\').click()">+ Upload</button>'
+    + '</div>'
+    + '<div class="pg-search">'
+      + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="14" height="14" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3" stroke-linecap="round"/></svg>'
+      + '<input type="text" placeholder="Search the vault…" value="' + esc(vwQuery) + '" oninput="vwSetQuery(this.value, this.selectionStart)">'
+    + '</div>'
+    + '<div class="pg-menu' + (vwMenu === 'filter' ? ' open' : '') + '">'
+      + '<button type="button" class="pg-ctl' + (n ? ' active' : '') + '" onclick="event.stopPropagation();vwToggleMenu(\'filter\')">'
+      + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" width="14" height="14" aria-hidden="true"><path d="M3 5h18M6 12h12M10 19h4" stroke-linecap="round"/></svg>Filter'
+      + (n ? '<span class="pg-ctl-n">' + n + '</span>' : '') + '</button>'
+      + '<div class="pg-pop" role="menu">' + filterPop + '</div></div>'
+    + '<div class="pg-menu' + (vwMenu === 'sort' ? ' open' : '') + '">'
+      + '<button type="button" class="pg-ctl" onclick="event.stopPropagation();vwToggleMenu(\'sort\')">Sort</button>'
+      + '<div class="pg-pop" role="menu">' + sortPop + '</div></div>'
+    + '<div class="pg-toggle">'
+      + '<button type="button" class="' + (vwView === 'cards' ? 'active' : '') + '" onclick="vwSetView(\'cards\')">▦ Cards</button>'
+      + '<button type="button" class="' + (vwView === 'list' ? 'active' : '') + '" onclick="vwSetView(\'list\')">☰ List</button>'
+    + '</div>'
+    + '<button type="button" class="pg-ctl" onclick="vwNewFolder()">+ Folder</button>'
+    + '</div>';
+}
+
+// ── Tiles ────────────────────────────────────────────────────────────────────
+
+function vwThumb(m, tag) {
+  return (m.kind === 'video'
+    ? '<video src="' + esc(m.thumb) + '" muted playsinline preload="metadata"></video>'
+    : '<img src="' + esc(m.thumb) + '" alt="" loading="lazy">')
+    + (tag && m.kind === 'video' ? '<span class="vw-b off" style="position:absolute;bottom:8px;left:8px;">clip</span>' : '');
+}
+
+function vwBadges(m) {
+  return '<div class="vw-badges">'
+    + '<span class="vw-b ' + (m.rating || 'none') + '">' + (m.rating ? m.rating.toUpperCase() : 'UNRATED') + '</span>'
+    + (m.no_posts ? '<span class="vw-b off">no posts</span>' : '')
+    + (m.no_dms ? '<span class="vw-b off">no DMs</span>' : '')
+    + '</div>';
+}
+
+function vwStar(m, cls) {
+  return '<button type="button" class="' + cls + (m.favourite ? ' active' : '') + '"'
+    + ' title="' + (m.favourite ? 'Unfavourite' : 'Favourite') + '"'
+    + ' onclick="event.stopPropagation();vwSet(\'' + m.id + '\',{favourite:' + (!m.favourite) + '})">'
+    + (m.favourite ? '★' : '☆') + '</button>';
+}
+
+function vwCard(m, idx) {
+  const on = vwPicked.has(m.id);
+  return '<div class="pg-card' + (on ? ' is-picked' : '') + (m.rating ? '' : ' vw-unrated')
+      + '" onclick="vwViewOpen(' + idx + ')">'
+    + '<div class="vw-tile-img">' + vwThumb(m, true) + '<div class="pg-scrim"></div>'
+      + vwBadges(m) + vwStar(m, 'pg-star')
+      + '<button type="button" class="pg-del" title="Delete" onclick="event.stopPropagation();vwDelete([\'' + m.id + '\'])">✕</button>'
+      + '<span class="vw-check" onclick="event.stopPropagation();vwTogglePick(\'' + m.id + '\',' + idx + ',event)">'
+      + (on ? '✓' : '') + '</span>'
+    + '</div>'
+    + '<div class="vw-card-foot"><span class="vw-card-name" title="' + esc(m.purpose || '') + '">'
+      + esc(m.purpose || 'untitled') + '</span></div></div>';
+}
+
+function vwRow(m, idx) {
+  const on = vwPicked.has(m.id);
+  const folders = vwFoldersOf(m).join(', ');
+  return '<div class="pg-row' + (on ? ' is-picked' : '') + '" onclick="vwViewOpen(' + idx + ')">'
+    + '<span class="vw-check" style="position:static;" onclick="event.stopPropagation();vwTogglePick(\'' + m.id + '\',' + idx + ',event)">'
+      + (on ? '✓' : '') + '</span>'
+    + '<div class="vw-row-thumb">' + vwThumb(m) + '</div>'
+    + '<div class="pg-row-info"><div class="pg-row-name">' + esc(m.purpose || 'untitled') + '</div>'
+      + '<div class="pg-row-sub">' + esc(folders || (m.kind === 'video' ? 'clip' : 'photo'))
+      + (m.no_posts ? ' · no posts' : '') + (m.no_dms ? ' · no DMs' : '') + '</div></div>'
+    + '<span class="vw-b ' + (m.rating || 'none') + '">' + (m.rating ? m.rating.toUpperCase() : 'UNRATED') + '</span>'
+    + vwStar(m, 'pg-star')
+    + '<button type="button" class="pg-del" title="Delete" onclick="event.stopPropagation();vwDelete([\'' + m.id + '\'])">✕</button>'
+    + '</div>';
+}
+
+// ── Draw ─────────────────────────────────────────────────────────────────────
+
 function vwRefilter() { vwPage = 1; vwDraw(); }
 
 function vwGo(page) {
@@ -173,40 +398,39 @@ function vwGo(page) {
 function vwDraw() {
   const all = vwFiltered();
   const pages = Math.max(1, Math.ceil(all.length / VW_PER_PAGE));
-  // Deleting the last item on the last page must not leave an empty grid.
   if (vwPage > pages) vwPage = pages;
-  const rows = all.slice((vwPage - 1) * VW_PER_PAGE, vwPage * VW_PER_PAGE);
-  document.getElementById('vw-count').textContent =
-    vwItems.length ? all.length + ' of ' + vwItems.length : '';
-  vwDrawPager(pages, all.length);
-  document.getElementById('vw-grid').innerHTML = rows.length ? rows.map(m => {
-    const clip = (m.kind || 'image') === 'video';
-    const thumb = clip
-      ? '<video src="' + esc(m.thumb) + '" muted playsinline preload="metadata"></video>'
-        + '<span class="vw-kind">clip</span>'
-      : '<img src="' + esc(m.thumb) + '" alt="" loading="lazy">';
-    const sub = [m.outfit, m.location].filter(Boolean).join(' · ');
-    return '<div class="vw-item' + (m.rating ? '' : ' vw-unrated') + '">'
-      + '<div class="vw-thumb">' + thumb + '</div>'
-      + '<div class="vw-meta">'
-      + '<span class="vw-name" title="' + esc(m.purpose || '') + '">'
-        + esc(m.purpose || 'untitled') + '</span>'
-      + (sub ? '<span class="vw-sub">' + esc(sub) + '</span>' : '')
-      + '<div class="vw-rate">'
-      + '<button type="button" class="' + (m.rating === 'sfw' ? 'on-sfw' : '')
-        + '" onclick="vwRate(\'' + esc(m.id) + '\', \'sfw\')">SFW</button>'
-      + '<button type="button" class="' + (m.rating === 'nsfw' ? 'on-nsfw' : '')
-        + '" onclick="vwRate(\'' + esc(m.id) + '\', \'nsfw\')">NSFW</button>'
+  const start = (vwPage - 1) * VW_PER_PAGE;
+  const rows = all.slice(start, start + VW_PER_PAGE);
+  window.vwShown = all;
+
+  el('vw-head').innerHTML = vwHead();
+  el('vw-count-badge').textContent = vwItems.length ? all.length + ' of ' + vwItems.length : '';
+  el('vw-selbar').innerHTML = vwSelBar();
+  el('vw-status').innerHTML = vwItems.length
+    ? '<div class="pg-status"><strong>' + all.length + '</strong> of ' + vwItems.length + ' items'
+      + (vwFilterCount() || vwQuery
+          ? ' <button type="button" class="pg-clear" onclick="vwClearFilter()">Clear</button>' : '')
+      + '</div>' : '';
+  el('vw-body').innerHTML = rows.length
+    ? '<div class="' + (vwView === 'list' ? 'pg-list' : 'pg-grid') + '">'
+      + rows.map((m, i) => vwView === 'list' ? vwRow(m, start + i) : vwCard(m, start + i)).join('')
       + '</div>'
-      + '<div class="vw-row">'
-      + '<span class="vw-sub">' + (m.rating ? '' : 'unrated') + '</span>'
-      + '<button type="button" class="vw-del" onclick="vwDelete(\'' + esc(m.id) + '\')">delete</button>'
-      + '</div></div></div>';
-  }).join('') : '<div class="vw-empty">Nothing here yet — upload a photo or keep a generation.</div>';
+    : '<div class="pg-none"><div class="pg-none-t">'
+      + (vwItems.length ? 'Nothing matches those filters.'
+                        : 'Nothing here yet — upload a photo or keep a generation.')
+      + '</div></div>';
+  vwDrawPager(pages, all.length);
+
+  // The search box's own oninput redraws this block, which would otherwise
+  // steal the cursor on every keystroke.
+  if (vwFocusPending !== null) {
+    const input = el('vw-head').querySelector('.pg-search input');
+    if (input) { input.focus(); input.setSelectionRange(vwFocusPending, vwFocusPending); }
+    vwFocusPending = null;
+  }
+  if (vwViewIdx >= 0) vwViewDraw();
 }
 
-// First and last always, plus a window around where the creator is: a vault of
-// forty pages is not a row of forty buttons.
 function vwPageNumbers(pages) {
   const out = [];
   for (let n = 1; n <= pages; n++) {
@@ -217,75 +441,305 @@ function vwPageNumbers(pages) {
 }
 
 function vwDrawPager(pages, total) {
-  const el = document.getElementById('vw-pager');
-  if (pages < 2) { el.innerHTML = ''; return; }
-  el.innerHTML =
-    '<button type="button"' + (vwPage === 1 ? ' disabled' : '')
-      + ' onclick="vwGo(' + (vwPage - 1) + ')">‹ Prev</button>'
+  const box = el('vw-pager');
+  if (pages < 2) { box.innerHTML = ''; return; }
+  box.innerHTML =
+    '<button type="button"' + (vwPage === 1 ? ' disabled' : '') + ' onclick="vwGo(' + (vwPage - 1) + ')">‹ Prev</button>'
     + vwPageNumbers(pages).map(n => n === '…'
         ? '<span class="vw-gap">…</span>'
-        : '<button type="button" class="' + (n === vwPage ? 'on' : '')
-          + '" onclick="vwGo(' + n + ')">' + n + '</button>').join('')
-    + '<button type="button"' + (vwPage === pages ? ' disabled' : '')
-      + ' onclick="vwGo(' + (vwPage + 1) + ')">Next ›</button>'
+        : '<button type="button" class="' + (n === vwPage ? 'on' : '') + '" onclick="vwGo(' + n + ')">' + n + '</button>').join('')
+    + '<button type="button"' + (vwPage === pages ? ' disabled' : '') + ' onclick="vwGo(' + (vwPage + 1) + ')">Next ›</button>'
     + '<span class="vw-of">Page ' + vwPage + ' of ' + pages + ' · ' + total + ' items</span>';
 }
 
-// A rating is what keeps an explicit file off a channel that bans them, so it
-// is written straight through rather than batched behind a save button.
-async function vwRate(id, rating) {
-  const item = vwItems.find(m => m.id === id);
-  if (!item) return;
-  const next = item.rating === rating ? '' : rating;
-  const was = item.rating;
-  item.rating = next;
+// ── Selection ────────────────────────────────────────────────────────────────
+
+function vwTogglePick(id, idx, ev) {
+  const all = window.vwShown || [];
+  if (ev && ev.shiftKey && vwLastPicked >= 0) {
+    const [a, b] = idx < vwLastPicked ? [idx, vwLastPicked] : [vwLastPicked, idx];
+    for (let i = a; i <= b; i++) if (all[i]) vwPicked.add(all[i].id);
+  } else if (vwPicked.has(id)) {
+    vwPicked.delete(id);
+  } else {
+    vwPicked.add(id);
+  }
+  vwLastPicked = idx;
+  vwDraw();
+}
+
+function vwSelBar() {
+  if (!vwPicked.size) return '';
+  return '<div class="vw-selbar"><strong>' + vwPicked.size + ' selected</strong>'
+    + '<button type="button" class="pg-ctl" onclick="vwSelectAll()">Select all shown</button>'
+    + '<button type="button" class="pg-ctl" onclick="vwClearPick()">Clear</button>'
+    + '<span class="sp"></span>'
+    + '<button type="button" class="pg-ctl" onclick="vwDownload()">⭳ Download</button>'
+    + '<button type="button" class="pg-ctl" onclick="vwBulkFolder()">Add to folder</button>'
+    + '<button type="button" class="pg-ctl" onclick="vwBulk({favourite:true})">★ Favourite</button>'
+    + '<button type="button" class="pg-ctl" onclick="vwBulk({no_posts:true})">No posts</button>'
+    + '<button type="button" class="pg-ctl" onclick="vwBulk({no_dms:true})">No DMs</button>'
+    + '<button type="button" class="pg-ctl" onclick="vwBulk({rating:\'sfw\'})">SFW</button>'
+    + '<button type="button" class="pg-ctl" onclick="vwBulk({rating:\'nsfw\'})">NSFW</button>'
+    + '<button type="button" class="pg-ctl" style="color:var(--err)" onclick="vwDelete([...vwPicked])">Delete</button>'
+    + '</div>';
+}
+
+function vwSelectAll() { (window.vwShown || []).forEach(m => vwPicked.add(m.id)); vwDraw(); }
+function vwClearPick() { vwPicked.clear(); vwLastPicked = -1; vwDraw(); }
+
+// ── Writes ───────────────────────────────────────────────────────────────────
+
+async function vwSet(id, fields) {
+  const m = vwItems.find(x => x.id === id);
+  if (!m) return;
+  const was = Object.assign({}, m);
+  Object.assign(m, fields);
   vwDraw();
   try {
     const res = await fetch('/api/personas/' + encodeURIComponent(vwSlug)
       + '/media/' + encodeURIComponent(id),
-      { method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rating: next }) });
+      { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(fields) });
     const d = await res.json();
     if (!d.ok) throw new Error(d.error || '');
   } catch (e) {
-    item.rating = was;
+    Object.assign(m, was);
     vwDraw();
-    note('Could not save that rating.');
+    note('Could not save that change.');
   }
 }
 
-async function vwDelete(id) {
-  if (!confirm('Delete this from the vault? This cannot be undone.')) return;
+async function vwBulk(fields) {
+  const ids = [...vwPicked];
+  if (!ids.length) return;
   try {
-    const res = await fetch('/api/personas/' + encodeURIComponent(vwSlug)
-      + '/media/' + encodeURIComponent(id), { method: 'DELETE' });
+    const res = await fetch('/api/personas/' + encodeURIComponent(vwSlug) + '/media/bulk',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ media_ids: ids, set: fields }) });
     const d = await res.json();
-    if (!d.ok) { note(d.error || 'Could not delete it.'); return; }
-    vwItems = vwItems.filter(m => m.id !== id);
+    if (!d.ok) { note(d.error || 'Could not apply that.'); return; }
+    ids.forEach(id => { const m = vwItems.find(x => x.id === id); if (m) Object.assign(m, fields); });
+    note('');
     vwDraw();
-  } catch (e) { note('Could not delete it.'); }
+  } catch (e) { note('Could not apply that.'); }
+}
+
+// An outfit is a real link the chat reads, so filing into one goes through the
+// outfit route; a plain folder is just this page's own tag.
+async function vwSetFolders(id, names) {
+  const m = vwItems.find(x => x.id === id);
+  if (!m) return;
+  const all = vwAllFolders();
+  const plain = names.filter(n => !(all.find(f => f.name === n) || {}).outfit);
+  const wantOutfits = names.map(n => (all.find(f => f.name === n) || {}).outfit).filter(Boolean);
+  const hadOutfits = (m.outfits || []).map(String);
+  await vwSet(id, { folders: plain });
+  for (const o of wantOutfits) {
+    if (hadOutfits.indexOf(o) === -1) await vwLink(id, o, true);
+  }
+  for (const o of hadOutfits) {
+    if (wantOutfits.indexOf(o) === -1) await vwLink(id, o, false);
+  }
+  m.outfits = wantOutfits;
+  vwDraw();
+}
+
+async function vwLink(id, outfit, add) {
+  try {
+    await fetch('/api/personas/' + encodeURIComponent(vwSlug) + '/media/' + (add ? 'link' : 'unlink'),
+      { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ media_ids: [id], outfit: outfit }) });
+  } catch (e) { note('Could not change the outfit.'); }
+}
+
+async function vwNewFolder() {
+  const name = (prompt('Name the folder') || '').trim();
+  if (!name) return;
+  if (vwAllFolders().some(f => f.name === name)) { note('There is already a folder called that.'); return; }
+  vwFolders.push(name);
+  try {
+    await fetch('/api/personas/' + encodeURIComponent(vwSlug) + '/folders',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folders: vwFolders }) });
+  } catch (e) { note('Could not save that folder.'); }
+  vwDraw();
+}
+
+async function vwBulkFolder() {
+  const all = vwAllFolders();
+  if (!all.length) { note('Make a folder first.'); return; }
+  const name = (prompt('Add the selection to which folder?\n\n' + all.map(f => f.name).join('\n')) || '').trim();
+  const folder = all.find(f => f.name === name);
+  if (!folder) return;
+  const ids = [...vwPicked];
+  if (folder.outfit) {
+    for (const id of ids) await vwLink(id, folder.outfit, true);
+    ids.forEach(id => {
+      const m = vwItems.find(x => x.id === id);
+      if (m && (m.outfits || []).map(String).indexOf(folder.outfit) === -1)
+        m.outfits = (m.outfits || []).concat([folder.outfit]);
+    });
+    vwDraw();
+    return;
+  }
+  for (const id of ids) {
+    const m = vwItems.find(x => x.id === id);
+    if (m && (m.folders || []).indexOf(name) === -1)
+      await vwSet(id, { folders: (m.folders || []).concat([name]) });
+  }
+}
+
+async function vwDelete(ids) {
+  if (!ids.length) return;
+  const many = ids.length > 1;
+  if (!confirm(many ? 'Delete these ' + ids.length + ' items? This cannot be undone.'
+                    : 'Delete this from the vault? This cannot be undone.')) return;
+  for (const id of ids) {
+    try {
+      await fetch('/api/personas/' + encodeURIComponent(vwSlug) + '/media/' + encodeURIComponent(id),
+        { method: 'DELETE' });
+      vwItems = vwItems.filter(m => m.id !== id);
+      vwPicked.delete(id);
+    } catch (e) { note('Could not delete everything.'); }
+  }
+  if (vwViewIdx >= 0) vwViewClose();
+  vwDraw();
+}
+
+async function vwDownload(ids) {
+  const want = ids || [...vwPicked];
+  if (!want.length) return;
+  note('building the download…');
+  try {
+    const res = await fetch('/api/personas/' + encodeURIComponent(vwSlug) + '/media/download',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ media_ids: want }) });
+    if (!res.ok) { note('Could not build that download.'); return; }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = vwSlug + '-vault.zip';
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    note('');
+  } catch (e) { note('Could not build that download.'); }
 }
 
 function vwUpload(input) {
-  const file = input.files && input.files[0];
+  const files = [...(input.files || [])];
   input.value = '';
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = async () => {
-    note('uploading…');
-    try {
-      const res = await fetch('/api/personas/' + encodeURIComponent(vwSlug) + '/media',
-        { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: reader.result, mime: file.type,
-                                 purpose: file.name.replace(/\.[^.]+$/, '').slice(0, 60),
-                                 kind: file.type.startsWith('video/') ? 'video' : 'image' }) });
-      const d = await res.json();
-      if (!d.ok) { note(d.error || 'Upload failed.'); return; }
-      note('');
-      vwLoad();
-    } catch (e) { note('Upload failed.'); }
+  if (!files.length) return;
+  let done = 0;
+  const step = () => {
+    if (!files.length) { note(''); vwLoad(); return; }
+    const file = files.shift();
+    const reader = new FileReader();
+    reader.onload = async () => {
+      note('uploading ' + (++done) + ' of ' + (done + files.length) + '…');
+      try {
+        const res = await fetch('/api/personas/' + encodeURIComponent(vwSlug) + '/media',
+          { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image: reader.result, mime: file.type,
+                                   purpose: file.name.replace(/\.[^.]+$/, '').slice(0, 60),
+                                   kind: file.type.startsWith('video/') ? 'video' : 'image' }) });
+        const d = await res.json();
+        if (!d.ok) note(d.error || 'One file would not upload.');
+      } catch (e) { note('One file would not upload.'); }
+      step();
+    };
+    reader.readAsDataURL(file);
   };
-  reader.readAsDataURL(file);
+  step();
+}
+
+// ── Viewer ───────────────────────────────────────────────────────────────────
+
+function vwViewOpen(idx) {
+  vwViewIdx = idx;
+  el('vw-view').classList.add('open');
+  vwViewDraw();
+}
+function vwViewClose() {
+  vwViewIdx = -1;
+  el('vw-view').classList.remove('open');
+  el('vw-stage').innerHTML = '';
+}
+// Next and previous walk the filtered list, crossing a page boundary rather
+// than stopping at one: the pages are how the grid is drawn, not what the
+// creator is looking through.
+function vwStep(d) {
+  const all = window.vwShown || [];
+  const next = vwViewIdx + d;
+  if (next < 0 || next >= all.length) return;
+  vwViewIdx = next;
+  const page = Math.floor(next / VW_PER_PAGE) + 1;
+  if (page !== vwPage) { vwPage = page; vwDraw(); }
+  else vwViewDraw();
+}
+
+document.addEventListener('keydown', e => {
+  if (vwViewIdx < 0) return;
+  if (e.key === 'Escape') vwViewClose();
+  else if (e.key === 'ArrowLeft') vwStep(-1);
+  else if (e.key === 'ArrowRight') vwStep(1);
+});
+
+function vwViewDraw() {
+  const all = window.vwShown || [];
+  const m = all[vwViewIdx];
+  if (!m) { vwViewClose(); return; }
+  el('vw-stage').innerHTML =
+    (m.kind === 'video'
+      ? '<video src="' + esc(m.thumb) + '" controls autoplay playsinline></video>'
+      : '<img src="' + esc(m.thumb) + '" alt="">')
+    + '<button type="button" class="vw-close" onclick="vwViewClose()">×</button>'
+    + (vwViewIdx > 0 ? '<button type="button" class="vw-nav prev" onclick="vwStep(-1)">‹</button>' : '')
+    + (vwViewIdx < all.length - 1 ? '<button type="button" class="vw-nav next" onclick="vwStep(1)">›</button>' : '')
+    + '<span class="vw-count">' + (vwViewIdx + 1) + ' of ' + all.length + '</span>';
+
+  const mine = vwFoldersOf(m);
+  el('vw-side').innerHTML =
+    '<h3>' + esc(m.purpose || 'untitled') + '</h3>'
+    + '<div class="vw-sec"><span class="vw-lab">Name</span>'
+      + '<input class="vw-vname" value="' + esc(m.purpose || '') + '"'
+      + ' onchange="vwSet(\'' + m.id + '\',{purpose:this.value})">'
+    + '</div>'
+    + '<div class="vw-sec"><span class="vw-lab">Rating</span><div class="vw-seg">'
+      + '<button type="button" class="' + (m.rating === 'sfw' ? 'on-sfw' : '') + '" onclick="vwSet(\'' + m.id + '\',{rating:\'' + (m.rating === 'sfw' ? '' : 'sfw') + '\'})">SFW</button>'
+      + '<button type="button" class="' + (m.rating === 'nsfw' ? 'on-nsfw' : '') + '" onclick="vwSet(\'' + m.id + '\',{rating:\'' + (m.rating === 'nsfw' ? '' : 'nsfw') + '\'})">NSFW</button>'
+    + '</div></div>'
+    + '<div class="vw-sec"><span class="vw-lab">Where it may be used</span>'
+      + vwTog(m, 'favourite', 'Favourite', m.favourite)
+      + vwTog(m, 'no_posts', 'Never use in content posts', m.no_posts)
+      + vwTog(m, 'no_dms', 'Never send automatically in DMs', m.no_dms)
+    + '</div>'
+    + '<div class="vw-sec"><span class="vw-lab">Folders</span><div class="vw-fold">'
+      + (vwAllFolders().length
+          ? vwAllFolders().map(f =>
+              '<button type="button" class="vw-fchip' + (mine.indexOf(f.name) !== -1 ? ' on' : '') + '"'
+              + ' onclick="vwToggleFolder(\'' + m.id + '\',' + JSON.stringify(f.name).replace(/"/g, '&quot;') + ')">'
+              + esc(f.name) + (f.outfit ? ' · outfit' : '') + '</button>').join('')
+          : '<span class="vw-lab">No folders yet.</span>')
+      + '<button type="button" class="vw-fchip" onclick="vwNewFolder()">+ new</button>'
+    + '</div></div>'
+    + '<div class="vw-sec" style="flex-direction:row;gap:8px;margin-top:auto;">'
+      + '<button type="button" class="btn btn-secondary" style="flex:1" onclick="vwDownload([\'' + m.id + '\'])">⭳ Download</button>'
+      + '<button type="button" class="btn btn-ghost" style="color:var(--err)" onclick="vwDelete([\'' + m.id + '\'])">Delete</button>'
+    + '</div>';
+}
+
+function vwTog(m, field, label, on) {
+  return '<button type="button" class="vw-tog' + (on ? ' on' : '') + '"'
+    + ' onclick="vwSet(\'' + m.id + '\',{' + field + ':' + (!on) + '})">'
+    + '<span class="tick">' + (on ? '✓' : '') + '</span>' + label + '</button>';
+}
+
+function vwToggleFolder(id, name) {
+  const m = vwItems.find(x => x.id === id);
+  if (!m) return;
+  const mine = vwFoldersOf(m);
+  const next = mine.indexOf(name) === -1 ? mine.concat([name]) : mine.filter(n => n !== name);
+  vwSetFolders(id, next);
 }
 
 vwInit();

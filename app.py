@@ -8919,11 +8919,14 @@ def _plan_media_check(persona, platform, media_id, override=False):
     try:
         row = get_persona_media(sdb, media_id)
         rating = getattr(row, 'rating', '') if row else ''
+        excluded = bool(row) and bool(getattr(row, 'no_posts', False))
         ok = bool(row) and row.slug == persona and row.approved is not False
     finally:
         sdb.close()
     if not ok:
         return '', 'That file is not in this persona\'s approved vault.'
+    if excluded:
+        return '', 'That file is marked as never to be posted. Clear that in the vault first.'
     why = growth.media_rating_reject(platform, rating)
     if why and not override:
         return '', why
@@ -8947,6 +8950,8 @@ def _plan_media_pick(persona, platform, used):
         sdb.close()
     for row in _approved_only(rows):
         if row.id in used or not growth.media_ok(platform, row.kind or 'image'):
+            continue
+        if getattr(row, 'no_posts', False):
             continue
         if not growth.media_rating_ok(platform, getattr(row, 'rating', '')):
             continue
@@ -10448,9 +10453,16 @@ def _approved_only(rows):
     return [r for r in (rows or []) if getattr(r, 'approved', None) is not False]
 
 
+def _sendable_only(rows):
+    """What an automatic chat send may reach for: approved, and not one the
+    creator has held back from DMs. Attaching it by hand still works -- this is
+    only about what the engine picks on its own."""
+    return [r for r in _approved_only(rows) if not getattr(r, 'no_dms', False)]
+
+
 def _pick_phase_photo(media_rows, outfits, sent_ids, locked_outfit=None):
     """Pick a random photo, respecting outfit lock and avoiding duplicates."""
-    available = [r for r in _approved_only(media_rows) if r.id not in sent_ids]
+    available = [r for r in _sendable_only(media_rows) if r.id not in sent_ids]
     if not available:
         return None
     if locked_outfit is not None:
@@ -10490,6 +10502,137 @@ def _safe_outfit_num(row):
         return None
 
 
+# Folders are the creator's own filing, kept beside the six outfits rather than
+# inside them: an outfit means one coherent look to every chat send path, so a
+# folder named "Beach trip" must not become one. Membership rides in the media
+# row's own `tags` string, which nothing else reads.
+def _media_folders(row):
+    return [t for t in (getattr(row, 'tags', '') or '').split(',') if t.strip()]
+
+
+def _folders_key(slug):
+    return f'vault_folders_{slug}'
+
+
+def _vault_folders(slug):
+    try:
+        names = json.loads(_get_setting(_folders_key(slug)) or '[]')
+    except Exception:
+        names = []
+    return [str(n)[:60] for n in names if str(n).strip()][:60]
+
+
+def _media_apply(row, data):
+    """Write the vault's own fields onto a media row. Returns '' or the reason
+    it refused, so the single and the bulk route say the same thing."""
+    if 'rating' in data:
+        rating = str(data['rating'] or '').lower()
+        if rating not in ('', 'sfw', 'nsfw'):
+            return 'Rating is sfw, nsfw, or blank.'
+        row.rating = rating
+    for field, col in (('favourite', 'is_favourite'), ('no_posts', 'no_posts'),
+                       ('no_dms', 'no_dms')):
+        if field in data:
+            setattr(row, col, bool(data[field]))
+    if 'folders' in data:
+        names = [str(n).strip()[:60] for n in (data['folders'] or []) if str(n).strip()]
+        joined = ','.join(dict.fromkeys(names))
+        if len(joined) > 300:
+            return 'That is more folders than one item can hold.'
+        row.tags = joined
+    return ''
+
+
+@app.route('/api/personas/<slug>/folders', methods=['GET', 'POST'])
+def api_persona_folders(slug):
+    if not re.match(r'^[a-z0-9_-]+$', slug):
+        return jsonify({'error': 'Invalid slug'}), 400
+    if request.method == 'POST':
+        names = (request.json or {}).get('folders') or []
+        clean = [str(n).strip()[:60] for n in names if str(n).strip()][:60]
+        _set_setting(_folders_key(slug), json.dumps(list(dict.fromkeys(clean))))
+    return jsonify({'ok': True, 'folders': _vault_folders(slug)})
+
+
+@app.route('/api/personas/<slug>/media/bulk', methods=['POST'])
+def api_persona_media_bulk(slug):
+    """One change across a selection. Body: {media_ids: [...], set: {...}}"""
+    if not re.match(r'^[a-z0-9_-]+$', slug):
+        return jsonify({'error': 'Invalid slug'}), 400
+    data = request.json or {}
+    ids = [str(i) for i in (data.get('media_ids') or [])][:500]
+    fields = data.get('set') or {}
+    if not ids or not fields:
+        return jsonify({'error': 'media_ids and set are required'}), 400
+    from db import SessionLocal, get_persona_media
+    s = SessionLocal()
+    try:
+        changed = 0
+        for mid in ids:
+            row = get_persona_media(s, mid)
+            if not row or row.slug != slug:
+                continue
+            why = _media_apply(row, fields)
+            if why:
+                return jsonify({'error': why}), 400
+            changed += 1
+        s.commit()
+    finally:
+        s.close()
+    return jsonify({'ok': True, 'changed': changed})
+
+
+@app.route('/api/personas/<slug>/media/download', methods=['POST'])
+def api_persona_media_download(slug):
+    """A selection as one zip. Built in memory: these are a creator's own files,
+    a few dozen at a time, and the alternative is a browser fighting its own
+    multi-download blocker."""
+    if not re.match(r'^[a-z0-9_-]+$', slug):
+        return jsonify({'error': 'Invalid slug'}), 400
+    ids = [str(i) for i in ((request.json or {}).get('media_ids') or [])][:200]
+    if not ids:
+        return jsonify({'error': 'Nothing selected.'}), 400
+    import io, zipfile, mimetypes
+    from db import SessionLocal, get_persona_media
+    buf = io.BytesIO()
+    taken = set()
+    s = SessionLocal()
+    try:
+        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_STORED) as z:
+            for mid in ids:
+                row = get_persona_media(s, mid)
+                if not row or row.slug != slug:
+                    continue
+                try:
+                    blob, _mime = _media_bytes({
+                        'data': row.image_data or '', 'mime': row.mime or '',
+                        'gcs_path': row.gcs_path or '',
+                        'source_url': row.source_url or ''})
+                except Exception:
+                    logger.exception('vault download failed for %s', mid)
+                    continue
+                if not blob:
+                    continue
+                ext = mimetypes.guess_extension(row.mime or '') or (
+                    '.mp4' if (row.kind or 'image') == 'video' else '.jpg')
+                base = re.sub(r'[^\w -]', '', row.purpose or '').strip() or mid[:8]
+                name = f'{base}{ext}'
+                n = 2
+                while name in taken:
+                    name = f'{base} ({n}){ext}'
+                    n += 1
+                taken.add(name)
+                z.writestr(name, blob)
+    finally:
+        s.close()
+    if not taken:
+        return jsonify({'error': 'None of those files could be read.'}), 502
+    buf.seek(0)
+    return app.response_class(
+        buf.getvalue(), mimetype='application/zip',
+        headers={'Content-Disposition': f'attachment; filename="{slug}-vault.zip"'})
+
+
 @app.route('/api/personas/<slug>/media', methods=['GET'])
 def api_persona_media_list(slug):
     if not re.match(r'^[a-z0-9_-]+$', slug):
@@ -10517,6 +10660,10 @@ def api_persona_media_list(slug):
                 'kind': r.kind or 'image',
                 'mime': r.mime or '',
                 'rating': getattr(r, 'rating', '') or '',
+                'favourite': bool(getattr(r, 'is_favourite', False)),
+                'no_posts': bool(getattr(r, 'no_posts', False)),
+                'no_dms': bool(getattr(r, 'no_dms', False)),
+                'folders': _media_folders(r),
                 'hosted': bool(r.source_url and not r.image_data),
                 'location': (o or {}).get('location', ''),
                 'lighting': (o or {}).get('lighting', ''),
@@ -10707,11 +10854,9 @@ def api_persona_media_update(slug, media_id):
         for f in ('location', 'outfit', 'lighting', 'purpose'):
             if f in data:
                 setattr(row, f, str(data[f])[:120])
-        if 'rating' in data:
-            rating = str(data['rating'] or '').lower()
-            if rating not in ('', 'sfw', 'nsfw'):
-                return jsonify({'error': 'Rating is sfw, nsfw, or blank.'}), 400
-            row.rating = rating
+        why = _media_apply(row, data)
+        if why:
+            return jsonify({'error': why}), 400
         if 'image' in data and data['image'].startswith('data:'):
             row.image_data = data['image']
         s.commit()
@@ -10823,7 +10968,7 @@ def _pick_media(rows, outfits=None, purpose='', lighting='', location='', outfit
     `exclude` is the set of media IDs this fan has already been sent."""
     outfits = outfits or []
     exclude = exclude or set()
-    rows = _approved_only(rows)
+    rows = _sendable_only(rows)
     want_outfit = str(outfit).strip().lower().replace('outfit ', '')
     best, best_score = None, -1
     for r in rows:

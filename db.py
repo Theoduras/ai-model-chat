@@ -188,6 +188,12 @@ class PersonaMedia(Base):
     # as safe when a channel asks, because the cost of guessing wrong the other
     # way is a banned account.
     rating = Column(String(8), default='')   # '' | sfw | nsfw
+    # Two separate exclusions, because the two surfaces are separate decisions:
+    # a photo fine for a paying fan in a DM is often exactly the one that must
+    # never go on a public feed. Both stop the *automatic* picks only -- the
+    # creator can still attach either by hand.
+    no_posts = Column(Boolean, default=False)
+    no_dms = Column(Boolean, default=False)
     source = Column(String(12), default='upload')   # upload | generated
     # The clip an extension continues. There is no ffmpeg in the image, so an
     # extension cannot be joined onto its source: it is delivered as its own
