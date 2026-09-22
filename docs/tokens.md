@@ -20,8 +20,9 @@ Two changes:
 
 1. **Re-denominate to tokens at human scale.** One token is about one photo.
    A clip is about twelve. A month's allowance is a two- or three-digit number.
-2. **Cut the retail price from ~15x provider cost to 3–3.5x**, which puts a
-   photo at roughly **€0.13** — below every comparable platform.
+2. **Cut the retail price from ~15x provider cost to 2.3–3.8x**, on a ladder
+   that discounts 40% by volume. A photo is **€0.15** at the smallest pack and
+   **€0.09** at the largest — at or below every comparable platform.
 
 The margin discipline is kept exactly: a token is still a fixed slice of
 provider cost, the slice is just twenty times bigger.
@@ -40,7 +41,8 @@ provider cost, the slice is just twenty times bigger.
 | [SeaArt](https://www.tooljunction.io/ai-tools/seaart-ai) | $5.99 | "stamina" | ~12 cr/query | — |
 | [Supercreator](https://ofm-tools.com/supercreator-review/) | $99/account | **+5% of AI-driven sales** | — | — |
 | [Botly](https://www.topsocialtools.com/insights/getbotly/) | ~$129 | + usage fees | — | — |
-| **Us, today** | €49 → 600 credits | credits | **~€0.56** | ~€6.40 |
+| **Us, proposed** | €49 → 30 tokens | tokens, expire monthly | **€0.15** | €1.80 |
+| **Us, today** | €49 → 600 credits | credits | ~€0.56 | ~€6.40 |
 
 Three things fall out of this:
 
@@ -78,7 +80,7 @@ Measured provider costs (from live bills, in `credits.PROVIDER_COST_USD`):
 | Wan 2.7, per second 720p | $0.10076 |
 
 Everything else in the table is a deliberate over-estimate. **That mattered
-little at 15x margin and matters a great deal at 3x** — see section 8.
+little at 15x margin and matters a great deal at 2.3–3.8x** — see section 8.
 
 ---
 
@@ -89,27 +91,27 @@ little at 15x margin and matters a great deal at 3x** — see section 8.
 *One token per photo, ten per clip, whatever model you pick.* The clearest
 pricing a person could be given.
 
-**It does not work.** At €0.13 a token, here is what a flat rate actually earns
-against what it costs:
+**It does not work.** At €0.15 a token — the smallest pack's rate — here is what
+a flat rate actually earns against what it costs:
 
 | Generation | Costs us | Flat price | Earns | Multiple | |
 |---|---|---|---|---|---|
-| Photo — Seedream 2k/4k | $0.040 | 1 token | $0.133 | 3.31x | OK |
-| Photo — Nano Banana 2, 2k | $0.103 | 1 token | $0.133 | 1.29x | under floor |
-| Photo — Nano Banana Pro, 2k | $0.138 | 1 token | $0.133 | 0.96x | **loses money** |
-| Photo — Nano Banana Pro, 4k | $0.276 | 1 token | $0.133 | 0.48x | **loses money** |
-| Clip — Wan 2.5, 5s 720p | $0.454 | 10 tokens | $1.326 | 2.92x | under floor |
-| Clip — Wan 2.7, 5s 720p | $0.504 | 10 tokens | $1.326 | 2.63x | under floor |
-| Clip — Wan 2.5, 5s 1080p | $1.135 | 10 tokens | $1.326 | 1.17x | under floor |
-| Clip — Seedance, 10s 1080p | $3.000 | 10 tokens | $1.326 | 0.44x | **loses money** |
+| Photo — Seedream 2k/4k | $0.040 | 1 token | $0.153 | 3.82x | OK |
+| Photo — Nano Banana 2, 2k | $0.103 | 1 token | $0.153 | 1.49x | under floor |
+| Photo — Nano Banana Pro, 2k | $0.138 | 1 token | $0.153 | 1.11x | under floor |
+| Photo — Nano Banana Pro, 4k | $0.276 | 1 token | $0.153 | 0.55x | **loses money** |
+| Clip — Wan 2.5, 5s 720p | $0.454 | 10 tokens | $1.530 | 3.37x | OK |
+| Clip — Wan 2.7, 5s 720p | $0.504 | 10 tokens | $1.530 | 3.04x | OK |
+| Clip — Wan 2.5, 5s 1080p | $1.135 | 10 tokens | $1.530 | 1.35x | under floor |
+| Clip — Seedance, 10s 1080p | $3.000 | 10 tokens | $1.530 | 0.51x | **loses money** |
 
-To make a flat rate clear the floor we would need a **7-token photo** and a
-**14-token clip** — at which point it is no longer flat in any useful sense.
-The only way to keep "1 token = 1 photo" flat is to **remove every image model
-except Seedream and cap video at 720p**, which throws away Nano Banana Pro and
-the whole premium tier.
+To clear the 2.25x floor flat we would need a **5-token photo** and a
+**9-token clip** — at which point it is no longer flat in any useful sense. The
+only way to keep "1 token = 1 photo" flat is to **remove every image model except
+Seedream and cap video at 720p**, which throws away Nano Banana Pro and the whole
+premium tier.
 
-Recorded so it is not re-proposed. At 15x margin this worked; at 3x it cannot.
+Recorded so it is not re-proposed. At 15x margin this worked; at these prices it cannot.
 
 ### Option B — graded, 1 token ≈ 1 photo *(recommended)*
 
@@ -167,7 +169,7 @@ system explainable.
 | 5s 720p clip | 10 | **12** | 23 |
 | Pro allowance | 125 | **125** | 250 |
 | Explainable in one line | yes | yes | nearly |
-| Clears the margin floor | **no** | yes | yes |
+| Clears the 2.25x margin floor | **no** | yes | yes |
 | Needs models removed | **yes** | no | no |
 
 ---
@@ -184,38 +186,36 @@ dollars. Each euro and pound price is converted at a **conservative** reference
 rate (€1 = $1.02, £1 = $1.18) and must still clear 3.0x. Using a pessimistic
 rate means an ordinary FX swing cannot quietly push a price under cost.
 
-### Recommended ladder — one price for everyone
+### The ladder — one price for everyone
 
-| Tokens | EUR | USD | GBP | margin | buys |
-|---|---|---|---|---|---|
-| 100 | **€13** | $15 | £11 | 3.31x | 100 photos / 8 clips |
-| 500 | **€62** | $69 | £53 | 3.16x | 500 photos / 41 clips |
-| 2,000 | **€245** | $269 | £209 | 3.12x | 2,000 photos / 166 clips |
-| 10,000 | **€1,200** | $1,299 | £1,020 | 3.06x | 10,000 photos / 833 clips |
+| Tokens | EUR | USD | GBP | €/token | margin | buys |
+|---|---|---|---|---|---|---|
+| 100 | **€15** | $16 | £13 | €0.150 | 3.82x | 100 photos / 8 clips |
+| 500 | **€70** | $75 | £62 | €0.140 | 3.57x | 500 photos / 41 clips |
+| 1,000 | **€130** | $139 | £115 | €0.130 | 3.31x | 1,000 photos / 83 clips |
+| 2,000 | **€220** | $235 | £195 | €0.110 | 2.81x | 2,000 photos / 166 clips |
+| 5,000 | **€450** | $479 | £395 | €0.090 | 2.29x | 5,000 photos / 416 clips |
 
-A photo is **€0.13**. A five-second clip is **€1.55**.
+A photo runs **€0.15 down to €0.09** and a five-second clip **€1.80 down to
+€1.08**, depending on pack size. Generation prices quoted in cash use the
+smallest pack's rate, because that is the marginal price of buying more — the
+same reason `credits.credit_rate_usd()` reads `PACK_SIZES[0]` today.
 
-The floor bites at €0.1176 a token, which is why the largest pack stops at
-€0.12 rather than going lower. There is no room below this.
+**`MIN_MARGIN_MULTIPLE` moves 4.0 → 2.25.** The two largest packs sell at 2.81x
+and 2.29x, under the 3.0x the smaller ones clear. That is the volume discount
+working as intended — gross margin is still 64% and 56% — but the floor is a
+build-gate assertion that runs at import, so it must come down or nothing starts.
 
-### The tier discount bands have to go
+### The ladder already is the discount — drop the tier bands
 
-Today Pro and Agency buy credits ~13% and ~27% cheaper than Starter. **That
-cannot survive a 3x floor.** Between the 3.0 floor and a ~3.5 ceiling there is
-only about 14% of room in total, and a −12% Agency band breaches the floor
-outright:
+Today Pro and Agency buy credits ~13% and ~27% cheaper than Starter. This ladder
+already falls 40% from smallest pack to largest, which is the same incentive
+bought by volume rather than by subscription tier. Stacking the tier bands on top
+would put the 5,000 pack at roughly **1.7x cost**.
 
-| Band | 2,000 tokens | 10,000 tokens |
-|---|---|---|
-| Base | €262 (3.34x) | €1,280 (3.26x) |
-| Pro −7% | €244 (3.11x) | €1,190 (3.03x) — £ breaches at 2.98x |
-| Agency −12% | €236 (3.01x) | €1,160 (**2.96x — under cost floor**) |
-
-Either the base price rises far enough to fund the discount — which defeats the
-point of repricing — or bands are dropped and everyone pays the ladder above.
-**Recommendation: drop the bands.** Volume discounting by pack size already
-gives a large buyer a better rate, and the upgrade incentive should live in the
-included allowance instead, which is exactly what section 6 is about.
+**Recommendation: drop the bands.** Price on size alone, and let the upgrade
+incentive live in the included allowance instead — which is what section 6 is
+about.
 
 ---
 
@@ -234,8 +234,8 @@ plan actually includes today:
 **Starter is €49 a month for two video clips.** Agency is €349 for thirty-one.
 For a product whose entire pitch is "generate content your fans will pay for",
 these allowances are not credible — and at the old €0.56-per-photo pricing they
-at least *sounded* substantial. At €0.13 they are visibly thin: Pro's 125 tokens
-are about €16 of value inside a €149 plan.
+at least *sounded* substantial. At €0.15 they are visibly thin: Pro's 125 tokens
+are about €19 of value inside a €149 plan.
 
 Raising them is cheap, because generation costs us very little:
 
@@ -285,7 +285,8 @@ loses money on every generation and nothing reports it*:
 - **The audio add-on** — $0.10 assumed, and per `CLAUDE.md` none of the audio
   model ids or field names have been verified against the live catalogue.
 
-At 15x margin a 2x over-estimate was invisible. **At 3x it is the difference
+At 15x margin a 2x over-estimate was invisible. **At 2.3x on the largest pack it is
+the difference
 between a healthy margin and selling under cost.** Before this ships, measure at
 minimum: Seedance at 720p, one 4k image on each Google model, and one 1080p clip.
 Run `imagegen.search_models('audio')` against a live Runware key and correct the
@@ -303,8 +304,8 @@ cost — but it can only check the numbers it is given.
    token, one photo, the sentence that makes the system explainable.
 2. **Raise the included allowances?** Recommend **yes**: 25 / 100 / 350 / 1,000.
    Starter at two clips a month is not a sellable entry tier.
-3. **Drop the tier discount bands?** Recommend **yes** — they breach the margin
-   floor at 3x, and the allowance ladder is a better upgrade incentive anyway.
+3. **Drop the tier discount bands?** Recommend **yes** — the size ladder already
+   discounts 40%, and stacking tier bands on top would reach ~1.7x cost.
 
 Once these are settled the implementation is mechanical: `credits.py` and its
 tests first (pure, no I/O, the floor assertions prove the numbers before
