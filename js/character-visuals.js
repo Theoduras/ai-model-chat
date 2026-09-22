@@ -1,0 +1,485 @@
+/* Option drawings for the character builder.
+ *
+ * One-colour outline icons: an even 2px stroke in currentColor, round caps, no
+ * fills except where the option is a colour or a paint. What an option changes
+ * shows in the shape itself; the picked card carries the accent.
+ *
+ * Parametric on purpose: a few base figures (a head with neck and ears, a front
+ * and a side body, a torso, a pelvis) and each option moves one parameter, so
+ * ~110 options stay in one small file and in one hand. Option labels must match
+ * characters.FEATURES exactly; test_characters.py checks every one renders.
+ */
+(function (root) {
+  function svg(inner) {
+    return '<svg viewBox="0 0 64 64" width="64" height="64" fill="none" stroke="currentColor" ' +
+      'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + inner + '</svg>';
+  }
+  const f = n => Math.round(n * 10) / 10;
+  const P = p => f(p[0]) + ',' + f(p[1]);
+  const line = (d, extra) => `<path d="${d}"${extra || ''}/>`;
+  const ring = (x, y, r) => `<circle cx="${f(x)}" cy="${f(y)}" r="${r}"/>`;
+  const spot = (x, y, r) => `<circle cx="${f(x)}" cy="${f(y)}" r="${r || 1.2}" fill="currentColor" stroke="none"/>`;
+  // The dashed shape a type is named after, in the accent, with a dot on each
+  // corner or extreme like the charts creators already know.
+  const guide = (d, dots) => `<path d="${d}" stroke="var(--accent)" stroke-width="1.4" stroke-dasharray="2.5 2.5"/>` +
+    (dots || []).map(p => `<circle cx="${p[0]}" cy="${p[1]}" r="1.4" fill="var(--accent)" stroke="none"/>`).join('');
+  // Every body drawing shares the creator's reference sketch: thin slate lines,
+  // with the type or the marked spot in soft pink.
+  const INK = '#6b6fa8', PINK = '#f0a8c6';
+  const bsvg = inner => svg(`<g color="${INK}" stroke-width="1.3">` +
+    inner.replace(/stroke-width="([\d.]+)"/g, (m, w) => `stroke-width="${f(w * 0.75)}"`) + '</g>');
+  const swatch = hex => svg(`<circle cx="32" cy="32" r="20" fill="${hex}" stroke-width="1.4"/>`);
+
+  // Catmull-Rom through the points: smooth contours from a handful of numbers.
+  function smooth(pts) {
+    const n = pts.length;
+    let d = 'M' + P(pts[0]);
+    for (let i = 0; i < n; i++) {
+      const p0 = pts[(i - 1 + n) % n], p1 = pts[i], p2 = pts[(i + 1) % n], p3 = pts[(i + 2) % n];
+      d += 'C' + P([p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6]) + ' ' +
+        P([p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6]) + ' ' + P(p2);
+    }
+    return d + 'Z';
+  }
+
+  // ── Head: outline, ears, neck and a quiet face ─────────────────────────────
+  const HEAD = {top: 5, fw: 11, templeY: 13, c: 12.5, cheekY: 25, j: 9.5, jawY: 37, cw: 3, chinY: 45};
+  function head(o, opts) {
+    o = Object.assign({}, HEAD, o || {});
+    opts = opts || {};
+    const pts = [[32, o.top], [32 + o.fw, o.templeY], [32 + o.c, o.cheekY], [32 + o.j, o.jawY], [32 + o.cw, o.chinY],
+      [32 - o.cw, o.chinY], [32 - o.j, o.jawY], [32 - o.c, o.cheekY], [32 - o.fw, o.templeY]];
+    const nx = (o.j + o.cw) / 2 * 0.8, ny = (o.jawY + o.chinY) / 2 + 1;
+    let s = line(smooth(pts));
+    if (!opts.noEars) {
+      const ex = 32 + o.c - 0.6, ey = o.cheekY - 4;
+      s += line(`M${f(ex)},${f(ey)} q3.2,-0.6 3.2,3.6 q0,4.2 -3,4.6 M${f(64 - ex)},${f(ey)} q-3.2,-0.6 -3.2,3.6 q0,4.2 3,4.6`);
+    }
+    s += line(`M${f(32 - nx)},${f(ny)} L${f(32 - nx - 0.5)},56 Q${f(32 - nx - 5)},59 ${f(32 - nx - 14)},61 ` +
+      `M${f(32 + nx)},${f(ny)} L${f(32 + nx + 0.5)},56 Q${f(32 + nx + 5)},59 ${f(32 + nx + 14)},61`);
+    if (!opts.blank) {
+      const ey = o.cheekY - 2;
+      s += line(`M22.5,${ey - 4.5} q3,-1.8 6,-0.4 M41.5,${ey - 4.5} q-3,-1.8 -6,-0.4`) +
+        line(`M23,${ey} q3,-2.2 6,0 q-3,2.2 -6,0 M35,${ey} q3,-2.2 6,0 q-3,2.2 -6,0`, ' stroke-width="1.6"') +
+        spot(26, ey, 1.1) + spot(38, ey, 1.1) +
+        line(`M32.5,${ey + 2} l-1.6,6.5 h2.6`, ' stroke-width="1.6"') +
+        line(`M28,${f(o.chinY - 9)} q4,2.2 8,0`);
+    }
+    return s + (opts.extra || '');
+  }
+
+  // Face shapes follow the creator's chart: a pink hair cap with strands, a
+  // black outline, ears and neck, the features as soft pink marks, a pink
+  // shadow under the chin, and the type as a thin grey shape on the face.
+  const HAIR_PINK = '#e3cbc8', FEATURE_PINK = '#d3a8a4', GUIDE_GREY = '#aaa3a1';
+  const FACE_SHAPE = {   // head parameters, then the guide
+    'Oval': [{}, 'M32,11 C38,11 42.5,17.5 42.5,27 C42.5,36.5 38,43 32,43 C26,43 21.5,36.5 21.5,27 C21.5,17.5 26,11 32,11 Z'],
+    'Round': [{fw: 12, c: 14.5, j: 12, cw: 5, chinY: 43, top: 6}, 'M32,14.5 A12.5,12.5 0 1 1 31.9,14.5 Z'],
+    'Square': [{fw: 12, c: 12.5, j: 12.5, cw: 6.5, jawY: 39}, 'M21,15 H43 V39 H21 Z'],
+    'Heart-shaped': [{fw: 13, c: 12.5, j: 8, cw: 1.5}, 'M32,20 C30,15 21,15 21,21 C21,28 29,36 32,42 C35,36 43,28 43,21 C43,15 34,15 32,20 Z'],
+    'Diamond': [{fw: 8.5, c: 14.5, j: 8.5, cw: 2}, 'M32,11 L44.5,26 L32,43 L19.5,26 Z'],
+    'Rectangle': [{fw: 10, c: 10.5, j: 9.5, cw: 4.5, top: 2, jawY: 42, chinY: 48}, 'M22,13 H42 V46 H22 Z'],
+    'Triangle': [{fw: 13.5, c: 13, j: 8.5, cw: 1.5, chinY: 46}, 'M19,16 H45 L32,44 Z'],
+    'Base-down triangle': [{fw: 7, templeY: 15, c: 11, j: 14.5, jawY: 40, cw: 7.5}, 'M32,13 L47,41 H17 Z'],
+  };
+  function faceShape([o, g]) {
+    const h = Object.assign({}, HEAD, o);
+    const pts = [[32, h.top], [32 + h.fw, h.templeY], [32 + h.c, h.cheekY], [32 + h.j, h.jawY], [32 + h.cw, h.chinY],
+      [32 - h.cw, h.chinY], [32 - h.j, h.jawY], [32 - h.c, h.cheekY], [32 - h.fw, h.templeY]];
+    const nx = (h.j + h.cw) / 2 * 0.8, ny = (h.jawY + h.chinY) / 2 + 1, ey = h.cheekY - 2;
+    const L = f(32 - h.fw - 2.5), R = f(32 + h.fw + 2.5), base = h.templeY + 9;
+    const cap = `M${L},${base} C${f(32 - h.fw - 4)},${h.top - 1} ${f(32 - 6)},${h.top - 3.5} 32,${h.top - 3.5} ` +
+      `C${f(32 + 6)},${h.top - 3.5} ${f(32 + h.fw + 4)},${h.top - 1} ${R},${base} ` +
+      `C${f(32 + h.fw)},${h.templeY + 1} ${f(32 + 5)},${h.top + 3} 32,${h.top + 2} ` +
+      `C${f(32 - 5)},${h.top + 3} ${f(32 - h.fw)},${h.templeY + 1} ${L},${base} Z`;
+    const ex = 32 + h.c - 0.6, ery = h.cheekY - 4;
+    return svg(
+      `<path d="M${f(32 - nx)},${f(ny)} Q32,${f(h.chinY + 9)} ${f(32 + nx)},${f(ny)} L${f(32 + nx + 0.4)},${f(ny + 8)} ` +
+        `Q32,${f(h.chinY + 13)} ${f(32 - nx - 0.4)},${f(ny + 8)} Z" fill="${HAIR_PINK}" stroke="none"/>` +
+      line(smooth(pts), ' stroke-width="1.5"') +
+      `<path d="${cap}" fill="${HAIR_PINK}" stroke-width="1.3"/>` +
+      line(`M32,${h.top - 3} Q${f(32 + 7)},${h.top - 1.5} ${f(32 + h.fw + 1.5)},${h.templeY + 5} ` +
+        `M32.5,${h.top - 0.5} Q${f(32 + 6)},${h.top + 1} ${f(32 + h.fw)},${h.templeY + 3} ` +
+        `M31.5,${h.top - 1} Q${f(32 - 6)},${h.top} ${f(32 - h.fw - 1)},${h.templeY + 4}`, ' stroke-width=".9"') +
+      line(`M${f(ex)},${f(ery)} q3.2,-0.6 3.2,3.6 q0,4.2 -3,4.6 M${f(64 - ex)},${f(ery)} q-3.2,-0.6 -3.2,3.6 q0,4.2 3,4.6`, ' stroke-width="1.2"') +
+      line(`M${f(32 - nx)},${f(ny)} L${f(32 - nx - 0.5)},56 Q${f(32 - nx - 5)},59 ${f(32 - nx - 14)},61 ` +
+        `M${f(32 + nx)},${f(ny)} L${f(32 + nx + 0.5)},56 Q${f(32 + nx + 5)},59 ${f(32 + nx + 14)},61`, ' stroke-width="1.5"') +
+      `<g stroke="${FEATURE_PINK}">` +
+        line(`M22.5,${ey - 4} q3.5,-2.4 7,-0.4 M41.5,${ey - 4} q-3.5,-2.4 -7,-0.4`, ' stroke-width="2.2"') +
+        line(`M23,${ey} q3,-2 6,0 M35,${ey} q3,-2 6,0`, ' stroke-width="1.6"') +
+        line(`M29.5,${f(h.chinY - 9.5)} q2.5,-1 5,0 M29,${f(h.chinY - 8)} q3,1.2 6,0`, ' stroke-width="1.4"') +
+      '</g>' +
+      `<path d="M29.8,${ey + 7} q2.2,1.6 4.4,0 q-2.2,2.4 -4.4,0 Z" fill="${FEATURE_PINK}" stroke="none"/>` +
+      `<path d="${g}" stroke="${GUIDE_GREY}" stroke-width="1"/>`);
+  }
+  const JAW = {
+    'Soft, rounded chin': {j: 9.5, cw: 4.5, chinY: 44}, 'Defined jaw': {j: 11.5, jawY: 36, cw: 3.5},
+    'Pointed chin': {j: 8, cw: 1, chinY: 47}, 'Square jaw': {j: 12.5, jawY: 40, cw: 6.5},
+  };
+  const CHEEK = {High: [13.5, 22], Medium: [12.5, 25], Soft: [12, 28]};
+
+  // ── Eye close-up: lids, crease, iris, pupil and outer lashes ───────────────
+  const EYE = {   // upper [x0,y0,cx,cy,x1,y1], lower control y, crease lift (0 = none)
+    'Almond': [[8, 34, 32, 16, 56, 32], 46, 7], 'Round': [[10, 35, 32, 11, 54, 34], 52, 7],
+    'Hooded': [[8, 34, 32, 22, 56, 32], 46, 2.5], 'Monolid': [[8, 34, 32, 25, 56, 33], 42, 0],
+    'Upturned': [[8, 38, 30, 18, 56, 27], 48, 7], 'Downturned': [[8, 28, 34, 18, 56, 38], 48, 7],
+  };
+  function eye(shape, iris) {
+    const [[x0, y0, cx, cy, x1, y1], loY, crease] = EYE[shape] || EYE.Almond;
+    const q = t => [(1 - t) * (1 - t) * x0 + 2 * (1 - t) * t * cx + t * t * x1, (1 - t) * (1 - t) * y0 + 2 * (1 - t) * t * cy + t * t * y1];
+    const midY = q(0.5)[1], lowMid = (y0 + y1) / 4 + loY / 2;
+    const ir = Math.min(9, (lowMid - midY) / 2 + 1.5), icy = (midY + lowMid) / 2;
+    let s = (iris ? `<circle cx="32" cy="${f(icy)}" r="${f(ir)}" fill="${iris}" stroke="none"/>` : '') +
+      ring(32, icy, f(ir)) + spot(32, icy, f(ir * 0.38)) +
+      line(`M${x0},${y0} Q${cx},${cy} ${x1},${y1}`, ' stroke-width="2.6"') +
+      line(`M${x0},${y0} Q${32},${loY} ${x1},${y1}`);
+    if (crease) s += line(`M${x0 + 5},${f(y0 - crease * 0.5)} Q${cx},${f(cy - crease)} ${x1 - 3},${f(y1 - crease * 0.7)}`, ' stroke-width="1.6"');
+    [0.74, 0.85, 0.96].forEach(t => {
+      const [px, py] = q(t);
+      const dx = 2 * (1 - t) * (cx - x0) + 2 * t * (x1 - cx), dy = 2 * (1 - t) * (cy - y0) + 2 * t * (y1 - cy);
+      const len = Math.hypot(dx, dy) || 1, nx = dy / len, ny = -dx / len;
+      s += line(`M${f(px)},${f(py)} l${f(nx * 5 + dx / len * 1.5)},${f(ny * 5 + dy / len * 1.5)}`, ' stroke-width="1.6"');
+    });
+    return svg(s);
+  }
+
+  const BROW = {   // curve [x0,y0,cx,cy,x1,y1], thickness
+    'Soft arch, medium': [[10, 34, 30, 22, 54, 30], 3.5], 'High arch, thin': [[10, 36, 28, 16, 54, 32], 2],
+    'Straight, full': [[10, 31, 32, 27, 54, 31], 5], 'Bold, thick': [[10, 35, 30, 22, 54, 31], 7],
+  };
+  function brow([x0, y0, cx, cy, x1, y1], t) {
+    const b = t < 2.5 ? line(`M${x0},${y0} Q${cx},${cy} ${x1},${y1}`) :
+      line(`M${x0},${y0} Q${cx},${cy} ${x1},${y1} Q${cx},${cy + t * 1.6} ${x0 + 2},${y0 + t * 0.7} Z`);
+    return svg(b + line('M18,50 Q32,42 46,50 Q32,56 18,50', ' stroke-width="1.6"'));
+  }
+  const NOSE = {
+    'Straight, narrow': 'M22,6 L36,40 Q41,46 34,48 L27,48',
+    'Button': 'M22,6 Q29,28 32,36 Q43,40 35,48 L27,48',
+    'Slightly upturned': 'M22,6 L33,35 Q43,35 37,46 L27,48',
+    'Roman': 'M22,6 Q38,16 36,40 Q39,46 33,48 L27,48',
+    'Wide': 'M22,6 L34,38 Q46,44 37,50 L25,50',
+  };
+  const nose = d => svg(line(d) + line('M30,44 q3,1.5 5,0', ' stroke-width="1.6"') +
+    line('M22,50 Q24,54 28,56', ' stroke-width="1.6"'));
+  const LIPS = {'Full, defined bow': [20, 9, 10, 4], 'Medium': [19, 6, 8, 2], 'Thin': [19, 3, 4, 1], 'Very full': [21, 12, 14, 3]};
+  function lips(w, up, lo, bow) {
+    const L = 32 - w, R = 32 + w;
+    return svg(line(`M${L},32 C${L + w * 0.4},${32 - up} 26,${32 - up - 1} 32,${32 - up + bow} ` +
+      `C38,${32 - up - 1} ${R - w * 0.4},${32 - up} ${R},32`) +
+      line(`M${L},32 C${L + w * 0.3},${32 + lo * 1.25} ${R - w * 0.3},${32 + lo * 1.25} ${R},32`) +
+      line(`M${L + 1},32 Q26,${32 + Math.min(2, up / 3)} 32,${32 + Math.min(1.2, up / 4)} Q38,${32 + Math.min(2, up / 3)} ${R - 1},32`));
+  }
+  const EAR = {'Small, close-set': [2.2, 6], 'Medium': [3.6, 7.5], 'Prominent': [6.5, 8.5]};
+  function ears(out, h) {
+    return svg(head({}, {noEars: true, blank: true}) +
+      line(`M${f(19.7)},${f(21 - h / 2)} Q${f(19.7 - out)},${f(21 - h / 2)} ${f(19.7 - out)},21 Q${f(19.7 - out * 0.8)},${f(21 + h)} 20,${f(21 + h * 0.8)}`) +
+      line(`M${f(44.3)},${f(21 - h / 2)} Q${f(44.3 + out)},${f(21 - h / 2)} ${f(44.3 + out)},21 Q${f(44.3 + out * 0.8)},${f(21 + h)} 44,${f(21 + h * 0.8)}`));
+  }
+
+  const HAIR = {
+    'Long, straight': 'M20,24 Q19,4 32,4 Q45,4 44,24 L46,60 M20,24 L18,60',
+    'Long, loose waves': 'M20,24 Q19,4 32,4 Q45,4 44,24 q4,6 0,12 q-4,6 0,12 q4,6 1,10 M20,24 q-4,6 0,12 q4,6 0,12 q-4,6 -1,10',
+    'Long, curly': 'M20,22 Q20,3 32,3 Q44,3 44,22 a3,3 0 1 1 2,6 a3,3 0 1 1 0,7 a3,3 0 1 1 -1,7 a3,3 0 1 1 0,7 ' +
+      'M20,22 a3,3 0 1 0 -2,6 a3,3 0 1 0 0,7 a3,3 0 1 0 1,7 a3,3 0 1 0 0,7',
+    'Shoulder-length': 'M20,24 Q19,4 32,4 Q45,4 44,24 L45,44 q1,3 4,3 M20,24 L19,44 q-1,3 -4,3',
+    'Bob': 'M20,26 Q18,4 32,4 Q46,4 44,26 L45,38 L39,38 M20,26 L19,38 L25,38',
+    'Pixie': 'M21,24 Q18,5 32,5 Q46,5 43,24 M21,18 q6,-6 14,-4 q6,1 8,6',
+  };
+  const hairOver = d => svg(head({top: 7, fw: 10, c: 11.5, j: 8.5}, {noEars: true}) + line(d));
+  const HAIRLINE = {
+    'Rounded, middle part': 'M21,17 Q22,7 32,7 Q42,7 43,17 M32,7 L32,3',
+    'Side part': 'M21,17 Q22,7 32,7 Q42,7 43,17 M27,7 L26,3 M27,7 Q37,8 43,14',
+    'Straight, fringe': 'M21,14 L43,14 M24,14 l0,-6 M29,14 l0,-7 M34,14 l0,-7 M39,14 l0,-6',
+    "Widow's peak": 'M21,17 Q22,8 28,8 L32,12 L36,8 Q42,8 43,17',
+  };
+  const FRECKLES = (list, r) => list.map(p => spot(p[0], p[1], r || 0.8)).join('');
+  const MARKS = {
+    'None': '', 'Light freckles, nose': FRECKLES([[29, 27], [35, 27], [27.5, 29.5], [36.5, 29.5], [31, 25.5], [33.5, 25.5]]),
+    'Heavy freckles': FRECKLES([[23, 27], [25.5, 29.5], [27.5, 26.5], [21.5, 30], [24.5, 32], [29, 28.5], [41, 27], [38.5, 29.5],
+      [36.5, 26.5], [42.5, 30], [39.5, 32], [35, 28.5], [31, 26], [33.5, 29], [24, 24.5], [40, 24.5]]),
+    'Beauty mark, cheek': spot(40, 30, 1.4), 'Beauty mark, lip': spot(36.5, 34, 1.3),
+  };
+
+  const COLOURS = {
+    skin_tone: {'Fair': '#f6dfcf', 'Light': '#eecbb0', 'Light olive': '#d9b48c', 'Olive': '#c49a6c', 'Tan': '#b07d52',
+      'Brown': '#8a5a3b', 'Deep brown': '#6a4029', 'Dark': '#4a2c1d'},
+    hair_colour: {'Black': '#1c1a1a', 'Dark brown': '#3b2618', 'Light brown': '#7a5436', 'Auburn': '#7e3a1e',
+      'Red': '#a8391c', 'Strawberry blonde': '#d19a6b', 'Blonde': '#e3c27a', 'Platinum': '#efe6d0'},
+    areola_colour: {'Light pink': '#e8b3a8', 'Pink': '#d98f86', 'Rosy brown': '#b87562', 'Brown': '#8e5a45', 'Dark brown': '#5e3a2c'},
+    vulva_colour: {'Pink': '#e3a197', 'Rosy': '#c9867a', 'Tan': '#b08466', 'Brown': '#8a5d47', 'Dark': '#5a3a2c'},
+    anus_colour: {'Pink': '#e3a197', 'Rosy': '#c9867a', 'Tan': '#b08466', 'Brown': '#8a5d47', 'Dark': '#5a3a2c'},
+  };
+  const EYE_COLOURS = {'Brown': '#6b4226', 'Dark brown': '#3a2414', 'Hazel': '#8e7440', 'Green': '#4f7a3e',
+    'Blue': '#4a7fb5', 'Grey': '#8a949c'};
+
+  // ── Front figure, arms at the sides ────────────────────────────────────────
+  // ── The chart figure: every front-view body option is drawn on it ─────────
+  // No head, open contour lines, hands on hips and long legs with one line
+  // between them, after the creator's body-shape chart. An option moves one
+  // proportion and marks that region in soft pink behind the lines.
+  const BODY = {sh: 10.5, bu: 10, wa: 8, hi: 11.5, th: 11};
+  function chartFigure(o, extra, opts) {
+    o = Object.assign({}, BODY, o || {});
+    opts = opts || {};
+    const {sh, bu, wa, hi, th} = o;
+    const side = k => {
+      const x = v => f(32 + k * v);
+      let d = `M${x(2)},0 Q${x(2.5)},3 ${x(sh)},4.5 Q${x(sh + 3)},6 ${x(sh + 3.5)},10 `;
+      d += opts.armsDown
+        ? `Q${x(sh + 4.5)},18 ${x(sh + 5)},27 M${x(sh)},11 Q${x(sh + 1.5)},18 ${x(sh + 2.5)},26 `
+        : `L${x(sh + 7)},16 L${x(wa + 1.5)},19.5 M${x(sh + 0.5)},11 L${x(sh + 3.8)},16 L${x(wa + 0.8)},18.5 `;
+      return d + `M${x(sh - 0.5)},11.5 Q${x(bu + 0.3)},13 ${x(bu)},15 C${x(bu - 0.3)},17 ${x(wa)},17 ${x(wa)},19.5 ` +
+        `C${x(wa)},22 ${x(hi)},23 ${x(hi)},26 C${x(hi)},29.5 ${x(th)},31 ${x(th - 0.5)},35 ` +
+        `C${x(th - 1)},39 ${x(9)},41 ${x(8.6)},46 C${x(8.2)},51 ${x(8)},55 ${x(6.5)},63`;
+    };
+    let s = (opts.under ? opts.under(o) : '') + line(side(1) + ' ' + side(-1) + ' M32,31 V63', ' stroke-width="1.4"') + (extra || '');
+    if (opts.head) {
+      s = '<g transform="translate(32,63) scale(.84) translate(-32,-63)">' +
+        '<ellipse cx="32" cy="-5.5" rx="3.8" ry="4.6" stroke-width="1.4"/>' + s + '</g>';
+    }
+    return s;
+  }
+  const pinkFill = d => `<path d="${d}" fill="${PINK}" fill-opacity=".5" stroke="none"/>`;
+  const pinkDot = ([x, y], r) => `<circle cx="${x}" cy="${y}" r="${r || 2.2}" fill="${PINK}" stroke="none"/>`;
+  const REGION = {
+    shoulders: o => `<path d="M${f(32 - o.sh)},4.8 Q32,3 ${f(32 + o.sh)},4.8" stroke="${PINK}" stroke-width="4" stroke-opacity=".8"/>`,
+    bust: o => pinkDot([f(32 - o.bu * 0.45), 14.5], f(o.bu * 0.33)) + pinkDot([f(32 + o.bu * 0.45), 14.5], f(o.bu * 0.33)),
+    waist: o => `<ellipse cx="32" cy="19.5" rx="${o.wa}" ry="1.8" fill="${PINK}" fill-opacity=".6" stroke="none"/>`,
+    hips: o => `<ellipse cx="32" cy="26" rx="${o.hi}" ry="2.2" fill="${PINK}" fill-opacity=".6" stroke="none"/>`,
+    thighs: o => [-1, 1].map(k => pinkFill(`M${f(32 + k * 1)},32 C${f(32 + k * (o.th - 0.5))},30 ${f(32 + k * (o.th - 0.5))},36 ` +
+      `${f(32 + k * (o.th - 1.5))},40 C${f(32 + k * 6)},42 ${f(32 + k * 1.5)},40 ${f(32 + k * 1)},32 Z`)).join(''),
+  };
+  const body = (o, region, extra) => bsvg(chartFigure(o, extra, {under: REGION[region]}));
+  const BUILD = {
+    'Slim': {sh: 9.5, bu: 9, wa: 7, hi: 10, th: 9.5}, 'Athletic': {sh: 12, bu: 10.5, wa: 8.5, hi: 10.5, th: 11},
+    'Average': {}, 'Curvy': {sh: 10.5, bu: 12, wa: 7.5, hi: 13.5, th: 12.5},
+    'Voluptuous': {sh: 11.5, bu: 13, wa: 9.5, hi: 14.5, th: 13.5}, 'Muscular': {sh: 13.5, bu: 11.5, wa: 9.5, hi: 11.5, th: 12},
+  };
+  const HEIGHT = {'Under 155 cm': 0.8, '155–165 cm': 0.87, '165–175 cm': 0.94, 'Over 175 cm': 1};
+  function height(s) {
+    const top = f(63 - 63 * s);
+    return bsvg(`<g transform="translate(32,63) scale(${s}) translate(-32,-63)">${chartFigure({})}</g>` +
+      `<path d="M58,62 L58,${top} M55.5,${top} L60.5,${top} M55.5,62 L60.5,62" stroke="${PINK}" stroke-width="2.4"/>`);
+  }
+  const MARKERS = {
+    tattoos: {'None': '', 'Small, wrist': [[44, 18.8]], 'Small, ankle': [[38.8, 59]], 'Hip': [[42, 26]],
+      'Sleeve': 'sleeve', 'Back piece': 'back'},
+    piercings: {'None': '', 'Ears': [[28.2, -5.5], [35.8, -5.5]], 'Nose': [[32, -4.6]], 'Navel': [[32, 22]]},
+    birthmarks: {'None': '', 'Shoulder': [[41.5, 6]], 'Hip': [[42, 26]]},
+  };
+  function marked(spec, key) {
+    let extra = '';
+    if (spec === 'sleeve') extra = `<path d="M44.5,10.5 L48,16.5" stroke="${PINK}" stroke-width="4" stroke-opacity=".85"/>`;
+    else if (spec === 'back') extra = `<rect x="26.5" y="8" width="11" height="15" rx="2.5" stroke="${PINK}" stroke-width="1.8" stroke-dasharray="2 2"/>`;
+    else if (Array.isArray(spec)) extra = spec.map(p => pinkDot(p, key === 'piercings' ? 1.6 : 2.2)).join('');
+    return bsvg(chartFigure({}, extra, {head: key === 'piercings'}));
+  }
+  // Bum from the side, after the creator's chart: the back contour carries the
+  // shape, the front line stays straight, a soft pink shade follows the curve,
+  // inside a thin circle as on the chart.
+  const GLUTE_SIDE = {   // lumbar x, peak x, peak y, fold y, second bulge
+    'Full, rounded': [28, 13.5, 32, 43], 'High shelf': [27.5, 12.5, 27, 38], 'Bubble': [28.5, 16, 30, 39],
+    'Sporty': [29, 18.5, 31, 38], 'Saggy': [29.5, 17, 39, 46], 'Double saggy': [29.5, 17.5, 31, 45, true],
+    'Flat': [29.5, 24.5, 32, 42], 'Bone': [29.5, 26.5, 30, 40],
+  };
+  function sideFigure([lx, bx, by, fy, second]) {
+    const tx = 27.5;
+    const bulge = second
+      ? `C${lx},22 ${bx},${by - 8} ${bx},${by} C${bx},${by + 4} ${bx + 3},35 ${bx + 3.5},36.5 ` +
+        `C${bx + 1},39 ${bx + 1.5},${fy - 1} ${tx + 2},${fy}`
+      : `C${lx},22 ${bx},${by - 8} ${bx},${by} C${bx},${fy - 3} ${bx + 5},${fy + 1} ${tx + 2},${fy}`;
+    const back = `M29,1 C28.5,8 ${lx},12 ${lx},17 ` + bulge;
+    const shade = `M${lx},19 ` + bulge + ` C${tx + 5},${fy - 4} ${f(bx + 4)},${by + 3} ${f(bx + 3.5)},${by} ` +
+      `C${f(bx + 3.5)},${by - 5} ${lx + 1},22 ${lx},19 Z`;
+    return bsvg(`<circle cx="32" cy="32" r="29.5" stroke-width="1" stroke-opacity=".45"/>` +
+      `<path d="${shade}" fill="${PINK}" fill-opacity=".45" stroke="none"/>` +
+      line(back + ` C${tx + 0.5},${fy + 6} 26.5,54 27.5,63`, ' stroke-width="1.6"') +
+      line(`M${tx + 2},${fy} q2.5,0.5 4,-1.2`, ' stroke-width="1.1"') +
+      line('M39,1 C40,13 37.5,24 39.5,34 C41,44 40,54 39,63', ' stroke-width="1.6"'));
+  }
+
+  const NAILS = {'Short, nude': [2, 'line'], 'Medium, painted': [5, 'paint'], 'Long, painted': [9, 'paint'], 'French tips': [5, 'tip']};
+  function nails(len, kind) {
+    let s = line('M12,64 L12,46 Q12,40 16,38');   // back of the hand
+    [[18, 30], [30, 26], [42, 28], [54, 34]].forEach(([x, y]) => {
+      s += line(`M${x - 5},64 L${x - 5},${y + 4} Q${x - 5},${y - 2} ${x},${y - 2} Q${x + 5},${y - 2} ${x + 5},${y + 4} L${x + 5},64`);
+      const tip = y - 2 - len, nail = `M${x - 3},${y + 5} L${x - 3},${tip + 3} Q${x},${tip - 1} ${x + 3},${tip + 3} L${x + 3},${y + 5} Z`;
+      s += kind === 'paint' ? `<path d="${nail}" fill="currentColor" stroke-width="1.4"/>` : line(nail, ' stroke-width="1.4"');
+      if (kind === 'tip') s += `<path d="M${x - 3},${tip + 4} Q${x},${tip - 1} ${x + 3},${tip + 4} Z" fill="currentColor" stroke-width="1"/>`;
+    });
+    return bsvg(s);
+  }
+
+  // ── Body shape: the usual chart figure ─────────────────────────────────────
+  // No head, open contour lines and a single line between the legs, with the
+  // type as a soft filled shape on the torso. Apple stands with arms down,
+  // the rest with hands on hips.
+  const BODY_SHAPE = {   // shoulder, waist, hip, thigh, arms down; filled type
+    'Apple': [[12, 13.5, 13, 11.5, true], 'M32,13 C29.5,10.5 24,11 24,17 C24,23 27.5,26 32,26 C36.5,26 40,23 40,17 C40,11 34.5,10.5 32,13 Z'],
+    'Pear': [[10, 9, 14.5, 13], 'M31,10 C28,10 29.2,15.5 27,18.5 C23.6,22.5 25,27 29,27 C34.5,27 36.3,23 34.6,18.3 C33.8,14.5 34.2,10 31,10 Z'],
+    'Hourglass': [[12, 7.5, 12.5, 11], 'M27.5,9 H36.5 V11 Q36.5,14 33,18 Q36.5,22 36.5,25 V27 H27.5 V25 Q27.5,22 31,18 Q27.5,14 27.5,11 Z'],
+    'Rectangle': [[11.5, 10.5, 11, 10], 'M29,9 H35 V27 H29 Z'],
+    'Oval': [[11.5, 12, 12, 10.5], 'M32,10 C36.8,10 39,13 39,17.5 C39,22.5 36,26 32,26 C28,26 25,22.5 25,17.5 C25,13 27.2,10 32,10 Z'],
+    'Inverted triangle': [[14, 9.5, 9.5, 9.5], 'M25,8.5 H39 L32,27 Z'],
+  };
+  function bodyShape([[sh, wa, hi, th, armsDown], fill]) {
+    return bsvg(chartFigure({sh, bu: sh - 0.5, wa, hi, th}, '', {armsDown, under: () => pinkFill(fill)}));
+  }
+
+
+  // ── Bum shape from behind ──────────────────────────────────────────────────
+  // Drawn after the creator's reference sheet: slate contour lines, the centre
+  // crease and folds meeting at a small dark point, and the type as a soft
+  // pink outline around the cheeks rather than a dashed guide.
+  const GLUTE_INK = INK, GLUTE_GUIDE = PINK;
+  const GLUTE_SHAPE = {   // waist, hip peak, peak height, low hip, thigh; guide
+    'Round': [[11, 17.5, 31, 17, 13.5], 'M32,16 C41,16 47.5,22.5 47.5,31 C47.5,40 41,45.5 32,45.5 C23,45.5 16.5,40 16.5,31 C16.5,22.5 23,16 32,16 Z'],
+    'Heart-shaped': [[10, 18, 35, 17.5, 13.5], 'M32,20 C24,14 15,21 16,33 C16.8,42 25,46 32,43 C39,46 47.2,42 48,33 C49,21 40,14 32,20 Z'],
+    'A-shaped': [[10.5, 15, 29, 18.5, 14.5], 'M23.5,15 H40.5 L49,44 H15 Z'],
+    'Pear': [[12, 16, 33, 19, 15], 'M21,10 H43 L50,44 H14 Z'],
+    'Bubble': [[11, 17, 30, 17.5, 14], 'M16.5,44 V26 C16.5,18 23,15 32,15 C41,15 47.5,18 47.5,26 V44 Z'],
+    'Wide': [[12, 19, 36, 19, 15], 'M13,44 V33 C13,24 21,19 32,19 C43,19 51,24 51,33 V44 Z'],
+    'Square': [[15, 16.5, 27, 16.5, 14], 'M16.5,17 Q16.5,16 18,16 H46 Q47.5,16 47.5,17 V43 Q47.5,44 46,44 H18 Q16.5,44 16.5,43 Z'],
+    'V-shaped': [[15.5, 16.5, 22, 13, 11], 'M14.5,15 H49.5 L41,44 H23 Z'],
+  };
+  function gluteShape([[wa, hp, hy, lh, th], g]) {
+    const sideLine = k => {
+      const x = v => f(32 + k * v);
+      return `M${x(wa)},2 C${x(wa - 0.5)},${hy - 13} ${x(hp)},${hy - 8} ${x(hp)},${hy} ` +
+        `C${x(hp)},${hy + 8} ${x(lh)},39 ${x(lh)},45 C${x(lh)},51 ${x(th)},56 ${x(th - 1)},63`;
+    };
+    const fold = k => { const x = v => f(32 + k * v); return `M${x(0.8)},42.5 Q${x(7)},46.5 ${x(lh - 5)},43.5`; };
+    return bsvg(`<path d="${g}" stroke="${GLUTE_GUIDE}" stroke-width="2.6" stroke-opacity=".75"/>` +
+      `<g stroke="${GLUTE_INK}">` +
+      line(sideLine(1) + ' ' + sideLine(-1), ' stroke-width="1.8"') +
+      line('M32,5 v6', ' stroke-width="1.2" stroke-opacity=".6"') +
+      line('M32,25 Q32.5,34 32,42 ' + fold(1) + ' ' + fold(-1), ' stroke-width="1.4"') +
+      line('M31.2,44 Q30.2,53 30.8,63 M32.8,44 Q33.8,53 33.2,63', ' stroke-width="1.4"') + '</g>' +
+      `<path d="M32,40.8 L33.3,42.8 L32,44.8 L30.7,42.8 Z" fill="${GLUTE_INK}" stroke="none"/>`);
+  }
+
+  // ── Torso for the schematic NSFW views ─────────────────────────────────────
+  const TORSO = line('M26,2 L26,8 Q16,9 11,14 Q7,19 7,30 L7,62 M38,2 L38,8 Q48,9 53,14 Q57,19 57,30 L57,62 ' +
+    'M13,22 Q11,40 16,62 M51,22 Q53,40 48,62') + line('M25,12 Q20,11.5 16,14 M39,12 Q44,11.5 48,14', ' stroke-width="1.6"');
+  const CUP = {A: 5, B: 6, C: 7, D: 8, DD: 9, 'E+': 10};
+  const BREAST = {r: 7, gap: 10.5, cy: 30, w: 1, h: 0.9, aug: false, drop: 0};
+  function breasts(o) {
+    o = Object.assign({}, BREAST, o || {});
+    let s = TORSO;
+    [-1, 1].forEach(side => {
+      const cx = 32 + side * o.gap, rw = o.r * o.w, rh = o.r * o.h, cy = o.cy + o.drop;
+      s += line(`M${f(cx - rw)},${cy} A${f(rw)},${f(rh)} 0 0 0 ${f(cx + rw)},${cy}`);
+      const inner = cx - side * rw;
+      s += line(`M${f(inner + side * 1.5)},${f(cy - o.r * 0.9)} Q${f(inner - side * 0.3)},${f(cy - o.r * 0.3)} ${f(inner)},${cy}`, ' stroke-width="1.6"');
+      if (o.aug) s += line(`M${f(cx - rw)},${cy} A${f(rw)},${f(rw * 0.75)} 0 0 1 ${f(cx + rw)},${cy}`, ' stroke-width="1.6"');
+      s += ring(cx + side * rw * 0.12, cy + rh * 0.38, 1.3);
+    });
+    return bsvg(s);
+  }
+  const SHAPE = {'Round': {}, 'Teardrop': {h: 1.15, drop: 1}, 'Athletic': {w: 1.1, h: 0.55, r: 6.5}, 'Relaxed': {w: 1.1, h: 1.2, drop: 4}};
+  const SPACING = {Close: 8.5, Average: 10.5, Wide: 12.5};
+  const PERK = {Perky: {cy: 27, h: 0.8}, Natural: {}, Soft: {cy: 31, h: 1.1, drop: 2}};
+  const areola = (ar, nr) => bsvg(ring(32, 32, ar) + ring(32, 32, nr));
+  const NIP_SHAPE = {
+    Flat: 'M10,8 Q46,12 50,32 Q46,52 10,56',
+    Puffy: 'M10,8 Q44,12 46,24 Q56,26 56,32 Q56,38 46,40 Q44,52 10,56',
+    Protruding: 'M10,8 Q46,12 50,28 L56,28 Q58,32 56,36 L50,36 Q46,52 10,56',
+    Inverted: 'M10,8 Q46,12 50,28 Q46,32 50,36 Q46,52 10,56',
+  };
+  function pair(n) {
+    let s = '';
+    [18, 46].forEach((cx, i) => {
+      s += ring(cx, 32, 8) + ring(cx, 32, 2.4);
+      if (n === 2 || (n === 1 && i === 1)) s += line(`M${cx - 7},32 L${cx + 7},32`, ' stroke-width="1.6"') + ring(cx - 7.5, 32, 1.6) + ring(cx + 7.5, 32, 1.6);
+    });
+    return bsvg(s);
+  }
+
+  // ── Pelvis with hair drawn as short strokes ────────────────────────────────
+  const PELVIS = line('M10,4 Q13,30 24,48 Q32,58 40,48 Q51,30 54,4') +
+    line('M17,17 Q24,33 29,48 M47,17 Q40,33 35,48', ' stroke-width="1.6"');
+  const PUBIC = {
+    'Trimmed': [[24, 28], [40, 28], [33, 45], [31, 45]], 'Landing strip': [[30, 26], [34, 26], [34, 45], [30, 45]],
+    'Triangle': [[22, 26], [42, 26], [32, 46]], 'Natural': [[18, 24], [46, 24], [38, 46], [26, 46]], 'Shaved': null,
+  };
+  function inside(pts, x, y) {
+    let c = false;
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      if (((pts[i][1] > y) !== (pts[j][1] > y)) && x < (pts[j][0] - pts[i][0]) * (y - pts[i][1]) / (pts[j][1] - pts[i][1]) + pts[i][0]) c = !c;
+    }
+    return c;
+  }
+  function pubic(shape, gap) {
+    const poly = PUBIC[shape];
+    if (!poly) return bsvg(PELVIS + line('M22,26 L42,26 L32,46 Z', ' stroke-width="1.4" stroke-dasharray="2 2.6"'));
+    const xs = poly.map(p => p[0]), ys = poly.map(p => p[1]);
+    let hairs = '';
+    for (let r = 0, y = Math.min(...ys) + 1.5; y < Math.max(...ys) - 1; r++, y += gap * 0.8) {
+      for (let x = Math.min(...xs) + 1 + (r % 2) * gap / 2; x < Math.max(...xs); x += gap) {
+        if (inside(poly, x, y) && inside(poly, x + 0.8, y + 2.2)) hairs += `M${f(x)},${f(y)} l0.8,2.2 `;
+      }
+    }
+    return bsvg(PELVIS + line('M' + poly.map(P).join(' L') + ' Z', ' stroke-width="1.2" stroke-opacity=".55"') +
+      line(hairs, ' stroke-width="1.3"'));
+  }
+
+  // ── Table ─────────────────────────────────────────────────────────────────
+  const map = (obj, fn) => Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, () => fn(v, k)]));
+  const TABLE = {
+    face_shape: map(FACE_SHAPE, faceShape),
+    body_shape: map(BODY_SHAPE, bodyShape),
+    glute_shape: map(GLUTE_SHAPE, gluteShape),
+    jaw: map(JAW, o => svg(head(o))),
+    cheekbones: map(CHEEK, ([c, y]) => svg(head({c, cheekY: y},
+      {extra: line(`M${f(32 - c + 2)},${y + 1} q3,-2 6.5,-1 M${f(32 + c - 2)},${y + 1} q-3,-2 -6.5,-1`, ' stroke-width="1.6"')}))),
+    eye_shape: map(EYE, (v, k) => eye(k)),
+    eye_colour: map(EYE_COLOURS, hex => eye('Almond', hex)),
+    brows: map(BROW, ([c, t]) => brow(c, t)),
+    nose: map(NOSE, nose),
+    lips: map(LIPS, a => lips.apply(null, a)),
+    ears: map(EAR, ([o, h]) => ears(o, h)),
+    hair_texture: map(HAIR, hairOver),
+    hairline: map(HAIRLINE, d => svg(head({top: 7, fw: 10, c: 11.5, j: 8.5}, {noEars: true}) + line(d, ' stroke-width="1.8"'))),
+    marks: map(MARKS, extra => svg(head({}, {extra}))),
+    height: map(HEIGHT, height),
+    build: map(BUILD, o => body(o)),
+    shoulders: map({Narrow: 8.5, Medium: 10.5, Broad: 13.5}, sh => body({sh}, 'shoulders')),
+    waist: map({Defined: 6.5, Straight: 10, Soft: 11}, wa => body({wa}, 'waist')),
+    hips: map({Narrow: 9.5, Medium: 11.5, Wide: 15.5}, hi => body({hi}, 'hips')),
+    bust: map({Small: 8.5, Medium: 10, Large: 11.5, 'Very large': 13}, bu => body({bu}, 'bust')),
+    glutes: map(GLUTE_SIDE, sideFigure),
+    thighs: map({Slim: 9.5, Toned: 11, Full: 13.5}, th => body({th}, 'thighs')),
+    tattoos: map(MARKERS.tattoos, m => marked(m, 'tattoos')), piercings: map(MARKERS.piercings, m => marked(m, 'piercings')),
+    birthmarks: map(MARKERS.birthmarks, m => marked(m, 'birthmarks')),
+    nails: map(NAILS, ([len, kind]) => nails(len, kind)),
+    cup: map(CUP, r => breasts({r})),
+    breast_shape: map(SHAPE, o => breasts(o)),
+    spacing: map(SPACING, gap => breasts({gap})),
+    augmented: map({Natural: false, Augmented: true}, aug => breasts({aug})),
+    perkiness: map(PERK, o => breasts(o)),
+    areola_size: map({Small: 8, Medium: 12, Large: 17}, r => areola(r, 3)),
+    nipple_size: map({Small: 2.5, Medium: 4, Large: 5.5}, r => areola(12, r)),
+    nipple_shape: map(NIP_SHAPE, d => bsvg(line('M10,8 L10,56', ' stroke-width="1.4" stroke-dasharray="2 2.6"') + line(d))),
+    nipple_piercing: map({None: 0, One: 1, Both: 2}, pair),
+    pubic_style: map(PUBIC, (v, k) => pubic(k, 3.6)),
+    pubic_density: map({Sparse: 5.2, Medium: 3.6, Dense: 2.6}, g => pubic('Natural', g)),
+  };
+  Object.entries(COLOURS).forEach(([key, set]) => { TABLE[key] = map(set, swatch); });
+
+  function render(feature, option, sheet) {
+    if (feature === 'pubic_colour') {
+      if (option === 'Dark') return swatch('#2a1d17');
+      if (option === 'Light') return swatch('#c9a36c');
+      if (option === 'Matches hair') {
+        const hair = COLOURS.hair_colour[(sheet || {}).hair_colour];
+        return hair ? swatch(hair) : svg(`<circle cx="32" cy="32" r="20" stroke-width="1.4" stroke-dasharray="3 3"/>`);
+      }
+    }
+    const fn = (TABLE[feature] || {})[option];
+    return fn ? fn() : '';
+  }
+
+  const api = {render, TEXT_ONLY: ['labia', 'labia_fullness']};
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+  else root.CharacterVisuals = api;
+})(this);

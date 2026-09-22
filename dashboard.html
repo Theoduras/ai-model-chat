@@ -178,6 +178,10 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.8"/><path d="m4 17 4.5-4.5L13 17M14 14l2.5-2.5L20 15" stroke-linecap="round" stroke-linejoin="round"/></svg>
           <span>Generation studio</span>
         </button>
+        <button type="button" class="sb-item admin-only" data-view="/characters" data-role-area="generate" data-search="characters character face body reference look identity" onclick="openEmbedded('/characters', this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6" stroke-linecap="round"/></svg>
+          <span>Characters</span>
+        </button>
         <button type="button" class="sb-item admin-only" data-view="/landing" data-search="landing page" onclick="openEmbedded('/landing', this)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18" stroke-linecap="round"/></svg>
           <span>Landing page</span>
@@ -1613,6 +1617,7 @@ async function loadPersona(slug) {
   renderForm(slug, config);
   showActionBar();
   loadGallery(slug);
+  loadCharacterSection(slug);
   loadNsfwGallery(slug);
   loadPhases();
   if (!config.speech_style) generateSpeechStyle(false);
@@ -1942,6 +1947,11 @@ function renderForm(slug, cfg) {
         <span class="hint" id="backstory-rand-status"></span>
         <span class="hint">Either type a short origin story, or let Gemini interview you and write it.</span>
       </div>
+    </div>
+
+    <div class="form-section admin-only" id="character-section">
+      <div class="section-title">Character</div>
+      <div id="character-box"><span class="hint">Loading…</span></div>
     </div>
 
     <div class="form-section">
@@ -2613,6 +2623,51 @@ function setAvatar(dataUrl) {
 function syncAvatarFromGallery() {
   if (!avatarFromPhoto || !galleryImages.length) return;
   setAvatar(galleryImages[0]);
+}
+
+async function loadCharacterSection(slug) {
+  const box = document.getElementById('character-box');
+  if (!box) return;
+  let c = null;
+  try {
+    const r = await fetch('/api/personas/' + encodeURIComponent(slug) + '/character');
+    if (!r.ok) { box.closest('.form-section').style.display = 'none'; return; }
+    c = (await r.json()).character;
+  } catch (e) { box.innerHTML = '<span class="hint">Could not load the character.</span>'; return; }
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+  if (!c) {
+    box.innerHTML = `<div style="display:flex; flex-direction:column; gap:8px;">
+      <strong>No character linked</strong>
+      <span class="hint">Content uses the written appearance fields, which can drift in explicit shots.</span>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button type="button" class="btn-ai" onclick="openEmbedded('/characters?persona=${encodeURIComponent(slug)}&new=1')">Create character for this persona</button>
+        <button type="button" class="btn btn-ghost" onclick="openEmbedded('/characters')">Link existing</button>
+      </div></div>`;
+    return;
+  }
+  const level = {sfw: 'SFW', moderate: 'Topless', explicit: 'Explicit'}[c.nsfw_level] || c.nsfw_level;
+  const pct = c.required ? Math.round(100 * c.approved_required / c.required) : 0;
+  box.innerHTML = `<div style="display:flex; gap:14px; align-items:center; flex-wrap:wrap;">
+      <div style="width:72px; height:90px; border-radius:10px; overflow:hidden; background:var(--surface-2); flex-shrink:0;">
+        ${c.face_url ? `<img src="${esc(c.face_url)}" alt="" style="width:100%; height:100%; object-fit:cover;">` : ''}</div>
+      <div style="flex:1; min-width:180px; display:flex; flex-direction:column; gap:6px;">
+        <strong>${esc(c.name)}</strong>
+        <span class="hint" style="margin:0;">${level} · ${c.age} · ${c.face_url ? 'face approved' : 'face not approved'} · v${c.version}</span>
+        <div style="height:6px; border-radius:3px; background:var(--surface-2); overflow:hidden;"><div style="height:6px; width:${pct}%; background:${pct === 100 ? 'var(--ok)' : 'var(--accent)'};"></div></div>
+        <span class="hint" style="margin:0;">${c.approved_required} of ${c.required} required views approved</span>
+      </div></div>
+    <span class="hint">Her look replaces this persona's written appearance fields for all generated stills once the character is complete.</span>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:6px;">
+      <button type="button" class="btn-ai" onclick="openEmbedded('/characters?id=${esc(c.id)}')">Open character</button>
+      <button type="button" class="btn btn-ghost" onclick="unlinkCharacter('${esc(c.id)}', '${esc(slug)}')">Unlink</button>
+    </div>`;
+}
+
+async function unlinkCharacter(id, slug) {
+  if (!confirm('Unlink this character? It is kept and can be linked again.')) return;
+  await fetch('/api/characters/' + id + '/link', {method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({persona: ''})});
+  loadCharacterSection(slug);
 }
 
 async function loadGallery(slug) {

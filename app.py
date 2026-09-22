@@ -28154,9 +28154,9 @@ def _gen_reference_urls(slug, model_key, role=None):
         if not media:
             continue
         url = None
-        if getattr(media, 'gcs_path', ''):
+        if media.get('gcs_path'):
             try:
-                url = storage.signed_url(media.gcs_path)
+                url = storage.signed_url(media['gcs_path'])
             except Exception:
                 url = None
         if not url:
@@ -28854,6 +28854,677 @@ def api_persona_references(slug):
                     'media_ids': kept})
 
 
+# ── Characters ────────────────────────────────────────────────────────────────
+# A character is the fixed look of one model: a checked face and a set of body
+# views, stored apart from the vault so nothing in it can reach a fan. Linked to
+# a persona, it becomes the references and the base prompt of every still made
+# for her. Admin-only while generation is in testing, like the studio.
+
+import characters as CH
+
+CHAR_IMAGE_MAX_BYTES = 8 * 1024 * 1024
+CHAR_MODEL = imagegen.EXPLICIT_MODEL
+CHAR_RESOLUTION = '4k'
+
+
+def _char_json_sheet(row):
+    try:
+        return json.loads(row.sheet_json or '{}') or {}
+    except ValueError:
+        return {}
+
+
+def _char_images(s, char_id, view=None, role=None):
+    from db import CharacterImage
+    q = s.query(CharacterImage).filter(CharacterImage.character_id == char_id)
+    if view is not None:
+        q = q.filter(CharacterImage.view == view)
+    if role:
+        q = q.filter(CharacterImage.role == role)
+    return q.order_by(CharacterImage.created_at).all()
+
+
+def _char_canonicals(s, char_id):
+    return {img.view: img for img in _char_images(s, char_id, role='canonical')}
+
+
+def _char_refresh_status(s, row):
+    s.flush()
+    missing = CH.missing_views(row.nsfw_level, _char_canonicals(s, row.id).keys(),
+                               row.body_type)
+    row.status = 'draft' if missing else 'complete'
+    return missing
+
+
+def _char_purge_expired(s, char_id):
+    """Unpicked candidates past their window. The bucket rule deletes the bytes;
+    this drops the rows that would otherwise point at nothing."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    for img in _char_images(s, char_id, role='candidate'):
+        if img.expires_at and img.expires_at.replace(tzinfo=None) < now:
+            s.delete(img)
+    s.commit()
+
+
+def _char_img_json(img):
+    try:
+        checks = json.loads(img.checks_json) if img.checks_json else None
+    except ValueError:
+        checks = None
+    return {'id': img.id, 'view': img.view, 'role': img.role,
+            'source': img.source, 'rating': img.rating, 'checks': checks,
+            'url': f'/api/characters/{img.character_id}/images/{img.id}/file',
+            'expires_at': img.expires_at.isoformat() if img.expires_at else ''}
+
+
+def _char_json(s, row, full=False):
+    canon = _char_canonicals(s, row.id)
+    required = CH.required_views(row.nsfw_level, row.body_type)
+    out = {'id': row.id, 'name': row.name, 'age': row.age,
+           'nsfw_level': row.nsfw_level, 'body_type': row.body_type,
+           'persona': row.slug or '', 'status': row.status,
+           'version': row.version or 0,
+           'required': len(required),
+           'approved_required': len([k for k in required if k in canon]),
+           'face_url': _char_img_json(canon['face_front'])['url']
+                       if 'face_front' in canon else ''}
+    if full:
+        _char_purge_expired(s, row.id)
+        out.update({'sheet': _char_json_sheet(row), 'notes': row.notes or '',
+                    'missing': CH.missing_views(row.nsfw_level, canon.keys(), row.body_type),
+                    'attested': bool(row.attested_at),
+                    'images': [_char_img_json(i) for i in _char_images(s, row.id)]})
+    return out
+
+
+def _char_row(s, user, char_id):
+    from db import Character
+    row = s.query(Character).filter(Character.id == char_id).first()
+    if not row or row.workspace_id != _workspace_id(user):
+        return None
+    return row
+
+
+def _char_persona_ok(slug):
+    if not re.match(r'^[a-z0-9_-]+$', slug or ''):
+        return False
+    mine = owned_slugs()
+    return mine is None or slug in mine
+
+
+def _character_for_slug(slug):
+    from db import Character
+    s = _db_session()
+    try:
+        row = s.query(Character).filter(Character.slug == slug).first()
+        if not row:
+            return None
+        return {'id': row.id, 'version': row.version or 0, 'status': row.status,
+                'age': row.age, 'level': row.nsfw_level,
+                'body_type': row.body_type, 'sheet': _char_json_sheet(row)}
+    finally:
+        s.close()
+
+
+def _char_ref_url(img):
+    """Something the provider can fetch: a signed URL, or the bytes inline when
+    the backend cannot mint one -- dropping a reference would quietly cost her
+    the identity lock."""
+    import base64
+    try:
+        url = storage.signed_url(img.gcs_path)
+    except Exception:
+        url = None
+    if url:
+        return url
+    try:
+        data = storage.get(img.gcs_path)
+    except Exception:
+        return None
+    return 'data:%s;base64,%s' % (img.mime or 'image/jpeg',
+                                  base64.b64encode(data).decode()) if data else None
+
+
+def _character_view_refs(char_id, view_key):
+    """References for generating one view: the approved views it builds on,
+    then the creator's uploads for that view, then her general uploads."""
+    from db import Character
+    s = _db_session()
+    try:
+        row = s.query(Character).filter(Character.id == char_id).first()
+        if not row:
+            return []
+        v = CH.view(view_key, row.body_type) or {}
+        canon = _char_canonicals(s, char_id)
+        picked = [canon[d] for d in v.get('depends', ()) if d in canon]
+        if view_key in canon:
+            picked.append(canon[view_key])
+        picked += _char_images(s, char_id, view=view_key, role='reference')
+        if v.get('group') == 'face' and view_key != 'face_front':
+            picked += _char_images(s, char_id, view='face_front', role='reference')
+        picked += _char_images(s, char_id, view='', role='reference')
+        urls = [u for u in (_char_ref_url(i) for i in picked) if u]
+        return urls[:imagegen.MAX_REFERENCES]
+    finally:
+        s.close()
+
+
+def _character_content(spec):
+    """(reference urls, prompt clause, age) a linked character adds to a content
+    still. The rating filter is in CH.views_for_job, so a safe-work shot cannot
+    be handed an intimate view or intimate words."""
+    if not spec.get('character_id'):
+        return [], '', None
+    from db import Character
+    s = _db_session()
+    try:
+        row = s.query(Character).filter(Character.id == spec['character_id']).first()
+        if not row:
+            return [], '', None
+        level = CH.job_level(spec.get('shot'), spec.get('scene'))
+        canon = _char_canonicals(s, row.id)
+        keys = CH.views_for_job(spec.get('shot'), spec.get('scene'), level, row.body_type)
+        urls = [u for u in (_char_ref_url(canon[k]) for k in keys if k in canon) if u]
+        return (urls, CH.content_clause(_char_json_sheet(row), level, row.body_type),
+                row.age)
+    finally:
+        s.close()
+
+
+def _character_finish(job_id, spec, workspace, urls):
+    from db import CharacterImage, update_generation
+    made = []
+    for url in urls:
+        try:
+            data, mime = imagegen.fetch_result(url)
+            path = storage.put(spec['slug'], data, mime)
+        except Exception as e:
+            logger.warning('character result failed job=%s: %s', job_id, str(e)[:200])
+            continue
+        s = _db_session()
+        try:
+            img = CharacterImage(character_id=spec['character_id'],
+                                 view=spec['character_view'], role='candidate',
+                                 source='generated', rating=spec['rating'],
+                                 gcs_path=path, mime=mime or 'image/jpeg',
+                                 job_id=job_id, expires_at=storage.staging_expiry())
+            s.add(img)
+            s.commit()
+            made.append(img.id)
+        finally:
+            s.close()
+    s = _db_session()
+    try:
+        if made:
+            update_generation(s, job_id, status='done', result_media_ids=','.join(made))
+        else:
+            update_generation(s, job_id, status='failed',
+                              error='the provider returned nothing usable')
+    finally:
+        s.close()
+    if not made:
+        _refund_credits(workspace, job_id, note='no usable result')
+
+
+def _character_job_json(job, ids, s):
+    from db import CharacterImage
+    rows = s.query(CharacterImage).filter(CharacterImage.id.in_(ids)).all() if ids else []
+    return {'id': job.id, 'kind': job.kind, 'job': 'character', 'status': job.status,
+            'credits': job.credits, 'error': job.error or '', 'persona': '',
+            'media': [_char_img_json(r) for r in rows],
+            'created_at': job.created_at.isoformat() if job.created_at else ''}
+
+
+def _char_vision_check(img, row, view_key):
+    """Ask a vision model whether the photo matches her sheet and reads as an
+    adult. Safe-work views only: nothing explicit is ever sent to Google.
+
+    Every answer can be 'uncertain', and an age that is not a confident
+    'adult' blocks approval -- a check that cannot decide must not pass."""
+    result = {'age': 'uncertain', 'age_note': '', 'features': {}}
+    if img.rating != 'sfw' or not client:
+        result['age_note'] = 'The automatic check is unavailable right now.'
+        return result
+    feats = CH.features(row.body_type)
+    sheet = _char_json_sheet(row)
+    keys = [k for k in CH.FACE_CHECKS if k in sheet] if view_key == 'face_front' else []
+    listing = '\n'.join(f'- {k}: {feats[k][0]} = {sheet[k]}' for k in keys)
+    instruction = (
+        'You are checking a reference photo of a fictional adult character.\n'
+        '1. Age appearance: does the person clearly look like an adult (18+)? '
+        'Answer "adult" only if confident, "minor" if they could look under 18, '
+        'otherwise "uncertain".\n' +
+        ('2. For each feature below, answer "match", "differs" or "uncertain" '
+         'and say briefly what you see.\n' + listing + '\n' if keys else '') +
+        'Reply with JSON only: {"age": "...", "age_note": "...", '
+        '"features": {"<key>": {"result": "...", "observed": "..."}}}')
+    try:
+        data = storage.get(img.gcs_path)
+        import base64
+        resp = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=[{'role': 'user', 'parts': [
+                {'text': instruction},
+                {'inline_data': {'mime_type': img.mime or 'image/jpeg',
+                                 'data': base64.b64encode(data).decode()}}]}],
+            config=_no_thinking(types.GenerateContentConfig(
+                temperature=0, response_mime_type='application/json')))
+        parsed = json.loads(_gemini_text(resp) or '{}')
+    except Exception as e:
+        logger.warning('character check failed img=%s: %s', img.id, str(e)[:200])
+        result['age_note'] = 'The automatic check failed. Try again.'
+        return result
+    age = str(parsed.get('age') or '').lower()
+    result['age'] = age if age in ('adult', 'minor', 'uncertain') else 'uncertain'
+    result['age_note'] = str(parsed.get('age_note') or '')[:200]
+    got = parsed.get('features') or {}
+    for k in keys:
+        f = got.get(k) or {}
+        r = str(f.get('result') or '').lower()
+        result['features'][k] = {
+            'result': r if r in ('match', 'differs', 'uncertain') else 'uncertain',
+            'observed': str(f.get('observed') or '')[:120]}
+    return result
+
+
+@app.route('/characters')
+def characters_page():
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    return send_from_directory(BASE_DIR, 'characters.html')
+
+
+@app.route('/api/characters/catalogue')
+def api_characters_catalogue():
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    level = request.args.get('level') or 'sfw'
+    if level not in CH.LEVEL_KEYS:
+        level = 'sfw'
+    return jsonify(dict(CH.catalogue(level), ok=True))
+
+
+@app.route('/api/characters', methods=['GET', 'POST'])
+def api_characters():
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    import uuid
+    user = _current_user()
+    from db import Character
+    s = _db_session()
+    try:
+        if request.method == 'GET':
+            rows = (s.query(Character)
+                    .filter(Character.workspace_id == _workspace_id(user))
+                    .order_by(Character.updated_at.desc()).all())
+            return jsonify({'ok': True, 'characters': [_char_json(s, r) for r in rows]})
+        body = request.get_json(silent=True) or {}
+        persona = (body.get('persona') or '').strip().lower()
+        if persona:
+            if not _char_persona_ok(persona):
+                return jsonify({'ok': False, 'error': 'Not your persona'}), 403
+            if s.query(Character).filter(Character.slug == persona).first():
+                return jsonify({'ok': False, 'error': 'That persona already has a character.'}), 409
+        try:
+            clean, warnings = CH.validate(dict(
+                {'name': 'Untitled draft', 'age': 24, 'nsfw_level': 'sfw'}, **body))
+        except CH.CharacterError as e:
+            return jsonify({'ok': False, 'error': str(e)}), 400
+        row = Character(workspace_id=_workspace_id(user), owner_id=user.get('id'),
+                        key='char-' + uuid.uuid4().hex[:12], slug=persona or None,
+                        name=clean['name'], age=clean['age'],
+                        nsfw_level=clean['nsfw_level'], notes=clean['notes'],
+                        sheet_json=json.dumps(clean['sheet']))
+        s.add(row)
+        s.commit()
+        return jsonify({'ok': True, 'character': _char_json(s, row, full=True),
+                        'warnings': warnings})
+    finally:
+        s.close()
+
+
+@app.route('/api/characters/<char_id>', methods=['GET', 'PUT', 'DELETE'])
+def api_character(char_id):
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    user = _current_user()
+    s = _db_session()
+    try:
+        row = _char_row(s, user, char_id)
+        if not row:
+            return jsonify({'ok': False, 'error': 'Unknown character'}), 404
+        if request.method == 'GET':
+            return jsonify({'ok': True, 'character': _char_json(s, row, full=True)})
+        if request.method == 'DELETE':
+            for img in _char_images(s, row.id):
+                if img.gcs_path:
+                    try:
+                        storage.delete(img.gcs_path)
+                    except Exception:
+                        pass
+                s.delete(img)
+            s.delete(row)
+            s.commit()
+            return jsonify({'ok': True})
+        body = request.get_json(silent=True) or {}
+        merged = {'name': row.name, 'age': row.age, 'nsfw_level': row.nsfw_level,
+                  'notes': row.notes, 'sheet': _char_json_sheet(row)}
+        merged.update({k: body[k] for k in ('name', 'age', 'nsfw_level', 'notes', 'sheet')
+                       if k in body})
+        if row.slug:
+            banned = _persona_config(row.slug).get('banned_terms') or []
+            merged['banned'] = ([t for t in re.split(r'[,\n]', banned) if t.strip()]
+                                if isinstance(banned, str) else banned)
+        try:
+            clean, warnings = CH.validate(merged, row.body_type)
+        except CH.CharacterError as e:
+            return jsonify({'ok': False, 'error': str(e)}), 400
+        row.name, row.age = clean['name'], clean['age']
+        row.nsfw_level, row.notes = clean['nsfw_level'], clean['notes']
+        row.sheet_json = json.dumps(clean['sheet'])
+        _char_refresh_status(s, row)
+        s.commit()
+        return jsonify({'ok': True, 'character': _char_json(s, row, full=True),
+                        'warnings': warnings})
+    finally:
+        s.close()
+
+
+@app.route('/api/characters/<char_id>/link', methods=['POST'])
+def api_character_link(char_id):
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    user = _current_user()
+    from db import Character
+    body = request.get_json(silent=True) or {}
+    persona = (body.get('persona') or '').strip().lower()
+    s = _db_session()
+    try:
+        row = _char_row(s, user, char_id)
+        if not row:
+            return jsonify({'ok': False, 'error': 'Unknown character'}), 404
+        if not persona:
+            row.slug = None
+            s.commit()
+            return jsonify({'ok': True, 'character': _char_json(s, row)})
+        if not _char_persona_ok(persona):
+            return jsonify({'ok': False, 'error': 'Not your persona'}), 403
+        other = s.query(Character).filter(Character.slug == persona).first()
+        if other and other.id != row.id:
+            return jsonify({'ok': False, 'error': 'That persona already has a character. Unlink it first.'}), 409
+        if row.slug and row.slug != persona:
+            return jsonify({'ok': False, 'error': 'This character is linked to another persona. Unlink it first.'}), 409
+        row.slug = persona
+        s.commit()
+        return jsonify({'ok': True, 'character': _char_json(s, row)})
+    finally:
+        s.close()
+
+
+@app.route('/api/personas/<slug>/character')
+def api_persona_character(slug):
+    """The linked character, and -- given a shot -- which of her views that shot
+    will send and which optional ones it wants but she does not have yet."""
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    if not _char_persona_ok(slug):
+        return jsonify({'ok': False, 'error': 'Not your persona'}), 403
+    from db import Character
+    s = _db_session()
+    try:
+        row = s.query(Character).filter(Character.slug == slug).first()
+        if not row:
+            return jsonify({'ok': True, 'character': None})
+        out = _char_json(s, row)
+        shot = (request.args.get('shot') or '').strip().lower()
+        if shot:
+            scene = (request.args.get('scene') or '').strip().lower()
+            canon = _char_canonicals(s, row.id)
+            out['shot_views'] = [
+                {'key': k, 'label': CH.view(k, row.body_type)['label'],
+                 'approved': k in canon}
+                for k in CH.views_for_job(shot, scene, None, row.body_type)
+                if k in canon or CH.view(k, row.body_type)['group'] == 'nsfw'
+                or k in ('face_front', 'body_front')]
+        return jsonify({'ok': True, 'character': out})
+    finally:
+        s.close()
+
+
+@app.route('/api/characters/<char_id>/images', methods=['POST'])
+def api_character_upload(char_id):
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    user = _current_user()
+    body = request.get_json(silent=True) or {}
+    if body.get('attest') is not True:
+        return jsonify({'ok': False, 'error': 'Confirm you have the rights to these '
+                        'images and that anyone shown is 18+ and agreed.'}), 400
+    raw = (body.get('image') or '').strip()
+    if not raw.startswith('data:image/') or ',' not in raw:
+        return jsonify({'ok': False, 'error': 'Upload a JPG, PNG or WebP image.'}), 415
+    import base64
+    head, b64 = raw.split(',', 1)
+    mime = head.split(';')[0].replace('data:', '') or 'image/jpeg'
+    if mime not in ('image/jpeg', 'image/png', 'image/webp'):
+        return jsonify({'ok': False, 'error': 'Upload a JPG, PNG or WebP image.'}), 415
+    try:
+        data = base64.b64decode(b64, validate=False)
+    except Exception:
+        return jsonify({'ok': False, 'error': 'That file could not be read.'}), 400
+    if len(data) > CHAR_IMAGE_MAX_BYTES:
+        return jsonify({'ok': False, 'error': 'Images must be 8 MB or smaller.'}), 413
+    from db import CharacterImage
+    s = _db_session()
+    try:
+        row = _char_row(s, user, char_id)
+        if not row:
+            return jsonify({'ok': False, 'error': 'Unknown character'}), 404
+        view_key = (body.get('view') or '').strip()
+        v = CH.view(view_key, row.body_type) if view_key else None
+        if view_key and (not v or v not in CH.views_for_level(row.nsfw_level, row.body_type)):
+            return jsonify({'ok': False, 'error': 'That view is not available at this level.'}), 400
+        path = storage.put(row.key, data, mime, prefix=storage.KEPT_PREFIX)
+        img = CharacterImage(character_id=row.id, view=view_key, role='reference',
+                             source='upload', rating=(v or {}).get('rating', 'sfw'),
+                             gcs_path=path, mime=mime)
+        s.add(img)
+        row.attested_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        s.commit()
+        return jsonify({'ok': True, 'image': _char_img_json(img)})
+    finally:
+        s.close()
+
+
+@app.route('/api/characters/<char_id>/images/<img_id>/file')
+def api_character_image_file(char_id, img_id):
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    user = _current_user()
+    from db import CharacterImage
+    s = _db_session()
+    try:
+        row = _char_row(s, user, char_id)
+        img = row and s.query(CharacterImage).filter_by(id=img_id, character_id=char_id).first()
+        if not img:
+            return ('Not found', 404)
+        path, mime = img.gcs_path, img.mime
+    finally:
+        s.close()
+    url = storage.signed_url(path)
+    if url:
+        return redirect(url)
+    data = storage.get(path)
+    if not data:
+        return ('Not found', 404)
+    return Response(data, mimetype=mime or 'image/jpeg',
+                    headers={'Cache-Control': 'private, max-age=300'})
+
+
+@app.route('/api/characters/<char_id>/images/<img_id>', methods=['DELETE'])
+def api_character_image_delete(char_id, img_id):
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    user = _current_user()
+    from db import CharacterImage
+    s = _db_session()
+    try:
+        row = _char_row(s, user, char_id)
+        img = row and s.query(CharacterImage).filter_by(id=img_id, character_id=char_id).first()
+        if not img:
+            return jsonify({'ok': False, 'error': 'Unknown image'}), 404
+        if img.gcs_path:
+            try:
+                storage.delete(img.gcs_path)
+            except Exception:
+                pass
+        s.delete(img)
+        _char_refresh_status(s, row)
+        s.commit()
+        return jsonify({'ok': True, 'character': _char_json(s, row, full=True)})
+    finally:
+        s.close()
+
+
+@app.route('/api/characters/<char_id>/generate', methods=['POST'])
+def api_character_generate(char_id):
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    user = _current_user()
+    body = request.get_json(silent=True) or {}
+    view_key = (body.get('view') or '').strip()
+    try:
+        batch = int(body.get('batch') or CH.DEFAULT_BATCH)
+    except (TypeError, ValueError):
+        batch = CH.DEFAULT_BATCH
+    batch = batch if batch in CH.BATCH_CHOICES else CH.DEFAULT_BATCH
+    s = _db_session()
+    try:
+        row = _char_row(s, user, char_id)
+        if not row:
+            return jsonify({'ok': False, 'error': 'Unknown character'}), 404
+        v = CH.view(view_key, row.body_type)
+        if not v or v not in CH.views_for_level(row.nsfw_level, row.body_type):
+            return jsonify({'ok': False, 'error': 'That view is not available at this level.'}), 400
+        canon = _char_canonicals(s, row.id)
+        waiting = [CH.view(d, row.body_type)['label'] for d in v['depends'] if d not in canon]
+        if waiting:
+            return jsonify({'ok': False, 'error': 'Approve ' + ' and '.join(waiting) + ' first.'}), 409
+        has_ref = bool(v['depends']) or bool(
+            _char_images(s, row.id, view=view_key, role='reference')
+            or _char_images(s, row.id, view='', role='reference'))
+        prompt = CH.build_view_prompt(view_key, _char_json_sheet(row), row.age,
+                                      has_ref, row.body_type)
+        key = row.key
+    finally:
+        s.close()
+    spec = {'kind': 'image', 'slug': key, 'job': '', 'model': CHAR_MODEL,
+            'resolution': CHAR_RESOLUTION, 'batch': batch, 'addons': [],
+            'shot': 'portrait', 'explicit': v['rating'] != 'sfw',
+            'rating': v['rating'], 'character_id': char_id,
+            'character_view': view_key, 'prompt': prompt,
+            'reference_media': '', 'negative_extra': ''}
+    try:
+        price = CR.quote(spec)
+    except CR.PricingError as e:
+        return jsonify({'ok': False, 'error': str(e)[:300]}), 400
+    return _gen_submit(user, key, spec, price)
+
+
+@app.route('/api/characters/<char_id>/images/<img_id>/check', methods=['POST'])
+def api_character_check(char_id, img_id):
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    user = _current_user()
+    from db import CharacterImage
+    s = _db_session()
+    try:
+        row = _char_row(s, user, char_id)
+        img = row and s.query(CharacterImage).filter_by(id=img_id, character_id=char_id).first()
+        if not img:
+            return jsonify({'ok': False, 'error': 'Unknown image'}), 404
+        if img.view not in CH.AGE_CHECKED_VIEWS:
+            return jsonify({'ok': False, 'error': 'Only the face and full-body photos are checked.'}), 400
+        result = _char_vision_check(img, row, img.view)
+        img.checks_json = json.dumps(result)
+        s.commit()
+        return jsonify({'ok': True, 'checks': result})
+    finally:
+        s.close()
+
+
+@app.route('/api/characters/<char_id>/images/<img_id>/approve', methods=['POST'])
+def api_character_approve(char_id, img_id):
+    """Make one image the approved photo for its view, and freeze the new set as
+    a version. The face needs every feature confirmed; the face and full body
+    both need a confident adult result from the check."""
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    user = _current_user()
+    body = request.get_json(silent=True) or {}
+    from db import CharacterImage, CharacterVersion
+    s = _db_session()
+    try:
+        row = _char_row(s, user, char_id)
+        img = row and s.query(CharacterImage).filter_by(id=img_id, character_id=char_id).first()
+        if not img or not img.view:
+            return jsonify({'ok': False, 'error': 'Unknown image'}), 404
+        v = CH.view(img.view, row.body_type)
+        if not v or v not in CH.views_for_level(row.nsfw_level, row.body_type):
+            return jsonify({'ok': False, 'error': 'That view is not available at this level.'}), 400
+        if v['group'] == 'face' and img.source == 'upload':
+            return jsonify({'ok': False, 'error': 'Face uploads are references. Generate the face from them.'}), 400
+        canon = _char_canonicals(s, row.id)
+        waiting = [CH.view(d, row.body_type)['label'] for d in v['depends'] if d not in canon]
+        if waiting:
+            return jsonify({'ok': False, 'error': 'Approve ' + ' and '.join(waiting) + ' first.'}), 409
+        if img.view in CH.AGE_CHECKED_VIEWS:
+            try:
+                checks = json.loads(img.checks_json) if img.checks_json else None
+            except ValueError:
+                checks = None
+            if not checks or checks.get('age') != 'adult':
+                return jsonify({'ok': False, 'error': 'The adult-appearance check has '
+                                'not passed for this photo. Run it, or regenerate.'}), 409
+        if img.view == 'face_front':
+            ticked = set(body.get('confirmed') or ())
+            sheet = _char_json_sheet(row)
+            unticked = [CH.features(row.body_type)[k][0] for k in CH.FACE_CHECKS
+                        if k in sheet and k not in ticked]
+            if unticked:
+                return jsonify({'ok': False, 'error': 'Confirm every feature first: ' +
+                                ', '.join(unticked) + '.'}), 409
+        old = canon.get(img.view)
+        if old and old.id != img.id:
+            old.role = 'reference'
+        img.gcs_path = storage.promote(img.gcs_path)
+        img.role, img.expires_at = 'canonical', None
+        canon[img.view] = img
+        row.version = (row.version or 0) + 1
+        s.add(CharacterVersion(character_id=row.id, number=row.version,
+                               snapshot_json=json.dumps({
+                                   'views': {k: i.id for k, i in canon.items()},
+                                   'sheet': _char_json_sheet(row), 'age': row.age,
+                                   'level': row.nsfw_level})))
+        _char_refresh_status(s, row)
+        s.commit()
+        return jsonify({'ok': True, 'character': _char_json(s, row, full=True)})
+    finally:
+        s.close()
+
+
 @app.route('/api/generate/models')
 def api_generate_models():
     """What the provider actually calls its models.
@@ -28972,10 +29643,20 @@ def api_generate_job():
 
     try:
         spec = _gen_spec(slug, body, user)
+        char = _character_for_slug(slug) if spec['kind'] == 'image' else None
+        if char and char.get('status') == 'complete':
+            spec['character_id'] = char['id']
+            spec['character_version'] = char['version']
         price = CR.quote(spec)
     except (imagegen.GenerationError, CR.PricingError) as e:
         return jsonify({'ok': False, 'error': str(e)[:300]}), 400
+    return _gen_submit(user, slug, spec, price)
 
+
+def _gen_submit(user, slug, spec, price):
+    """Reserve the credits, queue the job and start it -- in that order, so an
+    unaffordable job never costs an API call. Shared by the studio and the
+    character builder so both get the same refunds and sweeping."""
     balance = _credit_balance(user)
     if balance is not None and balance < price:
         return _credits_denied(price, balance)
@@ -29038,9 +29719,18 @@ def _gen_start(job_id, slug, spec, workspace):
             if ref_b64:
                 call['reference_b64'] = ref_b64
                 call['reference_mime'] = ref_mime
-            if spec['kind'] == 'image':
+            if spec['kind'] == 'image' and spec.get('character_view'):
+                refs = _character_view_refs(spec['character_id'],
+                                            spec['character_view'])
+                if refs:
+                    call['reference_urls'] = refs
+                call['prompt'] = spec['prompt']
+                provider_job, result = provider.submit_image(call)
+            elif spec['kind'] == 'image':
                 cfg = _persona_config(slug)
-                refs = _gen_reference_urls(slug, spec.get('model'))
+                char_refs, char_clause, char_age = _character_content(spec)
+                refs = (char_refs + _gen_reference_urls(slug, spec.get('model'))
+                        )[:imagegen.MAX_REFERENCES]
                 if refs:
                     call['reference_urls'] = refs
                 banned = cfg.get('banned_terms') or []
@@ -29054,9 +29744,10 @@ def _gen_start(job_id, slug, spec, workspace):
                     camera=spec.get('camera', ''),
                     lighting=spec.get('lighting', ''),
                     direction=' '.join(filter(None, (
+                        char_clause,
                         _prop_from_config(cfg, spec.get('style', '')),
                         spec.get('direction', '')))),
-                    banned=banned)
+                    banned=banned, age=char_age)
                 provider_job, result = provider.submit_image(call)
             else:
                 job = spec.get('job') or (
@@ -29242,6 +29933,8 @@ def _gen_finish(job_id, slug, spec, workspace, urls):
     """Pull the results off the provider's CDN into our own bucket and put them
     in the vault, unapproved. Their URLs are short lived, so this cannot wait."""
     from db import (SessionLocal, PersonaMedia, update_generation)
+    if spec.get('character_view'):
+        return _character_finish(job_id, spec, workspace, urls)
     made = []
     urls = _gen_audio_urls(job_id, spec, urls)
     for url in urls:
@@ -29492,6 +30185,8 @@ def api_generate_jobs():
 def _job_json(job, session_db):
     from db import get_persona_media
     ids = [i for i in (job.result_media_ids or '').split(',') if i]
+    if (job.slug or '').startswith('char-'):
+        return _character_job_json(job, ids, session_db)
     media = []
     for mid in ids:
         row = get_persona_media(session_db, mid)
