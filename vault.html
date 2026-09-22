@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Content Vault</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <script src="/js/theme.js"></script>
+  <link rel="stylesheet" href="/css/style.css">
+  <script src="/js/devnav.js" defer></script>
+  <link rel="stylesheet" href="/css/site-nav.css">
+  <script src="/js/site-nav.js" defer></script>
+  <style>
+    .vw-wrap { max-width: 1100px; margin: 0 auto; padding: 18px 16px 60px; }
+    .vw-bar { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:16px; }
+    .vw-bar select, .vw-bar input[type="search"] {
+      padding:7px 10px; border-radius:9px; border:1px solid var(--border);
+      background:var(--surface); color:var(--text); font-size:0.82rem; }
+    .vw-grid { display:grid; gap:14px;
+      grid-template-columns:repeat(auto-fill, minmax(168px, 1fr)); }
+    .vw-item { border:1px solid var(--border); border-radius:12px; overflow:hidden;
+      background:var(--surface); display:flex; flex-direction:column; }
+    .vw-thumb { position:relative; aspect-ratio:3/4; background:#0002; }
+    .vw-thumb img, .vw-thumb video { width:100%; height:100%; object-fit:cover; display:block; }
+    .vw-kind { position:absolute; top:5px; right:5px; font-size:0.62rem; padding:2px 6px;
+      border-radius:6px; background:#000a; color:#fff; letter-spacing:.04em; }
+    .vw-meta { padding:8px 9px 10px; display:flex; flex-direction:column; gap:7px; }
+    .vw-name { font-size:0.76rem; color:var(--text); overflow:hidden;
+      text-overflow:ellipsis; white-space:nowrap; }
+    .vw-sub { font-size:0.68rem; color:var(--text-muted); }
+    .vw-rate { display:flex; gap:0; border:1px solid var(--border); border-radius:8px;
+      overflow:hidden; }
+    .vw-rate button { flex:1; border:0; background:transparent; color:var(--text-muted);
+      font-size:0.68rem; font-weight:600; padding:4px 0; cursor:pointer; letter-spacing:.04em; }
+    .vw-rate button.on-sfw { background:#1f9d5522; color:#1f9d55; }
+    .vw-rate button.on-nsfw { background:#d6336c22; color:#d6336c; }
+    .vw-row { display:flex; gap:6px; align-items:center; justify-content:space-between; }
+    .vw-del { border:0; background:transparent; color:var(--text-muted); cursor:pointer;
+      font-size:0.68rem; padding:2px 4px; }
+    .vw-del:hover { color:#d6336c; }
+    .vw-empty, .vw-note { color:var(--text-muted); font-size:0.82rem; padding:22px 0; }
+    .vw-unrated { outline:1px dashed #f0932b88; outline-offset:-1px; }
+  </style>
+</head>
+<body class="page-dashboard">
+
+<header>
+  <div style="display:flex; align-items:center; gap:10px;">
+    <h1>Content Vault</h1>
+    <span class="badge" id="vw-count"></span>
+  </div>
+  <div style="display:flex; align-items:center; gap:16px;">
+    <nav data-site-nav="inline" class="sn-links sn-inline"></nav>
+    <a href="/dashboard" style="color:var(--text-muted); font-size:0.8rem; text-decoration:none;">← Dashboard</a>
+  </div>
+</header>
+
+<div class="vw-wrap">
+  <div class="vw-bar">
+    <select id="vw-persona" onchange="vwPick(this.value)"></select>
+    <input type="search" id="vw-q" placeholder="Search by name…" oninput="vwDraw()">
+    <select id="vw-rating" onchange="vwDraw()">
+      <option value="">All ratings</option>
+      <option value="sfw">Safe for work</option>
+      <option value="nsfw">Explicit</option>
+      <option value="unrated">Unrated</option>
+    </select>
+    <select id="vw-type" onchange="vwDraw()">
+      <option value="">Photos and clips</option>
+      <option value="image">Photos</option>
+      <option value="video">Clips</option>
+    </select>
+    <label class="btn btn-secondary" style="cursor:pointer; margin-left:auto;">
+      Upload<input type="file" accept="image/*,video/*" hidden onchange="vwUpload(this)">
+    </label>
+  </div>
+  <div class="vw-note" id="vw-note" hidden></div>
+  <div class="vw-grid" id="vw-grid"></div>
+</div>
+
+<script>
+let vwSlug = '';
+let vwItems = [];
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g,
+    c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function note(msg) {
+  const el = document.getElementById('vw-note');
+  el.textContent = msg || '';
+  el.hidden = !msg;
+}
+
+async function vwInit() {
+  let list = [];
+  try { list = await (await fetch('/api/personas')).json(); } catch (e) {}
+  if (!Array.isArray(list) || !list.length) {
+    note('No personas yet — create one in the dashboard first.');
+    return;
+  }
+  const wanted = new URLSearchParams(location.search).get('persona') || '';
+  const sel = document.getElementById('vw-persona');
+  sel.innerHTML = list.map(p =>
+    '<option value="' + esc(p.slug) + '">' + esc(p.name || p.slug) + '</option>').join('');
+  vwSlug = list.some(p => p.slug === wanted) ? wanted : list[0].slug;
+  sel.value = vwSlug;
+  vwLoad();
+}
+
+function vwPick(slug) { vwSlug = slug; vwLoad(); }
+
+async function vwLoad() {
+  if (!vwSlug) return;
+  try {
+    const d = await (await fetch('/api/personas/' + encodeURIComponent(vwSlug) + '/media')).json();
+    vwItems = (d && d.vault) || [];
+    note('');
+  } catch (e) { vwItems = []; note('Could not read the vault.'); }
+  vwDraw();
+}
+
+function vwFiltered() {
+  const q = (document.getElementById('vw-q').value || '').trim().toLowerCase();
+  const rating = document.getElementById('vw-rating').value;
+  const type = document.getElementById('vw-type').value;
+  return vwItems.filter(m => {
+    if (type && (m.kind || 'image') !== type) return false;
+    if (rating === 'unrated' && m.rating) return false;
+    if (rating && rating !== 'unrated' && m.rating !== rating) return false;
+    if (q && (m.purpose || '').toLowerCase().indexOf(q) === -1
+          && (m.outfit || '').toLowerCase().indexOf(q) === -1) return false;
+    return true;
+  });
+}
+
+function vwDraw() {
+  const rows = vwFiltered();
+  document.getElementById('vw-count').textContent =
+    vwItems.length ? rows.length + ' of ' + vwItems.length : '';
+  document.getElementById('vw-grid').innerHTML = rows.length ? rows.map(m => {
+    const clip = (m.kind || 'image') === 'video';
+    const thumb = clip
+      ? '<video src="' + esc(m.thumb) + '" muted playsinline preload="metadata"></video>'
+        + '<span class="vw-kind">clip</span>'
+      : '<img src="' + esc(m.thumb) + '" alt="" loading="lazy">';
+    const sub = [m.outfit, m.location].filter(Boolean).join(' · ');
+    return '<div class="vw-item' + (m.rating ? '' : ' vw-unrated') + '">'
+      + '<div class="vw-thumb">' + thumb + '</div>'
+      + '<div class="vw-meta">'
+      + '<span class="vw-name" title="' + esc(m.purpose || '') + '">'
+        + esc(m.purpose || 'untitled') + '</span>'
+      + (sub ? '<span class="vw-sub">' + esc(sub) + '</span>' : '')
+      + '<div class="vw-rate">'
+      + '<button type="button" class="' + (m.rating === 'sfw' ? 'on-sfw' : '')
+        + '" onclick="vwRate(\'' + esc(m.id) + '\', \'sfw\')">SFW</button>'
+      + '<button type="button" class="' + (m.rating === 'nsfw' ? 'on-nsfw' : '')
+        + '" onclick="vwRate(\'' + esc(m.id) + '\', \'nsfw\')">NSFW</button>'
+      + '</div>'
+      + '<div class="vw-row">'
+      + '<span class="vw-sub">' + (m.rating ? '' : 'unrated') + '</span>'
+      + '<button type="button" class="vw-del" onclick="vwDelete(\'' + esc(m.id) + '\')">delete</button>'
+      + '</div></div></div>';
+  }).join('') : '<div class="vw-empty">Nothing here yet — upload a photo or keep a generation.</div>';
+}
+
+// A rating is what keeps an explicit file off a channel that bans them, so it
+// is written straight through rather than batched behind a save button.
+async function vwRate(id, rating) {
+  const item = vwItems.find(m => m.id === id);
+  if (!item) return;
+  const next = item.rating === rating ? '' : rating;
+  const was = item.rating;
+  item.rating = next;
+  vwDraw();
+  try {
+    const res = await fetch('/api/personas/' + encodeURIComponent(vwSlug)
+      + '/media/' + encodeURIComponent(id),
+      { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rating: next }) });
+    const d = await res.json();
+    if (!d.ok) throw new Error(d.error || '');
+  } catch (e) {
+    item.rating = was;
+    vwDraw();
+    note('Could not save that rating.');
+  }
+}
+
+async function vwDelete(id) {
+  if (!confirm('Delete this from the vault? This cannot be undone.')) return;
+  try {
+    const res = await fetch('/api/personas/' + encodeURIComponent(vwSlug)
+      + '/media/' + encodeURIComponent(id), { method: 'DELETE' });
+    const d = await res.json();
+    if (!d.ok) { note(d.error || 'Could not delete it.'); return; }
+    vwItems = vwItems.filter(m => m.id !== id);
+    vwDraw();
+  } catch (e) { note('Could not delete it.'); }
+}
+
+function vwUpload(input) {
+  const file = input.files && input.files[0];
+  input.value = '';
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async () => {
+    note('uploading…');
+    try {
+      const res = await fetch('/api/personas/' + encodeURIComponent(vwSlug) + '/media',
+        { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: reader.result, mime: file.type,
+                                 purpose: file.name.replace(/\.[^.]+$/, '').slice(0, 60),
+                                 kind: file.type.startsWith('video/') ? 'video' : 'image' }) });
+      const d = await res.json();
+      if (!d.ok) { note(d.error || 'Upload failed.'); return; }
+      note('');
+      vwLoad();
+    } catch (e) { note('Upload failed.'); }
+  };
+  reader.readAsDataURL(file);
+}
+
+vwInit();
+</script>
+</body>
+</html>

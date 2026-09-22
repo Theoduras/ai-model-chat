@@ -486,6 +486,19 @@ check('a TikTok post is one clip', G.media_max('tiktok') == 1)
 check('every publishable channel can carry a still',
       all(G.media_ok(p, 'image') for p in G.PUBLISHABLE))
 
+print('an explicit file where the channel bans them')
+check('every banned channel refuses nsfw media',
+      all(not G.media_rating_ok(p, 'nsfw') for p in G.NSFW_BANNED_MEDIA))
+check('and the refusal says what it costs',
+      all('banned' in G.media_rating_reject(p, 'nsfw') for p in G.NSFW_BANNED_MEDIA))
+check('safe media rides anywhere',
+      all(G.media_rating_ok(p, 'sfw') for p in G.NSFW_BANNED_MEDIA))
+check('an unrated item is read as safe, never as explicit',
+      all(G.media_rating_ok(p, '') for p in G.NSFW_BANNED_MEDIA))
+check('a channel that allows explicit media says nothing',
+      G.media_rating_reject('x', 'nsfw') == ''
+      and G.media_rating_reject('fanvue', 'nsfw') == '')
+
 def test_nothing_failed():
     assert not FAILURES, FAILURES
 
@@ -495,3 +508,4 @@ if __name__ == '__main__':
         print(f'{len(FAILURES)} FAILED: {FAILURES}')
         raise SystemExit(1)
     print('all growth tests passed')
+

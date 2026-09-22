@@ -583,6 +583,33 @@ def media_reject(platform, kind):
         return f'{label} takes {takes}, not {kind}.'
     return ''
 
+
+# Where an explicit file is a terms-of-service breach rather than a taste call.
+# SFW_LOCKED is the caption rule below; this is the same list read for media, so
+# a channel that may not be *written* to explicitly may not be *shown* it either.
+NSFW_BANNED_MEDIA = ('tiktok', 'instagram', 'threads', 'reddit')
+
+
+def media_rating_ok(platform, rating):
+    """Whether this channel will take a file of this rating. An unrated item is
+    read as safe: it is the only reading that cannot get an account banned by
+    default."""
+    return not media_rating_reject(platform, rating)
+
+
+def media_rating_reject(platform, rating):
+    """Why this file must not go out on this channel, or '' when it may. One
+    string, so the picker's warning and the server's refusal cannot drift."""
+    if str(rating or '').lower() != 'nsfw':
+        return ''
+    plat = normalise_source(platform)
+    if plat not in NSFW_BANNED_MEDIA:
+        return ''
+    label = POST_PLATFORMS.get(plat, {}).get('label', plat or 'that channel')
+    return (f'{label} does not allow explicit media. Posting this will very '
+            f'likely get the {label} account banned.')
+
+
 # 'manual' is a post on a channel with no posting API: it sits on the calendar
 # as a reminder and the scheduler never sees it, because due_posts only ever
 # claims a 'queued' row. Without it a by-hand post would either be invisible or

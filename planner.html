@@ -11,6 +11,20 @@
   <script src="/js/devnav.js" defer></script>
   <link rel="stylesheet" href="/css/site-nav.css">
   <script src="/js/site-nav.js" defer></script>
+<style>
+  .pl-rate { position:absolute; top:4px; left:4px; font-size:0.58rem; font-weight:700;
+    padding:1px 5px; border-radius:5px; letter-spacing:.05em; }
+  .pl-rate.is-sfw  { background:#1f9d55dd; color:#fff; }
+  .pl-rate.is-nsfw { background:#d6336cdd; color:#fff; }
+  .pl-rate.is-none { background:#f0932bdd; color:#fff; }
+  .pl-vault-item.is-banned { opacity:.45; }
+  .pl-vault-item.is-banned .pl-vault-name::after { content:' · not allowed here'; color:#d6336c; }
+  .pl-slot-media { display:flex; align-items:center; gap:6px; margin:4px 0 2px;
+    font-size:0.66rem; color:var(--text-muted); }
+  .pl-slot-media .pl-slot-thumb { width:26px; height:26px; border-radius:5px;
+    object-fit:cover; display:block; }
+  .pl-slot-warn { color:#d6336c; font-weight:700; }
+</style>
 </head>
 <body class="page-dashboard">
 
@@ -161,6 +175,28 @@
                 onclick="plSave(this, true)">Post now</button>
         <button type="button" class="btn btn-primary" id="pl-m-save" onclick="plSave(this)">Save changes</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="pl-slot-media" onclick="if(event.target===this)plSlotMediaClose()">
+  <div class="modal pl-vault-modal">
+    <div class="modal-header">
+      <h2 id="pl-sm-title">Pick the media</h2>
+      <button class="modal-close" onclick="plSlotMediaClose()" aria-label="Close">&times;</button>
+    </div>
+    <div class="pl-vault-bar">
+      <input type="search" id="pl-sm-q" placeholder="Search by name…" oninput="plSlotMediaDraw()">
+      <select id="pl-sm-rating" onchange="plSlotMediaDraw()">
+        <option value="">All ratings</option>
+        <option value="sfw">Safe for work</option>
+        <option value="nsfw">Explicit</option>
+        <option value="unrated">Unrated</option>
+      </select>
+    </div>
+    <div class="modal-body pl-vault-body">
+      <div class="pl-vault-grid" id="pl-sm-grid"></div>
+      <div class="pl-vault-foot" id="pl-sm-foot"></div>
     </div>
   </div>
 </div>
@@ -612,7 +648,8 @@ function plRender(d) {
   }));
   plProposed.forEach((s, i) => cards.push({
     kind: 'proposed', at: s.at, platform: s.platform, publishable: s.publishable,
-    text: s.idea, job: s.kind, idx: i
+    text: s.idea, job: s.kind, idx: i,
+    media: s.media_id ? plMediaById(s.media_id) : null
   }));
   // Posts made in the Fanvue app itself. Shown so the week is planned around
   // them, never edited from here — they are not ours to change.
@@ -685,10 +722,110 @@ function plCard(c) {
     + '<span class="pl-card-top"><span class="pl-when">' + hourLabel(c.at) + '</span>'
     + '<span class="pl-chan">' + esc(PL_LABELS[c.platform] || c.platform) + '</span>'
     + (flag ? '<span class="pl-flag">' + esc(flag) + '</span>' : '') + '</span>'
-    + (c.media ? plMediaThumb(c.media, ' is-card') : '')
+    + (c.media && c.kind !== 'proposed' ? plMediaThumb(c.media, ' is-card') : '')
+    + (c.kind === 'proposed' && c.publishable ? plSlotMediaRow(c) : '')
     + '<span class="pl-text">' + esc(c.text || 'no angle yet') + '</span>'
     + (c.error ? '<span class="pl-flag" style="margin-left:0;">' + esc(c.error.slice(0, 60)) + '</span>' : '')
     + '</button>';
+}
+
+// What this proposal will go out carrying, and the way to change it. Shown on
+// the card rather than behind the editor: a week is reviewed by scanning it.
+function plSlotMediaRow(c) {
+  const slot = plProposed[c.idx] || {};
+  const m = c.media;
+  const warn = m && PL_NSFW_BANNED.indexOf(c.platform) !== -1 && m.rating === 'nsfw';
+  return '<span class="pl-slot-media" role="button" tabindex="0"'
+    + ' title="Pick the photo or clip for this post"'
+    + ' onclick="event.stopPropagation(); plSlotMediaOpen(' + c.idx + ')">'
+    + (m ? '<img class="pl-slot-thumb" src="' + esc(m.kind === 'video' ? (m.poster || m.thumb) : m.thumb) + '" alt="">' : '')
+    + '<span' + (warn ? ' class="pl-slot-warn"' : '') + '>'
+    + (m ? esc((m.purpose || (m.kind === 'video' ? 'clip' : 'photo')).slice(0, 18))
+           + (warn ? ' · explicit' : (slot.media_override ? ' · forced' : ''))
+         : '+ add media')
+    + '</span></span>';
+}
+
+// ── Slot media picker ───────────────────────────────────────────────────────
+
+// The channels that ban explicit media, mirrored from growth.NSFW_BANNED_MEDIA.
+// The server refuses one of these anyway; this is what lets the picker warn
+// before the creator has queued a week they have to unpick.
+const PL_NSFW_BANNED = ['tiktok', 'instagram', 'threads', 'reddit'];
+let plSlotIdx = -1;
+
+function plSlotMediaOpen(idx) {
+  if (!plProposed[idx]) return;
+  plSlotIdx = idx;
+  document.getElementById('pl-sm-q').value = '';
+  document.getElementById('pl-sm-rating').value = '';
+  document.getElementById('pl-sm-title').textContent =
+    'Media for ' + (PL_LABELS[plProposed[idx].platform] || plProposed[idx].platform);
+  document.getElementById('pl-slot-media').classList.add('open');
+  plSlotMediaDraw();
+}
+
+function plSlotMediaClose() {
+  document.getElementById('pl-slot-media').classList.remove('open');
+  plSlotIdx = -1;
+}
+
+function plSlotBanned(platform, m) {
+  return PL_NSFW_BANNED.indexOf(platform) !== -1 && (m || {}).rating === 'nsfw';
+}
+
+function plSlotMediaDraw() {
+  const slot = plProposed[plSlotIdx];
+  if (!slot) return;
+  const q = document.getElementById('pl-sm-q').value.trim().toLowerCase();
+  const rating = document.getElementById('pl-sm-rating').value;
+  const shown = plVault.filter(m => {
+    if (rating === 'unrated' && m.rating) return false;
+    if (rating && rating !== 'unrated' && m.rating !== rating) return false;
+    if (q && (m.purpose || '').toLowerCase().indexOf(q) === -1) return false;
+    return true;
+  });
+  document.getElementById('pl-sm-grid').innerHTML = shown.length
+    ? shown.map(m => '<button type="button" class="pl-vault-item'
+        + (slot.media_id === m.id ? ' on' : '')
+        + (plSlotBanned(slot.platform, m) ? ' is-banned' : '')
+        + '" onclick="plSlotMediaPick(\'' + esc(m.id) + '\')">'
+        + plMediaThumb(m)
+        + '<span class="pl-rate is-' + (m.rating || 'none') + '">'
+        + esc(m.rating ? m.rating.toUpperCase() : 'unrated') + '</span>'
+        + '<span class="pl-vault-name">' + esc(m.purpose || 'untitled') + '</span>'
+        + '</button>').join('')
+    : '<span class="hint">Nothing in the vault matches that. Add media in the '
+      + 'Content Vault.</span>';
+  document.getElementById('pl-sm-foot').innerHTML =
+    '<span class="hint">' + shown.length + ' of ' + plVault.length + ' shown'
+    + (PL_NSFW_BANNED.indexOf(slot.platform) !== -1
+        ? ' · this channel bans explicit media' : '') + '</span>'
+    + '<span style="display:flex; gap:8px;">'
+    + (slot.media_id
+        ? '<button type="button" class="btn btn-ghost" onclick="plSlotMediaPick(\'\')">Post without media</button>'
+        : '')
+    + '<button type="button" class="btn btn-primary" onclick="plSlotMediaClose()">Done</button>'
+    + '</span>';
+}
+
+function plSlotMediaPick(id) {
+  const slot = plProposed[plSlotIdx];
+  if (!slot) return;
+  const m = id ? plMediaById(id) : null;
+  if (id && plSlotBanned(slot.platform, m)) {
+    const label = PL_LABELS[slot.platform] || slot.platform;
+    if (!confirm(label + ' does not allow explicit media. Posting this will very '
+        + 'likely get the ' + label + ' account banned.\n\nUse it anyway?')) return;
+    if (!confirm('Last check: queue explicit media to ' + label + ' and accept the '
+        + 'risk of losing that account?')) return;
+    slot.media_override = true;
+  } else {
+    slot.media_override = false;
+  }
+  slot.media_id = id || '';
+  plSlotMediaClose();
+  plRender(plPlanMeta || {});
 }
 
 // ── Planning ─────────────────────────────────────────────────────────────────
@@ -770,7 +907,10 @@ async function plQueueWeek(btn) {
     const d = await res.json();
     if (!d.ok) { alert(d.error || 'Could not queue them.'); return; }
     let msg = d.queued.length + ' post' + (d.queued.length === 1 ? '' : 's') + ' queued.';
-    if (d.failed.length) msg += ' ' + d.failed.length + ' could not be written.';
+    if (d.failed.length) {
+      msg += ' ' + d.failed.length + ' could not be written: '
+        + (d.failed[0].error || 'no reason given');
+    }
     if (d.skipped) msg += ' ' + d.skipped + ' were over the ' + d.cap + '-post limit for one round.';
     // The ones that went in are real rows now; anything left is still by hand.
     plProposed = plProposed.filter(s => !s.publishable);

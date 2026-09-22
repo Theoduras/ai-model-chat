@@ -5739,6 +5739,15 @@ def planner_page():
         return redirect('/dashboard')
     return send_from_directory(BASE_DIR, 'planner.html')
 
+@app.route('/vault')
+def vault_page():
+    # Open past the operator check like /planner: every media call it makes is
+    # scoped to a persona the signed-in creator owns.
+    if not (_is_operator() or _current_user()):
+        return redirect('/dashboard')
+    return send_from_directory(BASE_DIR, 'vault.html')
+
+
 @app.route('/blog', methods=['GET'])
 def blog_page():
     return send_from_directory(BASE_DIR, 'blog.html')
@@ -8900,6 +8909,30 @@ def _growth_media_check(persona, platform, media_id):
     return media['id'], ''
 
 
+def _plan_media_check(persona, platform, media_id, override=False):
+    """Validate the item the creator attached to a slot. Returns (media_id, '')
+    when it may go out, or ('', why) when it may not. An explicit file on a
+    channel that bans them is refused unless the creator has already been shown
+    the warning and said yes twice, which is what `override` records."""
+    from db import SessionLocal, get_persona_media
+    sdb = SessionLocal()
+    try:
+        row = get_persona_media(sdb, media_id)
+        rating = getattr(row, 'rating', '') if row else ''
+        ok = bool(row) and row.slug == persona and row.approved is not False
+    finally:
+        sdb.close()
+    if not ok:
+        return '', 'That file is not in this persona\'s approved vault.'
+    why = growth.media_rating_reject(platform, rating)
+    if why and not override:
+        return '', why
+    if why:
+        logger.warning('PLAN explicit media forced [%s] %s media=%s',
+                       persona, platform, media_id)
+    return _growth_media_check(persona, platform, media_id)
+
+
 def _plan_media_pick(persona, platform, used):
     """One library item for a queued post: the first this channel will take that
     nothing in the queue already carries, so a week of posts does not go out
@@ -8912,8 +8945,10 @@ def _plan_media_pick(persona, platform, used):
         rows = list_persona_media(sdb, persona)
     finally:
         sdb.close()
-    for row in rows:
+    for row in _approved_only(rows):
         if row.id in used or not growth.media_ok(platform, row.kind or 'image'):
+            continue
+        if not growth.media_rating_ok(platform, getattr(row, 'rating', '')):
             continue
         media_id, _why = _growth_media_check(persona, platform, row.id)
         if media_id:
@@ -9354,7 +9389,10 @@ def api_growth_plan():
             kind = s.get('kind') if s.get('kind') in growth.MIX_BRIEF else 'value'
             idea = (s.get('idea') or '').strip()[:200]
             if idea:
-                wanted.append({'platform': plat, 'at': at, 'kind': kind, 'idea': idea})
+                wanted.append({'platform': plat, 'at': at, 'kind': kind,
+                               'idea': idea,
+                               'media_id': str(s.get('media_id') or '')[:64],
+                               'media_override': bool(s.get('media_override'))})
         if not wanted:
             return jsonify({'ok': False,
                             'error': 'Nothing here can be queued — the slots are '
@@ -9380,7 +9418,15 @@ def api_growth_plan():
                 if not text:
                     failed.append({**s, 'error': 'came back empty'})
                     continue
-                media_id = _plan_media_pick(persona, s['platform'], used)
+                if s.get('media_id'):
+                    media_id, why = _plan_media_check(
+                        persona, s['platform'], s['media_id'],
+                        bool(s.get('media_override')))
+                    if why:
+                        failed.append({**s, 'error': why})
+                        continue
+                else:
+                    media_id = _plan_media_pick(persona, s['platform'], used)
                 if media_id:
                     used.add(media_id)
                 run_at = datetime.fromtimestamp(s['at'], timezone.utc).replace(tzinfo=None)
@@ -9455,6 +9501,15 @@ def api_growth_plan():
             group = ((('cross', (s.get('cross') or {}).get('group')) if s.get('cross')
                       else ('series', (s.get('series') or {}).get('group'))))
             s['idea'] = by_group.get(group, '')
+    # The photo each slot would carry, shown with the plan so the creator can
+    # swap it before queueing rather than finding out from the feed.
+    used = {r['media_id'] for r in _growth_queue_rows(persona) if r['media_id']}
+    for s in slots:
+        if not s.get('publishable'):
+            continue
+        s['media_id'] = _plan_media_pick(persona, s['platform'], used)
+        if s['media_id']:
+            used.add(s['media_id'])
     return jsonify({'ok': True, 'persona': persona, 'start': start, 'days': days,
                     'slots': slots, 'ideas': len(ideas),
                     'cap': growth.PLAN_QUEUE_CAP,
@@ -10461,6 +10516,7 @@ def api_persona_media_list(slug):
                 'outfit': r.outfit or '',        # legacy, kept during migration
                 'kind': r.kind or 'image',
                 'mime': r.mime or '',
+                'rating': getattr(r, 'rating', '') or '',
                 'hosted': bool(r.source_url and not r.image_data),
                 'location': (o or {}).get('location', ''),
                 'lighting': (o or {}).get('lighting', ''),
@@ -10545,6 +10601,9 @@ def api_persona_media_save(slug):
             outfit=str(data.get('outfit', ''))[:120],
             lighting=str(data.get('lighting', ''))[:60],
             purpose=str(data.get('purpose', ''))[:60],
+            rating=(str(data.get('rating', '')).lower()
+                    if str(data.get('rating', '')).lower() in ('sfw', 'nsfw')
+                    else 'sfw'),
         )
         s.add(row)
         s.flush()
@@ -10648,6 +10707,11 @@ def api_persona_media_update(slug, media_id):
         for f in ('location', 'outfit', 'lighting', 'purpose'):
             if f in data:
                 setattr(row, f, str(data[f])[:120])
+        if 'rating' in data:
+            rating = str(data['rating'] or '').lower()
+            if rating not in ('', 'sfw', 'nsfw'):
+                return jsonify({'error': 'Rating is sfw, nsfw, or blank.'}), 400
+            row.rating = rating
         if 'image' in data and data['image'].startswith('data:'):
             row.image_data = data['image']
         s.commit()
@@ -29060,6 +29124,11 @@ def _gen_finish(job_id, slug, spec, workspace, urls):
                 outfit=(spec.get('outfit') or {}).get('name', '') or '',
                 purpose=spec.get('shot', '') or '',
                 source='generated', approved_for_training=False,
+                # From the spec, not from a later guess: the shot is what said
+                # whether this was going to be explicit.
+                rating=('nsfw' if (spec.get('explicit')
+                                   or (spec.get('level') or 'sfw') != 'sfw')
+                        else 'sfw'),
                 # An extension is its own clip -- nothing here can join it onto
                 # the one it continues -- so the chain is what says it is one.
                 parent_media=spec.get('parent_media') or '')

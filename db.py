@@ -184,6 +184,10 @@ class PersonaMedia(Base):
     is_favourite = Column(Boolean, default=False)
     tags = Column(String(300), default='')
     approved_for_training = Column(Boolean, default=True)
+    # Safe-work or explicit. '' is an item nobody has judged yet; it is treated
+    # as safe when a channel asks, because the cost of guessing wrong the other
+    # way is a banned account.
+    rating = Column(String(8), default='')   # '' | sfw | nsfw
     source = Column(String(12), default='upload')   # upload | generated
     # The clip an extension continues. There is no ffmpeg in the image, so an
     # extension cannot be joined onto its source: it is delivered as its own
