@@ -160,27 +160,27 @@
         <button class="btn-new" data-role-area="personas" onclick="newPersona()">+ New Persona</button>
 
         <div class="sb-label">Workspace</div>
-        <button type="button" class="sb-item" data-search="chat" onclick="openChat(this)">
+        <button type="button" class="sb-item" data-view="/chat" data-search="chat" onclick="openChat(this)">
           <svg class="sb-ic-chat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" width="16" height="16" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8A2.5 2.5 0 0 1 17.5 16H10l-4.5 4v-4H6.5A2.5 2.5 0 0 1 4 13.5v-8Z" stroke-linejoin="round"/></svg>
           <span>Chat</span>
         </button>
-        <button type="button" class="sb-item" data-search="planner content calendar posts schedule week" onclick="openPlanner(this)">
+        <button type="button" class="sb-item" data-view="/planner" data-search="planner content calendar posts schedule week" onclick="openPlanner(this)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4" stroke-linecap="round"/></svg>
           <span>Content planner</span>
         </button>
-        <button type="button" class="sb-item" data-search="vault media library photos clips sfw nsfw content" onclick="openEmbedded('/vault', this)">
+        <button type="button" class="sb-item" data-view="/vault" data-search="vault media library photos clips sfw nsfw content" onclick="openEmbedded('/vault', this)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="12" cy="12" r="3"/><path d="M12 4v2M12 18v2" stroke-linecap="round"/></svg>
           <span>Content Vault</span>
         </button>
-        <button type="button" class="sb-item admin-only" data-role-area="generate" data-search="studio generate image video nsfw ai photos clips credits" onclick="openEmbedded('/studio', this)">
+        <button type="button" class="sb-item admin-only" data-view="/studio" data-role-area="generate" data-search="studio generate image video nsfw ai photos clips credits" onclick="openEmbedded('/studio', this)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.8"/><path d="m4 17 4.5-4.5L13 17M14 14l2.5-2.5L20 15" stroke-linecap="round" stroke-linejoin="round"/></svg>
           <span>Generation studio</span>
         </button>
-        <button type="button" class="sb-item admin-only" data-search="landing page" onclick="openEmbedded('/landing', this)">
+        <button type="button" class="sb-item admin-only" data-view="/landing" data-search="landing page" onclick="openEmbedded('/landing', this)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18" stroke-linecap="round"/></svg>
           <span>Landing page</span>
         </button>
-        <button type="button" class="sb-item" data-search="share link embed widget snippet chat bubble" onclick="openEmbedWidget(this)">
+        <button type="button" class="sb-item" data-view="/embed-setup" data-search="share link embed widget snippet chat bubble" onclick="openEmbedWidget(this)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><path d="M8 4 3 12l5 8M16 4l5 8-5 8" stroke-linecap="round" stroke-linejoin="round"/></svg>
           <span>Share link</span>
         </button>
@@ -193,7 +193,7 @@
             <svg class="sb-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12" aria-hidden="true"><path d="M9 6l6 6-6 6" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
           <div class="sb-children">
-            <button type="button" class="sb-item" data-platform="fanvue" data-search="fanvue" onclick="openPlatform('fanvue', this)">
+            <button type="button" class="sb-item" data-platform="fanvue" data-view="/fanvue" data-search="fanvue" onclick="openPlatform('fanvue', this)">
               <svg class="sb-ic-fanvue" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect width="24" height="24" rx="6" fill="#FF2D6B"/><text x="12" y="16.5" font-family="Arial, sans-serif" font-size="12" font-weight="700" fill="#fff" text-anchor="middle">F</text></svg>
               <span>Fanvue</span>
             </button>
@@ -217,23 +217,23 @@
             <svg class="sb-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12" aria-hidden="true"><path d="M9 6l6 6-6 6" stroke-linecap="round" stroke-linejoin="round"/></svg>
           </button>
           <div class="sb-children">
-            <button type="button" class="sb-item" data-platform="telegram" data-search="telegram" onclick="openPlatform('telegram', this)">
+            <button type="button" class="sb-item" data-platform="telegram" data-view="/telegram" data-search="telegram" onclick="openPlatform('telegram', this)">
               <svg class="sb-ic-telegram" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/></svg>
               <span>Telegram</span>
             </button>
-            <button type="button" class="sb-item" data-platform="x" data-search="x bot twitter" onclick="openPlatform('x', this)">
+            <button type="button" class="sb-item" data-platform="x" data-view="/xbot" data-search="x bot twitter" onclick="openPlatform('x', this)">
               <svg class="sb-ic-x" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M14.234 10.162 22.977 0h-2.072l-7.591 8.824L7.251 0H.258l9.168 13.343L.258 24H2.33l8.016-9.318L16.749 24h6.993zm-2.837 3.299-.929-1.329L3.076 1.56h3.182l5.965 8.532.929 1.329 7.754 11.09h-3.182z"/></svg>
               <span>&#120143; Bot</span>
             </button>
-            <button type="button" class="sb-item" data-platform="threads" data-search="threads" onclick="openPlatform('threads', this)">
+            <button type="button" class="sb-item" data-platform="threads" data-view="/threads" data-search="threads" onclick="openPlatform('threads', this)">
               <svg class="sb-ic-threads" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M18.263 11.097c-.03-3.486-1.92-5.586-5.111-5.586-2.13 0-3.922.963-4.863 2.499l2.062 1.438c.535-.843 1.272-1.543 2.628-1.543 1.528 0 2.318.85 2.544 2.431a15 15 0 0 0-2.236-.173c-4.125 0-6.068 1.867-6.068 4.336s1.943 3.99 4.804 3.99c3.139 0 5.013-2.115 5.781-4.735.798.361 1.348 1.204 1.348 2.47 0 3.387-3.907 5.232-7.22 5.232-4.885 0-8.077-3.207-8.077-8.424 0-6.392 4.223-10.487 9.9-10.487 3.808 0 5.69 1.671 6.97 3.914l2.108-1.475C21.44 2.078 18.331 0 13.663 0 6.227 0 1.168 5.277 1.168 12.934c0 7 4.953 11.066 10.856 11.066 4.878 0 9.809-2.846 9.809-7.716 0-2.545-1.46-4.231-3.569-5.187m-6.33 4.855c-1.077 0-2.026-.512-2.026-1.453 0-1.483 1.822-1.934 3.606-1.934.678 0 1.34.045 1.927.173-.422 1.927-1.671 3.215-3.508 3.214Z"/></svg>
               <span>Threads</span>
             </button>
-            <button type="button" class="sb-item" data-platform="instagram" data-search="instagram ig" onclick="openPlatform('instagram', this)">
+            <button type="button" class="sb-item" data-platform="instagram" data-view="/instagram" data-search="instagram ig" onclick="openPlatform('instagram', this)">
               <svg class="sb-ic-instagram" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.2" cy="6.8" r="1.1" fill="currentColor" stroke="none"/></svg>
               <span>Instagram</span>
             </button>
-            <button type="button" class="sb-item" data-platform="discord" data-search="discord" onclick="openPlatform('discord', this)">
+            <button type="button" class="sb-item" data-platform="discord" data-view="/discord" data-search="discord" onclick="openPlatform('discord', this)">
               <svg class="sb-ic-discord" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path fill="currentColor" d="M20.317 4.369a19.79 19.79 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.6 12.6 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.1 13.1 0 0 1-1.872-.892.077.077 0 0 1-.008-.128c.126-.094.252-.192.372-.291a.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.009c.12.099.246.198.373.292a.077.077 0 0 1-.006.127c-.598.35-1.22.644-1.873.891a.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.84 19.84 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.028zM8.02 15.331c-1.183 0-2.157-1.086-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.42 0 1.332-.956 2.418-2.157 2.418zm7.975 0c-1.183 0-2.157-1.086-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.095 2.157 2.42 0 1.332-.946 2.418-2.157 2.418z"/></svg>
               <span>Discord</span>
             </button>
@@ -250,7 +250,7 @@
           </div>
         </div>
 
-        <button type="button" class="sb-item" id="sb-team" hidden data-role-area="team" data-search="team seats invite members"
+        <button type="button" class="sb-item" id="sb-team" hidden data-view="/team" data-role-area="team" data-search="team seats invite members"
                 onclick="openEmbedded('/team', this)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><circle cx="9" cy="8" r="3.25"/><path d="M2.5 19a6.5 6.5 0 0 1 13 0" stroke-linecap="round"/><path d="M16.5 5.5a3.25 3.25 0 0 1 0 6.5M20 19a6 6 0 0 0-4-5.65" stroke-linecap="round"/></svg>
           <span>Team</span>
@@ -262,7 +262,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" width="16" height="16" aria-hidden="true"><path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z" stroke-linecap="round" stroke-linejoin="round"/><path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" stroke-linecap="round" stroke-linejoin="round"/></svg>
           <span>Gemini settings</span>
         </a>
-        <button type="button" class="sb-item admin-only" data-search="manage users admin" onclick="openEmbedded('/admin/users', this)">
+        <button type="button" class="sb-item admin-only" data-view="/admin/users" data-search="manage users admin" onclick="openEmbedded('/admin/users', this)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><circle cx="9" cy="8" r="3.25"/><path d="M2.5 19a6.5 6.5 0 0 1 13 0" stroke-linecap="round"/><path d="M16.5 5.5a3.25 3.25 0 0 1 0 6.5M20 19a6 6 0 0 0-4-5.65" stroke-linecap="round"/></svg>
           <span>Manage users</span>
         </button>
@@ -272,7 +272,7 @@
 
     <div class="sb-foot">
       <div class="sb-plan" id="sb-plan" hidden></div>
-      <button type="button" class="btn btn-primary sb-refer" data-search="referrals refer earn commission invite"
+      <button type="button" class="btn btn-primary sb-refer" data-view="/referrals" data-search="referrals refer earn commission invite"
               onclick="openEmbedded('/referrals', this)">Refer a creator &middot; earn 5%</button>
       <a href="/account" class="sb-item" data-search="account billing">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2.5 2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -410,7 +410,7 @@ function filterSbNav() {
     label.style.display = anyVisible ? '' : 'none';
   });
 }
-let currentTab = (() => { try { return localStorage.getItem('dashboard_tab') || 'chat'; } catch(e) { return 'chat'; } })();
+let currentTab = 'chat';
 const personas = {};
 
 function _overlay() { return document.getElementById('mobile-overlay'); }
@@ -447,6 +447,10 @@ function lsNs() { return '_u' + CURRENT_UID; }
 function lsPersonaKey(slug) { return 'admin_persona_cfg_' + slug + lsNs(); }
 function lsSlugsKey() { return 'admin_persona_slugs' + lsNs(); }
 function lsPromptKey(slug) { return 'persona_prompt_' + slug + lsNs(); }
+function lsViewKey() { return 'admin_view' + lsNs(); }
+function lsTabKey() { return 'dashboard_tab' + lsNs(); }
+
+function saveView(v) { try { localStorage.setItem(lsViewKey(), JSON.stringify(v)); } catch(e) {} }
 
 // Drop the pre-namespacing keys, which were shared across accounts. The server
 // holds the real personas, so this only clears a cache.
@@ -458,7 +462,8 @@ function lsPurgeLegacy() {
       if (!k) continue;
       const legacy = (k.startsWith('admin_persona_cfg_') || k === 'admin_persona_slugs' ||
                       k === 'admin_folders' || k.startsWith('admin_folder_assign_') ||
-                      k.startsWith('admin_folder_open_') || k.startsWith('persona_prompt_'));
+                      k.startsWith('admin_folder_open_') || k.startsWith('persona_prompt_') ||
+                      k === 'dashboard_tab');
       // Namespaced keys end in _u<uid>; anything else is pre-namespacing.
       if (legacy && !/_u([0-9a-f]{32}|anon)$/.test(k)) stale.push(k);
     }
@@ -737,6 +742,7 @@ document.addEventListener('keydown', e => {
 
 async function init() {
   await identifyUser();
+  try { currentTab = localStorage.getItem(lsTabKey()) || 'chat'; } catch(e) {}
   restoreSbGroups();
   markActiveNavByPath();
   loadConfig();
@@ -763,6 +769,7 @@ async function init() {
   renderSidebar();
   document.getElementById('persona-count').textContent = seen.size;
   if (currentTab !== 'chat') switchTabByName(currentTab);
+  restoreView();
 }
 
 function applyConnState(configured, authMode, masked) {
@@ -1276,6 +1283,7 @@ function showPersonaBrowser() {
   clearSbActive();
   const nav = document.getElementById('sb-nav-personas');
   if (nav) nav.classList.add('active');
+  saveView({ kind: 'browser' });
   renderPersonaBrowser();
 }
 
@@ -1322,6 +1330,7 @@ function openPlatform(platform, navEl) {
   if (navEl) navEl.classList.add('active');
   document.body.classList.remove('browsing');
   document.body.classList.remove('embedding');
+  saveView({ kind: 'platform', platform: platform });
   PlatformSetup.open(platform, null);
 }
 
@@ -1364,6 +1373,31 @@ function openEmbedded(url, navEl) {
   document.body.classList.add('embedding');
   document.getElementById('form-area').innerHTML =
     '<iframe class="sb-frame" src="' + url + '" title="Embedded page"></iframe>';
+  saveView({ kind: 'embed', url: url });
+}
+
+// Reopens whatever was on screen last. A stored persona that has since been
+// deleted, or a view this account cannot see, falls through to the default.
+function restoreView() {
+  let v = null;
+  try { v = JSON.parse(localStorage.getItem(lsViewKey()) || 'null'); } catch(e) {}
+  if (!v) return false;
+  if (v.kind === 'persona') {
+    if (!personas[v.slug]) return false;
+    loadPersona(v.slug);
+    return true;
+  }
+  if (v.kind === 'embed') {
+    const path = String(v.url).split('?')[0];
+    openEmbedded(v.url, document.querySelector('[data-view="' + path + '"]'));
+    return true;
+  }
+  if (v.kind === 'platform') {
+    if (!window.PlatformSetup) return false;
+    openPlatform(v.platform, document.querySelector('[data-platform="' + v.platform + '"]'));
+    return true;
+  }
+  return false;
 }
 
 // An embedded console (the Fanvue setup wizard) runs its own coach-marks, but
@@ -1554,6 +1588,7 @@ async function loadPersona(slug) {
   clearSbActive();
   const item = document.getElementById('item-' + slug);
   if (item) item.classList.add('active');
+  saveView({ kind: 'persona', slug: slug });
   let config = {};
   try {
     const res = await fetch('/api/personas/' + slug);
@@ -2894,7 +2929,7 @@ async function testChat() {
 
 function switchTab(name, el) {
   currentTab = name;
-  try { localStorage.setItem('dashboard_tab', name); } catch(e) {}
+  try { localStorage.setItem(lsTabKey(), name); } catch(e) {}
   document.querySelectorAll('.preview-tab').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
   document.getElementById('preview-chat').style.display = name === 'chat' ? 'flex' : 'none';
