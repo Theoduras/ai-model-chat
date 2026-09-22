@@ -41,8 +41,11 @@ def _opts(noun, *values):
 FEATURES = {
     'female': {
         # Face
-        'face_shape': ('Face shape', 'face', _opts('face', 'Oval', 'Heart-shaped', 'Round', 'Square', 'Diamond', 'Long') +
-                       [('Triangle', 'triangle-shaped face, narrow forehead and wide jaw')]),
+        'face_shape': ('Face shape', 'face', [('Oval', 'oval face'), ('Round', 'round face'), ('Square', 'square face'),
+                                              ('Heart-shaped', 'heart-shaped face'), ('Diamond', 'diamond face'),
+                                              ('Rectangle', 'long rectangular face'),
+                                              ('Triangle', 'triangle-shaped face, wide forehead and narrow pointed chin'),
+                                              ('Base-down triangle', 'base-down triangle face, narrow forehead and wide jaw')]),
         'skin_tone': ('Skin tone', 'face', _opts('skin', 'Fair', 'Light', 'Light olive', 'Olive', 'Tan', 'Brown', 'Deep brown', 'Dark')),
         'marks': ('Freckles or moles', 'face', [('None', 'clear skin'), ('Light freckles, nose', 'light freckles across the nose'),
                                                  ('Heavy freckles', 'heavy freckles'), ('Beauty mark, cheek', 'a small beauty mark on the cheek'),
@@ -73,10 +76,20 @@ FEATURES = {
         'waist': ('Waist', 'body', _opts('waist', 'Defined', 'Straight', 'Soft')),
         'hips': ('Hips', 'body', _opts('hips', 'Narrow', 'Medium', 'Wide')),
         'bust': ('Bust', 'body', _opts('bust', 'Small', 'Medium', 'Large', 'Very large')),
-        'glutes': ('Bum projection', 'body', _opts('bum', 'Flat', 'Round', 'Full', 'Very full')),
+        'glutes': ('Bum from the side', 'body', [('Full, rounded', 'a full, rounded bum'),
+                                                  ('High shelf', 'a high, shelf-like bum that sits out from the back'),
+                                                  ('Bubble', 'a round, lifted bubble bum'),
+                                                  ('Sporty', 'a firm, athletic bum'),
+                                                  ('Saggy', 'a soft bum that sits low'),
+                                                  ('Double saggy', 'a soft, low bum with a crease below it'),
+                                                  ('Flat', 'a flat bum'), ('Bone', 'a slim, bony bum')]),
         'glute_shape': ('Bum shape, from behind', 'body', [('Round', 'a round bum'), ('Heart-shaped', 'a heart-shaped bum'),
                                                            ('A-shaped', 'an A-shaped bum, fuller at the bottom'),
-                                                           ('Square', 'a square-shaped bum'), ('V-shaped', 'a V-shaped bum')]),
+                                                           ('Pear', 'a pear-shaped bum, widest at the base'),
+                                                           ('Square', 'a square-shaped bum'),
+                                                           ('Bubble', 'a high, rounded bubble bum'),
+                                                           ('Wide', 'a wide, full bum set low on the hips'),
+                                                           ('V-shaped', 'a V-shaped bum')]),
         'thighs': ('Thighs', 'body', _opts('thighs', 'Slim', 'Toned', 'Full')),
         'tattoos': ('Tattoos', 'body', [('None', 'no tattoos'), ('Small, wrist', 'a small wrist tattoo'), ('Small, ankle', 'a small ankle tattoo'),
                                         ('Hip', 'a hip tattoo'), ('Sleeve', 'a full arm sleeve tattoo'), ('Back piece', 'a large back tattoo')]),
@@ -122,6 +135,11 @@ YOUTH_LEANING = {
     ('pubic_style', 'Shaved'), ('pubic_density', 'Sparse'),
     ('face_shape', 'Round'), ('nose', 'Button'), ('perkiness', 'Perky'),
 }
+# Options renamed after sheets were saved with them: the old label still
+# validates and is stored as the new one.
+RENAMED = {('face_shape', 'Long'): 'Rectangle', ('glutes', 'Round'): 'Bubble',
+           ('glutes', 'Full'): 'Full, rounded', ('glutes', 'Very full'): 'High shelf'}
+
 YOUTH_BLOCK_AT = 3
 YOUTH_WARN_AT = 2
 
@@ -292,6 +310,7 @@ def validate(data, body_type='female'):
     feats = features(body_type)
     sheet = {}
     for k, v in (data.get('sheet') or {}).items():
+        v = RENAMED.get((k, v), v)
         if k not in feats:
             continue
         if v in ('', None):

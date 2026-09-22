@@ -84,6 +84,8 @@ def test_validation():
         'height': 'Under 155 cm', 'cup': 'A', 'pubic_style': 'Shaved'}}))
     clean, warn = CH.validate({'age': 25, 'sheet': {'height': 'Under 155 cm', 'cup': 'A'}})
     check('two leaning choices warn', bool(warn))
+    clean, _ = CH.validate({'age': 25, 'sheet': {'face_shape': 'Long', 'glutes': 'Very full'}})
+    check('renamed options still validate', clean['sheet'] == {'face_shape': 'Rectangle', 'glutes': 'High shelf'})
     clean, warn = CH.validate({'age': 25, 'notes': 'likes red', 'banned': ['red']})
     check('banned terms struck', 'red' not in clean['notes'])
 
