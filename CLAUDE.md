@@ -29,6 +29,7 @@ app.py                          — Flask server, Gemini API, multi-persona, bui
 studio.html                     — Generation studio (admin-only while in testing)
 characters.py                   — Character catalogue: views, features, level rules, prompts
 characters.html                 — Character builder (face, checks, body views; admin-only)
+js/character-visuals.js         — Option drawings for the character builder (SVG, parametric)
 test_characters.py              — SFW/NSFW separation and validation tests
 imagegen.py                     — NSFW image/video generation (Runware, ModelsLab)
 credits.py                      — Credit pricing, tier packs, margin floor

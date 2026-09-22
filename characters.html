@@ -9,6 +9,7 @@
   <script src="/js/theme.js"></script>
   <link rel="stylesheet" href="/css/style.css">
   <script src="/js/devnav.js" defer></script>
+  <script src="/js/character-visuals.js"></script>
   <style>
     .ch-scroll { flex: 1; min-height: 0; overflow-y: auto; }
     .ch-wrap { padding: 24px 28px 72px; display: flex; flex-direction: column; gap: 20px; }
@@ -85,6 +86,16 @@
     .msg.err { color: var(--err); } .msg.ok { color: var(--ok); }
     .nsfw-closed { border-radius: 12px; background: var(--surface-2); padding: 36px; text-align: center; color: var(--text-muted);
       font-size: 0.82rem; }
+    .fp { display: flex; flex-direction: column; gap: 6px; border: 0; margin: 0; padding: 0; min-width: 0; }
+    .fp legend { font-size: 0.78rem; font-weight: 600; color: var(--text-2); padding: 0; margin-bottom: 6px; }
+    .fp-opts { display: flex; flex-wrap: wrap; gap: 6px; }
+    .fp-opt { width: 76px; min-height: 92px; padding: 6px 4px; border-radius: 10px; border: 2px solid var(--border);
+      background: var(--surface-2); color: var(--text); font: inherit; font-size: 0.68rem; line-height: 1.2; cursor: pointer;
+      display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 4px; text-align: center; }
+    .fp-opt[aria-pressed="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--surface-2)); font-weight: 700; }
+    .fp-opt.text { justify-content: center; min-height: 44px; }
+    .fp-list { display: flex; flex-direction: column; gap: 16px; }
+    .fp-mini svg { width: 32px; height: 32px; vertical-align: middle; margin-right: 6px; }
     [hidden] { display: none !important; }
     @media (max-width: 640px) { .ch-wrap { padding: 16px; } .ch-grid2 { grid-template-columns: 1fr; } }
   </style>
@@ -131,8 +142,8 @@
     <div class="ch-row" data-step="describe">
       <div class="ch-card ch-grow">
         <h2 class="ch-h1">Describe her face</h2>
-        <p class="ch-muted" style="margin-bottom:18px;">Pick each feature from the list. Nothing else can be generated until the face is approved.</p>
-        <div class="ch-grid3" id="face-features"></div>
+        <p class="ch-muted" style="margin-bottom:18px;">Tap the drawing that fits each feature. Nothing else can be generated until the face is approved.</p>
+        <div class="fp-list" id="face-features"></div>
       </div>
       <div class="ch-side">
         <div class="ch-card" style="display:flex; flex-direction:column; gap:14px;">
@@ -252,7 +263,7 @@
               <button type="button" class="btn btn-primary" id="vp-gen" onclick="generate(selView)">Generate</button>
             </div>
           </div>
-          <div class="ch-grid3" id="vp-features" style="margin-bottom:14px;"></div>
+          <div class="fp-list" id="vp-features" style="margin-bottom:14px;"></div>
           <div class="opts" id="vp-opts"></div>
           <div style="margin-top:14px;">
             <span style="font-size:0.8rem; font-weight:700; color:var(--text-2);">References for this view</span>
@@ -263,7 +274,7 @@
       <div class="ch-side">
         <div class="ch-card">
           <h2 class="ch-h2">Full body features</h2>
-          <div class="ch-grid2" id="body-features"></div>
+          <div class="fp-list" id="body-features"></div>
           <button type="button" class="btn" style="margin-top:12px; width:100%;" onclick="saveSheet()">Save features</button>
         </div>
         <div class="ch-card" style="display:flex; flex-direction:column; gap:10px;">
@@ -377,15 +388,33 @@ function render() {
   ({describe: renderDescribe, pick: renderPick, check: renderCheck, body: renderBody})[step]();
 }
 
-function featureSelect(f) {
+function featurePicker(f) {
   const v = (cur.sheet || {})[f.key] || '';
-  return `<label class="ch-label">${esc(f.label)}<select data-feature="${f.key}">
-    <option value="">Choose…</option>${f.options.map(o => `<option ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select></label>`;
+  const opts = f.options.map(o => {
+    const art = window.CharacterVisuals ? CharacterVisuals.render(f.key, o, cur.sheet) : '';
+    return `<button type="button" class="fp-opt${art ? '' : ' text'}" data-feature="${f.key}" data-value="${esc(o)}"
+      aria-pressed="${o === v}" onclick="pickOption(this)">${art}<span>${esc(o)}</span></button>`;
+  }).join('');
+  return `<fieldset class="fp"><legend>${esc(f.label)}</legend><div class="fp-opts" role="group">${opts}</div></fieldset>`;
+}
+function pickOption(btn) {
+  const on = btn.getAttribute('aria-pressed') !== 'true';
+  btn.parentNode.querySelectorAll('.fp-opt').forEach(b => b.setAttribute('aria-pressed', 'false'));
+  btn.setAttribute('aria-pressed', on);
+  if (btn.dataset.feature === 'hair_colour') {
+    cur.sheet = collectSheet();
+    document.querySelectorAll('[data-feature="pubic_colour"][data-value="Matches hair"]').forEach(b => {
+      const svg = CharacterVisuals.render('pubic_colour', 'Matches hair', cur.sheet);
+      b.innerHTML = svg + '<span>Matches hair</span>';
+    });
+  }
 }
 function collectSheet() {
   const sheet = Object.assign({}, cur.sheet || {});
-  document.querySelectorAll('[data-feature]').forEach(s => {
-    if (s.value) sheet[s.dataset.feature] = s.value; else delete sheet[s.dataset.feature];
+  const groups = new Set([...document.querySelectorAll('.fp-opt[data-feature]')].map(b => b.dataset.feature));
+  groups.forEach(k => {
+    const on = document.querySelector(`.fp-opt[data-feature="${k}"][aria-pressed="true"]`);
+    if (on) sheet[k] = on.dataset.value; else delete sheet[k];
   });
   return sheet;
 }
@@ -403,7 +432,7 @@ async function saveSheet(extra) {
 }
 
 function renderDescribe() {
-  el('face-features').innerHTML = cat.features.filter(f => f.group === 'face').map(featureSelect).join('');
+  el('face-features').innerHTML = cat.features.filter(f => f.group === 'face').map(featurePicker).join('');
   el('f-name').value = cur.name; el('f-age').value = cur.age; el('f-notes').value = cur.notes || '';
   el('level-chips').innerHTML = cat.levels.map(l => `<button type="button" class="chip" aria-pressed="${cur.nsfw_level === l.key}"
     onclick="saveSheet({nsfw_level:'${l.key}'})">${l.label}</button>`).join('');
@@ -472,7 +501,7 @@ function renderCheck() {
   el('check-rows').innerHTML = face.map(f => {
     const r = ((checks.features || {})[f.key] || {});
     const res = r.result || '';
-    return `<tr><td style="font-weight:600;">${esc(f.label)}</td><td>${esc(cur.sheet[f.key])}</td>
+    return `<tr><td style="font-weight:600;">${esc(f.label)}</td><td class="fp-mini">${window.CharacterVisuals ? CharacterVisuals.render(f.key, cur.sheet[f.key], cur.sheet) : ''}${esc(cur.sheet[f.key])}</td>
       <td>${res ? `<span class="tag ${res}" title="${esc(r.observed || '')}">${res === 'match' ? 'Matches' : res === 'differs' ? 'Differs' : 'Unsure'}</span>` : '<span class="ch-muted">—</span>'}
         ${r.observed ? `<div class="ch-muted" style="margin:2px 0 0;">${esc(r.observed)}</div>` : ''}</td>
       <td style="text-align:center;"><input type="checkbox" aria-label="Confirm ${esc(f.label)}" ${confirmed.has(f.key) ? 'checked' : ''}
@@ -533,7 +562,7 @@ function renderBody() {
   el('nsfw-views').hidden = !nsfwOpen; el('nsfw-closed').hidden = nsfwOpen;
   el('nsfw-toggle').textContent = nsfwOpen ? 'Hide NSFW views' : 'Show NSFW views';
   el('nsfw-toggle').setAttribute('aria-expanded', nsfwOpen);
-  el('body-features').innerHTML = cat.features.filter(f => f.group === 'body').map(featureSelect).join('');
+  el('body-features').innerHTML = cat.features.filter(f => f.group === 'body').map(featurePicker).join('');
   el('general-refs').innerHTML = images('', 'reference').map(refTile).join('');
   renderViewPanel();
 }
@@ -558,7 +587,7 @@ function renderViewPanel() {
   el('vp-gen').textContent = `Generate ${batch}`;
   el('vp-check').hidden = v.key !== 'body_front';
   const groups = v.uses.filter(g => g !== 'face' && g !== 'body');
-  el('vp-features').innerHTML = cat.features.filter(f => groups.includes(f.group)).map(featureSelect).join('') +
+  el('vp-features').innerHTML = cat.features.filter(f => groups.includes(f.group)).map(featurePicker).join('') +
     (groups.length ? `<div style="align-self:end;"><button type="button" class="btn" onclick="saveSheet()">Save</button></div>` : '');
   const opts = images(v.key, 'candidate').concat(images(v.key, 'canonical'), v.group === 'face' ? [] : images(v.key, 'reference'));
   el('vp-opts').className = 'opts' + (nsfw ? ' blur' : '');

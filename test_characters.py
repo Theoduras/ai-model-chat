@@ -84,10 +84,29 @@ def test_validation():
     check('banned terms struck', 'red' not in clean['notes'])
 
 
+def test_every_option_has_a_drawing():
+    import json, os, shutil, subprocess
+    node = shutil.which('node')
+    if not node:
+        print('skip drawings: node not installed')
+        return
+    here = os.path.dirname(os.path.abspath(__file__))
+    feats = {k: [o for o, _ in v[2]] for k, v in CH.features().items()}
+    script = ("const V=require(process.argv[1]),F=JSON.parse(process.argv[2]);"
+              "const m=[];for(const[k,os]of Object.entries(F)){if(V.TEXT_ONLY.includes(k))continue;"
+              "for(const o of os)if(!V.render(k,o,{}).startsWith('<svg'))m.push(k+'/'+o)}"
+              "console.log(JSON.stringify(m))")
+    out = subprocess.run([node, '-e', script, os.path.join(here, 'js', 'character-visuals.js'),
+                          json.dumps(feats)], capture_output=True, text=True)
+    missing = json.loads(out.stdout or '["node failed: ' + out.stderr[:80].replace('"', "'") + '"]')
+    check('every option has a drawing: ' + ', '.join(missing), not missing)
+
+
 if __name__ == '__main__':
     test_sfw_never_gets_nsfw()
     test_required_views()
     test_prompts()
     test_validation()
+    test_every_option_has_a_drawing()
     print('FAILED' if FAILURES else 'OK', len(FAILURES))
     raise SystemExit(1 if FAILURES else 0)
