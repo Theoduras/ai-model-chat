@@ -29363,26 +29363,33 @@ def _gen_advance_open(workspace_id=None, job_id=None):
 GEN_FAILED_TTL = int(os.getenv('GEN_FAILED_TTL', '21600'))
 
 
-def _gen_purge_failed():
-    """A failed generation is only worth showing while somebody might still be
-    looking at why it failed. After that it is clutter in the studio and rows
-    nobody reads, so it is swept along with whatever it staged."""
-    from db import SessionLocal, stale_failed_generations, get_persona_media
-    cutoff = (datetime.now(timezone.utc).replace(tzinfo=None)
-              - timedelta(seconds=GEN_FAILED_TTL))
+def _gen_purge_finished():
+    """A finished generation is only worth showing while somebody might still
+    be looking at it — the error on a failed one, the photos on a done one.
+    After that it is clutter in the studio and rows nobody reads."""
+    from db import SessionLocal, stale_generations, get_persona_media
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    cutoff = now - timedelta(seconds=GEN_FAILED_TTL)
     n = 0
     s = SessionLocal()
     try:
-        for job in stale_failed_generations(s, cutoff):
-            for mid in [i for i in (job.result_media_ids or '').split(',') if i]:
-                row = get_persona_media(s, mid)
-                if row and row.approved is not True:
-                    _gen_drop_media(s, row)
+        for job in stale_generations(s, cutoff):
+            rows = [r for r in (get_persona_media(s, mid) for mid in
+                                (job.result_media_ids or '').split(',') if mid)
+                    if r is not None]
+            staged = [r for r in rows if r.approved is not True]
+            # A done job whose photos are still inside their staging window is
+            # work waiting to be reviewed, not clutter: it leaves when they do.
+            if job.status == 'done' and any(
+                    r.expires_at is None or r.expires_at > now for r in staged):
+                continue
+            for row in staged:
+                _gen_drop_media(s, row)
             s.delete(job)
             s.commit()
             n += 1
     except Exception:
-        logger.exception('failed-generation purge failed')
+        logger.exception('finished-generation purge failed')
     finally:
         s.close()
     return n
@@ -29399,7 +29406,7 @@ def _gen_poll_round():
         s.close()
     for row in rows:
         _gen_advance(row)
-    _gen_purge_failed()
+    _gen_purge_finished()
     return len(rows)
 
 
@@ -29473,7 +29480,7 @@ def api_generate_jobs():
     from db import list_generations
     if not GEN_HAS_WORKER:
         _gen_advance_open(workspace_id=_workspace_id(user))
-        _gen_purge_failed()
+        _gen_purge_finished()
     s = _db_session()
     try:
         rows = list_generations(s, _workspace_id(user), slug or None)

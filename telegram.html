@@ -872,7 +872,9 @@ function setMediaStatus(msg, ok) {
 
 async function loadMedia() {
   if (!currentSlug) return;
-  if (!document.getElementById('outfit-list')) return;
+  const outfitBox = document.getElementById('outfit-list');
+  if (!outfitBox) return;
+  if (!outfitBox.children.length) outfitBox.innerHTML = skelRows(3, '92px');
   try {
     const res = await fetch('/api/personas/' + currentSlug + '/media');
     const data = await res.json();

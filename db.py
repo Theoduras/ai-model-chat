@@ -1200,10 +1200,11 @@ def delete_generation(session, job_id):
     return True
 
 
-def stale_failed_generations(session, cutoff, limit=200):
-    """Failed jobs old enough that nobody is still reading the error."""
+def stale_generations(session, cutoff, limit=200):
+    """Finished jobs old enough that nobody is still reading them. Whether a
+    done one can actually go depends on its media, which the caller checks."""
     return (session.query(GenerationJob)
-            .filter(GenerationJob.status == 'failed')
+            .filter(GenerationJob.status.in_(('failed', 'done')))
             .filter(GenerationJob.created_at < cutoff)
             .order_by(GenerationJob.created_at).limit(limit).all())
 

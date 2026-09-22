@@ -738,7 +738,7 @@ async function loadPpv(){
   if(!connState.connected){row.style.display='none';return;}
   row.style.display='block';
   const grid=document.getElementById('ppv-media-grid');
-  grid.innerHTML='<span class="hint">Loading media…</span>';
+  grid.innerHTML=skelGrid(8);
   if(!window._ppvFoldersLoaded){ window._ppvFoldersLoaded=true; loadFolders(); }
   let data={};
   try{data=await fetchMediaPage(1);}catch(e){}
@@ -872,6 +872,8 @@ function ladderPrices(){
 // ── Sales funnels ─────────────────────────────────────────────────────────────
 let fnCfg={}, fnMeta={};
 async function loadFunnels(){
+  const fnBox=document.getElementById('fn-list');
+  if(fnBox&&!fnBox.children.length) fnBox.innerHTML=skelRows(3);
   try{
     const d=await fetch('/api/fanvue/funnels?persona='+encodeURIComponent(persona())).then(r=>r.json());
     if(!d.ok) return;

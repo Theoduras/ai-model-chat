@@ -953,7 +953,7 @@ async function loadFolders(){
 
 async function loadMedia(){
   const grid=document.getElementById('media-grid');
-  grid.innerHTML='<span class="hint">Loading the vault…</span>';
+  grid.innerHTML=skelGrid(8);
   const q=new URLSearchParams({persona:persona(),
     q:document.getElementById('m-query').value.trim(),
     type:document.getElementById('m-type').value,
