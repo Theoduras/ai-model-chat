@@ -213,46 +213,66 @@
     'Blue': '#4a7fb5', 'Grey': '#8a949c'};
 
   // ── Front figure, arms at the sides ────────────────────────────────────────
-  const BODY = {sh: 10.5, bu: 10.5, wa: 8, hi: 11.5, th: 11};
-  function bodyPts(o) {
-    const R = [[34.5, 13], [32 + o.sh, 17], [32 + (o.sh + o.bu) / 2 - 1.5, 22], [32 + o.bu, 26], [32 + o.wa, 34], [32 + o.hi, 41],
-      [32 + o.th, 48], [39, 55], [37, 62], [34, 62], [34.3, 55], [32, 47]];
-    return R.concat(R.slice(0, 11).reverse().map(p => [64 - p[0], p[1]]));
-  }
-  function figure(o, extra) {
+  // ── The chart figure: every front-view body option is drawn on it ─────────
+  // No head, open contour lines, hands on hips and long legs with one line
+  // between them, after the creator's body-shape chart. An option moves one
+  // proportion and marks that region in soft pink behind the lines.
+  const BODY = {sh: 10.5, bu: 10, wa: 8, hi: 11.5, th: 11};
+  function chartFigure(o, extra, opts) {
     o = Object.assign({}, BODY, o || {});
-    const w = Math.max(o.hi, o.bu, o.sh) + 2.5;
-    const arm = side => {
-      const s = x => 32 + side * x;
-      return `M${f(s(o.sh))},17 Q${f(s(o.sh + 3))},22 ${f(s(w + 1))},32 L${f(s(w + 1.5))},42 ` +
-        `M${f(s(o.sh - 0.5))},22 Q${f(s(w - 1))},30 ${f(s(w - 1))},41 M${f(s(w - 1))},41 q${side * 1.2},2.5 ${side * 2.5},1`;
+    opts = opts || {};
+    const {sh, bu, wa, hi, th} = o;
+    const side = k => {
+      const x = v => f(32 + k * v);
+      let d = `M${x(2)},0 Q${x(2.5)},3 ${x(sh)},4.5 Q${x(sh + 3)},6 ${x(sh + 3.5)},10 `;
+      d += opts.armsDown
+        ? `Q${x(sh + 4.5)},18 ${x(sh + 5)},27 M${x(sh)},11 Q${x(sh + 1.5)},18 ${x(sh + 2.5)},26 `
+        : `L${x(sh + 7)},16 L${x(wa + 1.5)},19.5 M${x(sh + 0.5)},11 L${x(sh + 3.8)},16 L${x(wa + 0.8)},18.5 `;
+      return d + `M${x(sh - 0.5)},11.5 Q${x(bu + 0.3)},13 ${x(bu)},15 C${x(bu - 0.3)},17 ${x(wa)},17 ${x(wa)},19.5 ` +
+        `C${x(wa)},22 ${x(hi)},23 ${x(hi)},26 C${x(hi)},29.5 ${x(th)},31 ${x(th - 0.5)},35 ` +
+        `C${x(th - 1)},39 ${x(9)},41 ${x(8.6)},46 C${x(8.2)},51 ${x(8)},55 ${x(6.5)},63`;
     };
-    return line(smooth(bodyPts(o))) + ring(32, 6.5, 4.8) + line(arm(1)) + line(arm(-1)) + (extra || '');
+    let s = (opts.under ? opts.under(o) : '') + line(side(1) + ' ' + side(-1) + ' M32,31 V63', ' stroke-width="1.4"') + (extra || '');
+    if (opts.head) {
+      s = '<g transform="translate(32,63) scale(.84) translate(-32,-63)">' +
+        '<ellipse cx="32" cy="-5.5" rx="3.8" ry="4.6" stroke-width="1.4"/>' + s + '</g>';
+    }
+    return s;
   }
-  const body = (o, extra) => bsvg(figure(o, extra));
+  const pinkFill = d => `<path d="${d}" fill="${PINK}" fill-opacity=".5" stroke="none"/>`;
+  const pinkDot = ([x, y], r) => `<circle cx="${x}" cy="${y}" r="${r || 2.2}" fill="${PINK}" stroke="none"/>`;
+  const REGION = {
+    shoulders: o => `<path d="M${f(32 - o.sh)},4.8 Q32,3 ${f(32 + o.sh)},4.8" stroke="${PINK}" stroke-width="4" stroke-opacity=".8"/>`,
+    bust: o => pinkDot([f(32 - o.bu * 0.45), 14.5], f(o.bu * 0.33)) + pinkDot([f(32 + o.bu * 0.45), 14.5], f(o.bu * 0.33)),
+    waist: o => `<ellipse cx="32" cy="19.5" rx="${o.wa}" ry="1.8" fill="${PINK}" fill-opacity=".6" stroke="none"/>`,
+    hips: o => `<ellipse cx="32" cy="26" rx="${o.hi}" ry="2.2" fill="${PINK}" fill-opacity=".6" stroke="none"/>`,
+    thighs: o => [-1, 1].map(k => pinkFill(`M${f(32 + k * 1)},32 C${f(32 + k * (o.th - 0.5))},30 ${f(32 + k * (o.th - 0.5))},36 ` +
+      `${f(32 + k * (o.th - 1.5))},40 C${f(32 + k * 6)},42 ${f(32 + k * 1.5)},40 ${f(32 + k * 1)},32 Z`)).join(''),
+  };
+  const body = (o, region, extra) => bsvg(chartFigure(o, extra, {under: REGION[region]}));
   const BUILD = {
-    'Slim': {sh: 9.5, bu: 9.5, wa: 7, hi: 10, th: 9.5}, 'Athletic': {sh: 12, bu: 10.5, wa: 8.5, hi: 10.5, th: 11},
-    'Average': {}, 'Curvy': {sh: 10.5, bu: 12.5, wa: 7.5, hi: 14.5, th: 12.5},
-    'Voluptuous': {sh: 11.5, bu: 14.5, wa: 9.5, hi: 15.5, th: 13.5}, 'Muscular': {sh: 13.5, bu: 11.5, wa: 9.5, hi: 11.5, th: 12.5},
+    'Slim': {sh: 9.5, bu: 9, wa: 7, hi: 10, th: 9.5}, 'Athletic': {sh: 12, bu: 10.5, wa: 8.5, hi: 10.5, th: 11},
+    'Average': {}, 'Curvy': {sh: 10.5, bu: 12, wa: 7.5, hi: 13.5, th: 12.5},
+    'Voluptuous': {sh: 11.5, bu: 13, wa: 9.5, hi: 14.5, th: 13.5}, 'Muscular': {sh: 13.5, bu: 11.5, wa: 9.5, hi: 11.5, th: 12},
   };
   const HEIGHT = {'Under 155 cm': 0.8, '155–165 cm': 0.87, '165–175 cm': 0.94, 'Over 175 cm': 1};
   function height(s) {
-    const top = f(63 - 61 * s);
-    return bsvg(`<g transform="translate(32,63) scale(${s}) translate(-32,-63)">${figure({})}</g>` +
-      line(`M58,62 L58,${top} M55.5,${top} L60.5,${top} M55.5,62 L60.5,62`, ' stroke-width="1.6"'));
+    const top = f(63 - 63 * s);
+    return bsvg(`<g transform="translate(32,63) scale(${s}) translate(-32,-63)">${chartFigure({})}</g>` +
+      `<path d="M58,62 L58,${top} M55.5,${top} L60.5,${top} M55.5,62 L60.5,62" stroke="${PINK}" stroke-width="2.4"/>`);
   }
   const MARKERS = {
-    tattoos: {'None': '', 'Small, wrist': [[46.5, 39]], 'Small, ankle': [[37.5, 58.5]], 'Hip': [[41, 40]],
+    tattoos: {'None': '', 'Small, wrist': [[44, 18.8]], 'Small, ankle': [[38.8, 59]], 'Hip': [[42, 26]],
       'Sleeve': 'sleeve', 'Back piece': 'back'},
-    piercings: {'None': '', 'Ears': [[27, 7], [37, 7]], 'Nose': [[32, 8]], 'Navel': [[32, 36]]},
-    birthmarks: {'None': '', 'Shoulder': [[40, 18.5]], 'Hip': [[40.5, 41]]},
+    piercings: {'None': '', 'Ears': [[28.2, -5.5], [35.8, -5.5]], 'Nose': [[32, -4.6]], 'Navel': [[32, 22]]},
+    birthmarks: {'None': '', 'Shoulder': [[41.5, 6]], 'Hip': [[42, 26]]},
   };
-  function marked(spec) {
+  function marked(spec, key) {
     let extra = '';
-    if (spec === 'sleeve') extra = line('M43.5,19 l2,-1 M45,23 l2.5,-1 M46,27.5 l2.5,-0.8 M46.5,32 l2.5,-0.6 M47,36.5 l2.5,-0.4', ' stroke-width="1.6"');
-    else if (spec === 'back') extra = `<rect x="26" y="17" width="12" height="15" rx="3" stroke-width="1.6" stroke-dasharray="2 2.4"/>`;
-    else if (Array.isArray(spec)) extra = spec.map(p => `<circle cx="${p[0]}" cy="${p[1]}" r="2.2" fill="${PINK}" stroke="none"/>`).join('');
-    return body({}, extra);
+    if (spec === 'sleeve') extra = `<path d="M44.5,10.5 L48,16.5" stroke="${PINK}" stroke-width="4" stroke-opacity=".85"/>`;
+    else if (spec === 'back') extra = `<rect x="26.5" y="8" width="11" height="15" rx="2.5" stroke="${PINK}" stroke-width="1.8" stroke-dasharray="2 2"/>`;
+    else if (Array.isArray(spec)) extra = spec.map(p => pinkDot(p, key === 'piercings' ? 1.6 : 2.2)).join('');
+    return bsvg(chartFigure({}, extra, {head: key === 'piercings'}));
   }
   // Bum from the side, after the creator's chart: the back contour carries the
   // shape, the front line stays straight, a soft pink shade follows the curve,
@@ -303,20 +323,9 @@
     'Inverted triangle': [[14, 9.5, 9.5, 9.5], 'M25,8.5 H39 L32,27 Z'],
   };
   function bodyShape([[sh, wa, hi, th, armsDown], fill]) {
-    const side = k => {
-      const x = v => f(32 + k * v);
-      let d = `M${x(2)},0 Q${x(2.5)},3 ${x(sh)},4.5 Q${x(sh + 3)},6 ${x(sh + 3.5)},10 `;
-      d += armsDown
-        ? `Q${x(sh + 4.5)},18 ${x(sh + 5)},27 M${x(sh)},11 Q${x(sh + 1.5)},18 ${x(sh + 2.5)},26 `
-        : `L${x(sh + 7)},16 L${x(wa + 1.5)},19.5 M${x(sh + 0.5)},11 L${x(sh + 3.8)},16 L${x(wa + 0.8)},18.5 `;
-      d += `M${x(sh - 0.5)},11.5 C${x(sh - 1)},15 ${x(wa)},16 ${x(wa)},19.5 C${x(wa)},22 ${x(hi)},23 ${x(hi)},26 ` +
-        `C${x(hi)},29.5 ${x(th)},31 ${x(th - 0.5)},35 C${x(th - 1)},39 ${x(9)},41 ${x(8.6)},46 C${x(8.2)},51 ${x(8)},55 ${x(6.5)},63 ` +
-        `M${x(3.4)},44 Q${x(3.9)},53 ${x(3)},62`;
-      return d;
-    };
-    return bsvg(`<path d="${fill}" fill="${PINK}" fill-opacity=".45" stroke="none"/>` +
-      line(side(1) + ' ' + side(-1) + ' M32,31 V63', ' stroke-width="1.4"'));
+    return bsvg(chartFigure({sh, bu: sh - 0.5, wa, hi, th}, '', {armsDown, under: () => pinkFill(fill)}));
   }
+
 
   // ── Bum shape from behind ──────────────────────────────────────────────────
   // Drawn after the creator's reference sheet: slate contour lines, the centre
@@ -434,14 +443,14 @@
     marks: map(MARKS, extra => svg(head({}, {extra}))),
     height: map(HEIGHT, height),
     build: map(BUILD, o => body(o)),
-    shoulders: map({Narrow: 8.5, Medium: 10.5, Broad: 13.5}, sh => body({sh})),
-    waist: map({Defined: 6.5, Straight: 10, Soft: 11}, wa => body({wa})),
-    hips: map({Narrow: 9.5, Medium: 11.5, Wide: 15.5}, hi => body({hi})),
-    bust: map({Small: 9, Medium: 10.5, Large: 12.5, 'Very large': 14.5}, bu => body({bu})),
+    shoulders: map({Narrow: 8.5, Medium: 10.5, Broad: 13.5}, sh => body({sh}, 'shoulders')),
+    waist: map({Defined: 6.5, Straight: 10, Soft: 11}, wa => body({wa}, 'waist')),
+    hips: map({Narrow: 9.5, Medium: 11.5, Wide: 15.5}, hi => body({hi}, 'hips')),
+    bust: map({Small: 8.5, Medium: 10, Large: 11.5, 'Very large': 13}, bu => body({bu}, 'bust')),
     glutes: map(GLUTE_SIDE, sideFigure),
-    thighs: map({Slim: 9.5, Toned: 11, Full: 13.5}, th => body({th})),
-    tattoos: map(MARKERS.tattoos, marked), piercings: map(MARKERS.piercings, marked),
-    birthmarks: map(MARKERS.birthmarks, marked),
+    thighs: map({Slim: 9.5, Toned: 11, Full: 13.5}, th => body({th}, 'thighs')),
+    tattoos: map(MARKERS.tattoos, m => marked(m, 'tattoos')), piercings: map(MARKERS.piercings, m => marked(m, 'piercings')),
+    birthmarks: map(MARKERS.birthmarks, m => marked(m, 'birthmarks')),
     nails: map(NAILS, ([len, kind]) => nails(len, kind)),
     cup: map(CUP, r => breasts({r})),
     breast_shape: map(SHAPE, o => breasts(o)),
