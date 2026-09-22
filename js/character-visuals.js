@@ -243,24 +243,32 @@
     return svg(s);
   }
 
-  // ── Body shape: hands on hips, the type drawn over the torso ──────────────
-  const BODY_SHAPE = {
-    'Hourglass': [{sh: 11, bu: 12, wa: 7, hi: 12.5, th: 11.5}, 'M25,16 H39 L34,30 L39,44 H25 L30,30 Z', [[25, 16], [39, 16], [39, 44], [25, 44]]],
-    'Pear': [{sh: 9, bu: 9.5, wa: 8, hi: 14.5, th: 13}, 'M32,17 C28.5,17 29,25 28,29 C23,35 24.5,44 32,44 C39.5,44 41,35 36,29 C35,25 35.5,17 32,17 Z',
-      [[32, 17], [32, 44]]],
-    'Apple': [{sh: 11, bu: 12, wa: 12, hi: 11.5, th: 10.5}, 'M32,21 A10,10 0 1 1 31.9,21 Z', [[32, 21], [42, 31], [32, 41], [22, 31]]],
-    'Rectangle': [{sh: 10.5, bu: 10.5, wa: 10, hi: 10.5, th: 10}, 'M27,16 H37 V44 H27 Z', [[27, 16], [37, 16], [37, 44], [27, 44]]],
-    'Inverted triangle': [{sh: 14, bu: 12, wa: 9, hi: 9.5, th: 9.5}, 'M22,16 H42 L32,44 Z', [[22, 16], [42, 16], [32, 44]]],
-    'Oval': [{sh: 10.5, bu: 12.5, wa: 12.5, hi: 12, th: 11}, 'M32,17 A9.5,13.5 0 1 1 31.9,17 Z', [[32, 17], [41.5, 30.5], [32, 44], [22.5, 30.5]]],
+  // ── Body shape: the usual chart figure ─────────────────────────────────────
+  // No head, open contour lines and a single line between the legs, with the
+  // type as a soft filled shape on the torso. Apple stands with arms down,
+  // the rest with hands on hips.
+  const BODY_SHAPE = {   // shoulder, waist, hip, thigh, arms down; filled type
+    'Apple': [[12, 13.5, 13, 11.5, true], 'M32,13 C29.5,10.5 24,11 24,17 C24,23 27.5,26 32,26 C36.5,26 40,23 40,17 C40,11 34.5,10.5 32,13 Z'],
+    'Pear': [[10, 9, 14.5, 13], 'M31,10 C28,10 29.2,15.5 27,18.5 C23.6,22.5 25,27 29,27 C34.5,27 36.3,23 34.6,18.3 C33.8,14.5 34.2,10 31,10 Z'],
+    'Hourglass': [[12, 7.5, 12.5, 11], 'M27.5,9 H36.5 V11 Q36.5,14 33,18 Q36.5,22 36.5,25 V27 H27.5 V25 Q27.5,22 31,18 Q27.5,14 27.5,11 Z'],
+    'Rectangle': [[11.5, 10.5, 11, 10], 'M29,9 H35 V27 H29 Z'],
+    'Oval': [[11.5, 12, 12, 10.5], 'M32,10 C36.8,10 39,13 39,17.5 C39,22.5 36,26 32,26 C28,26 25,22.5 25,17.5 C25,13 27.2,10 32,10 Z'],
+    'Inverted triangle': [[14, 9.5, 9.5, 9.5], 'M25,8.5 H39 L32,27 Z'],
   };
-  function bodyShape([o, g, dots]) {
-    o = Object.assign({}, BODY, o);
-    const arm = side => {
-      const s = x => f(32 + side * x), ex = o.sh + 7, hx = Math.max(o.wa, o.hi - 2) + 0.5;
-      return `M${s(o.sh)},17 Q${s(o.sh + 4)},20 ${s(ex)},29 L${s(hx + 1)},38 ` +
-        `M${s(o.sh - 1)},22 Q${s(ex - 3.5)},25 ${s(ex - 3.5)},29.5 L${s(hx)},35`;
+  function bodyShape([[sh, wa, hi, th, armsDown], fill]) {
+    const side = k => {
+      const x = v => f(32 + k * v);
+      let d = `M${x(2)},0 Q${x(2.5)},3 ${x(sh)},4.5 Q${x(sh + 3)},6 ${x(sh + 3.5)},10 `;
+      d += armsDown
+        ? `Q${x(sh + 4.5)},18 ${x(sh + 5)},27 M${x(sh)},11 Q${x(sh + 1.5)},18 ${x(sh + 2.5)},26 `
+        : `L${x(sh + 7)},16 L${x(wa + 1.5)},19.5 M${x(sh + 0.5)},11 L${x(sh + 3.8)},16 L${x(wa + 0.8)},18.5 `;
+      d += `M${x(sh - 0.5)},11.5 C${x(sh - 1)},15 ${x(wa)},16 ${x(wa)},19.5 C${x(wa)},22 ${x(hi)},23 ${x(hi)},26 ` +
+        `C${x(hi)},29.5 ${x(th)},31 ${x(th - 0.5)},35 C${x(th - 1)},39 ${x(9)},41 ${x(8.6)},46 C${x(8.2)},51 ${x(8)},55 ${x(6.5)},63 ` +
+        `M${x(3.4)},44 Q${x(3.9)},53 ${x(3)},62`;
+      return d;
     };
-    return svg(line(smooth(bodyPts(o))) + ring(32, 6.5, 4.8) + line(arm(1)) + line(arm(-1)) + guide(g, dots));
+    return svg(`<path d="${fill}" fill="var(--accent)" fill-opacity=".22" stroke="none"/>` +
+      line(side(1) + ' ' + side(-1) + ' M32,31 V63', ' stroke-width="1.4"'));
   }
 
   // ── Bum shape from behind ──────────────────────────────────────────────────
