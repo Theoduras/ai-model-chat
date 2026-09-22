@@ -286,7 +286,9 @@
   </aside>
 
   <div style="display:flex; flex-direction:column; overflow:hidden;">
-    <div class="form-area" id="form-area">
+    <!-- Inert until renderPersonaBrowser injects it, so the card cannot paint
+         before init() knows which view the creator was actually on. -->
+    <template id="empty-tpl">
       <div class="empty-state">
         <div class="es-card">
           <div class="es-eyebrow">Getting started</div>
@@ -301,6 +303,11 @@
           <button class="btn btn-primary es-cta" onclick="newPersona()">+ Create a persona</button>
           <p class="es-foot">About 3 minutes. Nothing is published until you hit Save &amp; Deploy.</p>
         </div>
+      </div>
+    </template>
+    <div class="form-area" id="form-area">
+      <div class="empty-state">
+        <span class="loader-dots lg" role="status" aria-live="polite"><i></i><i></i><i></i></span>
       </div>
     </div>
     <div class="action-bar" id="action-bar" style="display:none;">
@@ -354,7 +361,7 @@
 
 <script>
 let currentSlug = null;
-const EMPTY_HTML = document.getElementById('form-area').innerHTML;
+const EMPTY_HTML = document.getElementById('empty-tpl').innerHTML;
 
 let sbQuery = '';
 let pgQuery = '';
@@ -766,10 +773,12 @@ async function init() {
   });
 
   applySidebarDefault();
-  renderSidebar();
+  renderQuickList();
   document.getElementById('persona-count').textContent = seen.size;
   if (currentTab !== 'chat') switchTabByName(currentTab);
-  restoreView();
+  // The main area is painted once, here: the boot placeholder holds until the
+  // restored view is known, so no intermediate screen is ever shown.
+  if (!restoreView()) showPersonaBrowser();
 }
 
 function applyConnState(configured, authMode, masked) {
