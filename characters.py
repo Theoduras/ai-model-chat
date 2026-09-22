@@ -41,7 +41,8 @@ def _opts(noun, *values):
 FEATURES = {
     'female': {
         # Face
-        'face_shape': ('Face shape', 'face', _opts('face', 'Oval', 'Heart-shaped', 'Round', 'Square', 'Diamond', 'Long')),
+        'face_shape': ('Face shape', 'face', _opts('face', 'Oval', 'Heart-shaped', 'Round', 'Square', 'Diamond', 'Long') +
+                       [('Triangle', 'triangle-shaped face, narrow forehead and wide jaw')]),
         'skin_tone': ('Skin tone', 'face', _opts('skin', 'Fair', 'Light', 'Light olive', 'Olive', 'Tan', 'Brown', 'Deep brown', 'Dark')),
         'marks': ('Freckles or moles', 'face', [('None', 'clear skin'), ('Light freckles, nose', 'light freckles across the nose'),
                                                  ('Heavy freckles', 'heavy freckles'), ('Beauty mark, cheek', 'a small beauty mark on the cheek'),
@@ -62,11 +63,20 @@ FEATURES = {
         # Body
         'height': ('Height', 'body', [('Under 155 cm', 'short, under 155 cm'), ('155–165 cm', 'average height'), ('165–175 cm', 'tall'), ('Over 175 cm', 'very tall')]),
         'build': ('Build', 'body', _opts('build', 'Slim', 'Athletic', 'Average', 'Curvy', 'Voluptuous', 'Muscular')),
+        'body_shape': ('Body shape', 'body', [('Hourglass', 'an hourglass figure'),
+                                              ('Pear', 'a pear-shaped figure, hips wider than shoulders'),
+                                              ('Apple', 'an apple-shaped figure, fuller through the middle'),
+                                              ('Rectangle', 'a straight rectangle figure'),
+                                              ('Inverted triangle', 'an inverted-triangle figure, shoulders wider than hips'),
+                                              ('Oval', 'an oval figure, fuller through the torso')]),
         'shoulders': ('Shoulders', 'body', _opts('shoulders', 'Narrow', 'Medium', 'Broad')),
         'waist': ('Waist', 'body', _opts('waist', 'Defined', 'Straight', 'Soft')),
         'hips': ('Hips', 'body', _opts('hips', 'Narrow', 'Medium', 'Wide')),
         'bust': ('Bust', 'body', _opts('bust', 'Small', 'Medium', 'Large', 'Very large')),
-        'glutes': ('Bum', 'body', _opts('bum', 'Flat', 'Round', 'Full', 'Very full')),
+        'glutes': ('Bum projection', 'body', _opts('bum', 'Flat', 'Round', 'Full', 'Very full')),
+        'glute_shape': ('Bum shape, from behind', 'body', [('Round', 'a round bum'), ('Heart-shaped', 'a heart-shaped bum'),
+                                                           ('A-shaped', 'an A-shaped bum, fuller at the bottom'),
+                                                           ('Square', 'a square-shaped bum'), ('V-shaped', 'a V-shaped bum')]),
         'thighs': ('Thighs', 'body', _opts('thighs', 'Slim', 'Toned', 'Full')),
         'tattoos': ('Tattoos', 'body', [('None', 'no tattoos'), ('Small, wrist', 'a small wrist tattoo'), ('Small, ankle', 'a small ankle tattoo'),
                                         ('Hip', 'a hip tattoo'), ('Sleeve', 'a full arm sleeve tattoo'), ('Back piece', 'a large back tattoo')]),

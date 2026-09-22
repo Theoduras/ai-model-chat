@@ -19,6 +19,10 @@
   const line = (d, extra) => `<path d="${d}"${extra || ''}/>`;
   const ring = (x, y, r) => `<circle cx="${f(x)}" cy="${f(y)}" r="${r}"/>`;
   const spot = (x, y, r) => `<circle cx="${f(x)}" cy="${f(y)}" r="${r || 1.2}" fill="currentColor" stroke="none"/>`;
+  // The dashed shape a type is named after, in the accent, with a dot on each
+  // corner or extreme like the charts creators already know.
+  const guide = (d, dots) => `<path d="${d}" stroke="var(--accent)" stroke-width="1.4" stroke-dasharray="2.5 2.5"/>` +
+    (dots || []).map(p => `<circle cx="${p[0]}" cy="${p[1]}" r="1.4" fill="var(--accent)" stroke="none"/>`).join('');
   const swatch = hex => svg(`<circle cx="32" cy="32" r="20" fill="${hex}" stroke-width="1.4"/>`);
 
   // Catmull-Rom through the points: smooth contours from a handful of numbers.
@@ -59,12 +63,27 @@
     return s + (opts.extra || '');
   }
 
-  const FACE_SHAPE = {
-    'Oval': {}, 'Heart-shaped': {fw: 13, c: 12.5, j: 8, cw: 1.5},
-    'Round': {fw: 12, c: 14.5, j: 12, cw: 5, chinY: 43, top: 6},
-    'Square': {fw: 12, c: 12.5, j: 12.5, cw: 6.5, jawY: 39},
-    'Diamond': {fw: 8.5, c: 14.5, j: 8.5, cw: 2}, 'Long': {fw: 10, c: 10.5, j: 8.5, cw: 3.5, top: 2, chinY: 48},
+  const FACE_SHAPE = {   // head parameters, then the guide and its dots
+    'Oval': [{}, 'M32,3 A14,21 0 1 1 31.9,3 Z', [[32, 3], [46, 24], [32, 45], [18, 24]]],
+    'Heart-shaped': [{fw: 13, c: 12.5, j: 8, cw: 1.5}, 'M32,10 C28,3 16,4 16,14 C16,25 27,34 32,47 C37,34 48,25 48,14 C48,4 36,3 32,10 Z',
+      [[19, 6], [45, 6], [32, 47]]],
+    'Round': [{fw: 12, c: 14.5, j: 12, cw: 5, chinY: 43, top: 6}, 'M32,7 A17,17 0 1 1 31.9,7 Z', [[32, 7], [49, 24], [32, 41], [15, 24]]],
+    'Square': [{fw: 12, c: 12.5, j: 12.5, cw: 6.5, jawY: 39}, 'M17,6 H47 V44 H17 Z', [[17, 6], [47, 6], [47, 44], [17, 44]]],
+    'Diamond': [{fw: 8.5, c: 14.5, j: 8.5, cw: 2}, 'M32,3 L48,25 L32,47 L16,25 Z', [[32, 3], [48, 25], [32, 47], [16, 25]]],
+    'Long': [{fw: 10, c: 10.5, j: 8.5, cw: 3.5, top: 2, chinY: 48}, 'M28,1 H36 Q44,1 44,9 V42 Q44,50 36,50 H28 Q20,50 20,42 V9 Q20,1 28,1 Z',
+      [[32, 1], [44, 25], [32, 50], [20, 25]]],
+    'Triangle': [{fw: 7, templeY: 15, c: 11, j: 14.5, jawY: 40, cw: 7.5, chinY: 45}, 'M32,4 L47,45 L17,45 Z', [[32, 4], [47, 45], [17, 45]]],
   };
+  // A face shape reads best with hair framing it, as in the usual charts: a
+  // cap from temple to temple with a centre part.
+  function faceShape([o, g, dots]) {
+    const h = Object.assign({}, HEAD, o);
+    const cap = line(`M${f(32 - h.fw - 1.5)},${h.templeY + 7} Q${f(32 - h.fw - 3)},${h.top - 3} 32,${h.top - 2.5} ` +
+      `Q${f(32 + h.fw + 3)},${h.top - 3} ${f(32 + h.fw + 1.5)},${h.templeY + 7}`) +
+      line(`M${f(32 - h.fw + 0.5)},${h.templeY + 4} Q${f(32 - h.fw / 2)},${h.top + 1} 32,${h.top + 3} ` +
+      `Q${f(32 + h.fw / 2)},${h.top + 1} ${f(32 + h.fw - 0.5)},${h.templeY + 4} M32,${h.top - 2.5} Q31.4,${h.top} 32,${h.top + 3}`, ' stroke-width="1.4"');
+    return svg(head(o) + cap + guide(g, dots));
+  }
   const JAW = {
     'Soft, rounded chin': {j: 9.5, cw: 4.5, chinY: 44}, 'Defined jaw': {j: 11.5, jawY: 36, cw: 3.5},
     'Pointed chin': {j: 8, cw: 1, chinY: 47}, 'Square jaw': {j: 12.5, jawY: 40, cw: 6.5},
@@ -224,6 +243,45 @@
     return svg(s);
   }
 
+  // ── Body shape: hands on hips, the type drawn over the torso ──────────────
+  const BODY_SHAPE = {
+    'Hourglass': [{sh: 11, bu: 12, wa: 7, hi: 12.5, th: 11.5}, 'M25,16 H39 L34,30 L39,44 H25 L30,30 Z', [[25, 16], [39, 16], [39, 44], [25, 44]]],
+    'Pear': [{sh: 9, bu: 9.5, wa: 8, hi: 14.5, th: 13}, 'M32,17 C28.5,17 29,25 28,29 C23,35 24.5,44 32,44 C39.5,44 41,35 36,29 C35,25 35.5,17 32,17 Z',
+      [[32, 17], [32, 44]]],
+    'Apple': [{sh: 11, bu: 12, wa: 12, hi: 11.5, th: 10.5}, 'M32,21 A10,10 0 1 1 31.9,21 Z', [[32, 21], [42, 31], [32, 41], [22, 31]]],
+    'Rectangle': [{sh: 10.5, bu: 10.5, wa: 10, hi: 10.5, th: 10}, 'M27,16 H37 V44 H27 Z', [[27, 16], [37, 16], [37, 44], [27, 44]]],
+    'Inverted triangle': [{sh: 14, bu: 12, wa: 9, hi: 9.5, th: 9.5}, 'M22,16 H42 L32,44 Z', [[22, 16], [42, 16], [32, 44]]],
+    'Oval': [{sh: 10.5, bu: 12.5, wa: 12.5, hi: 12, th: 11}, 'M32,17 A9.5,13.5 0 1 1 31.9,17 Z', [[32, 17], [41.5, 30.5], [32, 44], [22.5, 30.5]]],
+  };
+  function bodyShape([o, g, dots]) {
+    o = Object.assign({}, BODY, o);
+    const arm = side => {
+      const s = x => f(32 + side * x), ex = o.sh + 7, hx = Math.max(o.wa, o.hi - 2) + 0.5;
+      return `M${s(o.sh)},17 Q${s(o.sh + 4)},20 ${s(ex)},29 L${s(hx + 1)},38 ` +
+        `M${s(o.sh - 1)},22 Q${s(ex - 3.5)},25 ${s(ex - 3.5)},29.5 L${s(hx)},35`;
+    };
+    return svg(line(smooth(bodyPts(o))) + ring(32, 6.5, 4.8) + line(arm(1)) + line(arm(-1)) + guide(g, dots));
+  }
+
+  // ── Bum shape from behind ──────────────────────────────────────────────────
+  const GLUTE_SHAPE = {   // waist, hip peak, peak height, low hip, thigh; guide; dots
+    'Round': [[12, 18, 32, 17, 14], 'M32,17 A16,16 0 1 1 31.9,17 Z', [[32, 17], [48, 33], [32, 49], [16, 33]]],
+    'Heart-shaped': [[10, 18.5, 37, 17.5, 14], 'M32,6 L14,33 C11,44 22,50 32,44 C42,50 53,44 50,33 Z', [[32, 6], [14, 33], [50, 33]]],
+    'A-shaped': [[11, 15, 29, 19, 15], 'M24,12 H40 L51,46 H13 Z', [[24, 12], [40, 12], [51, 46], [13, 46]]],
+    'Square': [[16, 17, 26, 17, 14.5], 'M15,14 H49 V46 H15 Z', [[15, 14], [49, 14], [49, 46], [15, 46]]],
+    'V-shaped': [[16, 16.5, 22, 13, 11], 'M14,17 H50 L32,46 Z', [[14, 17], [50, 17], [32, 46]]],
+  };
+  function gluteShape([[wa, hp, hy, lh, th], g, dots]) {
+    const sideLine = side => {
+      const s = x => f(32 + side * x);
+      return `M${s(wa)},3 C${s(wa)},${hy - 12} ${s(hp)},${hy - 8} ${s(hp)},${hy} C${s(hp)},${hy + 8} ${s(lh)},40 ${s(lh)},45 ` +
+        `C${s(lh)},51 ${s(th)},56 ${s(th - 1)},63`;
+    };
+    return svg(line(sideLine(1) + ' ' + sideLine(-1)) +
+      line('M32,7 v4 M32,24 Q32.6,35 32,44 M31,47 L30.3,63 M33,47 L33.7,63', ' stroke-width="1.6"') +
+      line(`M31,45 Q24,49 ${f(32 - lh + 3)},45 M33,45 Q40,49 ${f(32 + lh - 3)},45`, ' stroke-width="1.6"') + guide(g, dots));
+  }
+
   // ── Torso for the schematic NSFW views ─────────────────────────────────────
   const TORSO = line('M26,2 L26,8 Q16,9 11,14 Q7,19 7,30 L7,62 M38,2 L38,8 Q48,9 53,14 Q57,19 57,30 L57,62 ' +
     'M13,22 Q11,40 16,62 M51,22 Q53,40 48,62') + line('M25,12 Q20,11.5 16,14 M39,12 Q44,11.5 48,14', ' stroke-width="1.6"');
@@ -292,7 +350,9 @@
   // ── Table ─────────────────────────────────────────────────────────────────
   const map = (obj, fn) => Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, () => fn(v, k)]));
   const TABLE = {
-    face_shape: map(FACE_SHAPE, o => svg(head(o))),
+    face_shape: map(FACE_SHAPE, faceShape),
+    body_shape: map(BODY_SHAPE, bodyShape),
+    glute_shape: map(GLUTE_SHAPE, gluteShape),
     jaw: map(JAW, o => svg(head(o))),
     cheekbones: map(CHEEK, ([c, y]) => svg(head({c, cheekY: y},
       {extra: line(`M${f(32 - c + 2)},${y + 1} q3,-2 6.5,-1 M${f(32 + c - 2)},${y + 1} q-3,-2 -6.5,-1`, ' stroke-width="1.6"')}))),

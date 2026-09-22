@@ -61,6 +61,10 @@ def test_prompts():
         if v['rating'] != 'explicit':
             check(f"{v['key']} no explicit words",
                   not any(w in p for w in CH._fragments(FULL_SHEET, ('pubic', 'vulva', 'anus'))))
+    shapes = {'body_shape': 'Pear', 'glute_shape': 'Heart-shaped', 'face_shape': 'Triangle'}
+    text = CH.describe(shapes, 'sfw')
+    check('shape fragments reach a safe-work prompt',
+          all(dict(CH.features()[k][2])[v] in text for k, v in shapes.items()))
     check('face prompt is frontal', 'front-facing' in CH.build_view_prompt('face_front', {}, 24, False))
 
 
