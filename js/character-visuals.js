@@ -10,13 +10,18 @@
   const A = 'var(--accent)';
 
   function svg(inner) {
-    return '<svg viewBox="0 0 64 64" width="56" height="56" fill="none" stroke="currentColor" ' +
-      'stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + inner + '</svg>';
+    return '<svg viewBox="0 0 64 64" width="64" height="64" fill="none" stroke="currentColor" ' +
+      'stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + inner + '</svg>';
   }
-  const hl = (d, w) => `<path d="${d}" stroke="${A}" stroke-width="${w || 2.4}"/>`;
+  // Fashion-sketch hand: every line is drawn twice, the second a faint pencil
+  // pass slightly offset, and the part an option changes goes in the accent.
+  const ghost = (d, color) => `<path d="${d}"${color ? ` stroke="${color}"` : ''} stroke-opacity=".28" stroke-width=".8" transform="translate(.8,.5)"/>`;
+  const sk = (d, w) => `<path d="${d}"${w ? ` stroke-width="${w}"` : ''}/>` + ghost(d);
+  const hl = (d, w) => `<path d="${d}" stroke="${A}" stroke-width="${w ? Math.round(w * 6) / 10 : 1.5}"/>` + ghost(d, A);
   const ln = (d, extra) => `<path d="${d}"${extra || ''}/>`;
   const dot = (x, y, r, color) => `<circle cx="${x}" cy="${y}" r="${r || 1.6}" fill="${color || A}" stroke="none"/>`;
-  const swatch = hex => svg(`<circle cx="32" cy="32" r="20" fill="${hex}" stroke="currentColor" stroke-opacity=".35"/>`);
+  const swatch = hex => svg(`<circle cx="32" cy="32" r="20" fill="${hex}" stroke="none"/>` +
+    `<circle cx="32" cy="32" r="20" stroke-width=".9"/><circle cx="32.8" cy="32.5" r="20.6" stroke-opacity=".28" stroke-width=".8"/>`);
   const f = n => Math.round(n * 10) / 10;
   const P = p => f(p[0]) + ',' + f(p[1]);
 
@@ -42,10 +47,12 @@
     return [[32, o.top], [32 + o.fw, o.templeY], [32 + o.c, o.cheekY], [32 + o.j, o.jawY], [32 + o.cw, o.chinY],
             [32 - o.cw, o.chinY], [32 - o.j, o.jawY], [32 - o.c, o.cheekY], [32 - o.fw, o.templeY]];
   }
-  const FACE_BITS = ln('M22,31 q4,-2.5 8,0 M34,31 q4,-2.5 8,0 M32,33 l-2,8 h4 M27,48 q5,3 10,0', ' stroke-opacity=".55"');
+  const FACE_BITS = ln('M21,31 q5,-3 9,0 M34,31 q5,-3 9,0', ' stroke-width="1.3"') +
+    ln('M32,33 q-1,6 -2,8 q2,1 4,0', ' stroke-opacity=".6" stroke-width=".9"') +
+    ln('M27,48 q5,2.5 10,0', ` stroke="${A}" stroke-width="1.4"`);
   function head(o, mode, extra) {
     const pts = headPts(o), segs = segments(pts);
-    let body = mode === 'all' ? hl(outline(pts, segs)) : ln(outline(pts, segs));
+    let body = sk(outline(pts, segs), mode === 'all' ? 1.4 : null);
     if (mode === 'jaw') body += hl(part(pts, segs, 2, 7));
     return svg(body + (mode === 'bare' ? '' : FACE_BITS) + (extra || ''));
   }
@@ -72,9 +79,10 @@
   };
   function eye(shape, iris) {
     const [up, lo, hood] = EYE[shape] || EYE.Almond;
-    return svg((iris ? `<circle cx="32" cy="32" r="8" fill="${iris}" stroke="none"/>` : '') +
-      (iris ? ln(up) + ln(lo) : hl(up) + hl(lo)) + `<circle cx="32" cy="32" r="8"/>` +
-      dot(32, 32, 2.6, 'currentColor') + (hood ? ln(hood, ' stroke-opacity=".6"') : ''));
+    return svg((iris ? `<circle cx="32" cy="32" r="7.5" fill="${iris}" stroke="none"/>` : '') +
+      ln(up, ' stroke-width="2.2"') + ghost(up) + ln(lo, ' stroke-width=".9" stroke-opacity=".7"') +
+      `<circle cx="32" cy="32" r="7.5" stroke-width=".9"/>` + dot(32, 32, 3, 'currentColor') +
+      (hood ? ln(hood, ' stroke-opacity=".6"') : ''));
   }
 
   const BROW = {
@@ -93,14 +101,15 @@
   };
   function lips(w, up, lo, bow) {
     const L = 32 - w, R = 32 + w;
-    return svg(hl(`M${L},32 C${L + w * 0.4},${32 - up} ${26},${32 - up - 1} 32,${32 - up + bow} ` +
-      `C38,${32 - up - 1} ${R - w * 0.4},${32 - up} ${R},32`) +
-      hl(`M${L},32 C${L + w * 0.3},${32 + lo * 1.25} ${R - w * 0.3},${32 + lo * 1.25} ${R},32`) +
-      ln(`M${L},32 Q32,34 ${R},32`, ' stroke-opacity=".6"'));
+    const lower = `M${L},32 C${L + w * 0.3},${32 + lo * 1.25} ${R - w * 0.3},${32 + lo * 1.25} ${R},32`;
+    return svg(`<path d="${lower}Z" fill="${A}" fill-opacity=".12" stroke="none"/>` +
+      hl(`M${L},32 C${L + w * 0.4},${32 - up} ${26},${32 - up - 1} 32,${32 - up + bow} ` +
+      `C38,${32 - up - 1} ${R - w * 0.4},${32 - up} ${R},32`, 2.2) + hl(lower, 1.7) +
+      ln(`M${L},32 Q32,34 ${R},32`, ' stroke-width="1.4"'));
   }
   const EAR = {'Small, close-set': [2.5, 8], 'Medium': [4.5, 10], 'Prominent': [8, 11]};
   function ears(out, h) {
-    return svg(`<ellipse cx="32" cy="32" rx="13" ry="19"/>` +
+    return svg(sk('M19,32 a13,19 0 1 0 26,0 a13,19 0 1 0 -26,0') +
       hl(`M19,${32 - h} Q${19 - out},${32 - h} ${19 - out},32 Q${19 - out * 0.8},${32 + h} 20,${32 + h * 0.8}`) +
       hl(`M45,${32 - h} Q${45 + out},${32 - h} ${45 + out},32 Q${45 + out * 0.8},${32 + h} 44,${32 + h * 0.8}`));
   }
@@ -155,7 +164,8 @@
   function body(o, partKey, extra, arms) {
     const pts = bodyPts(o), segs = segments(pts);
     const whole = partKey === 'all';
-    let s = `<circle cx="32" cy="8" r="5"/>` + (whole ? hl(outline(pts, segs), 2) : ln(outline(pts, segs)));
+    let s = sk('M28.4,7 a3.6,4.6 0 1 0 7.2,0 a3.6,4.6 0 1 0 -7.2,0') + sk(outline(pts, segs), whole ? 1.4 : null) +
+      `<path d="M32,20 L32,46" stroke="${A}" stroke-opacity=".5" stroke-width=".7" stroke-dasharray="1.5 2"/>`;
     (BODY_PARTS[partKey] || []).forEach(([a, b]) => { s += hl(part(pts, segs, a, b)); });
     if (arms) {
       const sh = (o && o.sh) || BODY.sh;
@@ -172,8 +182,8 @@
   function height(s) {
     const pts = bodyPts(), segs = segments(pts);
     const top = f(63 - 60 * s);
-    return svg(`<g transform="translate(32,63) scale(${s}) translate(-32,-63)"><circle cx="32" cy="8" r="5"/>` +
-      ln(outline(pts, segs)) + '</g>' + hl(`M56,63 L56,${top} M53,${top} L59,${top}`) +
+    return svg(`<g transform="translate(32,63) scale(${s}) translate(-32,-63)">` +
+      sk('M28.4,7 a3.6,4.6 0 1 0 7.2,0 a3.6,4.6 0 1 0 -7.2,0') + sk(outline(pts, segs)) + '</g>' + hl(`M56,63 L56,${top} M53,${top} L59,${top}`) +
       ln('M4,63 L60,63', ' stroke-opacity=".5"'));
   }
   const MARKERS = {
@@ -193,7 +203,7 @@
     const pts = [[28, 14], [25, 22], [27, 33], [26, 42], [28, 52], [29, 62], [33, 62], [34, 56], [35, 49], [34 + p, 42],
       [33, 34], [35, 22], [33, 14]];
     const segs = segments(pts);
-    return svg(`<circle cx="30" cy="8" r="5"/>` + ln(outline(pts, segs)) + hl(part(pts, segs, 7, 11)));
+    return svg(sk('M26.4,7 a3.6,4.6 0 1 0 7.2,0 a3.6,4.6 0 1 0 -7.2,0') + sk(outline(pts, segs)) + hl(part(pts, segs, 7, 11)));
   }
   const NAILS = {
     'Short, nude': [2, false], 'Medium, painted': [5, true], 'Long, painted': [9, true], 'French tips': [5, 'tip'],
@@ -210,7 +220,7 @@
   }
 
   // ── Schematic NSFW ────────────────────────────────────────────────────────
-  const TORSO = ln('M26,4 Q32,8 38,4 M14,6 Q11,34 18,62 M50,6 Q53,34 46,62', ' stroke-opacity=".7"');
+  const TORSO = sk('M26,4 Q32,8 38,4 M14,6 Q11,34 18,62 M50,6 Q53,34 46,62');
   const CUP = {A: 6, B: 7.5, C: 9, D: 10.5, DD: 12, 'E+': 13.5};
   const BREAST = {r: 9, gap: 11, cy: 28, w: 1, h: 0.9, aug: false, drop: 0};
   function breasts(o) {
@@ -218,11 +228,12 @@
     let s = TORSO;
     [-1, 1].forEach(side => {
       const cx = 32 + side * o.gap, rw = o.r * o.w, rh = o.r * o.h, cy = o.cy + o.drop;
-      s += hl(`M${f(cx - rw)},${cy} A${f(rw)},${f(rh)} 0 0 0 ${f(cx + rw)},${cy}`);
+      s += hl(`M${f(cx - rw)},${cy} A${f(rw)},${f(rh)} 0 0 0 ${f(cx + rw)},${cy}`, 2) +
+        ln(`M${f(cx - rw * 0.92)},${f(cy + 0.6)} A${f(rw * 0.92)},${f(rh * 0.88)} 0 0 0 ${f(cx + rw * 0.92)},${f(cy + 0.6)}`, ' stroke-opacity=".3" stroke-width=".8"');
       const outer = cx + side * rw;
       s += ln(`M${f(outer - side * 1)},${f(cy - o.r * 1.4)} Q${f(outer + side * 0.5)},${f(cy - o.r * 0.4)} ${f(outer)},${cy}`);
       if (o.aug) s += hl(`M${f(cx - rw)},${cy} A${f(rw)},${f(rw * 0.8)} 0 0 1 ${f(cx + rw)},${cy}`, 1.4);
-      s += dot(f(cx + side * rw * 0.15), f(cy + rh * 0.35), 1.4, 'currentColor');
+      s += dot(f(cx + side * rw * 0.15), f(cy + rh * 0.35), 1.2);
     });
     return svg(s);
   }
@@ -251,7 +262,7 @@
     });
     return svg(s);
   }
-  const PELVIS = ln('M10,6 Q13,30 24,48 Q32,58 40,48 Q51,30 54,6 M17,18 Q24,34 29,48 M47,18 Q40,34 35,48', ' stroke-opacity=".7"');
+  const PELVIS = sk('M10,6 Q13,30 24,48 Q32,58 40,48 Q51,30 54,6') + ln('M17,18 Q24,34 29,48 M47,18 Q40,34 35,48', ' stroke-opacity=".55"');
   const PUBIC = {
     'Trimmed': '<path d="M23,28 L41,28 L33,48 L31,48 Z"',
     'Landing strip': '<rect x="29.5" y="26" width="5" height="21" rx="2"',
@@ -278,8 +289,8 @@
     nose: map(NOSE, d => svg(hl(d))),
     lips: map(LIPS, a => lips.apply(null, a)),
     ears: map(EAR, ([o, h]) => ears(o, h)),
-    hair_texture: map(HAIR, d => svg(`<ellipse cx="32" cy="28" rx="11" ry="14" stroke-opacity=".6"/>` + hl(d, 2))),
-    hairline: map(HAIRLINE, d => svg(`<ellipse cx="32" cy="36" rx="16" ry="22"/>` + hl(d))),
+    hair_texture: map(HAIR, d => svg(sk('M21,28 a11,14 0 1 0 22,0 a11,14 0 1 0 -22,0') + hl(d, 2))),
+    hairline: map(HAIRLINE, d => svg(sk('M16,36 a16,22 0 1 0 32,0 a16,22 0 1 0 -32,0') + hl(d))),
     marks: map(MARKS, extra => head({}, '', extra)),
     height: map(HEIGHT, height),
     build: map(BUILD, o => body(o, 'all')),
@@ -299,7 +310,7 @@
     perkiness: map(PERK, o => breasts(o)),
     areola_size: map({Small: 8, Medium: 12, Large: 17}, r => areola(r, 3, true)),
     nipple_size: map({Small: 2.5, Medium: 4, Large: 5.5}, r => areola(12, r, false)),
-    nipple_shape: map(NIP_SHAPE, d => svg(ln('M10,8 L10,56', ' stroke-opacity=".4"') + hl(d))),
+    nipple_shape: map(NIP_SHAPE, d => svg(ln('M10,8 L10,56', ' stroke-opacity=".4"') + hl(d, 2))),
     nipple_piercing: map({None: 0, One: 1, Both: 2}, pair),
     pubic_style: map(PUBIC, (v, k) => pubic(k, 0.35)),
     pubic_density: map({Sparse: 0.15, Medium: 0.4, Dense: 0.75}, o => pubic('Natural', o)),
