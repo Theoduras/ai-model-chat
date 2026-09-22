@@ -1,11 +1,10 @@
 /* Option drawings for the character builder.
  *
- * One-colour outline icons: an even 2px stroke in currentColor, round caps, no
- * fills except where the option is a colour or a paint. What an option changes
- * shows in the shape itself; the picked card carries the accent.
+ * Thin slate sketch lines after the creator's reference charts, with what an
+ * option changes marked in soft pink; colours and paints are swatches.
  *
- * Parametric on purpose: a few base figures (a head with neck and ears, a front
- * and a side body, a torso, a pelvis) and each option moves one parameter, so
+ * Parametric on purpose: a few base figures (a head with hair, ears and neck, a
+ * front and a side body, a torso, a pelvis) and each option moves one parameter, so
  * ~110 options stay in one small file and in one hand. Option labels must match
  * characters.FEATURES exactly; test_characters.py checks every one renders.
  */
@@ -31,92 +30,154 @@
   const swatch = hex => svg(`<circle cx="32" cy="32" r="20" fill="${hex}" stroke-width="1.4"/>`);
 
   // Catmull-Rom through the points: smooth contours from a handful of numbers.
-  function smooth(pts) {
-    const n = pts.length;
-    let d = 'M' + P(pts[0]);
-    for (let i = 0; i < n; i++) {
-      const p0 = pts[(i - 1 + n) % n], p1 = pts[i], p2 = pts[(i + 1) % n], p3 = pts[(i + 2) % n];
-      d += 'C' + P([p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6]) + ' ' +
-        P([p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6]) + ' ' + P(p2);
+  function seg(pts, i) {
+    const n = pts.length, p0 = pts[(i - 1 + n) % n], p1 = pts[i], p2 = pts[(i + 1) % n], p3 = pts[(i + 2) % n];
+    return [p1, [p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6],
+      [p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6], p2];
+  }
+  // The closed curve, or only its run from one point to another.
+  function smooth(pts, from, to) {
+    const open = from !== undefined;
+    let d = 'M' + P(pts[open ? from : 0]);
+    for (let i = open ? from : 0; i < (open ? to : pts.length); i++) {
+      const [, a, b, c] = seg(pts, i);
+      d += 'C' + P(a) + ' ' + P(b) + ' ' + P(c);
     }
-    return d + 'Z';
+    return open ? d : d + 'Z';
   }
 
-  // ── Head: outline, ears, neck and a quiet face ─────────────────────────────
-  const HEAD = {top: 5, fw: 11, templeY: 13, c: 12.5, cheekY: 25, j: 9.5, jawY: 37, cw: 3, chinY: 45};
-  function head(o, opts) {
+  // ── Head, after the creator's face-shapes chart ───────────────────────────
+  // A full face that keeps its width down to the jaw and rounds into the chin,
+  // a hair cap down to the ears, a wide neck with a shadow under the chin, and
+  // the features as soft marks. Face shapes keep the chart's dusty pinks; every
+  // other face option marks what it changes in the body's pink.
+  const HAIR_PINK = '#e3cbc8', FEATURE_PINK = '#d3a8a4', GUIDE_GREY = '#aaa3a1';
+  const HEAD = {top: 9, fw: 12.5, c: 13.5, cheekY: 32, j: 12.3, jawY: 41, jl: 8, lowY: 48, chinY: 51.4};
+  function headPts(o) {
+    const r = [[o.fw, 18], [o.c, o.cheekY], [o.j, o.jawY], [o.jl, o.lowY]];
+    return [[32, o.top], ...r.map(([x, y]) => [32 + x, y]), [32, o.chinY],
+      ...r.slice().reverse().map(([x, y]) => [32 - x, y])];
+  }
+  // Where the jaw comes in to meet the neck, so a wide jaw never has the neck
+  // lines running up inside the face.
+  function neckTop(pts, half) {
+    for (let i = 2; i < 5; i++) {
+      const [a, b, c, d] = seg(pts, i);
+      for (let t = 0; t <= 1; t += 0.05) {
+        const u = 1 - t, at = k => u * u * u * a[k] + 3 * u * u * t * b[k] + 3 * u * t * t * c[k] + t * t * t * d[k];
+        if (at(0) <= 32 + half) return [at(0) - 32, at(1)];
+      }
+    }
+    return [half, pts[5][1]];
+  }
+  const CAP = [[-14.4, 31.8], [-16.3, 25], [-15.8, 16], [-12.3, 8], [-6.3, 4], [0, 3], [6.3, 4], [12.3, 8],
+    [15.8, 16], [16.3, 25], [14.4, 31.8]];
+  const HAIRLINE = {   // the cap's inner edge, right to left; the part, or the fringe
+    'Rounded, middle part': [[[13.2, 29], [12.3, 23], [9.2, 16.5], [5.2, 12.2], [0, 10.5], [-5.2, 12.2], [-9.2, 16.5],
+      [-12.3, 23], [-13.2, 29]], 0],
+    'Side part': [[[13.2, 29], [12.4, 22], [9.5, 15.5], [3, 11.8], [-5, 10], [-8.6, 13.5], [-11.8, 21], [-13.2, 29]], -5],
+    'Straight, fringe': [[[13.2, 29], [12.8, 20.5], [11.2, 17], [4, 16.6], [-4, 16.6], [-11.2, 17], [-12.8, 20.5],
+      [-13.2, 29]], 'fringe'],
+    "Widow's peak": [[[13.2, 29], [12.3, 23], [9.4, 15.8], [4.6, 11.6], [1.3, 13.2], [0, 14.8], [-1.3, 13.2], [-4.6, 11.6],
+      [-9.4, 15.8], [-12.3, 23], [-13.2, 29]], 0],
+  };
+  const PIXIE = [[[-13.9, 24], [-15.3, 17], [-12, 8.5], [-6, 4.6], [0, 3.8], [6, 4.6], [12, 8.5], [15.3, 17], [13.9, 24]],
+    [[13.3, 23.5], [12.2, 18.5], [8.8, 14.5], [3.5, 12.6], [-2.5, 12.2], [-7.5, 13.6], [-11.4, 17.5], [-13.3, 23.5]]];
+  const HAIR = {   // what falls below the cap on the right, mirrored left
+    'Long, straight': [[16.2, 24], [17, 36], [17.4, 50], [17.6, 62], [12, 62], [11.2, 54], [12.2, 46], [13.6, 38], [14.2, 31]],
+    'Long, loose waves': [[16.2, 24], [17.6, 32], [16.4, 40], [18, 48], [16.8, 56], [18, 62], [12.2, 62], [11, 56], [12.4, 49],
+      [12.2, 43], [13.8, 37], [14.2, 31]],
+    'Long, curly': [[16.6, 22], [19.2, 28], [17.9, 34], [19.8, 40], [18.4, 46], [20.2, 52], [18.6, 58], [19.6, 62], [12, 62],
+      [10.8, 57], [12, 50], [12.8, 44], [13.9, 37], [14.3, 31]],
+    'Shoulder-length': [[16.2, 24], [17, 36], [17.4, 47], [19.6, 53.5], [16.6, 54.2], [14.4, 52], [12.6, 47], [13.6, 38], [14.2, 31]],
+    'Bob': [[16.6, 24], [17.6, 34], [17.7, 43], [16.9, 47.4], [12.6, 47.6], [12.6, 44], [13.6, 38], [14.2, 31]],
+    'Pixie': null,
+  };
+  function hairStrands(part) {
+    if (part === 'fringe') {
+      return [-9, -4.5, 0, 4.5, 9].map(x => `M${f(32 + x)},5.5 Q${f(32 + x * 1.1 + 0.6)},11 ${f(32 + x * 1.15)},16`).join(' ') +
+        ' M22,7.5 Q17.5,12 17,20 M42,7.5 Q46.5,12 47,20';
+    }
+    const x = v => f(32 + part + v);
+    return `M${x(0.5)},3.9 Q${x(9)},4.8 ${f(47.2 - Math.max(0, part) * 0.3)},18 M${x(1)},6.2 Q${x(8)},7.6 45.8,21 ` +
+      `M${x(-0.6)},4.3 Q${x(-8.5)},5.4 ${f(17.2 + Math.min(0, part) * -0.2)},19 M${x(-1.2)},6.8 Q${x(-8)},8.6 18.6,21.5`;
+  }
+  function ear(k, c, [out, h], fill) {
+    const x = v => f(32 + k * v), y0 = 31.5 - h / 2;
+    return `<path d="M${x(c - 0.4)},${f(y0)} C${x(c + out)},${f(y0 - 1.8)} ${x(c + out + 1)},${f(y0 + h * 0.35)} ` +
+      `${x(c + out * 0.85)},${f(y0 + h * 0.6)} C${x(c + out * 0.6)},${f(y0 + h * 0.85)} ${x(c + out * 0.3)},${f(y0 + h)} ` +
+      `${x(c - 0.4)},${f(y0 + h)}"${fill ? ` fill="${PINK}"` : ''} stroke-width="1.3"/>` +
+      line(`M${x(c + out * 0.55)},${f(y0 + h * 0.22)} q${f(-k * out * 0.35)},${f(h * 0.15)} ${f(-k * out * 0.12)},${f(h * 0.42)}`,
+        ' stroke-width=".9"');
+  }
+  const FACE_MARKS = `<g stroke="${FEATURE_PINK}" stroke-width="2.6">` +
+      line('M20.3,28.2 Q24.2,25.4 28.6,27 M43.7,28.2 Q39.8,25.4 35.4,27') +
+      line('M21.4,30.6 q3,-1.6 6.2,0.3 M42.6,30.6 q-3,-1.6 -6.2,0.3', ' stroke-width="1.8"') +
+      line('M29.6,43.4 q2.4,-0.8 4.8,0 M30,44.5 q2,0.9 4,0', ' stroke-width="1.6"') + '</g>' +
+    `<path d="M29,37.3 Q30.5,35.9 32,37.3 Q33.5,35.9 35,37.3 Q33.6,39.8 32,39.6 Q30.4,39.8 29,37.3 Z" fill="${FEATURE_PINK}" stroke="none"/>`;
+  // opts: guide (a face shape's grey type), mark ('jaw' or 'cheeks'), ear
+  // [out, h] for the ears option, hair / hairline for the hair options, extra.
+  function chartHead(o, opts) {
     o = Object.assign({}, HEAD, o || {});
     opts = opts || {};
-    const pts = [[32, o.top], [32 + o.fw, o.templeY], [32 + o.c, o.cheekY], [32 + o.j, o.jawY], [32 + o.cw, o.chinY],
-      [32 - o.cw, o.chinY], [32 - o.j, o.jawY], [32 - o.c, o.cheekY], [32 - o.fw, o.templeY]];
-    const nx = (o.j + o.cw) / 2 * 0.8, ny = (o.jawY + o.chinY) / 2 + 1;
-    let s = line(smooth(pts));
-    if (!opts.noEars) {
-      const ex = 32 + o.c - 0.6, ey = o.cheekY - 4;
-      s += line(`M${f(ex)},${f(ey)} q3.2,-0.6 3.2,3.6 q0,4.2 -3,4.6 M${f(64 - ex)},${f(ey)} q-3.2,-0.6 -3.2,3.6 q0,4.2 3,4.6`);
+    const pts = headPts(o), w = o.c / 13.5, at = ([x, y]) => [32 + x * w, y];
+    const [nx, ny] = neckTop(pts, 8.7), N = k => x => f(32 + k * x);
+    const chosen = opts.hair || opts.hairline, hairFill = chosen ? PINK : HAIR_PINK;
+    const [inner, part] = opts.hair === 'Pixie' ? [PIXIE[1], 0] : HAIRLINE[opts.hairline || 'Rounded, middle part'];
+    const back = HAIR[opts.hair];
+    let s = '';
+    if (back) {
+      [1, -1].forEach(k => {
+        s += `<path d="${smooth(back.map(([x, y]) => [32 + k * x * w, y]))}" fill="${hairFill}" stroke-width="1.3"/>`;
+      });
+      if (opts.hair === 'Long, curly') {
+        s += [[16, 36], [16.6, 45], [15.4, 54], [17, 59]].map(([x, y]) =>
+          `<path d="M${f(32 + x * w)},${y} a1.4,1.4 0 1 1 1.4,1.4 M${f(32 - x * w)},${y} a1.4,1.4 0 1 0 -1.4,1.4" stroke-width=".9"/>`).join('');
+      } else {
+        s += line([1, -1].map(k => `M${f(32 + k * 15.3 * w)},34 Q${f(32 + k * 15.8 * w)},42 ${f(32 + k * 15.2 * w)},` +
+          (opts.hair === 'Bob' ? '45' : opts.hair === 'Shoulder-length' ? '50' : '59')).join(' '), ' stroke-width=".9"');
+      }
     }
-    s += line(`M${f(32 - nx)},${f(ny)} L${f(32 - nx - 0.5)},56 Q${f(32 - nx - 5)},59 ${f(32 - nx - 14)},61 ` +
-      `M${f(32 + nx)},${f(ny)} L${f(32 + nx + 0.5)},56 Q${f(32 + nx + 5)},59 ${f(32 + nx + 14)},61`);
-    if (!opts.blank) {
-      const ey = o.cheekY - 2;
-      s += line(`M22.5,${ey - 4.5} q3,-1.8 6,-0.4 M41.5,${ey - 4.5} q-3,-1.8 -6,-0.4`) +
-        line(`M23,${ey} q3,-2.2 6,0 q-3,2.2 -6,0 M35,${ey} q3,-2.2 6,0 q-3,2.2 -6,0`, ' stroke-width="1.6"') +
-        spot(26, ey, 1.1) + spot(38, ey, 1.1) +
-        line(`M32.5,${ey + 2} l-1.6,6.5 h2.6`, ' stroke-width="1.6"') +
-        line(`M28,${f(o.chinY - 9)} q4,2.2 8,0`);
+    s += `<path d="M${f(32 - nx)},${f(ny)} Q32,${f(2 * o.chinY - ny)} ${f(32 + nx)},${f(ny)} L41,55.5 ` +
+      `Q32,61.5 23,55.5 Z" fill="${HAIR_PINK}" stroke="none"/>`;
+    s += line([1, -1].map(k => { const x = N(k);
+      return `M${x(nx)},${f(ny)} C${x(nx + 0.2)},${f(ny + 4)} ${x(9)},53 ${x(9.2)},56.5 Q${x(9.8)},60.5 ${x(13.8)},62.5`; }).join(' '),
+      ' stroke-width="1.5"');
+    if (!opts.ear) s += ear(1, o.c, [3.6, 12]) + ear(-1, o.c, [3.6, 12]);
+    if (opts.mark === 'jaw') s += `<path d="${smooth(pts, 3, 7)}" stroke="${PINK}" stroke-width="4" stroke-opacity=".8"/>`;
+    s += line(smooth(pts), ' stroke-width="1.5"');
+    const capPts = opts.hair === 'Pixie' ? PIXIE[0].concat(inner) : CAP.concat(inner);
+    s += `<path d="${smooth(capPts.map(at))}" fill="${hairFill}" stroke-width="1.3"/>`;
+    s += opts.hair === 'Pixie'
+      ? line('M31,4.5 Q24,6 19.5,13 M33.5,4.6 Q40,6 44.5,13 M27,6.5 Q22,10 20.6,16 M38,6.8 Q43,10 43.6,16 ' +
+          'M20,19 l-1.2,2.4 M44,19 l1.2,2.4 M29,12.8 l-1.4,1.6 M35,12.6 l1.4,1.6', ' stroke-width=".9"')
+      : line(hairStrands(part), ' stroke-width=".9"');
+    if (opts.ear) s += ear(1, o.c, opts.ear, true) + ear(-1, o.c, opts.ear, true);
+    if (opts.mark === 'cheeks') {
+      const y = o.cheekY + 3.5;
+      s += line(`M${f(32 - o.c + 1.8)},${f(y + 1)} q3.4,-2.6 7,-1.6 M${f(32 + o.c - 1.8)},${f(y + 1)} q-3.4,-2.6 -7,-1.6`,
+        ` stroke="${PINK}" stroke-width="3.2"`);
     }
-    return s + (opts.extra || '');
+    s += FACE_MARKS + (opts.extra || '');
+    if (opts.guide) s += `<path d="${opts.guide}" stroke="${GUIDE_GREY}" stroke-width="1.3"/>`;
+    return bsvg(s);
   }
-
-  // Face shapes follow the creator's chart: a pink hair cap with strands, a
-  // black outline, ears and neck, the features as soft pink marks, a pink
-  // shadow under the chin, and the type as a thin grey shape on the face.
-  const HAIR_PINK = '#e3cbc8', FEATURE_PINK = '#d3a8a4', GUIDE_GREY = '#aaa3a1';
-  const FACE_SHAPE = {   // head parameters, then the guide
-    'Oval': [{}, 'M32,11 C38,11 42.5,17.5 42.5,27 C42.5,36.5 38,43 32,43 C26,43 21.5,36.5 21.5,27 C21.5,17.5 26,11 32,11 Z'],
-    'Round': [{fw: 12, c: 14.5, j: 12, cw: 5, chinY: 43, top: 6}, 'M32,14.5 A12.5,12.5 0 1 1 31.9,14.5 Z'],
-    'Square': [{fw: 12, c: 12.5, j: 12.5, cw: 6.5, jawY: 39}, 'M21,15 H43 V39 H21 Z'],
-    'Heart-shaped': [{fw: 13, c: 12.5, j: 8, cw: 1.5}, 'M32,20 C30,15 21,15 21,21 C21,28 29,36 32,42 C35,36 43,28 43,21 C43,15 34,15 32,20 Z'],
-    'Diamond': [{fw: 8.5, c: 14.5, j: 8.5, cw: 2}, 'M32,11 L44.5,26 L32,43 L19.5,26 Z'],
-    'Rectangle': [{fw: 10, c: 10.5, j: 9.5, cw: 4.5, top: 2, jawY: 42, chinY: 48}, 'M22,13 H42 V46 H22 Z'],
-    'Triangle': [{fw: 13.5, c: 13, j: 8.5, cw: 1.5, chinY: 46}, 'M19,16 H45 L32,44 Z'],
-    'Base-down triangle': [{fw: 7, templeY: 15, c: 11, j: 14.5, jawY: 40, cw: 7.5}, 'M32,13 L47,41 H17 Z'],
+  const FACE_SHAPE = {   // head parameters, then the guide, both fitted to the chart
+    'Oval': [{}, 'M32,15.5 A12.3,17.1 0 1 1 31.9,15.5 Z'],
+    'Round': [{fw: 13, c: 14.5, j: 13.6, jl: 10, lowY: 47.5, chinY: 50.5}, 'M32,19.7 A13.2,13.2 0 1 1 31.9,19.7 Z'],
+    'Square': [{fw: 13.3, c: 13.8, j: 13.6, jawY: 43, jl: 10.6, lowY: 49.4, chinY: 51}, 'M20.4,22.5 H43.6 V45.9 H20.4 Z'],
+    'Heart-shaped': [{fw: 13.8, c: 13.8, j: 11.6, jawY: 40.5, jl: 5.8, lowY: 48.4, chinY: 52},
+      'M32,24.2 C29.5,20.6 18.3,19.6 18.3,25 C18.3,31 28,38.6 32,45.2 C36,38.6 45.7,31 45.7,25 C45.7,19.6 34.5,20.6 32,24.2 Z'],
+    'Diamond': [{fw: 11, c: 14.3, j: 11.2, jl: 5.6, lowY: 48.4, chinY: 52}, 'M32,13.6 L45,30.4 L32,47 L19,30.4 Z'],
+    'Rectangle': [{fw: 12, c: 12.6, j: 12.4, jawY: 44, jl: 9.6, lowY: 50.6, chinY: 53}, 'M20.4,22 H43.6 V49.2 H20.4 Z'],
+    'Triangle': [{fw: 14, c: 13.6, j: 10.6, jl: 5.2, lowY: 48.6, chinY: 52.2}, 'M18.5,23 H45.5 L32,46.1 Z'],
+    'Base-down triangle': [{fw: 11, c: 13, j: 14, jawY: 43.5, jl: 12, lowY: 49.6, chinY: 51.2}, 'M32,22.2 L45.7,45.2 H18.3 Z'],
   };
-  function faceShape([o, g]) {
-    const h = Object.assign({}, HEAD, o);
-    const pts = [[32, h.top], [32 + h.fw, h.templeY], [32 + h.c, h.cheekY], [32 + h.j, h.jawY], [32 + h.cw, h.chinY],
-      [32 - h.cw, h.chinY], [32 - h.j, h.jawY], [32 - h.c, h.cheekY], [32 - h.fw, h.templeY]];
-    const nx = (h.j + h.cw) / 2 * 0.8, ny = (h.jawY + h.chinY) / 2 + 1, ey = h.cheekY - 2;
-    const L = f(32 - h.fw - 2.5), R = f(32 + h.fw + 2.5), base = h.templeY + 9;
-    const cap = `M${L},${base} C${f(32 - h.fw - 4)},${h.top - 1} ${f(32 - 6)},${h.top - 3.5} 32,${h.top - 3.5} ` +
-      `C${f(32 + 6)},${h.top - 3.5} ${f(32 + h.fw + 4)},${h.top - 1} ${R},${base} ` +
-      `C${f(32 + h.fw)},${h.templeY + 1} ${f(32 + 5)},${h.top + 3} 32,${h.top + 2} ` +
-      `C${f(32 - 5)},${h.top + 3} ${f(32 - h.fw)},${h.templeY + 1} ${L},${base} Z`;
-    const ex = 32 + h.c - 0.6, ery = h.cheekY - 4;
-    return svg(
-      `<path d="M${f(32 - nx)},${f(ny)} Q32,${f(h.chinY + 9)} ${f(32 + nx)},${f(ny)} L${f(32 + nx + 0.4)},${f(ny + 8)} ` +
-        `Q32,${f(h.chinY + 13)} ${f(32 - nx - 0.4)},${f(ny + 8)} Z" fill="${HAIR_PINK}" stroke="none"/>` +
-      line(smooth(pts), ' stroke-width="1.5"') +
-      `<path d="${cap}" fill="${HAIR_PINK}" stroke-width="1.3"/>` +
-      line(`M32,${h.top - 3} Q${f(32 + 7)},${h.top - 1.5} ${f(32 + h.fw + 1.5)},${h.templeY + 5} ` +
-        `M32.5,${h.top - 0.5} Q${f(32 + 6)},${h.top + 1} ${f(32 + h.fw)},${h.templeY + 3} ` +
-        `M31.5,${h.top - 1} Q${f(32 - 6)},${h.top} ${f(32 - h.fw - 1)},${h.templeY + 4}`, ' stroke-width=".9"') +
-      line(`M${f(ex)},${f(ery)} q3.2,-0.6 3.2,3.6 q0,4.2 -3,4.6 M${f(64 - ex)},${f(ery)} q-3.2,-0.6 -3.2,3.6 q0,4.2 3,4.6`, ' stroke-width="1.2"') +
-      line(`M${f(32 - nx)},${f(ny)} L${f(32 - nx - 0.5)},56 Q${f(32 - nx - 5)},59 ${f(32 - nx - 14)},61 ` +
-        `M${f(32 + nx)},${f(ny)} L${f(32 + nx + 0.5)},56 Q${f(32 + nx + 5)},59 ${f(32 + nx + 14)},61`, ' stroke-width="1.5"') +
-      `<g stroke="${FEATURE_PINK}">` +
-        line(`M22.5,${ey - 4} q3.5,-2.4 7,-0.4 M41.5,${ey - 4} q-3.5,-2.4 -7,-0.4`, ' stroke-width="2.2"') +
-        line(`M23,${ey} q3,-2 6,0 M35,${ey} q3,-2 6,0`, ' stroke-width="1.6"') +
-        line(`M29.5,${f(h.chinY - 9.5)} q2.5,-1 5,0 M29,${f(h.chinY - 8)} q3,1.2 6,0`, ' stroke-width="1.4"') +
-      '</g>' +
-      `<path d="M29.8,${ey + 7} q2.2,1.6 4.4,0 q-2.2,2.4 -4.4,0 Z" fill="${FEATURE_PINK}" stroke="none"/>` +
-      `<path d="${g}" stroke="${GUIDE_GREY}" stroke-width="1"/>`);
-  }
   const JAW = {
-    'Soft, rounded chin': {j: 9.5, cw: 4.5, chinY: 44}, 'Defined jaw': {j: 11.5, jawY: 36, cw: 3.5},
-    'Pointed chin': {j: 8, cw: 1, chinY: 47}, 'Square jaw': {j: 12.5, jawY: 40, cw: 6.5},
+    'Soft, rounded chin': {jl: 9, chinY: 51}, 'Defined jaw': {j: 13, jawY: 42, jl: 8.6, lowY: 48.6},
+    'Pointed chin': {j: 11.4, jl: 5, lowY: 48.8, chinY: 52.6}, 'Square jaw': {j: 13.6, jawY: 43, jl: 11, lowY: 49.6, chinY: 51},
   };
-  const CHEEK = {High: [13.5, 22], Medium: [12.5, 25], Soft: [12, 28]};
+  const CHEEK = {High: [14.2, 29], Medium: [13.5, 32], Soft: [13.2, 34]};
 
   // ── Eye close-up: lids, crease, iris, pupil and outer lashes ───────────────
   const EYE = {   // upper [x0,y0,cx,cy,x1,y1], lower control y, crease lift (0 = none)
@@ -129,7 +190,7 @@
     const q = t => [(1 - t) * (1 - t) * x0 + 2 * (1 - t) * t * cx + t * t * x1, (1 - t) * (1 - t) * y0 + 2 * (1 - t) * t * cy + t * t * y1];
     const midY = q(0.5)[1], lowMid = (y0 + y1) / 4 + loY / 2;
     const ir = Math.min(9, (lowMid - midY) / 2 + 1.5), icy = (midY + lowMid) / 2;
-    let s = (iris ? `<circle cx="32" cy="${f(icy)}" r="${f(ir)}" fill="${iris}" stroke="none"/>` : '') +
+    let s = `<circle cx="32" cy="${f(icy)}" r="${f(ir)}" fill="${iris || PINK}" stroke="none"/>` +
       ring(32, icy, f(ir)) + spot(32, icy, f(ir * 0.38)) +
       line(`M${x0},${y0} Q${cx},${cy} ${x1},${y1}`, ' stroke-width="2.6"') +
       line(`M${x0},${y0} Q${32},${loY} ${x1},${y1}`);
@@ -140,7 +201,7 @@
       const len = Math.hypot(dx, dy) || 1, nx = dy / len, ny = -dx / len;
       s += line(`M${f(px)},${f(py)} l${f(nx * 5 + dx / len * 1.5)},${f(ny * 5 + dy / len * 1.5)}`, ' stroke-width="1.6"');
     });
-    return svg(s);
+    return bsvg(s);
   }
 
   const BROW = {   // curve [x0,y0,cx,cy,x1,y1], thickness
@@ -148,9 +209,10 @@
     'Straight, full': [[10, 31, 32, 27, 54, 31], 5], 'Bold, thick': [[10, 35, 30, 22, 54, 31], 7],
   };
   function brow([x0, y0, cx, cy, x1, y1], t) {
-    const b = t < 2.5 ? line(`M${x0},${y0} Q${cx},${cy} ${x1},${y1}`) :
-      line(`M${x0},${y0} Q${cx},${cy} ${x1},${y1} Q${cx},${cy + t * 1.6} ${x0 + 2},${y0 + t * 0.7} Z`);
-    return svg(b + line('M18,50 Q32,42 46,50 Q32,56 18,50', ' stroke-width="1.6"'));
+    const b = t < 2.5 ? line(`M${x0},${y0} Q${cx},${cy} ${x1},${y1}`, ` stroke="${PINK}" stroke-width="3.4"`) +
+        line(`M${x0},${y0} Q${cx},${cy} ${x1},${y1}`) :
+      line(`M${x0},${y0} Q${cx},${cy} ${x1},${y1} Q${cx},${cy + t * 1.6} ${x0 + 2},${y0 + t * 0.7} Z`, ` fill="${PINK}"`);
+    return bsvg(b + line('M18,50 Q32,42 46,50 Q32,56 18,50', ' stroke-width="1.6"'));
   }
   const NOSE = {
     'Straight, narrow': 'M22,6 L36,40 Q41,46 34,48 L27,48',
@@ -159,45 +221,26 @@
     'Roman': 'M22,6 Q38,16 36,40 Q39,46 33,48 L27,48',
     'Wide': 'M22,6 L34,38 Q46,44 37,50 L25,50',
   };
-  const nose = d => svg(line(d) + line('M30,44 q3,1.5 5,0', ' stroke-width="1.6"') +
+  const nose = d => bsvg(`<ellipse cx="33" cy="45" rx="4.2" ry="2.6" fill="${PINK}" fill-opacity=".6" stroke="none"/>` + line(d) + line('M30,44 q3,1.5 5,0', ' stroke-width="1.6"') +
     line('M22,50 Q24,54 28,56', ' stroke-width="1.6"'));
   const LIPS = {'Full, defined bow': [20, 9, 10, 4], 'Medium': [19, 6, 8, 2], 'Thin': [19, 3, 4, 1], 'Very full': [21, 12, 14, 3]};
   function lips(w, up, lo, bow) {
     const L = 32 - w, R = 32 + w;
-    return svg(line(`M${L},32 C${L + w * 0.4},${32 - up} 26,${32 - up - 1} 32,${32 - up + bow} ` +
+    return bsvg(`<path d="M${L},32 C${L + w * 0.4},${32 - up} 26,${32 - up - 1} 32,${32 - up + bow} ` +
+      `C38,${32 - up - 1} ${R - w * 0.4},${32 - up} ${R},32 C${R - w * 0.3},${32 + lo * 1.25} ${L + w * 0.3},${32 + lo * 1.25} ${L},32 Z" ` +
+      `fill="${PINK}" fill-opacity=".7" stroke="none"/>` +
+      line(`M${L},32 C${L + w * 0.4},${32 - up} 26,${32 - up - 1} 32,${32 - up + bow} ` +
       `C38,${32 - up - 1} ${R - w * 0.4},${32 - up} ${R},32`) +
       line(`M${L},32 C${L + w * 0.3},${32 + lo * 1.25} ${R - w * 0.3},${32 + lo * 1.25} ${R},32`) +
       line(`M${L + 1},32 Q26,${32 + Math.min(2, up / 3)} 32,${32 + Math.min(1.2, up / 4)} Q38,${32 + Math.min(2, up / 3)} ${R - 1},32`));
   }
-  const EAR = {'Small, close-set': [2.2, 6], 'Medium': [3.6, 7.5], 'Prominent': [6.5, 8.5]};
-  function ears(out, h) {
-    return svg(head({}, {noEars: true, blank: true}) +
-      line(`M${f(19.7)},${f(21 - h / 2)} Q${f(19.7 - out)},${f(21 - h / 2)} ${f(19.7 - out)},21 Q${f(19.7 - out * 0.8)},${f(21 + h)} 20,${f(21 + h * 0.8)}`) +
-      line(`M${f(44.3)},${f(21 - h / 2)} Q${f(44.3 + out)},${f(21 - h / 2)} ${f(44.3 + out)},21 Q${f(44.3 + out * 0.8)},${f(21 + h)} 44,${f(21 + h * 0.8)}`));
-  }
-
-  const HAIR = {
-    'Long, straight': 'M20,24 Q19,4 32,4 Q45,4 44,24 L46,60 M20,24 L18,60',
-    'Long, loose waves': 'M20,24 Q19,4 32,4 Q45,4 44,24 q4,6 0,12 q-4,6 0,12 q4,6 1,10 M20,24 q-4,6 0,12 q4,6 0,12 q-4,6 -1,10',
-    'Long, curly': 'M20,22 Q20,3 32,3 Q44,3 44,22 a3,3 0 1 1 2,6 a3,3 0 1 1 0,7 a3,3 0 1 1 -1,7 a3,3 0 1 1 0,7 ' +
-      'M20,22 a3,3 0 1 0 -2,6 a3,3 0 1 0 0,7 a3,3 0 1 0 1,7 a3,3 0 1 0 0,7',
-    'Shoulder-length': 'M20,24 Q19,4 32,4 Q45,4 44,24 L45,44 q1,3 4,3 M20,24 L19,44 q-1,3 -4,3',
-    'Bob': 'M20,26 Q18,4 32,4 Q46,4 44,26 L45,38 L39,38 M20,26 L19,38 L25,38',
-    'Pixie': 'M21,24 Q18,5 32,5 Q46,5 43,24 M21,18 q6,-6 14,-4 q6,1 8,6',
-  };
-  const hairOver = d => svg(head({top: 7, fw: 10, c: 11.5, j: 8.5}, {noEars: true}) + line(d));
-  const HAIRLINE = {
-    'Rounded, middle part': 'M21,17 Q22,7 32,7 Q42,7 43,17 M32,7 L32,3',
-    'Side part': 'M21,17 Q22,7 32,7 Q42,7 43,17 M27,7 L26,3 M27,7 Q37,8 43,14',
-    'Straight, fringe': 'M21,14 L43,14 M24,14 l0,-6 M29,14 l0,-7 M34,14 l0,-7 M39,14 l0,-6',
-    "Widow's peak": 'M21,17 Q22,8 28,8 L32,12 L36,8 Q42,8 43,17',
-  };
-  const FRECKLES = (list, r) => list.map(p => spot(p[0], p[1], r || 0.8)).join('');
+  const EAR = {'Small, close-set': [2.6, 9.5], 'Medium': [3.6, 12], 'Prominent': [5.6, 13]};
+  const FRECKLES = (list, r) => list.map(p => `<circle cx="${p[0]}" cy="${p[1]}" r="${r || 0.8}" fill="${PINK}" stroke="none"/>`).join('');
   const MARKS = {
-    'None': '', 'Light freckles, nose': FRECKLES([[29, 27], [35, 27], [27.5, 29.5], [36.5, 29.5], [31, 25.5], [33.5, 25.5]]),
-    'Heavy freckles': FRECKLES([[23, 27], [25.5, 29.5], [27.5, 26.5], [21.5, 30], [24.5, 32], [29, 28.5], [41, 27], [38.5, 29.5],
-      [36.5, 26.5], [42.5, 30], [39.5, 32], [35, 28.5], [31, 26], [33.5, 29], [24, 24.5], [40, 24.5]]),
-    'Beauty mark, cheek': spot(40, 30, 1.4), 'Beauty mark, lip': spot(36.5, 34, 1.3),
+    'None': '', 'Light freckles, nose': FRECKLES([[29, 34.4], [35, 34.4], [27.4, 36.2], [36.6, 36.2], [30.8, 32.8], [33.2, 32.8]]),
+    'Heavy freckles': FRECKLES([[22.5, 34], [25, 36.5], [27.4, 33.6], [21.2, 37.2], [24, 39], [28.8, 35.8], [41.5, 34], [39, 36.5],
+      [36.6, 33.6], [42.8, 37.2], [40, 39], [35.2, 35.8], [30.8, 33], [33.2, 33.6], [23.6, 31.8], [40.4, 31.8]]),
+    'Beauty mark, cheek': FRECKLES([[41.5, 38.4]], 1.2), 'Beauty mark, lip': FRECKLES([[36.4, 42.2]], 1.1),
   };
 
   const COLOURS = {
@@ -426,21 +469,20 @@
   // ── Table ─────────────────────────────────────────────────────────────────
   const map = (obj, fn) => Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, () => fn(v, k)]));
   const TABLE = {
-    face_shape: map(FACE_SHAPE, faceShape),
+    face_shape: map(FACE_SHAPE, ([o, guide]) => chartHead(o, {guide})),
     body_shape: map(BODY_SHAPE, bodyShape),
     glute_shape: map(GLUTE_SHAPE, gluteShape),
-    jaw: map(JAW, o => svg(head(o))),
-    cheekbones: map(CHEEK, ([c, y]) => svg(head({c, cheekY: y},
-      {extra: line(`M${f(32 - c + 2)},${y + 1} q3,-2 6.5,-1 M${f(32 + c - 2)},${y + 1} q-3,-2 -6.5,-1`, ' stroke-width="1.6"')}))),
+    jaw: map(JAW, o => chartHead(o, {mark: 'jaw'})),
+    cheekbones: map(CHEEK, ([c, cheekY]) => chartHead({c, cheekY}, {mark: 'cheeks'})),
     eye_shape: map(EYE, (v, k) => eye(k)),
     eye_colour: map(EYE_COLOURS, hex => eye('Almond', hex)),
     brows: map(BROW, ([c, t]) => brow(c, t)),
     nose: map(NOSE, nose),
     lips: map(LIPS, a => lips.apply(null, a)),
-    ears: map(EAR, ([o, h]) => ears(o, h)),
-    hair_texture: map(HAIR, hairOver),
-    hairline: map(HAIRLINE, d => svg(head({top: 7, fw: 10, c: 11.5, j: 8.5}, {noEars: true}) + line(d, ' stroke-width="1.8"'))),
-    marks: map(MARKS, extra => svg(head({}, {extra}))),
+    ears: map(EAR, ear => chartHead({}, {ear})),
+    hair_texture: map(HAIR, (v, hair) => chartHead({}, {hair})),
+    hairline: map(HAIRLINE, (v, hairline) => chartHead({}, {hairline})),
+    marks: map(MARKS, extra => chartHead({}, {extra})),
     height: map(HEIGHT, height),
     build: map(BUILD, o => body(o)),
     shoulders: map({Narrow: 8.5, Medium: 10.5, Broad: 13.5}, sh => body({sh}, 'shoulders')),
