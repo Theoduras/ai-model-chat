@@ -12,13 +12,22 @@
   <link rel="stylesheet" href="/css/site-nav.css">
   <script src="/js/site-nav.js" defer></script>
   <style>
+    /* The body is height-locked by .page-dashboard so it fits the dashboard's
+       iframe; that means this page has to carry its own scroller, the way
+       .pl-scroll does for the planner. */
+    .vw-scroll { flex:1; min-height:0; overflow-y:auto; }
     .vw-wrap { max-width: 1100px; margin: 0 auto; padding: 18px 16px 60px; }
     .vw-bar { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:16px; }
+    /* The console stylesheet stretches a bare select to the row; these sit in a
+       toolbar, so they size to themselves. */
     .vw-bar select, .vw-bar input[type="search"] {
+      width:auto; flex:0 0 auto; min-width:140px; margin:0;
       padding:7px 10px; border-radius:9px; border:1px solid var(--border);
       background:var(--surface); color:var(--text); font-size:0.82rem; }
+    .vw-bar #vw-persona { min-width:180px; }
+    .vw-bar #vw-q { min-width:200px; }
     .vw-grid { display:grid; gap:14px;
-      grid-template-columns:repeat(auto-fill, minmax(168px, 1fr)); }
+      grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); }
     .vw-item { border:1px solid var(--border); border-radius:12px; overflow:hidden;
       background:var(--surface); display:flex; flex-direction:column; }
     .vw-thumb { position:relative; aspect-ratio:3/4; background:#0002; }
@@ -41,6 +50,15 @@
     .vw-del:hover { color:#d6336c; }
     .vw-empty, .vw-note { color:var(--text-muted); font-size:0.82rem; padding:22px 0; }
     .vw-unrated { outline:1px dashed #f0932b88; outline-offset:-1px; }
+    .vw-pager { display:flex; flex-wrap:wrap; gap:6px; align-items:center;
+      justify-content:center; padding:22px 0 4px; }
+    .vw-pager button { min-width:30px; padding:5px 9px; border-radius:8px; cursor:pointer;
+      border:1px solid var(--border); background:var(--surface); color:var(--text);
+      font-size:0.76rem; font-weight:600; }
+    .vw-pager button:disabled { opacity:.4; cursor:default; }
+    .vw-pager button.on { background:var(--accent, #6c5ce7); border-color:transparent; color:#fff; }
+    .vw-pager .vw-gap { color:var(--text-muted); font-size:0.76rem; padding:0 2px; }
+    .vw-pager .vw-of { color:var(--text-muted); font-size:0.72rem; margin-left:8px; }
   </style>
 </head>
 <body class="page-dashboard">
@@ -56,17 +74,18 @@
   </div>
 </header>
 
+<div class="vw-scroll">
 <div class="vw-wrap">
   <div class="vw-bar">
     <select id="vw-persona" onchange="vwPick(this.value)"></select>
-    <input type="search" id="vw-q" placeholder="Search by name…" oninput="vwDraw()">
-    <select id="vw-rating" onchange="vwDraw()">
+    <input type="search" id="vw-q" placeholder="Search by name…" oninput="vwRefilter()">
+    <select id="vw-rating" onchange="vwRefilter()">
       <option value="">All ratings</option>
       <option value="sfw">Safe for work</option>
       <option value="nsfw">Explicit</option>
       <option value="unrated">Unrated</option>
     </select>
-    <select id="vw-type" onchange="vwDraw()">
+    <select id="vw-type" onchange="vwRefilter()">
       <option value="">Photos and clips</option>
       <option value="image">Photos</option>
       <option value="video">Clips</option>
@@ -77,11 +96,15 @@
   </div>
   <div class="vw-note" id="vw-note" hidden></div>
   <div class="vw-grid" id="vw-grid"></div>
+  <div class="vw-pager" id="vw-pager"></div>
+</div>
 </div>
 
 <script>
 let vwSlug = '';
 let vwItems = [];
+const VW_PER_PAGE = 48;
+let vwPage = 1;
 
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g,
@@ -119,6 +142,7 @@ async function vwLoad() {
     vwItems = (d && d.vault) || [];
     note('');
   } catch (e) { vwItems = []; note('Could not read the vault.'); }
+  vwPage = 1;
   vwDraw();
 }
 
@@ -136,10 +160,25 @@ function vwFiltered() {
   });
 }
 
+// Anything that changes which items match starts the creator at the top again;
+// rating one or deleting one leaves them where they were reading.
+function vwRefilter() { vwPage = 1; vwDraw(); }
+
+function vwGo(page) {
+  vwPage = page;
+  vwDraw();
+  document.querySelector('.vw-scroll').scrollTop = 0;
+}
+
 function vwDraw() {
-  const rows = vwFiltered();
+  const all = vwFiltered();
+  const pages = Math.max(1, Math.ceil(all.length / VW_PER_PAGE));
+  // Deleting the last item on the last page must not leave an empty grid.
+  if (vwPage > pages) vwPage = pages;
+  const rows = all.slice((vwPage - 1) * VW_PER_PAGE, vwPage * VW_PER_PAGE);
   document.getElementById('vw-count').textContent =
-    vwItems.length ? rows.length + ' of ' + vwItems.length : '';
+    vwItems.length ? all.length + ' of ' + vwItems.length : '';
+  vwDrawPager(pages, all.length);
   document.getElementById('vw-grid').innerHTML = rows.length ? rows.map(m => {
     const clip = (m.kind || 'image') === 'video';
     const thumb = clip
@@ -164,6 +203,32 @@ function vwDraw() {
       + '<button type="button" class="vw-del" onclick="vwDelete(\'' + esc(m.id) + '\')">delete</button>'
       + '</div></div></div>';
   }).join('') : '<div class="vw-empty">Nothing here yet — upload a photo or keep a generation.</div>';
+}
+
+// First and last always, plus a window around where the creator is: a vault of
+// forty pages is not a row of forty buttons.
+function vwPageNumbers(pages) {
+  const out = [];
+  for (let n = 1; n <= pages; n++) {
+    if (n === 1 || n === pages || Math.abs(n - vwPage) <= 1) out.push(n);
+    else if (out[out.length - 1] !== '…') out.push('…');
+  }
+  return out;
+}
+
+function vwDrawPager(pages, total) {
+  const el = document.getElementById('vw-pager');
+  if (pages < 2) { el.innerHTML = ''; return; }
+  el.innerHTML =
+    '<button type="button"' + (vwPage === 1 ? ' disabled' : '')
+      + ' onclick="vwGo(' + (vwPage - 1) + ')">‹ Prev</button>'
+    + vwPageNumbers(pages).map(n => n === '…'
+        ? '<span class="vw-gap">…</span>'
+        : '<button type="button" class="' + (n === vwPage ? 'on' : '')
+          + '" onclick="vwGo(' + n + ')">' + n + '</button>').join('')
+    + '<button type="button"' + (vwPage === pages ? ' disabled' : '')
+      + ' onclick="vwGo(' + (vwPage + 1) + ')">Next ›</button>'
+    + '<span class="vw-of">Page ' + vwPage + ' of ' + pages + ' · ' + total + ' items</span>';
 }
 
 // A rating is what keeps an explicit file off a channel that bans them, so it
