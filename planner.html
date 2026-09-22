@@ -9,6 +9,7 @@
   <script src="/js/theme.js"></script>
   <link rel="stylesheet" href="/css/style.css">
 <link rel="stylesheet" href="/css/lazy.css">
+<script src="/js/skeleton.js"></script>
   <script src="/js/devnav.js" defer></script>
   <link rel="stylesheet" href="/css/site-nav.css">
   <script src="/js/site-nav.js" defer></script>
@@ -432,6 +433,8 @@ function plFvRemember(items) {
 async function plLoadFvVault() {
   if (plFvVault || !plSlug) return;
   plFvVault = [];
+  const strip = document.getElementById('pl-m-strip');
+  if (strip) strip.innerHTML = skelGrid(6);
   try {
     plFvRemember(await plFvFetch(1));
   } catch (e) { plFvVaultError = 'Could not read the Fanvue vault.'; }
@@ -471,6 +474,8 @@ async function plVaultLoadFolders() {
 }
 
 async function plVaultReload() {
+  const grid = document.getElementById('pl-v-grid');
+  if (grid) grid.innerHTML = skelGrid(12);
   plFvFolder = document.getElementById('pl-v-folder').value;
   plFvType = document.getElementById('pl-v-type').value;
   plFvItems = [];
@@ -557,6 +562,7 @@ function plShiftWeek(n) {
 
 async function plLoadQueue() {
   if (!plSlug) return;
+  document.getElementById('pl-grid').innerHTML = skelDays();
   document.getElementById('pl-range').textContent = rangeLabel(plWeekStart);
   const from = plWeekStart, to = plWeekStart + 7 * 86400;
   let d;

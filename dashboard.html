@@ -9,6 +9,7 @@
   <script src="/js/theme.js"></script>
   <link rel="stylesheet" href="/css/style.css">
 <link rel="stylesheet" href="/css/lazy.css">
+<script src="/js/skeleton.js"></script>
   <script src="/js/devnav.js" defer></script>
   <script src="/js/examples.js" defer></script>
 <script src="/js/onboarding.js" defer></script>
@@ -2616,7 +2617,8 @@ function syncAvatarFromGallery() {
 
 async function loadGallery(slug) {
   galleryImages = [];
-  renderGallery();
+  const grid = document.getElementById('photo-grid');
+  if (grid) grid.innerHTML = skelGrid(6);
   try {
     const res = await fetch('/api/personas/' + slug + '/images?full=1');
     const data = await res.json();
@@ -2745,7 +2747,8 @@ function renderNsfwGallery() {
 
 async function loadNsfwGallery(slug) {
   nsfwGalleryImages = [];
-  renderNsfwGallery();
+  const nsfwGrid = document.getElementById('nsfw-photo-grid');
+  if (nsfwGrid) nsfwGrid.innerHTML = skelGrid(6);
   try {
     const res = await fetch('/api/personas/' + slug + '/nsfw-images?full=1');
     const data = await res.json();

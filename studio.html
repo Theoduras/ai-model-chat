@@ -9,6 +9,7 @@
   <script src="/js/theme.js"></script>
   <link rel="stylesheet" href="/css/style.css">
 <link rel="stylesheet" href="/css/lazy.css">
+<script src="/js/skeleton.js"></script>
   <script src="/js/devnav.js" defer></script>
   <style>
     .fv-scroll { flex: 1; min-height: 0; overflow-y: auto; }
@@ -207,7 +208,12 @@
       display: flex; align-items: center; justify-content: center; text-align: center;
       color: var(--text-muted); font-size: 0.68rem; padding: 6px;
     }
-    .gen-failed { border-color: var(--err); }
+    .gen-failed { border-color: var(--err); position: relative; }
+    .gen-del {
+      position: absolute; top: 3px; right: 3px; width: 18px; height: 18px;
+      border: none; border-radius: 50%; background: #000000a0; color: var(--text);
+      font-size: 0.6rem; line-height: 1; cursor: pointer;
+    }
 
     /* The photos a clip can start from, chosen where the clip is set up rather
        than from the vault: one way in, and you can see which photo you picked. */
@@ -1915,7 +1921,9 @@ function renderGenStaging() {
     }
     if (job.status === 'failed') {
       cards.push(`<div class="gen-card gen-failed gen-pending">✗ ${esc(job.error || 'failed')}
-        <br><span style="opacity:.7">${job.credits} credits refunded</span></div>`);
+        <br><span style="opacity:.7">${job.credits} credits refunded</span>
+        <button type="button" class="gen-del" title="Delete this generation"
+          onclick="deleteGenJob('${job.id}')">✕</button></div>`);
       return;
     }
     job.media.filter(m => !m.approved).forEach(m => {
@@ -1935,6 +1943,16 @@ function renderGenStaging() {
     });
   });
   box.innerHTML = cards.join('');
+}
+
+async function deleteGenJob(id) {
+  try {
+    const res = await fetch('/api/generate/job/' + encodeURIComponent(id), { method: 'DELETE' });
+    const d = await res.json();
+    if (!d.ok) throw new Error(d.error || 'Could not delete that');
+    genJobs = genJobs.filter(j => j.id !== id);
+    renderGenStaging();
+  } catch (e) { setGenStatus('✗ ' + e.message, false); }
 }
 
 async function keepGenerated(id, keep) {

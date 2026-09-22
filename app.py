@@ -29360,6 +29360,34 @@ def _gen_advance_open(workspace_id=None, job_id=None):
     return len(rows)
 
 
+GEN_FAILED_TTL = int(os.getenv('GEN_FAILED_TTL', '21600'))
+
+
+def _gen_purge_failed():
+    """A failed generation is only worth showing while somebody might still be
+    looking at why it failed. After that it is clutter in the studio and rows
+    nobody reads, so it is swept along with whatever it staged."""
+    from db import SessionLocal, stale_failed_generations, get_persona_media
+    cutoff = (datetime.now(timezone.utc).replace(tzinfo=None)
+              - timedelta(seconds=GEN_FAILED_TTL))
+    n = 0
+    s = SessionLocal()
+    try:
+        for job in stale_failed_generations(s, cutoff):
+            for mid in [i for i in (job.result_media_ids or '').split(',') if i]:
+                row = get_persona_media(s, mid)
+                if row and row.approved is not True:
+                    _gen_drop_media(s, row)
+            s.delete(job)
+            s.commit()
+            n += 1
+    except Exception:
+        logger.exception('failed-generation purge failed')
+    finally:
+        s.close()
+    return n
+
+
 def _gen_poll_round():
     """Advance every open job. Also the sweeper: a job whose submit died leaves
     a reservation behind, and credits nobody can spend are credits stolen."""
@@ -29371,6 +29399,7 @@ def _gen_poll_round():
         s.close()
     for row in rows:
         _gen_advance(row)
+    _gen_purge_failed()
     return len(rows)
 
 
@@ -29444,6 +29473,7 @@ def api_generate_jobs():
     from db import list_generations
     if not GEN_HAS_WORKER:
         _gen_advance_open(workspace_id=_workspace_id(user))
+        _gen_purge_failed()
     s = _db_session()
     try:
         rows = list_generations(s, _workspace_id(user), slug or None)
@@ -29476,6 +29506,21 @@ def _job_json(job, session_db):
             'created_at': job.created_at.isoformat() if job.created_at else ''}
 
 
+def _gen_drop_media(session_db, row):
+    """Delete one generated photo or clip, and the bytes behind it."""
+    from db import (delete_persona_media, delete_media_links,
+                    drop_model_references)
+    path = row.gcs_path or ''
+    # Links first: a leftover link would point at a photo that is gone.
+    # delete_persona_media does not commit on its own.
+    delete_media_links(session_db, row.id)
+    drop_model_references(session_db, row.id)
+    delete_persona_media(session_db, row.id)
+    session_db.commit()
+    if path:
+        storage.delete(path)
+
+
 @app.route('/api/generate/keep', methods=['POST'])
 def api_generate_keep():
     """Keep or drop a staged generation. Keeping promotes it out of the staging
@@ -29491,8 +29536,7 @@ def api_generate_keep():
     if not ids:
         return jsonify({'ok': False, 'error': 'Nothing selected'}), 400
 
-    from db import (SessionLocal, get_persona_media, delete_persona_media,
-                    delete_media_links, drop_model_references)
+    from db import SessionLocal, get_persona_media
     mine = owned_slugs()
     done = []
     s = SessionLocal()
@@ -29511,19 +29555,40 @@ def api_generate_keep():
                 row.approved = True
                 s.commit()
             else:
-                path = row.gcs_path or ''
-                # Links first: a leftover link would point at a photo that is
-                # gone. delete_persona_media does not commit on its own.
-                delete_media_links(s, mid)
-                drop_model_references(s, mid)
-                delete_persona_media(s, mid)
-                s.commit()
-                if path:
-                    storage.delete(path)
+                _gen_drop_media(s, row)
             done.append(mid)
     finally:
         s.close()
     return jsonify({'ok': True, 'kept' if keep else 'dropped': done})
+
+
+@app.route('/api/generate/job/<job_id>', methods=['DELETE'])
+@app.route('/api/generate/job/<job_id>/delete', methods=['POST'])
+def api_generate_job_delete(job_id):
+    """Remove a generation from the studio. Anything still staged goes with it;
+    media already kept has been promoted into the vault and is no longer this
+    job's to delete."""
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    user = _current_user()
+    from db import SessionLocal, get_generation, get_persona_media, delete_generation
+    s = SessionLocal()
+    try:
+        job = get_generation(s, job_id)
+        if not job or job.workspace_id != _workspace_id(user):
+            return jsonify({'ok': False, 'error': 'Unknown job'}), 404
+        if job.status in ('queued', 'running'):
+            return jsonify({'ok': False,
+                            'error': 'That generation is still running'}), 409
+        for mid in [i for i in (job.result_media_ids or '').split(',') if i]:
+            row = get_persona_media(s, mid)
+            if row and row.approved is not True:
+                _gen_drop_media(s, row)
+        delete_generation(s, job_id)
+    finally:
+        s.close()
+    return jsonify({'ok': True, 'deleted': job_id})
 
 
 def _cron_authorised():

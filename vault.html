@@ -9,6 +9,7 @@
   <script src="/js/theme.js"></script>
   <link rel="stylesheet" href="/css/style.css">
 <link rel="stylesheet" href="/css/lazy.css">
+<script src="/js/skeleton.js"></script>
   <script src="/js/devnav.js" defer></script>
   <link rel="stylesheet" href="/css/site-nav.css">
   <script src="/js/site-nav.js" defer></script>
@@ -191,6 +192,7 @@ function vwPick(slug) { vwSlug = slug; vwPicked.clear(); vwLoad(); }
 
 async function vwLoad() {
   if (!vwSlug) return;
+  el('vw-body').innerHTML = skelGrid(12);
   const q = encodeURIComponent(vwSlug);
   try {
     const [m, f] = await Promise.all([

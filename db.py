@@ -1189,6 +1189,25 @@ def list_generations(session, workspace_id, slug=None, limit=40):
     return q.order_by(GenerationJob.created_at.desc()).limit(limit).all()
 
 
+def delete_generation(session, job_id):
+    """Drop one job row. The caller deals with its media first — a job is a
+    record of work, not the owner of what the work produced."""
+    row = get_generation(session, job_id)
+    if not row:
+        return False
+    session.delete(row)
+    session.commit()
+    return True
+
+
+def stale_failed_generations(session, cutoff, limit=200):
+    """Failed jobs old enough that nobody is still reading the error."""
+    return (session.query(GenerationJob)
+            .filter(GenerationJob.status == 'failed')
+            .filter(GenerationJob.created_at < cutoff)
+            .order_by(GenerationJob.created_at).limit(limit).all())
+
+
 def open_generations(session, limit=50):
     """Jobs the poller still owes an answer for."""
     return (session.query(GenerationJob)
