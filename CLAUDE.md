@@ -32,9 +32,9 @@ characters.html                 — Character builder (face, checks, body views;
 js/character-visuals.js         — Option drawings for the character builder (SVG, parametric)
 test_characters.py              — SFW/NSFW separation and validation tests
 imagegen.py                     — NSFW image/video generation (Runware, ModelsLab)
-credits.py                      — Credit pricing, tier packs, margin floor
+credits.py                      — Token pricing, top-up packs, margin floor
 storage.py                      — GCS for generated media (staging vs kept)
-test_credits.py                 — Pricing and ledger tests (python test_credits.py)
+test_tokens.py                  — Pricing and ledger tests (python test_tokens.py)
 onlyfans.py                     — OnlyFansAPI transport (OnlyFans chat)
 onlyfans.html                   — OnlyFans console (connect, auto-reply, PPV)
 of_connect.py                   — Hosted sign-in browser (OnlyFans, Discord, Instagram)
@@ -206,11 +206,21 @@ Stay completely in character. Never mention being an AI.
   `/api/generate/*` route go through `_require_admin`, which 404s rather than
   403s so the surface is not discoverable; the sidebar item carries
   `admin-only` and sits under Developers. An admin holds `UNLIMITED_CAPS`, so
-  `credits_month` is None and nothing is charged or written to the ledger —
-  the credit prices the studio shows are what a creator's plan *would* pay.
-  Credit top-up checkout is admin-gated too: nobody should buy credits for a
-  feature that is not offered yet. Open it to creators by dropping those
-  `_require_admin` calls and the `admin-only` class on the sidebar item.
+  `tokens_month` is None and nothing is charged or written to the ledger —
+  the token prices the studio shows are what a creator's plan *would* pay.
+  Open it to creators by dropping those `_require_admin` calls and the
+  `admin-only` class on the sidebar item.
+- **Buying tokens is open even though spending them is not.** Top-up checkout
+  went to every paid account while `/studio` stayed shut, so a creator can hold
+  a balance they cannot spend yet; the billing page says so. `TOKEN_SALES_OPEN=0`
+  closes the shop without a deploy if that turns into refunds.
+- **`TOKEN_TEST_PACK=1` sells 1,000 tokens for 0.50 EUR.** It exists to prove
+  the live Stripe path without spending 130 EUR, and it is gated on that env
+  flag *and* an admin session, because it hands over roughly 40 dollars of
+  provider spend. It is addressed by name (`credits.TEST_PACK_ID`), never by
+  token count — 1,000 is also a real pack — and lives outside `PACK_PRICES` so
+  the margin assertion keeps protecting every pack a creator can reach. Unset
+  the flag the moment a test is done.
 - **Generation works on Vercel as well as Cloud Run, by doing on-request what
   the worker does off-request.** `GEN_HAS_WORKER` (from `_worker_enabled`) is
   the switch. With a worker, a submit goes to a thread and `_gen_worker` polls.
@@ -298,14 +308,21 @@ Stay completely in character. Never mention being an AI.
   to `kept/` and sets `approved`. The three-day purge is a **bucket lifecycle
   rule**, installed at boot by `_gen_worker`, never a loop: a worker that is
   not running must not be why a generation outlives its window.
-- **Credits are pegged to provider cost** — `credits.CREDIT_COST_USD`, one
+- **Tokens are pegged to provider cost** — `credits.TOKEN_COST_USD`, one
   number — so margin is identical whatever is generated and a new model is a
   table entry, not a pricing decision. `credits.py` asserts at import that every
-  pack clears `MIN_MARGIN_MULTIPLE` times cost, and `test_credits.py` walks the
-  matrix, so a discount that would lose money fails the build. The ledger is
-  append-only (`CreditLedger`): balance is the sum of rows, never a counter,
-  because people buy these. A spend drains the expiring monthly allowance before
-  anything purchased, and a refund returns credits to the bucket they left.
+  pack clears `MIN_MARGIN_MULTIPLE` times cost and Stripe's own minimum charge,
+  and `test_tokens.py` walks the matrix, so a discount that would lose money, or
+  a price Stripe would refuse, fails the build. The ledger is append-only
+  (`TokenLedger`): balance is the sum of rows, never a counter, because people
+  buy these. A spend drains the expiring monthly allowance before anything
+  purchased, and a refund returns tokens to the bucket they left.
+- **A token pack has one durable Stripe Product**, created on first sale and
+  remembered in app settings (`_stripe_token_product`), the way the referral
+  coupon already works. The *amount* still comes from `credits.py` per request,
+  so the price charged cannot drift from the price quoted. A paid session is
+  also settled on return from Stripe, not only by webhook; that races the
+  webhook safely because `token_purchase` is keyed on the payment id.
 - A credit top-up rides the same `Payment` row, providers and webhooks as a
   subscription — `kind` is the only thing that tells them apart, so Oxapay keeps
   working and a redelivered webhook cannot credit twice.
@@ -414,4 +431,4 @@ When building new features, tackle in this order:
 - [ ] Persona prompt loads correctly from file
 - [ ] No API keys or secrets in committed files
 - [ ] `Dockerfile` still builds if deps or entrypoint changed
-- [ ] `python test_credits.py` passes — it is what stops a pack being sold below cost
+- [ ] `python test_tokens.py` passes — it is what stops a pack being sold below cost
