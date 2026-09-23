@@ -1528,31 +1528,24 @@ def _paid(c):
     return c['platforms'] != []
 
 
-def _count(n, one, many):
-    return f'{n} {one if n == 1 else many}'
-
-
 FEATURE_ROWS = [
     (G1, 'AI personas',
-     lambda c: ('Unlimited AI personas' if c['personas'] is None
-                else _count(c['personas'], 'AI persona', 'AI personas')),
+     lambda c: ('Unlimited AI Personas' if c['personas'] is None
+                else f"{c['personas']} × AI Persona"),
      'Every persona is her own character, with her own voice, photos, funnel and '
      'connected account. Your plan sets how many you can run at once.'),
     (G1, 'Character Creator',
      lambda c: ('Unlimited Character Creator' if c['personas'] is None
-                else f"Character Creator ×{c['personas']}"),
+                else f"{c['personas']} × Character Creator"),
      'Build her look once — face, body, style — and approve it. Every '
      'photo and clip is generated from that approved character, so she looks '
      'the same in every set.'),
     (G1, 'AI persona builder',
-     lambda c: 'Visual builder: voice, backstory, archetype, warmth, escalation',
+     lambda c: 'Visual builder, or generate backstory, voice and triggers',
      'Fill in a form — name, age, backstory, archetype, warmth, escalation '
      'pace — and the system prompt behind every reply is written for you. '
-     'No prompt engineering, no code.'),
-    (G1, 'AI persona generation',
-     lambda c: 'Generate backstory, speech style, interests and triggers',
-     'Stuck on a backstory or a speech style? Generate it and keep editing what '
-     'you like. Interests and conversion triggers come out of the same pass.'),
+     'Stuck? Generate the backstory, speech style and triggers, then edit what '
+     'you like. No prompt engineering, no code.'),
     (G1, 'Generation Studio',
      lambda c: ('Custom generation token allowance' if c['_key'] == 'custom'
                 else _tokens_line(f'{CR.FREE_CREDITS} generation tokens to get '
@@ -1564,15 +1557,12 @@ FEATURE_ROWS = [
      'the setting — without booking a shoot. A token buys a photo on the '
      'cheapest model; a five-second clip costs twelve. Top up any time.'),
     (G1, 'Content Vault',
-     lambda c: 'Unlimited photo uploads, SFW and NSFW sets'
+     lambda c: ('Unlimited uploads, SFW and NSFW sets'
+                + ('' if c['_key'] == 'starter' else ', media tagging'))
      if _paid(c) else (False, 'Starter and up'),
-     'Upload your own sets and tag them SFW or NSFW. The funnel then picks the '
-     'right photo for the right moment in the conversation.'),
-    (G1, 'Media tagging',
-     lambda c: 'Tag media so the funnel sends the right set, never twice'
-     if _paid(c) and c['outfit_lock'] else (False, 'Pro and up'),
-     'Tag every photo and clip so the funnel knows what it is sending, and she '
-     'never sends a fan the same photo twice.'),
+     'Upload your own sets and mark them SFW or NSFW. From Pro, tag every photo '
+     'and clip so the funnel picks the right one for the moment and never '
+     'sends a fan the same photo twice.'),
     (G1, 'Live chat engine',
      lambda c: 'Memory of the fan, in-character replies, tone matching',
      'She remembers what a fan told her, answers in character and matches his '
@@ -1581,16 +1571,12 @@ FEATURE_ROWS = [
      lambda c: 'Talk to her yourself and send fans a hosted landing page',
      'Talk to her yourself before any fan does, and send fans a hosted page '
      'where they can start chatting straight away.'),
-    (G2, 'Social media platforms',
-     lambda c: 'Every social media platform integration'
-     if _paid(c) else (False, 'Needs a paid plan'),
-     'Connect her accounts and she chats and posts there directly — same '
-     'persona, same funnel, on every platform.'),
-    (G2, 'Social media funnel to paid pages',
-     lambda c: 'Move followers from social media to your paid page'
+    (G2, 'Social media funnel',
+     lambda c: 'Every platform, funnelled to your paid page'
      if _paid(c) else (False, 'Starter and up'),
-     'Followers who find her on social media are walked, conversation by '
-     'conversation, to the page where they pay.'),
+     'Connect her accounts and she chats and posts there directly. Followers '
+     'who find her are walked, conversation by conversation, to the page where '
+     'they pay.'),
     (G2, 'PPV engine',
      lambda c: ('PPV selling tuned to your catalogue' if c['_key'] == 'custom'
                 else 'Ladders, per-fan pricing, timed re-offers')
@@ -1605,10 +1591,10 @@ FEATURE_ROWS = [
      'The conversation moves through phases — warm, engage, tease, offer, '
      'close — and you set the pace and the photo rate for each one.'),
     (G2, 'Content Planner Tool',
-     lambda c: 'Plan, draft and schedule posts that feed the funnel'
+     lambda c: 'Plan, draft and schedule posts on every platform'
      if _paid(c) else (False, 'Starter and up'),
-     'Plan, draft and schedule the posts that pull new followers into the '
-     'funnel, without leaving the dashboard.'),
+     'Plan, draft and schedule her posts across every platform without '
+     'leaving the dashboard.'),
     (G2, 'Scheduled follow-ups',
      lambda c: 'Win back fans who go quiet, on your schedule'
      if _paid(c) and c['scheduled_followups'] else (False, 'Pro and up'),
