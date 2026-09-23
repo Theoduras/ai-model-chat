@@ -28987,6 +28987,7 @@ def _gen_spec(slug, body, user):
         # Typed by the creator, and it wins over every other word about what
         # she wears: the shot, the scene, the outfit photos.
         'clothing': (body.get('clothing') or '').strip()[:200],
+        'phone_look': (body.get('phone_look') or 'medium').strip().lower(),
     })
 
     if kind == 'image':
@@ -31256,6 +31257,7 @@ def _gen_finish(job_id, slug, spec, workspace, urls):
             logger.warning('generation result download failed job=%s: %s', job_id, e)
             continue
         _gen_refund_short_clip(job_id, workspace, spec, data, mime)
+        data, mime = imagegen.phone_look(data, mime, spec.get('phone_look'))
         try:
             path = storage.put(slug, data, mime)
         except Exception:

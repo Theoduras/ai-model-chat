@@ -1815,3 +1815,43 @@ def fetch_result(url):
         raise GenerationError(f'could not download the result: {e}', fatal=False)
     mime = (resp.headers.get('Content-Type') or '').split(';')[0].strip()
     return resp.content, mime or 'application/octet-stream'
+
+
+# (blur px, glow opacity, grain amount, black lift). Done here, not by a second
+# model, because it costs nothing: Seedream's stills are too clean to pass for
+# a phone photo, and grain, halation and a soft lens are what a phone adds.
+PHONE_LOOKS = {
+    'light':  (0.3, 0.08, 0.02, 4),
+    'medium': (0.5, 0.12, 0.035, 7),
+    'heavy':  (0.8, 0.18, 0.055, 10),
+}
+
+
+def phone_look(data, mime, strength):
+    """Make a generated still read like a phone photo. Any failure hands back
+    the original, so the filter can never cost the creator her generation."""
+    look = PHONE_LOOKS.get(strength)
+    if not look or not (mime or '').startswith('image/'):
+        return data, mime
+    import io
+    from PIL import Image, ImageChops, ImageFilter
+    blur, glow, grain, lift = look
+    try:
+        img = Image.open(io.BytesIO(data)).convert('RGB')
+        img.thumbnail((2016, 2016), Image.LANCZOS)
+        img = img.filter(ImageFilter.GaussianBlur(blur))
+        halo = img.filter(ImageFilter.GaussianBlur(max(img.size) / 60))
+        img = Image.blend(img, ImageChops.screen(img, halo), glow)
+        img = img.point(lambda v: lift + v * (255 - lift * 1.6) / 255)
+        r, g, b = img.split()
+        img = Image.merge('RGB', (r.point(lambda v: min(255, v + 3)), g,
+                                  b.point(lambda v: max(0, v - 3))))
+        noise = Image.effect_noise(img.size, 64).convert('RGB')
+        noise = noise.filter(ImageFilter.GaussianBlur(0.6))
+        img = Image.blend(img, ImageChops.overlay(img, noise), grain * 4)
+        out = io.BytesIO()
+        img.save(out, 'JPEG', quality=82)
+        return out.getvalue(), 'image/jpeg'
+    except Exception:
+        logger.exception('phone look failed')
+        return data, mime

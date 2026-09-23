@@ -331,6 +331,12 @@
         </div>
         <label class="gen-f"><span>Photo quality</span>
           <select id="gen-quality"></select></label>
+        <label class="gen-f"><span>Phone look</span>
+          <select id="gen-phone-look">
+            <option value="off">Off</option><option value="light">Light</option>
+            <option value="medium" selected>Medium</option><option value="heavy">Heavy</option>
+          </select></label>
+        <span class="hint">Grain, soft lens and glow added after generation, so it reads like a phone photo. Free.</span>
         <label class="gen-f"><span>Clothing</span>
           <input type="text" id="gen-clothing" maxlength="200" placeholder="black satin robe with lace cuffs, fishnet stockings"></label>
         <span class="hint">Leave empty and the shot and scene decide. Filled in, it replaces every other clothing in the prompt.</span>
@@ -2112,6 +2118,7 @@ async function runGeneration() {
         clothing: el('gen-clothing').value.trim(),
         direction: el('gen-direction').value.trim(),
         aspect: currentImageAspect(),
+        phone_look: el('gen-phone-look').value,
       }),
     });
     const d = await res.json();
