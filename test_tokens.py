@@ -344,6 +344,16 @@ def test_ledger():
     check('a spend larger than the allowance takes the rest from purchased',
           db.token_balance(s, ws) == 850
           and db.token_balance(s, ws, at=soon + timedelta(days=1)) == 850)
+
+    # A batch of four that came back with two: the two missing are owed back.
+    db.token_debit(s, ws, 4, 'job-4')
+    back = db.token_settle(s, ws, 'job-4', 2)
+    check('a short batch returns the images that never arrived',
+          back == 2 and db.token_balance(s, ws) == 848, f'returned {back}')
+    check('settling the same job again pays nothing',
+          db.token_settle(s, ws, 'job-4', 2) == 0 and db.token_balance(s, ws) == 848)
+    check('a settle never charges more than was spent',
+          db.token_settle(s, ws, 'job-4', 10) == 0 and db.token_balance(s, ws) == 848)
     s.close()
 
 
