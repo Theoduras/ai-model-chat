@@ -1487,6 +1487,7 @@ function showTopupSuccess(added) {
         if (k < 1) requestAnimationFrame(step);
         else setTimeout(() => {
           closePayModal();
+          document.dispatchEvent(new Event('sn-tokens-changed'));
           box.style.display = 'none';
           document.getElementById('pay-frame').style.display = '';
         }, 2200);
