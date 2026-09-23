@@ -1146,7 +1146,9 @@ _REVALIDATE_PREFIXES = ('/js/', '/css/')
 
 @app.after_request
 def _revalidate_app_shell(resp):
-    if request.method not in ('GET', 'HEAD'):
+    # A redirect's body is text/html but it is not the shell, and the media
+    # route's signed-URL redirect sets its own caching.
+    if request.method not in ('GET', 'HEAD') or 300 <= resp.status_code < 400:
         return resp
     if ((resp.mimetype or '').startswith('text/html')
             or (request.path or '/').startswith(_REVALIDATE_PREFIXES)):
@@ -11221,7 +11223,12 @@ def api_persona_media_image(slug, media_id):
             try:
                 url = None if inline else storage.signed_url(path)
                 if url:
-                    return redirect(url)
+                    # Cacheable for less than the signature lives, or every
+                    # re-render mints a new URL and downloads the file again.
+                    resp = redirect(url)
+                    ttl = max(storage.signed_url_ttl() - 300, 0)
+                    resp.headers['Cache-Control'] = f'private, max-age={ttl}'
+                    return resp
                 data = storage.get(path)
             except Exception:
                 logger.exception('could not serve media %s', media_id)

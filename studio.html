@@ -2120,21 +2120,24 @@ function genTtl(iso) {
   return Math.round(hours / 24) + 'd left';
 }
 
+// Keyed, so a poll moves the cards that are already there instead of
+// recreating them: a recreated <img> or <video> downloads its media again, and
+// the poll runs every three seconds while anything is generating.
 function renderGenStaging() {
   const box = el('gen-staging');
   if (!box) return;
   const cards = [];
   genJobs.forEach(job => {
     if (job.status === 'queued' || job.status === 'running') {
-      cards.push(`<div class="gen-card gen-pending">Generating
-        ${job.kind === 'video' ? 'a clip' : 'photos'}…</div>`);
+      cards.push(['p:' + job.id, `<div class="gen-card gen-pending">Generating
+        ${job.kind === 'video' ? 'a clip' : 'photos'}…</div>`]);
       return;
     }
     if (job.status === 'failed') {
-      cards.push(`<div class="gen-card gen-failed gen-pending">✗ ${esc(job.error || 'failed')}
+      cards.push(['f:' + job.id, `<div class="gen-card gen-failed gen-pending">✗ ${esc(job.error || 'failed')}
         <br><span style="opacity:.7">${job.tokens} token${job.tokens === 1 ? '' : 's'} refunded</span>
         <button type="button" class="gen-del" title="Delete this generation"
-          onclick="deleteGenJob('${job.id}')">✕</button></div>`);
+          onclick="deleteGenJob('${job.id}')">✕</button></div>`]);
       return;
     }
     job.media.filter(m => !m.approved).forEach(m => {
@@ -2142,7 +2145,7 @@ function renderGenStaging() {
       const thumb = clip
         ? `<video src="${m.url}" muted playsinline preload="metadata" controls></video>`
         : `<img loading="lazy" decoding="async" src="${m.url}" alt="">`;
-      cards.push(`
+      cards.push(['m:' + m.id, `
         <div class="gen-card" data-lb="${m.url}" data-kind="${m.kind}" onclick="openLightbox(this)">
           ${thumb}
           <span class="gen-ttl">${esc(genTtl(m.expires_at))}</span>
@@ -2150,10 +2153,22 @@ function renderGenStaging() {
             <button type="button" class="gen-keep" onclick="keepGenerated('${m.id}', true)">Keep</button>
             <button type="button" class="gen-drop" onclick="keepGenerated('${m.id}', false)">Drop</button>
           </div>
-        </div>`);
+        </div>`]);
     });
   });
-  box.innerHTML = cards.join('');
+  const have = [...box.children];
+  if (have.length === cards.length && have.every((n, i) => n.dataset.key === cards[i][0])) return;
+  const byKey = new Map(have.map(n => [n.dataset.key, n]));
+  box.replaceChildren(...cards.map(([key, html]) => {
+    let node = byKey.get(key);
+    if (!node) {
+      const t = document.createElement('template');
+      t.innerHTML = html.trim();
+      node = t.content.firstElementChild;
+      node.dataset.key = key;
+    }
+    return node;
+  }));
 }
 
 async function deleteGenJob(id) {
