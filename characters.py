@@ -161,6 +161,52 @@ YOUTH_TERMS = ('child', 'kid', 'teen', 'underage', 'minor', 'young girl',
 STUDIO = ('Even soft studio lighting, plain neutral grey background, sharp '
           'focus, ultra-detailed natural skin texture, highest resolution.')
 
+# Pose and lighting only reword a view; the view's framing still decides what
+# is shown, so neither can move a view past its rating.
+POSES = {
+    'parent': ('From parent', ''),
+    'relaxed': ('Relaxed standing', 'standing relaxed, weight on one leg, arms loose at her sides'),
+    'hands_hips': ('Hands on hips', 'standing with both hands on her hips'),
+    'turned': ('Slight turn', 'body turned slightly to one side, face toward the lens'),
+    'seated': ('Seated', 'seated on a plain stool, back straight'),
+}
+LIGHTING = {
+    'anchor': ('Match anchor', STUDIO),
+    'studio_soft': ('Studio soft', 'Soft diffused key light with gentle fill, plain neutral grey background, sharp '
+                                   'focus, ultra-detailed natural skin texture, highest resolution.'),
+    'daylight': ('Window daylight', 'Natural window daylight from one side, plain light background, sharp focus, '
+                                    'ultra-detailed natural skin texture, highest resolution.'),
+    'warm': ('Warm evening', 'Warm low golden light, plain dark background, sharp focus, '
+                             'ultra-detailed natural skin texture, highest resolution.'),
+}
+VARIATIONS = (1, 4)
+
+# A preset only fills body features the creator has not set yet.
+BODY_PRESETS = {
+    'petite_athletic': ('Petite athletic', 'Short, toned, compact',
+                        {'height': '155–165 cm', 'build': 'Athletic', 'shoulders': 'Narrow', 'waist': 'Defined', 'hips': 'Narrow', 'thighs': 'Toned'}),
+    'slim_tall': ('Slim tall', 'Tall, lean, long lines',
+                  {'height': 'Over 175 cm', 'build': 'Slim', 'shoulders': 'Medium', 'waist': 'Straight', 'hips': 'Narrow', 'thighs': 'Slim'}),
+    'curvy': ('Curvy', 'Full hips and thighs',
+              {'build': 'Curvy', 'waist': 'Defined', 'hips': 'Wide', 'thighs': 'Full'}),
+    'hourglass': ('Hourglass', 'Defined waist, balanced curves',
+                  {'build': 'Curvy', 'shoulders': 'Medium', 'waist': 'Defined', 'hips': 'Wide', 'bust': 'Large'}),
+    'athletic_tall': ('Athletic tall', 'Strong frame, sporty',
+                      {'height': 'Over 175 cm', 'build': 'Athletic', 'shoulders': 'Broad', 'waist': 'Defined', 'hips': 'Medium', 'thighs': 'Toned'}),
+    'scratch': ('Start from scratch', 'Neutral defaults, set everything', {}),
+}
+
+
+def apply_preset(sheet, preset, body_type='female'):
+    if preset not in BODY_PRESETS:
+        raise CharacterError('Unknown body preset.')
+    feats = features(body_type)
+    out = dict(sheet or {})
+    for k, val in BODY_PRESETS[preset][2].items():
+        if k in feats and not out.get(k):
+            out[k] = val
+    return out
+
 VIEWS = {
     'female': [
         # key, label, group, rating, required_from, parents, tier, mode, region, framing, feature groups
@@ -307,6 +353,10 @@ def catalogue(level, body_type='female'):
         'features': [{'key': k, 'label': lab, 'group': g, 'options': [o for o, _ in opts]}
                      for k, (lab, g, opts) in feats.items() if g in groups],
         'batch': list(BATCH_CHOICES), 'default_batch': DEFAULT_BATCH,
+        'variations': list(VARIATIONS),
+        'poses': [{'key': k, 'label': l} for k, (l, _) in POSES.items()],
+        'lighting': [{'key': k, 'label': l} for k, (l, _) in LIGHTING.items()],
+        'presets': [{'key': k, 'label': l, 'hint': h, 'values': v} for k, (l, h, v) in BODY_PRESETS.items()],
         'min_age': MIN_AGE,
     }
 
@@ -403,7 +453,7 @@ def adult_clause(age):
 
 
 def build_view_prompt(key, sheet, age, has_reference, body_type='female',
-                      mode='reference', strength=None):
+                      mode='reference', strength=None, pose=None, lighting=None):
     v = view(key, body_type)
     if not v:
         raise CharacterError('Unknown view.')
@@ -427,7 +477,10 @@ def build_view_prompt(key, sheet, age, has_reference, body_type='female',
     else:
         lead = f"photorealistic photo of a woman, {v['framing']}."
     body = f' Her features: {detail}.' if detail else ''
-    return (lead + body + ' ' + STUDIO + ' ' + adult_clause(age)).strip()
+    posed = POSES.get(pose or '', ('', ''))[1]
+    posed = f' Pose: {posed}.' if posed else ''
+    light = LIGHTING.get(lighting or '', ('', STUDIO))[1]
+    return (lead + body + posed + ' ' + light + ' ' + adult_clause(age)).strip()
 
 
 def job_level(shot, scene):

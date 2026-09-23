@@ -29622,6 +29622,11 @@ def api_character(char_id):
                   'notes': row.notes, 'sheet': _char_json_sheet(row)}
         merged.update({k: body[k] for k in ('name', 'age', 'nsfw_level', 'notes', 'sheet')
                        if k in body})
+        if body.get('preset'):
+            try:
+                merged['sheet'] = CH.apply_preset(merged['sheet'], body['preset'], row.body_type)
+            except CH.CharacterError as e:
+                return jsonify({'ok': False, 'error': str(e)}), 400
         if row.slug:
             banned = _persona_config(row.slug).get('banned_terms') or []
             merged['banned'] = ([t for t in re.split(r'[,\n]', banned) if t.strip()]
@@ -29815,10 +29820,12 @@ def api_character_generate(char_id):
     body = request.get_json(silent=True) or {}
     view_key = (body.get('view') or '').strip()
     try:
-        batch = int(body.get('batch') or CH.DEFAULT_BATCH)
+        batch = int(body.get('variations') or body.get('batch') or CH.DEFAULT_BATCH)
     except (TypeError, ValueError):
         batch = CH.DEFAULT_BATCH
     batch = max(1, min(CH.MAX_BATCH, batch))
+    pose = body.get('pose') if body.get('pose') in CH.POSES else None
+    lighting = body.get('lighting') if body.get('lighting') in CH.LIGHTING else None
     s = _db_session()
     try:
         row = _char_row(s, user, char_id)
@@ -29844,7 +29851,8 @@ def api_character_generate(char_id):
             or _char_images(s, row.id, view='', role='reference'))
         prompt = CH.build_view_prompt(view_key, _char_json_sheet(row), row.age,
                                       has_ref, row.body_type, mode=mode,
-                                      strength=state[view_key]['strength'])
+                                      strength=state[view_key]['strength'],
+                                      pose=pose, lighting=lighting)
         parent_versions = {p: state[p]['version'] for p in v['parents']}
         key = row.key
     finally:

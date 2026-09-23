@@ -278,6 +278,8 @@
         <div class="ch-card">
           <h2 class="ch-h2">Body profile</h2>
           <span class="ch-muted" style="margin:0 0 10px; display:block;">Every view inherits these. Changes save as you pick.</span>
+          <div class="ch-label" style="margin-bottom:14px;">Start from a preset <div class="chips" id="presets"></div>
+            <span class="ch-muted" style="margin:0; font-weight:400;">Only fills features you have not set.</span></div>
           <div class="fp-list" id="body-features"></div>
           <div id="intimate-wrap" hidden>
             <div class="fp-list" id="intimate-features" style="margin-top:12px;"></div>
@@ -329,6 +331,10 @@
         </div>
         <label class="dl" style="display:block; margin-top:12px;"><span id="vp-strength-label"></span> <b id="vp-strength-val"></b>
           <input type="range" id="vp-strength" min="0" max="1" step="0.01" style="width:100%;" oninput="el('vp-strength-val').textContent=(+this.value).toFixed(2)" onchange="saveView({strength:+this.value})"></label>
+        <div class="ch-grid2" style="margin-top:12px;">
+          <label class="ch-label">Pose <select id="vp-pose" onchange="viewOpts[selView]=Object.assign(viewOpts[selView]||{},{pose:this.value})"></select></label>
+          <label class="ch-label">Lighting <select id="vp-light" onchange="viewOpts[selView]=Object.assign(viewOpts[selView]||{},{lighting:this.value})"></select></label>
+        </div>
         <div class="compare" id="vp-compare"></div>
         <div style="margin-top:12px;"><span class="dl">Inherited traits</span>
           <div class="chips" id="vp-traits" style="margin-top:6px;"></div></div>
@@ -354,7 +360,14 @@
 
 <script>
 const el = id => document.getElementById(id);
-let lbUrls = []; let lbIdx = 0; let vpOptUrls = [];
+let lbUrls = []; let lbIdx = 0; let vpOptUrls = []; const viewOpts = {};
+function fillSelect(id, items, val) {
+  el(id).innerHTML = items.map(o => `<option value="${o.key}"${o.key === val ? ' selected' : ''}>${o.label}</option>`).join('');
+}
+function renderPresets() {
+  el('presets').innerHTML = (cat.presets || []).map(p =>
+    `<button type="button" class="chip" title="${p.hint}" onclick="saveSheet({preset:'${p.key}'})">${p.label}</button>`).join('');
+}
 function setBatch(v) {
   batch = Math.max(1, Math.min(8, parseInt(v, 10) || 1));
   el('batch-input').value = batch;
@@ -651,6 +664,7 @@ function viewTile(v) {
       <div style="margin-top:4px; display:flex; gap:6px;"><span class="st ${st.display}">${STATUS_LABEL[st.display]}</span><span class="st">${st.mode}</span></div></div></button>`;
 }
 function renderBody() {
+  renderPresets();
   const shown = cat.views.filter(v => v.key !== 'face_front' || viewFilter !== 'NSFW').filter(inFilter);
   const req = cat.views.filter(v => v.required);
   const ok = req.filter(v => vs(v.key).status === 'approved').length;
@@ -698,6 +712,9 @@ function renderViewPanel() {
   el('drawer').hidden = !v;
   if (!v) return;
   const st = vs(v.key);
+  const o = viewOpts[v.key] || {};
+  fillSelect('vp-pose', cat.poses || [], o.pose || 'parent');
+  fillSelect('vp-light', cat.lighting || [], o.lighting || 'anchor');
   el('vp-title').textContent = v.label;
   el('vp-lineage').innerHTML = lineage(v.key).map(k => `<a href="#" onclick="openView('${k}');return false;">${esc(viewDef(k).label)}</a>`).join(' → ');
   const blockers = v.parents.filter(p => vs(p).status !== 'approved');
@@ -803,7 +820,8 @@ async function cropParent(key) {
   return c.toDataURL('image/jpeg', 0.92);
 }
 async function submitView(key, n) {
-  const body = {view: key, batch: n || batch};
+  const o = viewOpts[key] || {};
+  const body = {view: key, batch: n || batch, pose: o.pose, lighting: o.lighting};
   if (key !== 'face_front' && vs(key).mode === 'crop') body.crop_b64 = await cropParent(key);
   return api('/api/characters/' + cur.id + '/generate', {body});
 }
