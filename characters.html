@@ -181,7 +181,7 @@
         <div class="ch-card" style="display:flex; flex-direction:column; gap:12px;">
           <div style="display:flex; justify-content:space-between; align-items:center;">
             <span style="font-weight:600;">Options per try</span>
-            <div class="chips" id="batch-chips"></div>
+            <input type="number" id="batch-input" min="1" max="8" step="1" style="width:60px;" onchange="setBatch(this.value)">
           </div>
           <button type="button" class="btn btn-primary" id="gen-face" onclick="generate('face_front')">Generate face options</button>
           <span class="ch-muted" style="text-align:center; margin:0;">Front-facing · neutral · studio light · ears visible</span>
@@ -287,7 +287,8 @@
               <h2 class="ch-h2" style="margin:0;" id="vp-title"></h2>
               <span class="ch-muted" id="vp-sub"></span>
             </div>
-            <div style="display:flex; gap:8px;">
+            <div style="display:flex; gap:8px; align-items:center;">
+              <label class="ch-muted" style="margin:0;">Options <input type="number" id="batch-input-2" min="1" max="8" step="1" style="width:52px;" onchange="setBatch(this.value)"></label>
               <button type="button" class="btn" id="vp-check" onclick="runViewCheck()" hidden>Run adult check</button>
               <button type="button" class="btn btn-primary" id="vp-gen" onclick="generate(selView)">Generate</button>
             </div>
@@ -297,6 +298,8 @@
           <div style="margin-top:14px;">
             <span style="font-size:0.8rem; font-weight:700; color:var(--text-2);">References for this view</span>
             <div class="refs" id="vp-refs" style="margin-top:8px;"></div>
+            <button type="button" class="btn" style="margin-top:8px;" onclick="togglePastPicker()" id="past-toggle">Use a previous generation</button>
+            <div class="refs" id="vp-past" style="margin-top:8px;" hidden></div>
           </div>
         </div>
       </div>
@@ -329,6 +332,11 @@
 <script>
 const el = id => document.getElementById(id);
 let lbUrls = []; let lbIdx = 0; let vpOptUrls = [];
+function setBatch(v) {
+  batch = Math.max(1, Math.min(8, parseInt(v, 10) || 1));
+  el('batch-input').value = batch;
+  el('batch-input-2').value = batch;
+}
 function vpImgClick(e, i) {
   e.stopPropagation();
   const opts = e.currentTarget.closest('.opts');
@@ -489,8 +497,7 @@ function renderDescribe() {
   el('f-name').value = cur.name; el('f-age').value = cur.age; el('f-notes').value = cur.notes || '';
   el('level-chips').innerHTML = cat.levels.map(l => `<button type="button" class="chip" aria-pressed="${cur.nsfw_level === l.key}"
     onclick="saveSheet({nsfw_level:'${l.key}'})">${l.label}</button>`).join('');
-  el('batch-chips').innerHTML = cat.batch.map(n => `<button type="button" class="chip" aria-pressed="${batch === n}"
-    onclick="batch=${n};renderDescribe()">${n}</button>`).join('');
+  el('batch-input').value = batch;
   el('gen-face').textContent = `Generate ${batch} face options`;
   const sel = el('f-persona');
   sel.innerHTML = `<option value="">Not linked — link later</option>` + personas.map(p =>
@@ -652,7 +659,8 @@ function renderViewPanel() {
   const waiting = v.depends.filter(d => !canonOf(d)).map(d => viewDef(d).label);
   el('vp-sub').textContent = (v.required ? 'Required' : 'Optional') + (waiting.length ? ' · approve ' + waiting.join(' and ') + ' first' : '');
   el('vp-gen').disabled = waiting.length > 0;
-  el('vp-gen').textContent = `Generate ${batch}`;
+  el('vp-gen').textContent = 'Generate';
+  el('batch-input-2').value = batch;
   el('vp-check').hidden = v.key !== 'body_front';
   const groups = v.uses.filter(g => g !== 'face' && g !== 'body');
   el('vp-features').innerHTML = cat.features.filter(f => groups.includes(f.group)).map(featurePicker).join('') +
@@ -671,6 +679,24 @@ function renderViewPanel() {
         <button type="button" class="btn" style="height:36px;" onclick="removeImage('${o.id}')">Delete</button></div>` : ''}</div>`;
   }).join('') || '<p class="ch-muted">No options yet. Generate some, or upload one below.</p>';
   el('vp-refs').innerHTML = images(v.key, 'reference').map(refTile).join('') || '<span class="ch-muted">None.</span>';
+  renderPastPicker();
+}
+let pastOpen = false;
+function togglePastPicker() { pastOpen = !pastOpen; renderPastPicker(); }
+function renderPastPicker() {
+  el('vp-past').hidden = !pastOpen;
+  el('past-toggle').textContent = pastOpen ? 'Hide previous generations' : 'Use a previous generation';
+  if (!pastOpen) return;
+  const past = (cur.images || []).filter(i => i.source !== 'upload' && (i.role === 'candidate' || i.role === 'canonical'));
+  el('vp-past').innerHTML = past.map(i =>
+    `<div class="ref" style="cursor:pointer;" onclick="usePastAsReference('${i.id}')" title="Add as reference for this view"><img src="${esc(i.url)}" alt=""></div>`
+  ).join('') || '<span class="ch-muted">No generated images yet.</span>';
+}
+async function usePastAsReference(id) {
+  try {
+    await api(`/api/characters/${cur.id}/images/${id}/use-as-reference`, {body: {view: selView}});
+    await reload(); say('Added as a reference.', 'ok');
+  } catch (e) { say(e.message, 'err'); }
 }
 async function runViewCheck(id) {
   const target = id || (images('body_front', 'candidate')[0] || {}).id;

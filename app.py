@@ -29375,6 +29375,36 @@ def api_character_upload(char_id):
         s.close()
 
 
+@app.route('/api/characters/<char_id>/images/<img_id>/use-as-reference', methods=['POST'])
+def api_character_use_as_reference(char_id, img_id):
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    user = _current_user()
+    body = request.get_json(silent=True) or {}
+    view_key = (body.get('view') or '').strip()
+    from db import CharacterImage
+    s = _db_session()
+    try:
+        row = _char_row(s, user, char_id)
+        if not row:
+            return jsonify({'ok': False, 'error': 'Unknown character'}), 404
+        v = CH.view(view_key, row.body_type) if view_key else None
+        if view_key and (not v or v not in CH.views_for_level(row.nsfw_level, row.body_type)):
+            return jsonify({'ok': False, 'error': 'That view is not available at this level.'}), 400
+        src = s.query(CharacterImage).filter_by(id=img_id, character_id=row.id).first()
+        if not src:
+            return jsonify({'ok': False, 'error': 'Unknown image'}), 404
+        img = CharacterImage(character_id=row.id, view=view_key, role='reference',
+                             source=src.source, rating=src.rating,
+                             gcs_path=src.gcs_path, mime=src.mime)
+        s.add(img)
+        s.commit()
+        return jsonify({'ok': True, 'image': _char_img_json(img)})
+    finally:
+        s.close()
+
+
 @app.route('/api/characters/<char_id>/images/<img_id>/file')
 def api_character_image_file(char_id, img_id):
     blocked = _require_admin()
@@ -29439,7 +29469,7 @@ def api_character_generate(char_id):
         batch = int(body.get('batch') or CH.DEFAULT_BATCH)
     except (TypeError, ValueError):
         batch = CH.DEFAULT_BATCH
-    batch = batch if batch in CH.BATCH_CHOICES else CH.DEFAULT_BATCH
+    batch = max(1, min(CH.MAX_BATCH, batch))
     s = _db_session()
     try:
         row = _char_row(s, user, char_id)

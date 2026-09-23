@@ -17,6 +17,7 @@ LEVELS = (('sfw', 'SFW'), ('moderate', 'Topless'), ('explicit', 'Explicit'))
 LEVEL_KEYS = tuple(k for k, _ in LEVELS)
 BATCH_CHOICES = (2, 3, 4)
 DEFAULT_BATCH = 4
+MAX_BATCH = 8
 
 
 class CharacterError(ValueError):
