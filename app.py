@@ -14489,7 +14489,15 @@ def _fanvue_api(method, path, access_token, body=None):
     try:
         with urllib.request.urlopen(req, timeout=15) as r:
             raw = r.read()
-            return json.loads(raw) if raw else {}
+            if not raw:
+                return {}
+            # Some Fanvue routes answer 2xx with a bare string -- a part's
+            # presigned upload URL, for one -- and parsing that as JSON failed
+            # an upload that had in fact worked.
+            try:
+                return json.loads(raw)
+            except ValueError:
+                return raw.decode(errors='ignore').strip()
     except url_error.HTTPError as e:
         raw = b''
         try:
@@ -15538,7 +15546,8 @@ def api_fanvue_vault_upload():
             name = str(data.get('name') or '').strip()[:80]
             media_uuid = _fv_upload_media(
                 persona, blob, growth.media_kind(mime), f'{row["id"]}.{ext}',
-                name=name or None, content_type=mime or 'application/octet-stream')
+                name=name or None, content_type=mime or 'application/octet-stream',
+                wait_ready=False)
         except Exception as e:
             logger.warning('Fanvue vault upload failed for %s/%s: %s', persona, row['id'], e)
             return jsonify({'ok': False, 'error': _fv_error_text(e)}), 502
@@ -17185,7 +17194,8 @@ def _fv_put_part(url, chunk, content_type):
 
 
 def _fv_upload_media(persona, data, media_type, filename, name=None,
-                     content_type='application/octet-stream', scope=None):
+                     content_type='application/octet-stream', scope=None,
+                     wait_ready=True):
     """Upload bytes into the connected creator's Fanvue vault, returning the
     media uuid once Fanvue reports it ready. Raises on anything else — a media
     uuid that is still processing cannot be attached to a message."""
@@ -17193,9 +17203,20 @@ def _fv_upload_media(persona, data, media_type, filename, name=None,
         raise RuntimeError('nothing to upload')
     if scope is None:
         scope = _fanvue_scope(persona)
-    sess = _fanvue_call(persona, 'POST', f'{scope}/media/uploads',
-                        body={'name': name or filename, 'filename': filename,
-                              'mediaType': media_type, 'sizeBytes': len(data)})
+    def step(what, fn, *a, **kw):
+        # Name the step, or a failure reads as a bare parser or HTTP message
+        # with nothing saying which of a dozen calls it came from.
+        try:
+            return fn(*a, **kw)
+        except Exception as e:
+            raise RuntimeError(f'Fanvue upload failed at {what}: '
+                               f'{getattr(e, "detail", "") or e}') from e
+
+    sess = step('start', _fanvue_call, persona, 'POST', f'{scope}/media/uploads',
+                body={'name': name or filename, 'filename': filename,
+                      'mediaType': media_type, 'sizeBytes': len(data)})
+    if isinstance(sess, dict) and isinstance(sess.get('data'), dict) and not sess.get('uploadId'):
+        sess = sess['data']
     if not isinstance(sess, dict):
         raise RuntimeError('Fanvue returned no upload session')
     media_uuid = str(sess.get('mediaUuid') or '')
@@ -17214,13 +17235,16 @@ def _fv_upload_media(persona, data, media_type, filename, name=None,
         chunk = data[i * part_size:(i + 1) * part_size]
         if not chunk:
             break
-        etag = _fv_put_part(_fv_part_url(persona, scope, upload_id, i + 1),
-                            chunk, content_type)
+        url = step(f'part {i + 1} url', _fv_part_url, persona, scope, upload_id, i + 1)
+        etag = step(f'part {i + 1} upload', _fv_put_part, url, chunk, content_type)
         parts.append({'PartNumber': i + 1, 'ETag': etag})
-    _fanvue_call(persona, 'PATCH', f'{scope}/media/uploads/{upload_id}',
-                 body={'parts': parts})
+    step('complete', _fanvue_call, persona, 'PATCH', f'{scope}/media/uploads/{upload_id}',
+         body={'parts': parts})
 
     # Fanvue transcodes before the media can be sent, so poll until it is ready.
+    # A vault copy is not being sent anywhere, so it need not wait.
+    if not wait_ready:
+        return media_uuid
     for _ in range(FV_MEDIA_READY_TRIES):
         try:
             m = _fanvue_call(persona, 'GET', f'{scope}/media/{media_uuid}')

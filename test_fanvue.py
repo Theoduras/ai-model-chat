@@ -1012,7 +1012,7 @@ def test_vault_upload():
     app._media_row = lambda p, mid: rows.get(mid)
     app._media_bytes = lambda r: (b'bytes', r['mime'])
 
-    def up(persona, data, kind, filename, name=None, content_type=''):
+    def up(persona, data, kind, filename, name=None, content_type='', wait_ready=True):
         uploads.append((kind, filename, name, content_type))
         return 'uuid-1'
     app._fv_upload_media = up
@@ -1068,6 +1068,50 @@ def test_vault_upload():
           d['folders_ok'] == ['Teasers'] and calls[-1][2] == {'mediaUuid': 'uuid-1'}, (d, calls))
 
 
+def test_upload_accepts_text_answers():
+    """Fanvue answers a part-URL request with the bare presigned URL. Parsing
+    that as JSON is what failed every vault upload with "Expecting value"."""
+    import io
+    import urllib.request
+
+    class R(io.BytesIO):
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+    real = urllib.request.urlopen
+    try:
+        urllib.request.urlopen = lambda req, timeout=0: R(b'https://s3.example/part?sig=1')
+        got = app._fanvue_api('GET', '/media/uploads/u/parts/1/url', 't')
+        check('a text body comes back as text', got == 'https://s3.example/part?sig=1', got)
+        urllib.request.urlopen = lambda req, timeout=0: R(b'{"a": 1}')
+        check('JSON still parses', app._fanvue_api('GET', '/x', 't') == {'a': 1})
+    finally:
+        urllib.request.urlopen = real
+
+    puts = []
+    def api(persona, method, path, body=None):
+        if method == 'POST':
+            return {'mediaUuid': 'mu', 'uploadId': 'up', 'partSize': 4}
+        if path.endswith('/url'):
+            return 'https://s3.example/' + path.split('/')[-2]
+        return {}
+    app._fanvue_call = api
+    app._fv_put_part = lambda url, chunk, ct: puts.append(url) or 'etag'
+    uuid = app._fv_upload_media('p', b'12345678', 'image', 'a.png', scope='', wait_ready=False)
+    check('upload finishes with text part URLs', uuid == 'mu' and puts == [
+        'https://s3.example/1', 'https://s3.example/2'], (uuid, puts))
+
+    def broken(persona, method, path, body=None):
+        if path.endswith('/url'):
+            raise ValueError('Expecting value')
+        return api(persona, method, path, body)
+    app._fanvue_call = broken
+    try:
+        app._fv_upload_media('p', b'1234', 'image', 'a.png', scope='', wait_ready=False)
+        check('a failing step raises', False)
+    except RuntimeError as e:
+        check('the error names the step', 'part 1 url' in str(e), str(e))
+
+
 if __name__ == '__main__':
     for fn in (test_direction, test_import, test_identity_never_crosses,
                test_placeholders, test_pacing, test_backlog,
@@ -1083,7 +1127,7 @@ if __name__ == '__main__':
                test_telegram_off_silences_the_personal_account,
                test_a_stopped_account_stays_stopped,
                test_a_tag_only_reply_is_never_sent_as_a_blank,
-               test_vault_upload):
+               test_vault_upload, test_upload_accepts_text_answers):
         print('\n--- %s ---' % fn.__name__)
         restore_app()
         fn()
