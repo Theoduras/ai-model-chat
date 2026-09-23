@@ -12,297 +12,265 @@
 <script src="/js/skeleton.js"></script>
 <script src="/js/keyed-render.js"></script>
   <script src="/js/devnav.js" defer></script>
+  <script src="/js/page-wizard.js"></script>
+  <script>
+    if (window.self === window.top) location.replace('/dashboard?open=' + encodeURIComponent(location.pathname + location.search));
+    else document.documentElement.classList.add('in-workspace');
+  </script>
   <style>
+    [hidden] { display: none !important; }
+    .in-workspace body > header { display: none; }
+    body.pw-running .fv-scroll { display: none; }
+    #pw-step-body .gen-panel { box-shadow: none; border: 0; padding: 0; background: none; }
+    #pw-step-body .gen-result { position: static; }
     .fv-scroll { flex: 1; min-height: 0; overflow-y: auto; }
-    .fv-wrap { max-width: none; margin: 0; padding: 24px 28px 72px;
-               display: flex; flex-direction: column; gap: 20px; }
-    .note-box { border: 1px solid var(--border); background: var(--surface); color: var(--text-2);
-                border-radius: 10px; padding: 12px 14px; font-size: 0.82rem; line-height: 1.5; }
+    .fv-wrap { padding: 24px 28px 72px; display: flex; flex-direction: column; gap: 20px; }
+    .note-box { border: 1px solid var(--border-soft); background: var(--panel-2); color: var(--text-2);
+                border-radius: var(--r-md); padding: 12px 14px; font-size: 0.82rem; line-height: 1.5; }
     .note-box b { color: var(--text); }
+    .note-box a, .hint a { color: var(--accent); font-weight: 600; text-decoration: none; }
+    .note-box a:hover, .hint a:hover { text-decoration: underline; }
+    .btn:disabled { opacity: .5; cursor: not-allowed; transform: none; box-shadow: none; animation: none; }
+    .btn-sm { padding: 6px 12px; font-size: 0.78rem; border-radius: var(--r-md); }
 
-    /* Everything below is this page's own. It stays here rather than in
-       style.css because an admin-only feature in testing should not add weight
-       to the stylesheet every creator console loads. The .vault-* rules it sits
-       on top of are already shared, and are left alone. */
+    /* Page head: title, a one-line intro, and the guide. */
+    .st-head { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+    .st-head-t { flex: 1; min-width: 240px; }
+    .st-head h2 { font-size: 1.1rem; font-weight: 600; margin: 0 0 4px; }
+    .st-head .hint { margin: 0; max-width: 72ch; }
 
-    /* Make and Rating pick the variant; the model picker is deliberately a
-       quiet row of chips under them, because the mode is the decision and the
-       model is a detail of it. */
-    .gen-toggles { display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 12px; }
-    .gen-seg { display: flex; flex-direction: column; gap: 4px; }
-    .gen-seg > span { font-size: 0.7rem; color: var(--text-muted); letter-spacing: .02em; }
-    .gen-seg div { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-    .gen-seg button {
-      border: none; background: var(--surface); color: var(--text-2); cursor: pointer;
-      font: inherit; font-size: 0.75rem; padding: 6px 14px;
-    }
-    .gen-seg button[aria-pressed="true"] { background: var(--accent); color: var(--text); font-weight: 600; }
+    .gen-toggles { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+    .gen-toggles .pg-toggle { height: 38px; }
+    .gen-toggles .pg-toggle button.active { color: var(--accent); }
+    .gen-label { font-size: 0.78rem; font-weight: 600; color: var(--text-2); }
 
-    .gen-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+    .gen-chips { display: flex; flex-wrap: wrap; gap: 6px; }
     .gen-chip {
-      border: 1px solid var(--border); background: var(--surface); color: var(--text-2);
-      border-radius: 999px; cursor: pointer; font: inherit; font-size: 0.72rem; padding: 4px 12px;
+      border: 1px solid var(--border); background: var(--panel); color: var(--text-2);
+      border-radius: 999px; cursor: pointer; font-family: var(--font); font-size: 0.76rem; padding: 6px 12px;
+      transition: border-color .15s, background .15s, color .15s;
     }
-    .gen-chip[aria-pressed="true"] { border-color: var(--accent); color: var(--text); font-weight: 600; }
+    .gen-chip:hover:not(:disabled) { border-color: var(--accent-line); color: var(--text); }
+    .gen-chip[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--text); font-weight: 600; }
+    .gen-chip:disabled { opacity: .5; cursor: not-allowed; }
+    .gen-chip:focus-visible, .btn-ai:focus-visible, .gen-lb-nav:focus-visible, .gen-ref-x:focus-visible { border-radius: inherit; }
 
-    /* Option C: the toggles pick the variant, then the job runs down a column
-       of numbered panels and out to the result on the right. */
-    .gen-cols { display: grid; grid-template-columns: 300px minmax(0, 1fr) 352px; gap: 16px; align-items: start; }
-    .gen-col { display: flex; flex-direction: column; gap: 16px; }
-    .gen-panel { background: var(--panel); border: 1px solid var(--border); border-radius: var(--r); padding: 14px; display: flex; flex-direction: column; gap: 11px; }
-    .gen-panel h2 { margin: 0; font-size: 0.85rem; font-weight: 600; }
-    .gen-head { display: flex; align-items: baseline; gap: 8px; }
-    .gen-head b { font-family: var(--display); font-size: 0.75rem; color: var(--accent); }
-    .gen-panel .gen-form { grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); margin-bottom: 0; }
-    .gen-panel .gen-go { margin-bottom: 0; }
+    /* Setup panels on the left, the prompt in the middle, the result on the right. */
+    .gen-cols { display: grid; grid-template-columns: 300px minmax(0, 1fr) 340px; gap: 20px; align-items: start; }
+    .gen-col { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+    .gen-panel {
+      background: var(--panel-2); border: 1px solid var(--border-soft); border-radius: var(--r-lg);
+      padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; box-shadow: var(--shadow); min-width: 0;
+    }
+    .gen-head { display: flex; align-items: center; gap: 9px; padding-bottom: 12px; border-bottom: 1px solid var(--border-soft); }
+    .gen-head b {
+      width: 21px; height: 21px; border-radius: 50%; border: 1px solid var(--accent); color: var(--accent);
+      display: flex; align-items: center; justify-content: center; font-size: 0.7rem; flex-shrink: 0;
+    }
+    .gen-panel h2 { margin: 0; font-size: 0.9rem; font-weight: 600; }
+    .gen-result { position: sticky; top: 0; }
+    @media (max-width: 1320px) {
+      .gen-cols { grid-template-columns: minmax(0, 1fr) 320px; }
+      .gen-cols > .gen-col { grid-column: 1; }
+      .gen-cols > .gen-prompt { grid-column: 1; }
+      .gen-cols > .gen-result { grid-column: 2; grid-row: 1 / span 2; }
+    }
+    @media (max-width: 900px) {
+      .gen-cols { grid-template-columns: minmax(0, 1fr); }
+      .gen-cols > .gen-result { grid-column: 1; grid-row: auto; position: static; }
+      .fv-wrap { padding: 16px 16px 56px; }
+    }
 
-    .gen-chips.gen-stack { flex-direction: column; margin: 0; }
+    .gen-chips.gen-stack { flex-direction: column; }
     .gen-stack .gen-chip { display: flex; justify-content: space-between; gap: 8px; border-radius: var(--r-sm); padding: 8px 11px; text-align: left; }
     .gen-chip small { color: var(--text-muted); }
     .gen-chip[aria-pressed="true"] small { color: var(--text-2); }
 
+    /* Thumbnails: one 3:4 tile for every photo picker on the page. */
     .gen-refs { display: flex; gap: 6px; flex-wrap: wrap; }
-    .gen-f > span small { color: var(--text-3); margin-left: 5px; }
+    .gen-f > span small { color: var(--text-muted); font-weight: 400; margin-left: 5px; }
     .gen-ref-t {
-      position: relative; width: 50px; height: 64px; padding: 0; overflow: hidden; cursor: pointer;
-      border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--surface);
+      position: relative; width: 54px; aspect-ratio: 3 / 4; padding: 0; overflow: hidden; cursor: pointer;
+      border: 2px solid var(--border-soft); border-radius: var(--r-sm); background: var(--surface);
     }
     .gen-ref-t img { width: 100%; height: 100%; object-fit: cover; display: block; }
-    .gen-ref-t[aria-pressed="true"] { border-color: var(--accent); }
+    .gen-ref-t[aria-pressed="true"] { border-color: var(--accent); box-shadow: var(--ring); }
     .gen-ref-t em {
-      position: absolute; left: 3px; bottom: 3px; font-style: normal; font-size: 0.55rem;
-      color: var(--text-2); background: #000000b3; border-radius: 4px; padding: 1px 5px;
+      position: absolute; left: 3px; bottom: 3px; max-width: calc(100% - 6px); font-style: normal; font-size: 0.6rem;
+      color: #fff; background: rgba(0,0,0,.62); border-radius: 4px; padding: 1px 5px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    .gen-ref-none { display: flex; align-items: center; justify-content: center; font-size: 0.58rem; line-height: 1.2; color: var(--text-muted); padding: 4px; }
+    .gen-ref-none { display: flex; align-items: center; justify-content: center; font-size: 0.6rem; line-height: 1.2; color: var(--text-muted); padding: 4px; }
+    .gen-ref-x {
+      position: absolute; top: 2px; right: 2px; width: 22px; height: 22px; padding: 0;
+      border: none; border-radius: 50%; background: rgba(0,0,0,.6); color: #fff;
+      font-size: 0.7rem; line-height: 1; cursor: pointer; opacity: 0; transition: opacity .15s, background .15s;
+    }
+    .gen-ref-x:hover { background: var(--err); }
+    .gen-ref-t:hover .gen-ref-x, .gen-ref-x:focus { opacity: 1; }
+    @media (hover: none) { .gen-ref-x { opacity: 1; } }
+    .gen-add {
+      border: 1px dashed var(--border); background: transparent; color: var(--text-muted);
+      border-radius: var(--r-sm); width: 54px; aspect-ratio: 3 / 4; cursor: pointer; font-family: var(--font);
+      font-size: 0.66rem; line-height: 1.25; transition: border-color .15s, color .15s;
+    }
+    .gen-add:hover { border-color: var(--accent); color: var(--text-2); }
 
-    /* The vault picker and the full-size view. Both are this page's own: the
-       studio is the only console that picks reference photos. */
+    /* Vault picker and full-size view: over the page, the header included. */
     .gen-modal {
-      position: fixed; inset: 0; z-index: 60; display: flex; align-items: center;
-      justify-content: center; padding: 24px; background: #000000cc;
+      position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center;
+      justify-content: center; padding: 20px; background: rgba(0,0,0,.65); backdrop-filter: blur(2px);
     }
-    .gen-modal[hidden] { display: none; }
     .gen-sheet {
-      background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-lg);
-      width: min(900px, 100%); max-height: 86vh; display: flex; flex-direction: column;
-      box-shadow: var(--shadow-lg);
+      background: var(--panel); border: 1px solid var(--border-soft); border-radius: var(--r-lg);
+      width: min(900px, 100%); max-height: 86vh; display: flex; flex-direction: column; box-shadow: var(--shadow-lg);
+      animation: modalIn .15s ease-out;
     }
-    .gen-sheet header {
-      display: flex; align-items: center; justify-content: space-between; gap: 12px;
-      padding: 14px 18px; border-bottom: 1px solid var(--border-soft); background: none;
-    }
-    .gen-sheet h3 { margin: 0; font-size: 0.95rem; }
-    .gen-sheet-body { padding: 16px 18px; overflow-y: auto; }
-    .gen-sheet footer {
-      display: flex; align-items: center; justify-content: space-between; gap: 12px;
-      padding: 12px 18px; border-top: 1px solid var(--border-soft);
-    }
-    .gen-pick {
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 10px;
-    }
-    .gen-pick .gen-ref-t { width: 100%; height: 136px; }
+    .gen-sheet .modal-footer { margin: 0; padding: 14px 22px; border-top: 1px solid var(--border-soft); }
+    .gen-pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 10px; }
+    .gen-pick .gen-ref-t { width: 100%; }
     .gen-lightbox {
-      position: fixed; inset: 0; z-index: 70; display: flex; align-items: center;
-      justify-content: center; padding: 32px; background: #000000e8; cursor: zoom-out;
+      position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center;
+      justify-content: center; padding: 32px; background: rgba(0,0,0,.88); cursor: zoom-out;
     }
-    .gen-lightbox[hidden] { display: none; }
-    #vault-select-tools[hidden] { display: none; }
-    .gen-lightbox img, .gen-lightbox video { max-width: 100%; max-height: 100%; border-radius: var(--r); }
+    .gen-lightbox img, .gen-lightbox video { max-width: 100%; max-height: 100%; border-radius: var(--r-sm); }
     .gen-lb-nav {
       position: absolute; top: 50%; transform: translateY(-50%); width: 44px; height: 44px;
-      border: 0; border-radius: 50%; background: #ffffff26; color: #fff; font-size: 26px;
-      line-height: 1; cursor: pointer;
+      border: 0; border-radius: 50%; background: rgba(255,255,255,.12); color: #fff; font-size: 1.4rem;
+      line-height: 1; cursor: pointer; transition: background .15s;
     }
-    .gen-lb-nav:hover { background: #ffffff40; }
-    .gen-lb-nav[hidden] { display: none; }
-    .gen-lb-prev { left: 12px; }
-    .gen-lb-next { right: 12px; }
-    .gen-ref-x {
-      position: absolute; top: 2px; right: 2px; width: 17px; height: 17px; padding: 0;
-      border: none; border-radius: 50%; background: #000000c0; color: var(--text);
-      font-size: 0.6rem; line-height: 1; cursor: pointer; opacity: 0; transition: opacity .15s;
-    }
-    .gen-ref-t:hover .gen-ref-x, .gen-ref-x:focus { opacity: 1; }
-    .gen-add {
-      border: 1px dashed var(--border); background: var(--surface); color: var(--text-muted);
-      border-radius: var(--r-sm); width: 50px; height: 64px; cursor: pointer; font: inherit;
-      font-size: 0.6rem; line-height: 1.25;
-    }
+    .gen-lb-nav:hover { background: rgba(255,255,255,.25); }
+    .gen-lb-prev { left: 16px; }
+    .gen-lb-next { right: 16px; }
+    .gen-lb-close { top: 16px; right: 16px; transform: none; font-size: 1.25rem; }
 
-    .gen-quote { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 10px 11px; display: flex; flex-direction: column; gap: 7px; }
+    .gen-quote { background: var(--panel); border: 1px solid var(--border-soft); border-radius: var(--r-md); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
     .gen-q-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 0.78rem; color: var(--text-2); }
     .gen-q-row b { font-family: var(--display); font-size: 1.05rem; color: var(--text); }
-    .gen-quote .gen-engines { margin: 0; }
 
-    @media (max-width: 1180px) { .gen-cols { grid-template-columns: 1fr; } }
+    .gen-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+    .gen-form > .hint { grid-column: 1 / -1; }
+    .gen-stackform { display: flex; flex-direction: column; gap: 12px; }
+    .gen-f { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+    .gen-f > span, body.page-dashboard .gen-f > span { font-size: 0.78rem; font-weight: 600; color: var(--text-2); }
+    body.page-dashboard .gen-f select, body.page-dashboard .gen-f input[type="text"],
+    body.page-dashboard .gen-f textarea { font-size: 0.84rem; padding: 9px 12px; }
+    body.page-dashboard .gen-f select { padding-right: 32px; }
+    .gen-check { display: flex; gap: 8px; align-items: center; font-size: 0.82rem; }
+    .gen-check input { accent-color: var(--accent); width: 16px; height: 16px; }
+    .gen-file input[type="file"] { display: none; }
+    .gen-clip { width: 100%; max-height: 240px; border-radius: var(--r-md); background: #000; }
 
-    .gen-form {
-      display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-      gap: 8px; margin-bottom: 10px;
-    }
-    .gen-f { display: flex; flex-direction: column; gap: 4px; }
-    .gen-f > span { font-size: 0.7rem; color: var(--text-muted); letter-spacing: .02em; }
-    .gen-f select {
-      background: var(--surface); border: 1px solid var(--border); border-radius: 7px;
-      color: var(--text-2); font-size: 0.75rem; padding: 7px 8px; width: 100%;
-    }
-    .gen-wide { grid-column: span 2; }
-
-    /* One rule for every field a prompt is typed into. They were three
-       different things before: a select with the design system's tokens, a
-       textarea reaching for --line and --card, which this page never defined,
-       and bare inputs wearing the browser's own chrome. */
-    .gen-f textarea,
-    .gen-f input[type="text"],
-    .gen-f input:not([type]) {
-      font: inherit; font-size: 0.78rem; line-height: 1.55; width: 100%;
-      padding: 9px 11px; border-radius: var(--r-sm);
-      border: 1px solid var(--border); background: var(--surface);
-      color: var(--text);
-      transition: border-color .15s ease, box-shadow .15s ease;
-    }
-    .gen-f textarea { resize: vertical; min-height: 82px; }
-    .gen-f textarea::placeholder,
-    .gen-f input::placeholder { color: var(--text-muted); }
-    .gen-f textarea:focus,
-    .gen-f input:focus,
-    .gen-f select:focus {
-      outline: none; border-color: var(--accent);
-      box-shadow: 0 0 0 3px var(--accent-soft);
-    }
-    .gen-f select { transition: border-color .15s ease, box-shadow .15s ease; }
-    .gen-f select:disabled, .gen-f input:disabled { opacity: .5; }
-
-    /* A boxed sub-panel reads as one block rather than a run of loose rows. */
-    .gen-builder {
-      display: none; flex-direction: column; gap: 10px;
-      border: 1px solid var(--border); border-radius: var(--r);
-      background: var(--surface); padding: 12px;
-    }
-    .gen-builder .gen-f select { background: var(--bg, #141414); }
-    .gen-engines {
-      font-size: 0.68rem; color: var(--text-muted); margin: -4px 0 10px;
-      line-height: 1.6;
-    }
+    .gen-engines { font-size: 0.72rem; color: var(--text-muted); line-height: 1.6; }
     .gen-engines b { color: var(--text); font-weight: 600; }
-    .gen-engines code {
-      font-size: 0.95em; opacity: .8;
-    }
-    .gen-go { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
-    .gen-go .btn-ai:disabled { opacity: .45; cursor: not-allowed; }
-    .gen-low { color: var(--err); }
+    .gen-engines code { font-size: 0.95em; background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
+    .gen-go { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    #gen-run-btn { width: 100%; }
+    .gen-err { color: var(--err); }
+    .gen-ok { color: var(--ok); }
 
-    .gen-staging {
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
-      gap: 8px; margin-top: 10px;
-    }
+    .gen-staging { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
     .gen-card {
       position: relative; aspect-ratio: 3/4; border-radius: var(--r-sm); overflow: hidden;
-      border: 1px solid var(--border); background: var(--bg);
+      border: 1px solid var(--border-soft); background: var(--surface); cursor: zoom-in;
     }
     .gen-card img, .gen-card video { width: 100%; height: 100%; object-fit: cover; display: block; }
     .gen-card .gen-acts {
-      position: absolute; inset: auto 0 0 0; display: flex; gap: 2px; padding: 3px;
-      background: linear-gradient(to top, #000000d0, transparent);
+      position: absolute; inset: auto 0 0 0; display: flex; gap: 3px; padding: 4px;
+      background: linear-gradient(to top, rgba(0,0,0,.75), transparent);
     }
     .gen-card .gen-acts button {
-      flex: 1; border: none; border-radius: 5px; cursor: pointer;
-      font-size: 0.66rem; font-weight: 600; padding: 4px 0; color: var(--text);
+      flex: 1; border: none; border-radius: var(--r-xs); cursor: pointer; font-family: var(--font);
+      font-size: 0.68rem; font-weight: 600; padding: 5px 0; color: #fff;
     }
-    .gen-keep { background: var(--accent)dd; }
-    .gen-drop { background: #000000a0; }
+    .gen-keep { background: var(--accent); color: var(--accent-ink) !important; }
+    .gen-drop { background: rgba(0,0,0,.55); }
+    .gen-drop:hover { background: rgba(0,0,0,.75); }
     .gen-ttl {
-      position: absolute; top: 3px; left: 3px; padding: 1px 6px; border-radius: 999px;
-      background: #000000b0; color: var(--text-3); font-size: 0.6rem;
+      position: absolute; top: 4px; left: 4px; padding: 1px 6px; border-radius: 999px;
+      background: rgba(0,0,0,.62); color: #fff; font-size: 0.62rem;
     }
-    .gen-pending {
-      display: flex; align-items: center; justify-content: center; text-align: center;
-      color: var(--text-muted); font-size: 0.68rem; padding: 6px;
+    .gen-pending, .gen-failed {
+      display: flex; flex-direction: column; gap: 8px; align-items: center; justify-content: center; text-align: center;
+      color: var(--text-muted); font-size: 0.68rem; padding: 8px; cursor: default;
     }
-    .gen-failed { border-color: var(--err); position: relative; }
+    .gen-failed { border-color: var(--err); color: var(--err); }
+    .gen-failed span { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+    .gen-failed .gen-refund { color: var(--text-muted); }
     .gen-del {
-      position: absolute; top: 3px; right: 3px; width: 18px; height: 18px;
-      border: none; border-radius: 50%; background: #000000a0; color: var(--text);
-      font-size: 0.6rem; line-height: 1; cursor: pointer;
+      position: absolute; top: 4px; right: 4px; width: 24px; height: 24px;
+      border: none; border-radius: 50%; background: rgba(0,0,0,.6); color: #fff;
+      font-size: 0.7rem; line-height: 1; cursor: pointer;
     }
+    .gen-del:hover { background: var(--err); }
+    .gen-empty { grid-column: 1 / -1; padding: 18px 8px; text-align: center; border: 1px dashed var(--border); border-radius: var(--r-md); }
 
-    /* The photos a clip can start from, chosen where the clip is set up rather
-       than from the vault: one way in, and you can see which photo you picked. */
     .anim-strip { display: flex; gap: 6px; flex-wrap: wrap; }
     .anim-pick {
-      width: 54px; height: 72px; padding: 0; border-radius: 8px; overflow: hidden;
-      border: 2px solid transparent; background: #0000; cursor: pointer;
+      width: 54px; aspect-ratio: 3 / 4; padding: 0; border-radius: var(--r-sm); overflow: hidden;
+      border: 2px solid var(--border-soft); background: var(--surface); cursor: pointer;
     }
-    .anim-pick img { width: 100%; height: 100%; object-fit: cover; display: block; }
-    .anim-pick[aria-pressed="true"] { border-color: var(--accent, #ff6b4a); }
+    .anim-pick img, .anim-pick video { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .anim-pick[aria-pressed="true"] { border-color: var(--accent); box-shadow: var(--ring); }
 
-    /* The job tiles. What a creator wants comes first; which model serves it
-       is an advanced override further down. */
-    .gen-jobs { display: grid; gap: 6px; margin-bottom: 14px; }
-    .gen-jobs-row {
-      display: grid; gap: 8px;
-      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-    }
+    .gen-jobs { display: grid; gap: 8px; }
+    .gen-jobs-row { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
     .gen-jobs-h {
-      margin: 6px 0 0; font-size: 11px; font-weight: 600; letter-spacing: .06em;
-      text-transform: uppercase; opacity: .6;
+      margin: 4px 0 0; font-family: var(--font); font-size: 0.66rem; font-weight: 700; letter-spacing: .08em;
+      text-transform: uppercase; color: var(--text-muted);
     }
     .gen-job {
-      display: flex; flex-direction: column; gap: 3px; text-align: left;
-      padding: 10px 12px; border-radius: var(--r-sm); cursor: pointer;
-      border: 1px solid var(--line, #2a2a31); background: #ffffff08;
-      color: inherit; font: inherit;
+      display: flex; flex-direction: column; gap: 3px; text-align: left; position: relative;
+      padding: 11px 13px; border-radius: var(--r-md); cursor: pointer;
+      border: 1px solid var(--border-soft); background: var(--panel-2);
+      color: var(--text); font-family: var(--font); transition: border-color .15s, background .15s;
     }
+    .gen-job:hover:not([disabled]) { border-color: var(--border); }
     .gen-job b { font-size: 0.86rem; }
-    .gen-job small { color: var(--text-muted); font-size: 0.68rem; line-height: 1.3; }
-    .gen-job[aria-pressed="true"] {
-      border-color: var(--accent, #ff6b4a); background: #ff6b4a14;
+    .gen-job small { color: var(--text-muted); font-size: 0.7rem; line-height: 1.35; }
+    .gen-job[aria-pressed="true"] { border-color: var(--accent-line); background: var(--accent-soft); }
+    .gen-job[disabled] { cursor: not-allowed; }
+    .gen-job[disabled] b, .gen-job[disabled] small { opacity: .55; }
+    .gen-soon {
+      position: absolute; top: 9px; right: 9px; font-size: 0.6rem; font-weight: 700; letter-spacing: .04em;
+      text-transform: uppercase; padding: 2px 7px; border-radius: 999px; background: var(--surface-2); color: var(--text-2);
     }
-    .gen-job[disabled] { opacity: 0.4; cursor: not-allowed; }
 
-    /* Collapsed by default: the job already chose a model, and the override is
-       there for when an admin disagrees with it. */
-    .gen-adv summary {
-      cursor: pointer; font-size: 0.72rem; color: var(--text-muted);
-      list-style: none;
-    }
+    .gen-adv summary { cursor: pointer; font-size: 0.76rem; color: var(--text-muted); list-style: none; }
+    .gen-adv summary:hover { color: var(--text-2); }
     .gen-adv summary::-webkit-details-marker { display: none; }
     .gen-adv summary::before { content: "▸ "; }
     .gen-adv[open] summary::before { content: "▾ "; }
+    .gen-adv[open] summary { margin-bottom: 8px; }
+    .vault-kind.gen-tl { top: 4px; bottom: auto; left: 4px; right: auto; }
+    .vault-kind.gen-br { top: auto; bottom: 4px; left: auto; right: 4px; }
   </style>
 </head>
 <body class="page-dashboard">
 
 <header>
-  <div style="display:flex; align-items:center; gap:10px;">
-    <h1>Generation Studio</h1>
-    <span class="badge">Admin testing</span>
-  </div>
-  <div style="display:flex; align-items:center; gap:16px;">
-    <span id="gen-balance" class="hint" style="margin:0;"></span>
-    <a id="gen-topup" href="/tokens" hidden
-       style="color:var(--accent,#a78bfa); font-size:0.8rem; text-decoration:none;">Top up</a>
-    <nav data-site-nav="inline" class="sn-links sn-inline"></nav>
-    <a href="/dashboard" style="color:var(--text-muted); font-size:0.8rem; text-decoration:none;">← Dashboard</a>
-  </div>
+  <h1>Generation Studio</h1>
+  <nav data-site-nav="inline" class="sn-links sn-inline"></nav>
 </header>
 
 <div class="fv-scroll">
 <div class="fv-wrap">
 
-  <div class="note-box" id="intro">
-    Generate photos of your persona. Every generation spends tokens from your
-    monthly allowance, and its price is shown before you click. Video is coming soon.
+  <div class="st-head">
+    <div class="st-head-t">
+      <h2>Generation Studio</h2>
+      <p class="hint">Make photos of your persona. Every generation spends tokens, and its price is shown before you click. <span id="gen-balance"></span></p>
+    </div>
+    <button type="button" class="ob-skip" onclick="StudioWizard.open()"><span class="ob-skip-icon" aria-hidden="true">&#9678;</span>Guide</button>
   </div>
 
   <div class="gen-toggles">
-    <label class="gen-seg"><span>Rating</span>
-      <div>
-        <button type="button" id="rate-sfw" aria-pressed="true" onclick="setRating('sfw')">Safe</button>
-        <button type="button" id="rate-nsfw" aria-pressed="false" onclick="setRating('nsfw')">Explicit</button>
-      </div></label>
-    <span class="hint" style="margin:0; align-self:flex-end;">Pick what you want made.
-      Rating narrows the jobs and the shots this persona allows; it is never sent on its own.</span>
+    <span class="gen-label">Rating</span>
+    <div class="pg-toggle" role="group" aria-label="Rating">
+      <button type="button" id="rate-sfw" class="active" aria-pressed="true" onclick="setRating('sfw')">Safe</button>
+      <button type="button" id="rate-nsfw" aria-pressed="false" onclick="setRating('nsfw')">Explicit</button>
+    </div>
+    <span class="hint">Narrows the jobs and the shots this persona allows.</span>
   </div>
 
   <div class="gen-jobs" id="gen-jobs"></div>
@@ -310,28 +278,28 @@
   <div class="gen-cols">
     <div class="gen-col">
 
-      <div class="gen-panel">
+      <div class="gen-panel" id="gen-p-engine">
         <div class="gen-head"><b>1</b><h2>Engine</h2></div>
-        <span class="hint" id="gen-job-note" style="margin:0;"></span>
+        <span class="hint" id="gen-job-note"></span>
         <details class="gen-adv" id="gen-adv">
           <summary id="gen-adv-summary">Advanced — choose the model</summary>
           <div class="gen-chips gen-stack" id="gen-models" style="margin-top:8px;"></div>
-          <span class="hint" id="gen-model-note" style="margin:0;"></span>
+          <span class="hint" id="gen-model-note"></span>
         </details>
         <input type="hidden" id="gen-model">
         <input type="hidden" id="gen-vmodel">
       </div>
 
-      <div class="gen-panel">
+      <div class="gen-panel" id="gen-p-character">
         <div class="gen-head"><b>2</b><h2>Character</h2></div>
         <label class="gen-f"><span>Whose photos are we generating?</span>
           <select id="persona" onchange="loadPersona()"></select></label>
         <div class="gen-f" id="gen-identity-src" style="display:none"><span>Her look comes from</span>
-          <div class="gen-chips" style="margin:0;">
+          <div class="gen-chips">
             <button type="button" class="gen-chip" id="gen-src-character" onclick="setIdentitySrc('character')">Her character</button>
             <button type="button" class="gen-chip" id="gen-src-vault" onclick="setIdentitySrc('vault')">Face &amp; body photos</button>
           </div>
-          <span class="hint" id="gen-identity-note" style="margin:0;"></span>
+          <span class="hint" id="gen-identity-note"></span>
         </div>
         <div class="note-box" id="gen-character" hidden></div>
         <div id="gen-refs-wrap" style="display:flex; flex-direction:column; gap:11px;">
@@ -342,14 +310,14 @@
           <div class="gen-f">
             <span>Her body <small id="gen-body-count"></small></span>
             <div class="gen-refs" id="gen-refs-body"></div>
-            <span class="hint" id="gen-refs-note" style="margin:0;"></span>
+            <span class="hint" id="gen-refs-note"></span>
           </div>
         </div>
         <input type="hidden" id="gen-ref">
-        <span class="hint" id="persona-hint" style="margin:0;"></span>
+        <span class="hint" id="persona-hint"></span>
       </div>
 
-      <div class="gen-panel">
+      <div class="gen-panel" id="gen-p-output">
         <div class="gen-head"><b>3</b><h2>Output</h2></div>
         <div class="gen-form" id="gen-image-out">
           <label class="gen-f"><span>Size</span>
@@ -367,7 +335,7 @@
             <select id="gen-sres" onchange="genQuote()"></select></label>
           <label class="gen-f"><span>Seconds</span>
             <select id="gen-ssecs" onchange="genQuote()"></select></label>
-          <span class="hint" style="margin:0;" id="gen-smodel-note"></span>
+          <span class="hint" id="gen-smodel-note"></span>
         </div>
         <div class="gen-form" id="gen-video-out" style="display:none">
           <label class="gen-f"><span>Clip size</span>
@@ -375,25 +343,25 @@
           <label class="gen-f"><span>Seconds</span>
             <select id="gen-vsecs" onchange="genQuote()"></select></label>
         </div>
-        <div id="gen-shape-out" style="display:none; flex-direction:column; gap:10px; margin-top:10px;">
+        <div id="gen-shape-out" class="gen-stackform" style="display:none">
           <div class="gen-f"><span>Frame shape</span>
             <div class="gen-chips" id="gen-aspects"></div>
-            <span class="hint" style="margin:0;" id="gen-aspect-note"></span>
+            <span class="hint" id="gen-aspect-note"></span>
           </div>
           <div class="gen-f"><span>Sound</span>
             <div class="gen-chips" id="gen-audio-modes"></div>
-            <input id="gen-audio-prompt" maxlength="300" style="display:none"
+            <input type="text" id="gen-audio-prompt" maxlength="300" style="display:none"
                    oninput="genQuote()"
                    placeholder="what you want to hear">
-            <span class="hint" style="margin:0;" id="gen-audio-note"></span>
+            <span class="hint" id="gen-audio-note"></span>
           </div>
         </div>
       </div>
     </div>
 
-    <div class="gen-panel">
+    <div class="gen-panel gen-prompt" id="gen-p-prompt">
       <div class="gen-head"><b>4</b><h2 id="gen-prompt-head">Prompt</h2></div>
-      <div id="gen-image-form" style="display:flex; flex-direction:column; gap:11px;">
+      <div id="gen-image-form" class="gen-stackform">
         <div class="gen-form">
           <label class="gen-f"><span>Scene</span>
             <select id="gen-scene"></select></label>
@@ -409,28 +377,28 @@
             <select id="gen-lighting"></select></label>
         </div>
         <label class="gen-f"><span>Direction</span>
-          <input id="gen-direction" maxlength="300" placeholder="looking back over her shoulder, phone in one hand"></label>
-        <div style="display:flex; gap:8px; align-items:center;">
-          <button type="button" class="btn-ai" id="gen-write-btn" onclick="writePrompt()">
+          <input type="text" id="gen-direction" maxlength="300" placeholder="looking back over her shoulder, phone in one hand"></label>
+        <div class="gen-go">
+          <button type="button" class="btn-ai btn-ai-secondary" id="gen-write-btn" onclick="writePrompt()">
             Write the prompt</button>
-          <span class="hint" style="margin:0;" id="gen-write-note"></span>
+          <span class="hint" id="gen-write-note"></span>
         </div>
         <label class="gen-f"><span>Prompt</span>
           <textarea id="gen-prompt" rows="6" maxlength="2000"
                     placeholder="Fill in the dropdowns and click Write the prompt — or type your own"></textarea></label>
-        <span class="hint" style="margin:-6px 0 0;">Left empty, the prompt is built from the dropdowns when you generate.</span>
+        <span class="hint">Left empty, the prompt is built from the dropdowns when you generate.</span>
         <label class="gen-f"><span>Keep out of the shot</span>
           <textarea id="gen-negative" rows="3" placeholder="sunglasses, jewellery, other people"></textarea></label>
-        <span class="hint" style="margin:0;">The safety baseline is added to every negative prompt and cannot be edited away.</span>
+        <span class="hint">The safety baseline is added to every negative prompt and cannot be edited away.</span>
       </div>
-      <div id="gen-video-form" style="display:none; flex-direction:column; gap:11px;">
+      <div id="gen-video-form" class="gen-stackform" style="display:none">
         <div class="gen-f"><span>Photo to animate</span>
           <div class="anim-strip" id="gen-anim-photo"></div></div>
         <label class="gen-f"><span>Motion</span>
-          <input id="gen-video-motion" maxlength="300"
+          <input type="text" id="gen-video-motion" maxlength="300"
                  placeholder="she turns towards the camera and smiles"></label>
       </div>
-      <div id="gen-swap-form" style="display:none; flex-direction:column; gap:11px;">
+      <div id="gen-swap-form" class="gen-stackform" style="display:none">
         <label class="gen-f"><span>Her identity from</span>
           <select id="gen-swap-identity" class="gen-identity" onchange="this.dataset.touched = 1; renderGenForm()">
             <option value="vault">Vault reference photos</option>
@@ -438,41 +406,42 @@
           </select></label>
         <div class="gen-f" id="gen-swap-cvpick-row"><span>Character view (up to 3)</span>
           <div class="anim-strip" id="gen-swap-cvpick"></div>
-          <span class="hint" style="margin:0;">Kling uses only the first. A clothed view
+          <span class="hint">Kling uses only the first. A clothed view
             passes its moderation more often.</span></div>
         <div class="gen-f gen-idpick-row" id="gen-swap-idpick-row"><span>Pick her photos (up to 3)</span>
           <div class="anim-strip gen-idpick" id="gen-swap-idpick"></div></div>
-        <label class="gen-f"><span>Upload</span>
+        <div class="gen-f"><span>Upload</span>
+          <label class="btn btn-ghost btn-sm gen-file" style="align-self:flex-start;">Choose a clip
           <input type="file" id="gen-swap-file" accept="video/mp4,video/quicktime"
-                 onchange="uploadSwapSource(this.files[0])"></label>
-        <div id="gen-swap-have" style="display:none; flex-direction:column; gap:6px;">
+                 onchange="uploadSwapSource(this.files[0])"></label></div>
+        <div id="gen-swap-have" class="gen-stackform" style="display:none">
           <video id="gen-swap-player" controls muted playsinline
-                 style="width:100%; max-height:240px; border-radius:10px; background:#000;"></video>
-          <span class="hint" style="margin:0;" id="gen-swap-meta"></span>
+                 class="gen-clip"></video>
+          <span class="hint" id="gen-swap-meta"></span>
         </div>
         <label class="gen-f"><span id="gen-swap-motion-label">Motion</span>
-          <input id="gen-swap-motion" maxlength="300" placeholder="keep her hair down, match the original lighting"></label>
-        <div id="gen-swap-kling" style="display:none; flex-direction:column; gap:11px;">
+          <input type="text" id="gen-swap-motion" maxlength="300" placeholder="keep her hair down, match the original lighting"></label>
+        <div id="gen-swap-kling" class="gen-stackform" style="display:none">
           <label class="gen-f"><span>Facing</span>
             <select id="gen-swap-orient">
               <option value="video">Follow the clip</option>
               <option value="image">Follow her photo</option>
             </select></label>
-          <label id="gen-swap-sound-row" style="display:flex; gap:6px; align-items:center; font-size:.82rem;">
+          <label id="gen-swap-sound-row" class="gen-check">
             <input type="checkbox" id="gen-swap-sound" checked> Keep the clip's sound</label>
-          <span class="hint" style="margin:0;">One photo of her is used: the full body.
+          <span class="hint">One photo of her is used: the full body.
             The clip decides the length and the movement.</span>
         </div>
-        <span class="hint" style="margin:0;" id="gen-swap-limits"></span>
+        <span class="hint" id="gen-swap-limits"></span>
       </div>
 
-      <div id="gen-reel-form" style="display:none; flex-direction:column; gap:11px;">
+      <div id="gen-reel-form" class="gen-stackform" style="display:none">
         <label class="gen-f"><span>What happens in it</span>
           <textarea id="gen-reel-prompt" rows="4"
             placeholder="she walks through a night market, neon signs behind her, looking back once"></textarea></label>
         <div class="gen-f"><span>Start from a photo (optional)</span>
           <div class="anim-strip" id="gen-reel-photo"></div>
-          <span class="hint" style="margin:0;">A reel may run from the words alone.
+          <span class="hint">A reel may run from the words alone.
             With her photos it shows her, and a photo is the person she
             replaces. It still lands unapproved in staging.</span></div>
         <label class="gen-f"><span>Her identity from</span>
@@ -482,41 +451,42 @@
           </select></label>
         <div class="gen-f" id="gen-reel-cvpick-row"><span>Character view (up to 3)</span>
           <div class="anim-strip" id="gen-reel-cvpick"></div>
-          <span class="hint" style="margin:0;">Kling uses only the first. A clothed view
+          <span class="hint">Kling uses only the first. A clothed view
             passes its moderation more often.</span></div>
         <div class="gen-f gen-idpick-row" id="gen-reel-idpick-row"><span>Pick her photos (up to 3)</span>
           <div class="anim-strip gen-idpick" id="gen-reel-idpick"></div></div>
       </div>
 
-      <div id="gen-extend-form" style="display:none; flex-direction:column; gap:11px;">
+      <div id="gen-extend-form" class="gen-stackform" style="display:none">
         <div class="gen-f"><span>Clip to carry on from</span>
           <div class="anim-strip" id="gen-extend-clip"></div></div>
         <div class="gen-f"><span>How</span>
           <div class="gen-chips" id="gen-extend-modes"></div>
-          <span class="hint" style="margin:0;" id="gen-extend-note"></span></div>
+          <span class="hint" id="gen-extend-note"></span></div>
         <label class="gen-f"><span>Motion</span>
-          <input id="gen-extend-motion" maxlength="300"
+          <input type="text" id="gen-extend-motion" maxlength="300"
                  placeholder="she keeps walking, the camera stays with her"></label>
         <video id="gen-extend-player" muted playsinline preload="metadata"
-               style="display:none; width:100%; max-height:200px; border-radius:10px; background:#000;"></video>
+               class="gen-clip" style="display:none"></video>
       </div>
 
-      <div id="gen-multiref-form" style="display:none; flex-direction:column; gap:11px;">
+      <div id="gen-multiref-form" class="gen-stackform" style="display:none">
         <div class="gen-f"><span>Scene, outfit or setting</span>
           <div class="anim-strip" id="gen-scene-refs"></div>
-          <span class="hint" style="margin:0;" id="gen-scene-note">Pick the kept
+          <span class="hint" id="gen-scene-note">Pick the kept
             photos that say where she is and what she is wearing. Her own face
             references come from the slots above — these never replace them.</span></div>
         <label class="gen-f"><span>What happens in it</span>
-          <input id="gen-multiref-motion" maxlength="300"
+          <input type="text" id="gen-multiref-motion" maxlength="300"
                  placeholder="she turns slowly, the light moves across her"></label>
       </div>
 
-      <div id="gen-video-drive" style="display:none; flex-direction:column; gap:8px;">
-        <label class="gen-f"><span id="gen-drive-label">Motion clip (optional)</span>
+      <div id="gen-video-drive" class="gen-stackform" style="display:none">
+        <div class="gen-f"><span id="gen-drive-label">Motion clip (optional)</span>
+          <label class="btn btn-ghost btn-sm gen-file" style="align-self:flex-start;">Choose a clip
           <input type="file" id="gen-drive-file" accept="video/mp4,video/quicktime"
-                 onchange="uploadSwapSource(this.files[0], 'drive')"></label>
-        <span class="hint" style="margin:0;" id="gen-drive-note">Upload a clip and
+                 onchange="uploadSwapSource(this.files[0], 'drive')"></label></div>
+        <span class="hint" id="gen-drive-note">Upload a clip and
           her photo performs its motion instead of being animated freely. The clip
           only supplies movement — it is never shown to a fan.</span>
       </div>
@@ -528,7 +498,7 @@
       </div>
     </div>
 
-    <div class="gen-panel">
+    <div class="gen-panel gen-result" id="gen-p-result">
       <div class="gen-head"><b>5</b><h2>Result</h2></div>
       <div class="gen-quote">
         <div class="gen-q-row"><span id="gen-quote-what"></span><b id="gen-cost"></b></div>
@@ -538,11 +508,11 @@
         <div class="gen-engines" id="gen-engines"></div>
       </div>
       <div class="gen-go">
-        <button type="button" class="btn-ai" id="gen-run-btn" onclick="runGeneration()">Generate</button>
-        <span class="hint" id="gen-status" style="margin:0;"></span>
+        <button type="button" class="btn btn-primary" id="gen-run-btn" onclick="runGeneration()">Generate</button>
+        <span class="hint" id="gen-status"></span>
       </div>
       <div class="gen-staging" id="gen-staging"></div>
-      <span class="hint" style="margin:0;">Nothing here can reach a fan. Keep moves a shot into
+      <span class="hint">Nothing here can reach a fan. Keep moves a shot into
         the vault and approves it; the rest delete themselves in three days.</span>
     </div>
   </div>
@@ -551,20 +521,18 @@
     <div class="vault-head">
       <span class="vault-title">Kept photos <span id="vault-count"></span></span>
       <div class="vault-tools">
-        <span class="hint" style="margin:0;">▶ turns a photo into a clip</span>
-        <button type="button" class="btn btn-ghost" id="vault-select-btn" onclick="toggleVaultSelect()">Select</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="vault-select-btn" onclick="toggleVaultSelect()">Select</button>
       </div>
     </div>
     <div class="gen-go" id="vault-select-tools" hidden>
-      <span class="hint" style="margin:0;" id="vault-picked"></span>
-      <button type="button" class="btn btn-ghost" onclick="vaultSelectAll(true)">Select all</button>
-      <button type="button" class="btn btn-ghost" onclick="vaultSelectAll(false)">Clear</button>
-      <button type="button" class="btn-ai" id="fv-open-btn" onclick="openFanvueUpload()" disabled>Upload to Fanvue</button>
+      <span class="hint" id="vault-picked"></span>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="vaultSelectAll(true)">Select all</button>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="vaultSelectAll(false)">Clear</button>
+      <button type="button" class="btn btn-primary btn-sm" id="fv-open-btn" onclick="openFanvueUpload()" disabled>Upload to Fanvue</button>
     </div>
     <div class="vault-grid" id="vault-grid"></div>
     <span class="hint">Everything here is approved: uploads plus whatever was kept from a
-      generation. A clip can only start from one of these — its first frame is what keeps
-      the face consistent, so there is no text-to-video.</span>
+      generation. A clip of her starts from one of these, so its first frame carries her face.</span>
   </div>
 
 </div>
@@ -572,26 +540,25 @@
 
 <div class="gen-modal" id="gen-vault" hidden onclick="if(event.target===this) closeVault()">
   <div class="gen-sheet" role="dialog" aria-modal="true" aria-labelledby="gen-vault-title">
-    <header>
-      <h3 id="gen-vault-title">Her photos</h3>
-      <button type="button" class="btn btn-ghost" onclick="closeVault()" aria-label="Close">&times;</button>
-    </header>
-    <div class="gen-sheet-body">
+    <div class="modal-header">
+      <h2 id="gen-vault-title">Her photos</h2>
+      <button type="button" class="modal-close" onclick="closeVault()" aria-label="Close">&times;</button>
+    </div>
+    <div class="modal-body">
       <div class="gen-pick" id="gen-vault-grid"></div>
     </div>
-    <footer>
-      <label class="btn btn-ghost" style="cursor:pointer;">
-        Upload photos
-        <input type="file" id="gen-upload" accept="image/*" multiple
-               style="display:none" onchange="uploadRefs(this.files)">
+    <div class="modal-footer">
+      <label class="btn btn-ghost btn-sm gen-file" style="cursor:pointer;">Upload photos
+        <input type="file" id="gen-upload" accept="image/*" multiple onchange="uploadRefs(this.files)">
       </label>
-      <span class="hint" id="gen-vault-status" style="margin:0;"></span>
-      <button type="button" class="btn-ai" onclick="closeVault()">Done</button>
-    </footer>
+      <span class="hint" id="gen-vault-status" style="margin-right:auto;"></span>
+      <button type="button" class="btn btn-primary btn-sm" onclick="closeVault()">Done</button>
+    </div>
   </div>
 </div>
 
 <div class="gen-lightbox" id="gen-lightbox" hidden onclick="closeLightbox()">
+  <button type="button" class="gen-lb-nav gen-lb-close" aria-label="Close" onclick="event.stopPropagation(); closeLightbox()">&times;</button>
   <img decoding="async" id="gen-lightbox-img" src="" alt="">
   <video id="gen-lightbox-video" src="" controls autoplay playsinline hidden
          onclick="event.stopPropagation()"></video>
@@ -667,7 +634,9 @@ async function init() {
     el('persona-hint').textContent = 'Could not load personas.';
     return;
   }
+  el('gen-jobs').innerHTML = skelRows(1, '64px');
   await loadCredits();
+  if (!genPrices) el('gen-jobs').innerHTML = '<div class="note-box">Could not load prices. Reload the page to try again.</div>';
   await loadPersona();
 }
 
@@ -686,9 +655,8 @@ async function loadCredits() {
     if (topup) topup.hidden = d.unlimited || !d.can_buy;
     const e = el('gen-balance');
     if (e) {
-      e.textContent = d.unlimited
-        ? 'Unlimited tokens — admin'
-        : `${d.balance.toLocaleString()} token${d.balance === 1 ? '' : 's'}${cashFor(d.balance) ? ' (' + cashFor(d.balance) + ')' : ''} — about ${d.equivalents.photos.toLocaleString()} photos or ${d.equivalents.clips} clips`;
+      e.textContent = d.unlimited ? 'Admin: unlimited tokens.'
+        : `You have ${d.balance.toLocaleString()} token${d.balance === 1 ? '' : 's'}, about ${d.equivalents.photos.toLocaleString()} photos.`;
     }
   } catch (e) {}
 }
@@ -774,11 +742,11 @@ async function loadPersona() {
       + 'level is a chat setting — how far she flirts with a fan — and does not '
       + 'limit what you can generate.';
   } catch (e) { mediaVault = []; genAllowedShots = []; genScenes = []; }
-  loadCharacterBadge();
   renderVault();
   renderGenForm();
-  loadReferences();
   pollGenJobs();
+  await Promise.all([loadCharacterBadge(), loadReferences()]);
+  if (window.StudioWizard) StudioWizard.refresh();
 }
 
 // Photos is a job like the rest of them here: the tile row is the one place a
@@ -818,7 +786,7 @@ function renderJobTiles() {
     const row = jobRow(key);
     if (jobKind(key) !== 'image' && !genVideoOpen) {
       return `<button type="button" class="gen-job" disabled title="Coming soon">
-        <b>${esc(row.label)}</b><small>Coming soon</small></button>`;
+        <span class="gen-soon">Soon</span><b>${esc(row.label)}</b><small>${esc(row.note || '')}</small></button>`;
     }
     const ok = jobServes(key);
     return `<button type="button" class="gen-job" aria-pressed="${key === genJob}"
@@ -848,6 +816,8 @@ function setRating(v) {
   genRating = v;
   el('rate-sfw').setAttribute('aria-pressed', String(v === 'sfw'));
   el('rate-nsfw').setAttribute('aria-pressed', String(v === 'nsfw'));
+  el('rate-sfw').classList.toggle('active', v === 'sfw');
+  el('rate-nsfw').classList.toggle('active', v === 'nsfw');
   // A job this rating does not serve cannot stay selected, or the panel would
   // be quoting something the server is about to refuse.
   if (!jobServes(genJob)) return setJob(jobKeys().find(jobServes) || 'image');
@@ -925,7 +895,7 @@ function videoModelChips(box, note) {
       (el('gen-vres') || {}).value || genPrices.defaults.video_resolution;
     const rate = ((genPrices.video_rates || {})[m] || {})[rung] || videoPerSecond(m, rung);
     box.innerHTML = `<button type="button" class="gen-chip" aria-pressed="true" disabled>` +
-      `<span>${esc(videoLabel(m))}</span>` + (rate ? `<small>${rate.toFixed(1)} tk/s</small>` : '') +
+      `<span>${esc(videoLabel(m))}</span>` + (rate ? `<small>${rate.toFixed(1)} tokens/s</small>` : '') +
       `</button>`;
     if (note) note.textContent =
       `${videoLabel(m)} is the only model that takes a clip, so a swap always runs on it.`;
@@ -947,7 +917,7 @@ function videoModelChips(box, note) {
     const label = videoLabel(m);
     return `<button type="button" class="gen-chip" aria-pressed="${m === chosen}"
       onclick="pickVideoModel('${m}')"><span>${esc(label)}</span>` +
-      (rate ? `<small>${Math.round(rate)} cr/s</small>` : '') + `</button>`;
+      (rate ? `<small>${Math.round(rate)} tokens/s</small>` : '') + `</button>`;
   }).join('');
   if (note) {
     note.textContent = offered.length === 1
@@ -984,8 +954,8 @@ function renderModelChips() {
     const price = (genPrices.images[m] || {})[res];
     return `<button type="button" class="gen-chip" aria-pressed="${m === hidden.value}"
              onclick="pickModel('${m}')">${esc(genPrices.labels[m] || m)}
-             <small>${price === undefined ? '' : price + ' cr'}</small></button>`;
-  }).join('') || '<span class="hint" style="margin:0;">No model serves that rating.</span>';
+             <small>${price === undefined ? '' : price + ' tokens'}</small></button>`;
+  }).join('') || '<span class="hint">No model serves that rating.</span>';
   if (note) {
     const only = genPrices.labels[keys[0]] || keys[0];
     note.textContent = keys.length === 1
@@ -1105,7 +1075,7 @@ function renderVaultPicker() {
     `<button type="button" class="gen-ref-t" aria-pressed="${chosen.includes(v.id)}"
        onclick="toggleRef('${vaultRole}', '${v.id}')" title="${esc(v.purpose || 'Her photo')}">
        <img loading="lazy" decoding="async" src="${v.thumb}" alt="">${v.purpose ? `<em>${esc(v.purpose)}</em>` : ''}</button>`).join('')
-    || '<span class="hint" style="margin:0;">Nothing in the vault yet — upload a photo below.</span>';
+    || '<span class="hint">Nothing in the vault yet — upload a photo below.</span>';
 }
 
 // An upload lands in the vault as an approved photo, which is what makes it
@@ -1203,7 +1173,7 @@ function renderGenForm() {
   const video = genMake === 'video';
   const swap = genMake === 'swap';
   const animate = genJob === 'animate';
-  el('gen-image-form').style.display = genMake === 'image' ? '' : 'none';
+  el('gen-image-form').style.display = genMake === 'image' ? 'flex' : 'none';
   el('gen-video-form').style.display = animate ? 'flex' : 'none';
   if (animate) renderAnimPhotos();
   el('gen-video-note').style.display = animate ? '' : 'none';
@@ -1712,7 +1682,7 @@ function syncIdentity() {
       <button type="button" class="anim-pick" aria-pressed="${genIdPick.includes(v.id)}"
               title="${esc(v.purpose || 'kept photo')}" onclick="pickIdPhoto('${v.id}')">
         <img loading="lazy" decoding="async" src="${v.thumb}" alt="" draggable="false"></button>`).join('')
-      : '<span class="hint" style="margin:0;">No kept photos in the vault yet.</span>';
+      : '<span class="hint">No kept photos in the vault yet.</span>';
   });
 }
 
@@ -1917,7 +1887,7 @@ function genQuote() {
       what.textContent = genSwap
         ? `${swapSeconds()}s swap, ${swapResolution()}` : 'Upload a clip to swap her into';
     }
-    if (cost) cost.textContent = total === undefined ? '' : `${total} cr`;
+    if (cost) cost.textContent = total === undefined ? '' : `${total} tokens`;
     setMoney(total || 0);
     const cash = cashFor(total);
     const blocked = jobBlocker();
@@ -1925,7 +1895,7 @@ function genQuote() {
     btn.textContent = (blocked || total === undefined)
       ? (blocked || 'Upload a clip first')
       : `Swap her in · ${total} token${total === 1 ? '' : 's'}` + (cash ? ` · ${cash}` : '');
-    btn.classList.toggle('gen-low', genTokens !== null && genTokens < (total || 0));
+    
     showEngines();
     return total;
   }
@@ -1942,7 +1912,7 @@ function genQuote() {
         ? `${secs}s driven clip, ${resv}${shape}`
         : `One ${secs}s clip, ${resv}${shape}`;
     }
-    if (cost) cost.textContent = per === undefined ? '' : `${per} cr`;
+    if (cost) cost.textContent = per === undefined ? '' : `${per} tokens`;
     setMoney(per);
     lockVideoSeconds();
     const cash = cashFor(per);
@@ -1951,7 +1921,7 @@ function genQuote() {
     btn.textContent = blocked ||
       `${JOB_VERBS[genJob] || 'Generate'} · ${per} token${per === 1 ? '' : 's'}` +
       (cash ? ` · ${cash}` : '');
-    btn.classList.toggle('gen-low', genTokens !== null && genTokens < (per || 0));
+    
     el('gen-video-note').textContent = genDrive
       ? `Her photo will perform that clip's motion, for its whole ${genDrive.seconds}s.`
       : 'An animate always starts from a photo that is already kept, so its '
@@ -1985,8 +1955,8 @@ function genQuote() {
   renderModelChips();
   showEngines();
   const short = genTokens !== null && genTokens < total;
-  el('gen-run-btn').classList.toggle('gen-low', short);
-  if (short) setGenStatus(`Only ${genTokens} token${genTokens === 1 ? '' : 's'} left \u2014 top up on the billing page.`, false);
+  
+  if (short) setGenStatus(`Only ${genTokens} token${genTokens === 1 ? '' : 's'} left \u2014 top up from the tokens button at the top.`, false);
   return total;
 }
 
@@ -2001,7 +1971,7 @@ function setGenStatus(msg, ok) {
   const e = el('gen-status');
   if (!e) return;
   e.textContent = msg || '';
-  e.style.color = ok === true ? 'var(--ok)' : ok === false ? 'var(--err)' : '#5a5a63';
+  e.className = 'hint' + (ok === true ? ' gen-ok' : ok === false ? ' gen-err' : '');
 }
 
 async function runGeneration() {
@@ -2164,34 +2134,35 @@ function renderGenStaging() {
   const cards = [];
   genJobs.forEach(job => {
     if (job.status === 'queued' || job.status === 'running') {
-      cards.push(['p:' + job.id, `<div class="gen-card gen-pending">Generating
-        ${job.kind === 'video' ? 'a clip' : 'photos'}…</div>`]);
+      cards.push(['p:' + job.id, `<div class="gen-card gen-pending"><span class="loader-dots" aria-hidden="true"><i></i><i></i><i></i></span>Generating
+        ${isClip(job.kind) ? 'a clip' : 'photos'}…</div>`]);
       return;
     }
     if (job.status === 'failed') {
-      cards.push(['f:' + job.id, `<div class="gen-card gen-failed gen-pending">✗ ${esc(job.error || 'failed')}
-        <br><span style="opacity:.7">${job.tokens} token${job.tokens === 1 ? '' : 's'} refunded</span>
+      cards.push(['f:' + job.id, `<div class="gen-card gen-failed" title="${esc(job.error || 'failed')}"><span>${esc(job.error || 'Failed')}</span>
+        <span class="gen-refund">${job.tokens} token${job.tokens === 1 ? '' : 's'} refunded</span>
         <button type="button" class="gen-del" title="Delete this generation"
-          onclick="deleteGenJob('${job.id}')">✕</button></div>`]);
+          onclick="event.stopPropagation(); deleteGenJob('${job.id}')">&times;</button></div>`]);
       return;
     }
     job.media.filter(m => !m.approved).forEach(m => {
       const clip = isClip(m.kind);
       const thumb = clip
-        ? `<video src="${m.url}" muted playsinline preload="metadata" controls></video>`
+        ? `<video src="${m.url}" muted playsinline preload="metadata"></video>`
         : `<img loading="lazy" decoding="async" src="${m.url}" alt="">`;
       cards.push(['m:' + m.id, `
         <div class="gen-card" data-lb="${m.url}" data-kind="${m.kind}" onclick="openLightbox(this)">
           ${thumb}
           <span class="gen-ttl">${esc(genTtl(m.expires_at))}</span>
           <div class="gen-acts">
-            <button type="button" class="gen-keep" onclick="keepGenerated('${m.id}', true)">Keep</button>
-            <button type="button" class="gen-drop" onclick="keepGenerated('${m.id}', false)">Drop</button>
+            <button type="button" class="gen-keep" onclick="event.stopPropagation(); keepGenerated('${m.id}', true)">Keep</button>
+            <button type="button" class="gen-drop" onclick="event.stopPropagation(); keepGenerated('${m.id}', false)">Drop</button>
           </div>
         </div>`]);
     });
   });
-  keyedRender(box, cards);
+  keyedRender(box, cards, '<p class="hint gen-empty">Your generations land here. Nothing here reaches a fan until you keep it.</p>');
+  if (window.StudioWizard) StudioWizard.refresh();
 }
 
 async function deleteGenJob(id) {
@@ -2237,7 +2208,7 @@ function renderAnimPhotos() {
             title="${esc(v.outfit || v.purpose || 'kept photo')}"
             onclick="pickAnimPhoto('${v.id}')">
       <img loading="lazy" decoding="async" src="${v.thumb}" alt="" draggable="false"></button>`).join('')
-    : '<span class="hint" style="margin:0;">Keep a photo first — a clip starts from one.</span>';
+    : '<span class="hint">Keep a photo first — a clip starts from one.</span>';
 }
 
 function pickAnimPhoto(id) {
@@ -2261,7 +2232,7 @@ function renderReelPhotos() {
             title="${esc(v.outfit || v.purpose || 'kept photo')}"
             onclick="pickReelPhoto('${v.id}')">
       <img loading="lazy" decoding="async" src="${v.thumb}" alt="" draggable="false"></button>`).join('')
-    : '<span class="hint" style="margin:0;">No kept photos — a reel can still run from the words alone.</span>';
+    : '<span class="hint">No kept photos — a reel can still run from the words alone.</span>';
 }
 
 function pickReelPhoto(id) {
@@ -2296,7 +2267,7 @@ function renderExtendClips() {
             title="${esc(v.outfit || v.purpose || 'kept clip')}"
             onclick="pickExtendClip('${v.id}')">
       <video src="${inlineSrc(v.thumb)}" muted playsinline preload="metadata"></video></button>`]),
-    '<span class="hint" style="margin:0;">Keep a clip first — an extension carries on from one.</span>');
+    '<span class="hint">Keep a clip first — an extension carries on from one.</span>');
   const player = el('gen-extend-player');
   const chosen = clips.find(v => v.id === genExtendClip);
   if (player) {
@@ -2357,7 +2328,7 @@ function renderSceneRefs() {
             title="${esc(v.outfit || v.purpose || 'kept photo')}"
             onclick="toggleSceneRef('${v.id}')">
       <img loading="lazy" decoding="async" src="${v.thumb}" alt="" draggable="false"></button>`).join('')
-    : '<span class="hint" style="margin:0;">Keep a photo of the scene or outfit first.</span>';
+    : '<span class="hint">Keep a photo of the scene or outfit first.</span>';
 }
 
 function toggleSceneRef(id) {
@@ -2374,10 +2345,10 @@ function renderVault() {
   keyedRender(grid, mediaVault.map(v => {
     const clip = isClip(v.kind);
     const parent = v.parent_media
-      ? `<span class="vault-kind" style="left:4px; right:auto;"
+      ? `<span class="vault-kind gen-tl"
               title="Continues another clip">&#8627;</span>` : '';
     const fv = v.fanvue_uuid
-      ? `<span class="vault-kind" style="top:auto; bottom:4px;" title="In the Fanvue vault">FV</span>` : '';
+      ? `<span class="vault-kind gen-br" title="In the Fanvue vault">FV</span>` : '';
     const thumb = clip
       ? `<video src="${v.thumb}" muted playsinline preload="metadata"></video>
          <span class="vault-kind">video</span>${parent}`
@@ -2436,7 +2407,51 @@ function openFanvueUpload() {
   });
 }
 
-init();
+// ── Guided first run ────────────────────────────────────────────────────────
+// The persona wizard's frame over the studio's own panels, one at a time. The
+// panels are borrowed, not copied, so everything done in the guide is real.
+PageWizard.frame({
+  name: 'StudioWizard', key: 'page:studio', railTitle: 'Your first photos',
+  stages: [{key: 'what', label: 'What to make'}, {key: 'who', label: 'Who it is'},
+           {key: 'shot', label: 'The shot'}, {key: 'go', label: 'Generate'}],
+  steps: [
+    {stage: 'what', key: 'job', nav: 'Photo or video', title: 'What do you want to make?',
+     sub: 'Photos are open on every plan; video is coming soon. Safe or Explicit narrows the shots she allows.',
+     nodes: () => [document.querySelector('.gen-toggles'), el('gen-jobs'), el('gen-p-engine')], wide: true},
+    {stage: 'who', key: 'who', nav: 'Her face & body', title: 'Whose photos are these?',
+     sub: 'Pick the persona. Her approved character, or her face and body photos, keep her looking the same in every shot.',
+     nodes: () => [el('gen-p-character')],
+     done: () => !!slug() && !!(genCharacter || (genRefs.face || []).length),
+     gate: () => slug() ? '' : 'Create a persona first.'},
+    {stage: 'shot', key: 'output', nav: 'Size & count', title: 'How big, and how many?',
+     sub: 'Each photo is priced on its own, so more photos cost more. The total is shown before you generate.',
+     nodes: () => [el('gen-p-output')]},
+    {stage: 'shot', key: 'prompt', nav: 'Describe it', title: 'Describe the shot',
+     sub: 'Pick a scene and a shot, then let Write the prompt fill in the words, or type your own.',
+     nodes: () => [el('gen-p-prompt')]},
+    {stage: 'go', key: 'generate', nav: 'Generate & keep', title: 'Generate, then keep the best',
+     sub: 'The price is on the button. Results land here unapproved: Keep moves a photo into her vault, and the rest delete themselves after 3 days.',
+     nodes: () => [el('gen-p-result')], done: () => genJobs.length > 0},
+  ],
+  tour: [
+    {anchor: '#pw-stepwrap .ob-step-h', placement: 'bottom', title: 'One thing at a time',
+     body: 'The studio is split into a few short steps. Each one asks a single question; answer it and continue.'},
+    {anchor: '#pw-step-body', placement: 'right', title: 'These are the real controls',
+     body: 'Whatever appears in this box is the studio itself. What you set here is what gets generated.'},
+    {anchor: '.ob-rail', placement: 'right', title: 'Where you are',
+     body: 'Four stages. The bar shows how far along you are, and you can jump back to any step you have passed.'},
+    {anchor: '#pw-foot', placement: 'top', title: 'Continue, or skip ahead',
+     body: 'Continue moves on. Skip setup hands you the whole studio at once, and the Guide button brings this back any time.'},
+  ],
+  done: {title: 'You are ready to create.', sub: 'That is the whole loop: pick, describe, generate, keep. The full studio has every option on one page.',
+    cards: [
+      {icon: '✦', title: 'Open the full studio', desc: 'Every panel on one page.', call: 'StudioWizard.close(true)'},
+      {icon: '🖼️', title: 'See what you kept', desc: 'Her approved photos, ready to send.', call: "StudioWizard.close(true);el('vault-panel').scrollIntoView()"},
+      {icon: '👤', title: 'Build her character', desc: 'Lock her look so every photo matches.', call: "PageWizard.openPage('/characters')"},
+    ]},
+});
+
+init().then(() => StudioWizard.auto());
 </script>
 </body>
 </html>
