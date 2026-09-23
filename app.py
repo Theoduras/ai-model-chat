@@ -29554,6 +29554,38 @@ CHAR_MODEL = imagegen.EXPLICIT_MODEL
 CHAR_SFW_MODEL = 'nano-banana-pro'
 
 
+# Google's moderation sometimes refuses a safe-work view outright; the next
+# model gets the same request rather than the creator getting nothing.
+CHAR_SFW_FALLBACK = ('nano-banana-pro', 'nano-banana-2', 'seedream-5-pro')
+_MODERATION_WORDS = ('invalid content', 'content moderation', 'flagged', 'safety', 'blocked', 'prohibited')
+
+
+def _moderated(text):
+    text = str(text or '').lower()
+    return any(w in text for w in _MODERATION_WORDS)
+
+
+def _char_submit(call):
+    """Submit one character view, stepping down CHAR_SFW_FALLBACK when a model's
+    moderation refuses it. Returns (provider_job, result, model actually run)."""
+    chain = CHAR_SFW_FALLBACK[CHAR_SFW_FALLBACK.index(call['model']):] \
+        if call.get('model') in CHAR_SFW_FALLBACK else (call.get('model'),)
+    for i, model in enumerate(chain):
+        attempt = dict(call, model=model)
+        last = i == len(chain) - 1
+        try:
+            provider_job, result = imagegen.provider_for(attempt).submit_image(attempt)
+        except Exception as e:
+            if last or not _moderated(e):
+                raise
+            logger.info('character view refused by %s, trying %s: %s', model, chain[i + 1], str(e)[:160])
+            continue
+        if result and result.status == 'failed' and _moderated(result.error) and not last:
+            logger.info('character view refused by %s, trying %s: %s', model, chain[i + 1], str(result.error)[:160])
+            continue
+        return provider_job, result, model
+
+
 def _char_model(v):
     # Google refuses nudity, so only safe-work views go to Nano Banana Pro.
     return CHAR_SFW_MODEL if v.get('rating') == 'sfw' else CHAR_MODEL
@@ -30857,7 +30889,8 @@ def _gen_start(job_id, slug, spec, workspace):
                 if refs:
                     call['reference_urls'] = refs
                 call['prompt'] = spec['prompt']
-                provider_job, result = provider.submit_image(call)
+                provider_job, result, ran = _char_submit(call)
+                spec['model'] = ran
             elif spec['kind'] == 'image':
                 refs = _character_content(spec)[0]
                 if spec.get('identity') != 'character':
