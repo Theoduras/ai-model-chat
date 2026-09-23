@@ -258,7 +258,7 @@ def test_job_quotes():
     # A model that does not serve a job must not be quotable on it: the picker
     # offers the job's own list, so anything else arrived from a hand-made
     # request and would be billed on a model that never ran.
-    for job, model in (('reel', 'p-video-replace'), ('extend', 'wan-2-5'),
+    for job, model in (('reel', 'ml-face-swap'), ('extend', 'wan-2-5'),
                        ('multiref', 'seedance-2-5'), ('nonesuch', 'wan-2-7')):
         try:
             CR.quote({'job': job, 'model': model, 'resolution': '720p',

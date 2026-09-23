@@ -55,7 +55,8 @@ DEFAULT_RESOLUTION = '2k'
 DEFAULT_VIDEO_RESOLUTION = '720p'
 DEFAULT_VIDEO_DURATION = 5
 
-VIDEO_MODELS = ('wan-2-5', 'wan-2-7', 'seedance-2-5')
+VIDEO_MODELS = ('wan-2-5', 'wan-2-7', 'seedance-2-5', 'seedance-2-0',
+                'seedance-2-0-fast', 'minimax-h3', 'minimax-h3-fast', 'wan-3-0')
 DEFAULT_VIDEO_MODEL = 'wan-2-5'
 
 # Wan 2.7 is the only video model that takes an input clip, so a face swap into
@@ -89,6 +90,15 @@ VIDEO_COST_USD_PER_SECOND = {
     'seedance-2-5': {'480p': 0.12, '720p': 0.12, '1080p': 0.30},
     'p-video-replace': {'480p': 0.12, '720p': 0.12, '1080p': 0.30},
     'ml-face-swap': {'480p': 0.12, '720p': 0.12, '1080p': 0.30},
+    # Runware's published list prices, unmeasured. A rung a model does not
+    # serve carries its dearest real one: video_size snaps it to a rung it
+    # does serve, and the quote must never have been below that.
+    'p-video-animate': {'480p': 0.06, '720p': 0.03, '1080p': 0.06},
+    'seedance-2-0': {'480p': 0.07, '720p': 0.16, '1080p': 0.40},
+    'seedance-2-0-fast': {'480p': 0.06, '720p': 0.13, '1080p': 0.13},
+    'minimax-h3': {'480p': 0.13, '720p': 0.08, '1080p': 0.13},
+    'minimax-h3-fast': {'480p': 0.046, '720p': 0.046, '1080p': 0.046},
+    'wan-3-0': {'480p': 0.05, '720p': 0.10, '1080p': 0.20},
 }
 
 PROVIDER_COST_MEASURED = {
@@ -214,6 +224,12 @@ MODEL_LABELS = {
     'seedance-2-5': 'Seedance 2.5',
     'p-video-replace': 'Replace her in the clip',
     'ml-face-swap': 'Replace her in the clip — explicit',
+    'p-video-animate': 'Her photo performs the clip',
+    'seedance-2-0': 'Seedance 2.0',
+    'seedance-2-0-fast': 'Seedance 2.0 Fast',
+    'minimax-h3': 'MiniMax H3',
+    'minimax-h3-fast': 'MiniMax H3 Fast',
+    'wan-3-0': 'Wan 3.0',
 }
 
 # Which ratings each model actually serves, measured against the provider rather
@@ -241,6 +257,13 @@ VIDEO_MODEL_RATINGS = {
     # crash whose own traceback could not be deserialized because the safety
     # module raised it. The crash is the refusal, so this model is safe work.
     'p-video-replace': ('sfw',),
+    # Mainstream moderated providers, never probed explicit.
+    'p-video-animate': ('sfw',),
+    'seedance-2-0': ('sfw',),
+    'seedance-2-0-fast': ('sfw',),
+    'minimax-h3': ('sfw',),
+    'minimax-h3-fast': ('sfw',),
+    'wan-3-0': ('sfw',),
     # ModelsLab's face swap, not Runware -- an uncensored provider running an
     # actual swap rather than a regeneration. Runware carries no explicit
     # replace model at all (confirmed against its own catalogue), so this is the

@@ -28702,23 +28702,39 @@ def _gen_spec(slug, body, user):
                 'A reel needs a prompt, a photo, or both.')
         if spec['reference_media'] and not _media_row(slug, spec['reference_media']):
             raise imagegen.GenerationError('That photo is not in this vault.')
-        # With a character the reel shows her, so it runs on the one model
-        # that takes reference photos -- moved before the quote, like a rating.
+        # Her identity comes from the character's approved views or from the
+        # vault's reference photos, as the creator picks. A model is moved
+        # before the quote, like a rating, never after it.
         char = _character_snapshot(slug)
-        if char:
+        identity = (body.get('identity') or '').strip().lower()
+        if identity not in ('character', 'vault'):
+            identity = 'character' if char else 'vault'
+        if identity == 'character' and not char:
+            raise imagegen.GenerationError(
+                'Approve a view of her character first, or pick vault photos.')
+        spec['identity'] = identity
+        if identity == 'character':
             spec['character'] = char
+        drive_id = str(body.get('source') or '').strip()
+        if drive_id:
+            src = _video_source_row(slug, drive_id)
+            if not src:
+                raise imagegen.GenerationError(
+                    'That clip is no longer there. Upload it again.')
+            # A true replace by default: the clip keeps its motion, camera and
+            # background and only the person changes.
+            if model not in imagegen.CLIP_ONLY_MODELS + (CR.VIDEO_EDIT_MODEL,):
+                model = 'p-video-replace'
+            spec['source_path'] = src['path']
+            spec['source_id'] = drive_id
+            spec['source_width'] = src['width']
+            spec['source_height'] = src['height']
+            seconds = imagegen.video_seconds(model, src['seconds'])
+        elif model in imagegen.CLIP_ONLY_MODELS:
+            raise imagegen.GenerationError(
+                'That model replaces the person in a clip — upload one first.')
+        elif identity == 'character' and model not in imagegen.REFERENCE_VIDEO_MODELS:
             model = CR.VIDEO_EDIT_MODEL
-            drive_id = str(body.get('source') or '').strip()
-            if drive_id:
-                src = _video_source_row(slug, drive_id)
-                if not src:
-                    raise imagegen.GenerationError(
-                        'That clip is no longer there. Upload it again.')
-                spec['source_path'] = src['path']
-                spec['source_id'] = drive_id
-                spec['source_width'] = src['width']
-                spec['source_height'] = src['height']
-                seconds = imagegen.video_seconds(model, src['seconds'])
     elif job == 'extend':
         mode = (body.get('extend_mode') or 'continue').strip().lower()
         if mode not in imagegen.EXTEND_MODES:
@@ -28770,17 +28786,19 @@ def _gen_spec(slug, body, user):
             if not src:
                 raise imagegen.GenerationError(
                     'That motion clip is no longer there. Upload it again.')
-            # Wan 2.7 is the one model that takes a reference video as
-            # motion guidance while still conditioning on her photo, which
-            # is what this job needs -- the explicit swap model is a true
-            # replace on an existing clip and takes no motion guidance at
-            # all.
-            model = CR.VIDEO_EDIT_MODEL
+            # Wan 2.7 and P-Video-Animate take a reference video as motion
+            # guidance while still conditioning on her photo, which is what
+            # this job needs -- a true replace takes no motion guidance.
+            if model != 'p-video-animate':
+                model = CR.VIDEO_EDIT_MODEL
             spec['source_path'] = src['path']
             spec['source_id'] = drive_id
             spec['source_width'] = src['width']
             spec['source_height'] = src['height']
             seconds = imagegen.video_seconds(model, src['seconds'])
+        elif model in imagegen.CLIP_ONLY_MODELS:
+            raise imagegen.GenerationError(
+                'That model animates her from a motion clip — upload one first.')
         else:
             allowed = imagegen.model_durations(model)
             if allowed and seconds not in allowed:
@@ -30230,7 +30248,8 @@ def api_generate_job():
 
     try:
         spec = _gen_spec(slug, body, user)
-        char = spec.get('character') or _character_snapshot(slug)
+        char = spec.get('character') or (
+            None if spec.get('identity') == 'vault' else _character_snapshot(slug))
         if char:
             spec['character'] = char
             spec['character_id'] = char['id']
@@ -30359,10 +30378,16 @@ def _gen_start(job_id, slug, spec, workspace):
                         if spec.get('reference_media'):
                             call['scene_urls'] = _gen_media_urls(
                                 slug, [spec['reference_media']])
-                    call['prompt'] = imagegen.build_reel_prompt(
-                        spec.get('prompt_extra') or motion,
-                        has_photo=bool(spec.get('reference_media')),
-                        character=bool(char))
+                    if spec.get('source_path'):
+                        call['prompt'] = imagegen.build_swap_prompt(
+                            spec.get('prompt_extra') or motion,
+                            preserve=imagegen.preserves_source(
+                                'swap', spec.get('model')))
+                    else:
+                        call['prompt'] = imagegen.build_reel_prompt(
+                            spec.get('prompt_extra') or motion,
+                            has_photo=bool(spec.get('reference_media')),
+                            character=bool(char))
                 elif job == 'extend':
                     call['prompt'] = imagegen.build_extend_prompt(
                         spec.get('extend_mode'), motion)
@@ -30416,7 +30441,7 @@ def _gen_start(job_id, slug, spec, workspace):
                     if not refs:
                         ref_model = imagegen.EXPLICIT_MODEL
                         refs = _gen_reference_urls(slug, ref_model, role=role)
-                    if job == 'reel':
+                    if job == 'reel' and spec.get('character'):
                         refs = call['reference_urls']
                     elif spec.get('character'):
                         refs = (_character_urls(spec['character'], None, None,

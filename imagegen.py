@@ -83,7 +83,22 @@ RUNWARE_VIDEO_MODELS = {
     # on camera, which is what a swap has always meant here.
     'p-video-replace': os.getenv('RW_MODEL_VIDEO_REPLACE',
                                  'prunaai:p-video@replace'),
+    # Read off Runware's public model pages, not its live catalogue -- confirm
+    # with search_models() before trusting one in production.
+    'p-video-animate': os.getenv('RW_MODEL_VIDEO_ANIMATE', 'prunaai:p-video@animate'),
+    'seedance-2-0': os.getenv('RW_MODEL_SEEDANCE_20', 'bytedance:seedance@2.0'),
+    'seedance-2-0-fast': os.getenv('RW_MODEL_SEEDANCE_20_FAST',
+                                   'bytedance:seedance@2.0-fast'),
+    'minimax-h3': os.getenv('RW_MODEL_MINIMAX_H3', 'minimax:h3@0'),
+    'minimax-h3-fast': os.getenv('RW_MODEL_MINIMAX_H3_FAST', 'minimax:h3@fast'),
+    'wan-3-0': os.getenv('RW_MODEL_WAN_30', 'alibaba:wan@3.0'),
 }
+# The safe-work models that take her photos as `inputs.referenceImages` beside
+# a prompt, so a reel or an animate can carry her character on them.
+REFERENCE_VIDEO_MODELS = ('wan-2-7', 'seedance-2-0', 'seedance-2-0-fast',
+                          'minimax-h3', 'minimax-h3-fast', 'wan-3-0')
+# Models that only work on a clip the creator uploaded.
+CLIP_ONLY_MODELS = ('p-video-replace', 'p-video-animate')
 DEFAULT_VIDEO_MODEL = 'wan-2-5'
 
 # Swapping someone into an uploaded clip is video-to-video, which only Wan 2.7
@@ -114,7 +129,8 @@ VIDEO_EDIT_MODEL = 'wan-2-7'
 # model list. A true, explicit-capable replace instead goes to ModelsLab, whose
 # face-swap endpoint is uncensored and swaps rather than regenerates.
 VIDEO_JOBS = {
-    'reel': {'models': ('wan-2-5', 'seedance-2-5', 'wan-2-7'), 'needs': (),
+    'reel': {'models': ('wan-2-5', 'seedance-2-5', 'wan-2-7', 'seedance-2-0', 'seedance-2-0-fast', 'minimax-h3', 'minimax-h3-fast', 'wan-3-0',
+                        'p-video-replace', 'p-video-animate'), 'needs': (),
              'kind': 'video', 'ratings': ('sfw',),
              'label': 'Reel',
              'note': 'A prompt, a photo, or both, as a short clip.'},
@@ -123,7 +139,8 @@ VIDEO_JOBS = {
              'clause': 'preserve',
              'label': 'Swap',
              'note': 'Her into a clip you upload. Everything else untouched.'},
-    'animate': {'models': ('wan-2-7', 'wan-2-5'), 'needs': ('first_frame',),
+    'animate': {'models': ('wan-2-7', 'wan-2-5', 'seedance-2-0', 'seedance-2-0-fast', 'minimax-h3', 'minimax-h3-fast', 'wan-3-0',
+                           'p-video-animate'), 'needs': ('first_frame',),
                 'kind': 'video',
                 'label': 'Animate',
                 'note': 'An approved still becomes a clip.'},
@@ -228,6 +245,13 @@ MODEL_VIDEO_FIELDS = {
     'wan-2-7': {'shape': os.getenv('RW_VIDEO_SHAPE', 'inputs'),
                 'source': os.getenv('RW_VIDEO_SOURCE_FIELD', 'inputVideo'),
                 'refs': os.getenv('RW_VIDEO_REF_FIELD', 'referenceImages')},
+    # Her photo performs the uploaded clip's motion: both go in as references,
+    # and like the replace it runs the clip's own length at a named rung.
+    'p-video-animate': {'shape': 'replace', 'in_source': 'referenceVideos',
+                        'in_refs': 'referenceImages'},
+    **{m: {'shape': 'inputs', 'source': 'inputVideo', 'refs': 'referenceImages'}
+       for m in ('seedance-2-0', 'seedance-2-0-fast', 'minimax-h3',
+                 'minimax-h3-fast', 'wan-3-0')},
 }
 
 # referenceImages takes up to 30 and referenceVideos up to 10, nested.
@@ -241,6 +265,7 @@ MAX_VIDEO_REFERENCES = 30
 # the provider charges for it.
 MODEL_RESOLUTION_VALUES = {
     'p-video-replace': (('720p', '720p'), ('1080p', '1080p')),
+    'p-video-animate': (('720p', '720p'), ('1080p', '1080p')),
 }
 
 
@@ -343,6 +368,17 @@ MODEL_VIDEO_SIZES = {
     'wan-2-7': ((1280, 720), (720, 1280), (960, 960), (1088, 832), (832, 1088),
                 (1920, 1080), (1080, 1920), (1440, 1440), (1632, 1248),
                 (1248, 1632)),
+    'wan-3-0': ((832, 480), (480, 832), (624, 624), (720, 544), (544, 720),
+                (1280, 720), (720, 1280), (960, 960), (1104, 832), (832, 1104),
+                (1920, 1080), (1080, 1920), (1440, 1440), (1648, 1248),
+                (1248, 1648)),
+    **{m: ((864, 496), (752, 560), (640, 640), (560, 752), (496, 864),
+           (1280, 720), (1112, 834), (960, 960), (834, 1112), (720, 1280))
+       for m in ('seedance-2-0', 'seedance-2-0-fast')},
+    'minimax-h3': ((1344, 768), (1024, 768), (768, 768), (768, 1024), (768, 1344),
+                   (2560, 1440), (1920, 1440), (1440, 1440), (1440, 1920),
+                   (1440, 2560)),
+    'minimax-h3-fast': ((864, 480), (640, 480), (480, 480), (480, 640), (480, 864)),
 }
 
 
@@ -377,6 +413,12 @@ MODEL_VIDEO_SECONDS = {
     # The source clip's own length, whatever it is: this model is never told a
     # duration, so nothing here may shorten what it will be billed for.
     'p-video-replace': (1, 60),
+    'p-video-animate': (1, 60),
+    'seedance-2-0': (4, 15),
+    'seedance-2-0-fast': (4, 15),
+    'minimax-h3': (4, 15),
+    'minimax-h3-fast': (4, 15),
+    'wan-3-0': (2, 15),
 }
 
 
@@ -404,7 +446,7 @@ def wants_face_only(model_key):
 
 # A model asking for a clean portrait is not helped by thirty of them, and each
 # extra one is another chance to pull her face towards an average.
-MODEL_REF_CAP = {'p-video-replace': 4}
+MODEL_REF_CAP = {'p-video-replace': 4, 'minimax-h3': 5, 'minimax-h3-fast': 5}
 
 
 def video_seconds(model_key, seconds):
@@ -1294,7 +1336,7 @@ class RunwareProvider(Provider):
 
         cap = MODEL_REF_CAP.get(model_key, MAX_VIDEO_REFERENCES)
 
-        if job == 'swap':
+        if job == 'swap' or (shape == 'replace' and spec.get('source_url')):
             source = spec.get('source_url')
             if not source:
                 raise GenerationError('a swap needs the clip it is swapping into')

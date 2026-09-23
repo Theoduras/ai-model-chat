@@ -259,10 +259,14 @@ Stay completely in character. Never mention being an AI.
   carries the identity and there is nothing to correct. The one exception is
   the safe-work **Reel** job, which may run from a prompt alone: a prompt-only
   clip makes no claim to be anybody, carries no identity lock, and is the
-  reason Reel is SFW-only in `imagegen.VIDEO_JOBS`. A persona with an approved
-  character view makes a Reel of her instead: it runs on `wan-2-7` with her
-  safe-work views as references, and an optional still or motion clip is the
-  person she replaces, never a first frame. Every other video job —
+  reason Reel is SFW-only in `imagegen.VIDEO_JOBS`. A Reel can also be of her:
+  the creator picks her identity from the character build (safe-work views
+  only) or the vault references, and it then runs on a model in
+  `imagegen.REFERENCE_VIDEO_MODELS`. An uploaded video makes it a replace —
+  `p-video-replace` by default, `p-video-animate` to regenerate her in its
+  motion. Seedance 2.0 (+Fast), MiniMax H3 (+Fast), Wan 3.0 and P-Video-Animate
+  were added from Runware's public docs, prices included, **not** its live
+  catalogue: confirm them with `imagegen.search_models` once a key is reachable. Every other video job —
   Animate, Extend, Multi-reference, Swap — still needs her: an approved still,
   an approved clip, or her reference slots. All of them land unapproved in
   `staging/` either way, so nothing reaches a fan unreviewed.

@@ -236,9 +236,14 @@
 
     /* The job tiles. What a creator wants comes first; which model serves it
        is an advanced override further down. */
-    .gen-jobs {
-      display: grid; gap: 8px; margin-bottom: 14px;
-      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    .gen-jobs { display: grid; gap: 6px; margin-bottom: 14px; }
+    .gen-jobs-row {
+      display: grid; gap: 8px;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    }
+    .gen-jobs-h {
+      margin: 6px 0 0; font-size: 11px; font-weight: 600; letter-spacing: .06em;
+      text-transform: uppercase; opacity: .6;
     }
     .gen-job {
       display: flex; flex-direction: column; gap: 3px; text-align: left;
@@ -444,8 +449,13 @@
         <div class="gen-f"><span>Start from a photo (optional)</span>
           <div class="anim-strip" id="gen-reel-photo"></div>
           <span class="hint" style="margin:0;">A reel may run from the words alone.
-            With her character it shows her, and a photo or motion clip is the
-            person she replaces. It still lands unapproved in staging.</span></div>
+            With her photos it shows her, and a photo is the person she
+            replaces. It still lands unapproved in staging.</span></div>
+        <label class="gen-f"><span>Her identity from</span>
+          <select id="gen-reel-identity" onchange="this.dataset.touched = 1; renderGenForm()">
+            <option value="vault">Vault reference photos</option>
+            <option value="character">Character build</option>
+          </select></label>
       </div>
 
       <div id="gen-extend-form" style="display:none; flex-direction:column; gap:11px;">
@@ -473,7 +483,7 @@
       </div>
 
       <div id="gen-video-drive" style="display:none; flex-direction:column; gap:8px;">
-        <label class="gen-f"><span>Motion clip (optional)</span>
+        <label class="gen-f"><span id="gen-drive-label">Motion clip (optional)</span>
           <input type="file" id="gen-drive-file" accept="video/mp4,video/quicktime"
                  onchange="uploadSwapSource(this.files[0], 'drive')"></label>
         <span class="hint" style="margin:0;" id="gen-drive-note">Upload a clip and
@@ -656,9 +666,8 @@ async function loadCharacterBadge() {
       + encodeURIComponent(shot) + '&scene=' + encodeURIComponent(scene))).json();
     c = d.character;
   } catch (e) {}
-  const had = reelChar();
   genCharacter = c;
-  if (reelChar() !== had) renderGenForm();
+  if (genJob === 'reel') renderGenForm();
   box.hidden = !c;
   if (!c) return;
   const views = c.shot_views || [];
@@ -730,14 +739,19 @@ function jobKind(key) {
 function renderJobTiles() {
   const box = el('gen-jobs');
   if (!box) return;
-  box.innerHTML = jobKeys().map(key => {
+  const tile = key => {
     const row = jobRow(key);
     const ok = jobServes(key);
     return `<button type="button" class="gen-job" aria-pressed="${key === genJob}"
       ${ok ? '' : 'disabled title="Not offered at this rating"'}
       onclick="setJob('${key}')"><b>${esc(row.label)}</b>
       <small>${esc(row.note)}</small></button>`;
-  }).join('');
+  };
+  const keys = jobKeys();
+  const photo = keys.filter(k => jobKind(k) === 'image');
+  const video = keys.filter(k => jobKind(k) !== 'image');
+  box.innerHTML = `<h3 class="gen-jobs-h">Photo</h3><div class="gen-jobs-row">${photo.map(tile).join('')}</div>`
+    + `<h3 class="gen-jobs-h">Video</h3><div class="gen-jobs-row">${video.map(tile).join('')}</div>`;
 }
 
 function setJob(v) {
@@ -1126,7 +1140,10 @@ function renderGenForm() {
   // of the clip it was handed, and that panel has a seconds row of its own.
   el('gen-video-out').style.display = video ? '' : 'none';
   el('gen-shape-out').style.display = video || swap ? 'flex' : 'none';
-  el('gen-video-drive').style.display = animate || reelChar() ? 'flex' : 'none';
+  el('gen-video-drive').style.display = animate || genJob === 'reel' ? 'flex' : 'none';
+  if (genJob === 'reel') syncReelIdentity();
+  el('gen-drive-label').textContent = genJob === 'reel'
+    ? 'Video to put her in (optional)' : 'Motion clip (optional)';
   renderAspects();
   renderAudioModes();
   if (genJob === 'extend') renderExtendModes();
@@ -1551,13 +1568,36 @@ function swapTakesDuration() {
 
 // The Video tab runs the explicit animate model when it is given a motion
 // clip, and that model is told no length: it produces the clip's own.
-// A reel with her character runs on the one model that takes reference photos.
+// Mirrors imagegen.REFERENCE_VIDEO_MODELS / CLIP_ONLY_MODELS: the server moves
+// a reel onto one of these before quoting, so the price shown follows it.
+const REF_VIDEO_MODELS = ['wan-2-7', 'seedance-2-0', 'seedance-2-0-fast',
+                          'minimax-h3', 'minimax-h3-fast', 'wan-3-0'];
+const CLIP_MODELS = ['p-video-replace', 'p-video-animate'];
+
 function reelChar() {
-  return genJob === 'reel' && !!(genCharacter && genCharacter.has_approved);
+  return genJob === 'reel' && !!(genCharacter && genCharacter.has_approved)
+    && (el('gen-reel-identity') || {}).value === 'character';
+}
+
+// Character is offered only once a view is approved, and chosen by default then.
+function syncReelIdentity() {
+  const sel = el('gen-reel-identity');
+  if (!sel) return;
+  const has = !!(genCharacter && genCharacter.has_approved);
+  const opt = sel.querySelector('option[value="character"]');
+  opt.disabled = !has;
+  if (!has) sel.value = 'vault';
+  else if (!sel.dataset.touched) sel.value = 'character';
 }
 
 function videoModelNow() {
-  if (reelChar()) return 'wan-2-7';
+  if (genJob === 'reel') {
+    const m = videoModel();
+    if (genDrive) return CLIP_MODELS.includes(m) || m === 'wan-2-7' ? m : 'p-video-replace';
+    if (reelChar() && !REF_VIDEO_MODELS.includes(m)) return 'wan-2-7';
+    return m;
+  }
+  if (genJob === 'animate' && genDrive && videoModel() === 'p-video-animate') return 'p-video-animate';
   return genDrive ? ((genPrices && genPrices.explicit_swap_model) || videoModel())
                   : videoModel();
 }
@@ -1652,8 +1692,9 @@ async function uploadSwapSource(file, into) {
     if (!d.ok) throw new Error(d.error || 'Upload failed');
     if (into === 'drive') {
       genDrive = d;
-      el('gen-drive-note').textContent =
-        `${d.seconds}s of motion — her photo will perform it.`;
+      el('gen-drive-note').textContent = genJob === 'reel'
+        ? `${d.seconds}s — she replaces the person in it.`
+        : `${d.seconds}s of motion — her photo will perform it.`;
     } else {
       genSwap = d;
     }
@@ -1904,7 +1945,8 @@ async function jobPayload() {
     return Object.assign(base, {
       prompt: (el('gen-reel-prompt').value || '').trim(),
       reference_media: genReelPick || '',
-      source: reelChar() && genDrive ? genDrive.id : '',
+      source: genDrive ? genDrive.id : '',
+      identity: reelChar() ? 'character' : 'vault',
     });
   }
   if (genJob === 'multiref') {
