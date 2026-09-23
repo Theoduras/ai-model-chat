@@ -2750,6 +2750,8 @@ body[data-page="pricing"]{padding-top:80px}}
 .wrap.wide:has(.tiers.five){max-width:1480px}.tiers.five{grid-template-columns:repeat(5,1fr)}}
 .in-workspace body>header.site-nav{display:none}
 .in-workspace body[data-page="pricing"]{padding-top:32px}
+.in-workspace body[data-page="pricing"] .wrap{max-width:none!important}
+.in-workspace body[data-page="pricing"] .bar{display:none}
 """
 
 # The account pages belong inside the dashboard, where its header and sidebar
@@ -3061,8 +3063,8 @@ TOKENS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Buy tokens</title>
 <script src="/js/analytics.js" defer></script>
 <style>""" + ACCOUNT_CSS + """
-.tokbal{font-size:.95rem;color:var(--text-2);margin:0 0 4px}
-.tokbal strong{color:var(--text)}
+.tokbal{font-size:1.05rem;color:var(--text-2);margin:8px 0 14px}
+.tokbal strong{color:var(--text);font-size:1.6rem;font-weight:800}
 </style></head><body data-page="pricing">
 <header class="site-nav">
 <a class="brand" href="/">Velvetfunnel<i>.app</i></a>

@@ -99,7 +99,7 @@
 </div>
 
 <!-- Tokens / Upgrade lightbox -->
-<div class="modal-overlay" id="pay-modal" onclick="if(event.target===this)closePayModal()">
+<div class="modal-overlay" id="pay-modal" style="background:var(--bg);" onclick="if(event.target===this)closePayModal()">
   <div class="modal" style="max-width:none; width:100%; height:90vh; padding:0; position:relative; overflow:hidden;">
     <button class="modal-close" onclick="closePayModal()" aria-label="Close" style="position:absolute; top:8px; right:10px; z-index:1;">&times;</button>
     <iframe id="pay-frame" class="sb-frame" title="Tokens and plans"></iframe>
