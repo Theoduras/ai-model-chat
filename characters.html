@@ -232,6 +232,10 @@
     .mode-opt[aria-pressed="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, #f4f2ef); }
     .hex-pick { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 0.78rem; }
     .hex-pick input { width: 44px; height: 32px; padding: 0; border: 1px solid #dcd8d2; border-radius: 6px; background: none; cursor: pointer; }
+    .of-up { position: relative; display: inline-flex; }
+    .of-up .fp-opt img { width: 52px; height: 52px; object-fit: cover; border-radius: 6px; }
+    .of-del { position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; border-radius: 50%; border: 0;
+      background: #2b2a33; color: #fff; font-size: 12px; line-height: 20px; padding: 0; cursor: pointer; }
     .of-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0 10px; }
     .of-row > span { font-size: 0.72rem; font-weight: 700; min-width: 86px; }
     .of-sw { width: 26px; height: 26px; border-radius: 50%; border: 2px solid #dcd8d2; cursor: pointer; padding: 0; }
@@ -460,6 +464,18 @@
         <div class="ch-card" id="body-profile">
           <h2 class="ch-h2">Body profile</h2>
           <span class="ch-muted" style="margin:0 0 10px; display:block;">Every view inherits these. Changes save as you pick.</span>
+          <div class="mode-pick" role="group" aria-label="Body source" style="margin-bottom:14px;">
+            <button type="button" class="mode-opt" data-body-mode="build" onclick="setBodyMode('build')">
+              <strong>Create with the builder</strong><span>Pick her shape from drawings.</span></button>
+            <button type="button" class="mode-opt" data-body-mode="match" onclick="setBodyMode('match')">
+              <strong>Match reference bodies</strong><span>Upload one or more bodies; hers is made similar, not a copy.</span></button>
+          </div>
+          <div id="body-match-panel" hidden style="margin-bottom:16px;">
+            <p class="ch-muted" style="margin:0 0 8px;">Her face stays her own; only build, proportions and figure follow these. <span id="body-match-count"></span></p>
+            <div class="refs" id="body-match-refs" style="margin-bottom:10px;"></div>
+            <label class="attest"><input type="checkbox" id="attest-body">I have the rights to these images, and everyone shown is 18+ and agreed to their likeness being used.</label>
+            <button type="button" class="btn" style="margin-top:8px;" onclick="pickUpload('body_front', 'attest-body')">Add body photos</button>
+          </div>
           <div class="ch-label" style="margin-bottom:14px;">Start from a preset <div class="chips" id="presets"></div>
             <span class="ch-muted" style="margin:0; font-weight:400;">Only fills features you have not set.</span></div>
           <div class="fp-list" id="body-features"></div>
@@ -564,7 +580,7 @@ document.addEventListener('keydown', e => {
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const LEVEL_LABEL = {sfw: 'SFW', moderate: 'Topless', explicit: 'Explicit'};
 let chars = [], filter = 'all', cur = null, cat = null, personas = [];
-let step = 'describe', batch = 4, pickedFace = '', selView = '', uploadView = '';
+let step = 'describe', batch = 4, pickedFace = '', selView = '', uploadView = '', uploadRole = '';
 let confirmed = new Set();
 
 async function api(url, opts) {
@@ -700,9 +716,16 @@ function pickedOutfits() {
 function outfitPicker() {
   if (!cat.outfits) return '';
   const on = pickedOutfits(), colours = (cur.sheet || {}).outfit_colours || {};
+  const uploaded = images('', 'outfit');
   const chips = cat.outfits.map(o => `<button type="button" class="fp-opt text of-opt" data-outfit="${esc(o)}"
-      aria-pressed="${on.includes(o)}" onclick="toggleOutfit(this)"><span>${esc(o)}</span></button>`).join('');
-  const rows = on.map(o => `<div class="of-row" role="group" aria-label="${esc(o)} colour"><span>${esc(o)}</span>
+      aria-pressed="${on.includes(o)}" onclick="toggleOutfit(this)"><span>${esc(o)}</span></button>`).join('') +
+    uploaded.map(i => `<span class="of-up"><button type="button" class="fp-opt of-opt" data-outfit="upload:${i.id}"
+      aria-pressed="${on.includes('upload:' + i.id)}" onclick="toggleOutfit(this)"><img src="${esc(i.url)}" alt="">
+      <span>${esc(outfitLabel('upload:' + i.id))}</span></button>
+      <button type="button" class="of-del" aria-label="Remove ${esc(outfitLabel('upload:' + i.id))}" onclick="removeImage('${i.id}')">×</button></span>`).join('');
+  const upload = `<div style="margin-top:8px;"><label class="attest"><input type="checkbox" id="attest-outfit">I have the rights to these outfit photos, and anyone shown is 18+.</label>
+    <button type="button" class="btn" style="margin-top:6px;" onclick="pickUpload('', 'attest-outfit', 'outfit')">Upload outfit</button></div>`;
+  const rows = on.filter(o => !o.startsWith('upload:')).map(o => `<div class="of-row" role="group" aria-label="${esc(o)} colour"><span>${esc(o)}</span>
       <button type="button" class="of-sw any" data-colour-for="${esc(o)}" data-colour="" aria-pressed="${!colours[o]}"
         onclick="pickColour(this)">Any</button>` +
     Object.entries(cat.outfit_colours).map(([c, hex]) => `<button type="button" class="of-sw" style="background:${hex}"
@@ -710,7 +733,13 @@ function outfitPicker() {
       aria-label="${esc(c)}" onclick="pickColour(this)"></button>`).join('') + '</div>').join('');
   return `<fieldset class="fp"><legend>Outfits for body views</legend>
     <span class="ch-muted" style="margin:0 0 6px; display:block;">Pick one or more. Each outfit generates its own set of full-body options.</span>
-    <div class="fp-opts" role="group">${chips}</div>${rows}</fieldset>`;
+    <div class="fp-opts" role="group">${chips}</div>${upload}${rows}</fieldset>`;
+}
+function outfitLabel(key) {
+  if (!key) return 'Bodysuit';
+  if (!key.startsWith('upload:')) return key;
+  const n = images('', 'outfit').findIndex(i => 'upload:' + i.id === key);
+  return n < 0 ? 'Removed outfit' : 'Uploaded outfit ' + (n + 1);
 }
 function toggleOutfit(btn) {
   btn.setAttribute('aria-pressed', btn.getAttribute('aria-pressed') !== 'true');
@@ -776,6 +805,13 @@ async function saveSheet(extra, btnId) {
 }
 
 const BLEND_KEEP = ['ethnicity', 'apparent_age', 'hair_colour', 'hair_texture'];
+const BODY_MATCH_KEEP = ['height', 'tattoos', 'piercings', 'birthmarks', 'nails'];
+function bodyMode() { return (cur.sheet || {}).body_mode === 'match' ? 'match' : 'build'; }
+async function setBodyMode(mode) {
+  if (mode === bodyMode()) return;
+  cur.sheet = Object.assign(collectSheet(), {body_mode: mode});
+  await saveSheet(null, 'body-save');
+}
 function faceMode() { return (cur.sheet || {}).face_mode === 'blend' ? 'blend' : 'build'; }
 async function setFaceMode(mode) {
   if (mode === faceMode()) return;
@@ -945,7 +981,13 @@ function renderBody() {
   const todo = shown.filter(v => ['not_started', 'outdated'].includes(vs(v.key).display));
   el('gen-remaining').disabled = !todo.length;
   el('regen-branch').hidden = !shown.some(v => vs(v.key).display === 'outdated');
-  el('body-features').innerHTML = outfitPicker() + cat.features.filter(f => f.group === 'body').map(featurePicker).join('');
+  const match = bodyMode() === 'match', bodyRefs = images('body_front', 'reference');
+  document.querySelectorAll('[data-body-mode]').forEach(b => b.setAttribute('aria-pressed', b.dataset.bodyMode === bodyMode()));
+  el('body-match-panel').hidden = !match;
+  el('body-match-refs').innerHTML = bodyRefs.map(refTile).join('');
+  el('body-match-count').textContent = `${bodyRefs.length} added${bodyRefs.length ? '.' : ' — add at least 1.'}`;
+  el('body-features').innerHTML = outfitPicker() + cat.features
+    .filter(f => f.group === 'body' && (!match || BODY_MATCH_KEEP.includes(f.key))).map(featurePicker).join('');
   const intimate = cat.features.filter(f => INTIMATE.includes(f.group));
   el('intimate-wrap').hidden = !intimate.length;
   el('intimate-features').innerHTML = intimate.map(featurePicker).join('');
@@ -1022,16 +1064,22 @@ function renderViewPanel() {
   el('vp-traits').innerHTML = on.map(k => `<span class="trait">${esc(fl(k))}: <b>${esc(cur.sheet[k])}</b></span>`).join('');
   el('vp-traits-off').innerHTML = (off.length ? `Not set, so not sent: ${off.map(k => esc(fl(k))).join(', ')}. ` : '') +
     `<a href="#" onclick="go('body');return false;">Edit body profile</a>`;
-  const opts = images(v.key, 'canonical').concat(images(v.key, 'candidate'));
+  const dressed = ['body_front', 'body_side', 'body_back'].includes(v.key), main = canonOf(v.key);
+  const opts = images(v.key, 'canonical').concat(images(v.key, 'wardrobe'), images(v.key, 'candidate'));
   vpOptUrls = opts.map(o => o.url);
   el('vp-opts').className = 'opts';
   el('vp-opts').innerHTML = opts.map((o, i) => {
-    const age = (o.checks || {}).age, kept = o.role === 'canonical';
-    return `<div class="opt ${kept ? 'kept' : ''}" style="cursor:default;">
-      <img src="${esc(o.url)}" alt="${esc(v.label)} option" onclick="vpImgClick(event, ${i})" style="cursor:zoom-in;">
-      ${kept ? `<div class="opt-act"><b class="st approved">Approved</b><i style="flex:1;"></i>
-        <button type="button" class="btn" onclick="removeApproved()">Unapprove</button></div>` : `<div class="opt-act">
-        <button type="button" class="btn btn-primary" ${locked ? 'disabled' : ''} onclick="approveView('${o.id}')">Approve</button>
+    const age = (o.checks || {}).age, kept = o.role === 'canonical', worn = o.role === 'wardrobe';
+    const label = dressed ? `<span class="ch-muted" style="margin:4px 6px 0; display:block; font-size:0.72rem;">${esc(outfitLabel(o.outfit))}</span>` : '';
+    const toWardrobe = dressed && main && main.id !== o.id && (main.outfit || '') !== (o.outfit || '');
+    return `<div class="opt ${kept || worn ? 'kept' : ''}" style="cursor:default;">
+      <img src="${esc(o.url)}" alt="${esc(v.label)} option" onclick="vpImgClick(event, ${i})" style="cursor:zoom-in;">${label}
+      ${kept ? `<div class="opt-act"><b class="st approved">${dressed ? 'Main' : 'Approved'}</b><i style="flex:1;"></i>
+        <button type="button" class="btn" onclick="removeApproved()">Unapprove</button></div>` : worn ? `<div class="opt-act">
+        <b class="st approved">Wardrobe</b><i style="flex:1;"></i>
+        <button type="button" class="btn" onclick="approveView('${o.id}', true)">Make main</button>
+        <button type="button" class="btn" onclick="unapproveView('${o.id}')">Unapprove</button></div>` : `<div class="opt-act">
+        <button type="button" class="btn btn-primary" ${locked ? 'disabled' : ''} onclick="approveView('${o.id}')">${toWardrobe ? 'Approve for ' + esc(outfitLabel(o.outfit)) : 'Approve'}</button>
         ${v.key === 'body_front' ? `<button type="button" class="btn" onclick="runViewCheck('${o.id}')" title="Adult check">${age ? `<b class="tag ${age}">${age}</b>` : 'Check'}</button>` : ''}
         <button type="button" class="btn" onclick="removeImage('${o.id}')">Delete</button></div>`}</div>`;
   }).join('');
@@ -1196,10 +1244,10 @@ async function runViewCheck(id) {
   try { await api(`/api/characters/${cur.id}/images/${target}/check`, {body: {}}); await reload(); say('Check done.', 'ok'); }
   catch (e) { say(e.message, 'err'); }
 }
-async function approveView(id) {
+async function approveView(id, main) {
   const was = cur.status;
   try {
-    await api(`/api/characters/${cur.id}/images/${id}/approve`, {body: {}}); await reload(); say('Approved.', 'ok');
+    await api(`/api/characters/${cur.id}/images/${id}/approve`, {body: main ? {main: true} : {}}); await reload(); say('Approved.', 'ok');
     if (was !== 'complete' && cur.status === 'complete') go('finish');
   }
   catch (e) { say(e.message, 'err'); }
@@ -1215,16 +1263,16 @@ async function removeImage(id, confirmed) {
 }
 
 let attestBox = 'attest';
-function pickUpload(view, box) {
+function pickUpload(view, box, role) {
   attestBox = box || 'attest';
   if (!el(attestBox).checked) return say('Tick the rights and consent box first.', 'err');
-  uploadView = view || ''; el('upload').click();
+  uploadView = view || ''; uploadRole = role || ''; el('upload').click();
 }
 async function uploadFiles(input) {
   const files = [...input.files]; input.value = '';
   for (const f of files) {
     const data = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(f); });
-    try { await api(`/api/characters/${cur.id}/images`, {body: {view: uploadView, image: data, attest: el(attestBox).checked}}); }
+    try { await api(`/api/characters/${cur.id}/images`, {body: {view: uploadView, image: data, attest: el(attestBox).checked, role: uploadRole || undefined}}); }
     catch (e) { say(e.message, 'err'); return; }
   }
   await reload(); say(files.length + ' uploaded.', 'ok');

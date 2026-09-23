@@ -85,6 +85,11 @@ def test_prompts():
     check('custom hair colour reaches the prompt as words', 'pastel pink hair' in CH.describe(custom, 'sfw'))
     check('custom hair colour reaches the face view', 'pastel pink hair' in CH.build_view_prompt('face_front', custom, 24, True))
     check('hair words', [CH.hair_words(h) for h in ('#000000', '#c0c0c0', '#a8391c')] == ['jet black', 'silver grey', 'dark auburn'])
+    matched = CH.build_view_prompt('body_front', {}, 24, True, match=True)
+    check('body match asks for a similar body', 'similar to them, not a copy' in matched and 'ignore their faces' in matched)
+    check('body match only on the front body', 'not a copy' not in CH.build_view_prompt('body_side', {}, 24, True, match=True))
+    up = 'upload:' + 'a' * 32
+    check('uploaded outfit points at the last reference', 'last reference image' in CH.build_view_prompt('body_front', {'view_outfits': [up]}, 24, True, outfit=up))
     check('face prompt is frontal', 'front-facing' in CH.build_view_prompt('face_front', {}, 24, False))
     close = CH.build_view_prompt('vulva_open', FULL_SHEET, 31, True)
     far = ('height', 'bust', 'shoulders', 'body_shape', 'nails')
@@ -143,6 +148,15 @@ def test_validation():
     check('blend drops drawn face features', clean['sheet'] == {'face_mode': 'blend', 'apparent_age': '30s', 'build': 'Athletic'})
     check('face mode never reaches a prompt', CH.describe(clean['sheet'], 'sfw') == CH.describe({'apparent_age': '30s', 'build': 'Athletic'}, 'sfw'))
     check('unknown face mode refused', refused({'age': 25, 'sheet': {'face_mode': 'morph'}}))
+    clean, _ = CH.validate({'age': 25, 'sheet': {'body_mode': 'match', 'build': 'Curvy', 'hips': 'Wide', 'height': 'Over 175 cm',
+                                                 'nails': 'French tips', 'nose': 'Roman'}})
+    check('body match keeps height, marks and face', clean['sheet'] == {'body_mode': 'match', 'height': 'Over 175 cm',
+                                                                        'nails': 'French tips', 'nose': 'Roman'})
+    check('body mode never reaches a prompt', 'match' not in CH.describe(clean['sheet'], 'sfw'))
+    check('unknown body mode refused', refused({'age': 25, 'sheet': {'body_mode': 'morph'}}))
+    clean, _ = CH.validate({'age': 25, 'sheet': {'view_outfits': ['Casual', 'upload:' + 'b' * 32]}})
+    check('uploaded outfit validates', clean['sheet']['view_outfits'] == ['Casual', 'upload:' + 'b' * 32])
+    check('malformed uploaded outfit refused', refused({'age': 25, 'sheet': {'view_outfits': ['upload:../x']}}))
     clean, warn = CH.validate({'age': 25, 'notes': 'likes red', 'banned': ['red']})
     check('banned terms struck', 'red' not in clean['notes'])
 

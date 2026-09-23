@@ -324,13 +324,14 @@ class CharacterImage(Base):
     id = Column(String(32), primary_key=True, default=_uid)
     character_id = Column(String(32), nullable=False, index=True)
     view = Column(String(32), default='')             # '' = general reference
-    role = Column(String(12), default='reference')    # reference | candidate | canonical
+    role = Column(String(12), default='reference')    # reference | candidate | canonical | wardrobe | outfit
     source = Column(String(12), default='upload')     # upload | generated
     rating = Column(String(12), default='sfw')        # the view's, never the client's
     gcs_path = Column(String(400), default='')
     mime = Column(String(60), default='image/jpeg')
     checks_json = Column(Text, default='')
     job_id = Column(String(32), default='')
+    outfit = Column(String(80), default='')             # the outfit a full-body photo was made in
     expires_at = Column(DateTime)
     created_at = Column(DateTime, default=_now)
 

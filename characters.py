@@ -453,7 +453,7 @@ def validate(data, body_type='female'):
     if picked is None and raw.get('view_outfit'):
         picked = [raw['view_outfit']]
     if picked:
-        if not isinstance(picked, list) or any(o not in OUTFITS for o in picked):
+        if not isinstance(picked, list) or not all(is_outfit(o) for o in picked):
             raise CharacterError('Unknown outfit.')
         sheet['view_outfits'] = list(dict.fromkeys(picked))
         colours = raw.get('outfit_colours') or {}
@@ -476,6 +476,14 @@ def validate(data, body_type='female'):
         sheet = {k: x for k, x in sheet.items()
                  if feats.get(k, ('', ''))[1] != 'face' or k in BLEND_KEEP}
         sheet['face_mode'] = 'blend'
+    body_mode = raw.get('body_mode') or 'build'
+    if body_mode not in BODY_MODES:
+        raise CharacterError('Unknown body mode.')
+    if body_mode == 'match':
+        # Her shape comes from the photos; drawn shape choices would fight them.
+        sheet = {k: x for k, x in sheet.items()
+                 if feats.get(k, ('', ''))[1] != 'body' or k in BODY_MATCH_KEEP}
+        sheet['body_mode'] = 'match'
     name = re.sub(r'\s+', ' ', str(data.get('name') or '')).strip()[:80] or 'Untitled draft'
     return {'name': name, 'age': age, 'nsfw_level': level, 'sheet': sheet,
             'notes': clean_notes(data.get('notes'), data.get('banned') or ())}, warnings
@@ -548,6 +556,8 @@ def hair_words(hexcode):
 
 BLEND_KEEP = ('ethnicity', 'apparent_age', 'hair_colour', 'hair_texture')
 FACE_MODES = ('build', 'blend')
+BODY_MATCH_KEEP = ('height', 'tattoos', 'piercings', 'birthmarks', 'nails')
+BODY_MODES = ('build', 'match')
 
 
 # What the full-body reference photos are dressed in. Kept out of FEATURES so
@@ -566,11 +576,20 @@ def outfits(sheet):
     picked = sheet.get('view_outfits')
     if picked is None and sheet.get('view_outfit'):
         picked = [sheet['view_outfit']]
-    return [o for o in (picked or []) if o in OUTFITS] or ['Bodysuit']
+    return [o for o in (picked or []) if is_outfit(o)] or ['Bodysuit']
+
+
+UPLOADED_OUTFIT = re.compile(r'upload:[0-9a-f]{32}')
+
+
+def is_outfit(o):
+    return o in OUTFITS or bool(isinstance(o, str) and UPLOADED_OUTFIT.fullmatch(o))
 
 
 def outfit_text(sheet, outfit=None):
-    outfit = outfit if outfit in OUTFITS else outfits(sheet)[0]
+    outfit = outfit if is_outfit(outfit) else outfits(sheet)[0]
+    if outfit.startswith('upload:'):
+        return 'the exact outfit shown in the last reference image — the clothing only, not the person wearing it'
     template, default = OUTFITS[outfit]
     colour = ((sheet or {}).get('outfit_colours') or {}).get(outfit, '').lower() or default
     return re.sub(r'\s+', ' ', template.replace('{c}', colour))
@@ -578,7 +597,8 @@ def outfit_text(sheet, outfit=None):
 
 
 def build_view_prompt(key, sheet, age, has_reference, body_type='female',
-                      mode='reference', strength=None, pose=None, lighting=None, outfit=None, blend=False):
+                      mode='reference', strength=None, pose=None, lighting=None, outfit=None, blend=False,
+                      match=False):
     v = view(key, body_type)
     if not v:
         raise CharacterError('Unknown view.')
@@ -604,6 +624,10 @@ def build_view_prompt(key, sheet, age, has_reference, body_type='female',
         lead = ('photorealistic high-resolution close-up recreated from the first reference '
                 f'image, which is a crop of the same woman: {v["framing"]}. Same skin, lighting '
                 f'and proportions as that crop; {touch}.')
+    elif match and key == 'body_front':
+        lead = ('photorealistic photo of the exact same woman as the first reference image — identical face — '
+                'with a body matching the build, proportions and figure in the other reference photos: similar '
+                'to them, not a copy of any one person; ignore their faces, now as ' + v['framing'] + '.')
     elif blend and key == 'face_front':
         lead = ('photorealistic photo of a new woman whose face blends facial features of the women in the '
                 'reference images into one new, distinct face — she is not any one of them, now as '

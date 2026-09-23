@@ -29463,7 +29463,7 @@ def _char_img_json(img):
         checks = json.loads(img.checks_json) if img.checks_json else None
     except ValueError:
         checks = None
-    return {'id': img.id, 'view': img.view, 'role': img.role,
+    return {'id': img.id, 'view': img.view, 'role': img.role, 'outfit': img.outfit or '',
             'source': img.source, 'rating': img.rating, 'checks': checks,
             'url': f'/api/characters/{img.character_id}/images/{img.id}/file',
             'expires_at': img.expires_at.isoformat() if img.expires_at else ''}
@@ -29542,20 +29542,27 @@ def _character_snapshot(slug):
                  for k, img in _char_canonicals(s, row.id).items()}
         if not views:
             return None
+        wardrobe = [{'view': img.view, 'outfit': img.outfit or '', 'path': img.gcs_path, 'mime': img.mime}
+                    for img in _char_images(s, row.id, role='wardrobe')]
         return {'id': row.id, 'version': row.version or 0, 'age': row.age,
                 'body_type': row.body_type, 'sheet': _char_json_sheet(row),
-                'views': views}
+                'views': views, 'wardrobe': wardrobe}
     finally:
         s.close()
 
 
-def _character_urls(snap, shot, scene, face_only=False):
+def _character_urls(snap, shot, scene, face_only=False, wardrobe=False):
     keys = CH.snapshot_views(snap, shot, scene, face_only)
-    return [u for u in (_char_path_url(snap['views'][k]['path'], snap['views'][k]['mime'])
+    urls = [u for u in (_char_path_url(snap['views'][k]['path'], snap['views'][k]['mime'])
                         for k in keys) if u]
+    # Her wardrobe is clothed, so it only helps a safe-work shot; on an explicit
+    # one it would pull the clothes back on.
+    if wardrobe and CH.job_level(shot, scene) == 'sfw':
+        urls += [u for u in (_char_path_url(w['path'], w['mime']) for w in snap.get('wardrobe') or ()) if u]
+    return urls
 
 
-def _character_view_refs(char_id, view_key):
+def _character_view_refs(char_id, view_key, outfit_image=None):
     """References for generating one view: the approved views it builds on,
     then the creator's uploads for that view, then her general uploads."""
     from db import Character
@@ -29588,6 +29595,13 @@ def _character_view_refs(char_id, view_key):
         crop = _CHAR_CROPS.pop(char_id + ':' + view_key, None)
         if crop:
             urls.insert(0, crop if crop.startswith('data:') else 'data:image/jpeg;base64,' + crop)
+        outfit = outfit_image and s.query(CharacterImage).filter_by(
+            id=outfit_image, character_id=char_id, role='outfit').first()
+        outfit_url = outfit and _char_ref_url(outfit)
+        if outfit_url:
+            # The prompt names "the last reference image", so it goes last and
+            # is never the one trimmed.
+            return urls[:imagegen.MAX_REFERENCES - 1] + [outfit_url]
         return urls[:imagegen.MAX_REFERENCES]
     finally:
         s.close()
@@ -29602,7 +29616,7 @@ def _character_content(spec):
     if not snap:
         return [], '', None
     level = CH.job_level(spec.get('shot'), spec.get('scene'))
-    return (_character_urls(snap, spec.get('shot'), spec.get('scene')),
+    return (_character_urls(snap, spec.get('shot'), spec.get('scene'), wardrobe=True),
             CH.content_clause(snap['sheet'], level, snap['body_type']), snap['age'])
 
 
@@ -29650,7 +29664,7 @@ def _character_finish(job_id, spec, workspace, urls):
         try:
             img = CharacterImage(character_id=spec['character_id'],
                                  view=spec['character_view'], role='candidate',
-                                 source='generated', rating=spec['rating'],
+                                 source='generated', rating=spec['rating'], outfit=spec.get('outfit') or '',
                                  gcs_path=path, mime=mime or 'image/jpeg',
                                  job_id=job_id, expires_at=storage.staging_expiry())
             s.add(img)
@@ -29971,6 +29985,10 @@ def api_character_upload(char_id):
         if as_crop and not v:
             return jsonify({'ok': False, 'error': 'A crop belongs to a view.'}), 400
         role = body['crop_as'] if as_crop else 'reference'
+        if body.get('role') == 'outfit' and not as_crop:
+            # An outfit photo only ever dresses a full-body view; it is never
+            # a reference for her face or body, nor for content.
+            role, view_key, v = 'outfit', '', None
         path = storage.put(row.key, data, mime, prefix=storage.KEPT_PREFIX)
         img = CharacterImage(character_id=row.id, view=view_key, role=role,
                              source='crop' if as_crop else 'upload', rating=(v or {}).get('rating', 'sfw'),
@@ -30097,10 +30115,16 @@ def api_character_generate(char_id):
         blend = view_key == 'face_front' and sheet.get('face_mode') == 'blend'
         if blend and len(_char_images(s, row.id, view='face_front', role='reference')) < 2:
             return jsonify({'ok': False, 'error': 'Add at least two face photos to blend.'}), 400
+        match = view_key == 'body_front' and sheet.get('body_mode') == 'match'
+        if match and not _char_images(s, row.id, view='body_front', role='reference'):
+            return jsonify({'ok': False, 'error': 'Add at least one body photo to match.'}), 400
         dressed = CH.outfits(sheet) if '{outfit}' in v['framing'] else [None]
+        owned = {i.id for i in _char_images(s, row.id, view='', role='outfit')}
+        dressed = [o for o in dressed if not (o or '').startswith('upload:') or o[7:] in owned] or ['Bodysuit']
         prompts = [CH.build_view_prompt(view_key, sheet, row.age, has_ref, row.body_type, mode=mode,
                                         strength=state[view_key]['strength'],
-                                        pose=pose, lighting=lighting, outfit=o, blend=blend) for o in dressed]
+                                        pose=pose, lighting=lighting, outfit=o, blend=blend,
+                                        match=match) for o in dressed]
         parent_versions = {p: state[p]['version'] for p in v['parents']}
         key = row.key
     finally:
@@ -30111,7 +30135,8 @@ def api_character_generate(char_id):
               'rating': v['rating'], 'character_id': char_id,
               'character_view': view_key, 'prompt': prompt,
               'parent_versions': parent_versions,
-              'reference_media': '', 'negative_extra': ''} for prompt in prompts]
+              'outfit': o or '', 'outfit_image': (o or '')[7:] if (o or '').startswith('upload:') else '',
+              'reference_media': '', 'negative_extra': ''} for prompt, o in zip(prompts, dressed)]
     try:
         prices = [CR.quote(spec) for spec in specs]
     except CR.PricingError as e:
@@ -30270,18 +30295,31 @@ def api_character_approve(char_id, img_id):
                 return jsonify({'ok': False, 'error': 'Confirm every feature first: ' +
                                 ', '.join(unticked) + '.'}), 409
         old = canon.get(img.view)
-        if old and old.id != img.id:
-            old.role = 'reference'
+        dressed = '{outfit}' in v['framing']
         img.gcs_path = storage.promote(img.gcs_path)
-        img.role, img.expires_at = 'canonical', None
-        canon[img.view] = img
-        cv = rows[img.view]
-        cv.status, cv.result_image_id = 'approved', img.id
-        cv.version = (cv.version or 0) + 1
+        img.expires_at = None
+        if dressed and old and old.id != img.id and (old.outfit or '') != (img.outfit or '') \
+                and not body.get('main'):
+            # A different outfit joins her wardrobe: one approved photo per
+            # outfit per view. The main photo, and every view built on it, stay.
+            for w in _char_images(s, row.id, view=img.view, role='wardrobe'):
+                if (w.outfit or '') == (img.outfit or '') and w.id != img.id:
+                    w.role = 'reference'
+            img.role = 'wardrobe'
+        else:
+            if old and old.id != img.id:
+                old.role = ('wardrobe' if dressed and (old.outfit or '') != (img.outfit or '')
+                            else 'reference')
+            img.role = 'canonical'
+            canon[img.view] = img
+            cv = rows[img.view]
+            cv.status, cv.result_image_id = 'approved', img.id
+            cv.version = (cv.version or 0) + 1
         row.version = (row.version or 0) + 1
         s.add(CharacterVersion(character_id=row.id, number=row.version,
                                snapshot_json=json.dumps({
                                    'views': {k: i.id for k, i in canon.items()},
+                                   'wardrobe': [i.id for i in _char_images(s, row.id, role='wardrobe')],
                                    'sheet': _char_json_sheet(row), 'age': row.age,
                                    'level': row.nsfw_level})))
         _char_refresh_status(s, row)
@@ -30303,10 +30341,15 @@ def api_character_unapprove(char_id, img_id):
     s = _db_session()
     try:
         row = _char_row(s, user, char_id)
-        img = row and s.query(CharacterImage).filter_by(id=img_id, character_id=char_id,
-                                                        role='canonical').first()
+        img = row and s.query(CharacterImage).filter(
+            CharacterImage.id == img_id, CharacterImage.character_id == char_id,
+            CharacterImage.role.in_(('canonical', 'wardrobe'))).first()
         if not img or not img.view:
             return jsonify({'ok': False, 'error': 'Unknown image'}), 404
+        if img.role == 'wardrobe':
+            img.role = 'candidate'
+            s.commit()
+            return jsonify({'ok': True, 'character': _char_json(s, row, full=True)})
         img.role = 'candidate'
         rows, _ = _char_views_state(s, row)
         cv = rows.get(img.view)
@@ -30486,7 +30529,7 @@ def _gen_start(job_id, slug, spec, workspace):
                 call['reference_mime'] = ref_mime
             if spec['kind'] == 'image' and spec.get('character_view'):
                 refs = _character_view_refs(spec['character_id'],
-                                            spec['character_view'])
+                                            spec['character_view'], spec.get('outfit_image'))
                 if refs:
                     call['reference_urls'] = refs
                 call['prompt'] = spec['prompt']
