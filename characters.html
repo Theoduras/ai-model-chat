@@ -579,7 +579,7 @@
             <button type="button" class="btn btn-ghost btn-sm" style="align-self:flex-start;" onclick="pickUpload('body_front', 'attest-body')">+ Add body photos</button>
           </div>
           <div class="field"><label>Start from a preset</label><div class="chips" id="presets"></div>
-            <span class="hint">Only fills features you have not set.</span></div>
+            <span class="hint">Sets every body feature; you can adjust after.</span></div>
           <div class="fp-list" id="body-features"></div>
           <div id="intimate-wrap" hidden>
             <div class="fp-list" id="intimate-features"></div>
@@ -658,8 +658,14 @@ function fillSelect(id, items, val) {
   el(id).innerHTML = items.map(o => `<option value="${o.key}"${o.key === val ? ' selected' : ''}>${o.label}</option>`).join('');
 }
 function renderPresets() {
-  el('presets').innerHTML = (cat.presets || []).map(p =>
-    `<button type="button" class="chip" title="${p.hint}" onclick="saveSheet({preset:'${p.key}'})">${p.label}</button>`).join('');
+  const box = el('presets');
+  if (!box) return;
+  const sheet = cur.sheet || {};
+  box.innerHTML = (cat.presets || []).map(p => {
+    const vals = Object.entries(p.values || {});
+    const on = vals.length && vals.every(([k, v]) => sheet[k] === v);
+    return `<button type="button" class="chip" aria-pressed="${on ? 'true' : 'false'}" title="${p.hint}" onclick="saveSheet({preset:'${p.key}'})">${p.label}</button>`;
+  }).join('');
 }
 // The full-body views generate one set of options per picked outfit (the
 // server falls back to a single Bodysuit set when none is picked), and every
@@ -1182,6 +1188,7 @@ function markDirty() {
   cur.sheet = collectSheet();
   if (step === 'basics') Object.assign(cur, {name: el('f-name').value, age: el('f-age').value, notes: el('f-notes').value});
   dirty = true; say('Unsaved changes');
+  renderPresets();
 }
 function confirmLeave(then) {
   if (confirm('You have unsaved changes. Save them and continue? Cancel stays on this step.'))
