@@ -4916,6 +4916,9 @@ def api_billing_webhook_stripe():
         return _stripe_invoice_paid(obj)
     if event_type == 'customer.subscription.deleted':
         return _stripe_subscription_deleted(obj)
+    if event_type in ('checkout.session.expired',
+                      'checkout.session.async_payment_failed'):
+        return _stripe_checkout_failed(obj, event_type)
     logger.info('STRIPE WEBHOOK ignored type=%s', event_type)
     return ('ok', 200)
 
@@ -4950,6 +4953,16 @@ def _stripe_checkout_completed(obj):
         # 100%-off coupon, which is still a live subscription.
         paid = obj.get('payment_status') in ('paid', 'no_payment_required')
         pay.status = 'paid' if paid else (obj.get('payment_status') or pay.status)
+        u = s.get(User, pay.user_id)
+        # Before the kind split: a token pack can be an account's first Stripe
+        # payment now that top-ups are sold to creators, and without the id
+        # recorded here every later checkout mints a second Stripe customer and
+        # the billing portal stays unreachable for good.
+        customer = obj.get('customer')
+        if isinstance(customer, dict):
+            customer = customer.get('id')
+        if paid and u and customer:
+            u.stripe_customer_id = str(customer)
         if paid and pay.kind == 'tokens':
             if not pay.paid_at:
                 pay.paid_at = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -4959,13 +4972,7 @@ def _stripe_checkout_completed(obj):
         if paid and not pay.paid_at:
             now = datetime.now(timezone.utc).replace(tzinfo=None)
             pay.paid_at = now
-            u = s.get(User, pay.user_id)
             if u:
-                customer = obj.get('customer')
-                if isinstance(customer, dict):
-                    customer = customer.get('id')
-                if customer:
-                    u.stripe_customer_id = str(customer)
                 sub_id = _stripe_sub_id(obj)
                 if sub_id:
                     u.stripe_subscription_id = sub_id
@@ -4974,6 +4981,31 @@ def _stripe_checkout_completed(obj):
                             u.email, pay.tier, expires, order_id, sub_id)
                 _award_referral(s, u, pay, obj.get('amount_total'))
         s.commit()
+    finally:
+        s.close()
+    return ('ok', 200)
+
+
+def _stripe_checkout_failed(obj, event_type):
+    """A session that will never be paid: abandoned until it expired, or a bank
+    redirect that came back refused. Recorded so the row stops reading pending
+    forever -- iDEAL and SEPA settle after the browser leaves, so with euro as
+    the base currency this is an ordinary outcome rather than a rare one."""
+    order_id = str((obj.get('metadata') or {}).get('order_id') or
+                   obj.get('client_reference_id') or '')
+    if not order_id:
+        return ('ok', 200)
+    status = 'expired' if event_type.endswith('expired') else 'failed'
+    from db import get_payment_by_order
+    s = _db_session()
+    try:
+        pay = get_payment_by_order(s, order_id)
+        # Nothing is reversed here: crediting only ever happens on a paid
+        # event, so a failure has nothing to undo.
+        if pay and not pay.paid_at:
+            pay.status = status
+            s.commit()
+            logger.info('STRIPE checkout %s order=%s', status, order_id)
     finally:
         s.close()
     return ('ok', 200)
