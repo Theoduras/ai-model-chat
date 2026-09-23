@@ -2117,9 +2117,7 @@ def _cap_denied(name, user, extra=None):
 
 
 def _persona_count(user):
-    # A studio-only persona is just the handle a bare character generates under.
-    return len([p for p in db_list_personas(owner_id=_workspace_id(user))
-                if not (p.get('config') or {}).get('studio_only')])
+    return len(db_list_personas(owner_id=_workspace_id(user)))
 
 
 def _persona_cap_blocked(user):
@@ -7956,15 +7954,12 @@ def api_personas():
     because that is the public fan chat picker.
     """
     viewer = _current_user()
-    studio = request.args.get('studio') == '1'
     if viewer and not viewer.get('is_admin'):
         own = []
         # Personas are saved and counted against the active workspace, so
         # listing them by user id hides everything the moment the two differ.
         for sp in db_list_personas(owner_id=_workspace_id(viewer)):
             config = sp.get('config', {})
-            if config.get('studio_only') and not studio:
-                continue
             has_img = bool(config.get('avatar')) or len(db_get_images(sp['slug'])) > 0
             own.append({
                 'slug': sp['slug'],
@@ -8019,8 +8014,6 @@ def api_personas():
         if _is_premade(sp['slug']):
             continue  # a committed original shadows any stale DB copy of the same slug
         config = sp.get('config', {})
-        if config.get('studio_only') and not studio:
-            continue
         has_img = bool(config.get('avatar')) or len(db_get_images(sp['slug'])) > 0
         personas.append({
             'slug': sp['slug'],
@@ -8088,7 +8081,33 @@ def api_persona_save(slug):
     except Exception as e:
         logging.exception('persona save failed for %s', slug)
         return jsonify({'error': f'Save failed: {e}'}), 500
+    _persona_sync_character(slug, config)
     return jsonify({'ok': True, 'slug': slug, 'prompt': prompt})
+
+
+def _persona_sync_character(slug, config):
+    """Carry a builder save onto the linked character, within its own rules."""
+    from db import Character
+    s = _db_session()
+    try:
+        row = s.query(Character).filter(Character.slug == slug).first()
+        if not row:
+            return
+        fields = _persona_char_fields(config)
+        try:
+            clean, _ = CH.validate(dict({'name': row.name, 'age': row.age,
+                                         'nsfw_level': row.nsfw_level, 'notes': row.notes,
+                                         'sheet': _char_json_sheet(row)}, **fields),
+                                   row.body_type)
+        except CH.CharacterError:
+            return
+        row.name, row.age, row.nsfw_level = clean['name'], clean['age'], clean['nsfw_level']
+        _char_refresh_status(s, row)
+        s.commit()
+    except Exception:
+        logging.exception('character sync failed for %s', slug)
+    finally:
+        s.close()
 
 
 @app.route('/api/personas/<slug>/favorite', methods=['POST'])
@@ -30070,6 +30089,54 @@ def _char_persona_ok(slug):
     return mine is None or slug in mine
 
 
+_CHAR_GENDER = {'female': 'Female', 'male': 'Male'}
+
+
+def _char_to_persona(row, owner_id=None, extra=None):
+    """Write the character's name, age, level and gender onto its persona."""
+    config = dict(_persona_config(row.slug))
+    config.pop('studio_only', None)
+    config.update(extra or {})
+    config.update({'name': row.name, 'age': max(int(row.age or 18), 18),
+                   'gender': _CHAR_GENDER.get(row.body_type, config.get('gender') or 'Female'),
+                   'nsfw_enabled': row.nsfw_level != 'sfw'})
+    if row.nsfw_level != 'sfw':
+        config['nsfw_level'] = row.nsfw_level
+    if owner_id is None:
+        owner_id = _persona_owner(row.slug)
+    db_save_persona(row.slug, row.name, config, build_system_prompt(config),
+                    owner_id=owner_id or None)
+
+
+def _persona_char_fields(config):
+    """The character fields a persona config dictates."""
+    level = config.get('nsfw_level') if config.get('nsfw_enabled') else 'sfw'
+    out = {'nsfw_level': level if level in ('moderate', 'explicit') else 'sfw'}
+    if config.get('name'):
+        out['name'] = str(config['name'])[:80]
+    try:
+        out['age'] = int(config.get('age'))
+    except (TypeError, ValueError):
+        pass
+    return out
+
+
+_CHAR_CONTENT_TABLES = ('PersonaMedia', 'GenerationJob', 'MediaOutfitLink',
+                        'ModelReferenceSet', 'VideoSource', 'AudioReference',
+                        'StudioOutfit')
+
+
+def _char_move_content(s, old, new):
+    """Carry a character's own persona's vault and generations onto the
+    persona it is being linked to, then drop the emptied persona."""
+    import db as D
+    for name in _CHAR_CONTENT_TABLES:
+        model = getattr(D, name)
+        s.query(model).filter(model.slug == old).update(
+            {model.slug: new}, synchronize_session=False)
+    D.delete_saved_persona(s, old)
+
+
 def _char_ref_url(img):
     return _char_path_url(img.gcs_path, img.mime)
 
@@ -30398,16 +30465,24 @@ def api_characters():
                 return jsonify({'ok': False, 'error': 'Not your persona'}), 403
             if s.query(Character).filter(Character.slug == persona).first():
                 return jsonify({'ok': False, 'error': 'That persona already has a character.'}), 409
+            body = dict(_persona_char_fields(_persona_config(persona)), **body)
+        else:
+            capped = _persona_cap_blocked(user)
+            if capped:
+                return capped
         try:
             clean, warnings = CH.validate(dict(
                 {'name': 'Untitled draft', 'age': 24, 'nsfw_level': 'sfw'}, **body))
         except CH.CharacterError as e:
             return jsonify({'ok': False, 'error': str(e)}), 400
         row = Character(workspace_id=_workspace_id(user), owner_id=user.get('id'),
-                        key='char-' + uuid.uuid4().hex[:12], slug=persona or None,
+                        key='char-' + uuid.uuid4().hex[:12],
+                        slug=persona or unique_copy_slug(clean['name']),
                         name=clean['name'], age=clean['age'],
                         nsfw_level=clean['nsfw_level'], notes=clean['notes'],
                         sheet_json=json.dumps(clean['sheet']))
+        _char_to_persona(row, _workspace_id(user),
+                         None if persona else {'from_character': True})
         s.add(row)
         s.commit()
         return jsonify({'ok': True, 'character': _char_json(s, row, full=True),
@@ -30418,13 +30493,11 @@ def api_characters():
 
 @app.route('/api/characters/<char_id>/studio', methods=['POST'])
 def api_character_studio(char_id):
-    """Give an unlinked character a studio-only persona, so the studio can
-    generate from a character alone. Hidden from every other console and not
-    counted against the plan's persona limit."""
+    """Give an unlinked character its own persona, so the studio, the vault and
+    every console see it like any other."""
     blocked = _require_active()
     if blocked:
         return blocked
-    import uuid
     user = _current_user()
     s = _db_session()
     try:
@@ -30432,13 +30505,11 @@ def api_character_studio(char_id):
         if not row:
             return jsonify({'ok': False, 'error': 'Unknown character'}), 404
         if not row.slug:
-            slug = 'char-' + uuid.uuid4().hex[:10]
-            config = {'name': row.name or 'Character', 'age': max(int(row.age or 18), 18),
-                      'nsfw_enabled': True, 'nsfw_level': 'explicit',
-                      'studio_only': True}
-            db_save_persona(slug, config['name'], config, build_system_prompt(config),
-                            owner_id=_workspace_id(user) or None)
-            row.slug = slug
+            capped = _persona_cap_blocked(user)
+            if capped:
+                return capped
+            row.slug = unique_copy_slug(row.name or 'Character')
+            _char_to_persona(row, _workspace_id(user), {'from_character': True})
             s.commit()
         return jsonify({'ok': True, 'slug': row.slug})
     finally:
@@ -30492,6 +30563,8 @@ def api_character(char_id):
         row.sheet_json = json.dumps(clean['sheet'])
         _char_refresh_status(s, row)
         s.commit()
+        if row.slug:
+            _char_to_persona(row)
         return jsonify({'ok': True, 'character': _char_json(s, row, full=True),
                         'warnings': warnings})
     finally:
@@ -30521,10 +30594,16 @@ def api_character_link(char_id):
         other = s.query(Character).filter(Character.slug == persona).first()
         if other and other.id != row.id:
             return jsonify({'ok': False, 'error': 'That persona already has a character. Unlink it first.'}), 409
-        if row.slug and row.slug != persona:
-            return jsonify({'ok': False, 'error': 'This character is linked to another persona. Unlink it first.'}), 409
+        old = row.slug
+        if old and old != persona:
+            own = _persona_config(old)
+            if not (own.get('from_character') or own.get('studio_only')):
+                return jsonify({'ok': False, 'error': 'This character is linked to another persona. Unlink it first.'}), 409
+            _char_move_content(s, old, persona)
+            _prompt_cache.pop(old, None)
         row.slug = persona
         s.commit()
+        _char_to_persona(row)
         return jsonify({'ok': True, 'character': _char_json(s, row)})
     finally:
         s.close()
