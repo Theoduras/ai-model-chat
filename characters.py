@@ -76,13 +76,6 @@ FEATURES = {
         'waist': ('Waist', 'body', _opts('waist', 'Defined', 'Straight', 'Soft')),
         'hips': ('Hips', 'body', _opts('hips', 'Narrow', 'Medium', 'Wide')),
         'bust': ('Bust', 'body', _opts('bust', 'Small', 'Medium', 'Large', 'Very large')),
-        'glutes': ('Bum from the side', 'body', [('Full, rounded', 'a full, rounded bum'),
-                                                  ('High shelf', 'a high, shelf-like bum that sits out from the back'),
-                                                  ('Bubble', 'a round, lifted bubble bum'),
-                                                  ('Sporty', 'a firm, athletic bum'),
-                                                  ('Saggy', 'a soft bum that sits low'),
-                                                  ('Double saggy', 'a soft, low bum with a crease below it'),
-                                                  ('Flat', 'a flat bum'), ('Bone', 'a slim, bony bum')]),
         'glute_shape': ('Bum shape, from behind', 'body', [('Round', 'a round bum'), ('Heart-shaped', 'a heart-shaped bum'),
                                                            ('A-shaped', 'an A-shaped bum, fuller at the bottom'),
                                                            ('Pear', 'a pear-shaped bum, widest at the base'),
@@ -137,8 +130,7 @@ YOUTH_LEANING = {
 }
 # Options renamed after sheets were saved with them: the old label still
 # validates and is stored as the new one.
-RENAMED = {('face_shape', 'Long'): 'Rectangle', ('glutes', 'Round'): 'Bubble',
-           ('glutes', 'Full'): 'Full, rounded', ('glutes', 'Very full'): 'High shelf'}
+RENAMED = {('face_shape', 'Long'): 'Rectangle'}
 
 YOUTH_BLOCK_AT = 3
 YOUTH_WARN_AT = 2
