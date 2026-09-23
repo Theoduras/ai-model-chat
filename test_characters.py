@@ -66,6 +66,13 @@ def test_prompts():
     text = CH.describe(shapes, 'sfw')
     check('shape fragments reach a safe-work prompt',
           all(dict(CH.features()[k][2])[v] in text for k, v in shapes.items()))
+    for key in ('body_front', 'body_side', 'body_back'):
+        check(f'{key} defaults to bodysuit', 'bodysuit' in CH.build_view_prompt(key, {}, 24, True))
+        for o, text in CH.OUTFITS.items():
+            p = CH.build_view_prompt(key, {'view_outfit': o}, 24, True)
+            check(f'{key} wears {o}', text in p and '{outfit}' not in p)
+    check('outfit never reaches a content prompt',
+          all(CH.describe({'view_outfit': o}, lvl) == '' for o in CH.OUTFITS for lvl in ('sfw', 'explicit')))
     check('face prompt is frontal', 'front-facing' in CH.build_view_prompt('face_front', {}, 24, False))
     close = CH.build_view_prompt('vulva_open', FULL_SHEET, 31, True)
     far = ('height', 'bust', 'shoulders', 'body_shape', 'nails')
