@@ -1331,10 +1331,10 @@ class RunwareProvider(Provider):
             'deliveryMethod': 'async',
         }
         if shape == 'motion':
-            # The clip sets the length and the motion; the prompt only steers
-            # the scene. A duration or a negative prompt is refused here.
-            task['width'] = width
-            task['height'] = height
+            # The clip sets the length, size and motion; the prompt only steers
+            # the scene. A duration, a size or a negative prompt is refused.
+            if spec.get('fps'):
+                task['fps'] = int(spec['fps'])
             kling = {'characterOrientation': spec.get('orientation') or 'video'}
             if model_key == 'kling-2-6-mc':
                 kling['keepOriginalSound'] = spec.get('keep_sound', True) is not False
