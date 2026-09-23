@@ -288,15 +288,12 @@
     <div class="sb-foot">
       <button type="button" class="btn btn-primary sb-refer" data-view="/referrals" data-search="referrals refer earn commission invite"
               onclick="openEmbedded('/referrals', this)">Refer a creator &middot; earn 5%</button>
-      <button type="button" class="sb-item" data-view="/account" data-search="account billing plan tokens profile"
+      <!-- Opened from the header's account picture; kept as the frame anchor for /account, /billing and /tokens. -->
+      <button type="button" class="sb-item" hidden data-view="/account" data-search="account billing plan tokens profile"
               onclick="openEmbedded('/account', this)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2.5 2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
         <span>Account</span>
       </button>
-      <a href="/dashboard/logout" class="sb-item" data-search="log out sign out">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 17l5-5-5-5M21 12H9" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        <span>Log out</span>
-      </a>
     </div>
   </aside>
 

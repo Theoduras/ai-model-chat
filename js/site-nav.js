@@ -110,6 +110,7 @@
     { href: '/billing', label: 'Upgrade', icon: 'upgrade', cta: true, keep: true },
     { href: '/dashboard', label: 'Dashboard', icon: 'dashboard', cta: true },
     { href: '/logout', label: 'Log out', icon: 'logout' },
+    { href: '/account', label: 'Account', icon: 'account', avatar: true },
   ];
 
   function svg(paths) {
@@ -172,9 +173,12 @@
       }).join('') + '</div></div>';
   }
 
+  var avatarUrl = '';
   function linksHtml(items) {
     return items.map(function (i) {
       if (i.menu) return menuHtml(i);
+      if (i.avatar) return '<a data-sn href="' + i.href + '" class="sn-avatar" title="Account" aria-label="Account">' +
+        (avatarUrl ? '<img src="' + avatarUrl + '" alt="">' : ICONS.account) + '</a>';
       return '<a data-sn href="' + i.href + '"' +
         (i.cta ? ' class="sn-cta"' : '') +
         (i.keep ? ' data-keep' : '') +
@@ -328,6 +332,7 @@
       .then(function (r) { return r.json(); })
       .then(function (me) {
         if (!me || !me.signed_in) return;
+        avatarUrl = me.avatar || '';
         paint(ACCOUNT_IN);
         var t = me.usage && me.usage.tokens;
         paintTokens(t && 'balance' in t ? t.balance : 0);
