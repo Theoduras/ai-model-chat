@@ -358,7 +358,7 @@ STRIPE_MIN_CHARGE = {'eur': 0.50, 'usd': 0.50, 'gbp': 0.30}
 # purpose: _assert_floor would refuse to import with it in the ladder, and that
 # refusal is exactly the protection every real pack still needs. At these
 # amounts it sells roughly 40 dollars of provider spend for half a euro, so the
-# caller gates it on both an env flag and an admin session -- see
+# caller gates it on both an env flag and an admin session or active Starter plan -- see
 # app._token_test_pack_enabled.
 TEST_PACK_ID = 'test'
 TEST_PACK_TOKENS = 1000
