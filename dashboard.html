@@ -288,15 +288,12 @@
     <div class="sb-foot">
       <button type="button" class="btn btn-primary sb-refer" data-view="/referrals" data-search="referrals refer earn commission invite"
               onclick="openEmbedded('/referrals', this)">Refer a creator &middot; earn 5%</button>
-      <button type="button" class="sb-item" data-view="/account" data-search="account billing plan tokens profile"
+      <!-- Opened from the header's account picture; kept as the frame anchor for /account, /billing and /tokens. -->
+      <button type="button" class="sb-item" hidden data-view="/account" data-search="account billing plan tokens profile"
               onclick="openEmbedded('/account', this)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2.5 2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
         <span>Account</span>
       </button>
-      <a href="/dashboard/logout" class="sb-item" data-search="log out sign out">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 17l5-5-5-5M21 12H9" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        <span>Log out</span>
-      </a>
     </div>
   </aside>
 
@@ -1660,9 +1657,7 @@ async function loadPersona(slug) {
   }
   renderForm(slug, config);
   showActionBar();
-  loadGallery(slug);
   loadCharacterSection(slug);
-  loadNsfwGallery(slug);
   loadPhases();
   if (!config.speech_style) generateSpeechStyle(false);
   if (!config.conversion_triggers) generateTriggers();
@@ -1847,8 +1842,6 @@ async function newPersona() {
   }
   renderSidebar();
   renderForm(slug, { name });
-  galleryImages = [];
-  renderGallery();
 
   showActionBar();
 }
@@ -1933,48 +1926,49 @@ function renderForm(slug, cfg) {
 
       <div class="field full">
         <label>Appearance</label>
-        <textarea id="f-appearance" rows="2" placeholder="a tall redhead with freckles and a gap-toothed smile">${esc(cfg.appearance || '')}</textarea>
+        <textarea id="f-appearance"${cfg.char_linked ? ' disabled' : ''} rows="2" placeholder="a tall redhead with freckles and a gap-toothed smile">${esc(cfg.appearance || '')}</textarea>
         <span class="hint">Write this and it replaces the boxes below — they only build a
           description when this is empty. Either way it is what every generated photo
           of her is built from, so she stays the same woman shot to shot.</span>
+        ${cfg.char_linked ? '<span class="hint">Face and body come from her character &mdash; change them in the <a href="/characters">character builder</a>.</span>' : ''}
       </div>
 
       <div class="field-row">
         <div class="field">
           <label>Body type</label>
-          <select id="f-body-type">${opt(['Any', 'Petite', 'Slim', 'Athletic', 'Curvy', 'BBW'], cfg.body_type)}</select>
+          <select id="f-body-type"${cfg.char_linked ? ' disabled' : ''}>${opt(['Any', 'Petite', 'Slim', 'Athletic', 'Curvy', 'BBW'], cfg.body_type)}</select>
         </div>
         <div class="field">
           <label>Chest size</label>
-          <select id="f-chest-size">${opt(['Any', 'Small', 'Medium', 'Large', 'Very large'], cfg.chest_size)}</select>
+          <select id="f-chest-size"${cfg.char_linked ? ' disabled' : ''}>${opt(['Any', 'Small', 'Medium', 'Large', 'Very large'], cfg.chest_size)}</select>
         </div>
         <div class="field">
           <label>Hair colour</label>
-          <input id="f-hair-colour" value="${esc(cfg.hair_colour || '')}" placeholder="jet black">
+          <input type="text" id="f-hair-colour"${cfg.char_linked ? ' disabled' : ''} value="${esc(cfg.hair_colour || '')}" placeholder="jet black">
         </div>
         <div class="field">
           <label>Eye colour</label>
-          <input id="f-eye-colour" value="${esc(cfg.eye_colour || '')}" placeholder="green">
+          <input type="text" id="f-eye-colour"${cfg.char_linked ? ' disabled' : ''} value="${esc(cfg.eye_colour || '')}" placeholder="green">
         </div>
         <div class="field">
           <label>Style</label>
-          <input id="f-style" value="${esc(cfg.style || '')}" placeholder="streetwear">
+          <input type="text" id="f-style" value="${esc(cfg.style || '')}" placeholder="streetwear">
         </div>
         <div class="field">
           <label>Her phone</label>
-          <input id="f-phone-model" value="${esc(cfg.phone_model || '')}" placeholder="black iPhone 15 Pro">
+          <input type="text" id="f-phone-model" value="${esc(cfg.phone_model || '')}" placeholder="black iPhone 15 Pro">
           <span class="hint">Only used in selfies, where it is actually in shot.</span>
         </div>
         <div class="field">
           <label>Her voice</label>
-          <input id="f-voice" value="${esc(cfg.voice || '')}" placeholder="soft, low, slight West Country accent">
+          <input type="text" id="f-voice" value="${esc(cfg.voice || '')}" placeholder="soft, low, slight West Country accent">
           <span class="hint">How she sounds when a generated clip has her speak.</span>
         </div>
       </div>
 
       <div class="field full">
         <label>Never in her photos</label>
-        <input id="f-banned-terms" value="${esc(cfg.banned_terms || '')}" placeholder="tattoos, piercings, glasses">
+        <input type="text" id="f-banned-terms" value="${esc(cfg.banned_terms || '')}" placeholder="tattoos, piercings, glasses">
         <span class="hint">Comma separated. These are struck out of every generation prompt,
           whichever box they were typed into.</span>
       </div>
@@ -1998,37 +1992,7 @@ function renderForm(slug, cfg) {
       <div id="character-box"><span class="hint">Loading…</span></div>
     </div>
 
-    <div class="form-section">
-      <div class="section-title" style="flex-wrap:wrap;">
-        <span style="margin-right:auto;">Photos <span style="font-weight:400; color:var(--text-muted); font-size:0.8rem;">(up to 5 — same person)</span></span>
-        <span style="display:flex; gap:6px;">
-          <button type="button" class="btn-ai" id="gen-face-btn" onclick="generateFirstPhoto()" title="Generate a new fictional face">✨ New face</button>
-          <button type="button" class="btn-ai btn-ai-secondary" id="gen-more-btn" onclick="generateMorePhotos()" title="Add more shots of the same person">＋ More of her</button>
-          <button type="button" class="btn btn-ghost" onclick="document.getElementById('photo-file-input').click()" title="Upload your own photo">Upload</button>
-          <button type="button" class="btn-section-save" style="margin-left:0;" onclick="savePhotosSection(this)">Save</button>
-        </span>
-      </div>
-      <div class="photo-grid" id="photo-grid"></div>
-      <input type="file" id="photo-file-input" accept="image/*" multiple style="display:none;" onchange="onPhotoFiles(event)">
-      <span class="hint" id="photo-status"></span>
-      <span class="hint" style="margin-top:2px;">First photo creates a fictional face; "More of her" keeps the same person in new shots. Photos save to the database on Save.</span>
-    </div>
 
-    <div class="form-section">
-      <div class="section-title" style="flex-wrap:wrap;">
-        <span style="margin-right:auto;">NSFW Photos <span style="font-weight:400; color:var(--text-muted); font-size:0.8rem;">(up to 5 — held back until the CTA)</span></span>
-        <span style="display:flex; gap:6px;">
-          <button type="button" class="btn-ai" id="gen-nsfw-face-btn" onclick="generateNsfwFirstPhoto()" title="Generate a new suggestive shot">✨ New face</button>
-          <button type="button" class="btn-ai btn-ai-secondary" id="gen-nsfw-more-btn" onclick="generateNsfwMorePhotos()" title="Add more shots of the same person">＋ More of her</button>
-          <button type="button" class="btn btn-ghost" onclick="document.getElementById('nsfw-photo-file-input').click()" title="Upload your own photo">Upload</button>
-          <button type="button" class="btn-section-save" style="margin-left:0;" onclick="saveNsfwPhotosSection(this)">Save</button>
-        </span>
-      </div>
-      <div class="photo-grid" id="nsfw-photo-grid"></div>
-      <input type="file" id="nsfw-photo-file-input" accept="image/*" multiple style="display:none;" onchange="onNsfwPhotoFiles(event)">
-      <span class="hint" id="nsfw-photo-status"></span>
-      <span class="hint" style="margin-top:2px;">These never go out in a normal reply — only alongside the CTA link, once a fan has asked enough times (set below). Generated shots are the most suggestive the model will allow; for anything more explicit, upload your own.</span>
-    </div>
 
 
     <div class="form-section">
@@ -2540,15 +2504,6 @@ function flashSaved(btn, ok = true) {
   }, 1600);
 }
 
-async function savePhotosSection(btn) {
-  if (!currentSlug) return;
-  try {
-    await saveGallery(currentSlug);
-    noteAvatarChange(currentSlug, !!(v('f-avatar') || galleryImages.length));
-    renderSidebar();
-    flashSaved(btn);
-  } catch(e) { flashSaved(btn, false); }
-}
 
 // Every section edits one shared config object, so a section Save writes the
 // whole config — it just reports back where the user is looking.
@@ -2576,7 +2531,7 @@ async function saveSection(btn) {
     lsSavePersona(currentSlug, config);
     if (data.prompt) localStorage.setItem(lsPromptKey(currentSlug), data.prompt);
     if (personas[currentSlug]) personas[currentSlug].name = config.name || currentSlug;
-    noteAvatarChange(currentSlug, !!(config.avatar || galleryImages.length));
+    noteAvatarChange(currentSlug, !!config.avatar);
     renderSidebar();
     flashSaved(btn);
   } catch(e) {
@@ -2592,9 +2547,7 @@ async function savePersona() {
   const status = document.getElementById('save-status');
   status.textContent = 'Saving…'; status.className = 'save-status';
   try {
-    // Photos and phases always save to the current persona (originals included).
-    await saveGallery(currentSlug);
-    await saveNsfwGallery(currentSlug);
+    // Phases always save to the current persona (originals included).
     await postPhases(currentSlug);
 
     // Originals can now be overridden in place — the edit is saved to the DB
@@ -2616,7 +2569,7 @@ async function savePersona() {
       status.textContent = '✓ Saved & deployed'; status.className = 'save-status ok';
       if (personas[currentSlug]) {
         personas[currentSlug].name = config.name || currentSlug;
-        noteAvatarChange(currentSlug, !!(config.avatar || galleryImages.length));
+        noteAvatarChange(currentSlug, !!config.avatar);
       }
       renderSidebar();
       showPromptPreview(data.prompt);
@@ -2625,34 +2578,10 @@ async function savePersona() {
 }
 
 // ── Persona photo gallery (max 5, same person) ──
-let galleryImages = [];   // array of data URLs
-const MAX_PHOTOS = 5;
 // The avatar mirrors photo 1 until someone uploads or clears one by hand.
 let loadedPlatforms = {};
 let avatarFromPhoto = true;
 
-function renderGallery() {
-  const grid = document.getElementById('photo-grid');
-  if (!grid) return;
-  grid.innerHTML = '';
-  galleryImages.forEach((src, i) => {
-    const cell = document.createElement('div');
-    cell.className = 'photo-cell';
-    cell.innerHTML = '<img loading="lazy" decoding="async" src="' + src + '" alt="photo ' + (i+1) + '">' +
-      '<button type="button" class="photo-del" title="Remove" onclick="removePhoto(' + i + ')">✕</button>' +
-      (i === 0 ? '<span class="photo-badge">profile</span>' : '');
-    grid.appendChild(cell);
-  });
-  if (galleryImages.length < MAX_PHOTOS) {
-    const add = document.createElement('div');
-    add.className = 'photo-cell photo-add';
-    add.title = 'Upload a photo';
-    add.innerHTML = '<span>＋</span>';
-    add.onclick = () => document.getElementById('photo-file-input').click();
-    grid.appendChild(add);
-  }
-  syncAvatarFromGallery();
-}
 
 function setAvatar(dataUrl) {
   const field = document.getElementById('f-avatar');
@@ -2664,10 +2593,6 @@ function setAvatar(dataUrl) {
     : '<span style="font-size:28px;color:var(--text-muted);">+</span>';
 }
 
-function syncAvatarFromGallery() {
-  if (!avatarFromPhoto || !galleryImages.length) return;
-  setAvatar(galleryImages[0]);
-}
 
 async function loadCharacterSection(slug) {
   const box = document.getElementById('character-box');
@@ -2714,243 +2639,27 @@ async function unlinkCharacter(id, slug) {
   loadCharacterSection(slug);
 }
 
-async function loadGallery(slug) {
-  galleryImages = [];
-  const grid = document.getElementById('photo-grid');
-  if (grid) grid.innerHTML = skelGrid(6);
-  try {
-    const res = await fetch('/api/personas/' + slug + '/images?full=1');
-    const data = await res.json();
-    if (Array.isArray(data.images)) galleryImages = data.images.slice(0, MAX_PHOTOS);
-  } catch(e) {}
-  renderGallery();
 
-}
 
-function removePhoto(i) { galleryImages.splice(i, 1); renderGallery(); }
 
-function onPhotoFiles(ev) {
-  const files = Array.from(ev.target.files || []);
-  let remaining = MAX_PHOTOS - galleryImages.length;
-  files.slice(0, remaining).forEach(file => {
-    const reader = new FileReader();
-    reader.onload = e => { if (galleryImages.length < MAX_PHOTOS) { galleryImages.push(e.target.result); renderGallery(); } };
-    reader.readAsDataURL(file);
-  });
-  ev.target.value = '';
-}
 
-async function generateFirstPhoto() {
-  if (galleryImages.length >= MAX_PHOTOS) { setPhotoStatus('Max 5 photos.', false); return; }
-  const btn = document.getElementById('gen-face-btn');
-  if (btn) btn.disabled = true;
-  setPhotoBusy(true, 'Generating a new face…');
-  setPhotoStatus('Generating a new face…', null);
-  try {
-    const res = await fetch('/api/generate/image', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ config: collectConfig(), shot: 'portrait' })
-    });
-    const data = await res.json();
-    if (!data.ok) throw new Error(data.error || 'Generation failed');
-    galleryImages.push(data.image); renderGallery();
-    setPhotoStatus('✓ Face added — use "More of her" for matching shots', true);
-  } catch(e) { setPhotoStatus('✗ ' + e.message, false); }
-  finally { setPhotoBusy(false); if (btn) btn.disabled = false; }
-}
 
-async function generateMorePhotos() {
-  if (!galleryImages.length) { setPhotoStatus('Make a face first with "New face".', false); return; }
-  if (galleryImages.length >= MAX_PHOTOS) { setPhotoStatus('Max 5 photos.', false); return; }
-  const btn = document.getElementById('gen-more-btn');
-  if (btn) btn.disabled = true;
-  const shots = ['half', 'full', 'candid', 'mirror'];
-  const reference = galleryImages[0];
-  try {
-    while (galleryImages.length < MAX_PHOTOS) {
-      const shot = shots[(galleryImages.length - 1) % shots.length];
-      setPhotoBusy(true, 'Generating photo ' + (galleryImages.length + 1) + ' of the same person…');
-      setPhotoStatus('Generating photo ' + (galleryImages.length + 1) + ' of the same person…', null);
-      const res = await fetch('/api/generate/image', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reference, shot, config: collectConfig() })
-      });
-      const data = await res.json();
-      if (!data.ok) throw new Error(data.error || 'Generation failed');
-      galleryImages.push(data.image); renderGallery();
-    }
-    setPhotoStatus('✓ Photo set complete', true);
-  } catch(e) { setPhotoStatus('✗ ' + e.message, false); }
-  finally { setPhotoBusy(false); if (btn) btn.disabled = false; }
-}
-
-function setPhotoStatus(msg, ok) {
-  const el = document.getElementById('photo-status');
-  if (!el) return;
-  el.textContent = msg;
-  el.style.color = ok === true ? 'var(--ok)' : ok === false ? 'var(--err)' : 'var(--text-3)';
-}
 
 // Image generation is the longest wait in the builder, so it scrims the grid
 // it is about to change rather than only tinting a button somewhere else.
-function setPhotoBusy(on, label) {
-  const grid = document.getElementById('photo-grid');
-  if (!grid) return;
-  grid.classList.add('loader-host');
-  let ov = grid.querySelector('.loader-overlay');
-  if (!on) { if (ov) ov.remove(); return; }
-  if (!ov) {
-    ov = document.createElement('div');
-    ov.className = 'loader-overlay';
-    grid.appendChild(ov);
-  }
-  ov.innerHTML = '<span class="loader-dots lg" role="status" aria-live="polite"><i></i><i></i><i></i></span>'
-    + '<span>' + esc(label) + '</span>';
-}
 
-async function saveGallery(slug) {
-  try {
-    await fetch('/api/personas/' + slug + '/images', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ images: galleryImages })
-    });
-  } catch(e) {}
-}
 
 // ── NSFW photo pool (max 5, held out of every normal send) ──
 // Same shape as the gallery above, entirely separate storage and endpoints —
 // these never reach a normal reply, only the CTA moment (app.py _chat_nsfw_photo).
-let nsfwGalleryImages = [];   // array of data URLs
 
-function renderNsfwGallery() {
-  const grid = document.getElementById('nsfw-photo-grid');
-  if (!grid) return;
-  grid.innerHTML = '';
-  nsfwGalleryImages.forEach((src, i) => {
-    const cell = document.createElement('div');
-    cell.className = 'photo-cell';
-    cell.innerHTML = '<img loading="lazy" decoding="async" src="' + src + '" alt="nsfw photo ' + (i+1) + '">' +
-      '<button type="button" class="photo-del" title="Remove" onclick="removeNsfwPhoto(' + i + ')">✕</button>' +
-      (i === 0 ? '<span class="photo-badge">18+</span>' : '');
-    grid.appendChild(cell);
-  });
-  if (nsfwGalleryImages.length < MAX_PHOTOS) {
-    const add = document.createElement('div');
-    add.className = 'photo-cell photo-add';
-    add.title = 'Upload a photo';
-    add.innerHTML = '<span>＋</span>';
-    add.onclick = () => document.getElementById('nsfw-photo-file-input').click();
-    grid.appendChild(add);
-  }
-}
 
-async function loadNsfwGallery(slug) {
-  nsfwGalleryImages = [];
-  const nsfwGrid = document.getElementById('nsfw-photo-grid');
-  if (nsfwGrid) nsfwGrid.innerHTML = skelGrid(6);
-  try {
-    const res = await fetch('/api/personas/' + slug + '/nsfw-images?full=1');
-    const data = await res.json();
-    if (Array.isArray(data.images)) nsfwGalleryImages = data.images.slice(0, MAX_PHOTOS);
-  } catch(e) {}
-  renderNsfwGallery();
-}
 
-function removeNsfwPhoto(i) { nsfwGalleryImages.splice(i, 1); renderNsfwGallery(); }
 
-function onNsfwPhotoFiles(ev) {
-  const files = Array.from(ev.target.files || []);
-  let remaining = MAX_PHOTOS - nsfwGalleryImages.length;
-  files.slice(0, remaining).forEach(file => {
-    const reader = new FileReader();
-    reader.onload = e => { if (nsfwGalleryImages.length < MAX_PHOTOS) { nsfwGalleryImages.push(e.target.result); renderNsfwGallery(); } };
-    reader.readAsDataURL(file);
-  });
-  ev.target.value = '';
-}
 
-async function generateNsfwFirstPhoto() {
-  if (nsfwGalleryImages.length >= MAX_PHOTOS) { setNsfwPhotoStatus('Max 5 photos.', false); return; }
-  const btn = document.getElementById('gen-nsfw-face-btn');
-  if (btn) btn.disabled = true;
-  setNsfwPhotoBusy(true, 'Generating a new shot…');
-  setNsfwPhotoStatus('Generating a new shot…', null);
-  try {
-    const res = await fetch('/api/generate/image', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ config: collectConfig(), shot: 'lingerie' })
-    });
-    const data = await res.json();
-    if (!data.ok) throw new Error(data.error || 'Generation failed');
-    nsfwGalleryImages.push(data.image); renderNsfwGallery();
-    setNsfwPhotoStatus('✓ Shot added — use "More of her" for matching shots', true);
-  } catch(e) { setNsfwPhotoStatus('✗ ' + e.message, false); }
-  finally { setNsfwPhotoBusy(false); if (btn) btn.disabled = false; }
-}
 
-async function generateNsfwMorePhotos() {
-  if (!nsfwGalleryImages.length) { setNsfwPhotoStatus('Make a face first with "New face".', false); return; }
-  if (nsfwGalleryImages.length >= MAX_PHOTOS) { setNsfwPhotoStatus('Max 5 photos.', false); return; }
-  const btn = document.getElementById('gen-nsfw-more-btn');
-  if (btn) btn.disabled = true;
-  const shots = ['implied', 'sheer', 'bedroom', 'lingerie'];
-  const reference = nsfwGalleryImages[0];
-  try {
-    while (nsfwGalleryImages.length < MAX_PHOTOS) {
-      const shot = shots[(nsfwGalleryImages.length - 1) % shots.length];
-      setNsfwPhotoBusy(true, 'Generating photo ' + (nsfwGalleryImages.length + 1) + ' of the same person…');
-      setNsfwPhotoStatus('Generating photo ' + (nsfwGalleryImages.length + 1) + ' of the same person…', null);
-      const res = await fetch('/api/generate/image', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reference, shot, config: collectConfig() })
-      });
-      const data = await res.json();
-      if (!data.ok) throw new Error(data.error || 'Generation failed');
-      nsfwGalleryImages.push(data.image); renderNsfwGallery();
-    }
-    setNsfwPhotoStatus('✓ Photo set complete', true);
-  } catch(e) { setNsfwPhotoStatus('✗ ' + e.message, false); }
-  finally { setNsfwPhotoBusy(false); if (btn) btn.disabled = false; }
-}
 
-function setNsfwPhotoStatus(msg, ok) {
-  const el = document.getElementById('nsfw-photo-status');
-  if (!el) return;
-  el.textContent = msg;
-  el.style.color = ok === true ? 'var(--ok)' : ok === false ? 'var(--err)' : 'var(--text-3)';
-}
 
-function setNsfwPhotoBusy(on, label) {
-  const grid = document.getElementById('nsfw-photo-grid');
-  if (!grid) return;
-  grid.classList.add('loader-host');
-  let ov = grid.querySelector('.loader-overlay');
-  if (!on) { if (ov) ov.remove(); return; }
-  if (!ov) {
-    ov = document.createElement('div');
-    ov.className = 'loader-overlay';
-    grid.appendChild(ov);
-  }
-  ov.innerHTML = '<span class="loader-dots lg" role="status" aria-live="polite"><i></i><i></i><i></i></span>'
-    + '<span>' + esc(label) + '</span>';
-}
-
-async function saveNsfwGallery(slug) {
-  try {
-    await fetch('/api/personas/' + slug + '/nsfw-images', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ images: nsfwGalleryImages })
-    });
-  } catch(e) {}
-}
-
-async function saveNsfwPhotosSection(btn) {
-  if (!currentSlug) return;
-  try {
-    await saveNsfwGallery(currentSlug);
-    flashSaved(btn);
-  } catch(e) { flashSaved(btn, false); }
-}
 
 
 async function fillAllInfo() {
@@ -2966,8 +2675,6 @@ async function fillAllInfo() {
     const cfg = data.config;
     cfg.avatar = v('f-avatar') || cfg.avatar || '';   // keep any uploaded avatar
     renderForm(currentSlug, cfg);                       // repopulate every field at once
-    renderGallery();                                     // renderForm rebuilds #photo-grid from
-    renderNsfwGallery();                                 // scratch, so the existing photos need redrawing
     if (personas[currentSlug]) personas[currentSlug].name = cfg.name || currentSlug;
     renderSidebar();
     clearBusy('fillall-btn', 'save-status', '✓ Filled — review, then Save & Deploy', true);
@@ -2994,10 +2701,8 @@ async function copyPersona(presetConfig) {
     });
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || 'Could not copy');
-    await saveGallery(data.slug);   // carry the current photos onto the copy
-    await saveNsfwGallery(data.slug);
     personas[data.slug] = { slug: data.slug, name: data.name, config: { ...config, name: data.name }, premade: false };
-    noteAvatarChange(data.slug, !!(config.avatar || galleryImages.length));
+    noteAvatarChange(data.slug, !!config.avatar);
     document.getElementById('persona-count').textContent = Object.keys(personas).length;
     status.textContent = '✓ Copied as "' + data.name + '"'; status.className = 'save-status ok';
     renderSidebar();

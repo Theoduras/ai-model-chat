@@ -7729,8 +7729,32 @@ def db_set_nsfw_images(slug, images):
     return clean
 
 
+def _vault_photos(slug, nsfw):
+    """Approved vault stills of one rating: what the profile picture and the
+    CTA photo are drawn from. The old builder galleries are only a fallback."""
+    try:
+        from db import SessionLocal, list_persona_media
+        s = SessionLocal()
+        try:
+            rows = _approved_only(list_persona_media(s, slug) or [])
+        finally:
+            s.close()
+    except Exception:
+        return []
+    return [r for r in rows if (r.kind or 'image') == 'image'
+            and ((getattr(r, 'rating', '') == 'nsfw') == nsfw)]
+
+
+def _persona_has_photo(slug, config):
+    return (bool(config.get('avatar')) or bool(db_get_images(slug))
+            or bool(_vault_photos(slug, nsfw=False)))
+
+
 def _chat_nsfw_photo(slug):
     """Pick one NSFW photo to send with the CTA, or None if she has none."""
+    vault = _vault_photos(slug, nsfw=True)
+    if vault:
+        return f'/api/personas/{slug}/media/{random.choice(vault).id}/image'
     pool = db_get_nsfw_images(slug)
     if not pool:
         return None
@@ -8060,7 +8084,7 @@ def api_personas():
         # listing them by user id hides everything the moment the two differ.
         for sp in db_list_personas(owner_id=_workspace_id(viewer)):
             config = sp.get('config', {})
-            has_img = bool(config.get('avatar')) or len(db_get_images(sp['slug'])) > 0
+            has_img = _persona_has_photo(sp['slug'], config)
             own.append({
                 'slug': sp['slug'],
                 'name': sp.get('name') or config.get('name') or sp['slug'].capitalize(),
@@ -8099,7 +8123,7 @@ def api_personas():
         override = db_get_persona(slug)
         if override and isinstance(override.get('config'), dict):
             config = override['config']
-        has_img = bool(config.get('avatar')) or len(db_get_images(slug)) > 0
+        has_img = _persona_has_photo(slug, config)
         personas.append({
             'slug': slug,
             'name': config.get('name') or meta.get('cover_label') or slug.capitalize(),
@@ -8114,7 +8138,7 @@ def api_personas():
         if _is_premade(sp['slug']):
             continue  # a committed original shadows any stale DB copy of the same slug
         config = sp.get('config', {})
-        has_img = bool(config.get('avatar')) or len(db_get_images(sp['slug'])) > 0
+        has_img = _persona_has_photo(sp['slug'], config)
         personas.append({
             'slug': sp['slug'],
             'name': sp.get('name') or config.get('name') or sp['slug'].capitalize(),
@@ -8170,6 +8194,7 @@ def api_persona_save(slug):
         blocked = _persona_cap_blocked(me)
         if blocked:
             return blocked
+    config.update(_persona_char_look(slug))
 
     # Premade originals can be overridden in place: the edit is saved to the DB
     # and shadows the repo file (durable in Postgres).
@@ -8183,6 +8208,20 @@ def api_persona_save(slug):
         return jsonify({'error': f'Save failed: {e}'}), 500
     _persona_sync_character(slug, config)
     return jsonify({'ok': True, 'slug': slug, 'prompt': prompt})
+
+
+def _persona_char_look(slug):
+    """The linked character's face and body, which a builder save may not
+    change: the character leads."""
+    from db import Character
+    s = _db_session()
+    try:
+        row = s.query(Character).filter(Character.slug == slug).first()
+        if not row:
+            return {'char_linked': False}
+        return dict(_char_persona_look(_char_json_sheet(row)), char_linked=True)
+    finally:
+        s.close()
 
 
 def _persona_sync_character(slug, config):
@@ -8542,7 +8581,7 @@ def _appearance_from_config(cfg, with_age=True):
     more than the dropdowns can, and composing over the top of it would fight
     her own words. Everything else is built from the character fields.
     """
-    if cfg.get('appearance'):
+    if cfg.get('appearance') and not cfg.get('char_linked'):
         return cfg['appearance']
 
     age = str(cfg.get('age') or '24').strip()
@@ -9042,6 +9081,9 @@ def api_persona_avatar(slug):
         if imgs:
             avatar = imgs[0]
     if not avatar or not avatar.startswith('data:'):
+        vault = _vault_photos(slug, nsfw=False)
+        if vault:
+            return redirect(f'/api/personas/{slug}/media/{vault[0].id}/image')
         return ('', 404)
     try:
         header, b64 = avatar.split(',', 1)
@@ -30202,10 +30244,34 @@ def _char_to_persona(row, owner_id=None, extra=None):
                    'nsfw_enabled': row.nsfw_level != 'sfw'})
     if row.nsfw_level != 'sfw':
         config['nsfw_level'] = row.nsfw_level
+    config.update(_char_persona_look(_char_json_sheet(row)))
+    config['char_linked'] = True
     if owner_id is None:
         owner_id = _persona_owner(row.slug)
     db_save_persona(row.slug, row.name, config, build_system_prompt(config),
                     owner_id=owner_id or None)
+
+
+_CHAR_BUILD = {'Slim': 'Slim', 'Athletic': 'Athletic', 'Curvy': 'Curvy',
+               'Voluptuous': 'Curvy', 'Muscular': 'Athletic', 'Average': 'Any'}
+
+
+def _char_persona_look(sheet):
+    """The persona builder's appearance boxes, filled from the character's
+    picks. One way only: free text in the builder has no option to map to."""
+    out = {}
+    hair = sheet.get('hair_colour')
+    if hair == 'Custom':
+        hair = CH.hair_words(sheet.get('hair_colour_hex')) if sheet.get('hair_colour_hex') else ''
+    if hair:
+        out['hair_colour'] = hair.lower()
+    if sheet.get('eye_colour'):
+        out['eye_colour'] = sheet['eye_colour'].lower()
+    if sheet.get('build') in _CHAR_BUILD:
+        out['body_type'] = _CHAR_BUILD[sheet['build']]
+    if sheet.get('bust') in ('Small', 'Medium', 'Large', 'Very large'):
+        out['chest_size'] = sheet['bust']
+    return out
 
 
 def _persona_char_fields(config):
@@ -30266,6 +30332,13 @@ def _char_rename_legacy():
             _char_move_content(s, old, new)
             s.commit()
             _prompt_cache.pop(old, None)
+        for row in s.query(D.Character).filter(D.Character.slug.isnot(None)).all():
+            look = _char_persona_look(_char_json_sheet(row))
+            saved = db_get_persona(row.slug)
+            have = (saved or {}).get('config') or {}
+            if saved and (not have.get('char_linked')
+                          or any(have.get(k) != v for k, v in look.items())):
+                _char_to_persona(row)
     except Exception:
         s.rollback()
         logging.exception('legacy character persona rename failed')
@@ -30725,8 +30798,13 @@ def api_character_link(char_id):
         if not row:
             return jsonify({'ok': False, 'error': 'Unknown character'}), 404
         if not persona:
-            row.slug = None
+            old, row.slug = row.slug, None
             s.commit()
+            if old and db_get_persona(old):
+                config = dict(_persona_config(old))
+                config.pop('char_linked', None)
+                db_save_persona(old, config.get('name') or old, config,
+                                build_system_prompt(config), owner_id=_persona_owner(old))
             return jsonify({'ok': True, 'character': _char_json(s, row)})
         if not _char_persona_ok(persona):
             return jsonify({'ok': False, 'error': 'Not your persona'}), 403

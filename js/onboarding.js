@@ -36,9 +36,9 @@
 
     { stage: 'who', key: 'photos', nav: 'Photos',
       title: 'What does she look like?',
-      sub: 'Generate a fictional face, then add more shots of the same person. Fans see these on her profile.',
-      pick: function () { return section('photo-grid'); },
-      done: function () { return (document.querySelectorAll('#photo-grid .photo-item, #photo-grid img') || []).length > 0; } },
+      sub: 'Build her character — face and body. Every photo of her is made from it, and her vault fills from there.',
+      pick: function () { return section('character-box'); },
+      done: function () { return !!document.querySelector('#character-box img'); } },
 
     { stage: 'talks', key: 'speech', nav: 'Speech style',
       title: 'How does she write?',
