@@ -209,7 +209,9 @@ def apply_preset(sheet, preset, body_type='female'):
 
 VIEWS = {
     'female': [
-        # key, label, group, rating, required_from, parents, tier, mode, region, framing, feature groups
+        # key, label, group, rating, required_from, parents, tier, mode, region, framing, feature groups.
+        # A close-up names the body features it keeps in `body`: height or bust
+        # in a zoomed shot only pulls the camera back to show them.
         dict(key='face_front', label='Face, front', group='face', rating='sfw', required_from='sfw', parents=(), tier=0, mode='reference',
              framing=('a front-facing head-and-shoulders portrait, looking straight into the lens, neutral '
                       'relaxed expression, mouth closed, hair tucked behind the shoulders, both ears visible'),
@@ -229,11 +231,11 @@ VIEWS = {
         dict(key='body_back', label='Full body, back', group='body', rating='sfw', required_from='explicit', parents=('body_front',), tier=1, mode='reference',
              framing='a full-body view from behind, standing straight, wearing a plain fitted bodysuit', uses=('body',)),
         dict(key='hands', label='Hands', group='body', rating='sfw', required_from=None, parents=('body_front',), tier=1, mode='reference',
-             zoom=True,
+             zoom=True, body=('nails', 'tattoos'),
              framing=('a tight close-up of only her two hands, resting open palms down side by side on a plain surface, '
                       'fingers and nails in sharp focus, wrists at the frame edge'), uses=('body',)),
         dict(key='feet', label='Feet', group='body', rating='sfw', required_from=None, parents=('body_front',), tier=1, mode='reference',
-             zoom=True,
+             zoom=True, body=('tattoos',),
              framing=('a tight close-up of only her two bare feet standing side by side on a plain floor, '
                       'toes and nails in sharp focus, ankles at the top edge of the frame'), uses=('body',)),
         dict(key='nude_front', label='Nude full body, front', group='nsfw', rating='moderate', required_from='moderate',
@@ -241,12 +243,12 @@ VIEWS = {
              framing='a full-body nude photo from head to feet, standing straight facing the camera, arms relaxed at her sides',
              uses=('body', 'breasts', 'nipples', 'pubic')),
         dict(key='breasts', label='Breasts (topless, front)', group='nsfw', rating='moderate', required_from='moderate',
-             parents=('nude_front',), tier=1, mode='crop', region='chest', zoom=True,
+             parents=('nude_front',), tier=1, mode='crop', region='chest', zoom=True, body=('build',),
              framing=('a close-up of her bare breasts from the front, framed from the collarbones to just below the '
                       'breasts, arms down at her sides out of frame, both breasts centred and in sharp focus'),
              uses=('breasts', 'nipples')),
         dict(key='nipples', label='Nipples (close-up)', group='nsfw', rating='moderate', required_from='moderate',
-             parents=('breasts',), tier=2, mode='crop', region='chest_detail', zoom=True,
+             parents=('breasts',), tier=2, mode='crop', region='chest_detail', zoom=True, body=(),
              framing=('a macro close-up of her bare nipples and areolae, breast skin filling the frame, '
                       'nipple texture in sharp focus'),
              uses=('nipples',)),
@@ -254,26 +256,27 @@ VIEWS = {
              parents=('nude_front', 'body_back'), tier=1, mode='reference', framing='a full-body nude photo from behind, standing straight', uses=('body',)),
         dict(key='pubic', label='Pubic area (front, standing)', group='nsfw', rating='explicit', required_from='explicit',
              parents=('nude_front',), tier=1, mode='crop', region='pelvis', zoom=True,
+             body=('hips', 'thighs', 'tattoos', 'birthmarks'),
              framing=('a close-up of her nude pubic area from the front while standing, framed from just below the '
                       'navel to the top of the thighs, pubic mound centred and in sharp focus'),
              uses=('pubic',)),
         dict(key='vulva_closed', label='Vagina, closed', group='nsfw', rating='explicit', required_from='explicit',
-             parents=('nude_front',), tier=1, mode='reference', zoom=True,
+             parents=('nude_front',), tier=1, mode='reference', zoom=True, body=('thighs',),
              framing=('an explicit macro close-up of her vulva with labia closed, legs apart, the vulva centred and '
                       'filling the frame, inner thighs at the edges'),
              uses=('pubic', 'vulva')),
         dict(key='vulva_open', label='Vagina, open', group='nsfw', rating='explicit', required_from=None,
-             parents=('vulva_closed',), tier=2, mode='reference', zoom=True,
+             parents=('vulva_closed',), tier=2, mode='reference', zoom=True, body=('thighs',),
              framing=('an explicit macro close-up of her vulva with labia spread open by her fingers, the vulva centred '
                       'and filling the frame, only fingertips and inner thighs at the edges'),
              uses=('pubic', 'vulva')),
         dict(key='anus_closed', label='Anus, closed (bending forward)', group='nsfw', rating='explicit', required_from='explicit',
-             parents=('rear_nude',), tier=2, mode='reference', zoom=True,
+             parents=('rear_nude',), tier=2, mode='reference', zoom=True, body=('glute_shape',),
              framing=('an explicit macro close-up from behind of her closed anus while she bends forward, buttocks '
                       'parted, the anus centred and filling the frame, buttock skin at the edges'),
              uses=('anus',)),
         dict(key='anus_open', label='Anus, open (bending forward)', group='nsfw', rating='explicit', required_from=None,
-             parents=('rear_nude',), tier=2, mode='reference', zoom=True,
+             parents=('rear_nude',), tier=2, mode='reference', zoom=True, body=('glute_shape',),
              framing=('an explicit macro close-up from behind of her open anus while she bends forward, buttocks '
                       'spread, the anus centred and filling the frame, buttock skin at the edges'),
              uses=('anus',)),
@@ -334,13 +337,16 @@ def topo_order(body_type='female'):
 
 
 def traits(key, body_type='female'):
-    """Profile traits a view inherits: the sheet keys of the groups it uses."""
+    """Profile traits a view inherits: the sheet keys of the groups it uses,
+    cut to the body features a close-up keeps."""
     v = view(key, body_type)
     uses = set(v['uses']) if v else set()
     if v and 'face' not in uses:
         uses |= {'body'}
+    keep = v.get('body') if v else None
     return [k for k, (_, g, _) in features(body_type).items()
-            if g in uses or (k == 'skin_tone' and v and 'face' not in v['uses'])]
+            if (g in uses and (g != 'body' or keep is None or k in keep))
+            or (k == 'skin_tone' and v and 'face' not in v['uses'])]
 
 
 def features(body_type='female'):
@@ -480,7 +486,8 @@ def build_view_prompt(key, sheet, age, has_reference, body_type='female',
         raise CharacterError('Unknown view.')
     uses = tuple(v['uses']) + (() if 'face' in v['uses'] else ('body',))
     groups = tuple(g for g in uses if _rank(GROUP_LEVEL[g]) <= _rank(v['rating']))
-    frags = _fragments(sheet, groups, body_type)
+    keep = set(traits(key, body_type))
+    frags = _fragments({k: x for k, x in (sheet or {}).items() if k in keep}, groups, body_type)
     if 'face' not in v['uses'] and (sheet or {}).get('skin_tone'):
         frags = _fragments({'skin_tone': sheet['skin_tone']}, ('face',), body_type) + frags
     detail = ', '.join(frags)

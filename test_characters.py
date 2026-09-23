@@ -67,6 +67,18 @@ def test_prompts():
     check('shape fragments reach a safe-work prompt',
           all(dict(CH.features()[k][2])[v] in text for k, v in shapes.items()))
     check('face prompt is frontal', 'front-facing' in CH.build_view_prompt('face_front', {}, 24, False))
+    close = CH.build_view_prompt('vulva_open', FULL_SHEET, 31, True)
+    far = ('height', 'bust', 'shoulders', 'body_shape', 'nails')
+    check('close-up drops body features it cannot show',
+          not any(w in close for w in CH._fragments({k: FULL_SHEET[k] for k in far if k in FULL_SHEET}, ('body',))))
+    check('close-up keeps its own features',
+          all(w in close for w in CH._fragments(FULL_SHEET, ('vulva',))))
+    check('full body keeps every body feature',
+          all(w in CH.build_view_prompt('body_front', FULL_SHEET, 31, True)
+              for w in CH._fragments(FULL_SHEET, ('body',))))
+    check('nipples carry no body features',
+          not any(CH.features()[k][1] == 'body' for k in CH.traits('nipples')))
+    check('hands keep nails', 'nails' in CH.traits('hands'))
 
 
 def test_validation():
