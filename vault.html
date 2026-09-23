@@ -13,6 +13,7 @@
   <script src="/js/devnav.js" defer></script>
   <link rel="stylesheet" href="/css/site-nav.css">
   <script src="/js/site-nav.js" defer></script>
+  <script src="/js/fanvue-upload.js" defer></script>
   <style>
     /* The body is height-locked by .page-dashboard so it fits the dashboard's
        iframe; that means this page has to carry its own scroller, the way
@@ -348,6 +349,7 @@ function vwBadges(m) {
     + '<span class="vw-b ' + (m.rating || 'none') + '">' + (m.rating ? m.rating.toUpperCase() : 'UNRATED') + '</span>'
     + (m.no_posts ? '<span class="vw-b off">no posts</span>' : '')
     + (m.no_dms ? '<span class="vw-b off">no DMs</span>' : '')
+    + (m.fanvue_uuid ? '<span class="vw-b off" title="In the Fanvue vault">FV</span>' : '')
     + '</div>';
 }
 
@@ -381,7 +383,8 @@ function vwRow(m, idx) {
     + '<div class="vw-row-thumb">' + vwThumb(m) + '</div>'
     + '<div class="pg-row-info"><div class="pg-row-name">' + esc(m.purpose || 'untitled') + '</div>'
       + '<div class="pg-row-sub">' + esc(folders || (m.kind === 'video' ? 'clip' : 'photo'))
-      + (m.no_posts ? ' · no posts' : '') + (m.no_dms ? ' · no DMs' : '') + '</div></div>'
+      + (m.no_posts ? ' · no posts' : '') + (m.no_dms ? ' · no DMs' : '')
+      + (m.fanvue_uuid ? ' · on Fanvue' : '') + '</div></div>'
     + '<span class="vw-b ' + (m.rating || 'none') + '">' + (m.rating ? m.rating.toUpperCase() : 'UNRATED') + '</span>'
     + vwStar(m, 'pg-star')
     + '<button type="button" class="pg-del" title="Delete" onclick="event.stopPropagation();vwDelete([\'' + m.id + '\'])">✕</button>'
@@ -478,6 +481,7 @@ function vwSelBar() {
     + '<button type="button" class="pg-ctl" onclick="vwClearPick()">Clear</button>'
     + '<span class="sp"></span>'
     + '<button type="button" class="pg-ctl" onclick="vwDownload()">⭳ Download</button>'
+    + '<button type="button" class="pg-ctl" onclick="vwFanvue()">↑ Fanvue</button>'
     + '<button type="button" class="pg-ctl" onclick="vwBulkFolder()">Add to folder</button>'
     + '<button type="button" class="pg-ctl" onclick="vwBulk({favourite:true})">★ Favourite</button>'
     + '<button type="button" class="pg-ctl" onclick="vwBulk({no_posts:true})">No posts</button>'
@@ -486,6 +490,15 @@ function vwSelBar() {
     + '<button type="button" class="pg-ctl" onclick="vwBulk({rating:\'nsfw\'})">NSFW</button>'
     + '<button type="button" class="pg-ctl" style="color:var(--err)" onclick="vwDelete([...vwPicked])">Delete</button>'
     + '</div>';
+}
+
+function vwFanvue() {
+  fvUploadOpen({
+    persona: vwSlug,
+    ids: [...vwPicked],
+    onItem: (id, uuid) => { const m = vwItems.find(x => x.id === id); if (m) m.fanvue_uuid = uuid; },
+    onDone: vwDraw,
+  });
 }
 
 function vwSelectAll() { (window.vwShown || []).forEach(m => vwPicked.add(m.id)); vwDraw(); }
