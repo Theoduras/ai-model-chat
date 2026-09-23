@@ -187,6 +187,18 @@ BODY_PRESETS = {
     'athletic_tall': ('Athletic tall', 'Strong frame, sporty',
                       _preset('Over 175 cm', 'Athletic', 'Inverted triangle', 'Broad', 'Defined', 'Medium', 'Medium',
                               'Bubble', 'Toned', 'Small, wrist', 'Ears', 'None', 'Short, nude')),
+    'slim_petite': ('Slim petite', 'Small frame, lean',
+                    _preset('155–165 cm', 'Slim', 'Rectangle', 'Medium', 'Defined', 'Medium', 'Medium',
+                            'Round', 'Slim', 'None', 'Ears', 'None', 'Medium, painted')),
+    'voluptuous': ('Voluptuous', 'Very full bust, hips and bum',
+                   _preset('165–175 cm', 'Voluptuous', 'Hourglass', 'Medium', 'Defined', 'Wide', 'Very large',
+                           'Bubble', 'Full', 'Hip', 'Navel', 'None', 'Long, painted')),
+    'fitness': ('Fitness', 'Muscular, strong, sculpted',
+                _preset('165–175 cm', 'Muscular', 'Inverted triangle', 'Broad', 'Defined', 'Medium', 'Medium',
+                        'Bubble', 'Toned', 'Sleeve', 'Navel', 'None', 'Short, nude')),
+    'pear': ('Pear / thick bottom', 'Slimmer top, big hips and bum',
+             _preset('155–165 cm', 'Curvy', 'Pear', 'Narrow', 'Defined', 'Wide', 'Medium',
+                     'Wide', 'Full', 'Small, ankle', 'Ears', 'None', 'French tips')),
     'scratch': ('Start from scratch', 'Clear every body pick', {}),
 }
 
