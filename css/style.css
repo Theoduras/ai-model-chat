@@ -1095,8 +1095,11 @@ body.auth-pending .sb-plan { display: none !important; }
 .sb-ic-telegram { color: #29A9EB; }
 .sb-item span:not(.sb-badge):not(.sb-chevron) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sb-item:hover { background: var(--surface); color: var(--text); }
-.sb-item.active { background: var(--surface); color: var(--text); font-weight: 600; }
-.sb-item.active svg { color: var(--text); }
+.sb-item.active, .sb-item.active:hover {
+  background: var(--accent-soft); color: var(--accent); font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.sb-item.active svg { color: var(--accent); }
 .sb-badge {
   font-size: 0.68rem; color: var(--text-muted); background: var(--surface-2);
   border-radius: 9999px; padding: 1px 7px; flex: 0 0 auto;
