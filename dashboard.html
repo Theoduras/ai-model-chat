@@ -286,7 +286,6 @@
     </div>
 
     <div class="sb-foot">
-      <div class="sb-plan" id="sb-plan" hidden></div>
       <button type="button" class="btn btn-primary sb-refer" data-view="/referrals" data-search="referrals refer earn commission invite"
               onclick="openEmbedded('/referrals', this)">Refer a creator &middot; earn 5%</button>
       <button type="button" class="sb-item" data-view="/account" data-search="account billing plan tokens profile"
@@ -650,32 +649,6 @@ function applyEntitlements(me) {
     }
   }
 
-  renderPlanPanel(me);
-}
-
-function renderPlanPanel(me) {
-  const el = document.getElementById('sb-plan');
-  if (!el) return;
-  const u = me.usage || {};
-  const cap = v => (v === null || v === undefined) ? '\u221e' : v;
-  const row = (label, o) => o
-    ? '<div class="sb-plan-row"><span>' + label + '</span><span>' + o.used + ' / ' + cap(o.limit) + '</span></div>'
-    : '';
-  const tokenRow = o => o
-    ? '<div class="sb-plan-row"><span>Tokens</span><span>' + cap(o.balance)
-      + ' / ' + cap(o.limit) + '</span></div>'
-      + (o.limit === null ? '' : '<div class="sb-plan-row"><span></span>'
-        + '<span><a href="/tokens">Top up</a></span></div>')
-    : '';
-  const name = me.is_admin ? 'Admin' : ((me.tier || 'No plan').replace('_annual', ' (annual)'));
-  const legacy = me.grandfathered
-    ? '<div style="margin-top:6px">On your original terms &mdash; no plan limits yet.</div>' : '';
-  el.innerHTML = '<div class="sb-plan-tier"></div>'
-    + row('Personas', u.personas) + row('Seats', u.seats)
-    + tokenRow(u.tokens) + legacy
-    + (me.is_admin ? '' : '<div style="margin-top:6px"><a href="/pricing">Change plan</a></div>');
-  el.querySelector('.sb-plan-tier').textContent = name.charAt(0).toUpperCase() + name.slice(1);
-  el.hidden = false;
 }
 
 // A creator can hold a seat in other people's workspaces as well as their own.

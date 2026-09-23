@@ -30137,6 +30137,45 @@ def _char_move_content(s, old, new):
     D.delete_saved_persona(s, old)
 
 
+def _char_rename_legacy():
+    """Personas made for a bare character used to be hidden and slugged
+    `char-<hex>`; give each the character's name now that they are shown."""
+    try:
+        import db as D
+        s = D.SessionLocal()
+    except Exception:
+        return
+    try:
+        olds = [sp.slug for sp in s.query(D.SavedPersona)
+                .filter(D.SavedPersona.slug.like('char-%')).all()]
+        for old in olds:
+            sp = s.get(D.SavedPersona, old)
+            config = json.loads(sp.config_json or '{}')
+            if not config.get('studio_only'):
+                continue
+            s.commit()
+            new = unique_copy_slug(sp.name or config.get('name') or 'Character')
+            config.pop('studio_only', None)
+            config['from_character'] = True
+            D.upsert_saved_persona(s, new, sp.name, json.dumps(config), sp.prompt,
+                                   owner_id=sp.owner_id)
+            s.flush()
+            for model in (D.PersonaImages, D.PersonaNsfwImages, D.Character):
+                s.query(model).filter(model.slug == old).update(
+                    {model.slug: new}, synchronize_session=False)
+            _char_move_content(s, old, new)
+            s.commit()
+            _prompt_cache.pop(old, None)
+    except Exception:
+        s.rollback()
+        logging.exception('legacy character persona rename failed')
+    finally:
+        s.close()
+
+
+_char_rename_legacy()
+
+
 def _char_ref_url(img):
     return _char_path_url(img.gcs_path, img.mime)
 
