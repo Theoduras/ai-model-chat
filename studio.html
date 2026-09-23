@@ -264,6 +264,8 @@
   </div>
   <div style="display:flex; align-items:center; gap:16px;">
     <span id="gen-balance" class="hint" style="margin:0;"></span>
+    <a id="gen-topup" href="/billing#tokens" hidden
+       style="color:var(--accent,#a78bfa); font-size:0.8rem; text-decoration:none;">Top up</a>
     <nav data-site-nav="inline" class="sn-links sn-inline"></nav>
     <a href="/dashboard" style="color:var(--text-muted); font-size:0.8rem; text-decoration:none;">← Dashboard</a>
   </div>
@@ -614,6 +616,8 @@ async function loadCredits() {
     genRate = d.token_rate || null;
     genCosts = d.provider_costs || null;
     genTokens = d.unlimited ? null : d.balance;
+    const topup = el('gen-topup');
+    if (topup) topup.hidden = d.unlimited || !d.can_buy;
     const e = el('gen-balance');
     if (e) {
       e.textContent = d.unlimited
@@ -1777,7 +1781,7 @@ function genQuote() {
   showEngines();
   const short = genTokens !== null && genTokens < total;
   el('gen-run-btn').classList.toggle('gen-low', short);
-  if (short) setGenStatus(`Only ${genTokens} token${genTokens === 1 ? '' : 's'} left.`, false);
+  if (short) setGenStatus(`Only ${genTokens} token${genTokens === 1 ? '' : 's'} left \u2014 top up on the billing page.`, false);
   return total;
 }
 

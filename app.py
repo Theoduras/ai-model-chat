@@ -2500,6 +2500,19 @@ button:disabled{opacity:.6;cursor:not-allowed;transform:none;animation:none}
 .orsep:before,.orsep:after{content:'';flex:1;height:1px;background:var(--border)}
 .tiers{display:grid;gap:16px;margin-top:8px;align-items:stretch}
 .tier{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:22px;transition:border-color .2s,box-shadow .2s;display:flex;flex-direction:column;height:100%}
+.toksec{margin-top:52px;border-top:1px solid var(--border);padding-top:34px}
+.tokpacks{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:14px;margin-top:20px}
+.tokpack{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:18px;text-align:center;position:relative}
+.tokpack .n{font-size:1.5rem;font-weight:700}
+.tokpack .n span{font-size:.8rem;font-weight:500;color:var(--text-2)}
+.tokpack .p{margin:6px 0 2px;font-size:1.05rem}
+.tokpack .per{color:var(--text-2);font-size:.76rem}
+.tokpack button{width:100%;margin-top:12px;border-radius:9px;padding:9px;font-size:.84rem;font-weight:600;border:0;cursor:pointer;background:var(--grad);background-size:300% 100%;color:#fff}
+.tokpack button.alt{margin-top:7px;background:var(--surface);color:var(--text);border:1px solid var(--border)}
+.tokpack button[disabled]{opacity:.5;cursor:default}
+.tokpack .save{position:absolute;top:-9px;left:50%;transform:translateX(-50%);background:#a78bfa;color:#fff;border-radius:99px;padding:2px 9px;font-size:.68rem;font-weight:600;white-space:nowrap}
+.tokpack.is-test{border-color:#fbbf24}
+.tokpack.is-test .save{background:#fbbf24;color:#3b2c05}
 .tier:hover{border-color:#3d3d3d}
 .tier .tag{margin-left:auto;font-size:.62rem;font-weight:700;letter-spacing:.08em;padding:3px 9px;border-radius:999px;background:var(--surface);border:1px solid var(--border);color:var(--text-2)}
 .tier.selected .tag{border-color:var(--accent-2);color:var(--accent-2)}
@@ -2742,7 +2755,21 @@ monthly plan.</div>{% endif %}
 {% if dev_mode %}<p style="text-align:center;color:#fbbf24;font-size:.8rem;margin-top:18px">
 Dev mode: DEV_FAKE_PAYMENTS=1 is set, so plans can be activated without paying.
 Unset it before going live.</p>{% endif %}
+
+{% if user.email %}
+<section class="toksec" id="tokens" hidden>
+<h2 style="margin-bottom:6px">Generation tokens</h2>
+<p class="sub" style="margin-top:0">One token is about one photo; a five-second clip is twelve.
+Your plan's monthly tokens reset each month &mdash; tokens you buy here never expire.</p>
+<div id="tokup" class="ok" hidden></div>
+<div class="tokpacks" id="tokpacks"></div>
+<p class="sub" id="toknote" style="margin-top:16px;font-size:.82rem"></p>
+</section>
+{% endif %}
 </div>
+<script>
+var TOK_PROVIDERS = [{% if stripe_enabled %}['stripe','card']{% endif %}{% if stripe_enabled and oxapay_enabled %},{% endif %}{% if oxapay_enabled %}['oxapay','crypto']{% endif %}];
+</script>
 <script>
 document.querySelectorAll('.ptoggle button').forEach(function(tab){
   tab.addEventListener('click', function(){
@@ -2808,6 +2835,77 @@ document.querySelectorAll('button[data-tier]').forEach(function(b){
     b.disabled = false; b.textContent = old;
   });
 });
+
+// --- Generation tokens ----------------------------------------------------
+// The pack menu is fetched rather than rendered server-side: prices resolve to
+// the creator's own currency, and the test pack must never reach a page it is
+// not meant for.
+(async function(){
+  var sec = document.getElementById('tokens');
+  if (!sec) return;
+  var d;
+  try {
+    var r = await fetch('/api/tokens');
+    if (!r.ok) return;
+    d = await r.json();
+  } catch (e) { return; }
+  if (!d.sales_open) return;
+
+  var money = function(p, sym){
+    return sym + (p % 1 === 0 ? p.toFixed(0) : p.toFixed(2));
+  };
+  // A per-token price is a fraction of a cent on the test pack, where two
+  // decimals would round it to zero and read as free.
+  var perTok = function(p, sym){ return sym + p.toFixed(p < 0.01 ? 4 : 2); };
+  var packs = (d.packs || []).concat(d.test_pack ? [d.test_pack] : []);
+  var html = packs.map(function(p){
+    var badge = p.test ? '<div class="save">test only</div>'
+      : (p.save_pct ? '<div class="save">save ' + p.save_pct + '%</div>' : '');
+    var buttons = TOK_PROVIDERS.length
+      ? TOK_PROVIDERS.map(function(pr, i){
+          return '<button data-pack="' + p.id + '" data-provider="' + pr[0] + '"'
+            + (i ? ' class="alt"' : '') + (d.can_buy ? '' : ' disabled')
+            + '>Pay by ' + pr[1] + '</button>';
+        }).join('')
+      : '<button disabled>Payments not configured</button>';
+    return '<div class="tokpack' + (p.test ? ' is-test' : '') + '">' + badge
+      + '<div class="n">' + p.tokens.toLocaleString() + ' <span>tokens</span></div>'
+      + '<div class="p">' + money(p.price, p.symbol) + '</div>'
+      + '<div class="per">' + perTok(p.per_token, p.symbol) + ' per token</div>'
+      + buttons + '</div>';
+  }).join('');
+  document.getElementById('tokpacks').innerHTML = html;
+
+  document.getElementById('toknote').textContent = d.can_buy
+    ? 'Generation is still in testing, so tokens bought now may sit unused until it opens.'
+    : 'A plan is needed before tokens can be bought.';
+
+  // Acknowledge a purchase we just came back from. /billing/return has already
+  // credited it, so the balance below is the real one, not an optimistic guess.
+  var topup = new URLSearchParams(location.search).get('topup');
+  if (topup) {
+    var box = document.getElementById('tokup');
+    box.textContent = Number(topup).toLocaleString() + ' tokens added. Balance: '
+      + (d.unlimited ? 'unlimited' : Number(d.balance).toLocaleString()) + '.';
+    box.hidden = false;
+  }
+  sec.hidden = false;
+
+  document.querySelectorAll('button[data-pack]').forEach(function(b){
+    b.addEventListener('click', async function(){
+      b.disabled = true; var old = b.textContent; b.textContent = 'Redirecting...';
+      try {
+        var r = await fetch('/api/tokens/checkout', {
+          method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({pack: b.dataset.pack, provider: b.dataset.provider})});
+        var d2 = await r.json();
+        if (d2.payment_url) { window.location = d2.payment_url; return; }
+        alert(d2.error || 'Could not start checkout.');
+      } catch (e) { alert('Could not start checkout.'); }
+      b.disabled = false; b.textContent = old;
+    });
+  });
+})();
 </script></body></html>"""
 
 
