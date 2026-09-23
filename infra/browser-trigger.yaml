@@ -23,6 +23,20 @@ github:
 
 filename: cloudbuild.browser.yaml
 
+# Only what the browser service runs: its entrypoint, the modules it imports,
+# and what builds the image. An app-only push no longer redeploys it, which is
+# what interrupted open sign-ins. A new of_*.py it imports belongs here too.
+includedFiles:
+  - of_browser.py
+  - of_connect.py
+  - of_trace.py
+  - of_rules.py
+  - of_session.py
+  - start.sh
+  - Dockerfile
+  - requirements.txt
+  - cloudbuild.browser.yaml
+
 # The same service account the app's trigger deploys as, so it already carries
 # the roles this needs (run.developer, iam.serviceAccountUser) -- proven by the
 # app deploying with it today.

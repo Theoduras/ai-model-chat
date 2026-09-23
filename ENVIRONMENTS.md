@@ -153,6 +153,11 @@ This is the only part that is not in the repository, and it is one command:
 gcloud builds triggers import --source=infra/browser-trigger.yaml --region=global
 ```
 
+The trigger carries an `includedFiles` filter: only a push that changes the
+browser's own files (`of_browser.py` and the `of_*` modules it imports,
+`start.sh`, `Dockerfile`, `requirements.txt`, `cloudbuild.browser.yaml`)
+redeploys it. Re-run the import above after editing that list.
+
 `infra/browser-trigger.yaml` is the trigger itself. It is imported rather than
 built up from `gcloud builds triggers create github` flags, because create
 re-derives the repository link and refuses with a bare
