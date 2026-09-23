@@ -8,7 +8,7 @@ import datetime
 import uuid
 
 from sqlalchemy import (
-    create_engine, Boolean, Column, String, Text, DateTime, ForeignKey, Index,
+    create_engine, Boolean, Column, String, Text, DateTime, Float, ForeignKey, Index,
     Integer, case, func, or_
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
@@ -349,6 +349,40 @@ class CharacterVersion(Base):
     number = Column(Integer, nullable=False)
     snapshot_json = Column(Text, default='{}')
     created_at = Column(DateTime, default=_now)
+
+
+class CharacterView(Base):
+    """Where one view of a character stands in the view tree. Locked and
+    outdated are derived from the parents by characters.resolve_status, never
+    stored, so re-approving a parent needs no write to its children."""
+    __tablename__ = 'character_views'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    character_id = Column(String(32), nullable=False, index=True)
+    view_key = Column(String(32), nullable=False)
+    status = Column(String(12), default='not_started')  # not_started | generating | review | approved
+    mode = Column(String(12))                           # crop | reference; None = registry default
+    crop_box_json = Column(Text)                        # {x, y, w, h}, normalised 0-1
+    strength = Column(Float)                            # None = characters.STRENGTH[mode]
+    result_image_id = Column(String(32))
+    version = Column(Integer, default=0)
+    parent_versions_json = Column(Text, default='{}')   # {parent_key: version} at generation
+    updated_at = Column(DateTime, default=_now, onupdate=_now)
+
+
+Index('ix_charview_char_key', CharacterView.character_id, CharacterView.view_key,
+      unique=True)
+
+
+class ViewReference(Base):
+    """A reference image a view is generated from. The approved parents are the
+    default rows; any other approved view can be added."""
+    __tablename__ = 'view_references'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    view_id = Column(String(32), nullable=False, index=True)
+    ref_image_id = Column(String(32), nullable=False)
+    weight = Column(Float, default=1.0)
 
 
 Index('ix_link_media_outfit', MediaOutfitLink.media_id, MediaOutfitLink.outfit,

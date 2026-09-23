@@ -28920,6 +28920,27 @@ def _char_canonicals(s, char_id):
     return {img.view: img for img in _char_images(s, char_id, role='canonical')}
 
 
+def _char_views(s, row):
+    """The character's view rows by key, creating any that are missing. A view
+    that already has an approved photo starts approved at version 1, so
+    characters made before the view tree keep their approvals."""
+    from db import CharacterView
+    have = {v.view_key: v for v in s.query(CharacterView).filter_by(character_id=row.id)}
+    canon = None
+    for v in CH.views(row.body_type):
+        if v['key'] in have:
+            continue
+        if canon is None:
+            canon = _char_canonicals(s, row.id)
+        img = canon.get(v['key'])
+        cv = CharacterView(character_id=row.id, view_key=v['key'],
+                           status='approved' if img else 'not_started',
+                           version=1 if img else 0, result_image_id=img.id if img else None)
+        s.add(cv)
+        have[v['key']] = cv
+    return have
+
+
 def _char_refresh_status(s, row):
     s.flush()
     missing = CH.missing_views(row.nsfw_level, _char_canonicals(s, row.id).keys(),
@@ -29028,7 +29049,7 @@ def _character_view_refs(char_id, view_key):
             return []
         v = CH.view(view_key, row.body_type) or {}
         canon = _char_canonicals(s, char_id)
-        picked = [canon[d] for d in v.get('depends', ()) if d in canon]
+        picked = [canon[d] for d in v.get('parents', ()) if d in canon]
         if view_key in canon:
             picked.append(canon[view_key])
         picked += _char_images(s, char_id, view=view_key, role='reference')
@@ -29479,10 +29500,10 @@ def api_character_generate(char_id):
         if not v or v not in CH.views_for_level(row.nsfw_level, row.body_type):
             return jsonify({'ok': False, 'error': 'That view is not available at this level.'}), 400
         canon = _char_canonicals(s, row.id)
-        waiting = [CH.view(d, row.body_type)['label'] for d in v['depends'] if d not in canon]
+        waiting = [CH.view(d, row.body_type)['label'] for d in v['parents'] if d not in canon]
         if waiting:
             return jsonify({'ok': False, 'error': 'Approve ' + ' and '.join(waiting) + ' first.'}), 409
-        has_ref = bool(v['depends']) or bool(
+        has_ref = bool(v['parents']) or bool(
             _char_images(s, row.id, view=view_key, role='reference')
             or _char_images(s, row.id, view='', role='reference'))
         prompt = CH.build_view_prompt(view_key, _char_json_sheet(row), row.age,
@@ -29549,7 +29570,7 @@ def api_character_approve(char_id, img_id):
         if v['group'] == 'face' and img.source == 'upload':
             return jsonify({'ok': False, 'error': 'Face uploads are references. Generate the face from them.'}), 400
         canon = _char_canonicals(s, row.id)
-        waiting = [CH.view(d, row.body_type)['label'] for d in v['depends'] if d not in canon]
+        waiting = [CH.view(d, row.body_type)['label'] for d in v['parents'] if d not in canon]
         if waiting:
             return jsonify({'ok': False, 'error': 'Approve ' + ' and '.join(waiting) + ' first.'}), 409
         if img.view in CH.AGE_CHECKED_VIEWS:

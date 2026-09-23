@@ -618,7 +618,7 @@ function viewState(key) {
 }
 function viewTile(v) {
   const c = canonOf(v.key);
-  const locked = v.depends.some(d => !canonOf(d));
+  const locked = v.parents.some(d => !canonOf(d));
   return `<button type="button" class="view" aria-pressed="${selView === v.key}" onclick="openView('${v.key}')">
     <div class="vt">${c ? `<img src="${esc(c.url)}" alt="">` : ''}</div>
     <div style="flex:1; min-width:0;"><div style="font-weight:700; font-size:0.85rem;">${esc(v.label)}</div>
@@ -656,7 +656,7 @@ function renderViewPanel() {
   if (!v) return;
   const nsfw = v.group === 'nsfw';
   el('vp-title').textContent = v.label;
-  const waiting = v.depends.filter(d => !canonOf(d)).map(d => viewDef(d).label);
+  const waiting = v.parents.filter(d => !canonOf(d)).map(d => viewDef(d).label);
   el('vp-sub').textContent = (v.required ? 'Required' : 'Optional') + (waiting.length ? ' · approve ' + waiting.join(' and ') + ' first' : '');
   el('vp-gen').disabled = waiting.length > 0;
   el('vp-gen').textContent = 'Generate';

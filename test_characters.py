@@ -113,11 +113,33 @@ def test_every_option_has_a_drawing():
     check('every option has a drawing: ' + ', '.join(missing), not missing)
 
 
+def test_view_tree():
+    keys = {v['key'] for v in CH.views()}
+    order = CH.topo_order()
+    check('topo order covers every view once', sorted(order) == sorted(keys))
+    for v in CH.views():
+        k = v['key']
+        for p in v['parents']:
+            check(f'{k} parent {p} exists', p in keys)
+            check(f'{k} parent {p} comes first', order.index(p) < order.index(k))
+            check(f'{k} parent {p} rated no higher', CH._rank(CH.view(p)['rating']) <= CH._rank(v['rating']))
+            if v['required_from']:
+                pr = CH.view(p)['required_from']
+                check(f'{k} parent {p} required no later',
+                      pr and CH._rank(pr) <= CH._rank(v['required_from']))
+        ptiers = [CH.view(p)['tier'] for p in v['parents']]
+        check(f'{k} tier', v['tier'] in (0, 1, 2) and all(t <= v['tier'] for t in ptiers))
+        check(f'{k} mode', v['mode'] in CH.STRENGTH)
+        check(f'{k} crop has a region', v['mode'] != 'crop' or bool(v.get('region')))
+        check(f'{k} traits', CH.traits(k) and all(CH.features()[t][1] in v['uses'] for t in CH.traits(k)))
+
+
 if __name__ == '__main__':
     test_sfw_never_gets_nsfw()
     test_required_views()
     test_prompts()
     test_validation()
     test_every_option_has_a_drawing()
+    test_view_tree()
     print('FAILED' if FAILURES else 'OK', len(FAILURES))
     raise SystemExit(1 if FAILURES else 0)

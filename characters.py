@@ -163,55 +163,55 @@ STUDIO = ('Even soft studio lighting, plain neutral grey background, sharp '
 
 VIEWS = {
     'female': [
-        # key, label, group, rating, required_from, depends, framing, feature groups
-        dict(key='face_front', label='Face, front', group='face', rating='sfw', required_from='sfw', depends=(),
+        # key, label, group, rating, required_from, parents, tier, mode, region, framing, feature groups
+        dict(key='face_front', label='Face, front', group='face', rating='sfw', required_from='sfw', parents=(), tier=0, mode='reference',
              framing=('a front-facing head-and-shoulders portrait, looking straight into the lens, neutral '
                       'relaxed expression, mouth closed, hair tucked behind the shoulders, both ears visible'),
              uses=('face',)),
         dict(key='face_three_quarter', label='Face, three-quarter', group='face', rating='sfw', required_from=None,
-             depends=('face_front',), framing='a three-quarter view head-and-shoulders portrait, neutral expression', uses=('face',)),
+             parents=('face_front',), tier=1, mode='reference', framing='a three-quarter view head-and-shoulders portrait, neutral expression', uses=('face',)),
         dict(key='face_profile', label='Face, profile', group='face', rating='sfw', required_from=None,
-             depends=('face_front',), framing='a side-profile head-and-shoulders portrait, neutral expression', uses=('face',)),
+             parents=('body_front',), tier=1, mode='reference', framing='a side-profile head-and-shoulders portrait, neutral expression', uses=('face',)),
         dict(key='face_smile', label='Face, smiling', group='face', rating='sfw', required_from=None,
-             depends=('face_front',), framing='a front-facing head-and-shoulders portrait with a natural warm smile', uses=('face',)),
-        dict(key='body_front', label='Full body, front', group='body', rating='sfw', required_from='sfw', depends=('face_front',),
+             parents=('body_front',), tier=1, mode='reference', framing='a front-facing head-and-shoulders portrait with a natural warm smile', uses=('face',)),
+        dict(key='body_front', label='Full body, front', group='body', rating='sfw', required_from='sfw', parents=('face_front',), tier=0, mode='reference',
              framing=('a full-body photo from head to feet, standing straight facing the camera in a relaxed '
                       'A-pose, wearing a plain fitted nude-coloured bodysuit'),
              uses=('face', 'body')),
-        dict(key='body_side', label='Full body, side', group='body', rating='sfw', required_from=None, depends=('body_front',),
+        dict(key='body_side', label='Full body, side', group='body', rating='sfw', required_from=None, parents=('body_front',), tier=1, mode='reference',
              framing='a full-body side view, standing straight, wearing a plain fitted bodysuit', uses=('body',)),
-        dict(key='body_back', label='Full body, back', group='body', rating='sfw', required_from=None, depends=('body_front',),
+        dict(key='body_back', label='Full body, back', group='body', rating='sfw', required_from='explicit', parents=('body_front',), tier=1, mode='reference',
              framing='a full-body view from behind, standing straight, wearing a plain fitted bodysuit', uses=('body',)),
-        dict(key='hands', label='Hands', group='body', rating='sfw', required_from=None, depends=('body_front',),
+        dict(key='hands', label='Hands', group='body', rating='sfw', required_from=None, parents=('body_front',), tier=1, mode='reference',
              framing='a close-up of both hands resting open, palms down', uses=('body',)),
-        dict(key='feet', label='Feet', group='body', rating='sfw', required_from=None, depends=('body_front',),
+        dict(key='feet', label='Feet', group='body', rating='sfw', required_from=None, parents=('body_front',), tier=1, mode='reference',
              framing='a close-up of both bare feet standing on a plain floor', uses=('body',)),
         dict(key='nude_front', label='Nude full body, front', group='nsfw', rating='moderate', required_from='moderate',
-             depends=('face_front', 'body_front'),
+             parents=('body_front',), tier=0, mode='reference',
              framing='a full-body nude photo from head to feet, standing straight facing the camera, arms relaxed at her sides',
              uses=('body', 'breasts', 'nipples', 'pubic')),
         dict(key='breasts', label='Breasts (topless, front)', group='nsfw', rating='moderate', required_from='moderate',
-             depends=('face_front', 'body_front'), framing='a topless torso photo from the front, arms down at her sides',
+             parents=('nude_front',), tier=1, mode='crop', region='chest', framing='a topless torso photo from the front, arms down at her sides',
              uses=('breasts', 'nipples')),
         dict(key='nipples', label='Nipples (close-up)', group='nsfw', rating='moderate', required_from='moderate',
-             depends=('face_front', 'body_front'), framing='a close-up photo of her bare chest, focused on the nipples and areolae',
+             parents=('breasts',), tier=2, mode='crop', region='chest_detail', framing='a close-up photo of her bare chest, focused on the nipples and areolae',
              uses=('nipples',)),
-        dict(key='rear_nude', label='Nude from behind (standing)', group='nsfw', rating='moderate', required_from=None,
-             depends=('face_front', 'body_front'), framing='a full-body nude photo from behind, standing straight', uses=('body',)),
+        dict(key='rear_nude', label='Nude from behind (standing)', group='nsfw', rating='moderate', required_from='explicit',
+             parents=('nude_front', 'body_back'), tier=1, mode='reference', framing='a full-body nude photo from behind, standing straight', uses=('body',)),
         dict(key='pubic', label='Pubic area (front, standing)', group='nsfw', rating='explicit', required_from='explicit',
-             depends=('face_front', 'body_front'), framing='a nude photo of her lower torso and hips from the front, standing',
+             parents=('nude_front',), tier=1, mode='crop', region='pelvis', framing='a nude photo of her lower torso and hips from the front, standing',
              uses=('pubic',)),
         dict(key='vulva_closed', label='Vagina, closed', group='nsfw', rating='explicit', required_from='explicit',
-             depends=('face_front', 'body_front'), framing='an explicit close-up of her vulva, legs apart, labia closed',
+             parents=('nude_front',), tier=1, mode='reference', framing='an explicit close-up of her vulva, legs apart, labia closed',
              uses=('pubic', 'vulva')),
         dict(key='vulva_open', label='Vagina, open', group='nsfw', rating='explicit', required_from=None,
-             depends=('face_front', 'body_front'), framing='an explicit close-up of her vulva, labia spread open with her fingers',
+             parents=('vulva_closed',), tier=2, mode='reference', framing='an explicit close-up of her vulva, labia spread open with her fingers',
              uses=('pubic', 'vulva')),
         dict(key='anus_closed', label='Anus, closed (bending forward)', group='nsfw', rating='explicit', required_from='explicit',
-             depends=('face_front', 'body_front'), framing='an explicit rear view, bending forward, buttocks apart, anus closed',
+             parents=('rear_nude',), tier=2, mode='reference', framing='an explicit rear view, bending forward, buttocks apart, anus closed',
              uses=('anus',)),
         dict(key='anus_open', label='Anus, open (bending forward)', group='nsfw', rating='explicit', required_from=None,
-             depends=('face_front', 'body_front'), framing='an explicit rear view, bending forward, buttocks spread, anus open',
+             parents=('rear_nude',), tier=2, mode='reference', framing='an explicit rear view, bending forward, buttocks spread, anus open',
              uses=('anus',)),
     ],
 }
@@ -246,6 +246,36 @@ def view(key, body_type='female'):
     return None
 
 
+# Denoise for a crop's detail pass; reference weight for a generated view.
+STRENGTH = {'crop': 0.32, 'reference': 0.65}
+
+
+def parents(key, body_type='female'):
+    v = view(key, body_type)
+    return tuple(v['parents']) if v else ()
+
+
+def topo_order(body_type='female'):
+    """View keys with every parent before its children."""
+    done, out = set(), []
+    def visit(k):
+        if k not in done:
+            done.add(k)
+            for p in parents(k, body_type):
+                visit(p)
+            out.append(k)
+    for v in views(body_type):
+        visit(v['key'])
+    return out
+
+
+def traits(key, body_type='female'):
+    """Profile traits a view inherits: the sheet keys of the groups it uses."""
+    v = view(key, body_type)
+    uses = set(v['uses']) if v else set()
+    return [k for k, (_, g, _) in features(body_type).items() if g in uses]
+
+
 def features(body_type='female'):
     return FEATURES.get(body_type) or FEATURES['female']
 
@@ -271,7 +301,7 @@ def catalogue(level, body_type='female'):
     groups = {g for g, lvl in GROUP_LEVEL.items() if _rank(lvl) <= _rank(level)}
     return {
         'level': level, 'levels': [{'key': k, 'label': l} for k, l in LEVELS],
-        'views': [dict(v, depends=list(v['depends']), uses=list(v['uses']),
+        'views': [dict(v, parents=list(v['parents']), uses=list(v['uses']), traits=traits(v['key'], body_type),
                        required=bool(v['required_from'] and _rank(v['required_from']) <= _rank(level)))
                   for v in views_for_level(level, body_type)],
         'features': [{'key': k, 'label': lab, 'group': g, 'options': [o for o, _ in opts]}
