@@ -1590,6 +1590,23 @@ def _dev_payments_enabled():
     return (os.getenv('DEV_FAKE_PAYMENTS') or '').strip() == '1'
 
 
+def _token_sales_open():
+    """Whether creators may buy generation tokens. On by default; TOKEN_SALES_OPEN=0
+    closes the shop without a deploy, which matters because generation itself is
+    still admin-only -- a creator can buy tokens today and not yet spend them."""
+    return (os.getenv('TOKEN_SALES_OPEN') or '1').strip() != '0'
+
+
+def _token_test_pack_enabled():
+    """The pack that sells 1,000 tokens at Stripe's minimum charge, for proving
+    the live payment path without spending 130 euro on it. Off unless
+    TOKEN_TEST_PACK=1, and admin-only on top of that: at 0.50 euro it hands over
+    roughly 40 dollars of provider spend. Two independent gates, so forgetting
+    one is not enough to expose it, and the env flag kills it from the Cloud Run
+    console without waiting for a build."""
+    return (os.getenv('TOKEN_TEST_PACK') or '').strip() == '1'
+
+
 def _db_session():
     from db import SessionLocal
     return SessionLocal()
@@ -4431,7 +4448,48 @@ def billing_return():
     user = _current_user()
     if not user:
         return redirect('/login')
+    topup = _settle_token_session(user, request.args.get('session_id') or '')
+    if topup:
+        where = '/studio' if user.get('is_admin') else '/billing'
+        return redirect(f'{where}?topup={topup}')
     return redirect('/dashboard' if _user_is_active(user) else '/billing')
+
+
+def _settle_token_session(user, session_id):
+    """Credit a paid token pack on the way back from Stripe rather than waiting
+    for the webhook, which routinely lands after the browser does -- a creator
+    who has just paid and sees an unchanged balance assumes the money is gone.
+
+    Safe to race the webhook: token_purchase is keyed on the payment id, so
+    whichever arrives second posts nothing. Returns the token count to
+    acknowledge, or 0 when this was not a paid token session."""
+    if not session_id or not _stripe_key():
+        return 0
+    from db import Payment
+    s = _db_session()
+    try:
+        pay = (s.query(Payment)
+               .filter(Payment.track_id == session_id,
+                       Payment.user_id == user['id'],
+                       Payment.kind == 'tokens').first())
+        if not pay:
+            return 0
+        # Stripe is the authority on whether it was paid, not the redirect: the
+        # browser arrives at this URL whatever actually happened.
+        obj = _stripe_get(f'/checkout/sessions/{urllib.parse.quote(session_id)}') or {}
+        if obj.get('payment_status') not in ('paid', 'no_payment_required'):
+            return 0
+        if not pay.paid_at:
+            pay.paid_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        pay.status = 'paid'
+        _token_payment_paid(s, pay)
+        s.commit()
+        return int(pay.tokens or 0)
+    except Exception:
+        error_logger.error('Token session settle failed', exc_info=True)
+        return 0
+    finally:
+        s.close()
 
 
 def _checkout_oxapay(user, tier_key, tier, order_id, base):
@@ -4486,6 +4544,21 @@ def _stripe_post(path, form, timeout=20):
         error_logger.error('Stripe POST %s failed: %s', path, e.read()[:300])
     except Exception:
         error_logger.error('Stripe POST %s failed', path, exc_info=True)
+    return None
+
+
+def _stripe_get(path, timeout=20):
+    """GET from the Stripe API and return the parsed body, or None on failure."""
+    req = urllib.request.Request(
+        f'{STRIPE_API}{path}',
+        headers={'Authorization': 'Bearer ' + _stripe_key()})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode())
+    except url_error.HTTPError as e:
+        error_logger.error('Stripe GET %s failed: %s', path, e.read()[:300])
+    except Exception:
+        error_logger.error('Stripe GET %s failed', path, exc_info=True)
     return None
 
 
@@ -4617,6 +4690,14 @@ def api_tokens():
         'monthly': user_capabilities(user).get('tokens_month'),
         'equivalents': CR.equivalents(balance or 0),
         'packs': CR.packs_for(_user_currency(user)),
+        # Appended, never mixed in: it is priced far under cost, so it reaches
+        # the menu only for an admin with the env flag set.
+        'test_pack': (CR.test_pack_for(_user_currency(user))
+                      if _token_test_pack_enabled() and user.get('is_admin')
+                      else None),
+        'sales_open': _token_sales_open(),
+        'can_buy': bool(_token_sales_open()
+                        and (_user_is_active(user) or user.get('is_admin'))),
         'prices': CR.price_table(),
         # Admin only: this is what the provider bills us, which is the margin
         # written out. A creator is quoted tokens and cash, never this.
@@ -4633,10 +4714,11 @@ def api_tokens():
 
 @app.route('/api/tokens/history')
 def api_tokens_history():
-    blocked = _require_admin()
-    if blocked:
-        return blocked
+    """This workspace's own ledger. Open to any signed-in creator now that they
+    can buy tokens: a balance nobody can audit is a support ticket."""
     user = _current_user()
+    if not user:
+        return jsonify({'error': 'Sign in required'}), 401
     from db import token_history
     s = _db_session()
     try:
@@ -4673,21 +4755,39 @@ def api_tokens_checkout():
     and the same two webhooks as a subscription — `kind` is the only thing that
     tells them apart, so Oxapay keeps working untouched.
 
-    Admin-only for now: the packs are priced for a generation feature that is
-    still in testing, so nobody should be able to buy tokens for it yet."""
-    blocked = _require_admin()
-    if blocked:
-        return blocked
+    A pack is asked for by id, not by token count: the test pack grants 1,000
+    tokens and so does a real 130 euro one, and a size alone could not tell the
+    gate which of the two was meant."""
     user = _current_user()
+    if not user:
+        return jsonify({'error': 'Sign in required'}), 401
+    if not _token_sales_open():
+        return jsonify({'error': 'Token top-ups are not open yet.'}), 403
+    if not _user_is_active(user) and not user.get('is_admin'):
+        return jsonify({'error': 'Subscription required',
+                        'status': user.get('status')}), 402
+
     body = request.get_json(silent=True) or {}
-    try:
-        size = int(body.get('tokens') or 0)
-    except (TypeError, ValueError):
-        size = 0
+    pack_id = str(body.get('pack') or '').strip().lower()
     currency = _user_currency(user)
-    price = CR.pack_price(size, currency) if size else None
-    if price is None:
-        return jsonify({'error': 'Unknown token pack'}), 400
+    is_test = pack_id == CR.TEST_PACK_ID
+    if is_test:
+        # Both gates, every time. Priced at a fraction of cost, so a 404 rather
+        # than a 403: an account that may not buy it should not learn it exists.
+        if not (_token_test_pack_enabled() and user.get('is_admin')):
+            return jsonify({'error': 'Unknown token pack'}), 404
+        row = CR.test_pack_for(currency)
+        size, price = row['tokens'], row['price']
+        logger.warning('TEST PACK CHECKOUT (underpriced) user=%s tokens=%s price=%s %s',
+                       user['email'], size, price, currency)
+    else:
+        try:
+            size = int(pack_id or 0)
+        except (TypeError, ValueError):
+            size = 0
+        price = CR.pack_price(size, currency) if size else None
+        if price is None:
+            return jsonify({'error': 'Unknown token pack'}), 400
 
     provider = (body.get('provider') or '').strip().lower()
     if provider not in _CHECKOUT_PROVIDERS:
@@ -4701,7 +4801,7 @@ def api_tokens_checkout():
     order_id = f'{user["id"]}-c{secrets.token_hex(6)}'
     base = _callback_origin()
     pack = {'name': f'{size:,} tokens', 'price': price, 'tokens': size,
-            'currency': currency, 'days': 0}
+            'currency': currency, 'days': 0, 'test': is_test}
     if provider == 'stripe':
         pay_url, track_id = _checkout_stripe_tokens(user, pack, order_id, base)
     else:
@@ -4734,7 +4834,7 @@ def _checkout_stripe_tokens(user, pack, order_id, base):
     form = {
         'mode': 'payment',
         'success_url': f'{base}/billing/return?session_id={{CHECKOUT_SESSION_ID}}',
-        'cancel_url': f'{base}/admin',
+        'cancel_url': f'{base}/billing#tokens',
         'client_reference_id': order_id,
         'line_items[0][quantity]': '1',
         'metadata[order_id]': order_id,
@@ -4745,9 +4845,17 @@ def _checkout_stripe_tokens(user, pack, order_id, base):
             (pack.get('currency') or CURRENCY).lower(),
         'line_items[0][price_data][unit_amount]':
             str(int(round(pack['price'] * 100))),
-        'line_items[0][price_data][product_data][name]': pack['name'],
-        'line_items[0][price_data][product_data][tax_code]': STRIPE_TAX_CODE,
     }
+    # One durable Product per pack, so the live catalogue does not fill with a
+    # throwaway product per sale and revenue can be read per pack. The amount
+    # still comes from credits.py on every request, so the price charged cannot
+    # drift from the price quoted however long the Product has existed.
+    product = _stripe_token_product(pack['tokens'], pack.get('test'))
+    if product:
+        form['line_items[0][price_data][product]'] = product
+    else:
+        form['line_items[0][price_data][product_data][name]'] = pack['name']
+        form['line_items[0][price_data][product_data][tax_code]'] = STRIPE_TAX_CODE
     if user.get('stripe_customer_id'):
         form['customer'] = user['stripe_customer_id']
     else:
@@ -4760,6 +4868,44 @@ def _checkout_stripe_tokens(user, pack, order_id, base):
         logger.error('Stripe returned no url for tokens: %s', str(payload)[:300])
         return None, None
     return pay_url, str(payload.get('id') or '')
+
+
+TOKEN_PRODUCT_SETTING = 'stripe_token_product_%s'
+
+
+def _stripe_token_product(size, test=False):
+    """The one Stripe Product behind every sale of this pack, created on first
+    sale and remembered -- the same trick _stripe_ref_coupon uses for the
+    referral coupon. Returns '' if Stripe cannot be reached, and the caller
+    falls back to an inline product rather than losing the sale."""
+    key = TOKEN_PRODUCT_SETTING % (CR.TEST_PACK_ID if test else size)
+    from db import get_app_setting, set_app_setting
+    s = _db_session()
+    try:
+        existing = (get_app_setting(s, key) or '').strip()
+    finally:
+        s.close()
+    if existing:
+        return existing
+    name = (f'{size:,} tokens (test pack)' if test else f'{size:,} generation tokens')
+    payload = _stripe_post('/products', {
+        'name': name,
+        'tax_code': STRIPE_TAX_CODE,
+        'metadata[pack]': CR.TEST_PACK_ID if test else str(size),
+        'metadata[tokens]': str(size),
+    })
+    product = str((payload or {}).get('id') or '')
+    if not product:
+        return ''
+    s = _db_session()
+    try:
+        set_app_setting(s, key, product)
+        s.commit()
+    finally:
+        s.close()
+    logger.info('STRIPE token product created pack=%s id=%s',
+                CR.TEST_PACK_ID if test else size, product)
+    return product
 
 
 def _token_payment_paid(session_db, pay):
