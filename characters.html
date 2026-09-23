@@ -243,6 +243,14 @@
     <!-- 4 Body -->
     <div class="ch-row" data-step="body" hidden>
       <div class="ch-grow" style="display:flex; flex-direction:column; gap:16px;">
+        <div class="ch-card">
+          <h2 class="ch-h2">Choose her body features</h2>
+          <div class="fp-list" id="body-features"></div>
+          <div style="display:flex; align-items:center; gap:12px; margin-top:12px; flex-wrap:wrap;">
+            <button type="button" class="btn btn-primary" id="body-save" onclick="saveSheet(null, 'body-save')">Save features</button>
+            <span class="msg" id="body-save-msg" aria-live="polite" style="margin:0;"></span>
+          </div>
+        </div>
         <div>
           <h2 class="ch-h1">Body views</h2>
           <p class="ch-muted" id="body-summary"></p>
@@ -282,11 +290,6 @@
         </div>
       </div>
       <div class="ch-side">
-        <div class="ch-card">
-          <h2 class="ch-h2">Full body features</h2>
-          <div class="fp-list" id="body-features"></div>
-          <button type="button" class="btn" style="margin-top:12px; width:100%;" onclick="saveSheet()">Save features</button>
-        </div>
         <div class="ch-card" style="display:flex; flex-direction:column; gap:10px;">
           <h2 class="ch-h2" style="margin:0;">Your references</h2>
           <span class="ch-muted" style="margin:0;">Optional. General references apply to every view; view references attach to the view that is open. Any view upload can be approved as its final photo, except faces.</span>
@@ -428,17 +431,23 @@ function collectSheet() {
   });
   return sheet;
 }
-async function saveSheet(extra) {
+// Name, age and notes are only edited on Describe; any other step sends just
+// the sheet, since those fields are empty until Describe has been shown once.
+async function saveSheet(extra, btnId) {
+  const btn = btnId && el(btnId), note = btnId && el(btnId + '-msg');
+  const tell = (text, kind) => { say(text, kind); if (note) { note.textContent = text; note.className = 'msg ' + (kind || ''); } };
+  if (btn) btn.disabled = true;
   try {
-    const body = Object.assign({sheet: collectSheet(), name: el('f-name').value, age: +el('f-age').value,
-      notes: el('f-notes').value}, extra || {});
+    const body = Object.assign({sheet: collectSheet()}, step === 'describe'
+      ? {name: el('f-name').value, age: +el('f-age').value, notes: el('f-notes').value} : {}, extra || {});
     const d = await api('/api/characters/' + cur.id, {method: 'PUT', body});
     cur = d.character;
     cat = await api('/api/characters/catalogue?level=' + cur.nsfw_level);
-    say((d.warnings || []).join(' ') || 'Saved.', (d.warnings || []).length ? '' : 'ok');
     render();
+    tell((d.warnings || []).join(' ') || 'Saved.', (d.warnings || []).length ? '' : 'ok');
     return true;
-  } catch (e) { say(e.message, 'err'); return false; }
+  } catch (e) { tell(e.message, 'err'); return false; }
+  finally { if (btn) btn.disabled = false; }
 }
 
 function renderDescribe() {
