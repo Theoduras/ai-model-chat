@@ -106,6 +106,15 @@
     }
     .gen-lightbox[hidden] { display: none; }
     .gen-lightbox img, .gen-lightbox video { max-width: 100%; max-height: 100%; border-radius: var(--r); }
+    .gen-lb-nav {
+      position: absolute; top: 50%; transform: translateY(-50%); width: 44px; height: 44px;
+      border: 0; border-radius: 50%; background: #ffffff26; color: #fff; font-size: 26px;
+      line-height: 1; cursor: pointer;
+    }
+    .gen-lb-nav:hover { background: #ffffff40; }
+    .gen-lb-nav[hidden] { display: none; }
+    .gen-lb-prev { left: 12px; }
+    .gen-lb-next { right: 12px; }
     .gen-ref-x {
       position: absolute; top: 2px; right: 2px; width: 17px; height: 17px; padding: 0;
       border: none; border-radius: 50%; background: #000000c0; color: var(--text);
@@ -539,6 +548,10 @@
   <img decoding="async" id="gen-lightbox-img" src="" alt="">
   <video id="gen-lightbox-video" src="" controls autoplay playsinline hidden
          onclick="event.stopPropagation()"></video>
+  <button type="button" class="gen-lb-nav gen-lb-prev" id="gen-lb-prev" aria-label="Previous"
+          onclick="event.stopPropagation(); stepLightbox(-1)">‹</button>
+  <button type="button" class="gen-lb-nav gen-lb-next" id="gen-lb-next" aria-label="Next"
+          onclick="event.stopPropagation(); stepLightbox(1)">›</button>
 </div>
 
 <script src="/js/site-nav.js" defer></script>
@@ -947,7 +960,7 @@ function renderRefs() {
     const v = byId[id];
     if (!v) return '';
     return `<span class="gen-ref-t" role="img" aria-label="${esc(v.purpose || 'Her photo')}"
-       onclick="openLightbox('${v.thumb}')" title="Click to see it full size">
+       data-lb="${v.thumb}" onclick="openLightbox(this)" title="Click to see it full size">
        <img loading="lazy" decoding="async" src="${v.thumb}" alt="">${v.purpose ? `<em>${esc(v.purpose)}</em>` : ''}
        <button type="button" class="gen-ref-x" aria-label="Remove from this group"
          onclick="event.stopPropagation(); toggleRef('${role}', '${v.id}')">&times;</button></span>`;
@@ -1032,16 +1045,34 @@ function isClip(kind) {
   return kind === 'video' || kind === 'swap';
 }
 
-function openLightbox(src, kind) {
+// Prev/next walks the thumbnails that sit beside the one clicked, so each
+// grid (results, vault, her photos) pages through only itself.
+let lbItems = [], lbIdx = 0;
+function openLightbox(node) {
+  lbItems = [...node.parentNode.querySelectorAll(':scope > [data-lb]')];
+  lbIdx = Math.max(0, lbItems.indexOf(node));
+  showLightbox();
+}
+
+function showLightbox() {
+  const node = lbItems[lbIdx];
+  const src = node.dataset.lb, clip = isClip(node.dataset.kind);
   const img = el('gen-lightbox-img'), player = el('gen-lightbox-video');
-  const clip = isClip(kind);
   img.hidden = clip;
   img.src = clip ? '' : src;
   if (player) {
+    if (!clip) player.pause();
     player.hidden = !clip;
     player.src = clip ? src : '';
   }
+  el('gen-lb-prev').hidden = el('gen-lb-next').hidden = lbItems.length < 2;
   el('gen-lightbox').hidden = false;
+}
+
+function stepLightbox(d) {
+  if (lbItems.length < 2) return;
+  lbIdx = (lbIdx + d + lbItems.length) % lbItems.length;
+  showLightbox();
 }
 
 function closeLightbox() {
@@ -1052,6 +1083,10 @@ function closeLightbox() {
 }
 
 document.addEventListener('keydown', e => {
+  if (!el('gen-lightbox').hidden && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+    stepLightbox(e.key === 'ArrowLeft' ? -1 : 1);
+    return;
+  }
   if (e.key !== 'Escape') return;
   if (!el('gen-lightbox').hidden) closeLightbox();
   else if (!el('gen-vault').hidden) closeVault();
@@ -1968,7 +2003,7 @@ function renderGenStaging() {
         ? `<video src="${m.url}" muted playsinline preload="metadata" controls></video>`
         : `<img loading="lazy" decoding="async" src="${m.url}" alt="">`;
       cards.push(`
-        <div class="gen-card" onclick="openLightbox('${m.url}', '${m.kind}')">
+        <div class="gen-card" data-lb="${m.url}" data-kind="${m.kind}" onclick="openLightbox(this)">
           ${thumb}
           <span class="gen-ttl">${esc(genTtl(m.expires_at))}</span>
           <div class="gen-acts">
@@ -2167,7 +2202,7 @@ function renderVault() {
          <span class="vault-kind">video</span>${parent}`
       : `<img loading="lazy" decoding="async" src="${v.thumb}" alt="" draggable="false">`;
     return `
-      <div class="vault-item" onclick="openLightbox('${v.thumb}', '${v.kind}')">
+      <div class="vault-item" data-lb="${v.thumb}" data-kind="${v.kind}" onclick="openLightbox(this)">
         ${thumb}
       </div>`;
   }).join('') : '<div class="vault-empty">Nothing kept yet — generate some shots above.</div>';
