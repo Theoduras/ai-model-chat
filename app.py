@@ -5761,7 +5761,8 @@ td{padding:10px;border-bottom:1px solid var(--border);color:var(--text-2)}
 code{font-size:.8rem;color:#a78bfa;word-break:break-all}
 form.inline{display:inline}
 form.inline button{width:auto;padding:4px 12px;margin:0;font-size:.78rem;background:var(--surface);color:var(--text)}
-.newrow{display:flex;gap:8px}.newrow input{flex:1;margin:0}.newrow button{width:auto;padding:0 18px;margin:0}
+.newrow{display:flex;gap:8px;align-items:center}.newrow input{flex:1;margin:0}.newrow button{width:auto;padding:0 18px;margin:0}
+.prefix{color:var(--text-muted);font-size:.85rem;white-space:nowrap}
 </style></head><body data-page="admin-register-links"><div class="wrap wide">
 <div class="bar"><span>Register links</span><a href="/admin/users">Users</a></div>
 <div class="card">
@@ -5771,8 +5772,9 @@ form.inline button{width:auto;padding:4px 12px;margin:0;font-size:.78rem;backgro
 {% if saved %}<div class="ok">{{ saved }}</div>{% endif %}
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
 <form method="post"><input type="hidden" name="action" value="create">
-<label>Note (which channel is this for?)</label>
-<div class="newrow"><input name="note" placeholder="e.g. bio link, IG story" maxlength="200">
+<label>Slug (the /signup-&hellip; part)</label>
+<div class="newrow"><span class="prefix">/signup-</span><input name="slug" placeholder="x" maxlength="32" pattern="[a-z0-9-]+">
+<input name="note" placeholder="Note, e.g. IG story" maxlength="200">
 <button type="submit">Create link</button></div></form>
 <table><tr><th>Link</th><th>Note</th><th>Created</th><th>Clicks</th><th></th></tr>
 {% for r in rows %}<tr>
@@ -6274,14 +6276,20 @@ def admin_register_links():
         if request.method == 'POST':
             action = request.form.get('action', '')
             if action == 'create':
-                link = RegisterLink(
-                    code=secrets.token_urlsafe(9).replace('-', '').replace('_', '')[:12],
-                    note=(request.form.get('note') or '').strip()[:200],
-                    created_by=me['id'])
-                s.add(link)
-                s.commit()
-                saved = 'Register link created.'
-                logger.info('REGISTER LINK CREATED by=%s code=%s', me['email'], link.code)
+                slug = re.sub(r'[^a-z0-9-]', '',
+                              (request.form.get('slug') or '').strip().lower())[:32]
+                if not slug:
+                    error = 'Pick a short slug, e.g. "x" for /signup-x.'
+                elif s.query(RegisterLink).filter(RegisterLink.code == slug).first():
+                    error = f'/signup-{slug} is already taken.'
+                else:
+                    link = RegisterLink(code=slug,
+                                        note=(request.form.get('note') or '').strip()[:200],
+                                        created_by=me['id'])
+                    s.add(link)
+                    s.commit()
+                    saved = 'Register link created.'
+                    logger.info('REGISTER LINK CREATED by=%s code=%s', me['email'], link.code)
             elif action == 'delete':
                 link = s.query(RegisterLink).filter(
                     RegisterLink.code == request.form.get('code', '')).first()
@@ -6290,7 +6298,7 @@ def admin_register_links():
                     s.commit()
                     saved = 'Register link deleted.'
         rows = [{'code': link.code, 'note': link.note or '',
-                 'link': f'{_callback_origin()}/rl/{link.code}',
+                 'link': f'{_callback_origin()}/signup-{link.code}',
                  'created': _fmt_date(link.created_at),
                  'clicks': link.clicks or 0}
                 for link in list_register_links(s)]
@@ -6300,10 +6308,10 @@ def admin_register_links():
                                   saved=saved, error=error)
 
 
-@app.route('/rl/<code>')
+@app.route('/signup-<code>')
 def register_link_click(code):
     """A plain tracked link to /register — counts the click, grants nothing."""
-    code = (code or '').strip()[:32]
+    code = re.sub(r'[^a-z0-9-]', '', (code or '').strip().lower())[:32]
     from db import RegisterLink
     s = _db_session()
     try:
