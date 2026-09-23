@@ -193,6 +193,9 @@ def test_snapshot_views():
     check('face-only is face views', all(
         CH.view(k)['group'] == 'face' for k in CH.snapshot_views(snap, None, None, True)))
     partial = {'body_type': 'female', 'views': {'face_front': every['face_front']}}
+    check('reel sends face then full body', CH.reel_views(snap) == ['face_front', 'body_front'])
+    check('reel skips an unapproved view',
+          CH.reel_views({'views': {'body_front': 1}}) == ['body_front'])
     check('partial sends only approved views',
           CH.snapshot_views(partial, 'portrait', '') == ['face_front'])
 

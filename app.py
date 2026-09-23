@@ -30373,7 +30373,10 @@ def _gen_start(job_id, slug, spec, workspace):
                 elif job == 'reel':
                     char = spec.get('character')
                     if char:
-                        call['reference_urls'] = _character_urls(char, None, None)
+                        call['reference_urls'] = [
+                            u for u in (_char_path_url(char['views'][k]['path'],
+                                                       char['views'][k]['mime'])
+                                        for k in CH.reel_views(char)) if u]
                         if not call['reference_urls']:
                             raise imagegen.GenerationError(
                                 "Her character's safe-work photos could not be read.")

@@ -542,6 +542,15 @@ def views_for_job(shot, scene, level=None, body_type='female'):
             if view(k, body_type) and _rank(view(k, body_type)['rating']) <= _rank(level)]
 
 
+# A reel's model takes at most three references, so it gets the two that
+# carry identity; a still, when there is one, is the third.
+REEL_VIEWS = ('face_front', 'body_front')
+
+
+def reel_views(snap):
+    return [k for k in REEL_VIEWS if k in snap['views']]
+
+
 def snapshot_views(snap, shot, scene, face_only=False):
     """The approved views in a job's character snapshot that this shot may
     send. A clip passes no shot, so it gets only the safe-work base views."""

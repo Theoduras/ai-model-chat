@@ -446,7 +446,7 @@ def wants_face_only(model_key):
 
 # A model asking for a clean portrait is not helped by thirty of them, and each
 # extra one is another chance to pull her face towards an average.
-MODEL_REF_CAP = {'p-video-replace': 4, 'minimax-h3': 5, 'minimax-h3-fast': 5}
+MODEL_REF_CAP = {'p-video-replace': 4, 'wan-2-7': 3, 'minimax-h3': 5, 'minimax-h3-fast': 5}
 
 
 def video_seconds(model_key, seconds):
