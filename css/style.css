@@ -2960,12 +2960,17 @@ body.embedding:not(.ob-running) .preview-panel { display: none; }
      so the collapsed sidebar is a 0px column rather than a removed one, and its
      contents keep their width and are clipped by it instead of reflowing. */
   .sidebar > * { width: 280px; flex-shrink: 0; }
-  body.sidebar-off .sidebar { opacity: 0; border-right-color: transparent; }
   body.browsing:not(.ob-running) .layout,
   body.embedding:not(.ob-running) .layout { grid-template-columns: 280px 1fr; }
-  body.sidebar-off .layout { grid-template-columns: 0px 1fr 340px; }
+  /* Collapsed, the sidebar is a rail of its icons: the text is hidden rather
+     than removed so each icon keeps its place and its click. */
+  body.sidebar-off .layout { grid-template-columns: 52px 1fr 340px; }
   body.browsing.sidebar-off:not(.ob-running) .layout,
-  body.embedding.sidebar-off:not(.ob-running) .layout { grid-template-columns: 0px 1fr; }
+  body.embedding.sidebar-off:not(.ob-running) .layout { grid-template-columns: 52px 1fr; }
+  body.sidebar-off .sidebar { overflow: hidden; }
+  body.sidebar-off .sidebar :is(.sb-ws, .sb-search, .sb-label, .sb-quick, .sb-refer, .btn-new) { display: none; }
+  body.sidebar-off .sidebar :is(.sb-badge, .sb-chevron, .sb-soon-tag, .sb-item > span) { visibility: hidden; }
+  body.sidebar-off .sidebar .sb-children { padding-left: 0; margin-left: 0; border-left: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -3847,3 +3852,7 @@ body.embedding .form-area { padding: 0; overflow: hidden; }
 .pl-attached-dl { left: -6px; }
 .pl-attached-x:hover { color: var(--err); border-color: var(--err); }
 .pl-attached-dl:hover { color: var(--text); }
+
+.dash-brand { font-family: 'Sora', 'Inter', system-ui, sans-serif; font-weight: 800; font-size: 20px;
+  letter-spacing: -.02em; color: var(--text); text-decoration: none; }
+.dash-brand i { color: var(--accent, #ff5c38); font-style: normal; }

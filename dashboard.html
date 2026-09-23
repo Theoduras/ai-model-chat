@@ -24,11 +24,10 @@
     <button class="icon-btn mobile-only" onclick="openSidebar()" title="Personas" aria-label="Open personas">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="20" height="20"><path d="M4 6h16M4 12h16M4 18h16" stroke-linecap="round"/></svg>
     </button>
-    <button class="icon-btn desk-only" onclick="toggleSidebar()" title="Show or hide the persona list" aria-label="Toggle persona list">
+    <button class="icon-btn desk-only" onclick="toggleSidebar()" title="Collapse or expand the menu" aria-label="Toggle menu">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="20" height="20"><path d="M4 6h16M4 12h16M4 18h16" stroke-linecap="round"/></svg>
     </button>
-    <h1>Persona Builder</h1>
-    <span class="badge">Dashboard</span>
+    <a href="/" class="brand dash-brand"><span data-sn-brand>Velvetfunnel</span><i data-sn-suffix>.app</i></a>
   </div>
   <div style="display:flex; align-items:center; gap:16px;">
     <button class="icon-btn mobile-only" onclick="openPreview()" title="Preview" aria-label="Open preview">
@@ -288,12 +287,7 @@
     <div class="sb-foot">
       <button type="button" class="btn btn-primary sb-refer" data-view="/referrals" data-search="referrals refer earn commission invite"
               onclick="openEmbedded('/referrals', this)">Refer a creator &middot; earn 5%</button>
-      <!-- Opened from the header's account picture; kept as the frame anchor for /account, /billing and /tokens. -->
-      <button type="button" class="sb-item" hidden data-view="/account" data-search="account billing plan tokens profile"
-              onclick="openEmbedded('/account', this)">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2.5 2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        <span>Account</span>
-      </button>
+      <span hidden data-view="/account"></span>
     </div>
   </aside>
 
