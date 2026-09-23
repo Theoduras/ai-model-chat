@@ -268,25 +268,17 @@ body.kbd .site-nav{display:none}
 .tier-toggle button:not(.on):hover{background:var(--hover)}
 .features-cta a{transition:transform .2s,box-shadow .2s}
 .features-cta a:hover{transform:translateY(-2px) scale(1.03);box-shadow:0 16px 34px #ff2d7855}
+.features-cta a.soon{opacity:.6;pointer-events:none}
 .feature-group h3 .gi{transition:transform .3s}
 .feature-group:hover h3 .gi{transform:rotate(8deg) scale(1.08)}
 /* Scroll reveal: sections rise in the first time they come into view. */
 .reveal{opacity:0;transform:translateY(26px);transition:opacity .7s cubic-bezier(.22,1,.36,1),transform .7s cubic-bezier(.22,1,.36,1)}
 .reveal.in{opacity:1;transform:none}
-.tier-card{animation:riseIn .5s cubic-bezier(.22,1,.36,1) both}
-.tier-card:hover{box-shadow:0 22px 48px rgba(0,0,0,.16)}
-.tier-card li{transition:color .2s,transform .2s}
-.tier-card li:hover{color:var(--text);transform:translateX(3px)}
-.tier-card a{transition:transform .2s,box-shadow .2s,border-color .2s}
-.tier-card a:hover{transform:translateY(-2px)}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}.reveal{opacity:1;transform:none}}
 @media(max-width:900px){.features{padding:74px 22px 10px}.feature-groups{grid-template-columns:1fr}
   .sec-head h2{font-size:30px}.hl{flex-basis:calc(50% - 10px)}.tier-toggle button{padding:9px 14px}}
 /* ── Pricing ── */
 .pricing{padding:100px 60px 110px;background:var(--bg);scroll-margin-top:96px}
-.pricing-head{text-align:center;max-width:640px;margin:0 auto 56px}
-.pricing-head h2{font-family:'Sora';font-weight:800;font-size:38px;letter-spacing:-.02em;margin-bottom:14px}
-.pricing-head p{color:var(--text-soft);font-size:16px;line-height:1.6}
 .gen-compare{max-width:860px;margin:64px auto 0;padding:28px 26px;border:1px solid var(--line,rgba(255,255,255,.12));border-radius:16px}
 .gen-compare h3{font-family:'Sora';font-weight:700;font-size:22px;letter-spacing:-.01em;margin:0 0 10px}
 .gen-compare-lede{color:var(--text-soft);font-size:15px;line-height:1.6;margin:0 0 20px;max-width:56ch}
@@ -300,32 +292,8 @@ body.kbd .site-nav{display:none}
 .gen-compare-table .no{color:var(--text-soft)}
 .gen-compare-note{color:var(--text-soft);font-size:14px;line-height:1.6;margin:18px 0 0;max-width:60ch}
 @media (max-width:640px){.gen-compare{padding:22px 16px;margin-top:44px}}
-.tier-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:18px;max-width:1440px;margin:0 auto}
-.tier-card.soon{opacity:.85}
-.tier-card{background:var(--panel);border:1px solid var(--hair);border-radius:16px;padding:26px 22px;display:flex;flex-direction:column}
-.tier-card.featured{border-color:#ff2d78;box-shadow:0 0 0 1px #ff2d78 inset,0 20px 46px #ff2d781f;position:relative}
-.tier-card.featured::before{content:"Most popular";position:absolute;top:-11px;left:22px;background:var(--grad);background-size:300% 100%;color:#fff;font-size:10.5px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;padding:4px 11px;border-radius:9999px;animation:gsweep 6s linear infinite}
-.tier-card{transition:transform .25s,border-color .25s,box-shadow .25s}
-.tier-card:hover{transform:translateY(-3px);border-color:var(--hair-strong)}
-.tier-card h3{font-family:'Sora';font-weight:700;font-size:19px;margin-bottom:6px}
-.tier-card .blurb{color:var(--text-soft);font-size:13px;line-height:1.5;margin-bottom:18px;min-height:38px}
-.tier-card .price{font-family:'Sora';font-weight:800;font-size:30px;margin-bottom:18px}
-.tier-card .price span{font-family:'Inter';font-weight:500;font-size:13px;color:var(--text-dim)}
-.tier-card .price .vat{font-size:12px;color:var(--text-dim)}
-.tier-card ul{list-style:none;margin:0 0 22px;padding:0;flex:1}
-.tier-card li{font-size:13px;color:var(--text-soft);padding:6px 0;border-top:1px solid var(--hair);display:flex;gap:8px}
-.tier-card li:first-child{border-top:0}
-.tier-card li::before{content:"✓";color:var(--accent);font-weight:700}
-.tier-card a{display:block;text-align:center;text-decoration:none;font-weight:600;font-size:14px;padding:12px;border-radius:10px;color:#fff;background:var(--field);color:var(--text);border:1px solid var(--field-border)}
-.soon-cta{display:block;text-align:center;font-weight:600;font-size:14px;padding:12px;border-radius:10px;background:var(--field);color:var(--text-muted,var(--text));border:1px solid var(--field-border);opacity:.7}
-.tier-card.featured a{background:var(--grad);background-size:300% 100%;border:0;animation:gsweep 6s linear infinite}
-@media(max-width:1240px){
-  .tier-grid{grid-template-columns:repeat(3,1fr)}
-}
 @media(max-width:900px){
   .pricing{padding:70px 24px 80px}
-  .pricing-head h2{font-size:28px}
-  .tier-grid{grid-template-columns:1fr 1fr;gap:14px}
 }
 /* The nav overlays a panel that is 52% of the viewport, so below roughly
    1320px the links reach the artwork. Give the bar its own backdrop there
@@ -334,9 +302,6 @@ body.kbd .site-nav{display:none}
   .site-nav{background:var(--nav-bg);backdrop-filter:blur(18px) saturate(180%);
     -webkit-backdrop-filter:blur(18px) saturate(180%);
     box-shadow:0 14px 38px rgba(0,0,0,.18),0 1px 0 var(--hair)}
-}
-@media(max-width:600px){
-  .tier-grid{grid-template-columns:1fr}
 }
 </style>
 </head>
@@ -384,7 +349,7 @@ body.kbd .site-nav{display:none}
 
 </div>
 
-<section class="features" id="features">
+<section class="features" id="pricing">
   <div class="sec-head">
     <div class="sec-eyebrow"><span class="d"></span><span data-edit-id="features-eyebrow">What you get</span></div>
     <h2><span data-edit-id="features-title-a">Everything in the</span> <em data-edit-id="features-title-b">platform</em></h2>
@@ -394,7 +359,7 @@ body.kbd .site-nav{display:none}
   <div class="feature-note" id="feature-note"></div>
   <div class="hl-row" id="hl-row"></div>
   <div class="feature-groups" id="feature-groups">Loading features…</div>
-  <div class="features-cta"><a href="#pricing" data-edit-id="features-cta">See the plans</a></div>
+  <div class="features-cta"><a href="/register" id="features-cta">Get started</a></div>
 </section>
 
 <script>
@@ -417,7 +382,7 @@ fetch('/api/features')
     // Numbers roll up to their value each time the tier changes.
     function countUp(){
       hlRow.querySelectorAll('.v').forEach(function(el){
-        var target = parseInt(el.getAttribute('data-to'), 10);
+        var target = parseInt(el.getAttribute('data-to').replace(/,/g, ''), 10);
         if (isNaN(target) || target > 400) return;
         var t0 = performance.now(), dur = 620;
         (function step(now){
@@ -452,7 +417,12 @@ fetch('/api/features')
       requestAnimationFrame(function(){ movePill(!toggle.classList.contains('ready')); });
 
       note.innerHTML = '<b>' + esc(t.name) + '</b> — ' + esc(t.blurb) +
-        (t.price ? ' ' + cursym + t.price + '/month, excl. VAT.' : ' Free, by invitation.');
+        (t.price ? ' ' + cursym + t.price + '/month, excl. VAT.'
+                 : t.price_label ? ' ' + t.price_label + '.' : ' Free, no card needed.');
+      var cta = document.getElementById('features-cta');
+      cta.textContent = t.cta;
+      cta.classList.toggle('soon', t.cta === 'Coming soon');
+      if (t.cta === 'Coming soon') cta.removeAttribute('href'); else cta.href = '/register';
 
       hlRow.innerHTML = (t.highlights || []).map(function(h, i){
         return '<div class="hl" style="animation-delay:' + (i * 60) + 'ms">' +
@@ -518,7 +488,7 @@ fetch('/api/features')
       b.type = 'button';
       b.setAttribute('data-tier', key);
       b.innerHTML = esc(t.name) + '<span class="tprice">' +
-        (t.price ? cursym + t.price : 'Free') + '</span>';
+        (t.price ? cursym + t.price : t.price_label || 'Free') + '</span>';
       b.onclick = function(){ cur = key; render(); };
       toggle.appendChild(b);
     });
@@ -540,19 +510,12 @@ fetch('/api/features')
       if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
     });
   }, { threshold: .12, rootMargin: '0px 0px -60px 0px' });
-  document.querySelectorAll('.sec-head, .tier-toggle, .feature-note, .hl-row, .feature-groups, .features-cta, .tier-grid')
+  document.querySelectorAll('.sec-head, .tier-toggle, .feature-note, .hl-row, .feature-groups, .features-cta')
     .forEach(function(el){ el.classList.add('reveal'); io.observe(el); });
 })();
 </script>
 
-<section class="pricing" id="pricing">
-  <div class="sec-head pricing-head">
-    <div class="sec-eyebrow"><span class="d"></span><span data-edit-id="pricing-eyebrow">Plans</span></div>
-    <h2><span data-edit-id="pricing-title">Simple, transparent</span> <em data-edit-id="pricing-title-b">pricing</em></h2>
-    <p data-edit-id="pricing-subtitle">Pick the plan your roster needs, and upgrade when it needs more personas and platforms. All prices exclude VAT.</p>
-  </div>
-  <div class="tier-grid" id="tier-grid">Loading plans…</div>
-
+<section class="pricing" id="generation">
   <!-- Capability first, price second: the per-photo number only means something
        once you know which of these will generate her at all. -->
   <div class="gen-compare">
@@ -614,54 +577,6 @@ fetch('/api/features')
   <a href="/tos" style="color:inherit;text-decoration:none;opacity:.7;">Terms and Conditions</a>
 </footer>
 
-<script>
-fetch('/api/pricing')
-  .then(function(r){ return r.ok ? r.json() : null; })
-  .then(function(d){
-    if (!d) return;
-    var grid = document.getElementById('tier-grid');
-    grid.innerHTML = '';
-    var free = d.tiers.free;
-    if (free) {
-      var f = document.createElement('div');
-      f.className = 'tier-card';
-      f.innerHTML =
-        '<h3>' + free.name + '</h3>' +
-        '<div class="blurb">' + free.blurb + '</div>' +
-        '<div class="price">' + (d.currency || '\u20ac') + '0<span>/month</span></div>' +
-        '<ul>' + free.features.map(function(x){ return '<li>' + x + '</li>'; }).join('') + '</ul>' +
-        '<a href="/register">Start free</a>';
-      grid.appendChild(f);
-    }
-    d.order.forEach(function(key){
-      var t = d.tiers[key];
-      if (!t) return;
-      var card = document.createElement('div');
-      card.className = 'tier-card' + (key === 'pro' ? ' featured' : '');
-      var price = (d.currency || '\u20ac') + t.price +
-        '<span>/' + (t.period || 'month') + '</span> <span class="vat">excl. VAT</span>';
-      card.innerHTML =
-        '<h3>' + t.name + '</h3>' +
-        '<div class="blurb">' + t.blurb + '</div>' +
-        '<div class="price">' + price + '</div>' +
-        '<ul>' + t.features.map(function(f){ return '<li>' + f + '</li>'; }).join('') + '</ul>' +
-        '<a href="/register">Get started</a>';
-      grid.appendChild(card);
-    });
-    if (d.custom) {
-      var c = document.createElement('div');
-      c.className = 'tier-card' + (d.custom.coming_soon ? ' soon' : '');
-      c.innerHTML =
-        '<h3>' + d.custom.name + '</h3>' +
-        '<div class="blurb">' + d.custom.blurb + '</div>' +
-        '<div class="price">' + d.custom.price_label + '</div>' +
-        '<ul>' + d.custom.features.map(function(f){ return '<li>' + f + '</li>'; }).join('') + '</ul>' +
-        '<span class="soon-cta">' + d.custom.cta + '</span>';
-      grid.appendChild(c);
-    }
-  })
-  .catch(function(){});
-</script>
 
 <script>
 (function(){
