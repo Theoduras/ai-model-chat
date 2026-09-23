@@ -241,7 +241,9 @@ VIEWS = {
              framing='a full-body nude photo from head to feet, standing straight facing the camera, arms relaxed at her sides',
              uses=('body', 'breasts', 'nipples', 'pubic')),
         dict(key='breasts', label='Breasts (topless, front)', group='nsfw', rating='moderate', required_from='moderate',
-             parents=('nude_front',), tier=1, mode='crop', region='chest', framing='a topless torso photo from the front, arms down at her sides',
+             parents=('nude_front',), tier=1, mode='crop', region='chest', zoom=True,
+             framing=('a close-up of her bare breasts from the front, framed from the collarbones to just below the '
+                      'breasts, arms down at her sides out of frame, both breasts centred and in sharp focus'),
              uses=('breasts', 'nipples')),
         dict(key='nipples', label='Nipples (close-up)', group='nsfw', rating='moderate', required_from='moderate',
              parents=('breasts',), tier=2, mode='crop', region='chest_detail', zoom=True,

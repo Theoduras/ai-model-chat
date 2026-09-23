@@ -30048,6 +30048,34 @@ def api_character_approve(char_id, img_id):
         s.close()
 
 
+@app.route('/api/characters/<char_id>/images/<img_id>/unapprove', methods=['POST'])
+def api_character_unapprove(char_id, img_id):
+    """Take the approval off a view's photo but keep the photo, back among the
+    candidates. It stays in kept/ with no expiry, so it cannot be purged."""
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    user = _current_user()
+    from db import CharacterImage
+    s = _db_session()
+    try:
+        row = _char_row(s, user, char_id)
+        img = row and s.query(CharacterImage).filter_by(id=img_id, character_id=char_id,
+                                                        role='canonical').first()
+        if not img or not img.view:
+            return jsonify({'ok': False, 'error': 'Unknown image'}), 404
+        img.role = 'candidate'
+        rows, _ = _char_views_state(s, row)
+        cv = rows.get(img.view)
+        if cv:
+            cv.status, cv.result_image_id = 'review', img.id
+        _char_refresh_status(s, row)
+        s.commit()
+        return jsonify({'ok': True, 'character': _char_json(s, row, full=True)})
+    finally:
+        s.close()
+
+
 @app.route('/api/generate/models')
 def api_generate_models():
     """What the provider actually calls its models.

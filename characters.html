@@ -368,7 +368,7 @@
       </div>
       <div class="actionbar" style="flex-wrap:wrap;">
         <div style="display:flex; align-items:center; gap:8px; width:100%;"><span class="dl">Variations</span><div class="chips" id="vp-batch"></div></div>
-        <button type="button" class="btn" id="vp-remove" hidden>Remove approved photo</button>
+        <button type="button" class="btn" id="vp-remove" hidden>Remove approval</button>
         <button type="button" class="btn" id="vp-check" onclick="runViewCheck()" hidden>Adult check</button>
         <button type="button" class="btn" id="vp-var" onclick="generate(selView)"></button>
         <button type="button" class="btn btn-primary" id="vp-primary"></button>
@@ -864,8 +864,8 @@ function renderViewPanel() {
   const kept = st.status === 'approved' && canonOf(v.key);
   el('vp-remove').hidden = !kept;
   el('vp-remove').onclick = kept ? () => confirm(v.key === 'face_front'
-    ? 'Remove the approved face? Every other view depends on it and will need approving again.'
-    : 'Remove the approved photo for ' + v.label + '? Views built on it will need regenerating.') && removeImage(kept.id, true) : null;
+    ? 'Remove the approval from the face? Every other view depends on it and will need approving again.'
+    : 'Remove the approval from ' + v.label + '? Views built on it will need regenerating.') && unapproveView(kept.id) : null;
   prim.disabled = !action || (st.display === 'review' && !cand);
   prim.onclick = action ? action[1] : null;
   el('vp-var').disabled = locked || st.display === 'generating';
@@ -972,6 +972,10 @@ async function runViewCheck(id) {
 }
 async function approveView(id) {
   try { await api(`/api/characters/${cur.id}/images/${id}/approve`, {body: {}}); await reload(); say('Approved.', 'ok'); }
+  catch (e) { say(e.message, 'err'); }
+}
+async function unapproveView(id) {
+  try { cur = (await api(`/api/characters/${cur.id}/images/${id}/unapprove`, {body: {}})).character; render(); say('Approval removed.', 'ok'); }
   catch (e) { say(e.message, 'err'); }
 }
 async function removeImage(id, confirmed) {
