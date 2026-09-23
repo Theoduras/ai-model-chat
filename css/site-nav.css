@@ -58,6 +58,16 @@
 .sn-links a.sn-cta{opacity:1;color:#fff;background:var(--accent,#ff5c38);
   border-color:var(--accent,#ff5c38)}
 .sn-links a.sn-cta:hover{filter:brightness(1.08);background:var(--accent,#ff5c38)}
+/* The token count wears the app's btn-primary (the "+ New persona" button):
+   the same sweeping gradient and radius, with fallbacks for pages whose
+   stylesheet does not define them. */
+.sn-links a.sn-cta[data-sn-tokens]{border:0;border-radius:var(--r,12px);
+  background:var(--grad,linear-gradient(120deg,#ff5c38,#ff2d78 30%,#7c3aed 60%,#ff2d78 80%,#ff5c38));
+  background-size:300% 100%;color:var(--accent-ink,#fff)}
+.sn-links a.sn-cta[data-sn-tokens]:hover{filter:none;transform:translateY(-1px);
+  box-shadow:0 8px 24px #ff2d7855;animation:snSweep 3s ease-in-out infinite alternate}
+@keyframes snSweep{0%{background-position:0% 50%}100%{background-position:100% 50%}}
+@media(prefers-reduced-motion:reduce){.sn-links a.sn-cta[data-sn-tokens]:hover{animation:none}}
 
 /* The Features dropdown. The button is styled as a nav link so the bar reads
    as one row; the panel is absolutely positioned off it. */
