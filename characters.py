@@ -540,6 +540,16 @@ def views_for_job(shot, scene, level=None, body_type='female'):
             if view(k, body_type) and _rank(view(k, body_type)['rating']) <= _rank(level)]
 
 
+def snapshot_views(snap, shot, scene, face_only=False):
+    """The approved views in a job's character snapshot that this shot may
+    send. A clip passes no shot, so it gets only the safe-work base views."""
+    keys = [k for k in views_for_job(shot, scene, None, snap['body_type'])
+            if k in snap['views']]
+    if face_only:
+        keys = [k for k in keys if view(k, snap['body_type'])['group'] == 'face']
+    return keys
+
+
 def content_clause(sheet, level, body_type='female'):
     """What a content prompt adds for a linked character: her fixed features,
     cut to the job's level."""

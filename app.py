@@ -29343,37 +29343,54 @@ def _char_persona_ok(slug):
     return mine is None or slug in mine
 
 
-def _character_for_slug(slug):
+def _char_ref_url(img):
+    return _char_path_url(img.gcs_path, img.mime)
+
+
+def _char_path_url(path, mime):
+    """Something the provider can fetch: a signed URL, or the bytes inline when
+    the backend cannot mint one -- dropping a reference would quietly cost her
+    the identity lock."""
+    import base64
+    try:
+        url = storage.signed_url(path)
+    except Exception:
+        url = None
+    if url:
+        return url
+    try:
+        data = storage.get(path)
+    except Exception:
+        return None
+    return 'data:%s;base64,%s' % (mime or 'image/jpeg',
+                                  base64.b64encode(data).decode()) if data else None
+
+
+def _character_snapshot(slug):
+    """The linked character as it stands at submit: every approved view and
+    her features. The job keeps this copy, so re-approving a view later never
+    changes what a past job was generated from. None until a view is approved."""
     from db import Character
     s = _db_session()
     try:
         row = s.query(Character).filter(Character.slug == slug).first()
         if not row:
             return None
-        return {'id': row.id, 'version': row.version or 0, 'status': row.status,
-                'age': row.age, 'level': row.nsfw_level,
-                'body_type': row.body_type, 'sheet': _char_json_sheet(row)}
+        views = {k: {'path': img.gcs_path, 'mime': img.mime}
+                 for k, img in _char_canonicals(s, row.id).items()}
+        if not views:
+            return None
+        return {'id': row.id, 'version': row.version or 0, 'age': row.age,
+                'body_type': row.body_type, 'sheet': _char_json_sheet(row),
+                'views': views}
     finally:
         s.close()
 
 
-def _char_ref_url(img):
-    """Something the provider can fetch: a signed URL, or the bytes inline when
-    the backend cannot mint one -- dropping a reference would quietly cost her
-    the identity lock."""
-    import base64
-    try:
-        url = storage.signed_url(img.gcs_path)
-    except Exception:
-        url = None
-    if url:
-        return url
-    try:
-        data = storage.get(img.gcs_path)
-    except Exception:
-        return None
-    return 'data:%s;base64,%s' % (img.mime or 'image/jpeg',
-                                  base64.b64encode(data).decode()) if data else None
+def _character_urls(snap, shot, scene, face_only=False):
+    keys = CH.snapshot_views(snap, shot, scene, face_only)
+    return [u for u in (_char_path_url(snap['views'][k]['path'], snap['views'][k]['mime'])
+                        for k in keys) if u]
 
 
 def _character_view_refs(char_id, view_key):
@@ -29416,24 +29433,15 @@ def _character_view_refs(char_id, view_key):
 
 def _character_content(spec):
     """(reference urls, prompt clause, age) a linked character adds to a content
-    still. The rating filter is in CH.views_for_job, so a safe-work shot cannot
-    be handed an intimate view or intimate words."""
-    if not spec.get('character_id'):
+    still, read from the job's own snapshot. The rating filter is in
+    CH.views_for_job, so a safe-work shot cannot be handed an intimate view or
+    intimate words."""
+    snap = spec.get('character')
+    if not snap:
         return [], '', None
-    from db import Character
-    s = _db_session()
-    try:
-        row = s.query(Character).filter(Character.id == spec['character_id']).first()
-        if not row:
-            return [], '', None
-        level = CH.job_level(spec.get('shot'), spec.get('scene'))
-        canon = _char_canonicals(s, row.id)
-        keys = CH.views_for_job(spec.get('shot'), spec.get('scene'), level, row.body_type)
-        urls = [u for u in (_char_ref_url(canon[k]) for k in keys if k in canon) if u]
-        return (urls, CH.content_clause(_char_json_sheet(row), level, row.body_type),
-                row.age)
-    finally:
-        s.close()
+    level = CH.job_level(spec.get('shot'), spec.get('scene'))
+    return (_character_urls(snap, spec.get('shot'), spec.get('scene')),
+            CH.content_clause(snap['sheet'], level, snap['body_type']), snap['age'])
 
 
 def _character_finish(job_id, spec, workspace, urls):
@@ -30204,8 +30212,9 @@ def api_generate_job():
 
     try:
         spec = _gen_spec(slug, body, user)
-        char = _character_for_slug(slug) if spec['kind'] == 'image' else None
-        if char and char.get('status') == 'complete':
+        char = _character_snapshot(slug)
+        if char:
+            spec['character'] = char
             spec['character_id'] = char['id']
             spec['character_version'] = char['version']
         price = CR.quote(spec)
@@ -30340,6 +30349,9 @@ def _gen_start(job_id, slug, spec, workspace):
                     refs = _gen_reference_urls(slug, spec.get('model'))
                     if not refs:
                         refs = _gen_reference_urls(slug, imagegen.EXPLICIT_MODEL)
+                    if spec.get('character'):
+                        refs = (_character_urls(spec['character'], None, None)
+                                + refs)[:imagegen.MAX_REFERENCES]
                     if not refs:
                         raise imagegen.GenerationError(
                             'Fill her face reference slots first — a '
@@ -30372,6 +30384,10 @@ def _gen_start(job_id, slug, spec, workspace):
                     if not refs:
                         ref_model = imagegen.EXPLICIT_MODEL
                         refs = _gen_reference_urls(slug, ref_model, role=role)
+                    if spec.get('character'):
+                        refs = (_character_urls(spec['character'], None, None,
+                                                face_only=bool(role))
+                                + refs)[:imagegen.MAX_REFERENCES]
                     logger.info('swap job=%s refs=%d role=%s from=%s',
                                 job_id, len(refs), role or 'face+body', ref_model)
                     if refs:

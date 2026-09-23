@@ -173,6 +173,22 @@ def test_resolver():
     check('not-yet-generated child is not outdated', st['hands'] == 'not_started')
     branch = CH.outdated_branch(rows)
     check('branch holds outdated', 'face_profile' in branch and 'face_front' not in branch)
+def test_snapshot_views():
+    every = {v['key']: {'path': v['key'], 'mime': 'image/jpeg'} for v in CH.views()}
+    snap = {'body_type': 'female', 'views': every}
+    for shot in SHOT_LEVEL:
+        for scene in [''] + list(SCENES):
+            level = CH.job_level(shot, scene)
+            for k in CH.snapshot_views(snap, shot, scene):
+                check(f'snapshot {shot}/{scene} {k} within {level}',
+                      CH._rank(CH.view(k)['rating']) <= CH._rank(level))
+    check('clip gets only safe-work views', all(
+        CH.view(k)['rating'] == 'sfw' for k in CH.snapshot_views(snap, None, None)))
+    check('face-only is face views', all(
+        CH.view(k)['group'] == 'face' for k in CH.snapshot_views(snap, None, None, True)))
+    partial = {'body_type': 'female', 'views': {'face_front': every['face_front']}}
+    check('partial sends only approved views',
+          CH.snapshot_views(partial, 'portrait', '') == ['face_front'])
 
 
 if __name__ == '__main__':
@@ -183,5 +199,6 @@ if __name__ == '__main__':
     test_every_option_has_a_drawing()
     test_view_tree()
     test_resolver()
+    test_snapshot_views()
     print('FAILED' if FAILURES else 'OK', len(FAILURES))
     raise SystemExit(1 if FAILURES else 0)

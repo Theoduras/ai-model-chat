@@ -630,7 +630,7 @@ async function loadCredits() {
 }
 
 // The linked character, and which of her approved views this shot will send.
-// A still generates from her photos whenever the character is complete.
+// Every approved view is used, complete or not, and the job keeps a copy.
 async function loadCharacterBadge() {
   const box = el('gen-character');
   if (!box || !slug()) return;
@@ -645,12 +645,13 @@ async function loadCharacterBadge() {
   box.hidden = !c;
   if (!c) return;
   const views = c.shot_views || [];
+  const sent = views.filter(v => v.approved);
   const missing = views.filter(v => !v.approved);
-  box.innerHTML = `<b>${esc(c.name)}</b> · ` + (c.status === 'complete'
-      ? 'photos sent with this shot: ' + (views.filter(v => v.approved).map(v => esc(v.label)).join(', ') || '—')
-      : 'character not complete yet, so her photos are not used. <a href="/characters?id=' + esc(c.id) + '">Finish it</a>')
-    + (c.status === 'complete' && missing.length
-      ? `<br>Missing: ${missing.map(v => esc(v.label)).join(', ')} — the result may not match her exactly.` : '')
+  box.innerHTML = `<b>${esc(c.name)}</b> · `
+    + (sent.length ? 'photos sent with this shot: ' + sent.map(v => esc(v.label)).join(', ')
+                   : 'no approved photos yet, so the vault photos are used.')
+    + (missing.length
+      ? `<br>Missing: ${missing.map(v => esc(v.label)).join(', ')} — <a href="/characters?id=${esc(c.id)}">approve them</a> for a closer match.` : '')
     + '<br><small>Safe-work shots never receive an explicit photo.</small>';
 }
 document.addEventListener('change', e => {

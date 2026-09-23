@@ -288,14 +288,17 @@ Stay completely in character. Never mention being an AI.
   against the live catalogue** — run `imagegen.search_models('audio')` the
   moment a Runware key is reachable and correct the env defaults.
 - **A character is identity material, never vault media.** `CharacterImage` is
-  its own table so no send, post or pick path can reach one. Once a linked
-  character is complete, every still for that persona carries its approved
+  its own table so no send, post or pick path can reach one. From its first
+  approved view, every still for that persona carries its approved
   views as references and its features as prompt text, both cut to the shot's
   level by `characters.views_for_job` / `describe`: a safe-work shot never gets
   an explicit photo or word. The face and full-body photos need a confident
   "adult" from the vision check (SFW images only — nothing explicit goes to
   Google) and the face needs every feature ticked. Each approval saves a
-  `CharacterVersion`; jobs record `character_version`. Face uploads are
+  `CharacterVersion`; every job, clips included, stores a snapshot of the
+  approved views and features (`spec['character']`) and generates from that
+  copy, so a later re-approval never changes a past job. Swap and
+  Multi-reference clips lead with its safe-work views. Face uploads are
   references only; stacked youth-leaning choices are refused in `characters.validate`.
 - **Views are a tree.** Each view in `characters.VIEWS` names its parents; a
   `CharacterView` row holds status and version, and `characters.resolve_status`
