@@ -3688,7 +3688,13 @@ const TOUR_STEPS = [
   { anchor: '#sb-nav-personas', title: 'Personas',
     body: 'Each persona is an AI version of you that chats with your fans. Create one with <b>+ New Persona</b> and set her voice, her tone and how she sells.' },
   { anchor: '[data-view="/characters"]', span: '[data-view="/studio"]', title: 'Content creation',
-    body: 'Make photos and clips of your persona. <b>Characters</b> locks in her look; the <b>Generation Studio</b> turns it into content. Your plan includes tokens every month.' },
+    body: 'Make photos of your persona. <b>Character Creator</b> locks in her look; the <b>Generation Studio</b> turns it into photos. Video is coming soon.' },
+  { anchor: '[data-view="/vault"]', title: 'Vault',
+    body: 'Photos you keep from the studio land here. Nothing reaches a fan until you have approved it.' },
+  { anchor: '#sb-group-platforms', title: 'Platforms',
+    body: 'Connect the accounts she chats and posts on. OnlyFans, Fansly, TikTok and Reddit are coming soon.' },
+  { anchor: '[data-sn-tokens]', title: 'Tokens',
+    body: 'Generating spends tokens. Your plan adds an allowance every month, and you can top up here any time.' },
   { anchor: '[data-view="/characters"]', span: '[data-view="/studio"]', title: 'Make your first photo',
     body: 'Start with her character so every photo looks like her, or jump straight into the studio.', final: true },
 ];
@@ -3763,8 +3769,10 @@ function placeTour() {
     + '<div class="obt-body">' + st.body + '</div>'
     + '<div class="obt-foot"><span class="obt-count">' + (tour.i + 1) + ' of ' + n + '</span>' + foot + '</div>';
   const dw = dlg.offsetWidth, dh = dlg.offsetHeight;
-  const top2 = spot ? r.top : (vh - dh) / 2;
-  const left2 = spot ? r.right + 16 : (vw - dw) / 2;
+  let top2 = spot ? r.top : (vh - dh) / 2;
+  let left2 = spot ? r.right + 16 : (vw - dw) / 2;
+  // An anchor on the right edge (the header's token count) takes the dialog underneath it.
+  if (spot && left2 + dw > vw - 12) { top2 = r.bottom + 16; left2 = r.right - dw; }
   dlg.style.top = Math.max(12, Math.min(top2, vh - dh - 12)) + 'px';
   dlg.style.left = Math.max(12, Math.min(left2, vw - dw - 12)) + 'px';
 }

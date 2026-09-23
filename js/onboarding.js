@@ -36,9 +36,16 @@
 
     { stage: 'who', key: 'photos', nav: 'Photos',
       title: 'What does she look like?',
-      sub: 'Build her character — face and body. Every photo of her is made from it, and her vault fills from there.',
-      pick: function () { return section('character-box'); },
-      done: function () { return !!document.querySelector('#character-box img'); } },
+      sub: 'Her profile picture, from her vault or an upload, and how she looks. Link a character in Character Creator and it fills these in for you.',
+      // The Character section is admin-only, so it only joins the step when shown.
+      pick: function () {
+        var box = section('character-box').filter(function (s) { return s.offsetParent; });
+        return fields(['f-avatar-input', 'f-appearance', 'f-body-type', 'f-chest-size',
+          'f-hair-colour', 'f-eye-colour']).concat(box);
+      },
+      done: function (c) {
+        return !!(c.avatar || (c.appearance || '').trim() || (byId('f-appearance') || {}).disabled);
+      } },
 
     { stage: 'talks', key: 'speech', nav: 'Speech style',
       title: 'How does she write?',
