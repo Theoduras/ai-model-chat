@@ -1,3 +1,43 @@
+// Token spend watcher. Spending happens on half a dozen pages (studio, the
+// character builder, the dashboard and the consoles' image buttons), so it is
+// caught here from fetch instead of every page remembering to report it. It
+// runs in every window, framed ones included: the studio and the character
+// builder live inside the dashboard's iframe, while the counter lives in the
+// top window's header, so a framed page posts the news up to it. A job poll is
+// where a refund for a failed generation surfaces; those run every few
+// seconds, so they only report on a throttle.
+(function () {
+  if (!window.fetch) return;
+  var framed = window.self !== window.top;
+  var SPEND = /^\/api\/(generate\/|characters\/[^/]+\/generate)/;
+  var POLL = /^\/api\/generate\/jobs?(\/|$|\?)/;
+  var lastPoll = 0;
+  function changed() {
+    if (framed) {
+      try { window.top.postMessage({ snTokens: 'changed' }, location.origin); } catch (e) {}
+    } else {
+      document.dispatchEvent(new Event('sn-tokens-changed'));
+    }
+  }
+  var nativeFetch = window.fetch.bind(window);
+  window.fetch = function (input, init) {
+    var p = nativeFetch.apply(null, arguments);
+    try {
+      var url = new URL(typeof input === 'string' ? input : input.url, location.href);
+      var method = ((init && init.method) || (input && input.method) || 'GET').toUpperCase();
+      if (url.origin === location.origin && url.pathname !== '/api/generate/tick') {
+        var spend = method === 'POST' && SPEND.test(url.pathname);
+        var poll = method === 'GET' && POLL.test(url.pathname) && Date.now() - lastPoll > 10000;
+        if (spend || poll) {
+          if (poll) lastPoll = Date.now();
+          p.then(changed, function () {});
+        }
+      }
+    } catch (e) { /* never let the counter break a request */ }
+    return p;
+  };
+})();
+
 // The site menu, in one place. Blog is always offered; Dashboard only once the
 // visitor is signed in. Two modes so a page never grows a second bar:
 //
@@ -228,37 +268,23 @@
 
   function refreshTokens() {
     if (tokenBalance === undefined) return;
-    return nativeFetch('/api/tokens/balance', { credentials: 'same-origin' })
+    return fetch('/api/tokens/balance', { credentials: 'same-origin' })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) { if (d && 'balance' in d) paintTokens(d.balance); })
       .catch(function () {});
   }
 
-  // Spending happens on half a dozen pages (studio, dashboard, the consoles'
-  // image buttons, the character builder), so the count listens to fetch here
-  // instead of every page remembering to report a spend. A job poll is where a
-  // refund for a failed generation surfaces; those run every few seconds, so
-  // they only refresh on a throttle.
-  var nativeFetch = window.fetch.bind(window);
-  var SPEND = /^\/api\/(generate\/|characters\/[^/]+\/generate)/;
-  var POLL = /^\/api\/generate\/jobs?(\/|$|\?)/;
-  var lastPollRefresh = 0;
-  window.fetch = function (input, init) {
-    var p = nativeFetch.apply(null, arguments);
-    try {
-      var url = new URL(typeof input === 'string' ? input : input.url, location.href);
-      var method = ((init && init.method) || (input && input.method) || 'GET').toUpperCase();
-      if (url.origin === location.origin && url.pathname !== '/api/generate/tick') {
-        var spend = method === 'POST' && SPEND.test(url.pathname);
-        var poll = method === 'GET' && POLL.test(url.pathname) && Date.now() - lastPollRefresh > 10000;
-        if (spend || poll) {
-          if (poll) lastPollRefresh = Date.now();
-          p.then(refreshTokens, function () {});
-        }
-      }
-    } catch (e) { /* never let the counter break a request */ }
-    return p;
-  };
+  // The watcher below reports spends; bursts (Generate remaining fires one
+  // POST per view) collapse into one balance read.
+  var refreshTimer = 0;
+  function tokensChanged() {
+    clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(refreshTokens, 400);
+  }
+  document.addEventListener('sn-tokens-changed', tokensChanged);
+  addEventListener('message', function (e) {
+    if (e.origin === location.origin && e.data && e.data.snTokens) tokensChanged();
+  });
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'visible') refreshTokens();
   });
