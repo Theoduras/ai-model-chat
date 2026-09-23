@@ -2811,6 +2811,7 @@ button.ob-rstep {
   margin-top: 16px;
 }
 .obt-count {
+  white-space: nowrap;
   font-size: 0.75rem;
   color: var(--text-muted);
   margin-right: auto;

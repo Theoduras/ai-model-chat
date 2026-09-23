@@ -131,6 +131,13 @@
   </div>
 </div>
 
+<div class="obt-root" id="db-tour" role="dialog" aria-modal="true" aria-label="Dashboard tour">
+  <div class="obt-mask obt-t"></div><div class="obt-mask obt-r"></div>
+  <div class="obt-mask obt-b"></div><div class="obt-mask obt-l"></div>
+  <div class="obt-ring"></div>
+  <div class="obt-dialog"></div>
+</div>
+
 <div class="layout">
 
   <aside class="sidebar" aria-label="Navigation">
@@ -789,6 +796,7 @@ async function init() {
   // The main area is painted once, here: the boot placeholder holds until the
   // restored view is known, so no intermediate screen is ever shown.
   if (!restoreView()) showPersonaBrowser();
+  maybeStartTour();
 }
 
 function applyConnState(configured, authMode, masked) {
@@ -3824,6 +3832,94 @@ function v(id) { const el = document.getElementById(id); return el ? el.value.tr
 function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function opt(options, selected) {
   return options.map(o => '<option value="' + esc(o) + '" ' + (o === selected ? 'selected' : '') + '>' + o + '</option>').join('');
+}
+
+// First-visit tour of the sidebar. Shown once per account: the outcome is kept
+// in the same setup blob as the persona wizard, under a key no slug can take.
+const TOUR_KEY = '_dashboard';
+const TOUR_STEPS = [
+  { anchor: '#sb-nav-personas', title: 'Personas',
+    body: 'Each persona is an AI version of you that chats with your fans. Create one with <b>+ New Persona</b> and set her voice, her tone and how she sells.' },
+  { anchor: '[data-view="/characters"]', span: '[data-view="/studio"]', title: 'Content creation',
+    body: 'Make photos and clips of your persona. <b>Characters</b> locks in her look; the <b>Generation Studio</b> turns it into content. Your plan includes tokens every month.' },
+  { anchor: '[data-view="/characters"]', span: '[data-view="/studio"]', title: 'Make your first photo',
+    body: 'Start with her character so every photo looks like her, or jump straight into the studio.', final: true },
+];
+let tour = null;
+
+function maybeStartTour() {
+  if (CURRENT_UID === 'anon') return;
+  if (((window.USER_SETUP || {})[TOUR_KEY] || {}).tour) return;
+  const steps = TOUR_STEPS.filter(st => document.querySelector(st.anchor));
+  if (!steps.length) return;
+  tour = { steps, i: 0 };
+  document.getElementById('db-tour').classList.add('on');
+  document.body.classList.add('obt-open');
+  window.addEventListener('resize', placeTour);
+  tourGo(0);
+}
+
+function tourGo(i) {
+  tour.i = i;
+  placeTour();
+}
+
+function endTour(outcome, then) {
+  if (!tour) return;
+  tour = null;
+  document.getElementById('db-tour').classList.remove('on');
+  document.body.classList.remove('obt-open');
+  window.removeEventListener('resize', placeTour);
+  (window.USER_SETUP = window.USER_SETUP || {})[TOUR_KEY] = { tour: outcome };
+  fetch('/api/me/setup', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slug: TOUR_KEY, tour: outcome }) }).catch(() => {});
+  if (then) openEmbedded(then, document.querySelector('[data-view="' + then + '"]'));
+}
+
+function placeTour() {
+  if (!tour) return;
+  const st = tour.steps[tour.i];
+  const root = document.getElementById('db-tour');
+  const q = c => root.querySelector(c);
+  const dlg = q('.obt-dialog');
+  const vw = window.innerWidth, vh = window.innerHeight, pad = 6;
+  const a = document.querySelector(st.anchor);
+  const b = st.span && document.querySelector(st.span);
+  let r = a && a.getBoundingClientRect();
+  if (r && b) {
+    const r2 = b.getBoundingClientRect();
+    r = { top: Math.min(r.top, r2.top), left: Math.min(r.left, r2.left),
+          right: Math.max(r.right, r2.right), bottom: Math.max(r.bottom, r2.bottom), width: 1 };
+  }
+  const spot = r && r.width && vw > 700;
+  root.classList.toggle('obt-nospot', !spot);
+  if (spot) {
+    const top = Math.max(0, r.top - pad), left = Math.max(0, r.left - pad);
+    const right = Math.min(vw, r.right + pad), bot = Math.min(vh, r.bottom + pad);
+    q('.obt-t').style.cssText = 'top:0;left:0;right:0;height:' + top + 'px;';
+    q('.obt-b').style.cssText = 'top:' + bot + 'px;left:0;right:0;bottom:0;';
+    q('.obt-l').style.cssText = 'top:' + top + 'px;left:0;width:' + left + 'px;height:' + (bot - top) + 'px;';
+    q('.obt-r').style.cssText = 'top:' + top + 'px;left:' + right + 'px;right:0;height:' + (bot - top) + 'px;';
+    q('.obt-ring').style.cssText = 'top:' + top + 'px;left:' + left + 'px;width:' + (right - left) + 'px;height:' + (bot - top) + 'px;';
+  } else {
+    q('.obt-t').style.cssText = '';
+  }
+  const n = tour.steps.length;
+  const foot = st.final
+    ? '<button class="btn btn-ghost" type="button" onclick="endTour(\'done\', \'/characters\')">Build her character</button>'
+      + '<button class="btn btn-primary" type="button" onclick="endTour(\'done\', \'/studio\')">Open the studio</button>'
+    : (tour.i > 0 ? '<button class="btn btn-ghost" type="button" onclick="tourGo(' + (tour.i - 1) + ')">Back</button>' : '')
+      + '<button class="btn btn-primary" type="button" onclick="' + (tour.i < n - 1 ? 'tourGo(' + (tour.i + 1) + ')">Next' : 'endTour(\'done\')">Got it') + '</button>';
+  dlg.innerHTML =
+    '<button class="obt-close" type="button" onclick="endTour(\'skipped\')" aria-label="Skip tour">&times;</button>'
+    + '<div class="obt-title">' + esc(st.title) + '</div>'
+    + '<div class="obt-body">' + st.body + '</div>'
+    + '<div class="obt-foot"><span class="obt-count">' + (tour.i + 1) + ' of ' + n + '</span>' + foot + '</div>';
+  const dw = dlg.offsetWidth, dh = dlg.offsetHeight;
+  const top2 = spot ? r.top : (vh - dh) / 2;
+  const left2 = spot ? r.right + 16 : (vw - dw) / 2;
+  dlg.style.top = Math.max(12, Math.min(top2, vh - dh - 12)) + 'px';
+  dlg.style.left = Math.max(12, Math.min(left2, vw - dw - 12)) + 'px';
 }
 
 init();
