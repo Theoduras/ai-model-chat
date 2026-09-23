@@ -30194,10 +30194,33 @@ def _char_to_persona(row, owner_id=None, extra=None):
                    'nsfw_enabled': row.nsfw_level != 'sfw'})
     if row.nsfw_level != 'sfw':
         config['nsfw_level'] = row.nsfw_level
+    config.update(_char_persona_look(_char_json_sheet(row)))
     if owner_id is None:
         owner_id = _persona_owner(row.slug)
     db_save_persona(row.slug, row.name, config, build_system_prompt(config),
                     owner_id=owner_id or None)
+
+
+_CHAR_BUILD = {'Slim': 'Slim', 'Athletic': 'Athletic', 'Curvy': 'Curvy',
+               'Voluptuous': 'Curvy', 'Muscular': 'Athletic', 'Average': 'Any'}
+
+
+def _char_persona_look(sheet):
+    """The persona builder's appearance boxes, filled from the character's
+    picks. One way only: free text in the builder has no option to map to."""
+    out = {}
+    hair = sheet.get('hair_colour')
+    if hair == 'Custom':
+        hair = CH.hair_words(sheet.get('hair_colour_hex')) if sheet.get('hair_colour_hex') else ''
+    if hair:
+        out['hair_colour'] = hair.lower()
+    if sheet.get('eye_colour'):
+        out['eye_colour'] = sheet['eye_colour'].lower()
+    if sheet.get('build') in _CHAR_BUILD:
+        out['body_type'] = _CHAR_BUILD[sheet['build']]
+    if sheet.get('bust') in ('Small', 'Medium', 'Large', 'Very large'):
+        out['chest_size'] = sheet['bust']
+    return out
 
 
 def _persona_char_fields(config):
@@ -30258,6 +30281,11 @@ def _char_rename_legacy():
             _char_move_content(s, old, new)
             s.commit()
             _prompt_cache.pop(old, None)
+        for row in s.query(D.Character).filter(D.Character.slug.isnot(None)).all():
+            look = _char_persona_look(_char_json_sheet(row))
+            saved = db_get_persona(row.slug)
+            if look and saved and not (saved.get('config') or {}).get('hair_colour'):
+                _char_to_persona(row)
     except Exception:
         s.rollback()
         logging.exception('legacy character persona rename failed')

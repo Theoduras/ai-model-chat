@@ -1950,31 +1950,31 @@ function renderForm(slug, cfg) {
         </div>
         <div class="field">
           <label>Hair colour</label>
-          <input id="f-hair-colour" value="${esc(cfg.hair_colour || '')}" placeholder="jet black">
+          <input type="text" id="f-hair-colour" value="${esc(cfg.hair_colour || '')}" placeholder="jet black">
         </div>
         <div class="field">
           <label>Eye colour</label>
-          <input id="f-eye-colour" value="${esc(cfg.eye_colour || '')}" placeholder="green">
+          <input type="text" id="f-eye-colour" value="${esc(cfg.eye_colour || '')}" placeholder="green">
         </div>
         <div class="field">
           <label>Style</label>
-          <input id="f-style" value="${esc(cfg.style || '')}" placeholder="streetwear">
+          <input type="text" id="f-style" value="${esc(cfg.style || '')}" placeholder="streetwear">
         </div>
         <div class="field">
           <label>Her phone</label>
-          <input id="f-phone-model" value="${esc(cfg.phone_model || '')}" placeholder="black iPhone 15 Pro">
+          <input type="text" id="f-phone-model" value="${esc(cfg.phone_model || '')}" placeholder="black iPhone 15 Pro">
           <span class="hint">Only used in selfies, where it is actually in shot.</span>
         </div>
         <div class="field">
           <label>Her voice</label>
-          <input id="f-voice" value="${esc(cfg.voice || '')}" placeholder="soft, low, slight West Country accent">
+          <input type="text" id="f-voice" value="${esc(cfg.voice || '')}" placeholder="soft, low, slight West Country accent">
           <span class="hint">How she sounds when a generated clip has her speak.</span>
         </div>
       </div>
 
       <div class="field full">
         <label>Never in her photos</label>
-        <input id="f-banned-terms" value="${esc(cfg.banned_terms || '')}" placeholder="tattoos, piercings, glasses">
+        <input type="text" id="f-banned-terms" value="${esc(cfg.banned_terms || '')}" placeholder="tattoos, piercings, glasses">
         <span class="hint">Comma separated. These are struck out of every generation prompt,
           whichever box they were typed into.</span>
       </div>
