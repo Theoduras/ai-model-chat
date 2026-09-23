@@ -1535,8 +1535,10 @@ window.addEventListener('message', function (e) {
   if (e.origin !== location.origin || !e.data || e.data.type !== 'fv-tour') return;
   var el = document.getElementById('fv-frame-dim');
   if (!e.data.on) { if (el) el.remove(); return; }
-  var frame = document.querySelector('.sb-frame');
-  if (!frame) return;
+  // The sender's own frame: the first .sb-frame can be the hidden Tokens lightbox,
+  // whose empty rect would dim the whole window, the tour included.
+  var frame = [].find.call(document.querySelectorAll('iframe'), function (f) { return f.contentWindow === e.source; });
+  if (!frame || !frame.getBoundingClientRect().width) return;
   var r = frame.getBoundingClientRect();
   if (!el) {
     el = document.createElement('div');
