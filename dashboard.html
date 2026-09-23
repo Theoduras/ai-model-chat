@@ -1405,6 +1405,11 @@ function restoreView() {
     }
     return true;
   }
+  // The header's Dashboard link means the personas, not wherever she was last.
+  if (new URLSearchParams(location.search).get('view') === 'personas') {
+    history.replaceState(null, '', location.pathname);
+    return false;
+  }
   let v = null;
   try { v = JSON.parse(localStorage.getItem(lsViewKey()) || 'null'); } catch(e) {}
   if (!v) return false;
@@ -1439,6 +1444,11 @@ function navigateWorkspace(url) {
 document.addEventListener('click', function (e) {
   if (e.defaultPrevented || e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
   const a = e.target.closest('a[href]');
+  if (a && !a.target && a.origin === location.origin && a.pathname === '/dashboard') {
+    e.preventDefault();
+    showPersonaBrowser();
+    return;
+  }
   if (!a || a.target || a.origin !== location.origin || !viewEl(a.pathname)) return;
   e.preventDefault();
   navigateWorkspace(a.pathname + a.search);
