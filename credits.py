@@ -326,12 +326,15 @@ def symbol_for(currency):
 # app.py's tier capabilities are built from -- stated once, here, so a bullet
 # and the cap it describes cannot drift apart.
 MONTHLY_TOKENS = {
+    # Free never refills: its FREE_CREDITS are one grant, posted once.
+    'free': 0,
     'demo': 25,
     'starter': 100,
     'pro': 350,
     'agency': 1000,
 }
 DEFAULT_MONTHLY_TOKENS = 100
+FREE_CREDITS = 15
 
 # Top-up packs. One price for everyone -- there are no tier bands. The ladder
 # already falls 40% from the smallest pack to the largest, which is the same

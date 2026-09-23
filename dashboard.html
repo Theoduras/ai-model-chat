@@ -620,6 +620,15 @@ function applyEntitlements(me) {
   document.querySelectorAll('[data-platform]').forEach(el => {
     const key = el.dataset.platform;
     if (allowed === null || allowed === undefined || allowed.indexOf(key) !== -1) return;
+    // Free opens every page to look at; the server refuses only the write that
+    // would go live, and that refusal opens the upgrade offer.
+    if (tier === 'free') {
+      const lock = document.createElement('span');
+      lock.className = 'sb-lock';
+      lock.textContent = 'Paid';
+      el.appendChild(lock);
+      return;
+    }
     lockNavItem(el, demo ? 'Demo' : 'Pro',
                 demo ? '/demo-ends?from=' + encodeURIComponent(key) : '/pricing');
     el.parentNode.appendChild(el);

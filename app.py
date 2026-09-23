@@ -372,6 +372,34 @@ def _persona_owner(slug):
         return None
 
 
+def _persona_live_blocked(slug):
+    """A Free workspace's persona is for its owner to test, not for fans:
+    anyone else reaching it gets refused. The owner's own team still gets
+    through, so the builder's test chat keeps working."""
+    ws_id = _persona_owner(slug)
+    if not ws_id:
+        return False
+    viewer = _current_user()
+    if viewer and (viewer.get('is_admin') or _workspace_id(viewer) == ws_id):
+        return False
+    try:
+        from db import User, Workspace
+        s = _db_session()
+        try:
+            ws = s.get(Workspace, ws_id)
+            owner = s.get(User, ws.owner_id if ws else ws_id)
+            return bool(owner and owner.tier == FREE_TIER_KEY
+                        and owner.role not in ('admin', 'super_admin'))
+        finally:
+            s.close()
+    except Exception:
+        error_logger.error('Live check failed for %s', slug, exc_info=True)
+        return False
+
+
+_NOT_LIVE = {'error': "This character isn't live yet.", 'not_live': True}
+
+
 def _can_edit_persona(slug, user):
     """Admins edit anything. Everyone else only their own, plus slugs that do
     not exist yet (creating). Premade repo personas are house-owned."""
@@ -1321,8 +1349,33 @@ ANNUAL_SAVE_PCT = round((12 - ANNUAL_MONTHS_CHARGED) / 12 * 100)
 # cannot do is connect a platform, which is where the demo ends and the sale
 # starts. Assigned from the admin console; never sold or self-served.
 DEMO_TIER_KEY = 'demo'
+# Self-serve and per account, unlike the demo: the whole console to click
+# through, a one-off credit grant, and nothing that reaches a fan. Going live
+# is the thing it sells.
+FREE_TIER_KEY = 'free'
+# Plans that cost nothing: never checked out, never expire, no annual twin.
+_UNPAID_TIERS = (DEMO_TIER_KEY, FREE_TIER_KEY)
 
 _BASE_TIERS = {
+    FREE_TIER_KEY: {'name': 'Free', 'price': 0,
+                    'blurb': 'Look around and try the tools. Nothing goes live.',
+                    'features': ['1 AI persona to build and test',
+                                 'The persona builder and the Studio',
+                                 f'{CR.FREE_CREDITS} generation credits, once',
+                                 'Chat with her yourself to test the persona',
+                                 'No platform connection or public chat '
+                                 '— going live needs a paid plan'],
+                    'capabilities': {
+                        'personas': 1,
+                        'seats': 1,
+                        'platforms': [],
+                        'phases_max': 10,
+                        'outfit_lock': True,
+                        'scheduled_followups': True,
+                        'analytics': False,
+                        'ppv_reconcile': False,
+                        'tokens_month': CR.MONTHLY_TOKENS[FREE_TIER_KEY],
+                    }},
     DEMO_TIER_KEY: {'name': 'Demo', 'price': 0,
                     'blurb': 'The whole product, minus the platform connection.',
                     'features': ['Unlimited AI personas',
@@ -1424,9 +1477,9 @@ CUSTOM_TIER = {
 
 TIERS = {}
 for _key, _base in _BASE_TIERS.items():
-    if _key == DEMO_TIER_KEY:
+    if _key in _UNPAID_TIERS:
         # Free and never expires, so it has no annual twin and nothing to charge.
-        TIERS[_key] = {**_base, 'days': 0, 'period': 'demo'}
+        TIERS[_key] = {**_base, 'days': 0, 'period': _key}
         continue
     TIERS[_key] = {**_base, 'days': 30, 'period': 'month'}
     _annual_price = _base['price'] * ANNUAL_MONTHS_CHARGED
@@ -1713,6 +1766,8 @@ def _current_user():
                 'stripe_subscription_id': u.stripe_subscription_id or '',
                 'grandfathered_until': (grandfathered.isoformat()
                                         if grandfathered else None),
+                'offer_started_at': (owner.offer_started_at.isoformat()
+                                     if owner.offer_started_at else None),
                 'expires_at': expires_at.isoformat() if expires_at else None}
     finally:
         s.close()
@@ -1853,9 +1908,9 @@ def _activate_plan(session_db, user_row, tier_key, days=None):
     converting = (user_row.tier or '') == DEMO_TIER_KEY and tier_key != DEMO_TIER_KEY
     user_row.tier = tier_key
     user_row.status = 'active'
-    if tier_key == DEMO_TIER_KEY:
-        # The demo account is handed out, not sold, so nothing should switch it
-        # off in the middle of somebody's look around.
+    if tier_key in _UNPAID_TIERS:
+        # Neither is sold, so nothing should switch it off in the middle of
+        # somebody's look around.
         user_row.expires_at = None
         return None
     # Demo time is not credit, so a plan bought from the demo starts now instead
@@ -1975,9 +2030,10 @@ def user_capabilities(user):
     if user.get('status') != 'active':
         return dict(DENIED_CAPS)
     caps = tier_capabilities(user.get('tier'))
-    # X is on every plan. Added here rather than in each tier so a super admin's
-    # saved platform list cannot take it away again.
-    if isinstance(caps.get('platforms'), list) and 'x' not in caps['platforms']:
+    # X is on every paid plan. Added here rather than in each tier so a super
+    # admin's saved platform list cannot take it away again. Free goes nowhere.
+    if (user.get('tier') != FREE_TIER_KEY and isinstance(caps.get('platforms'), list)
+            and 'x' not in caps['platforms']):
         caps['platforms'] = caps['platforms'] + ['x']
     # OnlyFans is Pro and up, except for accounts that already had it connected
     # when it moved: taking it off them would disconnect a live account.
@@ -2094,6 +2150,9 @@ def _grant_monthly_tokens(session_db, user):
     """Post this period's allowance if it has not been posted. Keyed on the
     period, so it runs off the first token read of the month and there is no
     cron that can miss it."""
+    if user.get('tier') == FREE_TIER_KEY and user.get('status') == 'active':
+        _grant_free_credits(session_db, _workspace_id(user))
+        return
     allowance = user_capabilities(user).get('tokens_month')
     # A zero grant would still claim the period, so an account read before it
     # subscribed (the header asks for its balance) would get nothing this month.
@@ -2102,6 +2161,14 @@ def _grant_monthly_tokens(session_db, user):
     from db import token_grant
     token_grant(session_db, _workspace_id(user), int(allowance),
                  _usage_period(), _period_end(), note=(user.get('tier') or ''))
+
+
+def _grant_free_credits(session_db, workspace_id):
+    """Free's one grant. Keyed on a fixed source, so the ledger's grant dedupe
+    is what keeps it to once per workspace, however often Free is re-chosen."""
+    from db import token_grant
+    token_grant(session_db, workspace_id, CR.FREE_CREDITS, 'free-grant', None,
+                note=FREE_TIER_KEY)
 
 
 def _token_balance(user, session_db=None):
@@ -2414,7 +2481,14 @@ def _require_entitlement(path, method, user, wants_json):
                     if method not in ('GET', 'HEAD', 'OPTIONS') else None)
         if platform is None:
             platform = _PLATFORM_PAGES.get(path)
+            # Free is sold on seeing everything: its pages open read-only and
+            # only the write that would put something live is refused.
+            if platform and user.get('tier') == FREE_TIER_KEY:
+                platform = None
         if platform and platform not in allowed:
+            if user.get('tier') == FREE_TIER_KEY:
+                return _cap_denied('platform', user,
+                                   {'platform': platform, 'free': True})
             if _is_demo(user):
                 if not wants_json:
                     return redirect('/demo-ends?from=' + urllib.parse.quote(platform))
@@ -2593,6 +2667,9 @@ button:disabled{opacity:.6;cursor:not-allowed;transform:none;animation:none}
 .permo{font-size:.75rem;color:var(--text-muted);margin-bottom:10px}
 .vat{font-family:var(--font);font-size:.7rem;font-weight:500;color:var(--text-muted);letter-spacing:0}
 .tier.soon{opacity:.85}
+.freestrip{display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap;background:var(--panel);border:1px dashed var(--border);border-radius:14px;padding:14px 18px;margin:0 0 14px}
+.freestrip span{display:block;color:var(--text-2);font-size:.85rem;margin-top:3px}
+.freestrip button,.freestrip .nav-btn{width:auto;flex:none}
 /* Site header — same links and theme switch as the marketing pages. */
 .site-nav{position:fixed;top:0;left:0;right:0;z-index:60;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 24px;background:var(--panel);border-bottom:1px solid var(--border)}
 .site-nav .brand{font-family:var(--display);font-weight:800;font-size:1.05rem;color:var(--text);text-decoration:none;letter-spacing:-.01em}
@@ -2756,7 +2833,19 @@ plan is active{% if user.expires_at %} until {{ user.expires_at[:10] }}{% endif 
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
 {% if ref_pct %}<div class="ok" data-ref-banner>You came in on a referral link —
 <strong>{{ ref_pct }}% off your first month</strong> is applied at checkout on any
-monthly plan.</div>{% endif %}
+monthly plan.</div>{% elif offer.state == 'active' %}<div class="ok" data-offer-banner>
+Welcome offer: <strong>{{ offer.pct }}% off your first month</strong> on any monthly
+plan paid by card — <span data-offer-left="{{ offer.seconds_left }}">{{ offer.seconds_left // 60 }} min</span> left.</div>{% endif %}
+{# Only an offer taken by card is discounted: Stripe carries the coupon. #}
+{% set offer_pct = offer.pct if offer.state == 'active' and stripe_enabled else 0 %}
+{% if not user.email or user.status != 'active' or user.tier == free_key %}
+<div class="freestrip">
+<div><strong>{{ free.name }} — {{ currency }}0</strong>
+<span>{{ free.features|join(' · ') }}</span></div>
+{% if user.tier == free_key and user.status == 'active' %}<button disabled>Your current plan</button>
+{% elif user.email %}<button type="button" data-free>Start free</button>
+{% else %}<a class="nav-btn" href="/register">Start free</a>{% endif %}
+</div>{% endif %}
 <div class="ptoggle">
 <button type="button" class="active" data-set-period="month">Monthly</button>
 <button type="button" data-set-period="year">Annual <span class="save">Save {{ annual_save_pct }}%</span></button>
@@ -2773,9 +2862,9 @@ monthly plan.</div>{% endif %}
 <h2>{{ t.name }}</h2><div class="blurb">{{ t.blurb }}</div>
 {% set verb = 'Renew' if user.status == 'expired' else 'Pay' %}{% set card_verb = 'Resubscribe' if user.status == 'expired' else 'Subscribe' %}
 <div data-period="month">
-{% if ref_pct %}
+{% if ref_pct or offer_pct %}{% set dpct = ref_pct or offer_pct %}
 <div class="price"><s style="opacity:.5">{{ currency }}{{ t.price }}</s>
-{{ currency }}{{ '%.2f'|format(t.price * (100 - ref_pct) / 100) }}<span>/month</span>
+{{ currency }}{{ '%.2f'|format(t.price * (100 - dpct) / 100) }}<span>/month</span>
 <span class="vat">excl. VAT</span></div>
 <div class="permo">First month only — {{ currency }}{{ t.price }}/month after that.</div>
 {% else %}
@@ -2858,6 +2947,28 @@ if (cards.length) {
   cards.forEach(function(c){ if (c.dataset.select === active) start = c; });
   selectCard(start || document.querySelector('.tier.featured[data-select]') || cards[0]);
 }
+document.querySelectorAll('button[data-free]').forEach(function(b){
+  b.addEventListener('click', async function(){
+    b.disabled = true; b.textContent = 'Starting...';
+    try {
+      var r = await fetch('/api/billing/free', {method:'POST'});
+      var d = await r.json();
+      if (d.ok) { window.top.location.href = d.redirect || '/dashboard'; return; }
+      alert(d.error || 'Could not start the free plan.');
+    } catch (e) { alert('Could not start the free plan.'); }
+    b.disabled = false; b.textContent = 'Start free';
+  });
+});
+(function(){
+  var el = document.querySelector('[data-offer-left]');
+  if (!el) return;
+  var end = Date.now() + (+el.dataset.offerLeft) * 1000;
+  (function tick(){
+    var s = Math.max(0, Math.round((end - Date.now()) / 1000));
+    el.textContent = Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+    if (s) setTimeout(tick, 1000); else location.reload();
+  })();
+})();
 document.querySelectorAll('button[data-dev-tier]').forEach(function(b){
   b.addEventListener('click', async function(){
     b.disabled = true; b.textContent = 'Activating...';
@@ -4170,6 +4281,9 @@ def api_me():
     if not user:
         return jsonify({'signed_in': False, 'is_operator': _is_operator(),
                         'capabilities': dict(DENIED_CAPS)}), 200
+    # Sessions from before the offer existed have no sign-in stamp; the clock
+    # starts from the first look instead.
+    session.setdefault('login_at', time.time())
     caps = user_capabilities(user)
     from db import count_team_members
     sdb = _db_session()
@@ -4191,6 +4305,7 @@ def api_me():
                     'workspace_name': user.get('workspace_name') or '',
                     'capabilities': caps,
                     'grandfathered': _is_grandfathered(user),
+                    'offer': _offer_state(user),
                     'usage': {'personas': {'used': _persona_count(user),
                                            'limit': caps.get('personas')},
                               'seats': {'used': seats, 'limit': caps.get('seats')},
@@ -4393,6 +4508,7 @@ def auth_google_callback():
         _note_demo_signin(s, u, 'google')
         s.commit()
         session['user_id'] = u.id
+        session['login_at'] = time.time()
         session.permanent = True
         active = u.status == 'active' or (u.role or 'user') == 'admin'
     finally:
@@ -4429,6 +4545,7 @@ def register():
         u = create_user(s, email, generate_password_hash(password), name)
         s.commit()
         session['user_id'] = u.id
+        session['login_at'] = time.time()
         session.permanent = True
     finally:
         s.close()
@@ -4479,6 +4596,7 @@ def login():
         _note_demo_signin(s, u, nxt or '')
         s.commit()
         session['user_id'] = u.id
+        session['login_at'] = time.time()
         # Permanent sessions last PERMANENT_SESSION_LIFETIME; otherwise the
         # cookie is dropped when the browser closes.
         session.permanent = bool(request.form.get('remember'))
@@ -4622,6 +4740,8 @@ def pricing():
                                   annual_suffix=ANNUAL_SUFFIX,
                                   annual_save_pct=ANNUAL_SAVE_PCT,
                                   custom=CUSTOM_TIER,
+                                  free=TIERS[FREE_TIER_KEY], free_key=FREE_TIER_KEY,
+                                  offer=_offer_state(user if user.get('id') else None),
                                   ref_pct=(REF_DISCOUNT_PCT
                                            if _active_ref_code() else 0))
 
@@ -4660,6 +4780,8 @@ def billing():
                                   annual_suffix=ANNUAL_SUFFIX,
                                   annual_save_pct=ANNUAL_SAVE_PCT,
                                   custom=CUSTOM_TIER,
+                                  free=TIERS[FREE_TIER_KEY], free_key=FREE_TIER_KEY,
+                                  offer=_offer_state(user if user.get('id') else None),
                                   ref_pct=(REF_DISCOUNT_PCT
                                            if _active_ref_code() else 0))
 
@@ -4830,6 +4952,15 @@ def _checkout_stripe(user, tier_key, tier, order_id, base):
             form['discounts[0][coupon]'] = coupon
             form['metadata[ref_code]'] = ref_code
             form['subscription_data[metadata][ref_code]'] = ref_code
+    elif _ref_discountable(tier_key) and _offer_state(user)['state'] == 'active':
+        coupon = _stripe_offer_coupon()
+        if coupon:
+            form['discounts[0][coupon]'] = coupon
+            form['metadata[offer]'] = f'welcome{OFFER_DISCOUNT_PCT}'
+            form['subscription_data[metadata][offer]'] = f'welcome{OFFER_DISCOUNT_PCT}'
+            # The window is the offer: a checkout page left open past it
+            # should not keep the price. Stripe's floor is 30 minutes.
+            form['expires_at'] = str(int(time.time()) + 31 * 60)
     # Reuse the saved card and keep one Stripe customer per account; without
     # this Stripe makes a fresh customer per checkout and the billing portal
     # would only ever show the newest subscription.
@@ -4876,7 +5007,7 @@ def api_billing_checkout():
     body = request.get_json(silent=True) or {}
     tier_key = body.get('tier', '')
     tier = TIERS.get(tier_key)
-    if not tier or tier_key == DEMO_TIER_KEY:
+    if not tier or tier_key in _UNPAID_TIERS:
         return jsonify({'error': 'Unknown plan'}), 400
 
     provider = (body.get('provider') or '').strip().lower()
@@ -5169,6 +5300,32 @@ def _token_payment_paid(session_db, pay):
                 u.email, pay.tokens, pay.order_id)
 
 
+@app.route('/api/billing/free', methods=['POST'])
+def api_billing_free():
+    """Self-serve Free. Never over a live paid plan, the shared demo, or a seat
+    in someone else's workspace: Free is a way in, not a downgrade button."""
+    user = _current_user()
+    if not user:
+        return jsonify({'error': 'Sign in required'}), 401
+    if (user.get('seat_role') or 'owner') != 'owner':
+        return jsonify({'error': 'Only the workspace owner can change the plan.'}), 403
+    tier = user.get('tier') or ''
+    if tier == DEMO_TIER_KEY or (user.get('status') == 'active'
+                                 and tier not in ('', FREE_TIER_KEY)):
+        return jsonify({'error': 'This account already has a plan.'}), 409
+    from db import User
+    s = _db_session()
+    try:
+        u = s.get(User, user['id'])
+        _activate_plan(s, u, FREE_TIER_KEY)
+        s.commit()
+        _grant_free_credits(s, _workspace_id(user))
+    finally:
+        s.close()
+    logger.info('FREE PLAN STARTED user=%s', user['email'])
+    return jsonify({'ok': True, 'redirect': '/dashboard'})
+
+
 @app.route('/api/billing/dev-activate', methods=['POST'])
 def api_billing_dev_activate():
     """Activate a plan without payment. Requires DEV_FAKE_PAYMENTS=1."""
@@ -5179,7 +5336,7 @@ def api_billing_dev_activate():
         return jsonify({'error': 'Sign in required'}), 401
     tier_key = (request.get_json(silent=True) or {}).get('tier', '')
     tier = TIERS.get(tier_key)
-    if not tier or tier_key == DEMO_TIER_KEY:
+    if not tier or tier_key in _UNPAID_TIERS:
         return jsonify({'error': 'Unknown plan'}), 400
 
     from db import User, Payment
@@ -5608,14 +5765,14 @@ REF_COUPON_SETTING = 'stripe_ref_coupon_id'
 def _ref_discountable(tier_key):
     """Monthly paid plans only. The commission is defined on a first monthly
     subscription, so the discount that earns it is scoped the same way."""
-    return (tier_key in TIERS and tier_key != DEMO_TIER_KEY
+    return (tier_key in TIERS and tier_key not in _UNPAID_TIERS
             and not tier_key.endswith(ANNUAL_SUFFIX))
 
 
 def _ref_eligible(user_row):
     """Paid members refer; demo and lapsed accounts do not."""
     return (user_row is not None and user_row.status == 'active'
-            and (user_row.tier or '') not in ('', DEMO_TIER_KEY))
+            and (user_row.tier or '') not in ('',) + _UNPAID_TIERS)
 
 
 def _referral_code_for(session_db, user_row):
@@ -5710,6 +5867,108 @@ def _stripe_ref_coupon():
     s = _db_session()
     try:
         set_app_setting(s, REF_COUPON_SETTING, coupon)
+        s.commit()
+    finally:
+        s.close()
+    return coupon
+
+
+# ── Welcome offer: a Free account's one 30-minute window at 15% off ──
+
+OFFER_DISCOUNT_PCT = 15    # off the first month of a monthly plan
+OFFER_WINDOW_MIN = 30
+# Env-tunable so the popup can be tested without sitting through the wait.
+OFFER_DELAY_SEC = int(os.getenv('OFFER_DELAY_SEC', '120'))
+OFFER_COUPON_SETTING = 'stripe_offer_coupon_id'
+
+
+def _utcnow():
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _offer_state(user):
+    """Where this account is in its welcome offer: ineligible, pending (not
+    shown yet), active, or expired. The window opens when the popup first
+    shows and is stamped on the owner's row, so a reload or a second device
+    sees the same clock and it can never be run twice."""
+    out = {'state': 'ineligible', 'pct': OFFER_DISCOUNT_PCT,
+           'window_min': OFFER_WINDOW_MIN}
+    if (not user or user.get('is_admin') or user.get('tier') != FREE_TIER_KEY
+            or user.get('status') != 'active'
+            or (user.get('seat_role') or 'owner') != 'owner'):
+        return out
+    started = user.get('offer_started_at')
+    if started:
+        ends = datetime.fromisoformat(started) + timedelta(minutes=OFFER_WINDOW_MIN)
+        left = int((ends - _utcnow()).total_seconds())
+        out.update(state='active' if left > 0 else 'expired',
+                   expires_at=ends.isoformat() + 'Z', seconds_left=max(0, left))
+    else:
+        since = time.time() - float(session.get('login_at') or time.time())
+        out.update(state='pending',
+                   show_in_seconds=max(0, int(OFFER_DELAY_SEC - since)))
+    # Best discount wins: a standing referral is worth more, so the popup
+    # still shows but quotes the referral price, and checkout applies that.
+    # Past the window the plans stay, at full price, for the upgrade prompt.
+    referral = bool(_active_ref_code(user))
+    pct = (REF_DISCOUNT_PCT if referral
+           else 0 if out['state'] == 'expired' else OFFER_DISCOUNT_PCT)
+    out['referral_better'] = referral
+    out['plans'] = [{'key': k, 'name': TIERS[k]['name'], 'price': TIERS[k]['price'],
+                     'offer_price': round(TIERS[k]['price'] * (100 - pct) / 100, 2),
+                     'blurb': TIERS[k]['blurb']}
+                    for k in DEFAULT_TIER_ORDER if k in TIERS]
+    out['applied_pct'] = pct
+    return out
+
+
+@app.route('/api/offer/start', methods=['POST'])
+def api_offer_start():
+    """Open the window. Refused before the sign-in delay has run, so the clock
+    cannot be started early from the console, and a no-op once started."""
+    user = _current_user()
+    if not user:
+        return jsonify({'error': 'Sign in required'}), 401
+    state = _offer_state(user)
+    if state['state'] != 'pending':
+        return jsonify(state)
+    # A few seconds of slack for the browser timer firing a touch early.
+    if state['show_in_seconds'] > 5:
+        return jsonify(state), 409
+    from db import User
+    now = _utcnow()
+    s = _db_session()
+    try:
+        s.query(User).filter(User.id == user['workspace_owner_id'],
+                             User.offer_started_at.is_(None))             .update({User.offer_started_at: now}, synchronize_session=False)
+        s.commit()
+    finally:
+        s.close()
+    logger.info('OFFER STARTED user=%s', user['email'])
+    return jsonify(_offer_state(_current_user()))
+
+
+def _stripe_offer_coupon():
+    """The welcome offer's coupon, made once like the referral one."""
+    from db import get_app_setting, set_app_setting
+    s = _db_session()
+    try:
+        existing = (get_app_setting(s, OFFER_COUPON_SETTING) or '').strip()
+    finally:
+        s.close()
+    if existing:
+        return existing
+    payload = _stripe_post('/coupons', {
+        'percent_off': str(OFFER_DISCOUNT_PCT),
+        'duration': 'once',
+        'name': f'Welcome offer — {OFFER_DISCOUNT_PCT}% off first month',
+    })
+    coupon = str((payload or {}).get('id') or '')
+    if not coupon:
+        return ''
+    s = _db_session()
+    try:
+        set_app_setting(s, OFFER_COUPON_SETTING, coupon)
         s.commit()
     finally:
         s.close()
@@ -5869,7 +6128,7 @@ def _grant_trial(session_db, user_row, days=TRIAL_DAYS, tier=TRIAL_TIER):
     is a way in, not a way to extend a subscription."""
     if user_row.trial_at:
         return 'This account has already had a trial.'
-    if user_row.status == 'active' and (user_row.tier or '') not in ('', DEMO_TIER_KEY):
+    if user_row.status == 'active' and (user_row.tier or '') not in ('',) + _UNPAID_TIERS:
         return 'This account already has an active plan.'
     user_row.trial_at = datetime.now(timezone.utc).replace(tzinfo=None)
     _activate_plan(session_db, user_row, tier, days=days)
@@ -7531,6 +7790,9 @@ def chat():
     user = data.get('user', 'unknown')
     persona_slug = data.get('persona', DEFAULT_PERSONA)
 
+    if _persona_live_blocked(persona_slug):
+        return jsonify(_NOT_LIVE), 403
+
     chat_logger, safe_user = get_chat_logger(user)
 
     is_greeting = user_message == '__greeting__'
@@ -7628,6 +7890,8 @@ def api_v1_chat():
 
     if not user_message:
         return jsonify({'error': 'message is required'}), 400
+    if _persona_live_blocked(persona_slug):
+        return jsonify(_NOT_LIVE), 403
 
     system_prompt = get_system_prompt(persona_slug)
 

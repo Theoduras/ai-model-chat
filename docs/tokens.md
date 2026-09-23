@@ -333,3 +333,5 @@ Once these are settled the implementation is mechanical: `credits.py` and its
 tests first (pure, no I/O, the floor assertions prove the numbers before
 anything else moves), then the ledger, then the routes and checkout, then the
 studio's own labels.
+
+> **Free plan:** a one-time grant of 15 tokens (`credits.FREE_CREDITS`), never refilled. `MONTHLY_TOKENS["free"]` is 0.

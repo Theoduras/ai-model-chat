@@ -731,6 +731,10 @@ class User(Base):
     # its presence is what refuses a second one.
     trial_at = Column(DateTime)
 
+    # When a Free account was first shown the welcome discount. One window per
+    # account, ever, stamped server-side so a reload cannot restart the clock.
+    offer_started_at = Column(DateTime)
+
     # Creator profile, filled in after signup.
     brand = Column(String(120), default='')
     country = Column(String(80), default='')
