@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="/css/style.css">
 <link rel="stylesheet" href="/css/lazy.css">
 <script src="/js/skeleton.js"></script>
+<script src="/js/keyed-render.js"></script>
   <script src="/js/devnav.js" defer></script>
   <link rel="stylesheet" href="/css/site-nav.css">
   <script src="/js/site-nav.js" defer></script>
@@ -417,14 +418,24 @@ function vwDraw() {
       + (vwFilterCount() || vwQuery
           ? ' <button type="button" class="pg-clear" onclick="vwClearFilter()">Clear</button>' : '')
       + '</div>' : '';
-  el('vw-body').innerHTML = rows.length
-    ? '<div class="' + (vwView === 'list' ? 'pg-list' : 'pg-grid') + '">'
-      + rows.map((m, i) => vwView === 'list' ? vwRow(m, start + i) : vwCard(m, start + i)).join('')
-      + '</div>'
-    : '<div class="pg-none"><div class="pg-none-t">'
+  // Keyed, so a tick, a star or a page turn keeps the clips already on screen
+  // instead of downloading every one of them again.
+  const body = el('vw-body');
+  if (rows.length) {
+    const cls = vwView === 'list' ? 'pg-list' : 'pg-grid';
+    let box = body.firstElementChild;
+    if (!box || box.className !== cls || body.children.length !== 1) {
+      body.innerHTML = '<div class="' + cls + '"></div>';
+      box = body.firstElementChild;
+    }
+    keyedRender(box, rows.map((m, i) => [vwView + ':' + m.id,
+      vwView === 'list' ? vwRow(m, start + i) : vwCard(m, start + i)]));
+  } else {
+    body.innerHTML = '<div class="pg-none"><div class="pg-none-t">'
       + (vwItems.length ? 'Nothing matches those filters.'
                         : 'Nothing here yet — upload a photo or keep a generation.')
       + '</div></div>';
+  }
   vwDrawPager(pages, all.length);
 
   // The search box's own oninput redraws this block, which would otherwise
@@ -704,7 +715,9 @@ function vwViewDraw() {
   const all = window.vwShown || [];
   const m = all[vwViewIdx];
   if (!m) { vwViewClose(); return; }
-  el('vw-stage').innerHTML =
+  // Through keepMedia, so an edit in the side panel does not restart the clip.
+  const stage = document.createElement('template');
+  stage.innerHTML =
     (m.kind === 'video'
       ? '<video src="' + esc(m.thumb) + '" controls autoplay playsinline></video>'
       : '<img loading="lazy" decoding="async" src="' + esc(m.thumb) + '" alt="">')
@@ -712,6 +725,7 @@ function vwViewDraw() {
     + (vwViewIdx > 0 ? '<button type="button" class="vw-nav prev" onclick="vwStep(-1)">‹</button>' : '')
     + (vwViewIdx < all.length - 1 ? '<button type="button" class="vw-nav next" onclick="vwStep(1)">›</button>' : '')
     + '<span class="vw-count">' + (vwViewIdx + 1) + ' of ' + all.length + '</span>';
+  keepMedia(el('vw-stage'), stage.content);
 
   const mine = vwFoldersOf(m);
   el('vw-side').innerHTML =
