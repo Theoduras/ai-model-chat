@@ -300,6 +300,20 @@ def test_content_prompts():
         IG.pick_direction(s, '') for s in IG.SHOT_FRAMING))
 
 
+def test_presets():
+    feats = CH.features()
+    body = [k for k, f in feats.items() if f[1] == 'body']
+    for key, (_, _, values) in CH.BODY_PRESETS.items():
+        check(f'{key} values valid', all(v in [o for o, _ in feats[k][2]] for k, v in values.items()))
+        if key != 'scratch':
+            check(f'{key} covers every body feature', set(values) == set(body))
+        sheet = CH.apply_preset({'build': 'Muscular', 'eye_colour': 'Green', 'cup': 'C'}, key)
+        check(f'{key} keeps face and intimate picks', sheet['eye_colour'] == 'Green' and sheet['cup'] == 'C')
+        check(f'{key} overwrites body picks', sheet.get('build') == values.get('build'))
+        _, warnings = CH.validate({'age': 25, 'sheet': sheet})
+        check(f'{key} raises no youth warning', not warnings)
+
+
 if __name__ == '__main__':
     test_sfw_never_gets_nsfw()
     test_required_views()
@@ -310,5 +324,6 @@ if __name__ == '__main__':
     test_resolver()
     test_snapshot_views()
     test_content_prompts()
+    test_presets()
     print('FAILED' if FAILURES else 'OK', len(FAILURES))
     raise SystemExit(1 if FAILURES else 0)

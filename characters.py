@@ -163,30 +163,46 @@ STUDIO = 'Soft natural daylight, plain light-grey wall behind her. ' + PHOTO_LOO
 
 VARIATIONS = BATCH_CHOICES
 
-# A preset only fills body features the creator has not set yet.
+# A preset sets every body feature, replacing earlier picks, so clicking one
+# visibly changes the sheet. Face and intimate features are left alone.
+def _preset(height, build, shape, shoulders, waist, hips, bust, glutes, thighs, tattoos, piercings, birthmarks, nails):
+    return {'height': height, 'build': build, 'body_shape': shape, 'shoulders': shoulders, 'waist': waist,
+            'hips': hips, 'bust': bust, 'glute_shape': glutes, 'thighs': thighs, 'tattoos': tattoos,
+            'piercings': piercings, 'birthmarks': birthmarks, 'nails': nails}
+
+
 BODY_PRESETS = {
     'petite_athletic': ('Petite athletic', 'Short, toned, compact',
-                        {'height': '155–165 cm', 'build': 'Athletic', 'shoulders': 'Narrow', 'waist': 'Defined', 'hips': 'Narrow', 'thighs': 'Toned'}),
+                        _preset('155–165 cm', 'Athletic', 'Rectangle', 'Narrow', 'Defined', 'Medium', 'Medium',
+                                'Bubble', 'Toned', 'Small, ankle', 'Ears', 'None', 'Short, nude')),
     'slim_tall': ('Slim tall', 'Tall, lean, long lines',
-                  {'height': 'Over 175 cm', 'build': 'Slim', 'shoulders': 'Medium', 'waist': 'Straight', 'hips': 'Narrow', 'thighs': 'Slim'}),
+                  _preset('Over 175 cm', 'Slim', 'Rectangle', 'Medium', 'Straight', 'Medium', 'Medium',
+                          'Round', 'Slim', 'None', 'Ears', 'None', 'Medium, painted')),
     'curvy': ('Curvy', 'Full hips and thighs',
-              {'build': 'Curvy', 'waist': 'Defined', 'hips': 'Wide', 'thighs': 'Full'}),
+              _preset('155–165 cm', 'Curvy', 'Pear', 'Medium', 'Defined', 'Wide', 'Large',
+                      'Wide', 'Full', 'Hip', 'Navel', 'None', 'Long, painted')),
     'hourglass': ('Hourglass', 'Defined waist, balanced curves',
-                  {'build': 'Curvy', 'shoulders': 'Medium', 'waist': 'Defined', 'hips': 'Wide', 'bust': 'Large'}),
+                  _preset('165–175 cm', 'Curvy', 'Hourglass', 'Medium', 'Defined', 'Wide', 'Large',
+                          'Heart-shaped', 'Full', 'None', 'Ears', 'None', 'French tips')),
     'athletic_tall': ('Athletic tall', 'Strong frame, sporty',
-                      {'height': 'Over 175 cm', 'build': 'Athletic', 'shoulders': 'Broad', 'waist': 'Defined', 'hips': 'Medium', 'thighs': 'Toned'}),
-    'scratch': ('Start from scratch', 'Neutral defaults, set everything', {}),
+                      _preset('Over 175 cm', 'Athletic', 'Inverted triangle', 'Broad', 'Defined', 'Medium', 'Medium',
+                              'Bubble', 'Toned', 'Small, wrist', 'Ears', 'None', 'Short, nude')),
+    'scratch': ('Start from scratch', 'Clear every body pick', {}),
 }
 
 
 def apply_preset(sheet, preset, body_type='female'):
     if preset not in BODY_PRESETS:
         raise CharacterError('Unknown body preset.')
-    feats = features(body_type)
+    values = BODY_PRESETS[preset][2]
     out = dict(sheet or {})
-    for k, val in BODY_PRESETS[preset][2].items():
-        if k in feats and not out.get(k):
-            out[k] = val
+    for k, (_, group, _) in features(body_type).items():
+        if group != 'body':
+            continue
+        if k in values:
+            out[k] = values[k]
+        else:
+            out.pop(k, None)
     return out
 
 VIEWS = {
