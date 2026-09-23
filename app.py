@@ -29194,6 +29194,14 @@ def _char_images(s, char_id, view=None, role=None):
     return q.order_by(CharacterImage.created_at).all()
 
 
+def _char_view_fallback(s, char_id, view_key, skip=None):
+    """A view's status from the photos it holds, for when the one it had stops
+    being true. The version outlives an unapproved or deleted photo, so it
+    cannot say whether the view is still approved."""
+    roles = {i.role for i in _char_images(s, char_id, view=view_key) if i.id != skip}
+    return 'approved' if 'canonical' in roles else 'review' if 'candidate' in roles else 'not_started'
+
+
 def _char_canonicals(s, char_id):
     return {img.view: img for img in _char_images(s, char_id, role='canonical')}
 
@@ -29243,7 +29251,7 @@ def _char_views_state(s, row):
         if cv.status == 'generating':
             job = cv.job_id and s.query(GenerationJob).filter_by(id=cv.job_id).first()
             if not job or job.status == 'failed':
-                cv.status = 'approved' if cv.version else 'not_started'
+                cv.status = _char_view_fallback(s, row.id, cv.view_key)
                 cv.job_id = None
     s.commit()
     dicts = {k: _char_view_dict(cv) for k, cv in rows.items()}
@@ -29461,7 +29469,7 @@ def _character_finish(job_id, spec, workspace, urls):
                 cv.status = 'review'
                 cv.parent_versions_json = json.dumps(spec.get('parent_versions') or {})
             else:
-                cv.status = 'approved' if cv.version else 'not_started'
+                cv.status = _char_view_fallback(s, spec['character_id'], cv.view_key)
         if made:
             update_generation(s, job_id, status='done', result_media_ids=','.join(made))
         else:
@@ -29822,8 +29830,10 @@ def api_character_image_delete(char_id, img_id):
                 pass
         from db import CharacterView
         for cv in s.query(CharacterView).filter_by(character_id=char_id, view_key=img.view or ''):
-            if cv.result_image_id == img.id or (img.role == 'canonical' and cv.status == 'approved'):
-                cv.status, cv.result_image_id = 'not_started', None
+            if cv.result_image_id == img.id:
+                cv.result_image_id = None
+            if cv.status != 'generating':
+                cv.status = _char_view_fallback(s, char_id, cv.view_key, skip=img.id)
         s.delete(img)
         _char_refresh_status(s, row)
         s.commit()
