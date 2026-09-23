@@ -497,12 +497,19 @@
   };
   Object.entries(COLOURS).forEach(([key, set]) => { TABLE[key] = map(set, swatch); });
 
+  const unset = () => svg(`<circle cx="32" cy="32" r="20" stroke-width="1.4" stroke-dasharray="3 3"/>`);
+  const hairHex = sheet => (sheet || {}).hair_colour === 'Custom' ? (sheet || {}).hair_colour_hex
+    : COLOURS.hair_colour[(sheet || {}).hair_colour];
   function render(feature, option, sheet) {
+    if (feature === 'hair_colour' && option === 'Custom') {
+      const hex = (sheet || {}).hair_colour_hex;
+      return /^#[0-9a-f]{6}$/i.test(hex || '') ? swatch(hex) : unset();
+    }
     if (feature === 'pubic_colour') {
       if (option === 'Dark') return swatch('#2a1d17');
       if (option === 'Light') return swatch('#c9a36c');
       if (option === 'Matches hair') {
-        const hair = COLOURS.hair_colour[(sheet || {}).hair_colour];
+        const hair = hairHex(sheet);
         return hair ? swatch(hair) : svg(`<circle cx="32" cy="32" r="20" stroke-width="1.4" stroke-dasharray="3 3"/>`);
       }
     }
