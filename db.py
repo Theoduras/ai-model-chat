@@ -2181,7 +2181,9 @@ def init_db():
                          ('video_sources', VideoSource),
                          ('characters', Character),
                          ('character_images', CharacterImage),
-                         ('character_versions', CharacterVersion)):
+                         ('character_versions', CharacterVersion),
+                         ('character_views', CharacterView),
+                         ('view_references', ViewReference)):
         try:
             _sync_columns(table, model)
         except Exception:
