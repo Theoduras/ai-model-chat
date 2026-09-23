@@ -444,8 +444,8 @@
         <div class="gen-f"><span>Start from a photo (optional)</span>
           <div class="anim-strip" id="gen-reel-photo"></div>
           <span class="hint" style="margin:0;">A reel may run from the words alone.
-            With no photo it is not a clip of her, and it still lands unapproved
-            in staging like everything else.</span></div>
+            With her character it shows her, and a photo or motion clip is the
+            person she replaces. It still lands unapproved in staging.</span></div>
       </div>
 
       <div id="gen-extend-form" style="display:none; flex-direction:column; gap:11px;">
@@ -587,6 +587,7 @@ let genExtendClip = '';       // the vault clip an extension carries on from
 let genSceneRefs = [];        // the Multi-reference job's scene photographs
 let genReelPick = '';         // the optional photo a reel starts from
 let genSwap = null;       // the uploaded clip: {source, url, seconds, width, height}
+let genCharacter = null;
 let genDrive = null;      // the Video tab's optional motion clip, same shape
 // 32 MB is the host's own request ceiling, not the route's, so it is policed
 // in decimal megabytes: a file of 32 MiB plus multipart framing is over it.
@@ -655,6 +656,9 @@ async function loadCharacterBadge() {
       + encodeURIComponent(shot) + '&scene=' + encodeURIComponent(scene))).json();
     c = d.character;
   } catch (e) {}
+  const had = reelChar();
+  genCharacter = c;
+  if (reelChar() !== had) renderGenForm();
   box.hidden = !c;
   if (!c) return;
   const views = c.shot_views || [];
@@ -1122,7 +1126,7 @@ function renderGenForm() {
   // of the clip it was handed, and that panel has a seconds row of its own.
   el('gen-video-out').style.display = video ? '' : 'none';
   el('gen-shape-out').style.display = video || swap ? 'flex' : 'none';
-  el('gen-video-drive').style.display = animate ? 'flex' : 'none';
+  el('gen-video-drive').style.display = animate || reelChar() ? 'flex' : 'none';
   renderAspects();
   renderAudioModes();
   if (genJob === 'extend') renderExtendModes();
@@ -1547,7 +1551,13 @@ function swapTakesDuration() {
 
 // The Video tab runs the explicit animate model when it is given a motion
 // clip, and that model is told no length: it produces the clip's own.
+// A reel with her character runs on the one model that takes reference photos.
+function reelChar() {
+  return genJob === 'reel' && !!(genCharacter && genCharacter.has_approved);
+}
+
 function videoModelNow() {
+  if (reelChar()) return 'wan-2-7';
   return genDrive ? ((genPrices && genPrices.explicit_swap_model) || videoModel())
                   : videoModel();
 }
@@ -1894,6 +1904,7 @@ async function jobPayload() {
     return Object.assign(base, {
       prompt: (el('gen-reel-prompt').value || '').trim(),
       reference_media: genReelPick || '',
+      source: reelChar() && genDrive ? genDrive.id : '',
     });
   }
   if (genJob === 'multiref') {

@@ -28702,6 +28702,23 @@ def _gen_spec(slug, body, user):
                 'A reel needs a prompt, a photo, or both.')
         if spec['reference_media'] and not _media_row(slug, spec['reference_media']):
             raise imagegen.GenerationError('That photo is not in this vault.')
+        # With a character the reel shows her, so it runs on the one model
+        # that takes reference photos -- moved before the quote, like a rating.
+        char = _character_snapshot(slug)
+        if char:
+            spec['character'] = char
+            model = CR.VIDEO_EDIT_MODEL
+            drive_id = str(body.get('source') or '').strip()
+            if drive_id:
+                src = _video_source_row(slug, drive_id)
+                if not src:
+                    raise imagegen.GenerationError(
+                        'That clip is no longer there. Upload it again.')
+                spec['source_path'] = src['path']
+                spec['source_id'] = drive_id
+                spec['source_width'] = src['width']
+                spec['source_height'] = src['height']
+                seconds = imagegen.video_seconds(model, src['seconds'])
     elif job == 'extend':
         mode = (body.get('extend_mode') or 'continue').strip().lower()
         if mode not in imagegen.EXTEND_MODES:
@@ -29711,10 +29728,11 @@ def api_persona_character(slug):
         if not row:
             return jsonify({'ok': True, 'character': None})
         out = _char_json(s, row)
+        canon = _char_canonicals(s, row.id)
+        out['has_approved'] = bool(canon)
         shot = (request.args.get('shot') or '').strip().lower()
         if shot:
             scene = (request.args.get('scene') or '').strip().lower()
-            canon = _char_canonicals(s, row.id)
             out['shot_views'] = [
                 {'key': k, 'label': CH.view(k, row.body_type)['label'],
                  'approved': k in canon}
@@ -30212,7 +30230,7 @@ def api_generate_job():
 
     try:
         spec = _gen_spec(slug, body, user)
-        char = _character_snapshot(slug)
+        char = spec.get('character') or _character_snapshot(slug)
         if char:
             spec['character'] = char
             spec['character_id'] = char['id']
@@ -30328,9 +30346,23 @@ def _gen_start(job_id, slug, spec, workspace):
                         motion,
                         preserve=imagegen.preserves_source(job, spec.get('model')))
                 elif job == 'reel':
+                    char = spec.get('character')
+                    if char:
+                        call['reference_urls'] = _character_urls(char, None, None)
+                        if not call['reference_urls']:
+                            raise imagegen.GenerationError(
+                                "Her character's safe-work photos could not be read.")
+                        # The still is the person she replaces, not a first
+                        # frame: frame and references are exclusive inputs.
+                        call.pop('reference_b64', None)
+                        call.pop('reference_mime', None)
+                        if spec.get('reference_media'):
+                            call['scene_urls'] = _gen_media_urls(
+                                slug, [spec['reference_media']])
                     call['prompt'] = imagegen.build_reel_prompt(
                         spec.get('prompt_extra') or motion,
-                        has_photo=bool(spec.get('reference_media')))
+                        has_photo=bool(spec.get('reference_media')),
+                        character=bool(char))
                 elif job == 'extend':
                     call['prompt'] = imagegen.build_extend_prompt(
                         spec.get('extend_mode'), motion)
@@ -30384,7 +30416,9 @@ def _gen_start(job_id, slug, spec, workspace):
                     if not refs:
                         ref_model = imagegen.EXPLICIT_MODEL
                         refs = _gen_reference_urls(slug, ref_model, role=role)
-                    if spec.get('character'):
+                    if job == 'reel':
+                        refs = call['reference_urls']
+                    elif spec.get('character'):
                         refs = (_character_urls(spec['character'], None, None,
                                                 face_only=bool(role))
                                 + refs)[:imagegen.MAX_REFERENCES]

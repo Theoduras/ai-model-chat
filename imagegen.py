@@ -114,7 +114,7 @@ VIDEO_EDIT_MODEL = 'wan-2-7'
 # model list. A true, explicit-capable replace instead goes to ModelsLab, whose
 # face-swap endpoint is uncensored and swaps rather than regenerates.
 VIDEO_JOBS = {
-    'reel': {'models': ('wan-2-5', 'seedance-2-5'), 'needs': (),
+    'reel': {'models': ('wan-2-5', 'seedance-2-5', 'wan-2-7'), 'needs': (),
              'kind': 'video', 'ratings': ('sfw',),
              'label': 'Reel',
              'note': 'A prompt, a photo, or both, as a short clip.'},
@@ -870,13 +870,24 @@ def build_video_prompt(motion=''):
     return (motion.strip() + ' ' + base) if motion.strip() else base
 
 
-def build_reel_prompt(prompt='', has_photo=False):
-    """A safe-work reel. It may run from a prompt alone, which is the one video
-    path here that makes no claim to be anybody -- so nothing in this wording
-    describes a person, and a photo, when there is one, is what does."""
+def build_reel_prompt(prompt='', has_photo=False, character=False):
+    """A safe-work reel. Without a character it may run from a prompt alone and
+    makes no claim to be anybody -- so nothing in this wording describes a
+    person, and a photo, when there is one, is what does. With a character her
+    views are the reference photographs, and a photo is a person to replace."""
     text = (prompt or '').strip()
-    lead = ('The woman in the reference photograph, filmed in a short vertical '
-            'clip.' if has_photo else 'A short, natural-looking clip.')
+    if character and has_photo:
+        lead = ('The woman in the first reference photographs — identical face, '
+                'hair and features — in place of the person in the last '
+                'photograph, with the same setting, pose, outfit and framing, '
+                'filmed in a short vertical clip.')
+    elif character:
+        lead = ('The woman in the reference photographs — identical face, hair '
+                'and features — filmed in a short vertical clip.')
+    elif has_photo:
+        lead = 'The woman in the reference photograph, filmed in a short vertical clip.'
+    else:
+        lead = 'A short, natural-looking clip.'
     tail = ('Shot on a phone, natural light, handheld and unstyled, realistic '
             'motion.')
     return ' '.join(part for part in (lead, text, tail) if part)
@@ -1303,6 +1314,15 @@ class RunwareProvider(Provider):
             else:
                 task[fields['source']] = source
                 task[fields['refs']] = list(refs)[:MAX_REFERENCES]
+        elif (job == 'reel' and shape == 'inputs' and spec.get('reference_urls')
+              and not spec.get('source_url')):
+            # A reel with her character: her views lead and the creator's
+            # still, when there is one, goes last -- the prompt names it by
+            # position as the person to replace.
+            scenes = list(spec.get('scene_urls') or [])
+            keep = max(1, cap - len(scenes))
+            task['inputs'] = {'referenceImages':
+                              (list(spec['reference_urls'])[:keep] + scenes)[:cap]}
         elif job == 'multiref':
             # Her identity references first and the scene references after,
             # because the prompt names them by position -- the payload has no

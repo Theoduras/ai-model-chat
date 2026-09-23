@@ -259,7 +259,10 @@ Stay completely in character. Never mention being an AI.
   carries the identity and there is nothing to correct. The one exception is
   the safe-work **Reel** job, which may run from a prompt alone: a prompt-only
   clip makes no claim to be anybody, carries no identity lock, and is the
-  reason Reel is SFW-only in `imagegen.VIDEO_JOBS`. Every other video job —
+  reason Reel is SFW-only in `imagegen.VIDEO_JOBS`. A persona with an approved
+  character view makes a Reel of her instead: it runs on `wan-2-7` with her
+  safe-work views as references, and an optional still or motion clip is the
+  person she replaces, never a first frame. Every other video job —
   Animate, Extend, Multi-reference, Swap — still needs her: an approved still,
   an approved clip, or her reference slots. All of them land unapproved in
   `staging/` either way, so nothing reaches a fan unreviewed.
