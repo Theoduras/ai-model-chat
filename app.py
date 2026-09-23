@@ -5750,6 +5750,41 @@ Nobody gets a second trial.</p>
 </table>
 </div></div></body></html>"""
 
+ADMIN_REGISTER_LINKS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<link rel="icon" href="/favicon.ico" sizes="any"><title>Register links</title>
+<style>""" + ACCOUNT_CSS + """
+table{width:100%;border-collapse:collapse;font-size:.85rem;margin-top:12px}
+th{text-align:left;color:var(--text-muted);font-weight:500;padding:8px 10px;border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:10px;border-bottom:1px solid var(--border);color:var(--text-2)}
+code{font-size:.8rem;color:#a78bfa;word-break:break-all}
+form.inline{display:inline}
+form.inline button{width:auto;padding:4px 12px;margin:0;font-size:.78rem;background:var(--surface);color:var(--text)}
+.newrow{display:flex;gap:8px}.newrow input{flex:1;margin:0}.newrow button{width:auto;padding:0 18px;margin:0}
+</style></head><body data-page="admin-register-links"><div class="wrap wide">
+<div class="bar"><span>Register links</span><a href="/admin/users">Users</a></div>
+<div class="card">
+<h1>Plain register links</h1>
+<p class="sub">Each link just counts its clicks and sends the visitor to
+/register — no trial, no discount, nothing granted.</p>
+{% if saved %}<div class="ok">{{ saved }}</div>{% endif %}
+{% if error %}<div class="err">{{ error }}</div>{% endif %}
+<form method="post"><input type="hidden" name="action" value="create">
+<label>Note (which channel is this for?)</label>
+<div class="newrow"><input name="note" placeholder="e.g. bio link, IG story" maxlength="200">
+<button type="submit">Create link</button></div></form>
+<table><tr><th>Link</th><th>Note</th><th>Created</th><th>Clicks</th><th></th></tr>
+{% for r in rows %}<tr>
+<td><code>{{ r.link }}</code></td><td>{{ r.note }}</td><td>{{ r.created }}</td>
+<td>{{ r.clicks }}</td>
+<td><form class="inline" method="post" onsubmit="return confirm('Delete this link?')">
+<input type="hidden" name="action" value="delete"><input type="hidden" name="code" value="{{ r.code }}">
+<button type="submit">Delete</button></form></td>
+</tr>{% endfor %}
+</table>
+</div></div></body></html>"""
+
 
 # ── Referrals: a paid member's link, the 20% it unlocks, the 5% it earns ──
 
@@ -6224,6 +6259,63 @@ def _count_trial_click(code):
         error_logger.error('Trial click not counted', exc_info=True)
     finally:
         s.close()
+
+
+@app.route('/admin/register-links', methods=['GET', 'POST'])
+def admin_register_links():
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    from db import RegisterLink, list_register_links
+    me = _current_user()
+    saved = error = ''
+    s = _db_session()
+    try:
+        if request.method == 'POST':
+            action = request.form.get('action', '')
+            if action == 'create':
+                link = RegisterLink(
+                    code=secrets.token_urlsafe(9).replace('-', '').replace('_', '')[:12],
+                    note=(request.form.get('note') or '').strip()[:200],
+                    created_by=me['id'])
+                s.add(link)
+                s.commit()
+                saved = 'Register link created.'
+                logger.info('REGISTER LINK CREATED by=%s code=%s', me['email'], link.code)
+            elif action == 'delete':
+                link = s.query(RegisterLink).filter(
+                    RegisterLink.code == request.form.get('code', '')).first()
+                if link:
+                    s.delete(link)
+                    s.commit()
+                    saved = 'Register link deleted.'
+        rows = [{'code': link.code, 'note': link.note or '',
+                 'link': f'{_callback_origin()}/rl/{link.code}',
+                 'created': _fmt_date(link.created_at),
+                 'clicks': link.clicks or 0}
+                for link in list_register_links(s)]
+    finally:
+        s.close()
+    return render_template_string(ADMIN_REGISTER_LINKS_HTML, rows=rows,
+                                  saved=saved, error=error)
+
+
+@app.route('/rl/<code>')
+def register_link_click(code):
+    """A plain tracked link to /register — counts the click, grants nothing."""
+    code = (code or '').strip()[:32]
+    from db import RegisterLink
+    s = _db_session()
+    try:
+        link = s.query(RegisterLink).filter(RegisterLink.code == code).first()
+        if link:
+            link.clicks = (link.clicks or 0) + 1
+            s.commit()
+    except Exception:
+        error_logger.error('Register link click not recorded', exc_info=True)
+    finally:
+        s.close()
+    return redirect('/register')
 
 
 @app.route('/trial/<code>')
