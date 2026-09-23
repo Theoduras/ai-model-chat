@@ -1403,6 +1403,11 @@ function restoreView() {
   // A page opened on its own lands here as ?open= so it shows inside the
   // workspace.
   const open = new URLSearchParams(location.search).get('open') || '';
+  if (PAY_PATHS.includes(open.split('?')[0])) {
+    history.replaceState(null, '', location.pathname);
+    openPayModal(open);
+    return false;
+  }
   const openEl = /^\/[a-z]/.test(open) && viewEl(open);
   if (openEl) {
     history.replaceState(null, '', location.pathname);
