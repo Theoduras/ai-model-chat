@@ -42,12 +42,12 @@
     .in-workspace body.ch-studio > header { display: none; }
     #edit-view:not([hidden]) { display: grid; grid-template-columns: 240px minmax(0, 1fr); column-gap: 28px; align-items: start; }
     #edit-view > * { grid-column: 2; }
-    .views-mode [data-step="body"]:not([hidden]) { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 20px; align-items: start; }
+    .views-mode [data-step="body"]:not([hidden]) { display: grid; grid-template-columns: minmax(0, 1fr) 360px; grid-template-rows: auto 1fr; gap: 20px; align-items: start; }
     .views-mode .drawer { position: static; width: auto; box-shadow: none; border: 1px solid var(--border); border-radius: 20px;
       padding: 20px 20px 0; overflow: visible; grid-column: 1; grid-row: 1 / span 2; }
     .views-mode .drawer .vp-close { display: none; }
-    .views-mode [data-step="body"] > .ch-grow { grid-column: 2; position: sticky; top: 0; max-height: 100vh; overflow-y: auto; }
-    .views-mode [data-step="body"] > .ch-side { grid-column: 2; }
+    .views-mode [data-step="body"] > .ch-grow { grid-column: 2; grid-row: 2; position: sticky; top: 0; max-height: 100vh; overflow-y: auto; }
+    .views-mode [data-step="body"] > .ch-side { grid-column: 2; grid-row: 1; }
     .views-mode .views { grid-template-columns: 1fr; }
     .views-mode #tiers .ch-card { padding: 14px; }
     .views-mode #views-head { flex-direction: column; align-items: stretch; }
@@ -58,9 +58,9 @@
     .rail .steps button { width: 100%; height: 44px; text-align: left; border-radius: 10px; }
     @media (max-width: 860px) { #edit-view:not([hidden]) { grid-template-columns: 1fr; }
       #edit-view > * { grid-column: 1; }
-      .views-mode [data-step="body"]:not([hidden]) { grid-template-columns: minmax(0, 1fr); }
+      .views-mode [data-step="body"]:not([hidden]) { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; }
       .views-mode .drawer { grid-row: auto; }
-      .views-mode [data-step="body"] > .ch-grow, .views-mode [data-step="body"] > .ch-side { grid-column: 1; position: static; max-height: none; }
+      .views-mode [data-step="body"] > .ch-grow, .views-mode [data-step="body"] > .ch-side { grid-column: 1; grid-row: auto; position: static; max-height: none; }
       .vp-head { flex-wrap: wrap; } #vp-source { order: 3; width: 100%; } #vp-opts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       #edit-view > .rail { grid-column: 1; grid-row: auto; position: static; } .rail .steps { flex-direction: row; } .rail .steps button { width: auto; } }
     .ch-scroll { flex: 1; min-height: 0; overflow-y: auto; }
