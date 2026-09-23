@@ -138,7 +138,7 @@
     .banner { margin-top: 12px; padding: 10px 12px; border-radius: 10px; font-size: 0.82rem; background: var(--surface-2); }
     .banner.outdated { background: color-mix(in srgb, var(--warn) 14%, transparent); }
     .dl { font-size: 0.8rem; font-weight: 700; color: var(--text-2); }
-    .crop-stage { position: relative; user-select: none; touch-action: none; }
+    .crop-stage { position: relative; overflow: hidden; border-radius: 8px; user-select: none; touch-action: none; }
     .crop-stage img { width: 100%; display: block; border-radius: 8px; }
     .crop-box { position: absolute; border: 2px solid var(--accent); box-shadow: 0 0 0 9999px rgba(0,0,0,.35); cursor: move; }
     .crop-handle { position: absolute; right: -7px; bottom: -7px; width: 14px; height: 14px; border-radius: 7px; background: var(--accent); cursor: nwse-resize; }
@@ -383,7 +383,8 @@
           <div class="chips" id="vp-traits" style="margin-top:6px;"></div></div>
         <div class="opts" id="vp-opts" style="margin-top:12px;"></div>
       </div>
-      <div class="actionbar">
+      <div class="actionbar" style="flex-wrap:wrap;">
+        <div style="display:flex; align-items:center; gap:8px; width:100%;"><span class="dl">Variations</span><div class="chips" id="vp-batch"></div></div>
         <button type="button" class="btn" id="vp-check" onclick="runViewCheck()" hidden>Adult check</button>
         <button type="button" class="btn" id="vp-var" onclick="generate(selView)"></button>
         <button type="button" class="btn btn-primary" id="vp-primary"></button>
@@ -755,7 +756,7 @@ function autosaveSheet() {
 }
 function openView(key) {
   selView = key;
-  if (step !== 'body') { step = 'body'; render(); } else renderBody();
+  if (step !== 'views') { step = 'views'; render(); } else renderBody();
 }
 function closeDrawer() { selView = null; renderBody(); }
 function refTile(i) {
@@ -827,6 +828,7 @@ function renderViewPanel() {
                   outdated: ['Regenerate', () => generate(v.key)]}[st.display];
   prim.textContent = action ? action[0] + (action[0] === 'Approve' ? '' : cost(batch)) : STATUS_LABEL[st.display];
   el('vp-var').textContent = `Generate ${batch}` + cost(batch);
+  el('vp-batch').innerHTML = batchChips();
   prim.disabled = !action || (st.display === 'review' && !cand);
   prim.onclick = action ? action[1] : null;
   el('vp-var').disabled = locked || st.display === 'generating';

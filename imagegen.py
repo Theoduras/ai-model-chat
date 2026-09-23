@@ -45,6 +45,8 @@ RUNWARE_ENDPOINT = 'https://api.runware.ai/v1'
 MODELSLAB_ENDPOINT = 'https://modelslab.com/api/v6'
 
 TIMEOUT = 60
+# A still request waits for every image in the batch, so its window grows with it.
+IMAGE_TIMEOUT = int(os.getenv('RW_IMAGE_TIMEOUT', '180'))
 
 # A video submit is not an image call: the provider fetches and validates the
 # source clip before it acknowledges the task, which a 60s read timeout cuts
@@ -1221,7 +1223,7 @@ class RunwareProvider(Provider):
         if refs:
             task[REFERENCE_FIELD] = list(refs)[:MAX_REFERENCES]
 
-        data = self._send([task])
+        data = self._send([task], timeout=IMAGE_TIMEOUT + 30 * int(spec.get('batch') or 1))
         urls = [d.get('imageURL') for d in data if d.get('imageURL')]
         cost = sum(float(d.get('cost') or 0) for d in data)
         if not urls:
