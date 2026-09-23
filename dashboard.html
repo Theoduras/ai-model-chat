@@ -1406,6 +1406,7 @@ function restoreView() {
   if (PAY_PATHS.includes(open.split('?')[0])) {
     history.replaceState(null, '', location.pathname);
     openPayModal(open);
+    if (new URL(open, location.origin).searchParams.get('topup')) setTimeout(closePayModal, 4000);
     return false;
   }
   const openEl = /^\/[a-z]/.test(open) && viewEl(open);
