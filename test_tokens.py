@@ -361,7 +361,8 @@ def test_equivalents():
     print('equivalents')
     eq = CR.equivalents(350)
     check(f'350 tokens reads as {eq["photos"]} photos or {eq["clips"]} clips',
-          eq['photos'] == 350 and eq['clips'] == 29)
+          eq['photos'] == 350 // CR.image_price(CR.DEFAULT_IMAGE_MODEL, CR.DEFAULT_RESOLUTION)
+          and eq['clips'] == 29)
     check('an empty balance reads as nothing',
           CR.equivalents(0) == {'photos': 0, 'clips': 0})
     cash = CR.cash_for_tokens(12, 'eur')
