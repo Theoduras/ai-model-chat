@@ -28513,6 +28513,12 @@ def _gen_identity(slug, body, spec):
     spec['identity'] = identity
     if identity == 'character':
         spec['character'] = char
+    else:
+        # Picked per job from kept vault photos; none picked falls back to the
+        # model's saved reference slots.
+        ids = [str(i) for i in (body.get('identity_media') or []) if i][:3]
+        spec['identity_media'] = [i for i in ids
+                                  if (_media_row(slug, i) or {}).get('approved')]
     return identity
 
 
@@ -28744,7 +28750,8 @@ def _gen_spec(slug, body, user):
         elif model in imagegen.CLIP_ONLY_MODELS:
             raise imagegen.GenerationError(
                 'That model replaces the person in a clip — upload one first.')
-        elif identity == 'character' and model not in imagegen.REFERENCE_VIDEO_MODELS:
+        elif ((identity == 'character' or spec.get('identity_media'))
+              and model not in imagegen.REFERENCE_VIDEO_MODELS):
             model = CR.VIDEO_EDIT_MODEL
     elif job == 'extend':
         mode = (body.get('extend_mode') or 'continue').strip().lower()
@@ -30377,14 +30384,16 @@ def _gen_start(job_id, slug, spec, workspace):
                         preserve=imagegen.preserves_source(job, spec.get('model')))
                 elif job == 'reel':
                     char = spec.get('character')
-                    if char:
+                    picked = spec.get('identity_media')
+                    if char or picked:
                         call['reference_urls'] = [
                             u for u in (_char_path_url(char['views'][k]['path'],
                                                        char['views'][k]['mime'])
-                                        for k in CH.reel_views(char)) if u]
+                                        for k in CH.reel_views(char)) if u
+                        ] if char else _gen_media_urls(slug, picked)
                         if not call['reference_urls']:
                             raise imagegen.GenerationError(
-                                "Her character's safe-work photos could not be read.")
+                                "Her reference photos could not be read.")
                         # The still is the person she replaces, not a first
                         # frame: frame and references are exclusive inputs.
                         call.pop('reference_b64', None)
@@ -30401,7 +30410,7 @@ def _gen_start(job_id, slug, spec, workspace):
                         call['prompt'] = imagegen.build_reel_prompt(
                             spec.get('prompt_extra') or motion,
                             has_photo=bool(spec.get('reference_media')),
-                            character=bool(char))
+                            character=bool(char or picked))
                 elif job == 'extend':
                     call['prompt'] = imagegen.build_extend_prompt(
                         spec.get('extend_mode'), motion)
@@ -30459,8 +30468,12 @@ def _gen_start(job_id, slug, spec, workspace):
                         refs = _gen_reference_urls(slug, ref_model, role=role)
                     if not refs and role == 'body':
                         refs = _gen_reference_urls(slug, ref_model)
-                    if job == 'reel' and spec.get('character'):
+                    if job == 'reel' and (spec.get('character')
+                                          or spec.get('identity_media')):
                         refs = call['reference_urls']
+                    elif spec.get('identity_media'):
+                        refs = _gen_media_urls(slug, spec['identity_media'])
+                        ref_model = 'picked'
                     elif spec.get('identity') == 'character' and role == 'body':
                         body_view = spec['character']['views'].get('body_front')
                         refs = [u for u in [body_view and _char_path_url(

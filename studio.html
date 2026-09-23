@@ -434,6 +434,8 @@
             <option value="vault">Vault reference photos</option>
             <option value="character">Character build</option>
           </select></label>
+        <div class="gen-f gen-idpick-row" id="gen-swap-idpick-row"><span>Pick her photos (up to 3)</span>
+          <div class="anim-strip gen-idpick" id="gen-swap-idpick"></div></div>
         <label class="gen-f"><span>Upload</span>
           <input type="file" id="gen-swap-file" accept="video/mp4,video/quicktime"
                  onchange="uploadSwapSource(this.files[0])"></label>
@@ -472,6 +474,8 @@
             <option value="vault">Vault reference photos</option>
             <option value="character">Character build</option>
           </select></label>
+        <div class="gen-f gen-idpick-row" id="gen-reel-idpick-row"><span>Pick her photos (up to 3)</span>
+          <div class="anim-strip gen-idpick" id="gen-reel-idpick"></div></div>
       </div>
 
       <div id="gen-extend-form" style="display:none; flex-direction:column; gap:11px;">
@@ -1614,6 +1618,8 @@ function reelChar() {
 }
 
 // Character is offered only once a view is approved, and chosen by default then.
+let genIdPick = [];
+
 function syncIdentity() {
   const has = !!(genCharacter && genCharacter.has_approved);
   document.querySelectorAll('.gen-identity').forEach(sel => {
@@ -1621,6 +1627,24 @@ function syncIdentity() {
     if (!has) sel.value = 'vault';
     else if (!sel.dataset.touched) sel.value = 'character';
   });
+  ['swap', 'reel'].forEach(job => {
+    const vault = identityOf(job) === 'vault';
+    el('gen-' + job + '-idpick-row').style.display = vault ? '' : 'none';
+    if (!vault) return;
+    const photos = animPhotos();
+    el('gen-' + job + '-idpick').innerHTML = photos.length ? photos.map(v => `
+      <button type="button" class="anim-pick" aria-pressed="${genIdPick.includes(v.id)}"
+              title="${esc(v.purpose || 'kept photo')}" onclick="pickIdPhoto('${v.id}')">
+        <img loading="lazy" decoding="async" src="${v.thumb}" alt="" draggable="false"></button>`).join('')
+      : '<span class="hint" style="margin:0;">No kept photos in the vault yet.</span>';
+  });
+}
+
+// None picked falls back to the photos saved against the model in panel 2.
+function pickIdPhoto(id) {
+  genIdPick = genIdPick.includes(id) ? genIdPick.filter(x => x !== id)
+            : genIdPick.concat(id).slice(-3);
+  renderGenForm();
 }
 
 function videoModelNow() {
@@ -1969,6 +1993,7 @@ async function jobPayload() {
   if (genJob === 'swap') {
     return Object.assign(base, {
       source: genSwap.id, resolution: swapResolution(), identity: identityOf('swap'),
+      identity_media: identityOf('swap') === 'vault' ? genIdPick : [],
       seconds: swapSeconds(), motion: el('gen-swap-motion').value.trim(),
       orientation: el('gen-swap-orient').value,
       keep_sound: el('gen-swap-sound').checked,
@@ -1982,6 +2007,7 @@ async function jobPayload() {
       reference_media: genReelPick || '',
       source: genDrive ? genDrive.id : '',
       identity: identityOf('reel'),
+      identity_media: identityOf('reel') === 'vault' ? genIdPick : [],
     });
   }
   if (genJob === 'multiref') {
