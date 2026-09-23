@@ -29844,6 +29844,20 @@ def _character_finish(job_id, spec, workspace, urls):
         s.close()
     if not made:
         _refund_tokens(workspace, job_id, note='no usable result')
+    elif len(made) < int(spec.get('batch') or 1):
+        # Every image was paid for up front; the ones that never arrived are
+        # owed back, the same as a job that delivered none.
+        from db import token_settle
+        asked = int(spec.get('batch') or 1)
+        s = _db_session()
+        try:
+            back = token_settle(s, workspace, job_id,
+                                CR.quote(dict(spec, batch=len(made))),
+                                note=f'{len(made)} of {asked} images delivered')
+        finally:
+            s.close()
+        logger.info('character job=%s delivered %d of %d (%s tokens returned)',
+                    job_id, len(made), asked, back)
 
 
 def _character_job_json(job, ids, s):

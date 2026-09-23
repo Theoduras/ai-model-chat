@@ -1242,6 +1242,20 @@ def token_refund_part(session, workspace_id, source, amount, note=''):
     return given
 
 
+def token_settle(session, workspace_id, source, owed, note=''):
+    """Bring what `source` has cost down to `owed`, refunding the rest.
+
+    Stated as a target rather than an amount so it is safe to run twice: a
+    second settle for the same job finds nothing above `owed` and posts
+    nothing, where a second partial refund would pay the difference again."""
+    charged = -sum(int(r.delta) for r in session.query(TokenLedger).filter(
+        TokenLedger.workspace_id == workspace_id,
+        TokenLedger.source == source,
+        TokenLedger.kind.in_(('spend', 'refund'))).all())
+    return token_refund_part(session, workspace_id, source,
+                             charged - max(0, int(owed)), note=note)
+
+
 def token_refund(session, workspace_id, source, note=''):
     """Give back whatever was reserved against `source`, once. A job that fails
     or is swept must not cost anything, and a double refund must not pay out.
