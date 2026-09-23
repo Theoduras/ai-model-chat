@@ -98,6 +98,14 @@
   </div>
 </div>
 
+<!-- Tokens / Upgrade lightbox -->
+<div class="modal-overlay" id="pay-modal" onclick="if(event.target===this)closePayModal()">
+  <div class="modal" style="max-width:960px; width:100%; height:90vh; padding:0; position:relative; overflow:hidden;">
+    <button class="modal-close" onclick="closePayModal()" aria-label="Close" style="position:absolute; top:8px; right:10px; z-index:1;">&times;</button>
+    <iframe id="pay-frame" class="sb-frame" title="Tokens and plans"></iframe>
+  </div>
+</div>
+
 <!-- Backstory AI Interview Modal -->
 <div class="modal-overlay" id="backstory-modal" onclick="if(event.target===this)closeBackstoryAI()">
   <div class="modal" style="max-width:580px; display:flex; flex-direction:column; max-height:90vh;">
@@ -1395,6 +1403,12 @@ function restoreView() {
   // A page opened on its own lands here as ?open= so it shows inside the
   // workspace.
   const open = new URLSearchParams(location.search).get('open') || '';
+  if (PAY_PATHS.includes(open.split('?')[0])) {
+    history.replaceState(null, '', location.pathname);
+    openPayModal(open);
+    if (new URL(open, location.origin).searchParams.get('topup')) setTimeout(closePayModal, 4000);
+    return false;
+  }
   const openEl = /^\/[a-z]/.test(open) && viewEl(open);
   if (openEl) {
     history.replaceState(null, '', location.pathname);
@@ -1432,17 +1446,34 @@ function restoreView() {
   return false;
 }
 
+// Tokens and Upgrade open over the current view so the creator keeps her place.
+const PAY_PATHS = ['/tokens', '/billing'];
+function openPayModal(url) {
+  document.getElementById('pay-frame').src = url;
+  document.getElementById('pay-modal').classList.add('open');
+}
+function closePayModal() {
+  const m = document.getElementById('pay-modal');
+  if (!m.classList.contains('open')) return;
+  m.classList.remove('open');
+  document.getElementById('pay-frame').src = 'about:blank';
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closePayModal(); });
+
 // Opens a link inside the workspace when the sidebar offers it; anything else
 // (log out, the public pricing page) leaves the dashboard.
 function navigateWorkspace(url) {
-  if (url.split('?')[0] === '/dashboard') { showPersonaBrowser(); return; }
+  const path = url.split('?')[0];
+  if (PAY_PATHS.includes(path)) { openPayModal(url); return; }
+  closePayModal();
+  if (path === '/dashboard') { showPersonaBrowser(); return; }
   const el = viewEl(url);
   if (el) openEmbedded(url, el);
   else location.href = url;
 }
 
 // The header's Tokens and Upgrade links (and the plan box's Top up) open in
-// the frame rather than reloading the dashboard around them.
+// the lightbox rather than reloading the dashboard around them.
 document.addEventListener('click', function (e) {
   if (e.defaultPrevented || e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
   const a = e.target.closest('a[href]');
@@ -1451,7 +1482,7 @@ document.addEventListener('click', function (e) {
     showPersonaBrowser();
     return;
   }
-  if (!a || a.target || a.origin !== location.origin || !viewEl(a.pathname)) return;
+  if (!a || a.target || a.origin !== location.origin || !(viewEl(a.pathname) || PAY_PATHS.includes(a.pathname))) return;
   e.preventDefault();
   navigateWorkspace(a.pathname + a.search);
 });
