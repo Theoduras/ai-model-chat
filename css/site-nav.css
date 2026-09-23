@@ -93,6 +93,14 @@
    positioning of their own. */
 .sn-inline .sn-links a{padding:7px 14px;font-size:13px}
 
+/* An app header has its brand, badges and menu buttons beside these, so on a
+   narrow screen they drop to icons. The token count keeps its number: that is
+   the point of it (on a phone, only the number, beside the coin). */
+@media(max-width:900px){
+  .sn-inline a:not([data-sn-tokens]) .sn-label{display:none}
+  .sn-inline.sn-links a{padding:8px 10px}
+}
+
 @media(max-width:600px){
   .site-nav{gap:12px;padding:10px 14px;top:16px}
   .site-nav .brand{font-size:18px}
@@ -102,6 +110,7 @@
      viewport; the brand still links home and the blog is one tap from there.
      The account links keep their own button, so this is the left pill only. */
   .site-nav .sn-links a:not(.sn-cta):not([data-keep]){display:none}
+  .sn-inline .sn-tok-unit{display:none}
   .sn-menu-btn{padding:8px 13px}
   /* The bar is a pill near the left edge, so the panel is pinned to the
      viewport instead of to the button, which would overflow it. */
