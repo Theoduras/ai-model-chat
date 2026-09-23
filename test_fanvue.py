@@ -997,6 +997,77 @@ def test_a_tag_only_reply_is_never_sent_as_a_blank():
           app._tg_bursts('') == [''])
 
 
+def test_vault_upload():
+    """Pushing studio media into the Fanvue vault: one upload per item however
+    often it is pushed, filed into every folder asked for, and never an item
+    nobody has kept."""
+    import urllib.error
+    import utils
+    utils._is_operator = lambda: True
+    store, calls, uploads = {}, [], []
+    app._get_setting = lambda k, d=None: store.get(k, d)
+    app._set_setting = lambda k, v: store.__setitem__(k, v)
+    rows = {'m1': {'id': 'm1', 'approved': True, 'kind': 'video', 'mime': 'video/mp4'},
+            'm2': {'id': 'm2', 'approved': False, 'kind': 'image', 'mime': 'image/png'}}
+    app._media_row = lambda p, mid: rows.get(mid)
+    app._media_bytes = lambda r: (b'bytes', r['mime'])
+
+    def up(persona, data, kind, filename, name=None, content_type=''):
+        uploads.append((kind, filename, name, content_type))
+        return 'uuid-1'
+    app._fv_upload_media = up
+
+    def api(persona, method, path, body=None):
+        calls.append((method, path, body))
+        if path == '/vault/folders/Broken/media':
+            raise urllib.error.HTTPError(path, 500, 'boom', {}, None)
+        return {}
+    app._fanvue_call = api
+
+    def post(body):
+        with app.app.test_request_context('/api/fanvue/vault-upload', method='POST', json=body):
+            r = app.api_fanvue_vault_upload()
+        r, code = (r if isinstance(r, tuple) else (r, 200))
+        return code, r.get_json()
+
+    code, d = post({'persona': 'lilith', 'media_id': 'm1', 'name': 'Beach',
+                    'folders': ['Teasers', 'New one', 'Broken'], 'create': ['New one']})
+    check('upload answers ok', code == 200 and d['ok'], d)
+    check('uploaded once as a video with its name',
+          uploads == [('video', 'm1.mp4', 'Beach', 'video/mp4')], uploads)
+    check('a new folder is created before filing into it',
+          ('POST', '/vault/folders', {'name': 'New one'}) in calls, calls)
+    check('filed into the folders that work',
+          d['folders_ok'] == ['Teasers', 'New one'], d)
+    check('one broken folder is reported, not fatal', 'Broken' in d['folder_errors'], d)
+    check('folder names are URL-quoted',
+          any(c[1] == '/vault/folders/New%20one/media' for c in calls), calls)
+    check('the vault item is remembered',
+          json.loads(store['fanvue_uploads_lilith']) == {'m1': 'uuid-1'}, store)
+
+    calls.clear()
+    code, d = post({'persona': 'lilith', 'media_id': 'm1', 'folders': ['Teasers']})
+    check('a second push reuses the vault item', d['reused'] and len(uploads) == 1, d)
+    check('and only files it', calls == [('POST', '/vault/folders/Teasers/media',
+                                          {'mediaUuids': ['uuid-1']})], calls)
+
+    code, d = post({'persona': 'lilith', 'media_id': 'm2'})
+    check('unreviewed media never leaves', code == 400 and not d['ok'], (code, d))
+    code, d = post({'persona': 'lilith', 'media_id': 'nope'})
+    check('an unknown item is a 404', code == 404, code)
+
+    def bad_body(persona, method, path, body=None):
+        calls.append((method, path, body))
+        if body == {'mediaUuids': ['uuid-1']}:
+            raise urllib.error.HTTPError(path, 400, 'bad', {}, None)
+        return {}
+    app._fanvue_call = bad_body
+    calls.clear()
+    code, d = post({'persona': 'lilith', 'media_id': 'm1', 'folders': ['Teasers']})
+    check('a refused body shape falls back to the singular key',
+          d['folders_ok'] == ['Teasers'] and calls[-1][2] == {'mediaUuid': 'uuid-1'}, (d, calls))
+
+
 if __name__ == '__main__':
     for fn in (test_direction, test_import, test_identity_never_crosses,
                test_placeholders, test_pacing, test_backlog,
@@ -1011,7 +1082,8 @@ if __name__ == '__main__':
                test_unsendable_chats, test_complaints_are_remembered,
                test_telegram_off_silences_the_personal_account,
                test_a_stopped_account_stays_stopped,
-               test_a_tag_only_reply_is_never_sent_as_a_blank):
+               test_a_tag_only_reply_is_never_sent_as_a_blank,
+               test_vault_upload):
         print('\n--- %s ---' % fn.__name__)
         restore_app()
         fn()

@@ -105,6 +105,8 @@
       justify-content: center; padding: 32px; background: #000000e8; cursor: zoom-out;
     }
     .gen-lightbox[hidden] { display: none; }
+    #fv-panel { display: flex; margin-bottom: 10px; }
+    #fv-panel[hidden], #vault-select-tools[hidden] { display: none; }
     .gen-lightbox img, .gen-lightbox video { max-width: 100%; max-height: 100%; border-radius: var(--r); }
     .gen-lb-nav {
       position: absolute; top: 50%; transform: translateY(-50%); width: 44px; height: 44px;
@@ -550,6 +552,28 @@
       <span class="vault-title">Kept photos <span id="vault-count"></span></span>
       <div class="vault-tools">
         <span class="hint" style="margin:0;">▶ turns a photo into a clip</span>
+        <button type="button" class="btn btn-ghost" id="vault-select-btn" onclick="toggleVaultSelect()">Select</button>
+      </div>
+    </div>
+    <div class="gen-go" id="vault-select-tools" hidden>
+      <span class="hint" style="margin:0;" id="vault-picked"></span>
+      <button type="button" class="btn btn-ghost" onclick="vaultSelectAll(true)">Select all</button>
+      <button type="button" class="btn btn-ghost" onclick="vaultSelectAll(false)">Clear</button>
+      <button type="button" class="btn-ai" id="fv-open-btn" onclick="openFanvuePanel()" disabled>Upload to Fanvue</button>
+    </div>
+    <div class="gen-builder" id="fv-panel" hidden>
+      <b style="font-size:.8rem;">Upload to the Fanvue vault</b>
+      <span class="hint" style="margin:0;">Folders to file them in (optional):</span>
+      <div class="anim-strip" id="fv-folders"></div>
+      <span class="hint gen-low" style="margin:0;" id="fv-folder-err"></span>
+      <label class="gen-f">New folder<input type="text" id="fv-new-folder" maxlength="60"
+        placeholder="Name — separate several with commas"></label>
+      <label class="gen-f">Name on Fanvue<input type="text" id="fv-name" maxlength="80"
+        placeholder="Optional — numbered when several are selected"></label>
+      <div class="gen-go">
+        <button type="button" class="btn-ai" id="fv-upload-btn" onclick="uploadToFanvue()">Upload</button>
+        <button type="button" class="btn btn-ghost" onclick="el('fv-panel').hidden = true">Close</button>
+        <span class="hint" style="margin:0;" id="fv-result"></span>
       </div>
     </div>
     <div class="vault-grid" id="vault-grid"></div>
@@ -2120,9 +2144,42 @@ function genTtl(iso) {
   return Math.round(hours / 24) + 'd left';
 }
 
-// Keyed, so a poll moves the cards that are already there instead of
+// Keyed, so a re-render moves the tiles that are already there instead of
 // recreating them: a recreated <img> or <video> downloads its media again, and
-// the poll runs every three seconds while anything is generating.
+// the staging poll runs every three seconds while anything is generating.
+// A kept node takes the new attributes and children, except that an <img> or
+// <video> whose src is unchanged stays the element it was.
+function keepMedia(old, fresh) {
+  const media = new Map([...old.querySelectorAll('img, video')].map(m => [m.tagName + m.getAttribute('src'), m]));
+  fresh.querySelectorAll('img, video').forEach(m => {
+    const had = media.get(m.tagName + m.getAttribute('src'));
+    if (had) m.replaceWith(had);
+  });
+  old.replaceChildren(...fresh.childNodes);
+}
+
+function keyedRender(box, items, emptyHtml) {
+  if (!items.length) { box.innerHTML = emptyHtml || ''; return; }
+  const byKey = new Map([...box.children].map(n => [n.dataset.key, n]));
+  const nodes = items.map(([key, html]) => {
+    const t = document.createElement('template');
+    t.innerHTML = html.trim();
+    const fresh = t.content.firstElementChild;
+    fresh.dataset.key = key;
+    const old = byKey.get(key);
+    if (!old || old.tagName !== fresh.tagName) { fresh._inner = fresh.innerHTML; return fresh; }
+    [...old.attributes].forEach(at => { if (!fresh.hasAttribute(at.name)) old.removeAttribute(at.name); });
+    [...fresh.attributes].forEach(at => {
+      if (old.getAttribute(at.name) !== at.value) old.setAttribute(at.name, at.value);
+    });
+    const inner = t.content.firstElementChild.innerHTML;
+    if (old._inner !== inner) { keepMedia(old, fresh); old._inner = inner; }
+    return old;
+  });
+  const have = [...box.children];
+  if (have.length !== nodes.length || have.some((n, i) => n !== nodes[i])) box.replaceChildren(...nodes);
+}
+
 function renderGenStaging() {
   const box = el('gen-staging');
   if (!box) return;
@@ -2156,19 +2213,7 @@ function renderGenStaging() {
         </div>`]);
     });
   });
-  const have = [...box.children];
-  if (have.length === cards.length && have.every((n, i) => n.dataset.key === cards[i][0])) return;
-  const byKey = new Map(have.map(n => [n.dataset.key, n]));
-  box.replaceChildren(...cards.map(([key, html]) => {
-    let node = byKey.get(key);
-    if (!node) {
-      const t = document.createElement('template');
-      t.innerHTML = html.trim();
-      node = t.content.firstElementChild;
-      node.dataset.key = key;
-    }
-    return node;
-  }));
+  keyedRender(box, cards);
 }
 
 async function deleteGenJob(id) {
@@ -2268,12 +2313,12 @@ function renderExtendClips() {
   if (!clips.some(v => v.id === genExtendClip)) {
     genExtendClip = clips.length ? clips[0].id : '';
   }
-  box.innerHTML = clips.length ? clips.map(v => `
+  keyedRender(box, clips.map(v => [v.id, `
     <button type="button" class="anim-pick" aria-pressed="${v.id === genExtendClip}"
             title="${esc(v.outfit || v.purpose || 'kept clip')}"
             onclick="pickExtendClip('${v.id}')">
-      <video src="${inlineSrc(v.thumb)}" muted playsinline preload="metadata"></video></button>`).join('')
-    : '<span class="hint" style="margin:0;">Keep a clip first — an extension carries on from one.</span>';
+      <video src="${inlineSrc(v.thumb)}" muted playsinline preload="metadata"></video></button>`]),
+    '<span class="hint" style="margin:0;">Keep a clip first — an extension carries on from one.</span>');
   const player = el('gen-extend-player');
   const chosen = clips.find(v => v.id === genExtendClip);
   if (player) {
@@ -2347,21 +2392,142 @@ function toggleSceneRef(id) {
 function renderVault() {
   const grid = el('vault-grid');
   if (!grid) return;
-  grid.innerHTML = mediaVault.length ? mediaVault.map(v => {
+  vaultPicked = new Set([...vaultPicked].filter(id => mediaVault.some(v => v.id === id)));
+  keyedRender(grid, mediaVault.map(v => {
     const clip = isClip(v.kind);
     const parent = v.parent_media
       ? `<span class="vault-kind" style="left:4px; right:auto;"
               title="Continues another clip">&#8627;</span>` : '';
+    const fv = v.fanvue_uuid
+      ? `<span class="vault-kind" style="top:auto; bottom:4px;" title="In the Fanvue vault">FV</span>` : '';
     const thumb = clip
       ? `<video src="${v.thumb}" muted playsinline preload="metadata"></video>
          <span class="vault-kind">video</span>${parent}`
       : `<img loading="lazy" decoding="async" src="${v.thumb}" alt="" draggable="false">`;
-    return `
-      <div class="vault-item" data-lb="${v.thumb}" data-kind="${v.kind}" onclick="openLightbox(this)">
-        ${thumb}
-      </div>`;
-  }).join('') : '<div class="vault-empty">Nothing kept yet — generate some shots above.</div>';
+    return [v.id, `
+      <div class="vault-item${vaultPicked.has(v.id) ? ' selected' : ''}" data-id="${v.id}"
+           data-lb="${v.thumb}" data-kind="${v.kind}" onclick="vaultClick(this)">
+        ${thumb}${fv}
+      </div>`];
+  }), '<div class="vault-empty">Nothing kept yet — generate some shots above.</div>');
   el('vault-count').textContent = mediaVault.length ? `(${mediaVault.length})` : '';
+  renderVaultTools();
+}
+
+// ── Fanvue vault upload ─────────────────────────────────────────────────────
+// Selecting is a mode rather than a checkbox on every tile, so a plain click
+// still opens the lightbox the way it always did.
+let vaultSelecting = false;
+let vaultPicked = new Set();
+let fvFolders = null;
+let fvFolderPick = new Set();
+
+function vaultClick(node) {
+  if (!vaultSelecting) return openLightbox(node);
+  const id = node.dataset.id;
+  if (vaultPicked.has(id)) vaultPicked.delete(id); else vaultPicked.add(id);
+  renderVault();
+}
+
+function toggleVaultSelect(on) {
+  vaultSelecting = on === undefined ? !vaultSelecting : on;
+  if (!vaultSelecting) { vaultPicked.clear(); el('fv-panel').hidden = true; }
+  renderVault();
+}
+
+function vaultSelectAll(all) {
+  vaultPicked = all ? new Set(mediaVault.map(v => v.id)) : new Set();
+  renderVault();
+}
+
+function renderVaultTools() {
+  const n = vaultPicked.size;
+  el('vault-select-btn').textContent = vaultSelecting ? 'Cancel' : 'Select';
+  el('vault-select-tools').hidden = !vaultSelecting;
+  el('vault-picked').textContent = n ? `${n} selected` : 'Tap items to select';
+  el('fv-open-btn').disabled = !n;
+}
+
+async function openFanvuePanel() {
+  el('fv-panel').hidden = false;
+  el('fv-result').textContent = '';
+  if (fvFolders === null) await loadFanvueFolders();
+  renderFanvueFolders();
+}
+
+async function loadFanvueFolders() {
+  const box = el('fv-folders');
+  box.innerHTML = '<span class="hint" style="margin:0;">Loading Fanvue folders…</span>';
+  try {
+    const d = await (await fetch('/api/fanvue/folders?persona=' + encodeURIComponent(slug()))).json();
+    fvFolders = d.folders || [];
+    el('fv-folder-err').innerHTML = d.error
+      ? (/connected/i.test(d.error)
+          ? 'No Fanvue account is connected for this persona — <a href="/fanvue">connect it</a> first.'
+          : esc(d.error))
+      : '';
+  } catch (e) {
+    fvFolders = [];
+    el('fv-folder-err').textContent = 'Could not load Fanvue folders.';
+  }
+}
+
+function renderFanvueFolders() {
+  const box = el('fv-folders');
+  box.innerHTML = fvFolders.length ? fvFolders.map(f => `
+    <button type="button" class="gen-chip" aria-pressed="${fvFolderPick.has(f.name)}"
+            onclick="toggleFvFolder(this.dataset.name)" data-name="${esc(f.name)}">${esc(f.name)}${
+              f.count != null ? ` <span style="opacity:.6">${f.count}</span>` : ''}</button>`).join('')
+    : '<span class="hint" style="margin:0;">No folders yet — name one below, or upload without one.</span>';
+}
+
+function toggleFvFolder(name) {
+  if (fvFolderPick.has(name)) fvFolderPick.delete(name); else fvFolderPick.add(name);
+  renderFanvueFolders();
+}
+
+async function uploadToFanvue() {
+  const ids = mediaVault.filter(v => vaultPicked.has(v.id)).map(v => v.id);
+  if (!ids.length) return;
+  const typed = el('fv-new-folder').value.split(',').map(x => x.trim()).filter(Boolean);
+  const known = new Set((fvFolders || []).map(f => f.name));
+  const folders = [...fvFolderPick, ...typed.filter(x => !fvFolderPick.has(x))];
+  const create = typed.filter(x => !known.has(x));
+  const name = el('fv-name').value.trim();
+  const btn = el('fv-upload-btn'), out = el('fv-result');
+  btn.disabled = true;
+  // One item per request: each upload waits for Fanvue to finish processing,
+  // and a batch in one request would outlive a request timeout.
+  const done = [], reused = [], failed = [], folderErrs = new Set();
+  for (let i = 0; i < ids.length; i++) {
+    out.textContent = `Uploading ${i + 1} / ${ids.length}…`;
+    try {
+      const res = await fetch('/api/fanvue/vault-upload', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ persona: slug(), media_id: ids[i], folders, create,
+                               name: name ? (ids.length > 1 ? `${name} ${i + 1}` : name) : '' }),
+      });
+      const d = await res.json();
+      if (!res.ok || !d.ok) throw new Error(d.error || 'upload failed');
+      (d.reused ? reused : done).push(ids[i]);
+      Object.entries(d.folder_errors || {}).forEach(([f, why]) => folderErrs.add(`${f}: ${why}`));
+      const item = mediaVault.find(v => v.id === ids[i]);
+      if (item) item.fanvue_uuid = d.uuid;
+      if (create.length) create.length = 0;
+    } catch (e) {
+      failed.push(e.message || String(e));
+    }
+  }
+  btn.disabled = false;
+  if (typed.length) { fvFolders = null; el('fv-new-folder').value = ''; typed.forEach(x => fvFolderPick.add(x)); }
+  out.innerHTML = [
+    done.length ? `${done.length} uploaded` : '',
+    reused.length ? `${reused.length} already on Fanvue${folders.length ? ' (filed into the folders)' : ''}` : '',
+    failed.length ? `<span class="gen-low">${failed.length} failed: ${esc([...new Set(failed)].join('; '))}</span>` : '',
+    folderErrs.size ? `<span class="gen-low">Folder problems: ${esc([...folderErrs].join('; '))}</span>` : '',
+  ].filter(Boolean).join(' · ');
+  renderVault();
+  if (fvFolders === null) { await loadFanvueFolders(); renderFanvueFolders(); }
 }
 
 init();

@@ -10960,6 +10960,7 @@ def api_persona_media_list(slug):
         for l in links:
             by_media.setdefault(l.media_id, []).append(l.outfit)
 
+        on_fanvue = _fv_uploads(slug)
         vault = []
         for r in rows:
             o = _outfit_of(r, outfits)
@@ -10982,6 +10983,7 @@ def api_persona_media_list(slug):
                 # ffmpeg here to join the two, so the chain is the only thing
                 # that says these are one shot rather than two.
                 'parent_media': getattr(r, 'parent_media', '') or '',
+                'fanvue_uuid': on_fanvue.get(r.id, ''),
             })
 
         # One entry per placement, which is what the outfit strips render.
@@ -15475,6 +15477,90 @@ def api_fanvue_folders():
     except Exception as e:
         return jsonify({'folders': folders, 'error': str(e)[:140]})
     return jsonify({'folders': folders})
+
+
+def _fv_uploads_key(slug):
+    return f'fanvue_uploads_{slug}'
+
+
+def _fv_uploads(slug):
+    """{library media id: Fanvue media uuid} for what has been pushed to the
+    vault already, so a second push files it into folders instead of putting a
+    duplicate in the vault."""
+    try:
+        d = json.loads(_get_setting(_fv_uploads_key(slug)) or '{}')
+        return d if isinstance(d, dict) else {}
+    except ValueError:
+        return {}
+
+
+def _fv_error_text(e):
+    return str(getattr(e, 'detail', '') or e)[:160]
+
+
+def _fv_attach_to_folder(persona, folder, media_uuid):
+    """File a vault item into a folder. Fanvue's reference names the route but
+    the body key could not be checked from here, so a 400 on the plural form
+    gets one try with the singular."""
+    path = f'/vault/folders/{urllib.parse.quote(folder, safe="")}/media'
+    try:
+        _fanvue_call(persona, 'POST', path, body={'mediaUuids': [media_uuid]})
+    except url_error.HTTPError as e:
+        if e.code != 400:
+            raise
+        _fanvue_call(persona, 'POST', path, body={'mediaUuid': media_uuid})
+
+
+@app.route('/api/fanvue/vault-upload', methods=['POST'])
+@platform_scoped
+def api_fanvue_vault_upload():
+    """Push one approved library item into the creator's Fanvue vault and file
+    it into the chosen folders. One item per call: each upload blocks until
+    Fanvue has processed it, and a batch would outlive a request timeout."""
+    data = request.get_json(silent=True) or {}
+    persona = (data.get('persona') or '').strip()
+    row = _media_row(persona, (data.get('media_id') or '').strip())
+    if not row:
+        return jsonify({'ok': False, 'error': 'That item is not in the library.'}), 404
+    if not row['approved']:
+        return jsonify({'ok': False, 'error': 'Keep it first — unreviewed media never leaves the studio.'}), 400
+    folders = list(dict.fromkeys(str(f).strip()[:60] for f in (data.get('folders') or [])
+                                 if str(f).strip()))
+    create = {str(f).strip()[:60] for f in (data.get('create') or []) if str(f).strip()}
+
+    uploads = _fv_uploads(persona)
+    media_uuid = uploads.get(row['id']) or ''
+    reused = bool(media_uuid)
+    if not media_uuid:
+        try:
+            blob, mime = _media_bytes(row)
+            ext = (mime.split('/')[-1] or 'bin').split(';')[0]
+            name = str(data.get('name') or '').strip()[:80]
+            media_uuid = _fv_upload_media(
+                persona, blob, growth.media_kind(mime), f'{row["id"]}.{ext}',
+                name=name or None, content_type=mime or 'application/octet-stream')
+        except Exception as e:
+            logger.warning('Fanvue vault upload failed for %s/%s: %s', persona, row['id'], e)
+            return jsonify({'ok': False, 'error': _fv_error_text(e)}), 502
+        uploads[row['id']] = media_uuid
+        _set_setting(_fv_uploads_key(persona), json.dumps(uploads))
+
+    folders_ok, folder_errors = [], {}
+    for folder in folders:
+        try:
+            if folder in create:
+                try:
+                    _fanvue_call(persona, 'POST', '/vault/folders', body={'name': folder})
+                except url_error.HTTPError as e:
+                    # Already there is what the creator wanted anyway.
+                    if e.code not in (400, 409):
+                        raise
+            _fv_attach_to_folder(persona, folder, media_uuid)
+            folders_ok.append(folder)
+        except Exception as e:
+            folder_errors[folder] = _fv_error_text(e)
+    return jsonify({'ok': True, 'uuid': media_uuid, 'reused': reused,
+                    'folders_ok': folders_ok, 'folder_errors': folder_errors})
 
 
 @app.route('/api/fanvue/media')
