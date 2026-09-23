@@ -172,6 +172,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6" stroke-linecap="round"/></svg>
           <span>Character Creator</span>
         </button>
+        <div class="sb-quick" id="sb-chars" data-role-area="generate"></div>
         <button type="button" class="sb-item" data-view="/studio" data-role-area="generate" data-search="studio generate image video nsfw ai photos clips tokens credits" onclick="openEmbedded('/studio', this)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.8"/><path d="m4 17 4.5-4.5L13 17M14 14l2.5-2.5L20 15" stroke-linecap="round" stroke-linejoin="round"/></svg>
           <span>Generation Studio</span>
@@ -765,6 +766,7 @@ async function init() {
 
   applySidebarDefault();
   renderQuickList();
+  loadSidebarCharacters();
   document.getElementById('persona-count').textContent = seen.size;
   if (currentTab !== 'chat') switchTabByName(currentTab);
   // The main area is painted once, here: the boot placeholder holds until the
@@ -1637,6 +1639,52 @@ function renderPersonaBrowser() {
 function renderSidebar() {
   if (!currentSlug) renderPersonaBrowser();
   renderQuickList();
+  renderCharList();
+}
+
+let sbCharacters = [];
+
+async function loadSidebarCharacters() {
+  try {
+    const data = await (await fetch('/api/characters')).json();
+    sbCharacters = (data && data.characters) || [];
+  } catch (e) { sbCharacters = []; }
+  renderCharList();
+}
+
+// Same shape as the persona quick list: favourites (via the linked persona)
+// first, capped at 3. With no characters the section stays empty.
+function renderCharList() {
+  const host = document.getElementById('sb-chars');
+  if (!host) return;
+  host.innerHTML = '';
+  const fav = c => !!((personas[c.persona] || {}).config || {}).favorite;
+  const list = sbCharacters.filter(fav).concat(sbCharacters.filter(c => !fav(c))).slice(0, 3);
+  list.forEach(c => {
+    const el = document.createElement('div');
+    el.className = 'persona-item';
+    el.onclick = () => openEmbedded('/characters?id=' + encodeURIComponent(c.id),
+                                    document.querySelector('[data-view="/characters"]'));
+    const initials = (c.name || '?').slice(0, 2).toUpperCase();
+    const avatar = c.face_url
+      ? '<img loading="lazy" decoding="async" src="' + esc(c.face_url) + '" style="width:36px;height:36px;border-radius:50%;object-fit:cover;">'
+      : '<div class="persona-avatar">' + esc(initials) + '</div>';
+    const p = personas[c.persona];
+    const tag = p && p.premade ? '<span class="persona-tag">original</span>' : '';
+    el.innerHTML = avatar +
+      '<div style="flex:1;min-width:0;"><div class="persona-name">' + esc(c.name || 'Untitled') + tag + '</div>' +
+      '<div class="persona-slug">' + esc(c.persona || '') + '</div></div>' +
+      (p ? starBtn(c.persona, fav(c), 'persona-star') : '');
+    host.appendChild(el);
+  });
+  if (sbCharacters.length > list.length) {
+    const more = document.createElement('button');
+    more.type = 'button';
+    more.className = 'sb-showall';
+    more.textContent = 'Show all (' + sbCharacters.length + ')';
+    more.onclick = () => openEmbedded('/characters', document.querySelector('[data-view="/characters"]'));
+    host.appendChild(more);
+  }
 }
 
 async function loadPersona(slug) {
