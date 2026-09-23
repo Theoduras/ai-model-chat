@@ -1295,6 +1295,7 @@ function clearSbActive() {
 function showPersonaBrowser() {
   currentSlug = null;
   if (window.PlatformSetup && PlatformSetup.running()) PlatformSetup.close();
+  if (window.Onboarding) Onboarding.leave();
   document.body.classList.remove('embedding');
   document.querySelectorAll('.persona-item').forEach(el => el.classList.remove('active'));
   document.getElementById('action-bar').style.display = 'none';
@@ -1315,6 +1316,7 @@ function showPersonaBrowser() {
 function needsPersona() {
   if (Object.keys(personas).length) return false;
   if (window.PlatformSetup && PlatformSetup.running()) PlatformSetup.close();
+  if (window.Onboarding) Onboarding.leave();
   currentSlug = null;
   clearSbActive();
   document.body.classList.remove('embedding');
@@ -1381,6 +1383,7 @@ const PERSONA_PAGES = ['/chat', '/landing', '/planner', '/embed-setup'];
 function openEmbedded(url, navEl) {
   if (PERSONA_PAGES.indexOf(url.split('?')[0]) !== -1 && needsPersona()) return;
   if (window.PlatformSetup && PlatformSetup.running()) PlatformSetup.close();
+  if (window.Onboarding) Onboarding.leave();
   currentSlug = null;
   document.querySelectorAll('.persona-item').forEach(el => el.classList.remove('active'));
   clearSbActive();

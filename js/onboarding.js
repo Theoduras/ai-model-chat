@@ -591,6 +591,9 @@
       requestAnimationFrame(function () { self.tourStart(false); });
     },
 
+    // A sidebar page is taking #form-area; drop the wizard without finishing it.
+    leave: function () { if (state.on) teardown(); },
+
     firstUnfinished: function () {
       for (var i = 0; i < STEPS.length; i++) if (!safeDone(STEPS[i])) return i;
       return 0;
