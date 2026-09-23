@@ -41,6 +41,16 @@
     .in-workspace body.ch-studio > header { display: none; }
     #edit-view:not([hidden]) { display: grid; grid-template-columns: 240px minmax(0, 1fr); column-gap: 28px; align-items: start; }
     #edit-view > * { grid-column: 2; }
+    .views-mode [data-step="body"]:not([hidden]) { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 20px; align-items: start; }
+    .views-mode .drawer { position: static; width: auto; box-shadow: none; border: 1px solid var(--border); border-radius: 20px;
+      padding: 20px 20px 0; overflow: visible; grid-column: 1; grid-row: 1 / span 2; }
+    .views-mode .drawer .vp-close { display: none; }
+    .views-mode [data-step="body"] > .ch-grow { grid-column: 2; position: sticky; top: 0; max-height: 100vh; overflow-y: auto; }
+    .views-mode [data-step="body"] > .ch-side { grid-column: 2; }
+    .views-mode .views { grid-template-columns: 1fr; }
+    .views-mode #tiers .ch-card { padding: 14px; }
+    .views-mode #views-head { flex-direction: column; align-items: stretch; }
+    .views-mode .compare img, .views-mode .compare div { max-height: 60vh; object-fit: contain; }
     #edit-view > .rail { grid-column: 1; grid-row: 1 / span 20; position: sticky; top: 0; display: flex; flex-direction: column; gap: 18px;
       background: var(--paper); border: 1px solid var(--border); border-radius: 20px; padding: 20px 16px; }
     .rail .rail-name { font-size: 1.25rem; font-weight: 700; margin: 0; }
@@ -315,6 +325,42 @@
 
     <!-- 4 Body -->
     <div class="ch-row" data-step="body" hidden>
+    <aside class="drawer" id="drawer" hidden aria-label="View details">
+      <div style="display:flex; justify-content:space-between; align-items:start; gap:8px;">
+        <div><h2 class="ch-h2" style="margin:0;" id="vp-title"></h2><div class="lineage" id="vp-lineage"></div></div>
+        <button type="button" class="btn vp-close" style="height:34px; padding:0 12px;" onclick="closeDrawer()" aria-label="Close">×</button>
+      </div>
+      <div class="banner" id="vp-banner" hidden></div>
+      <div id="vp-body">
+        <div class="chips" id="vp-source" style="margin:12px 0;"></div>
+        <div id="vp-crop" hidden>
+          <div class="crop-stage" id="crop-stage"><img id="crop-img" alt="Parent view"><div class="crop-box" id="crop-box"><span class="crop-handle"></span></div></div>
+          <span class="ch-muted">Drag the box to move it, the corner to resize.</span>
+        </div>
+        <div style="margin-top:12px;">
+          <span class="dl">References</span>
+          <div class="chips" id="vp-refs" style="margin-top:6px;"></div>
+          <button type="button" class="btn" style="margin-top:8px; height:34px;" id="add-view-ref" onclick="pickUpload(selView)">Upload to this view</button>
+        </div>
+        <label class="dl" style="display:block; margin-top:12px;"><span id="vp-strength-label"></span> <b id="vp-strength-val"></b>
+          <input type="range" id="vp-strength" min="0" max="1" step="0.01" style="width:100%;" oninput="el('vp-strength-val').textContent=(+this.value).toFixed(2)" onchange="saveView({strength:+this.value})"></label>
+        <div class="ch-grid2" style="margin-top:12px;">
+          <label class="ch-label">Pose <select id="vp-pose" onchange="viewOpts[selView]=Object.assign(viewOpts[selView]||{},{pose:this.value})"></select></label>
+          <label class="ch-label">Lighting <select id="vp-light" onchange="viewOpts[selView]=Object.assign(viewOpts[selView]||{},{lighting:this.value})"></select></label>
+        </div>
+        <div class="compare" id="vp-compare"></div>
+        <div style="margin-top:12px;"><span class="dl">Inherited traits</span>
+          <div class="chips" id="vp-traits" style="margin-top:6px;"></div></div>
+        <div class="opts" id="vp-opts" style="margin-top:12px;"></div>
+      </div>
+      <div class="actionbar" style="flex-wrap:wrap;">
+        <div style="display:flex; align-items:center; gap:8px; width:100%;"><span class="dl">Variations</span><div class="chips" id="vp-batch"></div></div>
+        <button type="button" class="btn" id="vp-remove" hidden>Remove approved photo</button>
+        <button type="button" class="btn" id="vp-check" onclick="runViewCheck()" hidden>Adult check</button>
+        <button type="button" class="btn" id="vp-var" onclick="generate(selView)"></button>
+        <button type="button" class="btn btn-primary" id="vp-primary"></button>
+      </div>
+    </aside>
       <div class="ch-grow" style="display:flex; flex-direction:column; gap:16px;">
         <div class="ch-card" id="body-profile">
           <h2 class="ch-h2">Body profile</h2>
@@ -355,41 +401,6 @@
         </div>
       </div>
     </div>
-    <aside class="drawer" id="drawer" hidden aria-label="View details">
-      <div style="display:flex; justify-content:space-between; align-items:start; gap:8px;">
-        <div><h2 class="ch-h2" style="margin:0;" id="vp-title"></h2><div class="lineage" id="vp-lineage"></div></div>
-        <button type="button" class="btn" style="height:34px; padding:0 12px;" onclick="closeDrawer()" aria-label="Close">×</button>
-      </div>
-      <div class="banner" id="vp-banner" hidden></div>
-      <div id="vp-body">
-        <div class="chips" id="vp-source" style="margin:12px 0;"></div>
-        <div id="vp-crop" hidden>
-          <div class="crop-stage" id="crop-stage"><img id="crop-img" alt="Parent view"><div class="crop-box" id="crop-box"><span class="crop-handle"></span></div></div>
-          <span class="ch-muted">Drag the box to move it, the corner to resize.</span>
-        </div>
-        <div style="margin-top:12px;">
-          <span class="dl">References</span>
-          <div class="chips" id="vp-refs" style="margin-top:6px;"></div>
-          <button type="button" class="btn" style="margin-top:8px; height:34px;" id="add-view-ref" onclick="pickUpload(selView)">Upload to this view</button>
-        </div>
-        <label class="dl" style="display:block; margin-top:12px;"><span id="vp-strength-label"></span> <b id="vp-strength-val"></b>
-          <input type="range" id="vp-strength" min="0" max="1" step="0.01" style="width:100%;" oninput="el('vp-strength-val').textContent=(+this.value).toFixed(2)" onchange="saveView({strength:+this.value})"></label>
-        <div class="ch-grid2" style="margin-top:12px;">
-          <label class="ch-label">Pose <select id="vp-pose" onchange="viewOpts[selView]=Object.assign(viewOpts[selView]||{},{pose:this.value})"></select></label>
-          <label class="ch-label">Lighting <select id="vp-light" onchange="viewOpts[selView]=Object.assign(viewOpts[selView]||{},{lighting:this.value})"></select></label>
-        </div>
-        <div class="compare" id="vp-compare"></div>
-        <div style="margin-top:12px;"><span class="dl">Inherited traits</span>
-          <div class="chips" id="vp-traits" style="margin-top:6px;"></div></div>
-        <div class="opts" id="vp-opts" style="margin-top:12px;"></div>
-      </div>
-      <div class="actionbar" style="flex-wrap:wrap;">
-        <div style="display:flex; align-items:center; gap:8px; width:100%;"><span class="dl">Variations</span><div class="chips" id="vp-batch"></div></div>
-        <button type="button" class="btn" id="vp-check" onclick="runViewCheck()" hidden>Adult check</button>
-        <button type="button" class="btn" id="vp-var" onclick="generate(selView)"></button>
-        <button type="button" class="btn btn-primary" id="vp-primary"></button>
-      </div>
-    </aside>
   </section>
 
 </div>
@@ -533,6 +544,12 @@ function render() {
   document.querySelectorAll('[data-step]').forEach(n => n.hidden = n.dataset.step !== shown);
   el('body-profile').hidden = step === 'views';
   el('views-head').hidden = el('tiers').hidden = step === 'body';
+  el('edit-view').classList.toggle('views-mode', step === 'views');
+  if (step === 'views' && !selView) {
+    const pool = cat.views.filter(inFilter);
+    const next = pool.find(v => vs(v.key).status !== 'approved' && vs(v.key).display !== 'locked') || pool[0];
+    selView = next ? next.key : '';
+  }
   ({describe: renderDescribe, pick: renderPick, check: renderCheck, body: renderBody, views: renderBody})[step]();
 }
 
@@ -829,6 +846,11 @@ function renderViewPanel() {
   prim.textContent = action ? action[0] + (action[0] === 'Approve' ? '' : cost(batch)) : STATUS_LABEL[st.display];
   el('vp-var').textContent = `Generate ${batch}` + cost(batch);
   el('vp-batch').innerHTML = batchChips();
+  const kept = st.status === 'approved' && canonOf(v.key);
+  el('vp-remove').hidden = !kept;
+  el('vp-remove').onclick = kept ? () => confirm(v.key === 'face_front'
+    ? 'Remove the approved face? Every other view depends on it and will need approving again.'
+    : 'Remove the approved photo for ' + v.label + '? Views built on it will need regenerating.') && removeImage(kept.id, true) : null;
   prim.disabled = !action || (st.display === 'review' && !cand);
   prim.onclick = action ? action[1] : null;
   el('vp-var').disabled = locked || st.display === 'generating';
@@ -918,8 +940,8 @@ async function approveView(id) {
   try { await api(`/api/characters/${cur.id}/images/${id}/approve`, {body: {}}); await reload(); say('Approved.', 'ok'); }
   catch (e) { say(e.message, 'err'); }
 }
-async function removeImage(id) {
-  if (!confirm('Delete this image?')) return;
+async function removeImage(id, confirmed) {
+  if (!confirmed && !confirm('Delete this image?')) return;
   try { cur = (await api(`/api/characters/${cur.id}/images/${id}`, {method: 'DELETE'})).character; render(); }
   catch (e) { say(e.message, 'err'); }
 }

@@ -29804,6 +29804,10 @@ def api_character_image_delete(char_id, img_id):
                 storage.delete(img.gcs_path)
             except Exception:
                 pass
+        from db import CharacterView
+        for cv in s.query(CharacterView).filter_by(character_id=char_id, view_key=img.view or ''):
+            if cv.result_image_id == img.id or (img.role == 'canonical' and cv.status == 'approved'):
+                cv.status, cv.result_image_id = 'not_started', None
         s.delete(img)
         _char_refresh_status(s, row)
         s.commit()
