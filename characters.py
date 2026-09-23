@@ -585,10 +585,14 @@ def is_outfit(o):
     return o in OUTFITS or bool(isinstance(o, str) and UPLOADED_OUTFIT.fullmatch(o))
 
 
+OUTFIT_REF_TEXT = ('the exact outfit shown in the last reference image — the clothing only, '
+                   'not the person wearing it')
+
+
 def outfit_text(sheet, outfit=None):
     outfit = outfit if is_outfit(outfit) else outfits(sheet)[0]
     if outfit.startswith('upload:'):
-        return 'the exact outfit shown in the last reference image — the clothing only, not the person wearing it'
+        return OUTFIT_REF_TEXT
     template, default = OUTFITS[outfit]
     colour = ((sheet or {}).get('outfit_colours') or {}).get(outfit, '').lower() or default
     return re.sub(r'\s+', ' ', template.replace('{c}', colour))

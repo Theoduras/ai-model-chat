@@ -344,6 +344,11 @@
         <label class="gen-f"><span>Clothing</span>
           <input type="text" id="gen-clothing" maxlength="200" placeholder="black satin robe with lace cuffs, fishnet stockings"></label>
         <span class="hint">Leave empty and the shot and scene decide. Filled in, it replaces every other clothing in the prompt.</span>
+        <div class="gen-f"><span>Outfit photo</span>
+          <div id="gen-outfits" style="display:flex; flex-wrap:wrap; gap:6px; align-items:center;"></div>
+          <input type="file" id="gen-outfit-file" accept="image/*" style="display:none" onchange="uploadOutfit(this)">
+        </div>
+        <span class="hint">Pick one and she wears exactly that outfit — it replaces the Clothing box. Only the clothes are copied, not the person in the photo.</span>
         <div class="gen-f"><span>Direction</span>
           <div class="gen-go" style="flex-wrap:nowrap;">
             <input type="text" id="gen-direction" maxlength="300" style="flex:1; min-width:0;"
@@ -763,8 +768,64 @@ function renderIdentitySrc() {
   el('gen-refs-wrap').style.display = usePhotos ? 'flex' : 'none';
 }
 
+let genOutfits = [], genOutfit = '';
+
+function renderOutfits() {
+  el('gen-outfits').innerHTML = genOutfits.map(o => `
+    <span style="position:relative; display:inline-block;">
+      <img src="${esc(o.url)}" alt="" onclick="pickOutfit('${o.id}')" style="width:56px; height:72px; object-fit:cover;
+        border-radius:6px; cursor:pointer; outline:${o.id === genOutfit ? '2px solid var(--accent, #e0457b)' : '1px solid #444'};">
+      <button type="button" aria-label="Remove outfit" onclick="deleteOutfit('${o.id}')"
+        style="position:absolute; top:-6px; right:-6px; border-radius:50%; width:18px; height:18px; padding:0; line-height:16px;">&times;</button>
+    </span>`).join('') +
+    `<button type="button" class="gen-drop" onclick="el('gen-outfit-file').click()">+ Upload outfit</button>`;
+}
+
+async function loadOutfits() {
+  try {
+    const d = await (await fetch('/api/generate/outfits?persona=' + encodeURIComponent(slug()))).json();
+    genOutfits = d.outfits || [];
+  } catch (e) { genOutfits = []; }
+  if (!genOutfits.some(o => o.id === genOutfit)) genOutfit = '';
+  renderOutfits();
+}
+
+function pickOutfit(id) {
+  genOutfit = genOutfit === id ? '' : id;
+  renderOutfits();
+  checkPromptStale();
+}
+
+function uploadOutfit(input) {
+  const file = input.files && input.files[0];
+  input.value = '';
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async () => {
+    try {
+      const res = await fetch('/api/generate/outfits', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ persona: slug(), image: reader.result }),
+      });
+      const d = await res.json();
+      if (!d.ok) throw new Error(d.error || 'Upload failed');
+      genOutfits = d.outfits || [];
+      genOutfit = (genOutfits[0] || {}).id || '';
+      renderOutfits();
+      checkPromptStale();
+    } catch (e) { setGenStatus('✗ ' + e.message, false); }
+  };
+  reader.readAsDataURL(file);
+}
+
+async function deleteOutfit(id) {
+  await fetch('/api/generate/outfits/' + id + '?persona=' + encodeURIComponent(slug()), { method: 'DELETE' });
+  await loadOutfits();
+}
+
 async function loadPersona() {
   if (!slug()) return;
+  loadOutfits();
   genIdentityTouched = false;
   try {
     const d = await (await fetch('/api/personas/' + encodeURIComponent(slug()) + '/media')).json();
@@ -1893,6 +1954,7 @@ function promptChoices() {
     smudges: el('gen-smudges').checked,
     quality: el('gen-quality').value,
     clothing: el('gen-clothing').value.trim(),
+    outfit_ref: genOutfit,
     direction: el('gen-direction').value.trim(),
     aspect: currentImageAspect(),
     reference_media: el('gen-ref').value || '',
@@ -2126,6 +2188,7 @@ async function runGeneration() {
         smudges: el('gen-smudges').checked,
         quality: el('gen-quality').value,
         clothing: el('gen-clothing').value.trim(),
+        outfit_ref: genOutfit,
         direction: el('gen-direction').value.trim(),
         aspect: currentImageAspect(),
         phone_look: el('gen-phone-look').value,

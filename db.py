@@ -316,6 +316,18 @@ class Character(Base):
     updated_at = Column(DateTime, default=_now, onupdate=_now)
 
 
+class StudioOutfit(Base):
+    """An outfit photo a creator uploaded for the studio to dress her in. Not
+    PersonaMedia, so no send, post or pick path can reach one."""
+    __tablename__ = 'studio_outfits'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    slug = Column(String(80), nullable=False, index=True)
+    gcs_path = Column(String(400), default='')
+    mime = Column(String(60), default='image/jpeg')
+    created_at = Column(DateTime, default=_now)
+
+
 class CharacterImage(Base):
     """A reference or the approved image for one view of a character.
 

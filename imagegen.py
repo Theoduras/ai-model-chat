@@ -970,14 +970,14 @@ def build_prompt(appearance, shot, outfit=None, has_reference=False, extra='',
     glass = (style if style in SMUDGES
              else next(iter(STYLE_IN_SHOT.get(shot, ())), '')) if smudges else ''
 
-    purpose = ('A private photo she took for her subscribers' if intimate
-               else 'A real photo for her social media feed')
+    purpose = '' if intimate else 'A real photo for her social media feed'
     who = 'the exact same woman as the reference images' if has_reference else appearance
     light = LIGHTING.get(lighting, '') or (
         f"{outfit['lighting']} lighting" if outfit.get('lighting') else '')
 
     body = ' '.join(filter(None, [
-        f'{purpose}: ' + ', '.join(b for b in (who, framing, where, styled) if b) + '.',
+        _sentence(((purpose + ': ') if purpose else '')
+                  + ', '.join(b for b in (who, framing, where, styled) if b)),
         ('The reference images set who she is — not what she wears or where she is.'
          if has_reference else ''),
         _sentence(f'She is wearing {clothing}' if clothing else ''),

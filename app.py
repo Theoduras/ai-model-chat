@@ -28992,6 +28992,7 @@ def _gen_spec(slug, body, user):
         'phone_look': (body.get('phone_look') or 'medium').strip().lower(),
         'expression': (body.get('expression') or '').strip().lower(),
         'smudges': bool(body.get('smudges')),
+        'outfit_ref': _studio_outfit(slug, body.get('outfit_ref')) and str(body['outfit_ref']),
     })
 
     if kind == 'image':
@@ -29933,6 +29934,8 @@ def _gen_image_prompt(slug, spec, has_reference):
         clause = CH.content_clause(snap['sheet'], level, snap['body_type'])
         age = snap['age']
     clothing = spec.get('clothing', '')
+    if spec.get('outfit_ref'):
+        clothing = CH.OUTFIT_REF_TEXT
     if spec.get('prompt_full'):
         text = spec.get('prompt_extra', '')
         # A prompt written before the clothing was typed still has to wear it.
@@ -30965,6 +30968,12 @@ def _gen_start(job_id, slug, spec, workspace):
                 if spec.get('identity') != 'character':
                     refs = refs + _gen_reference_urls(slug, spec.get('model'))
                 refs = refs[:imagegen.MAX_REFERENCES]
+                outfit = _studio_outfit(slug, spec.get('outfit_ref'))
+                outfit_url = outfit and _char_path_url(outfit.gcs_path, outfit.mime)
+                if outfit_url:
+                    # The prompt names "the last reference image", so it goes
+                    # last and is never the one trimmed.
+                    refs = refs[:imagegen.MAX_REFERENCES - 1] + [outfit_url]
                 if refs:
                     call['reference_urls'] = refs
                 call['prompt'] = _gen_image_prompt(slug, spec, bool(ref_b64 or refs))
@@ -31635,6 +31644,109 @@ def api_generate_keep():
     finally:
         s.close()
     return jsonify({'ok': True, 'kept' if keep else 'dropped': done})
+
+
+def _studio_outfit(slug, outfit_id):
+    from db import StudioOutfit
+    if not outfit_id:
+        return None
+    s = _db_session()
+    try:
+        row = s.query(StudioOutfit).filter_by(id=str(outfit_id), slug=slug).first()
+        if row:
+            s.expunge(row)
+        return row
+    finally:
+        s.close()
+
+
+def _studio_outfit_slug(slug):
+    slug = str(slug or '').strip().lower()
+    mine = owned_slugs()
+    if not re.match(r'^[a-z0-9_-]+$', slug) or (mine is not None and slug not in mine):
+        return None
+    return slug
+
+
+@app.route('/api/generate/outfits', methods=['GET', 'POST'])
+def api_generate_outfits():
+    """The persona's saved outfit photos, and uploading a new one."""
+    blocked = _require_active()
+    if blocked:
+        return blocked
+    from db import StudioOutfit
+    body = request.get_json(silent=True) or {}
+    slug = _studio_outfit_slug(request.args.get('persona') or body.get('persona'))
+    if not slug:
+        return jsonify({'ok': False, 'error': 'Not your persona'}), 403
+    if request.method == 'POST':
+        import base64
+        import io
+        from PIL import Image
+        raw = str(body.get('image') or '')
+        try:
+            img = Image.open(io.BytesIO(base64.b64decode(raw.split(',', 1)[-1])))
+            img = img.convert('RGB')
+            img.thumbnail((1536, 1536), Image.LANCZOS)
+            out = io.BytesIO()
+            img.save(out, 'JPEG', quality=88)
+        except Exception:
+            return jsonify({'ok': False, 'error': 'That is not an image'}), 400
+        path = storage.put(slug, out.getvalue(), 'image/jpeg', prefix='outfits')
+        s = _db_session()
+        try:
+            s.add(StudioOutfit(slug=slug, gcs_path=path))
+            s.commit()
+        finally:
+            s.close()
+    s = _db_session()
+    try:
+        rows = (s.query(StudioOutfit).filter_by(slug=slug)
+                .order_by(StudioOutfit.created_at.desc()).all())
+        return jsonify({'ok': True, 'outfits': [
+            {'id': r.id, 'url': f'/api/generate/outfits/{r.id}/image?persona={slug}'}
+            for r in rows]})
+    finally:
+        s.close()
+
+
+@app.route('/api/generate/outfits/<outfit_id>/image')
+def api_generate_outfit_image(outfit_id):
+    blocked = _require_active()
+    if blocked:
+        return blocked
+    slug = _studio_outfit_slug(request.args.get('persona'))
+    row = slug and _studio_outfit(slug, outfit_id)
+    if not row:
+        return ('', 404)
+    try:
+        url = storage.signed_url(row.gcs_path)
+    except Exception:
+        url = None
+    if url:
+        return redirect(url)
+    data = storage.get(row.gcs_path)
+    return Response(data, mimetype=row.mime) if data else ('', 404)
+
+
+@app.route('/api/generate/outfits/<outfit_id>', methods=['DELETE'])
+def api_generate_outfit_delete(outfit_id):
+    blocked = _require_active()
+    if blocked:
+        return blocked
+    from db import StudioOutfit
+    slug = _studio_outfit_slug(request.args.get('persona'))
+    row = slug and _studio_outfit(slug, outfit_id)
+    if not row:
+        return jsonify({'ok': False, 'error': 'Unknown outfit'}), 404
+    s = _db_session()
+    try:
+        s.query(StudioOutfit).filter_by(id=row.id).delete()
+        s.commit()
+    finally:
+        s.close()
+    storage.delete(row.gcs_path)
+    return jsonify({'ok': True})
 
 
 @app.route('/api/generate/look', methods=['POST'])
