@@ -29717,7 +29717,10 @@ def api_character_upload(char_id):
         return blocked
     user = _current_user()
     body = request.get_json(silent=True) or {}
-    if body.get('attest') is not True:
+    # A crop is cut from the character's own approved parent, so there is no
+    # third party's likeness to attest for.
+    as_crop = body.get('crop_as') in ('candidate', 'reference')
+    if not as_crop and body.get('attest') is not True:
         return jsonify({'ok': False, 'error': 'Confirm you have the rights to these '
                         'images and that anyone shown is 18+ and agreed.'}), 400
     raw = (body.get('image') or '').strip()
@@ -29744,12 +29747,25 @@ def api_character_upload(char_id):
         v = CH.view(view_key, row.body_type) if view_key else None
         if view_key and (not v or v not in CH.views_for_level(row.nsfw_level, row.body_type)):
             return jsonify({'ok': False, 'error': 'That view is not available at this level.'}), 400
+        if as_crop and not v:
+            return jsonify({'ok': False, 'error': 'A crop belongs to a view.'}), 400
+        role = body['crop_as'] if as_crop else 'reference'
         path = storage.put(row.key, data, mime, prefix=storage.KEPT_PREFIX)
-        img = CharacterImage(character_id=row.id, view=view_key, role='reference',
-                             source='upload', rating=(v or {}).get('rating', 'sfw'),
+        img = CharacterImage(character_id=row.id, view=view_key, role=role,
+                             source='crop' if as_crop else 'upload', rating=(v or {}).get('rating', 'sfw'),
                              gcs_path=path, mime=mime)
         s.add(img)
-        row.attested_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        if role == 'candidate':
+            from db import CharacterView
+            _, state = _char_views_state(s, row)
+            cv = s.query(CharacterView).filter_by(character_id=row.id, view_key=view_key).first()
+            if not cv:
+                cv = CharacterView(character_id=row.id, view_key=view_key)
+                s.add(cv)
+            cv.status = 'review'
+            cv.parent_versions_json = json.dumps({p: state[p]['version'] for p in v['parents']})
+        if not as_crop:
+            row.attested_at = datetime.now(timezone.utc).replace(tzinfo=None)
         s.commit()
         return jsonify({'ok': True, 'image': _char_img_json(img)})
     finally:

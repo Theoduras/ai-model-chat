@@ -151,7 +151,13 @@
     .crop-stage { position: relative; overflow: hidden; border-radius: 8px; user-select: none; touch-action: none; }
     .crop-stage img { width: 100%; display: block; border-radius: 8px; }
     .crop-box { position: absolute; border: 2px solid var(--accent); box-shadow: 0 0 0 9999px rgba(0,0,0,.35); cursor: move; }
-    .crop-handle { position: absolute; right: -7px; bottom: -7px; width: 14px; height: 14px; border-radius: 7px; background: var(--accent); cursor: nwse-resize; }
+    .crop-handle { position: absolute; width: 16px; height: 16px; border-radius: 8px; background: var(--accent); border: 2px solid #fff; }
+    .crop-handle[data-c="nw"] { left: -9px; top: -9px; cursor: nwse-resize; } .crop-handle[data-c="ne"] { right: -9px; top: -9px; cursor: nesw-resize; }
+    .crop-handle[data-c="sw"] { left: -9px; bottom: -9px; cursor: nesw-resize; } .crop-handle[data-c="se"] { right: -9px; bottom: -9px; cursor: nwse-resize; }
+    .compare img, .compare div { max-height: min(60vh, 640px); object-fit: contain; }
+    .crop-stage img { max-height: min(70vh, 760px); object-fit: contain; }
+    @media (max-width: 900px) { .compare { grid-template-columns: 1fr; } }
+    #vp-opts { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
     .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
     .compare figure { margin: 0; }
     .compare img, .compare div { width: 100%; aspect-ratio: 3/4; object-fit: cover; border-radius: 8px; background: var(--surface-2); }
@@ -334,13 +340,20 @@
       <div id="vp-body">
         <div class="chips" id="vp-source" style="margin:12px 0;"></div>
         <div id="vp-crop" hidden>
-          <div class="crop-stage" id="crop-stage"><img id="crop-img" alt="Parent view"><div class="crop-box" id="crop-box"><span class="crop-handle"></span></div></div>
-          <span class="ch-muted">Drag the box to move it, the corner to resize.</span>
+          <div class="crop-stage" id="crop-stage"><img id="crop-img" alt="Parent view"><div class="crop-box" id="crop-box"><span class="crop-handle" data-c="nw"></span><span class="crop-handle" data-c="ne"></span><span class="crop-handle" data-c="sw"></span><span class="crop-handle" data-c="se"></span></div></div>
+          <span class="ch-muted">Drag the box to move it, any corner to resize.</span>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+            <button type="button" class="btn" onclick="useCrop('candidate')">Use crop as this view</button>
+            <button type="button" class="btn" onclick="useCrop('reference')">Use crop as reference</button>
+          </div>
         </div>
         <div style="margin-top:12px;">
           <span class="dl">References</span>
           <div class="chips" id="vp-refs" style="margin-top:6px;"></div>
-          <button type="button" class="btn" style="margin-top:8px; height:34px;" id="add-view-ref" onclick="pickUpload(selView)">Upload to this view</button>
+          <div style="display:flex; flex-direction:column; gap:8px; margin-top:10px; padding:12px; border:1px dashed var(--border); border-radius:10px;">
+            <label class="attest"><input type="checkbox" id="vp-attest" onchange="el('add-view-ref').disabled=!this.checked">I have the rights to this image, and anyone shown is 18+ and agreed to their likeness being used.</label>
+            <button type="button" class="btn" style="height:36px; align-self:flex-start;" id="add-view-ref" disabled onclick="pickUpload(selView, 'vp-attest')">Upload own reference</button>
+          </div>
         </div>
         <label class="dl" style="display:block; margin-top:12px;"><span id="vp-strength-label"></span> <b id="vp-strength-val"></b>
           <input type="range" id="vp-strength" min="0" max="1" step="0.01" style="width:100%;" oninput="el('vp-strength-val').textContent=(+this.value).toFixed(2)" onchange="saveView({strength:+this.value})"></label>
@@ -823,8 +836,10 @@ function renderViewPanel() {
   const result = imgById(st.result_image_id) || images(v.key, 'candidate')[0];
   el('vp-compare').innerHTML = `<figure>${parent ? `<img src="${esc(parent.url)}" alt="">` : '<div></div>'}<figcaption>Parent</figcaption></figure>
     <figure>${result ? `<img src="${esc(result.url)}" alt="">` : '<div></div>'}<figcaption>Result</figcaption></figure>`;
-  el('vp-traits').innerHTML = (v.traits || []).filter(k => (cur.sheet || {})[k]).map(k =>
-    `<span class="chip" style="cursor:default;">${esc(cur.sheet[k])}</span>`).join('') +
+  const fl = k => ((cat.features || []).find(f => f.key === k) || {}).label || k;
+  el('vp-traits').innerHTML = (v.traits || []).map(k => (cur.sheet || {})[k]
+    ? `<span class="chip" style="cursor:default;">${esc(fl(k))}: ${esc(cur.sheet[k])}</span>`
+    : `<span class="chip" style="cursor:default; opacity:.55;">${esc(fl(k))}: not set</span>`).join('') +
     `<button type="button" class="chip" onclick="closeDrawer();el('body-features').scrollIntoView({behavior:'smooth'})">Edit</button>`;
   const opts = images(v.key, 'candidate').concat(images(v.key, 'canonical'));
   vpOptUrls = opts.map(o => o.url);
@@ -865,13 +880,17 @@ function placeCropBox(b) {
     const box = e.target.closest && e.target.closest('#crop-box');
     if (!box) return;
     const r = el('crop-stage').getBoundingClientRect();
-    drag = {resize: e.target.classList.contains('crop-handle'), r, x: e.clientX, y: e.clientY, b: Object.assign({}, vs(selView).crop_box)};
+    drag = {resize: e.target.dataset.c || '', r, x: e.clientX, y: e.clientY, b: Object.assign({}, vs(selView).crop_box)};
     e.preventDefault();
   });
   document.addEventListener('pointermove', e => {
     if (!drag) return;
     const dx = (e.clientX - drag.x) / drag.r.width, dy = (e.clientY - drag.y) / drag.r.height, b = Object.assign({}, drag.b);
-    if (drag.resize) { b.w = Math.min(1 - b.x, Math.max(.05, b.w + dx)); b.h = Math.min(1 - b.y, Math.max(.05, b.h + dy)); }
+    if (drag.resize) {
+      const c = drag.resize, o = drag.b, R = o.x + o.w, B = o.y + o.h;
+      if (c.includes('w')) { b.x = Math.min(R - .05, Math.max(0, o.x + dx)); b.w = R - b.x; } else b.w = Math.min(1 - o.x, Math.max(.05, o.w + dx));
+      if (c.includes('n')) { b.y = Math.min(B - .05, Math.max(0, o.y + dy)); b.h = B - b.y; } else b.h = Math.min(1 - o.y, Math.max(.05, o.h + dy));
+    }
     else { b.x = Math.min(1 - b.w, Math.max(0, b.x + dx)); b.y = Math.min(1 - b.h, Math.max(0, b.y + dy)); }
     drag.cur = b; placeCropBox(b);
   });
@@ -889,12 +908,12 @@ function toggleRef(id) {
 }
 // Seedream takes no denoise, so a crop view sends the parent's region itself,
 // padded and upscaled 2x, as its first reference.
-async function cropParent(key) {
+async function cropParent(key, exact) {
   const v = viewDef(key), st = vs(key), parent = canonOf(v.parents[0]);
   if (!parent) throw new Error('Approve ' + viewDef(v.parents[0]).label + ' first.');
   const img = new Image();
   await new Promise((res, rej) => { img.onload = res; img.onerror = () => rej(new Error('Could not load the parent image.')); img.src = parent.url; });
-  const pad = 0.08, b = st.crop_box, W = img.naturalWidth, H = img.naturalHeight;
+  const pad = exact ? 0 : 0.08, b = st.crop_box, W = img.naturalWidth, H = img.naturalHeight;
   const x = Math.max(0, b.x - b.w * pad), y = Math.max(0, b.y - b.h * pad);
   const w = Math.min(1 - x, b.w * (1 + 2 * pad)), h = Math.min(1 - y, b.h * (1 + 2 * pad));
   const c = document.createElement('canvas');
@@ -902,6 +921,13 @@ async function cropParent(key) {
   const ctx = c.getContext('2d'); ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(img, x * W, y * H, w * W, h * H, 0, 0, c.width, c.height);
   return c.toDataURL('image/jpeg', 0.92);
+}
+async function useCrop(as) {
+  try {
+    const image = await cropParent(selView, true);
+    await api(`/api/characters/${cur.id}/images`, {body: {view: selView, image, crop_as: as}});
+    await reload(); say(as === 'candidate' ? 'Crop added. Approve it below.' : 'Crop added as a reference.', 'ok');
+  } catch (e) { say(e.message, 'err'); }
 }
 async function submitView(key, n) {
   const o = viewOpts[key] || {};

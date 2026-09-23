@@ -131,7 +131,10 @@ def test_view_tree():
         check(f'{k} tier', v['tier'] in (0, 1, 2) and all(t <= v['tier'] for t in ptiers))
         check(f'{k} mode', v['mode'] in CH.STRENGTH)
         check(f'{k} crop has a region', v['mode'] != 'crop' or bool(v.get('region')))
-        check(f'{k} traits', CH.traits(k) and all(CH.features()[t][1] in v['uses'] for t in CH.traits(k)))
+        # Non-face views also inherit the body profile and skin tone.
+        extra = set() if 'face' in v['uses'] else {'body'}
+        check(f'{k} traits', CH.traits(k) and all(CH.features()[t][1] in set(v['uses']) | extra or t == 'skin_tone'
+                                                  for t in CH.traits(k)))
 
 
 def _row(k, status='not_started', version=0, pv=None):

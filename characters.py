@@ -319,7 +319,10 @@ def traits(key, body_type='female'):
     """Profile traits a view inherits: the sheet keys of the groups it uses."""
     v = view(key, body_type)
     uses = set(v['uses']) if v else set()
-    return [k for k, (_, g, _) in features(body_type).items() if g in uses]
+    if v and 'face' not in uses:
+        uses |= {'body'}
+    return [k for k, (_, g, _) in features(body_type).items()
+            if g in uses or (k == 'skin_tone' and v and 'face' not in v['uses'])]
 
 
 def features(body_type='female'):
@@ -457,8 +460,12 @@ def build_view_prompt(key, sheet, age, has_reference, body_type='female',
     v = view(key, body_type)
     if not v:
         raise CharacterError('Unknown view.')
-    groups = tuple(g for g in v['uses'] if _rank(GROUP_LEVEL[g]) <= _rank(v['rating']))
-    detail = ', '.join(_fragments(sheet, groups, body_type))
+    uses = tuple(v['uses']) + (() if 'face' in v['uses'] else ('body',))
+    groups = tuple(g for g in uses if _rank(GROUP_LEVEL[g]) <= _rank(v['rating']))
+    frags = _fragments(sheet, groups, body_type)
+    if 'face' not in v['uses'] and (sheet or {}).get('skin_tone'):
+        frags = _fragments({'skin_tone': sheet['skin_tone']}, ('face',), body_type) + frags
+    detail = ', '.join(frags)
     strength = STRENGTH[mode] if strength is None else strength
     if mode == 'crop':
         # Seedream refuses a denoise strength, so the crop is the first
