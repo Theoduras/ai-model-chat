@@ -110,6 +110,7 @@
     .compare img, .compare div { width: 100%; aspect-ratio: 3/4; object-fit: cover; border-radius: 8px; background: var(--surface-2); }
     .compare figcaption { font-size: 0.72rem; color: var(--text-muted); margin-top: 4px; }
     .actionbar { position: sticky; bottom: 0; background: var(--surface); padding: 12px 0 16px; display: flex; gap: 8px; justify-content: flex-end; border-top: 1px solid var(--border); margin-top: 12px; }
+    .img-missing { display: grid; place-items: center; width: 100%; aspect-ratio: 3/4; font-size: 0.72rem; color: var(--text-muted); background: var(--surface-2); border-radius: 8px; }
     .refs { display: flex; gap: 8px; flex-wrap: wrap; }
     .ref { width: 64px; height: 64px; border-radius: 8px; overflow: hidden; position: relative; background: var(--surface-2); }
     .ref img { width: 100%; height: 100%; object-fit: cover; }
@@ -859,6 +860,10 @@ async function uploadFiles(input) {
   await reload(); say(files.length + ' uploaded.', 'ok');
 }
 
+document.addEventListener('error', e => {
+  if (e.target.tagName !== 'IMG' || !e.target.closest('#edit-view')) return;
+  e.target.replaceWith(Object.assign(document.createElement('div'), {className: 'img-missing', textContent: 'Image missing'}));
+}, true);
 (async function init() {
   try {
     const list = await (await fetch('/api/personas')).json();

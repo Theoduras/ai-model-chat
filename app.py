@@ -29002,6 +29002,13 @@ def _char_purge_expired(s, char_id):
     for img in _char_images(s, char_id, role='candidate'):
         if img.expires_at and img.expires_at.replace(tzinfo=None) < now:
             s.delete(img)
+    # References once made from a candidate share its staging object, which
+    # the bucket rule deletes on the candidate's schedule, not theirs.
+    gone = now - timedelta(days=storage.STAGING_DAYS)
+    for img in _char_images(s, char_id, role='reference'):
+        if ((img.gcs_path or '').startswith(storage.STAGING_PREFIX + '/') and img.created_at
+                and img.created_at.replace(tzinfo=None) < gone):
+            s.delete(img)
     s.commit()
 
 
@@ -29486,7 +29493,11 @@ def api_character_image_file(char_id, img_id):
     url = storage.signed_url(path)
     if url:
         return redirect(url)
-    data = storage.get(path)
+    try:
+        data = storage.get(path)
+    except Exception as e:
+        logger.warning('character image missing img=%s path=%s: %s', img_id, path, str(e)[:200])
+        data = None
     if not data:
         return ('Not found', 404)
     return Response(data, mimetype=mime or 'image/jpeg',
