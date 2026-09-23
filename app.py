@@ -11169,7 +11169,9 @@ def api_persona_media_list(slug):
                                     for k, v in imagegen.CAMERAS.items()],
                         'qualities': [{'key': k, 'label': v[0]}
                                       for k, v in imagegen.QUALITY.items()],
-                        'lighting': sorted(imagegen.LIGHTING)})
+                        'lighting': sorted(imagegen.LIGHTING),
+                        'expressions': [{'key': k, 'label': v[0]}
+                                        for k, v in imagegen.EXPRESSIONS.items()]})
     finally:
         s.close()
 
@@ -28988,6 +28990,8 @@ def _gen_spec(slug, body, user):
         # she wears: the shot, the scene, the outfit photos.
         'clothing': (body.get('clothing') or '').strip()[:200],
         'phone_look': (body.get('phone_look') or 'medium').strip().lower(),
+        'expression': (body.get('expression') or '').strip().lower(),
+        'smudges': bool(body.get('smudges')),
     })
 
     if kind == 'image':
@@ -29946,6 +29950,7 @@ def _gen_image_prompt(slug, spec, has_reference):
             spec.get('direction', ''),
             _prop_from_config(cfg, spec.get('style', ''), spec.get('camera', ''))))),
         features=clause, quality=spec.get('quality', ''), clothing=clothing,
+        expression=spec.get('expression', ''), smudges=spec.get('smudges', False),
         banned=banned, age=age)
 
 

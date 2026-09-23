@@ -743,6 +743,37 @@ LIGHTING = {
     'phone-flash': 'harsh direct phone flash',
 }
 
+EXPRESSIONS = {
+    'auto': ('Auto', ''),
+    'soft-smile': ('Soft smile', 'a soft, relaxed closed-mouth smile'),
+    'big-smile': ('Big smile', 'a big genuine smile, teeth showing, eyes creased'),
+    'laughing': ('Laughing', 'laughing mid-moment, eyes squinting'),
+    'smirk': ('Smirk', 'a playful half smirk, one corner of her mouth raised'),
+    'wink': ('Wink', 'winking at the camera with a small smile'),
+    'kissy-pout': ('Kissy pout', 'puckered lips blowing a kiss at the camera'),
+    'scrunched': ('Scrunched face', 'a goofy scrunched-nose face, lips pouted, eyes squeezed'),
+    'tongue-out': ('Tongue out', 'playfully sticking her tongue out'),
+    'deadpan': ('Deadpan', 'a neutral deadpan look straight into the lens'),
+    'sultry': ('Sultry', 'a sultry heavy-lidded gaze, lips slightly parted'),
+    'biting-lip': ('Biting lip', 'biting her lower lip, eyes on the lens'),
+    'surprised': ('Surprised', 'eyebrows raised, mouth open in mock surprise'),
+    'shy': ('Shy', 'a shy smile, glancing down and away'),
+}
+
+# Real phone selfies are rarely taken through clean glass. Which glass depends
+# on the photo: the phone's own lens, or the mirror she is holding it up to.
+SMUDGES = {
+    'pov-selfie': ('faint fingerprint smudges and dust specks on the phone lens, '
+                   'a soft hazy glow over one corner'),
+    'mirror-selfie': ('fingerprint smudges, dust spots and faint streaks on the '
+                      'mirror glass, catching a little glare'),
+}
+
+
+def expression_text(key):
+    return (EXPRESSIONS.get(key) or ('', ''))[1]
+
+
 # How real the photo looks. The first is the default and the target: a real
 # creator's own phone photo, skin, light and all.
 QUALITY = {
@@ -913,7 +944,8 @@ def _sentence(text):
 
 def build_prompt(appearance, shot, outfit=None, has_reference=False, extra='',
                  style='', scene='', camera='', lighting='', direction='',
-                 banned=(), age=None, quality='', clothing='', features=''):
+                 banned=(), age=None, quality='', clothing='', features='',
+                 expression='', smudges=False):
     """The positive prompt for one generation, written the way a creator
     would brief her own post: what it is for, who, the shot, what she wears,
     what she is doing, the phone and the light, how real it looks.
@@ -935,6 +967,8 @@ def build_prompt(appearance, shot, outfit=None, has_reference=False, extra='',
     if not where and outfit.get('location'):
         where = f"in {outfit['location']}"
     styled = '' if style in STYLE_IN_SHOT.get(shot, ()) else STYLES.get(style, '')
+    glass = (style if style in SMUDGES
+             else next(iter(STYLE_IN_SHOT.get(shot, ())), '')) if smudges else ''
 
     purpose = ('A private photo she took for her subscribers' if intimate
                else 'A real photo for her social media feed')
@@ -948,8 +982,10 @@ def build_prompt(appearance, shot, outfit=None, has_reference=False, extra='',
          if has_reference else ''),
         _sentence(f'She is wearing {clothing}' if clothing else ''),
         _sentence(direction),
+        _sentence(expression_text(expression)),
         _sentence(features),
-        _sentence(', '.join(b for b in (camera_text(camera), light) if b)),
+        _sentence(', '.join(b for b in (camera_text(camera), light,
+                                        SMUDGES.get(glass, '')) if b)),
     ]))
     look = quality_text(quality) + (' ' + CONSISTENCY if has_reference else '')
 

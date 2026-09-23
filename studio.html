@@ -328,7 +328,11 @@
             <select id="gen-camera"></select></label>
           <label class="gen-f"><span>Lighting</span>
             <select id="gen-lighting"></select></label>
+          <label class="gen-f"><span>Expression</span>
+            <select id="gen-expression"></select></label>
         </div>
+        <label class="gen-f" style="flex-direction:row; align-items:center; gap:8px;">
+          <input type="checkbox" id="gen-smudges"><span>Smudges and dust on the lens or mirror (selfies only)</span></label>
         <label class="gen-f"><span>Photo quality</span>
           <select id="gen-quality"></select></label>
         <label class="gen-f"><span>Phone look</span>
@@ -606,7 +610,7 @@ let genRate = null;        // what a token costs, in the creator's currency
 let genCosts = null;       // what the provider bills us — admin only, null otherwise
 let genAllowedShots = [];  // resolved server side from the persona's NSFW level
 let genScenes = [];        // scene builder vocabulary, already gated server side
-let genStyles = [], genCameras = [], genLighting = [], genQualities = [];
+let genStyles = [], genCameras = [], genLighting = [], genQualities = [], genExpressions = [];
 let mediaVault = [];
 let genJobs = [];
 let genTimer = null;
@@ -770,6 +774,7 @@ async function loadPersona() {
     genStyles = d.styles || [];
     genCameras = d.cameras || [];
     genLighting = d.lighting || [];
+    genExpressions = d.expressions || [];
     genQualities = d.qualities || [];
     el('persona-hint').textContent =
       'The Safe / Explicit toggle above decides what is offered here. Her NSFW '
@@ -1293,6 +1298,7 @@ function renderGenForm() {
   fillVocab('gen-style', genStyles);
   fillVocab('gen-camera', genCameras);
   fillVocab('gen-lighting', genLighting);
+  fillVocab('gen-expression', genExpressions);
   fillVocab('gen-quality', genQualities);
 
   const res = el('gen-res');
@@ -1883,6 +1889,8 @@ function promptChoices() {
     shot: el('gen-shot').value, scene: el('gen-scene').value,
     style: el('gen-style').value, camera: el('gen-camera').value,
     lighting: el('gen-lighting').value,
+    expression: el('gen-expression').value,
+    smudges: el('gen-smudges').checked,
     quality: el('gen-quality').value,
     clothing: el('gen-clothing').value.trim(),
     direction: el('gen-direction').value.trim(),
@@ -1922,7 +1930,7 @@ function checkPromptStale() {
 ['change', 'input'].forEach(t => document.addEventListener(t, e => {
   const id = e.target && e.target.id;
   if (['gen-shot', 'gen-scene', 'gen-style', 'gen-camera', 'gen-lighting',
-       'gen-quality', 'gen-clothing', 'gen-direction', 'gen-ref',
+       'gen-expression', 'gen-smudges', 'gen-quality', 'gen-clothing', 'gen-direction', 'gen-ref',
        'gen-model'].includes(id)) checkPromptStale();
 }));
 
@@ -2114,6 +2122,8 @@ async function runGeneration() {
         style: el('gen-style').value,
         camera: el('gen-camera').value,
         lighting: el('gen-lighting').value,
+        expression: el('gen-expression').value,
+        smudges: el('gen-smudges').checked,
         quality: el('gen-quality').value,
         clothing: el('gen-clothing').value.trim(),
         direction: el('gen-direction').value.trim(),
