@@ -29926,7 +29926,7 @@ def api_character_view_settings(char_id, view_key):
         cv = _char_views(s, row)[view_key]
         if 'mode' in body:
             mode = body['mode'] or None
-            if mode not in (None, 'crop', 'reference') or (mode == 'crop' and not v.get('region')):
+            if mode not in (None, 'crop', 'reference') or (mode == 'crop' and not v['parents']):
                 return jsonify({'ok': False, 'error': 'That view cannot be cropped.'}), 400
             cv.mode = mode
         if 'crop_box' in body:

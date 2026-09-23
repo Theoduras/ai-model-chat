@@ -566,4 +566,4 @@ CROP_PAD = 0.08
 
 
 def default_crop(region):
-    return dict(REGIONS[region]) if region in REGIONS else None
+    return dict(REGIONS[region]) if region in REGIONS else {'x': .2, 'y': .2, 'w': .6, 'h': .6}

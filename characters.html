@@ -817,19 +817,19 @@ function renderViewPanel() {
   const locked = st.display === 'locked';
   el('vp-body').style.opacity = locked ? .5 : 1;
   el('vp-source').innerHTML = [['crop', 'Crop & refine'], ['reference', 'Reference']].map(([m, l]) =>
-    `<button type="button" class="chip" aria-pressed="${st.mode === m}" ${m === 'crop' && !v.region ? 'disabled title="No body region for this view"' : ''} onclick="saveView({mode:'${m}'})">${l}</button>`).join('');
+    `<button type="button" class="chip" aria-pressed="${st.mode === m}" ${m === 'crop' && !v.parents.length ? 'disabled title="Only a view built from another view can be cropped"' : ''} onclick="saveView({mode:'${m}'})">${l}</button>`).join('');
   const parent = canonOf(v.parents[0]);
   el('vp-crop').hidden = st.mode !== 'crop';
   if (st.mode === 'crop') {
     el('crop-img').src = parent ? parent.url : '';
-    placeCropBox(st.crop_box);
+    placeCropBox(st.crop_box || {x: .2, y: .2, w: .6, h: .6});
   }
   const approved = cat.views.filter(o => o.key !== v.key && canonOf(o.key));
   const chosen = st.references ? st.references.map(r => r.image_id) : v.parents.map(p => (canonOf(p) || {}).id).filter(Boolean);
   el('vp-refs').innerHTML = approved.map(o => {
     const id = canonOf(o.key).id;
     return `<button type="button" class="chip" aria-pressed="${chosen.includes(id)}" onclick="toggleRef('${id}')">${esc(o.label)}</button>`;
-  }).join('') + images(v.key, 'reference').map(i => `<button type="button" class="chip" aria-pressed="true" onclick="removeImage('${i.id}')">Upload ×</button>`).join('')
+  }).join('') + (images(v.key, 'reference').length ? `<div class="refs" style="width:100%; margin-top:6px;">${images(v.key, 'reference').map(refTile).join('')}</div>` : '')
     || '<span class="ch-muted">No approved views yet.</span>';
   el('vp-strength-label').textContent = st.mode === 'crop' ? 'Detail-pass strength' : 'Reference influence';
   el('vp-strength').value = st.strength; el('vp-strength-val').textContent = (+st.strength).toFixed(2);
