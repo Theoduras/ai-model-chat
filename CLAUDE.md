@@ -304,8 +304,9 @@ Stay completely in character. Never mention being an AI.
   Google) and the face needs every feature ticked. Each approval saves a
   `CharacterVersion`; every job, clips included, stores a snapshot of the
   approved views and features (`spec['character']`) and generates from that
-  copy, so a later re-approval never changes a past job. Swap and
-  Multi-reference clips lead with its safe-work views. Face uploads are
+  copy, so a later re-approval never changes a past job. Swap and Reel
+  take her identity from a picker — character (safe-work views only) or vault
+  references; Multi-reference leads with the character's safe-work views. Face uploads are
   references only; stacked youth-leaning choices are refused in `characters.validate`.
 - **Views are a tree.** Each view in `characters.VIEWS` names its parents; a
   `CharacterView` row holds status and version, and `characters.resolve_status`

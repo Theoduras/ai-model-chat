@@ -28500,6 +28500,22 @@ def _gen_frame(raw):
     return b64, mime
 
 
+def _gen_identity(slug, body, spec):
+    """Where her identity comes from, as the creator picks: the character's
+    approved views or the vault's reference photos."""
+    char = _character_snapshot(slug)
+    identity = (body.get('identity') or '').strip().lower()
+    if identity not in ('character', 'vault'):
+        identity = 'character' if char else 'vault'
+    if identity == 'character' and not char:
+        raise imagegen.GenerationError(
+            'Approve a view of her character first, or pick vault photos.')
+    spec['identity'] = identity
+    if identity == 'character':
+        spec['character'] = char
+    return identity
+
+
 def _gen_video_model(job, level, asked):
     """The model a video job runs on.
 
@@ -28666,6 +28682,7 @@ def _gen_spec(slug, body, user):
         spec['addons'].append('audio')
 
     if job == 'swap':
+        _gen_identity(slug, body, spec)
         source_id = str(body.get('source') or body.get('source_media')
                         or body.get('id') or '').strip()
         src = _video_source_row(slug, source_id)
@@ -28702,19 +28719,8 @@ def _gen_spec(slug, body, user):
                 'A reel needs a prompt, a photo, or both.')
         if spec['reference_media'] and not _media_row(slug, spec['reference_media']):
             raise imagegen.GenerationError('That photo is not in this vault.')
-        # Her identity comes from the character's approved views or from the
-        # vault's reference photos, as the creator picks. A model is moved
-        # before the quote, like a rating, never after it.
-        char = _character_snapshot(slug)
-        identity = (body.get('identity') or '').strip().lower()
-        if identity not in ('character', 'vault'):
-            identity = 'character' if char else 'vault'
-        if identity == 'character' and not char:
-            raise imagegen.GenerationError(
-                'Approve a view of her character first, or pick vault photos.')
-        spec['identity'] = identity
-        if identity == 'character':
-            spec['character'] = char
+        # A model is moved before the quote, like a rating, never after it.
+        identity = _gen_identity(slug, body, spec)
         drive_id = str(body.get('source') or '').strip()
         if drive_id:
             src = _video_source_row(slug, drive_id)
@@ -30443,6 +30449,10 @@ def _gen_start(job_id, slug, spec, workspace):
                         refs = _gen_reference_urls(slug, ref_model, role=role)
                     if job == 'reel' and spec.get('character'):
                         refs = call['reference_urls']
+                    elif spec.get('identity') == 'character':
+                        refs = _character_urls(spec['character'], None, None,
+                                               face_only=bool(role))
+                        ref_model = 'character'
                     elif spec.get('character'):
                         refs = (_character_urls(spec['character'], None, None,
                                                 face_only=bool(role))

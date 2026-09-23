@@ -429,6 +429,11 @@
                  placeholder="she turns towards the camera and smiles"></label>
       </div>
       <div id="gen-swap-form" style="display:none; flex-direction:column; gap:11px;">
+        <label class="gen-f"><span>Her identity from</span>
+          <select id="gen-swap-identity" class="gen-identity" onchange="this.dataset.touched = 1; renderGenForm()">
+            <option value="vault">Vault reference photos</option>
+            <option value="character">Character build</option>
+          </select></label>
         <label class="gen-f"><span>Upload</span>
           <input type="file" id="gen-swap-file" accept="video/mp4,video/quicktime"
                  onchange="uploadSwapSource(this.files[0])"></label>
@@ -452,7 +457,7 @@
             With her photos it shows her, and a photo is the person she
             replaces. It still lands unapproved in staging.</span></div>
         <label class="gen-f"><span>Her identity from</span>
-          <select id="gen-reel-identity" onchange="this.dataset.touched = 1; renderGenForm()">
+          <select id="gen-reel-identity" class="gen-identity" onchange="this.dataset.touched = 1; renderGenForm()">
             <option value="vault">Vault reference photos</option>
             <option value="character">Character build</option>
           </select></label>
@@ -667,7 +672,7 @@ async function loadCharacterBadge() {
     c = d.character;
   } catch (e) {}
   genCharacter = c;
-  if (genJob === 'reel') renderGenForm();
+  if (genJob === 'reel' || genJob === 'swap') renderGenForm();
   box.hidden = !c;
   if (!c) return;
   const views = c.shot_views || [];
@@ -1141,7 +1146,7 @@ function renderGenForm() {
   el('gen-video-out').style.display = video ? '' : 'none';
   el('gen-shape-out').style.display = video || swap ? 'flex' : 'none';
   el('gen-video-drive').style.display = animate || genJob === 'reel' ? 'flex' : 'none';
-  if (genJob === 'reel') syncReelIdentity();
+  syncIdentity();
   el('gen-drive-label').textContent = genJob === 'reel'
     ? 'Video to put her in (optional)' : 'Motion clip (optional)';
   renderAspects();
@@ -1574,20 +1579,23 @@ const REF_VIDEO_MODELS = ['wan-2-7', 'seedance-2-0', 'seedance-2-0-fast',
                           'minimax-h3', 'minimax-h3-fast', 'wan-3-0'];
 const CLIP_MODELS = ['p-video-replace', 'p-video-animate'];
 
+function identityOf(job) {
+  return genCharacter && genCharacter.has_approved
+    && (el('gen-' + job + '-identity') || {}).value === 'character' ? 'character' : 'vault';
+}
+
 function reelChar() {
-  return genJob === 'reel' && !!(genCharacter && genCharacter.has_approved)
-    && (el('gen-reel-identity') || {}).value === 'character';
+  return genJob === 'reel' && identityOf('reel') === 'character';
 }
 
 // Character is offered only once a view is approved, and chosen by default then.
-function syncReelIdentity() {
-  const sel = el('gen-reel-identity');
-  if (!sel) return;
+function syncIdentity() {
   const has = !!(genCharacter && genCharacter.has_approved);
-  const opt = sel.querySelector('option[value="character"]');
-  opt.disabled = !has;
-  if (!has) sel.value = 'vault';
-  else if (!sel.dataset.touched) sel.value = 'character';
+  document.querySelectorAll('.gen-identity').forEach(sel => {
+    sel.querySelector('option[value="character"]').disabled = !has;
+    if (!has) sel.value = 'vault';
+    else if (!sel.dataset.touched) sel.value = 'character';
+  });
 }
 
 function videoModelNow() {
@@ -1935,7 +1943,7 @@ async function jobPayload() {
   };
   if (genJob === 'swap') {
     return Object.assign(base, {
-      source: genSwap.id, resolution: swapResolution(),
+      source: genSwap.id, resolution: swapResolution(), identity: identityOf('swap'),
       seconds: swapSeconds(), motion: el('gen-swap-motion').value.trim(),
     });
   }
@@ -1946,7 +1954,7 @@ async function jobPayload() {
       prompt: (el('gen-reel-prompt').value || '').trim(),
       reference_media: genReelPick || '',
       source: genDrive ? genDrive.id : '',
-      identity: reelChar() ? 'character' : 'vault',
+      identity: identityOf('reel'),
     });
   }
   if (genJob === 'multiref') {
