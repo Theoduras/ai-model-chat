@@ -79,6 +79,12 @@ def test_prompts():
     check('nipples carry no body features',
           not any(CH.features()[k][1] == 'body' for k in CH.traits('nipples')))
     check('hands keep nails', 'nails' in CH.traits('hands'))
+    for k in ('anus_closed', 'anus_open'):
+        p = CH.build_view_prompt(k, FULL_SHEET, 31, True)
+        check(f'{k} shows the vulva', 'vulva just below' in p
+              and all(w in p for w in CH._fragments(FULL_SHEET, ('vulva', 'anus'))))
+        check(f'{k} drops far body features',
+              not any(w in p for w in CH._fragments({x: FULL_SHEET[x] for x in far}, ('body',))))
 
 
 def test_validation():

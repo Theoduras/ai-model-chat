@@ -272,14 +272,16 @@ VIEWS = {
              uses=('pubic', 'vulva')),
         dict(key='anus_closed', label='Anus, closed (bending forward)', group='nsfw', rating='explicit', required_from='explicit',
              parents=('rear_nude',), tier=2, mode='reference', zoom=True, body=('glute_shape',),
-             framing=('an explicit macro close-up from behind of her closed anus while she bends forward, buttocks '
-                      'parted, the anus centred and filling the frame, buttock skin at the edges'),
-             uses=('anus',)),
+             framing=('an explicit macro close-up from behind while she bends forward, buttocks parted, her closed '
+                      'anus and her vulva just below it both in frame and in sharp focus, filling the frame, '
+                      'buttock skin at the edges'),
+             uses=('anus', 'vulva')),
         dict(key='anus_open', label='Anus, open (bending forward)', group='nsfw', rating='explicit', required_from=None,
              parents=('rear_nude',), tier=2, mode='reference', zoom=True, body=('glute_shape',),
-             framing=('an explicit macro close-up from behind of her open anus while she bends forward, buttocks '
-                      'spread, the anus centred and filling the frame, buttock skin at the edges'),
-             uses=('anus',)),
+             framing=('an explicit macro close-up from behind while she bends forward, buttocks spread, her open '
+                      'anus and her vulva just below it both in frame and in sharp focus, filling the frame, '
+                      'buttock skin at the edges'),
+             uses=('anus', 'vulva')),
     ],
 }
 
