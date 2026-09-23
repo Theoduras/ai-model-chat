@@ -598,6 +598,8 @@ async function init() {
       el('persona-hint').textContent = 'Create a persona first — generation needs one to look like.';
       return;
     }
+    const want = new URLSearchParams(location.search).get('persona');
+    if (want && rows.some(p => p.slug === want)) el('persona').value = want;
   } catch (e) {
     el('persona-hint').textContent = 'Could not load personas.';
     return;

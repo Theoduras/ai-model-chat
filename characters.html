@@ -50,13 +50,17 @@
     .views-mode .views { grid-template-columns: 1fr; }
     .views-mode #tiers .ch-card { padding: 14px; }
     .views-mode #views-head { flex-direction: column; align-items: stretch; }
-    .views-mode .compare img, .views-mode .compare div { max-height: 60vh; object-fit: contain; }
     #edit-view > .rail { grid-column: 1; grid-row: 1 / span 20; position: sticky; top: 0; display: flex; flex-direction: column; gap: 18px;
       background: var(--paper); border: 1px solid var(--border); border-radius: 20px; padding: 20px 16px; }
     .rail .rail-name { font-size: 1.25rem; font-weight: 700; margin: 0; }
     .rail .steps { flex-direction: column; }
     .rail .steps button { width: 100%; height: 44px; text-align: left; border-radius: 10px; }
     @media (max-width: 860px) { #edit-view:not([hidden]) { grid-template-columns: 1fr; }
+      #edit-view > * { grid-column: 1; }
+      .views-mode [data-step="body"]:not([hidden]) { grid-template-columns: minmax(0, 1fr); }
+      .views-mode .drawer { grid-row: auto; }
+      .views-mode [data-step="body"] > .ch-grow, .views-mode [data-step="body"] > .ch-side { grid-column: 1; position: static; max-height: none; }
+      .vp-head { flex-wrap: wrap; } #vp-source { order: 3; width: 100%; } #vp-opts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       #edit-view > .rail { grid-column: 1; grid-row: auto; position: static; } .rail .steps { flex-direction: row; } .rail .steps button { width: auto; } }
     .ch-scroll { flex: 1; min-height: 0; overflow-y: auto; }
     .ch-wrap { padding: 24px 28px 72px; display: flex; flex-direction: column; gap: 20px; }
@@ -154,15 +158,36 @@
     .crop-handle { position: absolute; width: 16px; height: 16px; border-radius: 8px; background: var(--accent); border: 2px solid #fff; }
     .crop-handle[data-c="nw"] { left: -9px; top: -9px; cursor: nwse-resize; } .crop-handle[data-c="ne"] { right: -9px; top: -9px; cursor: nesw-resize; }
     .crop-handle[data-c="sw"] { left: -9px; bottom: -9px; cursor: nesw-resize; } .crop-handle[data-c="se"] { right: -9px; bottom: -9px; cursor: nwse-resize; }
-    .compare img, .compare div { max-height: min(60vh, 640px); object-fit: contain; }
     .crop-stage img { max-height: min(70vh, 760px); object-fit: contain; }
-    @media (max-width: 900px) { .compare { grid-template-columns: 1fr; } }
-    #vp-opts { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
-    .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
-    .compare figure { margin: 0; }
-    .compare img, .compare div { width: 100%; aspect-ratio: 3/4; object-fit: cover; border-radius: 8px; background: var(--surface-2); }
-    .compare figcaption { font-size: 0.72rem; color: var(--text-muted); margin-top: 4px; }
-    .actionbar { position: sticky; bottom: 0; background: var(--surface); padding: 12px 0 16px; display: flex; gap: 8px; justify-content: flex-end; border-top: 1px solid var(--border); margin-top: 12px; }
+    #vp-opts { grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); gap: 12px; margin-top: 16px; }
+    .fin-shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin: 16px 0; }
+    .fin-shots figure { margin: 0; } .fin-shots img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border-radius: 10px; display: block; cursor: zoom-in; background: var(--surface-2); }
+    .fin-shots figcaption { font-size: 0.75rem; color: var(--text-muted); margin-top: 4px; }
+    #fin-next.off { opacity: .45; pointer-events: none; }
+    .vp-head { display: flex; gap: 12px; align-items: center; }
+    .vp-thumb { width: 48px; height: 64px; padding: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; cursor: zoom-in; background: var(--surface-2); flex-shrink: 0; }
+    .vp-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .vp-sec { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
+    .vp-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .vp-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+    @media (max-width: 520px) { .vp-controls { grid-template-columns: 1fr; } }
+    .vp-infl { grid-column: 1 / -1; }
+    .vp-infl input { width: 100%; margin: 4px 0 0; accent-color: var(--accent); }
+    .vp-val { font-size: 0.8rem; }
+    .bands { display: flex; gap: 2px; margin-top: 4px; }
+    .bands span { height: 22px; display: grid; place-items: center; font-size: 0.7rem; font-weight: 600; color: var(--text-muted);
+      background: var(--surface-2); border-radius: 4px; }
+    .bands span.on { background: var(--sel); color: var(--accent); }
+    .vp-more > summary { cursor: pointer; font-size: 0.8rem; font-weight: 600; color: var(--text-2); list-style-position: inside; }
+    .vp-more[open] > summary { margin-bottom: 8px; }
+    details.vp-more:not(.vp-sec) { display: flex; flex-direction: column; gap: 8px; }
+    .btn-sm { height: 34px; padding: 0 12px; font-size: 0.8rem; }
+    .opt { position: relative; }
+    .opt.kept { border-color: var(--ok); }
+    .opt-act { display: flex; gap: 6px; padding: 8px; flex-wrap: wrap; align-items: center; min-height: 48px; box-sizing: border-box; }
+    .opt-act .btn { height: 32px; padding: 0 10px; font-size: 0.78rem; }
+    .opt-act .btn-primary { flex: 1; }
+    .actionbar { position: sticky; bottom: 0; background: var(--paper, var(--surface)); padding: 12px 0 16px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; border-top: 1px solid var(--border); margin-top: 12px; }
     .img-missing { display: grid; place-items: center; width: 100%; aspect-ratio: 3/4; font-size: 0.72rem; color: var(--text-muted); background: var(--surface-2); border-radius: 8px; }
     .refs { display: flex; gap: 8px; flex-wrap: wrap; }
     .ref { width: 64px; height: 64px; border-radius: 8px; overflow: hidden; position: relative; background: var(--surface-2); }
@@ -251,7 +276,7 @@
           <label class="ch-label">Age <input id="f-age" type="number" min="18" max="80"></label>
           <p class="ch-muted" style="margin-top:-8px;">Must be 18 or over. Every prompt states she is a fictional adult of this age.</p>
           <div class="ch-label">Explicitness level <div class="chips" id="level-chips"></div>
-            <span class="ch-muted" style="margin:0; font-weight:400;">Sets which body views are required.</span></div>
+            <span class="ch-muted" style="margin:0; font-weight:400;">Sets which body photos are required.</span></div>
           <label class="ch-label">Persona <select id="f-persona" onchange="linkPersona(this.value)"></select></label>
           <label class="ch-label">Notes (optional) <input id="f-notes" type="text" maxlength="400"></label>
           <button type="button" class="btn" onclick="saveSheet()">Save</button>
@@ -331,47 +356,52 @@
 
     <!-- 4 Body -->
     <div class="ch-row" data-step="body" hidden>
-    <aside class="drawer" id="drawer" hidden aria-label="View details">
-      <div style="display:flex; justify-content:space-between; align-items:start; gap:8px;">
-        <div><h2 class="ch-h2" style="margin:0;" id="vp-title"></h2><div class="lineage" id="vp-lineage"></div></div>
+    <aside class="drawer" id="drawer" hidden aria-label="Photo details">
+      <div class="vp-head">
+        <div id="vp-src"></div>
+        <div style="flex:1; min-width:0;"><h2 class="ch-h2" style="margin:0;" id="vp-title"></h2><div class="lineage" id="vp-lineage"></div></div>
+        <div class="chips" id="vp-source"></div>
         <button type="button" class="btn vp-close" style="height:34px; padding:0 12px;" onclick="closeDrawer()" aria-label="Close">×</button>
       </div>
       <div class="banner" id="vp-banner" hidden></div>
       <div id="vp-body">
-        <div class="chips" id="vp-source" style="margin:12px 0;"></div>
-        <div id="vp-crop" hidden>
-          <div class="crop-stage" id="crop-stage"><img id="crop-img" alt="Parent view"><div class="crop-box" id="crop-box"><span class="crop-handle" data-c="nw"></span><span class="crop-handle" data-c="ne"></span><span class="crop-handle" data-c="sw"></span><span class="crop-handle" data-c="se"></span></div></div>
-          <span class="ch-muted">Drag the box to move it, any corner to resize.</span>
-          <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
-            <button type="button" class="btn" onclick="useCrop('candidate')">Use crop as this view</button>
-            <button type="button" class="btn" onclick="useCrop('reference')">Use crop as reference</button>
+        <div id="vp-crop" class="vp-sec" hidden>
+          <div class="crop-stage" id="crop-stage"><img id="crop-img" alt="Source photo"><div class="crop-box" id="crop-box"><span class="crop-handle" data-c="nw"></span><span class="crop-handle" data-c="ne"></span><span class="crop-handle" data-c="sw"></span><span class="crop-handle" data-c="se"></span></div></div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:8px;">
+            <button type="button" class="btn btn-sm" onclick="useCrop('candidate')">Use crop as this photo</button>
+            <button type="button" class="btn btn-sm" onclick="useCrop('reference')">Use crop as reference</button>
+            <span class="ch-muted" style="margin:0;">Drag the box to move it, a corner to resize.</span>
           </div>
         </div>
-        <div style="margin-top:12px;">
-          <span class="dl">References</span>
-          <div class="chips" id="vp-refs" style="margin-top:6px;"></div>
-          <div style="display:flex; flex-direction:column; gap:8px; margin-top:10px; padding:12px; border:1px dashed var(--border); border-radius:10px;">
+        <div class="vp-sec">
+          <div class="vp-row"><span class="dl">References</span><span class="ch-muted" style="margin:0;" id="vp-refs-n"></span></div>
+          <div class="chips" id="vp-refs"></div>
+          <details class="vp-more">
+            <summary>Upload own reference</summary>
             <label class="attest"><input type="checkbox" id="vp-attest" onchange="el('add-view-ref').disabled=!this.checked">I have the rights to this image, and anyone shown is 18+ and agreed to their likeness being used.</label>
-            <button type="button" class="btn" style="height:36px; align-self:flex-start;" id="add-view-ref" disabled onclick="pickUpload(selView, 'vp-attest')">Upload own reference</button>
-          </div>
+            <button type="button" class="btn btn-sm" style="align-self:flex-start;" id="add-view-ref" disabled onclick="pickUpload(selView, 'vp-attest')">Choose image</button>
+          </details>
         </div>
-        <label class="dl" style="display:block; margin-top:12px;"><span id="vp-strength-label"></span> <b id="vp-strength-val"></b>
-          <input type="range" id="vp-strength" min="0" max="1" step="0.01" style="width:100%;" oninput="el('vp-strength-val').textContent=(+this.value).toFixed(2)" onchange="saveView({strength:+this.value})"></label>
-        <div class="ch-grid2" style="margin-top:12px;">
+        <div class="vp-sec vp-controls">
+          <div class="vp-infl">
+            <div class="vp-row"><span class="dl" id="vp-strength-label"></span><b class="vp-val" id="vp-strength-val"></b></div>
+            <input type="range" id="vp-strength" min="0" max="1" step="0.01" oninput="strengthHint()" onchange="saveView({strength:+this.value})">
+            <div class="bands" id="vp-bands"></div>
+            <p class="ch-muted" id="vp-hint" style="margin:6px 0 0;"></p>
+          </div>
           <label class="ch-label">Pose <select id="vp-pose" onchange="viewOpts[selView]=Object.assign(viewOpts[selView]||{},{pose:this.value})"></select></label>
           <label class="ch-label">Lighting <select id="vp-light" onchange="viewOpts[selView]=Object.assign(viewOpts[selView]||{},{lighting:this.value})"></select></label>
         </div>
-        <div class="compare" id="vp-compare"></div>
-        <div style="margin-top:12px;"><span class="dl">Inherited traits</span>
-          <div class="chips" id="vp-traits" style="margin-top:6px;"></div></div>
-        <div class="opts" id="vp-opts" style="margin-top:12px;"></div>
+        <details class="vp-sec vp-more">
+          <summary><span class="dl">Inherited traits</span> <span class="ch-muted" style="margin:0;" id="vp-traits-n"></span></summary>
+          <div class="chips" id="vp-traits"></div>
+        </details>
+        <div class="opts" id="vp-opts"></div>
       </div>
-      <div class="actionbar" style="flex-wrap:wrap;">
-        <div style="display:flex; align-items:center; gap:8px; width:100%;"><span class="dl">Variations</span><div class="chips" id="vp-batch"></div></div>
-        <button type="button" class="btn" id="vp-remove" hidden>Remove approved photo</button>
-        <button type="button" class="btn" id="vp-check" onclick="runViewCheck()" hidden>Adult check</button>
+      <div class="actionbar">
+        <div class="vp-row" style="gap:8px;"><span class="dl">Variations</span><div class="chips" id="vp-batch"></div></div>
+        <span style="flex:1;"></span>
         <button type="button" class="btn" id="vp-var" onclick="generate(selView)"></button>
-        <button type="button" class="btn btn-primary" id="vp-primary"></button>
       </div>
     </aside>
       <div class="ch-grow" style="display:flex; flex-direction:column; gap:16px;">
@@ -385,12 +415,11 @@
             <div class="fp-list" id="intimate-features" style="margin-top:12px;"></div>
           </div>
           <span class="msg" id="body-save-msg" aria-live="polite" style="margin:8px 0 0; display:block;"></span>
-          <button type="button" class="btn btn-primary" style="margin-top:12px;" onclick="go('views')">Continue to views</button>
-          <button type="button" class="btn btn-primary" style="margin-top:12px;" onclick="go('views')">Continue to views</button>
+          <button type="button" class="btn btn-primary" style="margin-top:12px;" onclick="go('views')">Continue to fine tuning</button>
         </div>
         <div id="views-head" style="display:flex; justify-content:space-between; align-items:end; gap:12px; flex-wrap:wrap;">
           <div>
-            <h2 class="ch-h1">Views</h2>
+            <h2 class="ch-h1">Fine Tuning</h2>
             <p class="ch-muted" id="body-summary"></p>
           </div>
           <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
@@ -404,13 +433,35 @@
       <div class="ch-side">
         <div class="ch-card" style="display:flex; flex-direction:column; gap:10px;">
           <h2 class="ch-h2" style="margin:0;">General references</h2>
-          <span class="ch-muted" style="margin:0;">Optional. Uploads here guide the face. View references are set in each view's drawer.</span>
+          <span class="ch-muted" style="margin:0;">Optional. Uploads here guide the face. Each photo's own references are set in Fine Tuning.</span>
           <div class="refs" id="general-refs"></div>
           <label class="attest"><input type="checkbox" id="attest">I have the rights to these images, and anyone shown is 18+ and agreed to their likeness being used for AI generation.</label>
           <div style="display:flex; gap:8px; flex-wrap:wrap;">
             <button type="button" class="btn" onclick="pickUpload('')">Add general reference</button>
           </div>
           <input type="file" id="upload" accept="image/jpeg,image/png,image/webp" multiple hidden onchange="uploadFiles(this)">
+        </div>
+      </div>
+    </div>
+
+    <!-- 5 Finish -->
+    <div class="ch-row" data-step="finish" hidden>
+      <div class="ch-card ch-grow">
+        <h2 class="ch-h1">Finish</h2>
+        <p class="ch-muted" id="fin-sub"></p>
+        <div class="fin-shots" id="fin-shots"></div>
+        <button type="button" class="btn btn-primary" id="fin-accept" onclick="acceptCharacter()">Accept character</button>
+      </div>
+      <div class="ch-side" id="fin-next">
+        <div class="ch-card" style="display:flex; flex-direction:column; gap:12px;">
+          <h2 class="ch-h2" style="margin:0;">Link to a persona</h2>
+          <span class="ch-muted" style="margin:0;">Every photo her persona sends is then conditioned on this character.</span>
+          <label class="ch-label">Persona <select id="fin-persona" onchange="linkPersona(this.value).then(renderFinish)"></select></label>
+        </div>
+        <div class="ch-card" style="display:flex; flex-direction:column; gap:12px;">
+          <h2 class="ch-h2" style="margin:0;">Create content</h2>
+          <span class="ch-muted" style="margin:0;" id="fin-studio-note"></span>
+          <a class="btn btn-primary" id="fin-studio" style="display:grid; place-items:center; text-decoration:none;">Open creation studio</a>
         </div>
       </div>
     </div>
@@ -491,8 +542,8 @@ function renderList() {
   el('cards').innerHTML = shown.map(c => {
     const pct = c.required ? Math.round(100 * c.approved_required / c.required) : 0;
     const status = c.status === 'complete'
-      ? `Complete · ${c.approved_required} of ${c.required} required views`
-      : (c.face_url ? `Face approved · ${c.approved_required} of ${c.required} required views` : 'Face not approved yet');
+      ? `Complete · ${c.approved_required} of ${c.required} required photos`
+      : (c.face_url ? `Face approved · ${c.approved_required} of ${c.required} required photos` : 'Face not approved yet');
     return `<button type="button" class="ch-item" onclick="openCharacter('${c.id}')">
       <div class="ch-thumb">${c.face_url ? `<img src="${esc(c.face_url)}" alt="">` : ''}
         <span class="ch-badge">${LEVEL_LABEL[c.nsfw_level] || c.nsfw_level}</span></div>
@@ -535,17 +586,20 @@ async function reload() {
 function go(s) {
   if (s !== 'describe' && s !== 'pick' && !canonOf('face_front') && s !== 'check') s = 'describe';
   if (s === 'face') s = canonOf('face_front') || pickedFace ? 'check' : 'pick';
-  if ((s === 'body' || s === 'views') && !canonOf('face_front')) s = 'describe';
+  if ((s === 'body' || s === 'views' || s === 'finish') && !canonOf('face_front')) s = 'describe';
+  if (s === 'finish' && cur.status !== 'complete') s = 'views';
   step = s; render();
 }
 function render() {
   el('crumb').textContent = cur.name;
   const faceDone = !!canonOf('face_front');
-  const done = {describe: images('face_front').length > 0 || faceDone, face: faceDone, body: faceDone, views: cur.status === 'complete'};
+  const done = {describe: images('face_front').length > 0 || faceDone, face: faceDone, body: faceDone,
+                views: cur.status === 'complete', finish: accepted()};
   const at = step === 'pick' || step === 'check' ? 'face' : step;
-  el('steps').innerHTML = [['describe', '1 Base & references'], ['face', '2 Face'], ['body', '3 Body profile'], ['views', '4 Views']]
+  el('steps').innerHTML = [['describe', '1 Base & references'], ['face', '2 Face'], ['body', '3 Body profile'], ['views', '4 Fine Tuning'], ['finish', '5 Finish']]
     .map(([k, l]) => `<li><button type="button" class="${done[k] ? 'done' : ''}" ${at === k ? 'aria-current="step"' : ''}
-      ${(k === 'body' || k === 'views') && !faceDone || (k === 'face' && !images('face_front').length && !faceDone) ? 'disabled' : ''}
+      ${(k === 'body' || k === 'views') && !faceDone || (k === 'face' && !images('face_front').length && !faceDone)
+        || (k === 'finish' && cur.status !== 'complete') ? 'disabled' : ''}
       onclick="go('${k}')">${l}${done[k] && at !== k ? ' ✓' : ''}</button></li>`).join('');
   const req = cat.views.filter(v => v.required), ok = req.filter(v => vs(v.key).status === 'approved').length;
   el('rail-count').textContent = ok + ' / ' + req.length;
@@ -563,7 +617,7 @@ function render() {
     const next = pool.find(v => vs(v.key).status !== 'approved' && vs(v.key).display !== 'locked') || pool[0];
     selView = next ? next.key : '';
   }
-  ({describe: renderDescribe, pick: renderPick, check: renderCheck, body: renderBody, views: renderBody})[step]();
+  ({describe: renderDescribe, pick: renderPick, check: renderCheck, body: renderBody, views: renderBody, finish: renderFinish})[step]();
 }
 
 function featurePicker(f) {
@@ -758,7 +812,7 @@ function renderBody() {
   const shown = cat.views.filter(v => v.key !== 'face_front' || viewFilter !== 'NSFW').filter(inFilter);
   const req = cat.views.filter(v => v.required);
   const ok = req.filter(v => vs(v.key).status === 'approved').length;
-  el('body-summary').textContent = `Level: ${LEVEL_LABEL[cur.nsfw_level]} · ${ok} of ${req.length} required views approved · version ${cur.version}`;
+  el('body-summary').textContent = `Level: ${LEVEL_LABEL[cur.nsfw_level]} · ${ok} of ${req.length} required photos approved · version ${cur.version}`;
   const hasNsfw = cat.views.some(isNsfw);
   el('view-filter').innerHTML = (hasNsfw ? ['SFW', 'NSFW', 'All'] : ['SFW']).map(f =>
     `<button type="button" class="chip" aria-pressed="${viewFilter === f}" onclick="setFilter('${f}')">${f}</button>`).join('');
@@ -817,8 +871,10 @@ function renderViewPanel() {
   const locked = st.display === 'locked';
   el('vp-body').style.opacity = locked ? .5 : 1;
   el('vp-source').innerHTML = [['crop', 'Crop & refine'], ['reference', 'Reference']].map(([m, l]) =>
-    `<button type="button" class="chip" aria-pressed="${st.mode === m}" ${m === 'crop' && !v.parents.length ? 'disabled title="Only a view built from another view can be cropped"' : ''} onclick="saveView({mode:'${m}'})">${l}</button>`).join('');
+    `<button type="button" class="chip" aria-pressed="${st.mode === m}" ${m === 'crop' && !v.parents.length ? 'disabled title="Only a photo built from another photo can be cropped"' : ''} onclick="saveView({mode:'${m}'})">${l}</button>`).join('');
   const parent = canonOf(v.parents[0]);
+  el('vp-src').innerHTML = parent ? `<button type="button" class="vp-thumb" title="Built from ${esc(viewDef(v.parents[0]).label)}"
+    aria-label="Open source photo" onclick="openLightbox(['${esc(parent.url)}'], 0)"><img src="${esc(parent.url)}" alt=""></button>` : '';
   el('vp-crop').hidden = st.mode !== 'crop';
   if (st.mode === 'crop') {
     el('crop-img').src = parent ? parent.url : '';
@@ -826,49 +882,62 @@ function renderViewPanel() {
   }
   const approved = cat.views.filter(o => o.key !== v.key && canonOf(o.key));
   const chosen = st.references ? st.references.map(r => r.image_id) : v.parents.map(p => (canonOf(p) || {}).id).filter(Boolean);
+  el('vp-refs-n').textContent = approved.length ? approved.filter(o => chosen.includes(canonOf(o.key).id)).length + ' selected' : '';
   el('vp-refs').innerHTML = approved.map(o => {
     const id = canonOf(o.key).id;
     return `<button type="button" class="chip" aria-pressed="${chosen.includes(id)}" onclick="toggleRef('${id}')">${esc(o.label)}</button>`;
   }).join('') + (images(v.key, 'reference').length ? `<div class="refs" style="width:100%; margin-top:6px;">${images(v.key, 'reference').map(refTile).join('')}</div>` : '')
-    || '<span class="ch-muted">No approved views yet.</span>';
+    || '<span class="ch-muted">No approved photos yet.</span>';
   el('vp-strength-label').textContent = st.mode === 'crop' ? 'Detail-pass strength' : 'Reference influence';
-  el('vp-strength').value = st.strength; el('vp-strength-val').textContent = (+st.strength).toFixed(2);
-  const result = imgById(st.result_image_id) || images(v.key, 'candidate')[0];
-  el('vp-compare').innerHTML = `<figure>${parent ? `<img src="${esc(parent.url)}" alt="">` : '<div></div>'}<figcaption>Parent</figcaption></figure>
-    <figure>${result ? `<img src="${esc(result.url)}" alt="">` : '<div></div>'}<figcaption>Result</figcaption></figure>`;
+  el('vp-strength').value = st.strength;
+  strengthHint();
   const fl = k => ((cat.features || []).find(f => f.key === k) || {}).label || k;
-  el('vp-traits').innerHTML = (v.traits || []).map(k => (cur.sheet || {})[k]
+  const traits = v.traits || [];
+  el('vp-traits-n').textContent = `${traits.filter(k => (cur.sheet || {})[k]).length} of ${traits.length} set`;
+  el('vp-traits').innerHTML = traits.map(k => (cur.sheet || {})[k]
     ? `<span class="chip" style="cursor:default;">${esc(fl(k))}: ${esc(cur.sheet[k])}</span>`
     : `<span class="chip" style="cursor:default; opacity:.55;">${esc(fl(k))}: not set</span>`).join('') +
-    `<button type="button" class="chip" onclick="closeDrawer();el('body-features').scrollIntoView({behavior:'smooth'})">Edit</button>`;
-  const opts = images(v.key, 'candidate').concat(images(v.key, 'canonical'));
+    `<button type="button" class="chip" onclick="go('body')">Edit body profile</button>`;
+  const opts = images(v.key, 'canonical').concat(images(v.key, 'candidate'));
   vpOptUrls = opts.map(o => o.url);
   el('vp-opts').className = 'opts';
   el('vp-opts').innerHTML = opts.map((o, i) => {
-    const age = (o.checks || {}).age;
-    return `<div class="opt" style="cursor:default;">
-      <img src="${esc(o.url)}" alt="${esc(v.label)} option" onclick="vpImgClick(event, ${i})"><span>${o.role === 'canonical' ? 'Approved' : 'Candidate'}
-      ${v.key === 'body_front' && o.role !== 'canonical' ? ` · <span class="tag ${age || 'uncertain'}">${age || 'not checked'}</span>` : ''}</span>
-      ${o.role !== 'canonical' ? `<div style="display:flex; gap:6px; padding:0 12px 12px;">
-        <button type="button" class="btn btn-primary" style="height:36px;" ${locked ? 'disabled' : ''} onclick="approveView('${o.id}')">Approve</button>
-        ${v.key === 'body_front' ? `<button type="button" class="btn" style="height:36px;" onclick="runViewCheck('${o.id}')">Check</button>` : ''}
-        <button type="button" class="btn" style="height:36px;" onclick="removeImage('${o.id}')">Delete</button></div>` : ''}</div>`;
+    const age = (o.checks || {}).age, kept = o.role === 'canonical';
+    return `<div class="opt ${kept ? 'kept' : ''}" style="cursor:default;">
+      <img src="${esc(o.url)}" alt="${esc(v.label)} option" onclick="vpImgClick(event, ${i})" style="cursor:zoom-in;">
+      ${kept ? `<div class="opt-act"><b class="st approved">Approved</b><i style="flex:1;"></i>
+        <button type="button" class="btn" onclick="removeApproved()">Remove</button></div>` : `<div class="opt-act">
+        <button type="button" class="btn btn-primary" ${locked ? 'disabled' : ''} onclick="approveView('${o.id}')">Approve</button>
+        ${v.key === 'body_front' ? `<button type="button" class="btn" onclick="runViewCheck('${o.id}')" title="Adult check">${age ? `<b class="tag ${age}">${age}</b>` : 'Check'}</button>` : ''}
+        <button type="button" class="btn" onclick="removeImage('${o.id}')">Delete</button></div>`}</div>`;
   }).join('');
-  el('vp-check').hidden = v.key !== 'body_front';
-  const prim = el('vp-primary'), cand = images(v.key, 'candidate')[0];
-  const action = {not_started: ['Generate', () => generate(v.key)], review: ['Approve', () => cand && approveView(cand.id)],
-                  outdated: ['Regenerate', () => generate(v.key)]}[st.display];
-  prim.textContent = action ? action[0] + (action[0] === 'Approve' ? '' : cost(batch)) : STATUS_LABEL[st.display];
-  el('vp-var').textContent = `Generate ${batch}` + cost(batch);
+  const gen = el('vp-var');
+  gen.textContent = (st.display === 'outdated' ? 'Regenerate ' : 'Generate ') + batch + cost(batch);
+  gen.className = 'btn' + (st.display === 'review' ? '' : ' btn-primary');
+  gen.disabled = locked || st.display === 'generating';
   el('vp-batch').innerHTML = batchChips();
-  const kept = st.status === 'approved' && canonOf(v.key);
-  el('vp-remove').hidden = !kept;
-  el('vp-remove').onclick = kept ? () => confirm(v.key === 'face_front'
-    ? 'Remove the approved face? Every other view depends on it and will need approving again.'
-    : 'Remove the approved photo for ' + v.label + '? Views built on it will need regenerating.') && removeImage(kept.id, true) : null;
-  prim.disabled = !action || (st.display === 'review' && !cand);
-  prim.onclick = action ? action[1] : null;
-  el('vp-var').disabled = locked || st.display === 'generating';
+}
+function removeApproved() {
+  const v = viewDef(selView), kept = canonOf(selView);
+  if (kept && confirm(v.key === 'face_front'
+    ? 'Remove the approved face? Every other photo depends on it and will need approving again.'
+    : 'Remove the approved photo for ' + v.label + '? Photos built on it will need regenerating.')) removeImage(kept.id, true);
+}
+// The number never reaches the model (Seedream refuses a denoise strength):
+// characters.build_view_prompt turns it into wording, so only the band matters.
+const BANDS = {
+  reference: [[0, .5, 'Loose', 'Asks for the same face and build, loosely. The model has room to drift.'],
+              [.5, 1, 'Exact', 'Asks for the identical face and body as the references.']],
+  crop: [[0, .4, 'Sharpen', 'Only sharpens detail and skin texture. Nothing else changes.'],
+         [.4, .7, 'Refine', 'Refines detail, keeping pose, skin tone and lighting.'],
+         [.7, 1, 'Redraw', 'Redraws the detail freely, keeping the same body and lighting.']]
+};
+function strengthHint() {
+  const val = +el('vp-strength').value, bands = BANDS[vs(selView).mode] || BANDS.reference;
+  const on = bands.find(b => val < b[1]) || bands[bands.length - 1];
+  el('vp-strength-val').textContent = `${on[2]} · ${val.toFixed(2)}`;
+  el('vp-bands').innerHTML = bands.map(b => `<span class="${b === on ? 'on' : ''}" style="flex:${b[1] - b[0]};">${b[2]}</span>`).join('');
+  el('vp-hint').textContent = on[3] + ' Sent as prompt wording, not a number, so only the band changes the result.';
 }
 function placeCropBox(b) {
   const box = el('crop-box');
@@ -957,6 +1026,34 @@ function generateRemaining() {
 function regenerateBranch() {
   queueViews(cat.views.filter(inFilter).filter(v => vs(v.key).display === 'outdated').map(v => v.key));
 }
+// Acceptance is a per-viewer sign-off on this exact version; re-approving any
+// photo bumps the version and asks again.
+function accepted() {
+  try { return !!cur && cur.status === 'complete' && localStorage.getItem('ch-accepted:' + cur.id) === String(cur.version); } catch (e) { return false; }
+}
+function acceptCharacter() {
+  try { localStorage.setItem('ch-accepted:' + cur.id, String(cur.version)); } catch (e) {}
+  render();
+}
+function renderFinish() {
+  const ok = accepted(), shots = cat.views.filter(v => v.required && canonOf(v.key));
+  el('fin-sub').textContent = `${cur.name} · ${cur.age} · ${LEVEL_LABEL[cur.nsfw_level]} · version ${cur.version} · ${shots.length} approved photos`;
+  const urls = shots.map(v => canonOf(v.key).url);
+  el('fin-shots').innerHTML = shots.map((v, i) => `<figure><img src="${esc(urls[i])}" alt="" onclick="openLightbox(finUrls, ${i})"><figcaption>${esc(v.label)}</figcaption></figure>`).join('');
+  finUrls = urls;
+  el('fin-accept').textContent = ok ? 'Accepted ✓' : 'Accept character';
+  el('fin-accept').disabled = ok;
+  el('fin-next').classList.toggle('off', !ok);
+  el('fin-persona').innerHTML = `<option value="">Not linked</option>` + personas.map(p =>
+    `<option value="${esc(p.slug)}" ${cur.persona === p.slug ? 'selected' : ''}>${esc(p.name || p.slug)}</option>`).join('');
+  const a = el('fin-studio');
+  a.href = cur.persona ? '/studio?persona=' + encodeURIComponent(cur.persona) : '/studio';
+  el('fin-studio-note').textContent = cur.persona
+    ? `Generate stills and clips as ${(personas.find(p => p.slug === cur.persona) || {}).name || cur.persona}, locked to this character.` : 'Link a persona first so the studio uses this character.';
+  a.style.opacity = cur.persona ? 1 : .45; a.style.pointerEvents = cur.persona ? '' : 'none';
+}
+let finUrls = [];
+
 let pollTimer = null;
 function pollGenerating() {
   clearTimeout(pollTimer);
@@ -971,7 +1068,11 @@ async function runViewCheck(id) {
   catch (e) { say(e.message, 'err'); }
 }
 async function approveView(id) {
-  try { await api(`/api/characters/${cur.id}/images/${id}/approve`, {body: {}}); await reload(); say('Approved.', 'ok'); }
+  const was = cur.status;
+  try {
+    await api(`/api/characters/${cur.id}/images/${id}/approve`, {body: {}}); await reload(); say('Approved.', 'ok');
+    if (was !== 'complete' && cur.status === 'complete') go('finish');
+  }
   catch (e) { say(e.message, 'err'); }
 }
 async function removeImage(id, confirmed) {
