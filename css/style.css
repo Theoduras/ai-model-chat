@@ -2726,6 +2726,35 @@ body.ob-running .form-area {
   .ob-skip { flex: 1; justify-content: center; }
 }
 
+/* ── The same frame on other pages (js/page-wizard.js) ─────────────────────
+   Character Builder and Studio run the persona wizard's shell inside their own
+   iframe, so it fills the page body instead of the dashboard's form area. */
+.pw-shell { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.pw-shell > .ob-split { flex: 1; min-height: 0; }
+.pw-shell > .ob-done { flex: 1; }
+.pw-rail-name {
+  font-family: var(--display); font-size: 1.05rem; font-weight: 700;
+  letter-spacing: -0.015em; color: var(--text); margin: 2px 0 4px;
+  overflow-wrap: anywhere;
+}
+/* The persona rail's steps are divs; these are buttons, so they can be reached
+   from the keyboard, and have to shed the browser's button chrome first. */
+button.ob-rstep {
+  width: 100%; border: 0; background: transparent; text-align: left;
+  font-family: inherit; line-height: inherit;
+}
+.ob-rstep.pw-off { cursor: default; }
+.ob-rstep.pw-off:not(.done):not(.on) { opacity: 0.55; }
+.ob-rstep.pw-off:hover { background: transparent; color: var(--text-muted); }
+.ob-rstep.pw-off.done:hover { color: var(--text-3); }
+.ob-card.pw-wide { max-width: none; }
+.ob-foot .btn:disabled {
+  opacity: 0.5; cursor: not-allowed;
+  transform: none; box-shadow: none; animation: none;
+}
+.pw-why { font-size: 0.76rem; color: var(--text-muted); }
+.pw-slot[hidden] { display: none; }
+
 /* ── Guided tour overlay ──────────────────────────────────────────────────
    The dim is four rectangles fitted around the highlighted element, leaving a
    real hole rather than a shadow spread — so whatever is being explained is

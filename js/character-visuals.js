@@ -23,8 +23,9 @@
   const guide = (d, dots) => `<path d="${d}" stroke="var(--accent)" stroke-width="1.4" stroke-dasharray="2.5 2.5"/>` +
     (dots || []).map(p => `<circle cx="${p[0]}" cy="${p[1]}" r="1.4" fill="var(--accent)" stroke="none"/>`).join('');
   // Every body drawing shares the creator's reference sketch: thin slate lines,
-  // with the type or the marked spot in soft pink.
-  const INK = '#6b6fa8', PINK = '#f0a8c6';
+  // with the type or the marked spot in soft pink. The page can retune both for
+  // its theme through the --fp-* variables; the hex after each is the default.
+  const INK = 'var(--fp-ink, #6b6fa8)', PINK = 'var(--fp-mark, #f0a8c6)';
   const bsvg = inner => svg(`<g color="${INK}" stroke-width="1.3">` +
     inner.replace(/stroke-width="([\d.]+)"/g, (m, w) => `stroke-width="${f(w * 0.75)}"`) + '</g>');
   const swatch = hex => svg(`<circle cx="32" cy="32" r="20" fill="${hex}" stroke-width="1.4"/>`);
@@ -51,7 +52,7 @@
   // a hair cap down to the ears, a wide neck with a shadow under the chin, and
   // the features as soft marks. Face shapes keep the chart's dusty pinks; every
   // other face option marks what it changes in the body's pink.
-  const HAIR_PINK = '#e3cbc8', FEATURE_PINK = '#d3a8a4', GUIDE_GREY = '#aaa3a1';
+  const HAIR_PINK = 'var(--fp-hair, #e3cbc8)', FEATURE_PINK = 'var(--fp-feature, #d3a8a4)', GUIDE_GREY = 'var(--fp-guide, #aaa3a1)';
   const HEAD = {top: 9, fw: 12.5, c: 13.5, cheekY: 32, j: 12.3, jawY: 41, jl: 8, lowY: 48, chinY: 51.4};
   function headPts(o) {
     const r = [[o.fw, 18], [o.c, o.cheekY], [o.j, o.jawY], [o.jl, o.lowY]];

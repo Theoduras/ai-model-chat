@@ -8,541 +8,658 @@
   <link rel="icon" type="image/png" href="/favicon.png">
   <script src="/js/theme.js"></script>
   <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="/css/lazy.css">
+  <script src="/js/skeleton.js"></script>
   <script src="/js/devnav.js" defer></script>
   <script src="/js/character-visuals.js"></script>
+  <script src="/js/page-wizard.js"></script>
   <script>
     if (window.self === window.top) location.replace('/dashboard?open=' + encodeURIComponent(location.pathname + location.search));
     else document.documentElement.classList.add('in-workspace');
   </script>
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&display=swap">
   <style>
-    /* The studio keeps its own paper palette whatever the site theme says. */
-    body.ch-studio, body.ch-studio .drawer { --bg: #F4F1EC; --surface: #FFFFFF; --surface-2: #EEEAE3; --border: #E2DCD3;
-      --text: #1E1B18; --text-2: #5E574F; --text-muted: #6F675E; --accent: #B8321F; --ok: #2F6B3A; --warn: #8A5A00; --err: #B8321F;
-      --paper: #FFFFFF; --sel: #F7E4DF; --review-bg: #F8EBCB; --review: #8A5A00; --ok-bg: #E3F0E4;
-      font-family: "Instrument Sans", "Helvetica Neue", sans-serif; color-scheme: light; }
-    [data-theme="dark"] body.ch-studio, [data-theme="dark"] body.ch-studio .drawer { --bg: #171412; --surface: #221E1B; --surface-2: #2C2724;
-      --border: #3A342F; --text: #F1ECE5; --text-2: #C9C0B5; --text-muted: #A89F93; --accent: #D9533D; --ok: #7FC08A; --warn: #E0B25A; --err: #E0705C;
-      --paper: #221E1B; --sel: #3A221D; --review-bg: #3A2F17; --review: #E0B25A; --ok-bg: #1F3323; color-scheme: dark; }
-    body.ch-studio { background: var(--bg); color: var(--text); }
-    body.ch-studio header { background: var(--paper); border-bottom: 1px solid var(--border); }
-    body.ch-studio .ch-card, body.ch-studio .ch-item { border-radius: 20px; }
-    body.ch-studio .btn, body.ch-studio .view, body.ch-studio .ch-label select, body.ch-studio .ch-label input { border-radius: 10px; }
-    body.ch-studio .chip[aria-pressed="true"], body.ch-studio .steps button[aria-current="step"] { background: var(--accent); border-color: var(--accent); color: #fff; }
-    body.ch-studio .view { background: var(--paper); border-color: var(--border); }
-    body.ch-studio .view[aria-pressed="true"] { border-color: var(--accent); background: var(--sel); }
-    body.ch-studio .st.review, body.ch-studio .st.outdated { background: var(--review-bg); color: var(--review); }
-    body.ch-studio .st.approved { background: var(--ok-bg); color: var(--ok); }
-    body.ch-studio .banner.outdated { background: var(--review-bg); }
-    body.ch-studio .drawer { background: var(--paper); box-shadow: -12px 0 32px rgba(30,27,24,.10); }
-    body.ch-studio .tier-h { color: var(--text-2); font-weight: 600; }
-    body.ch-studio a:hover { color: var(--accent); }
-    .in-workspace body.ch-studio > header { display: none; }
-    #edit-view:not([hidden]) { display: grid; grid-template-columns: 240px minmax(0, 1fr); column-gap: 28px; align-items: start; }
-    #edit-view > * { grid-column: 2; }
-    .views-mode [data-step="body"]:not([hidden]) { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 20px; align-items: start; }
-    .views-mode .drawer { position: static; width: auto; box-shadow: none; border: 1px solid var(--border); border-radius: 20px;
-      padding: 20px 20px 0; overflow: visible; grid-column: 1; grid-row: 1 / span 2; }
-    .views-mode .drawer .vp-close { display: none; }
-    .views-mode [data-step="body"] > .ch-grow { grid-column: 2; position: sticky; top: 0; max-height: 100vh; overflow-y: auto; }
-    .views-mode [data-step="body"] > .ch-side { grid-column: 2; }
-    .views-mode .views { grid-template-columns: 1fr; }
-    .views-mode #tiers .ch-card { padding: 14px; }
-    .views-mode #views-head { flex-direction: column; align-items: stretch; }
-    #edit-view > .rail { grid-column: 1; grid-row: 1 / span 20; position: sticky; top: 0; display: flex; flex-direction: column; gap: 18px;
-      background: var(--paper); border: 1px solid var(--border); border-radius: 20px; padding: 20px 16px; }
-    .rail .rail-name { font-size: 1.25rem; font-weight: 700; margin: 0; }
-    .rail .steps { flex-direction: column; }
-    .rail .steps button { width: 100%; height: 44px; text-align: left; border-radius: 10px; }
-    @media (max-width: 860px) { #edit-view:not([hidden]) { grid-template-columns: 1fr; }
-      #edit-view > * { grid-column: 1; }
-      .views-mode [data-step="body"]:not([hidden]) { grid-template-columns: minmax(0, 1fr); }
-      .views-mode .drawer { grid-row: auto; }
-      .views-mode [data-step="body"] > .ch-grow, .views-mode [data-step="body"] > .ch-side { grid-column: 1; position: static; max-height: none; }
-      .vp-head { flex-wrap: wrap; } #vp-source { order: 3; width: 100%; } #vp-opts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      #edit-view > .rail { grid-column: 1; grid-row: auto; position: static; } .rail .steps { flex-direction: row; } .rail .steps button { width: auto; } }
+    /* Colours, type, buttons and fields come from style.css; the editor runs in
+       the persona wizard's frame (.ob-*). Only this page's own parts live here. */
+    [hidden] { display: none !important; }
+    .in-workspace body > header { display: none; }
+
+    /* The feature drawings read these, so they stay legible on either theme. */
+    :root { --fp-ink: #6b6fa8; --fp-mark: #e98fb6; --fp-hair: #e3cbc8; --fp-feature: #d3a8a4; --fp-guide: #aaa3a1; }
+    :root:not([data-theme="light"]) { --fp-ink: #a4a8dc; --fp-mark: #e58db5; --fp-hair: #6b5552; --fp-feature: #c28f8a; --fp-guide: #7a7471; }
+
+    /* ── List ── */
     .ch-scroll { flex: 1; min-height: 0; overflow-y: auto; }
-    .ch-wrap { padding: 24px 28px 72px; display: flex; flex-direction: column; gap: 20px; }
-    .ch-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; }
-    .ch-row { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
-    .ch-grow { flex: 1 1 520px; min-width: 0; }
-    .ch-side { flex: 0 1 330px; min-width: 280px; display: flex; flex-direction: column; gap: 16px; }
-    .ch-h1 { margin: 0; font-size: 1.6rem; font-weight: 600; }
-    .ch-h2 { margin: 0 0 12px; font-size: 0.95rem; font-weight: 700; }
-    .ch-muted { color: var(--text-muted); font-size: 0.82rem; margin: 4px 0 0; }
-    .ch-label { display: flex; flex-direction: column; gap: 5px; font-size: 0.78rem; font-weight: 600; color: var(--text-2); }
-    .ch-label select, .ch-label input { height: 40px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border);
-      background: var(--bg, var(--surface-2)); color: var(--text); font: inherit; font-weight: 500; }
-    .ch-grid3 { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 14px 18px; }
-    .ch-grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-    .btn { height: 42px; padding: 0 18px; border-radius: 10px; border: 1px solid var(--border); background: transparent;
-      color: var(--text); font: inherit; font-weight: 600; cursor: pointer; }
-    .btn:disabled { opacity: .45; cursor: not-allowed; }
-    .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    .ch-list-wrap { padding: 24px 28px 72px; }
+    .ch-list-head .pg-head-l { display: flex; align-items: center; gap: 12px; }
+    .ch-list-head h2 { font-size: 1.1rem; font-weight: 600; }
+    .ch-intro { margin: -6px 0 18px; max-width: 70ch; }
+    .ch-grid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+    .ch-grid .pg-card-img { aspect-ratio: 3 / 4; overflow: hidden; }
+    .ch-grid .pg-card-img img { object-fit: cover; display: block; }
+    .ch-grid .pg-initials { font-size: 2.4rem; }
+    .ch-level {
+      position: absolute; top: 10px; left: 10px; padding: 3px 9px; border-radius: 9999px;
+      background: rgba(0,0,0,.55); color: #fff; font-size: 0.66rem; font-weight: 700; letter-spacing: .03em;
+    }
+    .ch-grid .pg-card-foot { flex-wrap: wrap; row-gap: 6px; }
+    .ch-card-note { flex-basis: 100%; font-size: 0.72rem; color: var(--text-muted); }
+
+    /* ── Editor frame ── */
+    #edit-view { flex: 1; min-height: 0; }
+    #ch-rail .btn-back-gallery { display: block; margin-bottom: 18px; }
+    .ch-rail-meta {
+      margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border-soft);
+      display: flex; flex-direction: column; gap: 4px; font-size: 0.73rem; color: var(--text-muted);
+    }
+    .ch-rail-meta b { color: var(--text-2); font-weight: 600; }
+    #ch-stepwrap { padding-bottom: 0; }
+    /* Steps here run long (every feature is on screen), so Continue and the
+       status line stay pinned to the bottom of the column. */
+    #ch-foot {
+      position: sticky; bottom: 0; z-index: 3; margin-top: 26px; padding: 14px 0 18px;
+      background: var(--bg); border-top: 1px solid var(--border-soft);
+    }
+    #ch-foot .ob-saved.ok { color: var(--ok); }
+    #ch-foot .ob-saved.err { color: var(--err); }
+    #ch-done .ob-done { padding: 40px 0; }
+
+    /* ── Step layouts ── */
+    .ch-cols { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 20px; align-items: start; }
+    .ch-side { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+    .ch-describe { grid-template-areas: "main basics" "main gen"; }
+    .ch-describe > .ch-main { grid-area: main; }
+    .ch-describe > .ch-basics { grid-area: basics; }
+    .ch-describe > .ch-gen { grid-area: gen; }
+    .ch-check { grid-template-columns: 300px minmax(0, 1fr); }
+    .ch-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+    .ch-toolbar .grow { flex: 1; }
+    @media (max-width: 1100px) {
+      .ch-cols, .ch-check { grid-template-columns: minmax(0, 1fr); }
+      .ch-describe { grid-template-areas: "basics" "main" "gen"; }
+    }
+    .ch-sub-h { font-size: 0.84rem; font-weight: 600; color: var(--text-2); margin: 4px 0 -8px; }
+    .ch-quote { text-align: center; margin-top: -6px; }
+    .ch-gen .btn, .ch-block-btn { width: 100%; }
+    .ch-inline { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+    .ch-inline > span { font-size: 0.84rem; font-weight: 600; color: var(--text-2); }
+
+    /* ── Controls ── */
+    .btn-sm { padding: 6px 12px; font-size: 0.78rem; border-radius: var(--r-md); }
+    .btn:disabled { opacity: .5; cursor: not-allowed; transform: none; box-shadow: none; animation: none; }
     .chips { display: flex; gap: 8px; flex-wrap: wrap; }
-    .chip { height: 36px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--border); background: transparent;
-      color: var(--text); font: inherit; font-size: 0.82rem; cursor: pointer; }
-    .chip[aria-pressed="true"] { background: var(--text); color: var(--surface); font-weight: 700; }
-    .steps { list-style: none; margin: 0; padding: 0; display: flex; gap: 8px; flex-wrap: wrap; }
-    .steps button { height: 34px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--border); background: transparent;
-      color: var(--text-muted); font: inherit; font-size: 0.8rem; cursor: pointer; }
-    .steps button.done { color: var(--ok); }
-    .steps button[aria-current="step"] { background: var(--text); color: var(--surface); font-weight: 700; }
-    .ch-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 18px; }
-    .ch-item { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; overflow: hidden;
-      cursor: pointer; text-align: left; color: var(--text); font: inherit; padding: 0; }
-    .ch-thumb { height: 240px; background: var(--surface-2); display: flex; align-items: center; justify-content: center; position: relative; }
-    .ch-thumb img { width: 100%; height: 100%; object-fit: cover; }
-    .ch-badge { position: absolute; top: 10px; left: 10px; padding: 3px 10px; border-radius: 999px; background: var(--surface);
-      font-size: 0.72rem; font-weight: 700; }
-    .ch-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
-    .bar { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
-    .bar > div { height: 6px; background: var(--accent); }
-    .bar.full > div { background: var(--ok); }
-    .opts { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
-    .opt { border: 2px solid var(--border); border-radius: 14px; overflow: hidden; background: var(--surface); padding: 0;
-      color: var(--text); font: inherit; cursor: pointer; text-align: left; }
-    .opt[aria-pressed="true"] { border-color: var(--accent); }
+    .chip {
+      height: 34px; padding: 0 14px; border-radius: 9999px; border: 1px solid var(--border);
+      background: var(--panel); color: var(--text-2); font-family: var(--font); font-size: 0.8rem; font-weight: 500;
+      cursor: pointer; white-space: nowrap; transition: border-color .15s, background .15s, color .15s;
+    }
+    .chip:hover:not(:disabled) { border-color: var(--accent-line); color: var(--text); }
+    .chip[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); font-weight: 600; }
+    .chip:disabled { opacity: .5; cursor: not-allowed; }
+    .chip:focus-visible, .fp-opt:focus-visible, .of-sw:focus-visible, .ref-add:focus-visible,
+    .ref-pill:focus-visible, .of-del:focus-visible, .ref button:focus-visible { border-radius: inherit; }
+    body.page-dashboard label.attest {
+      display: flex; gap: 9px; align-items: flex-start; font-size: 0.76rem; font-weight: 400;
+      color: var(--text-3); line-height: 1.45; letter-spacing: 0; cursor: pointer;
+    }
+    .attest input, .checks input { width: 17px; height: 17px; margin: 1px 0 0; flex-shrink: 0; accent-color: var(--accent); cursor: pointer; }
+    .ch-msg-note { font-size: 0.78rem; min-height: 1.2em; color: var(--text-muted); }
+    .ch-msg-note.ok { color: var(--ok); } .ch-msg-note.err { color: var(--err); }
+
+    /* How the face or body is sourced: two big choices, one picked. */
+    .mode-pick { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 10px; }
+    .mode-opt {
+      display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; text-align: left;
+      border-radius: var(--r); border: 1px solid var(--border); background: var(--panel); color: var(--text);
+      font-family: var(--font); cursor: pointer; transition: border-color .15s, background .15s, box-shadow .15s;
+    }
+    .mode-opt strong { font-size: 0.88rem; font-weight: 600; }
+    .mode-opt span { font-size: 0.77rem; color: var(--text-muted); line-height: 1.45; }
+    .mode-opt:hover { border-color: var(--accent-line); }
+    .mode-opt[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+
+    /* Feature pickers: a drawing per option, or a chip when there is nothing to draw. */
+    .fp-list { display: flex; flex-direction: column; gap: 22px; }
+    .fp { display: flex; flex-direction: column; gap: 0; border: 0; margin: 0; padding: 0; min-width: 0; }
+    .fp legend { float: left; width: 100%; padding: 0; margin-bottom: 10px; font-size: 0.84rem; font-weight: 600; color: var(--text-2); }
+    .fp legend + * { clear: both; }
+    .fp-opts { display: flex; flex-wrap: wrap; gap: 8px; }
+    .fp-opt {
+      width: 80px; min-height: 98px; padding: 8px 4px 8px; border-radius: var(--r-md);
+      border: 1px solid var(--border); background: var(--panel); color: var(--text-2);
+      font-family: var(--font); font-size: 0.7rem; line-height: 1.25; cursor: pointer;
+      display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 5px; text-align: center;
+      transition: border-color .15s, background .15s, color .15s, box-shadow .15s;
+    }
+    .fp-opt svg { width: 56px; height: 56px; flex-shrink: 0; }
+    .fp-opt:hover { border-color: var(--accent-line); color: var(--text); }
+    .fp-opt[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--text); font-weight: 600; box-shadow: inset 0 0 0 1px var(--accent); }
+    .fp-opt.text { width: auto; min-height: 36px; padding: 0 14px; border-radius: 9999px; font-size: 0.78rem; justify-content: center; }
+    .fp-mini { white-space: nowrap; }
+    .fp-mini svg { width: 30px; height: 30px; vertical-align: middle; margin-right: 8px; }
+    .hex-pick { display: inline-flex; align-items: center; gap: 8px; margin-top: 10px; }
+    body.page-dashboard label.hex-pick { font-size: 0.78rem; font-weight: 500; color: var(--text-2); cursor: pointer; }
+    .hex-pick input { width: 40px; height: 30px; padding: 0; border: 1px solid var(--border); border-radius: var(--r-sm); background: none; cursor: pointer; }
+
+    /* Outfits: chips, uploaded outfits as tiles, and a colour row per outfit. */
+    .of-up { position: relative; display: inline-flex; }
+    .of-up .fp-opt img { width: 56px; height: 56px; object-fit: cover; border-radius: var(--r-sm); }
+    .of-del {
+      position: absolute; top: -7px; right: -7px; width: 22px; height: 22px; border-radius: 50%; border: 0; padding: 0;
+      background: rgba(0,0,0,.6); color: #fff; font-size: 0.72rem; line-height: 22px; cursor: pointer; transition: background .15s;
+    }
+    .of-del:hover { background: var(--err); }
+    .of-upload { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; margin-top: 12px; }
+    .of-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 10px; }
+    .of-row > span { font-size: 0.74rem; font-weight: 600; color: var(--text-2); min-width: 90px; }
+    .of-sw { width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--border); cursor: pointer; padding: 0; transition: transform .12s; }
+    .of-sw:hover { transform: scale(1.1); }
+    .of-sw[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--panel-2), 0 0 0 4px var(--accent); }
+    .of-sw.any { width: auto; height: 26px; padding: 0 10px; border-radius: 9999px; background: var(--panel); color: var(--text-2); font-family: var(--font); font-size: 0.68rem; font-weight: 600; }
+
+    /* Generated options and uploads. */
+    .opts { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; }
+    .opt {
+      position: relative; display: flex; flex-direction: column; padding: 0; overflow: hidden; text-align: left;
+      border: 1px solid var(--border-soft); border-radius: var(--r); background: var(--panel); color: var(--text);
+      font-family: var(--font); transition: border-color .15s, transform .15s, box-shadow .15s;
+    }
+    button.opt { cursor: pointer; }
+    button.opt:hover { border-color: var(--border); transform: translateY(-2px); }
+    .opt[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+    .opt.kept { border-color: var(--ok); box-shadow: inset 0 0 0 1px var(--ok); }
     .opt img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; display: block; background: var(--surface-2); }
-    .opt span { display: block; padding: 10px 12px; font-size: 0.82rem; font-weight: 600; }
-    .drop { border: 2px dashed var(--border); border-radius: 14px; padding: 16px; display: flex; flex-direction: column;
-      gap: 10px; align-items: center; justify-content: center; text-align: center; font-size: 0.82rem; }
-    .attest { display: flex; gap: 8px; align-items: flex-start; font-size: 0.75rem; color: var(--text-2); text-align: left; }
-    .attest input { width: 18px; height: 18px; margin: 0; flex-shrink: 0; }
-    .checks { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-    .checks th { text-align: left; font-size: 0.7rem; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted);
-      padding: 8px 10px; }
-    .checks td { border-top: 1px solid var(--border); padding: 8px 10px; }
-    .checks input { width: 20px; height: 20px; }
-    .tag { padding: 2px 10px; border-radius: 999px; font-size: 0.72rem; font-weight: 700; white-space: nowrap; }
-    .tag.match, .tag.adult { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
-    .tag.differs, .tag.uncertain { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
-    .tag.minor { background: color-mix(in srgb, var(--err) 18%, transparent); color: var(--err); }
-    .views { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
-    .view { display: flex; gap: 12px; align-items: center; padding: 10px 12px; border-radius: 12px; background: var(--surface-2);
-      border: 1px solid transparent; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
-    .view[aria-pressed="true"] { border-color: var(--accent); }
-    .view .vt { width: 48px; height: 60px; border-radius: 8px; background: var(--border); flex-shrink: 0; overflow: hidden; }
+    .opt-zoom { cursor: zoom-in; }
+    .opt-label { display: block; padding: 10px 12px; font-size: 0.8rem; font-weight: 600; }
+    .opt-sel .opt-label { color: var(--accent); }
+    .opt-outfit { display: block; padding: 8px 10px 0; font-size: 0.72rem; color: var(--text-muted); }
+    .opt-act { display: flex; gap: 6px; padding: 8px; flex-wrap: wrap; align-items: center; margin-top: auto; }
+    .opt-act .btn-primary { flex: 1; }
+    .opt-act .grow { flex: 1; }
+    .drop {
+      display: flex; flex-direction: column; gap: 10px; align-items: center; justify-content: center; text-align: center;
+      padding: 18px 16px; border: 1px dashed var(--border); border-radius: var(--r); background: var(--panel-2);
+      font-size: 0.8rem; transition: border-color .15s;
+    }
+    .drop:hover { border-color: var(--accent-line); }
+    .drop strong { font-size: 0.85rem; }
+    .img-missing {
+      display: grid; place-items: center; width: 100%; aspect-ratio: 3 / 4; font-size: 0.72rem;
+      color: var(--text-muted); background: var(--surface-2);
+    }
+    .refs { display: flex; gap: 8px; flex-wrap: wrap; }
+    .ref { width: 64px; height: 64px; border-radius: var(--r-sm); overflow: hidden; position: relative; background: var(--surface-2); flex-shrink: 0; }
+    .ref img { width: 100%; height: 100%; object-fit: cover; }
+    .ref button {
+      position: absolute; top: 3px; right: 3px; width: 22px; height: 22px; border-radius: 50%; border: 0; padding: 0;
+      background: rgba(0,0,0,.6); color: #fff; font-size: 0.72rem; cursor: pointer; transition: background .15s;
+    }
+    .ref button:hover { background: var(--err); }
+
+    /* Status pills: one set, tinted from the status colours. */
+    .st, .tag {
+      display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 9999px;
+      font-size: 0.68rem; font-weight: 700; white-space: nowrap; background: var(--surface-2); color: var(--text-2);
+    }
+    .st.approved, .tag.match, .tag.adult { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+    .st.review, .st.outdated, .tag.differs, .tag.uncertain { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+    .st.generating { background: var(--accent-soft); color: var(--accent); }
+    .st.locked, .st.not_started { color: var(--text-muted); }
+    .tag.minor { background: color-mix(in srgb, var(--err) 16%, transparent); color: var(--err); }
+
+    /* Check step. */
+    .ch-shot { border-radius: var(--r); overflow: hidden; border: 1px solid var(--border-soft); background: var(--surface-2); }
+    .ch-shot img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; display: block; }
+    .ch-check-card { padding: 0; gap: 0; overflow: hidden; }
+    .ch-check-card > * { padding: 16px 22px; }
+    .ch-check-card > * + * { border-top: 1px solid var(--border-soft); }
+    .ch-check-head .section-title { border: 0; padding: 0; }
+    .ch-check-age { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 0.84rem; font-weight: 600; }
+    .ch-table { padding: 0 !important; overflow-x: auto; }
+    .checks { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+    .checks th { text-align: left; font-size: 0.66rem; text-transform: uppercase; letter-spacing: .07em; color: var(--text-muted); padding: 10px 12px; font-weight: 700; }
+    .checks th:first-child, .checks td:first-child { padding-left: 22px; }
+    .checks th:last-child, .checks td:last-child { padding-right: 22px; text-align: center; }
+    .checks td { border-top: 1px solid var(--border-soft); padding: 9px 12px; vertical-align: middle; }
+    .checks td:first-child { font-weight: 600; }
+    .checks .hint { display: block; margin-top: 2px; line-height: 1.4; }
+    .ch-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+
+    /* Body step and the view tree. */
+    .ch-body { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 20px; align-items: start; }
+    .ch-body > .drawer { display: none; }
+    .ch-body > .ch-main { grid-column: 1; }
+    .ch-body > .ch-side { grid-column: 2; }
+    .ch-main { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+    @media (max-width: 1100px) {
+      .ch-body { grid-template-columns: minmax(0, 1fr); }
+      .ch-body > .ch-side { grid-column: 1; }
+    }
+    .views-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .views-toolbar .grow { flex: 1; min-width: 12px; }
+    .tier + .tier { margin-top: 22px; }
+    .tier-h { font-family: var(--font); font-size: 0.66rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); margin: 0 0 10px; }
+    .views { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+    .view {
+      display: flex; gap: 12px; align-items: center; padding: 10px 12px; text-align: left;
+      border-radius: var(--r); border: 1px solid var(--border-soft); background: var(--panel); color: var(--text);
+      font-family: var(--font); cursor: pointer; transition: border-color .15s, background .15s;
+    }
+    .view:hover { border-color: var(--border); }
+    .view[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); }
+    .view .vt {
+      width: 44px; height: 56px; border-radius: var(--r-sm); background: var(--surface-2); flex-shrink: 0; overflow: hidden;
+      display: grid; place-items: center; color: var(--text-muted);
+    }
     .view .vt img { width: 100%; height: 100%; object-fit: cover; }
-    .opt img { cursor: zoom-in; }
-    .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.88); display: flex; align-items: center;
-      justify-content: center; z-index: 1000; }
-    .lightbox[hidden] { display: none; }
-    .lightbox img { max-width: min(90vw, 900px); max-height: 85vh; object-fit: contain; border-radius: 8px; }
-    .lightbox button { position: absolute; border: 0; background: rgba(255,255,255,.12); color: #fff; cursor: pointer;
-      border-radius: 999px; width: 44px; height: 44px; font-size: 20px; display: flex; align-items: center; justify-content: center; }
+    .view .vt svg { width: 18px; height: 18px; opacity: .6; }
+    .view-t { flex: 1; min-width: 0; }
+    .view-n { font-size: 0.85rem; font-weight: 600; }
+    .view-f { font-size: 0.72rem; color: var(--text-muted); margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .view-s { display: flex; gap: 6px; margin-top: 5px; flex-wrap: wrap; }
+
+    /* The photo detail: beside the tree on a wide screen, a slide-over below. */
+    .drawer {
+      position: fixed; top: 0; right: 0; bottom: 0; width: min(480px, 100vw); z-index: 40;
+      display: flex; flex-direction: column; padding: 20px 20px 0; overflow-y: auto;
+      background: var(--panel); border-left: 1px solid var(--border); box-shadow: var(--shadow-lg);
+    }
+    .drawer-scrim { position: fixed; inset: 0; z-index: 39; background: rgba(0,0,0,.45); }
+    .views-mode .ch-body > .drawer:not([hidden]) { display: flex; }
+    @media (min-width: 1320px) {
+      .views-mode .ch-body { grid-template-columns: minmax(0, 1fr) 360px; }
+      .views-mode .ch-body > .drawer {
+        position: static; width: auto; z-index: auto; overflow: visible; box-shadow: none;
+        grid-column: 1; grid-row: 1 / span 2; border: 1px solid var(--border-soft); border-radius: var(--r-lg);
+        background: var(--panel-2); padding: 20px 22px;
+      }
+      .views-mode .ch-body > .ch-main, .views-mode .ch-body > .ch-side { grid-column: 2; }
+      .views-mode .views { grid-template-columns: 1fr; }
+      .views-mode .views-toolbar { flex-direction: column; align-items: stretch; }
+      .views-mode .drawer .vp-close { display: none; }
+      .drawer-scrim { display: none; }
+      .views-mode .drawer .actionbar { position: static; margin: 16px 0 0; padding: 16px 0 0; }
+    }
+    .vp-head { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    .vp-head-t { flex: 1; min-width: 140px; }
+    .vp-head h2 { font-size: 1.05rem; font-weight: 700; }
+    .vp-thumb { width: 44px; height: 58px; padding: 0; border: 1px solid var(--border); border-radius: var(--r-sm); overflow: hidden; cursor: zoom-in; background: var(--surface-2); flex-shrink: 0; }
+    .vp-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .vp-close { width: 34px; height: 34px; padding: 0; border-radius: var(--r-md); font-size: 1.1rem; line-height: 1; }
+    .lineage { font-size: 0.74rem; color: var(--text-muted); margin-top: 2px; }
+    .lineage a { color: inherit; text-decoration: none; }
+    .lineage a:hover { color: var(--accent); }
+    .banner {
+      margin-top: 14px; padding: 10px 12px; border-radius: var(--r-md); font-size: 0.8rem; line-height: 1.45;
+      background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--text-2);
+      display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    }
+    .vp-sec { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-soft); display: flex; flex-direction: column; gap: 8px; }
+    .vp-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .dl { font-size: 0.8rem; font-weight: 600; color: var(--text-2); }
+    .vp-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; align-items: start; }
+    .vp-controls .field { gap: 6px; }
+    .vp-infl { grid-column: 1 / -1; }
+    .vp-infl input { width: 100%; margin: 6px 0 0; accent-color: var(--accent); }
+    .vp-val { font-size: 0.78rem; color: var(--text-2); }
+    .bands { display: flex; gap: 2px; margin-top: 6px; }
+    .bands span {
+      height: 22px; display: grid; place-items: center; font-size: 0.68rem; font-weight: 600; color: var(--text-muted);
+      background: var(--surface-2); border-radius: var(--r-xs);
+    }
+    .bands span.on { background: var(--accent-soft); color: var(--accent); }
+    .vp-refs { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+    .ref-line { position: relative; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .ref-line .ref { width: 32px; height: 32px; }
+    .ref-line .ref button { width: 16px; height: 16px; font-size: 0.6rem; top: 1px; right: 1px; }
+    .ref-pill {
+      height: 32px; display: inline-flex; align-items: center; gap: 8px; padding: 0 12px 0 4px; max-width: 100%;
+      border-radius: 9999px; border: 1px solid var(--accent-line); background: var(--accent-soft); color: var(--text);
+      font-family: var(--font); font-size: 0.78rem; font-weight: 600; cursor: pointer;
+    }
+    .ref-pill img { width: 24px; height: 24px; border-radius: 50%; object-fit: cover; }
+    .ref-pill b { color: var(--accent); }
+    .ref-add {
+      width: 32px; height: 32px; border-radius: 50%; border: 1px dashed var(--border); background: transparent;
+      color: var(--text-2); font-size: 1.05rem; line-height: 1; cursor: pointer; transition: border-color .15s, color .15s;
+    }
+    .ref-add:hover, .ref-add[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
+    .ref-pop {
+      position: absolute; top: 40px; left: 0; z-index: 5; width: 280px; max-width: 100%; max-height: 320px; overflow-y: auto; padding: 6px;
+      background: var(--panel); border: 1px solid var(--border); border-radius: var(--r); box-shadow: var(--shadow-lg);
+    }
+    .ref-pop button {
+      width: 100%; display: flex; align-items: center; gap: 10px; padding: 6px 8px; border: 0; border-radius: var(--r-sm);
+      background: transparent; color: var(--text); font-family: var(--font); font-size: 0.8rem; text-align: left; cursor: pointer;
+    }
+    .ref-pop button:hover, .ref-pop button[aria-pressed="true"] { background: var(--accent-soft); }
+    .ref-pop img { width: 32px; height: 40px; border-radius: var(--r-xs); object-fit: cover; flex-shrink: 0; }
+    .ref-pop span { flex: 1; }
+    .ref-pop i { font-style: normal; color: var(--accent); font-weight: 700; }
+    .up-card { display: flex; flex-direction: column; gap: 8px; padding: 14px; border: 1px dashed var(--accent-line); border-radius: var(--r); background: var(--accent-soft); }
+    .up-card strong { font-size: 0.84rem; }
+    .up-card .btn { align-self: flex-start; }
+    .trait { padding: 4px 10px; border-radius: 9999px; background: var(--surface-2); font-size: 0.74rem; color: var(--text-2); }
+    .trait b { color: var(--text); font-weight: 600; }
+    #vp-traits-off a { color: var(--accent); font-weight: 600; text-decoration: none; }
+    .actionbar {
+      position: sticky; bottom: 0; margin: 16px -20px 0; padding: 12px 20px 16px; background: var(--panel);
+      border-top: 1px solid var(--border-soft); display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    }
+    .actionbar .grow { flex: 1; }
+    .actionbar .hint { white-space: nowrap; }
+    #vp-opts { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; margin-top: 16px; }
+    .crop-stage { position: relative; overflow: hidden; border-radius: var(--r-sm); user-select: none; touch-action: none; }
+    .crop-stage img { width: 100%; display: block; max-height: min(70vh, 760px); object-fit: contain; }
+    .crop-box { position: absolute; border: 2px solid var(--accent); box-shadow: 0 0 0 9999px rgba(0,0,0,.4); cursor: move; }
+    .crop-handle { position: absolute; width: 16px; height: 16px; border-radius: 50%; background: var(--accent); border: 2px solid #fff; }
+    .crop-handle[data-c="nw"] { left: -9px; top: -9px; cursor: nwse-resize; } .crop-handle[data-c="ne"] { right: -9px; top: -9px; cursor: nesw-resize; }
+    .crop-handle[data-c="sw"] { left: -9px; bottom: -9px; cursor: nesw-resize; } .crop-handle[data-c="se"] { right: -9px; bottom: -9px; cursor: nwse-resize; }
+    .crop-acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 4px; }
+
+    /* Finish. */
+    .fin-shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; }
+    .fin-shots figure { margin: 0; }
+    .fin-shots img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border-radius: var(--r-md); display: block; cursor: zoom-in; background: var(--surface-2); }
+    .fin-shots figcaption { font-size: 0.74rem; color: var(--text-muted); margin-top: 5px; }
+    .fin-accepted { display: inline-flex; align-items: center; gap: 8px; color: var(--ok); font-weight: 600; font-size: 0.88rem; }
+    #fin-next.off { opacity: .5; pointer-events: none; }
+
+    /* Lightbox, busy overlay and confirm. */
+    .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.88); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+    .lightbox img { max-width: min(90vw, 900px); max-height: 85vh; object-fit: contain; border-radius: var(--r-sm); }
+    .lightbox button {
+      position: absolute; border: 0; background: rgba(255,255,255,.12); color: #fff; cursor: pointer; border-radius: 50%;
+      width: 44px; height: 44px; font-size: 1.25rem; display: flex; align-items: center; justify-content: center; transition: background .15s;
+    }
     .lightbox button:hover { background: rgba(255,255,255,.25); }
     .lightbox .lb-close { top: 16px; right: 16px; }
     .lightbox .lb-prev { left: 16px; top: 50%; transform: translateY(-50%); }
     .lightbox .lb-next { right: 16px; top: 50%; transform: translateY(-50%); }
-    .dot { width: 10px; height: 10px; border-radius: 5px; flex-shrink: 0; background: var(--text-muted); }
-    .dot.ok { background: var(--ok); } .dot.review { background: var(--warn); }
-    .st { padding: 1px 8px; border-radius: 999px; font-size: 0.7rem; font-weight: 700; background: var(--border); color: var(--text-2); }
-    .st.approved { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
-    .st.review, .st.outdated { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
-    .st.generating { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
-    .st.locked { opacity: .6; }
-    .tier-h { color: var(--text-muted); text-transform: uppercase; letter-spacing: .06em; font-size: 0.75rem; }
-    .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(460px, 100vw); background: var(--surface); border-left: 1px solid var(--border);
-      padding: 18px 16px 0; overflow-y: auto; z-index: 40; box-shadow: -8px 0 24px rgba(0,0,0,.12); display: flex; flex-direction: column; }
-    .drawer #vp-body { flex: 1; }
-    .lineage { font-size: 0.75rem; color: var(--text-muted); margin-top: 4px; }
-    .lineage a { color: inherit; }
-    .banner { margin-top: 12px; padding: 10px 12px; border-radius: 10px; font-size: 0.82rem; background: var(--surface-2); }
-    .banner.outdated { background: color-mix(in srgb, var(--warn) 14%, transparent); }
-    .dl { font-size: 0.8rem; font-weight: 700; color: var(--text-2); }
-    .crop-stage { position: relative; overflow: hidden; border-radius: 8px; user-select: none; touch-action: none; }
-    .crop-stage img { width: 100%; display: block; border-radius: 8px; }
-    .crop-box { position: absolute; border: 2px solid var(--accent); box-shadow: 0 0 0 9999px rgba(0,0,0,.35); cursor: move; }
-    .crop-handle { position: absolute; width: 16px; height: 16px; border-radius: 8px; background: var(--accent); border: 2px solid #fff; }
-    .crop-handle[data-c="nw"] { left: -9px; top: -9px; cursor: nwse-resize; } .crop-handle[data-c="ne"] { right: -9px; top: -9px; cursor: nesw-resize; }
-    .crop-handle[data-c="sw"] { left: -9px; bottom: -9px; cursor: nesw-resize; } .crop-handle[data-c="se"] { right: -9px; bottom: -9px; cursor: nwse-resize; }
-    .crop-stage img { max-height: min(70vh, 760px); object-fit: contain; }
-    #vp-opts { grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); gap: 12px; margin-top: 16px; }
-    .fin-shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; margin: 16px 0; }
-    .fin-shots figure { margin: 0; } .fin-shots img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border-radius: 10px; display: block; cursor: zoom-in; background: var(--surface-2); }
-    .fin-shots figcaption { font-size: 0.75rem; color: var(--text-muted); margin-top: 4px; }
-    #fin-next.off { opacity: .45; pointer-events: none; }
-    .vp-head { display: flex; gap: 12px; align-items: center; }
-    .vp-thumb { width: 48px; height: 64px; padding: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; cursor: zoom-in; background: var(--surface-2); flex-shrink: 0; }
-    .vp-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-    .vp-sec { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 8px; }
-    .vp-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-    .vp-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
-    @media (max-width: 520px) { .vp-controls { grid-template-columns: 1fr; } }
-    .vp-infl { grid-column: 1 / -1; }
-    .vp-infl input { width: 100%; margin: 4px 0 0; accent-color: var(--accent); }
-    .vp-val { font-size: 0.8rem; }
-    .bands { display: flex; gap: 2px; margin-top: 4px; }
-    .bands span { height: 22px; display: grid; place-items: center; font-size: 0.7rem; font-weight: 600; color: var(--text-muted);
-      background: var(--surface-2); border-radius: 4px; }
-    .bands span.on { background: var(--sel); color: var(--accent); }
-    .vp-refs { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
-    @media (max-width: 700px) { .vp-refs { grid-template-columns: 1fr; } }
-    .ref-line { position: relative; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    .ref-line .ref { width: 32px; height: 32px; } .ref-line .ref button { width: 16px; height: 16px; font-size: 11px; line-height: 16px; padding: 0; }
-    .ref-pill { height: 32px; display: inline-flex; align-items: center; gap: 8px; padding: 0 12px 0 4px; border-radius: 999px; border: 1px solid var(--accent);
-      background: var(--sel); color: var(--text); font: inherit; font-size: 0.8rem; font-weight: 600; cursor: pointer; max-width: 100%; }
-    .ref-pill img { width: 24px; height: 24px; border-radius: 50%; object-fit: cover; }
-    .ref-pill b { color: var(--accent); }
-    .ref-add { width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--border); background: transparent; color: var(--text);
-      font: inherit; font-size: 1.1rem; line-height: 1; cursor: pointer; }
-    .ref-add[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
-    .ref-pop { position: absolute; top: 40px; left: 0; z-index: 5; width: 280px; max-width: 100%; max-height: 320px; overflow-y: auto; padding: 6px;
-      background: var(--paper, var(--surface)); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 32px rgba(30,27,24,.16); }
-    .ref-pop button { width: 100%; display: flex; align-items: center; gap: 10px; padding: 6px 8px; border: 0; border-radius: 8px; background: transparent;
-      color: var(--text); font: inherit; font-size: 0.8rem; text-align: left; cursor: pointer; }
-    .ref-pop button:hover, .ref-pop button[aria-pressed="true"] { background: var(--sel); }
-    .ref-pop img { width: 32px; height: 40px; border-radius: 6px; object-fit: cover; flex-shrink: 0; }
-    .ref-pop span { flex: 1; } .ref-pop i { font-style: normal; color: var(--accent); font-weight: 700; }
-    .up-card { display: flex; flex-direction: column; gap: 8px; padding: 14px; border: 1.5px dashed var(--accent); border-radius: 12px; background: var(--sel); }
-    .up-card strong { font-size: 0.85rem; }
-    .up-btn { align-self: flex-start; border-color: var(--accent); color: var(--accent); background: var(--paper, var(--surface)); }
-    .trait { padding: 4px 10px; border-radius: 999px; background: var(--surface-2); font-size: 0.75rem; color: var(--text-2); }
-    .trait b { color: var(--text); font-weight: 600; }
-    #vp-traits-off a { color: var(--accent); font-weight: 600; }
-    .btn-sm { height: 34px; padding: 0 12px; font-size: 0.8rem; }
-    .opt { position: relative; }
-    .opt.kept { border-color: var(--ok); }
-    .opt-act { display: flex; gap: 6px; padding: 8px; flex-wrap: wrap; align-items: center; min-height: 48px; box-sizing: border-box; }
-    .opt-act .btn { height: 32px; padding: 0 10px; font-size: 0.78rem; }
-    .opt-act .btn-primary { flex: 1; }
-    .actionbar { position: sticky; bottom: 0; background: var(--paper, var(--surface)); padding: 12px 0 16px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; border-top: 1px solid var(--border); margin-top: 12px; }
-    .img-missing { display: grid; place-items: center; width: 100%; aspect-ratio: 3/4; font-size: 0.72rem; color: var(--text-muted); background: var(--surface-2); border-radius: 8px; }
-    .refs { display: flex; gap: 8px; flex-wrap: wrap; }
-    .ref { width: 64px; height: 64px; border-radius: 8px; overflow: hidden; position: relative; background: var(--surface-2); }
-    .ref img { width: 100%; height: 100%; object-fit: cover; }
-    .ref button { position: absolute; top: 2px; right: 2px; width: 22px; height: 22px; border-radius: 11px; border: 0;
-      background: rgba(0,0,0,.6); color: #fff; cursor: pointer; font-size: 12px; }
-    .msg { font-size: 0.82rem; min-height: 1.2em; }
-    .msg.err { color: var(--err); } .msg.ok { color: var(--ok); }
-    .fp { display: flex; flex-direction: column; gap: 6px; border: 0; margin: 0; padding: 0; min-width: 0; }
-    .fp legend { font-size: 0.78rem; font-weight: 600; color: var(--text-2); padding: 0; margin-bottom: 6px; }
-    .fp-opts { display: flex; flex-wrap: wrap; gap: 6px; }
-    .fp-opt { width: 76px; min-height: 92px; padding: 6px 4px; border-radius: 10px; border: 2px solid #dcd8d2;
-      background: #f4f2ef; color: #2b2a33; font: inherit; font-size: 0.68rem; line-height: 1.2; cursor: pointer;
-      display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 4px; text-align: center; }
-    .fp-opt[aria-pressed="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, #f4f2ef); font-weight: 700; }
-    .fp-opt.text { justify-content: center; min-height: 44px; }
-    .mode-pick { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-top: 12px; }
-    .mode-opt { text-align: left; padding: 14px 16px; border-radius: 12px; border: 2px solid #dcd8d2; background: #f4f2ef;
-      color: #2b2a33; font: inherit; cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
-    .mode-opt span { font-size: 0.8rem; color: #6b6975; }
-    .mode-opt[aria-pressed="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, #f4f2ef); }
-    .hex-pick { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 0.78rem; }
-    .hex-pick input { width: 44px; height: 32px; padding: 0; border: 1px solid #dcd8d2; border-radius: 6px; background: none; cursor: pointer; }
-    .of-up { position: relative; display: inline-flex; }
-    .of-up .fp-opt img { width: 52px; height: 52px; object-fit: cover; border-radius: 6px; }
-    .of-del { position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; border-radius: 50%; border: 0;
-      background: #2b2a33; color: #fff; font-size: 12px; line-height: 20px; padding: 0; cursor: pointer; }
-    .of-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0 10px; }
-    .of-row > span { font-size: 0.72rem; font-weight: 700; min-width: 86px; }
-    .of-sw { width: 26px; height: 26px; border-radius: 50%; border: 2px solid #dcd8d2; cursor: pointer; padding: 0; }
-    .of-sw[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 2px; }
-    .of-sw.any { background: #f4f2ef; font-size: 0.6rem; width: auto; padding: 0 8px; border-radius: 13px; color: #2b2a33; }
-    .fp-list { display: flex; flex-direction: column; gap: 16px; }
-    .fp-mini svg { width: 32px; height: 32px; vertical-align: middle; margin-right: 6px; }
-    [hidden] { display: none !important; }
-    @media (max-width: 640px) { .ch-wrap { padding: 16px; } .ch-grid2 { grid-template-columns: 1fr; } }
-    .gen-overlay { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center;
-      background: rgba(20, 18, 24, .55); padding: 16px; }
-    .gen-overlay[hidden] { display: none; }
-    .gen-box { background: #fbfaf8; color: #2b2a33; border-radius: 16px; padding: 28px 32px; max-width: 340px; width: 100%;
-      text-align: center; box-shadow: 0 12px 40px rgba(0,0,0,.25); }
-    .gen-box p { margin: 6px 0 0; font-size: .85rem; color: #6b6975; }
-    .spinner { width: 42px; height: 42px; margin: 0 auto 16px; border-radius: 50%; border: 4px solid #e6e2dc;
-      border-top-color: var(--accent); animation: spin .9s linear infinite; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s; } }
+    .ch-busy { display: flex; }
+    .ch-busy .modal { max-width: 340px; padding: 30px 28px 26px; text-align: center; align-items: center; gap: 10px; }
+    .ch-busy strong { font-size: 0.95rem; }
+    .ch-busy p { margin: 0; font-size: 0.82rem; color: var(--text-muted); line-height: 1.5; }
+    .ch-confirm { display: flex; }
+    .ch-confirm .modal-body { font-size: 0.88rem; color: var(--text-2); line-height: 1.55; }
+    .ch-confirm .modal-footer { margin: 0; padding: 0 22px 20px; }
+
+    @media (max-width: 900px) {
+      .ch-list-wrap { padding: 16px 16px 56px; }
+      /* The shared rail disappears on a phone; this one is the step navigation,
+         so it folds into a strip above the step instead. */
+      #edit-view > #ch-rail { display: block; width: auto; border-right: 0; border-bottom: 1px solid var(--border-soft); padding: 14px 16px 10px; }
+      #ch-rail .btn-back-gallery { margin-bottom: 8px; }
+      #ch-rail .ob-rail-h, #ch-rail .ob-rsteps, #ch-rail .ch-rail-meta { display: none; }
+      #ch-rail .ob-mini { margin-bottom: 10px; }
+      #ch-rail .pw-stages { display: flex; gap: 14px; flex-wrap: wrap; }
+      #ch-rail .ob-rstage { margin: 0; }
+      #ch-rail .ob-rstage-t { margin: 0; }
+      #ch-stepwrap { padding: 18px 16px 0; }
+      .vp-refs, .vp-controls { grid-template-columns: 1fr; }
+      .opts { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+    }
   </style>
 </head>
-<body class="page-dashboard ch-studio">
+<body class="page-dashboard">
 
 <header>
-  <div style="display:flex; align-items:center; gap:10px;">
-    <h1>Characters</h1>
-    <span class="badge">Admin testing</span>
-  </div>
-  <div style="display:flex; align-items:center; gap:16px;">
-    <nav data-site-nav="inline" class="sn-links sn-inline"></nav>
-    <a href="/dashboard" style="color:var(--text-muted); font-size:0.8rem; text-decoration:none;">← Dashboard</a>
-  </div>
+  <h1>Characters</h1>
+  <nav data-site-nav="inline" class="sn-links sn-inline"></nav>
 </header>
 
-<div class="ch-scroll">
-<div class="ch-wrap">
-
-  <!-- List -->
-  <section id="list-view">
-    <div style="display:flex; justify-content:space-between; align-items:flex-end; gap:16px; flex-wrap:wrap; margin-bottom:18px;">
-      <div>
-        <h2 class="ch-h1">Characters</h2>
-        <p class="ch-muted">The fixed look of each model. A linked character drives every photo made for her persona.</p>
+<!-- List -->
+<section id="list-view" class="ch-scroll">
+  <div class="ch-list-wrap">
+    <div class="pg-head ch-list-head">
+      <div class="pg-head-l">
+        <h2>Your characters</h2>
+        <button type="button" class="btn btn-primary" onclick="newCharacter()">+ New character</button>
       </div>
-      <button type="button" class="btn btn-primary" onclick="newCharacter()">New character</button>
+      <div class="pg-toggle" id="filters" role="group" aria-label="Filter characters"></div>
     </div>
-    <div class="chips" id="filters" style="margin-bottom:18px;"></div>
-    <div class="ch-list" id="cards"></div>
-    <p class="ch-muted" id="list-empty" hidden>No characters yet.</p>
-  </section>
+    <p class="hint ch-intro" id="list-intro">The fixed look of each model. A linked character drives every photo made for her persona.</p>
+    <div id="cards"></div>
+  </div>
+</section>
 
-  <!-- Editor -->
-  <section id="edit-view" hidden>
-    <nav class="rail" aria-label="Character steps">
-      <a href="#" onclick="showList();return false;" class="ch-muted" style="margin:0; color:inherit;">← Characters</a>
-      <p class="rail-name" id="crumb"></p>
-      <ol class="steps" id="steps"></ol>
-      <div><div style="display:flex; justify-content:space-between; font-size:0.78rem; font-weight:600; color:var(--text-2); margin-bottom:6px;">
-        <span>Approved</span><span id="rail-count"></span></div><div class="bar" id="rail-bar"><div></div></div>
-        <p class="ch-muted" id="rail-cost"></p></div>
-    </nav>
-    <p class="msg" id="msg"></p>
+<!-- Editor: the persona wizard's frame -->
+<section id="edit-view" class="ob-split" hidden>
+  <nav class="ob-rail" id="ch-rail" aria-label="Character steps"></nav>
+  <div class="ob-stepwrap" id="ch-stepwrap">
+    <div id="ch-head"></div>
+    <div id="ch-done" hidden></div>
 
     <!-- 1 Describe -->
-    <div class="ch-row" data-step="describe">
-      <div class="ch-card ch-grow">
-        <h2 class="ch-h1">How should her face be made?</h2>
+    <div class="ch-cols ch-describe" data-step="describe">
+      <section class="form-section ch-main">
+        <div class="section-title">Her face</div>
         <div class="mode-pick" role="group" aria-label="Face source">
           <button type="button" class="mode-opt" data-mode="build" onclick="setFaceMode('build')">
             <strong>Create with the builder</strong><span>Pick every facial feature from drawings.</span></button>
           <button type="button" class="mode-opt" data-mode="blend" onclick="setFaceMode('blend')">
             <strong>Blend reference photos</strong><span>Upload 2 to 6 faces; they are mixed into one new face.</span></button>
         </div>
-        <div id="blend-panel" hidden>
-          <h2 class="ch-h2" style="margin-top:18px;">Faces to blend</h2>
-          <p class="ch-muted">The new face takes features from all of them and is none of them. <span id="blend-count"></span></p>
-          <div class="refs" id="blend-refs" style="margin-bottom:10px;"></div>
-          <label class="attest"><input type="checkbox" id="attest-blend">I have the rights to these images, and everyone shown is 18+ and agreed to their likeness being used.</label>
-          <button type="button" class="btn" style="margin-top:8px;" onclick="pickUpload('face_front', 'attest-blend')">Add photos</button>
-          <h2 class="ch-h2" style="margin-top:22px;">Optional steers</h2>
-        </div>
-        <p class="ch-muted" id="build-hint" style="margin:14px 0 18px;">Tap the drawing that fits each feature. Nothing else can be generated until the face is approved.</p>
-        <div class="fp-list" id="face-features"></div>
-      </div>
-      <div class="ch-side">
-        <div class="ch-card" style="display:flex; flex-direction:column; gap:14px;">
-          <h2 class="ch-h2" style="margin:0;">Basics</h2>
-          <label class="ch-label">Name <input id="f-name" type="text" maxlength="80"></label>
-          <label class="ch-label">Age <input id="f-age" type="number" min="18" max="80"></label>
-          <p class="ch-muted" style="margin-top:-8px;">Must be 18 or over. Every prompt states she is a fictional adult of this age.</p>
-          <div class="ch-label">Explicitness level <div class="chips" id="level-chips"></div>
-            <span class="ch-muted" style="margin:0; font-weight:400;">Sets which body photos are required.</span></div>
-          <label class="ch-label">Persona <select id="f-persona" onchange="linkPersona(this.value)"></select></label>
-          <label class="ch-label">Notes (optional) <input id="f-notes" type="text" maxlength="400"></label>
-          <button type="button" class="btn" onclick="saveSheet()">Save</button>
-        </div>
-        <div class="ch-card" style="display:flex; flex-direction:column; gap:12px;">
-          <div style="display:flex; justify-content:space-between; align-items:center;">
-            <span style="font-weight:600;">Options per try</span>
-            <div class="chips" id="batch-chips"></div>
+        <div id="blend-panel" class="ch-side" hidden>
+          <div>
+            <div class="ch-sub-h">Faces to blend</div>
+            <p class="hint" style="margin-top:12px;">The new face takes features from all of them and is none of them. <span id="blend-count"></span></p>
           </div>
-          <button type="button" class="btn btn-primary" id="gen-face" onclick="generate('face_front')">Generate face options</button>
-          <span class="ch-muted" style="text-align:center; margin:0;">Front-facing · neutral · studio light · ears visible</span>
+          <div class="refs" id="blend-refs"></div>
+          <label class="attest"><input type="checkbox" id="attest-blend">I have the rights to these images, and everyone shown is 18+ and agreed to their likeness being used.</label>
+          <button type="button" class="btn btn-ghost btn-sm" style="align-self:flex-start;" onclick="pickUpload('face_front', 'attest-blend')">+ Add photos</button>
+          <div class="ch-sub-h">Optional steers</div>
         </div>
-      </div>
+        <p class="hint" id="build-hint">Tap the drawing that fits each feature. Nothing else can be generated until the face is approved.</p>
+        <div class="fp-list" id="face-features"></div>
+      </section>
+      <section class="form-section ch-basics">
+        <div class="section-title">Basics</div>
+        <div class="field"><label for="f-name">Name</label><input id="f-name" type="text" maxlength="80"></div>
+        <div class="field"><label for="f-age">Age</label><input id="f-age" type="number" min="18" max="80">
+          <span class="hint">Must be 18 or over. Every prompt states she is a fictional adult of this age.</span></div>
+        <div class="field"><label>Explicitness level</label><div class="chips" id="level-chips"></div>
+          <span class="hint">Sets which body photos are required.</span></div>
+        <div class="field"><label for="f-persona">Persona</label><select id="f-persona" onchange="linkPersona(this.value)"></select></div>
+        <div class="field"><label for="f-notes">Notes (optional)</label><input id="f-notes" type="text" maxlength="400"></div>
+        <button type="button" class="btn btn-ghost" onclick="saveSheet()">Save basics</button>
+      </section>
+      <section class="form-section ch-gen">
+        <div class="section-title">Generate</div>
+        <div class="ch-inline"><span>Options per try</span><div class="chips" id="batch-chips"></div></div>
+        <button type="button" class="btn btn-primary" id="gen-face" onclick="generate('face_front')">Generate face options</button>
+        <span class="hint ch-quote" id="gen-face-quote"></span>
+      </section>
     </div>
 
     <!-- 2 Pick -->
     <div data-step="pick" hidden>
-      <div style="display:flex; justify-content:space-between; align-items:flex-end; gap:12px; flex-wrap:wrap; margin-bottom:16px;">
-        <div>
-          <h2 class="ch-h1">Pick her face</h2>
-          <p class="ch-muted">Unpicked options are deleted automatically after 3 days. Uploaded faces are used as references for the next try.</p>
-        </div>
-        <div style="display:flex; gap:10px;">
-          <button type="button" class="btn" onclick="go('describe')">Edit description</button>
-          <button type="button" class="btn" onclick="generate('face_front')">Regenerate</button>
-        </div>
+      <div class="ch-toolbar">
+        <span class="hint" id="pick-summary"></span>
+        <span class="grow"></span>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="go('describe')">Change features</button>
+        <button type="button" class="btn btn-secondary btn-sm" id="regen-face" onclick="generate('face_front')">Regenerate</button>
       </div>
       <div class="opts" id="face-opts"></div>
-      <div class="ch-card" style="margin-top:18px; display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
-        <span id="pick-summary" class="ch-muted" style="margin:0;"></span>
-        <button type="button" class="btn btn-primary" id="to-check" onclick="go('check')" disabled>Check features</button>
-      </div>
     </div>
 
     <!-- 3 Check -->
-    <div class="ch-row" data-step="check" hidden>
-      <div class="ch-side" style="flex-basis:340px;">
-        <div class="opt" style="cursor:default;"><img id="check-img" alt="Selected face option"></div>
-        <div>
-          <span style="font-size:0.8rem; font-weight:700; color:var(--text-2);">Optional extra angles</span>
-          <div class="chips" style="margin-top:8px;">
+    <div class="ch-cols ch-check" data-step="check" hidden>
+      <div class="ch-side">
+        <div class="ch-shot"><img id="check-img" alt="Selected face option"></div>
+        <div class="field"><label>Optional extra angles</label>
+          <div class="chips">
             <button type="button" class="chip" onclick="openView('face_three_quarter')">+ Three-quarter</button>
             <button type="button" class="chip" onclick="openView('face_profile')">+ Profile</button>
             <button type="button" class="chip" onclick="openView('face_smile')">+ Smiling</button>
-          </div>
-        </div>
+          </div></div>
       </div>
-      <div class="ch-card ch-grow" style="padding:0; overflow:hidden;">
-        <div style="padding:20px 22px; display:flex; justify-content:space-between; align-items:center; gap:12px; border-bottom:1px solid var(--border);">
-          <div>
-            <h2 class="ch-h1" style="font-size:1.3rem;">Check every feature</h2>
-            <p class="ch-muted">Tick each one you agree matches. Approving runs the adult-appearance check for you.</p>
-          </div>
-          <span id="check-count" style="font-weight:700;"></span>
+      <section class="form-section ch-check-card">
+        <div class="ch-check-head ch-inline">
+          <div class="section-title">Feature check</div>
+          <span id="check-count"></span>
         </div>
-        <div style="padding:10px 22px; display:flex; gap:10px; align-items:center; border-bottom:1px solid var(--border);">
-          <span style="font-weight:600; font-size:0.85rem;">Adult appearance</span>
+        <div class="ch-check-age">
+          <span>Adult appearance</span>
           <span id="age-tag" class="tag uncertain">Not checked</span>
-          <span id="age-note" class="ch-muted" style="margin:0;"></span>
+          <span id="age-note" class="hint"></span>
         </div>
-        <div style="overflow-x:auto;">
+        <div class="ch-table">
           <table class="checks">
-            <thead><tr><th>Feature</th><th>You chose</th><th>Auto-check</th><th style="text-align:center;">OK</th></tr></thead>
+            <thead><tr><th>Feature</th><th>You chose</th><th>Auto-check</th><th>OK</th></tr></thead>
             <tbody id="check-rows"></tbody>
           </table>
         </div>
-        <div style="padding:14px 22px; border-top:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
-          <button type="button" class="btn" onclick="go('pick')">Back to options</button>
-          <div style="display:flex; gap:10px; flex-wrap:wrap;">
-            <button type="button" class="btn" id="run-check" onclick="runCheck()">Run automatic check</button>
-            <button type="button" class="btn" onclick="tickMatches()">Tick all matches</button>
-            <button type="button" class="btn btn-primary" id="approve-face" onclick="approveFace()" disabled>Approve face</button>
-          </div>
+        <div class="ch-actions">
+          <button type="button" class="btn btn-ghost btn-sm" id="run-check" onclick="runCheck()">Run automatic check</button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="tickMatches()">Tick all matches</button>
+          <button type="button" class="btn btn-primary btn-sm" id="approve-face" onclick="approveFace()" disabled>Approve face</button>
         </div>
-      </div>
+      </section>
     </div>
 
-    <!-- 4 Body -->
-    <div class="ch-row" data-step="body" hidden>
-    <aside class="drawer" id="drawer" hidden aria-label="Photo details">
-      <div class="vp-head">
-        <div id="vp-src"></div>
-        <div style="flex:1; min-width:0;"><h2 class="ch-h2" style="margin:0;" id="vp-title"></h2><div class="lineage" id="vp-lineage"></div></div>
-        <div class="chips" id="vp-source"></div>
-        <button type="button" class="btn vp-close" style="height:34px; padding:0 12px;" onclick="closeDrawer()" aria-label="Close">×</button>
-      </div>
-      <div class="banner" id="vp-banner" hidden></div>
-      <div id="vp-body">
-        <div id="vp-crop" class="vp-sec" hidden>
-          <div class="crop-stage" id="crop-stage"><img id="crop-img" alt="Source photo"><div class="crop-box" id="crop-box"><span class="crop-handle" data-c="nw"></span><span class="crop-handle" data-c="ne"></span><span class="crop-handle" data-c="sw"></span><span class="crop-handle" data-c="se"></span></div></div>
-          <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:8px;">
-            <button type="button" class="btn btn-sm" onclick="useCrop('candidate')">Use crop as this photo</button>
-            <button type="button" class="btn btn-sm" onclick="useCrop('reference')">Use crop as reference</button>
-            <span class="ch-muted" style="margin:0;">Drag the box to move it, a corner to resize.</span>
-          </div>
+    <!-- 4 Body and 5 Fine tuning -->
+    <div class="ch-body" data-step="body" hidden>
+      <aside class="drawer" id="drawer" hidden aria-label="Photo details">
+        <div class="vp-head">
+          <div id="vp-src"></div>
+          <div class="vp-head-t"><h2 id="vp-title"></h2><div class="lineage" id="vp-lineage"></div></div>
+          <div class="chips" id="vp-source"></div>
+          <button type="button" class="btn btn-ghost vp-close" onclick="closeDrawer()" aria-label="Close">&times;</button>
         </div>
-        <div class="vp-sec vp-refs">
-          <div>
-            <span class="dl">References</span>
-            <p class="ch-muted" style="margin:2px 0 8px;">Approved photos sent with the prompt. The model copies her face, skin and body from them; Reference influence sets how strictly.</p>
-            <div class="ref-line" id="vp-refs"></div>
+        <div class="banner" id="vp-banner" hidden></div>
+        <div id="vp-body">
+          <div id="vp-crop" class="vp-sec" hidden>
+            <div class="crop-stage" id="crop-stage"><img id="crop-img" alt="Source photo"><div class="crop-box" id="crop-box"><span class="crop-handle" data-c="nw"></span><span class="crop-handle" data-c="ne"></span><span class="crop-handle" data-c="sw"></span><span class="crop-handle" data-c="se"></span></div></div>
+            <div class="crop-acts">
+              <button type="button" class="btn btn-ghost btn-sm" onclick="useCrop('candidate')">Use crop as this photo</button>
+              <button type="button" class="btn btn-ghost btn-sm" onclick="useCrop('reference')">Use crop as reference</button>
+              <span class="hint">Drag the box to move it, a corner to resize.</span>
+            </div>
           </div>
-          <div class="up-card">
-            <strong>Use your own reference photo</strong>
-            <span class="ch-muted" style="margin:0;">Sent alongside the references, for this photo only. Use it to steer pose, angle or framing. Her look still comes from the approved photos.</span>
-            <label class="attest"><input type="checkbox" id="vp-attest" onchange="el('add-view-ref').disabled=!this.checked">I have the rights to this image, and anyone shown is 18+ and agreed to their likeness being used.</label>
-            <button type="button" class="btn btn-sm up-btn" id="add-view-ref" disabled onclick="pickUpload(selView, 'vp-attest')">Upload photo</button>
+          <div class="vp-sec vp-refs">
+            <div>
+              <span class="dl">References</span>
+              <p class="hint" style="margin:2px 0 8px;">Approved photos sent with the prompt. The model copies her face, skin and body from them; Reference influence sets how strictly.</p>
+              <div class="ref-line" id="vp-refs"></div>
+            </div>
+            <div class="up-card">
+              <strong>Use your own reference photo</strong>
+              <span class="hint">Sent alongside the references, for this photo only. Use it to steer pose, angle or framing. Her look still comes from the approved photos.</span>
+              <label class="attest"><input type="checkbox" id="vp-attest" onchange="el('add-view-ref').disabled=!this.checked">I have the rights to this image, and anyone shown is 18+ and agreed to their likeness being used.</label>
+              <button type="button" class="btn btn-ghost btn-sm" id="add-view-ref" disabled onclick="pickUpload(selView, 'vp-attest')">Upload photo</button>
+            </div>
           </div>
-        </div>
-        <div class="vp-sec vp-controls">
-          <div class="vp-infl">
-            <div class="vp-row"><span class="dl" id="vp-strength-label"></span><b class="vp-val" id="vp-strength-val"></b></div>
-            <input type="range" id="vp-strength" min="0" max="1" step="0.01" oninput="strengthHint()" onchange="saveView({strength:+this.value})">
-            <div class="bands" id="vp-bands"></div>
-            <p class="ch-muted" id="vp-hint" style="margin:6px 0 0;"></p>
+          <div class="vp-sec vp-controls">
+            <div class="vp-infl">
+              <div class="vp-row"><span class="dl" id="vp-strength-label"></span><b class="vp-val" id="vp-strength-val"></b></div>
+              <input type="range" id="vp-strength" min="0" max="1" step="0.01" oninput="strengthHint()" onchange="saveView({strength:+this.value})">
+              <div class="bands" id="vp-bands"></div>
+              <p class="hint" id="vp-hint" style="margin-top:6px;"></p>
+            </div>
+            <div class="field"><label for="vp-pose">Pose</label><select id="vp-pose" onchange="viewOpts[selView]=Object.assign(viewOpts[selView]||{},{pose:this.value})"></select></div>
+            <div class="field"><label for="vp-light">Lighting</label><select id="vp-light" onchange="viewOpts[selView]=Object.assign(viewOpts[selView]||{},{lighting:this.value})"></select></div>
           </div>
-          <label class="ch-label">Pose <select id="vp-pose" onchange="viewOpts[selView]=Object.assign(viewOpts[selView]||{},{pose:this.value})"></select></label>
-          <label class="ch-label">Lighting <select id="vp-light" onchange="viewOpts[selView]=Object.assign(viewOpts[selView]||{},{lighting:this.value})"></select></label>
+          <div class="vp-sec">
+            <div class="vp-row"><span class="dl">Body profile used</span><span class="hint" id="vp-traits-n"></span></div>
+            <div class="chips" id="vp-traits"></div>
+            <p class="hint" id="vp-traits-off"></p>
+          </div>
+          <div class="actionbar">
+            <span class="dl">Variations</span><div class="chips" id="vp-batch"></div>
+            <span class="grow"></span>
+            <span class="hint" id="vp-quote"></span>
+            <button type="button" class="btn btn-primary btn-sm" id="vp-var" onclick="generate(selView)"></button>
+          </div>
+          <div class="opts" id="vp-opts"></div>
         </div>
-        <div class="vp-sec">
-          <div class="vp-row"><span class="dl">Body profile used</span><span class="ch-muted" style="margin:0;" id="vp-traits-n"></span></div>
-          <div class="chips" id="vp-traits"></div>
-          <p class="ch-muted" id="vp-traits-off" style="margin:0;"></p>
-        </div>
-        <div class="opts" id="vp-opts"></div>
-      </div>
-      <div class="actionbar">
-        <div class="vp-row" style="gap:8px;"><span class="dl">Variations</span><div class="chips" id="vp-batch"></div></div>
-        <span style="flex:1;"></span>
-        <button type="button" class="btn" id="vp-var" onclick="generate(selView)"></button>
-      </div>
-    </aside>
-      <div class="ch-grow" style="display:flex; flex-direction:column; gap:16px;">
-        <div class="ch-card" id="body-profile">
-          <h2 class="ch-h2">Body profile</h2>
-          <span class="ch-muted" style="margin:0 0 10px; display:block;">Every view inherits these. Changes save as you pick.</span>
-          <div class="mode-pick" role="group" aria-label="Body source" style="margin-bottom:14px;">
+      </aside>
+      <div class="ch-main">
+        <section class="form-section" id="body-profile">
+          <div class="section-title">Body profile</div>
+          <div class="mode-pick" role="group" aria-label="Body source">
             <button type="button" class="mode-opt" data-body-mode="build" onclick="setBodyMode('build')">
               <strong>Create with the builder</strong><span>Pick her shape from drawings.</span></button>
             <button type="button" class="mode-opt" data-body-mode="match" onclick="setBodyMode('match')">
               <strong>Match reference bodies</strong><span>Upload one or more bodies; hers is made similar, not a copy.</span></button>
           </div>
-          <div id="body-match-panel" hidden style="margin-bottom:16px;">
-            <p class="ch-muted" style="margin:0 0 8px;">Her face stays her own; only build, proportions and figure follow these. <span id="body-match-count"></span></p>
-            <div class="refs" id="body-match-refs" style="margin-bottom:10px;"></div>
+          <div id="body-match-panel" class="ch-side" hidden>
+            <p class="hint">Her face stays her own; only build, proportions and figure follow these. <span id="body-match-count"></span></p>
+            <div class="refs" id="body-match-refs"></div>
             <label class="attest"><input type="checkbox" id="attest-body">I have the rights to these images, and everyone shown is 18+ and agreed to their likeness being used.</label>
-            <button type="button" class="btn" style="margin-top:8px;" onclick="pickUpload('body_front', 'attest-body')">Add body photos</button>
+            <button type="button" class="btn btn-ghost btn-sm" style="align-self:flex-start;" onclick="pickUpload('body_front', 'attest-body')">+ Add body photos</button>
           </div>
-          <div class="ch-label" style="margin-bottom:14px;">Start from a preset <div class="chips" id="presets"></div>
-            <span class="ch-muted" style="margin:0; font-weight:400;">Only fills features you have not set.</span></div>
+          <div class="field"><label>Start from a preset</label><div class="chips" id="presets"></div>
+            <span class="hint">Only fills features you have not set.</span></div>
           <div class="fp-list" id="body-features"></div>
           <div id="intimate-wrap" hidden>
-            <div class="fp-list" id="intimate-features" style="margin-top:12px;"></div>
+            <div class="fp-list" id="intimate-features"></div>
           </div>
-          <span class="msg" id="body-save-msg" aria-live="polite" style="margin:8px 0 0; display:block;"></span>
-          <button type="button" class="btn btn-primary" style="margin-top:12px;" onclick="go('views')">Continue to fine tuning</button>
-        </div>
-        <div id="views-head" style="display:flex; justify-content:space-between; align-items:end; gap:12px; flex-wrap:wrap;">
-          <div>
-            <h2 class="ch-h1">Fine Tuning</h2>
-            <p class="ch-muted" id="body-summary"></p>
-          </div>
-          <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-            <div class="chips" id="view-filter"></div>
-            <button type="button" class="btn" id="regen-branch" onclick="regenerateBranch()">Regenerate outdated</button>
-            <button type="button" class="btn btn-primary" id="gen-remaining" onclick="generateRemaining()">Generate remaining</button>
-          </div>
+          <span class="ch-msg-note" id="body-save-msg" aria-live="polite"></span>
+        </section>
+        <div class="views-toolbar" id="views-head">
+          <div class="chips" id="view-filter"></div>
+          <span class="hint" id="body-summary"></span>
+          <span class="grow"></span>
+          <button type="button" class="btn btn-ghost btn-sm" id="regen-branch" onclick="regenerateBranch()">Regenerate outdated</button>
+          <button type="button" class="btn btn-primary btn-sm" id="gen-remaining" onclick="generateRemaining()">Generate remaining</button>
         </div>
         <div id="tiers"></div>
       </div>
       <div class="ch-side">
-        <div class="ch-card" style="display:flex; flex-direction:column; gap:10px;">
-          <h2 class="ch-h2" style="margin:0;">General references</h2>
-          <span class="ch-muted" style="margin:0;">Optional. Uploads here guide the face. Each photo's own references are set in Fine Tuning.</span>
+        <section class="form-section">
+          <div class="section-title">General references</div>
+          <span class="hint">Optional. Uploads here guide the face. Each photo's own references are set in its detail panel.</span>
           <div class="refs" id="general-refs"></div>
           <label class="attest"><input type="checkbox" id="attest">I have the rights to these images, and anyone shown is 18+ and agreed to their likeness being used for AI generation.</label>
-          <div style="display:flex; gap:8px; flex-wrap:wrap;">
-            <button type="button" class="btn" onclick="pickUpload('')">Add general reference</button>
-          </div>
+          <button type="button" class="btn btn-ghost btn-sm" style="align-self:flex-start;" onclick="pickUpload('')">+ Add general reference</button>
           <input type="file" id="upload" accept="image/jpeg,image/png,image/webp" multiple hidden onchange="uploadFiles(this)">
-        </div>
+        </section>
       </div>
     </div>
+    <div class="drawer-scrim" id="drawer-scrim" hidden onclick="closeDrawer()"></div>
 
-    <!-- 5 Finish -->
-    <div class="ch-row" data-step="finish" hidden>
-      <div class="ch-card ch-grow">
-        <h2 class="ch-h1">Finish</h2>
-        <p class="ch-muted" id="fin-sub"></p>
+    <!-- 6 Finish -->
+    <div class="ch-cols" data-step="finish" hidden>
+      <section class="form-section">
+        <div class="section-title">Her approved set</div>
+        <p class="hint" id="fin-sub"></p>
         <div class="fin-shots" id="fin-shots"></div>
-        <button type="button" class="btn btn-primary" id="fin-accept" onclick="acceptCharacter()">Accept character</button>
-      </div>
+        <div id="fin-accept-row"></div>
+      </section>
       <div class="ch-side" id="fin-next">
-        <div class="ch-card" style="display:flex; flex-direction:column; gap:12px;">
-          <h2 class="ch-h2" style="margin:0;">Link to a persona</h2>
-          <span class="ch-muted" style="margin:0;">Every photo her persona sends is then conditioned on this character.</span>
-          <label class="ch-label">Persona <select id="fin-persona" onchange="linkPersona(this.value).then(renderFinish)"></select></label>
-        </div>
-        <div class="ch-card" style="display:flex; flex-direction:column; gap:12px;">
-          <h2 class="ch-h2" style="margin:0;">Create content</h2>
-          <span class="ch-muted" style="margin:0;" id="fin-studio-note"></span>
-          <a class="btn btn-primary" id="fin-studio" style="display:grid; place-items:center; text-decoration:none;">Open creation studio</a>
-        </div>
+        <section class="form-section">
+          <div class="section-title">Link to a persona</div>
+          <span class="hint">Every photo her persona sends is then conditioned on this character.</span>
+          <select id="fin-persona" aria-label="Persona" onchange="linkPersona(this.value).then(renderFinish)"></select>
+        </section>
+        <section class="form-section">
+          <div class="section-title">Create content</div>
+          <span class="hint" id="fin-studio-note"></span>
+          <button type="button" class="btn btn-primary" id="fin-studio" onclick="openStudio()">Open the studio</button>
+        </section>
       </div>
     </div>
-  </section>
 
-</div>
-</div>
+    <div class="ob-foot" id="ch-foot"></div>
+  </div>
+</section>
 
 <div class="lightbox" id="lightbox" hidden onclick="if(event.target===this)closeLightbox()">
-  <button type="button" class="lb-close" onclick="closeLightbox()" aria-label="Close">×</button>
-  <button type="button" class="lb-prev" onclick="lbNav(-1)" aria-label="Previous">‹</button>
+  <button type="button" class="lb-close" onclick="closeLightbox()" aria-label="Close">&times;</button>
+  <button type="button" class="lb-prev" onclick="lbNav(-1)" aria-label="Previous">&lsaquo;</button>
   <img id="lb-img" src="" alt="">
-  <button type="button" class="lb-next" onclick="lbNav(1)" aria-label="Next">›</button>
+  <button type="button" class="lb-next" onclick="lbNav(1)" aria-label="Next">&rsaquo;</button>
+</div>
+
+<div class="modal-overlay ch-confirm" id="ch-confirm" hidden>
+  <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="ch-confirm-t">
+    <div class="modal-header"><h2 id="ch-confirm-t">Are you sure?</h2></div>
+    <div class="modal-body" id="ch-confirm-body"></div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-ghost" id="ch-confirm-no">Cancel</button>
+      <button type="button" class="btn btn-primary" id="ch-confirm-yes">Confirm</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -562,16 +679,18 @@ const DRESSED = ['body_front', 'body_side', 'body_back'];
 const outfitSets = view => DRESSED.includes(view) ? Math.max(1, pickedOutfits().length) : 1;
 const imagesFor = (view, n) => n * outfitSets(view);
 const tokensFor = images => images * ((cat && cat.price_per_image) || 0);
+// The price sits beside the button rather than in it, so a long label never
+// wraps a button onto two lines.
 function cost(view, n) {
   if (!cat || !cat.price_per_image) return '';
   const sets = outfitSets(view);
-  return (sets > 1 ? ` × ${sets} outfits` : '') + ' · ' + tokensFor(n * sets).toLocaleString() + ' tokens';
+  return (sets > 1 ? `${sets} outfits · ` : '') + tokensFor(n * sets).toLocaleString() + ' tokens';
 }
 function paintRailCost() {
   const left = cat.views.filter(v => v.required && vs(v.key).status !== 'approved');
   const total = left.reduce((sum, v) => sum + tokensFor(imagesFor(v.key, batch)), 0);
-  el('rail-cost').textContent = left.length && cat.price_per_image
-    ? `Remaining ≈ ${total.toLocaleString()} tokens` : '';
+  const box = el('rail-cost');
+  if (box) box.textContent = left.length && cat.price_per_image ? `≈ ${total.toLocaleString()} tokens to finish` : '';
 }
 function batchChips() {
   return (cat && cat.batch || [1, 2, 3, 4, 6]).map(n =>
@@ -608,35 +727,80 @@ async function api(url, opts) {
   if (!r.ok || data.ok === false) throw new Error(data.error || ('Request failed (' + r.status + ')'));
   return data;
 }
-function say(text, kind) { const m = el('msg'); m.textContent = text || ''; m.className = 'msg ' + (kind || ''); }
+// The status line lives in the step footer, which render() redraws, so the
+// last message is kept and painted back.
+let lastMsg = ['', ''];
+function say(text, kind) {
+  lastMsg = [text || '', kind || ''];
+  const m = el('ch-msg');
+  if (m) { m.textContent = lastMsg[0]; m.className = 'ob-saved ' + lastMsg[1]; }
+}
 
 // ── List ────────────────────────────────────────────────────────────────────
 async function loadList() {
-  chars = (await api('/api/characters')).characters || [];
+  el('cards').innerHTML = skelGrid(4);
+  try { chars = (await api('/api/characters')).characters || []; }
+  catch (e) {
+    el('cards').innerHTML = `<div class="pg-none"><div class="pg-none-t">Could not load your characters.</div>
+      <button type="button" class="btn btn-secondary" onclick="loadList()">Try again</button></div>`;
+    return;
+  }
   renderList();
 }
+// The same card and empty state as the persona gallery, so the two lists read
+// as one product.
+const EMPTY_LIST = `<div class="empty-state"><div class="es-card">
+  <div class="es-eyebrow">Getting started</div>
+  <h2 class="es-title">Create her character</h2>
+  <p class="es-sub">A character is her fixed look. Once it is linked to a persona, every photo made for her starts from it, so she looks like the same person every time.</p>
+  <ol class="es-steps">
+    <li><span class="es-num">1</span><div><strong>Her face</strong><span>Pick her features, then choose and approve a face.</span></div></li>
+    <li><span class="es-num">2</span><div><strong>Her body</strong><span>Set her shape and approve a few set photos.</span></div></li>
+    <li><span class="es-num">3</span><div><strong>Ready</strong><span>Accept her and link her to a persona.</span></div></li>
+  </ol>
+  <button type="button" class="btn btn-primary es-cta" onclick="newCharacter()">+ New character</button>
+  <p class="es-foot">We walk you through it one step at a time. Each photo shows its token price first.</p>
+</div></div>`;
+const LIST_INTRO = 'The fixed look of each model. A linked character drives every photo made for her persona.';
+let listNote = '';
+function progressColour(pct) { return pct >= 75 ? 'var(--ok)' : pct >= 40 ? 'var(--warn)' : 'var(--err)'; }
 function renderList() {
   const n = {all: chars.length, linked: chars.filter(c => c.persona).length,
              unlinked: chars.filter(c => !c.persona && c.status === 'complete').length,
              drafts: chars.filter(c => c.status !== 'complete').length};
+  el('filters').hidden = !chars.length;
+  el('list-intro').hidden = !chars.length && !listNote;
+  el('list-intro').textContent = listNote || LIST_INTRO;
+  el('list-intro').style.color = listNote ? 'var(--err)' : '';
+  listNote = '';
   el('filters').innerHTML = [['all', 'All'], ['linked', 'Linked'], ['unlinked', 'Unlinked'], ['drafts', 'Drafts']]
-    .map(([k, l]) => `<button type="button" class="chip" aria-pressed="${filter === k}" onclick="filter='${k}';renderList()">${l} · ${n[k]}</button>`).join('');
+    .map(([k, l]) => `<button type="button" class="${filter === k ? 'active' : ''}" aria-pressed="${filter === k}" onclick="filter='${k}';renderList()">${l} · ${n[k]}</button>`).join('');
+  if (!chars.length) { el('cards').innerHTML = EMPTY_LIST; return; }
   const shown = chars.filter(c => filter === 'all' || (filter === 'linked' && c.persona) ||
     (filter === 'unlinked' && !c.persona && c.status === 'complete') || (filter === 'drafts' && c.status !== 'complete'));
-  el('list-empty').hidden = shown.length > 0;
-  el('cards').innerHTML = shown.map(c => {
+  if (!shown.length) {
+    el('cards').innerHTML = `<div class="pg-none"><div class="pg-none-t">No characters match that filter</div>
+      <button type="button" class="btn btn-secondary" onclick="filter='all';renderList()">Show all</button></div>`;
+    return;
+  }
+  el('cards').innerHTML = '<div class="pg-grid ch-grid">' + shown.map(c => {
     const pct = c.required ? Math.round(100 * c.approved_required / c.required) : 0;
-    const status = c.status === 'complete'
-      ? `Complete · ${c.approved_required} of ${c.required} required photos`
-      : (c.face_url ? `Face approved · ${c.approved_required} of ${c.required} required photos` : 'Face not approved yet');
-    return `<button type="button" class="ch-item" onclick="openCharacter('${c.id}')">
-      <div class="ch-thumb">${c.face_url ? `<img src="${esc(c.face_url)}" alt="">` : ''}
-        <span class="ch-badge">${LEVEL_LABEL[c.nsfw_level] || c.nsfw_level}</span></div>
-      <div class="ch-body"><strong>${esc(c.name)}</strong>
-        <span class="ch-muted" style="margin:0;">${c.persona ? 'Linked to ' + esc(c.persona) : 'Not linked'}</span>
-        <div class="bar ${pct === 100 ? 'full' : ''}"><div style="width:${pct}%"></div></div>
-        <span class="ch-muted" style="margin:0;">${status} · v${c.version}</span></div></button>`;
-  }).join('');
+    const status = c.status === 'complete' ? 'Complete'
+      : (c.face_url ? `${c.approved_required} of ${c.required} photos approved` : 'Face not approved yet');
+    const linked = c.persona ? (personas.find(p => p.slug === c.persona) || {}).name || c.persona : '';
+    return `<div class="pg-card" onclick="openCharacter('${c.id}')">
+      <div class="pg-card-img">${c.face_url ? `<img src="${esc(c.face_url)}" alt="">`
+        : `<div class="pg-initials">${esc((c.name || '?').slice(0, 2).toUpperCase())}</div>`}
+        <div class="pg-scrim"></div><span class="ch-level">${LEVEL_LABEL[c.nsfw_level] || esc(c.nsfw_level)}</span>
+        <div class="pg-card-text"><div class="pg-card-name">${esc(c.name)}</div>
+          <div class="pg-card-sub">${linked ? 'Linked to ' + esc(linked) : 'Not linked'}</div></div></div>
+      <div class="pg-card-foot">
+        <div class="pg-bar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100" aria-label="Approved photos"><i style="width:${pct}%;background:${progressColour(pct)};"></i></div>
+        <span class="pg-pct" style="color:${progressColour(pct)};">${pct}%</span>
+        <button type="button" class="btn btn-primary pg-open" onclick="event.stopPropagation();openCharacter('${c.id}')">Open</button>
+        <span class="ch-card-note">${status} · version ${c.version}</span>
+      </div></div>`;
+  }).join('') + '</div>';
 }
 function showList() {
   el('edit-view').hidden = true; el('list-view').hidden = false;
@@ -647,17 +811,26 @@ async function newCharacter(persona) {
   try {
     const d = await api('/api/characters', {body: persona ? {persona} : {}});
     await openCharacter(d.character.id);
-  } catch (e) { alert(e.message); }
+  } catch (e) {
+    listNote = e.message;
+    showList();
+  }
 }
 
 // ── Editor ──────────────────────────────────────────────────────────────────
 async function openCharacter(id) {
-  cur = (await api('/api/characters/' + id)).character;
+  const [c, m] = await Promise.all([api('/api/characters/' + id), PageWizard.me()]);
+  cur = c.character;
   cat = await api('/api/characters/catalogue?level=' + cur.nsfw_level);
   el('list-view').hidden = true; el('edit-view').hidden = false;
   history.replaceState(null, '', '/characters?id=' + id);
+  // A creator is walked through each new character until they finish or skip;
+  // an admin gets the same frame without the guide, and Guide brings it back.
+  guided = !m.isAdmin && !PageWizard.entry(setupKey()).done;
+  showDone = false; selView = ''; pickedFace = ''; lastMsg = ['', ''];
   const canon = canonOf('face_front');
   go(canon ? 'views' : (images('face_front', 'candidate').length ? 'pick' : 'describe'));
+  if (guided) requestAnimationFrame(() => tourStart(false));
 }
 function images(view, role) { return (cur.images || []).filter(i => i.view === view && (!role || i.role === role)); }
 function canonOf(view) { return images(view, 'canonical')[0]; }
@@ -673,35 +846,177 @@ function go(s) {
   if (s === 'face') s = canonOf('face_front') || pickedFace ? 'check' : 'pick';
   if ((s === 'body' || s === 'views' || s === 'finish') && !canonOf('face_front')) s = 'describe';
   if (s === 'finish' && cur.status !== 'complete') s = 'views';
-  step = s; render();
+  if (s !== step) lastMsg = ['', ''];
+  // The photo panel belongs to Fine Tuning; leaving it closes the panel.
+  if (s !== 'views') selView = '';
+  step = s; showDone = false; render();
+  el('ch-stepwrap').scrollTop = 0;
 }
 function render() {
-  el('crumb').textContent = cur.name;
-  const faceDone = !!canonOf('face_front');
-  const done = {describe: images('face_front').length > 0 || faceDone, face: faceDone, body: faceDone,
-                views: cur.status === 'complete', finish: accepted()};
-  const at = step === 'pick' || step === 'check' ? 'face' : step;
-  el('steps').innerHTML = [['describe', '1 Base & references'], ['face', '2 Face'], ['body', '3 Body profile'], ['views', '4 Fine Tuning'], ['finish', '5 Finish']]
-    .map(([k, l]) => `<li><button type="button" class="${done[k] ? 'done' : ''}" ${at === k ? 'aria-current="step"' : ''}
-      ${(k === 'body' || k === 'views') && !faceDone || (k === 'face' && !images('face_front').length && !faceDone)
-        || (k === 'finish' && cur.status !== 'complete') ? 'disabled' : ''}
-      onclick="go('${k}')">${l}${done[k] && at !== k ? ' ✓' : ''}</button></li>`).join('');
-  const req = cat.views.filter(v => v.required), ok = req.filter(v => vs(v.key).status === 'approved').length;
-  el('rail-count').textContent = ok + ' / ' + req.length;
-  el('rail-bar').firstElementChild.style.width = (req.length ? 100 * ok / req.length : 0) + '%';
-  el('rail-bar').classList.toggle('full', req.length > 0 && ok === req.length);
-  paintRailCost();
   const shown = step === 'views' ? 'body' : step;
-  document.querySelectorAll('[data-step]').forEach(n => n.hidden = n.dataset.step !== shown);
+  document.querySelectorAll('[data-step]').forEach(n => n.hidden = showDone || n.dataset.step !== shown);
   el('body-profile').hidden = step === 'views';
   el('views-head').hidden = el('tiers').hidden = step === 'body';
   el('edit-view').classList.toggle('views-mode', step === 'views');
-  if (step === 'views' && !selView) {
+  // Beside the tree there is room to open the next photo straight away; as a
+  // slide-over it would cover the tree the moment the step opens.
+  if (step === 'views' && !selView && matchMedia('(min-width: 1320px)').matches) {
     const pool = cat.views.filter(inFilter);
     const next = pool.find(v => vs(v.key).status !== 'approved' && vs(v.key).display !== 'locked') || pool[0];
     selView = next ? next.key : '';
   }
   ({describe: renderDescribe, pick: renderPick, check: renderCheck, body: renderBody, views: renderBody, finish: renderFinish})[step]();
+  renderFrame();
+}
+
+// ── The wizard frame ────────────────────────────────────────────────────────
+// The editor is laid out as the persona wizard: stages on a rail, one question
+// per step, Back and Continue underneath. The page's own go() stays the source
+// of truth; this only draws around whichever step it settled on.
+const STAGES = [{key: 'face', label: 'Her face'}, {key: 'body', label: 'Her body'}, {key: 'ready', label: 'Ready'}];
+const STEPS = [
+  {key: 'describe', stage: 'face', nav: 'Design her face', title: 'How should her face be made?',
+   sub: 'Build it from the drawings, or blend 2 to 6 faces into a new one. Name, age and level go into every prompt. Nothing else can be generated until her face is approved.'},
+  {key: 'pick', stage: 'face', nav: 'Pick one', title: 'Pick her face',
+   sub: 'Choose the option that looks most like her. Not right? Regenerate, or change her features. Options you do not pick delete themselves after 3 days.'},
+  {key: 'check', stage: 'face', nav: 'Check & approve', title: 'Check every feature',
+   sub: 'Tick each feature that matches what you chose. Approving runs the adult-appearance check and locks her face in.'},
+  {key: 'body', stage: 'body', nav: 'Body profile', title: 'What is her body like?',
+   sub: 'Every body photo inherits this. Start from a preset, pick from the drawings, or match reference bodies. It saves as you pick.'},
+  {key: 'views', stage: 'body', nav: 'Her photos', title: 'Approve her photos',
+   sub: 'Each view is one photo of her from a set angle. Generate options, approve the best one, and the views built on it unlock. She is ready when every required photo is approved.'},
+  {key: 'finish', stage: 'ready', nav: 'Accept & link', title: 'Accept and link her',
+   sub: 'Check the set, accept this version, then link her to a persona so every photo it sends looks like her.'},
+];
+let guided = false, showDone = false;
+const setupKey = () => 'character:' + cur.id;
+const stepIdx = () => STEPS.findIndex(s => s.key === step);
+function approvedCount() {
+  const req = cat.views.filter(v => v.required);
+  return [req.filter(v => vs(v.key).status === 'approved').length, req.length];
+}
+function stepDone(i) {
+  const k = STEPS[i].key, face = !!canonOf('face_front');
+  if (k === 'describe') return face || images('face_front').length > 0;
+  if (k === 'pick') return face || !!pickedFace;
+  if (k === 'check') return face;
+  if (k === 'body') return face && PageWizard.seen(setupKey()).includes('body');
+  if (k === 'views') return cur.status === 'complete';
+  return accepted();
+}
+// The same gates go() applies, so the rail never offers a step it would refuse.
+function stepOpen(i) {
+  const k = STEPS[i].key, face = !!canonOf('face_front');
+  if (k === 'describe') return true;
+  if (k === 'pick') return face || images('face_front').length > 0;
+  if (k === 'check') return face || !!pickedFace;
+  if (k === 'finish') return cur.status === 'complete';
+  return face;
+}
+// What Continue is waiting for, so a greyed button is never a mystery.
+function stepWhy(i) {
+  const k = STEPS[i].key;
+  if (k === 'describe' && !stepDone(i)) return 'Generate face options to continue.';
+  if (k === 'pick' && !pickedFace) return 'Select one option to continue.';
+  if (k === 'check' && !canonOf('face_front')) return 'Approve her face to continue.';
+  if (k === 'views' && cur.status !== 'complete') {
+    const [ok, n] = approvedCount();
+    return `Approve every required photo to continue (${ok} of ${n}).`;
+  }
+  if (k === 'finish' && !accepted()) return 'Accept her to finish.';
+  return '';
+}
+function goStep(i) { go(STEPS[i].key); }
+function stepBack() { const i = stepIdx(); if (i > 0) go(STEPS[i - 1].key); }
+function stepNext() {
+  const i = stepIdx();
+  if (stepWhy(i)) return;
+  if (STEPS[i].key === 'body') PageWizard.markSeen(setupKey(), 'body');
+  if (i === STEPS.length - 1) return finishGuide();
+  go(STEPS[i + 1].key);
+}
+function renderFrame() {
+  const i = stepIdx(), [ok, n] = approvedCount();
+  const pct = Math.round(STEPS.filter((s, k) => stepDone(k)).length / STEPS.length * 100);
+  el('ch-rail').innerHTML = `<button type="button" class="btn-back-gallery" onclick="showList()">← All characters</button>` +
+    PageWizard.railHtml({title: 'Your character', name: cur.name, pct, stages: STAGES, steps: STEPS, idx: i,
+      done: stepDone, reachable: stepOpen, call: 'goStep'}) +
+    `<div class="ch-rail-meta"><span><b>${ok} of ${n}</b> required photos approved</span><span id="rail-cost"></span></div>`;
+  paintRailCost();
+  el('ch-head').hidden = el('ch-foot').hidden = showDone;
+  el('ch-done').hidden = !showDone;
+  if (showDone) {
+    el('ch-done').innerHTML = PageWizard.doneHtml({
+      title: cur.name + ' is ready.',
+      sub: cur.persona ? 'Her look is locked in. Every photo made for her persona now starts from this character.'
+                       : 'Her look is locked in. Link her to a persona and every photo made for it starts from this character.',
+      cards: [
+        {icon: '\u2726', title: 'Create content', desc: 'Open the studio and make photos of her.', call: 'openStudio()'},
+        {icon: '\ud83d\udd17', title: cur.persona ? 'Change her persona' : 'Link her to a persona',
+         desc: 'Choose which persona sends photos of her.', call: "closeDone('finish')"},
+        {icon: '\u2699\ufe0f', title: 'Fine-tune her photos', desc: 'Add optional views, or redo any photo.', call: "closeDone('views')"},
+      ]});
+    return;
+  }
+  const s = STEPS[i], last = i === STEPS.length - 1, why = stepWhy(i);
+  el('ch-head').innerHTML = PageWizard.headHtml({crumb: PageWizard.crumb(STAGES, STEPS, i), title: s.title, sub: s.sub});
+  const next = last && !guided ? null
+    : {label: last ? 'Finish \u2713' : 'Continue \u2192', call: 'stepNext()', disabled: !!why, why};
+  el('ch-foot').innerHTML = PageWizard.footHtml({back: i > 0 ? 'stepBack()' : null, next, statusId: 'ch-msg',
+    alt: guided ? [{icon: '\u25ce', label: 'Show me around', call: 'tourStart(true)'},
+                   {icon: '\u2699', label: 'Skip setup', call: 'skipGuide()'}]
+                : [{icon: '\u25ce', label: 'Guide', call: 'startGuide()'}]});
+  say(...lastMsg);
+}
+
+// ── The guide ───────────────────────────────────────────────────────────────
+function activeCard() {
+  return document.querySelector('[data-step]:not([hidden]) .form-section:not([hidden]), [data-step]:not([hidden]) .opts');
+}
+function priceAnchor() {
+  return ['#gen-face', '#regen-face', '#vp-var', '#gen-remaining'].map(q => document.querySelector(q))
+    .find(b => b && b.getBoundingClientRect().width);
+}
+const TOUR = PageWizard.tour([
+  {anchor: '#ch-head', placement: 'bottom', title: 'One step at a time',
+   body: 'Her look is built in order: face first, then body, then her photos. Each step asks one thing, and the line under the question says what to do.'},
+  {anchor: activeCard, placement: 'right', title: 'This is her real character',
+   body: 'Everything you pick here saves to her character as you go. Nothing reaches a fan until you approve it.'},
+  {anchor: '#ch-rail', placement: 'right', title: 'Where you are',
+   body: 'Three stages. The bar shows how far she is, and you can jump back to any step you have already reached.'},
+  {anchor: priceAnchor, placement: 'left', title: 'Every button shows its price',
+   body: 'Generating spends tokens from your allowance. The price is shown next to the button before you click, and anything that fails comes back to you.'},
+  {anchor: '#ch-foot', placement: 'top', title: 'Continue, or skip ahead',
+   body: 'Continue unlocks once a step is done. Skip setup leaves the guide and keeps everything you have made, and Guide brings it back any time.'},
+], {onEnd: skipped => PageWizard.save('page:characters', {tour: skipped ? 'skipped' : 'done'})});
+// The tour runs once per creator, not once per character.
+function tourStart(force) {
+  if (showDone || (!force && PageWizard.entry('page:characters').tour)) return;
+  TOUR.start();
+}
+function skipGuide() {
+  TOUR.end(true);
+  guided = false;
+  PageWizard.save(setupKey(), {done: true});
+  render();
+  say('Setup skipped. Everything you made is kept, and Guide brings the walkthrough back.', 'ok');
+}
+function startGuide() {
+  guided = true;
+  PageWizard.save(setupKey(), {done: false});
+  render();
+  tourStart(true);
+}
+function finishGuide() {
+  TOUR.end(false);
+  guided = false;
+  PageWizard.save(setupKey(), {done: true});
+  showDone = true;
+  render();
+}
+function closeDone(s) { showDone = false; go(s); }
+function openStudio() {
+  PageWizard.openPage(cur && cur.persona ? '/studio?persona=' + encodeURIComponent(cur.persona) : '/studio');
 }
 
 function featurePicker(f) {
@@ -739,8 +1054,8 @@ function outfitPicker() {
       aria-pressed="${on.includes('upload:' + i.id)}" onclick="toggleOutfit(this)"><img src="${esc(i.url)}" alt="">
       <span>${esc(outfitLabel('upload:' + i.id))}</span></button>
       <button type="button" class="of-del" aria-label="Remove ${esc(outfitLabel('upload:' + i.id))}" onclick="removeImage('${i.id}')">×</button></span>`).join('');
-  const upload = `<div style="margin-top:8px;"><label class="attest"><input type="checkbox" id="attest-outfit">I have the rights to these outfit photos, and anyone shown is 18+.</label>
-    <button type="button" class="btn" style="margin-top:6px;" onclick="pickUpload('', 'attest-outfit', 'outfit')">Upload outfit</button></div>`;
+  const upload = `<div class="of-upload"><label class="attest"><input type="checkbox" id="attest-outfit">I have the rights to these outfit photos, and anyone shown is 18+.</label>
+    <button type="button" class="btn btn-ghost btn-sm" onclick="pickUpload('', 'attest-outfit', 'outfit')">+ Upload outfit</button></div>`;
   const rows = on.filter(o => !o.startsWith('upload:')).map(o => `<div class="of-row" role="group" aria-label="${esc(o)} colour"><span>${esc(o)}</span>
       <button type="button" class="of-sw any" data-colour-for="${esc(o)}" data-colour="" aria-pressed="${!colours[o]}"
         onclick="pickColour(this)">Any</button>` +
@@ -748,7 +1063,7 @@ function outfitPicker() {
       data-colour-for="${esc(o)}" data-colour="${esc(c)}" aria-pressed="${colours[o] === c}" title="${esc(c)}"
       aria-label="${esc(c)}" onclick="pickColour(this)"></button>`).join('') + '</div>').join('');
   return `<fieldset class="fp"><legend>Outfits for body views</legend>
-    <span class="ch-muted" style="margin:0 0 6px; display:block;">Pick one or more. Each outfit generates its own set of full-body options.</span>
+    <span class="hint" style="margin:-4px 0 10px;">Pick one or more. Each outfit generates its own set of full-body options.</span>
     <div class="fp-opts" role="group">${chips}</div>${upload}${rows}</fieldset>`;
 }
 function outfitLabel(key) {
@@ -808,7 +1123,7 @@ function collectSheet() {
 // the sheet, since those fields are empty until Describe has been shown once.
 async function saveSheet(extra, btnId) {
   const btn = btnId && el(btnId), note = btnId && el(btnId + '-msg');
-  const tell = (text, kind) => { say(text, kind); if (note) { note.textContent = text; note.className = 'msg ' + (kind || ''); } };
+  const tell = (text, kind) => { say(text, kind); if (note) { note.textContent = text; note.className = 'ch-msg-note ' + (kind || ''); } };
   if (btn) btn.disabled = true;
   try {
     const body = Object.assign({sheet: collectSheet()}, step === 'describe'
@@ -849,7 +1164,8 @@ function renderDescribe() {
   el('level-chips').innerHTML = cat.levels.map(l => `<button type="button" class="chip" aria-pressed="${cur.nsfw_level === l.key}"
     onclick="saveSheet({nsfw_level:'${l.key}'})">${l.label}</button>`).join('');
   el('batch-chips').innerHTML = batchChips();
-  el('gen-face').textContent = `Generate ${batch} face options` + cost('face_front', batch);
+  el('gen-face').textContent = `Generate ${batch} face option${batch === 1 ? '' : 's'}`;
+  el('gen-face-quote').textContent = [cost('face_front', batch), 'front-facing, neutral, studio light'].filter(Boolean).join(' · ');
   el('gen-face').disabled = blend && refs.length < 2;
   const sel = el('f-persona');
   sel.innerHTML = `<option value="">Not linked — link later</option>` + personas.map(p =>
@@ -905,15 +1221,16 @@ function renderPick() {
   const opts = images('face_front', 'candidate').concat(images('face_front', 'canonical'));
   if (!opts.find(o => o.id === pickedFace)) pickedFace = (canonOf('face_front') || {}).id || '';
   const refs = images('face_front', 'reference');
-  el('face-opts').innerHTML = opts.map((o, i) => `<button type="button" class="opt" aria-pressed="${o.id === pickedFace}"
-      onclick="pickedFace='${o.id}';confirmed=new Set();renderPick()"><img src="${esc(o.url)}" alt="Face option ${i + 1}">
-      <span>${o.role === 'canonical' ? 'Approved' : 'Option ' + (i + 1)}${o.id === pickedFace ? ' · Selected' : ''}</span></button>`).join('') +
-    `<div class="drop"><strong>Use your own photo</strong><span class="ch-muted" style="margin:0;">Added as a face reference for the next try</span>
+  el('face-opts').innerHTML = opts.map((o, i) => `<button type="button" class="opt${o.id === pickedFace ? ' opt-sel' : ''}" aria-pressed="${o.id === pickedFace}"
+      onclick="pickedFace='${o.id}';confirmed=new Set();render()"><img src="${esc(o.url)}" alt="Face option ${i + 1}">
+      <span class="opt-label">${o.role === 'canonical' ? 'Approved' : 'Option ' + (i + 1)}${o.id === pickedFace ? ' · Selected' : ''}</span></button>`).join('') +
+    `<div class="drop"><strong>Use your own photo</strong><span class="hint">Added as a face reference for the next try.</span>
       ${refs.length ? `<div class="refs">${refs.map(refTile).join('')}</div>` : ''}
       <label class="attest"><input type="checkbox" id="attest-face">I have the rights to this image, and anyone shown is 18+ and agreed to their likeness being used.</label>
-      <button type="button" class="btn" onclick="pickUpload('face_front', 'attest-face')">Choose file</button></div>`;
-  el('pick-summary').textContent = pickedFace ? 'Selected — next, confirm it feature by feature.' : 'Select one option.';
-  el('to-check').disabled = !pickedFace;
+      <button type="button" class="btn btn-ghost btn-sm" onclick="pickUpload('face_front', 'attest-face')">Choose file</button></div>`;
+  el('pick-summary').textContent = pickedFace ? 'Selected. Next, confirm it feature by feature.'
+    : `${opts.length} option${opts.length === 1 ? '' : 's'}. Select the one that looks most like her.`;
+  el('regen-face').textContent = 'Regenerate' + (cost('face_front', batch) ? ' · ' + cost('face_front', batch) : '');
 }
 
 function renderCheck() {
@@ -930,19 +1247,19 @@ function renderCheck() {
   el('check-rows').innerHTML = face.map(f => {
     const r = ((checks.features || {})[f.key] || {});
     const res = r.result || '';
-    return `<tr><td style="font-weight:600;">${esc(f.label)}</td><td class="fp-mini">${window.CharacterVisuals ? CharacterVisuals.render(f.key, cur.sheet[f.key], cur.sheet) : ''}${esc(cur.sheet[f.key])}</td>
-      <td>${res ? `<span class="tag ${res}" title="${esc(r.observed || '')}">${res === 'match' ? 'Matches' : res === 'differs' ? 'Differs' : 'Unsure'}</span>` : '<span class="ch-muted">—</span>'}
-        ${r.observed ? `<div class="ch-muted" style="margin:2px 0 0;">${esc(r.observed)}</div>` : ''}</td>
-      <td style="text-align:center;"><input type="checkbox" aria-label="Confirm ${esc(f.label)}" ${confirmed.has(f.key) ? 'checked' : ''}
+    return `<tr><td>${esc(f.label)}</td><td class="fp-mini">${window.CharacterVisuals ? CharacterVisuals.render(f.key, cur.sheet[f.key], cur.sheet) : ''}${esc(cur.sheet[f.key])}</td>
+      <td>${res ? `<span class="tag ${res}" title="${esc(r.observed || '')}">${res === 'match' ? 'Matches' : res === 'differs' ? 'Differs' : 'Unsure'}</span>` : '<span class="hint">—</span>'}
+        ${r.observed ? `<span class="hint">${esc(r.observed)}</span>` : ''}</td>
+      <td><input type="checkbox" aria-label="Confirm ${esc(f.label)}" ${confirmed.has(f.key) ? 'checked' : ''}
         onchange="this.checked?confirmed.add('${f.key}'):confirmed.delete('${f.key}');updateApprove()"></td></tr>`;
-  }).join('') || `<tr><td colspan="4" class="ch-muted">Describe her face first.</td></tr>`;
+  }).join('') || `<tr><td colspan="4" class="hint">Describe her face first.</td></tr>`;
   updateApprove();
 }
 function updateApprove() {
   const img = (cur.images || []).find(i => i.id === pickedFace) || {};
   const face = cat.features.filter(f => f.group === 'face' && cur.sheet[f.key]);
   const n = face.filter(f => confirmed.has(f.key)).length;
-  el('check-count').textContent = `${n} of ${face.length} confirmed`;
+  el('check-count').innerHTML = `<span class="st ${n && n === face.length ? 'approved' : ''}">${n} of ${face.length} confirmed</span>`;
   el('approve-face').disabled = img.role === 'canonical' || !face.length || n < face.length;
   el('approve-face').textContent = img.role === 'canonical' ? 'Face approved' : 'Approve face';
 }
@@ -969,6 +1286,8 @@ async function approveFace() {
 const INTIMATE = ['breasts', 'nipples', 'pubic', 'vulva', 'anus'];
 const TIERS = [[0, 'Anchor · approve first'], [1, 'Derived from anchor'], [2, 'Second level']];
 const STATUS_LABEL = {not_started: 'Not started', generating: 'Generating', review: 'Review', approved: 'Approved', locked: 'Locked', outdated: 'Outdated'};
+const MODE_LABEL = {reference: 'Reference', crop: 'Crop'};
+const PHOTO_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 17-5-5-9 8"/></svg>';
 let viewFilter = 'SFW', saveTimer = null;
 function vs(key) { return (cur.views || {})[key] || {display: 'locked'}; }
 function isNsfw(v) { return v.group === 'nsfw'; }
@@ -977,26 +1296,28 @@ function imgById(id) { return (cur.images || []).find(i => i.id === id); }
 function viewTile(v) {
   const st = vs(v.key), c = canonOf(v.key);
   const from = v.parents.length ? 'from ' + v.parents.map(p => viewDef(p) ? viewDef(p).label : p).join(' + ') : 'base';
+  const mode = MODE_LABEL[st.mode];
   return `<button type="button" class="view" aria-pressed="${selView === v.key}" onclick="openView('${v.key}')">
-    <div class="vt">${c ? `<img src="${esc(c.url)}" alt="">` : ''}</div>
-    <div style="flex:1; min-width:0;"><div style="font-weight:700; font-size:0.85rem;">${esc(v.label)}</div>
-      <div class="ch-muted" style="margin:2px 0 0;">${esc(from)}${v.required ? ' · required' : ''}</div>
-      <div style="margin-top:4px; display:flex; gap:6px;"><span class="st ${st.display}">${STATUS_LABEL[st.display]}</span><span class="st">${st.mode}</span></div></div></button>`;
+    <div class="vt">${c ? `<img src="${esc(c.url)}" alt="">` : PHOTO_ICON}</div>
+    <div class="view-t"><div class="view-n">${esc(v.label)}</div>
+      <div class="view-f">${esc(from)}${v.required ? ' · required' : ''}</div>
+      <div class="view-s"><span class="st ${st.display}">${STATUS_LABEL[st.display] || 'Locked'}</span>${mode ? `<span class="st">${mode}</span>` : ''}</div></div></button>`;
 }
 function renderBody() {
   renderPresets();
   const shown = cat.views.filter(v => v.key !== 'face_front' || viewFilter !== 'NSFW').filter(inFilter);
   const req = cat.views.filter(v => v.required);
   const ok = req.filter(v => vs(v.key).status === 'approved').length;
-  el('body-summary').textContent = `Level: ${LEVEL_LABEL[cur.nsfw_level]} · ${ok} of ${req.length} required photos approved · version ${cur.version}`;
+  el('body-summary').textContent = `${LEVEL_LABEL[cur.nsfw_level]} · ${ok} of ${req.length} required approved · v${cur.version}`;
   const hasNsfw = cat.views.some(isNsfw);
+  el('view-filter').hidden = !hasNsfw;
   el('view-filter').innerHTML = (hasNsfw ? ['SFW', 'NSFW', 'All'] : ['SFW']).map(f =>
     `<button type="button" class="chip" aria-pressed="${viewFilter === f}" onclick="setFilter('${f}')">${f}</button>`).join('');
   el('tiers').innerHTML = TIERS.map(([t, label]) => {
     const vs_ = shown.filter(v => v.tier === t);
-    return vs_.length ? `<div class="ch-card" style="margin-bottom:16px;"><h2 class="ch-h2 tier-h">${label}</h2>
+    return vs_.length ? `<div class="tier"><h3 class="tier-h">${label}</h3>
       <div class="views">${vs_.map(viewTile).join('')}</div></div>` : '';
-  }).join('');
+  }).join('') || '<p class="hint">No views in this filter.</p>';
   const todo = shown.filter(v => ['not_started', 'outdated'].includes(vs(v.key).display));
   el('gen-remaining').disabled = !todo.length;
   el('regen-branch').hidden = !shown.some(v => vs(v.key).display === 'outdated');
@@ -1034,8 +1355,8 @@ function lineage(key) {
   return out;
 }
 function renderViewPanel() {
-  const v = selView && viewDef(selView);
-  el('drawer').hidden = !v;
+  const v = step === 'views' && selView && viewDef(selView);
+  el('drawer').hidden = el('drawer-scrim').hidden = !v;
   if (!v) return;
   const st = vs(v.key);
   const o = viewOpts[v.key] || {};
@@ -1048,10 +1369,10 @@ function renderViewPanel() {
   banner.hidden = !['locked', 'outdated'].includes(st.display);
   banner.className = 'banner ' + st.display;
   if (st.display === 'locked') banner.innerHTML = `Locked until ${blockers.map(p => esc(viewDef(p).label)).join(' and ')} ${blockers.length > 1 ? 'are' : 'is'} approved.
-    <button type="button" class="btn" style="height:32px; margin-left:8px;" onclick="openView('${blockers[0]}')">Open ${esc(viewDef(blockers[0]).label)}</button>`;
+    <button type="button" class="btn btn-ghost btn-sm" onclick="openView('${blockers[0]}')">Open ${esc(viewDef(blockers[0]).label)}</button>`;
   if (st.display === 'outdated') banner.textContent = 'A parent was re-approved since this was generated. Regenerate to match it.';
   const locked = st.display === 'locked';
-  el('vp-body').style.opacity = locked ? .5 : 1;
+  el('vp-body').style.opacity = locked ? .55 : 1;
   el('vp-source').innerHTML = [['crop', 'Crop & refine'], ['reference', 'Reference']].map(([m, l]) =>
     `<button type="button" class="chip" aria-pressed="${st.mode === m}" ${m === 'crop' && !v.parents.length ? 'disabled title="Only a photo built from another photo can be cropped"' : ''} onclick="saveView({mode:'${m}'})">${l}</button>`).join('');
   const parent = canonOf(v.parents[0]);
@@ -1068,7 +1389,7 @@ function renderViewPanel() {
   const own = images(v.key, 'reference');
   el('vp-refs').innerHTML = (pick.length
       ? `<button type="button" class="ref-pill" onclick="toggleRefPop(event)"><img src="${esc(canonOf(pick[0].key).url)}" alt="">${esc(pick[0].label)}${pick.length > 1 ? ` <b>+${pick.length - 1}</b>` : ''}</button>`
-      : `<span class="ch-muted" style="margin:0;">${approved.length ? 'No approved photo selected' : 'No approved photos yet'}</span>`) +
+      : `<span class="hint">${approved.length ? 'No approved photo selected' : 'No approved photos yet'}</span>`) +
     (approved.length ? `<button type="button" class="ref-add" aria-label="Choose reference photos" aria-expanded="${refPop}" onclick="toggleRefPop(event)">+</button>` : '') +
     own.map(refTile).join('') +
     (refPop ? `<div class="ref-pop" onclick="event.stopPropagation()">${approved.map(o => { const c = canonOf(o.key);
@@ -1089,22 +1410,23 @@ function renderViewPanel() {
   el('vp-opts').className = 'opts';
   el('vp-opts').innerHTML = opts.map((o, i) => {
     const age = (o.checks || {}).age, kept = o.role === 'canonical', worn = o.role === 'wardrobe';
-    const label = dressed ? `<span class="ch-muted" style="margin:4px 6px 0; display:block; font-size:0.72rem;">${esc(outfitLabel(o.outfit))}</span>` : '';
+    const label = dressed ? `<span class="opt-outfit">${esc(outfitLabel(o.outfit))}</span>` : '';
     const toWardrobe = dressed && main && main.id !== o.id && (main.outfit || '') !== (o.outfit || '');
-    return `<div class="opt ${kept || worn ? 'kept' : ''}" style="cursor:default;">
-      <img src="${esc(o.url)}" alt="${esc(v.label)} option" onclick="vpImgClick(event, ${i})" style="cursor:zoom-in;">${label}
-      ${kept ? `<div class="opt-act"><b class="st approved">${dressed ? 'Main' : 'Approved'}</b><i style="flex:1;"></i>
-        <button type="button" class="btn" onclick="removeApproved()">Unapprove</button></div>` : worn ? `<div class="opt-act">
-        <b class="st approved">Wardrobe</b><i style="flex:1;"></i>
-        <button type="button" class="btn" onclick="approveView('${o.id}', true)">Make main</button>
-        <button type="button" class="btn" onclick="unapproveView('${o.id}')">Unapprove</button></div>` : `<div class="opt-act">
-        <button type="button" class="btn btn-primary" ${locked ? 'disabled' : ''} onclick="approveView('${o.id}')">${toWardrobe ? 'Approve for ' + esc(outfitLabel(o.outfit)) : 'Approve'}</button>
-        ${v.key === 'body_front' ? `<button type="button" class="btn" onclick="runViewCheck('${o.id}')" title="Adult check">${age ? `<b class="tag ${age}">${age}</b>` : 'Check'}</button>` : ''}
-        <button type="button" class="btn" onclick="removeImage('${o.id}')">Delete</button></div>`}</div>`;
-  }).join('');
+    return `<div class="opt ${kept || worn ? 'kept' : ''}">
+      <img class="opt-zoom" src="${esc(o.url)}" alt="${esc(v.label)} option" onclick="vpImgClick(event, ${i})">${label}
+      ${kept ? `<div class="opt-act"><b class="st approved">${dressed ? 'Main' : 'Approved'}</b><span class="grow"></span>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="removeApproved()">Unapprove</button></div>` : worn ? `<div class="opt-act">
+        <b class="st approved">Wardrobe</b><span class="grow"></span>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="approveView('${o.id}', true)">Make main</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="unapproveView('${o.id}')">Unapprove</button></div>` : `<div class="opt-act">
+        <button type="button" class="btn btn-primary btn-sm" ${locked ? 'disabled' : ''} title="${toWardrobe ? 'Approve for ' + esc(outfitLabel(o.outfit)) : ''}" onclick="approveView('${o.id}')">${toWardrobe ? 'Add to wardrobe' : 'Approve'}</button>
+        ${v.key === 'body_front' ? `<button type="button" class="btn btn-ghost btn-sm" onclick="runViewCheck('${o.id}')" title="Adult check">${age ? `<b class="tag ${age}">${age}</b>` : 'Check'}</button>` : ''}
+        <button type="button" class="btn btn-ghost btn-sm" aria-label="Delete option" onclick="removeImage('${o.id}')">Delete</button></div>`}</div>`;
+  }).join('') || `<p class="hint">No options yet. Pick how many variations, then generate.</p>`;
   const gen = el('vp-var');
-  gen.textContent = (st.display === 'outdated' ? 'Regenerate ' : 'Generate ') + batch + cost(v.key, batch);
-  gen.className = 'btn' + (st.display === 'review' ? '' : ' btn-primary');
+  gen.textContent = (st.display === 'outdated' ? 'Regenerate ' : 'Generate ') + batch;
+  el('vp-quote').textContent = cost(v.key, batch);
+  gen.className = 'btn btn-sm ' + (st.display === 'review' ? 'btn-secondary' : 'btn-primary');
   gen.disabled = locked || st.display === 'generating';
   el('vp-batch').innerHTML = batchChips();
 }
@@ -1112,11 +1434,28 @@ let refPop = false;
 function toggleRefPop(e) { e.stopPropagation(); refPop = !refPop; renderViewPanel(); }
 document.addEventListener('click', () => { if (refPop) { refPop = false; renderViewPanel(); } });
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && refPop) { refPop = false; renderViewPanel(); } });
-function removeApproved() {
+async function removeApproved() {
   const v = viewDef(selView), kept = canonOf(selView);
-  if (kept && confirm(v.key === 'face_front'
+  if (kept && await askConfirm(v.key === 'face_front'
     ? 'Remove the approval from the face? Every other photo depends on it and will need approving again.'
-    : 'Remove the approval from ' + v.label + '? Photos built on it will need regenerating.')) unapproveView(kept.id);
+    : 'Remove the approval from ' + v.label + '? Photos built on it will need regenerating.', 'Remove approval')) unapproveView(kept.id);
+}
+// The app's own dialog rather than the browser's, which cannot be styled and
+// looks like a different product.
+function askConfirm(text, yes) {
+  return new Promise(res => {
+    const box = el('ch-confirm');
+    el('ch-confirm-body').textContent = text;
+    el('ch-confirm-yes').textContent = yes || 'Confirm';
+    box.hidden = false;
+    el('ch-confirm-no').focus();
+    const done = ok => { box.hidden = true; document.removeEventListener('keydown', key); res(ok); };
+    const key = e => { if (e.key === 'Escape') done(false); };
+    el('ch-confirm-yes').onclick = () => done(true);
+    el('ch-confirm-no').onclick = () => done(false);
+    box.onclick = e => { if (e.target === box) done(false); };
+    document.addEventListener('keydown', key);
+  });
 }
 // The number never reaches the model (Seedream refuses a denoise strength):
 // characters.build_view_prompt turns it into wording, so only the band matters.
@@ -1229,6 +1568,7 @@ function accepted() {
 }
 function acceptCharacter() {
   try { localStorage.setItem('ch-accepted:' + cur.id, String(cur.version)); } catch (e) {}
+  if (guided) return finishGuide();
   render();
 }
 function renderFinish() {
@@ -1237,16 +1577,16 @@ function renderFinish() {
   const urls = shots.map(v => canonOf(v.key).url);
   el('fin-shots').innerHTML = shots.map((v, i) => `<figure><img src="${esc(urls[i])}" alt="" onclick="openLightbox(finUrls, ${i})"><figcaption>${esc(v.label)}</figcaption></figure>`).join('');
   finUrls = urls;
-  el('fin-accept').textContent = ok ? 'Accepted ✓' : 'Accept character';
-  el('fin-accept').disabled = ok;
+  // Accepted is a success, so it reads as one rather than as a greyed button.
+  el('fin-accept-row').innerHTML = ok
+    ? `<span class="fin-accepted">✓ Accepted · version ${cur.version}</span>`
+    : `<button type="button" class="btn btn-primary" onclick="acceptCharacter()">Accept character</button>`;
   el('fin-next').classList.toggle('off', !ok);
   el('fin-persona').innerHTML = `<option value="">Not linked</option>` + personas.map(p =>
     `<option value="${esc(p.slug)}" ${cur.persona === p.slug ? 'selected' : ''}>${esc(p.name || p.slug)}</option>`).join('');
-  const a = el('fin-studio');
-  a.href = cur.persona ? '/studio?persona=' + encodeURIComponent(cur.persona) : '/studio';
   el('fin-studio-note').textContent = cur.persona
-    ? `Generate stills and clips as ${(personas.find(p => p.slug === cur.persona) || {}).name || cur.persona}, locked to this character.` : 'Link a persona first so the studio uses this character.';
-  a.style.opacity = cur.persona ? 1 : .45; a.style.pointerEvents = cur.persona ? '' : 'none';
+    ? `Generate photos as ${(personas.find(p => p.slug === cur.persona) || {}).name || cur.persona}, locked to this character.` : 'Link a persona first so the studio uses this character.';
+  el('fin-studio').disabled = !cur.persona;
 }
 let finUrls = [];
 
@@ -1276,7 +1616,7 @@ async function unapproveView(id) {
   catch (e) { say(e.message, 'err'); }
 }
 async function removeImage(id, confirmed) {
-  if (!confirmed && !confirm('Delete this image?')) return;
+  if (!confirmed && !(await askConfirm('Delete this image? This cannot be undone.', 'Delete'))) return;
   try { cur = (await api(`/api/characters/${cur.id}/images/${id}`, {method: 'DELETE'})).character; render(); }
   catch (e) { say(e.message, 'err'); }
 }
@@ -1297,10 +1637,19 @@ async function uploadFiles(input) {
   await reload(); say(files.length + ' uploaded.', 'ok');
 }
 
+// A lost image is swapped for a labelled box only inside a photo tile; small
+// thumbnails just empty out, and the images the code looks up by id stay put.
 document.addEventListener('error', e => {
-  if (e.target.tagName !== 'IMG' || !e.target.closest('#edit-view')) return;
-  e.target.replaceWith(Object.assign(document.createElement('div'), {className: 'img-missing', textContent: 'Image missing'}));
+  const img = e.target;
+  if (img.tagName !== 'IMG' || !img.closest('#edit-view') || !img.getAttribute('src')) return;
+  if (!img.id && img.closest('.opt, .fin-shots figure')) {
+    img.replaceWith(Object.assign(document.createElement('div'), {className: 'img-missing', textContent: 'Image missing'}));
+  } else img.style.visibility = 'hidden';
 }, true);
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && !el('drawer').hidden && !el('drawer-scrim').hidden
+      && !matchMedia('(min-width: 1320px)').matches && el('lightbox').hidden && el('ch-confirm').hidden) closeDrawer();
+});
 (async function init() {
   try {
     const list = await (await fetch('/api/personas')).json();
@@ -1310,13 +1659,13 @@ document.addEventListener('error', e => {
   try {
     if (q.get('persona') && q.get('new')) return await newCharacter(q.get('persona'));
     if (q.get('id')) return await openCharacter(q.get('id'));
-  } catch (e) { alert(e.message); }
+  } catch (e) { listNote = e.message; }
   loadList();
 })();
 </script>
-<div class="gen-overlay" id="gen-overlay" hidden>
-  <div class="gen-box" role="status" aria-live="polite">
-    <div class="spinner" aria-hidden="true"></div>
+<div class="modal-overlay ch-busy" id="gen-overlay" hidden>
+  <div class="modal" role="status" aria-live="polite">
+    <span class="loader-dots lg" aria-hidden="true"><i></i><i></i><i></i></span>
     <strong id="gen-title">Generating…</strong>
     <p>This usually takes under a minute. Keep this page open.</p>
   </div>
