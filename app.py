@@ -28765,6 +28765,24 @@ def _gen_identity(slug, body, spec):
     return identity
 
 
+def _gen_identity_source(slug, body, spec):
+    """The studio's step 2 choice for a still or a multi-reference clip: her
+    linked character or the face and body slots, never both. A request that
+    names neither is an older client or the character builder, and keeps
+    sending both."""
+    identity = (body.get('identity') or '').strip().lower()
+    if identity == 'vault':
+        spec['identity'] = identity
+    elif identity == 'character':
+        char = _character_snapshot(slug)
+        if not char:
+            raise imagegen.GenerationError(
+                'Approve a view of her character first, or pick face and body photos.')
+        spec['identity'] = identity
+        spec['character'] = char
+        spec['reference_media'] = ''
+
+
 def _gen_video_model(job, level, asked):
     """The model a video job runs on.
 
@@ -28911,6 +28929,7 @@ def _gen_spec(slug, body, user):
         # with two sources is one that drifts. Identity carries no add-on now —
         # Seedream conditions on the reference inside the call it already bills.
         spec['explicit'] = imagegen.SHOT_LEVEL.get(shot, 'sfw') != 'sfw'
+        _gen_identity_source(slug, body, spec)
         return spec
 
     # ── Video ────────────────────────────────────────────────────────────────
@@ -29041,6 +29060,7 @@ def _gen_spec(slug, body, user):
             raise imagegen.GenerationError(
                 'Pick at least one scene or outfit photo to place her in.')
         spec['scene_media'] = kept
+        _gen_identity_source(slug, body, spec)
     elif not spec['reference_media']:
         raise imagegen.GenerationError(
             'Pick an approved photo to animate — a clip starts from one.')
@@ -30584,14 +30604,15 @@ def api_generate_prompt():
         spec = _gen_spec(slug, body, user)
     except (imagegen.GenerationError, CR.PricingError) as e:
         return jsonify({'ok': False, 'error': str(e)[:300]}), 400
-    char = _character_snapshot(slug)
+    char = spec.get('character') or (
+        None if spec.get('identity') == 'vault' else _character_snapshot(slug))
     if char:
         spec['character'] = char
     # Whether the job would carry a reference, without signing any URLs: the
     # lead sentence differs, and that is all this needs to know.
     has_ref = bool(spec.get('reference_media')) or bool(
         char and CH.snapshot_views(char, spec.get('shot'), spec.get('scene')))
-    if not has_ref:
+    if not has_ref and spec.get('identity') != 'character':
         from db import model_references
         s = _db_session()
         try:
@@ -30711,9 +30732,10 @@ def _gen_start(job_id, slug, spec, workspace):
                 call['prompt'] = spec['prompt']
                 provider_job, result = provider.submit_image(call)
             elif spec['kind'] == 'image':
-                char_refs = _character_content(spec)[0]
-                refs = (char_refs + _gen_reference_urls(slug, spec.get('model'))
-                        )[:imagegen.MAX_REFERENCES]
+                refs = _character_content(spec)[0]
+                if spec.get('identity') != 'character':
+                    refs = refs + _gen_reference_urls(slug, spec.get('model'))
+                refs = refs[:imagegen.MAX_REFERENCES]
                 if refs:
                     call['reference_urls'] = refs
                 call['prompt'] = _gen_image_prompt(slug, spec, bool(ref_b64 or refs))
@@ -30771,9 +30793,10 @@ def _gen_start(job_id, slug, spec, workspace):
                         raise imagegen.GenerationError(
                             'Those scene photos are no longer in the vault.')
                     call['scene_urls'] = scenes
-                    refs = _gen_reference_urls(slug, spec.get('model'))
-                    if not refs:
-                        refs = _gen_reference_urls(slug, imagegen.EXPLICIT_MODEL)
+                    refs = []
+                    if spec.get('identity') != 'character':
+                        refs = (_gen_reference_urls(slug, spec.get('model'))
+                                or _gen_reference_urls(slug, imagegen.EXPLICIT_MODEL))
                     if spec.get('character'):
                         refs = (_character_urls(spec['character'], None, None)
                                 + refs)[:imagegen.MAX_REFERENCES]

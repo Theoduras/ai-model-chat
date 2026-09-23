@@ -326,18 +326,27 @@
         <div class="gen-head"><b>2</b><h2>Character</h2></div>
         <label class="gen-f"><span>Whose photos are we generating?</span>
           <select id="persona" onchange="loadPersona()"></select></label>
-        <div class="gen-f">
-          <span>Her face <small id="gen-face-count"></small></span>
-          <div class="gen-refs" id="gen-refs"></div>
-          <input type="hidden" id="gen-ref">
+        <div class="gen-f" id="gen-identity-src" style="display:none"><span>Her look comes from</span>
+          <div class="gen-chips" style="margin:0;">
+            <button type="button" class="gen-chip" id="gen-src-character" onclick="setIdentitySrc('character')">Her character</button>
+            <button type="button" class="gen-chip" id="gen-src-vault" onclick="setIdentitySrc('vault')">Face &amp; body photos</button>
+          </div>
+          <span class="hint" id="gen-identity-note" style="margin:0;"></span>
         </div>
-        <div class="gen-f">
-          <span>Her body <small id="gen-body-count"></small></span>
-          <div class="gen-refs" id="gen-refs-body"></div>
-          <span class="hint" id="gen-refs-note" style="margin:0;"></span>
-        </div>
-        <span class="hint" id="persona-hint" style="margin:0;"></span>
         <div class="note-box" id="gen-character" hidden></div>
+        <div id="gen-refs-wrap" style="display:flex; flex-direction:column; gap:11px;">
+          <div class="gen-f">
+            <span>Her face <small id="gen-face-count"></small></span>
+            <div class="gen-refs" id="gen-refs"></div>
+          </div>
+          <div class="gen-f">
+            <span>Her body <small id="gen-body-count"></small></span>
+            <div class="gen-refs" id="gen-refs-body"></div>
+            <span class="hint" id="gen-refs-note" style="margin:0;"></span>
+          </div>
+        </div>
+        <input type="hidden" id="gen-ref">
+        <span class="hint" id="persona-hint" style="margin:0;"></span>
       </div>
 
       <div class="gen-panel">
@@ -699,7 +708,9 @@ async function loadCharacterBadge() {
   } catch (e) {}
   genCharacter = c;
   if (genJob === 'reel' || genJob === 'swap') renderGenForm();
-  box.hidden = !c;
+  const was = genIdentity;
+  renderIdentitySrc();
+  if (genIdentity !== was) renderRefs();
   if (!c) return;
   const views = c.shot_views || [];
   const sent = views.filter(v => v.approved);
@@ -715,8 +726,41 @@ document.addEventListener('change', e => {
   if (e.target && (e.target.id === 'gen-shot' || e.target.id === 'gen-scene')) loadCharacterBadge();
 });
 
+// A linked character and the face/body slots are two answers to one question,
+// so the creator picks one and only that one is sent. The character is the
+// default once it has an approved view, until she picks for herself.
+let genIdentity = 'vault';
+let genIdentityTouched = false;
+
+function setIdentitySrc(v) {
+  genIdentity = v;
+  genIdentityTouched = true;
+  renderIdentitySrc();
+  renderRefs();
+  checkPromptStale();
+}
+
+function renderIdentitySrc() {
+  const c = genCharacter;
+  const has = !!(c && c.has_approved);
+  if (!has) genIdentity = 'vault';
+  else if (!genIdentityTouched) genIdentity = 'character';
+  const useChar = genIdentity === 'character';
+  el('gen-identity-src').style.display = c ? '' : 'none';
+  el('gen-src-character').disabled = !has;
+  el('gen-src-character').setAttribute('aria-pressed', String(useChar));
+  el('gen-src-vault').setAttribute('aria-pressed', String(!useChar));
+  el('gen-identity-note').innerHTML = !c ? ''
+    : !has ? `Nothing approved on ${esc(c.name)} yet — <a href="/characters?id=${esc(c.id)}">approve a view</a> to use her character.`
+    : useChar ? `Her approved views and features from the character builder.`
+    : 'Only the photos you pick below — her character is left out.';
+  el('gen-character').hidden = !useChar;
+  el('gen-refs-wrap').style.display = useChar ? 'none' : 'flex';
+}
+
 async function loadPersona() {
   if (!slug()) return;
+  genIdentityTouched = false;
   try {
     const d = await (await fetch('/api/personas/' + encodeURIComponent(slug()) + '/media')).json();
     mediaVault = d.vault || [];
@@ -1031,7 +1075,7 @@ function renderRefs() {
 
   // The first face photo also rides this job on its own, which is what the
   // engine line and the quote read.
-  el('gen-ref').value = genRefs.face[0] || '';
+  el('gen-ref').value = genIdentity === 'character' ? '' : (genRefs.face[0] || '');
   genQuote();
 }
 
@@ -1401,10 +1445,12 @@ function showEngines() {
   }
   const e = (genExplicit() ? genEngines.nsfw : genEngines.sfw) || {};
   const rows = [['Image', e.model, e.passes === 1 ? 'one pass' : '']];
-  if (el('gen-ref').value) {
+  if (genIdentity === 'character') {
+    rows.push(['Her character', e.identity || 'reference images', 'approved views, same call']);
+  } else if (el('gen-ref').value) {
     rows.push(['Her face', e.identity || 'reference images', 'inside the same call, at no extra cost']);
   }
-  if (genRefs.body.length) {
+  if (genIdentity !== 'character' && genRefs.body.length) {
     rows.push(['Her body', e.identity || 'reference images',
                `${genRefs.body.length} reference${genRefs.body.length === 1 ? '' : 's'}, same call`]);
   }
@@ -1803,6 +1849,7 @@ function promptChoices() {
     lighting: el('gen-lighting').value,
     direction: el('gen-direction').value.trim(),
     reference_media: el('gen-ref').value || '',
+    identity: genIdentity,
   };
 }
 
@@ -1975,6 +2022,7 @@ async function runGeneration() {
         resolution: el('gen-res').value,
         batch: parseInt(el('gen-batch').value || '1', 10),
         reference_media: el('gen-ref').value || '',
+        identity: genIdentity,
         prompt: el('gen-prompt').value.trim(),
         prompt_mode: el('gen-prompt').value.trim() ? 'full' : '',
         negative: el('gen-negative').value.trim(),
@@ -2028,6 +2076,7 @@ async function jobPayload() {
   if (genJob === 'multiref') {
     return Object.assign(base, {
       scene_media: genSceneRefs.slice(),
+      identity: genIdentity,
       motion: (el('gen-multiref-motion').value || '').trim(),
     });
   }
