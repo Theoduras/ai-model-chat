@@ -103,6 +103,13 @@
   <div class="modal" style="max-width:960px; width:100%; height:90vh; padding:0; position:relative; overflow:hidden;">
     <button class="modal-close" onclick="closePayModal()" aria-label="Close" style="position:absolute; top:8px; right:10px; z-index:1;">&times;</button>
     <iframe id="pay-frame" class="sb-frame" title="Tokens and plans"></iframe>
+    <div id="pay-success" style="display:none; height:100%; flex-direction:column; align-items:center; justify-content:center; gap:10px; text-align:center;">
+      <div style="font-size:44px;">🎉</div>
+      <div style="font-size:22px; font-weight:700;">Payment successful</div>
+      <div id="pay-added" style="opacity:.75;"></div>
+      <div id="pay-count" style="font-size:56px; font-weight:800; font-variant-numeric:tabular-nums;">0</div>
+      <div style="opacity:.6;">tokens</div>
+    </div>
   </div>
 </div>
 
@@ -1405,8 +1412,9 @@ function restoreView() {
   const open = new URLSearchParams(location.search).get('open') || '';
   if (PAY_PATHS.includes(open.split('?')[0])) {
     history.replaceState(null, '', location.pathname);
-    openPayModal(open);
-    if (new URL(open, location.origin).searchParams.get('topup')) setTimeout(closePayModal, 4000);
+    const added = +new URL(open, location.origin).searchParams.get('topup') || 0;
+    if (added) showTopupSuccess(added);
+    else openPayModal(open);
     return false;
   }
   const openEl = /^\/[a-z]/.test(open) && viewEl(open);
@@ -1459,6 +1467,32 @@ function closePayModal() {
   document.getElementById('pay-frame').src = 'about:blank';
 }
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closePayModal(); });
+
+// After a paid top-up: a success note and the balance counting up to its new value.
+function showTopupSuccess(added) {
+  const m = document.getElementById('pay-modal');
+  const box = document.getElementById('pay-success');
+  const num = document.getElementById('pay-count');
+  document.getElementById('pay-frame').style.display = 'none';
+  box.style.display = 'flex';
+  document.getElementById('pay-added').textContent = '+' + added.toLocaleString() + ' tokens added';
+  m.classList.add('open');
+  fetch('/api/tokens/balance', { credentials: 'same-origin' })
+    .then(r => r.json()).catch(() => ({}))
+    .then(d => {
+      const end = d.balance != null ? d.balance : added, start = Math.max(0, end - added), t0 = performance.now();
+      (function step(t) {
+        const k = Math.min(1, (t - t0) / 1800);
+        num.textContent = Math.round(start + (end - start) * (1 - Math.pow(1 - k, 3))).toLocaleString();
+        if (k < 1) requestAnimationFrame(step);
+        else setTimeout(() => {
+          closePayModal();
+          box.style.display = 'none';
+          document.getElementById('pay-frame').style.display = '';
+        }, 2200);
+      })(t0);
+    });
+}
 
 // Opens a link inside the workspace when the sidebar offers it; anything else
 // (log out, the public pricing page) leaves the dashboard.
