@@ -49,6 +49,15 @@
 <div class="mobile-overlay" id="mobile-overlay" onclick="closeMobilePanels()"></div>
 
 <!-- Settings Modal -->
+<div class="modal-overlay" id="vault-pick-modal" onclick="if(event.target===this)this.classList.remove('open')">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>Pick from the vault</h2>
+      <button class="modal-close" onclick="document.getElementById('vault-pick-modal').classList.remove('open')" aria-label="Close">×</button>
+    </div>
+    <div class="vault-pick-grid" id="vault-pick-grid"></div>
+  </div>
+</div>
 <div class="modal-overlay" id="settings-modal" onclick="if(event.target===this)closeSettings()">
   <div class="modal">
     <div class="modal-header">
@@ -2003,8 +2012,7 @@ function renderForm(slug, cfg) {
       <div class="section-title" style="flex-wrap:wrap;">
         <span style="margin-right:auto;">Photos <span style="font-weight:400; color:var(--text-muted); font-size:0.8rem;">(up to 5 — same person)</span></span>
         <span style="display:flex; gap:6px;">
-          <button type="button" class="btn-ai" id="gen-face-btn" onclick="generateFirstPhoto()" title="Generate a new fictional face">✨ New face</button>
-          <button type="button" class="btn-ai btn-ai-secondary" id="gen-more-btn" onclick="generateMorePhotos()" title="Add more shots of the same person">＋ More of her</button>
+          <button type="button" class="btn btn-ghost" onclick="openVaultPicker(false)" title="Pick from the vault">From vault</button>
           <button type="button" class="btn btn-ghost" onclick="document.getElementById('photo-file-input').click()" title="Upload your own photo">Upload</button>
           <button type="button" class="btn-section-save" style="margin-left:0;" onclick="savePhotosSection(this)">Save</button>
         </span>
@@ -2012,15 +2020,14 @@ function renderForm(slug, cfg) {
       <div class="photo-grid" id="photo-grid"></div>
       <input type="file" id="photo-file-input" accept="image/*" multiple style="display:none;" onchange="onPhotoFiles(event)">
       <span class="hint" id="photo-status"></span>
-      <span class="hint" style="margin-top:2px;">First photo creates a fictional face; "More of her" keeps the same person in new shots. Photos save to the database on Save.</span>
+      <span class="hint" style="margin-top:2px;">Pick from the vault or upload; uploads are also added to the vault. Photos save on Save.</span>
     </div>
 
     <div class="form-section">
       <div class="section-title" style="flex-wrap:wrap;">
         <span style="margin-right:auto;">NSFW Photos <span style="font-weight:400; color:var(--text-muted); font-size:0.8rem;">(up to 5 — held back until the CTA)</span></span>
         <span style="display:flex; gap:6px;">
-          <button type="button" class="btn-ai" id="gen-nsfw-face-btn" onclick="generateNsfwFirstPhoto()" title="Generate a new suggestive shot">✨ New face</button>
-          <button type="button" class="btn-ai btn-ai-secondary" id="gen-nsfw-more-btn" onclick="generateNsfwMorePhotos()" title="Add more shots of the same person">＋ More of her</button>
+          <button type="button" class="btn btn-ghost" onclick="openVaultPicker(true)" title="Pick from the vault">From vault</button>
           <button type="button" class="btn btn-ghost" onclick="document.getElementById('nsfw-photo-file-input').click()" title="Upload your own photo">Upload</button>
           <button type="button" class="btn-section-save" style="margin-left:0;" onclick="saveNsfwPhotosSection(this)">Save</button>
         </span>
@@ -2730,59 +2737,53 @@ async function loadGallery(slug) {
 
 function removePhoto(i) { galleryImages.splice(i, 1); renderGallery(); }
 
+function addToVault(image, mime, rating) {
+  if (!currentSlug) return;
+  fetch('/api/personas/' + currentSlug + '/media', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ image, mime, rating })
+  }).catch(() => {});
+}
+
+async function openVaultPicker(nsfw) {
+  if (!currentSlug) return;
+  const ov = document.getElementById('vault-pick-modal');
+  const grid = document.getElementById('vault-pick-grid');
+  grid.innerHTML = '<span class="hint">Loading…</span>';
+  ov.classList.add('open');
+  let items = [];
+  try {
+    const data = await (await fetch('/api/personas/' + currentSlug + '/media')).json();
+    items = (data.vault || []).filter(m =>
+      (m.kind || 'image') === 'image' && ((m.rating === 'nsfw') === nsfw));
+  } catch (e) {}
+  if (!items.length) { grid.innerHTML = '<span class="hint">No ' + (nsfw ? 'NSFW ' : '') + 'photos in the vault yet.</span>'; return; }
+  grid.innerHTML = '';
+  items.forEach(m => {
+    const img = document.createElement('img');
+    img.src = m.thumb; img.loading = 'lazy'; img.className = 'vault-pick-item';
+    img.onclick = async () => {
+      const list = nsfw ? nsfwGalleryImages : galleryImages;
+      if (list.length >= MAX_PHOTOS) { ov.classList.remove('open'); return; }
+      const blob = await (await fetch(m.thumb)).blob();
+      const url = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob); });
+      list.push(url);
+      nsfw ? renderNsfwGallery() : renderGallery();
+      img.style.opacity = '.35'; img.onclick = null;
+    };
+    grid.appendChild(img);
+  });
+}
+
 function onPhotoFiles(ev) {
   const files = Array.from(ev.target.files || []);
   let remaining = MAX_PHOTOS - galleryImages.length;
   files.slice(0, remaining).forEach(file => {
     const reader = new FileReader();
-    reader.onload = e => { if (galleryImages.length < MAX_PHOTOS) { galleryImages.push(e.target.result); renderGallery(); } };
+    reader.onload = e => { addToVault(e.target.result, file.type, 'sfw'); if (galleryImages.length < MAX_PHOTOS) { galleryImages.push(e.target.result); renderGallery(); } };
     reader.readAsDataURL(file);
   });
   ev.target.value = '';
-}
-
-async function generateFirstPhoto() {
-  if (galleryImages.length >= MAX_PHOTOS) { setPhotoStatus('Max 5 photos.', false); return; }
-  const btn = document.getElementById('gen-face-btn');
-  if (btn) btn.disabled = true;
-  setPhotoBusy(true, 'Generating a new face…');
-  setPhotoStatus('Generating a new face…', null);
-  try {
-    const res = await fetch('/api/generate/image', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ config: collectConfig(), shot: 'portrait' })
-    });
-    const data = await res.json();
-    if (!data.ok) throw new Error(data.error || 'Generation failed');
-    galleryImages.push(data.image); renderGallery();
-    setPhotoStatus('✓ Face added — use "More of her" for matching shots', true);
-  } catch(e) { setPhotoStatus('✗ ' + e.message, false); }
-  finally { setPhotoBusy(false); if (btn) btn.disabled = false; }
-}
-
-async function generateMorePhotos() {
-  if (!galleryImages.length) { setPhotoStatus('Make a face first with "New face".', false); return; }
-  if (galleryImages.length >= MAX_PHOTOS) { setPhotoStatus('Max 5 photos.', false); return; }
-  const btn = document.getElementById('gen-more-btn');
-  if (btn) btn.disabled = true;
-  const shots = ['half', 'full', 'candid', 'mirror'];
-  const reference = galleryImages[0];
-  try {
-    while (galleryImages.length < MAX_PHOTOS) {
-      const shot = shots[(galleryImages.length - 1) % shots.length];
-      setPhotoBusy(true, 'Generating photo ' + (galleryImages.length + 1) + ' of the same person…');
-      setPhotoStatus('Generating photo ' + (galleryImages.length + 1) + ' of the same person…', null);
-      const res = await fetch('/api/generate/image', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reference, shot, config: collectConfig() })
-      });
-      const data = await res.json();
-      if (!data.ok) throw new Error(data.error || 'Generation failed');
-      galleryImages.push(data.image); renderGallery();
-    }
-    setPhotoStatus('✓ Photo set complete', true);
-  } catch(e) { setPhotoStatus('✗ ' + e.message, false); }
-  finally { setPhotoBusy(false); if (btn) btn.disabled = false; }
 }
 
 function setPhotoStatus(msg, ok) {
@@ -2864,54 +2865,10 @@ function onNsfwPhotoFiles(ev) {
   let remaining = MAX_PHOTOS - nsfwGalleryImages.length;
   files.slice(0, remaining).forEach(file => {
     const reader = new FileReader();
-    reader.onload = e => { if (nsfwGalleryImages.length < MAX_PHOTOS) { nsfwGalleryImages.push(e.target.result); renderNsfwGallery(); } };
+    reader.onload = e => { addToVault(e.target.result, file.type, 'nsfw'); if (nsfwGalleryImages.length < MAX_PHOTOS) { nsfwGalleryImages.push(e.target.result); renderNsfwGallery(); } };
     reader.readAsDataURL(file);
   });
   ev.target.value = '';
-}
-
-async function generateNsfwFirstPhoto() {
-  if (nsfwGalleryImages.length >= MAX_PHOTOS) { setNsfwPhotoStatus('Max 5 photos.', false); return; }
-  const btn = document.getElementById('gen-nsfw-face-btn');
-  if (btn) btn.disabled = true;
-  setNsfwPhotoBusy(true, 'Generating a new shot…');
-  setNsfwPhotoStatus('Generating a new shot…', null);
-  try {
-    const res = await fetch('/api/generate/image', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ config: collectConfig(), shot: 'lingerie' })
-    });
-    const data = await res.json();
-    if (!data.ok) throw new Error(data.error || 'Generation failed');
-    nsfwGalleryImages.push(data.image); renderNsfwGallery();
-    setNsfwPhotoStatus('✓ Shot added — use "More of her" for matching shots', true);
-  } catch(e) { setNsfwPhotoStatus('✗ ' + e.message, false); }
-  finally { setNsfwPhotoBusy(false); if (btn) btn.disabled = false; }
-}
-
-async function generateNsfwMorePhotos() {
-  if (!nsfwGalleryImages.length) { setNsfwPhotoStatus('Make a face first with "New face".', false); return; }
-  if (nsfwGalleryImages.length >= MAX_PHOTOS) { setNsfwPhotoStatus('Max 5 photos.', false); return; }
-  const btn = document.getElementById('gen-nsfw-more-btn');
-  if (btn) btn.disabled = true;
-  const shots = ['implied', 'sheer', 'bedroom', 'lingerie'];
-  const reference = nsfwGalleryImages[0];
-  try {
-    while (nsfwGalleryImages.length < MAX_PHOTOS) {
-      const shot = shots[(nsfwGalleryImages.length - 1) % shots.length];
-      setNsfwPhotoBusy(true, 'Generating photo ' + (nsfwGalleryImages.length + 1) + ' of the same person…');
-      setNsfwPhotoStatus('Generating photo ' + (nsfwGalleryImages.length + 1) + ' of the same person…', null);
-      const res = await fetch('/api/generate/image', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reference, shot, config: collectConfig() })
-      });
-      const data = await res.json();
-      if (!data.ok) throw new Error(data.error || 'Generation failed');
-      nsfwGalleryImages.push(data.image); renderNsfwGallery();
-    }
-    setNsfwPhotoStatus('✓ Photo set complete', true);
-  } catch(e) { setNsfwPhotoStatus('✗ ' + e.message, false); }
-  finally { setNsfwPhotoBusy(false); if (btn) btn.disabled = false; }
 }
 
 function setNsfwPhotoStatus(msg, ok) {

@@ -3899,3 +3899,7 @@ body.embedding .form-area { padding: 0; overflow: hidden; }
 .pl-attached-dl { left: -6px; }
 .pl-attached-x:hover { color: var(--err); border-color: var(--err); }
 .pl-attached-dl:hover { color: var(--text); }
+
+.vault-pick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 10px; max-height: 60vh; overflow-y: auto; }
+.vault-pick-item { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border-radius: var(--r-sm); border: 1px solid var(--border); cursor: pointer; transition: border-color .15s; }
+.vault-pick-item:hover { border-color: var(--accent); }
