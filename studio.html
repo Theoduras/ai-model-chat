@@ -274,8 +274,8 @@
 
   <div class="note-box" id="intro">
     Internal testing surface for NSFW photo and video generation. It is not offered
-    to creators yet, and an admin account generates on <b>unlimited credits</b> — the
-    credit and cash prices shown are what a creator's plan would be charged.
+    to creators yet, and an admin account generates on <b>unlimited tokens</b> — the
+    token and cash prices shown are what a creator's plan would be charged.
   </div>
 
   <div class="gen-toggles">
@@ -546,11 +546,11 @@ function esc(s){ return (s||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','
 function slug(){ return (el('persona')||{}).value || ''; }
 
 // Every control quotes its own price before it is clicked: a button that spends
-// credits without saying how many is the one thing this panel must not be.
+// tokens without saying how many is the one thing this panel must not be.
 let genPrices = null;      // the server's price table
 let genEngines = null;     // which provider model is behind each picker entry
-let genCredits = null;     // null = unlimited, which is every admin
-let genRate = null;        // what a credit costs this tier in cash
+let genTokens = null;     // null = unlimited, which is every admin
+let genRate = null;        // what a token costs, in the creator's currency
 let genCosts = null;       // what the provider bills us — admin only, null otherwise
 let genAllowedShots = [];  // resolved server side from the persona's NSFW level
 let genScenes = [];        // scene builder vocabulary, already gated server side
@@ -606,19 +606,19 @@ async function init() {
 
 async function loadCredits() {
   try {
-    const res = await fetch('/api/credits');
+    const res = await fetch('/api/tokens');
     if (!res.ok) return;
     const d = await res.json();
     genPrices = d.prices;
     genEngines = d.engines || null;
-    genRate = d.credit_rate || null;
+    genRate = d.token_rate || null;
     genCosts = d.provider_costs || null;
-    genCredits = d.unlimited ? null : d.balance;
+    genTokens = d.unlimited ? null : d.balance;
     const e = el('gen-balance');
     if (e) {
       e.textContent = d.unlimited
-        ? 'Unlimited credits — admin'
-        : `${d.balance.toLocaleString()} credits${cashFor(d.balance) ? ' (' + cashFor(d.balance) + ')' : ''} — about ${d.equivalents.photos.toLocaleString()} photos or ${d.equivalents.clips} clips`;
+        ? 'Unlimited tokens — admin'
+        : `${d.balance.toLocaleString()} token${d.balance === 1 ? '' : 's'}${cashFor(d.balance) ? ' (' + cashFor(d.balance) + ')' : ''} — about ${d.equivalents.photos.toLocaleString()} photos or ${d.equivalents.clips} clips`;
     }
   } catch (e) {}
 }
@@ -808,7 +808,7 @@ function videoModelChips(box, note) {
       (el('gen-vres') || {}).value || genPrices.defaults.video_resolution;
     const rate = ((genPrices.video_rates || {})[m] || {})[rung] || videoPerSecond(m, rung);
     box.innerHTML = `<button type="button" class="gen-chip" aria-pressed="true" disabled>` +
-      `<span>${esc(videoLabel(m))}</span>` + (rate ? `<small>${Math.round(rate)} cr/s</small>` : '') +
+      `<span>${esc(videoLabel(m))}</span>` + (rate ? `<small>${rate.toFixed(1)} tk/s</small>` : '') +
       `</button>`;
     if (note) note.textContent =
       `${videoLabel(m)} is the only model that takes a clip, so a swap always runs on it.`;
@@ -1221,8 +1221,8 @@ function renderAudioModes() {
     note.textContent = !genAudio.mode
       ? 'No sound. Nothing is added to the price.'
       : genAudio.mode === 'speech'
-        ? `Her voice comes from her persona, not from here. ${cost || 0} credits a clip.`
-        : `${cost || 0} credits a clip, whatever its length. A model that cannot make sound still returns the clip.`;
+        ? `Her voice comes from her persona, not from here. ${cost || 0} tokens a clip.`
+        : `${cost || 0} tokens a clip, whatever its length. A model that cannot make sound still returns the clip.`;
   }
 }
 
@@ -1314,7 +1314,7 @@ function showEngines() {
   ).join('<br>');
 }
 
-// The provider's own bill, not a credit price: credits round up twice on the
+// The provider's own bill, not a token price: tokens round up twice on the
 // way from cost, so they cannot be read back as what a generation cost us.
 function providerCost() {
   if (!genCosts) return null;
@@ -1351,17 +1351,15 @@ function setProviderCost() {
   const c = providerCost();
   row.style.display = c ? 'flex' : 'none';
   if (!c) return;
-  const eur = genRate && genRate.eur_per_usd
-    ? ' · \u20ac' + (c.usd * genRate.eur_per_usd).toFixed(2) : '';
   el('gen-paid').textContent =
-    '$' + c.usd.toFixed(2) + eur + (c.measured ? '' : ' (estimate)');
+    '$' + c.usd.toFixed(2) + (c.measured ? '' : ' (estimate)');
 }
 
-function setMoney(credits) {
+function setMoney(tokens) {
   setProviderCost();
-  const cash = cashFor(credits);
+  const cash = cashFor(tokens);
   el('gen-money-what').textContent = !cash ? ''
-    : genCredits === null ? "What a creator's plan pays" : 'In money';
+    : genTokens === null ? "What a creator's plan pays" : 'In money';
   el('gen-money').textContent = cash;
 }
 
@@ -1400,7 +1398,7 @@ function swapMaxSeconds() {
 
 // A swap is priced per second at its own rung, both of which the server
 // measured off the file. Nothing the panel sends can change either.
-function audioCredits() {
+function audioTokens() {
   return genAudio.mode ? (((genPrices && genPrices.addons) || {}).audio || 0) : 0;
 }
 
@@ -1408,7 +1406,9 @@ function swapPrice() {
   if (!genSwap) return undefined;
   const rates = ((genPrices && genPrices.video_rates) || {})[swapModel()] || {};
   const rate = rates[swapResolution()];
-  return rate ? rate * swapSeconds() + audioCredits() : undefined;
+  // One ceil for the whole clip, exactly as credits.video_price does --
+  // rounding per second here would quote more than the server charges.
+  return rate ? Math.ceil(rate * swapSeconds()) + audioTokens() : undefined;
 }
 
 // Every whole second the model takes, since a swap is priced per second.
@@ -1550,7 +1550,7 @@ function renderSwapForm() {
   el('gen-swap-meta').textContent =
     `Your clip: ${genSwap.seconds}s, ${genSwap.resolution} ` +
     `(${genSwap.width}×${genSwap.height})${trimmed}` +
-    (total === undefined ? '' : ` — ${total} credits${cash ? ', ' + cash : ''}`);
+    (total === undefined ? '' : ` — ${total} token${total === 1 ? '' : 's'}${cash ? ', ' + cash : ''}`);
 }
 
 // Only to catch a long clip before the upload rather than after it; the
@@ -1715,8 +1715,8 @@ function genQuote() {
     btn.disabled = !!blocked;
     btn.textContent = (blocked || total === undefined)
       ? (blocked || 'Upload a clip first')
-      : `Swap her in · ${total} credit${total === 1 ? '' : 's'}` + (cash ? ` · ${cash}` : '');
-    btn.classList.toggle('gen-low', genCredits !== null && genCredits < (total || 0));
+      : `Swap her in · ${total} token${total === 1 ? '' : 's'}` + (cash ? ` · ${cash}` : '');
+    btn.classList.toggle('gen-low', genTokens !== null && genTokens < (total || 0));
     showEngines();
     return total;
   }
@@ -1725,7 +1725,7 @@ function genQuote() {
     const resv = (el('gen-vres') || {}).value || genPrices.defaults.video_resolution;
     const secs = videoSecondsNow();
     const rates = (genPrices.video_rates || {})[videoModelNow()] || {};
-    const per = rates[resv] ? rates[resv] * secs + audioCredits() : undefined;
+    const per = rates[resv] ? Math.ceil(rates[resv] * secs) + audioTokens() : undefined;
     const btn = el('gen-run-btn');
     const shape = aspectOffered() ? `, ${currentAspect()}` : '';
     if (what) {
@@ -1740,9 +1740,9 @@ function genQuote() {
     const blocked = jobBlocker();
     btn.disabled = !!blocked;
     btn.textContent = blocked ||
-      `${JOB_VERBS[genJob] || 'Generate'} · ${per} credit${per === 1 ? '' : 's'}` +
+      `${JOB_VERBS[genJob] || 'Generate'} · ${per} token${per === 1 ? '' : 's'}` +
       (cash ? ` · ${cash}` : '');
-    btn.classList.toggle('gen-low', genCredits !== null && genCredits < (per || 0));
+    btn.classList.toggle('gen-low', genTokens !== null && genTokens < (per || 0));
     el('gen-video-note').textContent = genDrive
       ? `Her photo will perform that clip's motion, for its whole ${genDrive.seconds}s.`
       : 'An animate always starts from a photo that is already kept, so its '
@@ -1768,25 +1768,24 @@ function genQuote() {
     what.textContent = `${batch} photo${batch === 1 ? '' : 's'}, ` +
       (GEN_RES_LABELS[el('gen-res').value] || el('gen-res').value);
   }
-  if (cost) cost.textContent = `${total} credit${total === 1 ? '' : 's'}`;
+  if (cost) cost.textContent = `${total} token${total === 1 ? '' : 's'}`;
   setMoney(total);
   const cash = cashFor(total);
-  el('gen-run-btn').textContent = `Generate · ${total} credit${total === 1 ? '' : 's'}` +
+  el('gen-run-btn').textContent = `Generate · ${total} token${total === 1 ? '' : 's'}` +
     (cash ? ` · ${cash}` : '');
   renderModelChips();
   showEngines();
-  const short = genCredits !== null && genCredits < total;
+  const short = genTokens !== null && genTokens < total;
   el('gen-run-btn').classList.toggle('gen-low', short);
-  if (short) setGenStatus(`Only ${genCredits} credits left.`, false);
+  if (short) setGenStatus(`Only ${genTokens} token${genTokens === 1 ? '' : 's'} left.`, false);
   return total;
 }
 
-function cashFor(credits) {
-  if (!genRate || !genRate.usd || !credits) return '';
-  const usd = credits * genRate.usd;
-  const money = (n, sym) => sym + (n < 100 ? n.toFixed(2) : Math.round(n).toLocaleString());
-  const out = money(usd, '$');
-  return genRate.eur_per_usd ? `${out} · ${money(usd * genRate.eur_per_usd, '\u20ac')}` : out;
+function cashFor(tokens) {
+  if (!genRate || !genRate.amount || !tokens) return '';
+  const n = tokens * genRate.amount;
+  return (genRate.symbol || '\u20ac') +
+    (n < 100 ? n.toFixed(2) : Math.round(n).toLocaleString());
 }
 
 function setGenStatus(msg, ok) {
@@ -1825,7 +1824,7 @@ async function runGeneration() {
     });
     const d = await res.json();
     if (!d.ok) throw new Error(d.error || 'Generation failed');
-    setGenStatus(`Running — ${d.credits} credits`, null);
+    setGenStatus(`Running — ${d.tokens} token${d.tokens === 1 ? '' : 's'}`, null);
     loadCredits();
     pollGenJobs();
   } catch (e) { setGenStatus('✗ ' + e.message, false); }
@@ -1897,7 +1896,7 @@ async function runVideoJob() {
     });
     const d = await res.json();
     if (!d.ok) throw new Error(d.error || 'Generation failed');
-    setGenStatus(`Running — ${d.credits} credits. It takes a few minutes.`, null);
+    setGenStatus(`Running — ${d.tokens} token${d.tokens === 1 ? '' : 's'}. It takes a few minutes.`, null);
     loadCredits();
     pollGenJobs();
   } catch (e) { setGenStatus('✗ ' + e.message, false); }
@@ -1906,7 +1905,7 @@ async function runVideoJob() {
 
 // The vault's play button is a shortcut into the Animate job rather than a
 // second way to submit one: the panel is what shows the price, and a click
-// that spends credits without showing one is the thing this surface must not do.
+// that spends tokens without showing one is the thing this surface must not do.
 function animateMedia(id) {
   genAnimPick = id;
   setJob('animate');
@@ -1951,7 +1950,7 @@ function renderGenStaging() {
     }
     if (job.status === 'failed') {
       cards.push(`<div class="gen-card gen-failed gen-pending">✗ ${esc(job.error || 'failed')}
-        <br><span style="opacity:.7">${job.credits} credits refunded</span>
+        <br><span style="opacity:.7">${job.tokens} token${job.tokens === 1 ? '' : 's'} refunded</span>
         <button type="button" class="gen-del" title="Delete this generation"
           onclick="deleteGenJob('${job.id}')">✕</button></div>`);
       return;

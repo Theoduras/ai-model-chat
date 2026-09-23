@@ -1308,7 +1308,7 @@ _BASE_TIERS = {
                         'scheduled_followups': True,
                         'analytics': False,
                         'ppv_reconcile': False,
-                        'credits_month': None,
+                        'tokens_month': None,
                     }},
     'starter': {'name': 'Starter', 'price': 49,
                 'blurb': 'One persona on Fanvue, fully monetised.',
@@ -1316,7 +1316,7 @@ _BASE_TIERS = {
                              'Full PPV engine — ladders, per-fan pricing, '
                              'timed re-offers',
                              'Up to 3 funnel phases + CTA',
-                             '600 generation credits a month',
+                             f'{CR.MONTHLY_TOKENS["starter"]:,} generation tokens a month',
                              'Unlimited photo uploads', 'Email support'],
                 'capabilities': {
                     'personas': 1,
@@ -1327,7 +1327,7 @@ _BASE_TIERS = {
                     'scheduled_followups': False,
                     'analytics': False,
                     'ppv_reconcile': False,
-                    'credits_month': 600,
+                    'tokens_month': CR.MONTHLY_TOKENS['starter'],
                 }},
     'pro': {'name': 'Pro', 'price': 149,
             'blurb': 'Five personas, every platform.',
@@ -1336,7 +1336,7 @@ _BASE_TIERS = {
                          'Outfit locking + media tagging',
                          'Up to 10 funnel phases with photo rates',
                          'Scheduled follow-ups',
-                         '2,500 generation credits a month',
+                         f'{CR.MONTHLY_TOKENS["pro"]:,} generation tokens a month',
                          'Priority support'],
             'capabilities': {
                 'personas': 5,
@@ -1347,7 +1347,7 @@ _BASE_TIERS = {
                 'scheduled_followups': True,
                 'analytics': False,
                 'ppv_reconcile': False,
-                'credits_month': 2500,
+                'tokens_month': CR.MONTHLY_TOKENS['pro'],
             }},
     'agency': {'name': 'Agency', 'price': 349,
                'blurb': 'Fifteen personas and a team to run them.',
@@ -1356,7 +1356,7 @@ _BASE_TIERS = {
                             'Outfit locking + media tagging',
                             'Conversation and revenue analytics',
                             'PPV reconciliation against Fanvue earnings',
-                            '7,500 generation credits a month',
+                            f'{CR.MONTHLY_TOKENS["agency"]:,} generation tokens a month',
                             'Dedicated support'],
                'capabilities': {
                    'personas': 15,
@@ -1367,7 +1367,7 @@ _BASE_TIERS = {
                    'scheduled_followups': True,
                    'analytics': True,
                    'ppv_reconcile': True,
-                   'credits_month': 7500,
+                   'tokens_month': CR.MONTHLY_TOKENS['agency'],
                }},
 }
 DEFAULT_TIER_ORDER = ['starter', 'pro', 'agency']
@@ -1425,8 +1425,8 @@ FEATURE_ROWS = [
      'Stuck on a backstory or a speech style? Generate it and keep editing what '
      'you like. Interests and conversion triggers come out of the same pass.'),
     (G1, 'AI photo and video generation',
-     lambda c: ('Unlimited credits' if c['credits_month'] is None
-                else f"{c['credits_month']:,} generation credits a month"),
+     lambda c: ('Unlimited tokens' if c['tokens_month'] is None
+                else f"{c['tokens_month']:,} generation tokens a month"),
      'Create on-brand photos and short clips of your persona \u2014 her look, '
      'her outfit, the setting \u2014 without booking a shoot.'),
     (G1, 'Photo library',
@@ -1533,8 +1533,8 @@ def _feature_matrix():
                          'label': 'Platforms'},
                         {'value': str(caps['phases_max']),
                          'label': 'Funnel phases'},
-                        {'value': ('\u221e' if caps['credits_month'] is None
-                                   else f"{caps['credits_month']:,}"),
+                        {'value': ('\u221e' if caps['tokens_month'] is None
+                                   else f"{caps['tokens_month']:,}"),
                          'label': 'Credits / mo'},
                         {'value': str(caps['seats']), 'label': 'Team seats'},
                     ]}
@@ -1824,7 +1824,7 @@ def _activate_plan(session_db, user_row, tier_key, days=None):
 DENIED_CAPS = {'personas': 0, 'seats': 0, 'platforms': [], 'phases_max': 0,
                'outfit_lock': False, 'scheduled_followups': False,
                'analytics': False, 'ppv_reconcile': False,
-               'credits_month': 0}
+               'tokens_month': 0}
 # None means "no limit" throughout, for both counts and the platform allow-list.
 UNLIMITED_CAPS = {k: (None if not isinstance(v, bool) else True)
                   for k, v in DENIED_CAPS.items()}
@@ -1838,7 +1838,7 @@ _TIER_FLAGS = (('outfit_lock', 'Outfit locking'),
                ('ppv_reconcile', 'PPV reconciliation'))
 _TIER_LIMITS = (('personas', 'Personas'), ('seats', 'Team seats'),
                 ('phases_max', 'Funnel phases'),
-                ('credits_month', 'Generation credits a month'))
+                ('tokens_month', 'Generation tokens a month'))
 _tier_caps_cache = {'at': 0.0, 'value': None}
 
 
@@ -1974,6 +1974,13 @@ def _workspace_id(user):
     return (user or {}).get('workspace_id') or (user or {}).get('id') or ''
 
 
+def _user_currency(user):
+    """The currency this creator is quoted in. One read point, so a price and
+    the checkout that charges it can never disagree. Euro is the base, and an
+    account that never picked one sees the prices as they were set."""
+    return CR.currency_of((user or {}).get('currency'))
+
+
 def _cap_denied(name, user, extra=None):
     """The 402 body for a capability the plan does not include. Names the
     capability and the cheapest tier that has it, so the UI can offer the
@@ -2024,60 +2031,60 @@ def _period_end():
                        second=0, microsecond=0)
 
 
-def _grant_monthly_credits(session_db, user):
+def _grant_monthly_tokens(session_db, user):
     """Post this period's allowance if it has not been posted. Keyed on the
-    period, so it runs off the first credit read of the month and there is no
+    period, so it runs off the first token read of the month and there is no
     cron that can miss it."""
-    allowance = user_capabilities(user).get('credits_month')
+    allowance = user_capabilities(user).get('tokens_month')
     if allowance is None:
         return
-    from db import credit_grant
-    credit_grant(session_db, _workspace_id(user), int(allowance),
+    from db import token_grant
+    token_grant(session_db, _workspace_id(user), int(allowance),
                  _usage_period(), _period_end(), note=(user.get('tier') or ''))
 
 
-def _credit_balance(user, session_db=None):
-    """Spendable credits, allowance granted on the way past. None means
+def _token_balance(user, session_db=None):
+    """Spendable tokens, allowance granted on the way past. None means
     unlimited — an admin or a grandfathered account, which never spends."""
-    if user_capabilities(user).get('credits_month') is None:
+    if user_capabilities(user).get('tokens_month') is None:
         return None
-    from db import credit_balance
+    from db import token_balance
     s = session_db or _db_session()
     try:
-        _grant_monthly_credits(s, user)
-        return credit_balance(s, _workspace_id(user))
+        _grant_monthly_tokens(s, user)
+        return token_balance(s, _workspace_id(user))
     finally:
         if session_db is None:
             s.close()
 
 
-def _credits_denied(need, have):
+def _tokens_denied(need, have):
     # Top-up checkout is admin-only while generation is in testing, so only tell
-    # a caller to buy credits if buying is actually open to them.
+    # a caller to buy tokens if buying is actually open to them.
     can_buy = bool((_current_user() or {}).get('is_admin'))
-    return jsonify({'ok': False, 'error': 'Not enough credits.',
-                    'need': need, 'have': have, 'buy_credits': can_buy}), 402
+    return jsonify({'ok': False, 'error': 'Not enough tokens.',
+                    'need': need, 'have': have, 'buy_tokens': can_buy}), 402
 
 
-def _spend_credits(user, amount, source, note=''):
-    """Reserve credits for a job. False means the balance will not cover it and
+def _spend_tokens(user, amount, source, note=''):
+    """Reserve tokens for a job. False means the balance will not cover it and
     nothing was posted, so the caller must not call the provider."""
-    if user_capabilities(user).get('credits_month') is None:
+    if user_capabilities(user).get('tokens_month') is None:
         return True
-    from db import credit_debit
+    from db import token_debit
     s = _db_session()
     try:
-        _grant_monthly_credits(s, user)
-        return credit_debit(s, _workspace_id(user), int(amount), source, note)
+        _grant_monthly_tokens(s, user)
+        return token_debit(s, _workspace_id(user), int(amount), source, note)
     finally:
         s.close()
 
 
-def _refund_credits(workspace_id, source, note=''):
-    from db import credit_refund
+def _refund_tokens(workspace_id, source, note=''):
+    from db import token_refund
     s = _db_session()
     try:
-        return credit_refund(s, workspace_id, source, note)
+        return token_refund(s, workspace_id, source, note)
     finally:
         s.close()
 
@@ -3961,8 +3968,8 @@ def api_me():
                     'usage': {'personas': {'used': _persona_count(user),
                                            'limit': caps.get('personas')},
                               'seats': {'used': seats, 'limit': caps.get('seats')},
-                              'credits': {'balance': _credit_balance(user),
-                                          'limit': caps.get('credits_month')}},
+                              'tokens': {'balance': _token_balance(user),
+                                          'limit': caps.get('tokens_month')}},
                     'setup': _get_setup(user['id'])}), 200
 
 
@@ -4595,44 +4602,45 @@ def api_billing_checkout():
     return jsonify({'payment_url': pay_url, 'track_id': track_id})
 
 
-@app.route('/api/credits')
-def api_credits():
-    """Balance, the tier-resolved pack menu and the price table the Generate
-    panel quotes from. One call, because the panel needs all three to render a
-    button that knows what it costs."""
+@app.route('/api/tokens')
+def api_tokens():
+    """Balance, the pack menu and the price table the Generate panel quotes
+    from. One call, because the panel needs all three to render a button that
+    knows what it costs."""
     user = _current_user()
     if not user:
         return jsonify({'error': 'Sign in required'}), 401
-    balance = _credit_balance(user)
+    balance = _token_balance(user)
     return jsonify({
         'balance': balance,
         'unlimited': balance is None,
-        'monthly': user_capabilities(user).get('credits_month'),
+        'monthly': user_capabilities(user).get('tokens_month'),
         'equivalents': CR.equivalents(balance or 0),
-        'packs': CR.packs_for(user.get('tier')),
+        'packs': CR.packs_for(_user_currency(user)),
         'prices': CR.price_table(),
         # Admin only: this is what the provider bills us, which is the margin
-        # written out. A creator is quoted credits and cash, never this.
+        # written out. A creator is quoted tokens and cash, never this.
         'provider_costs': CR.cost_table() if user.get('is_admin') else None,
-        # What a credit costs this tier in cash, so the studio can show a price
-        # beside a credit count without doing pack arithmetic of its own.
-        'credit_rate': {'usd': round(CR.credit_rate_usd(user.get('tier')), 5),
-                        'eur_per_usd': CR.eur_per_usd()},
+        # What a token costs in the creator's own currency, so the studio can
+        # show a price beside a token count without pack arithmetic of its own.
+        'token_rate': {'currency': _user_currency(user),
+                       'symbol': CR.symbol_for(_user_currency(user)),
+                       'amount': round(CR.token_rate(_user_currency(user)), 5)},
         'engines': imagegen.engine_report(),
         'period_end': _period_end().isoformat(),
     })
 
 
-@app.route('/api/credits/history')
-def api_credits_history():
+@app.route('/api/tokens/history')
+def api_tokens_history():
     blocked = _require_admin()
     if blocked:
         return blocked
     user = _current_user()
-    from db import credit_history
+    from db import token_history
     s = _db_session()
     try:
-        rows = credit_history(s, _workspace_id(user))
+        rows = token_history(s, _workspace_id(user))
         return jsonify({'rows': [
             {'delta': r.delta, 'kind': r.kind, 'note': r.note,
              'at': r.created_at.isoformat() if r.created_at else '',
@@ -4642,64 +4650,87 @@ def api_credits_history():
         s.close()
 
 
+# The routes were /api/credits* until the unit was re-denominated. Kept for one
+# release so a cached studio page does not 404 mid-generation; drop them after.
+@app.route('/api/credits')
+def api_credits_legacy():
+    return redirect('/api/tokens', code=308)
+
+
+@app.route('/api/credits/history')
+def api_credits_history_legacy():
+    return redirect('/api/tokens/history', code=308)
+
+
 @app.route('/api/credits/checkout', methods=['POST'])
-def api_credits_checkout():
+def api_credits_checkout_legacy():
+    return redirect('/api/tokens/checkout', code=308)
+
+
+@app.route('/api/tokens/checkout', methods=['POST'])
+def api_tokens_checkout():
     """Buy a top-up pack. Rides the same Payment row, the same two providers
     and the same two webhooks as a subscription — `kind` is the only thing that
     tells them apart, so Oxapay keeps working untouched.
 
     Admin-only for now: the packs are priced for a generation feature that is
-    still in testing, so nobody should be able to buy credits for it yet."""
+    still in testing, so nobody should be able to buy tokens for it yet."""
     blocked = _require_admin()
     if blocked:
         return blocked
     user = _current_user()
     body = request.get_json(silent=True) or {}
     try:
-        size = int(body.get('credits') or 0)
+        size = int(body.get('tokens') or 0)
     except (TypeError, ValueError):
         size = 0
-    price = CR.pack_price_usd(size, user.get('tier')) if size else None
+    currency = _user_currency(user)
+    price = CR.pack_price(size, currency) if size else None
     if price is None:
-        return jsonify({'error': 'Unknown credit pack'}), 400
+        return jsonify({'error': 'Unknown token pack'}), 400
 
     provider = (body.get('provider') or '').strip().lower()
     if provider not in _CHECKOUT_PROVIDERS:
         return jsonify({'error': 'Unknown payment method'}), 400
     _, key_fn = _CHECKOUT_PROVIDERS[provider]
     if not key_fn():
-        logger.error('Credit checkout via %s with no key configured', provider)
+        logger.error('Token checkout via %s with no key configured', provider)
         return jsonify({'error': 'Payments are not configured yet.'}), 503
 
     from db import Payment
     order_id = f'{user["id"]}-c{secrets.token_hex(6)}'
     base = _callback_origin()
-    pack = {'name': f'{size:,} credits', 'price': price, 'credits': size,
-            'days': 0}
+    pack = {'name': f'{size:,} tokens', 'price': price, 'tokens': size,
+            'currency': currency, 'days': 0}
     if provider == 'stripe':
-        pay_url, track_id = _checkout_stripe_credits(user, pack, order_id, base)
+        pay_url, track_id = _checkout_stripe_tokens(user, pack, order_id, base)
     else:
-        pay_url, track_id = _checkout_oxapay(user, 'credits', pack, order_id, base)
+        pay_url, track_id = _checkout_oxapay(user, 'tokens', pack, order_id, base)
     if not pay_url:
         return jsonify({'error': 'Could not reach the payment provider.'}), 502
 
     s = _db_session()
     try:
         s.add(Payment(user_id=user['id'], tier=(user.get('tier') or ''),
-                      kind='credits', credits=size, provider=provider,
-                      amount=str(price), currency=CURRENCY, order_id=order_id,
+                      kind='tokens', tokens=size, provider=provider,
+                      amount=str(price), currency=currency.upper(),
+                      order_id=order_id,
                       track_id=track_id, status='pending'))
         s.commit()
     finally:
         s.close()
-    logger.info('CREDIT CHECKOUT [%s] user=%s credits=%s price=%s order=%s',
-                provider, user['email'], size, price, order_id)
+    logger.info('TOKEN CHECKOUT [%s] user=%s tokens=%s price=%s %s order=%s',
+                provider, user['email'], size, price, currency, order_id)
     return jsonify({'payment_url': pay_url, 'track_id': track_id})
 
 
-def _checkout_stripe_credits(user, pack, order_id, base):
-    """A one-off Stripe payment, not a subscription: credits are bought, not
-    billed monthly, so `mode` is payment and nothing here touches the plan."""
+def _checkout_stripe_tokens(user, pack, order_id, base):
+    """A one-off Stripe payment, not a subscription: tokens are bought, not
+    billed monthly, so `mode` is payment and nothing here touches the plan.
+
+    The currency is the creator's own, not the global one: a pack is quoted from
+    their ladder, so charging in another currency would bill a price they were
+    never shown."""
     form = {
         'mode': 'payment',
         'success_url': f'{base}/billing/return?session_id={{CHECKOUT_SESSION_ID}}',
@@ -4707,10 +4738,11 @@ def _checkout_stripe_credits(user, pack, order_id, base):
         'client_reference_id': order_id,
         'line_items[0][quantity]': '1',
         'metadata[order_id]': order_id,
-        'metadata[kind]': 'credits',
-        'metadata[credits]': str(pack['credits']),
+        'metadata[kind]': 'tokens',
+        'metadata[tokens]': str(pack['tokens']),
         'metadata[user_id]': user['id'],
-        'line_items[0][price_data][currency]': CURRENCY.lower(),
+        'line_items[0][price_data][currency]':
+            (pack.get('currency') or CURRENCY).lower(),
         'line_items[0][price_data][unit_amount]':
             str(int(round(pack['price'] * 100))),
         'line_items[0][price_data][product_data][name]': pack['name'],
@@ -4725,27 +4757,27 @@ def _checkout_stripe_credits(user, pack, order_id, base):
         return None, None
     pay_url = payload.get('url')
     if not pay_url:
-        logger.error('Stripe returned no url for credits: %s', str(payload)[:300])
+        logger.error('Stripe returned no url for tokens: %s', str(payload)[:300])
         return None, None
     return pay_url, str(payload.get('id') or '')
 
 
-def _credit_payment_paid(session_db, pay):
-    """Post the bought credits for a paid pack. Idempotent on the payment id,
+def _token_payment_paid(session_db, pay):
+    """Post the bought tokens for a paid pack. Idempotent on the payment id,
     so a redelivered webhook cannot credit twice."""
-    from db import User, Workspace, credit_purchase
+    from db import User, Workspace, token_purchase
     u = session_db.get(User, pay.user_id)
     if not u:
         return
-    # Only a workspace owner is ever billed, so the workspace credits land in
+    # Only a workspace owner is ever billed, so the workspace tokens land in
     # is the one this user owns — the same id _workspace_id resolves in session.
     row = session_db.query(Workspace).filter(Workspace.owner_id == u.id).first()
     ws = row.id if row else u.id
-    posted = credit_purchase(session_db, ws, int(pay.credits or 0), pay.id,
-                             note=f'{pay.credits} credit pack')
-    logger.info('CREDITS %s user=%s amount=%s order=%s',
+    posted = token_purchase(session_db, ws, int(pay.tokens or 0), pay.id,
+                            note=f'{pay.tokens} token pack')
+    logger.info('TOKENS %s user=%s amount=%s order=%s',
                 'ADDED' if posted else 'ALREADY RECORDED',
-                u.email, pay.credits, pay.order_id)
+                u.email, pay.tokens, pay.order_id)
 
 
 @app.route('/api/billing/dev-activate', methods=['POST'])
@@ -4813,10 +4845,10 @@ def api_billing_webhook():
             logger.warning('Oxapay webhook for unknown order %s', order_id)
             return ('ok', 200)
         pay.status = status
-        if status.lower() == 'paid' and pay.kind == 'credits':
+        if status.lower() == 'paid' and pay.kind == 'tokens':
             if not pay.paid_at:
                 pay.paid_at = datetime.now(timezone.utc).replace(tzinfo=None)
-            _credit_payment_paid(s, pay)
+            _token_payment_paid(s, pay)
             s.commit()
             return ('ok', 200)
         if status.lower() == 'paid' and not pay.paid_at:
@@ -4918,10 +4950,10 @@ def _stripe_checkout_completed(obj):
         # 100%-off coupon, which is still a live subscription.
         paid = obj.get('payment_status') in ('paid', 'no_payment_required')
         pay.status = 'paid' if paid else (obj.get('payment_status') or pay.status)
-        if paid and pay.kind == 'credits':
+        if paid and pay.kind == 'tokens':
             if not pay.paid_at:
                 pay.paid_at = datetime.now(timezone.utc).replace(tzinfo=None)
-            _credit_payment_paid(s, pay)
+            _token_payment_paid(s, pay)
             s.commit()
             return ('ok', 200)
         if paid and not pay.paid_at:
@@ -7816,10 +7848,10 @@ def api_generate_image():
     """Generate a photorealistic image of a fictional person via Google Imagen.
     Reuse the same `appearance` text across shots to keep the same person."""
     me = _current_user()
-    balance = _credit_balance(me)
-    price = CR.GOOGLE_IMAGE_CREDITS
+    balance = _token_balance(me)
+    price = CR.GOOGLE_IMAGE_TOKENS
     if balance is not None and balance < price:
-        return _credits_denied(price, balance)
+        return _tokens_denied(price, balance)
 
     # The route has several success returns and a failed generation should not
     # cost the creator credits, so the charge runs on the way out and only when
@@ -7831,7 +7863,7 @@ def api_generate_image():
         def _meter(response):
             try:
                 if (response.get_json(silent=True) or {}).get('ok') is True:
-                    _spend_credits(me, price, source, note='Imagen generation')
+                    _spend_tokens(me, price, source, note='Imagen generation')
             except Exception:
                 logger.exception('image credit charge failed')
             return response
@@ -29063,14 +29095,14 @@ def _character_finish(job_id, spec, workspace, urls):
     finally:
         s.close()
     if not made:
-        _refund_credits(workspace, job_id, note='no usable result')
+        _refund_tokens(workspace, job_id, note='no usable result')
 
 
 def _character_job_json(job, ids, s):
     from db import CharacterImage
     rows = s.query(CharacterImage).filter(CharacterImage.id.in_(ids)).all() if ids else []
     return {'id': job.id, 'kind': job.kind, 'job': 'character', 'status': job.status,
-            'credits': job.credits, 'error': job.error or '', 'persona': '',
+            'tokens': job.tokens, 'error': job.error or '', 'persona': '',
             'media': [_char_img_json(r) for r in rows],
             'created_at': job.created_at.isoformat() if job.created_at else ''}
 
@@ -29657,9 +29689,9 @@ def _gen_submit(user, slug, spec, price):
     """Reserve the credits, queue the job and start it -- in that order, so an
     unaffordable job never costs an API call. Shared by the studio and the
     character builder so both get the same refunds and sweeping."""
-    balance = _credit_balance(user)
+    balance = _token_balance(user)
     if balance is not None and balance < price:
-        return _credits_denied(price, balance)
+        return _tokens_denied(price, balance)
 
     from db import queue_generation, update_generation
     s = _db_session()
@@ -29671,9 +29703,9 @@ def _gen_submit(user, slug, spec, price):
     finally:
         s.close()
 
-    if not _spend_credits(user, price, job_id, note=f"{spec['kind']} generation"):
+    if not _spend_tokens(user, price, job_id, note=f"{spec['kind']} generation"):
         _set_job_failed(job_id, 'Not enough credits.')
-        return _credits_denied(price, _credit_balance(user) or 0)
+        return _tokens_denied(price, _token_balance(user) or 0)
 
     workspace = _workspace_id(user)
     if GEN_HAS_WORKER:
@@ -29692,7 +29724,7 @@ def _gen_submit(user, slug, spec, price):
         payload = _job_json(job, s) if job else {'id': job_id, 'status': 'queued'}
     finally:
         s.close()
-    return jsonify({'ok': True, 'job': job_id, 'credits': price,
+    return jsonify({'ok': True, 'job': job_id, 'tokens': price,
                     'status': payload.get('status'), 'result': payload,
                     'balance': (balance - price) if balance is not None else None})
 
@@ -29839,7 +29871,7 @@ def _gen_start(job_id, slug, spec, workspace):
 
 def _gen_fail(job_id, workspace, message):
     _set_job_failed(job_id, message)
-    _refund_credits(workspace, job_id, note='generation failed')
+    _refund_tokens(workspace, job_id, note='generation failed')
 
 
 def _gen_refund_short_clip(job_id, workspace, spec, data, mime):
@@ -29866,10 +29898,10 @@ def _gen_refund_short_clip(job_id, workspace, spec, data, mime):
     rate = (CR.VIDEO_RATE_PER_SECOND.get(model) or {}).get(spec.get('resolution'))
     if not rate:
         return
-    from db import SessionLocal, credit_refund_part
+    from db import SessionLocal, token_refund_part
     s = SessionLocal()
     try:
-        back = credit_refund_part(s, workspace, job_id, rate * (billed - got),
+        back = token_refund_part(s, workspace, job_id, rate * (billed - got),
                                   note=f'clip ran {got}s of {billed}s quoted')
         s.commit()
     finally:
@@ -29987,7 +30019,7 @@ def _gen_finish(job_id, slug, spec, workspace, urls):
     finally:
         s.close()
     if not made:
-        _refund_credits(workspace, job_id, note='no usable result')
+        _refund_tokens(workspace, job_id, note='no usable result')
 
 
 def _gen_row(job):
@@ -30203,7 +30235,7 @@ def _job_json(job, session_db):
     except ValueError:
         job_name = ''
     return {'id': job.id, 'kind': job.kind, 'job': job_name, 'status': job.status,
-            'credits': job.credits, 'error': job.error or '',
+            'tokens': job.tokens, 'error': job.error or '',
             'persona': job.slug, 'media': media,
             'created_at': job.created_at.isoformat() if job.created_at else ''}
 
