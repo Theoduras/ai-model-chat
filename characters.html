@@ -457,14 +457,13 @@
       </section>
       <section class="form-section ch-basics">
         <div class="section-title">Basics</div>
-        <div class="field"><label for="f-name">Name</label><input id="f-name" type="text" maxlength="80"></div>
-        <div class="field"><label for="f-age">Age</label><input id="f-age" type="number" min="18" max="80">
+        <div class="field"><label for="f-name">Name</label><input id="f-name" type="text" maxlength="80" oninput="markDirty()"></div>
+        <div class="field"><label for="f-age">Age</label><input id="f-age" type="number" min="18" max="80" oninput="markDirty()">
           <span class="hint">Must be 18 or over. Every prompt states she is a fictional adult of this age.</span></div>
         <div class="field"><label>Explicitness level</label><div class="chips" id="level-chips"></div>
           <span class="hint">Sets which body photos are required.</span></div>
         <div class="field"><label for="f-persona">Persona</label><select id="f-persona" onchange="linkPersona(this.value)"></select></div>
-        <div class="field"><label for="f-notes">Notes (optional)</label><input id="f-notes" type="text" maxlength="400"></div>
-        <button type="button" class="btn btn-ghost" onclick="saveSheet()">Save basics</button>
+        <div class="field"><label for="f-notes">Notes (optional)</label><input id="f-notes" type="text" maxlength="400" oninput="markDirty()"></div>
       </section>
       <section class="form-section ch-gen">
         <div class="section-title">Generate</div>
@@ -597,7 +596,6 @@
           <div id="intimate-wrap" hidden>
             <div class="fp-list" id="intimate-features"></div>
           </div>
-          <span class="ch-msg-note" id="body-save-msg" aria-live="polite"></span>
         </section>
         <div class="views-toolbar" id="views-head">
           <div class="chips" id="view-filter"></div>
@@ -806,6 +804,7 @@ function renderList() {
   }).join('') + '</div>';
 }
 function showList() {
+  if (dirty) return confirmLeave(showList);
   el('edit-view').hidden = true; el('list-view').hidden = false;
   history.replaceState(null, '', '/characters');
   loadList();
@@ -830,7 +829,7 @@ async function openCharacter(id) {
   // A creator is walked through each new character until they finish or skip;
   // an admin gets the same frame without the guide, and Guide brings it back.
   guided = !m.isAdmin && !PageWizard.entry(setupKey()).done;
-  showDone = false; selView = ''; pickedFace = ''; lastMsg = ['', ''];
+  showDone = false; selView = ''; pickedFace = ''; lastMsg = ['', '']; dirty = false;
   const canon = canonOf('face_front');
   go(canon ? 'views' : (images('face_front', 'candidate').length ? 'pick' : 'describe'));
   if (guided) requestAnimationFrame(() => tourStart(false));
@@ -839,12 +838,15 @@ function images(view, role) { return (cur.images || []).filter(i => i.view === v
 function canonOf(view) { return images(view, 'canonical')[0]; }
 function viewDef(key) { return cat.views.find(v => v.key === key); }
 async function reload() {
+  const kept = dirty && {sheet: cur.sheet, name: cur.name, age: cur.age, notes: cur.notes};
   cur = (await api('/api/characters/' + cur.id)).character;
+  if (kept) Object.assign(cur, kept);
   cat = await api('/api/characters/catalogue?level=' + cur.nsfw_level);
   render();
 }
 
 function go(s) {
+  if (dirty && s !== step) return confirmLeave(() => go(s));
   if (s !== 'describe' && s !== 'pick' && !canonOf('face_front') && s !== 'check') s = 'describe';
   if (s === 'face') s = canonOf('face_front') || pickedFace ? 'check' : 'pick';
   if ((s === 'body' || s === 'views' || s === 'finish') && !canonOf('face_front')) s = 'describe';
@@ -885,7 +887,7 @@ const STEPS = [
   {key: 'check', stage: 'face', nav: 'Check & approve', title: 'Check every feature',
    sub: 'Tick each feature that matches what you chose. Approving runs the adult-appearance check and locks her face in.'},
   {key: 'body', stage: 'body', nav: 'Body profile', title: 'What is her body like?',
-   sub: 'Every body photo inherits this. Start from a preset, pick from the drawings, or match reference bodies. It saves as you pick.'},
+   sub: 'Every body photo inherits this. Start from a preset, pick from the drawings, or match reference bodies, then save.'},
   {key: 'views', stage: 'body', nav: 'Her photos', title: 'Approve her photos',
    sub: 'Each view is one photo of her from a set angle. Generate options, approve the best one, and the views built on it unlock. She is ready when every required photo is approved.'},
   {key: 'finish', stage: 'ready', nav: 'Accept & link', title: 'Accept and link her',
@@ -931,9 +933,10 @@ function stepWhy(i) {
 }
 function goStep(i) { go(STEPS[i].key); }
 function stepBack() { const i = stepIdx(); if (i > 0) go(STEPS[i - 1].key); }
-function stepNext() {
+async function stepNext() {
   const i = stepIdx();
   if (stepWhy(i)) return;
+  if (SAVED_STEPS.includes(STEPS[i].key) && !(await saveSheet())) return;
   if (STEPS[i].key === 'body') PageWizard.markSeen(setupKey(), 'body');
   if (i === STEPS.length - 1) return finishGuide();
   go(STEPS[i + 1].key);
@@ -963,9 +966,11 @@ function renderFrame() {
   }
   const s = STEPS[i], last = i === STEPS.length - 1, why = stepWhy(i);
   el('ch-head').innerHTML = PageWizard.headHtml({crumb: PageWizard.crumb(STAGES, STEPS, i), title: s.title, sub: s.sub});
+  const saves = SAVED_STEPS.includes(s.key);
   const next = last && !guided ? null
-    : {label: last ? 'Finish \u2713' : 'Continue \u2192', call: 'stepNext()', disabled: !!why, why};
+    : {label: last ? 'Finish \u2713' : saves ? 'Save & continue \u2192' : 'Continue \u2192', call: 'stepNext()', disabled: !!why, why};
   el('ch-foot').innerHTML = PageWizard.footHtml({back: i > 0 ? 'stepBack()' : null, next, statusId: 'ch-msg',
+    save: saves ? 'saveSheet()' : null,
     alt: guided ? [{icon: '\u25ce', label: 'Show me around', call: 'tourStart(true)'},
                    {icon: '\u2699', label: 'Skip setup', call: 'skipGuide()'}]
                 : [{icon: '\u25ce', label: 'Guide', call: 'startGuide()'}]});
@@ -984,7 +989,7 @@ const TOUR = PageWizard.tour([
   {anchor: '#ch-head', placement: 'bottom', title: 'One step at a time',
    body: 'Her look is built in order: face first, then body, then her photos. Each step asks one thing, and the line under the question says what to do.'},
   {anchor: activeCard, placement: 'right', title: 'This is her real character',
-   body: 'Everything you pick here saves to her character as you go. Nothing reaches a fan until you approve it.'},
+   body: 'Your picks are kept on her character when you press Save or Save & continue. Nothing reaches a fan until you approve it.'},
   {anchor: '#ch-rail', placement: 'right', title: 'Where you are',
    body: 'Three stages. The bar shows how far she is, and you can jump back to any step you have already reached.'},
   {anchor: priceAnchor, placement: 'left', title: 'Every button shows its price',
@@ -1040,6 +1045,7 @@ function pickHairHex(hex) {
   card.parentNode.querySelectorAll('.fp-opt').forEach(b => b.setAttribute('aria-pressed', 'false'));
   card.setAttribute('aria-pressed', 'true');
   card.innerHTML = CharacterVisuals.render('hair_colour', 'Custom', cur.sheet) + '<span>Custom</span>';
+  markDirty();
 }
 // Several outfits, one colour each: every outfit picked is its own set of
 // full-body options when those views generate.
@@ -1079,21 +1085,21 @@ function toggleOutfit(btn) {
   btn.setAttribute('aria-pressed', btn.getAttribute('aria-pressed') !== 'true');
   cur.sheet = collectSheet();
   el('body-features').querySelector('fieldset').outerHTML = outfitPicker();
-  // The quotes follow the picks now, not after the autosave comes back.
+  // The quotes follow the picks now, not after a save comes back.
   paintRailCost();
   if (selView && DRESSED.includes(selView)) renderViewPanel();
-  autosaveSheet();
+  markDirty();
 }
 function pickColour(btn) {
   btn.parentNode.querySelectorAll('.of-sw').forEach(b => b.setAttribute('aria-pressed', 'false'));
   btn.setAttribute('aria-pressed', 'true');
-  autosaveSheet();
+  markDirty();
 }
 function pickOption(btn) {
   const on = btn.getAttribute('aria-pressed') !== 'true';
   btn.parentNode.querySelectorAll('.fp-opt').forEach(b => b.setAttribute('aria-pressed', 'false'));
   btn.setAttribute('aria-pressed', on);
-  if (btn.closest('#body-features, #intimate-features')) autosaveSheet();
+  markDirty();
   if (btn.dataset.feature === 'hair_colour') {
     cur.sheet = collectSheet();
     document.querySelectorAll('[data-feature="pubic_colour"][data-value="Matches hair"]').forEach(b => {
@@ -1124,22 +1130,35 @@ function collectSheet() {
 }
 // Name, age and notes are only edited on Describe; any other step sends just
 // the sheet, since those fields are empty until Describe has been shown once.
-async function saveSheet(extra, btnId) {
-  const btn = btnId && el(btnId), note = btnId && el(btnId + '-msg');
-  const tell = (text, kind) => { say(text, kind); if (note) { note.textContent = text; note.className = 'ch-msg-note ' + (kind || ''); } };
-  if (btn) btn.disabled = true;
+async function saveSheet(extra) {
   try {
     const body = Object.assign({sheet: collectSheet()}, step === 'describe'
       ? {name: el('f-name').value, age: +el('f-age').value, notes: el('f-notes').value} : {}, extra || {});
     const d = await api('/api/characters/' + cur.id, {method: 'PUT', body});
     cur = d.character;
     cat = await api('/api/characters/catalogue?level=' + cur.nsfw_level);
+    dirty = false;
     render();
-    tell((d.warnings || []).join(' ') || 'Saved.', (d.warnings || []).length ? '' : 'ok');
+    say((d.warnings || []).join(' ') || 'All changes saved.', (d.warnings || []).length ? '' : 'ok');
     return true;
-  } catch (e) { tell(e.message, 'err'); return false; }
-  finally { if (btn) btn.disabled = false; }
+  } catch (e) { say(e.message, 'err'); return false; }
 }
+
+// Face and body picks save on Save or Save & continue, not per tap. Until then
+// they are held in cur.sheet, so a re-render (a filter, an upload, a reload)
+// shows them rather than the last saved sheet.
+const SAVED_STEPS = ['describe', 'body'];
+let dirty = false;
+function markDirty() {
+  cur.sheet = collectSheet();
+  if (step === 'describe') Object.assign(cur, {name: el('f-name').value, age: el('f-age').value, notes: el('f-notes').value});
+  dirty = true; say('Unsaved changes');
+}
+function confirmLeave(then) {
+  if (confirm('You have unsaved changes. Save them and continue? Cancel stays on this step.'))
+    saveSheet().then(ok => ok && then());
+}
+addEventListener('beforeunload', e => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
 
 const BLEND_KEEP = ['ethnicity', 'apparent_age', 'hair_colour', 'hair_texture'];
 const BODY_MATCH_KEEP = ['height', 'tattoos', 'piercings', 'birthmarks', 'nails'];
@@ -1147,7 +1166,7 @@ function bodyMode() { return (cur.sheet || {}).body_mode === 'match' ? 'match' :
 async function setBodyMode(mode) {
   if (mode === bodyMode()) return;
   cur.sheet = Object.assign(collectSheet(), {body_mode: mode});
-  await saveSheet(null, 'body-save');
+  await saveSheet();
 }
 function faceMode() { return (cur.sheet || {}).face_mode === 'blend' ? 'blend' : 'build'; }
 async function setFaceMode(mode) {
@@ -1291,7 +1310,7 @@ const TIERS = [[0, 'Anchor · approve first'], [1, 'Derived from anchor'], [2, '
 const STATUS_LABEL = {not_started: 'Not started', generating: 'Generating', review: 'Review', approved: 'Approved', locked: 'Locked', outdated: 'Outdated'};
 const MODE_LABEL = {reference: 'Reference', crop: 'Crop'};
 const PHOTO_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 17-5-5-9 8"/></svg>';
-let viewFilter = 'SFW', saveTimer = null;
+let viewFilter = 'SFW';
 function vs(key) { return (cur.views || {})[key] || {display: 'locked'}; }
 function isNsfw(v) { return v.group === 'nsfw'; }
 function inFilter(v) { return viewFilter === 'All' || (viewFilter === 'NSFW') === isNsfw(v); }
@@ -1339,11 +1358,6 @@ function renderBody() {
   pollGenerating();
 }
 function setFilter(f) { viewFilter = f; renderBody(); }
-function autosaveSheet() {
-  clearTimeout(saveTimer);
-  el('body-save-msg').textContent = 'Saving…';
-  saveTimer = setTimeout(() => saveSheet(null, 'body-save'), 600);
-}
 function openView(key) {
   selView = key;
   if (step !== 'views') { step = 'views'; render(); } else renderBody();

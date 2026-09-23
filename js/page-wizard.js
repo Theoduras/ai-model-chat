@@ -101,6 +101,7 @@
   function footHtml(o) {
     var n = o.next;
     return (o.back ? '<button type="button" class="btn btn-ghost" onclick="' + o.back + '">← Back</button>' : '') +
+      (o.save ? '<button type="button" class="btn btn-ghost" onclick="' + o.save + '">Save</button>' : '') +
       (n ? '<button type="button" class="btn btn-primary" onclick="' + n.call + '"' +
         (n.disabled ? ' disabled' : '') + '>' + esc(n.label) + '</button>' : '') +
       (n && n.disabled && n.why ? '<span class="pw-why">' + esc(n.why) + '</span>' : '') +
