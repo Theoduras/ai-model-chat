@@ -178,9 +178,30 @@
     .bands span { height: 22px; display: grid; place-items: center; font-size: 0.7rem; font-weight: 600; color: var(--text-muted);
       background: var(--surface-2); border-radius: 4px; }
     .bands span.on { background: var(--sel); color: var(--accent); }
-    .vp-more > summary { cursor: pointer; font-size: 0.8rem; font-weight: 600; color: var(--text-2); list-style-position: inside; }
-    .vp-more[open] > summary { margin-bottom: 8px; }
-    details.vp-more:not(.vp-sec) { display: flex; flex-direction: column; gap: 8px; }
+    .vp-refs { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+    @media (max-width: 700px) { .vp-refs { grid-template-columns: 1fr; } }
+    .ref-line { position: relative; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .ref-line .ref { width: 32px; height: 32px; } .ref-line .ref button { width: 16px; height: 16px; font-size: 11px; line-height: 16px; padding: 0; }
+    .ref-pill { height: 32px; display: inline-flex; align-items: center; gap: 8px; padding: 0 12px 0 4px; border-radius: 999px; border: 1px solid var(--accent);
+      background: var(--sel); color: var(--text); font: inherit; font-size: 0.8rem; font-weight: 600; cursor: pointer; max-width: 100%; }
+    .ref-pill img { width: 24px; height: 24px; border-radius: 50%; object-fit: cover; }
+    .ref-pill b { color: var(--accent); }
+    .ref-add { width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--border); background: transparent; color: var(--text);
+      font: inherit; font-size: 1.1rem; line-height: 1; cursor: pointer; }
+    .ref-add[aria-expanded="true"] { border-color: var(--accent); color: var(--accent); }
+    .ref-pop { position: absolute; top: 40px; left: 0; z-index: 5; width: 280px; max-width: 100%; max-height: 320px; overflow-y: auto; padding: 6px;
+      background: var(--paper, var(--surface)); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 32px rgba(30,27,24,.16); }
+    .ref-pop button { width: 100%; display: flex; align-items: center; gap: 10px; padding: 6px 8px; border: 0; border-radius: 8px; background: transparent;
+      color: var(--text); font: inherit; font-size: 0.8rem; text-align: left; cursor: pointer; }
+    .ref-pop button:hover, .ref-pop button[aria-pressed="true"] { background: var(--sel); }
+    .ref-pop img { width: 32px; height: 40px; border-radius: 6px; object-fit: cover; flex-shrink: 0; }
+    .ref-pop span { flex: 1; } .ref-pop i { font-style: normal; color: var(--accent); font-weight: 700; }
+    .up-card { display: flex; flex-direction: column; gap: 8px; padding: 14px; border: 1.5px dashed var(--accent); border-radius: 12px; background: var(--sel); }
+    .up-card strong { font-size: 0.85rem; }
+    .up-btn { align-self: flex-start; border-color: var(--accent); color: var(--accent); background: var(--paper, var(--surface)); }
+    .trait { padding: 4px 10px; border-radius: 999px; background: var(--surface-2); font-size: 0.75rem; color: var(--text-2); }
+    .trait b { color: var(--text); font-weight: 600; }
+    #vp-traits-off a { color: var(--accent); font-weight: 600; }
     .btn-sm { height: 34px; padding: 0 12px; font-size: 0.8rem; }
     .opt { position: relative; }
     .opt.kept { border-color: var(--ok); }
@@ -373,14 +394,18 @@
             <span class="ch-muted" style="margin:0;">Drag the box to move it, a corner to resize.</span>
           </div>
         </div>
-        <div class="vp-sec">
-          <div class="vp-row"><span class="dl">References</span><span class="ch-muted" style="margin:0;" id="vp-refs-n"></span></div>
-          <div class="chips" id="vp-refs"></div>
-          <details class="vp-more">
-            <summary>Upload own reference</summary>
+        <div class="vp-sec vp-refs">
+          <div>
+            <span class="dl">References</span>
+            <p class="ch-muted" style="margin:2px 0 8px;">Approved photos sent with the prompt. The model copies her face, skin and body from them; Reference influence sets how strictly.</p>
+            <div class="ref-line" id="vp-refs"></div>
+          </div>
+          <div class="up-card">
+            <strong>Use your own reference photo</strong>
+            <span class="ch-muted" style="margin:0;">Sent alongside the references, for this photo only. Use it to steer pose, angle or framing. Her look still comes from the approved photos.</span>
             <label class="attest"><input type="checkbox" id="vp-attest" onchange="el('add-view-ref').disabled=!this.checked">I have the rights to this image, and anyone shown is 18+ and agreed to their likeness being used.</label>
-            <button type="button" class="btn btn-sm" style="align-self:flex-start;" id="add-view-ref" disabled onclick="pickUpload(selView, 'vp-attest')">Choose image</button>
-          </details>
+            <button type="button" class="btn btn-sm up-btn" id="add-view-ref" disabled onclick="pickUpload(selView, 'vp-attest')">Upload photo</button>
+          </div>
         </div>
         <div class="vp-sec vp-controls">
           <div class="vp-infl">
@@ -392,10 +417,11 @@
           <label class="ch-label">Pose <select id="vp-pose" onchange="viewOpts[selView]=Object.assign(viewOpts[selView]||{},{pose:this.value})"></select></label>
           <label class="ch-label">Lighting <select id="vp-light" onchange="viewOpts[selView]=Object.assign(viewOpts[selView]||{},{lighting:this.value})"></select></label>
         </div>
-        <details class="vp-sec vp-more">
-          <summary><span class="dl">Inherited traits</span> <span class="ch-muted" style="margin:0;" id="vp-traits-n"></span></summary>
+        <div class="vp-sec">
+          <div class="vp-row"><span class="dl">Body profile used</span><span class="ch-muted" style="margin:0;" id="vp-traits-n"></span></div>
           <div class="chips" id="vp-traits"></div>
-        </details>
+          <p class="ch-muted" id="vp-traits-off" style="margin:0;"></p>
+        </div>
         <div class="opts" id="vp-opts"></div>
       </div>
       <div class="actionbar">
@@ -882,22 +908,25 @@ function renderViewPanel() {
   }
   const approved = cat.views.filter(o => o.key !== v.key && canonOf(o.key));
   const chosen = st.references ? st.references.map(r => r.image_id) : v.parents.map(p => (canonOf(p) || {}).id).filter(Boolean);
-  el('vp-refs-n').textContent = approved.length ? approved.filter(o => chosen.includes(canonOf(o.key).id)).length + ' selected' : '';
-  el('vp-refs').innerHTML = approved.map(o => {
-    const id = canonOf(o.key).id;
-    return `<button type="button" class="chip" aria-pressed="${chosen.includes(id)}" onclick="toggleRef('${id}')">${esc(o.label)}</button>`;
-  }).join('') + (images(v.key, 'reference').length ? `<div class="refs" style="width:100%; margin-top:6px;">${images(v.key, 'reference').map(refTile).join('')}</div>` : '')
-    || '<span class="ch-muted">No approved photos yet.</span>';
+  const pick = approved.filter(o => chosen.includes(canonOf(o.key).id));
+  const own = images(v.key, 'reference');
+  el('vp-refs').innerHTML = (pick.length
+      ? `<button type="button" class="ref-pill" onclick="toggleRefPop(event)"><img src="${esc(canonOf(pick[0].key).url)}" alt="">${esc(pick[0].label)}${pick.length > 1 ? ` <b>+${pick.length - 1}</b>` : ''}</button>`
+      : `<span class="ch-muted" style="margin:0;">${approved.length ? 'No approved photo selected' : 'No approved photos yet'}</span>`) +
+    (approved.length ? `<button type="button" class="ref-add" aria-label="Choose reference photos" aria-expanded="${refPop}" onclick="toggleRefPop(event)">+</button>` : '') +
+    own.map(refTile).join('') +
+    (refPop ? `<div class="ref-pop" onclick="event.stopPropagation()">${approved.map(o => { const c = canonOf(o.key);
+      return `<button type="button" aria-pressed="${chosen.includes(c.id)}" onclick="toggleRef('${c.id}')"><img src="${esc(c.url)}" alt=""><span>${esc(o.label)}</span><i>${chosen.includes(c.id) ? '✓' : ''}</i></button>`; }).join('')}</div>` : '');
   el('vp-strength-label').textContent = st.mode === 'crop' ? 'Detail-pass strength' : 'Reference influence';
   el('vp-strength').value = st.strength;
   strengthHint();
   const fl = k => ((cat.features || []).find(f => f.key === k) || {}).label || k;
   const traits = v.traits || [];
-  el('vp-traits-n').textContent = `${traits.filter(k => (cur.sheet || {})[k]).length} of ${traits.length} set`;
-  el('vp-traits').innerHTML = traits.map(k => (cur.sheet || {})[k]
-    ? `<span class="chip" style="cursor:default;">${esc(fl(k))}: ${esc(cur.sheet[k])}</span>`
-    : `<span class="chip" style="cursor:default; opacity:.55;">${esc(fl(k))}: not set</span>`).join('') +
-    `<button type="button" class="chip" onclick="go('body')">Edit body profile</button>`;
+  const on = traits.filter(k => (cur.sheet || {})[k]), off = traits.filter(k => !(cur.sheet || {})[k]);
+  el('vp-traits-n').textContent = `${on.length} of ${traits.length} in the prompt`;
+  el('vp-traits').innerHTML = on.map(k => `<span class="trait">${esc(fl(k))}: <b>${esc(cur.sheet[k])}</b></span>`).join('');
+  el('vp-traits-off').innerHTML = (off.length ? `Not set, so not sent: ${off.map(k => esc(fl(k))).join(', ')}. ` : '') +
+    `<a href="#" onclick="go('body');return false;">Edit body profile</a>`;
   const opts = images(v.key, 'canonical').concat(images(v.key, 'candidate'));
   vpOptUrls = opts.map(o => o.url);
   el('vp-opts').className = 'opts';
@@ -917,6 +946,10 @@ function renderViewPanel() {
   gen.disabled = locked || st.display === 'generating';
   el('vp-batch').innerHTML = batchChips();
 }
+let refPop = false;
+function toggleRefPop(e) { e.stopPropagation(); refPop = !refPop; renderViewPanel(); }
+document.addEventListener('click', () => { if (refPop) { refPop = false; renderViewPanel(); } });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && refPop) { refPop = false; renderViewPanel(); } });
 function removeApproved() {
   const v = viewDef(selView), kept = canonOf(selView);
   if (kept && confirm(v.key === 'face_front'
