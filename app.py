@@ -31129,7 +31129,6 @@ def api_character_generate(char_id):
     except (TypeError, ValueError):
         batch = CH.DEFAULT_BATCH
     batch = max(1, min(CH.MAX_BATCH, batch))
-    lighting = body.get('lighting') if body.get('lighting') in CH.LIGHTING else None
     s = _db_session()
     try:
         row = _char_row(s, user, char_id)
@@ -31165,7 +31164,7 @@ def api_character_generate(char_id):
         dressed = [o for o in dressed if not (o or '').startswith('upload:') or o[7:] in owned] or ['Bodysuit']
         prompts = [CH.build_view_prompt(view_key, sheet, row.age, has_ref, row.body_type, mode=mode,
                                         strength=state[view_key]['strength'],
-                                        lighting=lighting, outfit=o, blend=blend,
+                                        outfit=o, blend=blend,
                                         match=match) for o in dressed]
         parent_versions = {p: state[p]['version'] for p in v['parents']}
         key = row.key

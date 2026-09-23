@@ -300,7 +300,6 @@
     .vp-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
     .dl { font-size: 0.8rem; font-weight: 600; color: var(--text-2); }
     .vp-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; align-items: start; }
-    .vp-controls .field { gap: 6px; }
     .vp-infl { grid-column: 1 / -1; }
     .vp-infl input { width: 100%; margin: 6px 0 0; accent-color: var(--accent); }
     .vp-val { font-size: 0.78rem; color: var(--text-2); }
@@ -562,7 +561,6 @@
               <div class="bands" id="vp-bands"></div>
               <p class="hint" id="vp-hint" style="margin-top:6px;"></p>
             </div>
-            <div class="field"><label for="vp-light">Lighting</label><select id="vp-light" onchange="viewOpts[selView]=Object.assign(viewOpts[selView]||{},{lighting:this.value})"></select></div>
           </div>
           <div class="vp-sec">
             <div class="vp-row"><span class="dl">Body profile used</span><span class="hint" id="vp-traits-n"></span></div>
@@ -668,7 +666,7 @@
 
 <script>
 const el = id => document.getElementById(id);
-let lbUrls = []; let lbIdx = 0; let vpOptUrls = []; const viewOpts = {};
+let lbUrls = []; let lbIdx = 0; let vpOptUrls = [];
 function fillSelect(id, items, val) {
   el(id).innerHTML = items.map(o => `<option value="${o.key}"${o.key === val ? ' selected' : ''}>${o.label}</option>`).join('');
 }
@@ -1442,8 +1440,6 @@ function renderViewPanel() {
   el('drawer').hidden = el('drawer-scrim').hidden = !v;
   if (!v) return;
   const st = vs(v.key);
-  const o = viewOpts[v.key] || {};
-  fillSelect('vp-light', cat.lighting || [], o.lighting || 'anchor');
   el('vp-title').textContent = v.label;
   el('vp-lineage').innerHTML = lineage(v.key).map(k => `<a href="#" onclick="openView('${k}');return false;">${esc(viewDef(k).label)}</a>`).join(' → ');
   const blockers = v.parents.filter(p => vs(p).status !== 'approved');
@@ -1615,8 +1611,7 @@ async function useCrop(as) {
   } catch (e) { say(e.message, 'err'); }
 }
 async function submitView(key, n) {
-  const o = viewOpts[key] || {};
-  const body = {view: key, batch: n || batch, lighting: o.lighting};
+  const body = {view: key, batch: n || batch};
   if (key !== 'face_front' && vs(key).mode === 'crop') body.crop_b64 = await cropParent(key);
   return api('/api/characters/' + cur.id + '/generate', {body});
 }

@@ -161,17 +161,6 @@ YOUTH_TERMS = ('child', 'kid', 'teen', 'underage', 'minor', 'young girl',
 
 STUDIO = 'Soft natural daylight, plain light-grey wall behind her. ' + PHOTO_LOOK
 
-# Lighting only rewords a view; the view's framing still decides what is
-# shown, so it cannot move a view past its rating.
-LIGHTING = {
-    'anchor': ('Match anchor', STUDIO),
-    'studio_soft': ('Studio soft', 'Soft diffused key light with gentle fill, plain neutral grey background, sharp '
-                                   'focus, ultra-detailed natural skin texture, highest resolution.'),
-    'daylight': ('Window daylight', 'Natural window daylight from one side, plain light background, sharp focus, '
-                                    'ultra-detailed natural skin texture, highest resolution.'),
-    'warm': ('Warm evening', 'Warm low golden light, plain dark background, sharp focus, '
-                             'ultra-detailed natural skin texture, highest resolution.'),
-}
 VARIATIONS = BATCH_CHOICES
 
 # A preset only fills body features the creator has not set yet.
@@ -379,7 +368,6 @@ def catalogue(level, body_type='female'):
                      for k, (lab, g, opts) in feats.items() if g in groups],
         'batch': list(BATCH_CHOICES), 'default_batch': DEFAULT_BATCH,
         'variations': list(VARIATIONS),
-        'lighting': [{'key': k, 'label': l} for k, (l, _) in LIGHTING.items()],
         'presets': [{'key': k, 'label': l, 'hint': h, 'values': v} for k, (l, h, v) in BODY_PRESETS.items()],
         'min_age': MIN_AGE,
         'outfits': list(OUTFITS), 'outfit_colours': OUTFIT_COLOURS,
@@ -592,7 +580,7 @@ def outfit_text(sheet, outfit=None):
 
 
 def build_view_prompt(key, sheet, age, has_reference, body_type='female',
-                      mode='reference', strength=None, lighting=None, outfit=None, blend=False,
+                      mode='reference', strength=None, outfit=None, blend=False,
                       match=False):
     v = view(key, body_type)
     if not v:
@@ -638,12 +626,9 @@ def build_view_prompt(key, sheet, age, has_reference, body_type='female',
     else:
         lead = f"photorealistic photo of a woman, {v['framing']}."
     body = f' Her features: {detail}.' if detail else ''
-    light = LIGHTING.get(lighting or '', ('', STUDIO))[1]
-    if PHOTO_LOOK not in light:
-        light = light.rstrip(' .') + '. ' + PHOTO_LOOK
     zoom = (' Zoomed in: the subject fills the whole frame; no face, no full body, nothing '
             'beyond the subject in shot.') if v.get('zoom') else ''
-    return (lead + zoom + body + ' ' + light + ' ' + adult_clause(age)).strip()
+    return (lead + zoom + body + ' ' + STUDIO + ' ' + adult_clause(age)).strip()
 
 
 def job_level(shot, scene):
