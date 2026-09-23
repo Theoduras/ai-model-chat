@@ -100,10 +100,6 @@ FEATURES = {
                                         ('Hip', 'a hip tattoo'), ('Sleeve', 'a full arm sleeve tattoo'), ('Back piece', 'a large back tattoo')]),
         'piercings': ('Piercings', 'body', [('None', 'no piercings'), ('Ears', 'pierced ears'), ('Nose', 'a nose piercing'), ('Navel', 'a navel piercing')]),
         'birthmarks': ('Birthmarks', 'body', [('None', ''), ('Shoulder', 'a small birthmark on the shoulder'), ('Hip', 'a small birthmark on the hip')]),
-        # Dresses only the full-body reference photos, never a content shot:
-        # the fragments stay empty so describe() has nothing to add.
-        'view_outfit': ('Outfit for body views', 'outfit', [('Bodysuit', ''), ('Casual', ''), ('Activewear', ''),
-                                                             ('Fitted dress', '')]),
         'nails': ('Nails', 'body', _opts('nails', 'Short, nude', 'Medium, painted', 'Long, painted', 'French tips')),
         # Topless
         'cup': ('Cup size', 'breasts', [('B', 'B-cup breasts'), ('C', 'C-cup breasts'), ('D', 'D-cup breasts'), ('DD', 'DD-cup breasts'),
@@ -132,7 +128,7 @@ FEATURES = {
 
 # Which feature groups each level may put into words. A safe-work prompt never
 # carries an intimate word, whatever the character has filled in.
-GROUP_LEVEL = {'face': 'sfw', 'body': 'sfw', 'outfit': 'sfw', 'breasts': 'moderate',
+GROUP_LEVEL = {'face': 'sfw', 'body': 'sfw', 'breasts': 'moderate',
                'nipples': 'moderate', 'pubic': 'explicit', 'vulva': 'explicit',
                'anus': 'explicit'}
 
@@ -391,6 +387,7 @@ def catalogue(level, body_type='female'):
         'lighting': [{'key': k, 'label': l} for k, (l, _) in LIGHTING.items()],
         'presets': [{'key': k, 'label': l, 'hint': h, 'values': v} for k, (l, h, v) in BODY_PRESETS.items()],
         'min_age': MIN_AGE,
+        'outfits': list(OUTFITS), 'outfit_colours': OUTFIT_COLOURS,
     }
 
 
@@ -429,9 +426,9 @@ def validate(data, body_type='female'):
     feats = features(body_type)
     sheet = {}
     for k, v in (data.get('sheet') or {}).items():
-        v = RENAMED.get((k, v), v)
         if k not in feats:
             continue
+        v = RENAMED.get((k, v), v)
         if v in ('', None):
             continue
         if v not in [o for o, _ in feats[k][2]]:
@@ -447,6 +444,20 @@ def validate(data, body_type='female'):
     if score >= YOUTH_WARN_AT:
         warnings.append('Several choices lean young. The adult-appearance check '
                         'will be strict on this character.')
+    raw = data.get('sheet') or {}
+    picked = raw.get('view_outfits')
+    if picked is None and raw.get('view_outfit'):
+        picked = [raw['view_outfit']]
+    if picked:
+        if not isinstance(picked, list) or any(o not in OUTFITS for o in picked):
+            raise CharacterError('Unknown outfit.')
+        sheet['view_outfits'] = list(dict.fromkeys(picked))
+        colours = raw.get('outfit_colours') or {}
+        if not isinstance(colours, dict) or any(c not in OUTFIT_COLOURS for c in colours.values() if c):
+            raise CharacterError('Unknown outfit colour.')
+        colours = {o: c for o, c in colours.items() if c and o in sheet['view_outfits']}
+        if colours:
+            sheet['outfit_colours'] = colours
     name = re.sub(r'\s+', ' ', str(data.get('name') or '')).strip()[:80] or 'Untitled draft'
     return {'name': name, 'age': age, 'nsfw_level': level, 'sheet': sheet,
             'notes': clean_notes(data.get('notes'), data.get('banned') or ())}, warnings
@@ -485,18 +496,40 @@ def adult_clause(age):
             'and fully adult body proportions.')
 
 
-OUTFITS = {'Bodysuit': 'a plain fitted nude-coloured bodysuit', 'Casual': 'a fitted plain T-shirt and slim jeans',
-           'Activewear': 'a fitted tank top and leggings', 'Fitted dress': 'a simple fitted knee-length dress'}
+# What the full-body reference photos are dressed in. Kept out of FEATURES so
+# no content prompt inherits it: a sheet holds `view_outfits` (a list, one set
+# of options generated per outfit) and `outfit_colours` (outfit -> colour).
+OUTFITS = {'Bodysuit': ('a plain fitted {c} bodysuit', 'nude-coloured'),
+           'Casual': ('a fitted plain {c} T-shirt and slim jeans', ''),
+           'Activewear': ('a fitted {c} tank top and leggings', ''),
+           'Fitted dress': ('a simple fitted {c} knee-length dress', '')}
+OUTFIT_COLOURS = {'Black': '#1d1d1f', 'White': '#f7f7f5', 'Grey': '#8e8e93', 'Beige': '#d8c3a5', 'Navy': '#23305a',
+                  'Red': '#b3261e', 'Pink': '#e8a0bf', 'Green': '#3f6b45', 'Blue': '#3a6ea5', 'Brown': '#6b4a33'}
+
+
+def outfits(sheet):
+    sheet = sheet or {}
+    picked = sheet.get('view_outfits')
+    if picked is None and sheet.get('view_outfit'):
+        picked = [sheet['view_outfit']]
+    return [o for o in (picked or []) if o in OUTFITS] or ['Bodysuit']
+
+
+def outfit_text(sheet, outfit=None):
+    outfit = outfit if outfit in OUTFITS else outfits(sheet)[0]
+    template, default = OUTFITS[outfit]
+    colour = ((sheet or {}).get('outfit_colours') or {}).get(outfit, '').lower() or default
+    return re.sub(r'\s+', ' ', template.replace('{c}', colour))
+
 
 
 def build_view_prompt(key, sheet, age, has_reference, body_type='female',
-                      mode='reference', strength=None, pose=None, lighting=None):
+                      mode='reference', strength=None, pose=None, lighting=None, outfit=None):
     v = view(key, body_type)
     if not v:
         raise CharacterError('Unknown view.')
     if '{outfit}' in v['framing']:
-        outfit = OUTFITS.get((sheet or {}).get('view_outfit'), OUTFITS['Bodysuit'])
-        v = dict(v, framing=v['framing'].replace('{outfit}', outfit))
+        v = dict(v, framing=v['framing'].replace('{outfit}', outfit_text(sheet, outfit)))
     uses = tuple(v['uses']) + (() if 'face' in v['uses'] else ('body',))
     groups = tuple(g for g in uses if _rank(GROUP_LEVEL[g]) <= _rank(v['rating']))
     keep = set(traits(key, body_type))

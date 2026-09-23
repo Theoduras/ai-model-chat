@@ -67,12 +67,16 @@ def test_prompts():
     check('shape fragments reach a safe-work prompt',
           all(dict(CH.features()[k][2])[v] in text for k, v in shapes.items()))
     for key in ('body_front', 'body_side', 'body_back'):
-        check(f'{key} defaults to bodysuit', 'bodysuit' in CH.build_view_prompt(key, {}, 24, True))
-        for o, text in CH.OUTFITS.items():
-            p = CH.build_view_prompt(key, {'view_outfit': o}, 24, True)
-            check(f'{key} wears {o}', text in p and '{outfit}' not in p)
+        check(f'{key} defaults to a nude-coloured bodysuit', 'nude-coloured bodysuit' in CH.build_view_prompt(key, {}, 24, True))
+        for o in CH.OUTFITS:
+            p = CH.build_view_prompt(key, {'view_outfits': [o]}, 24, True)
+            check(f'{key} wears {o}', CH.outfit_text({}, o) in p and '{' not in p)
+    two = {'view_outfits': ['Casual', 'Fitted dress'], 'outfit_colours': {'Casual': 'Black', 'Fitted dress': 'Red'}}
+    check('named outfit picked', 'red knee-length dress' in CH.build_view_prompt('body_front', two, 24, True, outfit='Fitted dress'))
+    check('first outfit by default', 'black T-shirt' in CH.build_view_prompt('body_front', two, 24, True))
+    check('old single outfit still reads', CH.outfits({'view_outfit': 'Activewear'}) == ['Activewear'])
     check('outfit never reaches a content prompt',
-          all(CH.describe({'view_outfit': o}, lvl) == '' for o in CH.OUTFITS for lvl in ('sfw', 'explicit')))
+          all(CH.describe(two, lvl) == '' for lvl in ('sfw', 'explicit')))
     check('face prompt is frontal', 'front-facing' in CH.build_view_prompt('face_front', {}, 24, False))
     close = CH.build_view_prompt('vulva_open', FULL_SHEET, 31, True)
     far = ('height', 'bust', 'shoulders', 'body_shape', 'nails')
@@ -116,6 +120,14 @@ def test_validation():
     check('youngest look warns on its own', bool(warn))
     check('youngest look plus one lean is blocked', refused({'age': 25, 'sheet': {'apparent_age': '18–21', 'bust': 'Small'}}))
     check('no teen look offered', not any('teen' in o.lower() or 'teen' in fr for o, fr in CH.features()['apparent_age'][2]))
+    clean, _ = CH.validate({'age': 25, 'sheet': {'view_outfits': ['Casual', 'Casual', 'Bodysuit'],
+                                                 'outfit_colours': {'Casual': 'Navy', 'Activewear': 'Red'}}})
+    check('outfits deduped, colours cut to picked outfits',
+          clean['sheet'] == {'view_outfits': ['Casual', 'Bodysuit'], 'outfit_colours': {'Casual': 'Navy'}})
+    check('unknown outfit refused', refused({'age': 25, 'sheet': {'view_outfits': ['Ballgown']}}))
+    check('unknown colour refused', refused({'age': 25, 'sheet': {'view_outfits': ['Casual'], 'outfit_colours': {'Casual': 'Plaid'}}}))
+    clean, _ = CH.validate({'age': 25, 'sheet': {'view_outfit': 'Activewear'}})
+    check('old single outfit validates', clean['sheet'] == {'view_outfits': ['Activewear']})
     clean, warn = CH.validate({'age': 25, 'notes': 'likes red', 'banned': ['red']})
     check('banned terms struck', 'red' not in clean['notes'])
 

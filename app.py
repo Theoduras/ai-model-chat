@@ -29313,10 +29313,16 @@ def _char_views_state(s, row):
     rows = _char_views(s, row)
     for cv in rows.values():
         if cv.status == 'generating':
-            job = cv.job_id and s.query(GenerationJob).filter_by(id=cv.job_id).first()
-            if not job or job.status == 'failed':
-                cv.status = _char_view_fallback(s, row.id, cv.view_key)
-                cv.job_id = None
+            # A job can finish before its ids are stored here (an inline
+            # submit), so a done job counts as delivered, not as open.
+            ids = [j for j in (cv.pending_jobs or cv.job_id or '').split(',') if j]
+            found = s.query(GenerationJob).filter(GenerationJob.id.in_(ids)).all() if ids else []
+            live = [j.id for j in found if j.status not in ('failed', 'done')]
+            cv.pending_jobs = ','.join(live)
+            cv.job_id = live[0] if live else None
+            if not live:
+                cv.status = ('review' if any(j.status == 'done' for j in found)
+                             else _char_view_fallback(s, row.id, cv.view_key))
     s.commit()
     dicts = {k: _char_view_dict(cv) for k, cv in rows.items()}
     shown = CH.resolve_all(dicts, row.body_type)
@@ -29535,13 +29541,18 @@ def _character_finish(job_id, spec, workspace, urls):
         from db import CharacterView
         cv = s.query(CharacterView).filter_by(character_id=spec['character_id'],
                                               view_key=spec['character_view']).first()
-        if cv and cv.job_id == job_id:
-            cv.job_id = None
+        pending = [j for j in (cv.pending_jobs or cv.job_id or '').split(',') if j] if cv else []
+        if cv and job_id in pending:
+            pending.remove(job_id)
+            cv.pending_jobs = ','.join(pending)
+            cv.job_id = pending[0] if pending else None
             if made:
                 cv.status = 'review'
                 cv.parent_versions_json = json.dumps(spec.get('parent_versions') or {})
-            else:
+            elif not pending and cv.status == 'generating':
                 cv.status = _char_view_fallback(s, spec['character_id'], cv.view_key)
+            elif pending and cv.status != 'review':
+                cv.status = 'generating'
         if made:
             update_generation(s, job_id, status='done', result_media_ids=','.join(made))
         else:
@@ -29958,42 +29969,59 @@ def api_character_generate(char_id):
         has_ref = bool(v['parents']) or bool(
             _char_images(s, row.id, view=view_key, role='reference')
             or _char_images(s, row.id, view='', role='reference'))
-        prompt = CH.build_view_prompt(view_key, _char_json_sheet(row), row.age,
-                                      has_ref, row.body_type, mode=mode,
-                                      strength=state[view_key]['strength'],
-                                      pose=pose, lighting=lighting)
+        sheet = _char_json_sheet(row)
+        dressed = CH.outfits(sheet) if '{outfit}' in v['framing'] else [None]
+        prompts = [CH.build_view_prompt(view_key, sheet, row.age, has_ref, row.body_type, mode=mode,
+                                        strength=state[view_key]['strength'],
+                                        pose=pose, lighting=lighting, outfit=o) for o in dressed]
         parent_versions = {p: state[p]['version'] for p in v['parents']}
         key = row.key
     finally:
         s.close()
-    spec = {'kind': 'image', 'slug': key, 'job': '', 'model': CHAR_MODEL,
-            'resolution': CHAR_RESOLUTION, 'batch': batch, 'addons': [],
-            'shot': 'portrait', 'explicit': v['rating'] != 'sfw',
-            'rating': v['rating'], 'character_id': char_id,
-            'character_view': view_key, 'prompt': prompt,
-            'parent_versions': parent_versions,
-            'reference_media': '', 'negative_extra': ''}
+    specs = [{'kind': 'image', 'slug': key, 'job': '', 'model': CHAR_MODEL,
+              'resolution': CHAR_RESOLUTION, 'batch': batch, 'addons': [],
+              'shot': 'portrait', 'explicit': v['rating'] != 'sfw',
+              'rating': v['rating'], 'character_id': char_id,
+              'character_view': view_key, 'prompt': prompt,
+              'parent_versions': parent_versions,
+              'reference_media': '', 'negative_extra': ''} for prompt in prompts]
     try:
-        price = CR.quote(spec)
+        prices = [CR.quote(spec) for spec in specs]
     except CR.PricingError as e:
         return jsonify({'ok': False, 'error': str(e)[:300]}), 400
     if crop:
         # The crop rides with the job, not the spec: the spec is stored per
         # generation and a 4k crop has no business in a text column.
         _CHAR_CROPS[char_id + ':' + view_key] = crop
-    resp = _gen_submit(user, key, spec, price)
-    job_id = (resp.get_json(silent=True) or {}).get('job') if not isinstance(resp, tuple) else None
-    if job_id:
-        from db import CharacterView
-        s = _db_session()
-        try:
-            cv = s.query(CharacterView).filter_by(character_id=char_id, view_key=view_key).first()
-            if cv:
-                cv.status, cv.job_id = 'generating', job_id
-                s.commit()
-        finally:
-            s.close()
-    return resp
+    # One job per outfit, each a full set of options. A refusal part-way (the
+    # balance ran out) keeps the jobs already started and reports the rest.
+    jobs, first, refused = [], None, None
+    for spec, price in zip(specs, prices):
+        resp = _gen_submit(user, key, spec, price)
+        job_id = (resp.get_json(silent=True) or {}).get('job') if not isinstance(resp, tuple) else None
+        if not job_id:
+            refused = resp
+            break
+        jobs.append(job_id)
+        first = first or resp
+    if not jobs:
+        return refused
+    from db import CharacterView
+    s = _db_session()
+    try:
+        cv = s.query(CharacterView).filter_by(character_id=char_id, view_key=view_key).first()
+        if cv:
+            cv.status, cv.job_id, cv.pending_jobs = 'generating', jobs[0], ','.join(jobs)
+            s.commit()
+    finally:
+        s.close()
+    if len(specs) == 1:
+        return first
+    out = dict(first.get_json(silent=True) or {}, jobs=jobs)
+    if refused is not None:
+        body = refused[0].get_json(silent=True) if isinstance(refused, tuple) else refused.get_json(silent=True)
+        out['warning'] = f'Only {len(jobs)} of {len(specs)} outfits started: ' + ((body or {}).get('error') or 'refused')
+    return jsonify(out)
 
 
 @app.route('/api/characters/<char_id>/views/<view_key>', methods=['PUT'])

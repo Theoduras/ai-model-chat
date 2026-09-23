@@ -225,6 +225,11 @@
       display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 4px; text-align: center; }
     .fp-opt[aria-pressed="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, #f4f2ef); font-weight: 700; }
     .fp-opt.text { justify-content: center; min-height: 44px; }
+    .of-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0 10px; }
+    .of-row > span { font-size: 0.72rem; font-weight: 700; min-width: 86px; }
+    .of-sw { width: 26px; height: 26px; border-radius: 50%; border: 2px solid #dcd8d2; cursor: pointer; padding: 0; }
+    .of-sw[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .of-sw.any { background: #f4f2ef; font-size: 0.6rem; width: auto; padding: 0 8px; border-radius: 13px; color: #2b2a33; }
     .fp-list { display: flex; flex-direction: column; gap: 16px; }
     .fp-mini svg { width: 32px; height: 32px; vertical-align: middle; margin-right: 6px; }
     [hidden] { display: none !important; }
@@ -655,6 +660,38 @@ function featurePicker(f) {
   }).join('');
   return `<fieldset class="fp"><legend>${esc(f.label)}</legend><div class="fp-opts" role="group">${opts}</div></fieldset>`;
 }
+// Several outfits, one colour each: every outfit picked is its own set of
+// full-body options when those views generate.
+function pickedOutfits() {
+  const s = cur.sheet || {};
+  return s.view_outfits || (s.view_outfit ? [s.view_outfit] : []);
+}
+function outfitPicker() {
+  if (!cat.outfits) return '';
+  const on = pickedOutfits(), colours = (cur.sheet || {}).outfit_colours || {};
+  const chips = cat.outfits.map(o => `<button type="button" class="fp-opt text of-opt" data-outfit="${esc(o)}"
+      aria-pressed="${on.includes(o)}" onclick="toggleOutfit(this)"><span>${esc(o)}</span></button>`).join('');
+  const rows = on.map(o => `<div class="of-row" role="group" aria-label="${esc(o)} colour"><span>${esc(o)}</span>
+      <button type="button" class="of-sw any" data-colour-for="${esc(o)}" data-colour="" aria-pressed="${!colours[o]}"
+        onclick="pickColour(this)">Any</button>` +
+    Object.entries(cat.outfit_colours).map(([c, hex]) => `<button type="button" class="of-sw" style="background:${hex}"
+      data-colour-for="${esc(o)}" data-colour="${esc(c)}" aria-pressed="${colours[o] === c}" title="${esc(c)}"
+      aria-label="${esc(c)}" onclick="pickColour(this)"></button>`).join('') + '</div>').join('');
+  return `<fieldset class="fp"><legend>Outfits for body views</legend>
+    <span class="ch-muted" style="margin:0 0 6px; display:block;">Pick one or more. Each outfit generates its own set of full-body options.</span>
+    <div class="fp-opts" role="group">${chips}</div>${rows}</fieldset>`;
+}
+function toggleOutfit(btn) {
+  btn.setAttribute('aria-pressed', btn.getAttribute('aria-pressed') !== 'true');
+  cur.sheet = collectSheet();
+  el('body-features').querySelector('fieldset').outerHTML = outfitPicker();
+  autosaveSheet();
+}
+function pickColour(btn) {
+  btn.parentNode.querySelectorAll('.of-sw').forEach(b => b.setAttribute('aria-pressed', 'false'));
+  btn.setAttribute('aria-pressed', 'true');
+  autosaveSheet();
+}
 function pickOption(btn) {
   const on = btn.getAttribute('aria-pressed') !== 'true';
   btn.parentNode.querySelectorAll('.fp-opt').forEach(b => b.setAttribute('aria-pressed', 'false'));
@@ -675,6 +712,15 @@ function collectSheet() {
     const on = document.querySelector(`.fp-opt[data-feature="${k}"][aria-pressed="true"]`);
     if (on) sheet[k] = on.dataset.value; else delete sheet[k];
   });
+  const chips = [...document.querySelectorAll('.of-opt[data-outfit]')];
+  if (chips.length) {
+    delete sheet.view_outfit;
+    sheet.view_outfits = chips.filter(b => b.getAttribute('aria-pressed') === 'true').map(b => b.dataset.outfit);
+    sheet.outfit_colours = {};
+    document.querySelectorAll('.of-sw[aria-pressed="true"]').forEach(b => {
+      if (b.dataset.colour && sheet.view_outfits.includes(b.dataset.colourFor)) sheet.outfit_colours[b.dataset.colourFor] = b.dataset.colour;
+    });
+  }
   return sheet;
 }
 // Name, age and notes are only edited on Describe; any other step sends just
@@ -719,7 +765,7 @@ async function linkPersona(slug) {
 let generating = false;
 function setGenerating(on) {
   generating = on;
-  el('gen-title').textContent = `Generating ${batch} option${batch === 1 ? '' : 's'}…`;
+  if (on) el('gen-title').textContent = `Generating ${batch} option${batch === 1 ? '' : 's'}…`;
   el('gen-overlay').hidden = !on;
   document.querySelectorAll('[onclick^="generate("]').forEach(b => {
     if (on) { b.dataset.wasDisabled = b.disabled ? '1' : ''; b.disabled = true; }
@@ -732,12 +778,14 @@ async function generate(view, n) {
   say('');
   try {
     if (step === 'describe' && !(await saveSheet())) return;
+    const sets = ['body_front', 'body_side', 'body_back'].includes(view) ? pickedOutfits().length : 1;
+    if (sets > 1) el('gen-title').textContent = `Generating ${n || batch} options × ${sets} outfits…`;
     const d = await submitView(view, n);
-    await waitJob(d.job);
+    await Promise.all((d.jobs || [d.job]).map(waitJob));
     setGenerating(false);
     await reload();
     if (view === 'face_front') go('pick');
-    say('New options are ready.', 'ok');
+    say(d.warning || 'New options are ready.', d.warning ? 'err' : 'ok');
   } catch (e) { say(e.message, 'err'); }
   finally { if (generating) setGenerating(false); }
 }
@@ -850,8 +898,7 @@ function renderBody() {
   const todo = shown.filter(v => ['not_started', 'outdated'].includes(vs(v.key).display));
   el('gen-remaining').disabled = !todo.length;
   el('regen-branch').hidden = !shown.some(v => vs(v.key).display === 'outdated');
-  el('body-features').innerHTML = cat.features.filter(f => f.group === 'outfit')
-    .concat(cat.features.filter(f => f.group === 'body')).map(featurePicker).join('');
+  el('body-features').innerHTML = outfitPicker() + cat.features.filter(f => f.group === 'body').map(featurePicker).join('');
   const intimate = cat.features.filter(f => INTIMATE.includes(f.group));
   el('intimate-wrap').hidden = !intimate.length;
   el('intimate-features').innerHTML = intimate.map(featurePicker).join('');
@@ -1044,7 +1091,8 @@ async function queueViews(keys) {
   el('gen-title').textContent = `Generating ${keys.length} view${keys.length === 1 ? '' : 's'}…`;
   const jobs = [], errs = [];
   for (const k of keys) {
-    try { jobs.push((await submitView(k)).job); } catch (e) { errs.push(viewDef(k).label + ': ' + e.message); }
+    try { const d = await submitView(k); jobs.push(...(d.jobs || [d.job])); if (d.warning) errs.push(d.warning); }
+    catch (e) { errs.push(viewDef(k).label + ': ' + e.message); }
   }
   // Polling each job is what collects its images when no worker runs.
   const done = await Promise.allSettled(jobs.map(waitJob));
