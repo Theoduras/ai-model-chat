@@ -10,7 +10,26 @@
   <link rel="stylesheet" href="/css/style.css">
   <script src="/js/devnav.js" defer></script>
   <script src="/js/character-visuals.js"></script>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&display=swap">
   <style>
+    /* The studio keeps its own paper palette whatever the site theme says. */
+    body.ch-studio, body.ch-studio .drawer { --bg: #F4F1EC; --surface: #FFFFFF; --surface-2: #EEEAE3; --border: #E2DCD3;
+      --text: #1E1B18; --text-2: #5E574F; --text-muted: #6F675E; --accent: #B8321F; --ok: #2F6B3A; --warn: #8A5A00; --err: #B8321F;
+      font-family: "Instrument Sans", "Helvetica Neue", sans-serif; color-scheme: light; }
+    body.ch-studio { background: var(--bg); color: var(--text); }
+    body.ch-studio header { background: #FFFFFF; border-bottom: 1px solid var(--border); }
+    body.ch-studio .ch-card, body.ch-studio .ch-item { border-radius: 20px; }
+    body.ch-studio .btn, body.ch-studio .view, body.ch-studio .ch-label select, body.ch-studio .ch-label input { border-radius: 10px; }
+    body.ch-studio .chip[aria-pressed="true"], body.ch-studio .steps button[aria-current="step"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+    body.ch-studio .view { background: #FFFFFF; border-color: var(--border); }
+    body.ch-studio .view[aria-pressed="true"] { border-color: var(--accent); background: #F7E4DF; }
+    body.ch-studio .st.review, body.ch-studio .st.outdated { background: #F8EBCB; color: #8A5A00; }
+    body.ch-studio .st.approved { background: #E3F0E4; color: #2F6B3A; }
+    body.ch-studio .banner.outdated { background: #F8EBCB; }
+    body.ch-studio .drawer { background: #FFFFFF; box-shadow: -12px 0 32px rgba(30,27,24,.10); }
+    body.ch-studio .tier-h { color: var(--text-2); font-weight: 600; }
+    a:hover { color: #8E2415; }
     .ch-scroll { flex: 1; min-height: 0; overflow-y: auto; }
     .ch-wrap { padding: 24px 28px 72px; display: flex; flex-direction: column; gap: 20px; }
     .ch-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px; }
@@ -142,7 +161,7 @@
     @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s; } }
   </style>
 </head>
-<body class="page-dashboard">
+<body class="page-dashboard ch-studio">
 
 <header>
   <div style="display:flex; align-items:center; gap:10px;">
