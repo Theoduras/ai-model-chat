@@ -67,16 +67,16 @@
     /* ── Step layouts ── */
     .ch-cols { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 20px; align-items: start; }
     .ch-side { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
-    .ch-describe { grid-template-areas: "main basics" "main gen"; }
+    .ch-describe { grid-template-areas: "main gen"; }
     .ch-describe > .ch-main { grid-area: main; }
-    .ch-describe > .ch-basics { grid-area: basics; }
+    .ch-basics-step { grid-template-columns: minmax(0, 560px); }
     .ch-describe > .ch-gen { grid-area: gen; }
     .ch-check { grid-template-columns: 300px minmax(0, 1fr); }
     .ch-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
     .ch-toolbar .grow { flex: 1; }
     @media (max-width: 1100px) {
       .ch-cols, .ch-check { grid-template-columns: minmax(0, 1fr); }
-      .ch-describe { grid-template-areas: "basics" "main" "gen"; }
+      .ch-describe { grid-template-areas: "main" "gen"; }
     }
     .ch-sub-h { font-size: 0.84rem; font-weight: 600; color: var(--text-2); margin: 4px 0 -8px; }
     .ch-quote { text-align: center; margin-top: -6px; }
@@ -432,6 +432,20 @@
     <div id="ch-head"></div>
     <div id="ch-done" hidden></div>
 
+    <!-- 0 Basics -->
+    <div class="ch-cols ch-basics-step" data-step="basics">
+      <section class="form-section ch-basics">
+        <div class="section-title">Basics</div>
+        <div class="field"><label for="f-name">Name</label><input id="f-name" type="text" maxlength="80" oninput="markDirty()"></div>
+        <div class="field"><label for="f-age">Age</label><input id="f-age" type="number" min="18" max="80" oninput="markDirty()">
+          <span class="hint">Must be 18 or over. Every prompt states she is a fictional adult of this age.</span></div>
+        <div class="field"><label>Explicitness level</label><div class="chips" id="level-chips"></div>
+          <span class="hint">Sets which body photos are required.</span></div>
+        <div class="field"><label for="f-persona">Persona</label><select id="f-persona" onchange="linkPersona(this.value)"></select></div>
+        <div class="field"><label for="f-notes">Notes (optional)</label><input id="f-notes" type="text" maxlength="400" oninput="markDirty()"></div>
+      </section>
+    </div>
+
     <!-- 1 Describe -->
     <div class="ch-cols ch-describe" data-step="describe">
       <section class="form-section ch-main">
@@ -454,16 +468,6 @@
         </div>
         <p class="hint" id="build-hint">Tap the drawing that fits each feature. Nothing else can be generated until the face is approved.</p>
         <div class="fp-list" id="face-features"></div>
-      </section>
-      <section class="form-section ch-basics">
-        <div class="section-title">Basics</div>
-        <div class="field"><label for="f-name">Name</label><input id="f-name" type="text" maxlength="80" oninput="markDirty()"></div>
-        <div class="field"><label for="f-age">Age</label><input id="f-age" type="number" min="18" max="80" oninput="markDirty()">
-          <span class="hint">Must be 18 or over. Every prompt states she is a fictional adult of this age.</span></div>
-        <div class="field"><label>Explicitness level</label><div class="chips" id="level-chips"></div>
-          <span class="hint">Sets which body photos are required.</span></div>
-        <div class="field"><label for="f-persona">Persona</label><select id="f-persona" onchange="linkPersona(this.value)"></select></div>
-        <div class="field"><label for="f-notes">Notes (optional)</label><input id="f-notes" type="text" maxlength="400" oninput="markDirty()"></div>
       </section>
       <section class="form-section ch-gen">
         <div class="section-title">Generate</div>
@@ -800,6 +804,7 @@ function renderList() {
         <div class="pg-bar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100" aria-label="Approved photos"><i style="width:${pct}%;background:${progressColour(pct)};"></i></div>
         <span class="pg-pct" style="color:${progressColour(pct)};">${pct}%</span>
         <button type="button" class="btn btn-primary pg-open" onclick="event.stopPropagation();openCharacter('${c.id}')">Open</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="event.stopPropagation();deleteCharacter('${c.id}')">Delete</button>
         <span class="ch-card-note">${status} · version ${c.version}</span>
       </div></div>`;
   }).join('') + '</div>';
@@ -809,6 +814,14 @@ function showList() {
   el('edit-view').hidden = true; el('list-view').hidden = false;
   history.replaceState(null, '', '/characters');
   loadList();
+}
+async function deleteCharacter(id) {
+  const c = chars.find(x => x.id === id) || cur || {};
+  if (!confirm(`Delete ${c.name || 'this character'}? Every photo made for her character is deleted too. This cannot be undone.`)) return;
+  try { await api('/api/characters/' + id, {method: 'DELETE'}); }
+  catch (e) { listNote = e.message; }
+  dirty = false;
+  showList();
 }
 async function newCharacter(persona) {
   try {
@@ -832,7 +845,7 @@ async function openCharacter(id) {
   guided = !m.isAdmin && !PageWizard.entry(setupKey()).done;
   showDone = false; selView = ''; pickedFace = ''; lastMsg = ['', '']; dirty = false;
   const canon = canonOf('face_front');
-  go(canon ? 'views' : (images('face_front', 'candidate').length ? 'pick' : 'describe'));
+  go(canon ? 'views' : (images('face_front', 'candidate').length ? 'pick' : basicsWhy() ? 'basics' : 'describe'));
   if (guided) requestAnimationFrame(() => tourStart(false));
 }
 function images(view, role) { return (cur.images || []).filter(i => i.view === view && (!role || i.role === role)); }
@@ -848,7 +861,8 @@ async function reload() {
 
 function go(s) {
   if (dirty && s !== step) return confirmLeave(() => go(s));
-  if (s !== 'describe' && s !== 'pick' && !canonOf('face_front') && s !== 'check') s = 'describe';
+  if (s !== 'basics' && s !== 'describe' && s !== 'pick' && !canonOf('face_front') && s !== 'check') s = 'describe';
+  if (s === 'describe' && !canonOf('face_front') && basicsWhy()) s = 'basics';
   if (s === 'face') s = canonOf('face_front') || pickedFace ? 'check' : 'pick';
   if ((s === 'body' || s === 'views' || s === 'finish') && !canonOf('face_front')) s = 'describe';
   if (s === 'finish' && cur.status !== 'complete') s = 'views';
@@ -872,7 +886,7 @@ function render() {
     const next = pool.find(v => v.required && open(v)) || pool.find(open) || pool[0];
     selView = next ? next.key : '';
   }
-  ({describe: renderDescribe, pick: renderPick, check: renderCheck, body: renderBody, views: renderBody, finish: renderFinish})[step]();
+  ({basics: renderBasics, describe: renderDescribe, pick: renderPick, check: renderCheck, body: renderBody, views: renderBody, finish: renderFinish})[step]();
   renderFrame();
 }
 
@@ -882,8 +896,10 @@ function render() {
 // of truth; this only draws around whichever step it settled on.
 const STAGES = [{key: 'face', label: 'Her face'}, {key: 'body', label: 'Her body'}, {key: 'ready', label: 'Ready'}];
 const STEPS = [
+  {key: 'basics', stage: 'face', nav: 'About her', title: 'Who is she?',
+   sub: 'Give her a name, her age and how explicit her photos may be, and choose the persona she belongs to. Name, age and level go into every prompt.'},
   {key: 'describe', stage: 'face', nav: 'Design her face', title: 'How should her face be made?',
-   sub: 'Build it from the drawings, or blend 2 to 6 faces into a new one. Name, age and level go into every prompt. Nothing else can be generated until her face is approved.'},
+   sub: 'Build it from the drawings, or blend 2 to 6 faces into a new one. Nothing else can be generated until her face is approved.'},
   {key: 'pick', stage: 'face', nav: 'Pick one', title: 'Pick her face',
    sub: 'Choose the option that looks most like her. Not right? Regenerate, or change her features. Options you do not pick delete themselves after 3 days.'},
   {key: 'check', stage: 'face', nav: 'Check & approve', title: 'Check every feature',
@@ -902,8 +918,17 @@ function approvedCount() {
   const req = cat.views.filter(v => v.required);
   return [req.filter(v => vs(v.key).status === 'approved').length, req.length];
 }
+function basicsWhy() {
+  const name = (cur.name || '').trim();
+  if (!name || name === 'Untitled draft') return 'Give her a name to continue.';
+  if (!(+cur.age >= 18)) return 'Her age must be 18 or over.';
+  if (!cur.nsfw_level) return 'Choose an explicitness level to continue.';
+  if (personas.length && !cur.persona) return 'Choose her persona to continue.';
+  return '';
+}
 function stepDone(i) {
   const k = STEPS[i].key, face = !!canonOf('face_front');
+  if (k === 'basics') return !basicsWhy();
   if (k === 'describe') return face || images('face_front').length > 0;
   if (k === 'pick') return face || !!pickedFace;
   if (k === 'check') return face;
@@ -914,7 +939,8 @@ function stepDone(i) {
 // The same gates go() applies, so the rail never offers a step it would refuse.
 function stepOpen(i) {
   const k = STEPS[i].key, face = !!canonOf('face_front');
-  if (k === 'describe') return true;
+  if (k === 'basics') return true;
+  if (k === 'describe') return !basicsWhy();
   if (k === 'pick') return face || images('face_front').length > 0;
   if (k === 'check') return face || !!pickedFace;
   if (k === 'finish') return cur.status === 'complete';
@@ -923,6 +949,7 @@ function stepOpen(i) {
 // What Continue is waiting for, so a greyed button is never a mystery.
 function stepWhy(i) {
   const k = STEPS[i].key;
+  if (k === 'basics') return basicsWhy();
   if (k === 'describe' && !stepDone(i)) return 'Generate face options to continue.';
   if (k === 'pick' && !pickedFace) return 'Select one option to continue.';
   if (k === 'check' && !canonOf('face_front')) return 'Approve her face to continue.';
@@ -930,6 +957,7 @@ function stepWhy(i) {
     const [ok, n] = approvedCount();
     return `Approve every required photo to continue (${ok} of ${n}).`;
   }
+  if (k === 'finish' && basicsWhy()) return basicsWhy().replace('continue', 'finish');
   if (k === 'finish' && !accepted()) return 'Accept her to finish.';
   return '';
 }
@@ -949,7 +977,8 @@ function renderFrame() {
   el('ch-rail').innerHTML = `<button type="button" class="btn-back-gallery" onclick="showList()">← All characters</button>` +
     PageWizard.railHtml({title: 'Your character', name: cur.name, pct, stages: STAGES, steps: STEPS, idx: i,
       done: stepDone, reachable: stepOpen, call: 'goStep'}) +
-    `<div class="ch-rail-meta"><span><b>${ok} of ${n}</b> required photos approved</span><span id="rail-cost"></span></div>`;
+    `<div class="ch-rail-meta"><span><b>${ok} of ${n}</b> required photos approved</span><span id="rail-cost"></span>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="deleteCharacter('${cur.id}')">Delete character</button></div>`;
   paintRailCost();
   el('ch-head').hidden = el('ch-foot').hidden = showDone;
   el('ch-done').hidden = !showDone;
@@ -993,7 +1022,7 @@ const TOUR = PageWizard.tour([
   {anchor: activeCard, placement: 'right', title: 'This is her real character',
    body: 'Your picks are kept on her character when you press Save or Save & continue. Nothing reaches a fan until you approve it.'},
   {anchor: '#ch-rail', placement: 'right', title: 'Where you are',
-   body: 'Five steps: 1 Base & references, 2 Face, 3 Body profile, 4 Fine Tuning, 5 Finish. The bar shows how far she is, and you can jump back to any step you have already reached.'},
+   body: 'Start with who she is, then her face, her body, her photos and finally accept and link her. The bar shows how far she is, and you can jump back to any step you have already reached.'},
   {anchor: priceAnchor, placement: 'left', title: 'Every button shows its price',
    body: 'Generating spends tokens from your allowance. The price is shown next to the button before you click, and anything that fails comes back to you.'},
   {anchor: '#ch-foot', placement: 'top', title: 'Continue, or skip ahead',
@@ -1130,11 +1159,11 @@ function collectSheet() {
   }
   return sheet;
 }
-// Name, age and notes are only edited on Describe; any other step sends just
-// the sheet, since those fields are empty until Describe has been shown once.
+// Name, age and notes are only edited on About her; any other step sends just
+// the sheet, since those fields are empty until that step has been shown once.
 async function saveSheet(extra) {
   try {
-    const body = Object.assign({sheet: collectSheet()}, step === 'describe'
+    const body = Object.assign({sheet: collectSheet()}, step === 'basics'
       ? {name: el('f-name').value, age: +el('f-age').value, notes: el('f-notes').value} : {}, extra || {});
     const d = await api('/api/characters/' + cur.id, {method: 'PUT', body});
     cur = d.character;
@@ -1149,11 +1178,11 @@ async function saveSheet(extra) {
 // Face and body picks save on Save or Save & continue, not per tap. Until then
 // they are held in cur.sheet, so a re-render (a filter, an upload, a reload)
 // shows them rather than the last saved sheet.
-const SAVED_STEPS = ['describe', 'body'];
+const SAVED_STEPS = ['basics', 'describe', 'body'];
 let dirty = false;
 function markDirty() {
   cur.sheet = collectSheet();
-  if (step === 'describe') Object.assign(cur, {name: el('f-name').value, age: el('f-age').value, notes: el('f-notes').value});
+  if (step === 'basics') Object.assign(cur, {name: el('f-name').value, age: el('f-age').value, notes: el('f-notes').value});
   dirty = true; say('Unsaved changes');
 }
 function confirmLeave(then) {
@@ -1184,13 +1213,17 @@ function renderDescribe() {
   el('blend-count').textContent = `${refs.length} added${refs.length < 2 ? ' — add at least 2.' : '.'}`;
   el('face-features').innerHTML = cat.features.filter(f => f.group === 'face' && (!blend || BLEND_KEEP.includes(f.key)))
     .map(featurePicker).join('');
-  el('f-name').value = cur.name; el('f-age').value = cur.age; el('f-notes').value = cur.notes || '';
-  el('level-chips').innerHTML = cat.levels.map(l => `<button type="button" class="chip" aria-pressed="${cur.nsfw_level === l.key}"
-    onclick="saveSheet({nsfw_level:'${l.key}'})">${l.label}</button>`).join('');
   el('batch-chips').innerHTML = batchChips();
   el('gen-face').textContent = `Generate ${batch} face option${batch === 1 ? '' : 's'}`;
   el('gen-face-quote').textContent = [cost('face_front', batch), 'front-facing, neutral, studio light'].filter(Boolean).join(' · ');
   el('gen-face').disabled = blend && refs.length < 2;
+}
+function renderBasics() {
+  el('f-name').value = cur.name === 'Untitled draft' ? '' : cur.name;
+  el('f-name').placeholder = 'Her name';
+  el('f-age').value = cur.age; el('f-notes').value = cur.notes || '';
+  el('level-chips').innerHTML = cat.levels.map(l => `<button type="button" class="chip" aria-pressed="${cur.nsfw_level === l.key}"
+    onclick="saveSheet({nsfw_level:'${l.key}'})">${l.label}</button>`).join('');
   const sel = el('f-persona');
   sel.innerHTML = `<option value="">Not linked — link later</option>` + personas.map(p =>
     `<option value="${esc(p.slug)}" ${cur.persona === p.slug ? 'selected' : ''}>${esc(p.name || p.slug)}</option>`).join('');
@@ -1199,8 +1232,8 @@ async function linkPersona(slug) {
   try {
     if (cur.persona && slug) await api('/api/characters/' + cur.id + '/link', {body: {persona: ''}});
     await api('/api/characters/' + cur.id + '/link', {body: {persona: slug}});
-    cur.persona = slug; say(slug ? 'Linked to ' + slug + '.' : 'Unlinked.', 'ok');
-  } catch (e) { say(e.message, 'err'); renderDescribe(); }
+    cur.persona = slug; renderFrame(); say(slug ? 'Linked to ' + slug + '.' : 'Unlinked.', 'ok');
+  } catch (e) { say(e.message, 'err'); renderBasics(); }
 }
 
 // One generation at a time: a second press would start a second paid job.
