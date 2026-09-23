@@ -216,7 +216,8 @@
       <p class="rail-name" id="crumb"></p>
       <ol class="steps" id="steps"></ol>
       <div><div style="display:flex; justify-content:space-between; font-size:0.78rem; font-weight:600; color:var(--text-2); margin-bottom:6px;">
-        <span>Approved</span><span id="rail-count"></span></div><div class="bar" id="rail-bar"><div></div></div></div>
+        <span>Approved</span><span id="rail-count"></span></div><div class="bar" id="rail-bar"><div></div></div>
+        <p class="ch-muted" id="rail-cost"></p></div>
     </nav>
     <p class="msg" id="msg"></p>
 
@@ -242,7 +243,7 @@
         <div class="ch-card" style="display:flex; flex-direction:column; gap:12px;">
           <div style="display:flex; justify-content:space-between; align-items:center;">
             <span style="font-weight:600;">Options per try</span>
-            <input type="number" id="batch-input" min="1" max="8" step="1" style="width:60px;" onchange="setBatch(this.value)">
+            <div class="chips" id="batch-chips"></div>
           </div>
           <button type="button" class="btn btn-primary" id="gen-face" onclick="generate('face_front')">Generate face options</button>
           <span class="ch-muted" style="text-align:center; margin:0;">Front-facing · neutral · studio light · ears visible</span>
@@ -384,7 +385,7 @@
       </div>
       <div class="actionbar">
         <button type="button" class="btn" id="vp-check" onclick="runViewCheck()" hidden>Adult check</button>
-        <button type="button" class="btn" id="vp-var" onclick="generate(selView, 4)">4 variations</button>
+        <button type="button" class="btn" id="vp-var" onclick="generate(selView)"></button>
         <button type="button" class="btn btn-primary" id="vp-primary"></button>
       </div>
     </aside>
@@ -410,9 +411,14 @@ function renderPresets() {
   el('presets').innerHTML = (cat.presets || []).map(p =>
     `<button type="button" class="chip" title="${p.hint}" onclick="saveSheet({preset:'${p.key}'})">${p.label}</button>`).join('');
 }
+const cost = n => (cat && cat.price_per_image ? ' · ' + (n * cat.price_per_image).toLocaleString() + ' tokens' : '');
+function batchChips() {
+  return (cat && cat.batch || [1, 2, 3, 4, 6]).map(n =>
+    `<button type="button" class="chip" aria-pressed="${n === batch}" onclick="setBatch(${n})">${n}</button>`).join('');
+}
 function setBatch(v) {
-  batch = Math.max(1, Math.min(8, parseInt(v, 10) || 1));
-  el('batch-input').value = batch;
+  batch = parseInt(v, 10) || 4;
+  if (cur) render();
 }
 function vpImgClick(e, i) {
   e.stopPropagation();
@@ -520,6 +526,8 @@ function render() {
   el('rail-count').textContent = ok + ' / ' + req.length;
   el('rail-bar').firstElementChild.style.width = (req.length ? 100 * ok / req.length : 0) + '%';
   el('rail-bar').classList.toggle('full', req.length > 0 && ok === req.length);
+  el('rail-cost').textContent = req.length > ok && cat.price_per_image
+    ? `Remaining ≈ ${((req.length - ok) * batch * cat.price_per_image).toLocaleString()} tokens` : '';
   const shown = step === 'views' ? 'body' : step;
   document.querySelectorAll('[data-step]').forEach(n => n.hidden = n.dataset.step !== shown);
   el('body-profile').hidden = step === 'views';
@@ -582,8 +590,8 @@ function renderDescribe() {
   el('f-name').value = cur.name; el('f-age').value = cur.age; el('f-notes').value = cur.notes || '';
   el('level-chips').innerHTML = cat.levels.map(l => `<button type="button" class="chip" aria-pressed="${cur.nsfw_level === l.key}"
     onclick="saveSheet({nsfw_level:'${l.key}'})">${l.label}</button>`).join('');
-  el('batch-input').value = batch;
-  el('gen-face').textContent = `Generate ${batch} face options`;
+  el('batch-chips').innerHTML = batchChips();
+  el('gen-face').textContent = `Generate ${batch} face options` + cost(batch);
   const sel = el('f-persona');
   sel.innerHTML = `<option value="">Not linked — link later</option>` + personas.map(p =>
     `<option value="${esc(p.slug)}" ${cur.persona === p.slug ? 'selected' : ''}>${esc(p.name || p.slug)}</option>`).join('');
@@ -817,7 +825,8 @@ function renderViewPanel() {
   const prim = el('vp-primary'), cand = images(v.key, 'candidate')[0];
   const action = {not_started: ['Generate', () => generate(v.key)], review: ['Approve', () => cand && approveView(cand.id)],
                   outdated: ['Regenerate', () => generate(v.key)]}[st.display];
-  prim.textContent = action ? action[0] : STATUS_LABEL[st.display];
+  prim.textContent = action ? action[0] + (action[0] === 'Approve' ? '' : cost(batch)) : STATUS_LABEL[st.display];
+  el('vp-var').textContent = `Generate ${batch}` + cost(batch);
   prim.disabled = !action || (st.display === 'review' && !cand);
   prim.onclick = action ? action[1] : null;
   el('vp-var').disabled = locked || st.display === 'generating';

@@ -29550,7 +29550,8 @@ def api_characters_catalogue():
     level = request.args.get('level') or 'sfw'
     if level not in CH.LEVEL_KEYS:
         level = 'sfw'
-    return jsonify(dict(CH.catalogue(level), ok=True))
+    return jsonify(dict(CH.catalogue(level), ok=True,
+                        price_per_image=CR.image_price(CHAR_MODEL, CHAR_RESOLUTION)))
 
 
 @app.route('/api/characters', methods=['GET', 'POST'])

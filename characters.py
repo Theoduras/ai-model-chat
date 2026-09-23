@@ -15,7 +15,7 @@ MIN_AGE = 18
 # same comparison gates both.
 LEVELS = (('sfw', 'SFW'), ('moderate', 'Topless'), ('explicit', 'Explicit'))
 LEVEL_KEYS = tuple(k for k, _ in LEVELS)
-BATCH_CHOICES = (2, 3, 4)
+BATCH_CHOICES = (1, 2, 3, 4, 6)
 DEFAULT_BATCH = 4
 MAX_BATCH = 8
 
@@ -179,7 +179,7 @@ LIGHTING = {
     'warm': ('Warm evening', 'Warm low golden light, plain dark background, sharp focus, '
                              'ultra-detailed natural skin texture, highest resolution.'),
 }
-VARIATIONS = (1, 4)
+VARIATIONS = BATCH_CHOICES
 
 # A preset only fills body features the creator has not set yet.
 BODY_PRESETS = {
