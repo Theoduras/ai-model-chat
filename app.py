@@ -1299,7 +1299,7 @@ _BASE_TIERS = {
                                  'Chat with her yourself to test the persona',
                                  'All 10 funnel phases with photo rates',
                                  'Outfit locking + media tagging',
-                                 'Unlimited AI photo and video generation',
+                                 f'{CR.MONTHLY_TOKENS[DEMO_TIER_KEY]:,} generation tokens a month',
                                  'No platform connection \u2014 Fanvue needs a paid plan'],
                     'capabilities': {
                         'personas': None,
@@ -1310,11 +1310,11 @@ _BASE_TIERS = {
                         'scheduled_followups': True,
                         'analytics': False,
                         'ppv_reconcile': False,
-                        'tokens_month': None,
+                        'tokens_month': CR.MONTHLY_TOKENS[DEMO_TIER_KEY],
                     }},
     'starter': {'name': 'Starter', 'price': 49,
-                'blurb': 'One persona on Fanvue, fully monetised.',
-                'features': ['1 AI persona', 'Fanvue chat',
+                'blurb': 'One persona on every platform, fully monetised.',
+                'features': ['1 AI persona', 'Every platform',
                              'Full PPV engine — ladders, per-fan pricing, '
                              'timed re-offers',
                              'Up to 3 funnel phases + CTA',
@@ -1323,7 +1323,7 @@ _BASE_TIERS = {
                 'capabilities': {
                     'personas': 1,
                     'seats': 1,
-                    'platforms': ['fanvue'],
+                    'platforms': None,
                     'phases_max': 3,
                     'outfit_lock': False,
                     'scheduled_followups': False,
@@ -1594,8 +1594,7 @@ def _dev_payments_enabled():
 
 def _token_sales_open():
     """Whether creators may buy generation tokens. On by default; TOKEN_SALES_OPEN=0
-    closes the shop without a deploy, which matters because generation itself is
-    still admin-only -- a creator can buy tokens today and not yet spend them."""
+    closes the shop without a deploy."""
     return (os.getenv('TOKEN_SALES_OPEN') or '1').strip() != '0'
 
 
@@ -1937,7 +1936,11 @@ def user_capabilities(user):
     if user.get('is_admin'):
         return dict(UNLIMITED_CAPS)
     if user.get('status') == 'active' and _is_grandfathered(user):
-        return dict(UNLIMITED_CAPS)
+        # Grandfathered plans keep their limits off, but generation costs real
+        # provider money, so they spend tokens from their tier like anyone.
+        return dict(UNLIMITED_CAPS,
+                    tokens_month=(tier_capabilities(user.get('tier')).get('tokens_month')
+                                  or CR.DEFAULT_MONTHLY_TOKENS))
     if user.get('status') != 'active':
         return dict(DENIED_CAPS)
     caps = tier_capabilities(user.get('tier'))
@@ -2078,9 +2081,7 @@ def _token_balance(user, session_db=None):
 
 
 def _tokens_denied(need, have):
-    # Top-up checkout is admin-only while generation is in testing, so only tell
-    # a caller to buy tokens if buying is actually open to them.
-    can_buy = bool((_current_user() or {}).get('is_admin'))
+    can_buy = _token_sales_open() or bool((_current_user() or {}).get('is_admin'))
     return jsonify({'ok': False, 'error': 'Not enough tokens.',
                     'need': need, 'have': have, 'buy_tokens': can_buy}), 402
 
@@ -3293,6 +3294,21 @@ def _require_admin():
     if not user.get('is_admin'):
         logger.warning('ADMIN DENIED user=%s path=%s', user['email'], request.path)
         # 404 rather than 403, so the admin surface isn't discoverable.
+        if (request.path or '').startswith('/api/'):
+            return jsonify({'error': 'Not found'}), 404
+        return ('Not found', 404)
+    return None
+
+
+def _require_active():
+    """None when the caller is on an active plan (or an admin), else the
+    response to send instead. 404 for the same reason as _require_admin."""
+    user = _current_user()
+    if not user:
+        if (request.path or '').startswith('/api/'):
+            return jsonify({'error': 'Sign in required'}), 401
+        return redirect('/login?next=' + urllib.parse.quote(request.path or '/'))
+    if not user.get('is_admin') and user.get('status') != 'active':
         if (request.path or '').startswith('/api/'):
             return jsonify({'error': 'Not found'}), 404
         return ('Not found', 404)
@@ -5914,9 +5930,9 @@ def landing():
 
 @app.route('/studio')
 def studio():
-    """Generation studio. Admin-only while the feature is being tested: it is
-    not offered to creators yet, and an admin generates on unlimited credits."""
-    blocked = _require_admin()
+    """Generation studio. Every active plan generates photos on its tokens;
+    video stays admin-only until it leaves testing."""
+    blocked = _require_active()
     if blocked:
         return blocked
     return send_from_directory(BASE_DIR, 'studio.html')
@@ -29334,7 +29350,7 @@ def api_persona_references(slug):
     GET  ?model=seedream-4-5       -> {face: [media_id], body: [media_id], cap}
     POST {model, role, media_ids}  -> replaces that one group
     """
-    blocked = _require_admin()
+    blocked = _require_active()
     if blocked:
         return blocked
     if not re.match(r'^[a-z0-9_-]+$', slug or ''):
@@ -29824,7 +29840,7 @@ def _char_vision_check(img, row, view_key):
 
 @app.route('/characters')
 def characters_page():
-    blocked = _require_admin()
+    blocked = _require_active()
     if blocked:
         return blocked
     return send_from_directory(BASE_DIR, 'characters.html')
@@ -29832,7 +29848,7 @@ def characters_page():
 
 @app.route('/api/characters/catalogue')
 def api_characters_catalogue():
-    blocked = _require_admin()
+    blocked = _require_active()
     if blocked:
         return blocked
     level = request.args.get('level') or 'sfw'
@@ -29844,7 +29860,7 @@ def api_characters_catalogue():
 
 @app.route('/api/characters', methods=['GET', 'POST'])
 def api_characters():
-    blocked = _require_admin()
+    blocked = _require_active()
     if blocked:
         return blocked
     import uuid
@@ -29884,7 +29900,7 @@ def api_characters():
 
 @app.route('/api/characters/<char_id>', methods=['GET', 'PUT', 'DELETE'])
 def api_character(char_id):
-    blocked = _require_admin()
+    blocked = _require_active()
     if blocked:
         return blocked
     user = _current_user()
@@ -29937,7 +29953,7 @@ def api_character(char_id):
 
 @app.route('/api/characters/<char_id>/link', methods=['POST'])
 def api_character_link(char_id):
-    blocked = _require_admin()
+    blocked = _require_active()
     if blocked:
         return blocked
     user = _current_user()
@@ -29971,7 +29987,7 @@ def api_character_link(char_id):
 def api_persona_character(slug):
     """The linked character, and -- given a shot -- which of her views that shot
     will send and which optional ones it wants but she does not have yet."""
-    blocked = _require_admin()
+    blocked = _require_active()
     if blocked:
         return blocked
     if not _char_persona_ok(slug):
@@ -30006,7 +30022,7 @@ def api_persona_character(slug):
 
 @app.route('/api/characters/<char_id>/images', methods=['POST'])
 def api_character_upload(char_id):
-    blocked = _require_admin()
+    blocked = _require_active()
     if blocked:
         return blocked
     user = _current_user()
@@ -30072,7 +30088,7 @@ def api_character_upload(char_id):
 
 @app.route('/api/characters/<char_id>/images/<img_id>/file')
 def api_character_image_file(char_id, img_id):
-    blocked = _require_admin()
+    blocked = _require_active()
     if blocked:
         return blocked
     user = _current_user()
@@ -30102,7 +30118,7 @@ def api_character_image_file(char_id, img_id):
 
 @app.route('/api/characters/<char_id>/images/<img_id>', methods=['DELETE'])
 def api_character_image_delete(char_id, img_id):
-    blocked = _require_admin()
+    blocked = _require_active()
     if blocked:
         return blocked
     user = _current_user()
@@ -30134,7 +30150,7 @@ def api_character_image_delete(char_id, img_id):
 
 @app.route('/api/characters/<char_id>/generate', methods=['POST'])
 def api_character_generate(char_id):
-    blocked = _require_admin()
+    blocked = _require_active()
     if blocked:
         return blocked
     user = _current_user()
@@ -30238,7 +30254,7 @@ def api_character_generate(char_id):
 @app.route('/api/characters/<char_id>/views/<view_key>', methods=['PUT'])
 def api_character_view_settings(char_id, view_key):
     """Source mode, crop box, strength and references for one view."""
-    blocked = _require_admin()
+    blocked = _require_active()
     if blocked:
         return blocked
     user = _current_user()
@@ -30288,7 +30304,7 @@ def api_character_view_settings(char_id, view_key):
 
 @app.route('/api/characters/<char_id>/images/<img_id>/check', methods=['POST'])
 def api_character_check(char_id, img_id):
-    blocked = _require_admin()
+    blocked = _require_active()
     if blocked:
         return blocked
     user = _current_user()
@@ -30314,7 +30330,7 @@ def api_character_approve(char_id, img_id):
     """Make one image the approved photo for its view, and freeze the new set as
     a version. The face needs every feature confirmed; the face and full body
     both need a confident adult result from the check."""
-    blocked = _require_admin()
+    blocked = _require_active()
     if blocked:
         return blocked
     user = _current_user()
@@ -30392,7 +30408,7 @@ def api_character_approve(char_id, img_id):
 def api_character_unapprove(char_id, img_id):
     """Take the approval off a view's photo but keep the photo, back among the
     candidates. It stays in kept/ with no expiry, so it cannot be purged."""
-    blocked = _require_admin()
+    blocked = _require_active()
     if blocked:
         return blocked
     user = _current_user()
@@ -30429,7 +30445,7 @@ def api_generate_models():
     when a priced job fails at submit. This asks the provider instead, so an id
     is looked up rather than guessed and then set with the matching env var.
     """
-    blocked = _require_admin()
+    blocked = _require_active()
     if blocked:
         return blocked
     query = (request.args.get('q') or '').strip()
@@ -30453,7 +30469,7 @@ def api_generate_prompt():
     refuse is refused here too. Deterministic and never rewritten by Gemini:
     a rewrite is free to drop the sentence that ties her to the reference.
     """
-    blocked = _require_admin()
+    blocked = _require_active()
     if blocked:
         return blocked
     user = _current_user()
@@ -30490,7 +30506,7 @@ def api_generate_prompt():
 def api_generate_job():
     """Submit a generation. Quotes it, reserves the credits, then calls the
     provider — in that order, so an unaffordable job never costs an API call."""
-    blocked = _require_admin()
+    blocked = _require_active()
     if blocked:
         return blocked
     user = _current_user()
@@ -30513,6 +30529,8 @@ def api_generate_job():
         price = CR.quote(spec)
     except (imagegen.GenerationError, CR.PricingError) as e:
         return jsonify({'ok': False, 'error': str(e)[:300]}), 400
+    if spec['kind'] != 'image' and not user.get('is_admin'):
+        return jsonify({'ok': False, 'error': 'Video generation is coming soon.'}), 403
     return _gen_submit(user, slug, spec, price)
 
 
@@ -31044,9 +31062,41 @@ def _gen_ensure_lifecycle():
                          'generated media will not expire on its own')
 
 
+def _grant_all_monthly_tokens():
+    """Post this month's allowance to every active workspace now, so a balance
+    is there before anyone opens the studio. Keyed on the period, so another
+    instance or a restart posting it again is harmless."""
+    from db import User
+    s = _db_session()
+    try:
+        owners = (s.query(User).filter(User.status == 'active',
+                                       User.team_owner_id.is_(None)).all())
+        granted = 0
+        for u in owners:
+            if u.role in ('admin', 'super_admin'):
+                continue
+            user = {'id': u.id, 'workspace_id': u.id, 'tier': u.tier,
+                    'status': u.status, 'is_admin': False,
+                    'grandfathered_until': (u.grandfathered_until.isoformat()
+                                            if u.grandfathered_until else None)}
+            try:
+                _grant_monthly_tokens(s, user)
+                granted += 1
+            except Exception:
+                s.rollback()
+                logger.exception('monthly token grant failed user=%s', u.id)
+        logger.info('monthly tokens granted to %d workspaces', granted)
+    finally:
+        s.close()
+
+
 def _gen_worker():
     import time as _t
     _gen_ensure_lifecycle()
+    try:
+        _grant_all_monthly_tokens()
+    except Exception:
+        logger.exception('monthly token sweep failed')
     while True:
         _t.sleep(10)
         try:
@@ -31058,7 +31108,7 @@ def _gen_worker():
 
 @app.route('/api/generate/job/<job_id>')
 def api_generate_job_status(job_id):
-    blocked = _require_admin()
+    blocked = _require_active()
     if blocked:
         return blocked
     user = _current_user()
@@ -31077,7 +31127,7 @@ def api_generate_job_status(job_id):
 
 @app.route('/api/generate/jobs')
 def api_generate_jobs():
-    blocked = _require_admin()
+    blocked = _require_active()
     if blocked:
         return blocked
     user = _current_user()
@@ -31140,7 +31190,7 @@ def api_generate_keep():
     """Keep or drop a staged generation. Keeping promotes it out of the staging
     prefix so the lifecycle rule stops watching it, and approves it — which is
     the moment it becomes something a fan can be sent."""
-    blocked = _require_admin()
+    blocked = _require_active()
     if blocked:
         return blocked
     user = _current_user()
@@ -31182,7 +31232,7 @@ def api_generate_job_delete(job_id):
     """Remove a generation from the studio. Anything still staged goes with it;
     media already kept has been promoted into the vault and is no longer this
     job's to delete."""
-    blocked = _require_admin()
+    blocked = _require_active()
     if blocked:
         return blocked
     user = _current_user()

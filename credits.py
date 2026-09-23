@@ -326,6 +326,7 @@ def symbol_for(currency):
 # app.py's tier capabilities are built from -- stated once, here, so a bullet
 # and the cap it describes cannot drift apart.
 MONTHLY_TOKENS = {
+    'demo': 25,
     'starter': 100,
     'pro': 350,
     'agency': 1000,

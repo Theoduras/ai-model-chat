@@ -290,9 +290,8 @@
 <div class="fv-wrap">
 
   <div class="note-box" id="intro">
-    Internal testing surface for NSFW photo and video generation. It is not offered
-    to creators yet, and an admin account generates on <b>unlimited tokens</b> — the
-    token and cash prices shown are what a creator's plan would be charged.
+    Generate photos of your persona. Every generation spends tokens from your
+    monthly allowance, and its price is shown before you click. Video is coming soon.
   </div>
 
   <div class="gen-toggles">
@@ -604,6 +603,7 @@ function slug(){ return (el('persona')||{}).value || ''; }
 let genPrices = null;      // the server's price table
 let genEngines = null;     // which provider model is behind each picker entry
 let genTokens = null;     // null = unlimited, which is every admin
+let genVideoOpen = false;  // video is admin-only until it leaves testing
 let genRate = null;        // what a token costs, in the creator's currency
 let genCosts = null;       // what the provider bills us — admin only, null otherwise
 let genAllowedShots = [];  // resolved server side from the persona's NSFW level
@@ -671,6 +671,7 @@ async function loadCredits() {
     genRate = d.token_rate || null;
     genCosts = d.provider_costs || null;
     genTokens = d.unlimited ? null : d.balance;
+    genVideoOpen = !!d.unlimited;
     const topup = el('gen-topup');
     if (topup) topup.hidden = d.unlimited || !d.can_buy;
     const e = el('gen-balance');
@@ -770,6 +771,10 @@ function renderJobTiles() {
   if (!box) return;
   const tile = key => {
     const row = jobRow(key);
+    if (jobKind(key) !== 'image' && !genVideoOpen) {
+      return `<button type="button" class="gen-job" disabled title="Coming soon">
+        <b>${esc(row.label)}</b><small>Coming soon</small></button>`;
+    }
     const ok = jobServes(key);
     return `<button type="button" class="gen-job" aria-pressed="${key === genJob}"
       ${ok ? '' : 'disabled title="Not offered at this rating"'}

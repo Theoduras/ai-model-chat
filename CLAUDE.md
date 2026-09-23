@@ -202,18 +202,17 @@ Stay completely in character. Never mention being an AI.
   either host. See `DEPLOY.md`.
 - The Fanvue, OnlyFans, X, Telegram and Discord loops need an always-on host, so
   they run on Cloud Run and stay off on Vercel (`IS_VERCEL` in `app.py`).
-- **Generation is admin-only while it is in testing.** `/studio` and every
-  `/api/generate/*` route go through `_require_admin`, which 404s rather than
-  403s so the surface is not discoverable; the sidebar item carries
-  `admin-only` and sits under Developers. An admin holds `UNLIMITED_CAPS`, so
-  `tokens_month` is None and nothing is charged or written to the ledger —
-  the token prices the studio shows are what a creator's plan *would* pay.
-  Open it to creators by dropping those `_require_admin` calls and the
-  `admin-only` class on the sidebar item.
-- **Buying tokens is open even though spending them is not.** Top-up checkout
-  went to every paid account while `/studio` stayed shut, so a creator can hold
-  a balance they cannot spend yet; the billing page says so. `TOKEN_SALES_OPEN=0`
-  closes the shop without a deploy if that turns into refunds.
+- **Generation and characters are open to every active plan; video is not.**
+  `/studio`, `/characters` and the `/api/generate/*` and `/api/characters*`
+  routes go through `_require_active` (404 for an inactive account). Only
+  image jobs run for a non-admin: `/api/generate/job` refuses any video job,
+  and the studio shows the video tiles grayed out as Coming soon. Every plan
+  spends from the ledger — Demo 25, Starter 100, Pro 350, Agency 1000 tokens a
+  month (`credits.MONTHLY_TOKENS`), grandfathered accounts included; only an
+  admin (`UNLIMITED_CAPS`) generates without being charged. The allowance is
+  granted lazily on the first token read of the month and swept once at boot
+  by `_grant_all_monthly_tokens`; both are keyed on the period.
+  `TOKEN_SALES_OPEN=0` closes top-up checkout without a deploy.
 - **`TOKEN_TEST_PACK=1` sells 1,000 tokens for 0.50 EUR.** It exists to prove
   the live Stripe path without spending 130 EUR, and it is gated on that env
   flag *and* an admin session, because it hands over roughly 40 dollars of
