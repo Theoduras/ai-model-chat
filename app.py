@@ -1356,15 +1356,29 @@ FREE_TIER_KEY = 'free'
 # Plans that cost nothing: never checked out, never expire, no annual twin.
 _UNPAID_TIERS = (DEMO_TIER_KEY, FREE_TIER_KEY)
 
+
+def _tokens_line(text, tokens):
+    eq = CR.plan_equivalents(tokens)
+    photos = f"{eq['photos']:,} photo" + ('' if eq['photos'] == 1 else 's')
+    clips = f"{eq['clips']:,} video" + ('' if eq['clips'] == 1 else 's')
+    return f'{text} — up to {photos} or {clips}'
+
+
+def _monthly_tokens_line(key):
+    tokens = CR.MONTHLY_TOKENS[key]
+    return _tokens_line(f'{tokens:,} generation tokens a month', tokens)
+
+
 _BASE_TIERS = {
     FREE_TIER_KEY: {'name': 'Free', 'price': 0,
-                    'blurb': 'Look around and try the tools. Nothing goes live.',
-                    'features': ['1 AI persona to build and test',
-                                 'The persona builder and the Studio',
-                                 f'{CR.FREE_CREDITS} generation credits, once',
-                                 'Chat with her yourself to test the persona',
-                                 'No platform connection or public chat '
-                                 '— going live needs a paid plan'],
+                    'blurb': 'Try it with one persona, no card needed. '
+                             f'{CR.FREE_CREDITS} tokens on us.',
+                    'features': ['Character Creator ×1',
+                                 'Generation Studio access',
+                                 _tokens_line(f'{CR.FREE_CREDITS} generation tokens '
+                                              'to get started (one-time)',
+                                              CR.FREE_CREDITS),
+                                 'Community support'],
                     'capabilities': {
                         'personas': 1,
                         'seats': 1,
@@ -1383,7 +1397,7 @@ _BASE_TIERS = {
                                  'Chat with her yourself to test the persona',
                                  'All 10 funnel phases with photo rates',
                                  'Outfit locking + media tagging',
-                                 f'{CR.MONTHLY_TOKENS[DEMO_TIER_KEY]:,} generation tokens a month',
+                                 _monthly_tokens_line(DEMO_TIER_KEY),
                                  'No platform connection \u2014 Fanvue needs a paid plan'],
                     'capabilities': {
                         'personas': None,
@@ -1398,12 +1412,17 @@ _BASE_TIERS = {
                     }},
     'starter': {'name': 'Starter', 'price': 49,
                 'blurb': 'One persona on every platform, fully monetised.',
-                'features': ['1 AI persona', 'Every platform',
-                             'Full PPV engine — ladders, per-fan pricing, '
+                'features': ['Character Creator ×1',
+                             'Every social media platform integration',
+                             'Generation Studio access',
+                             'Social media funnel to paid pages',
+                             'Full PPV engine: ladders, per-fan pricing, '
                              'timed re-offers',
                              'Up to 3 funnel phases + CTA',
-                             f'{CR.MONTHLY_TOKENS["starter"]:,} generation tokens a month',
-                             'Unlimited photo uploads', 'Email support'],
+                             'Content Planner Tool',
+                             'Unlimited photo uploads in Content Vault',
+                             _monthly_tokens_line('starter'),
+                             'Email support'],
                 'capabilities': {
                     'personas': 1,
                     'seats': 1,
@@ -1417,12 +1436,12 @@ _BASE_TIERS = {
                 }},
     'pro': {'name': 'Pro', 'price': 149,
             'blurb': 'Five personas, every platform.',
-            'features': ['5 AI personas', '2 team seats',
-                         'Telegram, X, Fanvue, OnlyFans and Threads',
-                         'Outfit locking + media tagging',
+            'features': ['Everything in Starter, plus:',
+                         'Character Creator ×5', '2 team seats',
+                         'Media tagging',
                          'Up to 10 funnel phases with photo rates',
                          'Scheduled follow-ups',
-                         f'{CR.MONTHLY_TOKENS["pro"]:,} generation tokens a month',
+                         _monthly_tokens_line('pro'),
                          'Priority support'],
             'capabilities': {
                 'personas': 5,
@@ -1437,12 +1456,11 @@ _BASE_TIERS = {
             }},
     'agency': {'name': 'Agency', 'price': 349,
                'blurb': 'Fifteen personas and a team to run them.',
-               'features': ['15 AI personas', '6 team seats with roles',
-                            'Every platform',
-                            'Outfit locking + media tagging',
+               'features': ['Everything in Pro, plus:',
+                            'Character Creator ×15', '6 team seats with roles',
                             'Conversation and revenue analytics',
                             'PPV reconciliation against Fanvue earnings',
-                            f'{CR.MONTHLY_TOKENS["agency"]:,} generation tokens a month',
+                            _monthly_tokens_line('agency'),
                             'Dedicated support'],
                'capabilities': {
                    'personas': 15,
@@ -1464,8 +1482,9 @@ CUSTOM_TIER = {
     'name': 'Custom',
     'blurb': 'More than 15 personas, or something built to fit.',
     'price_label': "Let's talk",
-    'features': ['Unlimited AI personas', 'Every platform',
-                 'Photo sending + outfit locking',
+    'features': ['Everything in Agency, plus:',
+                 'Unlimited Character Creator',
+                 'Custom generation token allowance',
                  'PPV selling tuned to your catalogue',
                  'Custom funnel phases + integrations',
                  'Onboarding and roster migration',
@@ -1512,7 +1531,8 @@ FEATURE_ROWS = [
      'you like. Interests and conversion triggers come out of the same pass.'),
     (G1, 'AI photo and video generation',
      lambda c: ('Unlimited tokens' if c['tokens_month'] is None
-                else f"{c['tokens_month']:,} generation tokens a month"),
+                else _tokens_line(f"{c['tokens_month']:,} generation tokens a month",
+                                  c['tokens_month'])),
      'Create on-brand photos and short clips of your persona \u2014 her look, '
      'her outfit, the setting \u2014 without booking a shoot.'),
     (G1, 'Photo library',
@@ -2665,9 +2685,6 @@ button:disabled{opacity:.6;cursor:not-allowed;transform:none;animation:none}
 .permo{font-size:.75rem;color:var(--text-muted);margin-bottom:10px}
 .vat{font-family:var(--font);font-size:.7rem;font-weight:500;color:var(--text-muted);letter-spacing:0}
 .tier.soon{opacity:.85}
-.freestrip{display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap;background:var(--panel);border:1px dashed var(--border);border-radius:14px;padding:14px 18px;margin:0 0 14px}
-.freestrip span{display:block;color:var(--text-2);font-size:.85rem;margin-top:3px}
-.freestrip button,.freestrip .nav-btn{width:auto;flex:none}
 /* Site header — same links and theme switch as the marketing pages. */
 .site-nav{position:fixed;top:0;left:0;right:0;z-index:60;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 24px;background:var(--panel);border-bottom:1px solid var(--border)}
 .site-nav .brand{font-family:var(--display);font-weight:800;font-size:1.05rem;color:var(--text);text-decoration:none;letter-spacing:-.01em}
@@ -2695,7 +2712,8 @@ body[data-page="pricing"] .wrap{margin:0 auto}
 .site-nav .nav-pricing{display:none}
 body[data-page="pricing"]{padding-top:80px}}
 @media(min-width:700px){.wrap.wide{max-width:760px}.tiers{grid-template-columns:repeat(2,1fr)}}
-@media(min-width:1180px){.wrap.wide{max-width:1240px}.tiers{grid-template-columns:repeat(4,1fr)}}
+@media(min-width:1180px){.wrap.wide{max-width:1240px}.tiers{grid-template-columns:repeat(4,1fr)}
+.wrap.wide:has(.tiers.five){max-width:1480px}.tiers.five{grid-template-columns:repeat(5,1fr)}}
 .in-workspace body>header.site-nav{display:none}
 .in-workspace body[data-page="pricing"]{padding-top:32px}
 """
@@ -2836,14 +2854,6 @@ Welcome offer: <strong>{{ offer.pct }}% off your first month</strong> on any mon
 plan paid by card — <span data-offer-left="{{ offer.seconds_left }}">{{ offer.seconds_left // 60 }} min</span> left.</div>{% endif %}
 {# Only an offer taken by card is discounted: Stripe carries the coupon. #}
 {% set offer_pct = offer.pct if offer.state == 'active' and stripe_enabled else 0 %}
-{% if not user.email or user.status != 'active' or user.tier == free_key %}
-<div class="freestrip">
-<div><strong>{{ free.name }} — {{ currency }}0</strong>
-<span>{{ free.features|join(' · ') }}</span></div>
-{% if user.tier == free_key and user.status == 'active' %}<button disabled>Your current plan</button>
-{% elif user.email %}<button type="button" data-free>Start free</button>
-{% else %}<a class="nav-btn" href="/register">Start free</a>{% endif %}
-</div>{% endif %}
 <div class="ptoggle">
 <button type="button" class="active" data-set-period="month">Monthly</button>
 <button type="button" data-set-period="year">Annual <span class="save">Save {{ annual_save_pct }}%</span></button>
@@ -2851,7 +2861,19 @@ plan paid by card — <span data-offer-left="{{ offer.seconds_left }}">{{ offer.
 <p class="permo" style="margin:2px 0 10px" data-edit-id="vat-note">All prices exclude VAT — any VAT due is added at checkout. Card plans renew automatically and can be cancelled any time from your account. Crypto payments are one-off — you re-pay when the plan runs out.</p>
 {% set pay_slots = [(1 if stripe_enabled else 0) + (1 if oxapay_enabled else 0)
                     + (1 if dev_mode else 0), 1]|max %}
-<div class="tiers" role="radiogroup" aria-label="Plans">
+{% set show_free = not user.email or user.status != 'active' or user.tier == free_key %}
+<div class="tiers{{ ' five' if show_free }}" role="radiogroup" aria-label="Plans">
+{% if show_free %}<div class="tier">
+<div class="pick" style="visibility:hidden"><span class="off">Select</span></div>
+<h2>{{ free.name }}</h2><div class="blurb">{{ free.blurb }}</div>
+<div class="price">{{ currency }}0<span>/month</span></div>
+<ul>{% for f in free.features %}<li>{{ f }}</li>{% endfor %}</ul>
+<div class="cta">
+{% if user.tier == free_key and user.status == 'active' %}<button disabled>Your current plan</button>
+{% elif user.email %}<button type="button" data-free>Start free</button>
+{% else %}<button type="button" onclick="window.top.location.href='/register'">Start free</button>{% endif %}
+{% for _ in range(pay_slots - 1) %}<button class="spacer" disabled tabindex="-1" aria-hidden="true">&nbsp;</button>{% endfor %}</div>
+</div>{% endif %}
 {% for key in order %}{% set t = tiers[key] %}{% set ta = tiers[key + annual_suffix] %}
 <div class="tier {{ 'featured' if key == 'pro' else '' }}" data-select="{{ key }}"
  role="radio" aria-checked="false" tabindex="0" aria-label="{{ t.name }} plan">

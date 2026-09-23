@@ -365,6 +365,10 @@ def test_equivalents():
           and eq['clips'] == 29)
     check('an empty balance reads as nothing',
           CR.equivalents(0) == {'photos': 0, 'clips': 0})
+    check('a plan card counts photos on the cheapest still',
+          CR.plan_equivalents(150) == {'photos': 150, 'clips': 12})
+    check('an empty plan reads as nothing',
+          CR.plan_equivalents(0) == {'photos': 0, 'clips': 0})
     cash = CR.cash_for_tokens(12, 'eur')
     check(f'a clip prices at {cash["symbol"]}{cash["amount"]}',
           cash['amount'] > 0 and cash['symbol'] == '€')

@@ -158,7 +158,7 @@ Audio add-on: **3 tokens** a clip. Upscale and the NSFW check disappear as
 separate line items — at this scale they round to 1 token, which would be a 10x
 overcharge on a $0.004 operation, so they fold into the base price.
 
-Monthly allowance, as shipped: **100 / 350 / 1,000** (Starter / Pro / Agency).
+Monthly allowance, as shipped: **150 / 800 / 2,500** (Starter / Pro / Agency).
 Demo keeps unlimited generation, so it has no allowance to state.
 
 ### Option C — graded, 2 tokens = 1 photo
