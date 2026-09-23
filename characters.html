@@ -555,7 +555,24 @@ function renderPresets() {
   el('presets').innerHTML = (cat.presets || []).map(p =>
     `<button type="button" class="chip" title="${p.hint}" onclick="saveSheet({preset:'${p.key}'})">${p.label}</button>`).join('');
 }
-const cost = n => (cat && cat.price_per_image ? ' · ' + (n * cat.price_per_image).toLocaleString() + ' tokens' : '');
+// The full-body views generate one set of options per picked outfit (the
+// server falls back to a single Bodysuit set when none is picked), and every
+// image is charged, so a quote has to multiply by the outfits too.
+const DRESSED = ['body_front', 'body_side', 'body_back'];
+const outfitSets = view => DRESSED.includes(view) ? Math.max(1, pickedOutfits().length) : 1;
+const imagesFor = (view, n) => n * outfitSets(view);
+const tokensFor = images => images * ((cat && cat.price_per_image) || 0);
+function cost(view, n) {
+  if (!cat || !cat.price_per_image) return '';
+  const sets = outfitSets(view);
+  return (sets > 1 ? ` × ${sets} outfits` : '') + ' · ' + tokensFor(n * sets).toLocaleString() + ' tokens';
+}
+function paintRailCost() {
+  const left = cat.views.filter(v => v.required && vs(v.key).status !== 'approved');
+  const total = left.reduce((sum, v) => sum + tokensFor(imagesFor(v.key, batch)), 0);
+  el('rail-cost').textContent = left.length && cat.price_per_image
+    ? `Remaining ≈ ${total.toLocaleString()} tokens` : '';
+}
 function batchChips() {
   return (cat && cat.batch || [1, 2, 3, 4, 6]).map(n =>
     `<button type="button" class="chip" aria-pressed="${n === batch}" onclick="setBatch(${n})">${n}</button>`).join('');
@@ -673,8 +690,7 @@ function render() {
   el('rail-count').textContent = ok + ' / ' + req.length;
   el('rail-bar').firstElementChild.style.width = (req.length ? 100 * ok / req.length : 0) + '%';
   el('rail-bar').classList.toggle('full', req.length > 0 && ok === req.length);
-  el('rail-cost').textContent = req.length > ok && cat.price_per_image
-    ? `Remaining ≈ ${((req.length - ok) * batch * cat.price_per_image).toLocaleString()} tokens` : '';
+  paintRailCost();
   const shown = step === 'views' ? 'body' : step;
   document.querySelectorAll('[data-step]').forEach(n => n.hidden = n.dataset.step !== shown);
   el('body-profile').hidden = step === 'views';
@@ -745,6 +761,9 @@ function toggleOutfit(btn) {
   btn.setAttribute('aria-pressed', btn.getAttribute('aria-pressed') !== 'true');
   cur.sheet = collectSheet();
   el('body-features').querySelector('fieldset').outerHTML = outfitPicker();
+  // The quotes follow the picks now, not after the autosave comes back.
+  paintRailCost();
+  if (selView && DRESSED.includes(selView)) renderViewPanel();
   autosaveSheet();
 }
 function pickColour(btn) {
@@ -830,7 +849,7 @@ function renderDescribe() {
   el('level-chips').innerHTML = cat.levels.map(l => `<button type="button" class="chip" aria-pressed="${cur.nsfw_level === l.key}"
     onclick="saveSheet({nsfw_level:'${l.key}'})">${l.label}</button>`).join('');
   el('batch-chips').innerHTML = batchChips();
-  el('gen-face').textContent = `Generate ${batch} face options` + cost(batch);
+  el('gen-face').textContent = `Generate ${batch} face options` + cost('face_front', batch);
   el('gen-face').disabled = blend && refs.length < 2;
   const sel = el('f-persona');
   sel.innerHTML = `<option value="">Not linked — link later</option>` + personas.map(p =>
@@ -861,7 +880,7 @@ async function generate(view, n) {
   say('');
   try {
     if (step === 'describe' && !(await saveSheet())) return;
-    const sets = ['body_front', 'body_side', 'body_back'].includes(view) ? pickedOutfits().length : 1;
+    const sets = outfitSets(view);
     if (sets > 1) el('gen-title').textContent = `Generating ${n || batch} options × ${sets} outfits…`;
     const d = await submitView(view, n);
     await Promise.all((d.jobs || [d.job]).map(waitJob));
@@ -1064,7 +1083,7 @@ function renderViewPanel() {
   el('vp-traits').innerHTML = on.map(k => `<span class="trait">${esc(fl(k))}: <b>${esc(cur.sheet[k])}</b></span>`).join('');
   el('vp-traits-off').innerHTML = (off.length ? `Not set, so not sent: ${off.map(k => esc(fl(k))).join(', ')}. ` : '') +
     `<a href="#" onclick="go('body');return false;">Edit body profile</a>`;
-  const dressed = ['body_front', 'body_side', 'body_back'].includes(v.key), main = canonOf(v.key);
+  const dressed = DRESSED.includes(v.key), main = canonOf(v.key);
   const opts = images(v.key, 'canonical').concat(images(v.key, 'wardrobe'), images(v.key, 'candidate'));
   vpOptUrls = opts.map(o => o.url);
   el('vp-opts').className = 'opts';
@@ -1084,7 +1103,7 @@ function renderViewPanel() {
         <button type="button" class="btn" onclick="removeImage('${o.id}')">Delete</button></div>`}</div>`;
   }).join('');
   const gen = el('vp-var');
-  gen.textContent = (st.display === 'outdated' ? 'Regenerate ' : 'Generate ') + batch + cost(batch);
+  gen.textContent = (st.display === 'outdated' ? 'Regenerate ' : 'Generate ') + batch + cost(v.key, batch);
   gen.className = 'btn' + (st.display === 'review' ? '' : ' btn-primary');
   gen.disabled = locked || st.display === 'generating';
   el('vp-batch').innerHTML = batchChips();
