@@ -61,7 +61,8 @@ def test_prompts():
         if v['rating'] != 'explicit':
             check(f"{v['key']} no explicit words",
                   not any(w in p for w in CH._fragments(FULL_SHEET, ('pubic', 'vulva', 'anus'))))
-    shapes = {'body_shape': 'Pear', 'glute_shape': 'Heart-shaped', 'face_shape': 'Triangle'}
+    shapes = {'body_shape': 'Pear', 'glute_shape': 'Heart-shaped', 'face_shape': 'Triangle',
+              'ethnicity': 'East Asian', 'apparent_age': '30s'}
     text = CH.describe(shapes, 'sfw')
     check('shape fragments reach a safe-work prompt',
           all(dict(CH.features()[k][2])[v] in text for k, v in shapes.items()))
@@ -86,6 +87,10 @@ def test_validation():
     check('two leaning choices warn', bool(warn))
     clean, _ = CH.validate({'age': 25, 'sheet': {'face_shape': 'Long', 'glutes': 'Very full'}})
     check('renamed options still validate, retired features drop', clean['sheet'] == {'face_shape': 'Rectangle'})
+    clean, warn = CH.validate({'age': 25, 'sheet': {'apparent_age': '18–21'}})
+    check('youngest look warns on its own', bool(warn))
+    check('youngest look plus one lean is blocked', refused({'age': 25, 'sheet': {'apparent_age': '18–21', 'bust': 'Small'}}))
+    check('no teen look offered', not any('teen' in o.lower() or 'teen' in fr for o, fr in CH.features()['apparent_age'][2]))
     clean, warn = CH.validate({'age': 25, 'notes': 'likes red', 'banned': ['red']})
     check('banned terms struck', 'red' not in clean['notes'])
 

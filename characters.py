@@ -41,6 +41,17 @@ def _opts(noun, *values):
 FEATURES = {
     'female': {
         # Face
+        'ethnicity': ('Ethnicity', 'face', [('White / European', 'of European descent'), ('Black / African', 'of African descent'),
+                                             ('East Asian', 'of East Asian descent'), ('South Asian', 'of South Asian descent'),
+                                             ('Southeast Asian', 'of Southeast Asian descent'),
+                                             ('Hispanic / Latina', 'of Latin American descent'),
+                                             ('Middle Eastern', 'of Middle Eastern descent'), ('Mixed', 'of mixed heritage')]),
+        # Never younger than 18, and never a "teen" look: the lowest option is
+        # still a grown woman, and it weighs double toward the youth limit.
+        'apparent_age': ('Looks', 'face', [('18–21', 'looks 18 to 21, clearly a grown adult woman'),
+                                           ('Early 20s', 'looks in her early twenties'),
+                                           ('Late 20s', 'looks in her late twenties'), ('30s', 'looks in her thirties'),
+                                           ('40s', 'looks in her forties'), ('50s+', 'looks fifty or older')]),
         'face_shape': ('Face shape', 'face', [('Oval', 'oval face'), ('Round', 'round face'), ('Square', 'square face'),
                                               ('Heart-shaped', 'heart-shaped face'), ('Diamond', 'diamond face'),
                                               ('Rectangle', 'long rectangular face'),
@@ -127,7 +138,9 @@ YOUTH_LEANING = {
     ('hips', 'Narrow'), ('bust', 'Small'), ('cup', 'A'),
     ('pubic_style', 'Shaved'), ('pubic_density', 'Sparse'),
     ('face_shape', 'Round'), ('nose', 'Button'), ('perkiness', 'Perky'),
+    ('apparent_age', '18–21'), ('apparent_age', 'Early 20s'),
 }
+YOUTH_WEIGHT = {('apparent_age', '18–21'): 2}
 # Options renamed after sheets were saved with them: the old label still
 # validates and is stored as the new one.
 RENAMED = {('face_shape', 'Long'): 'Rectangle'}
@@ -270,7 +283,7 @@ def catalogue(level, body_type='female'):
 # ── Validation ────────────────────────────────────────────────────────────────
 
 def youth_score(sheet):
-    return sum(1 for k, v in (sheet or {}).items() if (k, v) in YOUTH_LEANING)
+    return sum(YOUTH_WEIGHT.get((k, v), 1) for k, v in (sheet or {}).items() if (k, v) in YOUTH_LEANING)
 
 
 def clean_notes(text, banned=()):
