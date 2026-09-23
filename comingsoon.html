@@ -288,6 +288,19 @@ body.kbd .site-nav{display:none}
 .pricing-head{text-align:center;max-width:640px;margin:0 auto 56px}
 .pricing-head h2{font-family:'Sora';font-weight:800;font-size:38px;letter-spacing:-.02em;margin-bottom:14px}
 .pricing-head p{color:var(--text-soft);font-size:16px;line-height:1.6}
+.gen-compare{max-width:860px;margin:64px auto 0;padding:28px 26px;border:1px solid var(--line,rgba(255,255,255,.12));border-radius:16px}
+.gen-compare h3{font-family:'Sora';font-weight:700;font-size:22px;letter-spacing:-.01em;margin:0 0 10px}
+.gen-compare-lede{color:var(--text-soft);font-size:15px;line-height:1.6;margin:0 0 20px;max-width:56ch}
+.gen-compare-scroll{overflow-x:auto}
+.gen-compare-table{border-collapse:collapse;width:100%;min-width:540px;font-size:14.5px}
+.gen-compare-table th{text-align:left;font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-soft);font-weight:600;padding:0 14px 10px}
+.gen-compare-table td{padding:13px 14px;border-top:1px solid var(--line,rgba(255,255,255,.1))}
+.gen-compare-table td:first-child{font-weight:600}
+.gen-compare-table tr.is-us td{background:rgba(255,255,255,.04)}
+.gen-compare-table .yes{color:#4ec9a0;font-weight:600}
+.gen-compare-table .no{color:var(--text-soft)}
+.gen-compare-note{color:var(--text-soft);font-size:14px;line-height:1.6;margin:18px 0 0;max-width:60ch}
+@media (max-width:640px){.gen-compare{padding:22px 16px;margin-top:44px}}
 .tier-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;max-width:1180px;margin:0 auto}
 .tier-card.soon{opacity:.85}
 .tier-card{background:var(--panel);border:1px solid var(--hair);border-radius:16px;padding:26px 22px;display:flex;flex-direction:column}
@@ -537,6 +550,45 @@ fetch('/api/features')
     <p data-edit-id="pricing-subtitle">Pick the plan your roster needs, and upgrade when it needs more personas and platforms. All prices exclude VAT.</p>
   </div>
   <div class="tier-grid" id="tier-grid">Loading plans…</div>
+
+  <!-- Capability first, price second: the per-photo number only means something
+       once you know which of these will generate her at all. -->
+  <div class="gen-compare">
+    <h3>Generating her content</h3>
+    <p class="gen-compare-lede">Every plan includes generation tokens — one token is
+    one photo, a five-second clip is twelve. Top up any time from &euro;0.09 a photo.</p>
+    <div class="gen-compare-scroll">
+      <table class="gen-compare-table">
+        <thead>
+          <tr><th>&nbsp;</th><th>Explicit content</th><th>Her face, every time</th>
+              <th>From</th></tr>
+        </thead>
+        <tbody>
+          <tr class="is-us">
+            <td>Velvet Funnel</td>
+            <td><span class="yes">Yes</span></td>
+            <td><span class="yes">Locked to her approved photo</span></td>
+            <td><strong>&euro;0.09</strong> a photo</td>
+          </tr>
+          <tr>
+            <td>Higgsfield</td>
+            <td><span class="no">Refused</span></td>
+            <td><span class="no">Prompt only</span></td>
+            <td>$0.14 a photo</td>
+          </tr>
+          <tr>
+            <td>A raw model API</td>
+            <td><span class="no">Depends, and it is on you</span></td>
+            <td><span class="no">You build the pipeline</span></td>
+            <td>$0.04 + your engineering</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="gen-compare-note">A general image tool can make a beautiful woman. It
+    cannot make <em>her</em> — the same face, the same body, in a set your fans
+    recognise. That is what the token price buys.</p>
+  </div>
 </section>
 
 <footer style="text-align:center;padding:32px 24px;">

@@ -1,8 +1,12 @@
-# Generation tokens — pricing options
+# Generation tokens — pricing
 
-Decision document for the Generation Studio billing unit. Nothing here is
-implemented yet. Read sections 1–3, pick an option in section 4, answer the
-three open questions in section 9.
+The Generation Studio billing unit, as shipped. **Option B, raised allowances
+and no tier discount bands** were chosen; sections 4 and 9 keep the options and
+the reasoning so a settled question is not re-opened.
+
+Implemented in `credits.py`, `db.py`, `app.py` and `studio.html`; the numbers
+below are the ones the code asserts at import. Generation itself is still
+admin-only — this prices the feature, it does not open it.
 
 ---
 
@@ -31,35 +35,50 @@ provider cost, the slice is just twenty times bigger.
 
 ## 2. What the market charges
 
-| Platform | Entry plan | Unit | Per image | Per 5s clip |
+The comparison set is deliberately two: **Higgsfield**, the retail product a
+creator would otherwise buy, and **WaveSpeed**, an inference provider we could
+buy from instead of Runware. One is a competitor for the customer, the other a
+competitor for our cost base.
+
+| | photo | 5s 720p clip | NSFW | our cost |
 |---|---|---|---|---|
-| [Higgsfield](https://higgsfield.ai/pricing) | $19 → 270 credits | credits | ~2 cr (**~$0.14**) | 7–29 cr |
-| [Candy AI](https://candyaiapp.com/pricing/) | $12.99/mo + token packs | tokens | ~2 tk (**~$0.20**) | 5–10 tk |
-| [Kling](https://www.cloudzero.com/blog/kling-ai-pricing/) | $8.80 → 660 credits | credits, expire monthly | — | — |
-| [Runway](https://www.cloudzero.com/blog/kling-ai-pricing/) | ~$15 → 625 credits | credits | — | Max $95 → 9,500 cr |
-| [Leonardo](https://www.eesel.ai/blog/leonardo-ai-pricing) | $12 → 8,500 tokens | tokens | ~$0.035 | — |
-| [SeaArt](https://www.tooljunction.io/ai-tools/seaart-ai) | $5.99 | "stamina" | ~12 cr/query | — |
-| [Supercreator](https://ofm-tools.com/supercreator-review/) | $99/account | **+5% of AI-driven sales** | — | — |
-| [Botly](https://www.topsocialtools.com/insights/getbotly/) | ~$129 | + usage fees | — | — |
-| **Us, proposed** | €49 → 30 tokens | tokens, expire monthly | **€0.15** | €1.80 |
-| **Us, today** | €49 → 600 credits | credits | ~€0.56 | ~€6.40 |
+| **Us** | €0.15 → €0.09 | €1.80 → €1.08 | **yes, identity-locked** | $0.040 / $0.504 |
+| Higgsfield, $19 tier | $0.141 | $0.56 | no | — |
+| Higgsfield, $99 tier | $0.066 | $0.26 | no | — |
+| WaveSpeed (a provider) | $0.040 Seedream | $1.80 Seedance 720p | n/a | it *is* cost |
 
-Three things fall out of this:
+Our range is smallest pack to largest. Higgsfield's is entry tier to top tier —
+its credits get cheaper the more you subscribe, the same shape as our pack
+ladder.
 
-**The market has already split into low-number and high-number units.** The
-platforms creators actually enjoy using — Higgsfield, Candy — charge *2 of
-something* per image. The ones people complain about — Kling, Runway, and us —
-charge hundreds. Low numbers are not a cosmetic choice; they are what makes a
-price legible at the moment of spending.
+### What €130 buys
 
-**Leonardo's $0.035 is not a comparable number.** That is SDXL-class output with
-no identity lock. Our pipeline conditions on an approved vault photo *and*
-faceswaps from the same photo, on Seedream, which bills us $0.04 before we add
-anything. We cannot and should not try to reach $0.035.
+| | tokens or credits | photos | 5s clips |
+|---|---|---|---|
+| **Us** (1,000-token pack) | 1,000 | **1,000** | 83 |
+| Higgsfield at its $19 rate | ~1,995 | 998 | 249 |
+| Higgsfield at its $99 rate | ~4,255 | 2,127 | 532 |
 
-**Supercreator prices on a completely different axis:** $99 flat plus 5% of
-AI-driven net sales. Worth knowing it exists, but it needs attributable revenue
-per message, which we do not have. Not proposed here.
+**On photos we are level with Higgsfield's entry tier and behind its top tier.
+On video we are 3–6x behind, and this is a cost problem, not a margin one.**
+Runware bills us $0.09076 a second for Wan 2.5; fal.ai lists $0.05 and EvoLink
+$0.0708. Higgsfield's top tier sells a 5s Wan 2.7 clip for **$0.264 — less than
+the $0.504 it costs us**. No pricing decision closes that gap; a cheaper
+provider might. See section 8.
+
+WaveSpeed is in the table as the provider alternative and does not beat Runware
+where it matters: Seedream is the same $0.04, and its Seedance 2.5 at 720p is
+$1.80 per 5s against Runware's $0.60. Its cheap rung is *Wan 2.2 Ultra Fast* at
+$0.01 a second, which is a different, lower-quality model rather than the same
+clip for less.
+
+### The one thing neither of them sells
+
+Higgsfield refuses NSFW outright, and WaveSpeed is an API you would have to
+build this on top of. **Nothing in the comparison set generates explicit
+content of a specific creator's face**, conditioned on an approved vault photo
+and faceswapped from the same photo. That is the product; the per-photo price
+is not what a creator is choosing between.
 
 ---
 
@@ -139,7 +158,8 @@ Audio add-on: **3 tokens** a clip. Upscale and the NSFW check disappear as
 separate line items — at this scale they round to 1 token, which would be a 10x
 overcharge on a $0.004 operation, so they fold into the base price.
 
-Monthly allowance: **10 / 30 / 125 / 375** (Demo / Starter / Pro / Agency).
+Monthly allowance, as shipped: **100 / 350 / 1,000** (Starter / Pro / Agency).
+Demo keeps unlimited generation, so it has no allowance to state.
 
 ### Option C — graded, 2 tokens = 1 photo
 
@@ -152,7 +172,7 @@ exactly, so a creator arriving from either reads our prices without conversion.
 | Nano Banana 2 | 6 | 11 | | Wan 2.7 | 26 | 63 |
 | Nano Banana Pro | 7 | 14 | | Seedance 2.5 | 30 | 75 |
 
-Audio: 5 tokens. Allowance: **20 / 60 / 250 / 750**.
+Audio: 5 tokens. Allowance would have been **200 / 700 / 2,000**.
 
 The case for C is finer grading — the gap between Seedream and Nano Banana Pro
 is 2→7 rather than 1→4, so a price difference is visible without being
@@ -167,7 +187,7 @@ system explainable.
 | Standard photo | 1 | **1** | 2 |
 | Premium photo 4k | 1 | 7 | 14 |
 | 5s 720p clip | 10 | **12** | 23 |
-| Pro allowance | 125 | **125** | 250 |
+| Pro allowance | 350 | **350** | 700 |
 | Explainable in one line | yes | yes | nearly |
 | Clears the 2.25x margin floor | **no** | yes | yes |
 | Needs models removed | **yes** | no | no |
@@ -219,36 +239,34 @@ about.
 
 ---
 
-## 6. The included allowance is now the problem
+## 6. The allowance, raised
 
-Re-denominating exposes something the old scale was hiding. Here is what each
-plan actually includes today:
+Re-denominating exposed something the old scale was hiding. What each plan used
+to include, read in clips rather than credits:
 
-| Plan | Price | Credits now | = Tokens | = Photos | = Clips | Costs us |
-|---|---|---|---|---|---|---|
-| Demo | free | 200 | 10 | 10 | 0 | $0.40 |
-| Starter | €49 | 600 | 30 | 30 | **2** | $1.20 |
-| Pro | €149 | 2,500 | 125 | 125 | **10** | $5.00 |
-| Agency | €349 | 7,500 | 375 | 375 | **31** | $15.00 |
-
-**Starter is €49 a month for two video clips.** Agency is €349 for thirty-one.
-For a product whose entire pitch is "generate content your fans will pay for",
-these allowances are not credible — and at the old €0.56-per-photo pricing they
-at least *sounded* substantial. At €0.15 they are visibly thin: Pro's 125 tokens
-are about €19 of value inside a €149 plan.
-
-Raising them is cheap, because generation costs us very little:
-
-| Plan | Proposed | = Photos | = Clips | Costs us/mo | % of plan price |
+| Plan | Price | Was | = Photos | = Clips | Cost us |
 |---|---|---|---|---|---|
-| Demo | 25 | 25 | 2 | $1.00 | — |
-| Starter | 100 | 100 | 8 | $4.00 | 8% |
-| Pro | 350 | 350 | 29 | $14.00 | 9% |
-| Agency | 1,000 | 1,000 | 83 | $40.00 | 11% |
+| Starter | €49 | 600 credits | 30 | **2** | $1.20 |
+| Pro | €149 | 2,500 credits | 125 | **10** | $5.00 |
+| Agency | €349 | 7,500 credits | 375 | **31** | $15.00 |
 
-That is a 3x increase in what every plan includes for single-digit percentages
-of revenue, and it restores the upgrade ladder that dropping the discount bands
-takes away. **Recommended.**
+**Starter was €49 a month for two video clips.** For a product whose entire
+pitch is "generate content your fans will pay for" that is not a credible entry
+tier — and at the old €0.56-per-photo pricing it at least *sounded* substantial.
+
+Shipped instead, roughly 3x across the board:
+
+| Plan | Now | = Photos | = Clips | Costs us/mo | % of plan price |
+|---|---|---|---|---|---|
+| Starter | **100** | 100 | 8 | $4.00 | 8% |
+| Pro | **350** | 350 | 29 | $14.00 | 9% |
+| Agency | **1,000** | 1,000 | 83 | $40.00 | 11% |
+
+Single-digit percentages of revenue, and it restores the upgrade ladder that
+dropping the pack discount bands gives up. The numbers live once, in
+`credits.MONTHLY_TOKENS`; the tier bullets and the enforced capability both read
+them from there, so a marketing string cannot drift from what the plan allows —
+`test_tokens.py` asserts it.
 
 ---
 
@@ -298,14 +316,18 @@ cost — but it can only check the numbers it is given.
 
 ---
 
-## 9. Decisions needed
+## 9. Decisions — settled
 
-1. **Which denomination?** A is ruled out by arithmetic. Recommend **B** — one
-   token, one photo, the sentence that makes the system explainable.
-2. **Raise the included allowances?** Recommend **yes**: 25 / 100 / 350 / 1,000.
-   Starter at two clips a month is not a sellable entry tier.
-3. **Drop the tier discount bands?** Recommend **yes** — the size ladder already
-   discounts 40%, and stacking tier bands on top would reach ~1.7x cost.
+1. **Which denomination?** → **B**. One token, one photo.
+2. **Raise the included allowances?** → **yes**: 100 / 350 / 1,000 for
+   Starter / Pro / Agency. Demo keeps unlimited generation, so it has no
+   allowance to state.
+3. **Drop the tier discount bands?** → **yes**. The size ladder already
+   discounts 40%.
+
+All three are implemented. What remains open is the video cost gap in section 2:
+measure Wan on fal.ai and WaveSpeed against Runware's $0.09076 a second, and if
+a cheaper route holds, clips fall below 12 tokens at the same margin.
 
 Once these are settled the implementation is mechanical: `credits.py` and its
 tests first (pure, no I/O, the floor assertions prove the numbers before
