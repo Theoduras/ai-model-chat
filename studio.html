@@ -434,6 +434,10 @@
             <option value="vault">Vault reference photos</option>
             <option value="character">Character build</option>
           </select></label>
+        <div class="gen-f" id="gen-swap-cvpick-row"><span>Character view (up to 3)</span>
+          <div class="anim-strip" id="gen-swap-cvpick"></div>
+          <span class="hint" style="margin:0;">Kling uses only the first. A clothed view
+            passes its moderation more often.</span></div>
         <div class="gen-f gen-idpick-row" id="gen-swap-idpick-row"><span>Pick her photos (up to 3)</span>
           <div class="anim-strip gen-idpick" id="gen-swap-idpick"></div></div>
         <label class="gen-f"><span>Upload</span>
@@ -474,6 +478,10 @@
             <option value="vault">Vault reference photos</option>
             <option value="character">Character build</option>
           </select></label>
+        <div class="gen-f" id="gen-reel-cvpick-row"><span>Character view (up to 3)</span>
+          <div class="anim-strip" id="gen-reel-cvpick"></div>
+          <span class="hint" style="margin:0;">Kling uses only the first. A clothed view
+            passes its moderation more often.</span></div>
         <div class="gen-f gen-idpick-row" id="gen-reel-idpick-row"><span>Pick her photos (up to 3)</span>
           <div class="anim-strip gen-idpick" id="gen-reel-idpick"></div></div>
       </div>
@@ -1619,6 +1627,14 @@ function reelChar() {
 
 // Character is offered only once a view is approved, and chosen by default then.
 let genIdPick = [];
+let genCvPick = [];
+
+// None picked sends the default views: full body for Kling, face and body for a reel.
+function pickCharView(key) {
+  genCvPick = genCvPick.includes(key) ? genCvPick.filter(x => x !== key)
+            : genCvPick.concat(key).slice(-3);
+  renderGenForm();
+}
 
 function syncIdentity() {
   const has = !!(genCharacter && genCharacter.has_approved);
@@ -1629,6 +1645,14 @@ function syncIdentity() {
   });
   ['swap', 'reel'].forEach(job => {
     const vault = identityOf(job) === 'vault';
+    el('gen-' + job + '-cvpick-row').style.display = vault ? 'none' : '';
+    if (!vault) {
+      const views = (genCharacter && genCharacter.sfw_views) || [];
+      el('gen-' + job + '-cvpick').innerHTML = views.map(v => `
+        <button type="button" class="anim-pick" aria-pressed="${genCvPick.includes(v.key)}"
+                title="${esc(v.label)}" onclick="pickCharView('${v.key}')">
+          <img loading="lazy" decoding="async" src="${v.url}" alt="${esc(v.label)}" draggable="false"></button>`).join('');
+    }
     el('gen-' + job + '-idpick-row').style.display = vault ? '' : 'none';
     if (!vault) return;
     const photos = animPhotos();
@@ -1994,6 +2018,7 @@ async function jobPayload() {
     return Object.assign(base, {
       source: genSwap.id, resolution: swapResolution(), identity: identityOf('swap'),
       identity_media: identityOf('swap') === 'vault' ? genIdPick : [],
+      character_views: identityOf('swap') === 'character' ? genCvPick : [],
       seconds: swapSeconds(), motion: el('gen-swap-motion').value.trim(),
       orientation: el('gen-swap-orient').value,
       keep_sound: el('gen-swap-sound').checked,
@@ -2008,6 +2033,7 @@ async function jobPayload() {
       source: genDrive ? genDrive.id : '',
       identity: identityOf('reel'),
       identity_media: identityOf('reel') === 'vault' ? genIdPick : [],
+      character_views: identityOf('reel') === 'character' ? genCvPick : [],
     });
   }
   if (genJob === 'multiref') {

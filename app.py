@@ -28513,6 +28513,10 @@ def _gen_identity(slug, body, spec):
     spec['identity'] = identity
     if identity == 'character':
         spec['character'] = char
+        keys = [str(k) for k in (body.get('character_views') or [])]
+        spec['character_views'] = [
+            k for k in keys if k in char['views']
+            and (CH.view(k, char['body_type']) or {}).get('rating') == 'sfw'][:3]
     else:
         # Picked per job from kept vault photos; none picked falls back to the
         # model's saved reference slots.
@@ -29766,6 +29770,11 @@ def api_persona_character(slug):
         out = _char_json(s, row)
         canon = _char_canonicals(s, row.id)
         out['has_approved'] = bool(canon)
+        out['sfw_views'] = [
+            {'key': k, 'label': CH.view(k, row.body_type)['label'],
+             'url': _char_img_json(img)['url']}
+            for k, img in canon.items()
+            if (CH.view(k, row.body_type) or {}).get('rating') == 'sfw']
         shot = (request.args.get('shot') or '').strip().lower()
         if shot:
             scene = (request.args.get('scene') or '').strip().lower()
@@ -30326,7 +30335,11 @@ def _set_job_failed(job_id, message):
     from db import update_generation
     s = _db_session()
     try:
-        update_generation(s, job_id, status='failed', error=str(message)[:500])
+        message = str(message)
+        if 'risk control' in message.lower():
+            message = ("Kling's moderation refused this — pick a different "
+                       'character view or vault photo, or a different clip.')
+        update_generation(s, job_id, status='failed', error=message[:500])
     finally:
         s.close()
 
@@ -30389,7 +30402,8 @@ def _gen_start(job_id, slug, spec, workspace):
                         call['reference_urls'] = [
                             u for u in (_char_path_url(char['views'][k]['path'],
                                                        char['views'][k]['mime'])
-                                        for k in CH.reel_views(char)) if u
+                                        for k in (spec.get('character_views')
+                                                  or CH.reel_views(char))) if u
                         ] if char else _gen_media_urls(slug, picked)
                         if not call['reference_urls']:
                             raise imagegen.GenerationError(
@@ -30474,6 +30488,12 @@ def _gen_start(job_id, slug, spec, workspace):
                     elif spec.get('identity_media'):
                         refs = _gen_media_urls(slug, spec['identity_media'])
                         ref_model = 'picked'
+                    elif spec.get('identity') == 'character' and spec.get('character_views'):
+                        char = spec['character']
+                        refs = [u for u in (_char_path_url(char['views'][k]['path'],
+                                                           char['views'][k]['mime'])
+                                            for k in spec['character_views']) if u]
+                        ref_model = 'character'
                     elif spec.get('identity') == 'character' and role == 'body':
                         body_view = spec['character']['views'].get('body_front')
                         refs = [u for u in [body_view and _char_path_url(
