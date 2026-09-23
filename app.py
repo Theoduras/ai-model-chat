@@ -29586,7 +29586,9 @@ def _char_vision_check(img, row, view_key):
     feats = CH.features(row.body_type)
     sheet = _char_json_sheet(row)
     keys = [k for k in CH.FACE_CHECKS if k in sheet] if view_key == 'face_front' else []
-    listing = '\n'.join(f'- {k}: {feats[k][0]} = {sheet[k]}' for k in keys)
+    shown = lambda k: (CH.hair_words(sheet.get('hair_colour_hex')) if k == 'hair_colour' and sheet[k] == 'Custom'
+                       else sheet[k])
+    listing = '\n'.join(f'- {k}: {feats[k][0]} = {shown(k)}' for k in keys)
     instruction = (
         'You are checking a reference photo of a fictional adult character.\n'
         '1. Age appearance: does the person clearly look like an adult (18+)? '
@@ -29970,10 +29972,13 @@ def api_character_generate(char_id):
             _char_images(s, row.id, view=view_key, role='reference')
             or _char_images(s, row.id, view='', role='reference'))
         sheet = _char_json_sheet(row)
+        blend = view_key == 'face_front' and sheet.get('face_mode') == 'blend'
+        if blend and len(_char_images(s, row.id, view='face_front', role='reference')) < 2:
+            return jsonify({'ok': False, 'error': 'Add at least two face photos to blend.'}), 400
         dressed = CH.outfits(sheet) if '{outfit}' in v['framing'] else [None]
         prompts = [CH.build_view_prompt(view_key, sheet, row.age, has_ref, row.body_type, mode=mode,
                                         strength=state[view_key]['strength'],
-                                        pose=pose, lighting=lighting, outfit=o) for o in dressed]
+                                        pose=pose, lighting=lighting, outfit=o, blend=blend) for o in dressed]
         parent_versions = {p: state[p]['version'] for p in v['parents']}
         key = row.key
     finally:

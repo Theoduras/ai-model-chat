@@ -71,7 +71,8 @@ FEATURES = {
         'jaw': ('Jaw and chin', 'face', [('Soft, rounded chin', 'a soft jaw and rounded chin'), ('Defined jaw', 'a defined jawline'),
                                           ('Pointed chin', 'a pointed chin'), ('Square jaw', 'a square jaw')]),
         'ears': ('Ears', 'face', _opts('ears', 'Small, close-set', 'Medium', 'Prominent')),
-        'hair_colour': ('Hair colour', 'face', _opts('hair', 'Black', 'Dark brown', 'Light brown', 'Auburn', 'Red', 'Strawberry blonde', 'Blonde', 'Platinum')),
+        'hair_colour': ('Hair colour', 'face', _opts('hair', 'Black', 'Dark brown', 'Light brown', 'Auburn', 'Red', 'Strawberry blonde', 'Blonde', 'Platinum')
+                        + [('Custom', '')]),
         'hair_texture': ('Hair length and texture', 'face', _opts('hair', 'Long, straight', 'Long, loose waves', 'Long, curly', 'Shoulder-length', 'Bob', 'Pixie')),
         'hairline': ('Hairline', 'face', [('Rounded, middle part', 'a rounded hairline with a middle part'), ('Side part', 'a side part'),
                                           ('Straight, fringe', 'a straight fringe'), ('Widow\'s peak', 'a widow\'s peak')]),
@@ -223,13 +224,16 @@ VIEWS = {
         dict(key='face_smile', label='Face, smiling', group='face', rating='sfw', required_from=None,
              parents=('body_front',), tier=1, mode='reference', framing='a front-facing head-and-shoulders portrait with a natural warm smile', uses=('face',)),
         dict(key='body_front', label='Full body, front', group='body', rating='sfw', required_from='sfw', parents=('face_front',), tier=0, mode='reference',
-             framing=('a full-body photo from head to feet, standing straight facing the camera in a relaxed '
-                      'A-pose, wearing {outfit}'),
+             framing=('a full-body photo from head to feet, standing perfectly straight and upright, facing the '
+                      'camera squarely, head level, shoulders level, feet together, arms relaxed slightly away '
+                      'from the body, symmetrical posture, wearing {outfit}'),
              uses=('face', 'body')),
         dict(key='body_side', label='Full body, side', group='body', rating='sfw', required_from=None, parents=('body_front',), tier=1, mode='reference',
-             framing='a full-body side view, standing straight, wearing {outfit}', uses=('body',)),
+             framing=('a full-body side view, standing perfectly straight and upright, head level, feet together, '
+                      'wearing {outfit}'), uses=('body',)),
         dict(key='body_back', label='Full body, back', group='body', rating='sfw', required_from='explicit', parents=('body_front',), tier=1, mode='reference',
-             framing='a full-body view from behind, standing straight, wearing {outfit}', uses=('body',)),
+             framing=('a full-body view from behind, standing perfectly straight and upright, head level, feet '
+                      'together, wearing {outfit}'), uses=('body',)),
         dict(key='hands', label='Hands', group='body', rating='sfw', required_from=None, parents=('body_front',), tier=1, mode='reference',
              zoom=True, body=('nails', 'tattoos'),
              framing=('a tight close-up of only her two hands, resting open palms down side by side on a plain surface, '
@@ -458,6 +462,20 @@ def validate(data, body_type='female'):
         colours = {o: c for o, c in colours.items() if c and o in sheet['view_outfits']}
         if colours:
             sheet['outfit_colours'] = colours
+    if sheet.get('hair_colour') == 'Custom':
+        hexcode = str(raw.get('hair_colour_hex') or '').lower()
+        if not re.fullmatch(r'#[0-9a-f]{6}', hexcode):
+            raise CharacterError('Pick a custom hair colour.')
+        sheet['hair_colour_hex'] = hexcode
+    mode = raw.get('face_mode') or 'build'
+    if mode not in FACE_MODES:
+        raise CharacterError('Unknown face mode.')
+    if mode == 'blend':
+        # A blended face comes from the photos; drawn face features would
+        # fight them, so only the steers that still make sense stay.
+        sheet = {k: x for k, x in sheet.items()
+                 if feats.get(k, ('', ''))[1] != 'face' or k in BLEND_KEEP}
+        sheet['face_mode'] = 'blend'
     name = re.sub(r'\s+', ' ', str(data.get('name') or '')).strip()[:80] or 'Untitled draft'
     return {'name': name, 'age': age, 'nsfw_level': level, 'sheet': sheet,
             'notes': clean_notes(data.get('notes'), data.get('banned') or ())}, warnings
@@ -472,6 +490,8 @@ def _fragments(sheet, groups, body_type='female'):
         if g not in groups or k not in (sheet or {}):
             continue
         frag = dict(opts).get(sheet[k], '')
+        if k == 'hair_colour' and sheet[k] == 'Custom':
+            frag = hair_words(sheet.get('hair_colour_hex')) + ' hair' if sheet.get('hair_colour_hex') else ''
         if k == 'pubic_colour' and sheet[k] == 'Matches hair':
             frag = 'pubic hair matching her hair colour'
         if k == 'pubic_density' and frag:
@@ -494,6 +514,40 @@ def adult_clause(age):
     age = max(MIN_AGE, int(age or MIN_AGE))
     return (f'Fictional adult woman, {age} years old, with a clearly adult face '
             'and fully adult body proportions.')
+
+
+# Image models follow colour words, not hex codes, so a picked colour is
+# described by its hue, saturation and lightness.
+def hair_words(hexcode):
+    import colorsys
+    try:
+        r, g, b = (int(hexcode[i:i + 2], 16) / 255 for i in (1, 3, 5))
+    except (TypeError, ValueError, IndexError):
+        return ''
+    h, l, sat = colorsys.rgb_to_hls(r, g, b)
+    h *= 360
+    if l < 0.12:
+        return 'jet black'
+    if sat < 0.12:
+        return 'platinum white' if l > 0.85 else 'silver grey' if l > 0.55 else 'ash grey' if l > 0.3 else 'charcoal'
+    names = [(12, 'red'), (35, 'copper'), (50, 'golden blonde'), (70, 'honey blonde'), (160, 'green'), (200, 'teal'),
+             (250, 'blue'), (290, 'purple'), (320, 'magenta'), (345, 'pink'), (361, 'red')]
+    hue = next(n for top, n in names if h < top)
+    warm = hue in ('copper', 'golden blonde', 'honey blonde')
+    if l > 0.85:
+        return 'platinum blonde' if warm else f'pastel {hue}'
+    if warm and l < 0.42:
+        hue = 'auburn' if h < 25 else 'brown'
+    if hue == 'red' and l < 0.35:
+        hue = 'burgundy red'
+    tone = 'pastel' if l > 0.72 else 'light' if l > 0.58 else 'deep' if l < 0.28 else 'dark' if l < 0.42 else ''
+    if sat < 0.3 and tone != 'pastel':
+        tone = (tone + ' ash').strip()
+    return f'{tone} {hue}'.strip()
+
+
+BLEND_KEEP = ('ethnicity', 'apparent_age', 'hair_colour', 'hair_texture')
+FACE_MODES = ('build', 'blend')
 
 
 # What the full-body reference photos are dressed in. Kept out of FEATURES so
@@ -524,7 +578,7 @@ def outfit_text(sheet, outfit=None):
 
 
 def build_view_prompt(key, sheet, age, has_reference, body_type='female',
-                      mode='reference', strength=None, pose=None, lighting=None, outfit=None):
+                      mode='reference', strength=None, pose=None, lighting=None, outfit=None, blend=False):
     v = view(key, body_type)
     if not v:
         raise CharacterError('Unknown view.')
@@ -533,7 +587,10 @@ def build_view_prompt(key, sheet, age, has_reference, body_type='female',
     uses = tuple(v['uses']) + (() if 'face' in v['uses'] else ('body',))
     groups = tuple(g for g in uses if _rank(GROUP_LEVEL[g]) <= _rank(v['rating']))
     keep = set(traits(key, body_type))
-    frags = _fragments({k: x for k, x in (sheet or {}).items() if k in keep}, groups, body_type)
+    kept = {k: x for k, x in (sheet or {}).items() if k in keep}
+    if 'hair_colour' in kept and (sheet or {}).get('hair_colour_hex'):
+        kept['hair_colour_hex'] = sheet['hair_colour_hex']
+    frags = _fragments(kept, groups, body_type)
     if 'face' not in v['uses'] and (sheet or {}).get('skin_tone'):
         frags = _fragments({'skin_tone': sheet['skin_tone']}, ('face',), body_type) + frags
     detail = ', '.join(frags)
@@ -547,6 +604,10 @@ def build_view_prompt(key, sheet, age, has_reference, body_type='female',
         lead = ('photorealistic high-resolution close-up recreated from the first reference '
                 f'image, which is a crop of the same woman: {v["framing"]}. Same skin, lighting '
                 f'and proportions as that crop; {touch}.')
+    elif blend and key == 'face_front':
+        lead = ('photorealistic photo of a new woman whose face blends facial features of the women in the '
+                'reference images into one new, distinct face — she is not any one of them, now as '
+                + v['framing'] + '.')
     elif has_reference:
         # Naming her face in a close-up pulls the camera back to include it.
         hold = ('identical skin and body' if v.get('zoom') and strength >= 0.5

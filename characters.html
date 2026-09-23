@@ -225,6 +225,13 @@
       display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 4px; text-align: center; }
     .fp-opt[aria-pressed="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, #f4f2ef); font-weight: 700; }
     .fp-opt.text { justify-content: center; min-height: 44px; }
+    .mode-pick { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-top: 12px; }
+    .mode-opt { text-align: left; padding: 14px 16px; border-radius: 12px; border: 2px solid #dcd8d2; background: #f4f2ef;
+      color: #2b2a33; font: inherit; cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
+    .mode-opt span { font-size: 0.8rem; color: #6b6975; }
+    .mode-opt[aria-pressed="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, #f4f2ef); }
+    .hex-pick { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 0.78rem; }
+    .hex-pick input { width: 44px; height: 32px; padding: 0; border: 1px solid #dcd8d2; border-radius: 6px; background: none; cursor: pointer; }
     .of-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0 10px; }
     .of-row > span { font-size: 0.72rem; font-weight: 700; min-width: 86px; }
     .of-sw { width: 26px; height: 26px; border-radius: 50%; border: 2px solid #dcd8d2; cursor: pointer; padding: 0; }
@@ -291,8 +298,22 @@
     <!-- 1 Describe -->
     <div class="ch-row" data-step="describe">
       <div class="ch-card ch-grow">
-        <h2 class="ch-h1">Describe her face</h2>
-        <p class="ch-muted" style="margin-bottom:18px;">Tap the drawing that fits each feature. Nothing else can be generated until the face is approved.</p>
+        <h2 class="ch-h1">How should her face be made?</h2>
+        <div class="mode-pick" role="group" aria-label="Face source">
+          <button type="button" class="mode-opt" data-mode="build" onclick="setFaceMode('build')">
+            <strong>Create with the builder</strong><span>Pick every facial feature from drawings.</span></button>
+          <button type="button" class="mode-opt" data-mode="blend" onclick="setFaceMode('blend')">
+            <strong>Blend reference photos</strong><span>Upload 2 to 6 faces; they are mixed into one new face.</span></button>
+        </div>
+        <div id="blend-panel" hidden>
+          <h2 class="ch-h2" style="margin-top:18px;">Faces to blend</h2>
+          <p class="ch-muted">The new face takes features from all of them and is none of them. <span id="blend-count"></span></p>
+          <div class="refs" id="blend-refs" style="margin-bottom:10px;"></div>
+          <label class="attest"><input type="checkbox" id="attest-blend">I have the rights to these images, and everyone shown is 18+ and agreed to their likeness being used.</label>
+          <button type="button" class="btn" style="margin-top:8px;" onclick="pickUpload('face_front', 'attest-blend')">Add photos</button>
+          <h2 class="ch-h2" style="margin-top:22px;">Optional steers</h2>
+        </div>
+        <p class="ch-muted" id="build-hint" style="margin:14px 0 18px;">Tap the drawing that fits each feature. Nothing else can be generated until the face is approved.</p>
         <div class="fp-list" id="face-features"></div>
       </div>
       <div class="ch-side">
@@ -658,7 +679,17 @@ function featurePicker(f) {
     return `<button type="button" class="fp-opt${art ? '' : ' text'}" data-feature="${f.key}" data-value="${esc(o)}"
       aria-pressed="${o === v}" onclick="pickOption(this)">${art}<span>${esc(o)}</span></button>`;
   }).join('');
-  return `<fieldset class="fp"><legend>${esc(f.label)}</legend><div class="fp-opts" role="group">${opts}</div></fieldset>`;
+  const hex = f.key === 'hair_colour' ? `<label class="hex-pick"><input type="color" id="hair-hex"
+      value="${esc((cur.sheet || {}).hair_colour_hex || '#7a5436')}" onchange="pickHairHex(this.value)">Or pick any colour</label>` : '';
+  return `<fieldset class="fp"><legend>${esc(f.label)}</legend><div class="fp-opts" role="group">${opts}</div>${hex}</fieldset>`;
+}
+function pickHairHex(hex) {
+  el('hair-hex').value = hex;
+  cur.sheet = Object.assign(collectSheet(), {hair_colour: 'Custom', hair_colour_hex: hex});
+  const card = document.querySelector('[data-feature="hair_colour"][data-value="Custom"]');
+  card.parentNode.querySelectorAll('.fp-opt').forEach(b => b.setAttribute('aria-pressed', 'false'));
+  card.setAttribute('aria-pressed', 'true');
+  card.innerHTML = CharacterVisuals.render('hair_colour', 'Custom', cur.sheet) + '<span>Custom</span>';
 }
 // Several outfits, one colour each: every outfit picked is its own set of
 // full-body options when those views generate.
@@ -712,6 +743,8 @@ function collectSheet() {
     const on = document.querySelector(`.fp-opt[data-feature="${k}"][aria-pressed="true"]`);
     if (on) sheet[k] = on.dataset.value; else delete sheet[k];
   });
+  const hexIn = document.getElementById('hair-hex');
+  if (hexIn && sheet.hair_colour === 'Custom') sheet.hair_colour_hex = hexIn.value;
   const chips = [...document.querySelectorAll('.of-opt[data-outfit]')];
   if (chips.length) {
     delete sheet.view_outfit;
@@ -742,13 +775,27 @@ async function saveSheet(extra, btnId) {
   finally { if (btn) btn.disabled = false; }
 }
 
+const BLEND_KEEP = ['ethnicity', 'apparent_age', 'hair_colour', 'hair_texture'];
+function faceMode() { return (cur.sheet || {}).face_mode === 'blend' ? 'blend' : 'build'; }
+async function setFaceMode(mode) {
+  if (mode === faceMode()) return;
+  cur.sheet = Object.assign(collectSheet(), {face_mode: mode});
+  await saveSheet();
+}
 function renderDescribe() {
-  el('face-features').innerHTML = cat.features.filter(f => f.group === 'face').map(featurePicker).join('');
+  const blend = faceMode() === 'blend', refs = images('face_front', 'reference');
+  document.querySelectorAll('.mode-opt').forEach(b => b.setAttribute('aria-pressed', b.dataset.mode === faceMode()));
+  el('blend-panel').hidden = !blend; el('build-hint').hidden = blend;
+  el('blend-refs').innerHTML = refs.map(refTile).join('');
+  el('blend-count').textContent = `${refs.length} added${refs.length < 2 ? ' — add at least 2.' : '.'}`;
+  el('face-features').innerHTML = cat.features.filter(f => f.group === 'face' && (!blend || BLEND_KEEP.includes(f.key)))
+    .map(featurePicker).join('');
   el('f-name').value = cur.name; el('f-age').value = cur.age; el('f-notes').value = cur.notes || '';
   el('level-chips').innerHTML = cat.levels.map(l => `<button type="button" class="chip" aria-pressed="${cur.nsfw_level === l.key}"
     onclick="saveSheet({nsfw_level:'${l.key}'})">${l.label}</button>`).join('');
   el('batch-chips').innerHTML = batchChips();
   el('gen-face').textContent = `Generate ${batch} face options` + cost(batch);
+  el('gen-face').disabled = blend && refs.length < 2;
   const sel = el('f-persona');
   sel.innerHTML = `<option value="">Not linked — link later</option>` + personas.map(p =>
     `<option value="${esc(p.slug)}" ${cur.persona === p.slug ? 'selected' : ''}>${esc(p.name || p.slug)}</option>`).join('');
