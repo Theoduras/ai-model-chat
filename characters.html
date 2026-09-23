@@ -936,12 +936,20 @@ async function submitView(key, n) {
   return api('/api/characters/' + cur.id + '/generate', {body});
 }
 async function queueViews(keys) {
-  let sent = 0;
+  if (!keys.length || generating) return say('Nothing to generate.');
+  setGenerating(true);
+  el('gen-title').textContent = `Generating ${keys.length} view${keys.length === 1 ? '' : 's'}…`;
+  const jobs = [], errs = [];
   for (const k of keys) {
-    try { await submitView(k); sent++; } catch (e) { say(viewDef(k).label + ': ' + e.message, 'err'); return; }
+    try { jobs.push((await submitView(k)).job); } catch (e) { errs.push(viewDef(k).label + ': ' + e.message); }
   }
+  // Polling each job is what collects its images when no worker runs.
+  const done = await Promise.allSettled(jobs.map(waitJob));
+  done.filter(r => r.status === 'rejected').forEach(r => errs.push(r.reason.message));
+  setGenerating(false);
   await reload();
-  say(sent ? `${sent} view${sent === 1 ? '' : 's'} queued. Their children unlock as you approve them.` : 'Nothing to queue.', sent ? 'ok' : '');
+  const ok = done.filter(r => r.status === 'fulfilled').length;
+  say(`${ok} of ${keys.length} ready to review.` + (errs.length ? ' ' + errs.join(' ') : ''), errs.length ? 'err' : 'ok');
 }
 function generateRemaining() {
   queueViews(cat.views.filter(inFilter).filter(v => ['not_started', 'outdated'].includes(vs(v.key).display)).map(v => v.key));
@@ -952,8 +960,8 @@ function regenerateBranch() {
 let pollTimer = null;
 function pollGenerating() {
   clearTimeout(pollTimer);
-  if (step === 'body' && Object.values(cur.views || {}).some(s => s.status === 'generating'))
-    pollTimer = setTimeout(reload, 5000);
+  if ((step === 'body' || step === 'views') && !generating && Object.values(cur.views || {}).some(s => s.status === 'generating'))
+    pollTimer = setTimeout(async () => { try { await api('/api/generate/jobs'); } catch (e) {} reload(); }, 5000);
 }
 async function runViewCheck(id) {
   const target = id || (images('body_front', 'candidate')[0] || {}).id;
