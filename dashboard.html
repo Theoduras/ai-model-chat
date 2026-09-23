@@ -49,15 +49,6 @@
 <div class="mobile-overlay" id="mobile-overlay" onclick="closeMobilePanels()"></div>
 
 <!-- Settings Modal -->
-<div class="modal-overlay" id="vault-pick-modal" onclick="if(event.target===this)this.classList.remove('open')">
-  <div class="modal">
-    <div class="modal-header">
-      <h2>Pick from the vault</h2>
-      <button class="modal-close" onclick="document.getElementById('vault-pick-modal').classList.remove('open')" aria-label="Close">×</button>
-    </div>
-    <div class="vault-pick-grid" id="vault-pick-grid"></div>
-  </div>
-</div>
 <div class="modal-overlay" id="settings-modal" onclick="if(event.target===this)closeSettings()">
   <div class="modal">
     <div class="modal-header">
@@ -1669,9 +1660,7 @@ async function loadPersona(slug) {
   }
   renderForm(slug, config);
   showActionBar();
-  loadGallery(slug);
   loadCharacterSection(slug);
-  loadNsfwGallery(slug);
   loadPhases();
   if (!config.speech_style) generateSpeechStyle(false);
   if (!config.conversion_triggers) generateTriggers();
@@ -1856,8 +1845,6 @@ async function newPersona() {
   }
   renderSidebar();
   renderForm(slug, { name });
-  galleryImages = [];
-  renderGallery();
 
   showActionBar();
 }
@@ -2008,35 +1995,7 @@ function renderForm(slug, cfg) {
       <div id="character-box"><span class="hint">Loading…</span></div>
     </div>
 
-    <div class="form-section">
-      <div class="section-title" style="flex-wrap:wrap;">
-        <span style="margin-right:auto;">Photos <span style="font-weight:400; color:var(--text-muted); font-size:0.8rem;">(up to 5 — same person)</span></span>
-        <span style="display:flex; gap:6px;">
-          <button type="button" class="btn btn-ghost" onclick="openVaultPicker(false)" title="Pick from the vault">From vault</button>
-          <button type="button" class="btn btn-ghost" onclick="document.getElementById('photo-file-input').click()" title="Upload your own photo">Upload</button>
-          <button type="button" class="btn-section-save" style="margin-left:0;" onclick="savePhotosSection(this)">Save</button>
-        </span>
-      </div>
-      <div class="photo-grid" id="photo-grid"></div>
-      <input type="file" id="photo-file-input" accept="image/*" multiple style="display:none;" onchange="onPhotoFiles(event)">
-      <span class="hint" id="photo-status"></span>
-      <span class="hint" style="margin-top:2px;">Pick from the vault or upload; uploads are also added to the vault. Photos save on Save.</span>
-    </div>
 
-    <div class="form-section">
-      <div class="section-title" style="flex-wrap:wrap;">
-        <span style="margin-right:auto;">NSFW Photos <span style="font-weight:400; color:var(--text-muted); font-size:0.8rem;">(up to 5 — held back until the CTA)</span></span>
-        <span style="display:flex; gap:6px;">
-          <button type="button" class="btn btn-ghost" onclick="openVaultPicker(true)" title="Pick from the vault">From vault</button>
-          <button type="button" class="btn btn-ghost" onclick="document.getElementById('nsfw-photo-file-input').click()" title="Upload your own photo">Upload</button>
-          <button type="button" class="btn-section-save" style="margin-left:0;" onclick="saveNsfwPhotosSection(this)">Save</button>
-        </span>
-      </div>
-      <div class="photo-grid" id="nsfw-photo-grid"></div>
-      <input type="file" id="nsfw-photo-file-input" accept="image/*" multiple style="display:none;" onchange="onNsfwPhotoFiles(event)">
-      <span class="hint" id="nsfw-photo-status"></span>
-      <span class="hint" style="margin-top:2px;">These never go out in a normal reply — only alongside the CTA link, once a fan has asked enough times (set below). Generated shots are the most suggestive the model will allow; for anything more explicit, upload your own.</span>
-    </div>
 
 
     <div class="form-section">
@@ -2548,15 +2507,6 @@ function flashSaved(btn, ok = true) {
   }, 1600);
 }
 
-async function savePhotosSection(btn) {
-  if (!currentSlug) return;
-  try {
-    await saveGallery(currentSlug);
-    noteAvatarChange(currentSlug, !!(v('f-avatar') || galleryImages.length));
-    renderSidebar();
-    flashSaved(btn);
-  } catch(e) { flashSaved(btn, false); }
-}
 
 // Every section edits one shared config object, so a section Save writes the
 // whole config — it just reports back where the user is looking.
@@ -2584,7 +2534,7 @@ async function saveSection(btn) {
     lsSavePersona(currentSlug, config);
     if (data.prompt) localStorage.setItem(lsPromptKey(currentSlug), data.prompt);
     if (personas[currentSlug]) personas[currentSlug].name = config.name || currentSlug;
-    noteAvatarChange(currentSlug, !!(config.avatar || galleryImages.length));
+    noteAvatarChange(currentSlug, !!config.avatar);
     renderSidebar();
     flashSaved(btn);
   } catch(e) {
@@ -2600,9 +2550,7 @@ async function savePersona() {
   const status = document.getElementById('save-status');
   status.textContent = 'Saving…'; status.className = 'save-status';
   try {
-    // Photos and phases always save to the current persona (originals included).
-    await saveGallery(currentSlug);
-    await saveNsfwGallery(currentSlug);
+    // Phases always save to the current persona (originals included).
     await postPhases(currentSlug);
 
     // Originals can now be overridden in place — the edit is saved to the DB
@@ -2624,7 +2572,7 @@ async function savePersona() {
       status.textContent = '✓ Saved & deployed'; status.className = 'save-status ok';
       if (personas[currentSlug]) {
         personas[currentSlug].name = config.name || currentSlug;
-        noteAvatarChange(currentSlug, !!(config.avatar || galleryImages.length));
+        noteAvatarChange(currentSlug, !!config.avatar);
       }
       renderSidebar();
       showPromptPreview(data.prompt);
@@ -2633,34 +2581,10 @@ async function savePersona() {
 }
 
 // ── Persona photo gallery (max 5, same person) ──
-let galleryImages = [];   // array of data URLs
-const MAX_PHOTOS = 5;
 // The avatar mirrors photo 1 until someone uploads or clears one by hand.
 let loadedPlatforms = {};
 let avatarFromPhoto = true;
 
-function renderGallery() {
-  const grid = document.getElementById('photo-grid');
-  if (!grid) return;
-  grid.innerHTML = '';
-  galleryImages.forEach((src, i) => {
-    const cell = document.createElement('div');
-    cell.className = 'photo-cell';
-    cell.innerHTML = '<img loading="lazy" decoding="async" src="' + src + '" alt="photo ' + (i+1) + '">' +
-      '<button type="button" class="photo-del" title="Remove" onclick="removePhoto(' + i + ')">✕</button>' +
-      (i === 0 ? '<span class="photo-badge">profile</span>' : '');
-    grid.appendChild(cell);
-  });
-  if (galleryImages.length < MAX_PHOTOS) {
-    const add = document.createElement('div');
-    add.className = 'photo-cell photo-add';
-    add.title = 'Upload a photo';
-    add.innerHTML = '<span>＋</span>';
-    add.onclick = () => document.getElementById('photo-file-input').click();
-    grid.appendChild(add);
-  }
-  syncAvatarFromGallery();
-}
 
 function setAvatar(dataUrl) {
   const field = document.getElementById('f-avatar');
@@ -2672,10 +2596,6 @@ function setAvatar(dataUrl) {
     : '<span style="font-size:28px;color:var(--text-muted);">+</span>';
 }
 
-function syncAvatarFromGallery() {
-  if (!avatarFromPhoto || !galleryImages.length) return;
-  setAvatar(galleryImages[0]);
-}
 
 async function loadCharacterSection(slug) {
   const box = document.getElementById('character-box');
@@ -2722,193 +2642,27 @@ async function unlinkCharacter(id, slug) {
   loadCharacterSection(slug);
 }
 
-async function loadGallery(slug) {
-  galleryImages = [];
-  const grid = document.getElementById('photo-grid');
-  if (grid) grid.innerHTML = skelGrid(6);
-  try {
-    const res = await fetch('/api/personas/' + slug + '/images?full=1');
-    const data = await res.json();
-    if (Array.isArray(data.images)) galleryImages = data.images.slice(0, MAX_PHOTOS);
-  } catch(e) {}
-  renderGallery();
 
-}
 
-function removePhoto(i) { galleryImages.splice(i, 1); renderGallery(); }
 
-function addToVault(image, mime, rating) {
-  if (!currentSlug) return;
-  fetch('/api/personas/' + currentSlug + '/media', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ image, mime, rating })
-  }).catch(() => {});
-}
 
-async function openVaultPicker(nsfw) {
-  if (!currentSlug) return;
-  const ov = document.getElementById('vault-pick-modal');
-  const grid = document.getElementById('vault-pick-grid');
-  grid.innerHTML = '<span class="hint">Loading…</span>';
-  ov.classList.add('open');
-  let items = [];
-  try {
-    const data = await (await fetch('/api/personas/' + currentSlug + '/media')).json();
-    items = (data.vault || []).filter(m =>
-      (m.kind || 'image') === 'image' && ((m.rating === 'nsfw') === nsfw));
-  } catch (e) {}
-  if (!items.length) { grid.innerHTML = '<span class="hint">No ' + (nsfw ? 'NSFW ' : '') + 'photos in the vault yet.</span>'; return; }
-  grid.innerHTML = '';
-  items.forEach(m => {
-    const img = document.createElement('img');
-    img.src = m.thumb; img.loading = 'lazy'; img.className = 'vault-pick-item';
-    img.onclick = async () => {
-      const list = nsfw ? nsfwGalleryImages : galleryImages;
-      if (list.length >= MAX_PHOTOS) { ov.classList.remove('open'); return; }
-      const blob = await (await fetch(m.thumb)).blob();
-      const url = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob); });
-      list.push(url);
-      nsfw ? renderNsfwGallery() : renderGallery();
-      img.style.opacity = '.35'; img.onclick = null;
-    };
-    grid.appendChild(img);
-  });
-}
 
-function onPhotoFiles(ev) {
-  const files = Array.from(ev.target.files || []);
-  let remaining = MAX_PHOTOS - galleryImages.length;
-  files.slice(0, remaining).forEach(file => {
-    const reader = new FileReader();
-    reader.onload = e => { addToVault(e.target.result, file.type, 'sfw'); if (galleryImages.length < MAX_PHOTOS) { galleryImages.push(e.target.result); renderGallery(); } };
-    reader.readAsDataURL(file);
-  });
-  ev.target.value = '';
-}
-
-function setPhotoStatus(msg, ok) {
-  const el = document.getElementById('photo-status');
-  if (!el) return;
-  el.textContent = msg;
-  el.style.color = ok === true ? 'var(--ok)' : ok === false ? 'var(--err)' : 'var(--text-3)';
-}
 
 // Image generation is the longest wait in the builder, so it scrims the grid
 // it is about to change rather than only tinting a button somewhere else.
-function setPhotoBusy(on, label) {
-  const grid = document.getElementById('photo-grid');
-  if (!grid) return;
-  grid.classList.add('loader-host');
-  let ov = grid.querySelector('.loader-overlay');
-  if (!on) { if (ov) ov.remove(); return; }
-  if (!ov) {
-    ov = document.createElement('div');
-    ov.className = 'loader-overlay';
-    grid.appendChild(ov);
-  }
-  ov.innerHTML = '<span class="loader-dots lg" role="status" aria-live="polite"><i></i><i></i><i></i></span>'
-    + '<span>' + esc(label) + '</span>';
-}
 
-async function saveGallery(slug) {
-  try {
-    await fetch('/api/personas/' + slug + '/images', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ images: galleryImages })
-    });
-  } catch(e) {}
-}
 
 // ── NSFW photo pool (max 5, held out of every normal send) ──
 // Same shape as the gallery above, entirely separate storage and endpoints —
 // these never reach a normal reply, only the CTA moment (app.py _chat_nsfw_photo).
-let nsfwGalleryImages = [];   // array of data URLs
 
-function renderNsfwGallery() {
-  const grid = document.getElementById('nsfw-photo-grid');
-  if (!grid) return;
-  grid.innerHTML = '';
-  nsfwGalleryImages.forEach((src, i) => {
-    const cell = document.createElement('div');
-    cell.className = 'photo-cell';
-    cell.innerHTML = '<img loading="lazy" decoding="async" src="' + src + '" alt="nsfw photo ' + (i+1) + '">' +
-      '<button type="button" class="photo-del" title="Remove" onclick="removeNsfwPhoto(' + i + ')">✕</button>' +
-      (i === 0 ? '<span class="photo-badge">18+</span>' : '');
-    grid.appendChild(cell);
-  });
-  if (nsfwGalleryImages.length < MAX_PHOTOS) {
-    const add = document.createElement('div');
-    add.className = 'photo-cell photo-add';
-    add.title = 'Upload a photo';
-    add.innerHTML = '<span>＋</span>';
-    add.onclick = () => document.getElementById('nsfw-photo-file-input').click();
-    grid.appendChild(add);
-  }
-}
 
-async function loadNsfwGallery(slug) {
-  nsfwGalleryImages = [];
-  const nsfwGrid = document.getElementById('nsfw-photo-grid');
-  if (nsfwGrid) nsfwGrid.innerHTML = skelGrid(6);
-  try {
-    const res = await fetch('/api/personas/' + slug + '/nsfw-images?full=1');
-    const data = await res.json();
-    if (Array.isArray(data.images)) nsfwGalleryImages = data.images.slice(0, MAX_PHOTOS);
-  } catch(e) {}
-  renderNsfwGallery();
-}
 
-function removeNsfwPhoto(i) { nsfwGalleryImages.splice(i, 1); renderNsfwGallery(); }
 
-function onNsfwPhotoFiles(ev) {
-  const files = Array.from(ev.target.files || []);
-  let remaining = MAX_PHOTOS - nsfwGalleryImages.length;
-  files.slice(0, remaining).forEach(file => {
-    const reader = new FileReader();
-    reader.onload = e => { addToVault(e.target.result, file.type, 'nsfw'); if (nsfwGalleryImages.length < MAX_PHOTOS) { nsfwGalleryImages.push(e.target.result); renderNsfwGallery(); } };
-    reader.readAsDataURL(file);
-  });
-  ev.target.value = '';
-}
 
-function setNsfwPhotoStatus(msg, ok) {
-  const el = document.getElementById('nsfw-photo-status');
-  if (!el) return;
-  el.textContent = msg;
-  el.style.color = ok === true ? 'var(--ok)' : ok === false ? 'var(--err)' : 'var(--text-3)';
-}
 
-function setNsfwPhotoBusy(on, label) {
-  const grid = document.getElementById('nsfw-photo-grid');
-  if (!grid) return;
-  grid.classList.add('loader-host');
-  let ov = grid.querySelector('.loader-overlay');
-  if (!on) { if (ov) ov.remove(); return; }
-  if (!ov) {
-    ov = document.createElement('div');
-    ov.className = 'loader-overlay';
-    grid.appendChild(ov);
-  }
-  ov.innerHTML = '<span class="loader-dots lg" role="status" aria-live="polite"><i></i><i></i><i></i></span>'
-    + '<span>' + esc(label) + '</span>';
-}
 
-async function saveNsfwGallery(slug) {
-  try {
-    await fetch('/api/personas/' + slug + '/nsfw-images', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ images: nsfwGalleryImages })
-    });
-  } catch(e) {}
-}
 
-async function saveNsfwPhotosSection(btn) {
-  if (!currentSlug) return;
-  try {
-    await saveNsfwGallery(currentSlug);
-    flashSaved(btn);
-  } catch(e) { flashSaved(btn, false); }
-}
 
 
 async function fillAllInfo() {
@@ -2924,8 +2678,6 @@ async function fillAllInfo() {
     const cfg = data.config;
     cfg.avatar = v('f-avatar') || cfg.avatar || '';   // keep any uploaded avatar
     renderForm(currentSlug, cfg);                       // repopulate every field at once
-    renderGallery();                                     // renderForm rebuilds #photo-grid from
-    renderNsfwGallery();                                 // scratch, so the existing photos need redrawing
     if (personas[currentSlug]) personas[currentSlug].name = cfg.name || currentSlug;
     renderSidebar();
     clearBusy('fillall-btn', 'save-status', '✓ Filled — review, then Save & Deploy', true);
@@ -2952,10 +2704,8 @@ async function copyPersona(presetConfig) {
     });
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || 'Could not copy');
-    await saveGallery(data.slug);   // carry the current photos onto the copy
-    await saveNsfwGallery(data.slug);
     personas[data.slug] = { slug: data.slug, name: data.name, config: { ...config, name: data.name }, premade: false };
-    noteAvatarChange(data.slug, !!(config.avatar || galleryImages.length));
+    noteAvatarChange(data.slug, !!config.avatar);
     document.getElementById('persona-count').textContent = Object.keys(personas).length;
     status.textContent = '✓ Copied as "' + data.name + '"'; status.className = 'save-status ok';
     renderSidebar();

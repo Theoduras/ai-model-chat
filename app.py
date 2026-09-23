@@ -7721,8 +7721,32 @@ def db_set_nsfw_images(slug, images):
     return clean
 
 
+def _vault_photos(slug, nsfw):
+    """Approved vault stills of one rating: what the profile picture and the
+    CTA photo are drawn from. The old builder galleries are only a fallback."""
+    try:
+        from db import SessionLocal, list_persona_media
+        s = SessionLocal()
+        try:
+            rows = _approved_only(list_persona_media(s, slug) or [])
+        finally:
+            s.close()
+    except Exception:
+        return []
+    return [r for r in rows if (r.kind or 'image') == 'image'
+            and ((getattr(r, 'rating', '') == 'nsfw') == nsfw)]
+
+
+def _persona_has_photo(slug, config):
+    return (bool(config.get('avatar')) or bool(db_get_images(slug))
+            or bool(_vault_photos(slug, nsfw=False)))
+
+
 def _chat_nsfw_photo(slug):
     """Pick one NSFW photo to send with the CTA, or None if she has none."""
+    vault = _vault_photos(slug, nsfw=True)
+    if vault:
+        return f'/api/personas/{slug}/media/{random.choice(vault).id}/image'
     pool = db_get_nsfw_images(slug)
     if not pool:
         return None
@@ -8052,7 +8076,7 @@ def api_personas():
         # listing them by user id hides everything the moment the two differ.
         for sp in db_list_personas(owner_id=_workspace_id(viewer)):
             config = sp.get('config', {})
-            has_img = bool(config.get('avatar')) or len(db_get_images(sp['slug'])) > 0
+            has_img = _persona_has_photo(sp['slug'], config)
             own.append({
                 'slug': sp['slug'],
                 'name': sp.get('name') or config.get('name') or sp['slug'].capitalize(),
@@ -8091,7 +8115,7 @@ def api_personas():
         override = db_get_persona(slug)
         if override and isinstance(override.get('config'), dict):
             config = override['config']
-        has_img = bool(config.get('avatar')) or len(db_get_images(slug)) > 0
+        has_img = _persona_has_photo(slug, config)
         personas.append({
             'slug': slug,
             'name': config.get('name') or meta.get('cover_label') or slug.capitalize(),
@@ -8106,7 +8130,7 @@ def api_personas():
         if _is_premade(sp['slug']):
             continue  # a committed original shadows any stale DB copy of the same slug
         config = sp.get('config', {})
-        has_img = bool(config.get('avatar')) or len(db_get_images(sp['slug'])) > 0
+        has_img = _persona_has_photo(sp['slug'], config)
         personas.append({
             'slug': sp['slug'],
             'name': sp.get('name') or config.get('name') or sp['slug'].capitalize(),
@@ -9049,6 +9073,9 @@ def api_persona_avatar(slug):
         if imgs:
             avatar = imgs[0]
     if not avatar or not avatar.startswith('data:'):
+        vault = _vault_photos(slug, nsfw=False)
+        if vault:
+            return redirect(f'/api/personas/{slug}/media/{vault[0].id}/image')
         return ('', 404)
     try:
         header, b64 = avatar.split(',', 1)
