@@ -2193,6 +2193,29 @@ def list_trial_invites(session, limit=200):
             .order_by(TrialInvite.created_at.desc()).limit(limit).all())
 
 
+class RegisterLink(Base):
+    """A plain trackable link to /register — no trial, no discount, just a
+    click counter so an admin can see how a channel performs."""
+    __tablename__ = 'register_links'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    code = Column(String(32), unique=True, index=True)
+    note = Column(String(200), default='')
+    created_by = Column(String(32), index=True)
+    created_at = Column(DateTime, default=_now, index=True)
+    clicks = Column(Integer, default=0)
+
+
+def get_register_link(session, code):
+    return (session.query(RegisterLink)
+            .filter(RegisterLink.code == (code or '')).first())
+
+
+def list_register_links(session, limit=200):
+    return (session.query(RegisterLink)
+            .order_by(RegisterLink.created_at.desc()).limit(limit).all())
+
+
 def init_db():
     Base.metadata.create_all(engine)
     for table, model in (('users', User), ('saved_personas', SavedPersona),
@@ -2209,6 +2232,7 @@ def init_db():
                          ('referral_earnings', ReferralEarning),
                          ('trial_invites', TrialInvite),
                          ('trial_redemptions', TrialRedemption),
+                         ('register_links', RegisterLink),
                          ('credit_ledger', TokenLedger),
                          ('generation_jobs', GenerationJob),
                          ('model_reference_sets', ModelReferenceSet),
