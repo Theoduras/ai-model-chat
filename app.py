@@ -30375,9 +30375,16 @@ def api_character_approve(char_id, img_id):
                 checks = json.loads(img.checks_json) if img.checks_json else None
             except ValueError:
                 checks = None
-            if not checks or checks.get('age') != 'adult':
-                return jsonify({'ok': False, 'error': 'The adult-appearance check has '
-                                'not passed for this photo. Run it, or regenerate.'}), 409
+            if not checks or checks.get('age') == 'uncertain':
+                # Approving runs the check itself; making the creator press a
+                # separate button first added a step and no safety. Uncertain
+                # is retried, since it is also what an unreachable check says.
+                checks = _char_vision_check(img, row, img.view)
+                img.checks_json = json.dumps(checks)
+                s.commit()
+            if checks.get('age') != 'adult':
+                return jsonify({'ok': False, 'error': 'The adult-appearance check did '
+                                'not pass for this photo. Regenerate it.'}), 409
         if img.view == 'face_front':
             ticked = set(body.get('confirmed') or ())
             sheet = _char_json_sheet(row)

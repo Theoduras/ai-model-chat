@@ -379,7 +379,7 @@
         <div style="padding:20px 22px; display:flex; justify-content:space-between; align-items:center; gap:12px; border-bottom:1px solid var(--border);">
           <div>
             <h2 class="ch-h1" style="font-size:1.3rem;">Check every feature</h2>
-            <p class="ch-muted">Tick each one you agree matches. Approve unlocks when all are ticked and the adult-appearance check passes.</p>
+            <p class="ch-muted">Tick each one you agree matches. Approving runs the adult-appearance check for you.</p>
           </div>
           <span id="check-count" style="font-weight:700;"></span>
         </div>
@@ -924,8 +924,7 @@ function updateApprove() {
   const face = cat.features.filter(f => f.group === 'face' && cur.sheet[f.key]);
   const n = face.filter(f => confirmed.has(f.key)).length;
   el('check-count').textContent = `${n} of ${face.length} confirmed`;
-  const ageOk = (img.checks || {}).age === 'adult';
-  el('approve-face').disabled = img.role === 'canonical' || !face.length || n < face.length || !ageOk;
+  el('approve-face').disabled = img.role === 'canonical' || !face.length || n < face.length;
   el('approve-face').textContent = img.role === 'canonical' ? 'Face approved' : 'Approve face';
 }
 function tickMatches() {
@@ -941,9 +940,10 @@ async function runCheck() {
 }
 async function approveFace() {
   try {
+    say('Checking and approving…');
     await api(`/api/characters/${cur.id}/images/${pickedFace}/approve`, {body: {confirmed: [...confirmed]}});
     await reload(); say('Face approved.', 'ok'); go('body');
-  } catch (e) { say(e.message, 'err'); }
+  } catch (e) { await reload(); say(e.message, 'err'); }
 }
 
 // ── Body ────────────────────────────────────────────────────────────────────
