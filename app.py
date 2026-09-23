@@ -3563,6 +3563,14 @@ h2{font-size:1rem;margin-bottom:14px}
 <button type="submit">Grant {{ trial_days }}-day trial</button></form>{% endif %}
 <p class="sub" style="margin-top:10px"><a href="/admin/trials">Shareable trial links</a></p></div>
 
+{% if super_admin %}<div class="card" style="margin-top:16px"><h2>Give tokens</h2>
+<p class="sub">Balance: {{ '{:,}'.format(u.tokens) }} tokens. A gift is free, never expires and is logged in the ledger.</p>
+<form method="post" action="/admin/users/{{ u.id }}">
+<input type="hidden" name="action" value="tokens">
+<label>Tokens</label><input type="number" name="tokens" min="1" max="1000000" required>
+<label>Note (optional)</label><input type="text" name="note" maxlength="200">
+<button type="submit">Give tokens</button></form></div>
+{% endif %}
 <div class="card" style="margin-top:16px"><h2>Set password</h2>
 <p class="sub">Replaces the password immediately. Tell them out of band.</p>
 <form method="post" action="/admin/users/{{ u.id }}">
@@ -3899,6 +3907,15 @@ def admin_demos():
                                   accounts=demo_accounts)
 
 
+def _owned_workspace_id(session_db, user_row):
+    """The workspace a user's tokens live in: the one they own, which is what
+    `_workspace_id` resolves to when they are signed in to it."""
+    from db import Workspace
+    ws = session_db.query(Workspace).filter(
+        Workspace.owner_id == user_row.id).first()
+    return ws.id if ws is not None else user_row.id
+
+
 @app.route('/admin/users/<uid>', methods=['GET', 'POST'])
 def admin_user_detail(uid):
     blocked = _require_admin()
@@ -3975,6 +3992,22 @@ def admin_user_detail(uid):
                                     u.email, u.role, u.status, u.tier,
                                     request.form.get('team_owner') or '-')
 
+            elif action == 'tokens':
+                raw = (request.form.get('tokens') or '').strip()
+                if not me.get('is_super_admin'):
+                    error = 'Only the super admin can give tokens.'
+                elif not raw.isdigit() or not 0 < int(raw) <= 1_000_000:
+                    error = 'Enter a whole number of tokens, 1 to 1,000,000.'
+                else:
+                    from db import token_post
+                    note = (request.form.get('note') or '').strip()
+                    token_post(s, _owned_workspace_id(s, u), int(raw), 'adjust',
+                               source='gift:' + me['id'],
+                               note=note or 'Gift from ' + me['email'])
+                    saved = f'{int(raw):,} tokens added.'
+                    logger.info('ADMIN TOKEN GIFT by=%s target=%s tokens=%s',
+                                me['email'], u.email, raw)
+
             elif action == 'trial':
                 err = _grant_trial(s, u)
                 if err:
@@ -3996,10 +4029,14 @@ def admin_user_detail(uid):
                 'grandfathered': _fmt_date(u.grandfathered_until),
                 'status': u.status, 'tier': u.tier, 'expires': _fmt_date(u.expires_at),
                 'trial_at': _fmt_date(u.trial_at)}
+        if me.get('is_super_admin'):
+            from db import token_balance
+            view['tokens'] = token_balance(s, _owned_workspace_id(s, u))
         p = {f: (getattr(u, f) or '') for f in pfields}
     finally:
         s.close()
     return render_template_string(ADMIN_USER_HTML, u=view, p=p, saved=saved,
+                                  super_admin=bool(me.get('is_super_admin')),
                                   error=error, tiers=TIERS, order=DEFAULT_TIER_ORDER,
                                   roles=ADMIN_ROLES, demo_key=DEMO_TIER_KEY,
                                   trial_days=TRIAL_DAYS)
