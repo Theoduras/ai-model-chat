@@ -5,6 +5,7 @@ Pure data and pure functions, no Flask, so the rules that keep safe-work and
 explicit apart can be tested without a server. Everything is keyed by body
 type, so a second one is a new table entry rather than a rewrite.
 """
+import os
 import re
 
 from imagegen import LEVEL_ORDER, PHOTO_LOOK, SCENES, SHOT_LEVEL
@@ -289,6 +290,22 @@ FACE_CHECKS = tuple(k for k, v in FEATURES['female'].items() if v[1] == 'face')
 AGE_CHECKED_VIEWS = ('face_front', 'body_front')
 
 
+# AI-generated examples the creator picks her vulva from, one file each in
+# character_looks/vulva/. The pick goes to the nude and closed close-up as a
+# reference; the views built on those inherit it. Kept out of FEATURES so no
+# content prompt reads it. No files, no picker and nothing required.
+LOOK_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'character_looks', 'vulva')
+VULVA_LOOKS = tuple(sorted((f[:-4] for f in (os.listdir(LOOK_DIR) if os.path.isdir(LOOK_DIR) else ())
+                            if f.endswith('.jpg') and f[:-4].isdigit()), key=int))
+LOOK_VIEWS = ('nude_front', 'vulva_closed')
+LOOK_TEXT = ('Her vulva has the same shape as the vulva in the last reference image — its shape only, in her own '
+             'skin tone; that image is an anatomy close-up, not her face or body.')
+
+
+def needs_look(level, key):
+    return bool(VULVA_LOOKS) and level == 'explicit' and key in LOOK_VIEWS
+
+
 def views(body_type='female'):
     return VIEWS.get(body_type) or VIEWS['female']
 
@@ -370,6 +387,7 @@ def catalogue(level, body_type='female'):
         'variations': list(VARIATIONS),
         'presets': [{'key': k, 'label': l, 'hint': h, 'values': v} for k, (l, h, v) in BODY_PRESETS.items()],
         'min_age': MIN_AGE,
+        'vulva_looks': list(VULVA_LOOKS) if level == 'explicit' else [],
         'outfits': list(OUTFITS), 'outfit_colours': OUTFIT_COLOURS,
     }
 
@@ -441,6 +459,11 @@ def validate(data, body_type='female'):
         colours = {o: c for o, c in colours.items() if c and o in sheet['view_outfits']}
         if colours:
             sheet['outfit_colours'] = colours
+    look = raw.get('vulva_look')
+    if look:
+        if look not in VULVA_LOOKS:
+            raise CharacterError('Unknown vagina photo.')
+        sheet['vulva_look'] = look
     if sheet.get('hair_colour') == 'Custom':
         hexcode = str(raw.get('hair_colour_hex') or '').lower()
         if not re.fullmatch(r'#[0-9a-f]{6}', hexcode):
@@ -581,7 +604,7 @@ def outfit_text(sheet, outfit=None):
 
 def build_view_prompt(key, sheet, age, has_reference, body_type='female',
                       mode='reference', strength=None, outfit=None, blend=False,
-                      match=False):
+                      match=False, look=False):
     v = view(key, body_type)
     if not v:
         raise CharacterError('Unknown view.')
@@ -626,6 +649,8 @@ def build_view_prompt(key, sheet, age, has_reference, body_type='female',
     else:
         lead = f"photorealistic photo of a woman, {v['framing']}."
     body = f' Her features: {detail}.' if detail else ''
+    if look and key in LOOK_VIEWS:
+        body += ' ' + LOOK_TEXT
     zoom = (' Zoomed in: the subject fills the whole frame; no face, no full body, nothing '
             'beyond the subject in shot.') if v.get('zoom') else ''
     return (lead + zoom + body + ' ' + STUDIO + ' ' + adult_clause(age)).strip()

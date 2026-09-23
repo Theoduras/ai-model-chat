@@ -998,7 +998,7 @@ for _w in _persistence_warnings():
 _BLOCKED_SUFFIXES = ('.py', '.pyc', '.pyo', '.db', '.sqlite', '.sqlite3', '.db-journal',
                      '.log', '.env', '.pem', '.key', '.cfg', '.ini', '.toml', '.lock',
                      '.txt', '.md', '.yml', '.yaml')
-_BLOCKED_DIRS = ('personas/', 'logs/', '__pycache__/', 'templates/', '.git/')
+_BLOCKED_DIRS = ('personas/', 'character_looks/', 'logs/', '__pycache__/', 'templates/', '.git/')
 _ALLOWED_FILES = {'/robots.txt', '/sitemap.xml'}
 
 
@@ -30526,7 +30526,7 @@ def _character_urls(snap, shot, scene, face_only=False):
                         for k in keys) if u]
 
 
-def _character_view_refs(char_id, view_key, outfit_image=None):
+def _character_view_refs(char_id, view_key, outfit_image=None, look=None):
     """References for generating one view: the approved views it builds on,
     then the creator's uploads for that view, then her general uploads."""
     from db import Character
@@ -30562,6 +30562,10 @@ def _character_view_refs(char_id, view_key, outfit_image=None):
         outfit = outfit_image and s.query(CharacterImage).filter_by(
             id=outfit_image, character_id=char_id, role='outfit').first()
         outfit_url = outfit and _char_ref_url(outfit)
+        if look in CH.VULVA_LOOKS:
+            import base64
+            with open(os.path.join(CH.LOOK_DIR, look + '.jpg'), 'rb') as f:
+                outfit_url = 'data:image/jpeg;base64,' + base64.b64encode(f.read()).decode()
         if outfit_url:
             # The prompt names "the last reference image", so it goes last and
             # is never the one trimmed.
@@ -31116,6 +31120,16 @@ def api_character_image_delete(char_id, img_id):
         s.close()
 
 
+@app.route('/api/characters/looks/vulva/<look>.jpg')
+def api_character_look(look):
+    blocked = _require_active()
+    if blocked:
+        return blocked
+    if look not in CH.VULVA_LOOKS:
+        return ('Not found', 404)
+    return send_from_directory(CH.LOOK_DIR, look + '.jpg')
+
+
 @app.route('/api/characters/<char_id>/generate', methods=['POST'])
 def api_character_generate(char_id):
     blocked = _require_active()
@@ -31159,13 +31173,18 @@ def api_character_generate(char_id):
         match = view_key == 'body_front' and sheet.get('body_mode') == 'match'
         if match and not _char_images(s, row.id, view='body_front', role='reference'):
             return jsonify({'ok': False, 'error': 'Add at least one body photo to match.'}), 400
+        look = ''
+        if CH.needs_look(row.nsfw_level, view_key):
+            look = sheet.get('vulva_look') or ''
+            if look not in CH.VULVA_LOOKS:
+                return jsonify({'ok': False, 'error': 'Pick her vagina example in Body profile first.'}), 400
         dressed = CH.outfits(sheet) if '{outfit}' in v['framing'] else [None]
         owned = {i.id for i in _char_images(s, row.id, view='', role='outfit')}
         dressed = [o for o in dressed if not (o or '').startswith('upload:') or o[7:] in owned] or ['Bodysuit']
         prompts = [CH.build_view_prompt(view_key, sheet, row.age, has_ref, row.body_type, mode=mode,
                                         strength=state[view_key]['strength'],
                                         outfit=o, blend=blend,
-                                        match=match) for o in dressed]
+                                        match=match, look=bool(look)) for o in dressed]
         parent_versions = {p: state[p]['version'] for p in v['parents']}
         key = row.key
     finally:
@@ -31177,7 +31196,7 @@ def api_character_generate(char_id):
               'character_view': view_key, 'prompt': prompt,
               'parent_versions': parent_versions,
               'outfit': o or '', 'outfit_image': (o or '')[7:] if (o or '').startswith('upload:') else '',
-              'reference_media': '', 'negative_extra': ''} for prompt, o in zip(prompts, dressed)]
+              'reference_media': '', 'negative_extra': '', 'look': look} for prompt, o in zip(prompts, dressed)]
     try:
         prices = [CR.quote(spec) for spec in specs]
     except CR.PricingError as e:
@@ -31635,7 +31654,8 @@ def _gen_start(job_id, slug, spec, workspace):
                 call['reference_mime'] = ref_mime
             if spec['kind'] == 'image' and spec.get('character_view'):
                 refs = _character_view_refs(spec['character_id'],
-                                            spec['character_view'], spec.get('outfit_image'))
+                                            spec['character_view'], spec.get('outfit_image'),
+                                            spec.get('look'))
                 if refs:
                     call['reference_urls'] = refs
                 call['prompt'] = spec['prompt']

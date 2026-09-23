@@ -300,6 +300,33 @@ def test_content_prompts():
         IG.pick_direction(s, '') for s in IG.SHOT_FRAMING))
 
 
+def test_vulva_looks():
+    saved = CH.VULVA_LOOKS
+    CH.VULVA_LOOKS = ('1', '2', '3')
+    try:
+        base = {'age': 25, 'nsfw_level': 'explicit'}
+        check('look accepted', CH.validate(dict(base, sheet={'vulva_look': '3'}))[0]['sheet']['vulva_look'] == '3')
+        for bad in ('10', 'x'):
+            try:
+                CH.validate(dict(base, sheet={'vulva_look': bad}))
+                check(f'look {bad} refused', False)
+            except CH.CharacterError:
+                pass
+        check('looks only at explicit', CH.catalogue('explicit')['vulva_looks'] and not CH.catalogue('moderate')['vulva_looks']
+              and not CH.catalogue('sfw')['vulva_looks'])
+        check('look required for the nude at explicit', CH.needs_look('explicit', 'nude_front'))
+        check('look not required below explicit', not CH.needs_look('moderate', 'nude_front'))
+        check('look not required for a dressed view', not CH.needs_look('explicit', 'body_front'))
+        check('look reaches the nude prompt', CH.LOOK_TEXT in CH.build_view_prompt('nude_front', {}, 25, True, look=True))
+        check('look stays off a dressed view', CH.LOOK_TEXT not in CH.build_view_prompt('body_front', {}, 25, True, look=True))
+        check('no look, no clause', CH.LOOK_TEXT not in CH.build_view_prompt('nude_front', {}, 25, True))
+        check('look never in content text', 'last reference' not in CH.describe({'vulva_look': '2'}, 'explicit'))
+        CH.VULVA_LOOKS = ()
+        check('no examples, nothing required', not CH.needs_look('explicit', 'nude_front'))
+    finally:
+        CH.VULVA_LOOKS = saved
+
+
 if __name__ == '__main__':
     test_sfw_never_gets_nsfw()
     test_required_views()
@@ -310,5 +337,6 @@ if __name__ == '__main__':
     test_resolver()
     test_snapshot_views()
     test_content_prompts()
+    test_vulva_looks()
     print('FAILED' if FAILURES else 'OK', len(FAILURES))
     raise SystemExit(1 if FAILURES else 0)
