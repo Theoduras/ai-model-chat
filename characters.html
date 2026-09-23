@@ -74,7 +74,6 @@
     .view[aria-pressed="true"] { border-color: var(--accent); }
     .view .vt { width: 48px; height: 60px; border-radius: 8px; background: var(--border); flex-shrink: 0; overflow: hidden; }
     .view .vt img { width: 100%; height: 100%; object-fit: cover; }
-    .blur img { filter: blur(14px); }
     .opt img { cursor: zoom-in; }
     .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.88); display: flex; align-items: center;
       justify-content: center; z-index: 1000; }
@@ -103,7 +102,7 @@
     .banner.outdated { background: color-mix(in srgb, var(--warn) 14%, transparent); }
     .dl { font-size: 0.8rem; font-weight: 700; color: var(--text-2); }
     .crop-stage { position: relative; user-select: none; touch-action: none; }
-    .crop-stage img { width: 100%; display: block; border-radius: 8px; filter: blur(10px); }
+    .crop-stage img { width: 100%; display: block; border-radius: 8px; }
     .crop-box { position: absolute; border: 2px solid var(--accent); box-shadow: 0 0 0 9999px rgba(0,0,0,.35); cursor: move; }
     .crop-handle { position: absolute; right: -7px; bottom: -7px; width: 14px; height: 14px; border-radius: 7px; background: var(--accent); cursor: nwse-resize; }
     .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
@@ -118,8 +117,6 @@
       background: rgba(0,0,0,.6); color: #fff; cursor: pointer; font-size: 12px; }
     .msg { font-size: 0.82rem; min-height: 1.2em; }
     .msg.err { color: var(--err); } .msg.ok { color: var(--ok); }
-    .nsfw-closed { border-radius: 12px; background: var(--surface-2); padding: 36px; text-align: center; color: var(--text-muted);
-      font-size: 0.82rem; }
     .fp { display: flex; flex-direction: column; gap: 6px; border: 0; margin: 0; padding: 0; min-width: 0; }
     .fp legend { font-size: 0.78rem; font-weight: 600; color: var(--text-2); padding: 0; margin-bottom: 6px; }
     .fp-opts { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -282,8 +279,7 @@
           <span class="ch-muted" style="margin:0 0 10px; display:block;">Every view inherits these. Changes save as you pick.</span>
           <div class="fp-list" id="body-features"></div>
           <div id="intimate-wrap" hidden>
-            <button type="button" class="btn" style="margin-top:12px;" id="intimate-toggle" onclick="toggleNsfw()">Show NSFW traits</button>
-            <div class="fp-list" id="intimate-features" style="margin-top:12px;" hidden></div>
+            <div class="fp-list" id="intimate-features" style="margin-top:12px;"></div>
           </div>
           <span class="msg" id="body-save-msg" aria-live="polite" style="margin:8px 0 0; display:block;"></span>
         </div>
@@ -364,8 +360,6 @@ function setBatch(v) {
 }
 function vpImgClick(e, i) {
   e.stopPropagation();
-  const opts = e.currentTarget.closest('.opts');
-  if (opts.classList.contains('blur')) { opts.classList.remove('blur'); return; }
   openLightbox(vpOptUrls, i);
 }
 function openLightbox(urls, idx) { lbUrls = urls; lbIdx = idx; el('lb-img').src = lbUrls[lbIdx]; el('lightbox').hidden = false; }
@@ -380,7 +374,7 @@ document.addEventListener('keydown', e => {
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const LEVEL_LABEL = {sfw: 'SFW', moderate: 'Topless', explicit: 'Explicit'};
 let chars = [], filter = 'all', cur = null, cat = null, personas = [];
-let step = 'describe', batch = 4, pickedFace = '', selView = '', nsfwOpen = false, uploadView = '';
+let step = 'describe', batch = 4, pickedFace = '', selView = '', uploadView = '';
 let confirmed = new Set();
 
 async function api(url, opts) {
@@ -649,7 +643,7 @@ function imgById(id) { return (cur.images || []).find(i => i.id === id); }
 function viewTile(v) {
   const st = vs(v.key), c = canonOf(v.key);
   const from = v.parents.length ? 'from ' + v.parents.map(p => viewDef(p) ? viewDef(p).label : p).join(' + ') : 'base';
-  return `<button type="button" class="view${isNsfw(v) ? ' blur' : ''}" aria-pressed="${selView === v.key}" onclick="openView('${v.key}')">
+  return `<button type="button" class="view" aria-pressed="${selView === v.key}" onclick="openView('${v.key}')">
     <div class="vt">${c ? `<img src="${esc(c.url)}" alt="">` : ''}</div>
     <div style="flex:1; min-width:0;"><div style="font-weight:700; font-size:0.85rem;">${esc(v.label)}</div>
       <div class="ch-muted" style="margin:2px 0 0;">${esc(from)}${v.required ? ' · required' : ''}</div>
@@ -674,15 +668,12 @@ function renderBody() {
   el('body-features').innerHTML = cat.features.filter(f => f.group === 'body').map(featurePicker).join('');
   const intimate = cat.features.filter(f => INTIMATE.includes(f.group));
   el('intimate-wrap').hidden = !intimate.length;
-  el('intimate-features').hidden = !nsfwOpen;
-  el('intimate-toggle').textContent = nsfwOpen ? 'Hide NSFW traits' : 'Show NSFW traits';
-  el('intimate-features').innerHTML = nsfwOpen ? intimate.map(featurePicker).join('') : '';
+  el('intimate-features').innerHTML = intimate.map(featurePicker).join('');
   el('general-refs').innerHTML = images('', 'reference').map(refTile).join('');
   renderViewPanel();
   pollGenerating();
 }
 function setFilter(f) { viewFilter = f; renderBody(); }
-function toggleNsfw() { nsfwOpen = !nsfwOpen; renderBody(); }
 function autosaveSheet() {
   clearTimeout(saveTimer);
   el('body-save-msg').textContent = 'Saving…';
@@ -735,17 +726,17 @@ function renderViewPanel() {
   el('vp-strength-label').textContent = st.mode === 'crop' ? 'Detail-pass strength' : 'Reference influence';
   el('vp-strength').value = st.strength; el('vp-strength-val').textContent = (+st.strength).toFixed(2);
   const result = imgById(st.result_image_id) || images(v.key, 'candidate')[0];
-  el('vp-compare').innerHTML = `<figure class="${isNsfw(v) ? 'blur' : ''}">${parent ? `<img src="${esc(parent.url)}" alt="">` : '<div></div>'}<figcaption>Parent</figcaption></figure>
-    <figure class="${isNsfw(v) ? 'blur' : ''}">${result ? `<img src="${esc(result.url)}" alt="">` : '<div></div>'}<figcaption>Result</figcaption></figure>`;
+  el('vp-compare').innerHTML = `<figure>${parent ? `<img src="${esc(parent.url)}" alt="">` : '<div></div>'}<figcaption>Parent</figcaption></figure>
+    <figure>${result ? `<img src="${esc(result.url)}" alt="">` : '<div></div>'}<figcaption>Result</figcaption></figure>`;
   el('vp-traits').innerHTML = (v.traits || []).filter(k => (cur.sheet || {})[k]).map(k =>
     `<span class="chip" style="cursor:default;">${esc(cur.sheet[k])}</span>`).join('') +
-    `<button type="button" class="chip" onclick="nsfwOpen=nsfwOpen||${isNsfw(v)};closeDrawer();el('body-features').scrollIntoView({behavior:'smooth'})">Edit</button>`;
+    `<button type="button" class="chip" onclick="closeDrawer();el('body-features').scrollIntoView({behavior:'smooth'})">Edit</button>`;
   const opts = images(v.key, 'candidate').concat(images(v.key, 'canonical'));
   vpOptUrls = opts.map(o => o.url);
-  el('vp-opts').className = 'opts' + (isNsfw(v) ? ' blur' : '');
+  el('vp-opts').className = 'opts';
   el('vp-opts').innerHTML = opts.map((o, i) => {
     const age = (o.checks || {}).age;
-    return `<div class="opt" style="cursor:default;" onclick="this.parentNode.classList.remove('blur')">
+    return `<div class="opt" style="cursor:default;">
       <img src="${esc(o.url)}" alt="${esc(v.label)} option" onclick="vpImgClick(event, ${i})"><span>${o.role === 'canonical' ? 'Approved' : 'Candidate'}
       ${v.key === 'body_front' && o.role !== 'canonical' ? ` · <span class="tag ${age || 'uncertain'}">${age || 'not checked'}</span>` : ''}</span>
       ${o.role !== 'canonical' ? `<div style="display:flex; gap:6px; padding:0 12px 12px;">
