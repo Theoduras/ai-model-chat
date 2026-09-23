@@ -287,6 +287,11 @@ Stay completely in character. Never mention being an AI.
   Google) and the face needs every feature ticked. Each approval saves a
   `CharacterVersion`; jobs record `character_version`. Face uploads are
   references only; stacked youth-leaning choices are refused in `characters.validate`.
+- **Views are a tree.** Each view in `characters.VIEWS` names its parents; a
+  `CharacterView` row holds status and version, and `characters.resolve_status`
+  derives locked (a parent unapproved) and outdated (a parent re-approved since).
+  Crop views send the parent's region, cropped client-side, as the first
+  reference: Seedream refuses a denoise strength, so strength is prompt wording.
 - A generation lands in `staging/` unapproved and is **invisible to every send
   path** — `_approved_only` filters `_pick_media`, `_pick_phase_photo` and the
   vault listing, so nothing unreviewed can reach a fan. Keeping it promotes it

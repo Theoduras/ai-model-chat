@@ -365,6 +365,7 @@ class CharacterView(Base):
     crop_box_json = Column(Text)                        # {x, y, w, h}, normalised 0-1
     strength = Column(Float)                            # None = characters.STRENGTH[mode]
     result_image_id = Column(String(32))
+    job_id = Column(String(32))                         # the open generation, while generating
     version = Column(Integer, default=0)
     parent_versions_json = Column(Text, default='{}')   # {parent_key: version} at generation
     updated_at = Column(DateTime, default=_now, onupdate=_now)

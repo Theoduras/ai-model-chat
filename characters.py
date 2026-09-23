@@ -402,15 +402,28 @@ def adult_clause(age):
             'and fully adult body proportions.')
 
 
-def build_view_prompt(key, sheet, age, has_reference, body_type='female'):
+def build_view_prompt(key, sheet, age, has_reference, body_type='female',
+                      mode='reference', strength=None):
     v = view(key, body_type)
     if not v:
         raise CharacterError('Unknown view.')
     groups = tuple(g for g in v['uses'] if _rank(GROUP_LEVEL[g]) <= _rank(v['rating']))
     detail = ', '.join(_fragments(sheet, groups, body_type))
-    if has_reference:
+    strength = STRENGTH[mode] if strength is None else strength
+    if mode == 'crop':
+        # Seedream refuses a denoise strength, so the crop is the first
+        # reference and the strength says in words how far it may move.
+        touch = ('only sharpen detail and skin texture, change nothing else' if strength < 0.4
+                 else 'refine detail, keeping pose, skin tone and lighting' if strength < 0.7
+                 else 'redraw the detail freely, keeping the same body and lighting')
+        lead = ('photorealistic high-resolution close-up recreated from the first reference '
+                f'image, which is a crop of the same woman: {v["framing"]}. Same skin, lighting '
+                f'and proportions as that crop; {touch}.')
+    elif has_reference:
+        hold = ('identical face and body' if strength >= 0.5
+                else 'the same face and build, loosely')
         lead = ('photorealistic photo of the exact same woman as the reference images, '
-                'identical face and body, now as ' + v['framing'] + '.')
+                + hold + ', now as ' + v['framing'] + '.')
     else:
         lead = f"photorealistic photo of a woman, {v['framing']}."
     body = f' Her features: {detail}.' if detail else ''
@@ -442,3 +455,55 @@ def content_clause(sheet, level, body_type='female'):
     cut to the job's level."""
     text = describe(sheet, level, body_type)
     return f'Her fixed features: {text}.' if text else ''
+
+
+# ── View tree status ──────────────────────────────────────────────────────────
+
+def resolve_status(view, parents):
+    """Display status of one view row. `view` and each parent are dicts with
+    view_key, status, version and (view only) parent_versions."""
+    if any(p['status'] != 'approved' for p in parents):
+        return 'locked'
+    seen = view.get('parent_versions') or {}
+    if any(p['view_key'] in seen and p['version'] > seen[p['view_key']] for p in parents):
+        return 'outdated'
+    return view['status']
+
+
+def resolve_all(rows, body_type='female'):
+    """{key: display status} for rows keyed by view key. A view whose parent
+    has no row is locked."""
+    out = {}
+    for k in topo_order(body_type):
+        if k not in rows:
+            continue
+        ps = [rows.get(p) or {'view_key': p, 'status': 'not_started', 'version': 0}
+              for p in parents(k, body_type)]
+        out[k] = resolve_status(rows[k], ps)
+    return out
+
+
+def outdated_branch(rows, body_type='female'):
+    """Keys to regenerate, parents first: every outdated view plus whatever
+    sits below it in the tree."""
+    status = resolve_all(rows, body_type)
+    stale = set()
+    for k in topo_order(body_type):
+        if status.get(k) == 'outdated' or any(p in stale for p in parents(k, body_type)):
+            stale.add(k)
+    return [k for k in topo_order(body_type) if k in stale]
+
+
+# Where a crop view sits in its parent, normalised 0-1, until the creator
+# drags it. The anchors are standing A-pose shots, so the body lands in a
+# predictable place.
+REGIONS = {
+    'chest': {'x': 0.28, 'y': 0.20, 'w': 0.44, 'h': 0.20},
+    'pelvis': {'x': 0.30, 'y': 0.42, 'w': 0.40, 'h': 0.18},
+    'chest_detail': {'x': 0.15, 'y': 0.15, 'w': 0.70, 'h': 0.60},
+}
+CROP_PAD = 0.08
+
+
+def default_crop(region):
+    return dict(REGIONS[region]) if region in REGIONS else None

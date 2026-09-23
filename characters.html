@@ -88,6 +88,29 @@
     .lightbox .lb-next { right: 16px; top: 50%; transform: translateY(-50%); }
     .dot { width: 10px; height: 10px; border-radius: 5px; flex-shrink: 0; background: var(--text-muted); }
     .dot.ok { background: var(--ok); } .dot.review { background: var(--warn); }
+    .st { padding: 1px 8px; border-radius: 999px; font-size: 0.7rem; font-weight: 700; background: var(--border); color: var(--text-2); }
+    .st.approved { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+    .st.review, .st.outdated { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+    .st.generating { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+    .st.locked { opacity: .6; }
+    .tier-h { color: var(--text-muted); text-transform: uppercase; letter-spacing: .06em; font-size: 0.75rem; }
+    .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(460px, 100vw); background: var(--surface); border-left: 1px solid var(--border);
+      padding: 18px 16px 0; overflow-y: auto; z-index: 40; box-shadow: -8px 0 24px rgba(0,0,0,.12); display: flex; flex-direction: column; }
+    .drawer #vp-body { flex: 1; }
+    .lineage { font-size: 0.75rem; color: var(--text-muted); margin-top: 4px; }
+    .lineage a { color: inherit; }
+    .banner { margin-top: 12px; padding: 10px 12px; border-radius: 10px; font-size: 0.82rem; background: var(--surface-2); }
+    .banner.outdated { background: color-mix(in srgb, var(--warn) 14%, transparent); }
+    .dl { font-size: 0.8rem; font-weight: 700; color: var(--text-2); }
+    .crop-stage { position: relative; user-select: none; touch-action: none; }
+    .crop-stage img { width: 100%; display: block; border-radius: 8px; filter: blur(10px); }
+    .crop-box { position: absolute; border: 2px solid var(--accent); box-shadow: 0 0 0 9999px rgba(0,0,0,.35); cursor: move; }
+    .crop-handle { position: absolute; right: -7px; bottom: -7px; width: 14px; height: 14px; border-radius: 7px; background: var(--accent); cursor: nwse-resize; }
+    .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+    .compare figure { margin: 0; }
+    .compare img, .compare div { width: 100%; aspect-ratio: 3/4; object-fit: cover; border-radius: 8px; background: var(--surface-2); }
+    .compare figcaption { font-size: 0.72rem; color: var(--text-muted); margin-top: 4px; }
+    .actionbar { position: sticky; bottom: 0; background: var(--surface); padding: 12px 0 16px; display: flex; gap: 8px; justify-content: flex-end; border-top: 1px solid var(--border); margin-top: 12px; }
     .refs { display: flex; gap: 8px; flex-wrap: wrap; }
     .ref { width: 64px; height: 64px; border-radius: 8px; overflow: hidden; position: relative; background: var(--surface-2); }
     .ref img { width: 100%; height: 100%; object-fit: cover; }
@@ -255,68 +278,71 @@
     <div class="ch-row" data-step="body" hidden>
       <div class="ch-grow" style="display:flex; flex-direction:column; gap:16px;">
         <div class="ch-card">
-          <h2 class="ch-h2">Choose her body features</h2>
+          <h2 class="ch-h2">Body profile</h2>
+          <span class="ch-muted" style="margin:0 0 10px; display:block;">Every view inherits these. Changes save as you pick.</span>
           <div class="fp-list" id="body-features"></div>
-          <div style="display:flex; align-items:center; gap:12px; margin-top:12px; flex-wrap:wrap;">
-            <button type="button" class="btn btn-primary" id="body-save" onclick="saveSheet(null, 'body-save')">Save features</button>
-            <span class="msg" id="body-save-msg" aria-live="polite" style="margin:0;"></span>
+          <div id="intimate-wrap" hidden>
+            <button type="button" class="btn" style="margin-top:12px;" id="intimate-toggle" onclick="toggleNsfw()">Show NSFW traits</button>
+            <div class="fp-list" id="intimate-features" style="margin-top:12px;" hidden></div>
+          </div>
+          <span class="msg" id="body-save-msg" aria-live="polite" style="margin:8px 0 0; display:block;"></span>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:end; gap:12px; flex-wrap:wrap;">
+          <div>
+            <h2 class="ch-h1">Views</h2>
+            <p class="ch-muted" id="body-summary"></p>
+          </div>
+          <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+            <div class="chips" id="view-filter"></div>
+            <button type="button" class="btn" id="regen-branch" onclick="regenerateBranch()">Regenerate outdated</button>
+            <button type="button" class="btn btn-primary" id="gen-remaining" onclick="generateRemaining()">Generate remaining</button>
           </div>
         </div>
-        <div>
-          <h2 class="ch-h1">Body views</h2>
-          <p class="ch-muted" id="body-summary"></p>
-        </div>
-        <div class="ch-card">
-          <h2 class="ch-h2" style="color:var(--text-muted); text-transform:uppercase; letter-spacing:.06em; font-size:0.75rem;">SFW</h2>
-          <div class="views" id="sfw-views"></div>
-        </div>
-        <div class="ch-card" id="nsfw-card">
-          <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:12px;">
-            <div>
-              <h2 class="ch-h2" style="margin:0; color:var(--text-muted); text-transform:uppercase; letter-spacing:.06em; font-size:0.75rem;">NSFW</h2>
-              <span class="ch-muted" id="nsfw-summary"></span>
-            </div>
-            <button type="button" class="btn" id="nsfw-toggle" aria-expanded="false" onclick="toggleNsfw()">Show NSFW views</button>
-          </div>
-          <div class="nsfw-closed" id="nsfw-closed">Hidden and blurred until you open this section.</div>
-          <div class="views blur" id="nsfw-views" hidden></div>
-        </div>
-        <div class="ch-card" id="view-panel" hidden>
-          <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
-            <div>
-              <h2 class="ch-h2" style="margin:0;" id="vp-title"></h2>
-              <span class="ch-muted" id="vp-sub"></span>
-            </div>
-            <div style="display:flex; gap:8px; align-items:center;">
-              <label class="ch-muted" style="margin:0;">Options <input type="number" id="batch-input-2" min="1" max="8" step="1" style="width:52px;" onchange="setBatch(this.value)"></label>
-              <button type="button" class="btn" id="vp-check" onclick="runViewCheck()" hidden>Run adult check</button>
-              <button type="button" class="btn btn-primary" id="vp-gen" onclick="generate(selView)">Generate</button>
-            </div>
-          </div>
-          <div class="fp-list" id="vp-features" style="margin-bottom:14px;"></div>
-          <div class="opts" id="vp-opts"></div>
-          <div style="margin-top:14px;">
-            <span style="font-size:0.8rem; font-weight:700; color:var(--text-2);">References for this view</span>
-            <div class="refs" id="vp-refs" style="margin-top:8px;"></div>
-            <button type="button" class="btn" style="margin-top:8px;" onclick="togglePastPicker()" id="past-toggle">Use a previous generation</button>
-            <div class="refs" id="vp-past" style="margin-top:8px;" hidden></div>
-          </div>
-        </div>
+        <div id="tiers"></div>
       </div>
       <div class="ch-side">
         <div class="ch-card" style="display:flex; flex-direction:column; gap:10px;">
-          <h2 class="ch-h2" style="margin:0;">Your references</h2>
-          <span class="ch-muted" style="margin:0;">Optional. General references apply to every view; view references attach to the view that is open. Any view upload can be approved as its final photo, except faces.</span>
+          <h2 class="ch-h2" style="margin:0;">General references</h2>
+          <span class="ch-muted" style="margin:0;">Optional. Uploads here guide the face. View references are set in each view's drawer.</span>
           <div class="refs" id="general-refs"></div>
           <label class="attest"><input type="checkbox" id="attest">I have the rights to these images, and anyone shown is 18+ and agreed to their likeness being used for AI generation.</label>
           <div style="display:flex; gap:8px; flex-wrap:wrap;">
             <button type="button" class="btn" onclick="pickUpload('')">Add general reference</button>
-            <button type="button" class="btn" id="add-view-ref" onclick="pickUpload(selView)" disabled>Add to open view</button>
           </div>
           <input type="file" id="upload" accept="image/jpeg,image/png,image/webp" multiple hidden onchange="uploadFiles(this)">
         </div>
       </div>
     </div>
+    <aside class="drawer" id="drawer" hidden aria-label="View details">
+      <div style="display:flex; justify-content:space-between; align-items:start; gap:8px;">
+        <div><h2 class="ch-h2" style="margin:0;" id="vp-title"></h2><div class="lineage" id="vp-lineage"></div></div>
+        <button type="button" class="btn" style="height:34px; padding:0 12px;" onclick="closeDrawer()" aria-label="Close">×</button>
+      </div>
+      <div class="banner" id="vp-banner" hidden></div>
+      <div id="vp-body">
+        <div class="chips" id="vp-source" style="margin:12px 0;"></div>
+        <div id="vp-crop" hidden>
+          <div class="crop-stage" id="crop-stage"><img id="crop-img" alt="Parent view"><div class="crop-box" id="crop-box"><span class="crop-handle"></span></div></div>
+          <span class="ch-muted">Drag the box to move it, the corner to resize.</span>
+        </div>
+        <div style="margin-top:12px;">
+          <span class="dl">References</span>
+          <div class="chips" id="vp-refs" style="margin-top:6px;"></div>
+          <button type="button" class="btn" style="margin-top:8px; height:34px;" id="add-view-ref" onclick="pickUpload(selView)">Upload to this view</button>
+        </div>
+        <label class="dl" style="display:block; margin-top:12px;"><span id="vp-strength-label"></span> <b id="vp-strength-val"></b>
+          <input type="range" id="vp-strength" min="0" max="1" step="0.01" style="width:100%;" oninput="el('vp-strength-val').textContent=(+this.value).toFixed(2)" onchange="saveView({strength:+this.value})"></label>
+        <div class="compare" id="vp-compare"></div>
+        <div style="margin-top:12px;"><span class="dl">Inherited traits</span>
+          <div class="chips" id="vp-traits" style="margin-top:6px;"></div></div>
+        <div class="opts" id="vp-opts" style="margin-top:12px;"></div>
+      </div>
+      <div class="actionbar">
+        <button type="button" class="btn" id="vp-check" onclick="runViewCheck()" hidden>Adult check</button>
+        <button type="button" class="btn" id="vp-var" onclick="generate(selView, 4)">4 variations</button>
+        <button type="button" class="btn btn-primary" id="vp-primary"></button>
+      </div>
+    </aside>
   </section>
 
 </div>
@@ -335,7 +361,6 @@ let lbUrls = []; let lbIdx = 0; let vpOptUrls = [];
 function setBatch(v) {
   batch = Math.max(1, Math.min(8, parseInt(v, 10) || 1));
   el('batch-input').value = batch;
-  el('batch-input-2').value = batch;
 }
 function vpImgClick(e, i) {
   e.stopPropagation();
@@ -456,6 +481,7 @@ function pickOption(btn) {
   const on = btn.getAttribute('aria-pressed') !== 'true';
   btn.parentNode.querySelectorAll('.fp-opt').forEach(b => b.setAttribute('aria-pressed', 'false'));
   btn.setAttribute('aria-pressed', on);
+  if (step === 'body') autosaveSheet();
   if (btn.dataset.feature === 'hair_colour') {
     cur.sheet = collectSheet();
     document.querySelectorAll('[data-feature="pubic_colour"][data-value="Matches hair"]').forEach(b => {
@@ -522,13 +548,13 @@ function setGenerating(on) {
     else { b.disabled = b.dataset.wasDisabled === '1'; delete b.dataset.wasDisabled; }
   });
 }
-async function generate(view) {
+async function generate(view, n) {
   if (generating) return;
   setGenerating(true);
   say('');
   try {
     if (step === 'describe' && !(await saveSheet())) return;
-    const d = await api('/api/characters/' + cur.id + '/generate', {body: {view, batch}});
+    const d = await submitView(view, n);
     await waitJob(d.job);
     setGenerating(false);
     await reload();
@@ -612,91 +638,202 @@ async function approveFace() {
 }
 
 // ── Body ────────────────────────────────────────────────────────────────────
-function viewState(key) {
-  if (canonOf(key)) return 'ok';
-  return images(key, 'candidate').length ? 'review' : '';
-}
+const INTIMATE = ['breasts', 'nipples', 'pubic', 'vulva', 'anus'];
+const TIERS = [[0, 'Anchor · approve first'], [1, 'Derived from anchor'], [2, 'Second level']];
+const STATUS_LABEL = {not_started: 'Not started', generating: 'Generating', review: 'Review', approved: 'Approved', locked: 'Locked', outdated: 'Outdated'};
+let viewFilter = 'SFW', saveTimer = null;
+function vs(key) { return (cur.views || {})[key] || {display: 'locked'}; }
+function isNsfw(v) { return v.group === 'nsfw'; }
+function inFilter(v) { return viewFilter === 'All' || (viewFilter === 'NSFW') === isNsfw(v); }
+function imgById(id) { return (cur.images || []).find(i => i.id === id); }
 function viewTile(v) {
-  const c = canonOf(v.key);
-  const locked = v.parents.some(d => !canonOf(d));
-  return `<button type="button" class="view" aria-pressed="${selView === v.key}" onclick="openView('${v.key}')">
+  const st = vs(v.key), c = canonOf(v.key);
+  const from = v.parents.length ? 'from ' + v.parents.map(p => viewDef(p) ? viewDef(p).label : p).join(' + ') : 'base';
+  return `<button type="button" class="view${isNsfw(v) ? ' blur' : ''}" aria-pressed="${selView === v.key}" onclick="openView('${v.key}')">
     <div class="vt">${c ? `<img src="${esc(c.url)}" alt="">` : ''}</div>
     <div style="flex:1; min-width:0;"><div style="font-weight:700; font-size:0.85rem;">${esc(v.label)}</div>
-      <div class="ch-muted" style="margin:2px 0 0;">${v.required ? 'Required' : 'Optional'}${locked ? ' · locked' : ''}</div></div>
-    <span class="dot ${viewState(v.key)}"></span></button>`;
+      <div class="ch-muted" style="margin:2px 0 0;">${esc(from)}${v.required ? ' · required' : ''}</div>
+      <div style="margin-top:4px; display:flex; gap:6px;"><span class="st ${st.display}">${STATUS_LABEL[st.display]}</span><span class="st">${st.mode}</span></div></div></button>`;
 }
 function renderBody() {
-  const sfw = cat.views.filter(v => v.group !== 'nsfw' && v.key !== 'face_front');
-  const nsfw = cat.views.filter(v => v.group === 'nsfw');
+  const shown = cat.views.filter(v => v.key !== 'face_front' || viewFilter !== 'NSFW').filter(inFilter);
   const req = cat.views.filter(v => v.required);
-  el('body-summary').textContent = `Level: ${LEVEL_LABEL[cur.nsfw_level]} · ${req.filter(v => canonOf(v.key)).length} of ${req.length} required views approved · version ${cur.version}`;
-  el('sfw-views').innerHTML = sfw.map(viewTile).join('');
-  el('nsfw-card').hidden = !nsfw.length;
-  el('nsfw-summary').textContent = `${nsfw.length} views · ${nsfw.filter(v => v.required).length} required at this level · ${nsfw.filter(v => canonOf(v.key)).length} approved`;
-  el('nsfw-views').innerHTML = nsfw.map(viewTile).join('');
-  el('nsfw-views').hidden = !nsfwOpen; el('nsfw-closed').hidden = nsfwOpen;
-  el('nsfw-toggle').textContent = nsfwOpen ? 'Hide NSFW views' : 'Show NSFW views';
-  el('nsfw-toggle').setAttribute('aria-expanded', nsfwOpen);
+  const ok = req.filter(v => vs(v.key).status === 'approved').length;
+  el('body-summary').textContent = `Level: ${LEVEL_LABEL[cur.nsfw_level]} · ${ok} of ${req.length} required views approved · version ${cur.version}`;
+  const hasNsfw = cat.views.some(isNsfw);
+  el('view-filter').innerHTML = (hasNsfw ? ['SFW', 'NSFW', 'All'] : ['SFW']).map(f =>
+    `<button type="button" class="chip" aria-pressed="${viewFilter === f}" onclick="setFilter('${f}')">${f}</button>`).join('');
+  el('tiers').innerHTML = TIERS.map(([t, label]) => {
+    const vs_ = shown.filter(v => v.tier === t);
+    return vs_.length ? `<div class="ch-card" style="margin-bottom:16px;"><h2 class="ch-h2 tier-h">${label}</h2>
+      <div class="views">${vs_.map(viewTile).join('')}</div></div>` : '';
+  }).join('');
+  const todo = shown.filter(v => ['not_started', 'outdated'].includes(vs(v.key).display));
+  el('gen-remaining').disabled = !todo.length;
+  el('regen-branch').hidden = !shown.some(v => vs(v.key).display === 'outdated');
   el('body-features').innerHTML = cat.features.filter(f => f.group === 'body').map(featurePicker).join('');
+  const intimate = cat.features.filter(f => INTIMATE.includes(f.group));
+  el('intimate-wrap').hidden = !intimate.length;
+  el('intimate-features').hidden = !nsfwOpen;
+  el('intimate-toggle').textContent = nsfwOpen ? 'Hide NSFW traits' : 'Show NSFW traits';
+  el('intimate-features').innerHTML = nsfwOpen ? intimate.map(featurePicker).join('') : '';
   el('general-refs').innerHTML = images('', 'reference').map(refTile).join('');
   renderViewPanel();
+  pollGenerating();
 }
+function setFilter(f) { viewFilter = f; renderBody(); }
 function toggleNsfw() { nsfwOpen = !nsfwOpen; renderBody(); }
+function autosaveSheet() {
+  clearTimeout(saveTimer);
+  el('body-save-msg').textContent = 'Saving…';
+  saveTimer = setTimeout(() => saveSheet(null, 'body-save'), 600);
+}
 function openView(key) {
   selView = key;
   if (step !== 'body') { step = 'body'; render(); } else renderBody();
-  el('view-panel').scrollIntoView({behavior: 'smooth', block: 'nearest'});
 }
+function closeDrawer() { selView = null; renderBody(); }
 function refTile(i) {
   return `<div class="ref"><img src="${esc(i.url)}" alt=""><button type="button" aria-label="Remove reference" onclick="removeImage('${i.id}')">×</button></div>`;
 }
+function lineage(key) {
+  const out = [];
+  for (let k = key; k; k = (viewDef(k) || {parents: []}).parents[0]) out.unshift(k);
+  return out;
+}
 function renderViewPanel() {
   const v = selView && viewDef(selView);
-  el('view-panel').hidden = !v; el('add-view-ref').disabled = !v;
+  el('drawer').hidden = !v;
   if (!v) return;
-  const nsfw = v.group === 'nsfw';
+  const st = vs(v.key);
   el('vp-title').textContent = v.label;
-  const waiting = v.parents.filter(d => !canonOf(d)).map(d => viewDef(d).label);
-  el('vp-sub').textContent = (v.required ? 'Required' : 'Optional') + (waiting.length ? ' · approve ' + waiting.join(' and ') + ' first' : '');
-  el('vp-gen').disabled = waiting.length > 0;
-  el('vp-gen').textContent = 'Generate';
-  el('batch-input-2').value = batch;
-  el('vp-check').hidden = v.key !== 'body_front';
-  const groups = v.uses.filter(g => g !== 'face' && g !== 'body');
-  el('vp-features').innerHTML = cat.features.filter(f => groups.includes(f.group)).map(featurePicker).join('') +
-    (groups.length ? `<div style="align-self:end;"><button type="button" class="btn" onclick="saveSheet()">Save</button></div>` : '');
-  const opts = images(v.key, 'candidate').concat(images(v.key, 'canonical'), v.group === 'face' ? [] : images(v.key, 'reference'));
+  el('vp-lineage').innerHTML = lineage(v.key).map(k => `<a href="#" onclick="openView('${k}');return false;">${esc(viewDef(k).label)}</a>`).join(' → ');
+  const blockers = v.parents.filter(p => vs(p).status !== 'approved');
+  const banner = el('vp-banner');
+  banner.hidden = !['locked', 'outdated'].includes(st.display);
+  banner.className = 'banner ' + st.display;
+  if (st.display === 'locked') banner.innerHTML = `Locked until ${blockers.map(p => esc(viewDef(p).label)).join(' and ')} ${blockers.length > 1 ? 'are' : 'is'} approved.
+    <button type="button" class="btn" style="height:32px; margin-left:8px;" onclick="openView('${blockers[0]}')">Open ${esc(viewDef(blockers[0]).label)}</button>`;
+  if (st.display === 'outdated') banner.textContent = 'A parent was re-approved since this was generated. Regenerate to match it.';
+  const locked = st.display === 'locked';
+  el('vp-body').style.opacity = locked ? .5 : 1;
+  el('vp-source').innerHTML = [['crop', 'Crop & refine'], ['reference', 'Reference']].map(([m, l]) =>
+    `<button type="button" class="chip" aria-pressed="${st.mode === m}" ${m === 'crop' && !v.region ? 'disabled title="No body region for this view"' : ''} onclick="saveView({mode:'${m}'})">${l}</button>`).join('');
+  const parent = canonOf(v.parents[0]);
+  el('vp-crop').hidden = st.mode !== 'crop';
+  if (st.mode === 'crop') {
+    el('crop-img').src = parent ? parent.url : '';
+    placeCropBox(st.crop_box);
+  }
+  const approved = cat.views.filter(o => o.key !== v.key && canonOf(o.key));
+  const chosen = st.references ? st.references.map(r => r.image_id) : v.parents.map(p => (canonOf(p) || {}).id).filter(Boolean);
+  el('vp-refs').innerHTML = approved.map(o => {
+    const id = canonOf(o.key).id;
+    return `<button type="button" class="chip" aria-pressed="${chosen.includes(id)}" onclick="toggleRef('${id}')">${esc(o.label)}</button>`;
+  }).join('') + images(v.key, 'reference').map(i => `<button type="button" class="chip" aria-pressed="true" onclick="removeImage('${i.id}')">Upload ×</button>`).join('')
+    || '<span class="ch-muted">No approved views yet.</span>';
+  el('vp-strength-label').textContent = st.mode === 'crop' ? 'Detail-pass strength' : 'Reference influence';
+  el('vp-strength').value = st.strength; el('vp-strength-val').textContent = (+st.strength).toFixed(2);
+  const result = imgById(st.result_image_id) || images(v.key, 'candidate')[0];
+  el('vp-compare').innerHTML = `<figure class="${isNsfw(v) ? 'blur' : ''}">${parent ? `<img src="${esc(parent.url)}" alt="">` : '<div></div>'}<figcaption>Parent</figcaption></figure>
+    <figure class="${isNsfw(v) ? 'blur' : ''}">${result ? `<img src="${esc(result.url)}" alt="">` : '<div></div>'}<figcaption>Result</figcaption></figure>`;
+  el('vp-traits').innerHTML = (v.traits || []).filter(k => (cur.sheet || {})[k]).map(k =>
+    `<span class="chip" style="cursor:default;">${esc(cur.sheet[k])}</span>`).join('') +
+    `<button type="button" class="chip" onclick="nsfwOpen=nsfwOpen||${isNsfw(v)};closeDrawer();el('body-features').scrollIntoView({behavior:'smooth'})">Edit</button>`;
+  const opts = images(v.key, 'candidate').concat(images(v.key, 'canonical'));
   vpOptUrls = opts.map(o => o.url);
-  el('vp-opts').className = 'opts' + (nsfw ? ' blur' : '');
+  el('vp-opts').className = 'opts' + (isNsfw(v) ? ' blur' : '');
   el('vp-opts').innerHTML = opts.map((o, i) => {
     const age = (o.checks || {}).age;
     return `<div class="opt" style="cursor:default;" onclick="this.parentNode.classList.remove('blur')">
-      <img src="${esc(o.url)}" alt="${esc(v.label)} option" onclick="vpImgClick(event, ${i})"><span>${o.role === 'canonical' ? 'Approved' : o.source === 'upload' ? 'Your upload' : 'Generated'}
+      <img src="${esc(o.url)}" alt="${esc(v.label)} option" onclick="vpImgClick(event, ${i})"><span>${o.role === 'canonical' ? 'Approved' : 'Candidate'}
       ${v.key === 'body_front' && o.role !== 'canonical' ? ` · <span class="tag ${age || 'uncertain'}">${age || 'not checked'}</span>` : ''}</span>
       ${o.role !== 'canonical' ? `<div style="display:flex; gap:6px; padding:0 12px 12px;">
-        <button type="button" class="btn btn-primary" style="height:36px;" onclick="approveView('${o.id}')">Approve</button>
+        <button type="button" class="btn btn-primary" style="height:36px;" ${locked ? 'disabled' : ''} onclick="approveView('${o.id}')">Approve</button>
         ${v.key === 'body_front' ? `<button type="button" class="btn" style="height:36px;" onclick="runViewCheck('${o.id}')">Check</button>` : ''}
         <button type="button" class="btn" style="height:36px;" onclick="removeImage('${o.id}')">Delete</button></div>` : ''}</div>`;
-  }).join('') || '<p class="ch-muted">No options yet. Generate some, or upload one below.</p>';
-  el('vp-refs').innerHTML = images(v.key, 'reference').map(refTile).join('') || '<span class="ch-muted">None.</span>';
-  renderPastPicker();
+  }).join('');
+  el('vp-check').hidden = v.key !== 'body_front';
+  const prim = el('vp-primary'), cand = images(v.key, 'candidate')[0];
+  const action = {not_started: ['Generate', () => generate(v.key)], review: ['Approve', () => cand && approveView(cand.id)],
+                  outdated: ['Regenerate', () => generate(v.key)]}[st.display];
+  prim.textContent = action ? action[0] : STATUS_LABEL[st.display];
+  prim.disabled = !action || (st.display === 'review' && !cand);
+  prim.onclick = action ? action[1] : null;
+  el('vp-var').disabled = locked || st.display === 'generating';
 }
-let pastOpen = false;
-function togglePastPicker() { pastOpen = !pastOpen; renderPastPicker(); }
-function renderPastPicker() {
-  el('vp-past').hidden = !pastOpen;
-  el('past-toggle').textContent = pastOpen ? 'Hide previous generations' : 'Use a previous generation';
-  if (!pastOpen) return;
-  const past = (cur.images || []).filter(i => i.source !== 'upload' && (i.role === 'candidate' || i.role === 'canonical'));
-  el('vp-past').innerHTML = past.map(i =>
-    `<div class="ref" style="cursor:pointer;" onclick="usePastAsReference('${i.id}')" title="Add as reference for this view"><img src="${esc(i.url)}" alt=""></div>`
-  ).join('') || '<span class="ch-muted">No generated images yet.</span>';
+function placeCropBox(b) {
+  const box = el('crop-box');
+  Object.assign(box.style, {left: b.x * 100 + '%', top: b.y * 100 + '%', width: b.w * 100 + '%', height: b.h * 100 + '%'});
 }
-async function usePastAsReference(id) {
-  try {
-    await api(`/api/characters/${cur.id}/images/${id}/use-as-reference`, {body: {view: selView}});
-    await reload(); say('Added as a reference.', 'ok');
-  } catch (e) { say(e.message, 'err'); }
+(function cropDrag() {
+  let drag = null;
+  document.addEventListener('pointerdown', e => {
+    const box = e.target.closest && e.target.closest('#crop-box');
+    if (!box) return;
+    const r = el('crop-stage').getBoundingClientRect();
+    drag = {resize: e.target.classList.contains('crop-handle'), r, x: e.clientX, y: e.clientY, b: Object.assign({}, vs(selView).crop_box)};
+    e.preventDefault();
+  });
+  document.addEventListener('pointermove', e => {
+    if (!drag) return;
+    const dx = (e.clientX - drag.x) / drag.r.width, dy = (e.clientY - drag.y) / drag.r.height, b = Object.assign({}, drag.b);
+    if (drag.resize) { b.w = Math.min(1 - b.x, Math.max(.05, b.w + dx)); b.h = Math.min(1 - b.y, Math.max(.05, b.h + dy)); }
+    else { b.x = Math.min(1 - b.w, Math.max(0, b.x + dx)); b.y = Math.min(1 - b.h, Math.max(0, b.y + dy)); }
+    drag.cur = b; placeCropBox(b);
+  });
+  document.addEventListener('pointerup', () => { if (drag && drag.cur) saveView({crop_box: drag.cur}); drag = null; });
+})();
+async function saveView(patch) {
+  try { cur = (await api(`/api/characters/${cur.id}/views/${selView}`, {method: 'PUT', body: patch})).character; renderBody(); }
+  catch (e) { say(e.message, 'err'); }
+}
+function toggleRef(id) {
+  const v = viewDef(selView), st = vs(selView);
+  let ids = st.references ? st.references.map(r => r.image_id) : v.parents.map(p => (canonOf(p) || {}).id).filter(Boolean);
+  ids = ids.includes(id) ? ids.filter(i => i !== id) : ids.concat(id);
+  saveView({references: ids.map((i, n) => ({image_id: i, weight: 1 - n * 0.1}))});
+}
+// Seedream takes no denoise, so a crop view sends the parent's region itself,
+// padded and upscaled 2x, as its first reference.
+async function cropParent(key) {
+  const v = viewDef(key), st = vs(key), parent = canonOf(v.parents[0]);
+  if (!parent) throw new Error('Approve ' + viewDef(v.parents[0]).label + ' first.');
+  const img = new Image();
+  await new Promise((res, rej) => { img.onload = res; img.onerror = () => rej(new Error('Could not load the parent image.')); img.src = parent.url; });
+  const pad = 0.08, b = st.crop_box, W = img.naturalWidth, H = img.naturalHeight;
+  const x = Math.max(0, b.x - b.w * pad), y = Math.max(0, b.y - b.h * pad);
+  const w = Math.min(1 - x, b.w * (1 + 2 * pad)), h = Math.min(1 - y, b.h * (1 + 2 * pad));
+  const c = document.createElement('canvas');
+  c.width = Math.round(w * W * 2); c.height = Math.round(h * H * 2);
+  const ctx = c.getContext('2d'); ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, x * W, y * H, w * W, h * H, 0, 0, c.width, c.height);
+  return c.toDataURL('image/jpeg', 0.92);
+}
+async function submitView(key, n) {
+  const body = {view: key, batch: n || batch};
+  if (key !== 'face_front' && vs(key).mode === 'crop') body.crop_b64 = await cropParent(key);
+  return api('/api/characters/' + cur.id + '/generate', {body});
+}
+async function queueViews(keys) {
+  let sent = 0;
+  for (const k of keys) {
+    try { await submitView(k); sent++; } catch (e) { say(viewDef(k).label + ': ' + e.message, 'err'); return; }
+  }
+  await reload();
+  say(sent ? `${sent} view${sent === 1 ? '' : 's'} queued. Their children unlock as you approve them.` : 'Nothing to queue.', sent ? 'ok' : '');
+}
+function generateRemaining() {
+  queueViews(cat.views.filter(inFilter).filter(v => ['not_started', 'outdated'].includes(vs(v.key).display)).map(v => v.key));
+}
+function regenerateBranch() {
+  queueViews(cat.views.filter(inFilter).filter(v => vs(v.key).display === 'outdated').map(v => v.key));
+}
+let pollTimer = null;
+function pollGenerating() {
+  clearTimeout(pollTimer);
+  if (step === 'body' && Object.values(cur.views || {}).some(s => s.status === 'generating'))
+    pollTimer = setTimeout(reload, 5000);
 }
 async function runViewCheck(id) {
   const target = id || (images('body_front', 'candidate')[0] || {}).id;

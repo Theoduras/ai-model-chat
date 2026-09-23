@@ -28897,6 +28897,8 @@ import characters as CH
 CHAR_IMAGE_MAX_BYTES = 8 * 1024 * 1024
 CHAR_MODEL = imagegen.EXPLICIT_MODEL
 CHAR_RESOLUTION = '4k'
+# Cropped parents for crop views, held from submit until the job sends them.
+_CHAR_CROPS = {}
 
 
 def _char_json_sheet(row):
@@ -28933,12 +28935,56 @@ def _char_views(s, row):
         if canon is None:
             canon = _char_canonicals(s, row.id)
         img = canon.get(v['key'])
-        cv = CharacterView(character_id=row.id, view_key=v['key'],
-                           status='approved' if img else 'not_started',
+        status = 'approved' if img else (
+            'review' if _char_images(s, row.id, view=v['key'], role='candidate') else 'not_started')
+        cv = CharacterView(character_id=row.id, view_key=v['key'], status=status,
                            version=1 if img else 0, result_image_id=img.id if img else None)
         s.add(cv)
         have[v['key']] = cv
     return have
+
+
+def _char_view_dict(cv):
+    try:
+        pv = json.loads(cv.parent_versions_json or '{}')
+    except ValueError:
+        pv = {}
+    try:
+        box = json.loads(cv.crop_box_json) if cv.crop_box_json else None
+    except ValueError:
+        box = None
+    return {'view_key': cv.view_key, 'status': cv.status, 'version': cv.version or 0,
+            'parent_versions': pv, 'mode': cv.mode, 'crop_box': box,
+            'strength': cv.strength, 'result_image_id': cv.result_image_id}
+
+
+def _char_views_state(s, row):
+    """Every view's row with its display status. A generation that died without
+    reaching _character_finish drops the view back to where it was."""
+    from db import GenerationJob, ViewReference
+    rows = _char_views(s, row)
+    for cv in rows.values():
+        if cv.status == 'generating':
+            job = cv.job_id and s.query(GenerationJob).filter_by(id=cv.job_id).first()
+            if not job or job.status == 'failed':
+                cv.status = 'approved' if cv.version else 'not_started'
+                cv.job_id = None
+    s.commit()
+    dicts = {k: _char_view_dict(cv) for k, cv in rows.items()}
+    shown = CH.resolve_all(dicts, row.body_type)
+    refs = {}
+    ids = [cv.id for cv in rows.values()]
+    for r in s.query(ViewReference).filter(ViewReference.view_id.in_(ids)).all() if ids else []:
+        refs.setdefault(r.view_id, []).append({'image_id': r.ref_image_id, 'weight': r.weight})
+    for k, cv in rows.items():
+        v = CH.view(k, row.body_type) or {}
+        mode = cv.mode or v.get('mode') or 'reference'
+        d = dicts[k]
+        d.update(display=shown.get(k, d['status']), mode=mode,
+                 strength=cv.strength if cv.strength is not None else CH.STRENGTH[mode],
+                 crop_box=d['crop_box'] or CH.default_crop(v.get('region')),
+                 references=refs.get(cv.id))
+    return rows, dicts
 
 
 def _char_refresh_status(s, row):
@@ -28986,6 +29032,7 @@ def _char_json(s, row, full=False):
         out.update({'sheet': _char_json_sheet(row), 'notes': row.notes or '',
                     'missing': CH.missing_views(row.nsfw_level, canon.keys(), row.body_type),
                     'attested': bool(row.attested_at),
+                    'views': _char_views_state(s, row)[1],
                     'images': [_char_img_json(i) for i in _char_images(s, row.id)]})
     return out
 
@@ -29047,9 +29094,20 @@ def _character_view_refs(char_id, view_key):
         row = s.query(Character).filter(Character.id == char_id).first()
         if not row:
             return []
+        from db import CharacterImage, CharacterView, ViewReference
         v = CH.view(view_key, row.body_type) or {}
         canon = _char_canonicals(s, char_id)
-        picked = [canon[d] for d in v.get('parents', ()) if d in canon]
+        cv = s.query(CharacterView).filter_by(character_id=char_id, view_key=view_key).first()
+        chosen = cv and s.query(ViewReference).filter_by(view_id=cv.id).all()
+        if chosen:
+            # Seedream takes no per-reference weight, so weight is order: the
+            # heaviest reference leads.
+            chosen.sort(key=lambda r: -(r.weight or 0))
+            by_id = {i.id: i for i in s.query(CharacterImage).filter(
+                CharacterImage.id.in_([r.ref_image_id for r in chosen]))}
+            picked = [by_id[r.ref_image_id] for r in chosen if r.ref_image_id in by_id]
+        else:
+            picked = [canon[d] for d in v.get('parents', ()) if d in canon]
         if view_key in canon:
             picked.append(canon[view_key])
         picked += _char_images(s, char_id, view=view_key, role='reference')
@@ -29057,6 +29115,9 @@ def _character_view_refs(char_id, view_key):
             picked += _char_images(s, char_id, view='face_front', role='reference')
         picked += _char_images(s, char_id, view='', role='reference')
         urls = [u for u in (_char_ref_url(i) for i in picked) if u]
+        crop = _CHAR_CROPS.pop(char_id + ':' + view_key, None)
+        if crop:
+            urls.insert(0, crop if crop.startswith('data:') else 'data:image/jpeg;base64,' + crop)
         return urls[:imagegen.MAX_REFERENCES]
     finally:
         s.close()
@@ -29108,6 +29169,16 @@ def _character_finish(job_id, spec, workspace, urls):
             s.close()
     s = _db_session()
     try:
+        from db import CharacterView
+        cv = s.query(CharacterView).filter_by(character_id=spec['character_id'],
+                                              view_key=spec['character_view']).first()
+        if cv and cv.job_id == job_id:
+            cv.job_id = None
+            if made:
+                cv.status = 'review'
+                cv.parent_versions_json = json.dumps(spec.get('parent_versions') or {})
+            else:
+                cv.status = 'approved' if cv.version else 'not_started'
         if made:
             update_generation(s, job_id, status='done', result_media_ids=','.join(made))
         else:
@@ -29396,36 +29467,6 @@ def api_character_upload(char_id):
         s.close()
 
 
-@app.route('/api/characters/<char_id>/images/<img_id>/use-as-reference', methods=['POST'])
-def api_character_use_as_reference(char_id, img_id):
-    blocked = _require_admin()
-    if blocked:
-        return blocked
-    user = _current_user()
-    body = request.get_json(silent=True) or {}
-    view_key = (body.get('view') or '').strip()
-    from db import CharacterImage
-    s = _db_session()
-    try:
-        row = _char_row(s, user, char_id)
-        if not row:
-            return jsonify({'ok': False, 'error': 'Unknown character'}), 404
-        v = CH.view(view_key, row.body_type) if view_key else None
-        if view_key and (not v or v not in CH.views_for_level(row.nsfw_level, row.body_type)):
-            return jsonify({'ok': False, 'error': 'That view is not available at this level.'}), 400
-        src = s.query(CharacterImage).filter_by(id=img_id, character_id=row.id).first()
-        if not src:
-            return jsonify({'ok': False, 'error': 'Unknown image'}), 404
-        img = CharacterImage(character_id=row.id, view=view_key, role='reference',
-                             source=src.source, rating=src.rating,
-                             gcs_path=src.gcs_path, mime=src.mime)
-        s.add(img)
-        s.commit()
-        return jsonify({'ok': True, 'image': _char_img_json(img)})
-    finally:
-        s.close()
-
-
 @app.route('/api/characters/<char_id>/images/<img_id>/file')
 def api_character_image_file(char_id, img_id):
     blocked = _require_admin()
@@ -29499,15 +29540,25 @@ def api_character_generate(char_id):
         v = CH.view(view_key, row.body_type)
         if not v or v not in CH.views_for_level(row.nsfw_level, row.body_type):
             return jsonify({'ok': False, 'error': 'That view is not available at this level.'}), 400
-        canon = _char_canonicals(s, row.id)
-        waiting = [CH.view(d, row.body_type)['label'] for d in v['parents'] if d not in canon]
-        if waiting:
+        rows, state = _char_views_state(s, row)
+        shown = state[view_key]['display']
+        if shown == 'locked':
+            waiting = [CH.view(d, row.body_type)['label'] for d in v['parents']
+                       if state.get(d, {}).get('status') != 'approved']
             return jsonify({'ok': False, 'error': 'Approve ' + ' and '.join(waiting) + ' first.'}), 409
+        if shown == 'generating':
+            return jsonify({'ok': False, 'error': 'That view is already generating.'}), 409
+        mode = state[view_key]['mode']
+        crop = body.get('crop_b64') if mode == 'crop' else None
+        if mode == 'crop' and not crop:
+            return jsonify({'ok': False, 'error': 'Send the cropped parent for a crop view.'}), 400
         has_ref = bool(v['parents']) or bool(
             _char_images(s, row.id, view=view_key, role='reference')
             or _char_images(s, row.id, view='', role='reference'))
         prompt = CH.build_view_prompt(view_key, _char_json_sheet(row), row.age,
-                                      has_ref, row.body_type)
+                                      has_ref, row.body_type, mode=mode,
+                                      strength=state[view_key]['strength'])
+        parent_versions = {p: state[p]['version'] for p in v['parents']}
         key = row.key
     finally:
         s.close()
@@ -29516,12 +29567,80 @@ def api_character_generate(char_id):
             'shot': 'portrait', 'explicit': v['rating'] != 'sfw',
             'rating': v['rating'], 'character_id': char_id,
             'character_view': view_key, 'prompt': prompt,
+            'parent_versions': parent_versions,
             'reference_media': '', 'negative_extra': ''}
     try:
         price = CR.quote(spec)
     except CR.PricingError as e:
         return jsonify({'ok': False, 'error': str(e)[:300]}), 400
-    return _gen_submit(user, key, spec, price)
+    if crop:
+        # The crop rides with the job, not the spec: the spec is stored per
+        # generation and a 4k crop has no business in a text column.
+        _CHAR_CROPS[char_id + ':' + view_key] = crop
+    resp = _gen_submit(user, key, spec, price)
+    job_id = (resp.get_json(silent=True) or {}).get('job') if not isinstance(resp, tuple) else None
+    if job_id:
+        from db import CharacterView
+        s = _db_session()
+        try:
+            cv = s.query(CharacterView).filter_by(character_id=char_id, view_key=view_key).first()
+            if cv:
+                cv.status, cv.job_id = 'generating', job_id
+                s.commit()
+        finally:
+            s.close()
+    return resp
+
+
+@app.route('/api/characters/<char_id>/views/<view_key>', methods=['PUT'])
+def api_character_view_settings(char_id, view_key):
+    """Source mode, crop box, strength and references for one view."""
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    user = _current_user()
+    body = request.get_json(silent=True) or {}
+    from db import CharacterImage, ViewReference
+    s = _db_session()
+    try:
+        row = _char_row(s, user, char_id)
+        v = row and CH.view(view_key, row.body_type)
+        if not v:
+            return jsonify({'ok': False, 'error': 'Unknown view'}), 404
+        cv = _char_views(s, row)[view_key]
+        if 'mode' in body:
+            mode = body['mode'] or None
+            if mode not in (None, 'crop', 'reference') or (mode == 'crop' and not v.get('region')):
+                return jsonify({'ok': False, 'error': 'That view cannot be cropped.'}), 400
+            cv.mode = mode
+        if 'crop_box' in body:
+            box = body['crop_box']
+            if box is not None:
+                try:
+                    box = {k: min(1.0, max(0.0, float(box[k]))) for k in ('x', 'y', 'w', 'h')}
+                except (KeyError, TypeError, ValueError):
+                    return jsonify({'ok': False, 'error': 'Bad crop box'}), 400
+            cv.crop_box_json = json.dumps(box) if box else None
+        if 'strength' in body:
+            try:
+                cv.strength = None if body['strength'] is None else min(1.0, max(0.0, float(body['strength'])))
+            except (TypeError, ValueError):
+                return jsonify({'ok': False, 'error': 'Bad strength'}), 400
+        if 'references' in body:
+            s.flush()
+            refs = body['references']
+            s.query(ViewReference).filter_by(view_id=cv.id).delete()
+            if refs is not None:
+                canon = {i.id for i in _char_canonicals(s, row.id).values()}
+                for r in refs[:imagegen.MAX_REFERENCES]:
+                    if r.get('image_id') not in canon:
+                        return jsonify({'ok': False, 'error': 'Only approved views can be references.'}), 400
+                    s.add(ViewReference(view_id=cv.id, ref_image_id=r['image_id'],
+                                        weight=float(r.get('weight') or 1.0)))
+        s.commit()
+        return jsonify({'ok': True, 'character': _char_json(s, row, full=True)})
+    finally:
+        s.close()
 
 
 @app.route('/api/characters/<char_id>/images/<img_id>/check', methods=['POST'])
@@ -29570,8 +29689,10 @@ def api_character_approve(char_id, img_id):
         if v['group'] == 'face' and img.source == 'upload':
             return jsonify({'ok': False, 'error': 'Face uploads are references. Generate the face from them.'}), 400
         canon = _char_canonicals(s, row.id)
-        waiting = [CH.view(d, row.body_type)['label'] for d in v['parents'] if d not in canon]
-        if waiting:
+        rows, state = _char_views_state(s, row)
+        if state[img.view]['display'] == 'locked':
+            waiting = [CH.view(d, row.body_type)['label'] for d in v['parents']
+                       if state.get(d, {}).get('status') != 'approved']
             return jsonify({'ok': False, 'error': 'Approve ' + ' and '.join(waiting) + ' first.'}), 409
         if img.view in CH.AGE_CHECKED_VIEWS:
             try:
@@ -29595,6 +29716,9 @@ def api_character_approve(char_id, img_id):
         img.gcs_path = storage.promote(img.gcs_path)
         img.role, img.expires_at = 'canonical', None
         canon[img.view] = img
+        cv = rows[img.view]
+        cv.status, cv.result_image_id = 'approved', img.id
+        cv.version = (cv.version or 0) + 1
         row.version = (row.version or 0) + 1
         s.add(CharacterVersion(character_id=row.id, number=row.version,
                                snapshot_json=json.dumps({

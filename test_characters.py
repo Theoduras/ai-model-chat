@@ -134,6 +134,32 @@ def test_view_tree():
         check(f'{k} traits', CH.traits(k) and all(CH.features()[t][1] in v['uses'] for t in CH.traits(k)))
 
 
+def _row(k, status='not_started', version=0, pv=None):
+    return {'view_key': k, 'status': status, 'version': version, 'parent_versions': pv or {}}
+
+
+def test_resolver():
+    rows = {k: _row(k) for k in CH.topo_order()}
+    st = CH.resolve_all(rows)
+    check('root starts not_started', st['face_front'] == 'not_started')
+    check('child of unapproved is locked', st['body_front'] == 'locked')
+    check('lock chain reaches grandchild', st['nipples'] == 'locked' and st['nude_front'] == 'locked')
+    rows['face_front'] = _row('face_front', 'approved', 1)
+    st = CH.resolve_all(rows)
+    check('approval unlocks child', st['body_front'] == 'not_started')
+    check('grandchild still locked', st['nude_front'] == 'locked')
+    rows['body_front'] = _row('body_front', 'approved', 1, {'face_front': 1})
+    rows['face_profile'] = _row('face_profile', 'approved', 1, {'body_front': 1})
+    check('approved stays approved', CH.resolve_all(rows)['face_profile'] == 'approved')
+    check('rear_nude needs both parents', CH.resolve_all(rows)['rear_nude'] == 'locked')
+    rows['body_front']['version'] = 2
+    st = CH.resolve_all(rows)
+    check('re-approved parent outdates child', st['face_profile'] == 'outdated')
+    check('not-yet-generated child is not outdated', st['hands'] == 'not_started')
+    branch = CH.outdated_branch(rows)
+    check('branch holds outdated', 'face_profile' in branch and 'face_front' not in branch)
+
+
 if __name__ == '__main__':
     test_sfw_never_gets_nsfw()
     test_required_views()
@@ -141,5 +167,6 @@ if __name__ == '__main__':
     test_validation()
     test_every_option_has_a_drawing()
     test_view_tree()
+    test_resolver()
     print('FAILED' if FAILURES else 'OK', len(FAILURES))
     raise SystemExit(1 if FAILURES else 0)
