@@ -1005,9 +1005,12 @@ _PUBLIC_PAGES = [('/', '1.0', 'weekly'),
                  ('/pricing', '0.9', 'weekly'),
                  ('/register', '0.6', 'monthly'),
                  ('/login', '0.3', 'monthly'),
-                 ('/blog', '0.7', 'weekly')]
+                 ('/blog', '0.7', 'weekly'),
+                 ('/privacy', '0.2', 'yearly'),
+                 ('/tos', '0.2', 'yearly')]
 _PUBLIC_PAGES += [(f'/blog/{slug}', '0.5', 'monthly') for slug in _BLOG_SLUGS]
 _PUBLIC_PAGES += [(f'/{slug}', '0.8', 'monthly') for slug in platform_pages.PAGES]
+_PUBLIC_PATHS = {path for path, _, _ in _PUBLIC_PAGES}
 
 # Crawling these wastes budget and can leak a creator's funnel into search.
 # The fan pages (/landing, /profile, /chat.html) are deliberately absent: they
@@ -1122,6 +1125,29 @@ window.gtag=function(){dataLayer.push(arguments);};
 gtag('js', new Date());
 %s%s
 })();""" % (primary, configs, conversion))
+    return resp
+
+
+_CANONICAL_TAG = re.compile(r'<link[^>]*rel=["\']canonical["\'][^>]*>\s*', re.I)
+
+
+@app.after_request
+def _canonical_public_pages(resp):
+    """Every sitemap page names itself as canonical on the domain it is served
+    from. A canonical pointing elsewhere tells Google the page is a copy, and it
+    then leaves it "Discovered – currently not indexed"."""
+    path = request.path or '/'
+    if (request.method != 'GET' or resp.status_code != 200
+            or not resp.mimetype == 'text/html'
+            or path not in _PUBLIC_PATHS and not path.startswith('/blog/')):
+        return resp
+    resp.direct_passthrough = False
+    html = resp.get_data(as_text=True)
+    tag = '<link rel="canonical" href="%s%s">' % (_site_origin(), path)
+    html = _CANONICAL_TAG.sub('', html)
+    html, n = re.subn(r'</head>', tag + '\n</head>', html, count=1, flags=re.I)
+    if n:
+        resp.set_data(html)
     return resp
 
 
@@ -6192,7 +6218,8 @@ def tos_page():
 # One public marketing page per platform. Registered by slug rather than with a
 # converter, so these can never shadow an existing single-segment route.
 def _platform_marketing_page(slug):
-    return render_template('platform.html', p=platform_pages.PAGES[slug])
+    return render_template('platform.html', p=platform_pages.PAGES[slug],
+                           origin=_site_origin())
 
 
 for _pp_slug in platform_pages.PAGES:
