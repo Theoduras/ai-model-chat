@@ -266,7 +266,10 @@ Stay completely in character. Never mention being an AI.
   `p-video-replace` by default, `p-video-animate` to regenerate her in its
   motion. Seedance 2.0 (+Fast), MiniMax H3 (+Fast), Wan 3.0 and P-Video-Animate
   were added from Runware's public docs, prices included, **not** its live
-  catalogue: confirm them with `imagegen.search_models` once a key is reachable. Every other video job —
+  catalogue: confirm them with `imagegen.search_models` once a key is reachable.
+  A safe-work **Swap** defaults to Kling motion control (2.6 Pro, 3.0 Pro
+  selectable, same docs-only caveat): her one full-body photo performs the
+  uploaded clip. Explicit swaps stay on ModelsLab's `ml-face-swap`. Every other video job —
   Animate, Extend, Multi-reference, Swap — still needs her: an approved still,
   an approved clip, or her reference slots. All of them land unapproved in
   `staging/` either way, so nothing reaches a fan unreviewed.

@@ -99,6 +99,9 @@ VIDEO_COST_USD_PER_SECOND = {
     'minimax-h3': {'480p': 0.13, '720p': 0.08, '1080p': 0.13},
     'minimax-h3-fast': {'480p': 0.046, '720p': 0.046, '1080p': 0.046},
     'wan-3-0': {'480p': 0.05, '720p': 0.10, '1080p': 0.20},
+    # Kling motion control runs at 1080p only; every rung snaps there.
+    'kling-2-6-mc': {'480p': 0.07, '720p': 0.07, '1080p': 0.07},
+    'kling-3-0-mc': {'480p': 0.17, '720p': 0.17, '1080p': 0.17},
 }
 
 PROVIDER_COST_MEASURED = {
@@ -230,6 +233,8 @@ MODEL_LABELS = {
     'minimax-h3': 'MiniMax H3',
     'minimax-h3-fast': 'MiniMax H3 Fast',
     'wan-3-0': 'Wan 3.0',
+    'kling-2-6-mc': 'Kling 2.6 motion control',
+    'kling-3-0-mc': 'Kling 3.0 motion control',
 }
 
 # Which ratings each model actually serves, measured against the provider rather
@@ -264,6 +269,8 @@ VIDEO_MODEL_RATINGS = {
     'minimax-h3': ('sfw',),
     'minimax-h3-fast': ('sfw',),
     'wan-3-0': ('sfw',),
+    'kling-2-6-mc': ('sfw',),
+    'kling-3-0-mc': ('sfw',),
     # ModelsLab's face swap, not Runware -- an uncensored provider running an
     # actual swap rather than a regeneration. Runware carries no explicit
     # replace model at all (confirmed against its own catalogue), so this is the

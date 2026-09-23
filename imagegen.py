@@ -92,7 +92,11 @@ RUNWARE_VIDEO_MODELS = {
     'minimax-h3': os.getenv('RW_MODEL_MINIMAX_H3', 'minimax:h3@0'),
     'minimax-h3-fast': os.getenv('RW_MODEL_MINIMAX_H3_FAST', 'minimax:h3@fast'),
     'wan-3-0': os.getenv('RW_MODEL_WAN_30', 'alibaba:wan@3.0'),
+    # Kling motion control: her one photo performs the uploaded clip.
+    'kling-2-6-mc': os.getenv('RW_MODEL_KLING_26_MC', 'klingai:kling-video@2.6-pro'),
+    'kling-3-0-mc': os.getenv('RW_MODEL_KLING_30_MC', 'klingai:kling-video@3-pro'),
 }
+KLING_MOTION_MODELS = ('kling-2-6-mc', 'kling-3-0-mc')
 # The safe-work models that take her photos as `inputs.referenceImages` beside
 # a prompt, so a reel or an animate can carry her character on them.
 REFERENCE_VIDEO_MODELS = ('wan-2-7', 'seedance-2-0', 'seedance-2-0-fast',
@@ -134,7 +138,8 @@ VIDEO_JOBS = {
              'kind': 'video', 'ratings': ('sfw',),
              'label': 'Reel',
              'note': 'A prompt, a photo, or both, as a short clip.'},
-    'swap': {'models': ('p-video-replace', 'ml-face-swap', 'wan-2-7'),
+    'swap': {'models': ('kling-2-6-mc', 'kling-3-0-mc', 'p-video-replace',
+                        'ml-face-swap', 'wan-2-7'),
              'needs': ('source', 'refs'), 'kind': 'swap',
              'clause': 'preserve',
              'label': 'Swap',
@@ -249,6 +254,8 @@ MODEL_VIDEO_FIELDS = {
     # and like the replace it runs the clip's own length at a named rung.
     'p-video-animate': {'shape': 'replace', 'in_source': 'referenceVideos',
                         'in_refs': 'referenceImages'},
+    **{m: {'shape': 'motion', 'in_source': 'referenceVideos',
+           'in_refs': 'referenceImages'} for m in ('kling-2-6-mc', 'kling-3-0-mc')},
     **{m: {'shape': 'inputs', 'source': 'inputVideo', 'refs': 'referenceImages'}
        for m in ('seedance-2-0', 'seedance-2-0-fast', 'minimax-h3',
                  'minimax-h3-fast', 'wan-3-0')},
@@ -378,6 +385,8 @@ MODEL_VIDEO_SIZES = {
     'minimax-h3': ((1344, 768), (1024, 768), (768, 768), (768, 1024), (768, 1344),
                    (2560, 1440), (1920, 1440), (1440, 1440), (1440, 1920),
                    (1440, 2560)),
+    **{m: ((1920, 1080), (1080, 1920), (1440, 1440))
+       for m in ('kling-2-6-mc', 'kling-3-0-mc')},
     'minimax-h3-fast': ((864, 480), (640, 480), (480, 480), (480, 640), (480, 864)),
 }
 
@@ -419,6 +428,8 @@ MODEL_VIDEO_SECONDS = {
     'minimax-h3': (4, 15),
     'minimax-h3-fast': (4, 15),
     'wan-3-0': (2, 15),
+    'kling-2-6-mc': (1, 60),
+    'kling-3-0-mc': (1, 60),
 }
 
 
@@ -427,7 +438,7 @@ def takes_duration(model_key):
     length of the clip it is given, so nothing may quote it anything else."""
     if model_key in _NO_DURATION_MODELS:
         return False
-    return _video_fields(model_key).get('shape') not in ('replace',)
+    return _video_fields(model_key).get('shape') not in ('replace', 'motion')
 
 
 def wants_face_only(model_key):
@@ -444,9 +455,15 @@ def wants_face_only(model_key):
     return _video_fields(model_key).get('shape') in ('replace',)
 
 
+def wants_body_only(model_key):
+    """Kling motion control takes one photo of her, and it has to carry her
+    build as well as her face, so it is the full body."""
+    return model_key in KLING_MOTION_MODELS
+
+
 # A model asking for a clean portrait is not helped by thirty of them, and each
 # extra one is another chance to pull her face towards an average.
-MODEL_REF_CAP = {'p-video-replace': 4, 'wan-2-7': 3, 'minimax-h3': 5, 'minimax-h3-fast': 5}
+MODEL_REF_CAP = {'kling-2-6-mc': 1, 'kling-3-0-mc': 1, 'p-video-replace': 4, 'wan-2-7': 3, 'minimax-h3': 5, 'minimax-h3-fast': 5}
 
 
 def video_seconds(model_key, seconds):
@@ -1313,7 +1330,16 @@ class RunwareProvider(Provider):
             'includeCost': True,
             'deliveryMethod': 'async',
         }
-        if shape == 'replace':
+        if shape == 'motion':
+            # The clip sets the length and the motion; the prompt only steers
+            # the scene. A duration or a negative prompt is refused here.
+            task['width'] = width
+            task['height'] = height
+            kling = {'characterOrientation': spec.get('orientation') or 'video'}
+            if model_key == 'kling-2-6-mc':
+                kling['keepOriginalSound'] = spec.get('keep_sound', True) is not False
+            task['providerSettings'] = {'klingai': kling}
+        elif shape == 'replace':
             # It takes a rung by name and no length at all: the output runs as
             # long as the clip it was given. Sending either of the others is
             # refused outright, which is the model saying what it is.
@@ -1336,7 +1362,7 @@ class RunwareProvider(Provider):
 
         cap = MODEL_REF_CAP.get(model_key, MAX_VIDEO_REFERENCES)
 
-        if job == 'swap' or (shape == 'replace' and spec.get('source_url')):
+        if job == 'swap' or (shape in ('replace', 'motion') and spec.get('source_url')):
             source = spec.get('source_url')
             if not source:
                 raise GenerationError('a swap needs the clip it is swapping into')
@@ -1345,7 +1371,7 @@ class RunwareProvider(Provider):
             if not refs:
                 raise GenerationError(
                     'a swap needs at least one approved photo of her to swap in')
-            if fields.get('shape') in ('inputs', 'replace'):
+            if fields.get('shape') in ('inputs', 'replace', 'motion'):
                 # A model that edits the clip takes it as a single `video`; one
                 # that takes guidance from it takes a list of reference videos.
                 src_key = fields.get('in_source') or 'referenceVideos'

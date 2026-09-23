@@ -352,7 +352,7 @@
         </div>
         <div class="gen-form" id="gen-swap-out" style="display:none">
           <label class="gen-f"><span>What to do with the clip</span>
-            <select id="gen-smodel" onchange="genQuote()"></select></label>
+            <select id="gen-smodel" onchange="genQuote(); syncSwapKling()"></select></label>
           <label class="gen-f"><span>Clip size</span>
             <select id="gen-sres" onchange="genQuote()"></select></label>
           <label class="gen-f"><span>Seconds</span>
@@ -442,8 +442,19 @@
                  style="width:100%; max-height:240px; border-radius:10px; background:#000;"></video>
           <span class="hint" style="margin:0;" id="gen-swap-meta"></span>
         </div>
-        <label class="gen-f"><span>Motion</span>
+        <label class="gen-f"><span id="gen-swap-motion-label">Motion</span>
           <input id="gen-swap-motion" maxlength="300" placeholder="keep her hair down, match the original lighting"></label>
+        <div id="gen-swap-kling" style="display:none; flex-direction:column; gap:11px;">
+          <label class="gen-f"><span>Facing</span>
+            <select id="gen-swap-orient">
+              <option value="video">Follow the clip</option>
+              <option value="image">Follow her photo</option>
+            </select></label>
+          <label id="gen-swap-sound-row" style="display:flex; gap:6px; align-items:center; font-size:.82rem;">
+            <input type="checkbox" id="gen-swap-sound" checked> Keep the clip's sound</label>
+          <span class="hint" style="margin:0;">One photo of her is used: the full body.
+            The clip decides the length and the movement.</span>
+        </div>
         <span class="hint" style="margin:0;" id="gen-swap-limits"></span>
       </div>
 
@@ -1147,6 +1158,7 @@ function renderGenForm() {
   el('gen-shape-out').style.display = video || swap ? 'flex' : 'none';
   el('gen-video-drive').style.display = animate || genJob === 'reel' ? 'flex' : 'none';
   syncIdentity();
+  syncSwapKling();
   el('gen-drive-label').textContent = genJob === 'reel'
     ? 'Video to put her in (optional)' : 'Motion clip (optional)';
   renderAspects();
@@ -1458,6 +1470,19 @@ function swapModel() {
   const picked = (el('gen-smodel') || {}).value;
   if (picked && swapModels().includes(picked)) return picked;
   return (genPrices && genPrices.default_swap_model) || swapModels()[0];
+}
+
+// Kling motion control takes the prompt as scene and look, not movement: the
+// clip is the movement. Only 2.6 documents keeping the clip's own sound.
+function syncSwapKling() {
+  const kling = genJob === 'swap' && swapModel().startsWith('kling-');
+  el('gen-swap-kling').style.display = kling ? 'flex' : 'none';
+  el('gen-swap-sound-row').style.display = swapModel() === 'kling-2-6-mc' ? 'flex' : 'none';
+  el('gen-swap-motion-label').textContent = kling ? 'Scene and look (optional)' : 'Motion';
+  el('gen-swap-motion').placeholder = kling
+    ? 'same room, soft daylight, she smiles at the end'
+    : 'keep her hair down, match the original lighting';
+  el('gen-build-btn').style.display = genJob === 'swap' ? 'none' : '';
 }
 
 function swapMaxSeconds() {
@@ -1945,6 +1970,8 @@ async function jobPayload() {
     return Object.assign(base, {
       source: genSwap.id, resolution: swapResolution(), identity: identityOf('swap'),
       seconds: swapSeconds(), motion: el('gen-swap-motion').value.trim(),
+      orientation: el('gen-swap-orient').value,
+      keep_sound: el('gen-swap-sound').checked,
     });
   }
   const resv = (el('gen-vres') || {}).value || genPrices.defaults.video_resolution;

@@ -28683,6 +28683,11 @@ def _gen_spec(slug, body, user):
 
     if job == 'swap':
         _gen_identity(slug, body, spec)
+        orientation = (body.get('orientation') or 'video').strip().lower()
+        if orientation not in ('video', 'image'):
+            raise imagegen.GenerationError('Unknown facing option.')
+        spec['orientation'] = orientation
+        spec['keep_sound'] = body.get('keep_sound') is not False
         source_id = str(body.get('source') or body.get('source_media')
                         or body.get('id') or '').strip()
         src = _video_source_row(slug, source_id)
@@ -30441,7 +30446,9 @@ def _gen_start(job_id, slug, spec, workspace):
                     # clip: it takes her build and wardrobe from the source, so
                     # a body reference is a second identity rather than more
                     # information about this one.
-                    role = 'face' if imagegen.wants_face_only(spec.get('model')) else None
+                    role = ('face' if imagegen.wants_face_only(spec.get('model'))
+                            else 'body' if imagegen.wants_body_only(spec.get('model'))
+                            else None)
                     # The swap models carry no reference set of their own, so
                     # they borrow the photo model's -- deliberately, and said
                     # out loud in the log rather than left as a fallback.
@@ -30450,11 +30457,18 @@ def _gen_start(job_id, slug, spec, workspace):
                     if not refs:
                         ref_model = imagegen.EXPLICIT_MODEL
                         refs = _gen_reference_urls(slug, ref_model, role=role)
+                    if not refs and role == 'body':
+                        refs = _gen_reference_urls(slug, ref_model)
                     if job == 'reel' and spec.get('character'):
                         refs = call['reference_urls']
+                    elif spec.get('identity') == 'character' and role == 'body':
+                        body_view = spec['character']['views'].get('body_front')
+                        refs = [u for u in [body_view and _char_path_url(
+                            body_view['path'], body_view['mime'])] if u]
+                        ref_model = 'character'
                     elif spec.get('identity') == 'character':
                         refs = _character_urls(spec['character'], None, None,
-                                               face_only=bool(role))
+                                               face_only=role == 'face')
                         ref_model = 'character'
                     elif spec.get('character'):
                         refs = (_character_urls(spec['character'], None, None,
