@@ -14519,8 +14519,43 @@ def _fanvue_api(method, path, access_token, body=None):
         raise err from None
 
 
+FV_RATE_RETRIES = 2
+FV_RATE_WAIT_CAP = 20
+
+
+def _fv_rate_wait(e, attempt):
+    """Seconds to wait after a 429. Fanvue allows 100 requests a minute per
+    account and says when to come back; without a header, back off."""
+    h = getattr(e, 'headers', None) or {}
+    for name in ('Retry-After', 'X-RateLimit-Reset'):
+        try:
+            v = float(h.get(name) or 0)
+        except (TypeError, ValueError):
+            continue
+        if v > 1e9:   # an epoch timestamp rather than a delay
+            v -= time.time()
+        if v > 0:
+            return min(v, FV_RATE_WAIT_CAP)
+    return min(3 * (attempt + 1) ** 2, FV_RATE_WAIT_CAP)
+
+
 def _fanvue_call(persona, method, path, body=None):
-    """Call the Fanvue API as a persona, refreshing the token once on 401."""
+    """Call the Fanvue API as a persona, refreshing the token once on 401 and
+    waiting out a 429. The chat loop spends the same per-account allowance,
+    so a creator's own action can land on a minute it has already used up."""
+    for attempt in range(FV_RATE_RETRIES + 1):
+        try:
+            return _fanvue_call_once(persona, method, path, body)
+        except url_error.HTTPError as e:
+            if e.code != 429 or attempt == FV_RATE_RETRIES:
+                if e.code == 429:
+                    e.detail = ('Fanvue is rate-limiting this account (100 requests a '
+                                'minute, shared with the chat bot). Try again in a minute.')
+                raise
+            time.sleep(_fv_rate_wait(e, attempt))
+
+
+def _fanvue_call_once(persona, method, path, body=None):
     t = _fanvue_tokens(persona)
     at = t.get('access_token')
     if not at:

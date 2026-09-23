@@ -1112,6 +1112,37 @@ def test_upload_accepts_text_answers():
         check('the error names the step', 'part 1 url' in str(e), str(e))
 
 
+def test_rate_limit_is_waited_out():
+    """Fanvue allows 100 requests a minute per account, shared with the chat
+    loop. A 429 is waited out, not reported as the upload failing."""
+    import urllib.error
+    slept, n = [], [0]
+    real_sleep = app.time.sleep
+    app.time.sleep = slept.append
+
+    def limited(times, headers):
+        def once(persona, method, path, body=None):
+            n[0] += 1
+            if n[0] <= times:
+                raise urllib.error.HTTPError(path, 429, 'Too many requests', headers, None)
+            return {'ok': 1}
+        return once
+    try:
+        app._fanvue_call_once = limited(2, {'Retry-After': '7'})
+        check('two 429s then success', app._fanvue_call('p', 'POST', '/x') == {'ok': 1})
+        check('Retry-After is honoured', slept == [7.0, 7.0], slept)
+        n[0], slept[:] = 0, []
+        app._fanvue_call_once = limited(9, {'Retry-After': '999'})
+        try:
+            app._fanvue_call('p', 'POST', '/x')
+            check('a persistent 429 raises', False)
+        except urllib.error.HTTPError as e:
+            check('a persistent 429 raises, explained', 'rate-limiting' in e.detail, e.detail)
+        check('the wait is capped', slept == [20, 20], slept)
+    finally:
+        app.time.sleep = real_sleep
+
+
 if __name__ == '__main__':
     for fn in (test_direction, test_import, test_identity_never_crosses,
                test_placeholders, test_pacing, test_backlog,
@@ -1127,7 +1158,8 @@ if __name__ == '__main__':
                test_telegram_off_silences_the_personal_account,
                test_a_stopped_account_stays_stopped,
                test_a_tag_only_reply_is_never_sent_as_a_blank,
-               test_vault_upload, test_upload_accepts_text_answers):
+               test_vault_upload, test_upload_accepts_text_answers,
+               test_rate_limit_is_waited_out):
         print('\n--- %s ---' % fn.__name__)
         restore_app()
         fn()
