@@ -29844,20 +29844,27 @@ def _character_finish(job_id, spec, workspace, urls):
         s.close()
     if not made:
         _refund_tokens(workspace, job_id, note='no usable result')
-    elif len(made) < int(spec.get('batch') or 1):
-        # Every image was paid for up front; the ones that never arrived are
-        # owed back, the same as a job that delivered none.
-        from db import token_settle
-        asked = int(spec.get('batch') or 1)
-        s = _db_session()
-        try:
-            back = token_settle(s, workspace, job_id,
-                                CR.quote(dict(spec, batch=len(made))),
-                                note=f'{len(made)} of {asked} images delivered')
-        finally:
-            s.close()
-        logger.info('character job=%s delivered %d of %d (%s tokens returned)',
-                    job_id, len(made), asked, back)
+    else:
+        _gen_settle_short(job_id, spec, workspace, len(made))
+
+
+def _gen_settle_short(job_id, spec, workspace, delivered):
+    """Return the stills a batch was paid for up front and never delivered,
+    the same as a job that delivered none. Settled to a target, so a job
+    finished twice by two pollers is not refunded twice."""
+    asked = int(spec.get('batch') or 1)
+    if spec.get('kind') != 'image' or not 0 < delivered < asked:
+        return
+    from db import token_settle
+    s = _db_session()
+    try:
+        back = token_settle(s, workspace, job_id,
+                            CR.quote(dict(spec, batch=delivered)),
+                            note=f'{delivered} of {asked} images delivered')
+    finally:
+        s.close()
+    logger.info('generation job=%s delivered %d of %d (%s tokens returned)',
+                job_id, delivered, asked, back)
 
 
 def _character_job_json(job, ids, s):
@@ -31010,6 +31017,8 @@ def _gen_finish(job_id, slug, spec, workspace, urls):
         s.close()
     if not made:
         _refund_tokens(workspace, job_id, note='no usable result')
+    else:
+        _gen_settle_short(job_id, spec, workspace, len(made))
 
 
 def _gen_row(job):
