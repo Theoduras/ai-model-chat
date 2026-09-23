@@ -72,7 +72,7 @@
     <span class="badge">𝕏</span>
   </div>
   <div style="display:flex; align-items:center; gap:16px;">
-    <a href="/admin/xchats" style="color:var(--accent); font-size:0.8rem; text-decoration:none;">💬 Chat log</a>
+    <a href="/admin/xchats" class="x-app-field" style="color:var(--accent); font-size:0.8rem; text-decoration:none;">💬 Chat log</a>
     <nav data-site-nav="inline" class="sn-links sn-inline"></nav>
     <button class="btn-ai" style="padding:5px 12px; font-size:0.75rem;" onclick="XGuide.open()">📘 Setup guide</button>
     <a href="/dashboard" style="color:var(--text-muted); font-size:0.8rem; text-decoration:none;">← Dashboard</a>
@@ -98,15 +98,15 @@
     </div>
 
     <div id="connect-panel" style="display:none; margin-top:4px; border-top:1px solid var(--border-soft); padding-top:16px;">
-      <div class="field full">
+      <div class="field full x-app-field">
         <label>X app OAuth 2.0 Client ID</label>
         <input type="text" id="x-client-id" placeholder="your-app-client-id" autocomplete="off" spellcheck="false">
       </div>
-      <div class="field full" style="margin-top:12px;">
+      <div class="field full x-app-field" style="margin-top:12px;">
         <label>Client Secret <span style="font-weight:400;color:var(--text-muted);">(required if your X app is a confidential client)</span></label>
         <input type="password" id="x-client-secret" placeholder="leave blank to keep the saved one" autocomplete="off" spellcheck="false">
       </div>
-      <div class="field full" style="margin-top:12px;">
+      <div class="field full x-app-field" style="margin-top:12px;">
         <label>Redirect URI <span style="font-weight:400;color:var(--text-muted);">(must match your X app's callback URL exactly)</span></label>
         <input type="text" id="x-redirect-uri" placeholder="https://your-domain/api/x/oauth-redirect" autocomplete="off" spellcheck="false">
       </div>
@@ -121,7 +121,7 @@
         <button class="btn-ai" style="margin-top:12px;" onclick="completeConnect()">Finish connection ✓</button>
       </div>
       <div class="result-box" id="connect-status"></div>
-      <span class="hint" style="margin-top:8px;">Need an X app? Create one at <a href="https://developer.x.com" target="_blank" style="color:var(--accent);">developer.x.com</a> with OAuth 2.0 enabled and scopes for tweet, follows, dm, and users. Set the Redirect URI above as a Callback URL in the app's user-authentication settings.</span>
+      <span class="hint x-app-field" style="margin-top:8px;">Need an X app? Create one at <a href="https://developer.x.com" target="_blank" style="color:var(--accent);">developer.x.com</a> with OAuth 2.0 enabled and scopes for tweet, follows, dm, and users. Set the Redirect URI above as a Callback URL in the app's user-authentication settings.</span>
     </div>
   </div>
 
@@ -355,7 +355,10 @@ async function init() {
       fetch('/api/personas'), fetch('/api/x/status'), fetch('/api/x/app-config')]);
     const list = await pRes.json();
     connStatus = await sRes.json();
-    appConfig = await cRes.json().catch(() => ({}));
+    // The X app is shared and only an operator may see or change it; a
+    // creator just authorizes through it.
+    appConfig = cRes.ok ? await cRes.json().catch(() => ({})) : { shared: true };
+    if (appConfig.shared) document.querySelectorAll('.x-app-field').forEach(e => e.remove());
     const sel = document.getElementById('persona');
     sel.innerHTML = list.map(p => '<option value="' + p.slug + '">' + esc(p.name || p.slug) + '</option>').join('');
     prefillConnect();
@@ -364,6 +367,7 @@ async function init() {
 }
 
 function prefillConnect() {
+  if (appConfig.shared) return;
   const idEl = document.getElementById('x-client-id');
   const uriEl = document.getElementById('x-redirect-uri');
   if (!idEl.value && appConfig.client_id) idEl.value = appConfig.client_id;
@@ -635,10 +639,10 @@ function toggleConnect() {
 
 async function startConnect() {
   const box = document.getElementById('connect-status');
-  const clientId = document.getElementById('x-client-id').value.trim();
-  const redirectUri = document.getElementById('x-redirect-uri').value.trim();
-  if (!clientId) { err(box, 'Enter your X app Client ID.'); return; }
-  if (!redirectUri) { err(box, 'Enter the Redirect URI.'); return; }
+  const clientId = ((document.getElementById('x-client-id') || {}).value || '').trim();
+  const redirectUri = ((document.getElementById('x-redirect-uri') || {}).value || '').trim();
+  if (!appConfig.shared && !clientId) { err(box, 'Enter your X app Client ID.'); return; }
+  if (!appConfig.shared && !redirectUri) { err(box, 'Enter the Redirect URI.'); return; }
   busy(box, 'Opening X authorization…');
   const clientSecret = (document.getElementById('x-client-secret') || {}).value?.trim() || '';
   const data = await post('/api/x/auth-url', { client_id: clientId, client_secret: clientSecret, redirect_uri: redirectUri, persona: persona() });
@@ -652,7 +656,7 @@ async function finishWith(code, state) {
   const box = document.getElementById('connect-status');
   if (!code || !state) { err(box, 'Could not find code/state in that URL.'); return; }
   busy(box, 'Finishing connection…');
-  const data = await post('/api/x/callback', { code, state });
+  const data = await post('/api/x/callback', { code, state, persona: persona() });
   if (!data.ok) { err(box, data.error); return; }
   box.innerHTML = '<span class="hint" style="color:#4ade80;">✓ Connected as @' + esc(data.username) + '</span>';
   const sRes = await fetch('/api/x/status');

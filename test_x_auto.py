@@ -125,10 +125,13 @@ class TokenStoreTest(XAutoBase):
 
     def test_oauth_state_round_trips(self):
         app._x_oauth_state_put({'state': 'abc', 'persona': PERSONA})
-        self.assertEqual(app._x_oauth_state_get()['state'], 'abc')
-        app._x_oauth_state_clear()
+        app._x_oauth_state_put({'state': 'xyz', 'persona': 'other'})
+        self.assertEqual(app._x_oauth_state_get('abc')['persona'], PERSONA)
+        self.assertEqual(app._x_oauth_state_get('xyz')['persona'], 'other')
+        app._x_oauth_state_clear('abc')
         with mock.patch.object(app.os.path, 'exists', return_value=False):
-            self.assertEqual(app._x_oauth_state_get(), {})
+            self.assertEqual(app._x_oauth_state_get('abc'), {})
+            self.assertEqual(app._x_oauth_state_get('xyz')['persona'], 'other')
 
 
 class WorkerLogTest(XAutoBase):

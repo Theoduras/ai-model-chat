@@ -1334,8 +1334,7 @@ function needsPersona() {
 function openPlatform(platform, navEl) {
   if (needsPersona()) return;
   // Every console below scopes its own calls to the caller's personas, so a
-  // creator gets the same page an admin does. /xbot is still operator-only at
-  // the route, so a non-operator clicking it is redirected server-side.
+  // creator gets the same page an admin does.
   const CONSOLES = {x: '/xbot', fanvue: '/fanvue', onlyfans: '/onlyfans',
                     telegram: '/telegram', threads: '/threads',
                     discord: '/discord', instagram: '/instagram',

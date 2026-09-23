@@ -1224,8 +1224,9 @@ def _x_oauth_state_put(data):
     """The in-flight PKCE handshake. In the settings table for the same reason
     the tokens are: on Cloud Run the callback can land on a different instance
     than the one that started the flow, and a file on the first instance is not
-    there to read."""
-    _set_setting(X_OAUTH_STATE_KEY, json.dumps(data))
+    there to read. Keyed on the state, because every creator connects through
+    the same X app and one slot would let two handshakes overwrite each other."""
+    _set_setting(f"{X_OAUTH_STATE_KEY}:{data['state']}", json.dumps(data))
     try:
         with open(X_OAUTH_STATE_FILE, 'w') as f:
             json.dump(data, f)
@@ -1233,8 +1234,10 @@ def _x_oauth_state_put(data):
         pass
 
 
-def _x_oauth_state_get():
-    raw = _get_setting(X_OAUTH_STATE_KEY)
+def _x_oauth_state_get(state):
+    if not state:
+        return {}
+    raw = _get_setting(f'{X_OAUTH_STATE_KEY}:{state}')
     if raw:
         try:
             d = json.loads(raw)
@@ -1245,14 +1248,16 @@ def _x_oauth_state_get():
     try:
         if os.path.exists(X_OAUTH_STATE_FILE):
             with open(X_OAUTH_STATE_FILE, 'r') as f:
-                return json.load(f)
+                d = json.load(f)
+            if isinstance(d, dict) and d.get('state') == state:
+                return d
     except Exception:
         pass
     return {}
 
 
-def _x_oauth_state_clear():
-    _set_setting(X_OAUTH_STATE_KEY, '')
+def _x_oauth_state_clear(state):
+    _set_setting(f'{X_OAUTH_STATE_KEY}:{state}', '')
     try:
         os.remove(X_OAUTH_STATE_FILE)
     except Exception:
@@ -1944,6 +1949,10 @@ def user_capabilities(user):
     if user.get('status') != 'active':
         return dict(DENIED_CAPS)
     caps = tier_capabilities(user.get('tier'))
+    # X is on every plan. Added here rather than in each tier so a super admin's
+    # saved platform list cannot take it away again.
+    if isinstance(caps.get('platforms'), list) and 'x' not in caps['platforms']:
+        caps['platforms'] = caps['platforms'] + ['x']
     # OnlyFans is Pro and up, except for accounts that already had it connected
     # when it moved: taking it off them would disconnect a live account.
     plats = caps.get('platforms')
@@ -5972,13 +5981,12 @@ def api_site_content_set(page):
     _set_setting(f'site_content_{page}', json.dumps(clean))
     return jsonify({'ok': True})
 
-# Operator consoles. _is_operator() rather than _check_admin() on purpose: with
-# ADMIN_PASSWORD unset the latter is true for everyone, which would hand every
-# paying creator the shared-bot registration and trace panels.
+# Open past the operator check like /fanvue: every /api/x call the page makes
+# is platform_scoped, and the shared app's credentials stay operator_only.
 @app.route('/xbot')
 def xbot_page():
-    if not _is_operator():
-        return redirect('/dashboard')
+    if not (_is_operator() or _current_user()):
+        return redirect('/login?next=/xbot')
     return send_from_directory(BASE_DIR, 'xbot.html')
 
 @app.route('/onlyfans')
@@ -13319,18 +13327,26 @@ def _x_audience_candidates(persona, limit, contacted,
 def api_x_auth_url():
     """Generate X OAuth 2.0 PKCE authorization URL."""
     data = request.json or {}
-    client_id = data.get('client_id', '').strip() or (_get_setting('x_client_id') or '')
-    redirect_uri = data.get('redirect_uri', '').strip() or (_get_setting('x_redirect_uri') or '')
-    client_secret = data.get('client_secret', '').strip()
+    # The X app is shared by every creator, so only an operator may set it; a
+    # creator connects through whatever app the operator saved.
+    operator = _is_operator()
+    client_id = ((data.get('client_id', '').strip() if operator else '')
+                 or (_get_setting('x_client_id') or ''))
+    redirect_uri = ((data.get('redirect_uri', '').strip() if operator else '')
+                    or (_get_setting('x_redirect_uri') or ''))
+    client_secret = data.get('client_secret', '').strip() if operator else ''
     persona = data.get('persona', 'lilly')
     if not client_id or not redirect_uri:
+        if not operator:
+            return jsonify({'ok': False, 'error': 'X is not set up yet. Ask support to enable it.'}), 400
         return jsonify({'ok': False, 'error': 'client_id and redirect_uri are required'}), 400
 
-    # Remember the app credentials so future connects/refreshes don't need them re-entered.
-    _set_setting('x_client_id', client_id)
-    _set_setting('x_redirect_uri', redirect_uri)
-    if client_secret:
-        _set_setting('x_client_secret', client_secret)
+    if operator:
+        # Remember the app credentials so future connects/refreshes don't need them re-entered.
+        _set_setting('x_client_id', client_id)
+        _set_setting('x_redirect_uri', redirect_uri)
+        if client_secret:
+            _set_setting('x_client_secret', client_secret)
     _log_x_event('connect_start', persona=persona)
     code_verifier = secrets.token_urlsafe(64)
     code_challenge = urllib.parse.quote(
@@ -13377,12 +13393,13 @@ def api_x_callback():
     code = data.get('code', '').strip()
     state = data.get('state', '').strip()
 
-    saved = _x_oauth_state_get()
+    saved = _x_oauth_state_get(state)
     if not saved:
         return jsonify({'ok': False, 'error': 'OAuth session expired. Start the flow again.'}), 400
-
-    if state != saved.get('state'):
-        return jsonify({'ok': False, 'error': 'State mismatch. Possible CSRF. Start again.'}), 400
+    # platform_scoped vouched for the persona in the body, so the handshake has
+    # to be for that same persona or a creator could land on someone else's.
+    if not _is_operator() and saved.get('persona') != (data.get('persona') or '').strip():
+        return jsonify({'ok': False, 'error': 'That authorization was for another persona. Start again.'}), 400
 
     client_id = saved['client_id']
     redirect_uri = saved['redirect_uri']
@@ -13437,7 +13454,7 @@ def api_x_callback():
         'connected_at': int(time.time()),
     }
     _save_x_tokens(tokens)
-    _x_oauth_state_clear()
+    _x_oauth_state_clear(state)
 
     _log_x_event('connect_complete', persona=persona, x_username=username)
     return jsonify({'ok': True, 'username': username, 'persona': persona})
