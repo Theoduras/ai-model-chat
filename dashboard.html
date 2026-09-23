@@ -289,10 +289,11 @@
       <div class="sb-plan" id="sb-plan" hidden></div>
       <button type="button" class="btn btn-primary sb-refer" data-view="/referrals" data-search="referrals refer earn commission invite"
               onclick="openEmbedded('/referrals', this)">Refer a creator &middot; earn 5%</button>
-      <a href="/account" class="sb-item" data-search="account billing">
+      <button type="button" class="sb-item" data-view="/account" data-search="account billing plan tokens profile"
+              onclick="openEmbedded('/account', this)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2.5 2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
         <span>Account</span>
-      </a>
+      </button>
       <a href="/dashboard/logout" class="sb-item" data-search="log out sign out">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" stroke-linecap="round" stroke-linejoin="round"/><path d="M16 17l5-5-5-5M21 12H9" stroke-linecap="round" stroke-linejoin="round"/></svg>
         <span>Log out</span>
@@ -1402,16 +1403,33 @@ function openEmbedded(url, navEl) {
   saveView({ kind: 'embed', url: url });
 }
 
+// The account pages with no sidebar row of their own sit under Account.
+const VIEW_ALIASES = {'/billing': '/account', '/tokens': '/account', '/account/profile': '/account'};
+
+// The sidebar item that frames a path, or null when the workspace does not
+// offer it — only such a path may be framed.
+function viewEl(path) {
+  path = String(path).split('?')[0];
+  return document.querySelector('[data-view="' + path + '"]') ||
+    (VIEW_ALIASES[path] ? document.querySelector('[data-view="' + VIEW_ALIASES[path] + '"]') : null);
+}
+
 // Reopens whatever was on screen last. A stored persona that has since been
 // deleted, or a view this account cannot see, falls through to the default.
 function restoreView() {
   // A page opened on its own lands here as ?open= so it shows inside the
-  // workspace; only a path the sidebar itself offers may be framed.
+  // workspace.
   const open = new URLSearchParams(location.search).get('open') || '';
-  const openEl = /^\/[a-z]/.test(open) && document.querySelector('[data-view="' + open.split('?')[0] + '"]');
+  const openEl = /^\/[a-z]/.test(open) && viewEl(open);
   if (openEl) {
     history.replaceState(null, '', location.pathname);
     openEmbedded(open, openEl);
+    // A checkout return (?topup=) is news once, not on every later visit.
+    const u = new URL(open, location.origin);
+    if (u.searchParams.has('topup')) {
+      u.searchParams.delete('topup');
+      saveView({ kind: 'embed', url: u.pathname + u.search });
+    }
     return true;
   }
   let v = null;
@@ -1423,8 +1441,7 @@ function restoreView() {
     return true;
   }
   if (v.kind === 'embed') {
-    const path = String(v.url).split('?')[0];
-    openEmbedded(v.url, document.querySelector('[data-view="' + path + '"]'));
+    openEmbedded(v.url, viewEl(v.url));
     return true;
   }
   if (v.kind === 'platform') {
@@ -1434,6 +1451,31 @@ function restoreView() {
   }
   return false;
 }
+
+// Opens a link inside the workspace when the sidebar offers it; anything else
+// (log out, the public pricing page) leaves the dashboard.
+function navigateWorkspace(url) {
+  if (url.split('?')[0] === '/dashboard') { showPersonaBrowser(); return; }
+  const el = viewEl(url);
+  if (el) openEmbedded(url, el);
+  else location.href = url;
+}
+
+// The header's Tokens and Upgrade links (and the plan box's Top up) open in
+// the frame rather than reloading the dashboard around them.
+document.addEventListener('click', function (e) {
+  if (e.defaultPrevented || e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+  const a = e.target.closest('a[href]');
+  if (!a || a.target || a.origin !== location.origin || !viewEl(a.pathname)) return;
+  e.preventDefault();
+  navigateWorkspace(a.pathname + a.search);
+});
+
+// A framed account page hands every link click up here (WORKSPACE_JS in app.py).
+window.addEventListener('message', function (e) {
+  if (e.origin !== location.origin || !e.data || e.data.type !== 'ws-nav') return;
+  if (typeof e.data.url === 'string' && /^\/(?!\/)/.test(e.data.url)) navigateWorkspace(e.data.url);
+});
 
 // An embedded console (the Fanvue setup wizard) runs its own coach-marks, but
 // an iframe can only dim itself — so it asks us to dim the chrome around it and

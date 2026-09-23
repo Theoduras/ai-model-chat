@@ -2593,7 +2593,31 @@ body[data-page="pricing"] .wrap{margin:0 auto}
 body[data-page="pricing"]{padding-top:80px}}
 @media(min-width:700px){.wrap.wide{max-width:760px}.tiers{grid-template-columns:repeat(2,1fr)}}
 @media(min-width:1180px){.wrap.wide{max-width:1240px}.tiers{grid-template-columns:repeat(4,1fr)}}
+.in-workspace body>header.site-nav{display:none}
+.in-workspace body[data-page="pricing"]{padding-top:32px}
 """
+
+# The account pages belong inside the dashboard, where its header and sidebar
+# are. Opened on their own they send the browser there (framed), and inside the
+# frame every link goes through the dashboard so it can pick the sidebar item or
+# leave the frame. Only a plan that can open /dashboard is sent: an inactive one
+# would bounce straight back to /billing.
+WORKSPACE_JS = """<script>
+(function () {
+  if (window.self === window.top) {
+    {% if workspace_ok() %}location.replace('/dashboard?open=' + encodeURIComponent(location.pathname + location.search));{% endif %}
+    return;
+  }
+  document.documentElement.classList.add('in-workspace');
+  document.addEventListener('click', function (e) {
+    if (e.defaultPrevented || e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    var a = e.target.closest && e.target.closest('a[href]');
+    if (!a || a.target || a.origin !== location.origin || a.getAttribute('href').charAt(0) === '#') return;
+    e.preventDefault();
+    window.top.postMessage({ type: 'ws-nav', url: a.pathname + a.search }, location.origin);
+  });
+})();
+</script>"""
 
 REGISTER_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -2671,7 +2695,7 @@ RESET_PASSWORD_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF
 
 BILLING_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>""" + WORKSPACE_JS + """
 <link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Choose a plan</title>
 <script src="/js/analytics.js" defer></script>
 <script src="/js/page-editor.js" defer></script>
@@ -2814,7 +2838,7 @@ document.querySelectorAll('button[data-dev-tier]').forEach(function(b){
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({tier: b.dataset.devTier})});
       var d = await r.json();
-      if (d.ok) { window.location = '/dashboard'; return; }
+      if (d.ok) { window.top.location.href = '/dashboard'; return; }
       alert(d.error || 'Could not activate.');
     } catch (e) { alert('Could not activate.'); }
     b.disabled = false; b.textContent = 'Activate free (dev)';
@@ -2828,8 +2852,8 @@ document.querySelectorAll('button[data-tier]').forEach(function(b){
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({tier: b.dataset.tier, provider: b.dataset.provider})});
       var d = await r.json();
-      if (d.payment_url) { window.location = d.payment_url; return; }
-      if (d.redirect) { window.location = d.redirect; return; }
+      if (d.payment_url) { window.top.location.href = d.payment_url; return; }
+      if (d.redirect) { window.top.location.href = d.redirect; return; }
       alert(d.error || 'Could not start checkout.');
     } catch (e) { alert('Could not start checkout.'); }
     b.disabled = false; b.textContent = old;
@@ -2840,7 +2864,7 @@ document.querySelectorAll('button[data-tier]').forEach(function(b){
 
 TOKENS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>""" + WORKSPACE_JS + """
 <link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Buy tokens</title>
 <script src="/js/analytics.js" defer></script>
 <style>""" + ACCOUNT_CSS + """
@@ -2943,7 +2967,7 @@ var TOK_PROVIDERS = [{% if stripe_enabled %}['stripe','card']{% endif %}{% if st
           method:'POST', headers:{'Content-Type':'application/json'},
           body: JSON.stringify({pack: b.dataset.pack, provider: b.dataset.provider})});
         var d2 = await r.json();
-        if (d2.payment_url) { window.location = d2.payment_url; return; }
+        if (d2.payment_url) { window.top.location.href = d2.payment_url; return; }
         alert(d2.error || 'Could not start checkout.');
       } catch (e) { alert('Could not start checkout.'); }
       b.disabled = false; b.textContent = old;
@@ -2993,7 +3017,7 @@ stops at the moment she would start talking to your real fans and taking their m
 
 ACCOUNT_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>""" + WORKSPACE_JS + """
 <link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>My account</title>
 <style>""" + ACCOUNT_CSS + """
 table{width:100%;border-collapse:collapse;margin-top:8px;font-size:.85rem}
@@ -3041,7 +3065,7 @@ document.getElementById('portal').addEventListener('click', async function(e){
   try {
     var r = await fetch('/api/billing/portal', {method: 'POST'});
     var d = await r.json();
-    if (d.url) { location.href = d.url; return; }
+    if (d.url) { window.top.location.href = d.url; return; }
     err.textContent = d.error || 'Could not open the billing portal.';
   } catch (_) {
     err.textContent = 'Could not open the billing portal.';
@@ -3067,7 +3091,7 @@ _AVATAR_PLACEHOLDER = (
 
 PROFILE_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>""" + WORKSPACE_JS + """
 <link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Your profile</title>
 <style>""" + ACCOUNT_CSS + """
 textarea{width:100%;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:11px 14px;color:var(--text);font-size:.95rem;outline:none;margin-bottom:16px;font-family:inherit;resize:vertical;min-height:88px}
@@ -3144,7 +3168,7 @@ function clearPic() {
 
 ADMIN_USERS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>""" + WORKSPACE_JS + """
 <link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Users</title>
 <style>""" + ACCOUNT_CSS + """
 table{width:100%;border-collapse:collapse;font-size:.85rem}
@@ -3762,7 +3786,7 @@ INVITE_DAYS = 14
 
 TEAM_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>""" + WORKSPACE_JS + """
 <link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Team</title>
 <style>""" + ACCOUNT_CSS + """
 table{width:100%;border-collapse:collapse;font-size:.88rem}
@@ -4256,6 +4280,18 @@ def _inject_google_oauth():
     nxt = request.args.get('next') or ''
     return {'google_enabled': bool(cid),
             'google_next': ('?next=' + urllib.parse.quote(nxt)) if nxt.startswith('/') else ''}
+
+
+# The paths dashboard.html can frame (its data-view entries and aliases).
+# /pricing shares BILLING_HTML but is the public page, so it stays out.
+_WORKSPACE_PAGES = ('/account', '/account/profile', '/billing', '/tokens',
+                    '/team', '/referrals', '/admin/users')
+
+
+@app.context_processor
+def _inject_workspace():
+    return {'workspace_ok': lambda: (request.path in _WORKSPACE_PAGES
+                                     and _user_is_active(_current_user()))}
 
 
 @app.route('/auth/google')
@@ -5424,7 +5460,7 @@ def api_billing_portal():
 
 REFERRALS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>""" + WORKSPACE_JS + """
 <link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Refer a creator</title>
 <style>""" + ACCOUNT_CSS + """
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:16px 0}
@@ -5468,7 +5504,7 @@ pay for it, credited automatically against your own next invoice.</p>
 
 REFERRALS_LOCKED_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>""" + WORKSPACE_JS + """
 <link rel="icon" href="/favicon.ico" sizes="any"><title>Refer a creator</title>
 <style>""" + ACCOUNT_CSS + """</style></head><body data-page="referrals"><div class="wrap"><div class="card">
 <h1>Refer a creator</h1>

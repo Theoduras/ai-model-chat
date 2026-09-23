@@ -7,6 +7,9 @@
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" href="/favicon.png">
   <script src="/js/theme.js"></script>
+  <script>
+    if (window.self === window.top) location.replace('/dashboard?open=' + encodeURIComponent(location.pathname + location.search));
+  </script>
   <link rel="stylesheet" href="/css/style.css">
 <link rel="stylesheet" href="/css/lazy.css">
 <script src="/js/skeleton.js"></script>
