@@ -562,7 +562,6 @@
               <div class="bands" id="vp-bands"></div>
               <p class="hint" id="vp-hint" style="margin-top:6px;"></p>
             </div>
-            <div class="field"><label for="vp-pose">Pose</label><select id="vp-pose" onchange="viewOpts[selView]=Object.assign(viewOpts[selView]||{},{pose:this.value})"></select></div>
             <div class="field"><label for="vp-light">Lighting</label><select id="vp-light" onchange="viewOpts[selView]=Object.assign(viewOpts[selView]||{},{lighting:this.value})"></select></div>
           </div>
           <div class="vp-sec">
@@ -1444,7 +1443,6 @@ function renderViewPanel() {
   if (!v) return;
   const st = vs(v.key);
   const o = viewOpts[v.key] || {};
-  fillSelect('vp-pose', cat.poses || [], o.pose || 'parent');
   fillSelect('vp-light', cat.lighting || [], o.lighting || 'anchor');
   el('vp-title').textContent = v.label;
   el('vp-lineage').innerHTML = lineage(v.key).map(k => `<a href="#" onclick="openView('${k}');return false;">${esc(viewDef(k).label)}</a>`).join(' → ');
@@ -1618,7 +1616,7 @@ async function useCrop(as) {
 }
 async function submitView(key, n) {
   const o = viewOpts[key] || {};
-  const body = {view: key, batch: n || batch, pose: o.pose, lighting: o.lighting};
+  const body = {view: key, batch: n || batch, lighting: o.lighting};
   if (key !== 'face_front' && vs(key).mode === 'crop') body.crop_b64 = await cropParent(key);
   return api('/api/characters/' + cur.id + '/generate', {body});
 }

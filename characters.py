@@ -161,15 +161,8 @@ YOUTH_TERMS = ('child', 'kid', 'teen', 'underage', 'minor', 'young girl',
 
 STUDIO = 'Soft natural daylight, plain light-grey wall behind her. ' + PHOTO_LOOK
 
-# Pose and lighting only reword a view; the view's framing still decides what
-# is shown, so neither can move a view past its rating.
-POSES = {
-    'parent': ('From parent', ''),
-    'relaxed': ('Relaxed standing', 'standing relaxed, weight on one leg, arms loose at her sides'),
-    'hands_hips': ('Hands on hips', 'standing with both hands on her hips'),
-    'turned': ('Slight turn', 'body turned slightly to one side, face toward the lens'),
-    'seated': ('Seated', 'seated on a plain stool, back straight'),
-}
+# Lighting only rewords a view; the view's framing still decides what is
+# shown, so it cannot move a view past its rating.
 LIGHTING = {
     'anchor': ('Match anchor', STUDIO),
     'studio_soft': ('Studio soft', 'Soft diffused key light with gentle fill, plain neutral grey background, sharp '
@@ -386,7 +379,6 @@ def catalogue(level, body_type='female'):
                      for k, (lab, g, opts) in feats.items() if g in groups],
         'batch': list(BATCH_CHOICES), 'default_batch': DEFAULT_BATCH,
         'variations': list(VARIATIONS),
-        'poses': [{'key': k, 'label': l} for k, (l, _) in POSES.items()],
         'lighting': [{'key': k, 'label': l} for k, (l, _) in LIGHTING.items()],
         'presets': [{'key': k, 'label': l, 'hint': h, 'values': v} for k, (l, h, v) in BODY_PRESETS.items()],
         'min_age': MIN_AGE,
@@ -600,7 +592,7 @@ def outfit_text(sheet, outfit=None):
 
 
 def build_view_prompt(key, sheet, age, has_reference, body_type='female',
-                      mode='reference', strength=None, pose=None, lighting=None, outfit=None, blend=False,
+                      mode='reference', strength=None, lighting=None, outfit=None, blend=False,
                       match=False):
     v = view(key, body_type)
     if not v:
@@ -646,14 +638,12 @@ def build_view_prompt(key, sheet, age, has_reference, body_type='female',
     else:
         lead = f"photorealistic photo of a woman, {v['framing']}."
     body = f' Her features: {detail}.' if detail else ''
-    posed = POSES.get(pose or '', ('', ''))[1]
-    posed = f' Pose: {posed}.' if posed else ''
     light = LIGHTING.get(lighting or '', ('', STUDIO))[1]
     if PHOTO_LOOK not in light:
         light = light.rstrip(' .') + '. ' + PHOTO_LOOK
     zoom = (' Zoomed in: the subject fills the whole frame; no face, no full body, nothing '
             'beyond the subject in shot.') if v.get('zoom') else ''
-    return (lead + zoom + body + posed + ' ' + light + ' ' + adult_clause(age)).strip()
+    return (lead + zoom + body + ' ' + light + ' ' + adult_clause(age)).strip()
 
 
 def job_level(shot, scene):
