@@ -30278,7 +30278,7 @@ def _char_views_state(s, row):
         mode = cv.mode or v.get('mode') or 'reference'
         d = dicts[k]
         d.update(display=shown.get(k, d['status']), mode=mode,
-                 strength=cv.strength if cv.strength is not None else CH.STRENGTH[mode],
+                 strength=CH.STRENGTH[mode],
                  crop_box=d['crop_box'] or CH.default_crop(v.get('region')),
                  references=refs.get(cv.id))
     return rows, dicts
@@ -31219,7 +31219,7 @@ def api_character_generate(char_id):
 
 @app.route('/api/characters/<char_id>/views/<view_key>', methods=['PUT'])
 def api_character_view_settings(char_id, view_key):
-    """Source mode, crop box, strength and references for one view."""
+    """Source mode, crop box and references for one view."""
     blocked = _require_active()
     if blocked:
         return blocked
@@ -31246,11 +31246,6 @@ def api_character_view_settings(char_id, view_key):
                 except (KeyError, TypeError, ValueError):
                     return jsonify({'ok': False, 'error': 'Bad crop box'}), 400
             cv.crop_box_json = json.dumps(box) if box else None
-        if 'strength' in body:
-            try:
-                cv.strength = None if body['strength'] is None else min(1.0, max(0.0, float(body['strength'])))
-            except (TypeError, ValueError):
-                return jsonify({'ok': False, 'error': 'Bad strength'}), 400
         if 'references' in body:
             s.flush()
             refs = body['references']

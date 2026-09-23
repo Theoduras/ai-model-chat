@@ -296,19 +296,12 @@
       background: color-mix(in srgb, var(--warn) 14%, transparent); color: var(--text-2);
       display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
     }
+    .banner.review { font-weight: 600; color: var(--text); border-left: 3px solid var(--warn); }
+    .opts-head { margin: 16px 0 0; font-size: 0.85rem; font-weight: 600; color: var(--warn); }
+    .opt-pending { padding: 8px 8px 0; }
     .vp-sec { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-soft); display: flex; flex-direction: column; gap: 8px; }
     .vp-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
     .dl { font-size: 0.8rem; font-weight: 600; color: var(--text-2); }
-    .vp-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; align-items: start; }
-    .vp-infl { grid-column: 1 / -1; }
-    .vp-infl input { width: 100%; margin: 6px 0 0; accent-color: var(--accent); }
-    .vp-val { font-size: 0.78rem; color: var(--text-2); }
-    .bands { display: flex; gap: 2px; margin-top: 6px; }
-    .bands span {
-      height: 22px; display: grid; place-items: center; font-size: 0.68rem; font-weight: 600; color: var(--text-muted);
-      background: var(--surface-2); border-radius: var(--r-xs);
-    }
-    .bands span.on { background: var(--accent-soft); color: var(--accent); }
     .vp-refs { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
     .ref-line { position: relative; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     .ref-line .ref { width: 32px; height: 32px; }
@@ -397,7 +390,7 @@
       #ch-rail .ob-rstage { margin: 0; }
       #ch-rail .ob-rstage-t { margin: 0; }
       #ch-stepwrap { padding: 18px 16px 0; }
-      .vp-refs, .vp-controls { grid-template-columns: 1fr; }
+      .vp-refs { grid-template-columns: 1fr; }
       .opts { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
     }
   </style>
@@ -544,7 +537,7 @@
           <div class="vp-sec vp-refs">
             <div>
               <span class="dl">References</span>
-              <p class="hint" style="margin:2px 0 8px;">Approved photos sent with the prompt. The model copies her face, skin and body from them; Reference influence sets how strictly.</p>
+              <p class="hint" style="margin:2px 0 8px;">Approved photos sent with the prompt. The model copies her face, skin and body from them.</p>
               <div class="ref-line" id="vp-refs"></div>
             </div>
             <div class="up-card">
@@ -552,14 +545,6 @@
               <span class="hint">Sent alongside the references, for this photo only. Use it to steer pose, angle or framing. Her look still comes from the approved photos.</span>
               <label class="attest"><input type="checkbox" id="vp-attest" onchange="el('add-view-ref').disabled=!this.checked">I have the rights to this image, and anyone shown is 18+ and agreed to their likeness being used.</label>
               <button type="button" class="btn btn-ghost btn-sm" id="add-view-ref" disabled onclick="pickUpload(selView, 'vp-attest')">Upload photo</button>
-            </div>
-          </div>
-          <div class="vp-sec vp-controls">
-            <div class="vp-infl">
-              <div class="vp-row"><span class="dl" id="vp-strength-label"></span><b class="vp-val" id="vp-strength-val"></b></div>
-              <input type="range" id="vp-strength" min="0" max="1" step="0.01" oninput="strengthHint()" onchange="saveView({strength:+this.value})">
-              <div class="bands" id="vp-bands"></div>
-              <p class="hint" id="vp-hint" style="margin-top:6px;"></p>
             </div>
           </div>
           <div class="vp-sec">
@@ -573,6 +558,7 @@
             <span class="hint" id="vp-quote"></span>
             <button type="button" class="btn btn-primary btn-sm" id="vp-var" onclick="generate(selView)"></button>
           </div>
+          <p class="opts-head" id="vp-opts-head" hidden>Pick one to approve — unapproved options delete themselves after 3 days.</p>
           <div class="opts" id="vp-opts"></div>
         </div>
       </aside>
@@ -1371,7 +1357,7 @@ async function approveFace() {
 // ── Body ────────────────────────────────────────────────────────────────────
 const INTIMATE = ['breasts', 'nipples', 'pubic', 'vulva', 'anus'];
 const TIERS = [[0, 'Anchor · approve first'], [1, 'Derived from anchor'], [2, 'Second level']];
-const STATUS_LABEL = {not_started: 'Not started', generating: 'Generating', review: 'Review', approved: 'Approved', locked: 'Locked', outdated: 'Outdated'};
+const STATUS_LABEL = {not_started: 'Not started', generating: 'Generating', review: 'Needs approval', approved: 'Approved', locked: 'Locked', outdated: 'Outdated'};
 const MODE_LABEL = {reference: 'Reference', crop: 'Crop'};
 const PHOTO_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 17-5-5-9 8"/></svg>';
 let viewFilter = 'SFW';
@@ -1394,7 +1380,9 @@ function renderBody() {
   const shown = cat.views.filter(v => v.key !== 'face_front' || viewFilter !== 'NSFW').filter(inFilter);
   const req = cat.views.filter(v => v.required);
   const ok = req.filter(v => vs(v.key).status === 'approved').length;
-  el('body-summary').textContent = `${LEVEL_LABEL[cur.nsfw_level]} · ${ok} of ${req.length} required approved · v${cur.version}`;
+  const waiting = cat.views.filter(v => vs(v.key).display === 'review').length;
+  el('body-summary').textContent = `${LEVEL_LABEL[cur.nsfw_level]} · ${ok} of ${req.length} required approved · v${cur.version}` +
+    (waiting ? ` · ${waiting} waiting for your approval` : '');
   const hasNsfw = cat.views.some(isNsfw);
   el('view-filter').hidden = !hasNsfw;
   el('view-filter').innerHTML = (hasNsfw ? ['SFW', 'NSFW', 'All'] : ['SFW']).map(f =>
@@ -1443,9 +1431,13 @@ function renderViewPanel() {
   el('vp-title').textContent = v.label;
   el('vp-lineage').innerHTML = lineage(v.key).map(k => `<a href="#" onclick="openView('${k}');return false;">${esc(viewDef(k).label)}</a>`).join(' → ');
   const blockers = v.parents.filter(p => vs(p).status !== 'approved');
-  const banner = el('vp-banner');
-  banner.hidden = !['locked', 'outdated'].includes(st.display);
-  banner.className = 'banner ' + st.display;
+  const banner = el('vp-banner'), pending = images(v.key, 'candidate').length, main = canonOf(v.key);
+  const shown = ['locked', 'outdated'].includes(st.display) ? st.display : pending ? 'review' : '';
+  banner.hidden = !shown;
+  banner.className = 'banner ' + shown;
+  if (shown === 'review') banner.textContent = main
+    ? 'New options waiting. Your approved photo stays in use until you approve one of these.'
+    : 'Not approved yet — pick the best option below and press Approve. Nothing is used until you do.';
   if (st.display === 'locked') banner.innerHTML = `Locked until ${blockers.map(p => esc(viewDef(p).label)).join(' and ')} ${blockers.length > 1 ? 'are' : 'is'} approved.
     <button type="button" class="btn btn-ghost btn-sm" onclick="openView('${blockers[0]}')">Open ${esc(viewDef(blockers[0]).label)}</button>`;
   if (st.display === 'outdated') banner.textContent = 'A parent was re-approved since this was generated. Regenerate to match it.';
@@ -1472,9 +1464,6 @@ function renderViewPanel() {
     own.map(refTile).join('') +
     (refPop ? `<div class="ref-pop" onclick="event.stopPropagation()">${approved.map(o => { const c = canonOf(o.key);
       return `<button type="button" aria-pressed="${chosen.includes(c.id)}" onclick="toggleRef('${c.id}')"><img src="${esc(c.url)}" alt=""><span>${esc(o.label)}</span><i>${chosen.includes(c.id) ? '✓' : ''}</i></button>`; }).join('')}</div>` : '');
-  el('vp-strength-label').textContent = st.mode === 'crop' ? 'Detail-pass strength' : 'Reference influence';
-  el('vp-strength').value = st.strength;
-  strengthHint();
   const fl = k => ((cat.features || []).find(f => f.key === k) || {}).label || k;
   const traits = v.traits || [];
   const on = traits.filter(k => (cur.sheet || {})[k]), off = traits.filter(k => !(cur.sheet || {})[k]);
@@ -1482,9 +1471,10 @@ function renderViewPanel() {
   el('vp-traits').innerHTML = on.map(k => `<span class="trait">${esc(fl(k))}: <b>${esc(cur.sheet[k])}</b></span>`).join('');
   el('vp-traits-off').innerHTML = (off.length ? `Not set, so not sent: ${off.map(k => esc(fl(k))).join(', ')}. ` : '') +
     `<a href="#" onclick="go('body');return false;">Edit body profile</a>`;
-  const dressed = DRESSED.includes(v.key), main = canonOf(v.key);
+  const dressed = DRESSED.includes(v.key);
   const opts = images(v.key, 'canonical').concat(images(v.key, 'wardrobe'), images(v.key, 'candidate'));
   vpOptUrls = opts.map(o => o.url);
+  el('vp-opts-head').hidden = !pending;
   el('vp-opts').className = 'opts';
   el('vp-opts').innerHTML = opts.map((o, i) => {
     const age = (o.checks || {}).age, kept = o.role === 'canonical', worn = o.role === 'wardrobe';
@@ -1492,12 +1482,13 @@ function renderViewPanel() {
     const toWardrobe = dressed && main && main.id !== o.id && (main.outfit || '') !== (o.outfit || '');
     return `<div class="opt ${kept || worn ? 'kept' : ''}">
       <img class="opt-zoom" src="${esc(o.url)}" alt="${esc(v.label)} option" onclick="vpImgClick(event, ${i})">${label}
+      ${kept || worn ? '' : '<div class="opt-pending"><b class="st review">Not approved</b></div>'}
       ${kept ? `<div class="opt-act"><b class="st approved">${dressed ? 'Main' : 'Approved'}</b><span class="grow"></span>
         <button type="button" class="btn btn-ghost btn-sm" onclick="removeApproved()">Unapprove</button></div>` : worn ? `<div class="opt-act">
         <b class="st approved">Wardrobe</b><span class="grow"></span>
         <button type="button" class="btn btn-ghost btn-sm" onclick="approveView('${o.id}', true)">Make main</button>
         <button type="button" class="btn btn-ghost btn-sm" onclick="unapproveView('${o.id}')">Unapprove</button></div>` : `<div class="opt-act">
-        <button type="button" class="btn btn-primary btn-sm" ${locked ? 'disabled' : ''} title="${toWardrobe ? 'Approve for ' + esc(outfitLabel(o.outfit)) : ''}" onclick="approveView('${o.id}')">${toWardrobe ? 'Add to wardrobe' : 'Approve'}</button>
+        <button type="button" class="btn btn-primary btn-sm" ${locked ? 'disabled' : ''} title="${toWardrobe ? 'Approve for ' + esc(outfitLabel(o.outfit)) : ''}" onclick="approveView('${o.id}')">${toWardrobe ? 'Add to wardrobe' : 'Approve this photo'}</button>
         ${v.key === 'body_front' ? `<button type="button" class="btn btn-ghost btn-sm" onclick="runViewCheck('${o.id}')" title="Adult check">${age ? `<b class="tag ${age}">${age}</b>` : 'Check'}</button>` : ''}
         <button type="button" class="btn btn-ghost btn-sm" aria-label="Delete option" onclick="removeImage('${o.id}')">Delete</button></div>`}</div>`;
   }).join('') || `<p class="hint">No options yet. Pick how many variations, then generate.</p>`;
@@ -1534,22 +1525,6 @@ function askConfirm(text, yes) {
     box.onclick = e => { if (e.target === box) done(false); };
     document.addEventListener('keydown', key);
   });
-}
-// The number never reaches the model (Seedream refuses a denoise strength):
-// characters.build_view_prompt turns it into wording, so only the band matters.
-const BANDS = {
-  reference: [[0, .5, 'Loose', 'Asks for the same face and build, loosely. The model has room to drift.'],
-              [.5, 1, 'Exact', 'Asks for the identical face and body as the references.']],
-  crop: [[0, .4, 'Sharpen', 'Only sharpens detail and skin texture. Nothing else changes.'],
-         [.4, .7, 'Refine', 'Refines detail, keeping pose, skin tone and lighting.'],
-         [.7, 1, 'Redraw', 'Redraws the detail freely, keeping the same body and lighting.']]
-};
-function strengthHint() {
-  const val = +el('vp-strength').value, bands = BANDS[vs(selView).mode] || BANDS.reference;
-  const on = bands.find(b => val < b[1]) || bands[bands.length - 1];
-  el('vp-strength-val').textContent = `${on[2]} · ${val.toFixed(2)}`;
-  el('vp-bands').innerHTML = bands.map(b => `<span class="${b === on ? 'on' : ''}" style="flex:${b[1] - b[0]};">${b[2]}</span>`).join('');
-  el('vp-hint').textContent = on[3] + ' Sent as prompt wording, not a number, so only the band changes the result.';
 }
 function placeCropBox(b) {
   const box = el('crop-box');
@@ -1634,7 +1609,7 @@ async function queueViews(keys) {
   setGenerating(false);
   try { await reload(); } catch (_) {}
   const ok = keys.length - failed.size;
-  say(`${ok} of ${keys.length} ready to review.`, errs.length ? 'err' : 'ok');
+  say(`${ok} of ${keys.length} generated — open each one and approve a photo to use it.`, errs.length ? 'err' : 'ok');
   if (errs.length) showGenError(errs.join(' '), () => queueViews([...failed].length ? [...failed] : keys));
 }
 function generateRemaining() {
