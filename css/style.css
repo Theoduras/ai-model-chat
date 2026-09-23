@@ -1394,6 +1394,9 @@ body.page-dashboard select:focus {
   background: var(--bg);
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
+body.page-dashboard input:disabled,
+body.page-dashboard textarea:disabled,
+body.page-dashboard select:disabled { opacity: .6; cursor: not-allowed; border-color: var(--border); }
 body.page-dashboard textarea { min-height: 84px; resize: vertical; line-height: 1.55; }
 body.page-dashboard select {
   appearance: none;

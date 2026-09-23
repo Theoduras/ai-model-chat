@@ -1933,28 +1933,29 @@ function renderForm(slug, cfg) {
 
       <div class="field full">
         <label>Appearance</label>
-        <textarea id="f-appearance" rows="2" placeholder="a tall redhead with freckles and a gap-toothed smile">${esc(cfg.appearance || '')}</textarea>
+        <textarea id="f-appearance"${cfg.char_linked ? ' disabled' : ''} rows="2" placeholder="a tall redhead with freckles and a gap-toothed smile">${esc(cfg.appearance || '')}</textarea>
         <span class="hint">Write this and it replaces the boxes below — they only build a
           description when this is empty. Either way it is what every generated photo
           of her is built from, so she stays the same woman shot to shot.</span>
+        ${cfg.char_linked ? '<span class="hint">Face and body come from her character &mdash; change them in the <a href="/characters">character builder</a>.</span>' : ''}
       </div>
 
       <div class="field-row">
         <div class="field">
           <label>Body type</label>
-          <select id="f-body-type">${opt(['Any', 'Petite', 'Slim', 'Athletic', 'Curvy', 'BBW'], cfg.body_type)}</select>
+          <select id="f-body-type"${cfg.char_linked ? ' disabled' : ''}>${opt(['Any', 'Petite', 'Slim', 'Athletic', 'Curvy', 'BBW'], cfg.body_type)}</select>
         </div>
         <div class="field">
           <label>Chest size</label>
-          <select id="f-chest-size">${opt(['Any', 'Small', 'Medium', 'Large', 'Very large'], cfg.chest_size)}</select>
+          <select id="f-chest-size"${cfg.char_linked ? ' disabled' : ''}>${opt(['Any', 'Small', 'Medium', 'Large', 'Very large'], cfg.chest_size)}</select>
         </div>
         <div class="field">
           <label>Hair colour</label>
-          <input type="text" id="f-hair-colour" value="${esc(cfg.hair_colour || '')}" placeholder="jet black">
+          <input type="text" id="f-hair-colour"${cfg.char_linked ? ' disabled' : ''} value="${esc(cfg.hair_colour || '')}" placeholder="jet black">
         </div>
         <div class="field">
           <label>Eye colour</label>
-          <input type="text" id="f-eye-colour" value="${esc(cfg.eye_colour || '')}" placeholder="green">
+          <input type="text" id="f-eye-colour"${cfg.char_linked ? ' disabled' : ''} value="${esc(cfg.eye_colour || '')}" placeholder="green">
         </div>
         <div class="field">
           <label>Style</label>

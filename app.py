@@ -8162,6 +8162,7 @@ def api_persona_save(slug):
         blocked = _persona_cap_blocked(me)
         if blocked:
             return blocked
+    config.update(_persona_char_look(slug))
 
     # Premade originals can be overridden in place: the edit is saved to the DB
     # and shadows the repo file (durable in Postgres).
@@ -8175,6 +8176,20 @@ def api_persona_save(slug):
         return jsonify({'error': f'Save failed: {e}'}), 500
     _persona_sync_character(slug, config)
     return jsonify({'ok': True, 'slug': slug, 'prompt': prompt})
+
+
+def _persona_char_look(slug):
+    """The linked character's face and body, which a builder save may not
+    change: the character leads."""
+    from db import Character
+    s = _db_session()
+    try:
+        row = s.query(Character).filter(Character.slug == slug).first()
+        if not row:
+            return {'char_linked': False}
+        return dict(_char_persona_look(_char_json_sheet(row)), char_linked=True)
+    finally:
+        s.close()
 
 
 def _persona_sync_character(slug, config):
@@ -8534,7 +8549,7 @@ def _appearance_from_config(cfg, with_age=True):
     more than the dropdowns can, and composing over the top of it would fight
     her own words. Everything else is built from the character fields.
     """
-    if cfg.get('appearance'):
+    if cfg.get('appearance') and not cfg.get('char_linked'):
         return cfg['appearance']
 
     age = str(cfg.get('age') or '24').strip()
@@ -30195,6 +30210,7 @@ def _char_to_persona(row, owner_id=None, extra=None):
     if row.nsfw_level != 'sfw':
         config['nsfw_level'] = row.nsfw_level
     config.update(_char_persona_look(_char_json_sheet(row)))
+    config['char_linked'] = True
     if owner_id is None:
         owner_id = _persona_owner(row.slug)
     db_save_persona(row.slug, row.name, config, build_system_prompt(config),
@@ -30284,7 +30300,9 @@ def _char_rename_legacy():
         for row in s.query(D.Character).filter(D.Character.slug.isnot(None)).all():
             look = _char_persona_look(_char_json_sheet(row))
             saved = db_get_persona(row.slug)
-            if look and saved and not (saved.get('config') or {}).get('hair_colour'):
+            have = (saved or {}).get('config') or {}
+            if saved and (not have.get('char_linked')
+                          or any(have.get(k) != v for k, v in look.items())):
                 _char_to_persona(row)
     except Exception:
         s.rollback()
@@ -30745,8 +30763,13 @@ def api_character_link(char_id):
         if not row:
             return jsonify({'ok': False, 'error': 'Unknown character'}), 404
         if not persona:
-            row.slug = None
+            old, row.slug = row.slug, None
             s.commit()
+            if old and db_get_persona(old):
+                config = dict(_persona_config(old))
+                config.pop('char_linked', None)
+                db_save_persona(old, config.get('name') or old, config,
+                                build_system_prompt(config), owner_id=_persona_owner(old))
             return jsonify({'ok': True, 'character': _char_json(s, row)})
         if not _char_persona_ok(persona):
             return jsonify({'ok': False, 'error': 'Not your persona'}), 403
