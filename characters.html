@@ -726,7 +726,7 @@ async function api(url, opts) {
     headers: {'Content-Type': 'application/json'}}, opts, {body: JSON.stringify(opts.body)}) : opts);
   let data = {};
   try { data = await r.json(); } catch (e) {}
-  if (!r.ok || data.ok === false) throw new Error(data.error || ('Request failed (' + r.status + ')'));
+  if (!r.ok || data.ok === false) throw Object.assign(new Error(data.error || ('Request failed (' + r.status + ')')), {status: r.status, plain: !data.error});
   return data;
 }
 // The status line lives in the step footer, which render() redraws, so the
@@ -868,7 +868,8 @@ function render() {
   // slide-over it would cover the tree the moment the step opens.
   if (step === 'views' && !selView && matchMedia('(min-width: 1320px)').matches) {
     const pool = cat.views.filter(inFilter);
-    const next = pool.find(v => vs(v.key).status !== 'approved' && vs(v.key).display !== 'locked') || pool[0];
+    const open = v => vs(v.key).status !== 'approved' && vs(v.key).display !== 'locked';
+    const next = pool.find(v => v.required && open(v)) || pool.find(open) || pool[0];
     selView = next ? next.key : '';
   }
   ({describe: renderDescribe, pick: renderPick, check: renderCheck, body: renderBody, views: renderBody, finish: renderFinish})[step]();
@@ -1204,8 +1205,36 @@ async function linkPersona(slug) {
 
 // One generation at a time: a second press would start a second paid job.
 let generating = false;
+// A bare status code tells a creator nothing; say what went wrong instead.
+function friendly(e) {
+  if (e instanceof TypeError) return "We couldn't reach the server. Check your connection.";
+  if (!e.plain) return e.message;
+  const st = e.status || 0;
+  if (st === 401 || st === 403 || st === 404) return 'Your session may have expired. Reload the page and sign in again.';
+  if (st === 402) return "You don't have enough tokens for this. Top up, then try again.";
+  if (st === 429) return 'Too many generations at once. Wait a moment.';
+  if (st >= 500) return 'The image service ran into a problem on its side.';
+  return 'Something went wrong while generating.';
+}
+function showGenError(msg, retry) {
+  const box = el('gen-overlay');
+  box.hidden = false;
+  box.querySelector('.modal').setAttribute('role', 'alert');
+  el('gen-dots').hidden = true;
+  el('gen-title').textContent = 'Generation failed';
+  el('gen-msg').textContent = msg.replace(/\s*$/, '') + ' Please try again.';
+  el('gen-actions').hidden = false;
+  el('gen-retry').onclick = () => { closeGenError(); retry(); };
+}
+function closeGenError() {
+  el('gen-overlay').hidden = true;
+  el('gen-overlay').querySelector('.modal').setAttribute('role', 'status');
+  el('gen-dots').hidden = false; el('gen-actions').hidden = true;
+  el('gen-msg').textContent = 'This usually takes under a minute. Keep this page open.';
+}
 function setGenerating(on) {
   generating = on;
+  if (on) closeGenError();
   if (on) el('gen-title').textContent = `Generating ${batch} option${batch === 1 ? '' : 's'}…`;
   el('gen-overlay').hidden = !on;
   document.querySelectorAll('[onclick^="generate("]').forEach(b => {
@@ -1227,7 +1256,11 @@ async function generate(view, n) {
     await reload();
     if (view === 'face_front') go('pick');
     say(d.warning || 'New options are ready.', d.warning ? 'err' : 'ok');
-  } catch (e) { say(e.message, 'err'); }
+  } catch (e) {
+    setGenerating(false);
+    showGenError(friendly(e), () => generate(view, n));
+    try { await reload(); } catch (_) {}
+  }
   finally { if (generating) setGenerating(false); }
 }
 async function waitJob(id) {
@@ -1560,18 +1593,23 @@ async function queueViews(keys) {
   if (!keys.length || generating) return say('Nothing to generate.');
   setGenerating(true);
   el('gen-title').textContent = `Generating ${keys.length} view${keys.length === 1 ? '' : 's'}…`;
-  const jobs = [], errs = [];
+  const jobs = [], owner = [], errs = [], failed = new Set();
   for (const k of keys) {
-    try { const d = await submitView(k); jobs.push(...(d.jobs || [d.job])); if (d.warning) errs.push(d.warning); }
-    catch (e) { errs.push(viewDef(k).label + ': ' + e.message); }
+    try {
+      const d = await submitView(k);
+      for (const id of d.jobs || [d.job]) { jobs.push(id); owner.push(k); }
+      if (d.warning) errs.push(d.warning);
+    }
+    catch (e) { errs.push(viewDef(k).label + ': ' + friendly(e)); failed.add(k); }
   }
   // Polling each job is what collects its images when no worker runs.
   const done = await Promise.allSettled(jobs.map(waitJob));
-  done.filter(r => r.status === 'rejected').forEach(r => errs.push(r.reason.message));
+  done.forEach((r, i) => { if (r.status === 'rejected') { errs.push(viewDef(owner[i]).label + ': ' + friendly(r.reason)); failed.add(owner[i]); } });
   setGenerating(false);
-  await reload();
-  const ok = done.filter(r => r.status === 'fulfilled').length;
-  say(`${ok} of ${keys.length} ready to review.` + (errs.length ? ' ' + errs.join(' ') : ''), errs.length ? 'err' : 'ok');
+  try { await reload(); } catch (_) {}
+  const ok = keys.length - failed.size;
+  say(`${ok} of ${keys.length} ready to review.`, errs.length ? 'err' : 'ok');
+  if (errs.length) showGenError(errs.join(' '), () => queueViews([...failed].length ? [...failed] : keys));
 }
 function generateRemaining() {
   queueViews(cat.views.filter(inFilter).filter(v => ['not_started', 'outdated'].includes(vs(v.key).display)).map(v => v.key));
@@ -1683,9 +1721,13 @@ document.addEventListener('keydown', e => {
 </script>
 <div class="modal-overlay ch-busy" id="gen-overlay" hidden>
   <div class="modal" role="status" aria-live="polite">
-    <span class="loader-dots lg" aria-hidden="true"><i></i><i></i><i></i></span>
+    <span class="loader-dots lg" id="gen-dots" aria-hidden="true"><i></i><i></i><i></i></span>
     <strong id="gen-title">Generating…</strong>
-    <p>This usually takes under a minute. Keep this page open.</p>
+    <p id="gen-msg">This usually takes under a minute. Keep this page open.</p>
+    <div id="gen-actions" hidden style="display:flex; gap:8px; justify-content:center; margin-top:14px;">
+      <button type="button" class="btn" onclick="closeGenError()">Close</button>
+      <button type="button" class="btn btn-primary" id="gen-retry">Try again</button>
+    </div>
   </div>
 </div>
 </body>
