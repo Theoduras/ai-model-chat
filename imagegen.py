@@ -678,130 +678,6 @@ NEGATIVE_PROMPT = (
 )
 
 
-# ── Guided prompt builder ─────────────────────────────────────────────────────
-# The vocabulary a creator assembles a prompt from, instead of typing one. Every
-# option is ours and carries the fragment it contributes, which is what makes
-# this safe to offer at all: nothing here can name a real person, imply anyone
-# under age, or describe an act nobody agreed to, and free text still passes
-# through the persona's banned terms on the way out.
-#
-# Each option is gated by the same LEVEL_ORDER ceiling the shots and scenes use,
-# so a persona set to suggestive is never offered explicit wording.
-PROMPT_QUESTIONS = (
-    {'id': 'position', 'label': 'Position', 'advanced': False, 'options': (
-        ('standing', 'Standing', 'sfw', 'standing'),
-        ('sitting', 'Sitting', 'sfw', 'sitting, weight on one hip'),
-        ('leaning', 'Leaning', 'sfw', 'leaning against the wall'),
-        ('lying-front', 'Lying on her front', 'suggestive',
-         'lying on her front, propped on her elbows'),
-        ('lying-back', 'Lying on her back', 'suggestive', 'lying on her back'),
-        ('kneeling', 'Kneeling', 'suggestive', 'kneeling, back arched'),
-        ('on-all-fours', 'On all fours', 'moderate', 'on all fours, arched'),
-        ('straddling', 'Straddling', 'explicit', 'straddling, knees apart'),
-    )},
-    {'id': 'action', 'label': 'What she is doing', 'advanced': False, 'options': (
-        ('still', 'Holding the pose', 'sfw', 'holding still, looking at the camera'),
-        ('glance', 'Looking back', 'sfw', 'glancing back over her shoulder'),
-        ('undressing', 'Undressing', 'suggestive', 'slipping one strap off her shoulder'),
-        ('touching', 'Touching herself', 'moderate',
-         'one hand on her own body, unhurried'),
-        ('explicit-touch', 'Explicit', 'explicit', 'touching herself explicitly'),
-    )},
-    {'id': 'wardrobe', 'label': 'Wearing', 'advanced': False, 'options': (
-        ('casual', 'Casual', 'sfw', 'an oversized shirt'),
-        ('dress', 'Dressed up', 'sfw', 'a fitted dress'),
-        ('lingerie', 'Lingerie', 'suggestive', 'matching lingerie'),
-        ('sheer', 'Sheer', 'suggestive', 'a sheer slip'),
-        ('topless', 'Topless', 'moderate', 'topless'),
-        ('nude', 'Nude', 'moderate', 'nude'),
-    )},
-    {'id': 'setting', 'label': 'Where', 'advanced': False, 'options': (
-        ('bedroom', 'Bedroom', 'sfw', 'in her bedroom, unmade bed'),
-        ('bathroom', 'Bathroom', 'sfw', 'in the bathroom, mirror behind her'),
-        ('kitchen', 'Kitchen', 'sfw', 'in the kitchen, morning light'),
-        ('hotel', 'Hotel room', 'sfw', 'a hotel room, curtains half drawn'),
-        ('shower', 'Shower', 'suggestive', 'in the shower, water on the glass'),
-    )},
-    {'id': 'camera', 'label': 'Camera', 'advanced': False, 'options': (
-        ('phone', 'Phone selfie', 'sfw', 'shot on a phone, held at arm length'),
-        ('eye', 'Eye level', 'sfw', 'eye level, 35mm'),
-        ('above', 'From above', 'sfw', 'shot from above, looking up at the lens'),
-        ('low', 'From below', 'sfw', 'low angle'),
-        ('mirror', 'Mirror', 'sfw', 'mirror selfie, phone visible'),
-    )},
-    {'id': 'lighting', 'label': 'Light', 'advanced': True, 'options': (
-        ('warm', 'Warm lamp', 'sfw', 'warm lamplight'),
-        ('window', 'Window light', 'sfw', 'soft window light'),
-        ('neon', 'Neon', 'sfw', 'neon spill, dusk'),
-        ('candle', 'Candlelight', 'sfw', 'candlelight'),
-    )},
-    {'id': 'mood', 'label': 'Mood', 'advanced': True, 'options': (
-        ('playful', 'Playful', 'sfw', 'playful, half smiling'),
-        ('sleepy', 'Sleepy', 'sfw', 'sleepy, just woken up'),
-        ('bored', 'Deadpan', 'sfw', 'deadpan, unimpressed'),
-        ('intense', 'Intense', 'suggestive', 'holding the look, unsmiling'),
-    )},
-    {'id': 'pacing', 'label': 'Pacing', 'advanced': True, 'video': True, 'options': (
-        ('still', 'Almost still', 'sfw', 'barely moving, a slow breath'),
-        ('slow', 'Slow', 'sfw', 'one slow, deliberate movement'),
-        ('turn', 'Turns to camera', 'sfw', 'turning towards the camera'),
-    )},
-)
-
-
-def prompt_questions(level, kind='image'):
-    """The questions to ask, with the options this persona's level allows.
-
-    Filtered rather than merely hidden: a level she is not set to is not in the
-    payload at all, so nothing in the browser can ask for it.
-    """
-    try:
-        ceiling = LEVEL_ORDER.index(level or 'sfw')
-    except ValueError:
-        ceiling = 0
-    out = []
-    for q in PROMPT_QUESTIONS:
-        if q.get('video') and kind != 'video':
-            continue
-        options = [{'id': oid, 'label': label, 'level': lvl}
-                   for oid, label, lvl, _ in q['options']
-                   if LEVEL_ORDER.index(lvl) <= ceiling]
-        if options:
-            out.append({'id': q['id'], 'label': q['label'],
-                        'advanced': bool(q.get('advanced')), 'options': options})
-    return out
-
-
-def prompt_fragments(answers, level, kind='image'):
-    """The chosen fragments, in question order, dropping anything above her
-    level — the ceiling is enforced here and not only where the list is
-    built, because answers arrive from a browser."""
-    try:
-        ceiling = LEVEL_ORDER.index(level or 'sfw')
-    except ValueError:
-        ceiling = 0
-    picked = []
-    for q in PROMPT_QUESTIONS:
-        if q.get('video') and kind != 'video':
-            continue
-        want = (answers or {}).get(q['id'])
-        for oid, _label, lvl, fragment in q['options']:
-            if oid == want and LEVEL_ORDER.index(lvl) <= ceiling:
-                picked.append(fragment)
-    return picked
-
-
-def build_generated_prompt(answers, appearance='', level='sfw', kind='image'):
-    """Assemble a prompt from the guided answers. Deterministic, and the only
-    path an explicit prompt ever takes — Google refuses this content at any
-    safety level, so it cannot be written there."""
-    parts = prompt_fragments(answers, level, kind)
-    if not parts:
-        return ''
-    body = ', '.join(parts)
-    return f'{appearance.strip()}, {body}'.strip(' ,') if appearance else body
-
-
 def shots_for_level(level):
     """The shots a persona at this NSFW level may ask for."""
     try:
@@ -872,15 +748,27 @@ def build_prompt(appearance, shot, outfit=None, has_reference=False, extra='',
               'sharp focus, realistic. Fictional adult woman, '
               f'{max(18, int(age or 25))} years old.' +
               direction + extra)
+    return finish_prompt(prompt, banned, age)
 
-    # A character's banned terms are struck from the finished prompt rather
-    # than trusted to the negative: a word the creator has forbidden should not
-    # reach the model at all, whichever field it was typed into.
+
+def finish_prompt(prompt, banned=(), age=None):
+    """What every still's prompt passes through last, whoever wrote it.
+
+    A character's banned terms are struck from the finished prompt rather than
+    trusted to the negative: a word the creator has forbidden should not reach
+    the model at all, whichever field it was typed into. And a prompt the
+    creator edited by hand still says she is an adult, because the edit is
+    exactly where that sentence would go missing.
+    """
     for term in (banned or ()):
         term = (term or '').strip()
         if term:
             prompt = re.sub(re.escape(term), '', prompt, flags=re.I)
-    return re.sub(r'\s{2,}', ' ', prompt).strip()
+    prompt = re.sub(r'\s{2,}', ' ', prompt).strip()
+    if 'fictional adult woman' not in prompt.lower():
+        prompt = (prompt.rstrip(' .') + '. ' if prompt else '') + (
+            f'Fictional adult woman, {max(18, int(age or 25))} years old.')
+    return prompt
 
 
 def engine_report():

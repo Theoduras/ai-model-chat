@@ -173,7 +173,7 @@
     .gen-f select { transition: border-color .15s ease, box-shadow .15s ease; }
     .gen-f select:disabled, .gen-f input:disabled { opacity: .5; }
 
-    /* The guided builder reads as one block rather than a run of loose rows. */
+    /* A boxed sub-panel reads as one block rather than a run of loose rows. */
     .gen-builder {
       display: none; flex-direction: column; gap: 10px;
       border: 1px solid var(--border); border-radius: var(--r);
@@ -385,21 +385,6 @@
 
     <div class="gen-panel">
       <div class="gen-head"><b>4</b><h2 id="gen-prompt-head">Prompt</h2></div>
-        <div class="gen-f" style="gap:6px;">
-          <button type="button" class="btn-ai" id="gen-build-btn"
-                  style="align-self:flex-start;" onclick="togglePromptBuilder()">
-            Build a prompt</button>
-          <div id="gen-builder" class="gen-builder">
-            <div id="gen-builder-qs" style="display:flex; flex-direction:column; gap:9px;"></div>
-            <label style="display:flex; gap:6px; align-items:center; font-size:.82rem;">
-              <input type="checkbox" id="gen-builder-adv" onchange="renderBuilder()">
-              More detail</label>
-            <div style="display:flex; gap:8px; align-items:center;">
-              <button type="button" class="btn-ai" onclick="runPromptBuilder()">Write it</button>
-              <span class="hint" style="margin:0;" id="gen-builder-note"></span>
-            </div>
-          </div>
-        </div>
       <div id="gen-image-form" style="display:flex; flex-direction:column; gap:11px;">
         <div class="gen-form">
           <label class="gen-f"><span>Scene</span>
@@ -417,8 +402,15 @@
         </div>
         <label class="gen-f"><span>Direction</span>
           <input id="gen-direction" maxlength="300" placeholder="looking back over her shoulder, phone in one hand"></label>
-        <label class="gen-f"><span>Add to the prompt</span>
-          <textarea id="gen-prompt" rows="5" placeholder="leaning against the window, morning light, looking away from the camera"></textarea></label>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <button type="button" class="btn-ai" id="gen-write-btn" onclick="writePrompt()">
+            Write the prompt</button>
+          <span class="hint" style="margin:0;" id="gen-write-note"></span>
+        </div>
+        <label class="gen-f"><span>Prompt</span>
+          <textarea id="gen-prompt" rows="6" maxlength="2000"
+                    placeholder="Fill in the dropdowns and click Write the prompt — or type your own"></textarea></label>
+        <span class="hint" style="margin:-6px 0 0;">Left empty, the prompt is built from the dropdowns when you generate.</span>
         <label class="gen-f"><span>Keep out of the shot</span>
           <textarea id="gen-negative" rows="3" placeholder="sunglasses, jewellery, other people"></textarea></label>
         <span class="hint" style="margin:0;">The safety baseline is added to every negative prompt and cannot be edited away.</span>
@@ -1518,7 +1510,6 @@ function syncSwapKling() {
   el('gen-swap-motion').placeholder = kling
     ? 'same room, soft daylight, she smiles at the end'
     : 'keep her hair down, match the original lighting';
-  el('gen-build-btn').style.display = genJob === 'swap' ? 'none' : '';
 }
 
 function swapMaxSeconds() {
@@ -1808,59 +1799,53 @@ async function uploadSwapSource(file, into) {
   renderGenForm();
 }
 
-// The guided prompt builder. The questions and the wording both come from the
-// server: her NSFW level decides which options exist, and an explicit prompt is
-// assembled there rather than written by Gemini, which refuses this content.
-let genBuilder = null;
-const genAnswers = {};
+// Writes the prompt the job would build from these choices and her character,
+// so the creator can read and edit it. It is only a snapshot of the choices,
+// so changing one afterwards says so rather than silently disagreeing.
+let genWritten = null;
 
-async function togglePromptBuilder() {
-  const box = el('gen-builder');
-  const open = box.style.display !== 'flex';
-  box.style.display = open ? 'flex' : 'none';
-  if (!open || genBuilder) { if (open) renderBuilder(); return; }
-  try {
-    const res = await fetch('/api/generate/prompt/options?persona=' +
-      encodeURIComponent(slug()) + '&kind=' + (genMake === 'image' ? 'image' : 'video') +
-      '&rating=' + genRating);
-    const d = await res.json();
-    if (!d.ok) throw new Error(d.error || 'could not load the questions');
-    genBuilder = d;
-    renderBuilder();
-  } catch (e) { setGenStatus('✗ ' + e.message, false); }
+function promptChoices() {
+  return {
+    persona: slug(), rating: genRating, model: el('gen-model').value,
+    shot: el('gen-shot').value, scene: el('gen-scene').value,
+    style: el('gen-style').value, camera: el('gen-camera').value,
+    lighting: el('gen-lighting').value,
+    direction: el('gen-direction').value.trim(),
+    reference_media: el('gen-ref').value || '',
+  };
 }
 
-function renderBuilder() {
-  if (!genBuilder) return;
-  const adv = el('gen-builder-adv').checked;
-  el('gen-builder-qs').innerHTML = genBuilder.questions
-    .filter(q => adv || !q.advanced)
-    .map(q => `<label class="gen-f"><span>${esc(q.label)}</span>
-        <select onchange="genAnswers['${q.id}'] = this.value">
-          ${opt('', '—', genAnswers[q.id] || '')}
-          ${q.options.map(o => opt(o.id, o.label, genAnswers[q.id] || '')).join('')}
-        </select></label>`).join('');
-}
-
-async function runPromptBuilder() {
-  el('gen-builder-note').textContent = 'Writing…';
+async function writePrompt() {
+  const note = el('gen-write-note');
+  const btn = el('gen-write-btn');
+  const choices = promptChoices();
+  btn.disabled = true;
+  note.textContent = 'Writing…';
   try {
     const res = await fetch('/api/generate/prompt', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ persona: slug(), rating: genRating,
-                             kind: genMake === 'image' ? 'image' : 'video',
-                             answers: genAnswers }),
+      body: JSON.stringify(choices),
     });
     const d = await res.json();
     if (!d.ok) throw new Error(d.error || 'could not write it');
-    const field = el(promptFieldId());
-    if (field) field.value = d.prompt;
-    el('gen-builder-note').textContent =
-      d.engine === 'gemini' ? 'Written — edit it before you generate.'
-                            : 'Built — edit it before you generate.';
-    genQuote();
-  } catch (e) { el('gen-builder-note').textContent = '✗ ' + e.message; }
+    el('gen-prompt').value = d.prompt;
+    genWritten = { choices: JSON.stringify(choices), prompt: d.prompt };
+    note.textContent = 'Written from your choices and her character — edit it before you generate.';
+  } catch (e) { note.textContent = '✗ ' + e.message; }
+  finally { btn.disabled = false; }
 }
+
+function checkPromptStale() {
+  if (!genWritten || !el('gen-prompt').value.trim()) return;
+  if (JSON.stringify(promptChoices()) !== genWritten.choices) {
+    el('gen-write-note').textContent = 'Choices changed — write the prompt again.';
+  }
+}
+['change', 'input'].forEach(t => document.addEventListener(t, e => {
+  const id = e.target && e.target.id;
+  if (['gen-shot', 'gen-scene', 'gen-style', 'gen-camera', 'gen-lighting',
+       'gen-direction', 'gen-ref', 'gen-model'].includes(id)) checkPromptStale();
+}));
 
 // What this job is still missing, said plainly, or '' when it is ready. One
 // place, so the button text and the submit guard can never disagree.
@@ -1880,18 +1865,6 @@ const JOB_VERBS = {
   reel: 'Make the reel', swap: 'Swap her in', animate: 'Animate her',
   extend: 'Extend it', multiref: 'Generate',
 };
-
-// Where the prompt builder writes. Each job has exactly one free-text field,
-// and a builder that writes into a hidden one is a builder that did nothing.
-const JOB_PROMPT_FIELDS = {
-  image: 'gen-prompt', swap: 'gen-swap-motion', animate: 'gen-video-motion',
-  reel: 'gen-reel-prompt', extend: 'gen-extend-motion',
-  multiref: 'gen-multiref-motion',
-};
-
-function promptFieldId() {
-  return JOB_PROMPT_FIELDS[genJob] || 'gen-prompt';
-}
 
 function genQuote() {
   if (!genPrices) return;
@@ -2012,6 +1985,7 @@ async function runGeneration() {
         batch: parseInt(el('gen-batch').value || '1', 10),
         reference_media: el('gen-ref').value || '',
         prompt: el('gen-prompt').value.trim(),
+        prompt_mode: el('gen-prompt').value.trim() ? 'full' : '',
         negative: el('gen-negative').value.trim(),
         scene: el('gen-scene').value,
         style: el('gen-style').value,

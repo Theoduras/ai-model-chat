@@ -28755,6 +28755,12 @@ def _gen_spec(slug, body, user):
         batch = max(1, min(8, int(body.get('batch') or 1)))
         spec.update({'shot': shot, 'model': model, 'resolution': resolution,
                      'batch': batch, 'outfit': body.get('outfit') or {}})
+        # A full prompt is the whole text the still is sent with, written by
+        # the studio from the dropdowns and her character, so it outgrows the
+        # few words `prompt` otherwise carries.
+        if body.get('prompt_mode') == 'full' and spec['prompt_extra']:
+            spec['prompt_full'] = True
+            spec['prompt_extra'] = (body.get('prompt') or '').strip()[:2000]
         # Explicit is derived from the shot, never sent alongside it: one fact
         # with two sources is one that drifts. Identity carries no add-on now —
         # Seedream conditions on the reference inside the call it already bills.
@@ -29600,6 +29606,36 @@ def _character_content(spec):
             CH.content_clause(snap['sheet'], level, snap['body_type']), snap['age'])
 
 
+def _gen_image_prompt(slug, spec, has_reference):
+    """The prompt a still is sent with. One function for the job and for the
+    studio's Write the prompt button, so what the button shows is what the job
+    would have built. A prompt the creator wrote or edited is sent as it
+    stands, but through the same finish: banned terms out, adult clause in."""
+    cfg = _persona_config(slug)
+    banned = cfg.get('banned_terms') or []
+    if isinstance(banned, str):
+        banned = [t for t in re.split(r'[,\n]', banned) if t.strip()]
+    snap = spec.get('character')
+    clause, age = '', None
+    if snap:
+        level = CH.job_level(spec.get('shot'), spec.get('scene'))
+        clause = CH.content_clause(snap['sheet'], level, snap['body_type'])
+        age = snap['age']
+    if spec.get('prompt_full'):
+        return imagegen.finish_prompt(spec.get('prompt_extra', ''), banned, age)
+    return imagegen.build_prompt(
+        _appearance_from_config(cfg), spec.get('shot'),
+        spec.get('outfit'), has_reference,
+        extra=spec.get('prompt_extra', ''),
+        style=spec.get('style', ''), scene=spec.get('scene', ''),
+        camera=spec.get('camera', ''),
+        lighting=spec.get('lighting', ''),
+        direction=' '.join(filter(None, (
+            clause, _prop_from_config(cfg, spec.get('style', '')),
+            spec.get('direction', '')))),
+        banned=banned, age=age)
+
+
 def _character_finish(job_id, spec, workspace, urls):
     from db import CharacterImage, update_generation
     made = []
@@ -30306,81 +30342,46 @@ def api_generate_models():
         return jsonify({'ok': False, 'error': str(e)[:300]}), 200
 
 
-@app.route('/api/generate/prompt/options')
-def api_generate_prompt_options():
-    """The questions the prompt builder asks, already cut to this persona's
-    NSFW level. Filtered server-side: an option she is not set for is not in
-    the payload, so nothing in the browser can ask for it."""
-    blocked = _require_admin()
-    if blocked:
-        return blocked
-    slug = (request.args.get('persona') or '').strip().lower()
-    if not re.match(r'^[a-z0-9_-]+$', slug or ''):
-        return jsonify({'ok': False, 'error': 'Invalid persona'}), 400
-    mine = owned_slugs()
-    if mine is not None and slug not in mine:
-        return jsonify({'ok': False, 'error': 'Not your persona'}), 403
-    kind = 'video' if (request.args.get('kind') or '') == 'video' else 'image'
-    level = ('sfw' if (request.args.get('rating') or '') == 'sfw'
-             else 'explicit')
-    return jsonify({'ok': True, 'level': level, 'kind': kind,
-                    'questions': imagegen.prompt_questions(level, kind)})
-
-
 @app.route('/api/generate/prompt', methods=['POST'])
 def api_generate_prompt():
-    """Turn the guided answers into a prompt.
+    """The prompt a still would be sent with, from the studio's dropdowns and
+    her character, for the creator to read and edit before she generates.
 
-    Two engines on purpose. Safe work goes to Gemini to be written as one
-    natural line; explicit work never can -- Google refuses this content at any
-    safety level, so it is assembled from the vocabulary instead. Gemini
-    failing or declining falls back to the same assembler, because a builder
-    that returns nothing is one nobody uses.
+    Validated through the job's own `_gen_spec`, so a choice the job would
+    refuse is refused here too. Deterministic and never rewritten by Gemini:
+    a rewrite is free to drop the sentence that ties her to the reference.
     """
     blocked = _require_admin()
     if blocked:
         return blocked
-    body = request.get_json(silent=True) or {}
+    user = _current_user()
+    body = dict(request.get_json(silent=True) or {}, kind='image', prompt='')
+    body.pop('job', None)
     slug = str(body.get('persona') or '').strip().lower()
     if not re.match(r'^[a-z0-9_-]+$', slug or ''):
         return jsonify({'ok': False, 'error': 'Invalid persona'}), 400
     mine = owned_slugs()
     if mine is not None and slug not in mine:
         return jsonify({'ok': False, 'error': 'Not your persona'}), 403
-
-    kind = 'video' if body.get('kind') == 'video' else 'image'
-    answers = body.get('answers') or {}
-    cfg = _persona_config(slug)
-    level = 'sfw' if body.get('rating') == 'sfw' else 'explicit'
-    appearance = _appearance_from_config(cfg)
-    built = imagegen.build_generated_prompt(answers, appearance, level, kind)
-    if not built:
-        return jsonify({'ok': False,
-                        'error': 'Pick at least one answer first.'}), 400
-
-    prompt, engine = built, 'vocabulary'
-    if level == 'sfw' and client is not None:
+    try:
+        spec = _gen_spec(slug, body, user)
+    except (imagegen.GenerationError, CR.PricingError) as e:
+        return jsonify({'ok': False, 'error': str(e)[:300]}), 400
+    char = _character_snapshot(slug)
+    if char:
+        spec['character'] = char
+    # Whether the job would carry a reference, without signing any URLs: the
+    # lead sentence differs, and that is all this needs to know.
+    has_ref = bool(spec.get('reference_media')) or bool(
+        char and CH.snapshot_views(char, spec.get('shot'), spec.get('scene')))
+    if not has_ref:
+        from db import model_references
+        s = _db_session()
         try:
-            resp = client.models.generate_content(
-                model=MODEL_NAME,
-                contents=[{'role': 'user', 'parts': [{'text': built}]}],
-                config=types.GenerateContentConfig(
-                    system_instruction=(
-                        'Rewrite these photo direction notes as one flowing '
-                        'sentence of image-generation prompt. Keep every '
-                        'detail. Add nothing that is not in the notes: no '
-                        'names, no ages, no brands. Reply with the sentence '
-                        'and nothing else.'),
-                    temperature=0.7),
-            )
-            written = (_gemini_text(resp) or '').strip()
-            if written:
-                prompt, engine = written[:600], 'gemini'
-        except Exception as e:
-            logger.info('prompt builder fell back to the vocabulary: %s',
-                        str(e)[:120])
-    return jsonify({'ok': True, 'prompt': prompt, 'engine': engine,
-                    'level': level})
+            has_ref = bool(model_references(s, slug, spec.get('model') or ''))
+        finally:
+            s.close()
+    return jsonify({'ok': True, 'prompt': _gen_image_prompt(slug, spec, has_ref)})
 
 
 @app.route('/api/generate/job', methods=['POST'])
@@ -30491,27 +30492,12 @@ def _gen_start(job_id, slug, spec, workspace):
                 call['prompt'] = spec['prompt']
                 provider_job, result = provider.submit_image(call)
             elif spec['kind'] == 'image':
-                cfg = _persona_config(slug)
-                char_refs, char_clause, char_age = _character_content(spec)
+                char_refs = _character_content(spec)[0]
                 refs = (char_refs + _gen_reference_urls(slug, spec.get('model'))
                         )[:imagegen.MAX_REFERENCES]
                 if refs:
                     call['reference_urls'] = refs
-                banned = cfg.get('banned_terms') or []
-                if isinstance(banned, str):
-                    banned = [t for t in re.split(r'[,\n]', banned) if t.strip()]
-                call['prompt'] = imagegen.build_prompt(
-                    _appearance_from_config(cfg), spec.get('shot'),
-                    spec.get('outfit'), bool(ref_b64 or refs),
-                    extra=spec.get('prompt_extra', ''),
-                    style=spec.get('style', ''), scene=spec.get('scene', ''),
-                    camera=spec.get('camera', ''),
-                    lighting=spec.get('lighting', ''),
-                    direction=' '.join(filter(None, (
-                        char_clause,
-                        _prop_from_config(cfg, spec.get('style', '')),
-                        spec.get('direction', '')))),
-                    banned=banned, age=char_age)
+                call['prompt'] = _gen_image_prompt(slug, spec, bool(ref_b64 or refs))
                 provider_job, result = provider.submit_image(call)
             else:
                 job = spec.get('job') or (
