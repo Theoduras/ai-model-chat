@@ -7,7 +7,7 @@ type, so a second one is a new table entry rather than a rewrite.
 """
 import re
 
-from imagegen import LEVEL_ORDER, SCENES, SHOT_LEVEL
+from imagegen import LEVEL_ORDER, PHOTO_LOOK, SCENES, SHOT_LEVEL
 
 MIN_AGE = 18
 
@@ -159,8 +159,7 @@ YOUTH_TERMS = ('child', 'kid', 'teen', 'underage', 'minor', 'young girl',
 
 # ── Views ─────────────────────────────────────────────────────────────────────
 
-STUDIO = ('Even soft studio lighting, plain neutral grey background, sharp '
-          'focus, ultra-detailed natural skin texture, highest resolution.')
+STUDIO = 'Soft natural daylight, plain light-grey wall behind her. ' + PHOTO_LOOK
 
 # Pose and lighting only reword a view; the view's framing still decides what
 # is shown, so neither can move a view past its rating.
@@ -646,6 +645,8 @@ def build_view_prompt(key, sheet, age, has_reference, body_type='female',
     posed = POSES.get(pose or '', ('', ''))[1]
     posed = f' Pose: {posed}.' if posed else ''
     light = LIGHTING.get(lighting or '', ('', STUDIO))[1]
+    if PHOTO_LOOK not in light:
+        light = light.rstrip(' .') + '. ' + PHOTO_LOOK
     zoom = (' Zoomed in: the subject fills the whole frame; no face, no full body, nothing '
             'beyond the subject in shot.') if v.get('zoom') else ''
     return (lead + zoom + body + posed + ' ' + light + ' ' + adult_clause(age)).strip()

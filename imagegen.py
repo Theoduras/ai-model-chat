@@ -674,8 +674,15 @@ NEGATIVE_PROMPT = (
     'deformed, disfigured, extra limbs, extra fingers, fused fingers, '
     'mutated hands, bad anatomy, bad proportions, watermark, text, logo, '
     'signature, blurry, low quality, jpeg artifacts, cartoon, anime, '
-    'illustration, 3d render, doll, plastic skin, child, teen, underage'
+    'illustration, 3d render, doll, plastic skin, child, teen, underage, '
+    'airbrushed, glossy skin, CGI, over-smoothed skin, studio glamour retouching'
 )
+
+# The look every still is asked for, content and character builder alike:
+# the creator's reference is casual phone photos, not studio renders.
+PHOTO_LOOK = ('Amateur smartphone photo, natural daylight, true-to-life skin with visible pores, freckles '
+              'and small imperfections, slight grain and phone-camera noise, candid and unretouched — '
+              'not airbrushed, not glossy, not a studio render, not CGI.')
 
 
 def shots_for_level(level):
@@ -744,8 +751,7 @@ def build_prompt(appearance, shot, outfit=None, has_reference=False, extra='',
     # least — they refine the shot, they do not get to replace who she is.
     extra = (' ' + extra.strip()) if (extra or '').strip() else ''
     prompt = (lead + lock + tail + scene_text +
-              ' Shot on a phone camera, natural skin texture and lighting, '
-              'sharp focus, realistic. Fictional adult woman, '
+              ' ' + PHOTO_LOOK + ' Fictional adult woman, '
               f'{max(18, int(age or 25))} years old.' +
               direction + extra)
     return finish_prompt(prompt, banned, age)
@@ -765,6 +771,8 @@ def finish_prompt(prompt, banned=(), age=None):
         if term:
             prompt = re.sub(re.escape(term), '', prompt, flags=re.I)
     prompt = re.sub(r'\s{2,}', ' ', prompt).strip()
+    if PHOTO_LOOK not in prompt:
+        prompt = (prompt.rstrip(' .') + '. ' if prompt else '') + PHOTO_LOOK
     if 'fictional adult woman' not in prompt.lower():
         prompt = (prompt.rstrip(' .') + '. ' if prompt else '') + (
             f'Fictional adult woman, {max(18, int(age or 25))} years old.')

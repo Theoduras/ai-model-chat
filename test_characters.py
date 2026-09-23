@@ -90,6 +90,10 @@ def test_prompts():
     check('body match only on the front body', 'not a copy' not in CH.build_view_prompt('body_side', {}, 24, True, match=True))
     up = 'upload:' + 'a' * 32
     check('uploaded outfit points at the last reference', 'last reference image' in CH.build_view_prompt('body_front', {'view_outfits': [up]}, 24, True, outfit=up))
+    from imagegen import PHOTO_LOOK, finish_prompt
+    check('builder photos get the phone-photo look', PHOTO_LOOK in CH.build_view_prompt('body_front', {}, 24, True))
+    check('hand-written prompts get the look once', finish_prompt('a woman on a sofa').count(PHOTO_LOOK) == 1
+          and finish_prompt('x. ' + PHOTO_LOOK).count(PHOTO_LOOK) == 1)
     check('face prompt is frontal', 'front-facing' in CH.build_view_prompt('face_front', {}, 24, False))
     close = CH.build_view_prompt('vulva_open', FULL_SHEET, 31, True)
     far = ('height', 'bust', 'shoulders', 'body_shape', 'nails')
