@@ -229,9 +229,13 @@ VIEWS = {
         dict(key='body_back', label='Full body, back', group='body', rating='sfw', required_from='explicit', parents=('body_front',), tier=1, mode='reference',
              framing='a full-body view from behind, standing straight, wearing a plain fitted bodysuit', uses=('body',)),
         dict(key='hands', label='Hands', group='body', rating='sfw', required_from=None, parents=('body_front',), tier=1, mode='reference',
-             framing='a close-up of both hands resting open, palms down', uses=('body',)),
+             zoom=True,
+             framing=('a tight close-up of only her two hands, resting open palms down side by side on a plain surface, '
+                      'fingers and nails in sharp focus, wrists at the frame edge'), uses=('body',)),
         dict(key='feet', label='Feet', group='body', rating='sfw', required_from=None, parents=('body_front',), tier=1, mode='reference',
-             framing='a close-up of both bare feet standing on a plain floor', uses=('body',)),
+             zoom=True,
+             framing=('a tight close-up of only her two bare feet standing side by side on a plain floor, '
+                      'toes and nails in sharp focus, ankles at the top edge of the frame'), uses=('body',)),
         dict(key='nude_front', label='Nude full body, front', group='nsfw', rating='moderate', required_from='moderate',
              parents=('body_front',), tier=0, mode='reference',
              framing='a full-body nude photo from head to feet, standing straight facing the camera, arms relaxed at her sides',
@@ -240,24 +244,36 @@ VIEWS = {
              parents=('nude_front',), tier=1, mode='crop', region='chest', framing='a topless torso photo from the front, arms down at her sides',
              uses=('breasts', 'nipples')),
         dict(key='nipples', label='Nipples (close-up)', group='nsfw', rating='moderate', required_from='moderate',
-             parents=('breasts',), tier=2, mode='crop', region='chest_detail', framing='a close-up photo of her bare chest, focused on the nipples and areolae',
+             parents=('breasts',), tier=2, mode='crop', region='chest_detail', zoom=True,
+             framing=('a macro close-up of her bare nipples and areolae, breast skin filling the frame, '
+                      'nipple texture in sharp focus'),
              uses=('nipples',)),
         dict(key='rear_nude', label='Nude from behind (standing)', group='nsfw', rating='moderate', required_from='explicit',
              parents=('nude_front', 'body_back'), tier=1, mode='reference', framing='a full-body nude photo from behind, standing straight', uses=('body',)),
         dict(key='pubic', label='Pubic area (front, standing)', group='nsfw', rating='explicit', required_from='explicit',
-             parents=('nude_front',), tier=1, mode='crop', region='pelvis', framing='a nude photo of her lower torso and hips from the front, standing',
+             parents=('nude_front',), tier=1, mode='crop', region='pelvis', zoom=True,
+             framing=('a close-up of her nude pubic area from the front while standing, framed from just below the '
+                      'navel to the top of the thighs, pubic mound centred and in sharp focus'),
              uses=('pubic',)),
         dict(key='vulva_closed', label='Vagina, closed', group='nsfw', rating='explicit', required_from='explicit',
-             parents=('nude_front',), tier=1, mode='reference', framing='an explicit close-up of her vulva, legs apart, labia closed',
+             parents=('nude_front',), tier=1, mode='reference', zoom=True,
+             framing=('an explicit macro close-up of her vulva with labia closed, legs apart, the vulva centred and '
+                      'filling the frame, inner thighs at the edges'),
              uses=('pubic', 'vulva')),
         dict(key='vulva_open', label='Vagina, open', group='nsfw', rating='explicit', required_from=None,
-             parents=('vulva_closed',), tier=2, mode='reference', framing='an explicit close-up of her vulva, labia spread open with her fingers',
+             parents=('vulva_closed',), tier=2, mode='reference', zoom=True,
+             framing=('an explicit macro close-up of her vulva with labia spread open by her fingers, the vulva centred '
+                      'and filling the frame, only fingertips and inner thighs at the edges'),
              uses=('pubic', 'vulva')),
         dict(key='anus_closed', label='Anus, closed (bending forward)', group='nsfw', rating='explicit', required_from='explicit',
-             parents=('rear_nude',), tier=2, mode='reference', framing='an explicit rear view, bending forward, buttocks apart, anus closed',
+             parents=('rear_nude',), tier=2, mode='reference', zoom=True,
+             framing=('an explicit macro close-up from behind of her closed anus while she bends forward, buttocks '
+                      'parted, the anus centred and filling the frame, buttock skin at the edges'),
              uses=('anus',)),
         dict(key='anus_open', label='Anus, open (bending forward)', group='nsfw', rating='explicit', required_from=None,
-             parents=('rear_nude',), tier=2, mode='reference', framing='an explicit rear view, bending forward, buttocks spread, anus open',
+             parents=('rear_nude',), tier=2, mode='reference', zoom=True,
+             framing=('an explicit macro close-up from behind of her open anus while she bends forward, buttocks '
+                      'spread, the anus centred and filling the frame, buttock skin at the edges'),
              uses=('anus',)),
     ],
 }
@@ -477,7 +493,10 @@ def build_view_prompt(key, sheet, age, has_reference, body_type='female',
                 f'image, which is a crop of the same woman: {v["framing"]}. Same skin, lighting '
                 f'and proportions as that crop; {touch}.')
     elif has_reference:
-        hold = ('identical face and body' if strength >= 0.5
+        # Naming her face in a close-up pulls the camera back to include it.
+        hold = ('identical skin and body' if v.get('zoom') and strength >= 0.5
+                else 'the same skin and build, loosely' if v.get('zoom')
+                else 'identical face and body' if strength >= 0.5
                 else 'the same face and build, loosely')
         lead = ('photorealistic photo of the exact same woman as the reference images, '
                 + hold + ', now as ' + v['framing'] + '.')
@@ -487,7 +506,9 @@ def build_view_prompt(key, sheet, age, has_reference, body_type='female',
     posed = POSES.get(pose or '', ('', ''))[1]
     posed = f' Pose: {posed}.' if posed else ''
     light = LIGHTING.get(lighting or '', ('', STUDIO))[1]
-    return (lead + body + posed + ' ' + light + ' ' + adult_clause(age)).strip()
+    zoom = (' Zoomed in: the subject fills the whole frame; no face, no full body, nothing '
+            'beyond the subject in shot.') if v.get('zoom') else ''
+    return (lead + zoom + body + posed + ' ' + light + ' ' + adult_clause(age)).strip()
 
 
 def job_level(shot, scene):
