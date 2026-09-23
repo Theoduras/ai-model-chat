@@ -2035,7 +2035,9 @@ def _cap_denied(name, user, extra=None):
 
 
 def _persona_count(user):
-    return len(db_list_personas(owner_id=_workspace_id(user)))
+    # A studio-only persona is just the handle a bare character generates under.
+    return len([p for p in db_list_personas(owner_id=_workspace_id(user))
+                if not (p.get('config') or {}).get('studio_only')])
 
 
 def _persona_cap_blocked(user):
@@ -7663,12 +7665,15 @@ def api_personas():
     because that is the public fan chat picker.
     """
     viewer = _current_user()
+    studio = request.args.get('studio') == '1'
     if viewer and not viewer.get('is_admin'):
         own = []
         # Personas are saved and counted against the active workspace, so
         # listing them by user id hides everything the moment the two differ.
         for sp in db_list_personas(owner_id=_workspace_id(viewer)):
             config = sp.get('config', {})
+            if config.get('studio_only') and not studio:
+                continue
             has_img = bool(config.get('avatar')) or len(db_get_images(sp['slug'])) > 0
             own.append({
                 'slug': sp['slug'],
@@ -7723,6 +7728,8 @@ def api_personas():
         if _is_premade(sp['slug']):
             continue  # a committed original shadows any stale DB copy of the same slug
         config = sp.get('config', {})
+        if config.get('studio_only') and not studio:
+            continue
         has_img = bool(config.get('avatar')) or len(db_get_images(sp['slug'])) > 0
         personas.append({
             'slug': sp['slug'],
@@ -30105,6 +30112,35 @@ def api_characters():
         s.commit()
         return jsonify({'ok': True, 'character': _char_json(s, row, full=True),
                         'warnings': warnings})
+    finally:
+        s.close()
+
+
+@app.route('/api/characters/<char_id>/studio', methods=['POST'])
+def api_character_studio(char_id):
+    """Give an unlinked character a studio-only persona, so the studio can
+    generate from a character alone. Hidden from every other console and not
+    counted against the plan's persona limit."""
+    blocked = _require_active()
+    if blocked:
+        return blocked
+    import uuid
+    user = _current_user()
+    s = _db_session()
+    try:
+        row = _char_row(s, user, char_id)
+        if not row:
+            return jsonify({'ok': False, 'error': 'Unknown character'}), 404
+        if not row.slug:
+            slug = 'char-' + uuid.uuid4().hex[:10]
+            config = {'name': row.name or 'Character', 'age': max(int(row.age or 18), 18),
+                      'nsfw_enabled': True, 'nsfw_level': 'explicit',
+                      'studio_only': True}
+            db_save_persona(slug, config['name'], config, build_system_prompt(config),
+                            owner_id=_workspace_id(user) or None)
+            row.slug = slug
+            s.commit()
+        return jsonify({'ok': True, 'slug': row.slug})
     finally:
         s.close()
 
