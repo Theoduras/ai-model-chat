@@ -1632,17 +1632,11 @@ def _token_sales_open():
 def _token_test_pack_enabled():
     """The pack that sells 1,000 tokens at Stripe's minimum charge, for proving
     the live payment path without spending 130 euro on it. Off unless
-    TOKEN_TEST_PACK=1, and admin or active Starter only on top of that: at 0.50 euro it hands over
+    TOKEN_TEST_PACK=1, and admin-only on top of that: at 0.50 euro it hands over
     roughly 40 dollars of provider spend. Two independent gates, so forgetting
     one is not enough to expose it, and the env flag kills it from the Cloud Run
     console without waiting for a build."""
     return (os.getenv('TOKEN_TEST_PACK') or '').strip() == '1'
-
-
-def _can_buy_test_pack(user):
-    return _token_test_pack_enabled() and bool(
-        user.get('is_admin')
-        or (user.get('tier') == 'starter' and _user_is_active(user)))
 
 
 def _db_session():
@@ -4930,9 +4924,9 @@ def api_tokens():
         'equivalents': CR.equivalents(balance or 0),
         'packs': CR.packs_for(_user_currency(user)),
         # Appended, never mixed in: it is priced far under cost, so it reaches
-        # the menu only for an admin or active Starter with the env flag set.
+        # the menu only for an admin with the env flag set.
         'test_pack': (CR.test_pack_for(_user_currency(user))
-                      if _can_buy_test_pack(user)
+                      if _token_test_pack_enabled() and user.get('is_admin')
                       else None),
         'sales_open': _token_sales_open(),
         'can_buy': bool(_token_sales_open()
@@ -5023,7 +5017,7 @@ def api_tokens_checkout():
     if is_test:
         # Both gates, every time. Priced at a fraction of cost, so a 404 rather
         # than a 403: an account that may not buy it should not learn it exists.
-        if not _can_buy_test_pack(user):
+        if not (_token_test_pack_enabled() and user.get('is_admin')):
             return jsonify({'error': 'Unknown token pack'}), 404
         row = CR.test_pack_for(currency)
         size, price = row['tokens'], row['price']

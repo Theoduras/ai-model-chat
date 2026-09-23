@@ -217,7 +217,7 @@ Stay completely in character. Never mention being an AI.
   `TOKEN_SALES_OPEN=0` closes top-up checkout without a deploy.
 - **`TOKEN_TEST_PACK=1` sells 1,000 tokens for 0.50 EUR.** It exists to prove
   the live Stripe path without spending 130 EUR, and it is gated on that env
-  flag *and* an admin session or an active Starter plan, because it hands over roughly 40 dollars of
+  flag *and* an admin session, because it hands over roughly 40 dollars of
   provider spend. It is addressed by name (`credits.TEST_PACK_ID`), never by
   token count — 1,000 is also a real pack — and lives outside `PACK_PRICES` so
   the margin assertion keeps protecting every pack a creator can reach. Unset
