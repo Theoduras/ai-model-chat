@@ -20,25 +20,29 @@
     /* The studio keeps its own paper palette whatever the site theme says. */
     body.ch-studio, body.ch-studio .drawer { --bg: #F4F1EC; --surface: #FFFFFF; --surface-2: #EEEAE3; --border: #E2DCD3;
       --text: #1E1B18; --text-2: #5E574F; --text-muted: #6F675E; --accent: #B8321F; --ok: #2F6B3A; --warn: #8A5A00; --err: #B8321F;
+      --paper: #FFFFFF; --sel: #F7E4DF; --review-bg: #F8EBCB; --review: #8A5A00; --ok-bg: #E3F0E4;
       font-family: "Instrument Sans", "Helvetica Neue", sans-serif; color-scheme: light; }
+    [data-theme="dark"] body.ch-studio, [data-theme="dark"] body.ch-studio .drawer { --bg: #171412; --surface: #221E1B; --surface-2: #2C2724;
+      --border: #3A342F; --text: #F1ECE5; --text-2: #C9C0B5; --text-muted: #A89F93; --accent: #D9533D; --ok: #7FC08A; --warn: #E0B25A; --err: #E0705C;
+      --paper: #221E1B; --sel: #3A221D; --review-bg: #3A2F17; --review: #E0B25A; --ok-bg: #1F3323; color-scheme: dark; }
     body.ch-studio { background: var(--bg); color: var(--text); }
-    body.ch-studio header { background: #FFFFFF; border-bottom: 1px solid var(--border); }
+    body.ch-studio header { background: var(--paper); border-bottom: 1px solid var(--border); }
     body.ch-studio .ch-card, body.ch-studio .ch-item { border-radius: 20px; }
     body.ch-studio .btn, body.ch-studio .view, body.ch-studio .ch-label select, body.ch-studio .ch-label input { border-radius: 10px; }
     body.ch-studio .chip[aria-pressed="true"], body.ch-studio .steps button[aria-current="step"] { background: var(--accent); border-color: var(--accent); color: #fff; }
-    body.ch-studio .view { background: #FFFFFF; border-color: var(--border); }
-    body.ch-studio .view[aria-pressed="true"] { border-color: var(--accent); background: #F7E4DF; }
-    body.ch-studio .st.review, body.ch-studio .st.outdated { background: #F8EBCB; color: #8A5A00; }
-    body.ch-studio .st.approved { background: #E3F0E4; color: #2F6B3A; }
-    body.ch-studio .banner.outdated { background: #F8EBCB; }
-    body.ch-studio .drawer { background: #FFFFFF; box-shadow: -12px 0 32px rgba(30,27,24,.10); }
+    body.ch-studio .view { background: var(--paper); border-color: var(--border); }
+    body.ch-studio .view[aria-pressed="true"] { border-color: var(--accent); background: var(--sel); }
+    body.ch-studio .st.review, body.ch-studio .st.outdated { background: var(--review-bg); color: var(--review); }
+    body.ch-studio .st.approved { background: var(--ok-bg); color: var(--ok); }
+    body.ch-studio .banner.outdated { background: var(--review-bg); }
+    body.ch-studio .drawer { background: var(--paper); box-shadow: -12px 0 32px rgba(30,27,24,.10); }
     body.ch-studio .tier-h { color: var(--text-2); font-weight: 600; }
-    a:hover { color: #8E2415; }
+    body.ch-studio a:hover { color: var(--accent); }
     .in-workspace body.ch-studio > header { display: none; }
     #edit-view:not([hidden]) { display: grid; grid-template-columns: 240px minmax(0, 1fr); column-gap: 28px; align-items: start; }
     #edit-view > * { grid-column: 2; }
     #edit-view > .rail { grid-column: 1; grid-row: 1 / span 20; position: sticky; top: 0; display: flex; flex-direction: column; gap: 18px;
-      background: #FFFFFF; border: 1px solid var(--border); border-radius: 20px; padding: 20px 16px; }
+      background: var(--paper); border: 1px solid var(--border); border-radius: 20px; padding: 20px 16px; }
     .rail .rail-name { font-size: 1.25rem; font-weight: 700; margin: 0; }
     .rail .steps { flex-direction: column; }
     .rail .steps button { width: 100%; height: 44px; text-align: left; border-radius: 10px; }
@@ -311,7 +315,7 @@
     <!-- 4 Body -->
     <div class="ch-row" data-step="body" hidden>
       <div class="ch-grow" style="display:flex; flex-direction:column; gap:16px;">
-        <div class="ch-card">
+        <div class="ch-card" id="body-profile">
           <h2 class="ch-h2">Body profile</h2>
           <span class="ch-muted" style="margin:0 0 10px; display:block;">Every view inherits these. Changes save as you pick.</span>
           <div class="ch-label" style="margin-bottom:14px;">Start from a preset <div class="chips" id="presets"></div>
@@ -321,8 +325,10 @@
             <div class="fp-list" id="intimate-features" style="margin-top:12px;"></div>
           </div>
           <span class="msg" id="body-save-msg" aria-live="polite" style="margin:8px 0 0; display:block;"></span>
+          <button type="button" class="btn btn-primary" style="margin-top:12px;" onclick="go('views')">Continue to views</button>
+          <button type="button" class="btn btn-primary" style="margin-top:12px;" onclick="go('views')">Continue to views</button>
         </div>
-        <div style="display:flex; justify-content:space-between; align-items:end; gap:12px; flex-wrap:wrap;">
+        <div id="views-head" style="display:flex; justify-content:space-between; align-items:end; gap:12px; flex-wrap:wrap;">
           <div>
             <h2 class="ch-h1">Views</h2>
             <p class="ch-muted" id="body-summary"></p>
@@ -484,7 +490,7 @@ async function openCharacter(id) {
   el('list-view').hidden = true; el('edit-view').hidden = false;
   history.replaceState(null, '', '/characters?id=' + id);
   const canon = canonOf('face_front');
-  go(canon ? 'body' : (images('face_front', 'candidate').length ? 'pick' : 'describe'));
+  go(canon ? 'views' : (images('face_front', 'candidate').length ? 'pick' : 'describe'));
 }
 function images(view, role) { return (cur.images || []).filter(i => i.view === view && (!role || i.role === role)); }
 function canonOf(view) { return images(view, 'canonical')[0]; }
@@ -497,23 +503,28 @@ async function reload() {
 
 function go(s) {
   if (s !== 'describe' && s !== 'pick' && !canonOf('face_front') && s !== 'check') s = 'describe';
-  if (s === 'body' && !canonOf('face_front')) s = 'describe';
+  if (s === 'face') s = canonOf('face_front') || pickedFace ? 'check' : 'pick';
+  if ((s === 'body' || s === 'views') && !canonOf('face_front')) s = 'describe';
   step = s; render();
 }
 function render() {
   el('crumb').textContent = cur.name;
   const faceDone = !!canonOf('face_front');
-  const done = {describe: images('face_front').length > 0 || faceDone, pick: faceDone, check: faceDone, body: cur.status === 'complete'};
-  el('steps').innerHTML = [['describe', '1 Describe'], ['pick', '2 Pick'], ['check', '3 Check'], ['body', '4 Body']]
-    .map(([k, l]) => `<li><button type="button" class="${done[k] ? 'done' : ''}" ${step === k ? 'aria-current="step"' : ''}
-      ${(k === 'body' && !faceDone) || (k === 'check' && !pickedFace && !faceDone) ? 'disabled' : ''}
-      onclick="go('${k}')">${l}${done[k] && step !== k ? ' ✓' : ''}</button></li>`).join('');
+  const done = {describe: images('face_front').length > 0 || faceDone, face: faceDone, body: faceDone, views: cur.status === 'complete'};
+  const at = step === 'pick' || step === 'check' ? 'face' : step;
+  el('steps').innerHTML = [['describe', '1 Base & references'], ['face', '2 Face'], ['body', '3 Body profile'], ['views', '4 Views']]
+    .map(([k, l]) => `<li><button type="button" class="${done[k] ? 'done' : ''}" ${at === k ? 'aria-current="step"' : ''}
+      ${(k === 'body' || k === 'views') && !faceDone || (k === 'face' && !images('face_front').length && !faceDone) ? 'disabled' : ''}
+      onclick="go('${k}')">${l}${done[k] && at !== k ? ' ✓' : ''}</button></li>`).join('');
   const req = cat.views.filter(v => v.required), ok = req.filter(v => vs(v.key).status === 'approved').length;
   el('rail-count').textContent = ok + ' / ' + req.length;
   el('rail-bar').firstElementChild.style.width = (req.length ? 100 * ok / req.length : 0) + '%';
   el('rail-bar').classList.toggle('full', req.length > 0 && ok === req.length);
-  document.querySelectorAll('[data-step]').forEach(n => n.hidden = n.dataset.step !== step);
-  ({describe: renderDescribe, pick: renderPick, check: renderCheck, body: renderBody})[step]();
+  const shown = step === 'views' ? 'body' : step;
+  document.querySelectorAll('[data-step]').forEach(n => n.hidden = n.dataset.step !== shown);
+  el('body-profile').hidden = step === 'views';
+  el('views-head').hidden = el('tiers').hidden = step === 'body';
+  ({describe: renderDescribe, pick: renderPick, check: renderCheck, body: renderBody, views: renderBody})[step]();
 }
 
 function featurePicker(f) {
