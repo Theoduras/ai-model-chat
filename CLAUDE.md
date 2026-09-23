@@ -91,6 +91,8 @@ requirements.txt                — Python deps: flask, google-genai, python-dot
 | `GET /studio` | — | Generation studio (admin only) |
 | `GET /api/credits` | — | Balance, tier-resolved packs, generation price table |
 | `POST /api/credits/checkout` | JSON | Buy a top-up pack (Stripe or Oxapay) |
+| `GET /tokens` | — | Buy-tokens page (the header's token button links here) |
+| `GET /api/tokens/balance` | — | Just the balance, for the header's live token count |
 | `POST /api/generate/job` | JSON | Submit an image or video generation |
 | `GET /api/generate/job/{id}` | — | Poll one generation |
 | `GET /api/generate/jobs?persona=` | — | Recent generations, with staged media |

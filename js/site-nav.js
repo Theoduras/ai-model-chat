@@ -47,6 +47,7 @@
     { href: '/register', label: 'Register', icon: 'register', cta: true },
   ];
   var ACCOUNT_IN = [
+    { href: '/tokens', label: 'Tokens', icon: 'tokens', cta: true, keep: true, tokens: true },
     { href: '/billing', label: 'Upgrade', icon: 'upgrade', cta: true, keep: true },
     { href: '/dashboard', label: 'Dashboard', icon: 'dashboard', cta: true },
     { href: '/logout', label: 'Log out', icon: 'logout' },
@@ -63,6 +64,7 @@
     dashboard: svg('<rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/>'),
     logout: svg('<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/>'),
     upgrade: svg('<path d="M12 19V5"/><path d="m5 12 7-7 7 7"/>'),
+    tokens: svg('<ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>'),
     account: svg('<circle cx="12" cy="8" r="4"/><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"/>'),
   };
 
@@ -117,6 +119,7 @@
       return '<a data-sn href="' + i.href + '"' +
         (i.cta ? ' class="sn-cta"' : '') +
         (i.keep ? ' data-keep' : '') +
+        (i.tokens ? ' data-sn-tokens title="Buy tokens"' : '') +
         (isCurrent(i.href) ? ' aria-current="page"' : '') +
         '>' + (i.icon ? ICONS[i.icon] : '') +
         '<span class="sn-label">' + i.label + '</span></a>';
@@ -211,6 +214,55 @@
     if (pill) fill(pill, account);
   }
 
+  // The header's token count. Painted from /api/me on load, then refreshed
+  // whenever this page does something that spends or refunds tokens.
+  var tokenBalance;
+  function paintTokens(balance) {
+    tokenBalance = balance;
+    [].slice.call(document.querySelectorAll('[data-sn-tokens] .sn-label')).forEach(function (el) {
+      el.innerHTML = balance === null ? 'Unlimited'
+        : Number(balance).toLocaleString() +
+          '<span class="sn-tok-unit">' + (balance === 1 ? ' token' : ' tokens') + '</span>';
+    });
+  }
+
+  function refreshTokens() {
+    if (tokenBalance === undefined) return;
+    return nativeFetch('/api/tokens/balance', { credentials: 'same-origin' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) { if (d && 'balance' in d) paintTokens(d.balance); })
+      .catch(function () {});
+  }
+
+  // Spending happens on half a dozen pages (studio, dashboard, the consoles'
+  // image buttons, the character builder), so the count listens to fetch here
+  // instead of every page remembering to report a spend. A job poll is where a
+  // refund for a failed generation surfaces; those run every few seconds, so
+  // they only refresh on a throttle.
+  var nativeFetch = window.fetch.bind(window);
+  var SPEND = /^\/api\/(generate\/|characters\/[^/]+\/generate)/;
+  var POLL = /^\/api\/generate\/jobs?(\/|$|\?)/;
+  var lastPollRefresh = 0;
+  window.fetch = function (input, init) {
+    var p = nativeFetch.apply(null, arguments);
+    try {
+      var url = new URL(typeof input === 'string' ? input : input.url, location.href);
+      var method = ((init && init.method) || (input && input.method) || 'GET').toUpperCase();
+      if (url.origin === location.origin && url.pathname !== '/api/generate/tick') {
+        var spend = method === 'POST' && SPEND.test(url.pathname);
+        var poll = method === 'GET' && POLL.test(url.pathname) && Date.now() - lastPollRefresh > 10000;
+        if (spend || poll) {
+          if (poll) lastPollRefresh = Date.now();
+          p.then(refreshTokens, function () {});
+        }
+      }
+    } catch (e) { /* never let the counter break a request */ }
+    return p;
+  };
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'visible') refreshTokens();
+  });
+
   function mount() {
     // No host and no header of its own: this page wants the whole bar.
     if (!hosts().length && !document.querySelector('header')) {
@@ -229,7 +281,12 @@
 
     fetch('/api/me', { credentials: 'same-origin' })
       .then(function (r) { return r.json(); })
-      .then(function (me) { if (me && me.signed_in) paint(ACCOUNT_IN); })
+      .then(function (me) {
+        if (!me || !me.signed_in) return;
+        paint(ACCOUNT_IN);
+        var t = me.usage && me.usage.tokens;
+        paintTokens(t && 'balance' in t ? t.balance : 0);
+      })
       .catch(function () { /* keep the signed-out menu */ });
 
     var bar2 = document.querySelector('.site-nav');

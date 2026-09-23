@@ -1013,7 +1013,7 @@ _PUBLIC_PAGES += [(f'/{slug}', '0.8', 'monthly') for slug in platform_pages.PAGE
 # The fan pages (/landing, /profile, /chat.html) are deliberately absent: they
 # carry <meta name="robots" content="noindex">, and a crawler blocked here would
 # never fetch the page to read that tag, leaving anything already indexed stuck.
-_CRAWL_DISALLOW = ['/dashboard', '/admin', '/account', '/billing', '/api/',
+_CRAWL_DISALLOW = ['/dashboard', '/admin', '/account', '/billing', '/tokens', '/api/',
                    '/xbot', '/fanvue', '/onlyfans', '/threads', '/telegram', '/auth/',
                    '/logout', '/go/']
 
@@ -2067,7 +2067,9 @@ def _grant_monthly_tokens(session_db, user):
     period, so it runs off the first token read of the month and there is no
     cron that can miss it."""
     allowance = user_capabilities(user).get('tokens_month')
-    if allowance is None:
+    # A zero grant would still claim the period, so an account read before it
+    # subscribed (the header asks for its balance) would get nothing this month.
+    if not allowance:
         return
     from db import token_grant
     token_grant(session_db, _workspace_id(user), int(allowance),
@@ -2512,7 +2514,6 @@ button:disabled{opacity:.6;cursor:not-allowed;transform:none;animation:none}
 .orsep:before,.orsep:after{content:'';flex:1;height:1px;background:var(--border)}
 .tiers{display:grid;gap:16px;margin-top:8px;align-items:stretch}
 .tier{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:22px;transition:border-color .2s,box-shadow .2s;display:flex;flex-direction:column;height:100%}
-.toksec{margin-top:52px;border-top:1px solid var(--border);padding-top:34px}
 .tokpacks{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:14px;margin-top:20px}
 .tokpack{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:18px;text-align:center;position:relative}
 .tokpack .n{font-size:1.5rem;font-weight:700}
@@ -2768,20 +2769,7 @@ monthly plan.</div>{% endif %}
 Dev mode: DEV_FAKE_PAYMENTS=1 is set, so plans can be activated without paying.
 Unset it before going live.</p>{% endif %}
 
-{% if user.email %}
-<section class="toksec" id="tokens" hidden>
-<h2 style="margin-bottom:6px">Generation tokens</h2>
-<p class="sub" style="margin-top:0">One token is about one photo; a five-second clip is twelve.
-Your plan's monthly tokens reset each month &mdash; tokens you buy here never expire.</p>
-<div id="tokup" class="ok" hidden></div>
-<div class="tokpacks" id="tokpacks"></div>
-<p class="sub" id="toknote" style="margin-top:16px;font-size:.82rem"></p>
-</section>
-{% endif %}
 </div>
-<script>
-var TOK_PROVIDERS = [{% if stripe_enabled %}['stripe','card']{% endif %}{% if stripe_enabled and oxapay_enabled %},{% endif %}{% if oxapay_enabled %}['oxapay','crypto']{% endif %}];
-</script>
 <script>
 document.querySelectorAll('.ptoggle button').forEach(function(tab){
   tab.addEventListener('click', function(){
@@ -2847,21 +2835,76 @@ document.querySelectorAll('button[data-tier]').forEach(function(b){
     b.disabled = false; b.textContent = old;
   });
 });
+</script></body></html>"""
 
-// --- Generation tokens ----------------------------------------------------
+
+TOKENS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Buy tokens</title>
+<script src="/js/analytics.js" defer></script>
+<style>""" + ACCOUNT_CSS + """
+.tokbal{font-size:.95rem;color:var(--text-2);margin:0 0 4px}
+.tokbal strong{color:var(--text)}
+</style></head><body data-page="pricing">
+<header class="site-nav">
+<a class="brand" href="/">Velvetfunnel<i>.app</i></a>
+<div class="links">
+<button type="button" class="theme-toggle" onclick="toggleTheme()" title="Light mode" aria-label="Switch to light mode">
+<svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke-linecap="round"/></svg>
+<svg class="ico-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" stroke-linejoin="round"/></svg>
+</button>
+<a class="nav-ghost nav-pricing" href="/pricing">Pricing</a>
+<a class="nav-ghost" href="/account">Account</a><a class="nav-btn" href="/dashboard">Dashboard</a>
+</div>
+</header>
+<div class="wrap wide">
+<div class="bar"><span>Signed in as {{ user.email }}</span><a href="/logout">Sign out</a></div>
+<h1 style="margin-bottom:6px">Buy tokens</h1>
+<p class="sub">One token is about one photo; a five-second clip is twelve.
+Your plan's monthly tokens reset each month &mdash; tokens you buy here never expire.</p>
+<p class="tokbal" id="tokbal" hidden></p>
+<div id="tokup" class="ok" hidden></div>
+<div class="tokpacks" id="tokpacks"></div>
+<p class="sub" id="toknote" style="margin-top:16px;font-size:.82rem"></p>
+</div>
+<script>
+var TOK_PROVIDERS = [{% if stripe_enabled %}['stripe','card']{% endif %}{% if stripe_enabled and oxapay_enabled %},{% endif %}{% if oxapay_enabled %}['oxapay','crypto']{% endif %}];
+
 // The pack menu is fetched rather than rendered server-side: prices resolve to
 // the creator's own currency, and the test pack must never reach a page it is
 // not meant for.
 (async function(){
-  var sec = document.getElementById('tokens');
-  if (!sec) return;
+  var note = document.getElementById('toknote');
   var d;
   try {
     var r = await fetch('/api/tokens');
-    if (!r.ok) return;
+    if (!r.ok) throw new Error(r.status);
     d = await r.json();
-  } catch (e) { return; }
-  if (!d.sales_open) return;
+  } catch (e) {
+    note.textContent = 'Could not load the token packs. Refresh to try again.';
+    return;
+  }
+
+  var bal = document.getElementById('tokbal');
+  bal.innerHTML = 'You have <strong></strong>.';
+  bal.querySelector('strong').textContent = d.unlimited ? 'unlimited tokens'
+    : Number(d.balance).toLocaleString() + (d.balance === 1 ? ' token' : ' tokens');
+  bal.hidden = false;
+
+  // Acknowledge a purchase we just came back from. /billing/return has already
+  // credited it, so the balance above is the real one, not an optimistic guess.
+  var topup = new URLSearchParams(location.search).get('topup');
+  if (topup) {
+    var box = document.getElementById('tokup');
+    box.textContent = Number(topup).toLocaleString() + ' tokens added.';
+    box.hidden = false;
+  }
+
+  if (!d.sales_open) {
+    note.textContent = 'Token top-ups are not open yet.';
+    return;
+  }
 
   var money = function(p, sym){
     return sym + (p % 1 === 0 ? p.toFixed(0) : p.toFixed(2));
@@ -2888,20 +2931,9 @@ document.querySelectorAll('button[data-tier]').forEach(function(b){
   }).join('');
   document.getElementById('tokpacks').innerHTML = html;
 
-  document.getElementById('toknote').textContent = d.can_buy
-    ? 'Generation is still in testing, so tokens bought now may sit unused until it opens.'
-    : 'A plan is needed before tokens can be bought.';
-
-  // Acknowledge a purchase we just came back from. /billing/return has already
-  // credited it, so the balance below is the real one, not an optimistic guess.
-  var topup = new URLSearchParams(location.search).get('topup');
-  if (topup) {
-    var box = document.getElementById('tokup');
-    box.textContent = Number(topup).toLocaleString() + ' tokens added. Balance: '
-      + (d.unlimited ? 'unlimited' : Number(d.balance).toLocaleString()) + '.';
-    box.hidden = false;
+  if (!d.can_buy) {
+    note.innerHTML = 'A plan is needed before tokens can be bought. <a href="/billing">See the plans</a>.';
   }
-  sec.hidden = false;
 
   document.querySelectorAll('button[data-pack]').forEach(function(b){
     b.addEventListener('click', async function(){
@@ -4568,6 +4600,16 @@ def billing():
                                            if _active_ref_code() else 0))
 
 
+@app.route('/tokens')
+def tokens_page():
+    user = _current_user()
+    if not user:
+        return redirect('/login?next=/tokens')
+    return render_template_string(TOKENS_HTML, user=user,
+                                  oxapay_enabled=bool(_oxapay_key()),
+                                  stripe_enabled=bool(_stripe_key()))
+
+
 @app.route('/billing/return')
 def billing_return():
     user = _current_user()
@@ -4575,7 +4617,7 @@ def billing_return():
         return redirect('/login')
     topup = _settle_token_session(user, request.args.get('session_id') or '')
     if topup:
-        where = '/studio' if user.get('is_admin') else '/billing'
+        where = '/studio' if user.get('is_admin') else '/tokens'
         return redirect(f'{where}?topup={topup}')
     return redirect('/dashboard' if _user_is_active(user) else '/billing')
 
@@ -4627,7 +4669,9 @@ def _checkout_oxapay(user, tier_key, tier, order_id, base):
         'description': (f'{tier["name"]} plan — {tier["days"]} days'
                         if tier.get('days') else tier['name']),
         'callback_url': f'{base}/api/billing/webhook',
-        'return_url': f'{base}/billing/return',
+        # A crypto top-up is credited by the webhook, not on return, so it goes
+        # straight back to the token page rather than through /billing/return.
+        'return_url': f'{base}/tokens' if tier_key == 'tokens' else f'{base}/billing/return',
     }).encode()
     req = urllib.request.Request(
         OXAPAY_API, data=body,
@@ -4837,6 +4881,16 @@ def api_tokens():
     })
 
 
+@app.route('/api/tokens/balance')
+def api_tokens_balance():
+    """Just the balance, for the header's token button. It refreshes after
+    every generation call, and /api/tokens builds the whole price table."""
+    user = _current_user()
+    if not user:
+        return jsonify({'error': 'Sign in required'}), 401
+    return jsonify({'balance': _token_balance(user)})
+
+
 @app.route('/api/tokens/history')
 def api_tokens_history():
     """This workspace's own ledger. Open to any signed-in creator now that they
@@ -4959,7 +5013,7 @@ def _checkout_stripe_tokens(user, pack, order_id, base):
     form = {
         'mode': 'payment',
         'success_url': f'{base}/billing/return?session_id={{CHECKOUT_SESSION_ID}}',
-        'cancel_url': f'{base}/billing#tokens',
+        'cancel_url': f'{base}/tokens',
         'client_reference_id': order_id,
         'line_items[0][quantity]': '1',
         'metadata[order_id]': order_id,

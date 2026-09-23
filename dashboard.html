@@ -646,7 +646,7 @@ function renderPlanPanel(me) {
     ? '<div class="sb-plan-row"><span>Tokens</span><span>' + cap(o.balance)
       + ' / ' + cap(o.limit) + '</span></div>'
       + (o.limit === null ? '' : '<div class="sb-plan-row"><span></span>'
-        + '<span><a href="/billing#tokens">Top up</a></span></div>')
+        + '<span><a href="/tokens">Top up</a></span></div>')
     : '';
   const name = me.is_admin ? 'Admin' : ((me.tier || 'No plan').replace('_annual', ' (annual)'));
   const legacy = me.grandfathered
