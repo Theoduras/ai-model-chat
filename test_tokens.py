@@ -359,11 +359,47 @@ def test_equivalents():
           cash['amount'] > 0 and cash['symbol'] == '€')
 
 
+def test_stripe_minimums():
+    print('stripe minimums')
+    for size in CR.PACK_SIZES:
+        for cur in CR.CURRENCIES:
+            price = CR.pack_price(size, cur)
+            check(f'pack {size} at {price} {cur} clears Stripe\'s minimum',
+                  price >= CR.STRIPE_MIN_CHARGE[cur])
+    for cur in CR.CURRENCIES:
+        check(f'the test pack itself clears Stripe\'s {cur} minimum',
+              CR.TEST_PACK_PRICES[cur] >= CR.STRIPE_MIN_CHARGE[cur])
+
+
+def test_test_pack_is_not_for_sale():
+    print('test pack')
+    # The whole safety of the underpriced pack is that it cannot be reached by
+    # asking for a token count -- only by asking for it by name.
+    for cur in CR.CURRENCIES:
+        check(f'the {CR.TEST_PACK_TOKENS} size still charges the real price in {cur}',
+              CR.pack_price(CR.TEST_PACK_TOKENS, cur)
+              == CR.PACK_PRICES[CR.TEST_PACK_TOKENS][cur])
+        check(f'the real {cur} price is far above the test price',
+              CR.pack_price(CR.TEST_PACK_TOKENS, cur) > CR.TEST_PACK_PRICES[cur] * 50)
+    row = CR.test_pack_for('eur')
+    real = CR.packs_for('eur')[0]
+    check('the test pack renders in the same shape as a real one',
+          set(row) == set(real))
+    check('the test pack is flagged as one', row['test'] is True)
+    check('a real pack is not', real['test'] is False)
+    check('the test pack is asked for by name', row['id'] == CR.TEST_PACK_ID)
+    check('no real pack answers to that name',
+          CR.TEST_PACK_ID not in [p['id'] for p in CR.packs_for('eur')])
+    check('every real pack id is its size',
+          all(p['id'] == str(p['tokens']) for p in CR.packs_for('eur')))
+
+
 if __name__ == '__main__':
     for fn in (test_margin_floor, test_currency_ladder,
                test_quote_covers_everything, test_prices_track_cost,
                test_nothing_is_free, test_job_quotes, test_allowances,
-               test_ledger, test_equivalents):
+               test_ledger, test_equivalents,
+               test_stripe_minimums, test_test_pack_is_not_for_sale):
         fn()
     print()
     if FAILURES:

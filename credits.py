@@ -317,6 +317,22 @@ PACK_PRICES = {
     5000:  {'eur': 450, 'usd': 479, 'gbp': 395},
 }
 
+# Stripe refuses a charge under these, whatever the price table says, so a pack
+# priced below one is a pack that fails at the checkout page rather than in a
+# test. https://docs.stripe.com/currencies -- "Minimum charge amount by currency".
+STRIPE_MIN_CHARGE = {'eur': 0.50, 'usd': 0.50, 'gbp': 0.30}
+
+# A deliberately underpriced pack, for proving the live Stripe path without
+# spending 130 euro to do it. It is kept out of PACK_SIZES and PACK_PRICES on
+# purpose: _assert_floor would refuse to import with it in the ladder, and that
+# refusal is exactly the protection every real pack still needs. At these
+# amounts it sells roughly 40 dollars of provider spend for half a euro, so the
+# caller gates it on both an env flag and an admin session -- see
+# app._token_test_pack_enabled.
+TEST_PACK_ID = 'test'
+TEST_PACK_TOKENS = 1000
+TEST_PACK_PRICES = dict(STRIPE_MIN_CHARGE)
+
 
 class PricingError(ValueError):
     """An unpriced generation was requested. Never let one reach the provider:
@@ -440,6 +456,25 @@ def pack_price(size, currency=BASE_CURRENCY):
     return row.get(currency_of(currency)) if row else None
 
 
+def _pack_row(size, price, cur, save_pct=0, test=False):
+    """One row of the buy menu. Both the real ladder and the test pack render
+    through here, so a card the checkout will honour and a card it will refuse
+    can never end up different shapes on the page."""
+    return {
+        # What the client sends back to buy this row. A size is not enough:
+        # the test pack grants 1,000 tokens, which is also a real pack.
+        'id': TEST_PACK_ID if test else str(size),
+        'tokens': size,
+        'currency': cur,
+        'symbol': symbol_for(cur),
+        'price': price,
+        'price_cents': int(round(price * 100)),
+        'per_token': round(price / size, 5),
+        'save_pct': save_pct,
+        'test': test,
+    }
+
+
 def packs_for(currency=BASE_CURRENCY):
     """The buy-tokens menu, already resolved to one currency so the client needs
     no pricing logic of its own. There are no tier bands: everyone sees this."""
@@ -448,16 +483,18 @@ def packs_for(currency=BASE_CURRENCY):
     for size in PACK_SIZES:
         price = PACK_PRICES[size][cur]
         full = PACK_PRICES[PACK_SIZES[0]][cur] / PACK_SIZES[0] * size
-        out.append({
-            'tokens': size,
-            'currency': cur,
-            'symbol': symbol_for(cur),
-            'price': price,
-            'price_cents': int(round(price * 100)),
-            'per_token': round(price / size, 5),
-            'save_pct': int(round((1 - price / full) * 100)) if full > price else 0,
-        })
+        out.append(_pack_row(
+            size, price, cur,
+            save_pct=int(round((1 - price / full) * 100)) if full > price else 0))
     return out
+
+
+def test_pack_for(currency=BASE_CURRENCY):
+    """The underpriced pack, for an admin proving the live Stripe path. It is
+    not reachable through pack_price(), so the ordinary checkout cannot sell it
+    however the size is spelled -- the caller has to ask for it by name."""
+    cur = currency_of(currency)
+    return _pack_row(TEST_PACK_TOKENS, TEST_PACK_PRICES[cur], cur, test=True)
 
 
 def token_rate(currency=BASE_CURRENCY):
@@ -668,6 +705,24 @@ def _assert_floor():
             if pack_price(big, cur) / big > pack_price(small, cur) / small:
                 raise AssertionError(
                     f'pack {big} in {cur} costs more per token than {small}')
+    # The test pack grants the same 1,000 tokens a real pack does, so a size is
+    # not enough to tell them apart -- it is asked for by name (TEST_PACK_ID)
+    # and priced from TEST_PACK_PRICES, never from the ladder. What has to hold
+    # is that asking by size still charges the real price: otherwise the by-name
+    # gate could be walked straight around with tokens=1000.
+    for cur in CURRENCIES:
+        if pack_price(TEST_PACK_TOKENS, cur) != PACK_PRICES[TEST_PACK_TOKENS][cur]:
+            raise AssertionError(
+                f'the {TEST_PACK_TOKENS}-token size in {cur} no longer resolves '
+                'to its ladder price -- the test pack has leaked into it')
+    # A pack Stripe will not charge is as broken as one that loses money: the
+    # customer reaches the checkout page and it fails there rather than here.
+    for size in PACK_SIZES:
+        for cur in CURRENCIES:
+            if pack_price(size, cur) < STRIPE_MIN_CHARGE[cur]:
+                raise AssertionError(
+                    f'pack {size} in {cur} is under Stripe\'s '
+                    f'{STRIPE_MIN_CHARGE[cur]} minimum charge')
 
 
 _assert_floor()
