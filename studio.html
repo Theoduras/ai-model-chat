@@ -156,6 +156,26 @@
     body.page-dashboard .gen-f select, body.page-dashboard .gen-f input[type="text"],
     body.page-dashboard .gen-f textarea { font-size: 0.84rem; padding: 9px 12px; }
     body.page-dashboard .gen-f select { padding-right: 32px; }
+    .gen-group { display: flex; flex-direction: column; gap: 10px; padding-top: 12px; border-top: 1px solid var(--border-soft); }
+    .gen-group:first-child { border-top: 0; padding-top: 0; }
+    .gen-group h3 { margin: 0; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
+    .gen-adv summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px; }
+    .gen-adv summary::-webkit-details-marker { display: none; }
+    .gen-adv summary::before { content: '\25B8'; color: var(--text-muted); font-size: 0.75rem; transition: transform .15s; }
+    .gen-adv[open] summary::before { transform: rotate(90deg); }
+    .gen-adv[open] > summary { margin-bottom: 4px; }
+    .gen-seg { display: flex; flex-wrap: wrap; gap: 6px; }
+    .gen-group > .gen-check { font-weight: 400; color: var(--text-2); }
+    .gen-outfits { display: flex; flex-wrap: wrap; gap: 8px; }
+    .gen-outfit { position: relative; width: 60px; height: 78px; border-radius: var(--r-md, 8px); overflow: visible;
+      border: 1px solid var(--border); background: var(--panel); padding: 0; cursor: pointer; }
+    .gen-outfit img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; display: block; }
+    .gen-outfit[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+    .gen-outfit .x { position: absolute; top: -7px; right: -7px; width: 20px; height: 20px; border-radius: 50%; padding: 0;
+      border: 1px solid var(--border); background: var(--panel-2); color: var(--text-2); font-size: 0.8rem; line-height: 1; cursor: pointer; }
+    .gen-outfit-add { width: 60px; height: 78px; border: 1px dashed var(--border); border-radius: var(--r-md, 8px);
+      background: none; color: var(--text-2); font-size: 0.72rem; cursor: pointer; }
+    .gen-outfit-add:hover, .gen-outfit:hover { border-color: var(--accent-line); }
     .gen-check { display: flex; gap: 8px; align-items: center; font-size: 0.82rem; }
     .gen-check input { accent-color: var(--accent); width: 16px; height: 16px; }
     .gen-file input[type="file"] { display: none; }
@@ -315,60 +335,79 @@
     <div class="gen-panel gen-prompt" id="gen-p-prompt">
       <div class="gen-head"><b>3</b><h2 id="gen-prompt-head">Prompt</h2></div>
       <div id="gen-image-form" class="gen-stackform">
-        <div class="gen-form">
-          <label class="gen-f"><span>Scene</span>
-            <select id="gen-scene"></select></label>
-          <label class="gen-f"><span>Shot</span>
-            <select id="gen-shot" onchange="genQuote()"></select></label>
-        </div>
-        <div class="gen-form">
-          <label class="gen-f"><span>Style</span>
-            <select id="gen-style"></select></label>
-          <label class="gen-f"><span>Phone camera</span>
-            <select id="gen-camera"></select></label>
-          <label class="gen-f"><span>Lighting</span>
-            <select id="gen-lighting"></select></label>
-          <label class="gen-f"><span>Expression</span>
-            <select id="gen-expression"></select></label>
-        </div>
-        <label class="gen-f" style="flex-direction:row; align-items:center; gap:8px;">
-          <input type="checkbox" id="gen-smudges"><span>Smudges and dust on the lens or mirror (selfies only)</span></label>
-        <label class="gen-f"><span>Photo quality</span>
-          <select id="gen-quality"></select></label>
-        <label class="gen-f"><span>Phone look</span>
-          <select id="gen-phone-look">
-            <option value="off">Off</option><option value="light">Light</option>
-            <option value="medium" selected>Medium</option><option value="heavy">Heavy</option>
-          </select></label>
-        <span class="hint">Grain, soft lens and glow added after generation, so it reads like a phone photo. Free.</span>
-        <label class="gen-f"><span>Clothing</span>
-          <input type="text" id="gen-clothing" maxlength="200" placeholder="black satin robe with lace cuffs, fishnet stockings"></label>
-        <span class="hint">Leave empty and the shot and scene decide. Filled in, it replaces every other clothing in the prompt.</span>
-        <div class="gen-f"><span>Outfit photo</span>
-          <div id="gen-outfits" style="display:flex; flex-wrap:wrap; gap:6px; align-items:center;"></div>
-          <input type="file" id="gen-outfit-file" accept="image/*" style="display:none" onchange="uploadOutfit(this)">
-        </div>
-        <span class="hint">Pick one and she wears exactly that outfit — it replaces the Clothing box. Only the clothes are copied, not the person in the photo.</span>
-        <div class="gen-f"><span>Direction</span>
-          <div class="gen-go" style="flex-wrap:nowrap;">
-            <input type="text" id="gen-direction" maxlength="300" style="flex:1; min-width:0;"
-                   placeholder="looking back over her shoulder, phone in one hand">
-            <button type="button" class="btn btn-ghost btn-sm" id="gen-direction-btn" onclick="suggestDirection()">&#10022; Suggest</button>
+        <section class="gen-group">
+          <h3>The shot</h3>
+          <div class="gen-form">
+            <label class="gen-f"><span>Scene</span>
+              <select id="gen-scene"></select></label>
+            <label class="gen-f"><span>Shot</span>
+              <select id="gen-shot" onchange="genQuote()"></select></label>
+            <label class="gen-f"><span>Style</span>
+              <select id="gen-style"></select></label>
+            <label class="gen-f"><span>Expression</span>
+              <select id="gen-expression"></select></label>
           </div>
-          <span class="hint" id="gen-direction-note">Filled in for you when you pick a scene or shot — or type your own.</span>
-        </div>
-        <div class="gen-go">
-          <button type="button" class="btn-ai btn-ai-secondary" id="gen-write-btn" onclick="writePrompt()">
-            Write the prompt</button>
-          <span class="hint" id="gen-write-note"></span>
-        </div>
-        <label class="gen-f"><span>Prompt</span>
-          <textarea id="gen-prompt" rows="6" maxlength="2000"
-                    placeholder="Fill in the dropdowns and click Write the prompt — or type your own"></textarea></label>
-        <span class="hint">Left empty, the prompt is built from the dropdowns when you generate.</span>
-        <label class="gen-f"><span>Keep out of the shot</span>
-          <textarea id="gen-negative" rows="3" placeholder="sunglasses, jewellery, other people"></textarea></label>
-        <span class="hint">The safety baseline is added to every negative prompt and cannot be edited away.</span>
+          <div class="gen-f"><span>What she's doing</span>
+            <div class="gen-go" style="flex-wrap:nowrap;">
+              <input type="text" id="gen-direction" maxlength="300" style="flex:1; min-width:0;"
+                     placeholder="looking back over her shoulder, phone in one hand">
+              <button type="button" class="btn btn-ghost btn-sm" id="gen-direction-btn" onclick="suggestDirection()">&#10022; Suggest</button>
+            </div>
+            <span class="hint" id="gen-direction-note">Filled in from the scene and shot — or type your own.</span>
+          </div>
+        </section>
+
+        <section class="gen-group">
+          <h3>What she wears</h3>
+          <label class="gen-f"><span>Describe it</span>
+            <input type="text" id="gen-clothing" maxlength="200" placeholder="black satin robe with lace cuffs, fishnet stockings"></label>
+          <div class="gen-f"><span>Or pick an outfit photo</span>
+            <div id="gen-outfits" class="gen-outfits"></div>
+            <input type="file" id="gen-outfit-file" accept="image/*" hidden onchange="uploadOutfit(this)">
+            <span class="hint">A picked photo wins over the text. Only the clothes are copied, never the person.</span>
+          </div>
+        </section>
+
+        <section class="gen-group">
+          <h3>Camera &amp; look</h3>
+          <div class="gen-form">
+            <label class="gen-f"><span>Phone camera</span>
+              <select id="gen-camera"></select></label>
+            <label class="gen-f"><span>Lighting</span>
+              <select id="gen-lighting"></select></label>
+            <label class="gen-f"><span>Photo quality</span>
+              <select id="gen-quality"></select></label>
+          </div>
+          <div class="gen-f"><span>Phone look <small>grain, soft lens, glow — free</small></span>
+            <div class="gen-seg" id="gen-phone-seg">
+              <button type="button" class="gen-chip" data-v="off">Off</button>
+              <button type="button" class="gen-chip" data-v="light">Light</button>
+              <button type="button" class="gen-chip" data-v="medium">Medium</button>
+              <button type="button" class="gen-chip" data-v="heavy">Heavy</button>
+            </div>
+            <select id="gen-phone-look" hidden>
+              <option value="off">Off</option><option value="light">Light</option>
+              <option value="medium" selected>Medium</option><option value="heavy">Heavy</option>
+            </select>
+          </div>
+          <label class="gen-check"><input type="checkbox" id="gen-smudges">
+            Smudges and dust on the lens or mirror <small class="hint">(selfies)</small></label>
+        </section>
+
+        <details class="gen-group gen-adv" id="gen-advanced">
+          <summary><h3>Advanced — see or edit the prompt</h3></summary>
+          <div class="gen-go">
+            <button type="button" class="btn-ai btn-ai-secondary" id="gen-write-btn" onclick="writePrompt()">
+              Write the prompt</button>
+            <span class="hint" id="gen-write-note"></span>
+          </div>
+          <label class="gen-f"><span>Prompt</span>
+            <textarea id="gen-prompt" rows="6" maxlength="2000"
+                      placeholder="Empty = built from your choices above when you generate"></textarea></label>
+          <label class="gen-f"><span>Keep out of the shot</span>
+            <textarea id="gen-negative" rows="2" placeholder="sunglasses, jewellery, other people"></textarea></label>
+          <span class="hint">A safety baseline is always added and can't be removed.</span>
+        </details>
       </div>
       <div id="gen-video-form" class="gen-stackform" style="display:none">
         <div class="gen-f"><span>Photo to animate</span>
@@ -772,14 +811,27 @@ let genOutfits = [], genOutfit = '';
 
 function renderOutfits() {
   el('gen-outfits').innerHTML = genOutfits.map(o => `
-    <span style="position:relative; display:inline-block;">
-      <img src="${esc(o.url)}" alt="" onclick="pickOutfit('${o.id}')" style="width:56px; height:72px; object-fit:cover;
-        border-radius:6px; cursor:pointer; outline:${o.id === genOutfit ? '2px solid var(--accent, #e0457b)' : '1px solid #444'};">
-      <button type="button" aria-label="Remove outfit" onclick="deleteOutfit('${o.id}')"
-        style="position:absolute; top:-6px; right:-6px; border-radius:50%; width:18px; height:18px; padding:0; line-height:16px;">&times;</button>
+    <span class="gen-outfit" role="button" tabindex="0" aria-pressed="${o.id === genOutfit}"
+          title="Wear this outfit" onclick="pickOutfit('${o.id}')">
+      <img src="${esc(o.url)}" alt="Outfit">
+      <button type="button" class="x" aria-label="Remove outfit"
+        onclick="event.stopPropagation(); deleteOutfit('${o.id}')">&times;</button>
     </span>`).join('') +
-    `<button type="button" class="gen-drop" onclick="el('gen-outfit-file').click()">+ Upload outfit</button>`;
+    `<button type="button" class="gen-outfit-add" onclick="el('gen-outfit-file').click()">+ Upload</button>`;
 }
+
+function renderPhoneSeg() {
+  const v = el('gen-phone-look').value;
+  document.querySelectorAll('#gen-phone-seg .gen-chip').forEach(b =>
+    b.setAttribute('aria-pressed', String(b.dataset.v === v)));
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest && e.target.closest('#gen-phone-seg .gen-chip');
+  if (!b) return;
+  el('gen-phone-look').value = b.dataset.v;
+  renderPhoneSeg();
+});
+document.addEventListener('DOMContentLoaded', renderPhoneSeg);
 
 async function loadOutfits() {
   try {
@@ -1977,6 +2029,7 @@ async function writePrompt() {
     const d = await res.json();
     if (!d.ok) throw new Error(d.error || 'could not write it');
     el('gen-prompt').value = d.prompt;
+    el('gen-advanced').open = true;
     genWritten = { choices: JSON.stringify(choices), prompt: d.prompt };
     note.textContent = 'Written from your choices and her character — edit it before you generate.';
   } catch (e) { note.textContent = '✗ ' + e.message; }
