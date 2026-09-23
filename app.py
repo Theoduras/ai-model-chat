@@ -3063,8 +3063,22 @@ TOKENS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Buy tokens</title>
 <script src="/js/analytics.js" defer></script>
 <style>""" + ACCOUNT_CSS + """
-.tokbal{font-size:1.05rem;color:var(--text-2);margin:8px 0 14px}
-.tokbal strong{color:var(--text);font-size:1.6rem;font-weight:800}
+.tokcard{display:grid;grid-template-columns:1.2fr 1fr;gap:0;margin:14px 0 22px;border:1px solid var(--border);border-radius:18px;overflow:hidden;
+background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 16%,var(--surface)),var(--surface) 60%)}
+.tokcard[hidden]{display:none}
+.tokcard>div{padding:22px 26px}
+.tk-lbl{font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text-2)}
+.tk-num{display:flex;align-items:baseline;gap:8px;margin-top:6px}
+.tk-num b{font-size:2.6rem;line-height:1;font-weight:800;color:var(--text);font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.tk-num span{color:var(--text-2);font-weight:600}
+.tk-sub{margin-top:8px;font-size:.85rem;color:var(--text-2)}
+.tk-side{border-left:1px solid var(--border);display:flex;flex-direction:column;justify-content:center}
+.tk-side[hidden]{display:none}
+.tk-date{margin-top:6px;font-size:1.25rem;font-weight:700;color:var(--text)}
+.tk-bar{margin-top:12px;height:6px;border-radius:99px;background:var(--border);overflow:hidden}
+.tk-bar i{display:block;height:100%;width:0;border-radius:inherit;background:var(--accent);transition:width .9s cubic-bezier(.2,.8,.2,1)}
+.tk-in{margin-top:8px;font-size:.8rem;color:var(--text-2)}
+@media(max-width:700px){.tokcard{grid-template-columns:1fr}.tk-side{border-left:0;border-top:1px solid var(--border)}}
 </style></head><body data-page="pricing">
 <header class="site-nav">
 <a class="brand" href="/">Velvetfunnel<i>.app</i></a>
@@ -3082,7 +3096,10 @@ TOKENS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <h1 style="margin-bottom:6px">Buy tokens</h1>
 <p class="sub">One token is about one photo; a five-second clip is twelve.
 Your plan's monthly tokens reset each month &mdash; tokens you buy here never expire.</p>
-<p class="tokbal" id="tokbal" hidden></p>
+<div class="tokcard" id="tokbal" hidden>
+<div><div class="tk-lbl">Your balance</div><div class="tk-num"><b id="tk-n"></b><span id="tk-u"></span></div><div class="tk-sub" id="tk-m"></div></div>
+<div class="tk-side" id="tk-reset" hidden><div class="tk-lbl">Monthly tokens reset</div><div class="tk-date" id="tk-d"></div><div class="tk-bar"><i id="tk-p"></i></div><div class="tk-in" id="tk-in"></div></div>
+</div>
 <div id="tokup" class="ok" hidden></div>
 <div class="tokpacks" id="tokpacks"></div>
 <p class="sub" id="toknote" style="margin-top:16px;font-size:.82rem"></p>
@@ -3106,9 +3123,21 @@ var TOK_PROVIDERS = [{% if stripe_enabled %}['stripe','card']{% endif %}{% if st
   }
 
   var bal = document.getElementById('tokbal');
-  bal.innerHTML = 'You have <strong></strong>.';
-  bal.querySelector('strong').textContent = d.unlimited ? 'unlimited tokens'
-    : Number(d.balance).toLocaleString() + (d.balance === 1 ? ' token' : ' tokens');
+  document.getElementById('tk-n').textContent = d.unlimited ? 'Unlimited' : Number(d.balance).toLocaleString();
+  document.getElementById('tk-u').textContent = d.unlimited ? '' : (d.balance === 1 ? 'token' : 'tokens');
+  document.getElementById('tk-m').textContent = d.monthly
+    ? 'Your plan adds ' + Number(d.monthly).toLocaleString() + ' tokens every month.' : 'Tokens you buy never expire.';
+  if (d.monthly && d.resets_at && !d.unlimited) {
+    var end = new Date(d.resets_at + 'T00:00:00Z'), start = new Date(end), now = new Date();
+    start.setUTCMonth(start.getUTCMonth() - 1);
+    var left = Math.max(0, Math.ceil((end - now) / 864e5));
+    document.getElementById('tk-d').textContent = end.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+    document.getElementById('tk-in').textContent = left <= 1 ? 'Resets tomorrow' : 'In ' + left + ' days';
+    document.getElementById('tk-reset').hidden = false;
+    requestAnimationFrame(function () { requestAnimationFrame(function () {
+      document.getElementById('tk-p').style.width = Math.min(100, (now - start) / (end - start) * 100) + '%';
+    }); });
+  }
   bal.hidden = false;
 
   // Acknowledge a purchase we just came back from. /billing/return has already
@@ -5108,6 +5137,7 @@ def api_tokens():
         'balance': balance,
         'unlimited': balance is None,
         'monthly': user_capabilities(user).get('tokens_month'),
+        'resets_at': _period_end().date().isoformat(),
         'equivalents': CR.equivalents(balance or 0),
         'packs': CR.packs_for(_user_currency(user)),
         # Appended, never mixed in: it is priced far under cost, so it reaches
