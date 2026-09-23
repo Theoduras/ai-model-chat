@@ -53,6 +53,15 @@ IMAGE_TIMEOUT = int(os.getenv('RW_IMAGE_TIMEOUT', '180'))
 # off mid-ingest.
 VIDEO_TIMEOUT = int(os.getenv('RW_VIDEO_TIMEOUT', '180'))
 
+
+def submit_window(spec):
+    """The longest a submit for this spec can block before it has an answer.
+    A still is answered inline, so until then there is no task id to record,
+    and a job without one is not dead until this has passed."""
+    if (spec or {}).get('kind') == 'image':
+        return IMAGE_TIMEOUT + 30 * int(spec.get('batch') or 1)
+    return VIDEO_TIMEOUT
+
 # Credit model keys (credits.IMAGE_MODELS) to each provider's model id.
 #
 # Seedream replaced the Flux/SDXL family here. It is a closed API model, which
@@ -1189,7 +1198,7 @@ class RunwareProvider(Provider):
         if refs:
             task[REFERENCE_FIELD] = list(refs)[:MAX_REFERENCES]
 
-        data = self._send([task], timeout=IMAGE_TIMEOUT + 30 * int(spec.get('batch') or 1))
+        data = self._send([task], timeout=submit_window(spec))
         urls = [d.get('imageURL') for d in data if d.get('imageURL')]
         cost = sum(float(d.get('cost') or 0) for d in data)
         if not urls:

@@ -30877,6 +30877,8 @@ def _gen_start(job_id, slug, spec, workspace):
             _gen_fail(job_id, workspace, str(e)[:200] or 'generation failed')
             return
 
+        if not _gen_claim_late(job_id, workspace, result, provider_job):
+            return
         s = _db_session()
         try:
             update_generation(s, job_id, status='running',
@@ -30887,6 +30889,41 @@ def _gen_start(job_id, slug, spec, workspace):
             _gen_finish(job_id, slug, spec, workspace, result.urls)
         elif result.status == 'failed':
             _gen_fail(job_id, workspace, result.error or 'generation failed')
+
+
+def _gen_claim_late(job_id, workspace, result, provider_job):
+    """Whether a submit that has just come back may still carry its job.
+
+    The sweep can write a job off while its submit is still waiting on the
+    provider. If the answer is an image, the provider has made it and billed
+    us for it, so it is delivered and the refund is taken back; anything else
+    leaves the job as the sweep left it rather than reviving a refunded job."""
+    from db import get_generation, token_debit, TokenLedger
+    s = _db_session()
+    try:
+        job = get_generation(s, job_id)
+        if not job or job.status != 'failed':
+            return True
+        if result.status != 'done' or not result.urls:
+            return False
+        # What the sweep actually gave back, not the job's price: an unlimited
+        # account was never charged and must not be charged now.
+        refunded = sum(int(r.delta) for r in s.query(TokenLedger).filter(
+            TokenLedger.workspace_id == workspace,
+            TokenLedger.source == job_id,
+            TokenLedger.kind == 'refund'))
+        charged = token_debit(s, workspace, refunded, job_id,
+                              note='late result after a refund')
+        logger.warning('generation job=%s came back after it was written off '
+                       '(provider=%s); delivering it, %s', job_id, provider_job,
+                       'charged %d again' % refunded if charged else
+                       'balance no longer covers it, delivered free')
+        job.error = ''
+        job.finished_at = None
+        s.commit()
+        return True
+    finally:
+        s.close()
 
 
 def _gen_fail(job_id, workspace, message):
@@ -31062,14 +31099,20 @@ def _gen_advance(row):
         logger.warning('generation job %s timed out after %.0fs', job_id, age)
         _gen_fail(job_id, workspace, 'the provider never finished')
         return
+    try:
+        spec = json.loads(spec_json or '{}')
+    except ValueError:
+        spec = {}
     if not provider_job:
         # Submitted but never acknowledged: whatever was submitting died before
         # it could record a provider id, so there is nothing left to poll for.
-        if age > GEN_SUBMIT_GRACE:
+        # A still only gets its id once the image exists, so the submit's own
+        # timeout has to run out first -- a flat two minutes wrote off slow
+        # images the provider went on to deliver.
+        if age > imagegen.submit_window(spec) + GEN_SUBMIT_GRACE:
             _gen_fail(job_id, workspace, 'the generation never started')
         return
     try:
-        spec = json.loads(spec_json or '{}')
         result = imagegen.get_provider(provider_name).poll(provider_job)
     except imagegen.GenerationError as e:
         if e.fatal:
@@ -31158,7 +31201,8 @@ def _gen_poll_round():
 
 
 GEN_JOB_TIMEOUT = int(os.getenv('GEN_JOB_TIMEOUT', '1800'))
-GEN_SUBMIT_GRACE = int(os.getenv('GEN_SUBMIT_GRACE', '120'))
+# Slack on top of the submit's own timeout (imagegen.submit_window).
+GEN_SUBMIT_GRACE = int(os.getenv('GEN_SUBMIT_GRACE', '60'))
 
 # Whether anything advances a generation on its own. False on Vercel, where a
 # lambda is frozen the moment it answers: a submit handed to a thread would
