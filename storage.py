@@ -39,6 +39,11 @@ _EXT = {
 }
 
 
+def mime_of(path):
+    ext = os.path.splitext(path or '')[1].lower()
+    return next((m for m, e in _EXT.items() if e == ext), 'application/octet-stream')
+
+
 BLOB_API = 'https://blob.vercel-storage.com'
 BLOB_API_VERSION = '11'
 

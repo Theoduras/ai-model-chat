@@ -2275,6 +2275,7 @@ function renderGenStaging() {
           <div class="gen-acts">
             <button type="button" class="gen-keep" onclick="event.stopPropagation(); keepGenerated('${m.id}', true)">Keep</button>
             <button type="button" class="gen-drop" onclick="event.stopPropagation(); keepGenerated('${m.id}', false)">Drop</button>
+            ${m.has_original ? `<button type="button" class="gen-drop" title="Switch between phone look and the unfiltered original" onclick="event.stopPropagation(); switchLook('${m.id}')">Look</button>` : ''}
           </div>
         </div>`]);
     });
@@ -2290,6 +2291,18 @@ async function deleteGenJob(id) {
     if (!d.ok) throw new Error(d.error || 'Could not delete that');
     genJobs = genJobs.filter(j => j.id !== id);
     renderGenStaging();
+  } catch (e) { setGenStatus('✗ ' + e.message, false); }
+}
+
+async function switchLook(id) {
+  try {
+    const res = await fetch('/api/generate/look', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ media_id: id }),
+    });
+    const d = await res.json();
+    if (!d.ok) throw new Error(d.error || 'Could not switch that');
+    await pollGenJobs();
   } catch (e) { setGenStatus('✗ ' + e.message, false); }
 }
 

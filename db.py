@@ -199,6 +199,9 @@ class PersonaMedia(Base):
     # extension cannot be joined onto its source: it is delivered as its own
     # vault clip and this is what says which clip it carries on from.
     parent_media = Column(String(32), default='')
+    # The other version of a filtered generation (phone look on or off), so
+    # the creator can switch it back without generating again.
+    original_path = Column(String(400), default='')
 
 
 Index('ix_media_slug_purpose', PersonaMedia.slug, PersonaMedia.purpose)

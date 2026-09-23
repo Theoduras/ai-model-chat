@@ -31257,12 +31257,19 @@ def _gen_finish(job_id, slug, spec, workspace, urls):
             logger.warning('generation result download failed job=%s: %s', job_id, e)
             continue
         _gen_refund_short_clip(job_id, workspace, spec, data, mime)
+        raw, raw_mime = data, mime
         data, mime = imagegen.phone_look(data, mime, spec.get('phone_look'))
         try:
             path = storage.put(slug, data, mime)
         except Exception:
             logger.exception('generation upload failed job=%s', job_id)
             continue
+        original = ''
+        if data is not raw:
+            try:
+                original = storage.put(slug, raw, raw_mime)
+            except Exception:
+                logger.exception('unfiltered copy upload failed job=%s', job_id)
         s = SessionLocal()
         try:
             # From the bytes, not from the job: a swap's *job* is a swap, but
@@ -31283,7 +31290,8 @@ def _gen_finish(job_id, slug, spec, workspace, urls):
                         else 'sfw'),
                 # An extension is its own clip -- nothing here can join it onto
                 # the one it continues -- so the chain is what says it is one.
-                parent_media=spec.get('parent_media') or '')
+                parent_media=spec.get('parent_media') or '',
+                original_path=original)
             s.add(row)
             s.commit()
             made.append(row.id)
@@ -31549,8 +31557,11 @@ def _job_json(job, session_db):
             continue
         media.append({
             'id': row.id, 'kind': row.kind or 'image',
-            'url': f'/api/personas/{row.slug}/media/{row.id}/image',
+            # The path in the URL, so switching the phone look is a new src.
+            'url': f'/api/personas/{row.slug}/media/{row.id}/image'
+                   f'?v={hashlib.md5((row.gcs_path or "").encode()).hexdigest()[:8]}',
             'approved': row.approved is not False,
+            'has_original': bool(row.original_path),
             'expires_at': row.expires_at.isoformat() if row.expires_at else '',
         })
     try:
@@ -31567,14 +31578,14 @@ def _gen_drop_media(session_db, row):
     """Delete one generated photo or clip, and the bytes behind it."""
     from db import (delete_persona_media, delete_media_links,
                     drop_model_references)
-    path = row.gcs_path or ''
+    paths = [p for p in (row.gcs_path, row.original_path) if p]
     # Links first: a leftover link would point at a photo that is gone.
     # delete_persona_media does not commit on its own.
     delete_media_links(session_db, row.id)
     drop_model_references(session_db, row.id)
     delete_persona_media(session_db, row.id)
     session_db.commit()
-    if path:
+    for path in paths:
         storage.delete(path)
 
 
@@ -31605,6 +31616,8 @@ def api_generate_keep():
             if keep:
                 try:
                     row.gcs_path = storage.promote(row.gcs_path or '')
+                    if row.original_path:
+                        row.original_path = storage.promote(row.original_path)
                 except Exception:
                     logger.exception('promote failed for media %s', mid)
                     continue
@@ -31617,6 +31630,29 @@ def api_generate_keep():
     finally:
         s.close()
     return jsonify({'ok': True, 'kept' if keep else 'dropped': done})
+
+
+@app.route('/api/generate/look', methods=['POST'])
+def api_generate_look():
+    """Switch a generated still between its phone-look and unfiltered copies."""
+    blocked = _require_active()
+    if blocked:
+        return blocked
+    mid = str((request.get_json(silent=True) or {}).get('media_id') or '')
+    from db import SessionLocal, get_persona_media
+    mine = owned_slugs()
+    s = SessionLocal()
+    try:
+        row = get_persona_media(s, mid) if mid else None
+        if (not row or not row.original_path
+                or (mine is not None and row.slug not in mine)):
+            return jsonify({'ok': False, 'error': 'Nothing to switch'}), 404
+        row.gcs_path, row.original_path = row.original_path, row.gcs_path
+        row.mime = storage.mime_of(row.gcs_path)
+        s.commit()
+    finally:
+        s.close()
+    return jsonify({'ok': True})
 
 
 @app.route('/api/generate/job/<job_id>', methods=['DELETE'])
