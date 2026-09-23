@@ -489,7 +489,35 @@
     return api;
   }
 
+  // A first-run guide that walks the page as it is, panel by panel, instead of
+  // lifting panels into a frame: what the creator is shown is the page they use.
+  function pageTour(cfg) {
+    var guide = tour(cfg.steps, {
+      onEnd: function () { save(cfg.key, { done: true, tour: 'done' }); }
+    });
+    var api = {
+      running: function () { return guide.on(); },
+      auto: function () {
+        return me().then(function (m) {
+          if (m.isAdmin || entry(cfg.key).done) return false;
+          api.open();
+          return true;
+        });
+      },
+      open: function () { requestAnimationFrame(guide.start); },
+      close: function (markDone) {
+        guide.end(true);
+        if (markDone) save(cfg.key, { done: true });
+      },
+      refresh: function () {},
+      tourStart: function () { api.open(); },
+    };
+    window[cfg.name] = api;
+    return api;
+  }
+
   window.PageWizard = {
+    pageTour: pageTour,
     esc: esc, me: me, entry: entry, save: save, seen: seen, markSeen: markSeen,
     railHtml: railHtml, crumb: crumb, headHtml: headHtml, footHtml: footHtml,
     doneHtml: doneHtml, openPage: openPage, tour: tour, frame: frame,

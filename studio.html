@@ -2504,42 +2504,20 @@ function openFanvueUpload() {
 // ── Guided first run ────────────────────────────────────────────────────────
 // The persona wizard's frame over the studio's own panels, one at a time. The
 // panels are borrowed, not copied, so everything done in the guide is real.
-PageWizard.frame({
-  name: 'StudioWizard', key: 'page:studio', railTitle: 'Your first photos',
-  stages: [{key: 'what', label: 'What to make'}, {key: 'who', label: 'Who it is'},
-           {key: 'shot', label: 'The shot'}, {key: 'go', label: 'Generate'}],
+PageWizard.pageTour({
+  name: 'StudioWizard', key: 'page:studio',
   steps: [
-    {stage: 'what', key: 'job', nav: 'Photo or video', title: 'What do you want to make?',
-     sub: 'Photos are open on every plan; video is coming soon. Safe or Explicit narrows the shots she allows.',
-     nodes: () => [document.querySelector('.gen-toggles'), el('gen-jobs'), el('gen-p-engine')], wide: true},
-    {stage: 'who', key: 'who', nav: 'Her face & body', title: 'Whose photos are these?',
-     sub: 'Pick the persona. Her approved character, or her face and body photos, keep her looking the same in every shot.',
-     nodes: () => [el('gen-p-character')],
-     done: () => !!slug() && !!(genCharacter || (genRefs.face || []).length),
-     gate: () => slug() ? '' : 'Create a persona first.'},
-    {stage: 'shot', key: 'prompt', nav: 'Describe it', title: 'Describe the shot',
-     sub: 'Pick a scene and a shot — the direction fills itself in. Add clothing if you want it exact, then let Write the prompt fill in the words, or type your own.',
-     nodes: () => [el('gen-p-prompt')]},
-    {stage: 'go', key: 'generate', nav: 'Size & generate', title: 'Pick the size, then keep the best',
-     sub: 'Choose the size, shape and how many. The price is on the button. Results land here unapproved: Keep moves a photo into her vault, and the rest delete themselves after 3 days.',
-     nodes: () => [el('gen-p-result')], done: () => genJobs.length > 0},
+    {anchor: '.gen-toggles', placement: 'bottom', title: 'Rating',
+     body: 'Safe or Explicit. It narrows the jobs and shots this persona allows, so pick it first.'},
+    {anchor: '#gen-p-engine', placement: 'right', title: '1 · Engine',
+     body: 'The model that makes the photo. Photos are open on every plan; video is coming soon.'},
+    {anchor: '#gen-p-character', placement: 'right', title: '2 · Character',
+     body: 'Pick whose photos these are. Her approved character, or her face and body photos, keep her looking the same in every shot.'},
+    {anchor: '#gen-p-prompt', placement: 'left', title: '3 · Prompt',
+     body: 'Pick a scene and a shot and the direction fills itself in. Clothing, if filled in, replaces every other outfit. Write the prompt turns it all into words, or type your own.'},
+    {anchor: '#gen-p-result', placement: 'left', title: '4 · Size & generate',
+     body: 'Choose size, shape and how many; the price is on the button. Results land unapproved: Keep moves a photo into her vault, the rest delete themselves after 3 days.'},
   ],
-  tour: [
-    {anchor: '#pw-stepwrap .ob-step-h', placement: 'bottom', title: 'One thing at a time',
-     body: 'The studio is split into a few short steps. Each one asks a single question; answer it and continue.'},
-    {anchor: '#pw-step-body', placement: 'right', title: 'These are the real controls',
-     body: 'Whatever appears in this box is the studio itself. What you set here is what gets generated.'},
-    {anchor: '.ob-rail', placement: 'right', title: 'Where you are',
-     body: 'Four stages. The bar shows how far along you are, and you can jump back to any step you have passed.'},
-    {anchor: '#pw-foot', placement: 'top', title: 'Continue, or skip ahead',
-     body: 'Continue moves on. Skip setup hands you the whole studio at once, and the Guide button brings this back any time.'},
-  ],
-  done: {title: 'You are ready to create.', sub: 'That is the whole loop: pick, describe, generate, keep. The full studio has every option on one page.',
-    cards: [
-      {icon: '✦', title: 'Open the full studio', desc: 'Every panel on one page.', call: 'StudioWizard.close(true)'},
-      {icon: '🖼️', title: 'See what you kept', desc: 'Her approved photos, ready to send.', call: "StudioWizard.close(true);el('vault-panel').scrollIntoView()"},
-      {icon: '👤', title: 'Build her character', desc: 'Lock her look so every photo matches.', call: "PageWizard.openPage('/characters')"},
-    ]},
 });
 
 init().then(() => StudioWizard.auto());
