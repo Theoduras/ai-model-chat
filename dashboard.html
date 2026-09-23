@@ -1396,6 +1396,15 @@ function openEmbedded(url, navEl) {
 // Reopens whatever was on screen last. A stored persona that has since been
 // deleted, or a view this account cannot see, falls through to the default.
 function restoreView() {
+  // A page opened on its own lands here as ?open= so it shows inside the
+  // workspace; only a path the sidebar itself offers may be framed.
+  const open = new URLSearchParams(location.search).get('open') || '';
+  const openEl = /^\/[a-z]/.test(open) && document.querySelector('[data-view="' + open.split('?')[0] + '"]');
+  if (openEl) {
+    history.replaceState(null, '', location.pathname);
+    openEmbedded(open, openEl);
+    return true;
+  }
   let v = null;
   try { v = JSON.parse(localStorage.getItem(lsViewKey()) || 'null'); } catch(e) {}
   if (!v) return false;

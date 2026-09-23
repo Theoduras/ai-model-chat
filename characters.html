@@ -10,6 +10,10 @@
   <link rel="stylesheet" href="/css/style.css">
   <script src="/js/devnav.js" defer></script>
   <script src="/js/character-visuals.js"></script>
+  <script>
+    if (window.self === window.top) location.replace('/dashboard?open=' + encodeURIComponent(location.pathname + location.search));
+    else document.documentElement.classList.add('in-workspace');
+  </script>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&display=swap">
   <style>
@@ -30,6 +34,7 @@
     body.ch-studio .drawer { background: #FFFFFF; box-shadow: -12px 0 32px rgba(30,27,24,.10); }
     body.ch-studio .tier-h { color: var(--text-2); font-weight: 600; }
     a:hover { color: #8E2415; }
+    .in-workspace body.ch-studio > header { display: none; }
     #edit-view:not([hidden]) { display: grid; grid-template-columns: 240px minmax(0, 1fr); column-gap: 28px; align-items: start; }
     #edit-view > * { grid-column: 2; }
     #edit-view > .rail { grid-column: 1; grid-row: 1 / span 20; position: sticky; top: 0; display: flex; flex-direction: column; gap: 18px;
