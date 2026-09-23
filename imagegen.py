@@ -1674,6 +1674,36 @@ def _data_uri(b64, mime):
     return f'data:{mime};base64,{b64}'
 
 
+# Kling refuses a reference whose sides fall outside this range; a 4k still is
+# over it and a thumbnail under it.
+KLING_REF_SIDE = (340, 3850)
+
+
+def fit_reference(url, lo=KLING_REF_SIDE[0], hi=KLING_REF_SIDE[1]):
+    """The reference rescaled so both sides sit inside [lo, hi], as a JPEG data
+    URI. Returned untouched when it already fits or cannot be read."""
+    import base64
+    import io
+    from PIL import Image
+    try:
+        if url.startswith('data:'):
+            data = base64.b64decode(url.split(',', 1)[1])
+        else:
+            data, _ = fetch_result(url)
+        img = Image.open(io.BytesIO(data))
+        w, h = img.size
+    except Exception:
+        return url
+    if lo <= min(w, h) and max(w, h) <= hi:
+        return url
+    scale = min(hi / max(w, h), max(lo / min(w, h), 1.0))
+    img = img.convert('RGB').resize((max(lo, round(w * scale)), max(lo, round(h * scale))),
+                                    Image.LANCZOS)
+    out = io.BytesIO()
+    img.save(out, 'JPEG', quality=92)
+    return 'data:image/jpeg;base64,' + base64.b64encode(out.getvalue()).decode()
+
+
 def fetch_result(url):
     """Pull a finished generation off the provider's CDN. Their URLs are short
     lived, so nothing downstream may hold one — the bytes go to our storage."""

@@ -16,3 +16,4 @@ cryptography
 aiohttp
 google-cloud-storage
 requests
+Pillow

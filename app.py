@@ -30476,6 +30476,8 @@ def _gen_start(job_id, slug, spec, workspace):
                                 + refs)[:imagegen.MAX_REFERENCES]
                     logger.info('swap job=%s refs=%d role=%s from=%s',
                                 job_id, len(refs), role or 'face+body', ref_model)
+                    if refs and imagegen.wants_body_only(spec.get('model')):
+                        refs = [imagegen.fit_reference(refs[0])]
                     if refs:
                         call['reference_urls'] = refs
                 provider_job, result = provider.submit_video(call)
