@@ -624,6 +624,10 @@ def price_table():
         'default_job': DEFAULT_JOB,
         'aspects': list(ASPECTS),
         'default_aspect': DEFAULT_ASPECT,
+        # A still's frame is free for the same reason: the rung is the pixel
+        # budget and the shape only reshapes it.
+        'image_aspects': list(_IG.IMAGE_ASPECTS),
+        'default_image_aspect': _IG.DEFAULT_IMAGE_ASPECT,
         'audio_modes': list(AUDIO_MODES),
         'extend_modes': list(EXTEND_MODES),
         # What each model lets the operator choose. A model that runs the length

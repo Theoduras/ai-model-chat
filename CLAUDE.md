@@ -311,8 +311,10 @@ Stay completely in character. Never mention being an AI.
   copy, so a later re-approval never changes a past job. Swap and Reel
   take her identity from a picker — character (safe-work views only) or vault
   references; Multi-reference leads with the character's safe-work views. Photos and
-  Multi-reference follow the studio's step 2 choice (`identity`): her character *or*
-  the face/body slots, never both; a request without it sends both. Face uploads are
+  Multi-reference follow the studio's step 2 choice (`identity`): her character, the
+  face/body slots, or `both` (character views first); a request without it sends both.
+  Content stills never send her wardrobe photos: what she wears comes from the studio's
+  Clothing box (which overrides the shot and scene), else the shot or scene. Face uploads are
   references only; stacked youth-leaning choices are refused in `characters.validate`.
 - **Views are a tree.** Each view in `characters.VIEWS` names its parents; a
   `CharacterView` row holds status and version, and `characters.resolve_status`

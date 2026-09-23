@@ -252,6 +252,54 @@ def test_snapshot_views():
           CH.snapshot_views(partial, 'portrait', '') == ['face_front'])
 
 
+def test_content_prompts():
+    import imagegen as IG
+    for model in ('seedream-4-5', 'nano-banana-2'):
+        rungs = ('2k', '4k') if model == 'seedream-4-5' else ('2k',)
+        for rung in rungs:
+            for a in IG.IMAGE_ASPECTS:
+                w, h = IG.dimensions(model, rung, a)
+                rw, rh = (int(x) for x in a.split(':'))
+                check(f'{model} {rung} {a} keeps its shape',
+                      abs(w / h - rw / rh) / (rw / rh) < 0.02)
+                check(f'{model} {rung} {a} on the grid', w % 16 == 0 and h % 16 == 0)
+                check(f'{model} {rung} {a} under the side cap', max(w, h) <= IG.MAX_IMAGE_SIDE)
+                if model == 'seedream-4-5':
+                    check(f'{model} {rung} {a} over the floor', w * h >= IG.SEEDREAM_MIN_PX)
+    check('nano uses its own list', IG.dimensions('nano-banana-2', '2k', '16:9') == (2752, 1536))
+    check('no shape named keeps the old frame', IG.dimensions('seedream-4-5', '2k') == (1664, 2432))
+
+    def clauses(p):
+        import re
+        return [IG._norm(c) for c in re.split(r'[.,;:]\s', p) if IG._norm(c)]
+    for shot in IG.SHOT_FRAMING:
+        for scene, style in (('', 'any'), ('bathroom', 'mirror-selfie'),
+                             ('lingerie-tease', 'candid'), ('shower', 'pov-selfie')):
+            p = IG.build_prompt('a slim woman', shot, has_reference=True, style=style,
+                                scene=scene, camera='iphone-14', lighting='daylight',
+                                direction='looking back over her shoulder', age=27)
+            cs = clauses(p)
+            check(f'{shot}/{scene} says nothing twice', len(cs) == len(set(cs)))
+            check(f'{shot}/{scene} one adult clause', p.count('Fictional adult woman') == 1)
+            check(f'{shot}/{scene} one quality text', p.count(IG.PHOTO_LOOK) == 1)
+            check(f'{shot}/{scene} one age', p.count('27') == 1)
+    ref = IG.build_prompt('a woman', 'full', has_reference=True)
+    check('reference no longer dresses her', 'Copy the clothing' not in ref and 'not what she wears' in ref)
+    check('full body is not forced into an outfit', 'casual outfit' not in ref)
+    worn = IG.build_prompt('a woman', 'lingerie', clothing='a black satin robe', scene='lingerie-tease')
+    check('clothing replaces the shot and scene clothing',
+          'lingerie' not in worn and 'She is wearing a black satin robe.' in worn)
+    check('style the shot already says is dropped',
+          IG.build_prompt('a woman', 'mirror', style='mirror-selfie').count('mirror selfie') == 1)
+    check('camera picks differ', len({IG.camera_text(k) for k in IG.CAMERAS}) == len(IG.CAMERAS))
+    check('quality choice reaches the prompt',
+          IG.QUALITY['pro-shoot'][1] in IG.build_prompt('a woman', 'portrait', quality='pro-shoot'))
+    check('hand-written prompt keeps its own quality',
+          IG.finish_prompt('x. ' + IG.QUALITY['pro-shoot'][1]).count('Real unretouched') == 0)
+    check('every explicit direction has a pool', all(
+        IG.pick_direction(s, '') for s in IG.SHOT_FRAMING))
+
+
 if __name__ == '__main__':
     test_sfw_never_gets_nsfw()
     test_required_views()
@@ -261,5 +309,6 @@ if __name__ == '__main__':
     test_view_tree()
     test_resolver()
     test_snapshot_views()
+    test_content_prompts()
     print('FAILED' if FAILURES else 'OK', len(FAILURES))
     raise SystemExit(1 if FAILURES else 0)

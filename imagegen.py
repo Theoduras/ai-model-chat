@@ -36,6 +36,7 @@ import base64
 import json
 import logging
 import os
+import random
 import re
 import uuid
 
@@ -340,9 +341,46 @@ RESOLUTION_PX = {
 }
 
 
-def dimensions(model_key, resolution):
+# Frame shapes for a still. 2:3 is closest to the frame every still had before
+# there was a choice; a request that names no shape still gets that exact frame.
+IMAGE_ASPECTS = ('1:1', '4:5', '5:4', '3:4', '4:3', '2:3', '3:2', '9:16', '16:9', '21:9')
+DEFAULT_IMAGE_ASPECT = '2:3'
+
+# The Google models take sizes from their own list only, one per shape.
+GOOGLE_PX_2K = {
+    '1:1': (2048, 2048), '2:3': (1696, 2528), '3:2': (2528, 1696),
+    '3:4': (1792, 2400), '4:3': (2400, 1792), '4:5': (1856, 2304),
+    '5:4': (2304, 1856), '9:16': (1536, 2752), '16:9': (2752, 1536),
+    '21:9': (3168, 1344),
+}
+SEEDREAM_MIN_PX = 3686400
+MAX_IMAGE_SIDE = 4096
+
+
+def dimensions(model_key, resolution, aspect=None):
+    """(width, height) for a still. The rung is a pixel budget and the aspect
+    only reshapes it, so a 16:9 still costs what a 2:3 one does."""
     sizes = MODEL_PX.get(model_key) or RESOLUTION_PX
-    return sizes.get(resolution) or sizes.get('2k') or RESOLUTION_PX['2k']
+    base = sizes.get(resolution) or sizes.get('2k') or RESOLUTION_PX['2k']
+    if aspect not in IMAGE_ASPECTS:
+        return base
+    if model_key in ('nano-banana-pro', 'nano-banana-2'):
+        return GOOGLE_PX_2K[aspect]
+    rw, rh = (int(x) for x in aspect.split(':'))
+    budget = max(base[0] * base[1], SEEDREAM_MIN_PX)
+    # The pair on the 64 grid closest to the shape that neither drops under
+    # Seedream's floor nor overshoots the rung it was priced at.
+    best = None
+    for width in range(64, MAX_IMAGE_SIDE + 1, 64):
+        height = max(64, round(width * rh / rw / 64) * 64)
+        if height > MAX_IMAGE_SIDE or width * height < SEEDREAM_MIN_PX:
+            continue
+        if width * height > budget * 1.15:
+            break
+        err = (abs(width / height - rw / rh) / (rw / rh), abs(width * height - budget))
+        if best is None or err < best[0]:
+            best = (err, (width, height))
+    return best[1] if best else base
 # Frame shape and pixel count are separate axes: a rung says how much detail a
 # clip is billed for, an aspect says what shape it is. A reel and a 16:9 cut of
 # the same scene cost the same, so the rung alone could never express the one
@@ -571,19 +609,28 @@ def size_rung(height, width=0):
 # the creator's own setting decides, and nothing above her level is offered.
 
 SHOT_FRAMING = {
-    'portrait': 'a head-and-shoulders portrait selfie, looking at the camera',
-    'half': 'a waist-up casual photo',
-    'full': 'a full-body photo in a casual outfit',
-    'candid': 'a candid lifestyle photo doing an everyday activity',
-    'mirror': 'a mirror selfie holding a phone',
-    'lingerie': 'a boudoir photo in matching lingerie, soft window light',
+    'portrait': 'a head-and-shoulders selfie, looking into the lens',
+    'half': 'a waist-up photo',
+    'full': 'a full-body photo',
+    'candid': 'a candid photo in the middle of an everyday moment',
+    'mirror': 'a mirror selfie, phone in hand',
+    'lingerie': 'a boudoir photo in lingerie',
     'implied': ('an implied-nude photo — bare shoulders and back, the camera '
                 'angle and framing suggesting more than it shows'),
-    'sheer': 'a photo in a sheer, partially see-through robe, artistic and moody',
-    'bedroom': 'a sultry, relaxed bedroom photo, intimate mood',
-    'topless': 'a topless boudoir photo, warm natural light, tasteful and artistic',
-    'nude': 'an artistic full nude photo, soft natural light, classic boudoir framing',
-    'explicit': 'an explicit intimate photo, natural light, candid and unposed',
+    'sheer': 'a moody photo in a sheer, partially see-through robe',
+    'bedroom': 'a relaxed, sultry bedroom photo',
+    'topless': 'a topless boudoir photo',
+    'nude': 'a full nude boudoir photo',
+    'explicit': 'an explicit intimate photo, candid and unposed',
+}
+
+# The same shots with what she wears taken out, for when the creator has typed
+# the clothing herself: her words win, so the framing must not argue with them.
+SHOT_FRAMING_BARE = {
+    'lingerie': 'a boudoir photo',
+    'sheer': 'a moody, intimate photo',
+    'topless': 'an intimate boudoir photo',
+    'nude': 'an intimate full-body boudoir photo',
 }
 
 SHOT_LEVEL = {
@@ -611,6 +658,10 @@ STYLES = {
     'candid': 'candid and unposed, as if caught mid-moment',
     'photoshoot': 'a styled photoshoot frame, deliberate posing',
 }
+
+# A style the shot already says, so it is not said twice.
+STYLE_IN_SHOT = {'mirror': ('mirror-selfie',), 'portrait': ('pov-selfie',),
+                 'candid': ('candid',), 'explicit': ('candid',)}
 
 SCENES = {
     # Safe for work.
@@ -645,13 +696,39 @@ SCENES = {
     'aftermath': ('explicit', 'afterwards, flushed and tousled'),
 }
 
-CAMERAS = {
-    'auto': '',
-    'flash': 'harsh direct flash',
-    'night-mode': 'phone night mode, slight grain',
-    '35mm': 'shot on 35mm film',
-    'film-grain': 'visible film grain',
+# Scenes that name clothing, without it, for when the creator typed her own.
+SCENES_BARE = {
+    'lingerie-tease': 'teasing the camera',
+    'activewear': 'stretching on a yoga mat',
 }
+
+# The phone the photo was taken on, which is most of how a creator's photo
+# looks: each one is written to a visibly different result, so picking a
+# budget phone over a flagship is a choice the output actually shows.
+CAMERAS = {
+    'auto': ('Auto', ''),
+    'iphone-16-pro': ('iPhone 16 Pro', 'shot on an iPhone 16 Pro main camera: crisp 48MP detail, '
+                      'natural HDR, true colour, gentle natural depth of field'),
+    'iphone-14': ('iPhone 14', 'shot on an iPhone 14: clean detail, slightly warm Apple colour, '
+                  'mild HDR, moderate sharpening'),
+    'iphone-11': ('iPhone 11', 'shot on an iPhone 11: softer detail, visible noise in the shadows, '
+                  'older HDR with slightly washed-out highlights'),
+    'iphone-front': ('iPhone front camera', 'shot on an iPhone front camera: wide selfie lens with '
+                     'slight edge stretch, softer detail, a little smoothing'),
+    'galaxy-s24-ultra': ('Samsung S24 Ultra', 'shot on a Samsung Galaxy S24 Ultra: very sharp detail, '
+                         'punchy saturated colour, bright exposure'),
+    'galaxy-s22': ('Samsung S22', 'shot on a Samsung Galaxy S22: saturated Samsung colour, strong '
+                   'sharpening, lifted shadows'),
+    'pixel-8': ('Google Pixel 8', 'shot on a Google Pixel 8: contrasty HDR, cool neutral colour, '
+                'deep shadows'),
+    'budget-android': ('Budget Android', 'shot on a cheap Android phone: low detail, smeared noise '
+                       'reduction, heavy JPEG compression, blown highlights'),
+    'disposable': ('Disposable camera', 'shot on a disposable film camera: direct flash, coarse grain, '
+                   'faded colour, slightly soft focus'),
+}
+
+# The cameras that are phones: in a selfie, the one she is holding.
+PHONE_CAMERAS = tuple(k for k in CAMERAS if k not in ('auto', 'disposable'))
 
 LIGHTING = {
     'auto': '',
@@ -663,7 +740,95 @@ LIGHTING = {
     'candlelight': 'candlelight',
     'studio': 'studio lighting',
     'shower-light': 'diffused light through steam',
+    'phone-flash': 'harsh direct phone flash',
 }
+
+# How real the photo looks. The first is the default and the target: a real
+# creator's own phone photo, skin, light and all.
+QUALITY = {
+    'real-phone': ('Real phone photo', (
+        'Real unretouched smartphone photo: true-to-life skin with visible pores, peach fuzz, fine texture '
+        'and small imperfections; light behaves like a real room, with soft falloff and real shadows; '
+        'slight sensor noise and phone sharpening; accurate colour — not airbrushed, not glossy, not a '
+        'studio render, not CGI.')),
+    'flagship-clean': ('Clean flagship phone', (
+        'Clean, bright flagship-phone photo: crisp detail, gentle HDR, even exposure, real skin texture '
+        'with pores still visible — not airbrushed, not CGI.')),
+    'pro-shoot': ('Professional shoot', (
+        'Professional full-frame camera photo: controlled light, shallow depth of field, a light retouch '
+        'that keeps real skin texture — photographic, not CGI.')),
+}
+DEFAULT_QUALITY = 'real-phone'
+
+# Said only when she is conditioned on photos: the details that make a
+# returning fan recognise her are the first ones a model lets drift.
+CONSISTENCY = ('Every identifying detail — face shape, eyes, freckles, moles, tattoos, piercings, '
+               'hair colour and cut — exactly as in the reference images.')
+
+# Directions for jobs that never go to Gemini: anything above safe work. A few
+# per scene, then per shot, in a creator's own shorthand for her next post.
+DIRECTIONS = {
+    'lingerie-tease': ['kneeling on the bed, one strap slipping off her shoulder, biting her lip',
+                       'hand on her hip, looking back over her shoulder with a half smile'],
+    'shower': ['head tilted back under the water, eyes closed, hands in her wet hair',
+               'looking down with a shy smile, water running down her shoulders'],
+    'bath': ['leaning back in the bubbles, one leg raised, smirking at the lens',
+             'chin resting on the edge of the tub, wet hair, playful look'],
+    'undressing': ['pulling her top over her head, stomach showing, laughing',
+                   'hooking her thumbs into her waistband, glancing at the lens'],
+    'activewear': ['mid-stretch on the mat, looking up at the phone', 'sitting cross-legged, towel round her neck, flushed cheeks'],
+    'just-woke-up': ['lying on her side in the sheets, sleepy half smile', 'sitting up in bed, messy hair, stretching one arm'],
+    'towel-drop': ['holding the towel loosely at her chest, looking back', 'towel sliding off one hip, surprised grin'],
+    'vanity': ['leaning into the mirror doing her lashes, eyes on the lens', 'sitting sideways on the stool, legs crossed, glancing back'],
+    'walk-in-closet': ['holding two outfits up, pouting at the lens', 'leaning on the shelves, one hand in her hair'],
+    'exposed': ['lying back on the pillows, arms above her head, heavy-lidded look',
+                'propped on her elbows, knees up, looking straight at the lens'],
+    'solo-touch': ['lying back, eyes half closed, lips parted', 'hand trailing down her stomach, biting her lip'],
+    'bent-over': ['bent over the edge of the bed, looking back over her shoulder', 'hands on the dresser, arched back, glancing back with a smirk'],
+    'nipple-play': ['cupping her chest, looking down at the lens', 'fingertips at her chest, playful wink'],
+    'aftermath': ['sprawled across the sheets, flushed cheeks, messy hair', 'lying on her stomach, chin on her hands, satisfied smile'],
+}
+DIRECTIONS_BY_SHOT = {
+    'portrait': ['chin resting on her hand, soft smile, looking into the lens',
+                 'hair tucked behind one ear, laughing at something off camera'],
+    'half': ['leaning on the counter, coffee in hand, relaxed smile',
+             'arms folded loosely, head tilted, playful look'],
+    'full': ['walking towards the lens mid-step, hair moving',
+             'leaning against the wall, one foot up, looking off to the side'],
+    'candid': ['laughing mid-sentence, glancing away from the lens',
+               'reaching for something on a shelf, looking back over her shoulder'],
+    'mirror': ['hip popped, phone covering half her face, peace sign',
+               'turned side-on to the mirror, checking her outfit'],
+    'lingerie': ['kneeling on the bed, hands on her thighs, looking up at the lens',
+                 'standing by the window, one hand in her hair, looking back'],
+    'implied': ['sitting with her back to the lens, looking over her shoulder',
+                'lying on her stomach, sheets at her waist, chin on her arms'],
+    'sheer': ['standing in the doorway, robe falling open, leaning on the frame',
+              'sitting on the edge of the bed, robe slipping off one shoulder'],
+    'bedroom': ['lying across the bed, phone held above her, lazy smile',
+                'sitting against the headboard, knees up, teasing look'],
+    'topless': ['arm across her chest, soft smile, looking at the lens',
+                'sitting on the bed, hair over one shoulder, glancing down'],
+    'nude': ['lying on her side along the bed, head propped on one hand',
+             'standing by the window, looking back over her shoulder'],
+    'explicit': ['lying back on the pillows, knees apart, eyes on the lens',
+                 'on her knees on the bed, looking back with a smirk'],
+}
+
+
+def camera_text(key):
+    return (CAMERAS.get(key) or ('', ''))[1]
+
+
+def quality_text(key):
+    return (QUALITY.get(key) or QUALITY[DEFAULT_QUALITY])[1]
+
+
+def pick_direction(shot, scene, rng=None):
+    """A built-in direction for this shot and scene."""
+    pool = (DIRECTIONS.get(scene or '') or DIRECTIONS_BY_SHOT.get(shot or '')
+            or DIRECTIONS_BY_SHOT['portrait'])
+    return (rng or random).choice(pool)
 
 
 def scenes_for_level(level):
@@ -688,10 +853,9 @@ NEGATIVE_PROMPT = (
 )
 
 # The look every still is asked for, content and character builder alike:
-# the creator's reference is casual phone photos, not studio renders.
-PHOTO_LOOK = ('Amateur smartphone photo, natural daylight, true-to-life skin with visible pores, freckles '
-              'and small imperfections, slight grain and phone-camera noise, candid and unretouched — '
-              'not airbrushed, not glossy, not a studio render, not CGI.')
+# the creator's reference is casual phone photos, not studio renders. No light
+# in it: that belongs to the lighting pick, and saying it here said it twice.
+PHOTO_LOOK = QUALITY[DEFAULT_QUALITY][1]
 
 
 def shots_for_level(level):
@@ -715,58 +879,89 @@ def merge_negative(extra=''):
     return (NEGATIVE_PROMPT + ', ' + extra) if extra else NEGATIVE_PROMPT
 
 
+def _norm(text):
+    return re.sub(r'[^a-z0-9 ]+', '', text.lower()).strip()
+
+
+def _dedupe_clauses(text):
+    """Drop every clause that says again what an earlier one already said.
+
+    Shot, scene, style and the creator's direction are written separately and
+    overlap ("a mirror selfie" twice, "candid and unposed" twice); a prompt
+    that repeats itself weights the repeat, not the picture.
+    """
+    seen, out = [], []
+    for sentence in re.split(r'(?<=[.!?])\s+', text.strip()):
+        end = sentence[-1] if sentence[-1:] in '.!?' else ''
+        body = sentence[:-1] if end else sentence
+        kept = []
+        for clause in body.split(', '):
+            n = _norm(clause)
+            if not n or any(n == o or f' {n} ' in f' {o} ' for o in seen):
+                continue
+            seen.append(n)
+            kept.append(clause.strip())
+        if kept:
+            out.append(', '.join(kept) + (end or '.'))
+    return ' '.join(out)
+
+
+def _sentence(text):
+    text = (text or '').strip().rstrip(' .')
+    return (text[0].upper() + text[1:] + '.') if text else ''
+
+
 def build_prompt(appearance, shot, outfit=None, has_reference=False, extra='',
                  style='', scene='', camera='', lighting='', direction='',
-                 banned=(), age=None):
-    """The positive prompt for one generation.
+                 banned=(), age=None, quality='', clothing='', features=''):
+    """The positive prompt for one generation, written the way a creator
+    would brief her own post: what it is for, who, the shot, what she wears,
+    what she is doing, the phone and the light, how real it looks.
 
     With a reference photo the prompt describes what changes, not who she is —
     leading with a fresh description invites the model to draw a new person and
-    ignore the reference.
+    ignore the reference. The reference fixes who she is and nothing else: what
+    she wears comes from the creator's clothing, the shot or the scene.
     """
-    framing = SHOT_FRAMING.get(shot, SHOT_FRAMING['portrait'])
     outfit = outfit or {}
-    bits = []
-    if outfit.get('clothing'):
-        bits.append(f"wearing exactly {outfit['clothing']}")
-    if outfit.get('location'):
-        bits.append(f"in the same place: {outfit['location']}")
-    if outfit.get('lighting'):
-        bits.append(f"{outfit['lighting']} lighting")
+    clothing = (clothing or outfit.get('clothing') or '').strip().rstrip('.')
+    level = SHOT_LEVEL.get(shot, 'sfw')
+    scene_row = SCENES.get(scene, ('sfw', ''))
+    intimate = level != 'sfw' or scene_row[0] != 'sfw'
 
-    if has_reference:
-        lead = ('photorealistic photo of the exact same woman as the reference '
-                'image — identical face, hair and features — now as ' + framing)
-        lock = (' She must be ' + ', '.join(bits) + '.') if bits else (
-            ' Copy the clothing, hairstyle, location and lighting exactly as '
-            'they appear in the reference image.')
-        tail = (' Taken in the same session minutes apart — only the pose and '
-                'framing change.')
-    else:
-        lead = f'photorealistic photo of {appearance}, {framing}'
-        lock = (' She is ' + ', '.join(bits) + '.') if bits else ''
-        tail = ''
+    framing = ((clothing and SHOT_FRAMING_BARE.get(shot))
+               or SHOT_FRAMING.get(shot, SHOT_FRAMING['portrait']))
+    where = (clothing and SCENES_BARE.get(scene)) or scene_row[1]
+    if not where and outfit.get('location'):
+        where = f"in {outfit['location']}"
+    styled = '' if style in STYLE_IN_SHOT.get(shot, ()) else STYLES.get(style, '')
 
-    # Scene, style, camera and lighting sit between the subject and the
-    # creator's own words: specific enough to steer the shot, general enough
-    # that none of them competes with the reference for who she is.
-    scene_bits = [SCENES.get(scene, ('', ''))[1], STYLES.get(style, ''),
-                  CAMERAS.get(camera, ''), LIGHTING.get(lighting, '')]
-    scene_text = ', '.join(b for b in scene_bits if b)
-    scene_text = (' ' + scene_text[0].upper() + scene_text[1:] + '.') if scene_text else ''
-    direction = (' ' + direction.strip()) if (direction or '').strip() else ''
+    purpose = ('A private photo she took for her subscribers' if intimate
+               else 'A real photo for her social media feed')
+    who = 'the exact same woman as the reference images' if has_reference else appearance
+    light = LIGHTING.get(lighting, '') or (
+        f"{outfit['lighting']} lighting" if outfit.get('lighting') else '')
+
+    body = ' '.join(filter(None, [
+        f'{purpose}: ' + ', '.join(b for b in (who, framing, where, styled) if b) + '.',
+        ('The reference images set who she is — not what she wears or where she is.'
+         if has_reference else ''),
+        _sentence(f'She is wearing {clothing}' if clothing else ''),
+        _sentence(direction),
+        _sentence(features),
+        _sentence(', '.join(b for b in (camera_text(camera), light) if b)),
+    ]))
+    look = quality_text(quality) + (' ' + CONSISTENCY if has_reference else '')
 
     # The creator's own words go last, where a diffusion prompt weights them
     # least — they refine the shot, they do not get to replace who she is.
     extra = (' ' + extra.strip()) if (extra or '').strip() else ''
-    prompt = (lead + lock + tail + scene_text +
-              ' ' + PHOTO_LOOK + ' Fictional adult woman, '
-              f'{max(18, int(age or 25))} years old.' +
-              direction + extra)
-    return finish_prompt(prompt, banned, age)
+    prompt = (_dedupe_clauses(body) + ' ' + look + ' Fictional adult woman, '
+              f'{max(18, int(age or 25))} years old.' + extra)
+    return finish_prompt(prompt, banned, age, quality)
 
 
-def finish_prompt(prompt, banned=(), age=None):
+def finish_prompt(prompt, banned=(), age=None, quality=''):
     """What every still's prompt passes through last, whoever wrote it.
 
     A character's banned terms are struck from the finished prompt rather than
@@ -780,8 +975,8 @@ def finish_prompt(prompt, banned=(), age=None):
         if term:
             prompt = re.sub(re.escape(term), '', prompt, flags=re.I)
     prompt = re.sub(r'\s{2,}', ' ', prompt).strip()
-    if PHOTO_LOOK not in prompt:
-        prompt = (prompt.rstrip(' .') + '. ' if prompt else '') + PHOTO_LOOK
+    if not any(text in prompt for _, text in QUALITY.values()):
+        prompt = (prompt.rstrip(' .') + '. ' if prompt else '') + quality_text(quality)
     if 'fictional adult woman' not in prompt.lower():
         prompt = (prompt.rstrip(' .') + '. ' if prompt else '') + (
             f'Fictional adult woman, {max(18, int(age or 25))} years old.')
@@ -1182,7 +1377,7 @@ class RunwareProvider(Provider):
         if spec.get('explicit'):
             model_key = EXPLICIT_MODEL
         model = RUNWARE_MODELS.get(model_key) or RUNWARE_MODELS['seedream-4-5']
-        width, height = dimensions(model_key, spec.get('resolution'))
+        width, height = dimensions(model_key, spec.get('resolution'), spec.get('aspect'))
 
         task = self._base_task(spec, model, width, height)
         task[_RW['results']] = int(spec.get('batch') or 1)
@@ -1467,8 +1662,8 @@ class ModelsLabProvider(Provider):
         return Result('running')
 
     def submit_image(self, spec):
-        width, height = RESOLUTION_PX.get(spec.get('resolution'),
-                                          RESOLUTION_PX['1024x1536'])
+        width, height = dimensions(spec.get('model'), spec.get('resolution'),
+                                   spec.get('aspect'))
         payload = {
             'model_id': MODELSLAB_MODELS.get(spec.get('model'),
                                              MODELSLAB_MODELS['sdxl']),

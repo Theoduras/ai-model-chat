@@ -8074,7 +8074,14 @@ def api_generate_persona():
         return jsonify({'ok': False, 'error': str(e)[:200]}), 200
 
 
-def _appearance_from_config(cfg):
+def _config_age(cfg):
+    try:
+        return max(18, int(str(cfg.get('age') or '').strip()))
+    except ValueError:
+        return None
+
+
+def _appearance_from_config(cfg, with_age=True):
     """A fixed physical description, so every photo of a persona is the same
     fictional woman.
 
@@ -8093,7 +8100,9 @@ def _appearance_from_config(cfg):
         # it must not reach the prompt as a description.
         if value and value.lower() != 'any':
             bits.append(value.lower())
-    bits.append(f'{age}-year-old woman')
+    # Without it where the prompt states her age once already, in the adult
+    # clause: two ages in one prompt was one of them being wrong.
+    bits.append(f'{age}-year-old woman' if with_age else 'woman')
 
     tail = []
     for key, phrase in (('hair_colour', '{} hair'), ('eye_colour', '{} eyes')):
@@ -8103,17 +8112,19 @@ def _appearance_from_config(cfg):
     for key in ('style', 'archetype'):
         value = str(cfg.get(key) or '').strip()
         if value:
-            tail.append(f"a {value.lower().split('/')[0].strip()} look")
+            word = value.lower().split('/')[0].strip()
+            tail.append(f"{'an' if word[:1] in 'aeiou' else 'a'} {word} look")
             break
 
     return ' '.join(('a ' + ' '.join(bits),
                      ('with ' + ', '.join(tail)) if tail else '')).strip()
 
 
-def _prop_from_config(cfg, style):
+def _prop_from_config(cfg, style, camera=''):
     """Her phone, named only where it is actually in the picture. A selfie that
-    invents a different handset every shot reads as a different person's."""
-    if style not in ('pov-selfie', 'mirror-selfie'):
+    invents a different handset every shot reads as a different person's. A
+    phone picked as the camera already names the one she holds."""
+    if style not in ('pov-selfie', 'mirror-selfie') or camera in imagegen.PHONE_CAMERAS:
         return ''
     phone = str(cfg.get('phone_model') or '').strip()
     return f'holding a {phone}' if phone else ''
@@ -11084,7 +11095,10 @@ def api_persona_media_list(slug):
                                     'text': imagegen.SCENES[k][1]}
                                    for k in imagegen.scenes_for_level(level)],
                         'styles': sorted(imagegen.STYLES),
-                        'cameras': sorted(imagegen.CAMERAS),
+                        'cameras': [{'key': k, 'label': v[0]}
+                                    for k, v in imagegen.CAMERAS.items()],
+                        'qualities': [{'key': k, 'label': v[0]}
+                                      for k, v in imagegen.QUALITY.items()],
                         'lighting': sorted(imagegen.LIGHTING)})
     finally:
         s.close()
@@ -28767,20 +28781,21 @@ def _gen_identity(slug, body, spec):
 
 def _gen_identity_source(slug, body, spec):
     """The studio's step 2 choice for a still or a multi-reference clip: her
-    linked character or the face and body slots, never both. A request that
-    names neither is an older client or the character builder, and keeps
-    sending both."""
+    linked character, the face and body slots, or both — the character's views
+    first, the slots after them. A request that names none is an older client
+    or the character builder, and keeps sending both."""
     identity = (body.get('identity') or '').strip().lower()
     if identity == 'vault':
         spec['identity'] = identity
-    elif identity == 'character':
+    elif identity in ('character', 'both'):
         char = _character_snapshot(slug)
         if not char:
             raise imagegen.GenerationError(
                 'Approve a view of her character first, or pick face and body photos.')
         spec['identity'] = identity
         spec['character'] = char
-        spec['reference_media'] = ''
+        if identity == 'character':
+            spec['reference_media'] = ''
 
 
 def _gen_video_model(job, level, asked):
@@ -28898,6 +28913,10 @@ def _gen_spec(slug, body, user):
         'camera': (body.get('camera') or '').strip().lower(),
         'lighting': (body.get('lighting') or '').strip().lower(),
         'direction': (body.get('direction') or '').strip()[:300],
+        'quality': (body.get('quality') or '').strip().lower(),
+        # Typed by the creator, and it wins over every other word about what
+        # she wears: the shot, the scene, the outfit photos.
+        'clothing': (body.get('clothing') or '').strip()[:200],
     })
 
     if kind == 'image':
@@ -28917,7 +28936,9 @@ def _gen_spec(slug, body, user):
                 and 'nsfw' not in CR.MODEL_RATINGS.get(model, ('sfw',))):
             model = imagegen.EXPLICIT_MODEL
         batch = max(1, min(8, int(body.get('batch') or 1)))
+        aspect = (body.get('aspect') or '').strip()
         spec.update({'shot': shot, 'model': model, 'resolution': resolution,
+                     'aspect': aspect if aspect in imagegen.IMAGE_ASPECTS else '',
                      'batch': batch, 'outfit': body.get('outfit') or {}})
         # A full prompt is the whole text the still is sent with, written by
         # the studio from the dropdowns and her character, so it outgrows the
@@ -29717,15 +29738,10 @@ def _character_snapshot(slug):
         s.close()
 
 
-def _character_urls(snap, shot, scene, face_only=False, wardrobe=False):
+def _character_urls(snap, shot, scene, face_only=False):
     keys = CH.snapshot_views(snap, shot, scene, face_only)
-    urls = [u for u in (_char_path_url(snap['views'][k]['path'], snap['views'][k]['mime'])
+    return [u for u in (_char_path_url(snap['views'][k]['path'], snap['views'][k]['mime'])
                         for k in keys) if u]
-    # Her wardrobe is clothed, so it only helps a safe-work shot; on an explicit
-    # one it would pull the clothes back on.
-    if wardrobe and CH.job_level(shot, scene) == 'sfw':
-        urls += [u for u in (_char_path_url(w['path'], w['mime']) for w in snap.get('wardrobe') or ()) if u]
-    return urls
 
 
 def _character_view_refs(char_id, view_key, outfit_image=None):
@@ -29782,7 +29798,9 @@ def _character_content(spec):
     if not snap:
         return [], '', None
     level = CH.job_level(spec.get('shot'), spec.get('scene'))
-    return (_character_urls(snap, spec.get('shot'), spec.get('scene'), wardrobe=True),
+    # Her outfit photos are not sent: they dressed every still in the builder's
+    # clothes. What she wears comes from the clothing box, the shot or the scene.
+    return (_character_urls(snap, spec.get('shot'), spec.get('scene')),
             CH.content_clause(snap['sheet'], level, snap['body_type']), snap['age'])
 
 
@@ -29796,23 +29814,29 @@ def _gen_image_prompt(slug, spec, has_reference):
     if isinstance(banned, str):
         banned = [t for t in re.split(r'[,\n]', banned) if t.strip()]
     snap = spec.get('character')
-    clause, age = '', None
+    clause, age = '', _config_age(cfg)
     if snap:
         level = CH.job_level(spec.get('shot'), spec.get('scene'))
         clause = CH.content_clause(snap['sheet'], level, snap['body_type'])
         age = snap['age']
+    clothing = spec.get('clothing', '')
     if spec.get('prompt_full'):
-        return imagegen.finish_prompt(spec.get('prompt_extra', ''), banned, age)
+        text = spec.get('prompt_extra', '')
+        # A prompt written before the clothing was typed still has to wear it.
+        if clothing and clothing.lower() not in text.lower():
+            text = text.rstrip(' .') + f'. She is wearing exactly {clothing} — no other clothing.'
+        return imagegen.finish_prompt(text, banned, age, spec.get('quality', ''))
     return imagegen.build_prompt(
-        _appearance_from_config(cfg), spec.get('shot'),
+        _appearance_from_config(cfg, with_age=False), spec.get('shot'),
         spec.get('outfit'), has_reference,
         extra=spec.get('prompt_extra', ''),
         style=spec.get('style', ''), scene=spec.get('scene', ''),
         camera=spec.get('camera', ''),
         lighting=spec.get('lighting', ''),
         direction=' '.join(filter(None, (
-            clause, _prop_from_config(cfg, spec.get('style', '')),
-            spec.get('direction', '')))),
+            spec.get('direction', ''),
+            _prop_from_config(cfg, spec.get('style', ''), spec.get('camera', ''))))),
+        features=clause, quality=spec.get('quality', ''), clothing=clothing,
         banned=banned, age=age)
 
 
@@ -30620,6 +30644,66 @@ def api_generate_prompt():
         finally:
             s.close()
     return jsonify({'ok': True, 'prompt': _gen_image_prompt(slug, spec, has_ref)})
+
+
+@app.route('/api/generate/direction', methods=['POST'])
+def api_generate_direction():
+    """One line of direction for the next still — pose, expression, what she
+    is doing — written the way a creator plans her own post.
+
+    Only a safe-work job goes to Gemini: nothing explicit is sent to Google,
+    and it would refuse anyway. Everything above safe work, and any Gemini
+    failure, gets one of the studio's own lines instead.
+    """
+    blocked = _require_active()
+    if blocked:
+        return blocked
+    body = request.get_json(silent=True) or {}
+    slug = str(body.get('persona') or '').strip().lower()
+    if not re.match(r'^[a-z0-9_-]+$', slug or ''):
+        return jsonify({'ok': False, 'error': 'Invalid persona'}), 400
+    mine = owned_slugs()
+    if mine is not None and slug not in mine:
+        return jsonify({'ok': False, 'error': 'Not your persona'}), 403
+    shot = str(body.get('shot') or 'portrait').strip().lower()
+    scene = str(body.get('scene') or '').strip().lower()
+    if scene not in imagegen.SCENES:
+        scene = ''
+    if CH.job_level(shot, scene) != 'sfw':
+        return jsonify({'ok': True, 'direction': imagegen.pick_direction(shot, scene),
+                        'source': 'built-in'})
+
+    cfg = _persona_config(slug) or {}
+    clothing = str(body.get('clothing') or '').strip()[:200]
+    what = ', '.join(filter(None, (
+        imagegen.SHOT_FRAMING.get(shot, ''), imagegen.SCENES.get(scene, ('', ''))[1],
+        imagegen.STYLES.get(str(body.get('style') or ''), ''),
+        f'wearing {clothing}' if clothing else '')))
+    system = (
+        "You are a content creator planning your next social media photo. "
+        "Write ONE direction for it: your pose, expression, what you are doing "
+        "and any prop, in 25 words or fewer, as a plain comma-separated phrase. "
+        "Make it feel natural and personal, like something you would actually post. "
+        "Do not mention clothing" + (" beyond what is given" if clothing else "") + ", "
+        "camera, lighting, photo quality, age or body. No quotes, no hashtags, no emoji.")
+    ask = f"The photo: {what or 'a casual photo'}."
+    interests = str(cfg.get('interests') or '').strip()
+    if interests:
+        ask += f" Things you are into: {interests[:200]}."
+    try:
+        resp = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=[{'role': 'user', 'parts': [{'text': ask}]}],
+            config=types.GenerateContentConfig(system_instruction=system,
+                                               temperature=1.0),
+        )
+        line = re.sub(r'\s+', ' ', _gemini_text(resp)).strip().strip('"\'').rstrip('.')
+        if line:
+            return jsonify({'ok': True, 'direction': line[:300], 'source': 'gemini'})
+    except Exception as e:
+        logger.warning('direction suggestion failed: %s', str(e)[:200])
+    return jsonify({'ok': True, 'direction': imagegen.pick_direction(shot, scene),
+                    'source': 'built-in'})
 
 
 @app.route('/api/generate/job', methods=['POST'])

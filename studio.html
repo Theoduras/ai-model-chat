@@ -152,7 +152,7 @@
     .gen-form > .hint { grid-column: 1 / -1; }
     .gen-stackform { display: flex; flex-direction: column; gap: 12px; }
     .gen-f { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-    .gen-f > span, body.page-dashboard .gen-f > span { font-size: 0.78rem; font-weight: 600; color: var(--text-2); }
+    .gen-f > span:not(.hint), body.page-dashboard .gen-f > span:not(.hint) { font-size: 0.78rem; font-weight: 600; color: var(--text-2); }
     body.page-dashboard .gen-f select, body.page-dashboard .gen-f input[type="text"],
     body.page-dashboard .gen-f textarea { font-size: 0.84rem; padding: 9px 12px; }
     body.page-dashboard .gen-f select { padding-right: 32px; }
@@ -236,12 +236,6 @@
       text-transform: uppercase; padding: 2px 7px; border-radius: 999px; background: var(--surface-2); color: var(--text-2);
     }
 
-    .gen-adv summary { cursor: pointer; font-size: 0.76rem; color: var(--text-muted); list-style: none; }
-    .gen-adv summary:hover { color: var(--text-2); }
-    .gen-adv summary::-webkit-details-marker { display: none; }
-    .gen-adv summary::before { content: "▸ "; }
-    .gen-adv[open] summary::before { content: "▾ "; }
-    .gen-adv[open] summary { margin-bottom: 8px; }
     .vault-kind.gen-tl { top: 4px; bottom: auto; left: 4px; right: auto; }
     .vault-kind.gen-br { top: auto; bottom: 4px; left: auto; right: 4px; }
   </style>
@@ -281,11 +275,10 @@
       <div class="gen-panel" id="gen-p-engine">
         <div class="gen-head"><b>1</b><h2>Engine</h2></div>
         <span class="hint" id="gen-job-note"></span>
-        <details class="gen-adv" id="gen-adv">
-          <summary id="gen-adv-summary">Advanced — choose the model</summary>
-          <div class="gen-chips gen-stack" id="gen-models" style="margin-top:8px;"></div>
+        <div class="gen-f"><span id="gen-adv-summary">Model</span>
+          <div class="gen-chips gen-stack" id="gen-models"></div>
           <span class="hint" id="gen-model-note"></span>
-        </details>
+        </div>
         <input type="hidden" id="gen-model">
         <input type="hidden" id="gen-vmodel">
       </div>
@@ -298,6 +291,7 @@
           <div class="gen-chips">
             <button type="button" class="gen-chip" id="gen-src-character" onclick="setIdentitySrc('character')">Her character</button>
             <button type="button" class="gen-chip" id="gen-src-vault" onclick="setIdentitySrc('vault')">Face &amp; body photos</button>
+            <button type="button" class="gen-chip" id="gen-src-both" onclick="setIdentitySrc('both')">Both</button>
           </div>
           <span class="hint" id="gen-identity-note"></span>
         </div>
@@ -316,51 +310,10 @@
         <input type="hidden" id="gen-ref">
         <span class="hint" id="persona-hint"></span>
       </div>
-
-      <div class="gen-panel" id="gen-p-output">
-        <div class="gen-head"><b>3</b><h2>Output</h2></div>
-        <div class="gen-form" id="gen-image-out">
-          <label class="gen-f"><span>Size</span>
-            <select id="gen-res" onchange="genQuote()"></select></label>
-          <label class="gen-f"><span>How many</span>
-            <select id="gen-batch" onchange="genQuote()">
-              <option value="1">1</option><option value="2">2</option>
-              <option value="4" selected>4</option><option value="6">6</option>
-            </select></label>
-        </div>
-        <div class="gen-form" id="gen-swap-out" style="display:none">
-          <label class="gen-f"><span>What to do with the clip</span>
-            <select id="gen-smodel" onchange="genQuote(); syncSwapKling()"></select></label>
-          <label class="gen-f"><span>Clip size</span>
-            <select id="gen-sres" onchange="genQuote()"></select></label>
-          <label class="gen-f"><span>Seconds</span>
-            <select id="gen-ssecs" onchange="genQuote()"></select></label>
-          <span class="hint" id="gen-smodel-note"></span>
-        </div>
-        <div class="gen-form" id="gen-video-out" style="display:none">
-          <label class="gen-f"><span>Clip size</span>
-            <select id="gen-vres" onchange="genQuote()"></select></label>
-          <label class="gen-f"><span>Seconds</span>
-            <select id="gen-vsecs" onchange="genQuote()"></select></label>
-        </div>
-        <div id="gen-shape-out" class="gen-stackform" style="display:none">
-          <div class="gen-f"><span>Frame shape</span>
-            <div class="gen-chips" id="gen-aspects"></div>
-            <span class="hint" id="gen-aspect-note"></span>
-          </div>
-          <div class="gen-f"><span>Sound</span>
-            <div class="gen-chips" id="gen-audio-modes"></div>
-            <input type="text" id="gen-audio-prompt" maxlength="300" style="display:none"
-                   oninput="genQuote()"
-                   placeholder="what you want to hear">
-            <span class="hint" id="gen-audio-note"></span>
-          </div>
-        </div>
-      </div>
     </div>
 
     <div class="gen-panel gen-prompt" id="gen-p-prompt">
-      <div class="gen-head"><b>4</b><h2 id="gen-prompt-head">Prompt</h2></div>
+      <div class="gen-head"><b>3</b><h2 id="gen-prompt-head">Prompt</h2></div>
       <div id="gen-image-form" class="gen-stackform">
         <div class="gen-form">
           <label class="gen-f"><span>Scene</span>
@@ -371,13 +324,24 @@
         <div class="gen-form">
           <label class="gen-f"><span>Style</span>
             <select id="gen-style"></select></label>
-          <label class="gen-f"><span>Camera</span>
+          <label class="gen-f"><span>Phone camera</span>
             <select id="gen-camera"></select></label>
           <label class="gen-f"><span>Lighting</span>
             <select id="gen-lighting"></select></label>
         </div>
-        <label class="gen-f"><span>Direction</span>
-          <input type="text" id="gen-direction" maxlength="300" placeholder="looking back over her shoulder, phone in one hand"></label>
+        <label class="gen-f"><span>Photo quality</span>
+          <select id="gen-quality"></select></label>
+        <label class="gen-f"><span>Clothing</span>
+          <input type="text" id="gen-clothing" maxlength="200" placeholder="black satin robe with lace cuffs, fishnet stockings"></label>
+        <span class="hint">Leave empty and the shot and scene decide. Filled in, it replaces every other clothing in the prompt.</span>
+        <div class="gen-f"><span>Direction</span>
+          <div class="gen-go" style="flex-wrap:nowrap;">
+            <input type="text" id="gen-direction" maxlength="300" style="flex:1; min-width:0;"
+                   placeholder="looking back over her shoulder, phone in one hand">
+            <button type="button" class="btn btn-ghost btn-sm" id="gen-direction-btn" onclick="suggestDirection()">&#10022; Suggest</button>
+          </div>
+          <span class="hint" id="gen-direction-note">Filled in for you when you pick a scene or shot — or type your own.</span>
+        </div>
         <div class="gen-go">
           <button type="button" class="btn-ai btn-ai-secondary" id="gen-write-btn" onclick="writePrompt()">
             Write the prompt</button>
@@ -499,7 +463,48 @@
     </div>
 
     <div class="gen-panel gen-result" id="gen-p-result">
-      <div class="gen-head"><b>5</b><h2>Result</h2></div>
+      <div class="gen-head"><b>4</b><h2>Size &amp; generate</h2></div>
+      <div class="gen-form" id="gen-image-out">
+        <label class="gen-f"><span>Size</span>
+          <select id="gen-res" onchange="genQuote()"></select></label>
+        <label class="gen-f"><span>How many</span>
+          <select id="gen-batch" onchange="genQuote()">
+            <option value="1">1</option><option value="2">2</option>
+            <option value="4" selected>4</option><option value="6">6</option>
+          </select></label>
+      </div>
+      <div class="gen-f" id="gen-image-shape"><span>Frame shape</span>
+        <div class="gen-chips" id="gen-image-aspects"></div>
+        <span class="hint">Costs the same whichever you pick — the same pixels, a different shape.</span>
+      </div>
+      <div class="gen-form" id="gen-swap-out" style="display:none">
+        <label class="gen-f"><span>What to do with the clip</span>
+          <select id="gen-smodel" onchange="genQuote(); syncSwapKling()"></select></label>
+        <label class="gen-f"><span>Clip size</span>
+          <select id="gen-sres" onchange="genQuote()"></select></label>
+        <label class="gen-f"><span>Seconds</span>
+          <select id="gen-ssecs" onchange="genQuote()"></select></label>
+        <span class="hint" id="gen-smodel-note"></span>
+      </div>
+      <div class="gen-form" id="gen-video-out" style="display:none">
+        <label class="gen-f"><span>Clip size</span>
+          <select id="gen-vres" onchange="genQuote()"></select></label>
+        <label class="gen-f"><span>Seconds</span>
+          <select id="gen-vsecs" onchange="genQuote()"></select></label>
+      </div>
+      <div id="gen-shape-out" class="gen-stackform" style="display:none">
+        <div class="gen-f"><span>Frame shape</span>
+          <div class="gen-chips" id="gen-aspects"></div>
+          <span class="hint" id="gen-aspect-note"></span>
+        </div>
+        <div class="gen-f"><span>Sound</span>
+          <div class="gen-chips" id="gen-audio-modes"></div>
+          <input type="text" id="gen-audio-prompt" maxlength="300" style="display:none"
+                 oninput="genQuote()"
+                 placeholder="what you want to hear">
+          <span class="hint" id="gen-audio-note"></span>
+        </div>
+      </div>
       <div class="gen-quote">
         <div class="gen-q-row"><span id="gen-quote-what"></span><b id="gen-cost"></b></div>
         <div class="gen-q-row"><span id="gen-money-what"></span><span id="gen-money"></span></div>
@@ -585,7 +590,7 @@ let genRate = null;        // what a token costs, in the creator's currency
 let genCosts = null;       // what the provider bills us — admin only, null otherwise
 let genAllowedShots = [];  // resolved server side from the persona's NSFW level
 let genScenes = [];        // scene builder vocabulary, already gated server side
-let genStyles = [], genCameras = [], genLighting = [];
+let genStyles = [], genCameras = [], genLighting = [], genQualities = [];
 let mediaVault = [];
 let genJobs = [];
 let genTimer = null;
@@ -597,6 +602,7 @@ let genTimer = null;
 let genJob = 'image';
 let genMake = 'image';
 let genAspect = '';
+let genImageAspect = '';
 let genAudio = { mode: '' };
 let genExtendMode = 'continue';
 let genExtendClip = '';       // the vault clip an extension carries on from
@@ -694,9 +700,9 @@ document.addEventListener('change', e => {
   if (e.target && (e.target.id === 'gen-shot' || e.target.id === 'gen-scene')) loadCharacterBadge();
 });
 
-// A linked character and the face/body slots are two answers to one question,
-// so the creator picks one and only that one is sent. The character is the
-// default once it has an approved view, until she picks for herself.
+// Her look comes from the linked character, the face/body slots, or both —
+// the character's views first, the slots after them. Both is the default when
+// she has each, the character when she has only that, until she picks.
 let genIdentity = 'vault';
 let genIdentityTouched = false;
 
@@ -712,18 +718,22 @@ function renderIdentitySrc() {
   const c = genCharacter;
   const has = !!(c && c.has_approved);
   if (!has) genIdentity = 'vault';
-  else if (!genIdentityTouched) genIdentity = 'character';
-  const useChar = genIdentity === 'character';
+  else if (!genIdentityTouched) genIdentity = (genRefs.face || []).length ? 'both' : 'character';
+  const useChar = genIdentity !== 'vault';
+  const usePhotos = genIdentity !== 'character';
   el('gen-identity-src').style.display = c ? '' : 'none';
   el('gen-src-character').disabled = !has;
-  el('gen-src-character').setAttribute('aria-pressed', String(useChar));
-  el('gen-src-vault').setAttribute('aria-pressed', String(!useChar));
+  el('gen-src-both').disabled = !has;
+  el('gen-src-character').setAttribute('aria-pressed', String(genIdentity === 'character'));
+  el('gen-src-vault').setAttribute('aria-pressed', String(genIdentity === 'vault'));
+  el('gen-src-both').setAttribute('aria-pressed', String(genIdentity === 'both'));
   el('gen-identity-note').innerHTML = !c ? ''
     : !has ? `Nothing approved on ${esc(c.name)} yet — <a href="/characters?id=${esc(c.id)}">approve a view</a> to use her character.`
+    : genIdentity === 'both' ? 'Her character, plus the face and body photos below as extra references.'
     : useChar ? `Her approved views and features from the character builder.`
     : 'Only the photos you pick below — her character is left out.';
   el('gen-character').hidden = !useChar;
-  el('gen-refs-wrap').style.display = useChar ? 'none' : 'flex';
+  el('gen-refs-wrap').style.display = usePhotos ? 'flex' : 'none';
 }
 
 async function loadPersona() {
@@ -737,6 +747,7 @@ async function loadPersona() {
     genStyles = d.styles || [];
     genCameras = d.cameras || [];
     genLighting = d.lighting || [];
+    genQualities = d.qualities || [];
     el('persona-hint').textContent =
       'The Safe / Explicit toggle above decides what is offered here. Her NSFW '
       + 'level is a chat setting — how far she flirts with a fan — and does not '
@@ -1043,6 +1054,7 @@ function renderRefs() {
 
   if (!el('gen-vault').hidden) renderVaultPicker();
 
+  if (!genIdentityTouched) renderIdentitySrc();
   // The first face photo also rides this job on its own, which is what the
   // engine line and the quote read.
   el('gen-ref').value = genIdentity === 'character' ? '' : (genRefs.face[0] || '');
@@ -1195,6 +1207,7 @@ function renderGenForm() {
   el('gen-drive-label').textContent = genJob === 'reel'
     ? 'Video to put her in (optional)' : 'Motion clip (optional)';
   renderAspects();
+  renderImageAspects();
   renderAudioModes();
   if (genJob === 'extend') renderExtendModes();
   // The uploaded clip is the ceiling for a swap's length and size, not the
@@ -1212,8 +1225,8 @@ function renderGenForm() {
   const summary = el('gen-adv-summary');
   if (summary) {
     summary.textContent = genMake === 'image'
-      ? 'Advanced — choose the model'
-      : `Advanced — running on ${videoLabel(genMake === 'swap' ? swapModel() : videoModel())}`;
+      ? 'Model'
+      : `Model — running on ${videoLabel(genMake === 'swap' ? swapModel() : videoModel())}`;
   }
   if (swap) renderSwapForm();
 
@@ -1257,6 +1270,7 @@ function renderGenForm() {
   fillVocab('gen-style', genStyles);
   fillVocab('gen-camera', genCameras);
   fillVocab('gen-lighting', genLighting);
+  fillVocab('gen-quality', genQualities);
 
   const res = el('gen-res');
   if (res && !res.options.length) {
@@ -1306,6 +1320,32 @@ function renderAspects() {
 function pickAspect(a) {
   genAspect = a;
   renderGenForm();
+}
+
+// A still's frame has its own list and its own pick: stills and clips are
+// different shapes of work, and choosing one should not move the other.
+function currentImageAspect() {
+  const list = (genPrices && genPrices.image_aspects) || [];
+  if (!list.includes(genImageAspect)) {
+    genImageAspect = (genPrices && genPrices.default_image_aspect) || list[0] || '';
+  }
+  return genImageAspect;
+}
+
+function renderImageAspects() {
+  const box = el('gen-image-aspects');
+  if (!box || !genPrices) return;
+  el('gen-image-shape').style.display = genMake === 'image' ? '' : 'none';
+  const chosen = currentImageAspect();
+  box.innerHTML = (genPrices.image_aspects || []).map(a =>
+    `<button type="button" class="gen-chip" aria-pressed="${a === chosen}"
+       onclick="pickImageAspect('${a}')">${esc(a)}</button>`).join('');
+}
+
+function pickImageAspect(a) {
+  genImageAspect = a;
+  renderImageAspects();
+  genQuote();
 }
 
 const AUDIO_LABELS = {
@@ -1385,14 +1425,16 @@ function prettyKey(k) {
 
 // 'any' and 'auto' mean "let the model decide", so they lead the list however
 // the server happened to sort it.
+// Takes plain keys, or {key, label} rows in the order they should read.
 function fillVocab(id, keys) {
   const sel = el(id);
   if (!sel || !keys.length) return;
-  const first = keys.filter(k => k === 'any' || k === 'auto');
-  const rest = keys.filter(k => k !== 'any' && k !== 'auto');
-  const keep = sel.value || first[0] || '';
-  sel.innerHTML = first.concat(rest).map(k =>
-    `<option value="${k}"${k === keep ? ' selected' : ''}>${esc(prettyKey(k))}</option>`).join('');
+  const rows = keys.map(k => typeof k === 'string' ? { key: k, label: prettyKey(k) } : k);
+  const first = rows.filter(r => r.key === 'any' || r.key === 'auto');
+  const rest = rows.filter(r => r.key !== 'any' && r.key !== 'auto');
+  const keep = sel.value || (first[0] || rows[0]).key;
+  sel.innerHTML = first.concat(rest).map(r =>
+    `<option value="${r.key}"${r.key === keep ? ' selected' : ''}>${esc(r.label)}</option>`).join('');
 }
 
 // What is actually running, named. A creator writing a prompt is writing it
@@ -1415,9 +1457,10 @@ function showEngines() {
   }
   const e = (genExplicit() ? genEngines.nsfw : genEngines.sfw) || {};
   const rows = [['Image', e.model, e.passes === 1 ? 'one pass' : '']];
-  if (genIdentity === 'character') {
+  if (genIdentity !== 'vault' && genCharacter && genCharacter.has_approved) {
     rows.push(['Her character', e.identity || 'reference images', 'approved views, same call']);
-  } else if (el('gen-ref').value) {
+  }
+  if (genIdentity !== 'character' && el('gen-ref').value) {
     rows.push(['Her face', e.identity || 'reference images', 'inside the same call, at no extra cost']);
   }
   if (genIdentity !== 'character' && genRefs.body.length) {
@@ -1817,7 +1860,10 @@ function promptChoices() {
     shot: el('gen-shot').value, scene: el('gen-scene').value,
     style: el('gen-style').value, camera: el('gen-camera').value,
     lighting: el('gen-lighting').value,
+    quality: el('gen-quality').value,
+    clothing: el('gen-clothing').value.trim(),
     direction: el('gen-direction').value.trim(),
+    aspect: currentImageAspect(),
     reference_media: el('gen-ref').value || '',
     identity: genIdentity,
   };
@@ -1826,6 +1872,7 @@ function promptChoices() {
 async function writePrompt() {
   const note = el('gen-write-note');
   const btn = el('gen-write-btn');
+  if (!el('gen-direction').value.trim()) await suggestDirection();
   const choices = promptChoices();
   btn.disabled = true;
   note.textContent = 'Writing…';
@@ -1852,8 +1899,51 @@ function checkPromptStale() {
 ['change', 'input'].forEach(t => document.addEventListener(t, e => {
   const id = e.target && e.target.id;
   if (['gen-shot', 'gen-scene', 'gen-style', 'gen-camera', 'gen-lighting',
-       'gen-direction', 'gen-ref', 'gen-model'].includes(id)) checkPromptStale();
+       'gen-quality', 'gen-clothing', 'gen-direction', 'gen-ref',
+       'gen-model'].includes(id)) checkPromptStale();
 }));
+
+// The direction fills itself in from the shot and scene, and only while it
+// still holds a suggestion: the moment she types, the words are hers and
+// nothing here writes over them.
+let genDirectionSeq = 0;
+
+async function suggestDirection() {
+  const input = el('gen-direction');
+  const btn = el('gen-direction-btn');
+  const note = el('gen-direction-note');
+  if (!slug()) return;
+  const seq = ++genDirectionSeq;
+  btn.disabled = true;
+  note.textContent = 'Thinking of one…';
+  try {
+    const res = await fetch('/api/generate/direction', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        persona: slug(), rating: genRating, shot: el('gen-shot').value,
+        scene: el('gen-scene').value, style: el('gen-style').value,
+        clothing: el('gen-clothing').value.trim(),
+      }),
+    });
+    const d = await res.json();
+    if (!d.ok) throw new Error(d.error || 'no suggestion');
+    if (seq !== genDirectionSeq) return;
+    input.value = d.direction;
+    input.dataset.auto = '1';
+    note.textContent = 'Suggested for this shot — edit it, or Suggest again.';
+    checkPromptStale();
+  } catch (e) { note.textContent = '✗ ' + e.message; }
+  finally { btn.disabled = false; }
+}
+
+document.addEventListener('input', e => {
+  if (e.target && e.target.id === 'gen-direction') delete e.target.dataset.auto;
+});
+document.addEventListener('change', e => {
+  if (!e.target || !['gen-shot', 'gen-scene'].includes(e.target.id)) return;
+  const input = el('gen-direction');
+  if (!input.value.trim() || input.dataset.auto) suggestDirection();
+});
 
 // What this job is still missing, said plainly, or '' when it is ready. One
 // place, so the button text and the submit guard can never disagree.
@@ -1945,7 +2035,7 @@ function genQuote() {
 
   if (what) {
     what.textContent = `${batch} photo${batch === 1 ? '' : 's'}, ` +
-      (GEN_RES_LABELS[el('gen-res').value] || el('gen-res').value);
+      (GEN_RES_LABELS[el('gen-res').value] || el('gen-res').value) + `, ${currentImageAspect()}`;
   }
   if (cost) cost.textContent = `${total} token${total === 1 ? '' : 's'}`;
   setMoney(total);
@@ -1981,6 +2071,7 @@ async function runGeneration() {
   if (genMake !== 'image') return runVideoJob();
   const btn = el('gen-run-btn');
   btn.disabled = true;
+  if (!el('gen-prompt').value.trim() && !el('gen-direction').value.trim()) await suggestDirection();
   setGenStatus('Sending…', null);
   try {
     const res = await fetch('/api/generate/job', {
@@ -2000,7 +2091,10 @@ async function runGeneration() {
         style: el('gen-style').value,
         camera: el('gen-camera').value,
         lighting: el('gen-lighting').value,
+        quality: el('gen-quality').value,
+        clothing: el('gen-clothing').value.trim(),
         direction: el('gen-direction').value.trim(),
+        aspect: currentImageAspect(),
       }),
     });
     const d = await res.json();
@@ -2423,14 +2517,11 @@ PageWizard.frame({
      nodes: () => [el('gen-p-character')],
      done: () => !!slug() && !!(genCharacter || (genRefs.face || []).length),
      gate: () => slug() ? '' : 'Create a persona first.'},
-    {stage: 'shot', key: 'output', nav: 'Size & count', title: 'How big, and how many?',
-     sub: 'Each photo is priced on its own, so more photos cost more. The total is shown before you generate.',
-     nodes: () => [el('gen-p-output')]},
     {stage: 'shot', key: 'prompt', nav: 'Describe it', title: 'Describe the shot',
-     sub: 'Pick a scene and a shot, then let Write the prompt fill in the words, or type your own.',
+     sub: 'Pick a scene and a shot — the direction fills itself in. Add clothing if you want it exact, then let Write the prompt fill in the words, or type your own.',
      nodes: () => [el('gen-p-prompt')]},
-    {stage: 'go', key: 'generate', nav: 'Generate & keep', title: 'Generate, then keep the best',
-     sub: 'The price is on the button. Results land here unapproved: Keep moves a photo into her vault, and the rest delete themselves after 3 days.',
+    {stage: 'go', key: 'generate', nav: 'Size & generate', title: 'Pick the size, then keep the best',
+     sub: 'Choose the size, shape and how many. The price is on the button. Results land here unapproved: Keep moves a photo into her vault, and the rest delete themselves after 3 days.',
      nodes: () => [el('gen-p-result')], done: () => genJobs.length > 0},
   ],
   tour: [
