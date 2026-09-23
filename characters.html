@@ -679,17 +679,18 @@ function renderPresets() {
 const DRESSED = ['body_front', 'body_side', 'body_back'];
 const outfitSets = view => DRESSED.includes(view) ? Math.max(1, pickedOutfits().length) : 1;
 const imagesFor = (view, n) => n * outfitSets(view);
-const tokensFor = images => images * ((cat && cat.price_per_image) || 0);
+const tokensFor = (images, view) => images * ((cat && ((viewDef(view) || {}).rating === 'sfw' || !view
+  ? cat.price_per_image : cat.price_per_image_nsfw || cat.price_per_image)) || 0);
 // The price sits beside the button rather than in it, so a long label never
 // wraps a button onto two lines.
 function cost(view, n) {
   if (!cat || !cat.price_per_image) return '';
   const sets = outfitSets(view);
-  return (sets > 1 ? `${sets} outfits · ` : '') + tokensFor(n * sets).toLocaleString() + ' tokens';
+  return (sets > 1 ? `${sets} outfits · ` : '') + tokensFor(n * sets, view).toLocaleString() + ' tokens';
 }
 function paintRailCost() {
   const left = cat.views.filter(v => v.required && vs(v.key).status !== 'approved');
-  const total = left.reduce((sum, v) => sum + tokensFor(imagesFor(v.key, batch)), 0);
+  const total = left.reduce((sum, v) => sum + tokensFor(imagesFor(v.key, batch), v.key), 0);
   const box = el('rail-cost');
   if (box) box.textContent = left.length && cat.price_per_image ? `≈ ${total.toLocaleString()} tokens to finish` : '';
 }
