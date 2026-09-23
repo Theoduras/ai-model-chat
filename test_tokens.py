@@ -1,9 +1,10 @@
-"""Credit pricing and ledger tests. Run with `python test_credits.py`.
+"""Token pricing and ledger tests. Run with `python test_tokens.py`.
 
 The margin floor test is the one that matters commercially: it walks every pack
-against every tier band, so a discount that would sell credits below cost fails
-here rather than on a month of invoices.
+in every currency, so a price that would sell tokens below cost fails here
+rather than on a month of invoices.
 """
+import math
 import os
 import sys
 import tempfile
@@ -27,31 +28,41 @@ def check(name, cond, detail=''):
 
 def test_margin_floor():
     print('margin floor')
-    floor = CR.MIN_MARGIN_MULTIPLE * CR.CREDIT_COST_USD
-    worst = min(CR.margin_report(), key=lambda r: r['per_credit'])
-    for row in CR.margin_report():
-        check(f"{row['credits']:>5} credits / {row['band']:<6} "
-              f"= {row['multiple']:.1f}x cost, {row['margin_pct']:.0f}% margin",
-              row['per_credit'] >= floor,
-              f"${row['per_credit']:.5f} < ${floor:.5f}")
-    check('worst cell still clears the floor', worst['per_credit'] >= floor)
-    print(f"  worst: {worst['credits']} on {worst['band']} — "
-          f"{worst['multiple']:.1f}x cost, {worst['margin_pct']:.0f}% margin")
+    floor = CR.MIN_MARGIN_MULTIPLE * CR.TOKEN_COST_USD
+    rows = CR.margin_report()
+    worst = min(rows, key=lambda r: r['per_token_usd'])
+    for row in rows:
+        check(f"{row['tokens']:>5} tokens / {row['currency']} "
+              f"= {row['multiple']:.2f}x cost, {row['margin_pct']:.0f}% margin",
+              row['per_token_usd'] + 1e-9 >= floor,
+              f"${row['per_token_usd']:.5f} < ${floor:.5f}")
+    check('worst cell still clears the floor',
+          worst['per_token_usd'] + 1e-9 >= floor)
+    print(f"  worst: {worst['tokens']} in {worst['currency']} — "
+          f"{worst['multiple']:.2f}x cost, {worst['margin_pct']:.0f}% margin")
 
 
-def test_tier_discount():
-    print('tier discount')
+def test_currency_ladder():
+    """Euro is the base, but a hole in any currency renders a blank price tag,
+    and a ladder that stops falling tells a creator to buy twice rather than
+    once."""
+    print('currency ladder')
     for size in CR.PACK_SIZES:
-        base = CR.pack_price_usd(size, 'starter')
-        pro = CR.pack_price_usd(size, 'pro')
-        agency = CR.pack_price_usd(size, 'agency')
-        check(f'{size} credits gets cheaper with tier ({base} > {pro} > {agency})',
-              base > pro > agency)
-    check('a bigger pack is cheaper per credit',
-          all(CR.pack_price_usd(a, 'pro') / a > CR.pack_price_usd(b, 'pro') / b
-              for a, b in zip(CR.PACK_SIZES, CR.PACK_SIZES[1:])))
-    check('an unknown pack size has no price',
-          CR.pack_price_usd(777, 'pro') is None)
+        have = [c for c in CR.CURRENCIES if CR.pack_price(size, c)]
+        check(f'{size} tokens has a price in all three currencies',
+              len(have) == len(CR.CURRENCIES), str(have))
+    for cur in CR.CURRENCIES:
+        per = [CR.pack_price(s, cur) / s for s in CR.PACK_SIZES]
+        check(f'a bigger pack is cheaper per token in {cur}',
+              all(a > b for a, b in zip(per, per[1:])),
+              str([round(p, 4) for p in per]))
+    check('an unknown pack size has no price', CR.pack_price(777) is None)
+    check('an unknown currency falls back to the base one',
+          CR.pack_price(100, 'jpy') == CR.pack_price(100, CR.BASE_CURRENCY))
+    check('the base currency is euro', CR.BASE_CURRENCY == 'eur')
+    check('the quoted rate is the smallest pack, the marginal price of more',
+          CR.token_rate('eur') ==
+          CR.pack_price(CR.PACK_SIZES[0], 'eur') / CR.PACK_SIZES[0])
 
 
 def test_quote_covers_everything():
@@ -61,8 +72,7 @@ def test_quote_covers_everything():
     missing = []
     for model in CR.IMAGE_MODELS:
         for res in CR.RESOLUTIONS:
-            for addons in ((), ('upscale',), ('nsfw_check',),
-                           ('upscale', 'nsfw_check')):
+            for addons in ((), ('audio',)):
                 try:
                     CR.quote({'kind': 'image', 'model': model, 'resolution': res,
                               'addons': addons, 'batch': 4})
@@ -81,62 +91,84 @@ def test_quote_covers_everything():
 
     for bad in ({'kind': 'image', 'model': 'nope', 'resolution': '1024x1024'},
                 {'kind': 'video', 'resolution': '4k', 'seconds': 5},
-                # Not a duration: any whole number in range is priced now,
-                # since a clip is billed per second rather than by preset.
+                # Not a duration: any whole number in range is priced now, since
+                # a clip is billed per second rather than by preset.
                 {'kind': 'video', 'resolution': '720p', 'seconds': 99},
+                {'kind': 'image', 'model': 'seedream-4-5', 'resolution': '2k',
+                 'addons': ('upscale',)},
                 {'kind': 'hologram'}):
         try:
             CR.quote(bad)
             check(f'unpriced spec {bad} is refused', False)
         except CR.PricingError:
-            check(f'unpriced spec {bad.get("kind")} is refused', True)
-
-
-IMAGE_BASE = 20
+            check(f'unpriced spec {bad.get("kind")} '
+                  f'{bad.get("addons") or bad.get("seconds") or ""} is refused',
+                  True)
 
 
 def test_prices_track_cost():
     print('prices track cost')
-    check('a credit is the rounded-up cost slice',
-          CR.credits_for_cost(0.0013) == 1 and CR.credits_for_cost(0.0021) == 2)
-    check('batch multiplies, add-ons are per image',
+    check('one token is one standard photo — the whole point of the scale',
           CR.quote({'kind': 'image', 'model': 'seedream-4-5',
-                    'resolution': '2k', 'addons': ('upscale',),
-                    'batch': 4}) == (20 + 2) * 4)
+                    'resolution': '2k'}) == 1)
+    check('a token is the rounded-up cost slice',
+          CR.credits_for_cost(0.01) == 1 and CR.credits_for_cost(0.041) == 2)
+    check('batch multiplies',
+          CR.quote({'kind': 'image', 'model': 'seedream-4-5',
+                    'resolution': '2k', 'batch': 4}) == 4)
     check('4k costs what 2k costs, because the provider bills them the same',
           CR.quote({'kind': 'image', 'model': 'seedream-4-5', 'resolution': '4k'}) ==
           CR.quote({'kind': 'image', 'model': 'seedream-4-5', 'resolution': '2k'}))
     check('holding her face is free — identity is inside the one call',
-          CR.quote({'kind': 'image', 'model': 'seedream-4-5', 'resolution': '2k'}) ==
-          IMAGE_BASE)
-    check('a 720p 5s clip is priced at the measured per-second rate',
-          CR.quote({'kind': 'video', 'resolution': '720p', 'seconds': 5}) == 46 * 5)
-    # What a 5s 720p clip actually billed on the provider, per model. Seedance
-    # refused the probe before it billed, so it is held to the dearer of the
-    # two that did.
-    measured = {'wan-2-5': 0.4538, 'wan-2-7': 0.5038, 'seedance-2-5': 0.5038}
+          CR.IMAGE_PRICES['seedream-4-5']['2k'] == 1)
+    check('a premium still costs more, in single digits',
+          CR.IMAGE_PRICES['nano-banana-pro'] == {'2k': 4, '4k': 7})
+
+    # The whole-job rounding is the reason a clip is 12 and not 15. A
+    # per-second integer rate would round 2.269 up to 3 and overcharge by 25%.
+    check('a 5s 720p clip rounds once for the whole job, not per second',
+          CR.quote({'kind': 'video', 'resolution': '720p', 'seconds': 5}) == 12)
+    check('the per-second rate is fractional, so the client can ceil the same',
+          isinstance(CR.VIDEO_RATE_PER_SECOND['wan-2-5']['720p'], float))
+    for model in CR.VIDEO_RATE_PER_SECOND:
+        for res in CR.VIDEO_RATE_PER_SECOND[model]:
+            for secs in (2, 3, 5, 7, 10, 15):
+                want = max(1, math.ceil(
+                    CR.VIDEO_RATE_PER_SECOND[model][res] * secs))
+                got = CR.video_price(res, secs, (), model)
+                if got != want:
+                    check(f'{model} {res} {secs}s rounds the whole job',
+                          False, f'got {got}, wanted {want}')
+                    break
+            else:
+                continue
+            break
+    else:
+        check('every rung rounds the whole job, never per second', True)
+
+    measured = {'wan-2-5': 0.4538, 'wan-2-7': 0.5038, 'seedance-2-5': 0.60}
     for model, cost in measured.items():
         check(f'a {model} clip never sells under what the provider charges',
               CR.quote({'kind': 'video', 'model': model,
                         'resolution': '720p', 'seconds': 5})
-              * CR.CREDIT_COST_USD >= cost)
+              * CR.TOKEN_COST_USD >= cost)
     check('a swap is priced on the model it will actually run on',
           all(CR.quote({'kind': 'swap', 'model': m,
                         'resolution': '720p', 'seconds': 5}) ==
-              CR.VIDEO_RATE_PER_SECOND[m]['720p'] * 5
+              math.ceil(CR.VIDEO_RATE_PER_SECOND[m]['720p'] * 5)
               for m in CR.SWAP_MODELS))
     check('a swap on no model named is priced on the default one',
           CR.quote({'kind': 'swap', 'resolution': '720p', 'seconds': 5}) ==
           CR.quote({'kind': 'swap', 'model': CR.DEFAULT_SWAP_MODEL,
                     'resolution': '720p', 'seconds': 5}))
     check('a swap is billed for every second of the clip it was given',
-          CR.quote({'kind': 'swap', 'resolution': '720p', 'seconds': 7}) ==
-          CR.VIDEO_RATE_PER_SECOND[CR.DEFAULT_SWAP_MODEL]['720p'] * 7)
+          CR.quote({'kind': 'swap', 'resolution': '720p', 'seconds': 7}) >
+          CR.quote({'kind': 'swap', 'resolution': '720p', 'seconds': 5}))
     for m in CR.SWAP_MODELS:
         cost = CR.VIDEO_COST_USD_PER_SECOND[m]['720p'] * 5
         check(f'a swap on {m} never sells under what the provider charges',
               CR.quote({'kind': 'swap', 'model': m, 'resolution': '720p',
-                        'seconds': 5}) * CR.CREDIT_COST_USD >= cost)
+                        'seconds': 5}) * CR.TOKEN_COST_USD >= cost)
     for bad in ({'kind': 'swap', 'resolution': '720p',
                  'seconds': CR.VIDEO_MAX_SECONDS + 1},
                 {'kind': 'swap', 'resolution': '720p', 'seconds': 0}):
@@ -146,14 +178,33 @@ def test_prices_track_cost():
         except CR.PricingError:
             check(f'a swap of {bad["seconds"]}s is refused', True)
     check('the legacy Google path is priced too, so it is not a free bypass',
-          CR.GOOGLE_IMAGE_CREDITS > 0)
+          CR.GOOGLE_IMAGE_TOKENS > 0)
+
+
+def test_nothing_is_free():
+    """max(1, ...) does far more work at a 20x coarser unit: a rung that rounds
+    to nothing is a generation the creator is never charged for."""
+    print('nothing is free')
+    zero = []
+    for model, rows in CR.IMAGE_PRICES.items():
+        for res, price in rows.items():
+            if price < 1:
+                zero.append(('image', model, res, price))
+    for model, rows in CR.VIDEO_PRICES.items():
+        for res, durations in rows.items():
+            for secs, price in durations.items():
+                if price < 1:
+                    zero.append(('video', model, res, secs, price))
+    check('no image or video rung prices at zero tokens', not zero, str(zero))
+    check('every add-on costs at least one token',
+          all(v >= 1 for v in CR.ADDON_PRICES.values()))
 
 
 def test_job_quotes():
-    """Every combination the five job tiles can produce has a price, and none
-    of them sells under what the provider bills. The picker reads its options
-    out of the same tables this walks, so an option that appears there and
-    cannot be quoted fails here rather than at submit."""
+    """Every combination the five job tiles can produce has a price, and none of
+    them sells under what the provider bills. The picker reads its options out
+    of the same tables this walks, so an option that appears there and cannot be
+    quoted fails here rather than at submit."""
     print('video jobs')
     missing, under = [], []
     for job, models in CR.JOB_MODELS.items():
@@ -176,7 +227,7 @@ def test_job_quotes():
                                 continue
                             cost = (CR.video_cost_usd(model, res, secs) or 0) \
                                 + sum(CR.ADDON_COST_USD.get(a, 0) for a in addons)
-                            if price * CR.CREDIT_COST_USD + 1e-9 < cost:
+                            if price * CR.TOKEN_COST_USD + 1e-9 < cost:
                                 under.append((job, model, aspect, res, secs,
                                               addons, price))
     check('every job / model / aspect / rung / duration is priced',
@@ -201,7 +252,7 @@ def test_job_quotes():
           CR.ADDON_PRICES['audio'])
 
     check('sound never sells under what a pass costs us',
-          CR.ADDON_PRICES['audio'] * CR.CREDIT_COST_USD >=
+          CR.ADDON_PRICES['audio'] * CR.TOKEN_COST_USD >=
           CR.ADDON_COST_USD['audio'])
 
     # A model that does not serve a job must not be quotable on it: the picker
@@ -234,6 +285,24 @@ def test_job_quotes():
           set(CR.JOB_KINDS.values()) <= {'video', 'swap'})
 
 
+def test_allowances():
+    """The marketing bullet and the enforced number must not drift apart, and an
+    entry tier that cannot make a handful of clips is not sellable."""
+    print('allowances')
+    clip = CR.video_price(CR.DEFAULT_VIDEO_RESOLUTION, CR.DEFAULT_VIDEO_DURATION)
+    for tier in ('starter', 'pro', 'agency'):
+        tokens = CR.monthly_tokens(tier)
+        check(f'{tier} includes {tokens} tokens '
+              f'= {tokens} photos or {tokens // clip} clips', tokens > 0)
+    check('a bigger plan always includes more',
+          CR.monthly_tokens('starter') < CR.monthly_tokens('pro')
+          < CR.monthly_tokens('agency'))
+    check('starter can make more than a couple of clips a month',
+          CR.monthly_tokens('starter') // clip >= 5)
+    check('an unknown tier falls back rather than crashing',
+          CR.monthly_tokens('nonesuch') == CR.DEFAULT_MONTHLY_TOKENS)
+
+
 def test_ledger():
     print('ledger')
     db.init_db()
@@ -241,59 +310,63 @@ def test_ledger():
     ws = 'ws-' + os.urandom(4).hex()
     soon = datetime.utcnow() + timedelta(days=20)
 
-    db.credit_grant(s, ws, 600, '2026-09', soon)
-    check('grant posts', db.credit_balance(s, ws) == 600)
-    db.credit_grant(s, ws, 600, '2026-09', soon)
-    check('the same period cannot grant twice', db.credit_balance(s, ws) == 600)
+    db.token_grant(s, ws, 350, '2026-09', soon)
+    check('grant posts', db.token_balance(s, ws) == 350)
+    db.token_grant(s, ws, 350, '2026-09', soon)
+    check('the same period cannot grant twice', db.token_balance(s, ws) == 350)
 
-    db.credit_purchase(s, ws, 2000, 'pay-1')
-    db.credit_purchase(s, ws, 2000, 'pay-1')
+    db.token_purchase(s, ws, 1000, 'pay-1')
+    db.token_purchase(s, ws, 1000, 'pay-1')
     check('a replayed webhook cannot credit twice',
-          db.credit_balance(s, ws) == 2600)
+          db.token_balance(s, ws) == 1350)
 
-    db.credit_debit(s, ws, 150, 'job-1')
-    check('a spend lowers the balance', db.credit_balance(s, ws) == 2450)
+    db.token_debit(s, ws, 100, 'job-1')
+    check('a spend lowers the balance', db.token_balance(s, ws) == 1250)
 
     # The point of the split: the allowance pays first, so when the month turns
     # the purchased balance is untouched.
-    expired = db.credit_balance(s, ws, at=soon + timedelta(days=1))
-    check('spend drains the expiring allowance before purchased credits',
-          expired == 2000, f'got {expired}, wanted 2000')
+    expired = db.token_balance(s, ws, at=soon + timedelta(days=1))
+    check('spend drains the expiring allowance before purchased tokens',
+          expired == 1000, f'got {expired}, wanted 1000')
 
-    db.credit_refund(s, ws, 'job-1')
-    check('a refund restores the balance', db.credit_balance(s, ws) == 2600)
-    check('a refund returns credits to the bucket they left',
-          db.credit_balance(s, ws, at=soon + timedelta(days=1)) == 2000)
-    db.credit_refund(s, ws, 'job-1')
-    check('a second refund pays nothing', db.credit_balance(s, ws) == 2600)
+    db.token_refund(s, ws, 'job-1')
+    check('a refund restores the balance', db.token_balance(s, ws) == 1350)
+    check('a refund returns tokens to the bucket they left',
+          db.token_balance(s, ws, at=soon + timedelta(days=1)) == 1000)
+    db.token_refund(s, ws, 'job-1')
+    check('a second refund pays nothing', db.token_balance(s, ws) == 1350)
 
     check('an overdraw is refused and posts nothing',
-          db.credit_debit(s, ws, 99999, 'job-2') is False
-          and db.credit_balance(s, ws) == 2600)
+          db.token_debit(s, ws, 99999, 'job-2') is False
+          and db.token_balance(s, ws) == 1350)
 
-    db.credit_debit(s, ws, 900, 'job-3')
+    db.token_debit(s, ws, 500, 'job-3')
     check('a spend larger than the allowance takes the rest from purchased',
-          db.credit_balance(s, ws) == 1700
-          and db.credit_balance(s, ws, at=soon + timedelta(days=1)) == 1700)
+          db.token_balance(s, ws) == 850
+          and db.token_balance(s, ws, at=soon + timedelta(days=1)) == 850)
     s.close()
 
 
 def test_equivalents():
     print('equivalents')
-    eq = CR.equivalents(4200)
-    check(f'4,200 credits reads as {eq["photos"]} photos or {eq["clips"]} clips',
-          eq['photos'] > 0 and eq['clips'] > 0)
+    eq = CR.equivalents(350)
+    check(f'350 tokens reads as {eq["photos"]} photos or {eq["clips"]} clips',
+          eq['photos'] == 350 and eq['clips'] == 29)
     check('an empty balance reads as nothing',
           CR.equivalents(0) == {'photos': 0, 'clips': 0})
+    cash = CR.cash_for_tokens(12, 'eur')
+    check(f'a clip prices at {cash["symbol"]}{cash["amount"]}',
+          cash['amount'] > 0 and cash['symbol'] == '€')
 
 
 if __name__ == '__main__':
-    for fn in (test_margin_floor, test_tier_discount, test_quote_covers_everything,
-               test_prices_track_cost, test_job_quotes, test_ledger,
-               test_equivalents):
+    for fn in (test_margin_floor, test_currency_ladder,
+               test_quote_covers_everything, test_prices_track_cost,
+               test_nothing_is_free, test_job_quotes, test_allowances,
+               test_ledger, test_equivalents):
         fn()
     print()
     if FAILURES:
         print(f'{len(FAILURES)} FAILED: {", ".join(FAILURES)}')
         sys.exit(1)
-    print('all credit tests passed')
+    print('all token tests passed')

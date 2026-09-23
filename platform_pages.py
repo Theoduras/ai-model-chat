@@ -711,7 +711,7 @@ PAGES = {
         'live': False,
         'title': 'AI Image and Video Generator for Creators | Velvetfunnel',
         'description': ('Generate photos and short clips of your own persona from her reference shots. '
-                        'Consistent face and body, safe or explicit, priced per generation in credits.'),
+                        'Consistent face and body, safe or explicit, priced per generation in tokens.'),
         'eyebrow': 'In testing · Tool',
         'h1_pre': 'AI image and video generator for',
         'h1_accent': 'your own persona.',

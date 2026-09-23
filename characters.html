@@ -466,7 +466,7 @@ async function waitJob(id) {
   for (let i = 0; i < 120; i++) {
     const j = await api('/api/generate/job/' + id);
     if (j.status === 'done') return j;
-    if (j.status === 'failed') throw new Error(j.error || 'Generation failed. Your credits were returned.');
+    if (j.status === 'failed') throw new Error(j.error || 'Generation failed. Your tokens were returned.');
     await new Promise(r => setTimeout(r, 4000));
   }
   throw new Error('Still running — check back in a minute.');

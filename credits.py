@@ -1,12 +1,17 @@
-"""Credit pricing for AI image and video generation.
+"""Token pricing for AI image and video generation.
 
 Every retail price in this file is derived from one number: what a generation
-costs us at the provider. A credit is a fixed slice of that cost, so gross
-margin is the same whatever the creator generates — they cannot arbitrage us by
+costs us at the provider. A token is a fixed slice of that cost, so gross margin
+is the same whatever the creator generates -- they cannot arbitrage us by
 favouring an expensive model, and adding a model is a table entry rather than a
-pricing decision. If a provider raises prices, CREDIT_COST_USD is the only
-number to move; every pack rate follows it and the margin floor re-asserts at
-import.
+pricing decision. If a provider raises prices, TOKEN_COST_USD is the only number
+to move; every pack rate follows it and the margin floor re-asserts at import.
+
+The unit used to be a "credit" worth $0.002, which made a photo 20 and a clip
+230. Those numbers were unreadable: nobody can tell whether 230 is a lot. A
+token is the same idea at a human scale -- **one token is about one photo** --
+so the slice is twenty times bigger and every price the studio shows is a number
+a creator can hold in their head.
 """
 import math
 import os
@@ -16,17 +21,25 @@ import os
 # rather than restated: two lists of what a job may be is how a picker starts
 # offering something nothing can price. This costs nothing at import -- the
 # provider stack itself (requests, the endpoints) is loaded lazily inside
-# imagegen's own functions, so `python test_credits.py` still needs no network.
+# imagegen's own functions, so `python test_tokens.py` still needs no network.
 import imagegen as _IG
 
-# What one credit is allowed to cost us at the provider. Every generation is
-# priced at ceil(provider_cost / CREDIT_COST_USD), so rounding always favours us.
-CREDIT_COST_USD = 0.002
+# What one token is allowed to cost us at the provider, in USD. Pegged to a
+# standard Seedream still, which is why one token buys one photo. Every
+# generation is priced at ceil(provider_cost / TOKEN_COST_USD), so rounding
+# always favours us.
+TOKEN_COST_USD = 0.04
 
-# No pack may sell credits for less than this multiple of their cost. Asserted
-# at import, so a discount that would lose money fails the build rather than a
+# No pack may sell tokens for less than this multiple of their cost. Asserted at
+# import, so a discount that would lose money fails the build rather than a
 # month of invoices.
-MIN_MARGIN_MULTIPLE = 4.0
+#
+# It was 4.0 when the ladder was four packs with a shallow curve. The ladder now
+# runs from EUR 0.15 a token down to EUR 0.09 -- a 40% volume discount -- so the
+# two largest packs land at 2.81x and 2.29x. That is the discount working as
+# intended (64% and 56% gross margin), not a mistake, but the floor has to admit
+# it or nothing starts.
+MIN_MARGIN_MULTIPLE = 2.25
 
 IMAGE_MODELS = ('seedream-4-5', 'seedream-5-pro',
                 'nano-banana-pro', 'nano-banana-2')
@@ -42,110 +55,27 @@ DEFAULT_RESOLUTION = '2k'
 DEFAULT_VIDEO_RESOLUTION = '720p'
 DEFAULT_VIDEO_DURATION = 5
 
-# Credits per generation, by model and resolution. Measured against the live
-# provider, not a list price: Seedream bills $0.04 a still whatever the size,
-# so 4k costs the same as 2k and both round to 20 credits at CREDIT_COST_USD.
-#
-# That is five times what the old Flux rung cost. It buys native identity —
-# a reference-conditioned single call, where Flux needed an adapter, a LoRA and
-# a second restore pass to hold the same face.
-# Seedream bills flat by size; the Google models do not, so their tiers differ.
-# Measured at 2k: Nano Banana 2 $0.10255, Nano Banana Pro $0.138. The 4k figure
-# came back before the provider reported a cost, so 4k is priced at twice 2k —
-# a deliberate over-estimate, because the floor protects us only while the
-# price is above the cost. Measure it and bring these down.
-IMAGE_PRICES = {
-    'seedream-4-5':    {'2k': 20, '4k': 20},
-    'seedream-5-pro':  {'2k': 20, '4k': 20},
-    'nano-banana-2':   {'2k': 52, '4k': 104},
-    'nano-banana-pro': {'2k': 69, '4k': 138},
-}
-
-# Video, priced per second against a measured clip, per model. A 5s 720p clip
-# on Wan 2.5 costs $0.4538, which is 46 credits a second — the old table charged
-# 30 a second and so sold every clip below cost. The floor assertion never
-# caught it because it only walks the packs, not the generation table.
-#
-# Wan 2.7 measured $0.5038 on the same clip, so 52. Seedance 2.5 refused the
-# probe at ByteDance's moderation end before it billed anything, so its rate is
-# a deliberate over-estimate: a guess that is too low loses money on every clip
-# and nothing reports it. Only 720p is measured; 480p is charged at the same
-# rate for the same reason, and 1080p keeps the old table's 2.5x shape. Measure
-# them and bring these down.
 VIDEO_MODELS = ('wan-2-5', 'wan-2-7', 'seedance-2-5')
 DEFAULT_VIDEO_MODEL = 'wan-2-5'
-
-# The five video jobs, mirrored from imagegen so the picker and the price
-# table read one list. A job names its own models; a model is never the
-# question a creator is asked.
-JOB_MODELS = {job: tuple(row['models']) for job, row in _IG.VIDEO_JOBS.items()}
-JOB_KINDS = {job: _IG.job_kind(job) for job in _IG.VIDEO_JOBS}
-JOB_RATINGS = {job: tuple(_IG.job_ratings(job)) for job in _IG.VIDEO_JOBS}
-JOB_LABELS = {job: row.get('label') or job.title()
-              for job, row in _IG.VIDEO_JOBS.items()}
-JOB_NOTES = {job: row.get('note') or ''
-             for job, row in _IG.VIDEO_JOBS.items()}
-JOB_NEEDS = {job: tuple(row.get('needs') or ())
-             for job, row in _IG.VIDEO_JOBS.items()}
-DEFAULT_JOB = 'reel'
-
-# Frame shape is free: a 9:16 reel and a 16:9 cut of the same scene run the
-# same pixels through the same model, so the picker changes what a clip looks
-# like without changing what it costs.
-ASPECTS = tuple(_IG.ASPECTS)
-DEFAULT_ASPECT = _IG.DEFAULT_ASPECT
-AUDIO_MODES = tuple(_IG.AUDIO_MODES)
-EXTEND_MODES = tuple(_IG.EXTEND_MODES)
 
 # Wan 2.7 is the only video model that takes an input clip, so a face swap into
 # an uploaded video is always priced and run on it whatever the picker says.
 VIDEO_EDIT_MODEL = 'wan-2-7'
 
-# The models a swap may run on, read off the job table rather than restated.
-# They do opposite things with the clip they are given: replace keeps the video
-# and changes who is in it, Wan 2.7 regenerates the video from her references
-# in a similar motion. Both are offered because only the operator can say which
-# one a given clip wants.
-SWAP_MODELS = JOB_MODELS['swap']
-DEFAULT_SWAP_MODEL = SWAP_MODELS[0]
-# Where an explicit persona goes: the only model that both replaces rather
-# than regenerates and serves explicit work. It runs on ModelsLab, not
-# Runware -- see imagegen.provider_name_for.
-EXPLICIT_SWAP_MODEL = 'ml-face-swap'
-
-VIDEO_RATE_PER_SECOND = {
-    'wan-2-5':      {'480p': 46, '720p': 46, '1080p': 115},
-    'wan-2-7':      {'480p': 52, '720p': 52, '1080p': 130},
-    'seedance-2-5': {'480p': 60, '720p': 60, '1080p': 150},
-    # Unmeasured, so deliberately high: a guess under cost loses money on every
-    # clip and nothing reports it. Measure it and bring this down.
-    'p-video-replace': {'480p': 60, '720p': 60, '1080p': 150},
-    'ml-face-swap': {'480p': 60, '720p': 60, '1080p': 150},
-}
-
-# A swap runs the length of the clip it is given, so it is priced per second
-# from the same rates rather than off the fixed durations a generated clip
-# offers. The cap matches what the upload route will take.
-# Wan 2.7's own ceiling. A longer upload cannot be swapped, so it is refused
-# at the upload rather than truncated after it is paid for.
+# Wan 2.7's own ceiling. A longer upload cannot be swapped, so it is refused at
+# the upload rather than truncated after it is paid for.
 VIDEO_MAX_SECONDS = 15
 
-VIDEO_PRICES = {
-    model: {res: {secs: rate * secs for secs in VIDEO_DURATIONS}
-            for res, rate in rates.items()}
-    for model, rates in VIDEO_RATE_PER_SECOND.items()
-}
-
-# What the provider actually bills us, in USD. The credit tables above are
-# derived from these by ceil(cost / CREDIT_COST_USD) and then rounded up again
-# where a figure is a guess, so credits * CREDIT_COST_USD reads high and cannot
-# be used to answer "what did that cost me". This is the number to show an
-# operator before they press Generate.
+# ── What the provider actually bills us, in USD ───────────────────────────────
+# This is the source of every number in this file: the token tables below are
+# derived from these, never hand-written beside them. A second hand-maintained
+# table is exactly how a clip came to be sold at 30 credits while costing 46.
 #
 # `PROVIDER_COST_MEASURED` names the rungs that came off a live bill. Everything
-# else is an over-estimate carried from the credit table's own reasoning: a
-# guess that is too low loses money quietly, so the guesses are deliberately
-# high. Measure one and move its key into the measured set.
+# else is an over-estimate: a guess that is too low loses money quietly, so the
+# guesses are deliberately high. Measure one and move its key into the measured
+# set. At the old 15x margin a 2x over-estimate was invisible; at 2.3x on the
+# largest pack these are load-bearing.
 PROVIDER_COST_USD = {
     'seedream-4-5':    {'2k': 0.04, '4k': 0.04},
     'seedream-5-pro':  {'2k': 0.04, '4k': 0.04},
@@ -166,6 +96,88 @@ PROVIDER_COST_MEASURED = {
                'nano-banana-2': ('2k',),
                'nano-banana-pro': ('2k',)},
     'videos': {'wan-2-5': ('720p',), 'wan-2-7': ('720p',)},
+}
+
+# What an add-on costs us, where it costs anything. Unmeasured and therefore
+# deliberately high, the same as every other guess in this file.
+ADDON_COST_USD = {
+    'audio': 0.10,
+}
+
+
+def credits_for_cost(usd):
+    """The token price of something that costs us `usd`, rounded up."""
+    return max(1, int(math.ceil(float(usd) / TOKEN_COST_USD)))
+
+
+# Tokens per generation, by model and resolution, derived from the bill above.
+# Seedream bills $0.04 a still whatever the size, so 2k and 4k both land on one
+# token -- that flat rate is what makes "one token, one photo" true.
+IMAGE_PRICES = {model: {res: credits_for_cost(cost)
+                        for res, cost in rows.items()}
+                for model, rows in PROVIDER_COST_USD.items()}
+
+# Video is priced per second, but **rounded once for the whole job**, not per
+# second. At this scale a per-second integer rate would overcharge badly: Wan
+# 2.5 at 720p is 2.269 tokens a second, and rounding that up to 3 would sell a
+# five-second clip at 15 tokens instead of 12. So the rate stays fractional and
+# `video_price` does the single ceil.
+VIDEO_RATE_PER_SECOND = {
+    model: {res: cost / TOKEN_COST_USD for res, cost in rows.items()}
+    for model, rows in VIDEO_COST_USD_PER_SECOND.items()
+}
+
+# The five video jobs, mirrored from imagegen so the picker and the price table
+# read one list. A job names its own models; a model is never the question a
+# creator is asked.
+JOB_MODELS = {job: tuple(row['models']) for job, row in _IG.VIDEO_JOBS.items()}
+JOB_KINDS = {job: _IG.job_kind(job) for job in _IG.VIDEO_JOBS}
+JOB_RATINGS = {job: tuple(_IG.job_ratings(job)) for job in _IG.VIDEO_JOBS}
+JOB_LABELS = {job: row.get('label') or job.title()
+              for job, row in _IG.VIDEO_JOBS.items()}
+JOB_NOTES = {job: row.get('note') or ''
+             for job, row in _IG.VIDEO_JOBS.items()}
+JOB_NEEDS = {job: tuple(row.get('needs') or ())
+             for job, row in _IG.VIDEO_JOBS.items()}
+DEFAULT_JOB = 'reel'
+
+# Frame shape is free: a 9:16 reel and a 16:9 cut of the same scene run the same
+# pixels through the same model, so the picker changes what a clip looks like
+# without changing what it costs.
+ASPECTS = tuple(_IG.ASPECTS)
+DEFAULT_ASPECT = _IG.DEFAULT_ASPECT
+AUDIO_MODES = tuple(_IG.AUDIO_MODES)
+EXTEND_MODES = tuple(_IG.EXTEND_MODES)
+
+# The models a swap may run on, read off the job table rather than restated.
+# They do opposite things with the clip they are given: replace keeps the video
+# and changes who is in it, Wan 2.7 regenerates the video from her references in
+# a similar motion. Both are offered because only the operator can say which one
+# a given clip wants.
+SWAP_MODELS = JOB_MODELS['swap']
+DEFAULT_SWAP_MODEL = SWAP_MODELS[0]
+# Where an explicit persona goes: the only model that both replaces rather than
+# regenerates and serves explicit work. It runs on ModelsLab, not Runware --
+# see imagegen.provider_name_for.
+EXPLICIT_SWAP_MODEL = 'ml-face-swap'
+
+# The legacy Google/Imagen path is priced from the same peg (~$0.02 a call), so
+# it cannot be used as a free way around the token system.
+GOOGLE_IMAGE_TOKENS = credits_for_cost(0.02)
+
+# Add-ons. Identity is not one of them: Seedream conditions on reference images
+# inside the one call it already charges for, so holding her face costs nothing
+# on top.
+#
+# Upscale and the NSFW check used to be line items at 2 and 1 credits. At this
+# scale each would round to a whole token -- a 10x overcharge on a $0.004
+# operation -- so they are folded into the base price and are no longer sold
+# separately. Audio survives because it is a real second pass: the provider
+# bills a video-to-audio call flat, and a model that emits sound in the same
+# pass bills nothing extra at all. Priced as if it always costs us the dearer of
+# the two, because the cheaper case cannot be told apart at quote time.
+ADDON_PRICES = {
+    'audio': credits_for_cost(ADDON_COST_USD['audio']),
 }
 
 
@@ -189,30 +201,6 @@ def cost_table():
             'measured': PROVIDER_COST_MEASURED}
 
 
-# The legacy Google/Imagen path is priced from the same peg (~$0.02 a call), so
-# it cannot be used as a free way around the credit system.
-GOOGLE_IMAGE_CREDITS = 10
-
-# Add-ons, in the same measured slices. Identity is no longer one of them:
-# Seedream conditions on reference images inside the one call it already
-# charges for, so holding her face now costs nothing on top.
-# Audio is flat per clip rather than per second: the provider bills a
-# video-to-audio pass by the call, and a model that emits sound in the same
-# pass bills nothing extra at all. Priced as if it always costs us the dearer
-# of the two, because the cheaper case cannot be told apart at quote time.
-ADDON_PRICES = {
-    'upscale': 2,
-    'nsfw_check': 1,
-    'audio': 50,
-}
-
-# What an add-on costs us, where it costs anything. Unmeasured and therefore
-# deliberately high, the same as every other guess in this file: a guess that
-# is too low loses money on every clip and nothing reports it.
-ADDON_COST_USD = {
-    'audio': 0.10,
-}
-
 # Human labels for the model picker. Closed video models (Kling, Veo, Seedance)
 # are deliberately absent everywhere in this file: they are moderated and cannot
 # serve this feature, so nothing may offer them for an NSFW slot.
@@ -228,20 +216,19 @@ MODEL_LABELS = {
     'ml-face-swap': 'Replace her in the clip — explicit',
 }
 
-# Which ratings each model actually serves, measured against the provider
-# rather than assumed. The picker filters on this: a model that would be moved
-# to another one at submit should never have been offered in the first place,
+# Which ratings each model actually serves, measured against the provider rather
+# than assumed. The picker filters on this: a model that would be moved to
+# another one at submit should never have been offered in the first place,
 # because the creator reads the swap as the model having lied.
 #
-# Only Seedream 4.5 serves explicit work. 5.0 Pro refuses it at ByteDance's
-# end, and the Google models refuse it at any safety level.
+# Only Seedream 4.5 serves explicit work. 5.0 Pro refuses it at ByteDance's end,
+# and the Google models refuse it at any safety level.
 MODEL_RATINGS = {
     'seedream-4-5': ('sfw', 'nsfw'),
     'seedream-5-pro': ('sfw',),
     'nano-banana-pro': ('sfw',),
     'nano-banana-2': ('sfw',),
 }
-
 
 # Video, measured the same way. Wan 2.7 served the explicit probe; Seedance 2.5
 # refused it at ByteDance's end. Wan 2.5 has not been probed explicit, so it is
@@ -256,8 +243,8 @@ VIDEO_MODEL_RATINGS = {
     'p-video-replace': ('sfw',),
     # ModelsLab's face swap, not Runware -- an uncensored provider running an
     # actual swap rather than a regeneration. Runware carries no explicit
-    # replace model at all (confirmed against its own catalogue), so this is
-    # the one place a swap job leaves the default provider.
+    # replace model at all (confirmed against its own catalogue), so this is the
+    # one place a swap job leaves the default provider.
     'ml-face-swap': ('sfw', 'nsfw'),
 }
 
@@ -272,40 +259,68 @@ def video_models_for_rating(rating):
     return [m for m in VIDEO_MODELS
             if want in VIDEO_MODEL_RATINGS.get(m, ('sfw',))]
 
+
+# ── Currency ──────────────────────────────────────────────────────────────────
+# Euro is the base: prices are *set* in euro, matching the existing plan prices,
+# and the dollar and pound ladders are hand-set round points alongside rather
+# than conversions of it. A fixed price point never costs EUR 13.47 and never
+# moves because the exchange rate did.
+BASE_CURRENCY = 'eur'
+CURRENCIES = ('eur', 'usd', 'gbp')
+CURRENCY_SYMBOLS = {'eur': '€', 'usd': '$', 'gbp': '£'}
+
+# USD per unit, deliberately pessimistic rather than market. Used **only** by
+# the floor assertion -- provider bills arrive in dollars, so a euro price can
+# only be proved safe by converting it -- and never to compute a displayed
+# price. A pessimistic rate means an ordinary FX swing cannot quietly push a
+# pack under cost.
+REFERENCE_RATES = {'eur': 1.02, 'usd': 1.0, 'gbp': 1.18}
+
+
+def currency_of(name):
+    name = (name or '').strip().lower()
+    return name if name in CURRENCIES else BASE_CURRENCY
+
+
+def symbol_for(currency):
+    return CURRENCY_SYMBOLS[currency_of(currency)]
+
+
 # Included allowance per calendar month, keyed on the tier keys in app.TIERS.
-MONTHLY_CREDITS = {
-    'demo': 200,
-    'starter': 600,
-    'pro': 2500,
-    'agency': 7500,
+# Read in clips rather than tokens, the old allowances were indefensible:
+# Starter was EUR 49 a month for two video clips. Generation costs us very
+# little, so tripling them costs 8-11% of plan revenue and buys back the upgrade
+# ladder that dropping the pack discount bands gives up.
+# The Demo plan is deliberately absent: it carries unlimited generation in
+# app._BASE_TIERS, so it has no allowance to state. These are the numbers
+# app.py's tier capabilities are built from -- stated once, here, so a bullet
+# and the cap it describes cannot drift apart.
+MONTHLY_TOKENS = {
+    'starter': 100,
+    'pro': 350,
+    'agency': 1000,
 }
-DEFAULT_MONTHLY_CREDITS = 200
+DEFAULT_MONTHLY_TOKENS = 100
 
-# Top-up packs. Price in whole dollars per (pack size, tier band) — the higher
-# the subscription, the cheaper the credit, which is a real upgrade incentive
-# that costs nothing because every rate still clears the floor by at least 5x.
-PACK_SIZES = (500, 2000, 10000, 50000)
+# Top-up packs. One price for everyone -- there are no tier bands. The ladder
+# already falls 40% from the smallest pack to the largest, which is the same
+# incentive bought by volume rather than by subscription tier; stacking the old
+# Pro and Agency bands on top of it would put the 5,000 pack at roughly 1.7x
+# cost.
+PACK_SIZES = (100, 500, 1000, 2000, 5000)
 
-# Tiers that share a price column. Anything not listed bills at the base rate.
-PACK_BANDS = {'demo': 'base', 'starter': 'base', 'pro': 'pro', 'agency': 'agency'}
-DEFAULT_PACK_BAND = 'base'
-
-PACK_PRICES_USD = {
-    500:   {'base': 15,  'pro': 13,  'agency': 11},
-    2000:  {'base': 50,  'pro': 42,  'agency': 34},
-    10000: {'base': 200, 'pro': 165, 'agency': 130},
-    50000: {'base': 850, 'pro': 700, 'agency': 550},
+PACK_PRICES = {
+    100:   {'eur': 15,  'usd': 16,  'gbp': 13},
+    500:   {'eur': 70,  'usd': 75,  'gbp': 62},
+    1000:  {'eur': 130, 'usd': 139, 'gbp': 115},
+    2000:  {'eur': 220, 'usd': 235, 'gbp': 195},
+    5000:  {'eur': 450, 'usd': 479, 'gbp': 395},
 }
 
 
 class PricingError(ValueError):
     """An unpriced generation was requested. Never let one reach the provider:
     a spec we cannot quote is a spec we cannot bill for."""
-
-
-def credits_for_cost(usd):
-    """The credit price of something that costs us `usd`, rounded up."""
-    return max(1, int(math.ceil(float(usd) / CREDIT_COST_USD)))
 
 
 def image_price(model, resolution, addons=(), batch=1):
@@ -318,8 +333,10 @@ def image_price(model, resolution, addons=(), batch=1):
 
 
 def video_price(resolution, seconds, addons=(), model=None):
-    """Per second at the model's rung, so any length in range has a price --
-    the three presets are no longer the only lengths a clip may be."""
+    """Per second at the model's rung, rounded up **once for the whole clip**.
+
+    The single ceil is the point: at a token scale a per-second rounding would
+    sell a five-second Wan 2.5 clip at 15 tokens where it costs 11.3."""
     model = model or DEFAULT_VIDEO_MODEL
     rates = VIDEO_RATE_PER_SECOND.get(model) or {}
     rate = rates.get(resolution)
@@ -330,15 +347,15 @@ def video_price(resolution, seconds, addons=(), model=None):
     if not rate or not VIDEO_SECONDS_MIN <= secs <= VIDEO_MAX_SECONDS:
         raise PricingError(
             f'no price for video {model!r} {resolution!r} at {seconds!r}s')
-    return rate * secs + sum(_addon(a) for a in addons)
+    return max(1, int(math.ceil(rate * secs))) + sum(_addon(a) for a in addons)
 
 
 def job_price(job, resolution, seconds, addons=(), model=None):
-    """Credits for one video job. The job decides which of the two shapes it
-    is priced as: a swap is billed for the clip it was handed, everything else
-    for the clip it will make. Aspect is not an argument because it is not a
-    cost -- the same pixels through the same model come out a different shape
-    for the same money."""
+    """Tokens for one video job. The job decides which of the two shapes it is
+    priced as: a swap is billed for the clip it was handed, everything else for
+    the clip it will make. Aspect is not an argument because it is not a cost --
+    the same pixels through the same model come out a different shape for the
+    same money."""
     models = JOB_MODELS.get(job)
     if models is None:
         raise PricingError(f'unknown video job {job!r}')
@@ -347,8 +364,8 @@ def job_price(job, resolution, seconds, addons=(), model=None):
     model = model or models[0]
     if JOB_KINDS.get(job) == 'swap':
         # No default duration here, unlike a generated clip: a swap is billed
-        # for the clip it was handed, so a spec carrying no measured duration
-        # is one we cannot price rather than one we guess at.
+        # for the clip it was handed, so a spec carrying no measured duration is
+        # one we cannot price rather than one we guess at.
         return swap_price(resolution, seconds, addons, model)
     return video_price(resolution, seconds or DEFAULT_VIDEO_DURATION,
                        addons, model)
@@ -361,7 +378,7 @@ def swap_price(resolution, seconds, addons=(), model=None):
     secs = int(seconds or 0)
     if not rate or not VIDEO_SECONDS_MIN <= secs <= VIDEO_MAX_SECONDS:
         raise PricingError(f'no price for a swap at {resolution!r} / {seconds!r}s')
-    return rate * secs + sum(_addon(a) for a in addons)
+    return max(1, int(math.ceil(rate * secs))) + sum(_addon(a) for a in addons)
 
 
 def _addon(name):
@@ -372,7 +389,7 @@ def _addon(name):
 
 
 def quote(spec):
-    """Credits for a generation spec, as the job API and the UI both see it.
+    """Tokens for a generation spec, as the job API and the UI both see it.
 
     spec: {kind: image|video, model, resolution, seconds, batch, addons[]}
     """
@@ -380,21 +397,18 @@ def quote(spec):
     job = (spec.get('job') or '').strip().lower()
     addons = tuple(spec.get('addons') or ())
     # A job names its own models, so it is the stricter of the two routes and
-    # takes precedence: a model that does not serve the job asked for is a
-    # spec we refuse to quote rather than one we quietly reprice.
+    # takes precedence: a model that does not serve the job asked for is a spec
+    # we refuse to quote rather than one we quietly reprice.
     if job:
         return job_price(job, spec.get('resolution') or DEFAULT_VIDEO_RESOLUTION,
                          spec.get('seconds'), addons, spec.get('model'))
     kind = spec.get('kind') or 'image'
     if kind == 'swap':
-        # No default duration here, unlike a generated clip: a swap is billed
-        # for the clip it was handed, so a spec that carries no measured
-        # duration is one we cannot price rather than one we guess at.
         return swap_price(spec.get('resolution') or DEFAULT_VIDEO_RESOLUTION,
                           spec.get('seconds'), addons, spec.get('model'))
     if kind == 'video':
         model = spec.get('model')
-        if model not in VIDEO_PRICES:
+        if model not in VIDEO_RATE_PER_SECOND:
             model = DEFAULT_VIDEO_MODEL
         return video_price(spec.get('resolution') or DEFAULT_VIDEO_RESOLUTION,
                            spec.get('seconds') or DEFAULT_VIDEO_DURATION,
@@ -406,72 +420,67 @@ def quote(spec):
                        addons, spec.get('batch') or 1)
 
 
-def monthly_credits(tier):
-    return MONTHLY_CREDITS.get(tier or '', DEFAULT_MONTHLY_CREDITS)
+# Precomputed per-preset prices, for the UI's menu. Derived from video_price so
+# the table and the charge can never disagree.
+VIDEO_PRICES = {
+    model: {res: {secs: video_price(res, secs, (), model)
+                  for secs in VIDEO_DURATIONS}
+            for res in rates}
+    for model, rates in VIDEO_RATE_PER_SECOND.items()
+}
 
 
-def pack_band(tier):
-    return PACK_BANDS.get(tier or '', DEFAULT_PACK_BAND)
+def monthly_tokens(tier):
+    return MONTHLY_TOKENS.get(tier or '', DEFAULT_MONTHLY_TOKENS)
 
 
-def pack_price_usd(size, tier):
-    """Dollar price of a pack for this tier, or None if there is no such pack."""
-    row = PACK_PRICES_USD.get(int(size))
-    return row.get(pack_band(tier)) if row else None
+def pack_price(size, currency=BASE_CURRENCY):
+    """Price of a pack in one currency, or None if there is no such pack."""
+    row = PACK_PRICES.get(int(size))
+    return row.get(currency_of(currency)) if row else None
 
 
-def packs_for(tier):
-    """The buy-credits menu, already tier-resolved so the client needs no
-    discount logic of its own."""
-    band = pack_band(tier)
-    base = DEFAULT_PACK_BAND
+def packs_for(currency=BASE_CURRENCY):
+    """The buy-tokens menu, already resolved to one currency so the client needs
+    no pricing logic of its own. There are no tier bands: everyone sees this."""
+    cur = currency_of(currency)
     out = []
     for size in PACK_SIZES:
-        price = PACK_PRICES_USD[size][band]
-        full = PACK_PRICES_USD[size][base]
+        price = PACK_PRICES[size][cur]
+        full = PACK_PRICES[PACK_SIZES[0]][cur] / PACK_SIZES[0] * size
         out.append({
-            'credits': size,
-            'price_usd': price,
+            'tokens': size,
+            'currency': cur,
+            'symbol': symbol_for(cur),
+            'price': price,
             'price_cents': int(round(price * 100)),
-            'per_credit': round(price / size, 5),
+            'per_token': round(price / size, 5),
             'save_pct': int(round((1 - price / full) * 100)) if full > price else 0,
         })
     return out
 
 
-def credit_rate_usd(tier):
-    """What one credit costs this tier in cash, for showing a price beside a
-    credit count. It is the smallest pack's rate — the marginal price of buying
-    more — rather than an average over packs nobody bought, so "20 credits"
-    reads as what the next twenty would actually cost."""
-    return pack_price_usd(PACK_SIZES[0], tier) / PACK_SIZES[0]
+def token_rate(currency=BASE_CURRENCY):
+    """What one token costs in cash, for showing a price beside a token count.
+    It is the smallest pack's rate -- the marginal price of buying more -- rather
+    than an average over packs nobody bought, so "12 tokens" reads as what the
+    next twelve would actually cost."""
+    return pack_price(PACK_SIZES[0], currency) / PACK_SIZES[0]
 
 
-# Euros are shown only when a rate is configured. A hard-coded one would be
-# wrong within a week and wrong silently, which is worse than showing dollars.
-def eur_per_usd():
-    raw = (os.getenv('EUR_PER_USD') or '').strip()
-    try:
-        rate = float(raw)
-    except ValueError:
-        return None
-    return rate if rate > 0 else None
+def cash_for_tokens(tokens, currency=BASE_CURRENCY):
+    """A token count priced in cash: {currency, symbol, amount}."""
+    cur = currency_of(currency)
+    return {'currency': cur, 'symbol': symbol_for(cur),
+            'amount': round(max(0, int(tokens or 0)) * token_rate(cur), 2)}
 
 
-def cash_for_credits(credits, tier):
-    """A credit count priced in cash: {usd, eur}. `eur` is None unless a rate
-    is set."""
-    usd = round(max(0, int(credits or 0)) * credit_rate_usd(tier), 2)
-    rate = eur_per_usd()
-    return {'usd': usd, 'eur': round(usd * rate, 2) if rate else None}
-
-
-def equivalents(credits):
+def equivalents(tokens):
     """What a balance is worth in the two things creators actually make, for the
-    'about 4,200 photos or 28 clips' line in the header."""
+    'about 350 photos or 29 clips' line in the header."""
     photo = image_price(DEFAULT_IMAGE_MODEL, DEFAULT_RESOLUTION)
     clip = video_price(DEFAULT_VIDEO_RESOLUTION, DEFAULT_VIDEO_DURATION)
-    n = max(0, int(credits or 0))
+    n = max(0, int(tokens or 0))
     return {'photos': n // photo, 'clips': n // clip}
 
 
@@ -549,16 +558,18 @@ def price_table():
         'default_aspect': DEFAULT_ASPECT,
         'audio_modes': list(AUDIO_MODES),
         'extend_modes': list(EXTEND_MODES),
-        # What each model lets the operator choose. A model that runs the
-        # length and the frame of the clip it is given has neither to offer.
-        # Still called swap_model_caps because it is the same map the swap
-        # panel already read; it now covers every model a job can reach.
+        # What each model lets the operator choose. A model that runs the length
+        # and the frame of the clip it is given has neither to offer. Still
+        # called swap_model_caps because it is the same map the swap panel
+        # already read; it now covers every model a job can reach.
         'swap_model_caps': {m: model_caps(m) for m in all_video_models()},
         'explicit_swap_model': EXPLICIT_SWAP_MODEL,
         # The lengths each video model actually serves, so the picker cannot
         # offer one the provider will refuse.
         'video_model_durations': {m: _imagegen_durations(m)
                                   for m in VIDEO_MODELS},
+        # Fractional tokens a second. The client must ceil the whole clip, the
+        # same as video_price does, or its estimate will not match the charge.
         'video_rates': VIDEO_RATE_PER_SECOND,
         'video_px': _IG.VIDEO_PX,
         'video_max_seconds': VIDEO_MAX_SECONDS,
@@ -580,23 +591,25 @@ def price_table():
 
 
 def margin_report():
-    """Per-credit price against per-credit cost for every pack and band. The
-    floor assertion below reads this; the admin billing page shows it."""
+    """Per-token price against per-token cost for every pack in every currency.
+    The floor assertion below reads this; the admin billing page shows it."""
     rows = []
     for size in PACK_SIZES:
-        for band, price in PACK_PRICES_USD[size].items():
+        for cur in CURRENCIES:
+            price = PACK_PRICES[size][cur]
             per = price / size
-            rows.append({'credits': size, 'band': band, 'price_usd': price,
-                         'per_credit': per,
-                         'multiple': per / CREDIT_COST_USD,
-                         'margin_pct': (1 - CREDIT_COST_USD / per) * 100})
+            per_usd = per * REFERENCE_RATES[cur]
+            rows.append({'tokens': size, 'currency': cur, 'price': price,
+                         'per_token': per, 'per_token_usd': per_usd,
+                         'multiple': per_usd / TOKEN_COST_USD,
+                         'margin_pct': (1 - TOKEN_COST_USD / per_usd) * 100})
     return rows
 
 
 def generation_margin_report():
-    """Credits against provider cost for every generation the picker can ask
-    for. The pack floor never saw this table, which is how a clip came to be
-    sold at 30 credits a second while costing 46 — so it is walked too."""
+    """Tokens against provider cost for every generation the picker can ask for.
+    The pack floor never saw this table, which is how a clip came to be sold at
+    30 credits while costing 46 -- so it is walked too."""
     rows = []
     for job, models in JOB_MODELS.items():
         for model in models:
@@ -613,17 +626,16 @@ def generation_margin_report():
                             ADDON_COST_USD.get(a, 0) for a in addons)
                         rows.append({'job': job, 'model': model,
                                      'resolution': res, 'seconds': secs,
-                                     'addons': addons, 'credits': price,
-                                     'sells_for': price * CREDIT_COST_USD,
+                                     'addons': addons, 'tokens': price,
+                                     'sells_for': price * TOKEN_COST_USD,
                                      'cost_usd': cost})
     return rows
 
 
 def _assert_generation_floor():
-    """A generation may never sell under what it costs us. Unlike the pack
-    floor this is a 1x test, not a margin one: the margin is taken when the
-    credits are bought, and taking it twice would price us out of our own
-    table."""
+    """A generation may never sell under what it costs us. Unlike the pack floor
+    this is a 1x test, not a margin one: the margin is taken when the tokens are
+    bought, and taking it twice would price us out of our own table."""
     for row in generation_margin_report():
         if row['sells_for'] + 1e-9 < row['cost_usd']:
             raise AssertionError(
@@ -632,23 +644,30 @@ def _assert_generation_floor():
                 f"sells for ${row['sells_for']:.4f} and costs ${row['cost_usd']:.4f}")
     for name, cost in ADDON_COST_USD.items():
         price = ADDON_PRICES.get(name)
-        if price is None or price * CREDIT_COST_USD + 1e-9 < cost:
+        if price is None or price * TOKEN_COST_USD + 1e-9 < cost:
             raise AssertionError(
-                f'add-on {name!r} sells for {price} credits and costs ${cost}')
+                f'add-on {name!r} sells for {price} tokens and costs ${cost}')
 
 
 def _assert_floor():
-    floor = MIN_MARGIN_MULTIPLE * CREDIT_COST_USD
+    floor = MIN_MARGIN_MULTIPLE * TOKEN_COST_USD
     for row in margin_report():
-        if row['per_credit'] < floor:
+        if row['per_token_usd'] + 1e-9 < floor:
             raise AssertionError(
-                f"pack {row['credits']} on band {row['band']} sells credits at "
-                f"${row['per_credit']:.5f}, under the ${floor:.5f} floor "
+                f"pack {row['tokens']} in {row['currency']} sells tokens at "
+                f"${row['per_token_usd']:.5f}, under the ${floor:.5f} floor "
                 f"({MIN_MARGIN_MULTIPLE}x cost)")
     missing = [s for s in PACK_SIZES
-               if set(PACK_PRICES_USD.get(s, {})) < set(PACK_BANDS.values())]
+               if set(PACK_PRICES.get(s, {})) < set(CURRENCIES)]
     if missing:
-        raise AssertionError(f'pack sizes missing a band price: {missing}')
+        raise AssertionError(f'pack sizes missing a currency: {missing}')
+    # A bigger pack must never cost more per token than a smaller one, or the
+    # ladder tells a creator to buy twice rather than once.
+    for small, big in zip(PACK_SIZES, PACK_SIZES[1:]):
+        for cur in CURRENCIES:
+            if pack_price(big, cur) / big > pack_price(small, cur) / small:
+                raise AssertionError(
+                    f'pack {big} in {cur} costs more per token than {small}')
 
 
 _assert_floor()

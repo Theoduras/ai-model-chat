@@ -645,6 +645,9 @@ class User(Base):
     # every deployment has run the backfill.
     team_owner_id = Column(String(32), index=True)
     tier = Column(String(32), default='')          # '' until a plan is chosen
+    # eur | usd | gbp. Euro is the base currency every price is set in, so an
+    # account that never picks one sees the prices as they were decided.
+    currency = Column(String(3), default='eur')
     status = Column(String(16), default='unpaid')  # unpaid | active | expired
     expires_at = Column(DateTime)
     created_at = Column(DateTime, default=_now)
@@ -702,10 +705,10 @@ class Payment(Base):
     id = Column(String(32), primary_key=True, default=_uid)
     user_id = Column(String(32), ForeignKey('users.id'), nullable=False, index=True)
     tier = Column(String(32), nullable=False)
-    # A credits checkout reuses this whole table and both webhooks; `tier` then
+    # A token checkout reuses this whole table and both webhooks; `tier` then
     # records the tier the pack was priced at rather than one being bought.
-    kind = Column(String(16), default='subscription')  # subscription | credits
-    credits = Column(Integer, default=0)
+    kind = Column(String(16), default='subscription')  # subscription | tokens
+    tokens = Column(Integer, default=0)
     provider = Column(String(16), default='oxapay')  # oxapay | stripe
     amount = Column(String(32), default='')
     currency = Column(String(16), default='USD')
@@ -879,12 +882,12 @@ Index('ix_usage_unique', UsageCounter.workspace_id, UsageCounter.metric,
       UsageCounter.period, unique=True)
 
 
-class CreditLedger(Base):
-    """Every credit movement, append-only. The balance is the sum of the rows,
+class TokenLedger(Base):
+    """Every token movement, append-only. The balance is the sum of the rows,
     never a column: people pay for these, so a mutable counter that a crash or a
     race can corrupt is not an option — with a ledger, any disputed balance can
     be reconstructed from what actually happened."""
-    __tablename__ = 'credit_ledger'
+    __tablename__ = 'token_ledger'
 
     id = Column(String(32), primary_key=True, default=_uid)
     workspace_id = Column(String(32), nullable=False, index=True)
@@ -892,20 +895,20 @@ class CreditLedger(Base):
     kind = Column(String(16), nullable=False)      # grant|purchase|spend|refund|adjust
     # What caused it: 'YYYY-MM' for a grant, a Payment id, a GenerationJob id.
     source = Column(String(64), default='', index=True)
-    # Monthly grants expire at the end of their period; bought credits never do.
+    # Monthly grants expire at the end of their period; bought tokens never do.
     expires_at = Column(DateTime)
     note = Column(String(200), default='')
     created_at = Column(DateTime, default=_now, index=True)
 
 
-Index('ix_credit_ws_created', CreditLedger.workspace_id, CreditLedger.created_at)
+Index('ix_token_ws_created', TokenLedger.workspace_id, TokenLedger.created_at)
 # One grant per workspace per period, and one purchase per payment: the guard
 # against a replayed webhook or a double-fired monthly grant is the database's,
 # not the caller's.
-Index('ix_credit_source_kind', CreditLedger.workspace_id, CreditLedger.kind,
-      CreditLedger.source, unique=True,
-      sqlite_where=CreditLedger.kind.in_(('grant', 'purchase')),
-      postgresql_where=CreditLedger.kind.in_(('grant', 'purchase')))
+Index('ix_token_source_kind', TokenLedger.workspace_id, TokenLedger.kind,
+      TokenLedger.source, unique=True,
+      sqlite_where=TokenLedger.kind.in_(('grant', 'purchase')),
+      postgresql_where=TokenLedger.kind.in_(('grant', 'purchase')))
 
 
 class GenerationJob(Base):
@@ -922,7 +925,7 @@ class GenerationJob(Base):
     provider_job_id = Column(String(200), default='', index=True)
     spec_json = Column(Text, default='{}')
     status = Column(String(12), default='queued')  # queued|running|done|failed
-    credits = Column(Integer, default=0)           # reserved at submit
+    tokens = Column(Integer, default=0)            # reserved at submit
     result_media_ids = Column(Text, default='')    # CSV of PersonaMedia ids
     error = Column(String(500), default='')
     created_at = Column(DateTime, default=_now, index=True)
@@ -1078,33 +1081,33 @@ def bump_usage(session, workspace_id, metric, period, by=1):
     return int(row.count)
 
 
-# ── Credits ───────────────────────────────────────────────────────────────────
+# ── Tokens ───────────────────────────────────────────────────────────────────
 
-def credit_balance(session, workspace_id, at=None):
-    """Spendable credits: every row that has not expired. An expired monthly
+def token_balance(session, workspace_id, at=None):
+    """Spendable tokens: every row that has not expired. An expired monthly
     grant is left in place rather than deleted — the history is the point."""
     now = at or _now()
-    total = (session.query(func.coalesce(func.sum(CreditLedger.delta), 0))
-             .filter(CreditLedger.workspace_id == workspace_id,
-                     or_(CreditLedger.expires_at.is_(None),
-                         CreditLedger.expires_at > now))
+    total = (session.query(func.coalesce(func.sum(TokenLedger.delta), 0))
+             .filter(TokenLedger.workspace_id == workspace_id,
+                     or_(TokenLedger.expires_at.is_(None),
+                         TokenLedger.expires_at > now))
              .scalar())
     return int(total or 0)
 
 
-def credit_post(session, workspace_id, delta, kind, source='', expires_at=None,
+def token_post(session, workspace_id, delta, kind, source='', expires_at=None,
                 note=''):
     """Append one movement. Returns the row, or None when a unique grant or
     purchase for this source already exists — that duplicate is the whole
     defence against a replayed webhook, so it is a no-op and not an error."""
     if kind in ('grant', 'purchase'):
-        dupe = session.query(CreditLedger).filter(
-            CreditLedger.workspace_id == workspace_id,
-            CreditLedger.kind == kind,
-            CreditLedger.source == (source or '')).first()
+        dupe = session.query(TokenLedger).filter(
+            TokenLedger.workspace_id == workspace_id,
+            TokenLedger.kind == kind,
+            TokenLedger.source == (source or '')).first()
         if dupe:
             return None
-    row = CreditLedger(workspace_id=workspace_id, delta=int(delta), kind=kind,
+    row = TokenLedger(workspace_id=workspace_id, delta=int(delta), kind=kind,
                        source=(source or '')[:64], expires_at=expires_at,
                        note=(note or '')[:200])
     session.add(row)
@@ -1118,34 +1121,34 @@ def credit_post(session, workspace_id, delta, kind, source='', expires_at=None,
     return row
 
 
-def credit_grant(session, workspace_id, amount, period, expires_at, note=''):
+def token_grant(session, workspace_id, amount, period, expires_at, note=''):
     """The monthly allowance. Keyed on the period so firing twice is harmless."""
-    return credit_post(session, workspace_id, abs(int(amount)), 'grant',
+    return token_post(session, workspace_id, abs(int(amount)), 'grant',
                        source=period, expires_at=expires_at, note=note)
 
 
-def credit_purchase(session, workspace_id, amount, payment_id, note=''):
-    return credit_post(session, workspace_id, abs(int(amount)), 'purchase',
+def token_purchase(session, workspace_id, amount, payment_id, note=''):
+    return token_post(session, workspace_id, abs(int(amount)), 'purchase',
                        source=payment_id, note=note)
 
 
 def expiring_balance(session, workspace_id, at=None):
     """The part of the balance that lapses at period end, and when. A spend has
     to be charged against this first — otherwise an unexpiring row cancels a
-    bought credit and the allowance silently lapses unused, which is the
+    bought token and the allowance silently lapses unused, which is the
     creator paying twice for the same generation."""
     now = at or _now()
-    rows = (session.query(CreditLedger)
-            .filter(CreditLedger.workspace_id == workspace_id,
-                    CreditLedger.expires_at.isnot(None),
-                    CreditLedger.expires_at > now).all())
+    rows = (session.query(TokenLedger)
+            .filter(TokenLedger.workspace_id == workspace_id,
+                    TokenLedger.expires_at.isnot(None),
+                    TokenLedger.expires_at > now).all())
     total = sum(int(r.delta) for r in rows)
     soonest = min((r.expires_at for r in rows if r.delta > 0), default=None)
     return max(0, total), soonest
 
 
-def credit_debit(session, workspace_id, amount, source, note=''):
-    """Reserve credits for a job. Returns False without posting anything when
+def token_debit(session, workspace_id, amount, source, note=''):
+    """Reserve tokens for a job. Returns False without posting anything when
     the balance will not cover it, so an unaffordable job never reaches the
     provider.
 
@@ -1154,22 +1157,22 @@ def credit_debit(session, workspace_id, amount, source, note=''):
     turns, the grant and what it paid for lapse together and the purchased
     balance is left whole."""
     amount = abs(int(amount))
-    if amount and credit_balance(session, workspace_id) < amount:
+    if amount and token_balance(session, workspace_id) < amount:
         return False
     if not amount:
         return True
     expiring, when = expiring_balance(session, workspace_id)
     from_grant = min(amount, expiring) if when else 0
     if from_grant:
-        credit_post(session, workspace_id, -from_grant, 'spend', source=source,
+        token_post(session, workspace_id, -from_grant, 'spend', source=source,
                     expires_at=when, note=note)
     if amount - from_grant:
-        credit_post(session, workspace_id, -(amount - from_grant), 'spend',
+        token_post(session, workspace_id, -(amount - from_grant), 'spend',
                     source=source, note=note)
     return True
 
 
-def credit_refund_part(session, workspace_id, source, amount, note=''):
+def token_refund_part(session, workspace_id, source, amount, note=''):
     """Give back part of what was reserved against `source`.
 
     For a job that delivered less than it was quoted -- a model that decides
@@ -1180,10 +1183,10 @@ def credit_refund_part(session, workspace_id, source, amount, note=''):
     amount = int(amount or 0)
     if amount <= 0:
         return 0
-    rows = (session.query(CreditLedger)
-            .filter(CreditLedger.workspace_id == workspace_id,
-                    CreditLedger.source == source,
-                    CreditLedger.kind.in_(('spend', 'refund'))).all())
+    rows = (session.query(TokenLedger)
+            .filter(TokenLedger.workspace_id == workspace_id,
+                    TokenLedger.source == source,
+                    TokenLedger.kind.in_(('spend', 'refund'))).all())
     owed = {}
     for r in rows:
         owed[r.expires_at] = owed.get(r.expires_at, 0) + int(r.delta)
@@ -1196,23 +1199,23 @@ def credit_refund_part(session, workspace_id, source, amount, note=''):
         if outstanding <= 0:
             continue
         give = min(outstanding, amount - given)
-        credit_post(session, workspace_id, give, 'refund', source=source,
+        token_post(session, workspace_id, give, 'refund', source=source,
                     expires_at=expires_at, note=note)
         given += give
     return given
 
 
-def credit_refund(session, workspace_id, source, note=''):
+def token_refund(session, workspace_id, source, note=''):
     """Give back whatever was reserved against `source`, once. A job that fails
     or is swept must not cost anything, and a double refund must not pay out.
 
     Each refund row mirrors the expiry of the spend it reverses, so credits
     come back into the bucket they left — refunding an allowance charge as a
-    permanent credit would mint balance out of a failed job."""
-    rows = (session.query(CreditLedger)
-            .filter(CreditLedger.workspace_id == workspace_id,
-                    CreditLedger.source == source,
-                    CreditLedger.kind.in_(('spend', 'refund'))).all())
+    permanent token would mint balance out of a failed job."""
+    rows = (session.query(TokenLedger)
+            .filter(TokenLedger.workspace_id == workspace_id,
+                    TokenLedger.source == source,
+                    TokenLedger.kind.in_(('spend', 'refund'))).all())
     owed = {}
     for r in rows:
         owed[r.expires_at] = owed.get(r.expires_at, 0) + int(r.delta)
@@ -1220,24 +1223,24 @@ def credit_refund(session, workspace_id, source, note=''):
     for expires_at, delta in owed.items():
         if delta >= 0:
             continue
-        credit_post(session, workspace_id, -delta, 'refund', source=source,
+        token_post(session, workspace_id, -delta, 'refund', source=source,
                     expires_at=expires_at, note=note)
         total += -delta
     return total
 
 
-def credit_history(session, workspace_id, limit=50):
-    return (session.query(CreditLedger)
-            .filter(CreditLedger.workspace_id == workspace_id)
-            .order_by(CreditLedger.created_at.desc()).limit(limit).all())
+def token_history(session, workspace_id, limit=50):
+    return (session.query(TokenLedger)
+            .filter(TokenLedger.workspace_id == workspace_id)
+            .order_by(TokenLedger.created_at.desc()).limit(limit).all())
 
 
 # ── Generation jobs ───────────────────────────────────────────────────────────
 
-def queue_generation(session, workspace_id, slug, kind, spec_json, credits=0,
+def queue_generation(session, workspace_id, slug, kind, spec_json, tokens=0,
                      provider=''):
     row = GenerationJob(workspace_id=workspace_id, slug=slug, kind=kind,
-                        spec_json=spec_json, credits=int(credits or 0),
+                        spec_json=spec_json, tokens=int(tokens or 0),
                         provider=provider or '')
     session.add(row)
     session.commit()
@@ -2136,7 +2139,7 @@ def init_db():
                          ('referral_earnings', ReferralEarning),
                          ('trial_invites', TrialInvite),
                          ('trial_redemptions', TrialRedemption),
-                         ('credit_ledger', CreditLedger),
+                         ('credit_ledger', TokenLedger),
                          ('generation_jobs', GenerationJob),
                          ('model_reference_sets', ModelReferenceSet),
                          ('audio_references', AudioReference),
