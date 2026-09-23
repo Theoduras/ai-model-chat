@@ -286,7 +286,7 @@
       <div class="gen-panel" id="gen-p-character">
         <div class="gen-head"><b>2</b><h2>Character</h2></div>
         <label class="gen-f"><span>Whose photos are we generating?</span>
-          <select id="persona" onchange="loadPersona()"></select></label>
+          <select id="persona" onchange="studioSlugFor().then(loadPersona)"></select></label>
         <div class="gen-f" id="gen-identity-src" style="display:none"><span>Her look comes from</span>
           <div class="gen-chips">
             <button type="button" class="gen-chip" id="gen-src-character" onclick="setIdentitySrc('character')">Her character</button>
@@ -578,7 +578,17 @@
 <script>
 function el(id){ return document.getElementById(id); }
 function esc(s){ return (s||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
-function slug(){ return (el('persona')||{}).value || ''; }
+function slug(){ const v = (el('persona')||{}).value || ''; return v.startsWith('char:') ? '' : v; }
+// A bare character gets its studio-only persona the moment it is picked.
+async function studioSlugFor() {
+  const sel = el('persona'), v = sel.value;
+  if (!v.startsWith('char:')) return;
+  try {
+    const d = await (await fetch('/api/characters/' + encodeURIComponent(v.slice(5)) + '/studio',
+      {method: 'POST'})).json();
+    if (d.slug) { sel.selectedOptions[0].value = d.slug; sel.value = d.slug; }
+  } catch (e) {}
+}
 
 // Every control quotes its own price before it is clicked: a button that spends
 // tokens without saying how many is the one thing this panel must not be.
@@ -626,16 +636,23 @@ const GEN_RES_LABELS = { '2k': '2K', '4k': '4K' };
 
 async function init() {
   try {
-    const list = await (await fetch('/api/personas')).json();
+    const list = await (await fetch('/api/personas?studio=1')).json();
     const rows = Array.isArray(list) ? list : (list.personas || []);
+    let chars = [];
+    try {
+      chars = ((await (await fetch('/api/characters')).json()).characters || [])
+        .filter(c => !c.persona);
+    } catch (e) {}
     el('persona').innerHTML = rows.map(p =>
-      `<option value="${esc(p.slug)}">${esc(p.name || p.slug)}</option>`).join('');
+      `<option value="${esc(p.slug)}">${esc(p.name || p.slug)}</option>`).join('')
+      + chars.map(c => `<option value="char:${esc(c.id)}">${esc(c.name || 'Character')} (character)</option>`).join('');
     if (!el('persona').options.length) {
-      el('persona-hint').textContent = 'Create a persona first — generation needs one to look like.';
+      el('persona-hint').textContent = 'Create a persona or a character first — generation needs one to look like.';
       return;
     }
     const want = new URLSearchParams(location.search).get('persona');
     if (want && rows.some(p => p.slug === want)) el('persona').value = want;
+    await studioSlugFor();
   } catch (e) {
     el('persona-hint').textContent = 'Could not load personas.';
     return;
