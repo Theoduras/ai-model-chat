@@ -510,7 +510,7 @@
     return fn ? fn() : '';
   }
 
-  const api = {render, TEXT_ONLY: ['labia', 'labia_fullness', 'ethnicity', 'apparent_age']};
+  const api = {render, TEXT_ONLY: ['labia', 'labia_fullness', 'ethnicity', 'apparent_age', 'view_outfit']};
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.CharacterVisuals = api;
 })(this);

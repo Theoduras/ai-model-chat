@@ -659,7 +659,7 @@ function pickOption(btn) {
   const on = btn.getAttribute('aria-pressed') !== 'true';
   btn.parentNode.querySelectorAll('.fp-opt').forEach(b => b.setAttribute('aria-pressed', 'false'));
   btn.setAttribute('aria-pressed', on);
-  if (step === 'body') autosaveSheet();
+  if (btn.closest('#body-features, #intimate-features')) autosaveSheet();
   if (btn.dataset.feature === 'hair_colour') {
     cur.sheet = collectSheet();
     document.querySelectorAll('[data-feature="pubic_colour"][data-value="Matches hair"]').forEach(b => {
@@ -850,7 +850,8 @@ function renderBody() {
   const todo = shown.filter(v => ['not_started', 'outdated'].includes(vs(v.key).display));
   el('gen-remaining').disabled = !todo.length;
   el('regen-branch').hidden = !shown.some(v => vs(v.key).display === 'outdated');
-  el('body-features').innerHTML = cat.features.filter(f => f.group === 'body').map(featurePicker).join('');
+  el('body-features').innerHTML = cat.features.filter(f => f.group === 'outfit')
+    .concat(cat.features.filter(f => f.group === 'body')).map(featurePicker).join('');
   const intimate = cat.features.filter(f => INTIMATE.includes(f.group));
   el('intimate-wrap').hidden = !intimate.length;
   el('intimate-features').innerHTML = intimate.map(featurePicker).join('');

@@ -100,6 +100,10 @@ FEATURES = {
                                         ('Hip', 'a hip tattoo'), ('Sleeve', 'a full arm sleeve tattoo'), ('Back piece', 'a large back tattoo')]),
         'piercings': ('Piercings', 'body', [('None', 'no piercings'), ('Ears', 'pierced ears'), ('Nose', 'a nose piercing'), ('Navel', 'a navel piercing')]),
         'birthmarks': ('Birthmarks', 'body', [('None', ''), ('Shoulder', 'a small birthmark on the shoulder'), ('Hip', 'a small birthmark on the hip')]),
+        # Dresses only the full-body reference photos, never a content shot:
+        # the fragments stay empty so describe() has nothing to add.
+        'view_outfit': ('Outfit for body views', 'outfit', [('Bodysuit', ''), ('Casual', ''), ('Activewear', ''),
+                                                             ('Fitted dress', '')]),
         'nails': ('Nails', 'body', _opts('nails', 'Short, nude', 'Medium, painted', 'Long, painted', 'French tips')),
         # Topless
         'cup': ('Cup size', 'breasts', [('B', 'B-cup breasts'), ('C', 'C-cup breasts'), ('D', 'D-cup breasts'), ('DD', 'DD-cup breasts'),
@@ -128,7 +132,7 @@ FEATURES = {
 
 # Which feature groups each level may put into words. A safe-work prompt never
 # carries an intimate word, whatever the character has filled in.
-GROUP_LEVEL = {'face': 'sfw', 'body': 'sfw', 'breasts': 'moderate',
+GROUP_LEVEL = {'face': 'sfw', 'body': 'sfw', 'outfit': 'sfw', 'breasts': 'moderate',
                'nipples': 'moderate', 'pubic': 'explicit', 'vulva': 'explicit',
                'anus': 'explicit'}
 
@@ -224,12 +228,12 @@ VIEWS = {
              parents=('body_front',), tier=1, mode='reference', framing='a front-facing head-and-shoulders portrait with a natural warm smile', uses=('face',)),
         dict(key='body_front', label='Full body, front', group='body', rating='sfw', required_from='sfw', parents=('face_front',), tier=0, mode='reference',
              framing=('a full-body photo from head to feet, standing straight facing the camera in a relaxed '
-                      'A-pose, wearing a plain fitted nude-coloured bodysuit'),
+                      'A-pose, wearing {outfit}'),
              uses=('face', 'body')),
         dict(key='body_side', label='Full body, side', group='body', rating='sfw', required_from=None, parents=('body_front',), tier=1, mode='reference',
-             framing='a full-body side view, standing straight, wearing a plain fitted bodysuit', uses=('body',)),
+             framing='a full-body side view, standing straight, wearing {outfit}', uses=('body',)),
         dict(key='body_back', label='Full body, back', group='body', rating='sfw', required_from='explicit', parents=('body_front',), tier=1, mode='reference',
-             framing='a full-body view from behind, standing straight, wearing a plain fitted bodysuit', uses=('body',)),
+             framing='a full-body view from behind, standing straight, wearing {outfit}', uses=('body',)),
         dict(key='hands', label='Hands', group='body', rating='sfw', required_from=None, parents=('body_front',), tier=1, mode='reference',
              zoom=True, body=('nails', 'tattoos'),
              framing=('a tight close-up of only her two hands, resting open palms down side by side on a plain surface, '
@@ -481,11 +485,18 @@ def adult_clause(age):
             'and fully adult body proportions.')
 
 
+OUTFITS = {'Bodysuit': 'a plain fitted nude-coloured bodysuit', 'Casual': 'a fitted plain T-shirt and slim jeans',
+           'Activewear': 'a fitted tank top and leggings', 'Fitted dress': 'a simple fitted knee-length dress'}
+
+
 def build_view_prompt(key, sheet, age, has_reference, body_type='female',
                       mode='reference', strength=None, pose=None, lighting=None):
     v = view(key, body_type)
     if not v:
         raise CharacterError('Unknown view.')
+    if '{outfit}' in v['framing']:
+        outfit = OUTFITS.get((sheet or {}).get('view_outfit'), OUTFITS['Bodysuit'])
+        v = dict(v, framing=v['framing'].replace('{outfit}', outfit))
     uses = tuple(v['uses']) + (() if 'face' in v['uses'] else ('body',))
     groups = tuple(g for g in uses if _rank(GROUP_LEVEL[g]) <= _rank(v['rating']))
     keep = set(traits(key, body_type))
