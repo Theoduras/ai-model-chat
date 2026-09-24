@@ -302,7 +302,7 @@ def test_content_prompts():
 
 def test_vulva_looks():
     saved = CH.LOOK_FILES
-    CH.LOOK_FILES = {'vulva_look': ('1', '2', '3'), 'vulva_open_look': ('1',)}
+    CH.LOOK_FILES = {'vulva_look': ('1', '2', '3'), 'vulva_open_look': ('1',), 'anus_look': ('1',), 'anus_open_look': ('1',)}
     try:
         base = {'age': 25, 'nsfw_level': 'explicit'}
         check('look accepted', CH.validate(dict(base, sheet={'vulva_look': '3'}))[0]['sheet']['vulva_look'] == '3')
@@ -312,10 +312,12 @@ def test_vulva_looks():
                 check(f'look {bad} refused', False)
             except CH.CharacterError:
                 pass
-        check('looks only at explicit', len(CH.catalogue('explicit')['looks']) == 2 and not CH.catalogue('moderate')['looks']
+        check('looks only at explicit', len(CH.catalogue('explicit')['looks']) == 4 and not CH.catalogue('moderate')['looks']
               and not CH.catalogue('sfw')['looks'])
         check('closed look required for the nude at explicit', CH.look_for('explicit', 'nude_front') == 'vulva_look')
         check('open look required for the open view', CH.look_for('explicit', 'vulva_open') == 'vulva_open_look')
+        check('anus looks required for their views', CH.look_for('explicit', 'anus_closed') == 'anus_look'
+              and CH.look_for('explicit', 'anus_open') == 'anus_open_look')
         check('look not required below explicit', not CH.look_for('moderate', 'nude_front'))
         check('look not required for a dressed view', not CH.look_for('explicit', 'body_front'))
         closed, opened = CH.LOOKS['vulva_look'][3], CH.LOOKS['vulva_open_look'][3]
@@ -326,7 +328,7 @@ def test_vulva_looks():
         check('look never in content text', 'last reference' not in CH.describe({'vulva_look': '2'}, 'explicit'))
         check('look path only for our files', CH.look_path('vulva/2') and not CH.look_path('vulva/9')
               and not CH.look_path('../vulva/2') and not CH.look_path('vulva_open/../vulva/1'))
-        CH.LOOK_FILES = {'vulva_look': (), 'vulva_open_look': ()}
+        CH.LOOK_FILES = {k: () for k in CH.LOOKS}
         check('no examples, nothing required', not CH.look_for('explicit', 'nude_front'))
     finally:
         CH.LOOK_FILES = saved

@@ -331,6 +331,10 @@ LOOKS = {
                    'Her vulva has the same shape as the vulva' + _LOOK_TAIL),
     'vulva_open_look': ('vulva_open', 'Vagina, open', ('vulva_open',),
                         'Her open vulva has the same shape as the open vulva' + _LOOK_TAIL),
+    'anus_look': ('anus', 'Anus, closed', ('anus_closed',),
+                  'Her anus has the same shape as the anus' + _LOOK_TAIL),
+    'anus_open_look': ('anus_open', 'Anus, open', ('anus_open',),
+                       'Her open anus has the same shape as the open anus' + _LOOK_TAIL),
 }
 
 
