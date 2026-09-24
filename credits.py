@@ -130,6 +130,16 @@ IMAGE_PRICES = {model: {res: credits_for_cost(cost)
                         for res, cost in rows.items()}
                 for model, rows in PROVIDER_COST_USD.items()}
 
+# Set above cost on purpose: the Nano Banana models are sold as the premium
+# tier, not at the cost-derived price. Only ever raise a price here -- the
+# generation floor assertion still refuses anything below cost.
+IMAGE_PRICE_OVERRIDES = {
+    'nano-banana-pro': {'2k': 6},
+    'nano-banana-2':   {'2k': 4},
+}
+for _model, _rows in IMAGE_PRICE_OVERRIDES.items():
+    IMAGE_PRICES[_model].update(_rows)
+
 # Video is priced per second, but **rounded once for the whole job**, not per
 # second. At this scale a per-second integer rate would overcharge badly: Wan
 # 2.5 at 720p is 2.269 tokens a second, and rounding that up to 3 would sell a

@@ -122,7 +122,9 @@ def test_prices_track_cost():
     check('holding her face is free — identity is inside the one call',
           CR.IMAGE_PRICES['seedream-4-5']['2k'] == 1)
     check('a premium still costs more, in single digits',
-          CR.IMAGE_PRICES['nano-banana-pro'] == {'2k': 4, '4k': 7})
+          CR.IMAGE_PRICES['nano-banana-pro'] == {'2k': 6, '4k': 7})
+    check('nano banana 2 sells at 4 at 2k',
+          CR.IMAGE_PRICES['nano-banana-2']['2k'] == 4)
 
     # The whole-job rounding is the reason a clip is 12 and not 15. A
     # per-second integer rate would round 2.269 up to 3 and overcharge by 25%.
