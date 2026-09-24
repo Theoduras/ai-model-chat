@@ -1059,15 +1059,15 @@ function featurePicker(f) {
       value="${esc((cur.sheet || {}).hair_colour_hex || '#7a5436')}" onchange="pickHairHex(this.value)">Or pick any colour</label>` : '';
   return `<fieldset class="fp"><legend>${esc(f.label)}</legend><div class="fp-opts" role="group">${opts}</div>${hex}</fieldset>`;
 }
-// Required at Explicit: the nude photo is generated to match the picked example.
+// Required at Explicit: her photos are generated to match the picked examples.
 function lookPicker() {
-  const looks = cat.vulva_looks || [];
-  if (!looks.length) return '';
-  const v = (cur.sheet || {}).vulva_look || '';
-  return `<fieldset class="fp"><legend>Vagina, closed · required</legend>
-    ${v ? '' : '<p class="hint">Pick one before generating her nude photos.</p>'}
-    <div class="fp-opts" role="group">${looks.map(n => `<button type="button" class="fp-opt look-opt" data-look="${n}"
-      aria-pressed="${n === v}" onclick="pickOption(this)"><img src="/api/characters/looks/vulva/${n}.jpg" alt="Example ${n}" loading="lazy"><span>${n}</span></button>`).join('')}</div></fieldset>`;
+  return (cat.looks || []).map(l => {
+    const v = (cur.sheet || {})[l.key] || '';
+    return `<fieldset class="fp"><legend>${esc(l.label)} · required</legend>
+      ${v ? '' : '<p class="hint">Pick one before generating those photos.</p>'}
+      <div class="fp-opts" role="group">${l.options.map(n => `<button type="button" class="fp-opt look-opt" data-look-key="${l.key}" data-look="${n}"
+        aria-pressed="${n === v}" onclick="pickOption(this)"><img src="/api/characters/looks/${l.folder}/${n}.jpg" alt="Example ${n}" loading="lazy"><span>${n}</span></button>`).join('')}</div></fieldset>`;
+  }).join('');
 }
 function pickHairHex(hex) {
   el('hair-hex').value = hex;
@@ -1146,10 +1146,11 @@ function collectSheet() {
     const on = document.querySelector(`.fp-opt[data-feature="${k}"][aria-pressed="true"]`);
     if (on) sheet[k] = on.dataset.value; else delete sheet[k];
   });
-  if (document.querySelector('.look-opt')) {
-    const on = document.querySelector('.look-opt[aria-pressed="true"]');
-    if (on) sheet.vulva_look = on.dataset.look; else delete sheet.vulva_look;
-  }
+  (cat.looks || []).forEach(l => {
+    if (!document.querySelector(`.look-opt[data-look-key="${l.key}"]`)) return;
+    const on = document.querySelector(`.look-opt[data-look-key="${l.key}"][aria-pressed="true"]`);
+    if (on) sheet[l.key] = on.dataset.look; else delete sheet[l.key];
+  });
   const hexIn = document.getElementById('hair-hex');
   if (hexIn && sheet.hair_colour === 'Custom') sheet.hair_colour_hex = hexIn.value;
   const chips = [...document.querySelectorAll('.of-opt[data-outfit]')];
@@ -1282,9 +1283,8 @@ function setGenerating(on) {
 }
 async function generate(view, n) {
   if (generating) return;
-  if ((cat.vulva_looks || []).length && ['nude_front', 'vulva_closed'].includes(view) && !(cur.sheet || {}).vulva_look) {
-    say('Pick her vagina example in Body profile first.', 'err'); return go('body');
-  }
+  const look = (cat.looks || []).find(l => l.views.includes(view) && !(cur.sheet || {})[l.key]);
+  if (look) { say(`Pick her ${look.label.toLowerCase()} example in Body profile first.`, 'err'); return go('body'); }
   setGenerating(true);
   say('');
   try {

@@ -301,8 +301,8 @@ def test_content_prompts():
 
 
 def test_vulva_looks():
-    saved = CH.VULVA_LOOKS
-    CH.VULVA_LOOKS = ('1', '2', '3')
+    saved = CH.LOOK_FILES
+    CH.LOOK_FILES = {'vulva_look': ('1', '2', '3'), 'vulva_open_look': ('1',)}
     try:
         base = {'age': 25, 'nsfw_level': 'explicit'}
         check('look accepted', CH.validate(dict(base, sheet={'vulva_look': '3'}))[0]['sheet']['vulva_look'] == '3')
@@ -312,19 +312,24 @@ def test_vulva_looks():
                 check(f'look {bad} refused', False)
             except CH.CharacterError:
                 pass
-        check('looks only at explicit', CH.catalogue('explicit')['vulva_looks'] and not CH.catalogue('moderate')['vulva_looks']
-              and not CH.catalogue('sfw')['vulva_looks'])
-        check('look required for the nude at explicit', CH.needs_look('explicit', 'nude_front'))
-        check('look not required below explicit', not CH.needs_look('moderate', 'nude_front'))
-        check('look not required for a dressed view', not CH.needs_look('explicit', 'body_front'))
-        check('look reaches the nude prompt', CH.LOOK_TEXT in CH.build_view_prompt('nude_front', {}, 25, True, look=True))
-        check('look stays off a dressed view', CH.LOOK_TEXT not in CH.build_view_prompt('body_front', {}, 25, True, look=True))
-        check('no look, no clause', CH.LOOK_TEXT not in CH.build_view_prompt('nude_front', {}, 25, True))
+        check('looks only at explicit', len(CH.catalogue('explicit')['looks']) == 2 and not CH.catalogue('moderate')['looks']
+              and not CH.catalogue('sfw')['looks'])
+        check('closed look required for the nude at explicit', CH.look_for('explicit', 'nude_front') == 'vulva_look')
+        check('open look required for the open view', CH.look_for('explicit', 'vulva_open') == 'vulva_open_look')
+        check('look not required below explicit', not CH.look_for('moderate', 'nude_front'))
+        check('look not required for a dressed view', not CH.look_for('explicit', 'body_front'))
+        closed, opened = CH.LOOKS['vulva_look'][3], CH.LOOKS['vulva_open_look'][3]
+        check('look reaches the nude prompt', closed in CH.build_view_prompt('nude_front', {}, 25, True, look=True))
+        check('open look reaches the open prompt', opened in CH.build_view_prompt('vulva_open', {}, 25, True, look=True))
+        check('look stays off a dressed view', 'last reference' not in CH.build_view_prompt('body_front', {}, 25, True, look=True))
+        check('no look, no clause', closed not in CH.build_view_prompt('nude_front', {}, 25, True))
         check('look never in content text', 'last reference' not in CH.describe({'vulva_look': '2'}, 'explicit'))
-        CH.VULVA_LOOKS = ()
-        check('no examples, nothing required', not CH.needs_look('explicit', 'nude_front'))
+        check('look path only for our files', CH.look_path('vulva/2') and not CH.look_path('vulva/9')
+              and not CH.look_path('../vulva/2') and not CH.look_path('vulva_open/../vulva/1'))
+        CH.LOOK_FILES = {'vulva_look': (), 'vulva_open_look': ()}
+        check('no examples, nothing required', not CH.look_for('explicit', 'nude_front'))
     finally:
-        CH.VULVA_LOOKS = saved
+        CH.LOOK_FILES = saved
 
 
 def test_presets():

@@ -318,20 +318,43 @@ FACE_CHECKS = tuple(k for k, v in FEATURES['female'].items() if v[1] == 'face')
 AGE_CHECKED_VIEWS = ('face_front', 'body_front')
 
 
-# AI-generated examples the creator picks her vulva from, one file each in
-# character_looks/vulva/. The pick goes to the nude and closed close-up as a
-# reference; the views built on those inherit it. Kept out of FEATURES so no
-# content prompt reads it. No files, no picker and nothing required.
-LOOK_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'character_looks', 'vulva')
-VULVA_LOOKS = tuple(sorted((f[:-4] for f in (os.listdir(LOOK_DIR) if os.path.isdir(LOOK_DIR) else ())
-                            if f.endswith('.jpg') and f[:-4].isdigit()), key=int))
-LOOK_VIEWS = ('nude_front', 'vulva_closed')
-LOOK_TEXT = ('Her vulva has the same shape as the vulva in the last reference image — its shape only, in her own '
-             'skin tone; that image is an anatomy close-up, not her face or body.')
+# AI-generated examples the creator picks her anatomy from, one file each in
+# character_looks/{folder}/. The pick goes to its views as the last reference;
+# the views built on those inherit it. Kept out of FEATURES so no content
+# prompt reads it. A folder with no files has no picker and requires nothing.
+LOOK_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'character_looks')
+_LOOK_TAIL = (' in the last reference image — its shape only, in her own skin tone; that image is an '
+              'anatomy close-up, not her face or body.')
+# sheet key: (folder, label, views, prompt text)
+LOOKS = {
+    'vulva_look': ('vulva', 'Vagina, closed', ('nude_front', 'vulva_closed'),
+                   'Her vulva has the same shape as the vulva' + _LOOK_TAIL),
+    'vulva_open_look': ('vulva_open', 'Vagina, open', ('vulva_open',),
+                        'Her open vulva has the same shape as the open vulva' + _LOOK_TAIL),
+}
 
 
-def needs_look(level, key):
-    return bool(VULVA_LOOKS) and level == 'explicit' and key in LOOK_VIEWS
+def _look_files(folder):
+    d = os.path.join(LOOK_ROOT, folder)
+    return tuple(sorted((f[:-4] for f in (os.listdir(d) if os.path.isdir(d) else ())
+                         if f.endswith('.jpg') and f[:-4].isdigit()), key=int))
+
+
+LOOK_FILES = {k: _look_files(v[0]) for k, v in LOOKS.items()}
+
+
+def look_for(level, key):
+    """The sheet key of the example this view must be generated from, or None."""
+    if level != 'explicit':
+        return None
+    return next((k for k, (_, _, vs, _) in LOOKS.items() if key in vs and LOOK_FILES[k]), None)
+
+
+def look_path(ref):
+    """'folder/n' from a job spec, as a file path, or None if it is not ours."""
+    folder, _, n = (ref or '').partition('/')
+    k = next((k for k, v in LOOKS.items() if v[0] == folder), None)
+    return os.path.join(LOOK_ROOT, folder, n + '.jpg') if k and n in LOOK_FILES[k] else None
 
 
 def views(body_type='female'):
@@ -415,7 +438,8 @@ def catalogue(level, body_type='female'):
         'variations': list(VARIATIONS),
         'presets': [{'key': k, 'label': l, 'hint': h, 'values': v} for k, (l, h, v) in BODY_PRESETS.items()],
         'min_age': MIN_AGE,
-        'vulva_looks': list(VULVA_LOOKS) if level == 'explicit' else [],
+        'looks': [{'key': k, 'folder': f, 'label': lab, 'views': list(vs), 'options': list(LOOK_FILES[k])}
+                  for k, (f, lab, vs, _) in LOOKS.items() if level == 'explicit' and LOOK_FILES[k]],
         'outfits': list(OUTFITS), 'outfit_colours': OUTFIT_COLOURS,
     }
 
@@ -487,11 +511,11 @@ def validate(data, body_type='female'):
         colours = {o: c for o, c in colours.items() if c and o in sheet['view_outfits']}
         if colours:
             sheet['outfit_colours'] = colours
-    look = raw.get('vulva_look')
-    if look:
-        if look not in VULVA_LOOKS:
-            raise CharacterError('Unknown vagina photo.')
-        sheet['vulva_look'] = look
+    for k, (_, label, _, _) in LOOKS.items():
+        if raw.get(k):
+            if raw[k] not in LOOK_FILES[k]:
+                raise CharacterError(f'Unknown {label.lower()} example.')
+            sheet[k] = raw[k]
     if sheet.get('hair_colour') == 'Custom':
         hexcode = str(raw.get('hair_colour_hex') or '').lower()
         if not re.fullmatch(r'#[0-9a-f]{6}', hexcode):
@@ -677,8 +701,9 @@ def build_view_prompt(key, sheet, age, has_reference, body_type='female',
     else:
         lead = f"photorealistic photo of a woman, {v['framing']}."
     body = f' Her features: {detail}.' if detail else ''
-    if look and key in LOOK_VIEWS:
-        body += ' ' + LOOK_TEXT
+    text = look and next((t for _, _, vs, t in LOOKS.values() if key in vs), '')
+    if text:
+        body += ' ' + text
     zoom = (' Zoomed in: the subject fills the whole frame; no face, no full body, nothing '
             'beyond the subject in shot.') if v.get('zoom') else ''
     return (lead + zoom + body + ' ' + STUDIO + ' ' + adult_clause(age)).strip()

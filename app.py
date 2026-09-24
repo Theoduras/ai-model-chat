@@ -30562,9 +30562,10 @@ def _character_view_refs(char_id, view_key, outfit_image=None, look=None):
         outfit = outfit_image and s.query(CharacterImage).filter_by(
             id=outfit_image, character_id=char_id, role='outfit').first()
         outfit_url = outfit and _char_ref_url(outfit)
-        if look in CH.VULVA_LOOKS:
+        look_file = CH.look_path(look)
+        if look_file:
             import base64
-            with open(os.path.join(CH.LOOK_DIR, look + '.jpg'), 'rb') as f:
+            with open(look_file, 'rb') as f:
                 outfit_url = 'data:image/jpeg;base64,' + base64.b64encode(f.read()).decode()
         if outfit_url:
             # The prompt names "the last reference image", so it goes last and
@@ -31120,14 +31121,14 @@ def api_character_image_delete(char_id, img_id):
         s.close()
 
 
-@app.route('/api/characters/looks/vulva/<look>.jpg')
-def api_character_look(look):
+@app.route('/api/characters/looks/<folder>/<n>.jpg')
+def api_character_look(folder, n):
     blocked = _require_active()
     if blocked:
         return blocked
-    if look not in CH.VULVA_LOOKS:
+    if not CH.look_path(folder + '/' + n):
         return ('Not found', 404)
-    return send_from_directory(CH.LOOK_DIR, look + '.jpg')
+    return send_from_directory(os.path.join(CH.LOOK_ROOT, folder), n + '.jpg')
 
 
 @app.route('/api/characters/<char_id>/generate', methods=['POST'])
@@ -31174,10 +31175,12 @@ def api_character_generate(char_id):
         if match and not _char_images(s, row.id, view='body_front', role='reference'):
             return jsonify({'ok': False, 'error': 'Add at least one body photo to match.'}), 400
         look = ''
-        if CH.needs_look(row.nsfw_level, view_key):
-            look = sheet.get('vulva_look') or ''
-            if look not in CH.VULVA_LOOKS:
-                return jsonify({'ok': False, 'error': 'Pick her vagina example in Body profile first.'}), 400
+        need = CH.look_for(row.nsfw_level, view_key)
+        if need:
+            folder, label = CH.LOOKS[need][:2]
+            if sheet.get(need) not in CH.LOOK_FILES[need]:
+                return jsonify({'ok': False, 'error': f'Pick her {label.lower()} example in Body profile first.'}), 400
+            look = folder + '/' + sheet[need]
         dressed = CH.outfits(sheet) if '{outfit}' in v['framing'] else [None]
         owned = {i.id for i in _char_images(s, row.id, view='', role='outfit')}
         dressed = [o for o in dressed if not (o or '').startswith('upload:') or o[7:] in owned] or ['Bodysuit']
