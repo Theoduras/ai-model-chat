@@ -621,6 +621,11 @@
   <img decoding="async" id="gen-lightbox-img" src="" alt="">
   <video id="gen-lightbox-video" src="" controls autoplay playsinline hidden
          onclick="event.stopPropagation()"></video>
+  <div id="gen-lb-actions" hidden onclick="event.stopPropagation()"
+       style="position:absolute;bottom:20px;left:50%;transform:translateX(-50%);display:flex;gap:10px">
+    <button type="button" class="gen-keep" style="padding:10px 28px" onclick="lightboxKeep(true)">Keep</button>
+    <button type="button" class="gen-drop" style="padding:10px 28px" onclick="lightboxKeep(false)">Drop</button>
+  </div>
   <button type="button" class="gen-lb-nav gen-lb-prev" id="gen-lb-prev" aria-label="Previous"
           onclick="event.stopPropagation(); stepLightbox(-1)">‹</button>
   <button type="button" class="gen-lb-nav gen-lb-next" id="gen-lb-next" aria-label="Next"
@@ -1286,7 +1291,16 @@ function showLightbox() {
     player.src = clip ? src : '';
   }
   el('gen-lb-prev').hidden = el('gen-lb-next').hidden = lbItems.length < 2;
+  el('gen-lb-actions').hidden = !node.dataset.stagedId;
   el('gen-lightbox').hidden = false;
+}
+
+async function lightboxKeep(keep) {
+  const id = lbItems[lbIdx].dataset.stagedId;
+  lbItems.splice(lbIdx, 1);
+  if (!lbItems.length) closeLightbox();
+  else { lbIdx %= lbItems.length; showLightbox(); }
+  await keepGenerated(id, keep);
 }
 
 function stepLightbox(d) {
@@ -2395,7 +2409,7 @@ function renderGenStaging() {
         ? `<video src="${m.url}" muted playsinline preload="metadata"></video>`
         : `<img loading="lazy" decoding="async" src="${m.url}" alt="">`;
       cards.push(['m:' + m.id, `
-        <div class="gen-card" data-lb="${m.url}" data-kind="${m.kind}" onclick="openLightbox(this)">
+        <div class="gen-card" data-lb="${m.url}" data-kind="${m.kind}" data-staged-id="${m.id}" onclick="openLightbox(this)">
           ${thumb}
           <span class="gen-ttl">${esc(genTtl(m.expires_at))}</span>
           <div class="gen-acts">
