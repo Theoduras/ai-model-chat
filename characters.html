@@ -283,6 +283,9 @@
       .drawer-scrim { display: none; }
       .views-mode .drawer .actionbar { position: static; margin: 16px 0 0; padding: 16px 0 0; }
     }
+    .vp-next { display: flex; align-items: center; gap: 10px; margin: 16px 0 12px; padding: 10px 12px; border: 1px solid var(--border-soft); border-radius: var(--r-sm); background: var(--surface-2); font-size: 0.85rem; }
+    .vp-next[hidden] { display: none; }
+    .vp-next .grow { flex: 1; }
     .vp-head { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
     .vp-head-t { flex: 1; min-width: 140px; }
     .vp-head h2 { font-size: 1.05rem; font-weight: 700; }
@@ -560,6 +563,7 @@
             <button type="button" class="btn btn-primary btn-sm" id="vp-var" onclick="generate(selView)"></button>
           </div>
           <p class="opts-head" id="vp-opts-head" hidden>Pick one to approve — unapproved options delete themselves after 3 days.</p>
+          <div class="vp-next" id="vp-next" hidden></div>
           <div class="opts" id="vp-opts"></div>
         </div>
       </aside>
@@ -859,6 +863,7 @@ function go(s) {
   if (s !== step) lastMsg = ['', ''];
   // The photo panel belongs to Fine Tuning; leaving it closes the panel.
   if (s !== 'views') selView = '';
+  else if (!selView) showFilterFor((nextPhoto() || {}).key);
   step = s; showDone = false; render();
   el('ch-stepwrap').scrollTop = 0;
 }
@@ -873,7 +878,7 @@ function render() {
   if (step === 'views' && !selView && matchMedia('(min-width: 1320px)').matches) {
     const pool = cat.views.filter(inFilter);
     const open = v => vs(v.key).status !== 'approved' && vs(v.key).display !== 'locked';
-    const next = pool.find(v => v.required && open(v)) || pool.find(open) || pool[0];
+    const next = nextPhoto() || pool.find(open) || pool[0];
     selView = next ? next.key : '';
   }
   ({basics: renderBasics, describe: renderDescribe, pick: renderPick, check: renderCheck, body: renderBody, views: renderBody, finish: renderFinish})[step]();
@@ -897,7 +902,7 @@ const STEPS = [
   {key: 'body', stage: 'body', nav: 'Body profile', title: 'What is her body like?',
    sub: 'Every body photo inherits this. Start from a preset, pick from the drawings, or match reference bodies, then save.'},
   {key: 'views', stage: 'body', nav: 'Her photos', title: 'Approve her photos',
-   sub: 'Each view is one photo of her from a set angle. Generate options, approve the best one, and the views built on it unlock. She is ready when every required photo is approved.'},
+   sub: 'Each view is one photo of her from a set angle. Generate options and approve the best one, then Continue opens the next photo. She is ready when every required photo is approved.'},
   {key: 'finish', stage: 'ready', nav: 'Accept & link', title: 'Accept and link her',
    sub: 'Check the set, accept this version, then link her to a persona so every photo it sends looks like her.'},
 ];
@@ -907,6 +912,12 @@ const stepIdx = () => STEPS.findIndex(s => s.key === step);
 function approvedCount() {
   const req = cat.views.filter(v => v.required);
   return [req.filter(v => vs(v.key).status === 'approved').length, req.length];
+}
+// Her photos are walked one at a time: Continue opens the first required view
+// still waiting, in catalogue order, so Full body, front always comes first.
+function nextPhoto() {
+  const left = cat.views.filter(v => v.required && v.key !== 'face_front' && vs(v.key).status !== 'approved');
+  return left.find(v => vs(v.key).display !== 'locked') || left[0];
 }
 function basicsWhy() {
   const name = (cur.name || '').trim();
@@ -944,8 +955,8 @@ function stepWhy(i) {
   if (k === 'pick' && !pickedFace) return 'Select one option to continue.';
   if (k === 'check' && !canonOf('face_front')) return 'Approve her face to continue.';
   if (k === 'views' && cur.status !== 'complete') {
-    const [ok, n] = approvedCount();
-    return `Approve every required photo to continue (${ok} of ${n}).`;
+    const v = selView && viewDef(selView), [ok, n] = approvedCount();
+    if (v && v.required && vs(v.key).status !== 'approved') return `Approve ${v.label} to continue (${ok} of ${n}).`;
   }
   if (k === 'finish' && basicsWhy()) return basicsWhy().replace('continue', 'finish');
   if (k === 'finish' && !accepted()) return 'Accept her to finish.';
@@ -958,8 +969,17 @@ async function stepNext() {
   if (stepWhy(i)) return;
   if (SAVED_STEPS.includes(STEPS[i].key) && !(await saveSheet())) return;
   if (STEPS[i].key === 'body') PageWizard.markSeen(setupKey(), 'body');
+  if (STEPS[i].key === 'views' && cur.status !== 'complete' && nextPhoto()) {
+    showFilterFor(nextPhoto().key);
+    lastMsg = ['', ''];
+    return render();
+  }
   if (i === STEPS.length - 1) return finishGuide();
   go(STEPS[i + 1].key);
+}
+function continueLabel() {
+  const v = step === 'views' && cur.status !== 'complete' && nextPhoto();
+  return v && v.key !== selView ? `Continue to ${v.label} \u2192` : 'Continue \u2192';
 }
 function renderFrame() {
   const i = stepIdx(), [ok, n] = approvedCount();
@@ -989,7 +1009,7 @@ function renderFrame() {
   el('ch-head').innerHTML = PageWizard.headHtml({crumb: PageWizard.crumb(STAGES, STEPS, i), title: s.title, sub: s.sub});
   const saves = SAVED_STEPS.includes(s.key);
   const next = last && !guided ? null
-    : {label: last ? 'Finish \u2713' : saves ? 'Save & continue \u2192' : 'Continue \u2192', call: 'stepNext()', disabled: !!why, why};
+    : {label: last ? 'Finish \u2713' : saves ? 'Save & continue \u2192' : continueLabel(), call: 'stepNext()', disabled: !!why, why};
   el('ch-foot').innerHTML = PageWizard.footHtml({back: i > 0 ? 'stepBack()' : null, next, statusId: 'ch-msg',
     save: saves ? 'saveSheet()' : null,
     alt: guided ? [{icon: '\u25ce', label: 'Show me around', call: 'tourStart(true)'},
@@ -1375,7 +1395,7 @@ async function approveFace() {
   try {
     say('Checking and approving…');
     await api(`/api/characters/${cur.id}/images/${pickedFace}/approve`, {body: {confirmed: [...confirmed]}});
-    await reload(); say('Face approved.', 'ok'); go('body');
+    await reload(); say('Face approved. Press Continue.', 'ok');
   } catch (e) { await reload(); say(e.message, 'err'); }
 }
 
@@ -1435,6 +1455,12 @@ function renderBody() {
   pollGenerating();
 }
 function setFilter(f) { viewFilter = f; renderBody(); }
+function showFilterFor(key) {
+  const v = key && viewDef(key);
+  if (!v) return;
+  selView = key;
+  if (!inFilter(v)) viewFilter = isNsfw(v) ? 'NSFW' : 'SFW';
+}
 function openView(key) {
   selView = key;
   if (step !== 'views') { step = 'views'; render(); } else renderBody();
@@ -1466,6 +1492,12 @@ function renderViewPanel() {
   if (st.display === 'locked') banner.innerHTML = `Locked until ${blockers.map(p => esc(viewDef(p).label)).join(' and ')} ${blockers.length > 1 ? 'are' : 'is'} approved.
     <button type="button" class="btn btn-ghost btn-sm" onclick="openView('${blockers[0]}')">Open ${esc(viewDef(blockers[0]).label)}</button>`;
   if (st.display === 'outdated') banner.textContent = 'A parent was re-approved since this was generated. Regenerate to match it.';
+  // The slide-over covers the page footer on a narrow screen, so the way on
+  // is repeated here once this photo is done.
+  el('vp-next').hidden = st.status !== 'approved';
+  if (st.status === 'approved') el('vp-next').innerHTML = `<span>${cur.status === 'complete'
+      ? 'Every required photo is approved.' : 'Approved.'}</span><span class="grow"></span>
+    <button type="button" class="btn btn-primary btn-sm" onclick="stepNext()">${esc(continueLabel())}</button>`;
   const locked = st.display === 'locked';
   el('vp-body').style.opacity = locked ? .55 : 1;
   el('vp-source').innerHTML = [['crop', 'Crop & refine'], ['reference', 'Reference']].map(([m, l]) =>
@@ -1686,10 +1718,11 @@ async function runViewCheck(id) {
   catch (e) { say(e.message, 'err'); }
 }
 async function approveView(id, main) {
-  const was = cur.status;
   try {
-    await api(`/api/characters/${cur.id}/images/${id}/approve`, {body: main ? {main: true} : {}}); await reload(); say('Approved.', 'ok');
-    if (was !== 'complete' && cur.status === 'complete') go('finish');
+    await api(`/api/characters/${cur.id}/images/${id}/approve`, {body: main ? {main: true} : {}}); await reload();
+    const next = cur.status !== 'complete' && nextPhoto();
+    say(next ? `Approved. Press Continue for ${next.label}.` : 'Every required photo is approved. Press Continue to accept her.', 'ok');
+    if (!el('vp-next').hidden) el('vp-next').scrollIntoView({block: 'nearest', behavior: 'smooth'});
   }
   catch (e) { say(e.message, 'err'); }
 }
