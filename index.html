@@ -108,41 +108,40 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 h1{font-family:'Sora';font-weight:800;font-size:58px;line-height:1.08;letter-spacing:-.02em;margin-bottom:24px}
 h1 u{text-decoration:none;background:linear-gradient(120deg,#ff5c38,#ff2d78 30%,#7c3aed 55%,#ff2d78 80%,#ff5c38);background-size:300% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:sweep 4s ease-in-out infinite alternate}
 p.sub{font-size:17px;color:var(--text-soft);line-height:1.65;margin-bottom:36px;max-width:480px}
-.cta{display:flex;gap:10px;max-width:480px}
-.cta input{flex:1;background:var(--field);border:1px solid var(--field-border);outline:0;color:var(--text);padding:15px 18px;font-size:15px;border-radius:12px;transition:border-color .2s}
-.cta input:focus{border-color:var(--accent)}
-.cta button{background:linear-gradient(120deg,#ff5c38,#ff2d78 30%,#7c3aed 60%,#ff2d78 80%,#ff5c38);background-size:300% 100%;background-position:0% 50%;border:0;color:#fff;font-weight:600;padding:15px 26px;border-radius:12px;font-size:15px;cursor:pointer;white-space:nowrap;transition:transform .25s ease-out,box-shadow .25s ease-out}
-.cta button:hover{transform:translateY(-2px) scale(1.03);box-shadow:0 8px 30px #ff2d7866;animation:sweep 3s ease-in-out infinite alternate}
-.cta button:active{transform:translateY(0) scale(1.05);box-shadow:0 4px 24px #7c3aed88}
 @keyframes sweep{0%{background-position:0% 50%}100%{background-position:100% 50%}}
-.note{font-size:13px;color:var(--text-dim);margin-top:14px}
 .meta{display:flex;gap:26px;font-size:13px;color:var(--text-dim)}
 .meta a{color:var(--text-dim);text-decoration:none;transition:color .2s}
 .meta a:hover{color:var(--text)}
 /* ── Right ── */
-.right{position:relative;overflow:hidden;background:linear-gradient(155deg,#ff5c38,#ff2d78 52%,#7c3aed);padding:48px 56px;display:flex;flex-direction:column;justify-content:center;min-height:100vh}
-.right::after{content:"";position:absolute;inset:0;background:radial-gradient(circle at 78% 22%,#ffffff40,transparent 42%);pointer-events:none}
-.ring{position:absolute;border:1.5px solid #ffffff44;border-radius:50%}
+.right{position:relative;overflow:hidden;background:radial-gradient(120% 90% at 100% 0%,#ff2d7840,transparent 55%),radial-gradient(90% 70% at 0% 100%,#7c3aed33,transparent 60%),#221226;padding:124px 56px 56px;display:flex;flex-direction:column;justify-content:flex-start;min-height:100vh}
+.right::after{content:"";position:absolute;inset:0;background:radial-gradient(circle at 85% 12%,#ff5c3826,transparent 40%);pointer-events:none}
+.ring{position:absolute;border:1.5px solid #ffffff14;border-radius:50%}
 .ring.a{width:360px;height:360px;top:-70px;right:-120px}
 .ring.b{width:210px;height:210px;top:6px;right:-10px}
 .rhead{position:relative;z-index:2;max-width:880px;margin:0 auto 22px}
-.rlabel{font-size:12px;letter-spacing:.25em;text-transform:uppercase;color:#ffffffcc;margin-bottom:10px}
+.rlabel{font-size:12px;letter-spacing:.25em;text-transform:uppercase;color:#ff9fbf;margin-bottom:10px}
 .rtitle{font-family:'Sora';font-weight:800;font-size:30px;line-height:1.15;letter-spacing:-.01em;color:#fff}
 .who{list-style:none;display:grid;gap:8px;margin:-16px 0 32px;max-width:480px;font-size:15px;color:var(--text-soft)}
 .who b{color:var(--text);margin-right:6px}
 .paths{position:relative;z-index:2;max-width:880px;width:100%;margin:0 auto 18px;display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.path{background:#ffffff1f;border:1px solid #ffffff40;border-radius:14px;padding:14px 16px;color:#fff;display:grid;gap:4px}
-.path span{font-size:13.5px;color:#ffffffd9;line-height:1.45}
+.path{background:#34203a;border:1px solid #ffffff1f;border-radius:14px;padding:14px 16px;color:#fff;display:grid;gap:4px}
+.path span{font-size:13.5px;color:#e9dcec;line-height:1.45}
 .flow{position:relative;z-index:2;max-width:880px;width:100%;margin:0 auto;list-style:none;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;counter-reset:f}
-.flow li{counter-increment:f;background:#00000033;border:1px solid #ffffff33;border-radius:14px;padding:14px;color:#fff;display:grid;gap:4px;position:relative}
-.flow li::before{content:counter(f);position:absolute;top:10px;right:12px;font:700 12px 'Sora';color:#ffffff99}
+.flow li{counter-increment:f;background:#2d1a33;border:1px solid #ffffff1a;border-radius:14px;padding:14px;color:#fff;display:grid;gap:4px;position:relative}
+.flow li::before{content:counter(f);position:absolute;top:10px;right:12px;font:700 12px 'Sora';color:#ff6b9a}
 .flow i{font-style:normal;font-size:22px}
 .flow b{font-size:14.5px}
-.flow span{font-size:12.5px;color:#ffffffcc;line-height:1.4}
+.flow span{font-size:12.5px;color:#e0d2e4;line-height:1.4}
 .flow-time{position:relative;z-index:2;max-width:880px;width:100%;margin:10px auto 0}
-.flow-time span{display:block;width:calc(50% - 6px);border-top:2px dashed #ffffffaa;padding-top:6px;text-align:center;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#fff}
-.flow-cta{position:relative;z-index:2;align-self:center;margin-top:22px;background:#fff;color:#1a1020;font-weight:700;text-decoration:none;padding:13px 24px;border-radius:12px}
-.rsub{font-size:14.5px;color:#ffffffcc;line-height:1.55;margin-top:8px}
+.flow-time span{display:block;width:calc(50% - 6px);border-top:2px dashed #ff6b9a;padding-top:6px;text-align:center;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#ff9fbf}
+.flow-cta{position:relative;z-index:2;align-self:center;margin-top:22px;background:linear-gradient(120deg,#ff5c38,#ff2d78);color:#fff;font-weight:700;text-decoration:none;padding:13px 24px;border-radius:12px;box-shadow:0 10px 30px #ff2d7840}
+.clips{position:relative;z-index:2;max-width:880px;width:100%;margin:0 auto 18px}
+.clip-tabs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+.clip-tabs button{background:#34203a;color:#e9dcec;border:1px solid #ffffff1f;border-radius:999px;padding:8px 14px;font:600 13px inherit;cursor:pointer}
+.clip-tabs button[aria-selected="true"]{background:#fff;color:#221226}
+.clips video{display:block;width:100%;aspect-ratio:900/669;border-radius:14px;background:#140a17;box-shadow:0 18px 50px #00000080;border:1px solid #ffffff1a}
+.clips video[hidden]{display:none}
+.rsub{font-size:14.5px;color:#e9dcec;line-height:1.55;margin-top:8px}
 @media(max-width:900px){
   .split{grid-template-columns:1fr}
   .left{min-height:auto;padding:160px 26px 40px}
@@ -161,9 +160,6 @@ p.sub{font-size:17px;color:var(--text-soft);line-height:1.65;margin-bottom:36px;
   .pill{font-size:11px;margin-bottom:20px}
   h1{font-size:32px;margin-bottom:16px}
   p.sub{font-size:15px;margin-bottom:26px}
-  .cta{flex-direction:column;max-width:none}
-  .cta input,.cta button{width:100%}
-  .cta button{padding:14px 20px}
   .meta{flex-wrap:wrap;gap:14px;font-size:12px}
   .right{padding:32px 16px}
   .rtitle{font-size:24px}
@@ -329,11 +325,6 @@ p.sub{font-size:17px;color:var(--text-soft);line-height:1.65;margin-bottom:36px;
         <li><b>Agencies</b> Scale more models without more staff.</li>
         <li><b>Solo creators</b> A full growth team in one tool.</li>
       </ul>
-      <form class="cta" onsubmit="return subscribe(event)">
-        <input id="email" type="email" placeholder="Enter your email" required>
-        <button type="submit"><span data-edit-id="cta-btn-text">Sign up for news</span></button>
-      </form>
-      <div class="note" id="note" data-edit-id="note-text">Product news, new features and tips, straight to your inbox.</div>
     </div>
     <div class="meta">
       <span data-edit-id="meta-copyright">© 2026 velvetfunneler.com</span>
@@ -348,6 +339,14 @@ p.sub{font-size:17px;color:var(--text-soft);line-height:1.65;margin-bottom:36px;
       <div class="rlabel">Character builder</div>
       <div class="rtitle">Build your dream model in 30 minutes. No prompts.</div>
       <div class="rsub">Pick every detail (face, body and each body part) by choosing options and following the steps. When you're done she's ready to use: safe-for-work and explicit content with the exact same face and body, in one click or from your own prompt.</div>
+    </div>
+    <div class="clips">
+      <div class="clip-tabs" role="tablist">
+        <button type="button" role="tab" aria-selected="true" data-clip="0">Create her character</button>
+        <button type="button" role="tab" aria-selected="false" data-clip="1">Set up her persona</button>
+      </div>
+      <video src="/img/character-creator.mp4" muted loop playsinline preload="none" aria-label="Creating a character in the builder"></video>
+      <video src="/img/persona-setup.mp4" muted loop playsinline preload="none" hidden aria-label="Setting up a persona"></video>
     </div>
     <div class="paths">
       <div class="path"><b>Use your own photos</b><span>Add reference photos for her face, body or single body parts.</span></div>
@@ -610,17 +609,21 @@ fetch('/api/features')
 </script>
 
 <script>
-function subscribe(e){
-  e.preventDefault();
-  var email=document.getElementById('email').value.trim();
-  var note=document.getElementById('note');
-  if(!email){return false;}
-  // Placeholder: wire to your email/news backend when ready.
-  note.textContent="✓ You're signed up. Look out for our next update.";
-  note.style.color="#ff9d85";
-  document.getElementById('email').value='';
-  return false;
-}
+(function(){
+  var box=document.querySelector('.clips'); if(!box) return;
+  var vids=box.querySelectorAll('video'), tabs=box.querySelectorAll('[data-clip]'), cur=0, seen=false;
+  function show(i){
+    cur=i;
+    vids.forEach(function(v,j){v.hidden=j!==i; if(j!==i) v.pause();});
+    tabs.forEach(function(t,j){t.setAttribute('aria-selected',j===i);});
+    if(seen){vids[i].preload='auto';vids[i].play().catch(function(){});}
+  }
+  tabs.forEach(function(t,j){t.addEventListener('click',function(){show(j);});});
+  // Loaded only once the panel is on screen: on a phone it sits below the fold.
+  new IntersectionObserver(function(es,o){
+    if(es[0].isIntersecting){seen=true;o.disconnect();show(cur);}
+  }).observe(box);
+})();
 </script>
 </body>
 </html>
