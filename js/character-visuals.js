@@ -218,6 +218,16 @@
   };
   const CHEEK = {High: [14.2, 29], Medium: [13.5, 32], Soft: [13.2, 34]};
 
+  // Makeup on the chart head: blush, a lip colour, liner, and shading for glam.
+  const blush = `<ellipse cx="22.5" cy="38" rx="3.6" ry="2" fill="${PINK}" fill-opacity=".55" stroke="none"/>` +
+    `<ellipse cx="41.5" cy="38" rx="3.6" ry="2" fill="${PINK}" fill-opacity=".55" stroke="none"/>`;
+  const lip = c => `<path d="M29.4,43.6 Q32,42.3 34.6,43.6 Q32,46.2 29.4,43.6 Z" fill="${c}" stroke="none"/>`;
+  const liner = line('M21,30.4 q3.5,-2 7,0.2 l1.4,-0.9 M43,30.4 q-3.5,-2 -7,0.2 l-1.4,-0.9', ' stroke-width="1.4"');
+  const shade = `<path d="M20.5,29.5 Q24.3,26.4 28.6,28.6 Q24.3,27.4 20.5,29.5 Z M43.5,29.5 Q39.7,26.4 35.4,28.6 Q39.7,27.4 43.5,29.5 Z" ` +
+    `fill="${INK}" fill-opacity=".45" stroke="none"/>`;
+  const MAKEUP = {'Soft natural': blush + lip('#c98a7e'), 'Polished': blush + liner + lip('#b86a6a'),
+    'Soft glam': blush + shade + liner + lip('#a45a5e'), 'Classic red lip': liner + lip('#b3261e'), 'Bare': ''};
+
   // ── Eye close-up: lids, crease, iris, pupil and outer lashes ───────────────
   const EYE = {   // upper [x0,y0,cx,cy,x1,y1], lower control y, crease lift (0 = none)
     'Almond': [[8, 34, 32, 16, 56, 32], 46, 7], 'Round': [[10, 35, 32, 11, 54, 34], 52, 7],
@@ -530,6 +540,7 @@
     hair_texture: map(Object.assign({}, HAIR, STYLE), (v, hair) => chartHead({}, {hair})),
     hairline: map(HAIRLINE, (v, hairline) => chartHead({}, {hairline})),
     marks: map(MARKS, extra => chartHead({}, {extra})),
+    makeup: map(MAKEUP, extra => chartHead({}, {extra})),
     height: map(HEIGHT, height),
     build: map(BUILD, o => body(o)),
     shoulders: map(PART.shoulders[1], sh => body({sh}, 'shoulders')),

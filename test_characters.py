@@ -82,7 +82,7 @@ def test_prompts():
     check('first outfit by default', 'black T-shirt' in CH.build_view_prompt('body_front', two, 24, True))
     check('old single outfit still reads', CH.outfits({'view_outfit': 'Activewear'}) == ['Activewear'])
     check('outfit never reaches a content prompt',
-          all(CH.describe(two, lvl) == '' for lvl in ('sfw', 'explicit')))
+          all(CH.describe(two, lvl) == CH.describe({}, lvl) for lvl in ('sfw', 'explicit')))
     blend = CH.build_view_prompt('face_front', {}, 24, True, blend=True)
     check('blend asks for a new face', 'new, distinct face' in blend and 'exact same woman' not in blend)
     check('blend only on the face', 'exact same woman' in CH.build_view_prompt('body_front', {}, 24, True, blend=True))
@@ -127,6 +127,12 @@ def test_topless_level():
     check('explicit full body stays nude', 'nude' in CH.build_view_prompt('nude_front', {}, 25, True, level='explicit'))
     check('topless back wears panties', 'panties' in CH.build_view_prompt('rear_nude', {}, 25, True, level='moderate'))
     check('no nude label at topless', not any('Nude' in v['label'] for v in CH.catalogue('moderate')['views']))
+
+
+def test_makeup():
+    check('unset makeup is soft natural', 'soft natural professional makeup' in CH.build_view_prompt('face_front', {}, 25, False))
+    check('bare means no makeup', 'no makeup' in CH.build_view_prompt('face_front', {'makeup': 'Bare'}, 25, False))
+    check('makeup stays off a close-up', 'makeup' not in CH.build_view_prompt('nipples', {'makeup': 'Soft glam'}, 25, True))
 
 
 def test_validation():
@@ -374,6 +380,7 @@ if __name__ == '__main__':
     test_prompts()
     test_validation()
     test_topless_level()
+    test_makeup()
     test_every_option_has_a_drawing()
     test_view_tree()
     test_resolver()

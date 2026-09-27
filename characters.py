@@ -68,6 +68,12 @@ FEATURES = {
         'brows': ('Eyebrows', 'face', _opts('eyebrows', 'Soft arch, medium', 'High arch, thin', 'Straight, full', 'Bold, thick')),
         'nose': ('Nose', 'face', _opts('nose', 'Straight, narrow', 'Button', 'Slightly upturned', 'Roman', 'Wide')),
         'lips': ('Lips', 'face', _opts('lips', 'Full, defined bow', 'Medium', 'Thin', 'Very full')),
+        'makeup': ('Makeup', 'face', [
+            ('Soft natural', 'soft natural professional makeup: even skin, light concealer, subtle mascara and a neutral lip, barely noticeable'),
+            ('Polished', 'polished professional makeup: defined brows, fine eyeliner, mascara, subtle contour and a rosy nude lip, refined rather than heavy'),
+            ('Soft glam', 'soft glam makeup: softly smoky neutral eyes, fuller lashes, sculpted cheeks and a satin lip, still skin-like'),
+            ('Classic red lip', 'clean polished makeup with a classic red lip'),
+            ('Bare', 'no makeup, bare natural skin')]),
         'cheekbones': ('Cheekbones', 'face', _opts('cheekbones', 'High', 'Medium', 'Soft')),
         'jaw': ('Jaw and chin', 'face', [('Soft, rounded chin', 'a soft jaw and rounded chin'), ('Defined jaw', 'a defined jawline'),
                                           ('Pointed chin', 'a pointed chin'), ('Square jaw', 'a square jaw')]),
@@ -588,12 +594,17 @@ def _fragments(sheet, groups, body_type='female'):
     feats = features(body_type)
     out = []
     for k, (_, g, opts) in feats.items():
-        if g not in groups or k not in (sheet or {}):
+        if g not in groups:
             continue
-        frag = dict(opts).get(sheet[k], '')
-        if k == 'hair_colour' and sheet[k] == 'Custom':
+        # She wears light makeup unless the creator says otherwise; a bare face
+        # is what the unretouched photo look drifts to by itself.
+        val = (sheet or {}).get(k) or (DEFAULT_MAKEUP if k == 'makeup' else None)
+        if not val:
+            continue
+        frag = dict(opts).get(val, '')
+        if k == 'hair_colour' and val == 'Custom':
             frag = hair_words(sheet.get('hair_colour_hex')) + ' hair' if sheet.get('hair_colour_hex') else ''
-        if k == 'pubic_colour' and sheet[k] == 'Matches hair':
+        if k == 'pubic_colour' and val == 'Matches hair':
             frag = 'pubic hair matching her hair colour'
         if k == 'pubic_density' and frag:
             frag = f'{frag} pubic hair'
@@ -647,7 +658,8 @@ def hair_words(hexcode):
     return f'{tone} {hue}'.strip()
 
 
-BLEND_KEEP = ('ethnicity', 'apparent_age', 'hair_colour', 'hair_texture')
+BLEND_KEEP = ('ethnicity', 'apparent_age', 'hair_colour', 'hair_texture', 'makeup')
+DEFAULT_MAKEUP = 'Soft natural'
 FACE_MODES = ('build', 'blend')
 BODY_MATCH_KEEP = ('height', 'tattoos', 'piercings', 'birthmarks', 'nails')
 BODY_MODES = ('build', 'match')
