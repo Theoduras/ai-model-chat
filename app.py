@@ -1035,6 +1035,7 @@ _PUBLIC_PAGES = [('/', '1.0', 'weekly'),
                  ('/register', '0.6', 'monthly'),
                  ('/login', '0.3', 'monthly'),
                  ('/blog', '0.7', 'weekly'),
+                 ('/webhook-signature-simulator', '0.7', 'monthly'),
                  ('/privacy', '0.2', 'yearly'),
                  ('/tos', '0.2', 'yearly')]
 _PUBLIC_PAGES += [(f'/blog/{slug}', '0.5', 'monthly') for slug in _BLOG_SLUGS]
@@ -7592,6 +7593,11 @@ def vault_page():
 @app.route('/blog', methods=['GET'])
 def blog_page():
     return send_from_directory(BASE_DIR, 'blog.html')
+
+
+@app.route('/webhook-signature-simulator', methods=['GET'])
+def webhook_simulator_page():
+    return send_from_directory(BASE_DIR, 'webhook-simulator.html')
 
 
 @app.route('/privacy', methods=['GET'])

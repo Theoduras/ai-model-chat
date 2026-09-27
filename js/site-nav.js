@@ -93,6 +93,7 @@
     { group: 'Tools', items: [
       { href: '/ai-content-planner', label: 'AI content planner' },
       { href: '/ai-image-generator', label: 'AI image generator', soon: true },
+      { href: '/webhook-signature-simulator', label: 'Webhook signature simulator' },
     ] },
   ];
 

@@ -58,6 +58,7 @@ tiktok_stub.py                   — Offline TikTok transport (tests only)
 tiktok.html                      — TikTok console (connect, post a video)
 admin.html                      — Visual persona builder UI (creator-facing)
 index.html                      — Homepage (character builder pitch, plans, generation prices)
+webhook-simulator.html          — Free HMAC webhook signature tool (lead magnet; all client-side)
 chat.html                       — Fan chat (also where old /landing and /profile links land)
 profile_data.json               — Legacy Lilith profile data (fallback)
 personas/
