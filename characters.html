@@ -878,8 +878,13 @@ async function openCharacter(id) {
   guided = !m.isAdmin && !PageWizard.entry(setupKey()).done;
   showDone = false; selView = ''; pickedFace = ''; lastMsg = ['', '']; dirty = false;
   const canon = canonOf('face_front');
-  go(canon ? 'views' : (images('face_front', 'candidate').length ? 'pick' : basicsWhy() ? 'basics' : 'describe'));
-  if (guided) requestAnimationFrame(() => tourStart(false));
+  // A refresh comes back to the step (and photo panel) it left, this tab only.
+  let saved = null;
+  try { saved = JSON.parse(sessionStorage.getItem('ch-state:' + id) || 'null'); } catch (e) {}
+  if (saved && saved.edits) { Object.assign(cur, saved.edits); dirty = true; }
+  go((saved && saved.step) || (canon ? 'views' : (images('face_front', 'candidate').length ? 'pick' : basicsWhy() ? 'basics' : 'describe')));
+  if (saved && saved.selView && step === 'views') { selView = saved.selView; render(); }
+  if (guided && !saved) requestAnimationFrame(() => tourStart(false));
 }
 function images(view, role) { return (cur.images || []).filter(i => i.view === view && (!role || i.role === role)); }
 function canonOf(view) { return images(view, 'canonical')[0]; }
@@ -1953,6 +1958,16 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && !el('drawer').hidden && !el('drawer-scrim').hidden
       && !matchMedia('(min-width: 1320px)').matches && el('lightbox').hidden && el('ch-confirm').hidden) closeDrawer();
 });
+function saveChState() {
+  if (!cur || el('edit-view').hidden) return;
+  try {
+    sessionStorage.setItem('ch-state:' + cur.id, JSON.stringify({step, selView,
+      edits: dirty ? {sheet: cur.sheet, name: cur.name, age: cur.age, notes: cur.notes} : null}));
+  } catch (e) {}
+}
+['input', 'change', 'click'].forEach(t => document.addEventListener(t, () => setTimeout(saveChState, 0), true));
+window.addEventListener('pagehide', saveChState);
+
 (async function init() {
   await loadPersonas();
   const q = new URLSearchParams(location.search);

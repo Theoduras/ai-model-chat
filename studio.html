@@ -709,8 +709,9 @@ async function init() {
       el('persona-hint').textContent = 'Create a persona or a character first — generation needs one to look like.';
       return;
     }
-    const want = new URLSearchParams(location.search).get('persona');
-    if (want && rows.some(p => p.slug === want)) el('persona').value = want;
+    const want = new URLSearchParams(location.search).get('persona')
+      || (studioSaved() || {}).persona;
+    if (want && [...el('persona').options].some(o => o.value === want)) el('persona').value = want;
     await studioSlugFor();
   } catch (e) {
     el('persona-hint').textContent = 'Could not load personas.';
@@ -2717,7 +2718,63 @@ PageWizard.pageTour({
   ],
 });
 
-init().then(() => StudioWizard.auto());
+// A refresh puts the studio back exactly where it was, for this tab only.
+const STUDIO_STATE = 'studio-state';
+let studioRestoring = false, studioSaveTimer = null;
+function studioSaved() {
+  try { return JSON.parse(sessionStorage.getItem(STUDIO_STATE) || 'null'); } catch (e) { return null; }
+}
+function studioSave() {
+  if (!genPrices || studioRestoring) return;
+  const fields = {};
+  document.querySelectorAll('input[id], select[id], textarea[id]').forEach(f => {
+    if (f.type === 'file' || f.id === 'persona') return;
+    fields[f.id] = f.type === 'checkbox' ? f.checked : f.value;
+  });
+  try {
+    sessionStorage.setItem(STUDIO_STATE, JSON.stringify({
+      persona: el('persona').value, rating: genRating, job: genJob,
+      identity: genIdentityTouched ? genIdentity : '', imageAspect: genImageAspect,
+      aspect: genAspect, audio: genAudio, extendMode: genExtendMode,
+      scroll: window.scrollY, fields}));
+  } catch (e) {}
+}
+function studioSaveSoon() {
+  clearTimeout(studioSaveTimer);
+  studioSaveTimer = setTimeout(studioSave, 300);
+}
+function studioRestore() {
+  const s = studioSaved();
+  if (!s || s.persona !== el('persona').value || !genPrices) return;
+  studioRestoring = true;
+  try {
+    if (s.rating) setRating(s.rating);
+    if (s.job) setJob(s.job);
+    if (s.identity) setIdentitySrc(s.identity);
+    if (s.imageAspect) genImageAspect = s.imageAspect;
+    if (s.aspect) genAspect = s.aspect;
+    if (s.audio) genAudio = s.audio;
+    if (s.extendMode) genExtendMode = s.extendMode;
+    const f = s.fields || {};
+    if (f['gen-model']) pickModel(f['gen-model']);
+    Object.entries(f).forEach(([id, v]) => {
+      const x = el(id);
+      if (!x || id === 'gen-model') return;
+      if (x.type === 'checkbox') x.checked = !!v; else x.value = v;
+      x.dispatchEvent(new Event('input', {bubbles: true}));
+      x.dispatchEvent(new Event('change', {bubbles: true}));
+    });
+    renderPhoneSeg();
+    renderGenForm();
+    genQuote();
+    if (s.scroll) requestAnimationFrame(() => window.scrollTo(0, s.scroll));
+  } catch (e) {}
+  studioRestoring = false;
+}
+['input', 'change', 'click'].forEach(t => document.addEventListener(t, studioSaveSoon, true));
+window.addEventListener('pagehide', studioSave);
+
+init().then(() => { studioRestore(); StudioWizard.auto(); });
 </script>
 </body>
 </html>
