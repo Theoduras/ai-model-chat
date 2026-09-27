@@ -247,7 +247,7 @@
     .views-toolbar .grow { flex: 1; min-width: 12px; }
     .tier + .tier { margin-top: 22px; }
     .tier-h { font-family: var(--font); font-size: 0.66rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); margin: 0 0 10px; }
-    .views { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+    .views { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(230px, 100%), 1fr)); gap: 10px; }
     .view {
       display: flex; gap: 12px; align-items: center; padding: 10px 12px; text-align: left;
       border-radius: var(--r); border: 1px solid var(--border-soft); background: var(--panel); color: var(--text);
@@ -284,7 +284,7 @@
       .views-mode .ch-body { grid-template-rows: auto 1fr; }
       .views-mode .ch-body > .ch-side { grid-column: 2; grid-row: 1; }
       .views-mode .ch-body > .ch-main { grid-column: 2; grid-row: 1 / span 2; }
-      .views-mode .views { grid-template-columns: 1fr; }
+      .views-mode .views { grid-template-columns: minmax(0, 1fr); }
       .views-mode .views-toolbar { flex-direction: column; align-items: stretch; }
       .views-mode .drawer .vp-close { display: none; }
       .drawer-scrim { display: none; }
@@ -1594,7 +1594,8 @@ function renderViewPanel() {
     (refPop ? `<div class="ref-pop" onclick="event.stopPropagation()">${approved.map(o => { const c = canonOf(o.key);
       return `<button type="button" aria-pressed="${chosen.includes(c.id)}" onclick="toggleRef('${c.id}')"><img src="${esc(c.url)}" alt=""><span>${esc(o.label)}</span><i>${chosen.includes(c.id) ? '✓' : ''}</i></button>`; }).join('')}</div>` : '');
   const fl = k => ((cat.features || []).find(f => f.key === k) || {}).label || k;
-  const traits = v.traits || [];
+  // Only traits this level offers; the rest were never pickable here.
+  const traits = (v.traits || []).filter(k => (cat.features || []).some(f => f.key === k));
   const on = traits.filter(k => (cur.sheet || {})[k]), off = traits.filter(k => !(cur.sheet || {})[k]);
   el('vp-traits-n').textContent = `${on.length} of ${traits.length} in the prompt`;
   el('vp-traits').innerHTML = on.map(k => `<span class="trait">${esc(fl(k))}: <b>${esc(cur.sheet[k])}</b></span>`).join('');
