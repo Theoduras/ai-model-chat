@@ -64,7 +64,7 @@
 //   inline  — fills an existing <nav data-site-nav="inline"> in the page's own
 //             header (dashboard and the platform consoles)
 //
-// A page that already ships .site-nav markup (comingsoon.html) keeps it: only
+// A page that already ships .site-nav markup (index.html) keeps it: only
 // the links inside are rendered, so its entry animation and layout are untouched.
 (function () {
   // The landing page embeds the fan chat in an iframe; the menu belongs to the
@@ -129,7 +129,7 @@
   };
 
   var BRAND_HTML = '<a href="/" class="brand">' +
-    '<span data-sn-brand>Velvetfunnel</span><i data-sn-suffix>.app</i></a>';
+    '<span data-sn-brand>Velvetfunneler</span><i data-sn-suffix></i></a>';
 
   // The homepage's brand wording is operator-editable and stored under the
   // "home" page content; every page reads it so the name never diverges.
@@ -272,7 +272,7 @@
       if (inline) host.classList.add('sn-inline');
       var links = inline ? [] : PAGE_LINKS;
       // Only ever replace our own links: a page's theme toggle and its own
-      // entries (comingsoon.html's Pricing) share this container.
+      // entries (index.html's Pricing) share this container.
       fill(host, pill ? links : links.concat(account));
     });
     if (pill) fill(pill, account);

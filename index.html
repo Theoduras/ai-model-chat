@@ -5,22 +5,22 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="icon" href="/favicon.ico" sizes="any">
 <link rel="icon" type="image/png" href="/favicon.png">
-<title>Velvetfunnel.app · One stop shop</title>
-<meta name="description" content="Fully automated chat, posting and engagement funnels from social media into your own platform. One persona, one API.">
+<title>Velvetfunneler · The all-in-one engine for OFM agencies and Fanvue creators</title>
+<meta name="description" content="Build an AI character, lock in her persona and generate on-brand content at scale. Then run the social media funnel that turns followers into paying Fanvue subscribers.">
 <meta name="robots" content="index,follow,max-image-preview:large">
 <meta property="og:type" content="website">
-<meta property="og:site_name" content="Velvetfunnel">
+<meta property="og:site_name" content="Velvetfunneler">
 <meta property="og:url" content="https://velvetfunneler.com/">
-<meta property="og:title" content="Velvetfunnel · Your persona, fully automated">
-<meta property="og:description" content="Fully automated chat, posting and engagement funnels from social media into your own platform. One persona, one API.">
+<meta property="og:title" content="Velvetfunneler · Build her once. Grow her everywhere.">
+<meta property="og:description" content="Build an AI character, lock in her persona and generate on-brand content at scale. Then run the social media funnel that turns followers into paying Fanvue subscribers.">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Velvetfunnel · Your persona, fully automated">
-<meta name="twitter:description" content="Fully automated chat, posting and engagement funnels from social media into your own platform. One persona, one API.">
+<meta name="twitter:title" content="Velvetfunneler · Build her once. Grow her everywhere.">
+<meta name="twitter:description" content="Build an AI character, lock in her persona and generate on-brand content at scale. Then run the social media funnel that turns followers into paying Fanvue subscribers.">
 <script type="application/ld+json">
 {"@context":"https://schema.org","@type":"SoftwareApplication",
- "name":"Velvetfunnel","applicationCategory":"BusinessApplication",
+ "name":"Velvetfunneler","applicationCategory":"BusinessApplication",
  "operatingSystem":"Web","url":"https://velvetfunneler.com/",
- "description":"Fully automated chat, posting and engagement funnels from social media into your own platform.",
+ "description":"Build an AI character, lock in her persona and generate on-brand content at scale. Then run the social media funnel that turns followers into paying Fanvue subscribers.",
  "offers":{"@type":"AggregateOffer","priceCurrency":"USD","lowPrice":"0","highPrice":"199",
            "offerCount":"4","url":"https://velvetfunneler.com/pricing"}}
 </script>
@@ -120,7 +120,7 @@ p.sub{font-size:17px;color:var(--text-soft);line-height:1.65;margin-bottom:36px;
 .meta a{color:var(--text-dim);text-decoration:none;transition:color .2s}
 .meta a:hover{color:var(--text)}
 /* ── Right ── */
-.right{position:relative;overflow:hidden;background:linear-gradient(155deg,#ff5c38,#ff2d78 52%,#7c3aed);padding:48px 56px;display:flex;flex-direction:column;justify-content:center;height:100vh}
+.right{position:relative;overflow:hidden;background:linear-gradient(155deg,#ff5c38,#ff2d78 52%,#7c3aed);padding:48px 56px;display:flex;flex-direction:column;justify-content:center;min-height:100vh}
 .right::after{content:"";position:absolute;inset:0;background:radial-gradient(circle at 78% 22%,#ffffff40,transparent 42%);pointer-events:none}
 .ring{position:absolute;border:1.5px solid #ffffff44;border-radius:50%}
 .ring.a{width:360px;height:360px;top:-70px;right:-120px}
@@ -128,18 +128,21 @@ p.sub{font-size:17px;color:var(--text-soft);line-height:1.65;margin-bottom:36px;
 .rhead{position:relative;z-index:2;max-width:880px;margin:0 auto 22px}
 .rlabel{font-size:12px;letter-spacing:.25em;text-transform:uppercase;color:#ffffffcc;margin-bottom:10px}
 .rtitle{font-family:'Sora';font-weight:800;font-size:30px;line-height:1.15;letter-spacing:-.01em;color:#fff}
+.who{list-style:none;display:grid;gap:8px;margin:-16px 0 32px;max-width:480px;font-size:15px;color:var(--text-soft)}
+.who b{color:var(--text);margin-right:6px}
+.paths{position:relative;z-index:2;max-width:880px;width:100%;margin:0 auto 18px;display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.path{background:#ffffff1f;border:1px solid #ffffff40;border-radius:14px;padding:14px 16px;color:#fff;display:grid;gap:4px}
+.path span{font-size:13.5px;color:#ffffffd9;line-height:1.45}
+.flow{position:relative;z-index:2;max-width:880px;width:100%;margin:0 auto;list-style:none;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;counter-reset:f}
+.flow li{counter-increment:f;background:#00000033;border:1px solid #ffffff33;border-radius:14px;padding:14px;color:#fff;display:grid;gap:4px;position:relative}
+.flow li::before{content:counter(f);position:absolute;top:10px;right:12px;font:700 12px 'Sora';color:#ffffff99}
+.flow i{font-style:normal;font-size:22px}
+.flow b{font-size:14.5px}
+.flow span{font-size:12.5px;color:#ffffffcc;line-height:1.4}
+.flow-time{position:relative;z-index:2;max-width:880px;width:100%;margin:10px auto 0}
+.flow-time span{display:block;width:calc(50% - 6px);border-top:2px dashed #ffffffaa;padding-top:6px;text-align:center;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#fff}
+.flow-cta{position:relative;z-index:2;align-self:center;margin-top:22px;background:#fff;color:#1a1020;font-weight:700;text-decoration:none;padding:13px 24px;border-radius:12px}
 .rsub{font-size:14.5px;color:#ffffffcc;line-height:1.55;margin-top:8px}
-.demo{position:relative;z-index:2;width:100%;max-width:880px;margin:0 auto;flex:1;min-height:0;border-radius:20px;overflow:hidden;background:var(--bg);border:1px solid #ffffff33;box-shadow:0 24px 60px #00000055}
-.demo iframe{width:100%;height:100%;border:0;display:block}
-/* The chat asks for the full viewport when its profile card opens, which needs
-   more room than the demo panel has. */
-.demo.expanded{position:fixed;inset:0;z-index:60;max-width:none;width:100%;height:100%;border-radius:0;border:0;box-shadow:none}
-/* While the on-screen keyboard is up the whole panel — gradient included — is
-   pinned to what is still visible, so neither the chat header nor its backdrop
-   can be scrolled away. */
-body.kbd .right{position:fixed;left:0;right:0;top:0;z-index:60;padding:8px;overflow:hidden}
-body.kbd .demo{height:100%;flex:none;max-width:none;margin:0}
-body.kbd .site-nav{display:none}
 @media(max-width:900px){
   .split{grid-template-columns:1fr}
   .left{min-height:auto;padding:160px 26px 40px}
@@ -147,8 +150,7 @@ body.kbd .site-nav{display:none}
   .site-nav.scrolled{padding:11px 18px}
   .auth a{padding:8px 15px;font-size:13px}
   h1{font-size:46px}
-  /* Stacked, the demo still gets a screen of its own rather than a slice. */
-  .right{padding:32px 20px 20px;height:100dvh}
+  .right{padding:40px 20px;min-height:auto}
   .ring.a{width:240px;height:240px}
 }
 @media(max-width:600px){
@@ -163,11 +165,12 @@ body.kbd .site-nav{display:none}
   .cta input,.cta button{width:100%}
   .cta button{padding:14px 20px}
   .meta{flex-wrap:wrap;gap:14px;font-size:12px}
-  /* On a phone the demo is the whole screen: no framing, no heading above it. */
-  .right{padding:8px;height:100dvh}
-  .rhead{display:none}
+  .right{padding:32px 16px}
+  .rtitle{font-size:24px}
+  .paths{grid-template-columns:minmax(0,1fr)}
+  .flow{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .flow-time{display:none}
   .ring.a,.ring.b{display:none}
-  .demo{max-width:none;flex:none;height:calc(100dvh - 16px);border:0;border-radius:14px;box-shadow:none}
   .auth a{padding:7px 12px;font-size:12.5px}
 }
 /* ── Features ── */
@@ -307,7 +310,7 @@ body.kbd .site-nav{display:none}
 </head>
 <body data-page="home">
 <header class="site-nav" id="site-nav">
-  <div class="brand"><span data-sn-brand data-edit-id="brand-name">Velvetfunnel</span><i data-sn-suffix data-edit-id="brand-suffix">.app</i></div>
+  <div class="brand"><span data-sn-brand data-edit-id="brand-name">Velvetfunneler</span></div>
   <nav class="auth sn-links">
     <button class="theme-toggle" onclick="toggleTheme()" title="Light mode" aria-label="Switch to light mode">
       <svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke-linecap="round"/></svg>
@@ -319,9 +322,13 @@ body.kbd .site-nav{display:none}
 
   <div class="left">
     <div class="lc">
-      <div class="pill"><span class="d"></span><span data-edit-id="pill-text">One stop shop</span></div>
-      <h1><span data-edit-id="h1-line1">Your persona,</span><br><u><span data-edit-id="h1-highlight">fully automated.</span></u></h1>
-      <p class="sub" data-edit-id="sub-text">A fully automated chat, posting and engagement funnel that turns social media followers into fans on your own platform, running around the clock, in your voice.</p>
+      <div class="pill"><span class="d"></span><span data-edit-id="pill-text">All-in-one engine</span></div>
+      <h1><span data-edit-id="h1-line1">Build her once.</span><br><u><span data-edit-id="h1-highlight">Grow her everywhere.</span></u></h1>
+      <p class="sub" data-edit-id="sub-text">Build an AI character, lock in her persona, and generate on-brand content at scale. Then let Velvetfunneler run the social media funnel that turns followers into paying Fanvue subscribers.</p>
+      <ul class="who">
+        <li><b>Agencies</b> Scale more models without more staff.</li>
+        <li><b>Solo creators</b> A full growth team in one tool.</li>
+      </ul>
       <form class="cta" onsubmit="return subscribe(event)">
         <input id="email" type="email" placeholder="Enter your email" required>
         <button type="submit"><span data-edit-id="cta-btn-text">Sign up for news</span></button>
@@ -329,7 +336,7 @@ body.kbd .site-nav{display:none}
       <div class="note" id="note" data-edit-id="note-text">Product news, new features and tips, straight to your inbox.</div>
     </div>
     <div class="meta">
-      <span data-edit-id="meta-copyright">© 2026 velvetfunnel.app</span>
+      <span data-edit-id="meta-copyright">© 2026 velvetfunneler.com</span>
       <a href="#" data-edit-id="meta-link1">Twitter</a>
       <a href="#" data-edit-id="meta-link2">Instagram</a>
     </div>
@@ -338,13 +345,22 @@ body.kbd .site-nav{display:none}
   <div class="right">
     <div class="ring a"></div><div class="ring b"></div>
     <div class="rhead">
-      <div class="rlabel" data-edit-id="rlabel-text">Live demo</div>
-      <div class="rtitle" data-edit-id="rtitle-text">Try it out yourself</div>
-      <div class="rsub" data-edit-id="rsub-text">Say hi and see how the persona replies. This is the same engine that runs your funnel.</div>
+      <div class="rlabel">Character builder</div>
+      <div class="rtitle">Build your dream model in 30 minutes. No prompts.</div>
+      <div class="rsub">Pick every detail (face, body and each body part) by choosing options and following the steps. When you're done she's ready to use: safe-for-work and explicit content with the exact same face and body, in one click or from your own prompt.</div>
     </div>
-    <div class="demo">
-      <iframe src="/chat?persona=nova&amp;demo=1" title="Live persona chat demo" loading="lazy"></iframe>
+    <div class="paths">
+      <div class="path"><b>Use your own photos</b><span>Add reference photos for her face, body or single body parts.</span></div>
+      <div class="path"><b>Use our easy picker</b><span>Choose every feature from options. No photos needed.</span></div>
     </div>
+    <ol class="flow">
+      <li><i aria-hidden="true">🎛️</i><b>Choose or upload</b><span>Face, body, every detail</span></li>
+      <li><i aria-hidden="true">🔒</i><b>Face &amp; body locked</b><span>The same her in every shot</span></li>
+      <li><i aria-hidden="true">✨</i><b>Create content</b><span>SFW and NSFW, prompt or no prompt</span></li>
+      <li><i aria-hidden="true">💸</i><b>Post &amp; funnel</b><span>Followers into Fanvue subscribers</span></li>
+    </ol>
+    <div class="flow-time"><span>about 30 minutes</span></div>
+    <a class="flow-cta" href="/register">Start building her →</a>
   </div>
 
 </div>
@@ -352,7 +368,7 @@ body.kbd .site-nav{display:none}
 <section class="features" id="pricing">
   <div class="sec-head">
     <div class="sec-eyebrow"><span class="d"></span><span data-edit-id="features-eyebrow">What you get</span></div>
-    <h2><span data-edit-id="features-title-a">Everything in the</span> <em data-edit-id="features-title-b">platform</em></h2>
+    <h2><span data-edit-id="features-title-a">What each plan</span> <em data-edit-id="features-title-b">includes</em></h2>
     <p data-edit-id="features-subtitle">Switch the plan to see exactly what it unlocks. Dimmed lines are the ones that plan does not include.</p>
   </div>
   <div class="tier-toggle" id="tier-toggle"></div>
@@ -530,7 +546,7 @@ fetch('/api/features')
         </thead>
         <tbody>
           <tr class="is-us">
-            <td>Velvet Funnel</td>
+            <td>Velvetfunneler</td>
             <td><span class="yes">Yes</span></td>
             <td><span class="yes">Locked to her approved photo</span></td>
             <td><strong>&euro;0.09</strong> a photo</td>
@@ -594,36 +610,6 @@ fetch('/api/features')
 </script>
 
 <script>
-var vv=window.visualViewport;
-
-function fitToKeyboard(){
-  if(!document.body.classList.contains('kbd')) return;
-  var right=document.querySelector('.right');
-  if(!right) return;
-  var h=vv?vv.height:window.innerHeight;
-  var top=vv?vv.offsetTop:0;
-  right.style.top=top+'px';
-  right.style.height=h+'px';
-  if(window.scrollY) window.scrollTo(0,0);
-}
-if(vv){vv.addEventListener('resize',fitToKeyboard);vv.addEventListener('scroll',fitToKeyboard);}
-
-window.addEventListener('message',function(e){
-  var d=e.data;
-  if(!d||typeof d!=='object'||!d.vf) return;
-  var demo=document.querySelector('.demo');
-  if(!demo) return;
-  if(d.vf==='profile-open') demo.classList.add('expanded');
-  if(d.vf==='profile-close') demo.classList.remove('expanded');
-  // Only in the stacked layout: beside the copy the panel is already in view.
-  if(d.vf==='input-focus'&&window.innerWidth<=900){document.body.classList.add('kbd');fitToKeyboard();}
-  if(d.vf==='input-blur'){
-    document.body.classList.remove('kbd');
-    var right=document.querySelector('.right');
-    if(right){right.style.top='';right.style.height='';}
-  }
-});
-
 function subscribe(e){
   e.preventDefault();
   var email=document.getElementById('email').value.trim();

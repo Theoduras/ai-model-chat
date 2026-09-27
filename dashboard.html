@@ -27,7 +27,7 @@
     <button class="icon-btn desk-only" onclick="toggleSidebar()" title="Collapse or expand the menu" aria-label="Toggle menu">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="20" height="20"><path d="M4 6h16M4 12h16M4 18h16" stroke-linecap="round"/></svg>
     </button>
-    <a href="/" class="brand dash-brand"><span data-sn-brand>Velvetfunnel</span><i data-sn-suffix>.app</i></a>
+    <a href="/" class="brand dash-brand"><span data-sn-brand>Velvetfunneler</span><i data-sn-suffix></i></a>
   </div>
   <div style="display:flex; align-items:center; gap:16px;">
     <button class="icon-btn mobile-only" onclick="openPreview()" title="Preview" aria-label="Open preview">
@@ -210,10 +210,6 @@
         <button type="button" class="sb-item" data-view="/embed-setup" data-search="share link embed widget snippet chat bubble" onclick="openEmbedWidget(this)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><path d="M8 4 3 12l5 8M16 4l5 8-5 8" stroke-linecap="round" stroke-linejoin="round"/></svg>
           <span>Share link</span>
-        </button>
-        <button type="button" class="sb-item admin-only" data-view="/landing" data-search="landing page" onclick="openEmbedded('/landing', this)">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18" stroke-linecap="round"/></svg>
-          <span>Landing page</span>
         </button>
 
 
@@ -1393,7 +1389,7 @@ function openEmbedWidget(navEl) {
 }
 
 // Tools that read a persona; the account, team and admin pages do not.
-const PERSONA_PAGES = ['/chat', '/landing', '/planner', '/embed-setup'];
+const PERSONA_PAGES = ['/chat', '/planner', '/embed-setup'];
 
 function openEmbedded(url, navEl) {
   if (PERSONA_PAGES.indexOf(url.split('?')[0]) !== -1 && needsPersona()) return;

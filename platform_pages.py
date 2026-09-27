@@ -28,7 +28,7 @@ _ALL = [
     {'slug': 'threads-auto-reply', 'name': 'Threads', 'tag': 'Posting and comment auto-reply', 'status': 'Live'},
     {'slug': 'velvetchat-share-link', 'name': 'Velvetchat', 'tag': 'Your own chat page and embed', 'status': 'Live'},
     {'slug': 'ai-content-planner', 'name': 'Content Planner', 'tag': 'A month of posts in one calendar', 'status': 'Live'},
-    {'slug': 'ai-image-generator', 'name': 'Generation Studio', 'tag': 'Photos and clips of your persona', 'status': 'Soon'},
+    {'slug': 'ai-image-generator', 'name': 'Generation Studio', 'tag': 'Build her, then create her content', 'status': 'Live'},
     {'slug': 'onlyfans-ai-chatbot', 'name': 'OnlyFans', 'tag': 'Inbox auto-reply and PPV', 'status': 'Soon'},
     {'slug': 'fansly-ai-chatbot', 'name': 'Fansly', 'tag': 'Another paid page to funnel into', 'status': 'Soon'},
     {'slug': 'reddit-posting-bot', 'name': 'Reddit', 'tag': 'Per-subreddit posting and comments', 'status': 'Soon'},
@@ -46,7 +46,7 @@ PAGES = {
     'telegram-ai-chatbot': {
         'slug': 'telegram-ai-chatbot',
         'live': True,
-        'title': 'Telegram AI Chatbot for Creators | Velvetfunnel',
+        'title': 'Telegram AI Chatbot for Creators | Velvetfunneler',
         'description': ('Give every persona her own Telegram bot. Automated fan DMs, memory, photo '
                         'teasing and a built-in conversion funnel that sells your paid page 24/7.'),
         'eyebrow': 'Live now · DM funnel',
@@ -93,7 +93,7 @@ PAGES = {
         'how_sub': 'No servers, no code, no browser left open on a machine somewhere.',
         'steps': [
             {'title': 'Build the persona', 'body': 'Fill in her identity, voice and funnel pacing in the visual builder. Or describe her in a sentence and let the AI draft it for you to edit.'},
-            {'title': 'Create the bot', 'body': 'Open BotFather in Telegram, send /newbot, and paste the token into Velvetfunnel. That is the whole connection.'},
+            {'title': 'Create the bot', 'body': 'Open BotFather in Telegram, send /newbot, and paste the token into Velvetfunneler. That is the whole connection.'},
             {'title': 'Send traffic', 'body': 'Put your tracked Telegram link in the bios she already posts to. Every fan who opens it is credited to the channel that found them.'},
         ],
         'rows_eyebrow': 'Where it fits',
@@ -109,7 +109,7 @@ PAGES = {
         ],
         'faq': [
             {'q': 'Will fans know they are talking to an AI?',
-             'a': 'That is your call and your setting. The persona is built to stay in character, and every chat Velvetfunnel hosts on your own page is labelled as an AI chat. On Telegram the bot is your bot, so you decide what its description says.'},
+             'a': 'That is your call and your setting. The persona is built to stay in character, and every chat Velvetfunneler hosts on your own page is labelled as an AI chat. On Telegram the bot is your bot, so you decide what its description says.'},
             {'q': 'Do I need to keep a browser or a tab open?',
              'a': 'No. The Telegram loop runs server side and stays on through deploys. Your machine can be off.'},
             {'q': 'Can I run more than one persona?',
@@ -129,7 +129,7 @@ PAGES = {
     'fanvue-ai-chatter': {
         'slug': 'fanvue-ai-chatter',
         'live': True,
-        'title': 'Fanvue AI Chatter & PPV Automation | Velvetfunnel',
+        'title': 'Fanvue AI Chatter & PPV Automation | Velvetfunneler',
         'description': ('Fanvue is where your funnel lands. An AI chatter works your subscriber inbox, '
                         'sells PPV from your vault and keeps every paying fan engaged 24/7.'),
         'eyebrow': 'Live now · Paid destination',
@@ -138,9 +138,10 @@ PAGES = {
         'lede': [
             'Fanvue is the paid page every other channel points at. Your social platforms build the '
             'audience, the DM funnel warms them up, and Fanvue is where they subscribe.',
-            'Velvetfunnel does not stop at the paywall. The same persona keeps working inside your '
+            'Velvetfunneler does not stop at the paywall. The same persona keeps working inside your '
             'Fanvue inbox, reading incoming messages and replying in character, so a fan who just '
             'paid gets the same voice they were talking to an hour ago.',
+            'Agencies scale more models without more staff. Solo creators get a full growth team in one tool.',
         ],
         'cta_primary': 'Start now',
         'hero_note': 'Runs server side, through deploys, with no open tab and no browser running.',
@@ -212,7 +213,7 @@ PAGES = {
     'discord-ai-chatbot': {
         'slug': 'discord-ai-chatbot',
         'live': True,
-        'title': 'Discord AI Chatbot for Creators | Velvetfunnel',
+        'title': 'Discord AI Chatbot for Creators | Velvetfunneler',
         'description': ('Run your persona as a real Discord account. Automated fan DMs with the full '
                         'funnel, natural chime-ins in public channels, and no spam in anyone server.'),
         'eyebrow': 'Live now · DM funnel',
@@ -229,7 +230,7 @@ PAGES = {
         'hero_note': 'Sign in as her once in a hosted browser. No token pasting, no bot application to register.',
         'route_title': 'The route, end to end',
         'route': [
-            {'label': 'She is already in the servers', 'detail': 'Her own account, her own communities. Velvetfunnel never joins one for her.'},
+            {'label': 'She is already in the servers', 'detail': 'Her own account, her own communities. Velvetfunneler never joins one for her.'},
             {'label': 'She talks in the channels', 'detail': 'Chime-ins that read like a member, on the channels you pick.'},
             {'label': 'A fan opens a DM', 'detail': 'She never messages first. When a fan starts the chat, the funnel starts with it.'},
             {'label': 'The offer lands in the DM', 'detail': 'Warm, engage, intrigue, tease, offer, close, at the pace you set in the builder.'},
@@ -295,7 +296,7 @@ PAGES = {
     'x-ai-bot': {
         'slug': 'x-ai-bot',
         'live': True,
-        'title': 'X (Twitter) AI Bot for Creators | Auto DM & Reply | Velvetfunnel',
+        'title': 'X (Twitter) AI Bot for Creators | Auto DM & Reply | Velvetfunneler',
         'description': ('Automate X posts, comment replies and DM conversations with your AI persona. '
                         'Find new leads, start chats and funnel them to your paid page 24/7.'),
         'eyebrow': 'Live now · Reach and DMs',
@@ -305,7 +306,7 @@ PAGES = {
             'Your persona posts to X, replies to comments on her own posts, follows and unfollows, '
             'and runs a complete DM funnel. She can find new people worth talking to, open the '
             'conversation and carry it through to the offer.',
-            'X is the one channel in Velvetfunnel that does both jobs at once: public engagement '
+            'X is the one channel in Velvetfunneler that does both jobs at once: public engagement '
             'that builds reach, and private DMs that convert it. Everything runs server side, so it '
             'keeps working with the tab closed.',
         ],
@@ -379,14 +380,14 @@ PAGES = {
     'instagram-posting-automation': {
         'slug': 'instagram-posting-automation',
         'live': True,
-        'title': 'Instagram Posting Automation for Creators | Velvetfunnel',
+        'title': 'Instagram Posting Automation for Creators | Velvetfunneler',
         'description': ('Schedule Instagram feed posts, Stories and Reels from one calendar. Post as a '
                         'real account, plan a week in one sitting, and send the traffic to your funnel.'),
         'eyebrow': 'Live now · Reach',
         'h1_pre': 'Instagram posting automation for',
         'h1_accent': 'Posts, Stories and Reels.',
         'lede': [
-            'Instagram is a reach channel and Velvetfunnel treats it as one. Your persona posts to '
+            'Instagram is a reach channel and Velvetfunneler treats it as one. Your persona posts to '
             'the feed, to Stories and to Reels, on a schedule you set in the content planner, from '
             'the account your fans already follow.',
             'There is no DM automation and no funnel here on purpose. Instagram fills the funnel and '
@@ -442,7 +443,7 @@ PAGES = {
         ],
         'faq': [
             {'q': 'Can it reply to DMs or comments?',
-             'a': 'No. Instagram is posting only in Velvetfunnel. Automated messaging is what gets creator accounts restricted there, so the path is not built.'},
+             'a': 'No. Instagram is posting only in Velvetfunneler. Automated messaging is what gets creator accounts restricted there, so the path is not built.'},
             {'q': 'Can it post Stories?',
              'a': 'Yes, along with feed posts and Reels. That is one of the reasons it runs as a signed-in account rather than through the official API, which cannot post Stories at all.'},
             {'q': 'Do I need a Business or Creator account?',
@@ -462,7 +463,7 @@ PAGES = {
     'threads-auto-reply': {
         'slug': 'threads-auto-reply',
         'live': True,
-        'title': 'Threads Auto-Reply Bot for Creators | Velvetfunnel',
+        'title': 'Threads Auto-Reply Bot for Creators | Velvetfunneler',
         'description': ('Post to Threads and reply to every comment and mention in your persona\'s voice. '
                         'Public reach on autopilot, feeding the DM funnel that closes on your paid page.'),
         'eyebrow': 'Live now · Reach',
@@ -627,7 +628,7 @@ PAGES = {
     'ai-content-planner': {
         'slug': 'ai-content-planner',
         'live': True,
-        'title': 'AI Content Planner for Creators | Velvetfunnel',
+        'title': 'AI Content Planner for Creators | Velvetfunneler',
         'description': ('Plan a week of posts across X, Threads, Instagram and Fanvue from one calendar. '
                         'The AI writes them in your persona\'s voice, attaches your media and posts on time.'),
         'eyebrow': 'Live now · Tool',
@@ -708,14 +709,18 @@ PAGES = {
 
     'ai-image-generator': {
         'slug': 'ai-image-generator',
-        'live': False,
-        'title': 'AI Image and Video Generator for Creators | Velvetfunnel',
+        'live': True,
+        'title': 'AI Image and Video Generator for Creators | Velvetfunneler',
         'description': ('Generate photos and short clips of your own persona from her reference shots. '
                         'Consistent face and body, safe or explicit, priced per generation in tokens.'),
-        'eyebrow': 'In testing · Tool',
+        'eyebrow': 'Live now · Character builder',
         'h1_pre': 'AI image and video generator for',
         'h1_accent': 'your own persona.',
         'lede': [
+            'Build your dream model in 30 minutes, no prompts. Pick every detail (face, body and each '
+            'body part) by choosing options and following the steps, or add your own photos as '
+            'reference. When you are done she is ready to use: safe-for-work and explicit content with '
+            'the exact same face and body, in one click or from your own prompt.',
             'The Generation Studio makes new photos of a persona who already exists. You give her a '
             'set of face shots and a set of body shots, and every generation is conditioned on them, '
             'so it is the same woman in every frame rather than a new one each time.',
@@ -723,7 +728,7 @@ PAGES = {
             'you already kept, so its first frame carries her face and there is nothing to correct.',
         ],
         'cta_primary': 'Start now',
-        'hero_note': 'In testing with a small group. Everything below is built and running on the platform now.',
+        'hero_note': 'Photos are live on every plan. Video is coming soon.',
         'route_title': 'The route, end to end',
         'route': [
             {'label': 'Pick the model', 'detail': 'Photo or video, safe or explicit. The choice filters the models that can do it.'},
@@ -792,14 +797,14 @@ PAGES = {
     'onlyfans-ai-chatbot': {
         'slug': 'onlyfans-ai-chatbot',
         'live': False,
-        'title': 'OnlyFans AI Chatbot & PPV Automation | Velvetfunnel',
+        'title': 'OnlyFans AI Chatbot & PPV Automation | Velvetfunneler',
         'description': ('An AI chatter for your OnlyFans inbox. Automated replies in your persona\'s voice, '
                         'PPV delivery and fan scoring, running the same funnel as every other channel.'),
         'eyebrow': 'In production · Paid destination',
         'h1_pre': 'OnlyFans AI chatbot and',
         'h1_accent': 'PPV automation.',
         'lede': [
-            'OnlyFans is the second paid page Velvetfunnel funnels into. The console, the connection '
+            'OnlyFans is the second paid page Velvetfunneler funnels into. The console, the connection '
             'and the reply loop are built and tested. It is not switched on for creators yet, and '
             'the sign-up says so rather than pointing you at a connection you cannot finish.',
             'When it opens, it works the way Fanvue already does: the same persona, the same memory '
@@ -875,8 +880,8 @@ PAGES = {
     'fansly-ai-chatbot': {
         'slug': 'fansly-ai-chatbot',
         'live': False,
-        'title': 'Fansly AI Chatbot & PPV Automation | Velvetfunnel',
-        'description': ('Fansly is a planned paid destination for the Velvetfunnel funnel. Same persona, '
+        'title': 'Fansly AI Chatbot & PPV Automation | Velvetfunneler',
+        'description': ('Fansly is a planned paid destination for the Velvetfunneler funnel. Same persona, '
                         'same funnel, same PPV automation. Run it to Fanvue today and switch later.'),
         'eyebrow': 'Planned · Paid destination',
         'h1_pre': 'Fansly AI chatbot and',
@@ -958,7 +963,7 @@ PAGES = {
     'reddit-posting-bot': {
         'slug': 'reddit-posting-bot',
         'live': False,
-        'title': 'Reddit Posting Bot for Creators | Velvetfunnel',
+        'title': 'Reddit Posting Bot for Creators | Velvetfunneler',
         'description': ('Plan one post and it becomes a post per subreddit, each with its own title, flair '
                         'and slot, staggered so it does not read as spam. In production, waiting on access.'),
         'eyebrow': 'In production · Reach',
@@ -1042,14 +1047,14 @@ PAGES = {
     'tiktok-posting-automation': {
         'slug': 'tiktok-posting-automation',
         'live': False,
-        'title': 'TikTok Posting Automation for Creators | Velvetfunnel',
+        'title': 'TikTok Posting Automation for Creators | Velvetfunneler',
         'description': ('Schedule safe-for-work clips to TikTok from the same calendar as every other '
                         'channel. Built as a registered app, in production and waiting on release.'),
         'eyebrow': 'In production · Reach',
         'h1_pre': 'TikTok posting automation for',
         'h1_accent': 'safe-for-work clips.',
         'lede': [
-            'TikTok is a top-of-funnel channel and Velvetfunnel treats it as exactly that. Clips go '
+            'TikTok is a top-of-funnel channel and Velvetfunneler treats it as exactly that. Clips go '
             'out on a schedule from the same calendar as every other channel, and nothing explicit '
             'and no paid link ever rides on it.',
             'It is built as a registered TikTok app with the Content Posting API, tested, and sitting '

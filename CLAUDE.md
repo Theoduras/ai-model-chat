@@ -57,9 +57,8 @@ tiktok_rest.py                   — TikTok Content Posting API (init, upload, s
 tiktok_stub.py                   — Offline TikTok transport (tests only)
 tiktok.html                      — TikTok console (connect, post a video)
 admin.html                      — Visual persona builder UI (creator-facing)
-index.html                      — Fan chat UI (embeds as iframe in profile.html)
-chat.html                       — Standalone fan chat (mobile hamburger link)
-profile.html                    — Creator landing page with embedded chat
+index.html                      — Homepage (character builder pitch, plans, generation prices)
+chat.html                       — Fan chat (also where old /landing and /profile links land)
 profile_data.json               — Legacy Lilith profile data (fallback)
 personas/
   lilith.txt                    — Lilith system prompt (auto-generated or hand-edited)
@@ -68,7 +67,7 @@ personas/
   {slug}.txt                    — Any other persona's system prompt
   {slug}.config.json            — Any other persona's builder config
 grok-lilith-prompt.txt          — Legacy location (still loaded as fallback)
-templates/profile.html          — Jinja2 template variant (unused currently)
+templates/platform.html         — Per-platform marketing pages (text in platform_pages.py)
 .env                            — API keys (never commit)
 Dockerfile                      — Cloud Run image (the real deployment)
 api/index.py                    — Vercel entrypoint (secondary host)
@@ -81,8 +80,7 @@ requirements.txt                — Python deps: flask, google-genai, python-dot
 
 | Route | Method | Purpose |
 |---|---|---|
-| `GET /` | — | Fan chat UI |
-| `GET /profile` | — | Creator landing page |
+| `GET /` | — | Homepage |
 | `GET /admin` | — | Persona builder UI |
 | `POST /chat` | JSON | Send message, get AI reply. Accepts `persona` slug param. |
 | `GET /api/profile?persona=slug` | — | Profile data JSON for landing page |

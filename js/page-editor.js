@@ -45,7 +45,7 @@
     .then(function (d) {
       saved = d.content || {};
       applyContent(saved);
-      // Pages like /landing paint their own copy in from another endpoint, so
+      // Pages that paint their own copy in from another endpoint, so
       // the saved overrides go back on once that has had a chance to run.
       [400, 1500].forEach(function (ms) {
         setTimeout(function () { if (!editing) applyContent(saved); }, ms);

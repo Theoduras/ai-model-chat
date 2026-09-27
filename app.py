@@ -1038,11 +1038,12 @@ _PUBLIC_PAGES = [('/', '1.0', 'weekly'),
                  ('/privacy', '0.2', 'yearly'),
                  ('/tos', '0.2', 'yearly')]
 _PUBLIC_PAGES += [(f'/blog/{slug}', '0.5', 'monthly') for slug in _BLOG_SLUGS]
-_PUBLIC_PAGES += [(f'/{slug}', '0.8', 'monthly') for slug in platform_pages.PAGES]
+_PUBLIC_PAGES += [(f'/{slug}', '0.9' if slug == 'ai-image-generator' else '0.8', 'monthly')
+                  for slug in platform_pages.PAGES]
 _PUBLIC_PATHS = {path for path, _, _ in _PUBLIC_PAGES}
 
 # Crawling these wastes budget and can leak a creator's funnel into search.
-# The fan pages (/landing, /profile, /chat.html) are deliberately absent: they
+# The fan pages (/chat, /chat.html) are deliberately absent: they
 # carry <meta name="robots" content="noindex">, and a crawler blocked here would
 # never fetch the page to read that tag, leaving anything already indexed stuck.
 _CRAWL_DISALLOW = ['/dashboard', '/admin', '/account', '/billing', '/tokens', '/api/',
@@ -1182,7 +1183,7 @@ def _canonical_public_pages(resp):
 
 # Fan-facing funnel pages. The meta tag covers the HTML; this header covers the
 # same pages served as static files and any non-HTML response under them.
-_NOINDEX_PATHS = ('/landing', '/landingpage.html', '/profile', '/chat')
+_NOINDEX_PATHS = ('/chat',)
 
 
 @app.after_request
@@ -2860,7 +2861,7 @@ BILLING_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <style>""" + ACCOUNT_CSS + """
 </style></head><body data-page="pricing">
 <header class="site-nav">
-<a class="brand" href="/">Velvetfunnel<i>.app</i></a>
+<a class="brand" href="/">Velvetfunneler</a>
 <div class="links">
 <button type="button" class="theme-toggle" onclick="toggleTheme()" title="Light mode" aria-label="Switch to light mode">
 <svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke-linecap="round"/></svg>
@@ -3082,7 +3083,7 @@ background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 16%,var(--surf
 @media(max-width:700px){.tokcard{grid-template-columns:1fr}.tk-side{border-left:0;border-top:1px solid var(--border)}}
 </style></head><body data-page="pricing">
 <header class="site-nav">
-<a class="brand" href="/">Velvetfunnel<i>.app</i></a>
+<a class="brand" href="/">Velvetfunneler</a>
 <div class="links">
 <button type="button" class="theme-toggle" onclick="toggleTheme()" title="Light mode" aria-label="Switch to light mode">
 <svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke-linecap="round"/></svg>
@@ -3226,7 +3227,7 @@ DEMO_ENDS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <div class="lockart"><svg viewBox="0 0 24 24" aria-hidden="true">
 <rect x="4" y="10.5" width="16" height="10" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></svg></div>
 <h1 style="margin-bottom:6px" data-edit-id="h1">This is where the demo ends</h1>
-<p class="sub" data-edit-id="sub">Connecting {{ platform_name }} is the paid half of Velvetfunnel. The demo
+<p class="sub" data-edit-id="sub">Connecting {{ platform_name }} is the paid half of Velvetfunneler. The demo
 gives you the persona, the funnel and the whole builder, with nothing capped &mdash; it
 stops at the moment she would start talking to your real fans and taking their money.</p>
 <ul class="steps">
@@ -7435,16 +7436,12 @@ def _all_persona_slugs():
     return sorted(slugs)
 
 
-@app.route('/api/landing')
-def api_landing_get():
-    """Public: the marketing pages read this to point their chat at the live
-    demo model. Fixed to Nova — the demo is not a persona picker."""
-    return jsonify({'persona': LANDING_PERSONA})
-
-
+# The fan landing page is gone; links already out in bios land on the chat.
 @app.route('/landing')
+@app.route('/profile')
 def landing():
-    return send_from_directory(BASE_DIR, 'landingpage.html')
+    qs = request.query_string.decode()
+    return redirect('/chat' + ('?' + qs if qs else ''))
 
 
 @app.route('/studio')
@@ -7629,7 +7626,7 @@ def blog_post_page(slug):
 
 @app.route('/', methods=['GET'])
 def home_page():
-    return send_from_directory(BASE_DIR, 'comingsoon.html')
+    return send_from_directory(BASE_DIR, 'index.html')
 
 
 # The page moved to the root; the old paths stay as redirects for links already
@@ -7638,10 +7635,6 @@ def home_page():
 @app.route('/soon')
 def comingsoon_page():
     return redirect('/')
-
-@app.route('/profile')
-def profile():
-    return redirect('/landing')
 
 @app.route('/admin', methods=['GET', 'POST'])
 def admin():
@@ -11966,7 +11959,7 @@ def growth_entry(slug):
     link = _tg_share_link(bot, attr)
     if attr.get('source'):
         _growth_source_bump(slug, attr['source'])
-    return redirect(link or f'/landing?persona={slug}', code=302)
+    return redirect(link or f'/chat?persona={slug}', code=302)
 
 
 @app.route('/api/growth/links')
