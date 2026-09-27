@@ -3418,7 +3418,7 @@ a.email{color:#a78bfa;text-decoration:none;font-weight:500}
 <a href="/admin/support">Support inbox</a>
 <span>{% if super_admin %}<a href="/admin/permissions">Permissions</a> &nbsp; <a href="/admin/register-links">Register links</a> &nbsp; {% endif %}<a href="/admin/demos">Demo accounts</a> &nbsp; <a href="/dashboard">Dashboard</a> &nbsp; <a href="/logout">Sign out</a></span></div>
 <div class="card"><div class="scroll"><table>
-<tr><th>Email</th><th>Name</th><th>Role</th><th>Team</th><th>Plan</th><th>Status</th><th>Renews</th><th>Joined</th><th></th></tr>
+<tr><th>Email</th><th>Name</th><th>Role</th><th>Team</th><th>Plan</th><th>Status</th><th>Renews</th><th>Joined</th><th>Last online</th><th></th></tr>
 {% for u in users %}<tr>
 <td><a class="email" href="/admin/users/{{ u.id }}">{{ u.email }}</a></td>
 <td>{{ u.name or '—' }}</td>
@@ -3427,10 +3427,20 @@ a.email{color:#a78bfa;text-decoration:none;font-weight:500}
 <td>{{ u.tier or '—' }}{% if u.grandfathered %} <span class="pill legacy" title="No plan limits until {{ u.grandfathered }}">legacy</span>{% endif %}
 {% if u.trial %} <span class="pill trial" title="Trial granted {{ u.trial }}">trial</span>{% endif %}</td>
 <td><span class="pill {{ u.status }}">{{ u.status }}</span></td>
-<td>{{ u.expires or '—' }}</td><td>{{ u.created or '—' }}</td>
+<td>{{ u.expires or '—' }}</td><td data-at="{{ u.joined_at }}">{{ u.created or '—' }}</td>
+<td data-seen="{{ u.seen_at }}">—</td>
 <td><a class="email" href="/admin/support?user={{ u.id }}">Message</a></td>
 </tr>{% endfor %}
-</table></div></div></div></body></html>"""
+</table></div></div></div>
+<script>
+// Epochs from the server, shown in this browser's timezone.
+var skew={{ now }}-Date.now()/1000, win={{ online_window }};
+function full(t){return new Date(t*1000).toLocaleString([], {day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});}
+document.querySelectorAll('[data-at]').forEach(function(td){var t=+td.dataset.at;if(t)td.textContent=full(t);});
+document.querySelectorAll('[data-seen]').forEach(function(td){var t=+td.dataset.seen;if(!t)return;
+  if(Date.now()/1000+skew-t<win){td.innerHTML='<span style="color:#16a34a;font-weight:600">&#9679; Online now</span>';}
+  else td.textContent=full(t);});
+</script></body></html>"""
 
 ADMIN_DEMOS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -3664,7 +3674,7 @@ def admin_users():
     blocked = _require_admin()
     if blocked:
         return blocked
-    from db import list_users
+    from db import list_users, _epoch
     s = _db_session()
     try:
         from db import Workspace, Membership
@@ -3690,11 +3700,14 @@ def admin_users():
                 'grandfathered': _fmt_date(u.grandfathered_until),
                 'trial': _fmt_date(u.trial_at),
                 'expires': _fmt_date(u.expires_at),
-                'created': _fmt_date(u.created_at)})
+                'created': _fmt_date(u.created_at),
+                'joined_at': _epoch(u.created_at),
+                'seen_at': _support_seen_epoch(u)})
     finally:
         s.close()
     return render_template_string(
-        ADMIN_USERS_HTML, users=rows,
+        ADMIN_USERS_HTML, users=rows, now=int(time.time()),
+        online_window=SUPPORT_ONLINE_WINDOW,
         super_admin=bool((_current_user() or {}).get('is_super_admin')))
 
 
@@ -3802,6 +3815,192 @@ def _support_caller():
     return user, _demo_visitor()
 
 
+# Admins hear about a new support message by email and by a push to any
+# browser they switched alerts on in. Both are throttled per thread; a request
+# for a person always gets through, because that is the one that is waiting.
+SUPPORT_EMAIL_EVERY = timedelta(minutes=10)
+SUPPORT_PUSH_EVERY = timedelta(minutes=1)
+SUPPORT_ALERT_PREFS = 'support_alert_prefs'
+VAPID_SETTING = 'vapid_private_pem'
+_vapid = {}
+
+
+def _support_alert_prefs(s):
+    from db import get_app_setting
+    try:
+        return json.loads(get_app_setting(s, SUPPORT_ALERT_PREFS) or '{}') or {}
+    except ValueError:
+        return {}
+
+
+def _support_admins(s):
+    from db import User
+    return (s.query(User).filter(User.role.in_(('admin', 'super_admin'))).all())
+
+
+def _vapid_key():
+    """The VAPID signing key browsers bind a push subscription to. Kept in the
+    database rather than generated per process: a new key would silently
+    orphan every subscription already made."""
+    if 'key' in _vapid:
+        return _vapid['key']
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    pem = (os.getenv('VAPID_PRIVATE_KEY') or '').strip().replace('\\n', '\n')
+    if not pem:
+        from db import get_app_setting, set_app_setting
+        s = _db_session()
+        try:
+            pem = get_app_setting(s, VAPID_SETTING) or ''
+            if not pem:
+                pem = ec.generate_private_key(ec.SECP256R1()).private_bytes(
+                    serialization.Encoding.PEM,
+                    serialization.PrivateFormat.PKCS8,
+                    serialization.NoEncryption()).decode()
+                set_app_setting(s, VAPID_SETTING, pem)
+                s.commit()
+                # Another instance may have raced this one; the stored key wins.
+                pem = get_app_setting(s, VAPID_SETTING) or pem
+        finally:
+            s.close()
+    _vapid['key'] = serialization.load_pem_private_key(pem.encode(), None)
+    return _vapid['key']
+
+
+def _b64url(b):
+    import base64
+    return base64.urlsafe_b64encode(b).rstrip(b'=').decode()
+
+
+def _vapid_public():
+    from cryptography.hazmat.primitives import serialization
+    return _b64url(_vapid_key().public_key().public_bytes(
+        serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint))
+
+
+def _vapid_auth(endpoint, contact):
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
+    u = urllib.parse.urlsplit(endpoint)
+    head = _b64url(json.dumps({'typ': 'JWT', 'alg': 'ES256'}).encode())
+    claims = _b64url(json.dumps({'aud': f'{u.scheme}://{u.netloc}',
+                                 'exp': int(time.time()) + 12 * 3600,
+                                 'sub': contact}).encode())
+    r, s_ = decode_dss_signature(_vapid_key().sign(
+        f'{head}.{claims}'.encode(), ec.ECDSA(hashes.SHA256())))
+    sig = _b64url(r.to_bytes(32, 'big') + s_.to_bytes(32, 'big'))
+    return f'vapid t={head}.{claims}.{sig}, k={_vapid_public()}'
+
+
+def _send_push(endpoint, contact):
+    """An empty push: the service worker asks /api/admin/support/latest what
+    to show, so there is no payload to encrypt. False when the browser's push
+    service says the subscription is gone for good."""
+    import requests
+    try:
+        r = requests.post(endpoint, timeout=10, data=b'', headers={
+            'Authorization': _vapid_auth(endpoint, contact),
+            'TTL': '86400', 'Urgency': 'high'})
+    except Exception as e:
+        logger.warning('PUSH FAILED %s: %s', endpoint[:60], e)
+        return True
+    if r.status_code in (404, 410):
+        return False
+    if r.status_code >= 400:
+        logger.warning('PUSH REFUSED %s: %s %s', endpoint[:60], r.status_code,
+                       r.text[:200])
+    return True
+
+
+def _deliver_support_alert(emails, endpoints, contact, subject, body):
+    if emails and not _send_email(emails, subject, body):
+        logger.info('SUPPORT EMAIL not sent (SMTP unset or failed)')
+    gone = [e for e in endpoints if not _send_push(e, contact)]
+    if gone:
+        from db import delete_push_subscription
+        s = _db_session()
+        try:
+            for e in gone:
+                delete_push_subscription(s, e)
+            s.commit()
+        finally:
+            s.close()
+
+
+def _support_alert(s, t, user, text, human=False):
+    """What to send for a user's new support message, stamping the throttle
+    in the request's own transaction. The caller hands the result to
+    _fire_support_alert after committing, so no send holds the transaction."""
+    from db import list_push_subscriptions
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    want_email = human or not t.emailed_at or now - t.emailed_at >= SUPPORT_EMAIL_EVERY
+    want_push = human or not t.pushed_at or now - t.pushed_at >= SUPPORT_PUSH_EVERY
+    if not (want_email or want_push):
+        return None
+    admins = _support_admins(s)
+    prefs = _support_alert_prefs(s)
+    emails, endpoints = [], []
+    if want_email:
+        override = (os.getenv('SUPPORT_ALERT_EMAILS') or '').strip()
+        emails = ([e.strip() for e in override.split(',') if e.strip()] if override
+                  else [a.email for a in admins
+                        if (prefs.get(a.id) or {}).get('email', True)])
+        if emails and _smtp_config():
+            t.emailed_at = now
+    if want_push:
+        endpoints = [p.endpoint for p in
+                     list_push_subscriptions(s, [a.id for a in admins])]
+        if endpoints:
+            t.pushed_at = now
+    if not (emails or endpoints):
+        return None
+    who = (user.get('name') or user['email']) if user else 'A visitor'
+    key = user['id'] if user else 'v:' + (t.visitor_id or '')
+    link = (_callback_origin() + '/admin/support?'
+            + (f'user={key}' if user else f'visitor={t.visitor_id}'))
+    subject = (f'{who} asked for a person in support' if human
+               else f'Support message from {who}')
+    body = (f"{who}{' (' + user['email'] + ')' if user and user.get('name') else ''}"
+            f" wrote{' on ' + t.last_page if t.last_page else ''}:\n\n{text}\n\n"
+            f"{'They asked to talk to a person. ' if human else ''}"
+            f"Reply: {link}\n")
+    contact = 'mailto:' + ((_smtp_config() or {}).get('from')
+                           or (admins[0].email if admins else 'support@localhost'))
+    return (emails, endpoints, contact, subject, body)
+
+
+def _fire_support_alert(args):
+    if not args:
+        return
+    if IS_VERCEL:
+        _deliver_support_alert(*args)
+    else:
+        threading.Thread(target=_deliver_support_alert, args=args,
+                         daemon=True).start()
+
+
+SUPPORT_SEEN_EVERY = timedelta(seconds=60)
+# The bubble polls every 30s while a tab is visible and stops when it is
+# hidden, so anyone seen inside this window has the site open in front of them.
+SUPPORT_ONLINE_WINDOW = 90
+
+
+def _support_seen(s, t, user):
+    """Stamp presence from the bubble's poll, throttled so a tab polling every
+    few seconds is not a write every few seconds."""
+    from db import User
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    rows = [t] if t is not None else []
+    if user:
+        u = s.get(User, user['id'])
+        if u is not None:
+            rows.append(u)
+    for row in rows:
+        if not row.last_seen_at or now - row.last_seen_at >= SUPPORT_SEEN_EVERY:
+            row.last_seen_at = now
+
+
 def _support_payload(s, t, user):
     from db import list_support_messages, _epoch
     msgs = list_support_messages(s, t.id) if t is not None else []
@@ -3824,6 +4023,7 @@ def api_support_get():
         page = (request.args.get('page') or '')[:255]
         if t is not None and page and page != t.last_page:
             t.last_page = page
+        _support_seen(s, t, user)
         s.commit()
         return jsonify(_support_payload(s, t, user))
     finally:
@@ -3850,6 +4050,13 @@ def api_support_post():
             t.last_page = page
         add_support_message(s, t, 'user', text)
         chat_logger.info('SUPPORT IN %s: %s', who, text)
+        alert = None
+        try:
+            alert = _support_alert(s, t, user, text)
+        except Exception:
+            logger.exception('SUPPORT ALERT failed')
+        s.commit()
+        _fire_support_alert(alert)
         if t.mode == 'ai':
             since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=1)
             if not user and count_support_ai_since(s, t.id, since) >= SUPPORT_AI_DAILY_CAP:
@@ -3876,14 +4083,21 @@ def api_support_human():
     try:
         t = get_support_thread(s, user_id=user['id'] if user else None,
                                visitor_id=vid, create=True)
+        alert = None
         if t.mode != 'human':
             t.mode = 'human'
             add_support_message(s, t, 'ai', "I've asked a team member to join. "
                                 "They'll reply here, and you'll see a badge on "
                                 "the chat button when they do.")
             t.admin_unread = (t.admin_unread or 0) + 1
+            try:
+                alert = _support_alert(s, t, user, 'Asked to talk to a person.',
+                                       human=True)
+            except Exception:
+                logger.exception('SUPPORT ALERT failed')
         t.user_unread = 0
         s.commit()
+        _fire_support_alert(alert)
         return jsonify(_support_payload(s, t, user))
     finally:
         s.close()
@@ -3917,6 +4131,15 @@ def _admin_support_thread(s, key, create=False):
     return get_support_thread(s, user_id=key, create=create)
 
 
+def _support_seen_epoch(u, t=None):
+    """Last time this person was on the site: the bubble's heartbeat, or a
+    sign-in for someone who has not been back since this was added."""
+    from db import _epoch
+    stamps = [x for x in ((u.last_seen_at, u.last_login) if u is not None else ())
+              + ((t.last_seen_at,) if t is not None else ()) if x]
+    return _epoch(max(stamps)) if stamps else 0
+
+
 @app.route('/api/admin/support', methods=['GET'])
 def api_admin_support_threads():
     blocked = _require_admin()
@@ -3941,11 +4164,16 @@ def api_admin_support_threads():
                         'page': t.last_page or '',
                         'last': (last.content[:120] if last else ''),
                         'last_role': last.role if last else '',
-                        'at': _epoch(t.last_at)})
+                        'at': _epoch(t.last_at),
+                        'joined': _epoch(u.created_at if u else t.created_at),
+                        'seen': _support_seen_epoch(u, t)})
         people = [{'key': u.id, 'email': u.email, 'name': u.name or '',
-                   'tier': u.tier or '', 'status': u.status or ''}
+                   'tier': u.tier or '', 'status': u.status or '',
+                   'joined': _epoch(u.created_at), 'seen': _support_seen_epoch(u)}
                   for u in users.values()]
-        return jsonify({'ok': True, 'threads': out, 'users': people})
+        return jsonify({'ok': True, 'threads': out, 'users': people,
+                        'now': int(time.time()),
+                        'online_window': SUPPORT_ONLINE_WINDOW})
     finally:
         s.close()
 
@@ -3971,8 +4199,10 @@ def api_admin_support_get(key):
             'page': (t.last_page if t is not None else '') or '',
             'user': ({'email': u.email, 'name': u.name or '', 'tier': u.tier or '',
                       'status': u.status or '', 'country': u.country or '',
-                      'brand': u.brand or '', 'joined': _fmt_date(u.created_at),
-                      'last_login': _fmt_datetime(u.last_login)} if u else None),
+                      'brand': u.brand or ''} if u else None),
+            'joined': _epoch(u.created_at if u else t.created_at),
+            'seen': _support_seen_epoch(u, t),
+            'now': int(time.time()), 'online_window': SUPPORT_ONLINE_WINDOW,
             'messages': [{'id': m.id, 'role': m.role, 'content': m.content,
                           'author': m.author or '', 'at': _epoch(m.created_at)}
                          for m in msgs]})
@@ -4028,6 +4258,123 @@ def api_admin_support_mode(key):
         s.close()
 
 
+@app.route('/api/admin/support/alerts', methods=['GET', 'POST'])
+def api_admin_support_alerts():
+    """This admin's email alert switch, and what the inbox needs to switch
+    push on in this browser."""
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    from db import set_app_setting
+    admin = _current_user()
+    s = _db_session()
+    try:
+        prefs = _support_alert_prefs(s)
+        if request.method == 'POST':
+            mine = prefs.setdefault(admin['id'], {})
+            mine['email'] = bool((request.get_json(silent=True) or {}).get('email'))
+            set_app_setting(s, SUPPORT_ALERT_PREFS, json.dumps(prefs))
+            s.commit()
+        override = (os.getenv('SUPPORT_ALERT_EMAILS') or '').strip()
+        return jsonify({'ok': True,
+                        'email': (prefs.get(admin['id']) or {}).get('email', True),
+                        'email_to': admin['email'], 'email_override': override,
+                        'smtp': bool(_smtp_config()),
+                        'vapid_public': _vapid_public()})
+    finally:
+        s.close()
+
+
+@app.route('/api/admin/push/subscribe', methods=['POST'])
+def api_admin_push_subscribe():
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    from db import save_push_subscription
+    endpoint = ((request.get_json(silent=True) or {}).get('endpoint') or '').strip()
+    if not endpoint.startswith('https://'):
+        return jsonify({'ok': False, 'error': 'No push endpoint'}), 400
+    s = _db_session()
+    try:
+        save_push_subscription(s, _current_user()['id'], endpoint)
+        s.commit()
+        return jsonify({'ok': True})
+    finally:
+        s.close()
+
+
+@app.route('/api/admin/push/unsubscribe', methods=['POST'])
+def api_admin_push_unsubscribe():
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    from db import delete_push_subscription
+    endpoint = ((request.get_json(silent=True) or {}).get('endpoint') or '').strip()
+    s = _db_session()
+    try:
+        delete_push_subscription(s, endpoint)
+        s.commit()
+        return jsonify({'ok': True})
+    finally:
+        s.close()
+
+
+@app.route('/api/admin/support/latest')
+def api_admin_support_latest():
+    """What a push notification says. The push itself is empty, so the
+    service worker asks here, with the admin's own cookie."""
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    from db import User, SupportThread, SupportMessage
+    s = _db_session()
+    try:
+        t = (s.query(SupportThread).filter(SupportThread.admin_unread > 0)
+             .order_by(SupportThread.last_at.desc()).first())
+        if t is None:
+            return jsonify({'ok': True, 'title': 'Support', 'url': '/admin/support',
+                            'body': 'New activity in the support inbox.'})
+        u = s.get(User, t.user_id) if t.user_id else None
+        last = (s.query(SupportMessage)
+                .filter_by(thread_id=t.id, role='user')
+                .order_by(SupportMessage.created_at.desc()).first())
+        waiting = (s.query(SupportThread)
+                   .filter(SupportThread.admin_unread > 0).count())
+        who = ((u.name or u.email) if u else 'Visitor')
+        return jsonify({
+            'ok': True, 'tag': 'support-' + t.id,
+            'title': f'{who}' + (' · wants a person' if t.mode == 'human' else ''),
+            'body': ((last.content if last else 'New support message')[:180]
+                     + (f'\n+{waiting - 1} more waiting' if waiting > 1 else '')),
+            'url': '/admin/support?' + (f'user={u.id}' if u
+                                        else f'visitor={t.visitor_id}')})
+    finally:
+        s.close()
+
+
+@app.route('/api/admin/support/test-alert', methods=['POST'])
+def api_admin_support_test_alert():
+    """Push and email only this admin, so they can see alerts work without
+    waiting for a user to write in."""
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    from db import list_push_subscriptions
+    admin = _current_user()
+    s = _db_session()
+    try:
+        endpoints = [p.endpoint for p in list_push_subscriptions(s, [admin['id']])]
+    finally:
+        s.close()
+    contact = 'mailto:' + ((_smtp_config() or {}).get('from') or admin['email'])
+    emailed = _send_email([admin['email']], 'Support alerts are working',
+                          'This is a test of the support inbox alerts.\n\n'
+                          + _callback_origin() + '/admin/support\n')
+    pushed = sum(1 for e in endpoints if _send_push(e, contact))
+    return jsonify({'ok': True, 'emailed': emailed, 'pushed': pushed,
+                    'devices': len(endpoints)})
+
+
 @app.route('/admin/support')
 def admin_support():
     blocked = _require_admin()
@@ -4043,7 +4390,13 @@ ADMIN_SUPPORT_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-
 <style>""" + ACCOUNT_CSS + """
 body{display:block;padding:24px 16px}
 .wrap{max-width:1180px;margin:0 auto}
-.inbox{display:grid;grid-template-columns:320px 1fr;gap:14px;height:calc(100vh - 110px);min-height:480px}
+.alerts{display:flex;flex-wrap:wrap;gap:10px 22px;align-items:center;background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:10px 14px;margin-bottom:12px;font-size:.82rem;color:var(--text-2)}
+.alerts label{display:flex;align-items:center;gap:8px;margin:0;font-size:.82rem;color:var(--text-2);cursor:pointer}
+.alerts input[type=checkbox]{width:16px;height:16px;margin:0;accent-color:var(--accent)}
+.alerts .note{color:var(--text-muted);font-size:.76rem}
+.alerts .warn{color:#f59e0b;font-size:.76rem}
+.alerts button{width:auto;padding:6px 12px;font-size:.78rem;border-radius:9px}
+.inbox{display:grid;grid-template-columns:320px 1fr;gap:14px;height:calc(100vh - 160px);min-height:480px}
 .col{background:var(--panel);border:1px solid var(--border);border-radius:14px;display:flex;flex-direction:column;min-height:0}
 .col-head{padding:12px;border-bottom:1px solid var(--border)}
 .col-head input{margin:0;padding:9px 12px;font-size:.85rem}
@@ -4052,13 +4405,18 @@ body{display:block;padding:24px 16px}
 .item:hover{background:var(--surface)}
 .item.sel{background:var(--surface);box-shadow:inset 3px 0 0 var(--accent)}
 .item .top{display:flex;justify-content:space-between;gap:8px;align-items:center}
-.item .who{font-weight:600;font-size:.86rem;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.item .prev{font-size:.78rem;color:var(--text-muted);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.item .who{font-weight:600;font-size:.86rem;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center;gap:7px}
+.item .prev,.item .seen{font-size:.78rem;color:var(--text-muted);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.item .seen{font-size:.72rem}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--border);flex-shrink:0;display:inline-block}
+.dot.on{background:#22c55e;box-shadow:0 0 0 3px #22c55e33}
+.on-text{color:#16a34a;font-weight:600}
 .badge{background:var(--accent);color:#fff;border-radius:999px;font-size:.68rem;font-weight:700;padding:1px 7px}
 .pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:.68rem;font-weight:600;background:var(--surface);color:var(--text-3);border:1px solid var(--border)}
 .pill.human{background:#2e1065;color:#c4b5fd;border-color:#4c1d95}
 .sect{font-size:.7rem;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);padding:12px 14px 6px}
 .convo-head{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap}
+.convo-head .name{font-weight:700;display:flex;align-items:center;gap:8px}
 .convo-head .meta{font-size:.78rem;color:var(--text-muted);margin-top:3px}
 .msgs{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:8px}
 .m{max-width:72%;padding:9px 13px;border-radius:14px;font-size:.88rem;line-height:1.45;white-space:pre-wrap;word-wrap:break-word}
@@ -4076,6 +4434,13 @@ button.ghost:hover{animation:none;box-shadow:none}
 </style></head><body><div class="wrap">
 <div class="bar"><span>Admin &middot; support inbox</span>
 <span><a href="/admin/users">All users</a> &nbsp; <a href="/dashboard">Dashboard</a> &nbsp; <a href="/logout">Sign out</a></span></div>
+<div class="alerts">
+  <label><input type="checkbox" id="al-email"> Email me when a user writes</label>
+  <span class="note" id="al-email-note"></span>
+  <span id="al-push"></span>
+  <button type="button" class="ghost" id="al-test">Send test alert</button>
+  <span class="note" id="al-test-note"></span>
+</div>
 <div class="inbox">
   <div class="col">
     <div class="col-head"><input id="q" type="search" placeholder="Search, or pick anyone to message"></div>
@@ -4084,14 +4449,25 @@ button.ghost:hover{animation:none;box-shadow:none}
   <div class="col" id="convo"><div class="empty">Pick a conversation, or search for any user to start one.<br>They'll see it in the chat bubble on their next page view.</div></div>
 </div></div>
 <script>
-var threads = [], users = [], current = null, lastSig = '';
+var threads = [], users = [], current = null, lastSig = '', skew = 0, onlineWindow = 90;
 function esc(s){var d=document.createElement('div');d.textContent=s==null?'':String(s);return d.innerHTML;}
+function now(){return Date.now()/1000+skew;}
+// Times are epochs from the server and shown in this browser's own timezone.
 function when(t){if(!t)return '';var d=new Date(t*1000),n=new Date();
   return d.toDateString()===n.toDateString()?d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}):d.toLocaleDateString();}
+function full(t){return t?new Date(t*1000).toLocaleString([], {day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}):'';}
+function isOnline(seen){return seen&&now()-seen<onlineWindow;}
+function ago(t){var s=Math.max(0,now()-t);
+  if(s<3600)return Math.max(1,Math.round(s/60))+' min ago';
+  if(s<86400)return Math.round(s/3600)+' h ago';
+  if(s<86400*30)return Math.round(s/86400)+' d ago';
+  return new Date(t*1000).toLocaleDateString();}
+function presence(seen){return isOnline(seen)?'<span class="on-text">Online now</span>':(seen?'Last online '+ago(seen):'Not seen online yet');}
 function label(t){return t.visitor?'Visitor':(t.name?t.name+' · '+t.email:t.email);}
 function loadList(){
   fetch('/api/admin/support').then(function(r){return r.json();}).then(function(d){
-    if(!d.ok)return; threads=d.threads; users=d.users; renderList();
+    if(!d.ok)return; threads=d.threads; users=d.users;
+    skew=d.now-Date.now()/1000; onlineWindow=d.online_window||90; renderList();
   });
 }
 function renderList(){
@@ -4099,18 +4475,26 @@ function renderList(){
   var have={};
   threads.forEach(function(t){have[t.key]=1;
     if(q && (label(t)+' '+t.last+' '+t.page).toLowerCase().indexOf(q)<0)return;
-    h+='<a class="item'+(current===t.key?' sel':'')+'" data-k="'+esc(t.key)+'"><div class="top"><span class="who">'+esc(label(t))+'</span>'
+    h+='<a class="item'+(current===t.key?' sel':'')+'" data-k="'+esc(t.key)+'"><div class="top"><span class="who"><span class="dot'+(isOnline(t.seen)?' on':'')+'"></span>'+esc(label(t))+'</span>'
       +(t.unread?'<span class="badge">'+t.unread+'</span>':'<span class="pill'+(t.mode==='human'?' human':'')+'">'+(t.mode==='human'?'you':'AI')+'</span>')
-      +'</div><div class="prev">'+esc((t.last_role==='user'?'':t.last_role==='admin'?'You: ':'AI: ')+t.last)+' · '+when(t.at)+'</div></a>';
+      +'</div><div class="prev">'+esc((t.last_role==='user'?'':t.last_role==='admin'?'You: ':'AI: ')+t.last)+' · '+when(t.at)+'</div>'
+      +'<div class="seen">'+presence(t.seen)+' · joined '+esc(full(t.joined))+'</div></a>';
   });
   if(!h)h='<div class="empty">No conversations yet.</div>';
+  var online=users.filter(function(u){return !have[u.key]&&isOnline(u.seen);});
   if(q){
     var more=users.filter(function(u){return !have[u.key]&&(u.email+' '+u.name).toLowerCase().indexOf(q)>=0;}).slice(0,40);
-    if(more.length){h+='<div class="sect">Start a chat</div>';
-      more.forEach(function(u){h+='<a class="item" data-k="'+esc(u.key)+'"><div class="who">'+esc(u.name?u.name+' · '+u.email:u.email)+'</div><div class="prev">'+esc((u.tier||'no plan')+' · '+u.status)+'</div></a>';});}
+    if(more.length){h+='<div class="sect">Start a chat</div>';more.forEach(function(u){h+=person(u);});}
+  } else if(online.length){
+    h+='<div class="sect">Online now &middot; no chat yet</div>';online.forEach(function(u){h+=person(u);});
   }
   var el=document.getElementById('list'); el.innerHTML=h;
   el.querySelectorAll('.item').forEach(function(a){a.onclick=function(){open(a.getAttribute('data-k'));};});
+}
+function person(u){
+  return '<a class="item'+(current===u.key?' sel':'')+'" data-k="'+esc(u.key)+'"><div class="who"><span class="dot'+(isOnline(u.seen)?' on':'')+'"></span>'+esc(u.name?u.name+' · '+u.email:u.email)+'</div>'
+    +'<div class="prev">'+esc((u.tier||'no plan')+' · '+u.status)+'</div>'
+    +'<div class="seen">'+presence(u.seen)+' · joined '+esc(full(u.joined))+'</div></a>';
 }
 function open(k){current=k;lastSig='';history.replaceState(null,'','?'+(k.indexOf('v:')===0?'visitor='+encodeURIComponent(k.slice(2)):'user='+encodeURIComponent(k)));loadConvo(true);renderList();}
 function loadConvo(scroll){
@@ -4118,14 +4502,17 @@ function loadConvo(scroll){
   var k=current;
   fetch('/api/admin/support/'+encodeURIComponent(k)).then(function(r){return r.json();}).then(function(d){
     if(!d.ok||k!==current)return;
-    var sig=d.mode+'|'+d.messages.length+'|'+(d.messages.length?d.messages[d.messages.length-1].id:'');
+    skew=d.now-Date.now()/1000;
+    var on=isOnline(d.seen);
+    var sig=d.mode+'|'+d.messages.length+'|'+(d.messages.length?d.messages[d.messages.length-1].id:'')+'|'+on+'|'+d.seen;
     if(sig===lastSig)return; lastSig=sig;
     var u=d.user, c=document.getElementById('convo');
     var draft=(document.getElementById('reply')||{}).value||'';
     var hadFocus=document.activeElement&&document.activeElement.id==='reply';
-    var meta=u?[u.tier||'no plan',u.status,u.brand,u.country,'joined '+u.joined,u.last_login?'last seen '+u.last_login:''].filter(Boolean).join(' · '):'Anonymous visitor';
-    if(d.page)meta+=' · on '+d.page;
-    var h='<div class="convo-head"><div><div style="font-weight:700">'+esc(u?(u.name?u.name+' · '+u.email:u.email):'Visitor')+'</div><div class="meta">'+esc(meta)+'</div></div>'
+    var meta=(u?[u.tier||'no plan',u.status,u.brand,u.country]:['Anonymous visitor']).filter(Boolean).join(' · ');
+    var times=presence(d.seen)+(d.seen&&!on?' ('+esc(full(d.seen))+')':'')+' · '+(u?'joined ':'first seen ')+esc(full(d.joined));
+    if(d.page)times+=' · on '+esc(d.page);
+    var h='<div class="convo-head"><div><div class="name"><span class="dot'+(on?' on':'')+'"></span>'+esc(u?(u.name?u.name+' · '+u.email:u.email):'Visitor')+'</div><div class="meta">'+esc(meta)+'</div><div class="meta">'+times+'</div></div>'
       +'<div>'+(d.mode==='human'?'<button class="ghost" id="mode" data-m="ai">Hand back to AI</button>':'<button class="ghost" id="mode" data-m="human">Take over</button>')+'</div></div><div class="msgs" id="msgs">';
     if(!d.messages.length)h+='<div class="empty">No messages yet. Write first &mdash; it appears in their chat bubble with a badge.</div>';
     d.messages.forEach(function(m){h+='<div class="m '+m.role+'"><span class="by">'+esc(m.role==='user'?'them':m.role==='ai'?'AI assistant':(m.author||'admin'))+' · '+when(m.at)+'</span>'+esc(m.content)+'</div>';});
@@ -4149,10 +4536,66 @@ function send(){
   fetch('/api/admin/support/'+encodeURIComponent(k),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text})})
     .then(function(x){return x.json();}).then(function(d){if(!d.ok){r.value=text;alert(d.error||'Could not send');return;}lastSig='';loadConvo();loadList();});
 }
+
+// Alerts: email is a per-admin switch; push is per browser, so it is set up
+// here against this browser's own service worker.
+var vapidKey = '';
+function post(url, body){return fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})}).then(function(r){return r.json();});}
+function keyBytes(b64){var p='='.repeat((4-b64.length%4)%4),s=atob((b64+p).replace(/-/g,'+').replace(/_/g,'/'));
+  var a=new Uint8Array(s.length);for(var i=0;i<s.length;i++)a[i]=s.charCodeAt(i);return a;}
+function pushSupported(){return 'serviceWorker' in navigator&&'PushManager' in window&&'Notification' in window;}
+function paintPush(sub){
+  var el=document.getElementById('al-push');
+  if(!pushSupported()){el.innerHTML='<span class="note">Push isn\\u2019t available in this browser. On iPhone, add this page to the Home Screen first.</span>';return;}
+  if(Notification.permission==='denied'){el.innerHTML='<span class="warn">Notifications are blocked for this site in your browser settings.</span>';return;}
+  el.innerHTML=sub?'<label><input type="checkbox" checked id="al-push-cb"> Push alerts on this device</label>'
+                  :'<label><input type="checkbox" id="al-push-cb"> Push alerts on this device</label>';
+  document.getElementById('al-push-cb').onchange=function(){this.checked?enablePush():disablePush();};
+}
+function registration(){return navigator.serviceWorker.register('/js/support-sw.js',{scope:'/js/'});}
+function enablePush(){
+  Notification.requestPermission().then(function(p){
+    if(p!=='granted'){paintPush(null);return;}
+    return registration().then(function(reg){return navigator.serviceWorker.ready.then(function(){return reg;});})
+      .then(function(reg){return reg.pushManager.getSubscription().then(function(s){
+        return s||reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:keyBytes(vapidKey)});});})
+      .then(function(sub){return post('/api/admin/push/subscribe',{endpoint:sub.endpoint}).then(function(){paintPush(sub);});});
+  }).catch(function(e){document.getElementById('al-push').innerHTML='<span class="warn">Could not turn on push: '+esc(e.message||e)+'</span>';});
+}
+function disablePush(){
+  navigator.serviceWorker.getRegistration('/js/').then(function(reg){return reg&&reg.pushManager.getSubscription();})
+    .then(function(sub){if(!sub)return paintPush(null);
+      return post('/api/admin/push/unsubscribe',{endpoint:sub.endpoint}).then(function(){return sub.unsubscribe();}).then(function(){paintPush(null);});});
+}
+function loadAlerts(){
+  fetch('/api/admin/support/alerts').then(function(r){return r.json();}).then(function(d){
+    if(!d.ok)return; vapidKey=d.vapid_public;
+    var cb=document.getElementById('al-email'), note=document.getElementById('al-email-note');
+    cb.checked=!!d.email; cb.disabled=!!d.email_override;
+    note.innerHTML=!d.smtp?'<span class="warn">SMTP isn\\u2019t set up (SMTP_HOST), so no email goes out yet.</span>'
+      :d.email_override?esc('SUPPORT_ALERT_EMAILS sends to '+d.email_override):esc('to '+d.email_to);
+    cb.onchange=function(){post('/api/admin/support/alerts',{email:cb.checked});};
+    if(!pushSupported())return paintPush(null);
+    navigator.serviceWorker.getRegistration('/js/').then(function(reg){return reg?reg.pushManager.getSubscription():null;})
+      .then(function(sub){
+        // Re-register a subscription the server has lost, so a redeploy or a
+        // pruned row does not silently stop alerts on a browser that says on.
+        if(sub)post('/api/admin/push/subscribe',{endpoint:sub.endpoint});
+        paintPush(sub);
+      });
+  });
+}
+document.getElementById('al-test').onclick=function(){
+  var n=document.getElementById('al-test-note'); n.textContent='Sending\\u2026';
+  post('/api/admin/support/test-alert').then(function(d){
+    n.textContent=(d.emailed?'Email sent':'No email (SMTP not set up)')+' \\u00b7 push to '+d.pushed+' of '+d.devices+' device'+(d.devices===1?'':'s');
+  });
+};
+
 document.getElementById('q').oninput=renderList;
 var p=new URLSearchParams(location.search);
 if(p.get('user'))current=p.get('user'); else if(p.get('visitor'))current='v:'+p.get('visitor');
-loadList(); if(current)loadConvo(true);
+loadAlerts(); loadList(); if(current)loadConvo(true);
 setInterval(function(){if(document.hidden)return;loadList();loadConvo();},5000);
 </script></body></html>"""
 
@@ -5211,30 +5654,35 @@ def _smtp_config():
     }
 
 
-def _send_reset_email(to_email, reset_link):
-    """Send the reset link over SMTP. Returns True only if the send actually
-    succeeded, so a failed send falls back to showing the link on the page
-    instead of silently pretending it was delivered."""
+def _send_email(to_emails, subject, body):
+    """Send a plain-text email over SMTP. True only if the send succeeded."""
     cfg = _smtp_config()
-    if not cfg:
+    if not cfg or not to_emails:
         return False
     import smtplib
     from email.mime.text import MIMEText
-    msg = MIMEText(f'Reset your password: {reset_link}\n\n'
-                    'If you did not request this, ignore this email.')
-    msg['Subject'] = 'Reset your password'
+    msg = MIMEText(body)
+    msg['Subject'] = subject
     msg['From'] = cfg['from']
-    msg['To'] = to_email
+    msg['To'] = ', '.join(to_emails)
     try:
         with smtplib.SMTP(cfg['host'], cfg['port'], timeout=10) as server:
             server.starttls()
             if cfg['user']:
                 server.login(cfg['user'], cfg['password'])
-            server.sendmail(cfg['from'], [to_email], msg.as_string())
+            server.sendmail(cfg['from'], list(to_emails), msg.as_string())
     except Exception:
-        logger.exception('RESET EMAIL FAILED to=%s', to_email)
+        logger.exception('EMAIL FAILED to=%s subject=%s', to_emails, subject)
         return False
     return True
+
+
+def _send_reset_email(to_email, reset_link):
+    """A failed send falls back to showing the link on the page instead of
+    silently pretending it was delivered, so this reports whether it went."""
+    return _send_email([to_email], 'Reset your password',
+                       f'Reset your password: {reset_link}\n\n'
+                       'If you did not request this, ignore this email.')
 
 
 @app.route('/forgot-password', methods=['GET', 'POST'])

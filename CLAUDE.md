@@ -31,6 +31,7 @@ characters.py                   — Character catalogue: views, features, level 
 characters.html                 — Character builder (face, checks, body views; admin-only)
 js/character-visuals.js         — Option drawings for the character builder (SVG, parametric)
 js/support-widget.js            — Support bubble (AI assistant, team takeover), loaded by site-nav.js
+js/support-sw.js                — Service worker for admin push alerts (empty push; fetches what to show)
 test_characters.py              — SFW/NSFW separation and validation tests
 imagegen.py                     — NSFW image/video generation (Runware, ModelsLab)
 credits.py                      — Token pricing, top-up packs, margin floor
@@ -108,6 +109,8 @@ requirements.txt                — Python deps: flask, google-genai, python-dot
 | `POST /api/support/human` | — | Ask for a person; the assistant stops answering |
 | `GET /admin/support` | — | Admin support inbox; start a chat with any account |
 | `GET/POST /api/admin/support/{user_id}` | JSON | Read / write a thread as the team (`v:{visitor}` for a signed-out one) |
+| `GET/POST /api/admin/support/alerts` | JSON | This admin's email-alert switch and the VAPID public key |
+| `POST /api/admin/push/subscribe` | JSON | Register this browser for support push alerts |
 
 ---
 
@@ -350,6 +353,14 @@ Stay completely in character. Never mention being an AI.
 - A credit top-up rides the same `Payment` row, providers and webhooks as a
   subscription — `kind` is the only thing that tells them apart, so Oxapay keeps
   working and a redelivered webhook cannot credit twice.
+- **Support alerts** go to every admin by email (`SMTP_*`; `SUPPORT_ALERT_EMAILS`
+  overrides the recipients) and by Web Push to browsers switched on in
+  `/admin/support`, throttled per thread (email 10 min, push 1 min; a request for a
+  person always gets through). The push is empty — the service worker fetches the
+  text with the admin's cookie — so it needs no encryption library. The VAPID key
+  lives in app settings (or `VAPID_PRIVATE_KEY`); replacing it orphans every
+  subscription. Presence ("Online now") is the support bubble's poll, stamped at
+  most once a minute into `users.last_seen_at`.
 - Fanvue, OnlyFans and Discord DMs share one reply engine through the platform
   adapters (`_Platform` in `app.py`): a platform says where its state is keyed,
   how a chat reads, and how a message goes out. New platform work belongs in an

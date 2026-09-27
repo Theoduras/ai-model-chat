@@ -704,6 +704,9 @@ class User(Base):
     expires_at = Column(DateTime)
     created_at = Column(DateTime, default=_now)
     last_login = Column(DateTime)
+    # Refreshed by the support bubble's poll, at most once a minute, so admins
+    # can see who is on the site right now.
+    last_seen_at = Column(DateTime)
 
     # Forgot-password flow. Single-use, cleared on consumption or replaced by
     # a fresh request; reset_token_expires makes an old, unclaimed link inert.
@@ -1082,6 +1085,12 @@ class SupportThread(Base):
     last_page = Column(String(255), default='')
     user_unread = Column(Integer, default=0)
     admin_unread = Column(Integer, default=0)
+    # When admins were last alerted about this thread, so a user typing five
+    # lines in a row is one email rather than five.
+    emailed_at = Column(DateTime)
+    pushed_at = Column(DateTime)
+    # A visitor has no user row, so their presence is kept here.
+    last_seen_at = Column(DateTime)
     last_at = Column(DateTime, default=_now, index=True)
     created_at = Column(DateTime, default=_now)
 
@@ -1099,6 +1108,39 @@ class SupportMessage(Base):
 
 Index('ix_support_messages_thread_created', SupportMessage.thread_id,
       SupportMessage.created_at)
+
+
+class PushSubscription(Base):
+    """A browser an admin allowed to show support alerts. The endpoint is the
+    browser vendor's push URL for that one browser; it is dropped the first
+    time the vendor says it is gone."""
+    __tablename__ = 'push_subscriptions'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    user_id = Column(String(32), nullable=False, index=True)
+    endpoint = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=_now)
+
+
+def save_push_subscription(session, user_id, endpoint):
+    row = session.query(PushSubscription).filter_by(endpoint=endpoint).first()
+    if row is None:
+        row = PushSubscription(user_id=user_id, endpoint=endpoint)
+        session.add(row)
+    else:
+        row.user_id = user_id
+    return row
+
+
+def delete_push_subscription(session, endpoint):
+    return session.query(PushSubscription).filter_by(endpoint=endpoint).delete()
+
+
+def list_push_subscriptions(session, user_ids):
+    if not user_ids:
+        return []
+    return (session.query(PushSubscription)
+            .filter(PushSubscription.user_id.in_(list(user_ids))).all())
 
 
 def get_support_thread(session, user_id=None, visitor_id=None, create=False):
