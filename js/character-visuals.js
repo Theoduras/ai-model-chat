@@ -225,8 +225,11 @@
   const liner = line('M21,30.4 q3.5,-2 7,0.2 l1.4,-0.9 M43,30.4 q-3.5,-2 -7,0.2 l-1.4,-0.9', ' stroke-width="1.4"');
   const shade = `<path d="M20.5,29.5 Q24.3,26.4 28.6,28.6 Q24.3,27.4 20.5,29.5 Z M43.5,29.5 Q39.7,26.4 35.4,28.6 Q39.7,27.4 43.5,29.5 Z" ` +
     `fill="${INK}" fill-opacity=".45" stroke="none"/>`;
-  const MAKEUP = {'Soft natural': blush + lip('#c98a7e'), 'Polished': blush + liner + lip('#b86a6a'),
-    'Soft glam': blush + shade + liner + lip('#a45a5e'), 'Classic red lip': liner + lip('#b3261e'), 'Bare': ''};
+  const lid = c => `<path d="M20.5,29.5 Q24.3,26.4 28.6,28.6 Q24.3,27.4 20.5,29.5 Z M43.5,29.5 Q39.7,26.4 35.4,28.6 Q39.7,27.4 43.5,29.5 Z" ` +
+    `fill="${c}" fill-opacity=".8" stroke="none"/>`;
+  const MAKEUP = {'Natural glam': blush + lip('#c98a7e'), 'Smoky red': shade + liner + lip('#7e1f2c'),
+    'Gold winged': lid('#d9b25a') + liner + lip('#b0406a'), 'Bronze glam': blush + lid('#b8642e') + liner + lip('#b0604a'),
+    'Emerald glitter': lid('#1f8a5a') + shade + lip('#8a5560'), 'Bare': ''};
 
   // ── Eye close-up: lids, crease, iris, pupil and outer lashes ───────────────
   const EYE = {   // upper [x0,y0,cx,cy,x1,y1], lower control y, crease lift (0 = none)

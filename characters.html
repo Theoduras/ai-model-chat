@@ -1146,11 +1146,15 @@ function pointToNext() {
   say('Accepted \u2713 Next: set up her persona, or start creating content.', 'ok');
 }
 
+const MAKEUP_PHOTOS = {'Natural glam': 1, 'Smoky red': 2, 'Gold winged': 3, 'Bronze glam': 4, 'Emerald glitter': 5};
 function featurePicker(f) {
   const v = (cur.sheet || {})[f.key] || '';
   const opts = f.options.map(o => {
-    const art = window.CharacterVisuals ? CharacterVisuals.render(f.key, o, cur.sheet) : '';
-    return `<button type="button" class="fp-opt${art ? '' : ' text'}" data-feature="${f.key}" data-value="${esc(o)}"
+    // Makeup is picked from example photos; only its words reach the prompt.
+    const photo = f.key === 'makeup' && MAKEUP_PHOTOS[o];
+    const art = photo ? `<img src="/img/makeup/${photo}.jpg" alt="" loading="lazy">`
+      : window.CharacterVisuals ? CharacterVisuals.render(f.key, o, cur.sheet) : '';
+    return `<button type="button" class="fp-opt${photo ? ' look-opt' : art ? '' : ' text'}" data-feature="${f.key}" data-value="${esc(o)}"
       aria-pressed="${o === v}" onclick="pickOption(this)">${art}<span>${esc(o)}</span></button>`;
   }).join('');
   const hex = f.key === 'hair_colour' ? `<label class="hex-pick"><input type="color" id="hair-hex"

@@ -130,7 +130,9 @@ def test_topless_level():
 
 
 def test_makeup():
-    check('unset makeup is soft natural', 'soft natural professional makeup' in CH.build_view_prompt('face_front', {}, 25, False))
+    check('unset makeup is natural glam', 'natural glam makeup' in CH.build_view_prompt('face_front', {}, 25, False))
+    check('old makeup labels still validate', CH.validate({'age': 25, 'sheet': {'makeup': 'Soft glam'}})[0]['sheet']['makeup'] == 'Bronze glam')
+    check('makeup never points at a reference image', not any('reference' in fr for _, fr in CH.features()['makeup'][2]))
     check('bare means no makeup', 'no makeup' in CH.build_view_prompt('face_front', {'makeup': 'Bare'}, 25, False))
     check('makeup stays off a close-up', 'makeup' not in CH.build_view_prompt('nipples', {'makeup': 'Soft glam'}, 25, True))
 

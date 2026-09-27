@@ -68,11 +68,14 @@ FEATURES = {
         'brows': ('Eyebrows', 'face', _opts('eyebrows', 'Soft arch, medium', 'High arch, thin', 'Straight, full', 'Bold, thick')),
         'nose': ('Nose', 'face', _opts('nose', 'Straight, narrow', 'Button', 'Slightly upturned', 'Roman', 'Wide')),
         'lips': ('Lips', 'face', _opts('lips', 'Full, defined bow', 'Medium', 'Thin', 'Very full')),
+        # Described in words only: the picker's example photos never reach a
+        # prompt, so she takes the makeup and never those women's faces.
         'makeup': ('Makeup', 'face', [
-            ('Soft natural', 'soft natural professional makeup: even skin, light concealer, subtle mascara and a neutral lip, barely noticeable'),
-            ('Polished', 'polished professional makeup: defined brows, fine eyeliner, mascara, subtle contour and a rosy nude lip, refined rather than heavy'),
-            ('Soft glam', 'soft glam makeup: softly smoky neutral eyes, fuller lashes, sculpted cheeks and a satin lip, still skin-like'),
-            ('Classic red lip', 'clean polished makeup with a classic red lip'),
+            ('Natural glam', 'wearing natural glam makeup: soft brown eyeshadow, defined lashes, groomed brows, soft blush and a glossy nude-pink lip'),
+            ('Smoky red', 'wearing smoky makeup: smoky brown-burgundy eyes with smudged liner and a deep berry-red lip'),
+            ('Gold winged', 'wearing gold winged makeup: gold and white shimmer on the lids, a sharp black winged liner and a glossy berry-pink lip'),
+            ('Bronze glam', 'wearing bronze glam makeup: copper-bronze shimmer eyeshadow, winged liner, warm blush and a matte terracotta lip'),
+            ('Emerald glitter', 'wearing emerald glitter makeup: emerald glitter smoky eyes, full lashes, glowing highlighted cheekbones and a matte mauve lip'),
             ('Bare', 'no makeup, bare natural skin')]),
         'cheekbones': ('Cheekbones', 'face', _opts('cheekbones', 'High', 'Medium', 'Soft')),
         'jaw': ('Jaw and chin', 'face', [('Soft, rounded chin', 'a soft jaw and rounded chin'), ('Defined jaw', 'a defined jawline'),
@@ -159,7 +162,9 @@ YOUTH_LEANING = {
 YOUTH_WEIGHT = {('apparent_age', '18–21'): 2}
 # Options renamed after sheets were saved with them: the old label still
 # validates and is stored as the new one.
-RENAMED = {('face_shape', 'Long'): 'Rectangle'}
+RENAMED = {('face_shape', 'Long'): 'Rectangle', ('makeup', 'Soft natural'): 'Natural glam',
+           ('makeup', 'Polished'): 'Natural glam', ('makeup', 'Soft glam'): 'Bronze glam',
+           ('makeup', 'Classic red lip'): 'Smoky red'}
 
 YOUTH_BLOCK_AT = 3
 YOUTH_WARN_AT = 2
@@ -659,7 +664,7 @@ def hair_words(hexcode):
 
 
 BLEND_KEEP = ('ethnicity', 'apparent_age', 'hair_colour', 'hair_texture', 'makeup')
-DEFAULT_MAKEUP = 'Soft natural'
+DEFAULT_MAKEUP = 'Natural glam'
 FACE_MODES = ('build', 'blend')
 BODY_MATCH_KEEP = ('height', 'tattoos', 'piercings', 'birthmarks', 'nails')
 BODY_MODES = ('build', 'match')
