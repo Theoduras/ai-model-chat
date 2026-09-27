@@ -58,7 +58,9 @@ tiktok_stub.py                   — Offline TikTok transport (tests only)
 tiktok.html                      — TikTok console (connect, post a video)
 admin.html                      — Visual persona builder UI (creator-facing)
 index.html                      — Homepage (character builder pitch, plans, generation prices)
-webhook-simulator.html          — Free HMAC webhook signature tool (lead magnet; all client-side)
+free_tools.py                   — Free public tools (lead magnets): the list, generator prompts, limiter
+templates/tool.html             — Shared page for the free tools; one child per tool in templates/tools/
+test_free_tools.py              — Free-tool input, parsing and rate-limit tests
 chat.html                       — Fan chat (also where old /landing and /profile links land)
 profile_data.json               — Legacy Lilith profile data (fallback)
 personas/
@@ -110,6 +112,9 @@ requirements.txt                — Python deps: flask, google-genai, python-dot
 | `GET/POST /api/admin/support/{user_id}` | JSON | Read / write a thread as the team (`v:{visitor}` for a signed-out one) |
 | `GET/POST /api/admin/support/alerts` | JSON | This admin's email-alert switch and the VAPID public key |
 | `POST /api/admin/push/subscribe` | JSON | Register this browser for support push alerts |
+| `GET /{tool-slug}` | — | Free tools (`free_tools.TOOLS`); each CTA goes through its own `/signup-tool-…` link |
+| `POST /api/tools/generate` | JSON | Public PPV-caption / DM-opener generator (whitelisted input, rate-limited per IP) |
+| `GET /signup-{code}` | — | Tracked register link: counts the click, and the account made after it (`/admin/register-links`) |
 
 ---
 

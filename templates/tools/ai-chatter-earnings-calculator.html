@@ -1,0 +1,79 @@
+{% extends "tool.html" %}
+{% block sub %}Most creators can't answer every fan who messages them, and unanswered fans rarely buy.
+  Plug in your numbers to see what a reply to every fan could be worth each month.{% endblock %}
+{% block tool %}
+  <section class="panel plain">
+    <h2>Your page today</h2>
+    <p>Every number is yours to change. The defaults are a mid-sized page.</p>
+    <div class="row">
+      <div><label for="subs">Active subscribers</label>
+        <input id="subs" type="number" min="0" step="1" value="500"></div>
+      <div><label for="price">Subscription price (<span class="cur">€</span>/month)</label>
+        <input id="price" type="number" min="0" step="0.01" value="9.99"></div>
+      <div><label for="msg">Fans who message you each month (%)</label>
+        <input id="msg" type="number" min="0" max="100" step="1" value="40"></div>
+      <div><label for="answered">Of those, how many you answer quickly (%)
+        <span class="help">Within an hour or so, while they're still keen.</span></label>
+        <input id="answered" type="number" min="0" max="100" step="1" value="30"></div>
+      <div><label for="buy">Answered fans who buy a PPV (%)</label>
+        <input id="buy" type="number" min="0" max="100" step="1" value="15"></div>
+      <div><label for="ppv">Average PPV price (<span class="cur">€</span>)</label>
+        <input id="ppv" type="number" min="0" step="0.5" value="15"></div>
+      <div><label for="per">PPVs each buyer takes per month</label>
+        <input id="per" type="number" min="0" step="0.5" value="2"></div>
+      <div><label for="fee">Platform fee (%)
+        <span class="help">OnlyFans and Fanvue both keep 20%.</span></label>
+        <input id="fee" type="number" min="0" max="100" step="1" value="20"></div>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="k">You take home today</div><div class="v" id="now">–</div></div>
+      <div class="stat"><div class="k">If every fan got a reply</div><div class="v" id="all">–</div></div>
+      <div class="stat hi"><div class="k">Left on the table each month</div><div class="v" id="gap">–</div></div>
+    </div>
+    <p class="nudge" id="planLine" hidden></p>
+    <p class="note">An estimate, not a promise: it assumes fans you answer buy at the same rate as the
+      ones you answer today, and it counts messages and PPV only, not tips or new subscribers.</p>
+  </section>
+{% endblock %}
+{% block script %}
+<script>
+let CUR = '€', PLAN = null;
+const num = id => Math.max(0, parseFloat($(id).value) || 0);
+const pct = id => Math.min(100, num(id)) / 100;
+const money = v => CUR + Math.round(v).toLocaleString('en-US');
+
+function calc() {
+  const subsRev = num('subs') * num('price');
+  const chatters = num('subs') * pct('msg');
+  const perAnswered = pct('buy') * num('per') * num('ppv');
+  const keep = 1 - pct('fee');
+  const now = (subsRev + chatters * pct('answered') * perAnswered) * keep;
+  const all = (subsRev + chatters * perAnswered) * keep;
+  $('now').textContent = money(now);
+  $('all').textContent = money(all);
+  $('gap').textContent = money(all - now);
+  if (PLAN) {
+    const net = all - now - PLAN.price;
+    $('planLine').hidden = false;
+    $('planLine').innerHTML = all - now < 1
+      ? 'You already answer every fan quickly. An AI chatter would give you those hours back instead.'
+      : net > 0
+      ? 'That is <strong>' + esc(money(net)) + '</strong> a month more after the ' + esc(PLAN.name) +
+        ' plan (' + esc(money(PLAN.price)) + '). <a href="' + esc(SIGNUP) + '">Start free →</a>'
+      : 'At these numbers the ' + esc(PLAN.name) + ' plan (' + esc(money(PLAN.price)) +
+        ') costs more than the replies would earn. Grow your page first, then come back.';
+  }
+}
+
+document.querySelectorAll('input').forEach(el => el.addEventListener('input', calc));
+calc();
+fetch('/api/pricing').then(r => r.json()).then(d => {
+  CUR = d.currency || CUR;
+  document.querySelectorAll('.cur').forEach(el => { el.textContent = CUR; });
+  const k = (d.order || [])[0];
+  if (k && d.tiers && d.tiers[k]) PLAN = { name: d.tiers[k].name, price: +d.tiers[k].price || 0 };
+  calc();
+}).catch(() => {});
+</script>
+{% endblock %}

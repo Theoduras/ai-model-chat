@@ -93,6 +93,10 @@
     { group: 'Tools', items: [
       { href: '/ai-content-planner', label: 'AI content planner' },
       { href: '/ai-image-generator', label: 'AI image generator', soon: true },
+      { href: '/ai-chatter-earnings-calculator', label: 'Earnings calculator' },
+      { href: '/chatter-cost-calculator', label: 'Chatter cost calculator' },
+      { href: '/ppv-caption-generator', label: 'PPV caption generator' },
+      { href: '/dm-opener-generator', label: 'DM opener generator' },
       { href: '/webhook-signature-simulator', label: 'Webhook signature simulator' },
     ] },
   ];

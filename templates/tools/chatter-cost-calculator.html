@@ -1,0 +1,91 @@
+{% extends "tool.html" %}
+{% block sub %}Chatting agencies take a cut of everything your DMs earn, and a hired chatter bills
+  by the hour. See what that costs you per month and per year next to an AI chatter.{% endblock %}
+{% block tool %}
+  <section class="panel plain">
+    <h2>What you pay for chatting</h2>
+    <p>Pick how your chatting is handled today.</p>
+    <div class="seg" role="tablist">
+      <button type="button" class="on" data-mode="agency">Agency commission</button>
+      <button type="button" data-mode="hourly">Hired chatter</button>
+    </div>
+
+    <div id="agency">
+      <div class="row">
+        <div><label for="rev">Monthly revenue from DMs and PPV (<span class="cur">€</span>)</label>
+          <input id="rev" type="number" min="0" step="50" value="3000"></div>
+        <div><label for="cut">Agency commission (%)
+          <span class="help">Agencies typically take 30–50%. Enter yours.</span></label>
+          <input id="cut" type="number" min="0" max="100" step="1" value="40"></div>
+      </div>
+    </div>
+    <div id="hourly" hidden>
+      <div class="row">
+        <div><label for="wage">Chatter's hourly rate (<span class="cur">€</span>)</label>
+          <input id="wage" type="number" min="0" step="0.5" value="5"></div>
+        <div><label for="hours">Hours covered per day</label>
+          <input id="hours" type="number" min="0" max="24" step="1" value="8"></div>
+      </div>
+    </div>
+    <div id="planBox" hidden>
+      <label for="plan">Compare with</label>
+      <select id="plan"></select>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="k">Chatting costs you</div><div class="v" id="cost">–</div></div>
+      <div class="stat"><div class="k" id="planK">AI chatter plan</div><div class="v" id="planV">–</div></div>
+      <div class="stat hi"><div class="k">You'd keep per year</div><div class="v" id="save">–</div></div>
+    </div>
+    <p class="nudge" id="line"></p>
+    <p class="note">Monthly figures use 30 days. An AI chatter replies around the clock; a human
+      chatter covers the hours you pay for. Plan prices are live from our pricing page.</p>
+  </section>
+{% endblock %}
+{% block script %}
+<script>
+let CUR = '€', MODE = 'agency', PLANS = [];
+const num = id => Math.max(0, parseFloat($(id).value) || 0);
+const money = v => (v < 0 ? '−' : '') + CUR + Math.round(Math.abs(v)).toLocaleString('en-US');
+
+function calc() {
+  const cost = MODE === 'agency'
+    ? num('rev') * Math.min(100, num('cut')) / 100
+    : num('wage') * Math.min(24, num('hours')) * 30;
+  $('cost').textContent = money(cost) + '/mo';
+  const plan = PLANS[+$('plan').value || 0];
+  if (!plan) {
+    $('planV').textContent = '–'; $('save').textContent = '–'; $('line').innerHTML = '';
+    return;
+  }
+  $('planK').textContent = plan.name + ' plan';
+  $('planV').textContent = money(plan.price) + '/mo';
+  const yearly = (cost - plan.price) * 12;
+  $('save').textContent = money(yearly);
+  $('line').innerHTML = yearly > 0
+    ? 'Switching would leave <strong>' + esc(money(yearly)) + '</strong> a year with you. ' +
+      '<a href="' + esc(SIGNUP) + '">Start free →</a>'
+    : 'At this size your current setup is cheaper than the ' + esc(plan.name) + ' plan.';
+}
+
+document.querySelectorAll('.seg button').forEach(b => b.addEventListener('click', () => {
+  MODE = b.dataset.mode;
+  document.querySelectorAll('.seg button').forEach(x => x.classList.toggle('on', x === b));
+  $('agency').hidden = MODE !== 'agency';
+  $('hourly').hidden = MODE !== 'hourly';
+  calc();
+}));
+document.querySelectorAll('input,select').forEach(el => el.addEventListener('input', calc));
+calc();
+fetch('/api/pricing').then(r => r.json()).then(d => {
+  CUR = d.currency || CUR;
+  document.querySelectorAll('.cur').forEach(el => { el.textContent = CUR; });
+  PLANS = (d.order || []).filter(k => d.tiers && d.tiers[k] && +d.tiers[k].price > 0)
+    .map(k => ({ name: d.tiers[k].name, price: +d.tiers[k].price }));
+  $('plan').innerHTML = PLANS.map((p, i) =>
+    '<option value="' + i + '">' + esc(p.name) + ' — ' + esc(money(p.price)) + '/month</option>').join('');
+  $('planBox').hidden = !PLANS.length;
+  calc();
+}).catch(() => {});
+</script>
+{% endblock %}

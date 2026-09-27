@@ -1,0 +1,54 @@
+{% extends "tool.html" %}
+{% block sub %}The first message decides whether a new subscriber ever talks to you. Get five
+  openers in your vibe that feel personal and end with an easy question.{% endblock %}
+{% block tool %}
+  <section class="panel plain">
+    <h2>About you</h2>
+    <p>Pick your vibe. A line about what you post makes the openers more specific.</p>
+    <form id="form">
+      <div class="row">
+        <div><label for="vibe">Your vibe</label>
+          <select id="vibe">{% for v in choices.vibes %}<option{% if v == 'Girl-Next-Door' %} selected{% endif %}>{{ v }}</option>{% endfor %}</select></div>
+        <div><label for="platform">Platform</label>
+          <select id="platform">{% for p in choices.platforms %}<option>{{ p }}</option>{% endfor %}</select></div>
+      </div>
+      <label for="about">What you post <span class="help">Optional.</span></label>
+      <input id="about" type="text" maxlength="300" placeholder="e.g. Gym selfies, cosplay and behind-the-scenes of my shoots">
+      <button class="btn" type="submit" id="go">Write openers</button>
+    </form>
+    <div class="out" id="out"></div>
+  </section>
+{% endblock %}
+{% block script %}
+<script>
+$('form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const btn = $('go'), out = $('out');
+  btn.disabled = true; btn.textContent = 'Writing…';
+  let d;
+  try {
+    const r = await fetch('/api/tools/generate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tool: 'dm-opener', about: $('about').value,
+        platform: $('platform').value, vibe: $('vibe').value })
+    });
+    d = await r.json();
+  } catch (err) {
+    d = { ok: false, error: 'Could not reach the generator. Check your connection.' };
+  }
+  btn.disabled = false; btn.textContent = 'Write five more';
+  if (!d.ok) {
+    out.innerHTML = '<div class="verdict rejected">' + esc(d.error || 'Something went wrong.') + '</div>';
+  } else {
+    out.innerHTML = d.openers.map(c =>
+      '<div class="header-line"><span>' + esc(c) + '</span>' +
+      '<button class="btn ghost" type="button">Copy</button></div>').join('') +
+      '<p class="nudge"><a href="' + esc(SIGNUP) + '">Velvetfunneler sends an opener like these to ' +
+      'every new fan the moment they subscribe, then keeps the chat going →</a></p>';
+    out.querySelectorAll('.header-line button').forEach((b, i) =>
+      b.addEventListener('click', () => copyText(d.openers[i], b)));
+  }
+  out.classList.add('show');
+});
+</script>
+{% endblock %}

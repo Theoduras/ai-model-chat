@@ -2327,8 +2327,9 @@ def list_trial_invites(session, limit=200):
 
 
 class RegisterLink(Base):
-    """A plain trackable link to /register — no trial, no discount, just a
-    click counter so an admin can see how a channel performs."""
+    """A plain trackable link to /register — no trial, no discount, just
+    counters (clicks, and accounts created after one) so an admin can see how
+    a channel performs."""
     __tablename__ = 'register_links'
 
     id = Column(String(32), primary_key=True, default=_uid)
@@ -2337,6 +2338,7 @@ class RegisterLink(Base):
     created_by = Column(String(32), index=True)
     created_at = Column(DateTime, default=_now, index=True)
     clicks = Column(Integer, default=0)
+    signups = Column(Integer, default=0)
 
 
 def get_register_link(session, code):

@@ -1,0 +1,153 @@
+{% extends "tool.html" %}
+{% block sub %}Sign a test payload with HMAC-SHA256, then check whether a receiver would
+    accept or reject the signature it gets — and why.{% endblock %}
+{% block private %}<p class="private">Everything runs in your browser. Your payload and secret are never sent anywhere.</p>{% endblock %}
+{% block tool %}
+  <section class="panel">
+    <h2>1. The signing rule</h2>
+    <p>What the sender and receiver both agree on.</p>
+    <label for="payload">Payload (the raw request body, byte for byte)</label>
+    <textarea id="payload" spellcheck="false">{"lead_id": 12345, "action": "created"}</textarea>
+    <label for="secret">Secret key</label>
+    <input id="secret" type="text" value="my_super_secret_key" spellcheck="false" autocomplete="off">
+    <div class="row">
+      <div>
+        <label for="headerName">Signature header</label>
+        <input id="headerName" type="text" value="X-Hub-Signature-256" spellcheck="false">
+      </div>
+      <div>
+        <label for="format">Signature format</label>
+        <select id="format">
+          <option value="prefixed">sha256=&lt;hex&gt; (GitHub style)</option>
+          <option value="hex">&lt;hex&gt;</option>
+          <option value="base64">&lt;base64&gt; (Shopify style)</option>
+        </select>
+      </div>
+    </div>
+    <button class="btn" type="button" onclick="generate()">Generate signature</button>
+    <div class="out" id="genOut">
+      <div class="header-line"><code id="genLine"></code>
+        <button class="btn ghost" type="button" onclick="copyText($('genLine').textContent, this)">Copy</button></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>2. Simulate the receiver</h2>
+    <p>Paste the signature your sender actually put in the header.</p>
+    <label for="received">Received signature value</label>
+    <input id="received" type="text" placeholder="sha256=…" spellcheck="false" autocomplete="off">
+    <button class="btn" type="button" onclick="verify()">Simulate request</button>
+    <div class="out" id="verOut"></div>
+  </section>
+
+{% endblock %}
+{% block cta %}
+    <h2>Your fans' messages deserve the same care.</h2>
+    <p>Velvetfunneler runs an AI persona in your voice across your platforms — it chats, remembers
+      every fan and offers your paid content at the right moment.</p>
+{% endblock %}
+{% block script %}
+<script>
+const enc = new TextEncoder();
+
+async function hmacBytes(secret, payload) {
+  const key = await crypto.subtle.importKey('raw', enc.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  return new Uint8Array(await crypto.subtle.sign('HMAC', key, enc.encode(payload)));
+}
+const toHex = b => Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
+const toB64 = b => btoa(String.fromCharCode(...b));
+
+function formatSig(bytes, format) {
+  if (format === 'base64') return toB64(bytes);
+  return (format === 'prefixed' ? 'sha256=' : '') + toHex(bytes);
+}
+
+function sameSig(a, b, format) {
+  return format === 'base64' ? a === b : a.toLowerCase() === b.toLowerCase();
+}
+
+function noCrypto(box) {
+  if (window.crypto && crypto.subtle) return false;
+  box.innerHTML = '<div class="verdict rejected"><strong>UNAVAILABLE</strong>' +
+    'Your browser only allows signing on a secure (https) page.</div>';
+  box.classList.add('show');
+  return true;
+}
+
+async function generate() {
+  if (noCrypto($('genOut'))) return;
+  const sig = formatSig(await hmacBytes($('secret').value, $('payload').value), $('format').value);
+  $('genLine').textContent = ($('headerName').value.trim() || 'X-Signature') + ': ' + sig;
+  $('received').value = sig;
+  $('genOut').classList.add('show');
+}
+
+// The shape checks run before the HMAC so the verdict names the real mistake
+// (a missing prefix, the wrong encoding) instead of a bare "mismatch".
+function shapeProblem(got, format) {
+  const hasPrefix = /^sha256=/i.test(got);
+  const body = got.replace(/^sha256=/i, '');
+  if (format === 'prefixed' && !hasPrefix)
+    return 'The receiver expects the value to start with <code>sha256=</code>.';
+  if (format !== 'prefixed' && hasPrefix)
+    return 'The receiver expects the bare signature, without the <code>sha256=</code> prefix.';
+  if (format === 'base64' && /^[0-9a-f]{64}$/i.test(body))
+    return 'This looks like a hex digest, but the receiver expects base64.';
+  if (format !== 'base64' && !/^[0-9a-f]{64}$/i.test(body))
+    return /^[A-Za-z0-9+/]{43}=$/.test(body)
+      ? 'This looks like a base64 digest, but the receiver expects hex.'
+      : 'A SHA-256 hex digest is exactly 64 characters of 0-9 and a-f.';
+  return null;
+}
+
+// A mismatch almost always comes from the sender signing slightly different
+// bytes than it sent, so try the usual culprits and name the one that fits.
+async function mismatchHint(secret, payload, got, format) {
+  const tries = [
+    [payload.replace(/\s+$/, ''), secret, 'The sender signed the payload without its trailing whitespace or newline.'],
+    [payload + '\n', secret, 'The sender signed the payload with an extra trailing newline.'],
+    [payload, secret.trim(), 'The secret has leading or trailing spaces on one side.'],
+  ];
+  try {
+    const compact = JSON.stringify(JSON.parse(payload));
+    if (compact !== payload)
+      tries.push([compact, secret, 'The sender re-serialised the JSON before signing. Sign the raw body exactly as sent.']);
+  } catch (e) {}
+  for (const [p, s, why] of tries) {
+    if (p === payload && s === secret) continue;
+    if (sameSig(formatSig(await hmacBytes(s, p), format), got, format)) return why;
+  }
+  return 'Check that both sides use the same secret and sign the exact raw body.';
+}
+
+async function verify() {
+  const box = $('verOut');
+  if (noCrypto(box)) return;
+  const header = $('headerName').value.trim() || 'the signature header';
+  const format = $('format').value;
+  const payload = $('payload').value, secret = $('secret').value;
+  const got = $('received').value.trim();
+  const expected = formatSig(await hmacBytes(secret, payload), format);
+
+  let html;
+  const shape = got && shapeProblem(got, format);
+  if (!got) {
+    html = '<div class="verdict rejected"><strong>REJECTED</strong>Missing required header: ' +
+      esc(header) + '.</div>';
+  } else if (shape) {
+    html = '<div class="verdict rejected"><strong>REJECTED</strong>' + shape + '</div>';
+  } else if (sameSig(expected, got, format)) {
+    html = '<div class="verdict accepted"><strong>ACCEPTED</strong>Signature valid. ' +
+      'The receiver would pass this payload on.</div>';
+  } else {
+    html = '<div class="verdict rejected"><strong>REJECTED</strong>Signature mismatch. Expected ' +
+      '<code>' + esc(expected) + '</code>' +
+      '<div class="hint">' + esc(await mismatchHint(secret, payload, got, format)) + '</div></div>';
+  }
+  box.innerHTML = html;
+  box.classList.add('show');
+}
+
+</script>
+{% endblock %}

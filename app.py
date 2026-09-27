@@ -4,6 +4,7 @@ import os
 import sys
 import functools
 import platform_pages
+import free_tools
 import copy
 import json
 import re
@@ -1035,10 +1036,11 @@ _PUBLIC_PAGES = [('/', '1.0', 'weekly'),
                  ('/register', '0.6', 'monthly'),
                  ('/login', '0.3', 'monthly'),
                  ('/blog', '0.7', 'weekly'),
-                 ('/webhook-signature-simulator', '0.7', 'monthly'),
                  ('/privacy', '0.2', 'yearly'),
                  ('/tos', '0.2', 'yearly')]
 _PUBLIC_PAGES += [(f'/blog/{slug}', '0.5', 'monthly') for slug in _BLOG_SLUGS]
+_PUBLIC_PAGES += [('/' + t['slug'], '0.8' if t['track'] else '0.6', 'monthly')
+                  for t in free_tools.TOOLS]
 _PUBLIC_PAGES += [(f'/{slug}', '0.9' if slug == 'ai-image-generator' else '0.8', 'monthly')
                   for slug in platform_pages.PAGES]
 _PUBLIC_PATHS = {path for path, _, _ in _PUBLIC_PAGES}
@@ -5530,6 +5532,7 @@ def auth_google_callback():
         u = get_user_by_google_sub(s, sub) or get_user_by_email(s, email)
         if u is None:
             u = create_user(s, email, '', info.get('name') or '', google_sub=sub)
+            _credit_signup_link(s)
         # Links an existing password account to the Google account on first use.
         if not u.google_sub:
             u.google_sub = sub
@@ -5572,6 +5575,7 @@ def register():
                 REGISTER_HTML, error='That email is already registered.',
                 email=email, name=name)
         u = create_user(s, email, generate_password_hash(password), name)
+        _credit_signup_link(s)
         s.commit()
         session['user_id'] = u.id
         session['login_at'] = time.time()
@@ -6804,8 +6808,9 @@ form.inline button{width:auto;padding:4px 12px;margin:0;font-size:.78rem;backgro
 <div class="bar"><span>Register links</span><a href="/admin/users">Users</a></div>
 <div class="card">
 <h1>Plain register links</h1>
-<p class="sub">Each link just counts its clicks and sends the visitor to
-/register — no trial, no discount, nothing granted.</p>
+<p class="sub">Each link counts its clicks and the accounts created after one, and
+sends the visitor to /register — no trial, no discount, nothing granted. The
+tool-&hellip; links belong to the free tools and are made automatically.</p>
 {% if saved %}<div class="ok">{{ saved }}</div>{% endif %}
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
 <form method="post"><input type="hidden" name="action" value="create">
@@ -6813,10 +6818,10 @@ form.inline button{width:auto;padding:4px 12px;margin:0;font-size:.78rem;backgro
 <div class="newrow"><span class="prefix">/signup-</span><input name="slug" placeholder="x" maxlength="32" pattern="[a-z0-9-]+">
 <input name="note" placeholder="Note, e.g. IG story" maxlength="200">
 <button type="submit">Create link</button></div></form>
-<table><tr><th>Link</th><th>Note</th><th>Created</th><th>Clicks</th><th></th></tr>
+<table><tr><th>Link</th><th>Note</th><th>Created</th><th>Clicks</th><th>Signups</th><th>Conversion</th><th></th></tr>
 {% for r in rows %}<tr>
 <td><code>{{ r.link }}</code></td><td>{{ r.note }}</td><td>{{ r.created }}</td>
-<td>{{ r.clicks }}</td>
+<td>{{ r.clicks }}</td><td>{{ r.signups }}</td><td>{{ r.conversion }}</td>
 <td><form class="inline" method="post" onsubmit="return confirm('Delete this link?')">
 <input type="hidden" name="action" value="delete"><input type="hidden" name="code" value="{{ r.code }}">
 <button type="submit">Delete</button></form></td>
@@ -7310,6 +7315,7 @@ def admin_register_links():
     saved = error = ''
     s = _db_session()
     try:
+        _ensure_tool_links(s)
         if request.method == 'POST':
             action = request.form.get('action', '')
             if action == 'create':
@@ -7337,7 +7343,9 @@ def admin_register_links():
         rows = [{'code': link.code, 'note': link.note or '',
                  'link': f'{_callback_origin()}/signup-{link.code}',
                  'created': _fmt_date(link.created_at),
-                 'clicks': link.clicks or 0}
+                 'clicks': link.clicks or 0, 'signups': link.signups or 0,
+                 'conversion': (f'{100 * (link.signups or 0) / link.clicks:.1f}%'
+                                if link.clicks else '–')}
                 for link in list_register_links(s)]
     finally:
         s.close()
@@ -7345,17 +7353,50 @@ def admin_register_links():
                                   saved=saved, error=error)
 
 
+def _ensure_tool_links(s):
+    """Every free tool's CTA goes through its own register link. The rows are
+    made here rather than by hand so a tool's first clicks are never lost, and
+    one an admin deletes comes back."""
+    from db import RegisterLink
+    have = {c for (c,) in s.query(RegisterLink.code)
+            .filter(RegisterLink.code.in_(list(free_tools.TRACK_NOTES)))}
+    for code, note in free_tools.TRACK_NOTES.items():
+        if code not in have:
+            s.add(RegisterLink(code=code, note=note, created_by='system'))
+    if len(have) < len(free_tools.TRACK_NOTES):
+        s.commit()
+
+
+def _credit_signup_link(s):
+    """Count a new account against the register link it last came through.
+    Never allowed to break a sign-up."""
+    code = session.pop('signup_link', '')
+    if not code:
+        return
+    from db import RegisterLink
+    try:
+        link = s.query(RegisterLink).filter(RegisterLink.code == code).first()
+        if link:
+            link.signups = (link.signups or 0) + 1
+    except Exception:
+        error_logger.error('Register link signup not recorded', exc_info=True)
+
+
 @app.route('/signup-<code>')
 def register_link_click(code):
-    """A plain tracked link to /register — counts the click, grants nothing."""
+    """A plain tracked link to /register — counts the click, grants nothing.
+    The code rides in the session so the account made afterwards counts too."""
     code = re.sub(r'[^a-z0-9-]', '', (code or '').strip().lower())[:32]
     from db import RegisterLink
     s = _db_session()
     try:
+        if code in free_tools.TRACK_NOTES:
+            _ensure_tool_links(s)
         link = s.query(RegisterLink).filter(RegisterLink.code == code).first()
         if link:
             link.clicks = (link.clicks or 0) + 1
             s.commit()
+            session['signup_link'] = code
     except Exception:
         error_logger.error('Register link click not recorded', exc_info=True)
     finally:
@@ -7595,11 +7636,6 @@ def blog_page():
     return send_from_directory(BASE_DIR, 'blog.html')
 
 
-@app.route('/webhook-signature-simulator', methods=['GET'])
-def webhook_simulator_page():
-    return send_from_directory(BASE_DIR, 'webhook-simulator.html')
-
-
 @app.route('/privacy', methods=['GET'])
 def privacy_page():
     return send_from_directory(BASE_DIR, 'privacy.html')
@@ -7621,6 +7657,53 @@ for _pp_slug in platform_pages.PAGES:
     app.add_url_rule('/' + _pp_slug, endpoint='platform_page_' + _pp_slug.replace('-', '_'),
                      view_func=functools.partial(_platform_marketing_page, _pp_slug),
                      methods=['GET'])
+
+
+def _free_tool_page(slug):
+    tool = free_tools.BY_SLUG[slug]
+    return render_template(
+        f'tools/{slug}.html', tool=tool, tools=free_tools.TOOLS,
+        origin=_site_origin(),
+        signup='/signup-' + tool['track'] if tool['track'] else '/register',
+        choices={'platforms': free_tools.PLATFORMS, 'vibes': free_tools.VIBES,
+                 'content_types': free_tools.CONTENT_TYPES})
+
+
+for _ft in free_tools.TOOLS:
+    app.add_url_rule('/' + _ft['slug'], endpoint='free_tool_' + _ft['slug'].replace('-', '_'),
+                     view_func=functools.partial(_free_tool_page, _ft['slug']),
+                     methods=['GET'])
+
+
+@app.route('/api/tools/generate', methods=['POST'])
+def free_tool_generate():
+    """The two public generators. No session: the input is whitelisted in
+    free_tools and the limiter caps what an anonymous caller can spend."""
+    try:
+        system, prompt, key = free_tools.build_prompt(request.get_json(silent=True) or {})
+    except free_tools.InputError as e:
+        return jsonify({'ok': False, 'error': str(e)}), 400
+    if not free_tools.limiter.allow(_client_ip()):
+        return jsonify({'ok': False, 'error': "You've hit the free limit for now. "
+                                              'Try again in a few minutes.'}), 429
+    busy = {'ok': False, 'error': 'The generator is busy — try again in a minute.'}
+    if client is None:
+        return jsonify(busy), 503
+    try:
+        resp = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=[{'role': 'user', 'parts': [{'text': prompt}]}],
+            config=_no_thinking(types.GenerateContentConfig(
+                system_instruction=system, temperature=0.9, max_output_tokens=800,
+                response_mime_type='application/json')))
+        result = free_tools.parse_result(_gemini_text(resp), key)
+    except Exception:
+        error_logger.error('Free tool generation failed', exc_info=True)
+        return jsonify(busy), 502
+    if not result.get(key):
+        return jsonify(busy), 502
+    logger.info('FREE TOOL %s ip=%s items=%d', key, _client_ip(), len(result[key]))
+    return jsonify({'ok': True, **result})
 
 
 @app.route('/blog/<slug>', methods=['GET'])
