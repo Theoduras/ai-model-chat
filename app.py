@@ -31206,7 +31206,7 @@ def api_character_generate(char_id):
         prompts = [CH.build_view_prompt(view_key, sheet, row.age, has_ref, row.body_type, mode=mode,
                                         strength=state[view_key]['strength'],
                                         outfit=o, blend=blend,
-                                        match=match, look=bool(look)) for o in dressed]
+                                        match=match, look=bool(look), level=row.nsfw_level) for o in dressed]
         parent_versions = {p: state[p]['version'] for p in v['parents']}
         key = row.key
     finally:

@@ -121,6 +121,14 @@ def test_prompts():
               not any(w in p for w in CH._fragments({x: FULL_SHEET[x] for x in far}, ('body',))))
 
 
+def test_topless_level():
+    top = CH.build_view_prompt('nude_front', {}, 25, True, level='moderate')
+    check('topless full body wears panties', 'panties' in top and 'topless' in top and 'nude' not in top)
+    check('explicit full body stays nude', 'nude' in CH.build_view_prompt('nude_front', {}, 25, True, level='explicit'))
+    check('topless back wears panties', 'panties' in CH.build_view_prompt('rear_nude', {}, 25, True, level='moderate'))
+    check('no nude label at topless', not any('Nude' in v['label'] for v in CH.catalogue('moderate')['views']))
+
+
 def test_validation():
     def refused(data):
         try:
@@ -365,6 +373,7 @@ if __name__ == '__main__':
     test_required_views()
     test_prompts()
     test_validation()
+    test_topless_level()
     test_every_option_has_a_drawing()
     test_view_tree()
     test_resolver()

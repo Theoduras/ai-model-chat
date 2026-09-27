@@ -289,9 +289,12 @@ VIEWS = {
         dict(key='nude_front', label='Nude full body, front', group='nsfw', rating='moderate', required_from='moderate',
              parents=('body_front', 'breasts', 'nipples'), tier=2, mode='reference',
              framing='a full-body nude photo from head to feet, standing straight facing the camera, arms relaxed at her sides',
+             topless=('Topless full body, front', 'a full-body topless photo from head to feet wearing only plain panties, '
+                      'standing straight facing the camera, arms relaxed at her sides'),
              uses=('body', 'breasts', 'nipples', 'pubic')),
         dict(key='rear_nude', label='Nude from behind (standing)', group='nsfw', rating='moderate', required_from='explicit',
-             parents=('nude_front', 'body_back'), tier=2, mode='reference', framing='a full-body nude photo from behind, standing straight', uses=('body',)),
+             parents=('nude_front', 'body_back'), tier=2, mode='reference', framing='a full-body nude photo from behind, standing straight', uses=('body',),
+             topless=('Topless from behind (standing)', 'a full-body topless photo from behind wearing only plain panties, standing straight')),
         dict(key='pubic', label='Pubic area (front, standing)', group='nsfw', rating='explicit', required_from='explicit',
              parents=('nude_front',), tier=2, mode='crop', region='pelvis', zoom=True,
              body=('hips', 'thighs', 'tattoos', 'birthmarks'),
@@ -385,6 +388,14 @@ def look_path(ref):
     return os.path.join(LOOK_ROOT, folder, n + '.jpg') if k and n in LOOK_FILES[k] else None
 
 
+def for_level(v, level):
+    """The view as this level shows it: below Explicit her full-body "nude"
+    views are topless in panties."""
+    if v and v.get('topless') and _rank(level) < _rank('explicit'):
+        return dict(v, label=v['topless'][0], framing=v['topless'][1])
+    return v
+
+
 def views(body_type='female'):
     return VIEWS.get(body_type) or VIEWS['female']
 
@@ -457,7 +468,7 @@ def catalogue(level, body_type='female'):
     groups = {g for g, lvl in GROUP_LEVEL.items() if _rank(lvl) <= _rank(level)}
     return {
         'level': level, 'levels': [{'key': k, 'label': l} for k, l in LEVELS],
-        'views': [dict(v, parents=list(v['parents']), uses=list(v['uses']), traits=traits(v['key'], body_type),
+        'views': [dict(for_level(v, level), parents=list(v['parents']), uses=list(v['uses']), traits=traits(v['key'], body_type),
                        required=bool(v['required_from'] and _rank(v['required_from']) <= _rank(level)))
                   for v in views_for_level(level, body_type)],
         'features': [{'key': k, 'label': lab, 'group': g, 'options': [o for o, _ in opts]}
@@ -684,8 +695,8 @@ def outfit_text(sheet, outfit=None):
 
 def build_view_prompt(key, sheet, age, has_reference, body_type='female',
                       mode='reference', strength=None, outfit=None, blend=False,
-                      match=False, look=False):
-    v = view(key, body_type)
+                      match=False, look=False, level='explicit'):
+    v = for_level(view(key, body_type), level)
     if not v:
         raise CharacterError('Unknown view.')
     if '{outfit}' in v['framing']:
