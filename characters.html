@@ -1076,7 +1076,8 @@ function renderFrame() {
     return;
   }
   const s = STEPS[i], last = i === STEPS.length - 1, why = stepWhy(i);
-  el('ch-head').innerHTML = PageWizard.headHtml({crumb: PageWizard.crumb(STAGES, STEPS, i), title: s.title, sub: s.sub});
+  el('ch-head').innerHTML = PageWizard.headHtml({crumb: PageWizard.crumb(STAGES, STEPS, i), title: s.title, sub: s.sub})
+    + (cur.owner ? `<div class="hint">Owner: ${esc(cur.owner)}</div>` : '');
   const saves = SAVED_STEPS.includes(s.key);
   const next = last && !guided ? null
     : {label: last ? 'Finish \u2713' : saves ? 'Save & continue \u2192' : continueLabel(), call: 'stepNext()',

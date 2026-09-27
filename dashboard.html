@@ -2013,6 +2013,7 @@ function renderForm(slug, cfg) {
       <button type="button" class="btn-back-gallery" onclick="showPersonaBrowser()">&larr; All personas</button>
       <h2 style="font-size:1.1rem; font-weight:600;">${cfg.name || slug}</h2>
       <span style="font-size:0.75rem; color:var(--text-muted);">/${slug}</span>
+      ${(personas[slug] || {}).owner ? `<span style="font-size:0.75rem; color:var(--text-muted);">· Owner: ${esc(personas[slug].owner)}</span>` : ''}
     </div>
 
     <div class="form-section">

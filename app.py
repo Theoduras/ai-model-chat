@@ -31826,7 +31826,10 @@ def api_character(char_id):
         if not row:
             return jsonify({'ok': False, 'error': 'Unknown character'}), 404
         if request.method == 'GET':
-            return jsonify({'ok': True, 'character': _char_json(s, row, full=True)})
+            j = _char_json(s, row, full=True)
+            if row.workspace_id != _workspace_id(user):
+                j['owner'] = _char_owner_emails(s, {row.workspace_id}).get(row.workspace_id, row.workspace_id)
+            return jsonify({'ok': True, 'character': j})
         if request.method == 'DELETE':
             for img in _char_images(s, row.id):
                 if img.gcs_path:
