@@ -225,8 +225,13 @@
   const liner = line('M21,30.4 q3.5,-2 7,0.2 l1.4,-0.9 M43,30.4 q-3.5,-2 -7,0.2 l-1.4,-0.9', ' stroke-width="1.4"');
   const shade = `<path d="M20.5,29.5 Q24.3,26.4 28.6,28.6 Q24.3,27.4 20.5,29.5 Z M43.5,29.5 Q39.7,26.4 35.4,28.6 Q39.7,27.4 43.5,29.5 Z" ` +
     `fill="${INK}" fill-opacity=".45" stroke="none"/>`;
+  const lid = (c, o) => shade.replace(`fill="${INK}" fill-opacity=".45"`, `fill="${c}" fill-opacity="${o}"`);
   const MAKEUP = {'Soft natural': blush + lip('#c98a7e'), 'Polished': blush + liner + lip('#b86a6a'),
-    'Soft glam': blush + shade + liner + lip('#a45a5e'), 'Classic red lip': liner + lip('#b3261e'), 'Bare': ''};
+    'Soft glam': blush + shade + liner + lip('#a45a5e'), 'Classic red lip': liner + lip('#b3261e'),
+    'Old Hollywood': lid('#6b4a3a', '.6') + liner + lip('#8e1b1b'), 'Fresh glow': blush + lid('#a08878', '.35') + lip('#e0908f'),
+    'Cat-eye gloss': lid('#e8d9b0', '.8') + liner + lip('#c2185b'), 'Emerald glitter': lid('#1f8a4c', '.85') + liner + lip('#a8676a'),
+    'Bronze smoky': blush + lid('#7a4a2a', '.6') + liner + lip('#c77b6b'), 'Wine lip': blush + lid('#b07080', '.45') + liner + lip('#6d1a2a'),
+    'Bare': ''};
 
   // ── Eye close-up: lids, crease, iris, pupil and outer lashes ───────────────
   const EYE = {   // upper [x0,y0,cx,cy,x1,y1], lower control y, crease lift (0 = none)

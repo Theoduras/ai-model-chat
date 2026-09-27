@@ -73,6 +73,20 @@ FEATURES = {
             ('Polished', 'polished professional makeup: defined brows, fine eyeliner, mascara, subtle contour and a rosy nude lip, refined rather than heavy'),
             ('Soft glam', 'soft glam makeup: softly smoky neutral eyes, fuller lashes, sculpted cheeks and a satin lip, still skin-like'),
             ('Classic red lip', 'clean polished makeup with a classic red lip'),
+            ('Old Hollywood', 'old Hollywood glamour makeup: warm brown smoky eyeshadow blended up to the brow bone, '
+             'fine black liner, full lashes, groomed arched brows, soft contour and a deep matte red lip'),
+            ('Fresh glow', 'fresh glowing makeup: dewy luminous skin, softly defined brushed brows, a wash of taupe '
+             'eyeshadow, thin brown liner, mascara, a hint of peach blush and a glossy nude pink lip'),
+            ('Cat-eye gloss', 'retro cat-eye makeup: a sharp black winged liner, shimmery ivory and champagne lids, '
+             'long fluttery lashes, sculpted brows, flawless matte skin and a high-shine glossy fuchsia lip'),
+            ('Emerald glitter', 'full glam makeup: emerald green glitter eyeshadow packed on the lids, a dark smoky '
+             'outer corner and lower lash line, dramatic false lashes, bold sculpted brows, strong contour, '
+             'bright cheekbone highlight and a matte mauve rose lip'),
+            ('Bronze smoky', 'bronzed smoky makeup: warm brown eyeshadow smoked out, smudged black liner winged at '
+             'the outer corner, full brushed-up brows, bronzer and warm contour, a soft cheek glow and a matte '
+             'peachy rose lip'),
+            ('Wine lip', 'soft editorial makeup: pale even matte skin, rosy mauve eyeshadow, a thin flicked liner, '
+             'wispy lashes, flushed rosy cheeks and a deep matte wine red lip'),
             ('Bare', 'no makeup, bare natural skin')]),
         'cheekbones': ('Cheekbones', 'face', _opts('cheekbones', 'High', 'Medium', 'Soft')),
         'jaw': ('Jaw and chin', 'face', [('Soft, rounded chin', 'a soft jaw and rounded chin'), ('Defined jaw', 'a defined jawline'),
