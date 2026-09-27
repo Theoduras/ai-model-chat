@@ -610,6 +610,8 @@ def size_rung(height, width=0):
 
 SHOT_FRAMING = {
     'portrait': 'a head-and-shoulders selfie, looking into the lens',
+    'closeup': ('a tight full-face beauty close-up, her whole face filling the frame '
+                'from hairline to chin, facing the lens, her makeup crisp in every detail'),
     'half': 'a waist-up photo',
     'full': 'a full-body photo',
     'candid': 'a candid photo in the middle of an everyday moment',
@@ -624,6 +626,13 @@ SHOT_FRAMING = {
     'explicit': 'an explicit intimate photo, candid and unposed',
 }
 
+# The one thing a close-up takes from the reference beyond who she is: the
+# face photo is what the creator uploaded to show her makeup, and a face this
+# close with different makeup reads as a different woman.
+MAKEUP_FROM_REFERENCE = ('Her makeup copies the face reference photo exactly: the same '
+                         'eye makeup, lashes, brows, blush, contour and lip colour and finish, '
+                         'no heavier and no lighter.')
+
 # The same shots with what she wears taken out, for when the creator has typed
 # the clothing herself: her words win, so the framing must not argue with them.
 SHOT_FRAMING_BARE = {
@@ -634,7 +643,7 @@ SHOT_FRAMING_BARE = {
 }
 
 SHOT_LEVEL = {
-    'portrait': 'sfw', 'half': 'sfw', 'full': 'sfw', 'candid': 'sfw',
+    'portrait': 'sfw', 'closeup': 'sfw', 'half': 'sfw', 'full': 'sfw', 'candid': 'sfw',
     'mirror': 'sfw',
     'lingerie': 'suggestive', 'implied': 'suggestive', 'sheer': 'suggestive',
     'bedroom': 'suggestive',
@@ -820,6 +829,8 @@ DIRECTIONS = {
     'aftermath': ['sprawled across the sheets, flushed cheeks, messy hair', 'lying on her stomach, chin on her hands, satisfied smile'],
 }
 DIRECTIONS_BY_SHOT = {
+    'closeup': ['eyes on the lens, lips softly closed, relaxed brows',
+                'chin tilted slightly down, soft half-smile, looking up into the lens'],
     'portrait': ['chin resting on her hand, soft smile, looking into the lens',
                  'hair tucked behind one ear, laughing at something off camera'],
     'half': ['leaning on the counter, coffee in hand, relaxed smile',
@@ -980,6 +991,7 @@ def build_prompt(appearance, shot, outfit=None, has_reference=False, extra='',
                   + ', '.join(b for b in (who, framing, where, styled) if b)),
         ('The reference images set who she is — not what she wears or where she is.'
          if has_reference else ''),
+        (MAKEUP_FROM_REFERENCE if has_reference and shot == 'closeup' else ''),
         _sentence(f'She is wearing {clothing}' if clothing else ''),
         _sentence(direction),
         _sentence(expression_text(expression)),
