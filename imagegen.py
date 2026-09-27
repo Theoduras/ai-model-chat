@@ -75,21 +75,6 @@ RUNWARE_MODELS = {
     'seedream-5-pro': os.getenv('RW_MODEL_SEEDREAM_5PRO', 'bytedance:seedream@5.0-pro'),
     'nano-banana-pro': os.getenv('RW_MODEL_NANO_BANANA_PRO', 'google:4@2'),
     'nano-banana-2': os.getenv('RW_MODEL_NANO_BANANA_2', 'google:4@3'),
-    # Read off Runware's public model pages, not its live catalogue -- confirm
-    # with search_models('krea', 'image') before trusting one in production.
-    'krea-2-large': os.getenv('RW_MODEL_KREA_2_LARGE', 'krea:krea@2-large'),
-    'krea-2-medium': os.getenv('RW_MODEL_KREA_2_MEDIUM', 'krea:krea@2-medium'),
-}
-
-# Krea takes its references nested under `inputs`, at most ten, and only the
-# sizes below -- Runware's own `unsupportedDimensions` answer, one per shape at
-# about a megapixel. A shape missing here is one the picker must not offer.
-KREA_MODELS = ('krea-2-large', 'krea-2-medium')
-KREA_MAX_REFERENCES = 10
-KREA_PX = {
-    '1:1': (1024, 1024), '4:3': (1184, 896), '3:2': (1248, 832),
-    '16:9': (1376, 768), '21:9': (1568, 672), '4:5': (928, 1152),
-    '2:3': (832, 1248), '9:16': (768, 1376),
 }
 
 # Google's image models, whatever Runware calls them, refuse explicit content
@@ -249,8 +234,7 @@ def preserves_source(job, model_key):
 EXPLICIT_MODEL = 'seedream-4-5'
 # Every image model that may run an explicit shot as asked. credits imports
 # this module, so this is a copy of its MODEL_RATINGS; test_tokens pins the two.
-# Krea is rated from its docs, not yet probed explicit like Seedream was.
-EXPLICIT_MODELS = (EXPLICIT_MODEL,) + KREA_MODELS
+EXPLICIT_MODELS = (EXPLICIT_MODEL,)
 
 # Identity is one reference-conditioned call. `referenceImages` is the field
 # Seedream accepts; `seedImage` with a strength is refused by the architecture.
@@ -353,7 +337,6 @@ MODEL_PX = {
     'seedream-5-pro':  {'2k': (1664, 2432), '4k': (3072, 4096)},
     'nano-banana-pro': {'2k': (1696, 2528), '4k': (3392, 5096)},
     'nano-banana-2':   {'2k': (1696, 2528), '4k': (3392, 5096)},
-    **{m: {'2k': KREA_PX['2:3']} for m in KREA_MODELS},
 }
 RESOLUTION_PX = {
     '2k': (1664, 2432),
@@ -379,8 +362,6 @@ MAX_IMAGE_SIDE = 4096
 
 def image_aspects_for(model_key):
     """The frame shapes a model serves, in the picker's own order."""
-    if model_key in KREA_MODELS:
-        return [a for a in IMAGE_ASPECTS if a in KREA_PX]
     return list(IMAGE_ASPECTS)
 
 
@@ -393,8 +374,6 @@ def dimensions(model_key, resolution, aspect=None):
         return base
     if model_key in ('nano-banana-pro', 'nano-banana-2'):
         return GOOGLE_PX_2K[aspect]
-    if model_key in KREA_MODELS:
-        return KREA_PX.get(aspect) or base
     rw, rh = (int(x) for x in aspect.split(':'))
     budget = max(base[0] * base[1], SEEDREAM_MIN_PX)
     # The pair on the 64 grid closest to the shape that neither drops under
@@ -1467,9 +1446,7 @@ class RunwareProvider(Provider):
         refs = spec.get('reference_urls') or []
         if spec.get('reference_b64'):
             refs = [_data_uri(spec['reference_b64'], spec.get('reference_mime'))] + list(refs)
-        if refs and model_key in KREA_MODELS:
-            task['inputs'] = {'referenceImages': list(refs)[:KREA_MAX_REFERENCES]}
-        elif refs:
+        if refs:
             task[REFERENCE_FIELD] = list(refs)[:MAX_REFERENCES]
 
         if spec.get('async_delivery'):

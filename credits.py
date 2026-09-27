@@ -42,8 +42,7 @@ TOKEN_COST_USD = 0.04
 MIN_MARGIN_MULTIPLE = 2.25
 
 IMAGE_MODELS = ('seedream-4-5', 'seedream-5-pro',
-                'nano-banana-pro', 'nano-banana-2',
-                'krea-2-large', 'krea-2-medium')
+                'nano-banana-pro', 'nano-banana-2')
 RESOLUTIONS = ('2k', '4k')
 VIDEO_RESOLUTIONS = ('480p', '720p', '1080p')
 # The presets the picker offers. Any whole number in VIDEO_SECONDS_RANGE is
@@ -83,10 +82,6 @@ PROVIDER_COST_USD = {
     'seedream-5-pro':  {'2k': 0.04, '4k': 0.04},
     'nano-banana-2':   {'2k': 0.10255, '4k': 0.2051},
     'nano-banana-pro': {'2k': 0.138, '4k': 0.276},
-    # Runware's list price, flat per image. One rung only: Krea takes a fixed
-    # ~1 MP size per shape, so a 4k still is not something it can make.
-    'krea-2-large':    {'2k': 0.06},
-    'krea-2-medium':   {'2k': 0.04},
 }
 
 VIDEO_COST_USD_PER_SECOND = {
@@ -227,8 +222,6 @@ MODEL_LABELS = {
     'seedream-5-pro': 'Seedream 5.0 Pro',
     'nano-banana-pro': 'Nano Banana Pro',
     'nano-banana-2': 'Nano Banana 2',
-    'krea-2-large': 'Krea 2 Large',
-    'krea-2-medium': 'Krea 2 Medium',
     'wan-2-5': 'Wan 2.5',
     'wan-2-7': 'Wan 2.7',
     'seedance-2-5': 'Seedance 2.5',
@@ -249,17 +242,13 @@ MODEL_LABELS = {
 # another one at submit should never have been offered in the first place,
 # because the creator reads the swap as the model having lied.
 #
-# Seedream 4.5 serves explicit work; 5.0 Pro refuses it at ByteDance's end, and
-# the Google models refuse it at any safety level. Krea 2 is rated explicit from
-# its docs, not a probe: if Runware refuses one, drop 'nsfw' here and from
-# imagegen.EXPLICIT_MODELS.
+# Only Seedream 4.5 serves explicit work. 5.0 Pro refuses it at ByteDance's end,
+# and the Google models refuse it at any safety level.
 MODEL_RATINGS = {
     'seedream-4-5': ('sfw', 'nsfw'),
     'seedream-5-pro': ('sfw',),
     'nano-banana-pro': ('sfw',),
     'nano-banana-2': ('sfw',),
-    'krea-2-large': ('sfw', 'nsfw'),
-    'krea-2-medium': ('sfw', 'nsfw'),
 }
 
 # Video, measured the same way. Wan 2.7 served the explicit probe; Seedance 2.5

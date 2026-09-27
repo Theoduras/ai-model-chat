@@ -123,9 +123,6 @@ def test_prices_track_cost():
           CR.IMAGE_PRICES['seedream-4-5']['2k'] == 1)
     check('a premium still costs more, in single digits',
           CR.IMAGE_PRICES['nano-banana-pro'] == {'2k': 4, '4k': 7})
-    check('Krea 2 is priced off its own bill',
-          CR.IMAGE_PRICES['krea-2-large'] == {'2k': 2}
-          and CR.IMAGE_PRICES['krea-2-medium'] == {'2k': 1})
     import imagegen as IG
     check('imagegen runs explicit on exactly the models credits offers for it',
           set(CR.models_for_rating('nsfw')) == set(IG.EXPLICIT_MODELS))
