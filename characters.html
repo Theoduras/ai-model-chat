@@ -1882,12 +1882,26 @@ function pickUpload(view, box, role) {
 }
 async function uploadFiles(input) {
   const files = [...input.files]; input.value = '';
+  const added = [];
+  let failed = '';
   for (const f of files) {
     const data = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(f); });
-    try { await api(`/api/characters/${cur.id}/images`, {body: {view: uploadView, image: data, attest: el(attestBox).checked, role: uploadRole || undefined}}); }
-    catch (e) { say(e.message, 'err'); return; }
+    try {
+      const d = await api(`/api/characters/${cur.id}/images`, {body: {view: uploadView, image: data, attest: el(attestBox).checked, role: uploadRole || undefined}});
+      if (d.image) added.push('upload:' + d.image.id);
+    }
+    catch (e) { failed = e.message; break; }
   }
-  await reload(); say(files.length + ' uploaded.', 'ok');
+  await reload();
+  if (failed) return say(failed, 'err');
+  // An outfit is uploaded to be worn, so it starts selected.
+  if (uploadRole === 'outfit' && added.length) {
+    cur.sheet = Object.assign({}, cur.sheet, {view_outfits: [...new Set(pickedOutfits().concat(added))]});
+    render();
+    if (await saveSheet()) say(added.length + ' outfit' + (added.length === 1 ? '' : 's') + ' uploaded and selected.', 'ok');
+    return;
+  }
+  say(files.length + ' uploaded.', 'ok');
 }
 
 // A lost image is swapped for a labelled box only inside a photo tile; small
