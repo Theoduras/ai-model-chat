@@ -27,6 +27,23 @@ delivered there rather than to the custom domain. The app prints a
 `CONFIG WARNING` at startup while it is unset, and the Fanvue page shows the
 URL each subscription actually points at.
 
+## Sign in with Google
+
+The button on `/login` and `/register` stays hidden until both variables are
+set on the service; `/healthz` reports `google_login`. An account found by
+email is linked on first use, so a creator who registered with a password can
+switch to the button without a second account.
+
+| Variable | Where it comes from |
+|---|---|
+| `GOOGLE_OAUTH_CLIENT_ID` | Google Auth Platform → Clients → the Web application client. Plain env var. |
+| `GOOGLE_OAUTH_CLIENT_SECRET` | Same client. Kept in Secret Manager as `google-oauth-client-secret` and mounted with `--update-secrets`, so only the service's runtime account can read it. |
+
+The client's authorised redirect URI is
+`https://velvetfunneler.com/auth/google/callback`, and the app builds the same
+URL from `PUBLIC_BASE_URL` (`GOOGLE_OAUTH_REDIRECT_URI` overrides it). While the
+consent screen's audience is "Testing", only its listed test users can sign in.
+
 ## Generation (images and video)
 
 Two variables on the service, plus a bucket. Without them `/studio` loads and
