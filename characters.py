@@ -837,7 +837,7 @@ def outdated_branch(rows, body_type='female'):
 REGIONS = {
     'chest': {'x': 0.28, 'y': 0.20, 'w': 0.44, 'h': 0.20},
     'pelvis': {'x': 0.30, 'y': 0.42, 'w': 0.40, 'h': 0.18},
-    'chest_detail': {'x': 0.15, 'y': 0.15, 'w': 0.70, 'h': 0.60},
+    'chest_detail': {'x': 0.03, 'y': 0.50, 'w': 0.94, 'h': 0.32},
 }
 CROP_PAD = 0.08
 

@@ -562,14 +562,15 @@
         <div class="vp-steps" id="vp-steps"></div>
         <div class="banner" id="vp-banner" hidden></div>
         <div id="vp-body">
-          <div id="vp-crop" class="vp-sec" hidden>
+          <details id="vp-crop" class="vp-sec adv" hidden>
+            <summary>Adjust the crop</summary>
             <div class="crop-stage" id="crop-stage"><img id="crop-img" alt="Source photo"><div class="crop-box" id="crop-box"><span class="crop-handle" data-c="nw"></span><span class="crop-handle" data-c="ne"></span><span class="crop-handle" data-c="sw"></span><span class="crop-handle" data-c="se"></span></div></div>
             <div class="crop-acts">
               <button type="button" class="btn btn-ghost btn-sm" onclick="useCrop('candidate')">Use crop as this photo</button>
               <button type="button" class="btn btn-ghost btn-sm" onclick="useCrop('reference')">Use crop as reference</button>
               <span class="hint">Drag the box to move it, a corner to resize.</span>
             </div>
-          </div>
+          </details>
           <div class="vp-sec vp-refs">
             <div>
               <span class="dl">References</span>
@@ -1591,6 +1592,13 @@ function renderViewPanel() {
   el('vp-src').innerHTML = parent ? `<button type="button" class="vp-thumb" title="Built from ${esc(viewDef(v.parents[0]).label)}"
     aria-label="Open source photo" onclick="openLightbox(['${esc(parent.url)}'], 0)"><img src="${esc(parent.url)}" alt=""></button>` : '';
   el('vp-crop').hidden = st.mode !== 'crop';
+  // A crop view starts from its parent's region on its own, so the first
+  // thing she sees is a photo to approve rather than a box to drag.
+  const key = v.key + ':' + (parent || {}).id;
+  if (st.mode === 'crop' && parent && !locked && !main && !pending && !autoCropped.has(key)) {
+    autoCropped.add(key);
+    setTimeout(() => useCrop('candidate'), 0);
+  }
   if (st.mode === 'crop') {
     el('crop-img').src = parent ? parent.url : '';
     placeCropBox(st.crop_box || {x: .2, y: .2, w: .6, h: .6});
@@ -1655,6 +1663,7 @@ function renderViewPanel() {
   el('vp-batch').innerHTML = batchChips();
 }
 let vpPick = {view: '', id: ''};
+const autoCropped = new Set();
 // The required photo the walk opens after this one, once it is approved.
 function nextAfter(key) {
   const left = cat.views.filter(v => v.required && v.key !== 'face_front' && v.key !== key && vs(v.key).status !== 'approved');
