@@ -209,7 +209,7 @@ Stay completely in character. Never mention being an AI.
   routes go through `_require_active` (404 for an inactive account). Only
   image jobs run for a non-admin: `/api/generate/job` refuses any video job,
   and the studio shows the video tiles grayed out as Coming soon. Every plan
-  spends from the ledger — Demo 25, Starter 100, Pro 350, Agency 1000 tokens a
+  spends from the ledger — Demo 25, Starter 150, Pro 800, Agency 2500 tokens a
   month (`credits.MONTHLY_TOKENS`), grandfathered accounts included; only an
   admin (`UNLIMITED_CAPS`) generates without being charged. The allowance is
   granted lazily on the first token read of the month and swept once at boot

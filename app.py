@@ -998,7 +998,7 @@ for _w in _persistence_warnings():
 _BLOCKED_SUFFIXES = ('.py', '.pyc', '.pyo', '.db', '.sqlite', '.sqlite3', '.db-journal',
                      '.log', '.env', '.pem', '.key', '.cfg', '.ini', '.toml', '.lock',
                      '.txt', '.md', '.yml', '.yaml')
-_BLOCKED_DIRS = ('personas/', 'logs/', '__pycache__/', 'templates/', '.git/')
+_BLOCKED_DIRS = ('personas/', 'character_looks/', 'logs/', '__pycache__/', 'templates/', '.git/')
 _ALLOWED_FILES = {'/robots.txt', '/sitemap.xml'}
 
 
@@ -1356,15 +1356,29 @@ FREE_TIER_KEY = 'free'
 # Plans that cost nothing: never checked out, never expire, no annual twin.
 _UNPAID_TIERS = (DEMO_TIER_KEY, FREE_TIER_KEY)
 
+
+def _tokens_line(text, tokens):
+    eq = CR.plan_equivalents(tokens)
+    photos = f"{eq['photos']:,} photo" + ('' if eq['photos'] == 1 else 's')
+    clips = f"{eq['clips']:,} video" + ('' if eq['clips'] == 1 else 's')
+    return f'{text} — up to {photos} or {clips}'
+
+
+def _monthly_tokens_line(key):
+    tokens = CR.MONTHLY_TOKENS[key]
+    return _tokens_line(f'{tokens:,} generation tokens a month', tokens)
+
+
 _BASE_TIERS = {
     FREE_TIER_KEY: {'name': 'Free', 'price': 0,
-                    'blurb': 'Look around and try the tools. Nothing goes live.',
-                    'features': ['1 AI persona to build and test',
-                                 'The persona builder and the Studio',
-                                 f'{CR.FREE_CREDITS} generation credits, once',
-                                 'Chat with her yourself to test the persona',
-                                 'No platform connection or public chat '
-                                 '— going live needs a paid plan'],
+                    'blurb': 'Try it with one persona, no card needed. '
+                             f'{CR.FREE_CREDITS} tokens on us.',
+                    'features': ['1 × AI Persona', '1 × Character Creator',
+                                 'Generation Studio access',
+                                 _tokens_line(f'{CR.FREE_CREDITS} generation tokens '
+                                              'to get started (one-time)',
+                                              CR.FREE_CREDITS),
+                                 'Community support'],
                     'capabilities': {
                         'personas': 1,
                         'seats': 1,
@@ -1383,7 +1397,7 @@ _BASE_TIERS = {
                                  'Chat with her yourself to test the persona',
                                  'All 10 funnel phases with photo rates',
                                  'Outfit locking + media tagging',
-                                 f'{CR.MONTHLY_TOKENS[DEMO_TIER_KEY]:,} generation tokens a month',
+                                 _monthly_tokens_line(DEMO_TIER_KEY),
                                  'No platform connection \u2014 Fanvue needs a paid plan'],
                     'capabilities': {
                         'personas': None,
@@ -1398,12 +1412,17 @@ _BASE_TIERS = {
                     }},
     'starter': {'name': 'Starter', 'price': 49,
                 'blurb': 'One persona on every platform, fully monetised.',
-                'features': ['1 AI persona', 'Every platform',
-                             'Full PPV engine — ladders, per-fan pricing, '
+                'features': ['1 × AI Persona', '1 × Character Creator',
+                             'Every social media platform integration',
+                             'Generation Studio access',
+                             'Social media funnel to paid pages',
+                             'Full PPV engine: ladders, per-fan pricing, '
                              'timed re-offers',
                              'Up to 3 funnel phases + CTA',
-                             f'{CR.MONTHLY_TOKENS["starter"]:,} generation tokens a month',
-                             'Unlimited photo uploads', 'Email support'],
+                             'Content Planner Tool',
+                             'Unlimited photo uploads in Content Vault',
+                             _monthly_tokens_line('starter'),
+                             'Email support'],
                 'capabilities': {
                     'personas': 1,
                     'seats': 1,
@@ -1417,12 +1436,13 @@ _BASE_TIERS = {
                 }},
     'pro': {'name': 'Pro', 'price': 149,
             'blurb': 'Five personas, every platform.',
-            'features': ['5 AI personas', '2 team seats',
-                         'Telegram, X, Fanvue, OnlyFans and Threads',
-                         'Outfit locking + media tagging',
+            'features': ['Everything in Starter, plus:',
+                         '5 × AI Persona', '5 × Character Creator',
+                         '2 team seats',
+                         'Media tagging',
                          'Up to 10 funnel phases with photo rates',
                          'Scheduled follow-ups',
-                         f'{CR.MONTHLY_TOKENS["pro"]:,} generation tokens a month',
+                         _monthly_tokens_line('pro'),
                          'Priority support'],
             'capabilities': {
                 'personas': 5,
@@ -1437,12 +1457,12 @@ _BASE_TIERS = {
             }},
     'agency': {'name': 'Agency', 'price': 349,
                'blurb': 'Fifteen personas and a team to run them.',
-               'features': ['15 AI personas', '6 team seats with roles',
-                            'Every platform',
-                            'Outfit locking + media tagging',
+               'features': ['Everything in Pro, plus:',
+                            '15 × AI Persona', '15 × Character Creator',
+                            '6 team seats with roles',
                             'Conversation and revenue analytics',
                             'PPV reconciliation against Fanvue earnings',
-                            f'{CR.MONTHLY_TOKENS["agency"]:,} generation tokens a month',
+                            _monthly_tokens_line('agency'),
                             'Dedicated support'],
                'capabilities': {
                    'personas': 15,
@@ -1464,8 +1484,9 @@ CUSTOM_TIER = {
     'name': 'Custom',
     'blurb': 'More than 15 personas, or something built to fit.',
     'price_label': "Let's talk",
-    'features': ['Unlimited AI personas', 'Every platform',
-                 'Photo sending + outfit locking',
+    'features': ['Everything in Agency, plus:',
+                 'Unlimited AI Personas', 'Unlimited Character Creator',
+                 'Custom generation token allowance',
                  'PPV selling tuned to your catalogue',
                  'Custom funnel phases + integrations',
                  'Onboarding and roster migration',
@@ -1495,35 +1516,53 @@ G1 = 'Persona & chat'
 G2 = 'Funnel, selling & platforms'
 G3 = 'Team & support'
 
+# Custom is quote-only, so it has no capabilities of its own to enforce; these
+# exist only so the feature matrix can describe it beside the plans that do.
+CUSTOM_CAPS = {'personas': None, 'seats': None, 'platforms': None,
+               'phases_max': None, 'outfit_lock': True,
+               'scheduled_followups': True, 'analytics': True,
+               'ppv_reconcile': True, 'tokens_month': None}
+
+
+def _paid(c):
+    return c['platforms'] != []
+
+
 FEATURE_ROWS = [
-    (G1, 'AI persona builder',
-     lambda c: 'Visual builder: voice, backstory, archetype, warmth, escalation',
-     'Fill in a form \u2014 name, age, backstory, archetype, warmth, escalation '
-     'pace \u2014 and the system prompt behind every reply is written for you. '
-     'No prompt engineering, no code.'),
-    (G1, 'How many personas',
-     lambda c: ('Unlimited personas' if c['personas'] is None
-                else f"{c['personas']} persona" + ('' if c['personas'] == 1 else 's')),
+    (G1, 'AI personas',
+     lambda c: ('Unlimited AI Personas' if c['personas'] is None
+                else f"{c['personas']} × AI Persona"),
      'Every persona is her own character, with her own voice, photos, funnel and '
      'connected account. Your plan sets how many you can run at once.'),
-    (G1, 'AI persona generation',
-     lambda c: 'Generate backstory, speech style, interests and triggers',
-     'Stuck on a backstory or a speech style? Generate it and keep editing what '
-     'you like. Interests and conversion triggers come out of the same pass.'),
-    (G1, 'AI photo and video generation',
-     lambda c: ('Unlimited tokens' if c['tokens_month'] is None
-                else f"{c['tokens_month']:,} generation tokens a month"),
-     'Create on-brand photos and short clips of your persona \u2014 her look, '
-     'her outfit, the setting \u2014 without booking a shoot.'),
-    (G1, 'Photo library',
-     lambda c: 'Unlimited uploads, SFW and NSFW sets, per-photo tagging',
-     'Upload your own sets and tag them SFW or NSFW. The funnel then picks the '
-     'right photo for the right moment in the conversation.'),
-    (G1, 'Outfit locking + media tagging',
-     lambda c: 'Keep her in one outfit per set and tag media for the funnel'
-     if c['outfit_lock'] else (False, 'Pro and up'),
-     'Pin a persona to one outfit so a whole set stays consistent, and tag media '
-     'so she never sends a fan the same photo twice.'),
+    (G1, 'Character Creator',
+     lambda c: ('Unlimited Character Creator' if c['personas'] is None
+                else f"{c['personas']} × Character Creator"),
+     'Build her look once — face, body, style — and approve it. Every '
+     'photo and clip is generated from that approved character, so she looks '
+     'the same in every set.'),
+    (G1, 'AI persona builder',
+     lambda c: 'Visual builder, or generate backstory, voice and triggers',
+     'Fill in a form — name, age, backstory, archetype, warmth, escalation '
+     'pace — and the system prompt behind every reply is written for you. '
+     'Stuck? Generate the backstory, speech style and triggers, then edit what '
+     'you like. No prompt engineering, no code.'),
+    (G1, 'Generation Studio',
+     lambda c: ('Custom generation token allowance' if c['_key'] == 'custom'
+                else _tokens_line(f'{CR.FREE_CREDITS} generation tokens to get '
+                                  'started (one-time)', CR.FREE_CREDITS)
+                if c['_key'] == FREE_TIER_KEY
+                else _tokens_line(f"{c['tokens_month']:,} generation tokens a month",
+                                  c['tokens_month'])),
+     'Create on-brand photos and short clips of her — her look, her outfit, '
+     'the setting — without booking a shoot. A token buys a photo on the '
+     'cheapest model; a five-second clip costs twelve. Top up any time.'),
+    (G1, 'Content Vault',
+     lambda c: ('Unlimited uploads, SFW and NSFW sets'
+                + ('' if c['_key'] == 'starter' else ', media tagging'))
+     if _paid(c) else (False, 'Starter and up'),
+     'Upload your own sets and mark them SFW or NSFW. From Pro, tag every photo '
+     'and clip so the funnel picks the right one for the moment and never '
+     'sends a fan the same photo twice.'),
     (G1, 'Live chat engine',
      lambda c: 'Memory of the fan, in-character replies, tone matching',
      'She remembers what a fan told her, answers in character and matches his '
@@ -1532,59 +1571,66 @@ FEATURE_ROWS = [
      lambda c: 'Talk to her yourself and send fans a hosted landing page',
      'Talk to her yourself before any fan does, and send fans a hosted page '
      'where they can start chatting straight away.'),
-    (G2, 'Funnel phases',
-     lambda c: (f"Up to {c['phases_max']} phases with per-phase photo rates"
-                if c['phases_max'] > 3
-                else f"Up to {c['phases_max']} phases + CTA"),
-     'The conversation moves through phases \u2014 warm, engage, tease, offer, '
-     'close \u2014 and you set the pace and the photo rate for each one.'),
-    (G2, 'Scheduled follow-ups',
-     lambda c: 'Win back fans who go quiet, on your schedule'
-     if c['scheduled_followups'] else (False, 'Pro and up'),
-     'Fans who go quiet get a message back in their inbox on the schedule you '
-     'choose, written in her voice rather than a template.'),
+    (G2, 'Social media funnel',
+     lambda c: 'Every platform, funnelled to your paid page'
+     if _paid(c) else (False, 'Starter and up'),
+     'Connect her accounts and she chats and posts there directly. Followers '
+     'who find her are walked, conversation by conversation, to the page where '
+     'they pay.'),
     (G2, 'PPV engine',
-     lambda c: 'Price ladders, per-fan pricing and timed re-offers'
-     if c['platforms'] != [] else (False, 'Needs a connected platform'),
+     lambda c: ('PPV selling tuned to your catalogue' if c['_key'] == 'custom'
+                else 'Ladders, per-fan pricing, timed re-offers')
+     if _paid(c) else (False, 'Starter and up'),
      'Price ladders, per-fan pricing and timed re-offers: she prices the unlock '
      'to the fan in front of her, and follows up when he hesitates.'),
-    (G2, 'Connected platforms',
-     lambda c: ((False, 'Needs a paid plan')
-                if c['platforms'] == [] else
-                'Fanvue, OnlyFans, Telegram, X and Threads'
-                if c['platforms'] is None else
-                ' or '.join(PLATFORM_NAMES.get(p, p.title())
-                            for p in c['platforms'])),
-     'Connect her account and she chats there directly \u2014 same persona, same '
-     'funnel, on every platform your plan covers.'),
-    (G2, 'Growth planner',
-     lambda c: 'Plan, draft and schedule posts that feed the funnel'
-     if c['platforms'] != [] else (False, 'Needs a connected platform'),
-     'Plan, draft and schedule the posts that pull new followers into the '
-     'funnel, without leaving the dashboard.'),
-    (G2, 'PPV reconciliation',
-     lambda c: 'Match sent PPVs against Fanvue earnings'
-     if c['ppv_reconcile'] else (False, 'Agency only'),
-     'Every PPV she sends is matched against your Fanvue earnings, so you can '
-     'see what actually converted instead of guessing.'),
+    (G2, 'Funnel phases',
+     lambda c: ((False, 'Starter and up') if not _paid(c) else
+                'Custom funnel phases + integrations' if c['phases_max'] is None else
+                f"Up to {c['phases_max']} phases with photo rates"
+                if c['phases_max'] > 3 else f"Up to {c['phases_max']} phases + CTA"),
+     'The conversation moves through phases — warm, engage, tease, offer, '
+     'close — and you set the pace and the photo rate for each one.'),
+    (G2, 'Content Planner Tool',
+     lambda c: 'Plan, draft and schedule posts on every platform'
+     if _paid(c) else (False, 'Starter and up'),
+     'Plan, draft and schedule her posts across every platform without '
+     'leaving the dashboard.'),
+    (G2, 'Scheduled follow-ups',
+     lambda c: 'Win back fans who go quiet, on your schedule'
+     if _paid(c) and c['scheduled_followups'] else (False, 'Pro and up'),
+     'Fans who go quiet get a message back in their inbox on the schedule you '
+     'choose, written in her voice rather than a template.'),
     (G2, 'Conversation + revenue analytics',
      lambda c: 'Funnel stage per fan, conversion and revenue reporting'
-     if c['analytics'] else (False, 'Agency only'),
+     if c['analytics'] else (False, 'Agency and up'),
      'See which funnel stage every fan sits in, where conversations stall, and '
      'what each persona earns you per month.'),
+    (G2, 'PPV reconciliation',
+     lambda c: 'Match sent PPVs against Fanvue earnings'
+     if c['ppv_reconcile'] else (False, 'Agency and up'),
+     'Every PPV she sends is matched against your Fanvue earnings, so you can '
+     'see what actually converted instead of guessing.'),
     (G3, 'Team seats',
-     lambda c: (f"{c['seats']} seats with roles" if c['seats'] > 1
+     lambda c: ('Seats for your whole team' if c['seats'] is None
+                else f"{c['seats']} team seats with roles" if c['seats'] > 2
+                else f"{c['seats']} team seats" if c['seats'] > 1
                 else '1 seat'),
      'Invite chatters or managers with their own logins and roles, instead of '
      'passing one password around the team.'),
+    (G3, 'Onboarding and roster migration',
+     lambda c: 'We move your roster over and set it up with you'
+     if c['_key'] == 'custom' else (False, 'Custom only'),
+     'Bring an existing roster: we migrate your personas and media and set up '
+     'the funnels with you.'),
     (G3, 'Support',
-     lambda c: {'demo': 'Email support', 'starter': 'Email support',
-                'pro': 'Priority support'}.get(c['_key'], 'Dedicated support'),
-     'How you reach us and how fast we come back to you \u2014 from email on '
-     'Starter to a named contact on Agency.'),
+     lambda c: {FREE_TIER_KEY: 'Community support', 'starter': 'Email support',
+                'pro': 'Priority support', 'agency': 'Dedicated support',
+                }.get(c['_key'], 'Named contact on our team'),
+     'How you reach us and how fast we come back to you — from the '
+     'community on Free to a named contact on Custom.'),
 ]
 
-FEATURE_TIER_ORDER = DEFAULT_TIER_ORDER
+FEATURE_TIER_ORDER = [FREE_TIER_KEY] + DEFAULT_TIER_ORDER + ['custom']
 
 
 def _feature_id(label):
@@ -1597,8 +1643,9 @@ def _feature_id(label):
 def _feature_matrix():
     out = {}
     for key in FEATURE_TIER_ORDER:
-        tier = _BASE_TIERS[key]
-        caps = {**tier['capabilities'], '_key': key}
+        tier = CUSTOM_TIER if key == 'custom' else _BASE_TIERS[key]
+        caps = {**(CUSTOM_CAPS if key == 'custom' else tier['capabilities']),
+                '_key': key}
         rows = []
         for group, label, detail, explain in FEATURE_ROWS:
             text = detail(caps)
@@ -1609,20 +1656,27 @@ def _feature_matrix():
                          'id': _feature_id(label), 'explain': explain,
                          'detail': text or '', 'included': included and bool(text)})
         plats = caps['platforms']
-        out[key] = {'name': tier['name'], 'price': tier['price'],
+        tokens = (CR.FREE_CREDITS if key == FREE_TIER_KEY else caps['tokens_month'])
+        out[key] = {'name': tier['name'], 'price': tier.get('price'),
+                    'price_label': tier.get('price_label'),
                     'blurb': tier['blurb'], 'features': rows,
+                    'cta': ('Coming soon' if tier.get('coming_soon') else
+                            'Start free' if key == FREE_TIER_KEY else 'Get started'),
                     'highlights': [
-                        {'value': ('\u221e' if caps['personas'] is None
+                        {'value': ('∞' if caps['personas'] is None
                                    else str(caps['personas'])),
                          'label': 'Personas'},
                         {'value': ('5' if plats is None else str(len(plats))),
                          'label': 'Platforms'},
-                        {'value': str(caps['phases_max']),
+                        {'value': ('∞' if caps['phases_max'] is None
+                                   else str(caps['phases_max']) if plats != []
+                                   else '0'),
                          'label': 'Funnel phases'},
-                        {'value': ('\u221e' if caps['tokens_month'] is None
-                                   else f"{caps['tokens_month']:,}"),
-                         'label': 'Credits / mo'},
-                        {'value': str(caps['seats']), 'label': 'Team seats'},
+                        {'value': ('∞' if tokens is None else f'{tokens:,}'),
+                         'label': ('Tokens, once' if key == FREE_TIER_KEY
+                                   else 'Tokens / mo')},
+                        {'value': ('∞' if caps['seats'] is None
+                                   else str(caps['seats'])), 'label': 'Team seats'},
                     ]}
     return out
 
@@ -2665,9 +2719,6 @@ button:disabled{opacity:.6;cursor:not-allowed;transform:none;animation:none}
 .permo{font-size:.75rem;color:var(--text-muted);margin-bottom:10px}
 .vat{font-family:var(--font);font-size:.7rem;font-weight:500;color:var(--text-muted);letter-spacing:0}
 .tier.soon{opacity:.85}
-.freestrip{display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap;background:var(--panel);border:1px dashed var(--border);border-radius:14px;padding:14px 18px;margin:0 0 14px}
-.freestrip span{display:block;color:var(--text-2);font-size:.85rem;margin-top:3px}
-.freestrip button,.freestrip .nav-btn{width:auto;flex:none}
 /* Site header — same links and theme switch as the marketing pages. */
 .site-nav{position:fixed;top:0;left:0;right:0;z-index:60;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 24px;background:var(--panel);border-bottom:1px solid var(--border)}
 .site-nav .brand{font-family:var(--display);font-weight:800;font-size:1.05rem;color:var(--text);text-decoration:none;letter-spacing:-.01em}
@@ -2695,9 +2746,12 @@ body[data-page="pricing"] .wrap{margin:0 auto}
 .site-nav .nav-pricing{display:none}
 body[data-page="pricing"]{padding-top:80px}}
 @media(min-width:700px){.wrap.wide{max-width:760px}.tiers{grid-template-columns:repeat(2,1fr)}}
-@media(min-width:1180px){.wrap.wide{max-width:1240px}.tiers{grid-template-columns:repeat(4,1fr)}}
+@media(min-width:1180px){.wrap.wide{max-width:1240px}.tiers{grid-template-columns:repeat(4,1fr)}
+.wrap.wide:has(.tiers.five){max-width:1480px}.tiers.five{grid-template-columns:repeat(5,1fr)}}
 .in-workspace body>header.site-nav{display:none}
 .in-workspace body[data-page="pricing"]{padding-top:32px}
+.in-workspace body[data-page="pricing"] .wrap{max-width:none!important}
+.in-workspace body[data-page="pricing"] .bar{display:none}
 """
 
 # The account pages belong inside the dashboard, where its header and sidebar
@@ -2836,14 +2890,6 @@ Welcome offer: <strong>{{ offer.pct }}% off your first month</strong> on any mon
 plan paid by card — <span data-offer-left="{{ offer.seconds_left }}">{{ offer.seconds_left // 60 }} min</span> left.</div>{% endif %}
 {# Only an offer taken by card is discounted: Stripe carries the coupon. #}
 {% set offer_pct = offer.pct if offer.state == 'active' and stripe_enabled else 0 %}
-{% if not user.email or user.status != 'active' or user.tier == free_key %}
-<div class="freestrip">
-<div><strong>{{ free.name }} — {{ currency }}0</strong>
-<span>{{ free.features|join(' · ') }}</span></div>
-{% if user.tier == free_key and user.status == 'active' %}<button disabled>Your current plan</button>
-{% elif user.email %}<button type="button" data-free>Start free</button>
-{% else %}<a class="nav-btn" href="/register">Start free</a>{% endif %}
-</div>{% endif %}
 <div class="ptoggle">
 <button type="button" class="active" data-set-period="month">Monthly</button>
 <button type="button" data-set-period="year">Annual <span class="save">Save {{ annual_save_pct }}%</span></button>
@@ -2851,7 +2897,19 @@ plan paid by card — <span data-offer-left="{{ offer.seconds_left }}">{{ offer.
 <p class="permo" style="margin:2px 0 10px" data-edit-id="vat-note">All prices exclude VAT — any VAT due is added at checkout. Card plans renew automatically and can be cancelled any time from your account. Crypto payments are one-off — you re-pay when the plan runs out.</p>
 {% set pay_slots = [(1 if stripe_enabled else 0) + (1 if oxapay_enabled else 0)
                     + (1 if dev_mode else 0), 1]|max %}
-<div class="tiers" role="radiogroup" aria-label="Plans">
+{% set show_free = not user.email or user.status != 'active' or user.tier == free_key %}
+<div class="tiers{{ ' five' if show_free }}" role="radiogroup" aria-label="Plans">
+{% if show_free %}<div class="tier">
+<div class="pick" style="visibility:hidden"><span class="off">Select</span></div>
+<h2>{{ free.name }}</h2><div class="blurb">{{ free.blurb }}</div>
+<div class="price">{{ currency }}0<span>/month</span></div>
+<ul>{% for f in free.features %}<li>{{ f }}</li>{% endfor %}</ul>
+<div class="cta">
+{% if user.tier == free_key and user.status == 'active' %}<button disabled>Your current plan</button>
+{% elif user.email %}<button type="button" data-free>Start free</button>
+{% else %}<button type="button" onclick="window.top.location.href='/register'">Start free</button>{% endif %}
+{% for _ in range(pay_slots - 1) %}<button class="spacer" disabled tabindex="-1" aria-hidden="true">&nbsp;</button>{% endfor %}</div>
+</div>{% endif %}
 {% for key in order %}{% set t = tiers[key] %}{% set ta = tiers[key + annual_suffix] %}
 <div class="tier {{ 'featured' if key == 'pro' else '' }}" data-select="{{ key }}"
  role="radio" aria-checked="false" tabindex="0" aria-label="{{ t.name }} plan">
@@ -3005,8 +3063,22 @@ TOKENS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Buy tokens</title>
 <script src="/js/analytics.js" defer></script>
 <style>""" + ACCOUNT_CSS + """
-.tokbal{font-size:.95rem;color:var(--text-2);margin:0 0 4px}
-.tokbal strong{color:var(--text)}
+.tokcard{display:grid;grid-template-columns:1.2fr 1fr;gap:0;margin:14px 0 22px;border:1px solid var(--border);border-radius:18px;overflow:hidden;
+background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 16%,var(--surface)),var(--surface) 60%)}
+.tokcard[hidden]{display:none}
+.tokcard>div{padding:22px 26px}
+.tk-lbl{font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text-2)}
+.tk-num{display:flex;align-items:baseline;gap:8px;margin-top:6px}
+.tk-num b{font-size:2.6rem;line-height:1;font-weight:800;color:var(--text);font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.tk-num span{color:var(--text-2);font-weight:600}
+.tk-sub{margin-top:8px;font-size:.85rem;color:var(--text-2)}
+.tk-side{border-left:1px solid var(--border);display:flex;flex-direction:column;justify-content:center}
+.tk-side[hidden]{display:none}
+.tk-date{margin-top:6px;font-size:1.25rem;font-weight:700;color:var(--text)}
+.tk-bar{margin-top:12px;height:6px;border-radius:99px;background:var(--border);overflow:hidden}
+.tk-bar i{display:block;height:100%;width:0;border-radius:inherit;background:var(--accent);transition:width .9s cubic-bezier(.2,.8,.2,1)}
+.tk-in{margin-top:8px;font-size:.8rem;color:var(--text-2)}
+@media(max-width:700px){.tokcard{grid-template-columns:1fr}.tk-side{border-left:0;border-top:1px solid var(--border)}}
 </style></head><body data-page="pricing">
 <header class="site-nav">
 <a class="brand" href="/">Velvetfunnel<i>.app</i></a>
@@ -3024,7 +3096,10 @@ TOKENS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <h1 style="margin-bottom:6px">Buy tokens</h1>
 <p class="sub">One token is about one photo; a five-second clip is twelve.
 Your plan's monthly tokens reset each month &mdash; tokens you buy here never expire.</p>
-<p class="tokbal" id="tokbal" hidden></p>
+<div class="tokcard" id="tokbal" hidden>
+<div><div class="tk-lbl">Your balance</div><div class="tk-num"><b id="tk-n"></b><span id="tk-u"></span></div><div class="tk-sub" id="tk-m"></div></div>
+<div class="tk-side" id="tk-reset" hidden><div class="tk-lbl">Monthly tokens reset</div><div class="tk-date" id="tk-d"></div><div class="tk-bar"><i id="tk-p"></i></div><div class="tk-in" id="tk-in"></div></div>
+</div>
 <div id="tokup" class="ok" hidden></div>
 <div class="tokpacks" id="tokpacks"></div>
 <p class="sub" id="toknote" style="margin-top:16px;font-size:.82rem"></p>
@@ -3048,9 +3123,21 @@ var TOK_PROVIDERS = [{% if stripe_enabled %}['stripe','card']{% endif %}{% if st
   }
 
   var bal = document.getElementById('tokbal');
-  bal.innerHTML = 'You have <strong></strong>.';
-  bal.querySelector('strong').textContent = d.unlimited ? 'unlimited tokens'
-    : Number(d.balance).toLocaleString() + (d.balance === 1 ? ' token' : ' tokens');
+  document.getElementById('tk-n').textContent = d.unlimited ? 'Unlimited' : Number(d.balance).toLocaleString();
+  document.getElementById('tk-u').textContent = d.unlimited ? '' : (d.balance === 1 ? 'token' : 'tokens');
+  document.getElementById('tk-m').textContent = d.monthly
+    ? 'Your plan adds ' + Number(d.monthly).toLocaleString() + ' tokens every month.' : 'Tokens you buy never expire.';
+  if (d.monthly && d.resets_at && !d.unlimited) {
+    var end = new Date(d.resets_at + 'T00:00:00Z'), start = new Date(end), now = new Date();
+    start.setUTCMonth(start.getUTCMonth() - 1);
+    var left = Math.max(0, Math.ceil((end - now) / 864e5));
+    document.getElementById('tk-d').textContent = end.toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+    document.getElementById('tk-in').textContent = left <= 1 ? 'Resets tomorrow' : 'In ' + left + ' days';
+    document.getElementById('tk-reset').hidden = false;
+    requestAnimationFrame(function () { requestAnimationFrame(function () {
+      document.getElementById('tk-p').style.width = Math.min(100, (now - start) / (end - start) * 100) + '%';
+    }); });
+  }
   bal.hidden = false;
 
   // Acknowledge a purchase we just came back from. /billing/return has already
@@ -3476,6 +3563,14 @@ h2{font-size:1rem;margin-bottom:14px}
 <button type="submit">Grant {{ trial_days }}-day trial</button></form>{% endif %}
 <p class="sub" style="margin-top:10px"><a href="/admin/trials">Shareable trial links</a></p></div>
 
+{% if super_admin %}<div class="card" style="margin-top:16px"><h2>Give tokens</h2>
+<p class="sub">Balance: {{ '{:,}'.format(u.tokens) }} tokens. A gift is free, never expires and is logged in the ledger.</p>
+<form method="post" action="/admin/users/{{ u.id }}">
+<input type="hidden" name="action" value="tokens">
+<label>Tokens</label><input type="number" name="tokens" min="1" max="1000000" required>
+<label>Note (optional)</label><input type="text" name="note" maxlength="200">
+<button type="submit">Give tokens</button></form></div>
+{% endif %}
 <div class="card" style="margin-top:16px"><h2>Set password</h2>
 <p class="sub">Replaces the password immediately. Tell them out of band.</p>
 <form method="post" action="/admin/users/{{ u.id }}">
@@ -3812,6 +3907,15 @@ def admin_demos():
                                   accounts=demo_accounts)
 
 
+def _owned_workspace_id(session_db, user_row):
+    """The workspace a user's tokens live in: the one they own, which is what
+    `_workspace_id` resolves to when they are signed in to it."""
+    from db import Workspace
+    ws = session_db.query(Workspace).filter(
+        Workspace.owner_id == user_row.id).first()
+    return ws.id if ws is not None else user_row.id
+
+
 @app.route('/admin/users/<uid>', methods=['GET', 'POST'])
 def admin_user_detail(uid):
     blocked = _require_admin()
@@ -3888,6 +3992,22 @@ def admin_user_detail(uid):
                                     u.email, u.role, u.status, u.tier,
                                     request.form.get('team_owner') or '-')
 
+            elif action == 'tokens':
+                raw = (request.form.get('tokens') or '').strip()
+                if not me.get('is_super_admin'):
+                    error = 'Only the super admin can give tokens.'
+                elif not raw.isdigit() or not 0 < int(raw) <= 1_000_000:
+                    error = 'Enter a whole number of tokens, 1 to 1,000,000.'
+                else:
+                    from db import token_post
+                    note = (request.form.get('note') or '').strip()
+                    token_post(s, _owned_workspace_id(s, u), int(raw), 'adjust',
+                               source='gift:' + me['id'],
+                               note=note or 'Gift from ' + me['email'])
+                    saved = f'{int(raw):,} tokens added.'
+                    logger.info('ADMIN TOKEN GIFT by=%s target=%s tokens=%s',
+                                me['email'], u.email, raw)
+
             elif action == 'trial':
                 err = _grant_trial(s, u)
                 if err:
@@ -3909,10 +4029,14 @@ def admin_user_detail(uid):
                 'grandfathered': _fmt_date(u.grandfathered_until),
                 'status': u.status, 'tier': u.tier, 'expires': _fmt_date(u.expires_at),
                 'trial_at': _fmt_date(u.trial_at)}
+        if me.get('is_super_admin'):
+            from db import token_balance
+            view['tokens'] = token_balance(s, _owned_workspace_id(s, u))
         p = {f: (getattr(u, f) or '') for f in pfields}
     finally:
         s.close()
     return render_template_string(ADMIN_USER_HTML, u=view, p=p, saved=saved,
+                                  super_admin=bool(me.get('is_super_admin')),
                                   error=error, tiers=TIERS, order=DEFAULT_TIER_ORDER,
                                   roles=ADMIN_ROLES, demo_key=DEMO_TIER_KEY,
                                   trial_days=TRIAL_DAYS)
@@ -5050,6 +5174,7 @@ def api_tokens():
         'balance': balance,
         'unlimited': balance is None,
         'monthly': user_capabilities(user).get('tokens_month'),
+        'resets_at': _period_end().date().isoformat(),
         'equivalents': CR.equivalents(balance or 0),
         'packs': CR.packs_for(_user_currency(user)),
         # Appended, never mixed in: it is priced far under cost, so it reaches
@@ -30150,10 +30275,10 @@ def _char_views_state(s, row):
         refs.setdefault(r.view_id, []).append({'image_id': r.ref_image_id, 'weight': r.weight})
     for k, cv in rows.items():
         v = CH.view(k, row.body_type) or {}
-        mode = cv.mode or v.get('mode') or 'reference'
+        mode = 'reference' if v.get('nocrop') else cv.mode or v.get('mode') or 'reference'
         d = dicts[k]
         d.update(display=shown.get(k, d['status']), mode=mode,
-                 strength=cv.strength if cv.strength is not None else CH.STRENGTH[mode],
+                 strength=CH.STRENGTH[mode],
                  crop_box=d['crop_box'] or CH.default_crop(v.get('region')),
                  references=refs.get(cv.id))
     return rows, dicts
@@ -30219,9 +30344,19 @@ def _char_json(s, row, full=False):
 def _char_row(s, user, char_id):
     from db import Character
     row = s.query(Character).filter(Character.id == char_id).first()
-    if not row or row.workspace_id != _workspace_id(user):
+    if not row or (row.workspace_id != _workspace_id(user)
+                   and not (user or {}).get('is_super_admin')):
         return None
     return row
+
+
+def _char_owner_emails(s, workspace_ids):
+    from db import Workspace, User
+    if not workspace_ids:
+        return {}
+    rows = (s.query(Workspace.id, User.email).join(User, User.id == Workspace.owner_id)
+            .filter(Workspace.id.in_(workspace_ids)).all())
+    return {w: e for w, e in rows}
 
 
 def _char_persona_ok(slug):
@@ -30401,7 +30536,7 @@ def _character_urls(snap, shot, scene, face_only=False):
                         for k in keys) if u]
 
 
-def _character_view_refs(char_id, view_key, outfit_image=None):
+def _character_view_refs(char_id, view_key, outfit_image=None, look=None):
     """References for generating one view: the approved views it builds on,
     then the creator's uploads for that view, then her general uploads."""
     from db import Character
@@ -30437,6 +30572,11 @@ def _character_view_refs(char_id, view_key, outfit_image=None):
         outfit = outfit_image and s.query(CharacterImage).filter_by(
             id=outfit_image, character_id=char_id, role='outfit').first()
         outfit_url = outfit and _char_ref_url(outfit)
+        look_file = CH.look_path(look)
+        if look_file:
+            import base64
+            with open(look_file, 'rb') as f:
+                outfit_url = 'data:image/jpeg;base64,' + base64.b64encode(f.read()).decode()
         if outfit_url:
             # The prompt names "the last reference image", so it goes last and
             # is never the one trimmed.
@@ -30666,10 +30806,19 @@ def api_characters():
     s = _db_session()
     try:
         if request.method == 'GET':
-            rows = (s.query(Character)
-                    .filter(Character.workspace_id == _workspace_id(user))
-                    .order_by(Character.updated_at.desc()).all())
-            return jsonify({'ok': True, 'characters': [_char_json(s, r) for r in rows]})
+            q = s.query(Character)
+            mine = _workspace_id(user)
+            if not (user or {}).get('is_super_admin'):
+                q = q.filter(Character.workspace_id == mine)
+            rows = q.order_by(Character.updated_at.desc()).all()
+            owners = _char_owner_emails(s, {r.workspace_id for r in rows if r.workspace_id != mine})
+            out = []
+            for r in rows:
+                j = _char_json(s, r)
+                if r.workspace_id != mine:
+                    j['owner'] = owners.get(r.workspace_id, r.workspace_id)
+                out.append(j)
+            return jsonify({'ok': True, 'characters': out})
         body = request.get_json(silent=True) or {}
         persona = (body.get('persona') or '').strip().lower()
         if persona:
@@ -30991,6 +31140,16 @@ def api_character_image_delete(char_id, img_id):
         s.close()
 
 
+@app.route('/api/characters/looks/<folder>/<n>.jpg')
+def api_character_look(folder, n):
+    blocked = _require_active()
+    if blocked:
+        return blocked
+    if not CH.look_path(folder + '/' + n):
+        return ('Not found', 404)
+    return send_from_directory(os.path.join(CH.LOOK_ROOT, folder), n + '.jpg')
+
+
 @app.route('/api/characters/<char_id>/generate', methods=['POST'])
 def api_character_generate(char_id):
     blocked = _require_active()
@@ -31004,8 +31163,6 @@ def api_character_generate(char_id):
     except (TypeError, ValueError):
         batch = CH.DEFAULT_BATCH
     batch = max(1, min(CH.MAX_BATCH, batch))
-    pose = body.get('pose') if body.get('pose') in CH.POSES else None
-    lighting = body.get('lighting') if body.get('lighting') in CH.LIGHTING else None
     s = _db_session()
     try:
         row = _char_row(s, user, char_id)
@@ -31036,13 +31193,20 @@ def api_character_generate(char_id):
         match = view_key == 'body_front' and sheet.get('body_mode') == 'match'
         if match and not _char_images(s, row.id, view='body_front', role='reference'):
             return jsonify({'ok': False, 'error': 'Add at least one body photo to match.'}), 400
+        look = ''
+        need = CH.look_for(row.nsfw_level, view_key)
+        if need:
+            folder, label = CH.LOOKS[need][:2]
+            if sheet.get(need) not in CH.LOOK_FILES[need]:
+                return jsonify({'ok': False, 'error': f'Pick her {label.lower()} example in Body profile first.'}), 400
+            look = folder + '/' + sheet[need]
         dressed = CH.outfits(sheet) if '{outfit}' in v['framing'] else [None]
         owned = {i.id for i in _char_images(s, row.id, view='', role='outfit')}
         dressed = [o for o in dressed if not (o or '').startswith('upload:') or o[7:] in owned] or ['Bodysuit']
         prompts = [CH.build_view_prompt(view_key, sheet, row.age, has_ref, row.body_type, mode=mode,
                                         strength=state[view_key]['strength'],
-                                        pose=pose, lighting=lighting, outfit=o, blend=blend,
-                                        match=match) for o in dressed]
+                                        outfit=o, blend=blend,
+                                        match=match, look=bool(look), level=row.nsfw_level) for o in dressed]
         parent_versions = {p: state[p]['version'] for p in v['parents']}
         key = row.key
     finally:
@@ -31054,7 +31218,7 @@ def api_character_generate(char_id):
               'character_view': view_key, 'prompt': prompt,
               'parent_versions': parent_versions,
               'outfit': o or '', 'outfit_image': (o or '')[7:] if (o or '').startswith('upload:') else '',
-              'reference_media': '', 'negative_extra': ''} for prompt, o in zip(prompts, dressed)]
+              'reference_media': '', 'negative_extra': '', 'look': look} for prompt, o in zip(prompts, dressed)]
     try:
         prices = [CR.quote(spec) for spec in specs]
     except CR.PricingError as e:
@@ -31096,7 +31260,7 @@ def api_character_generate(char_id):
 
 @app.route('/api/characters/<char_id>/views/<view_key>', methods=['PUT'])
 def api_character_view_settings(char_id, view_key):
-    """Source mode, crop box, strength and references for one view."""
+    """Source mode, crop box and references for one view."""
     blocked = _require_active()
     if blocked:
         return blocked
@@ -31112,7 +31276,7 @@ def api_character_view_settings(char_id, view_key):
         cv = _char_views(s, row)[view_key]
         if 'mode' in body:
             mode = body['mode'] or None
-            if mode not in (None, 'crop', 'reference') or (mode == 'crop' and not v['parents']):
+            if mode not in (None, 'crop', 'reference') or (mode == 'crop' and (not v['parents'] or v.get('nocrop'))):
                 return jsonify({'ok': False, 'error': 'That view cannot be cropped.'}), 400
             cv.mode = mode
         if 'crop_box' in body:
@@ -31123,11 +31287,6 @@ def api_character_view_settings(char_id, view_key):
                 except (KeyError, TypeError, ValueError):
                     return jsonify({'ok': False, 'error': 'Bad crop box'}), 400
             cv.crop_box_json = json.dumps(box) if box else None
-        if 'strength' in body:
-            try:
-                cv.strength = None if body['strength'] is None else min(1.0, max(0.0, float(body['strength'])))
-            except (TypeError, ValueError):
-                return jsonify({'ok': False, 'error': 'Bad strength'}), 400
         if 'references' in body:
             s.flush()
             refs = body['references']
@@ -31517,7 +31676,8 @@ def _gen_start(job_id, slug, spec, workspace):
                 call['reference_mime'] = ref_mime
             if spec['kind'] == 'image' and spec.get('character_view'):
                 refs = _character_view_refs(spec['character_id'],
-                                            spec['character_view'], spec.get('outfit_image'))
+                                            spec['character_view'], spec.get('outfit_image'),
+                                            spec.get('look'))
                 if refs:
                     call['reference_urls'] = refs
                 call['prompt'] = spec['prompt']

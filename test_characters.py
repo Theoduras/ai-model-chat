@@ -43,6 +43,12 @@ def test_required_views():
     check('topless adds nude full body', 'nude_front' in top)
     check('topless adds breasts and nipples', {'breasts', 'nipples'} <= set(top))
     check('topless has nothing explicit', not {'pubic', 'vulva_closed', 'anus_closed'} & set(top))
+    check('topless adds the back view', 'body_back' in top)
+    check('back view walks right after the front, close-ups before the nude',
+          [k for k in CH.required_views('explicit') if k != 'face_front'][:5]
+          == ['body_front', 'body_back', 'breasts', 'nipples', 'nude_front'])
+    check('breasts come from the dressed body, never cropped',
+          CH.view('breasts')['parents'] == ('body_front',) and CH.view('breasts')['mode'] == 'reference')
     exp = set(CH.required_views('explicit'))
     check('explicit requires pubic, vulva, anus closed',
           {'pubic', 'vulva_closed', 'anus_closed'} <= exp)
@@ -115,6 +121,14 @@ def test_prompts():
               not any(w in p for w in CH._fragments({x: FULL_SHEET[x] for x in far}, ('body',))))
 
 
+def test_topless_level():
+    top = CH.build_view_prompt('nude_front', {}, 25, True, level='moderate')
+    check('topless full body wears panties', 'panties' in top and 'topless' in top and 'nude' not in top)
+    check('explicit full body stays nude', 'nude' in CH.build_view_prompt('nude_front', {}, 25, True, level='explicit'))
+    check('topless back wears panties', 'panties' in CH.build_view_prompt('rear_nude', {}, 25, True, level='moderate'))
+    check('no nude label at topless', not any('Nude' in v['label'] for v in CH.catalogue('moderate')['views']))
+
+
 def test_validation():
     def refused(data):
         try:
@@ -163,6 +177,8 @@ def test_validation():
     check('malformed uploaded outfit refused', refused({'age': 25, 'sheet': {'view_outfits': ['upload:../x']}}))
     clean, warn = CH.validate({'age': 25, 'notes': 'likes red', 'banned': ['red']})
     check('banned terms struck', 'red' not in clean['notes'])
+    clean, _ = CH.validate({'age': 25, 'sheet': {'labia': 'Tucked', 'labia_fullness': 'Full', 'vulva_colour': 'Pink'}})
+    check('retired labia picks drop', clean['sheet'] == {'vulva_colour': 'Pink'})
 
 
 def test_every_option_has_a_drawing():
@@ -300,15 +316,70 @@ def test_content_prompts():
         IG.pick_direction(s, '') for s in IG.SHOT_FRAMING))
 
 
+def test_vulva_looks():
+    saved = CH.LOOK_FILES
+    CH.LOOK_FILES = {'vulva_look': ('1', '2', '3'), 'vulva_open_look': ('1',), 'anus_look': ('1',), 'anus_open_look': ('1',)}
+    try:
+        base = {'age': 25, 'nsfw_level': 'explicit'}
+        check('look accepted', CH.validate(dict(base, sheet={'vulva_look': '3'}))[0]['sheet']['vulva_look'] == '3')
+        for bad in ('10', 'x'):
+            try:
+                CH.validate(dict(base, sheet={'vulva_look': bad}))
+                check(f'look {bad} refused', False)
+            except CH.CharacterError:
+                pass
+        check('looks only at explicit', len(CH.catalogue('explicit')['looks']) == 4 and not CH.catalogue('moderate')['looks']
+              and not CH.catalogue('sfw')['looks'])
+        check('closed look required for the nude at explicit', CH.look_for('explicit', 'nude_front') == 'vulva_look')
+        check('open look required for the open view', CH.look_for('explicit', 'vulva_open') == 'vulva_open_look')
+        check('anus looks required for their views', CH.look_for('explicit', 'anus_closed') == 'anus_look'
+              and CH.look_for('explicit', 'anus_open') == 'anus_open_look')
+        check('look not required below explicit', not CH.look_for('moderate', 'nude_front'))
+        check('look not required for a dressed view', not CH.look_for('explicit', 'body_front'))
+        closed, opened = CH.LOOKS['vulva_look'][3], CH.LOOKS['vulva_open_look'][3]
+        check('look reaches the nude prompt', closed in CH.build_view_prompt('nude_front', {}, 25, True, look=True))
+        check('open look reaches the open prompt', opened in CH.build_view_prompt('vulva_open', {}, 25, True, look=True))
+        check('look stays off a dressed view', 'last reference' not in CH.build_view_prompt('body_front', {}, 25, True, look=True))
+        check('no look, no clause', closed not in CH.build_view_prompt('nude_front', {}, 25, True))
+        check('look never in content text', 'last reference' not in CH.describe({'vulva_look': '2'}, 'explicit'))
+        check('look path only for our files', CH.look_path('vulva/2') and not CH.look_path('vulva/9')
+              and not CH.look_path('../vulva/2') and not CH.look_path('vulva_open/../vulva/1'))
+        CH.LOOK_FILES = {k: () for k in CH.LOOKS}
+        check('no examples, nothing required', not CH.look_for('explicit', 'nude_front'))
+    finally:
+        CH.LOOK_FILES = saved
+
+
+def test_presets():
+    feats = CH.features()
+    body = [k for k, f in feats.items() if f[1] == 'body']
+    for key, (_, _, values) in CH.BODY_PRESETS.items():
+        check(f'{key} values valid', all(v in [o for o, _ in feats[k][2]] for k, v in values.items()))
+        if key != 'scratch':
+            check(f'{key} covers every body feature', set(body) <= set(values))
+        sheet = CH.apply_preset({'build': 'Muscular', 'eye_colour': 'Green', 'cup': 'A', 'areola_colour': 'Pink'}, key)
+        check(f'{key} keeps face picks and colours', sheet['eye_colour'] == 'Green' and sheet['areola_colour'] == 'Pink')
+        check(f'{key} overwrites body and intimate picks', sheet.get('build') == values.get('build')
+              and sheet.get('cup') == values.get('cup'))
+        check(f'{key} leans young nowhere', CH.youth_score(values) == 0)
+        # The youngest face a creator can save still leaves room for any preset.
+        face = {'apparent_age': '18–21'}
+        _, warnings = CH.validate({'age': 25, 'nsfw_level': 'explicit', 'sheet': dict(sheet, **face)})
+        check(f'{key} adds no youth warning', warnings == CH.validate({'age': 25, 'sheet': face})[1])
+
+
 if __name__ == '__main__':
     test_sfw_never_gets_nsfw()
     test_required_views()
     test_prompts()
     test_validation()
+    test_topless_level()
     test_every_option_has_a_drawing()
     test_view_tree()
     test_resolver()
     test_snapshot_views()
     test_content_prompts()
+    test_vulva_looks()
+    test_presets()
     print('FAILED' if FAILURES else 'OK', len(FAILURES))
     raise SystemExit(1 if FAILURES else 0)

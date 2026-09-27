@@ -75,9 +75,16 @@
           (o.done(i) && i !== o.idx ? '<span class="ob-rcheck">✓</span>' : '<span class="ob-rdot"></span>') +
           esc(s.nav) + '</button>';
       }).join('') + '</div>' : '';
+      // Another stage's title jumps to where that stage left off, or to its
+      // result once it is finished — never past what `reachable` allows.
+      var can = open ? [] : mine.filter(function (i) { return o.reachable(i); });
+      var to = can.filter(function (i) { return !o.done(i); })[0];
+      if (to === undefined) to = can[can.length - 1];
+      var tag = to === undefined ? 'div' : 'button';
       return '<div class="ob-rstage">' +
-        '<div class="ob-rstage-t' + (open ? ' on' : '') + '">' +
-          '<span class="ob-rnum ' + stt + '">' + (all ? '✓' : (n + 1)) + '</span>' + esc(st.label) + '</div>' +
+        '<' + tag + (to === undefined ? '' : ' type="button" onclick="' + o.call + '(' + to + ')"') +
+          ' class="ob-rstage-t' + (open ? ' on' : '') + '">' +
+          '<span class="ob-rnum ' + stt + '">' + (all ? '✓' : (n + 1)) + '</span>' + esc(st.label) + '</' + tag + '>' +
         steps + '</div>';
     }).join('') + '</div>';
     return html;

@@ -24,11 +24,10 @@
     <button class="icon-btn mobile-only" onclick="openSidebar()" title="Personas" aria-label="Open personas">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="20" height="20"><path d="M4 6h16M4 12h16M4 18h16" stroke-linecap="round"/></svg>
     </button>
-    <button class="icon-btn desk-only" onclick="toggleSidebar()" title="Show or hide the persona list" aria-label="Toggle persona list">
+    <button class="icon-btn desk-only" onclick="toggleSidebar()" title="Collapse or expand the menu" aria-label="Toggle menu">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="20" height="20"><path d="M4 6h16M4 12h16M4 18h16" stroke-linecap="round"/></svg>
     </button>
-    <h1>Persona Builder</h1>
-    <span class="badge">Dashboard</span>
+    <a href="/" class="brand dash-brand"><span data-sn-brand>Velvetfunnel</span><i data-sn-suffix>.app</i></a>
   </div>
   <div style="display:flex; align-items:center; gap:16px;">
     <button class="icon-btn mobile-only" onclick="openPreview()" title="Preview" aria-label="Open preview">
@@ -95,6 +94,21 @@
         <button class="btn btn-ghost" onclick="nameCancel()">Cancel</button>
         <button class="btn btn-primary" id="name-ok" onclick="nameConfirm()">Create</button>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Tokens / Upgrade lightbox -->
+<div class="modal-overlay" id="pay-modal" style="background:var(--bg);" onclick="if(event.target===this)closePayModal()">
+  <div class="modal" style="max-width:none; width:100%; height:90vh; padding:0; position:relative; overflow:hidden;">
+    <button class="modal-close" onclick="closePayModal()" aria-label="Close" style="position:absolute; top:8px; right:10px; z-index:1;">&times;</button>
+    <iframe id="pay-frame" class="sb-frame" title="Tokens and plans"></iframe>
+    <div id="pay-success" style="display:none; height:100%; flex-direction:column; align-items:center; justify-content:center; gap:10px; text-align:center;">
+      <div style="font-size:44px;">🎉</div>
+      <div style="font-size:22px; font-weight:700;">Payment successful</div>
+      <div id="pay-added" style="opacity:.75;"></div>
+      <div id="pay-count" style="font-size:56px; font-weight:800; font-variant-numeric:tabular-nums;">0</div>
+      <div style="opacity:.6;">tokens</div>
     </div>
   </div>
 </div>
@@ -173,6 +187,8 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6" stroke-linecap="round"/></svg>
           <span>Character Creator</span>
         </button>
+        <div class="sb-quick" id="sb-chars" data-role-area="generate"></div>
+        <button class="btn-new" data-role-area="generate" onclick="newModel()">+ New Character</button>
         <button type="button" class="sb-item" data-view="/studio" data-role-area="generate" data-search="studio generate image video nsfw ai photos clips tokens credits" onclick="openEmbedded('/studio', this)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.8"/><path d="m4 17 4.5-4.5L13 17M14 14l2.5-2.5L20 15" stroke-linecap="round" stroke-linejoin="round"/></svg>
           <span>Generation Studio</span>
@@ -288,12 +304,7 @@
     <div class="sb-foot">
       <button type="button" class="btn btn-primary sb-refer" data-view="/referrals" data-search="referrals refer earn commission invite"
               onclick="openEmbedded('/referrals', this)">Refer a creator &middot; earn 5%</button>
-      <!-- Opened from the header's account picture; kept as the frame anchor for /account, /billing and /tokens. -->
-      <button type="button" class="sb-item" hidden data-view="/account" data-search="account billing plan tokens profile"
-              onclick="openEmbedded('/account', this)">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2.5 2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        <span>Account</span>
-      </button>
+      <span hidden data-view="/account"></span>
     </div>
   </aside>
 
@@ -771,6 +782,7 @@ async function init() {
 
   applySidebarDefault();
   renderQuickList();
+  loadSidebarCharacters();
   document.getElementById('persona-count').textContent = seen.size;
   if (currentTab !== 'chat') switchTabByName(currentTab);
   // The main area is painted once, here: the boot placeholder holds until the
@@ -1284,6 +1296,7 @@ function clearSbActive() {
 function showPersonaBrowser() {
   currentSlug = null;
   if (window.PlatformSetup && PlatformSetup.running()) PlatformSetup.close();
+  if (window.Onboarding) Onboarding.leave();
   document.body.classList.remove('embedding');
   document.querySelectorAll('.persona-item').forEach(el => el.classList.remove('active'));
   document.getElementById('action-bar').style.display = 'none';
@@ -1304,6 +1317,7 @@ function showPersonaBrowser() {
 function needsPersona() {
   if (Object.keys(personas).length) return false;
   if (window.PlatformSetup && PlatformSetup.running()) PlatformSetup.close();
+  if (window.Onboarding) Onboarding.leave();
   currentSlug = null;
   clearSbActive();
   document.body.classList.remove('embedding');
@@ -1370,6 +1384,7 @@ const PERSONA_PAGES = ['/chat', '/landing', '/planner', '/embed-setup'];
 function openEmbedded(url, navEl) {
   if (PERSONA_PAGES.indexOf(url.split('?')[0]) !== -1 && needsPersona()) return;
   if (window.PlatformSetup && PlatformSetup.running()) PlatformSetup.close();
+  if (window.Onboarding) Onboarding.leave();
   currentSlug = null;
   document.querySelectorAll('.persona-item').forEach(el => el.classList.remove('active'));
   clearSbActive();
@@ -1399,6 +1414,13 @@ function restoreView() {
   // A page opened on its own lands here as ?open= so it shows inside the
   // workspace.
   const open = new URLSearchParams(location.search).get('open') || '';
+  if (PAY_PATHS.includes(open.split('?')[0])) {
+    history.replaceState(null, '', location.pathname);
+    const added = +new URL(open, location.origin).searchParams.get('topup') || 0;
+    if (added) showTopupSuccess(added);
+    else openPayModal(open);
+    return false;
+  }
   const openEl = /^\/[a-z]/.test(open) && viewEl(open);
   if (openEl) {
     history.replaceState(null, '', location.pathname);
@@ -1410,6 +1432,11 @@ function restoreView() {
       saveView({ kind: 'embed', url: u.pathname + u.search });
     }
     return true;
+  }
+  // The header's Dashboard link means the personas, not wherever she was last.
+  if (new URLSearchParams(location.search).get('view') === 'personas') {
+    history.replaceState(null, '', location.pathname);
+    return false;
   }
   let v = null;
   try { v = JSON.parse(localStorage.getItem(lsViewKey()) || 'null'); } catch(e) {}
@@ -1431,21 +1458,70 @@ function restoreView() {
   return false;
 }
 
+// Tokens and Upgrade open over the current view so the creator keeps her place.
+const PAY_PATHS = ['/tokens', '/billing'];
+function openPayModal(url) {
+  document.getElementById('pay-frame').src = url;
+  document.getElementById('pay-modal').classList.add('open');
+}
+function closePayModal() {
+  const m = document.getElementById('pay-modal');
+  if (!m.classList.contains('open')) return;
+  m.classList.remove('open');
+  document.getElementById('pay-frame').src = 'about:blank';
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closePayModal(); });
+
+// After a paid top-up: a success note and the balance counting up to its new value.
+function showTopupSuccess(added) {
+  const m = document.getElementById('pay-modal');
+  const box = document.getElementById('pay-success');
+  const num = document.getElementById('pay-count');
+  document.getElementById('pay-frame').style.display = 'none';
+  box.style.display = 'flex';
+  document.getElementById('pay-added').textContent = '+' + added.toLocaleString() + ' tokens added';
+  m.classList.add('open');
+  fetch('/api/tokens/balance', { credentials: 'same-origin' })
+    .then(r => r.json()).catch(() => ({}))
+    .then(d => {
+      const end = d.balance != null ? d.balance : added, start = Math.max(0, end - added), t0 = performance.now();
+      (function step(t) {
+        const k = Math.min(1, (t - t0) / 1800);
+        num.textContent = Math.round(start + (end - start) * (1 - Math.pow(1 - k, 3))).toLocaleString();
+        if (k < 1) requestAnimationFrame(step);
+        else setTimeout(() => {
+          closePayModal();
+          document.dispatchEvent(new Event('sn-tokens-changed'));
+          box.style.display = 'none';
+          document.getElementById('pay-frame').style.display = '';
+        }, 2200);
+      })(t0);
+    });
+}
+
 // Opens a link inside the workspace when the sidebar offers it; anything else
 // (log out, the public pricing page) leaves the dashboard.
 function navigateWorkspace(url) {
-  if (url.split('?')[0] === '/dashboard') { showPersonaBrowser(); return; }
+  const path = url.split('?')[0];
+  if (PAY_PATHS.includes(path)) { openPayModal(url); return; }
+  closePayModal();
+  if (path === '/dashboard') { showPersonaBrowser(); return; }
   const el = viewEl(url);
   if (el) openEmbedded(url, el);
   else location.href = url;
 }
 
 // The header's Tokens and Upgrade links (and the plan box's Top up) open in
-// the frame rather than reloading the dashboard around them.
+// the lightbox rather than reloading the dashboard around them.
 document.addEventListener('click', function (e) {
   if (e.defaultPrevented || e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
   const a = e.target.closest('a[href]');
-  if (!a || a.target || a.origin !== location.origin || !viewEl(a.pathname)) return;
+  if (a && !a.target && a.origin === location.origin && a.pathname === '/dashboard') {
+    e.preventDefault();
+    showPersonaBrowser();
+    return;
+  }
+  if (!a || a.target || a.origin !== location.origin || !(viewEl(a.pathname) || PAY_PATHS.includes(a.pathname))) return;
   e.preventDefault();
   navigateWorkspace(a.pathname + a.search);
 });
@@ -1463,8 +1539,10 @@ window.addEventListener('message', function (e) {
   if (e.origin !== location.origin || !e.data || e.data.type !== 'fv-tour') return;
   var el = document.getElementById('fv-frame-dim');
   if (!e.data.on) { if (el) el.remove(); return; }
-  var frame = document.querySelector('.sb-frame');
-  if (!frame) return;
+  // The sender's own frame: the first .sb-frame can be the hidden Tokens lightbox,
+  // whose empty rect would dim the whole window, the tour included.
+  var frame = [].find.call(document.querySelectorAll('iframe'), function (f) { return f.contentWindow === e.source; });
+  if (!frame || !frame.getBoundingClientRect().width) return;
   var r = frame.getBoundingClientRect();
   if (!el) {
     el = document.createElement('div');
@@ -1633,6 +1711,59 @@ function renderPersonaBrowser() {
 function renderSidebar() {
   if (!currentSlug) renderPersonaBrowser();
   renderQuickList();
+  renderCharList();
+}
+
+let sbCharacters = [];
+
+async function loadSidebarCharacters() {
+  try {
+    const data = await (await fetch('/api/characters')).json();
+    sbCharacters = (data && data.characters) || [];
+  } catch (e) { sbCharacters = []; }
+  renderCharList();
+}
+
+// Same shape as the persona quick list: favourites (via the linked persona)
+// first, capped at 3. With no characters the section stays empty.
+function renderCharList() {
+  const host = document.getElementById('sb-chars');
+  if (!host) return;
+  host.innerHTML = '';
+  const fav = c => !!((personas[c.persona] || {}).config || {}).favorite;
+  const list = sbCharacters.filter(fav).concat(sbCharacters.filter(c => !fav(c))).slice(0, 3);
+  list.forEach(c => {
+    const el = document.createElement('div');
+    el.className = 'persona-item';
+    el.onclick = () => openEmbedded('/characters?id=' + encodeURIComponent(c.id),
+                                    document.querySelector('[data-view="/characters"]'));
+    const initials = (c.name || '?').slice(0, 2).toUpperCase();
+    const avatar = c.face_url
+      ? '<img loading="lazy" decoding="async" src="' + esc(c.face_url) + '" style="width:36px;height:36px;border-radius:50%;object-fit:cover;">'
+      : '<div class="persona-avatar">' + esc(initials) + '</div>';
+    const p = personas[c.persona];
+    const tag = p && p.premade ? '<span class="persona-tag">original</span>' : '';
+    el.innerHTML = avatar +
+      '<div style="flex:1;min-width:0;"><div class="persona-name">' + esc(c.name || 'Untitled') + tag + '</div>' +
+      '<div class="persona-slug">' + esc(c.persona || '') + '</div></div>' +
+      (p ? starBtn(c.persona, fav(c), 'persona-star') : '');
+    host.appendChild(el);
+  });
+  if (sbCharacters.length > list.length) {
+    const more = document.createElement('button');
+    more.type = 'button';
+    more.className = 'sb-showall';
+    more.textContent = 'Show all (' + sbCharacters.length + ')';
+    more.onclick = () => openEmbedded('/characters', document.querySelector('[data-view="/characters"]'));
+    host.appendChild(more);
+  }
+}
+
+// Saved as plain /characters so a reload reopens the list rather than
+// creating another character.
+function newModel() {
+  openEmbedded('/characters?new=1', document.querySelector('[data-view="/characters"]'));
+  saveView({ kind: 'embed', url: '/characters' });
 }
 
 async function loadPersona(slug) {
@@ -3570,7 +3701,13 @@ const TOUR_STEPS = [
   { anchor: '#sb-nav-personas', title: 'Personas',
     body: 'Each persona is an AI version of you that chats with your fans. Create one with <b>+ New Persona</b> and set her voice, her tone and how she sells.' },
   { anchor: '[data-view="/characters"]', span: '[data-view="/studio"]', title: 'Content creation',
-    body: 'Make photos and clips of your persona. <b>Characters</b> locks in her look; the <b>Generation Studio</b> turns it into content. Your plan includes tokens every month.' },
+    body: 'Make photos of your persona. <b>Character Creator</b> locks in her look; the <b>Generation Studio</b> turns it into photos. Video is coming soon.' },
+  { anchor: '[data-view="/vault"]', title: 'Vault',
+    body: 'Photos you keep from the studio land here. Nothing reaches a fan until you have approved it.' },
+  { anchor: '#sb-group-platforms', title: 'Platforms',
+    body: 'Connect the accounts she chats and posts on. OnlyFans, Fansly, TikTok and Reddit are coming soon.' },
+  { anchor: '[data-sn-tokens]', title: 'Tokens',
+    body: 'Generating spends tokens. Your plan adds an allowance every month, and you can top up here any time.' },
   { anchor: '[data-view="/characters"]', span: '[data-view="/studio"]', title: 'Make your first photo',
     body: 'Start with her character so every photo looks like her, or jump straight into the studio.', final: true },
 ];
@@ -3645,8 +3782,10 @@ function placeTour() {
     + '<div class="obt-body">' + st.body + '</div>'
     + '<div class="obt-foot"><span class="obt-count">' + (tour.i + 1) + ' of ' + n + '</span>' + foot + '</div>';
   const dw = dlg.offsetWidth, dh = dlg.offsetHeight;
-  const top2 = spot ? r.top : (vh - dh) / 2;
-  const left2 = spot ? r.right + 16 : (vw - dw) / 2;
+  let top2 = spot ? r.top : (vh - dh) / 2;
+  let left2 = spot ? r.right + 16 : (vw - dw) / 2;
+  // An anchor on the right edge (the header's token count) takes the dialog underneath it.
+  if (spot && left2 + dw > vw - 12) { top2 = r.bottom + 16; left2 = r.right - dw; }
   dlg.style.top = Math.max(12, Math.min(top2, vh - dh - 12)) + 'px';
   dlg.style.left = Math.max(12, Math.min(left2, vw - dw - 12)) + 'px';
 }

@@ -5,6 +5,7 @@ Pure data and pure functions, no Flask, so the rules that keep safe-work and
 explicit apart can be tested without a server. Everything is keyed by body
 type, so a second one is a new table entry rather than a rewrite.
 """
+import os
 import re
 
 from imagegen import LEVEL_ORDER, PHOTO_LOOK, SCENES, SHOT_LEVEL
@@ -73,7 +74,14 @@ FEATURES = {
         'ears': ('Ears', 'face', _opts('ears', 'Small, close-set', 'Medium', 'Prominent')),
         'hair_colour': ('Hair colour', 'face', _opts('hair', 'Black', 'Dark brown', 'Light brown', 'Auburn', 'Red', 'Strawberry blonde', 'Blonde', 'Platinum')
                         + [('Custom', '')]),
-        'hair_texture': ('Hair length and texture', 'face', _opts('hair', 'Long, straight', 'Long, loose waves', 'Long, curly', 'Shoulder-length', 'Bob', 'Pixie')),
+        'hair_texture': ('Hair style', 'face', _opts('hair', 'Long, straight', 'Long, loose waves', 'Long, curly', 'Shoulder-length', 'Bob', 'Pixie')
+                         + [('Afro', 'a full natural afro'), ('Box braids', 'long box braids'),
+                            ('Cornrows', 'neat cornrow braids close to the scalp'), ('Locs', 'long locs'),
+                            ('Bantu knots', 'bantu knots'), ('Twist-out curls', 'defined twist-out curls'),
+                            ('High ponytail', 'hair pulled back into a high ponytail'),
+                            ('Low ponytail', 'hair pulled back into a sleek low ponytail'),
+                            ('Side braid', 'a long braid over one shoulder'), ('Crown braid', 'a braided crown'),
+                            ('Messy bun', 'hair up in a messy bun')]),
         'hairline': ('Hairline', 'face', [('Rounded, middle part', 'a rounded hairline with a middle part'), ('Side part', 'a side part'),
                                           ('Straight, fringe', 'a straight fringe'), ('Widow\'s peak', 'a widow\'s peak')]),
         # Body
@@ -120,8 +128,8 @@ FEATURES = {
                                                      ('Shaved', 'shaved pubic area')]),
         'pubic_colour': ('Pubic hair colour', 'pubic', _opts('pubic hair', 'Matches hair', 'Dark', 'Light')),
         'pubic_density': ('Density', 'pubic', _opts('', 'Sparse', 'Medium', 'Dense')),
-        'labia': ('Labia', 'vulva', [('Tucked', 'tucked inner labia'), ('Slightly visible', 'slightly visible inner labia'), ('Protruding', 'protruding inner labia')]),
-        'labia_fullness': ('Fullness', 'vulva', _opts('outer labia', 'Slim', 'Medium', 'Full')),
+        # Her shape comes from the example she picks (LOOKS), so only the colour
+        # is described in words.
         'vulva_colour': ('Colour', 'vulva', _opts('vulva', 'Pink', 'Rosy', 'Tan', 'Brown', 'Dark')),
         'anus_colour': ('Colour', 'anus', _opts('anus', 'Pink', 'Rosy', 'Tan', 'Brown', 'Dark')),
     },
@@ -161,50 +169,77 @@ YOUTH_TERMS = ('child', 'kid', 'teen', 'underage', 'minor', 'young girl',
 
 STUDIO = 'Soft natural daylight, plain light-grey wall behind her. ' + PHOTO_LOOK
 
-# Pose and lighting only reword a view; the view's framing still decides what
-# is shown, so neither can move a view past its rating.
-POSES = {
-    'parent': ('From parent', ''),
-    'relaxed': ('Relaxed standing', 'standing relaxed, weight on one leg, arms loose at her sides'),
-    'hands_hips': ('Hands on hips', 'standing with both hands on her hips'),
-    'turned': ('Slight turn', 'body turned slightly to one side, face toward the lens'),
-    'seated': ('Seated', 'seated on a plain stool, back straight'),
-}
-LIGHTING = {
-    'anchor': ('Match anchor', STUDIO),
-    'studio_soft': ('Studio soft', 'Soft diffused key light with gentle fill, plain neutral grey background, sharp '
-                                   'focus, ultra-detailed natural skin texture, highest resolution.'),
-    'daylight': ('Window daylight', 'Natural window daylight from one side, plain light background, sharp focus, '
-                                    'ultra-detailed natural skin texture, highest resolution.'),
-    'warm': ('Warm evening', 'Warm low golden light, plain dark background, sharp focus, '
-                             'ultra-detailed natural skin texture, highest resolution.'),
-}
 VARIATIONS = BATCH_CHOICES
 
-# A preset only fills body features the creator has not set yet.
+# A preset sets every body feature and her intimate shapes, replacing earlier
+# picks, so clicking one visibly changes the sheet. Face picks and colours are
+# left alone. No preset uses a youth-leaning option, so none can push a face
+# pick over the limit.
+def _preset(height, build, shape, shoulders, waist, hips, bust, glutes, thighs, tattoos, piercings, birthmarks, nails,
+            cup, breast_shape, spacing, augmented, perkiness, areola, nipple, nipple_shape, pubic, density):
+    return {'height': height, 'build': build, 'body_shape': shape, 'shoulders': shoulders, 'waist': waist,
+            'hips': hips, 'bust': bust, 'glute_shape': glutes, 'thighs': thighs, 'tattoos': tattoos,
+            'piercings': piercings, 'birthmarks': birthmarks, 'nails': nails,
+            'cup': cup, 'breast_shape': breast_shape, 'spacing': spacing, 'augmented': augmented,
+            'perkiness': perkiness, 'areola_size': areola, 'nipple_size': nipple, 'nipple_shape': nipple_shape,
+            'nipple_piercing': 'None', 'pubic_style': pubic, 'pubic_density': density}
+
+
+PRESET_GROUPS = ('body', 'breasts', 'nipples', 'pubic')
+
 BODY_PRESETS = {
-    'petite_athletic': ('Petite athletic', 'Short, toned, compact',
-                        {'height': '155–165 cm', 'build': 'Athletic', 'shoulders': 'Narrow', 'waist': 'Defined', 'hips': 'Narrow', 'thighs': 'Toned'}),
-    'slim_tall': ('Slim tall', 'Tall, lean, long lines',
-                  {'height': 'Over 175 cm', 'build': 'Slim', 'shoulders': 'Medium', 'waist': 'Straight', 'hips': 'Narrow', 'thighs': 'Slim'}),
+    'natural': ('Natural', 'Average height and build',
+                _preset('165–175 cm', 'Average', 'Rectangle', 'Medium', 'Straight', 'Medium', 'Medium',
+                        'Round', 'Toned', 'None', 'Ears', 'None', 'Short, nude',
+                        'B', 'Round', 'Average', 'Natural', 'Natural', 'Medium', 'Medium', 'Protruding', 'Trimmed', 'Medium')),
+    'petite_athletic': ('Petite athletic', 'Compact, toned',
+                        _preset('155–165 cm', 'Athletic', 'Rectangle', 'Medium', 'Defined', 'Medium', 'Medium',
+                                'Bubble', 'Toned', 'Small, ankle', 'Ears', 'None', 'Short, nude',
+                                'B', 'Athletic', 'Average', 'Natural', 'Natural', 'Small', 'Medium', 'Protruding', 'Landing strip', 'Medium')),
     'curvy': ('Curvy', 'Full hips and thighs',
-              {'build': 'Curvy', 'waist': 'Defined', 'hips': 'Wide', 'thighs': 'Full'}),
+              _preset('155–165 cm', 'Curvy', 'Pear', 'Medium', 'Defined', 'Wide', 'Large',
+                      'Wide', 'Full', 'Hip', 'Navel', 'None', 'Long, painted',
+                      'D', 'Round', 'Average', 'Natural', 'Natural', 'Medium', 'Medium', 'Protruding', 'Trimmed', 'Medium')),
     'hourglass': ('Hourglass', 'Defined waist, balanced curves',
-                  {'build': 'Curvy', 'shoulders': 'Medium', 'waist': 'Defined', 'hips': 'Wide', 'bust': 'Large'}),
+                  _preset('165–175 cm', 'Curvy', 'Hourglass', 'Medium', 'Defined', 'Wide', 'Large',
+                          'Heart-shaped', 'Full', 'None', 'Ears', 'None', 'French tips',
+                          'D', 'Teardrop', 'Average', 'Natural', 'Natural', 'Medium', 'Medium', 'Protruding', 'Triangle', 'Medium')),
     'athletic_tall': ('Athletic tall', 'Strong frame, sporty',
-                      {'height': 'Over 175 cm', 'build': 'Athletic', 'shoulders': 'Broad', 'waist': 'Defined', 'hips': 'Medium', 'thighs': 'Toned'}),
-    'scratch': ('Start from scratch', 'Neutral defaults, set everything', {}),
+                      _preset('Over 175 cm', 'Athletic', 'Inverted triangle', 'Broad', 'Defined', 'Medium', 'Medium',
+                              'Bubble', 'Toned', 'Small, wrist', 'Ears', 'None', 'Short, nude',
+                              'B', 'Athletic', 'Wide', 'Natural', 'Natural', 'Small', 'Medium', 'Flat', 'Landing strip', 'Medium')),
+    'voluptuous': ('Voluptuous', 'Very full bust, hips and bum',
+                   _preset('165–175 cm', 'Voluptuous', 'Hourglass', 'Medium', 'Defined', 'Wide', 'Very large',
+                           'Bubble', 'Full', 'Hip', 'Navel', 'None', 'Long, painted',
+                           'E+', 'Round', 'Close', 'Natural', 'Soft', 'Large', 'Large', 'Puffy', 'Trimmed', 'Medium')),
+    'fitness': ('Fitness', 'Muscular, strong, sculpted',
+                _preset('165–175 cm', 'Muscular', 'Inverted triangle', 'Broad', 'Defined', 'Medium', 'Medium',
+                        'Bubble', 'Toned', 'Sleeve', 'Navel', 'None', 'Short, nude',
+                        'C', 'Athletic', 'Average', 'Natural', 'Natural', 'Small', 'Medium', 'Protruding', 'Landing strip', 'Medium')),
+    'pear': ('Pear / thick bottom', 'Slimmer top, big hips and bum',
+             _preset('155–165 cm', 'Curvy', 'Pear', 'Medium', 'Defined', 'Wide', 'Medium',
+                     'Wide', 'Full', 'Small, ankle', 'Ears', 'None', 'French tips',
+                     'C', 'Teardrop', 'Average', 'Natural', 'Natural', 'Medium', 'Medium', 'Protruding', 'Natural', 'Medium')),
+    'glamour': ('Glamour', 'Tall, enhanced bust, defined waist',
+                _preset('165–175 cm', 'Curvy', 'Hourglass', 'Medium', 'Defined', 'Medium', 'Very large',
+                        'Round', 'Toned', 'None', 'Navel', 'None', 'Long, painted',
+                        'DD', 'Round', 'Close', 'Augmented', 'Natural', 'Medium', 'Medium', 'Protruding', 'Landing strip', 'Medium')),
+    'scratch': ('Start from scratch', 'Clear every body pick', {}),
 }
 
 
 def apply_preset(sheet, preset, body_type='female'):
     if preset not in BODY_PRESETS:
         raise CharacterError('Unknown body preset.')
-    feats = features(body_type)
+    values = BODY_PRESETS[preset][2]
     out = dict(sheet or {})
-    for k, val in BODY_PRESETS[preset][2].items():
-        if k in feats and not out.get(k):
-            out[k] = val
+    for k, (_, group, _) in features(body_type).items():
+        if group not in PRESET_GROUPS or (group != 'body' and k.endswith('_colour')):
+            continue
+        if k in values:
+            out[k] = values[k]
+        else:
+            out.pop(k, None)
     return out
 
 VIEWS = {
@@ -227,12 +262,12 @@ VIEWS = {
                       'camera squarely, head level, shoulders level, feet together, arms relaxed slightly away '
                       'from the body, symmetrical posture, wearing {outfit}'),
              uses=('face', 'body')),
+        dict(key='body_back', label='Full body, back', group='body', rating='sfw', required_from='moderate', parents=('body_front',), tier=1, mode='reference',
+             framing=('a full-body view from behind, standing perfectly straight and upright, head level, feet '
+                      'together, wearing {outfit}'), uses=('body',)),
         dict(key='body_side', label='Full body, side', group='body', rating='sfw', required_from=None, parents=('body_front',), tier=1, mode='reference',
              framing=('a full-body side view, standing perfectly straight and upright, head level, feet together, '
                       'wearing {outfit}'), uses=('body',)),
-        dict(key='body_back', label='Full body, back', group='body', rating='sfw', required_from='explicit', parents=('body_front',), tier=1, mode='reference',
-             framing=('a full-body view from behind, standing perfectly straight and upright, head level, feet '
-                      'together, wearing {outfit}'), uses=('body',)),
         dict(key='hands', label='Hands', group='body', rating='sfw', required_from=None, parents=('body_front',), tier=1, mode='reference',
              zoom=True, body=('nails', 'tattoos'),
              framing=('a tight close-up of only her two hands, resting open palms down side by side on a plain surface, '
@@ -241,12 +276,8 @@ VIEWS = {
              zoom=True, body=('tattoos',),
              framing=('a tight close-up of only her two bare feet standing side by side on a plain floor, '
                       'toes and nails in sharp focus, ankles at the top edge of the frame'), uses=('body',)),
-        dict(key='nude_front', label='Nude full body, front', group='nsfw', rating='moderate', required_from='moderate',
-             parents=('body_front',), tier=0, mode='reference',
-             framing='a full-body nude photo from head to feet, standing straight facing the camera, arms relaxed at her sides',
-             uses=('body', 'breasts', 'nipples', 'pubic')),
         dict(key='breasts', label='Breasts (topless, front)', group='nsfw', rating='moderate', required_from='moderate',
-             parents=('nude_front',), tier=1, mode='crop', region='chest', zoom=True, body=('build',),
+             parents=('body_front',), tier=1, mode='reference', nocrop=True, zoom=True, body=('build',),
              framing=('a close-up of her bare breasts from the front, framed from the collarbones to just below the '
                       'breasts, arms down at her sides out of frame, both breasts centred and in sharp focus'),
              uses=('breasts', 'nipples')),
@@ -255,16 +286,23 @@ VIEWS = {
              framing=('a macro close-up of her bare nipples and areolae, breast skin filling the frame, '
                       'nipple texture in sharp focus'),
              uses=('nipples',)),
+        dict(key='nude_front', label='Nude full body, front', group='nsfw', rating='moderate', required_from='moderate',
+             parents=('body_front', 'breasts', 'nipples'), tier=2, mode='reference',
+             framing='a full-body nude photo from head to feet, standing straight facing the camera, arms relaxed at her sides',
+             topless=('Topless full body, front', 'a full-body topless photo from head to feet wearing only plain panties, '
+                      'standing straight facing the camera, arms relaxed at her sides'),
+             uses=('body', 'breasts', 'nipples', 'pubic')),
         dict(key='rear_nude', label='Nude from behind (standing)', group='nsfw', rating='moderate', required_from='explicit',
-             parents=('nude_front', 'body_back'), tier=1, mode='reference', framing='a full-body nude photo from behind, standing straight', uses=('body',)),
+             parents=('nude_front', 'body_back'), tier=2, mode='reference', framing='a full-body nude photo from behind, standing straight', uses=('body',),
+             topless=('Topless from behind (standing)', 'a full-body topless photo from behind wearing only plain panties, standing straight')),
         dict(key='pubic', label='Pubic area (front, standing)', group='nsfw', rating='explicit', required_from='explicit',
-             parents=('nude_front',), tier=1, mode='crop', region='pelvis', zoom=True,
+             parents=('nude_front',), tier=2, mode='crop', region='pelvis', zoom=True,
              body=('hips', 'thighs', 'tattoos', 'birthmarks'),
              framing=('a close-up of her nude pubic area from the front while standing, framed from just below the '
                       'navel to the top of the thighs, pubic mound centred and in sharp focus'),
              uses=('pubic',)),
         dict(key='vulva_closed', label='Vagina, closed', group='nsfw', rating='explicit', required_from='explicit',
-             parents=('nude_front',), tier=1, mode='reference', zoom=True, body=('thighs',),
+             parents=('nude_front',), tier=2, mode='reference', zoom=True, body=('thighs',),
              framing=('an explicit macro close-up of her vulva with labia closed, legs apart, the vulva centred and '
                       'filling the frame, inner thighs at the edges'),
              uses=('pubic', 'vulva')),
@@ -305,6 +343,57 @@ _BASE_VIEWS = ('face_front', 'face_three_quarter', 'face_profile', 'face_smile',
                'body_front', 'body_side', 'body_back')
 FACE_CHECKS = tuple(k for k, v in FEATURES['female'].items() if v[1] == 'face')
 AGE_CHECKED_VIEWS = ('face_front', 'body_front')
+
+
+# AI-generated examples the creator picks her anatomy from, one file each in
+# character_looks/{folder}/. The pick goes to its views as the last reference;
+# the views built on those inherit it. Kept out of FEATURES so no content
+# prompt reads it. A folder with no files has no picker and requires nothing.
+LOOK_ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'character_looks')
+_LOOK_TAIL = (' in the last reference image — its shape only, in her own skin tone; that image is an '
+              'anatomy close-up, not her face or body.')
+# sheet key: (folder, label, views, prompt text)
+LOOKS = {
+    'vulva_look': ('vulva', 'Vagina, closed', ('nude_front', 'vulva_closed'),
+                   'Her vulva has the same shape as the vulva' + _LOOK_TAIL),
+    'vulva_open_look': ('vulva_open', 'Vagina, open', ('vulva_open',),
+                        'Her open vulva has the same shape as the open vulva' + _LOOK_TAIL),
+    'anus_look': ('anus', 'Anus, closed', ('anus_closed',),
+                  'Her anus has the same shape as the anus' + _LOOK_TAIL),
+    'anus_open_look': ('anus_open', 'Anus, open', ('anus_open',),
+                       'Her open anus has the same shape as the open anus' + _LOOK_TAIL),
+}
+
+
+def _look_files(folder):
+    d = os.path.join(LOOK_ROOT, folder)
+    return tuple(sorted((f[:-4] for f in (os.listdir(d) if os.path.isdir(d) else ())
+                         if f.endswith('.jpg') and f[:-4].isdigit()), key=int))
+
+
+LOOK_FILES = {k: _look_files(v[0]) for k, v in LOOKS.items()}
+
+
+def look_for(level, key):
+    """The sheet key of the example this view must be generated from, or None."""
+    if level != 'explicit':
+        return None
+    return next((k for k, (_, _, vs, _) in LOOKS.items() if key in vs and LOOK_FILES[k]), None)
+
+
+def look_path(ref):
+    """'folder/n' from a job spec, as a file path, or None if it is not ours."""
+    folder, _, n = (ref or '').partition('/')
+    k = next((k for k, v in LOOKS.items() if v[0] == folder), None)
+    return os.path.join(LOOK_ROOT, folder, n + '.jpg') if k and n in LOOK_FILES[k] else None
+
+
+def for_level(v, level):
+    """The view as this level shows it: below Explicit her full-body "nude"
+    views are topless in panties."""
+    if v and v.get('topless') and _rank(level) < _rank('explicit'):
+        return dict(v, label=v['topless'][0], framing=v['topless'][1])
+    return v
 
 
 def views(body_type='female'):
@@ -379,17 +468,17 @@ def catalogue(level, body_type='female'):
     groups = {g for g, lvl in GROUP_LEVEL.items() if _rank(lvl) <= _rank(level)}
     return {
         'level': level, 'levels': [{'key': k, 'label': l} for k, l in LEVELS],
-        'views': [dict(v, parents=list(v['parents']), uses=list(v['uses']), traits=traits(v['key'], body_type),
+        'views': [dict(for_level(v, level), parents=list(v['parents']), uses=list(v['uses']), traits=traits(v['key'], body_type),
                        required=bool(v['required_from'] and _rank(v['required_from']) <= _rank(level)))
                   for v in views_for_level(level, body_type)],
         'features': [{'key': k, 'label': lab, 'group': g, 'options': [o for o, _ in opts]}
                      for k, (lab, g, opts) in feats.items() if g in groups],
         'batch': list(BATCH_CHOICES), 'default_batch': DEFAULT_BATCH,
         'variations': list(VARIATIONS),
-        'poses': [{'key': k, 'label': l} for k, (l, _) in POSES.items()],
-        'lighting': [{'key': k, 'label': l} for k, (l, _) in LIGHTING.items()],
         'presets': [{'key': k, 'label': l, 'hint': h, 'values': v} for k, (l, h, v) in BODY_PRESETS.items()],
         'min_age': MIN_AGE,
+        'looks': [{'key': k, 'folder': f, 'label': lab, 'views': list(vs), 'options': list(LOOK_FILES[k])}
+                  for k, (f, lab, vs, _) in LOOKS.items() if level == 'explicit' and LOOK_FILES[k]],
         'outfits': list(OUTFITS), 'outfit_colours': OUTFIT_COLOURS,
     }
 
@@ -461,6 +550,11 @@ def validate(data, body_type='female'):
         colours = {o: c for o, c in colours.items() if c and o in sheet['view_outfits']}
         if colours:
             sheet['outfit_colours'] = colours
+    for k, (_, label, _, _) in LOOKS.items():
+        if raw.get(k):
+            if raw[k] not in LOOK_FILES[k]:
+                raise CharacterError(f'Unknown {label.lower()} example.')
+            sheet[k] = raw[k]
     if sheet.get('hair_colour') == 'Custom':
         hexcode = str(raw.get('hair_colour_hex') or '').lower()
         if not re.fullmatch(r'#[0-9a-f]{6}', hexcode):
@@ -600,9 +694,9 @@ def outfit_text(sheet, outfit=None):
 
 
 def build_view_prompt(key, sheet, age, has_reference, body_type='female',
-                      mode='reference', strength=None, pose=None, lighting=None, outfit=None, blend=False,
-                      match=False):
-    v = view(key, body_type)
+                      mode='reference', strength=None, outfit=None, blend=False,
+                      match=False, look=False, level='explicit'):
+    v = for_level(view(key, body_type), level)
     if not v:
         raise CharacterError('Unknown view.')
     if '{outfit}' in v['framing']:
@@ -646,14 +740,12 @@ def build_view_prompt(key, sheet, age, has_reference, body_type='female',
     else:
         lead = f"photorealistic photo of a woman, {v['framing']}."
     body = f' Her features: {detail}.' if detail else ''
-    posed = POSES.get(pose or '', ('', ''))[1]
-    posed = f' Pose: {posed}.' if posed else ''
-    light = LIGHTING.get(lighting or '', ('', STUDIO))[1]
-    if PHOTO_LOOK not in light:
-        light = light.rstrip(' .') + '. ' + PHOTO_LOOK
+    text = look and next((t for _, _, vs, t in LOOKS.values() if key in vs), '')
+    if text:
+        body += ' ' + text
     zoom = (' Zoomed in: the subject fills the whole frame; no face, no full body, nothing '
             'beyond the subject in shot.') if v.get('zoom') else ''
-    return (lead + zoom + body + posed + ' ' + light + ' ' + adult_clause(age)).strip()
+    return (lead + zoom + body + ' ' + STUDIO + ' ' + adult_clause(age)).strip()
 
 
 def job_level(shot, scene):
@@ -745,7 +837,7 @@ def outdated_branch(rows, body_type='female'):
 REGIONS = {
     'chest': {'x': 0.28, 'y': 0.20, 'w': 0.44, 'h': 0.20},
     'pelvis': {'x': 0.30, 'y': 0.42, 'w': 0.40, 'h': 0.18},
-    'chest_detail': {'x': 0.15, 'y': 0.15, 'w': 0.70, 'h': 0.60},
+    'chest_detail': {'x': 0.03, 'y': 0.50, 'w': 0.94, 'h': 0.32},
 }
 CROP_PAD = 0.08
 

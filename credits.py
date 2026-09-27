@@ -318,9 +318,9 @@ def symbol_for(currency):
 
 # Included allowance per calendar month, keyed on the tier keys in app.TIERS.
 # Read in clips rather than tokens, the old allowances were indefensible:
-# Starter was EUR 49 a month for two video clips. Generation costs us very
-# little, so tripling them costs 8-11% of plan revenue and buys back the upgrade
-# ladder that dropping the pack discount bands gives up.
+# Starter was EUR 49 a month for two video clips. At the peg a full month is
+# worth about $6 / $32 / $100 of provider spend on Starter / Pro / Agency --
+# 12-29% of plan revenue, and only if every token is spent.
 # The Demo plan is deliberately absent: it carries unlimited generation in
 # app._BASE_TIERS, so it has no allowance to state. These are the numbers
 # app.py's tier capabilities are built from -- stated once, here, so a bullet
@@ -329,9 +329,9 @@ MONTHLY_TOKENS = {
     # Free never refills: its FREE_CREDITS are one grant, posted once.
     'free': 0,
     'demo': 25,
-    'starter': 100,
-    'pro': 350,
-    'agency': 1000,
+    'starter': 150,
+    'pro': 800,
+    'agency': 2500,
 }
 DEFAULT_MONTHLY_TOKENS = 100
 FREE_CREDITS = 15
@@ -550,6 +550,15 @@ def equivalents(tokens):
     """What a balance is worth in the two things creators actually make, for the
     'about 350 photos or 29 clips' line in the header."""
     photo = image_price(DEFAULT_IMAGE_MODEL, DEFAULT_RESOLUTION)
+    clip = video_price(DEFAULT_VIDEO_RESOLUTION, DEFAULT_VIDEO_DURATION)
+    n = max(0, int(tokens or 0))
+    return {'photos': n // photo, 'clips': n // clip}
+
+
+def plan_equivalents(tokens):
+    """The 'up to N photos or M videos' on the plan cards. Photos are counted on
+    the cheapest still, which is the honest ceiling; clips on the default one."""
+    photo = min(p for rows in IMAGE_PRICES.values() for p in rows.values())
     clip = video_price(DEFAULT_VIDEO_RESOLUTION, DEFAULT_VIDEO_DURATION)
     n = max(0, int(tokens or 0))
     return {'photos': n // photo, 'clips': n // clip}

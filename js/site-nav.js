@@ -108,7 +108,7 @@
   var ACCOUNT_IN = [
     { href: '/tokens', label: 'Tokens', icon: 'tokens', cta: true, keep: true, tokens: true },
     { href: '/billing', label: 'Upgrade', icon: 'upgrade', cta: true, keep: true },
-    { href: '/dashboard', label: 'Dashboard', icon: 'dashboard', cta: true },
+    { href: '/dashboard?view=personas', label: 'Dashboard', icon: 'dashboard', cta: true },
     { href: '/logout', label: 'Log out', icon: 'logout' },
     { href: '/account', label: 'Account', icon: 'account', avatar: true },
   ];
@@ -150,6 +150,7 @@
   function isCurrent(href) {
     if (href.indexOf('#') !== -1) return false;
     var path = location.pathname;
+    href = href.split('?')[0];
     return path === href || (href !== '/' && path.indexOf(href) === 0);
   }
 
