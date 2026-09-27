@@ -1218,7 +1218,7 @@ class Provider:
     def submit_video(self, spec):
         raise NotImplementedError
 
-    def poll(self, job_id):
+    def poll(self, job_id, expect=1):
         raise NotImplementedError
 
 
@@ -1429,7 +1429,23 @@ class RunwareProvider(Provider):
         if refs:
             task[REFERENCE_FIELD] = list(refs)[:MAX_REFERENCES]
 
-        data = self._send([task], timeout=submit_window(spec))
+        if spec.get('async_delivery'):
+            # Answered with an ack instead of the images, so the task id is on
+            # the job within seconds. Held open for the whole batch, a submit
+            # that died mid-wait -- a lambda cut off, a restarted worker --
+            # left a job with no id, written off as never started while the
+            # provider went on to make and bill every image.
+            task['deliveryMethod'] = 'async'
+            try:
+                # The full window still: a model that refuses the field has it
+                # stripped and answers the old, blocking way.
+                data = self._send([task], timeout=submit_window(spec))
+            except ProviderUnreachable as e:
+                logger.warning('runware image submit unanswered, adopting %s: %s',
+                               task['taskUUID'], e)
+                return task['taskUUID'], Result('running')
+        else:
+            data = self._send([task], timeout=submit_window(spec))
         urls = [d.get('imageURL') for d in data if d.get('imageURL')]
         cost = sum(float(d.get('cost') or 0) for d in data)
         if not urls:
@@ -1646,7 +1662,7 @@ class RunwareProvider(Provider):
             return task_uuid, Result('done', urls)
         return task_uuid, Result('running')
 
-    def poll(self, job_id):
+    def poll(self, job_id, expect=1):
         data = self._send([{'taskType': _RW['get'], 'taskUUID': job_id}])
         if not data:
             return Result('running')
@@ -1663,9 +1679,10 @@ class RunwareProvider(Provider):
                 return Result('failed', error=_error_text(row) or 'generation failed')
             if state in ('success', 'done', 'completed'):
                 status = 'done'
-        if urls:
+        # A batch comes back an image at a time; the first is not the job.
+        if len(urls) >= expect:
             return Result('done', urls)
-        return Result(status if status == 'done' else 'running')
+        return Result('running', urls)
 
 
 # ── ModelsLab ─────────────────────────────────────────────────────────────────
@@ -1760,7 +1777,7 @@ class ModelsLabProvider(Provider):
         })
         return str(body.get('id') or ''), self._read(body)
 
-    def poll(self, job_id):
+    def poll(self, job_id, expect=1):
         body = _post(f'{MODELSLAB_ENDPOINT}/images/fetch/{job_id}',
                      {'key': self.key}, {'Content-Type': 'application/json'})
         return self._read(body)
