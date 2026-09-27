@@ -142,8 +142,6 @@ p.sub{font-size:17px;color:var(--text-soft);line-height:1.65;margin-bottom:36px;
 .step[data-slot="3"]{grid-column:2;grid-row:3}
 .step.moving{z-index:3}
 .step video{position:absolute;inset:0;display:block;width:100%;height:100%;object-fit:cover;background:#140a17}
-.step .ph{position:absolute;inset:0;display:grid;place-content:center;justify-items:center;gap:10px;background:radial-gradient(80% 70% at 30% 20%,#ff2d7833,transparent 60%),radial-gradient(70% 60% at 80% 90%,#7c3aed33,transparent 60%),#1a0e1e;font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:#cdbfd1}
-.step .ph i{font-style:normal;font-size:56px;letter-spacing:0}
 .step .card{position:absolute;inset:0;display:grid;align-content:start;gap:5px;padding:16px 18px;background:#2d1a33;transition:opacity .3s}
 .step .card i{font-style:normal;font-size:22px;margin-bottom:4px}
 .step .card b{font-size:14.5px}
@@ -375,11 +373,11 @@ p.sub{font-size:17px;color:var(--text-soft);line-height:1.65;margin-bottom:36px;
         <span class="card"><em>2</em><i aria-hidden="true">🔒</i><b>Face &amp; body locked</b><span>The same her in every shot</span></span>
       </button>
       <button type="button" class="step" data-slot="2" aria-pressed="false">
-        <span class="ph"><i aria-hidden="true">✨</i>Clip coming soon</span>
+        <video src="/img/generation-studio.mp4" muted loop playsinline preload="none" aria-label="Creating content in the Generation Studio"></video>
         <span class="card"><em>3</em><i aria-hidden="true">✨</i><b>Create content</b><span>SFW and NSFW, prompt or no prompt</span></span>
       </button>
       <button type="button" class="step" data-slot="3" aria-pressed="false">
-        <span class="ph"><i aria-hidden="true">💸</i>Clip coming soon</span>
+        <video src="/img/post-and-funnel.mp4" muted loop playsinline preload="none" aria-label="Planning the posting week in the Content Planner"></video>
         <span class="card"><em>4</em><i aria-hidden="true">💸</i><b>Post &amp; funnel</b><span>Followers into Fanvue subscribers</span></span>
       </button>
     </div>
