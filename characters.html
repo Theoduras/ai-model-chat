@@ -429,6 +429,22 @@
       .vp-refs { grid-template-columns: 1fr; }
       .opts { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
     }
+    @media (max-width: 600px) {
+      /* Fixed 80px tiles left a ragged gap on the right; a grid fills the row. */
+      .fp-opts:not(:has(.fp-opt.text)) { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); }
+      .fp-opts:not(:has(.fp-opt.text)) .fp-opt { width: auto; }
+      #ch-rail .btn-back-gallery { display: inline-flex; align-items: center; min-height: 32px; }
+      /* Three stacked rows ate a sixth of the screen: Back, Save and Guide share
+         one, the primary action gets the full width under them. */
+      #ch-foot { padding: 10px 0 max(12px, env(safe-area-inset-bottom)); margin-top: 18px; gap: 8px; }
+      #ch-foot .btn, #ch-foot .ob-skip { flex: 1 1 0; min-height: 42px; justify-content: center; }
+      #ch-foot .btn-primary { order: 2; flex-basis: 100%; }
+      #ch-foot .ob-alt { width: auto; flex: 1 1 0; margin: 0; }
+      #ch-foot .ob-alt .ob-skip { width: 100%; padding: 8px 6px; }
+      #ch-foot .ob-alt:has(.ob-skip + .ob-skip) { flex-basis: 100%; order: 3; }
+      #ch-foot .ob-saved { order: 4; flex-basis: 100%; text-align: center; }
+      #ch-foot .ob-saved:empty { display: none; }
+    }
   </style>
 </head>
 <body class="page-dashboard">

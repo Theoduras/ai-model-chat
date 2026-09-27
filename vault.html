@@ -9,6 +9,7 @@
   <script src="/js/theme.js"></script>
   <script>
     if (window.self === window.top) location.replace('/dashboard?open=' + encodeURIComponent(location.pathname + location.search));
+    else document.documentElement.classList.add('in-workspace');
   </script>
   <link rel="stylesheet" href="/css/style.css">
 <link rel="stylesheet" href="/css/lazy.css">
@@ -19,6 +20,7 @@
   <script src="/js/site-nav.js" defer></script>
   <script src="/js/fanvue-upload.js" defer></script>
   <style>
+    .in-workspace body > header { display: none; }
     /* The body is height-locked by .page-dashboard so it fits the dashboard's
        iframe; that means this page has to carry its own scroller, the way
        .pl-scroll does for the planner. Everything else here is the persona
@@ -91,7 +93,9 @@
       border:1px solid var(--border); background:transparent; color:var(--text-2);
       font-size:0.76rem; cursor:pointer; text-align:left; width:100%; font-family:var(--font); }
     .vw-tog.on { border-color:var(--accent-line); color:var(--text); font-weight:600; }
-    .vw-tog .tick { width:14px; color:var(--accent); }
+    .vw-tog .tick { width:16px; height:16px; flex-shrink:0; border:1.5px solid var(--border); border-radius:4px;
+      display:flex; align-items:center; justify-content:center; font-size:0.62rem; color:#fff; }
+    .vw-tog.on .tick { background:var(--accent); border-color:var(--accent); }
     .vw-fold { display:flex; flex-wrap:wrap; gap:6px; }
     .vw-fchip { font-size:0.72rem; padding:4px 9px; border-radius:9999px; cursor:pointer;
       border:1px solid var(--border); background:transparent; color:var(--text-muted);
@@ -116,9 +120,26 @@
     .vw-pager .vw-of { color:var(--text-muted); font-size:0.72rem; margin-left:8px; }
     .vw-note { color:var(--text-muted); font-size:0.82rem; padding:10px 0; }
 
+    /* In a row there is no photo under the box, so it takes the page's colours. */
+    .pg-row .vw-check { background:var(--panel); border-color:var(--border); }
+    .pg-row.is-picked .vw-check { background:var(--accent); border-color:var(--accent); }
+    .pg-row-name { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+    @media (max-width: 600px) {
+      /* One card per row made each photo fill the screen. */
+      .vw-wrap .pg-grid { grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; }
+      .pg-row { gap:10px; padding:10px 12px; }
+      .pg-row .vw-check { width:24px; height:24px; flex-shrink:0; }
+      /* Half-width cards have no room for badges beside the corner controls. */
+      .pg-card .vw-badges { top:auto; bottom:8px; }
+      .vw-tog { padding:10px 11px; font-size:0.82rem; }
+      .vw-seg button { min-height:36px; }
+    }
     @media (max-width: 760px) {
       .vw-view { flex-direction:column; }
       .vw-side { width:auto; max-height:52%; }
+      /* The close button sat on the photo's corner. */
+      .vw-stage { padding:56px 12px 12px; }
       .vw-wrap { padding:18px 16px 64px; }
     }
   </style>
@@ -314,7 +335,7 @@ function vwHead() {
     + '<div class="pg-head-l" style="display:flex;align-items:center;gap:10px;">'
       + '<h2 style="font-size:1.1rem;font-weight:600;">Her vault</h2>'
       + (people.length > 1
-          ? '<select class="pg-ctl" style="padding:0 10px;" onchange="vwPick(this.value)">'
+          ? '<select class="pg-ctl" style="padding:0 30px 0 10px;" onchange="vwPick(this.value)">'
             + people.map(p => '<option value="' + esc(p.slug) + '"' + (p.slug === vwSlug ? ' selected' : '') + '>'
               + esc(p.name || p.slug) + '</option>').join('') + '</select>' : '')
       + '<button type="button" class="btn btn-primary" onclick="document.getElementById(\'vw-file\').click()">+ Upload</button>'
@@ -417,7 +438,7 @@ function vwDraw() {
   el('vw-count-badge').textContent = vwItems.length ? all.length + ' of ' + vwItems.length : '';
   el('vw-selbar').innerHTML = vwSelBar();
   el('vw-status').innerHTML = vwItems.length
-    ? '<div class="pg-status"><strong>' + all.length + '</strong> of ' + vwItems.length + ' items'
+    ? '<div class="pg-status"><span><strong>' + all.length + '</strong> of ' + vwItems.length + ' items</span>'
       + (vwFilterCount() || vwQuery
           ? ' <button type="button" class="pg-clear" onclick="vwClearFilter()">Clear</button>' : '')
       + '</div>' : '';
