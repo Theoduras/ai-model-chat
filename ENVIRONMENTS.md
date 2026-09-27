@@ -27,27 +27,6 @@ delivered there rather than to the custom domain. The app prints a
 `CONFIG WARNING` at startup while it is unset, and the Fanvue page shows the
 URL each subscription actually points at.
 
-## Sign in with Google and Apple
-
-Each button on `/login` and `/register` stays hidden until its variables are
-set on the service; `/healthz` reports `google_login` and `apple_login`. An
-account found by email is linked on first use, so a creator who registered
-with a password can switch to either button without a second account.
-
-| Variable | Where it comes from |
-|---|---|
-| `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` | Google Cloud Console → APIs & Services → Credentials → OAuth client (Web application). Authorised redirect URI: `https://velvetfunneler.com/auth/google/callback`. |
-| `APPLE_CLIENT_ID` | developer.apple.com → Identifiers → a **Services ID** with Sign in with Apple enabled (not the App ID). Under Configure, add the domain and the return URL `https://velvetfunneler.com/auth/apple/callback`. |
-| `APPLE_TEAM_ID` | The 10-character team id, top right of the developer account. |
-| `APPLE_KEY_ID`, `APPLE_PRIVATE_KEY` | Keys → a key with Sign in with Apple enabled. The `.p8` downloads once; put its whole PEM in the variable (newlines may be written as `\n`). |
-
-`GOOGLE_OAUTH_REDIRECT_URI` / `APPLE_REDIRECT_URI` override the callback URL;
-otherwise it is built from `PUBLIC_BASE_URL`. Apple refuses anything but
-HTTPS and a registered domain, so it cannot be tried on localhost. A creator who
-chooses "Hide My Email" is registered under the `@privaterelay.appleid.com`
-address Apple gives them; mail to it reaches them only once the sending domain
-is registered under Apple's Private Email Relay (Services → Configure).
-
 ## Generation (images and video)
 
 Two variables on the service, plus a bucket. Without them `/studio` loads and

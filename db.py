@@ -683,8 +683,6 @@ class User(Base):
     # Google account id (the OAuth "sub"). Set for users who signed in with
     # Google; they have no usable password_hash.
     google_sub = Column(String(64), index=True)
-    # Apple account id (the Sign in with Apple "sub"), same arrangement.
-    apple_sub = Column(String(64), index=True)
     name = Column(String(120), default='')
     # user | manager | chatter | support | admin. 'user' is a workspace owner;
     # manager and chatter are seats inside someone else's workspace.
@@ -1204,11 +1202,10 @@ def get_user_by_email(session, email):
         User.email == (email or '').strip().lower()).first()
 
 
-def create_user(session, email, password_hash, name='', google_sub=None,
-                apple_sub=None):
+def create_user(session, email, password_hash, name='', google_sub=None):
     u = User(email=(email or '').strip().lower(),
              password_hash=password_hash or '', name=name or '',
-             google_sub=google_sub, apple_sub=apple_sub)
+             google_sub=google_sub)
     session.add(u)
     session.flush()
     return u
@@ -1227,12 +1224,6 @@ def get_user_by_google_sub(session, sub):
     if not sub:
         return None
     return session.query(User).filter(User.google_sub == sub).first()
-
-
-def get_user_by_apple_sub(session, sub):
-    if not sub:
-        return None
-    return session.query(User).filter(User.apple_sub == sub).first()
 
 
 def get_payment_by_order(session, order_id):
