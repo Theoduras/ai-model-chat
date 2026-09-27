@@ -835,7 +835,7 @@ function renderList() {
         <div class="pg-bar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100" aria-label="Approved photos"><i style="width:${pct}%;background:${progressColour(pct)};"></i></div>
         <span class="pg-pct" style="color:${progressColour(pct)};">${pct}%</span>
         <button type="button" class="btn btn-primary pg-open" onclick="event.stopPropagation();openCharacter('${c.id}')">Open</button>
-        ${c.owner ? '' : `<button type="button" class="btn btn-ghost btn-sm" onclick="event.stopPropagation();deleteCharacter('${c.id}')">Delete</button>`}
+        ${c.owner && !c.can_delete ? '' : `<button type="button" class="btn btn-ghost btn-sm" onclick="event.stopPropagation();deleteCharacter('${c.id}')">Delete</button>`}
         <span class="ch-card-note">${status} · version ${c.version}</span>
       </div></div>`;
   }).join('') + '</div>';

@@ -31282,7 +31282,7 @@ def _char_row(s, user, char_id):
     from db import Character
     row = s.query(Character).filter(Character.id == char_id).first()
     if not row or (row.workspace_id != _workspace_id(user)
-                   and not (user or {}).get('is_super_admin')):
+                   and not (user or {}).get('is_admin')):
         return None
     return row
 
@@ -31745,7 +31745,7 @@ def api_characters():
         if request.method == 'GET':
             q = s.query(Character)
             mine = _workspace_id(user)
-            if not (user or {}).get('is_super_admin'):
+            if not (user or {}).get('is_admin'):
                 q = q.filter(Character.workspace_id == mine)
             rows = q.order_by(Character.updated_at.desc()).all()
             owners = _char_owner_emails(s, {r.workspace_id for r in rows if r.workspace_id != mine})
@@ -31754,6 +31754,7 @@ def api_characters():
                 j = _char_json(s, r)
                 if r.workspace_id != mine:
                     j['owner'] = owners.get(r.workspace_id, r.workspace_id)
+                    j['can_delete'] = bool(user.get('is_super_admin'))
                 out.append(j)
             return jsonify({'ok': True, 'characters': out})
         body = request.get_json(silent=True) or {}
@@ -31831,6 +31832,8 @@ def api_character(char_id):
                 j['owner'] = _char_owner_emails(s, {row.workspace_id}).get(row.workspace_id, row.workspace_id)
             return jsonify({'ok': True, 'character': j})
         if request.method == 'DELETE':
+            if row.workspace_id != _workspace_id(user) and not user.get('is_super_admin'):
+                return jsonify({'ok': False, 'error': 'Only a super admin can delete another account\'s character'}), 403
             for img in _char_images(s, row.id):
                 if img.gcs_path:
                     try:
