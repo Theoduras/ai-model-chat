@@ -1668,7 +1668,7 @@ function renderPersonaBrowser() {
     const cfg = p.config || {};
     const pcfg = progressCfg(p);
     const pct = personaProgress(pcfg);
-    const sub = esc(cfg.archetype || p.slug);
+    const sub = (p.owner ? esc(p.owner) + ' · ' : '') + esc(cfg.archetype || p.slug);
     const delBtn = p.premade ? '' :
       '<button type="button" class="pg-del" title="Delete" onclick="event.stopPropagation();deletePersona(\'' + slug + '\')">✕</button>';
     const star = starBtn(slug, !!cfg.favorite, 'pg-star');
@@ -1748,7 +1748,8 @@ function renderCharList() {
   if (!host) return;
   host.innerHTML = '';
   const fav = c => !!((personas[c.persona] || {}).config || {}).favorite;
-  const list = sbCharacters.filter(fav).concat(sbCharacters.filter(c => !fav(c))).slice(0, 3);
+  const own = sbCharacters.filter(c => !c.owner);
+  const list = own.filter(fav).concat(own.filter(c => !fav(c))).slice(0, 3);
   list.forEach(c => {
     const el = document.createElement('div');
     el.className = 'persona-item' + (String(c.id) === activeCharId ? ' active' : '');
@@ -1767,11 +1768,11 @@ function renderCharList() {
       (p ? starBtn(c.persona, fav(c), 'persona-star') : '');
     host.appendChild(el);
   });
-  if (sbCharacters.length > list.length) {
+  if (own.length > list.length) {
     const more = document.createElement('button');
     more.type = 'button';
     more.className = 'sb-showall';
-    more.textContent = 'Show all (' + sbCharacters.length + ')';
+    more.textContent = 'Show all (' + own.length + ')';
     more.onclick = () => openEmbedded('/characters', document.querySelector('[data-view="/characters"]'));
     host.appendChild(more);
   }

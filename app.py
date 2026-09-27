@@ -330,6 +330,7 @@ def db_list_personas(owner_id=None):
                 config = {}
             out.append({
                 'slug': sp.slug, 'name': sp.name, 'config': config,
+                'owner_id': sp.owner_id,
                 # Surfaced so the dashboard can sort by recency.
                 'created_at': sp.created_at.isoformat() if sp.created_at else None,
                 'updated_at': sp.updated_at.isoformat() if sp.updated_at else None,
@@ -9168,7 +9169,13 @@ def api_personas():
         })
 
     # Saved copies live in the DB (durable across redeploys)
-    for sp in db_list_personas():
+    saved = db_list_personas()
+    # Anonymous callers get this list too (the fan picker): owners are admin-only.
+    mine = _workspace_id(viewer) if viewer else None
+    owners = (_owner_emails({sp['owner_id'] for sp in saved
+                             if sp.get('owner_id') and sp['owner_id'] != mine})
+              if viewer else {})
+    for sp in saved:
         if _is_premade(sp['slug']):
             continue  # a committed original shadows any stale DB copy of the same slug
         config = sp.get('config', {})
@@ -9180,10 +9187,32 @@ def api_personas():
             'config': config,
             'cta_url': _phases_cta(sp['slug']).get('cta_url', ''),
             'premade': False,
+            'owner': owners.get(sp.get('owner_id'), ''),
             'created_at': sp.get('created_at'),
             'updated_at': sp.get('updated_at'),
         })
     return jsonify(personas)
+
+
+def _owner_emails(ids):
+    """Owner email per workspace id; a pre-workspace id is the user id itself."""
+    if not ids:
+        return {}
+    try:
+        s = _db_session()
+    except Exception:
+        return {}
+    try:
+        out = dict(_char_owner_emails(s, ids))
+        from db import User
+        rest = ids - set(out)
+        if rest:
+            out.update(s.query(User.id, User.email).filter(User.id.in_(rest)).all())
+        return out
+    except Exception:
+        return {}
+    finally:
+        s.close()
 
 
 @app.route('/api/personas/<slug>', methods=['GET'])
