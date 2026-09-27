@@ -30344,9 +30344,19 @@ def _char_json(s, row, full=False):
 def _char_row(s, user, char_id):
     from db import Character
     row = s.query(Character).filter(Character.id == char_id).first()
-    if not row or row.workspace_id != _workspace_id(user):
+    if not row or (row.workspace_id != _workspace_id(user)
+                   and not (user or {}).get('is_super_admin')):
         return None
     return row
+
+
+def _char_owner_emails(s, workspace_ids):
+    from db import Workspace, User
+    if not workspace_ids:
+        return {}
+    rows = (s.query(Workspace.id, User.email).join(User, User.id == Workspace.owner_id)
+            .filter(Workspace.id.in_(workspace_ids)).all())
+    return {w: e for w, e in rows}
 
 
 def _char_persona_ok(slug):
@@ -30796,10 +30806,19 @@ def api_characters():
     s = _db_session()
     try:
         if request.method == 'GET':
-            rows = (s.query(Character)
-                    .filter(Character.workspace_id == _workspace_id(user))
-                    .order_by(Character.updated_at.desc()).all())
-            return jsonify({'ok': True, 'characters': [_char_json(s, r) for r in rows]})
+            q = s.query(Character)
+            mine = _workspace_id(user)
+            if not (user or {}).get('is_super_admin'):
+                q = q.filter(Character.workspace_id == mine)
+            rows = q.order_by(Character.updated_at.desc()).all()
+            owners = _char_owner_emails(s, {r.workspace_id for r in rows if r.workspace_id != mine})
+            out = []
+            for r in rows:
+                j = _char_json(s, r)
+                if r.workspace_id != mine:
+                    j['owner'] = owners.get(r.workspace_id, r.workspace_id)
+                out.append(j)
+            return jsonify({'ok': True, 'characters': out})
         body = request.get_json(silent=True) or {}
         persona = (body.get('persona') or '').strip().lower()
         if persona:

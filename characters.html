@@ -793,12 +793,12 @@ function renderList() {
         : `<div class="pg-initials">${esc((c.name || '?').slice(0, 2).toUpperCase())}</div>`}
         <div class="pg-scrim"></div><span class="ch-level">${LEVEL_LABEL[c.nsfw_level] || esc(c.nsfw_level)}</span>
         <div class="pg-card-text"><div class="pg-card-name">${esc(c.name)}</div>
-          <div class="pg-card-sub">${linked ? 'Linked to ' + esc(linked) : 'Not linked'}</div></div></div>
+          <div class="pg-card-sub">${c.owner ? esc(c.owner) + ' · ' : ''}${linked ? 'Linked to ' + esc(linked) : 'Not linked'}</div></div></div>
       <div class="pg-card-foot">
         <div class="pg-bar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100" aria-label="Approved photos"><i style="width:${pct}%;background:${progressColour(pct)};"></i></div>
         <span class="pg-pct" style="color:${progressColour(pct)};">${pct}%</span>
         <button type="button" class="btn btn-primary pg-open" onclick="event.stopPropagation();openCharacter('${c.id}')">Open</button>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="event.stopPropagation();deleteCharacter('${c.id}')">Delete</button>
+        ${c.owner ? '' : `<button type="button" class="btn btn-ghost btn-sm" onclick="event.stopPropagation();deleteCharacter('${c.id}')">Delete</button>`}
         <span class="ch-card-note">${status} · version ${c.version}</span>
       </div></div>`;
   }).join('') + '</div>';
@@ -1772,7 +1772,7 @@ document.addEventListener('keydown', e => {
   } catch (e) {}
   const q = new URLSearchParams(location.search);
   try {
-    if (q.get('persona') && q.get('new')) return await newCharacter(q.get('persona'));
+    if (q.get('new')) return await newCharacter(q.get('persona'));
     if (q.get('id')) return await openCharacter(q.get('id'));
   } catch (e) { listNote = e.message; }
   loadList();
