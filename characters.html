@@ -54,6 +54,12 @@
     }
     .ch-rail-meta b { color: var(--text-2); font-weight: 600; }
     #ch-stepwrap { padding-bottom: 0; }
+    /* Nothing on a step may push the page sideways: long labels wrap and
+       grid and flex children may shrink below their content. */
+    #ch-stepwrap, #list-view { overflow-x: hidden; }
+    #ch-stepwrap *, .drawer * { min-width: 0; }
+    #ch-stepwrap select, #ch-stepwrap img, .drawer img, .drawer select { max-width: 100%; }
+    .fp-opt, .preset-opt, .mode-opt, .view-f { overflow-wrap: anywhere; }
     /* Steps here run long (every feature is on screen), so Continue and the
        status line stay pinned to the bottom of the column. */
     #ch-foot {
@@ -135,7 +141,7 @@
     .fp-opt:hover { border-color: var(--accent-line); color: var(--text); }
     .fp-opt[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--text); font-weight: 600; box-shadow: inset 0 0 0 1px var(--accent); }
     .fp-opt.text { width: auto; min-height: 36px; padding: 0 14px; border-radius: 9999px; font-size: 0.78rem; justify-content: center; }
-    .fp-mini { white-space: nowrap; }
+    .fp-mini { white-space: normal; }
     .fp-mini svg { width: 30px; height: 30px; vertical-align: middle; margin-right: 8px; }
     .hex-pick { display: inline-flex; align-items: center; gap: 8px; margin-top: 10px; }
     body.page-dashboard label.hex-pick { font-size: 0.78rem; font-weight: 500; color: var(--text-2); cursor: pointer; }
@@ -346,7 +352,7 @@
       border-top: 1px solid var(--border-soft); display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
     }
     .actionbar .grow { flex: 1; }
-    .actionbar .hint { white-space: nowrap; }
+    .actionbar .hint { white-space: normal; }
     #vp-opts { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; margin-top: 16px; }
     .crop-stage { position: relative; overflow: hidden; border-radius: var(--r-sm); user-select: none; touch-action: none; }
     .crop-stage img { width: 100%; display: block; max-height: min(70vh, 760px); object-fit: contain; }
