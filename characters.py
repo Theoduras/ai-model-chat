@@ -74,7 +74,14 @@ FEATURES = {
         'ears': ('Ears', 'face', _opts('ears', 'Small, close-set', 'Medium', 'Prominent')),
         'hair_colour': ('Hair colour', 'face', _opts('hair', 'Black', 'Dark brown', 'Light brown', 'Auburn', 'Red', 'Strawberry blonde', 'Blonde', 'Platinum')
                         + [('Custom', '')]),
-        'hair_texture': ('Hair length and texture', 'face', _opts('hair', 'Long, straight', 'Long, loose waves', 'Long, curly', 'Shoulder-length', 'Bob', 'Pixie')),
+        'hair_texture': ('Hair style', 'face', _opts('hair', 'Long, straight', 'Long, loose waves', 'Long, curly', 'Shoulder-length', 'Bob', 'Pixie')
+                         + [('Afro', 'a full natural afro'), ('Box braids', 'long box braids'),
+                            ('Cornrows', 'neat cornrow braids close to the scalp'), ('Locs', 'long locs'),
+                            ('Bantu knots', 'bantu knots'), ('Twist-out curls', 'defined twist-out curls'),
+                            ('High ponytail', 'hair pulled back into a high ponytail'),
+                            ('Low ponytail', 'hair pulled back into a sleek low ponytail'),
+                            ('Side braid', 'a long braid over one shoulder'), ('Crown braid', 'a braided crown'),
+                            ('Messy bun', 'hair up in a messy bun')]),
         'hairline': ('Hairline', 'face', [('Rounded, middle part', 'a rounded hairline with a middle part'), ('Side part', 'a side part'),
                                           ('Straight, fringe', 'a straight fringe'), ('Widow\'s peak', 'a widow\'s peak')]),
         # Body
@@ -121,8 +128,8 @@ FEATURES = {
                                                      ('Shaved', 'shaved pubic area')]),
         'pubic_colour': ('Pubic hair colour', 'pubic', _opts('pubic hair', 'Matches hair', 'Dark', 'Light')),
         'pubic_density': ('Density', 'pubic', _opts('', 'Sparse', 'Medium', 'Dense')),
-        'labia': ('Labia', 'vulva', [('Tucked', 'tucked inner labia'), ('Slightly visible', 'slightly visible inner labia'), ('Protruding', 'protruding inner labia')]),
-        'labia_fullness': ('Fullness', 'vulva', _opts('outer labia', 'Slim', 'Medium', 'Full')),
+        # Her shape comes from the example she picks (LOOKS), so only the colour
+        # is described in words.
         'vulva_colour': ('Colour', 'vulva', _opts('vulva', 'Pink', 'Rosy', 'Tan', 'Brown', 'Dark')),
         'anus_colour': ('Colour', 'anus', _opts('anus', 'Pink', 'Rosy', 'Tan', 'Brown', 'Dark')),
     },
@@ -164,42 +171,59 @@ STUDIO = 'Soft natural daylight, plain light-grey wall behind her. ' + PHOTO_LOO
 
 VARIATIONS = BATCH_CHOICES
 
-# A preset sets every body feature, replacing earlier picks, so clicking one
-# visibly changes the sheet. Face and intimate features are left alone.
-def _preset(height, build, shape, shoulders, waist, hips, bust, glutes, thighs, tattoos, piercings, birthmarks, nails):
+# A preset sets every body feature and her intimate shapes, replacing earlier
+# picks, so clicking one visibly changes the sheet. Face picks and colours are
+# left alone. No preset uses a youth-leaning option, so none can push a face
+# pick over the limit.
+def _preset(height, build, shape, shoulders, waist, hips, bust, glutes, thighs, tattoos, piercings, birthmarks, nails,
+            cup, breast_shape, spacing, augmented, perkiness, areola, nipple, nipple_shape, pubic, density):
     return {'height': height, 'build': build, 'body_shape': shape, 'shoulders': shoulders, 'waist': waist,
             'hips': hips, 'bust': bust, 'glute_shape': glutes, 'thighs': thighs, 'tattoos': tattoos,
-            'piercings': piercings, 'birthmarks': birthmarks, 'nails': nails}
+            'piercings': piercings, 'birthmarks': birthmarks, 'nails': nails,
+            'cup': cup, 'breast_shape': breast_shape, 'spacing': spacing, 'augmented': augmented,
+            'perkiness': perkiness, 'areola_size': areola, 'nipple_size': nipple, 'nipple_shape': nipple_shape,
+            'nipple_piercing': 'None', 'pubic_style': pubic, 'pubic_density': density}
 
+
+PRESET_GROUPS = ('body', 'breasts', 'nipples', 'pubic')
 
 BODY_PRESETS = {
-    'petite_athletic': ('Petite athletic', 'Short, toned, compact',
-                        _preset('155–165 cm', 'Athletic', 'Rectangle', 'Narrow', 'Defined', 'Medium', 'Medium',
-                                'Bubble', 'Toned', 'Small, ankle', 'Ears', 'None', 'Short, nude')),
-    'slim_tall': ('Slim tall', 'Tall, lean, long lines',
-                  _preset('Over 175 cm', 'Slim', 'Rectangle', 'Medium', 'Straight', 'Medium', 'Medium',
-                          'Round', 'Slim', 'None', 'Ears', 'None', 'Medium, painted')),
+    'natural': ('Natural', 'Average height and build',
+                _preset('165–175 cm', 'Average', 'Rectangle', 'Medium', 'Straight', 'Medium', 'Medium',
+                        'Round', 'Toned', 'None', 'Ears', 'None', 'Short, nude',
+                        'B', 'Round', 'Average', 'Natural', 'Natural', 'Medium', 'Medium', 'Protruding', 'Trimmed', 'Medium')),
+    'petite_athletic': ('Petite athletic', 'Compact, toned',
+                        _preset('155–165 cm', 'Athletic', 'Rectangle', 'Medium', 'Defined', 'Medium', 'Medium',
+                                'Bubble', 'Toned', 'Small, ankle', 'Ears', 'None', 'Short, nude',
+                                'B', 'Athletic', 'Average', 'Natural', 'Natural', 'Small', 'Medium', 'Protruding', 'Landing strip', 'Medium')),
     'curvy': ('Curvy', 'Full hips and thighs',
               _preset('155–165 cm', 'Curvy', 'Pear', 'Medium', 'Defined', 'Wide', 'Large',
-                      'Wide', 'Full', 'Hip', 'Navel', 'None', 'Long, painted')),
+                      'Wide', 'Full', 'Hip', 'Navel', 'None', 'Long, painted',
+                      'D', 'Round', 'Average', 'Natural', 'Natural', 'Medium', 'Medium', 'Protruding', 'Trimmed', 'Medium')),
     'hourglass': ('Hourglass', 'Defined waist, balanced curves',
                   _preset('165–175 cm', 'Curvy', 'Hourglass', 'Medium', 'Defined', 'Wide', 'Large',
-                          'Heart-shaped', 'Full', 'None', 'Ears', 'None', 'French tips')),
+                          'Heart-shaped', 'Full', 'None', 'Ears', 'None', 'French tips',
+                          'D', 'Teardrop', 'Average', 'Natural', 'Natural', 'Medium', 'Medium', 'Protruding', 'Triangle', 'Medium')),
     'athletic_tall': ('Athletic tall', 'Strong frame, sporty',
                       _preset('Over 175 cm', 'Athletic', 'Inverted triangle', 'Broad', 'Defined', 'Medium', 'Medium',
-                              'Bubble', 'Toned', 'Small, wrist', 'Ears', 'None', 'Short, nude')),
-    'slim_petite': ('Slim petite', 'Small frame, lean',
-                    _preset('155–165 cm', 'Slim', 'Rectangle', 'Medium', 'Defined', 'Medium', 'Medium',
-                            'Round', 'Slim', 'None', 'Ears', 'None', 'Medium, painted')),
+                              'Bubble', 'Toned', 'Small, wrist', 'Ears', 'None', 'Short, nude',
+                              'B', 'Athletic', 'Wide', 'Natural', 'Natural', 'Small', 'Medium', 'Flat', 'Landing strip', 'Medium')),
     'voluptuous': ('Voluptuous', 'Very full bust, hips and bum',
                    _preset('165–175 cm', 'Voluptuous', 'Hourglass', 'Medium', 'Defined', 'Wide', 'Very large',
-                           'Bubble', 'Full', 'Hip', 'Navel', 'None', 'Long, painted')),
+                           'Bubble', 'Full', 'Hip', 'Navel', 'None', 'Long, painted',
+                           'E+', 'Round', 'Close', 'Natural', 'Soft', 'Large', 'Large', 'Puffy', 'Trimmed', 'Medium')),
     'fitness': ('Fitness', 'Muscular, strong, sculpted',
                 _preset('165–175 cm', 'Muscular', 'Inverted triangle', 'Broad', 'Defined', 'Medium', 'Medium',
-                        'Bubble', 'Toned', 'Sleeve', 'Navel', 'None', 'Short, nude')),
+                        'Bubble', 'Toned', 'Sleeve', 'Navel', 'None', 'Short, nude',
+                        'C', 'Athletic', 'Average', 'Natural', 'Natural', 'Small', 'Medium', 'Protruding', 'Landing strip', 'Medium')),
     'pear': ('Pear / thick bottom', 'Slimmer top, big hips and bum',
-             _preset('155–165 cm', 'Curvy', 'Pear', 'Narrow', 'Defined', 'Wide', 'Medium',
-                     'Wide', 'Full', 'Small, ankle', 'Ears', 'None', 'French tips')),
+             _preset('155–165 cm', 'Curvy', 'Pear', 'Medium', 'Defined', 'Wide', 'Medium',
+                     'Wide', 'Full', 'Small, ankle', 'Ears', 'None', 'French tips',
+                     'C', 'Teardrop', 'Average', 'Natural', 'Natural', 'Medium', 'Medium', 'Protruding', 'Natural', 'Medium')),
+    'glamour': ('Glamour', 'Tall, enhanced bust, defined waist',
+                _preset('165–175 cm', 'Curvy', 'Hourglass', 'Medium', 'Defined', 'Medium', 'Very large',
+                        'Round', 'Toned', 'None', 'Navel', 'None', 'Long, painted',
+                        'DD', 'Round', 'Close', 'Augmented', 'Natural', 'Medium', 'Medium', 'Protruding', 'Landing strip', 'Medium')),
     'scratch': ('Start from scratch', 'Clear every body pick', {}),
 }
 
@@ -210,7 +234,7 @@ def apply_preset(sheet, preset, body_type='female'):
     values = BODY_PRESETS[preset][2]
     out = dict(sheet or {})
     for k, (_, group, _) in features(body_type).items():
-        if group != 'body':
+        if group not in PRESET_GROUPS or (group != 'body' and k.endswith('_colour')):
             continue
         if k in values:
             out[k] = values[k]
@@ -238,12 +262,12 @@ VIEWS = {
                       'camera squarely, head level, shoulders level, feet together, arms relaxed slightly away '
                       'from the body, symmetrical posture, wearing {outfit}'),
              uses=('face', 'body')),
+        dict(key='body_back', label='Full body, back', group='body', rating='sfw', required_from='moderate', parents=('body_front',), tier=1, mode='reference',
+             framing=('a full-body view from behind, standing perfectly straight and upright, head level, feet '
+                      'together, wearing {outfit}'), uses=('body',)),
         dict(key='body_side', label='Full body, side', group='body', rating='sfw', required_from=None, parents=('body_front',), tier=1, mode='reference',
              framing=('a full-body side view, standing perfectly straight and upright, head level, feet together, '
                       'wearing {outfit}'), uses=('body',)),
-        dict(key='body_back', label='Full body, back', group='body', rating='sfw', required_from='explicit', parents=('body_front',), tier=1, mode='reference',
-             framing=('a full-body view from behind, standing perfectly straight and upright, head level, feet '
-                      'together, wearing {outfit}'), uses=('body',)),
         dict(key='hands', label='Hands', group='body', rating='sfw', required_from=None, parents=('body_front',), tier=1, mode='reference',
              zoom=True, body=('nails', 'tattoos'),
              framing=('a tight close-up of only her two hands, resting open palms down side by side on a plain surface, '
@@ -252,12 +276,8 @@ VIEWS = {
              zoom=True, body=('tattoos',),
              framing=('a tight close-up of only her two bare feet standing side by side on a plain floor, '
                       'toes and nails in sharp focus, ankles at the top edge of the frame'), uses=('body',)),
-        dict(key='nude_front', label='Nude full body, front', group='nsfw', rating='moderate', required_from='moderate',
-             parents=('body_front',), tier=0, mode='reference',
-             framing='a full-body nude photo from head to feet, standing straight facing the camera, arms relaxed at her sides',
-             uses=('body', 'breasts', 'nipples', 'pubic')),
         dict(key='breasts', label='Breasts (topless, front)', group='nsfw', rating='moderate', required_from='moderate',
-             parents=('nude_front',), tier=1, mode='crop', region='chest', zoom=True, body=('build',),
+             parents=('body_front',), tier=1, mode='reference', nocrop=True, zoom=True, body=('build',),
              framing=('a close-up of her bare breasts from the front, framed from the collarbones to just below the '
                       'breasts, arms down at her sides out of frame, both breasts centred and in sharp focus'),
              uses=('breasts', 'nipples')),
@@ -266,16 +286,20 @@ VIEWS = {
              framing=('a macro close-up of her bare nipples and areolae, breast skin filling the frame, '
                       'nipple texture in sharp focus'),
              uses=('nipples',)),
+        dict(key='nude_front', label='Nude full body, front', group='nsfw', rating='moderate', required_from='moderate',
+             parents=('body_front', 'breasts', 'nipples'), tier=2, mode='reference',
+             framing='a full-body nude photo from head to feet, standing straight facing the camera, arms relaxed at her sides',
+             uses=('body', 'breasts', 'nipples', 'pubic')),
         dict(key='rear_nude', label='Nude from behind (standing)', group='nsfw', rating='moderate', required_from='explicit',
-             parents=('nude_front', 'body_back'), tier=1, mode='reference', framing='a full-body nude photo from behind, standing straight', uses=('body',)),
+             parents=('nude_front', 'body_back'), tier=2, mode='reference', framing='a full-body nude photo from behind, standing straight', uses=('body',)),
         dict(key='pubic', label='Pubic area (front, standing)', group='nsfw', rating='explicit', required_from='explicit',
-             parents=('nude_front',), tier=1, mode='crop', region='pelvis', zoom=True,
+             parents=('nude_front',), tier=2, mode='crop', region='pelvis', zoom=True,
              body=('hips', 'thighs', 'tattoos', 'birthmarks'),
              framing=('a close-up of her nude pubic area from the front while standing, framed from just below the '
                       'navel to the top of the thighs, pubic mound centred and in sharp focus'),
              uses=('pubic',)),
         dict(key='vulva_closed', label='Vagina, closed', group='nsfw', rating='explicit', required_from='explicit',
-             parents=('nude_front',), tier=1, mode='reference', zoom=True, body=('thighs',),
+             parents=('nude_front',), tier=2, mode='reference', zoom=True, body=('thighs',),
              framing=('an explicit macro close-up of her vulva with labia closed, legs apart, the vulva centred and '
                       'filling the frame, inner thighs at the edges'),
              uses=('pubic', 'vulva')),

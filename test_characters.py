@@ -43,6 +43,12 @@ def test_required_views():
     check('topless adds nude full body', 'nude_front' in top)
     check('topless adds breasts and nipples', {'breasts', 'nipples'} <= set(top))
     check('topless has nothing explicit', not {'pubic', 'vulva_closed', 'anus_closed'} & set(top))
+    check('topless adds the back view', 'body_back' in top)
+    check('back view walks right after the front, close-ups before the nude',
+          [k for k in CH.required_views('explicit') if k != 'face_front'][:5]
+          == ['body_front', 'body_back', 'breasts', 'nipples', 'nude_front'])
+    check('breasts come from the dressed body, never cropped',
+          CH.view('breasts')['parents'] == ('body_front',) and CH.view('breasts')['mode'] == 'reference')
     exp = set(CH.required_views('explicit'))
     check('explicit requires pubic, vulva, anus closed',
           {'pubic', 'vulva_closed', 'anus_closed'} <= exp)
@@ -163,6 +169,8 @@ def test_validation():
     check('malformed uploaded outfit refused', refused({'age': 25, 'sheet': {'view_outfits': ['upload:../x']}}))
     clean, warn = CH.validate({'age': 25, 'notes': 'likes red', 'banned': ['red']})
     check('banned terms struck', 'red' not in clean['notes'])
+    clean, _ = CH.validate({'age': 25, 'sheet': {'labia': 'Tucked', 'labia_fullness': 'Full', 'vulva_colour': 'Pink'}})
+    check('retired labia picks drop', clean['sheet'] == {'vulva_colour': 'Pink'})
 
 
 def test_every_option_has_a_drawing():
@@ -340,12 +348,16 @@ def test_presets():
     for key, (_, _, values) in CH.BODY_PRESETS.items():
         check(f'{key} values valid', all(v in [o for o, _ in feats[k][2]] for k, v in values.items()))
         if key != 'scratch':
-            check(f'{key} covers every body feature', set(values) == set(body))
-        sheet = CH.apply_preset({'build': 'Muscular', 'eye_colour': 'Green', 'cup': 'C'}, key)
-        check(f'{key} keeps face and intimate picks', sheet['eye_colour'] == 'Green' and sheet['cup'] == 'C')
-        check(f'{key} overwrites body picks', sheet.get('build') == values.get('build'))
-        _, warnings = CH.validate({'age': 25, 'sheet': sheet})
-        check(f'{key} raises no youth warning', not warnings)
+            check(f'{key} covers every body feature', set(body) <= set(values))
+        sheet = CH.apply_preset({'build': 'Muscular', 'eye_colour': 'Green', 'cup': 'A', 'areola_colour': 'Pink'}, key)
+        check(f'{key} keeps face picks and colours', sheet['eye_colour'] == 'Green' and sheet['areola_colour'] == 'Pink')
+        check(f'{key} overwrites body and intimate picks', sheet.get('build') == values.get('build')
+              and sheet.get('cup') == values.get('cup'))
+        check(f'{key} leans young nowhere', CH.youth_score(values) == 0)
+        # The youngest face a creator can save still leaves room for any preset.
+        face = {'apparent_age': '18–21'}
+        _, warnings = CH.validate({'age': 25, 'nsfw_level': 'explicit', 'sheet': dict(sheet, **face)})
+        check(f'{key} adds no youth warning', warnings == CH.validate({'age': 25, 'sheet': face})[1])
 
 
 if __name__ == '__main__':

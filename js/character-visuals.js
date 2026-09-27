@@ -93,6 +93,40 @@
     'Shoulder-length': [[16.2, 24], [17, 36], [17.4, 47], [19.6, 53.5], [16.6, 54.2], [14.4, 52], [12.6, 47], [13.6, 38], [14.2, 31]],
     'Bob': [[16.6, 24], [17.6, 34], [17.7, 43], [16.9, 47.4], [12.6, 47.6], [12.6, 44], [13.6, 38], [14.2, 31]],
     'Pixie': null,
+    'Box braids': [[16.2, 24], [17.4, 36], [17.8, 50], [18, 62], [11.8, 62], [11.4, 54], [12.2, 46], [13.6, 38], [14.2, 31]],
+    'Locs': [[16.4, 24], [18, 36], [18.6, 50], [19, 62], [11.6, 62], [11.2, 54], [12.2, 46], [13.6, 38], [14.2, 31]],
+    'Low ponytail': [[14.8, 30], [17.5, 38], [18.2, 48], [17, 58], [14.6, 58], [15.2, 48], [14.8, 40], [13.8, 34]],
+    'Side braid': [[15.2, 30], [18, 38], [18.4, 50], [17.6, 60], [14.6, 60], [14.4, 50], [14.2, 40], [13.4, 34]],
+  };
+  // Styles that are more than hair falling on both sides: `one` falls on her
+  // right only, `under` is drawn behind the head, `over` on top of the cap.
+  const braidTicks = (x, y0, y1, k) => {
+    let d = '';
+    for (let y = y0; y < y1; y += 3.2) d += `M${f(32 + k * (x - 1.8))},${f(y)} l${f(k * 3.6)},1.8 `;
+    return line(d, ' stroke-width=".9"');
+  };
+  const knot = (x, y, r) => `<circle cx="${f(x)}" cy="${f(y)}" r="${r}" fill="${PINK}" stroke-width="1.1"/>` +
+    line(`M${f(x - r * 0.5)},${f(y - r * 0.2)} q${f(r * 0.5)},${f(r * 0.6)} ${f(r)},0`, ' stroke-width=".8"');
+  const curls = pts => pts.map(([x, y]) => `<path d="M${x},${y} a1.4,1.4 0 1 1 1.4,1.4" stroke-width=".9"/>`).join('');
+  const STYLE = {
+    'Afro': {under: fill => `<ellipse cx="32" cy="22" rx="24" ry="20" fill="${fill}" stroke-width="1.3"/>`,
+      over: () => curls([[12, 14], [18, 5], [30, 1.5], [42, 4], [50, 12], [53, 24], [10, 26]])},
+    'Twist-out curls': {under: fill => `<ellipse cx="32" cy="26" rx="22" ry="21" fill="${fill}" stroke-width="1.3"/>`,
+      over: () => curls([[13, 20], [15, 36], [48, 20], [49, 36], [20, 7], [42, 7]])},
+    'Box braids': {over: () => braidTicks(15.2, 34, 60, 1) + braidTicks(15.2, 34, 60, -1)},
+    'Locs': {over: () => line('M45.5,34 Q46.5,48 46,61 M48.5,34 Q49.5,48 49.4,61 M18.5,34 Q17.5,48 18,61 M15.5,34 Q14.5,48 14.6,61',
+      ' stroke-width=".9"')},
+    'Cornrows': {over: () => line([-8.5, -4.2, 0, 4.2, 8.5].map(x => `M${f(32 + x * 0.9)},11.5 Q${f(32 + x * 1.3)},6 ${f(32 + x * 1.1)},3.6`).join(' '),
+      ' stroke-width=".9" stroke-dasharray="1.6 1.2"')},
+    'Bantu knots': {over: () => [[21, 8], [32, 4.5], [43, 8], [15.5, 16], [48.5, 16]].map(([x, y]) => knot(x, y, 3.2)).join('')},
+    'High ponytail': {under: fill => `<path d="M40,7 C52,4 57,14 54,28 C52,38 55,46 51,54 C48,46 47,38 48,30 C49,20 46,12 40,9 Z" ` +
+      `fill="${fill}" stroke-width="1.3"/>`, over: () => knot(40, 5.5, 2.6)},
+    'Low ponytail': {one: true, over: () => knot(46.5, 31, 2.2)},
+    'Side braid': {one: true, over: () => braidTicks(16.2, 36, 58, 1)},
+    'Crown braid': {over: () => line('M17.5,17 Q18.5,6 32,5 Q45.5,6 46.5,17', ` stroke="${PINK}" stroke-width="3.6"`) +
+      line('M19,14 l2,-2.6 M22.5,9.4 l2.6,-1.6 M27,6.6 l3,-.6 M34,6.2 l3,.6 M39,7.8 l2.6,1.6 M43,11.4 l2,2.6', ' stroke-width=".9"')},
+    'Messy bun': {under: fill => `<circle cx="32" cy="5.5" r="5.4" fill="${fill}" stroke-width="1.3"/>`,
+      over: () => line('M29,3.5 q3,-2 6,0 M28.5,6.5 q3.5,2 7,0 M37,2 l2.4,-1.6 M26.5,2.5 l-2.2,-1.4', ' stroke-width=".9"')},
   };
   function hairStrands(part) {
     if (part === 'fringe') {
@@ -125,16 +159,16 @@
     const [nx, ny] = neckTop(pts, 8.7), N = k => x => f(32 + k * x);
     const chosen = opts.hair || opts.hairline, hairFill = chosen ? PINK : HAIR_PINK;
     const [inner, part] = opts.hair === 'Pixie' ? [PIXIE[1], 0] : HAIRLINE[opts.hairline || 'Rounded, middle part'];
-    const back = HAIR[opts.hair];
-    let s = '';
+    const back = HAIR[opts.hair], style = STYLE[opts.hair] || {};
+    let s = style.under ? style.under(hairFill) : '';
     if (back) {
-      [1, -1].forEach(k => {
+      (style.one ? [1] : [1, -1]).forEach(k => {
         s += `<path d="${smooth(back.map(([x, y]) => [32 + k * x * w, y]))}" fill="${hairFill}" stroke-width="1.3"/>`;
       });
       if (opts.hair === 'Long, curly') {
         s += [[16, 36], [16.6, 45], [15.4, 54], [17, 59]].map(([x, y]) =>
           `<path d="M${f(32 + x * w)},${y} a1.4,1.4 0 1 1 1.4,1.4 M${f(32 - x * w)},${y} a1.4,1.4 0 1 0 -1.4,1.4" stroke-width=".9"/>`).join('');
-      } else {
+      } else if (!style.one && !style.over) {
         s += line([1, -1].map(k => `M${f(32 + k * 15.3 * w)},34 Q${f(32 + k * 15.8 * w)},42 ${f(32 + k * 15.2 * w)},` +
           (opts.hair === 'Bob' ? '45' : opts.hair === 'Shoulder-length' ? '50' : '59')).join(' '), ' stroke-width=".9"');
       }
@@ -146,6 +180,8 @@
       ' stroke-width="1.5"');
     if (!opts.ear) s += ear(1, o.c, [3.6, 12]) + ear(-1, o.c, [3.6, 12]);
     if (opts.mark === 'jaw') s += `<path d="${smooth(pts, 3, 7)}" stroke="${PINK}" stroke-width="4" stroke-opacity=".8"/>`;
+    // Hair drawn behind the head would show through an unfilled face.
+    if (style.under) s += `<path d="${smooth(pts)}" fill="var(--panel, #fff)" stroke="none"/>`;
     s += line(smooth(pts), ' stroke-width="1.5"');
     const capPts = opts.hair === 'Pixie' ? PIXIE[0].concat(inner) : CAP.concat(inner);
     s += `<path d="${smooth(capPts.map(at))}" fill="${hairFill}" stroke-width="1.3"/>`;
@@ -153,6 +189,7 @@
       ? line('M31,4.5 Q24,6 19.5,13 M33.5,4.6 Q40,6 44.5,13 M27,6.5 Q22,10 20.6,16 M38,6.8 Q43,10 43.6,16 ' +
           'M20,19 l-1.2,2.4 M44,19 l1.2,2.4 M29,12.8 l-1.4,1.6 M35,12.6 l1.4,1.6', ' stroke-width=".9"')
       : line(hairStrands(part), ' stroke-width=".9"');
+    if (style.over) s += style.over();
     if (opts.ear) s += ear(1, o.c, opts.ear, true) + ear(-1, o.c, opts.ear, true);
     if (opts.mark === 'cheeks') {
       const y = o.cheekY + 3.5;
@@ -458,6 +495,24 @@
       line(hairs, ' stroke-width="1.3"'));
   }
 
+  // One figure per body proportion, so a preset can be drawn from its picks.
+  const PART = {
+    shoulders: ['sh', {Narrow: 8.5, Medium: 10.5, Broad: 13.5}], waist: ['wa', {Defined: 6.5, Straight: 10, Soft: 11}],
+    hips: ['hi', {Narrow: 9.5, Medium: 11.5, Wide: 15.5}], bust: ['bu', {Small: 8.5, Medium: 10, Large: 11.5, 'Very large': 13}],
+    thighs: ['th', {Slim: 9.5, Toned: 11, Full: 13.5}],
+  };
+  // A body preset: her build, then each proportion it names, at her height,
+  // with the body shape's type as the pink fill.
+  function preset(values) {
+    values = values || {};
+    if (!Object.keys(values).length) return unset();
+    const o = Object.assign({}, BUILD[values.build] || {});
+    Object.entries(PART).forEach(([k, [p, set]]) => { if (set[values[k]] !== undefined) o[p] = set[values[k]]; });
+    const shape = BODY_SHAPE[values.body_shape], sc = HEIGHT[values.height] || 0.94;
+    return bsvg(`<g transform="translate(32,63) scale(${sc}) translate(-32,-63)">` +
+      chartFigure(o, '', {under: shape ? () => pinkFill(shape[1]) : null}) + '</g>');
+  }
+
   // ── Table ─────────────────────────────────────────────────────────────────
   const map = (obj, fn) => Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, () => fn(v, k)]));
   const TABLE = {
@@ -472,16 +527,16 @@
     nose: map(NOSE, nose),
     lips: map(LIPS, a => lips.apply(null, a)),
     ears: map(EAR, ear => chartHead({}, {ear})),
-    hair_texture: map(HAIR, (v, hair) => chartHead({}, {hair})),
+    hair_texture: map(Object.assign({}, HAIR, STYLE), (v, hair) => chartHead({}, {hair})),
     hairline: map(HAIRLINE, (v, hairline) => chartHead({}, {hairline})),
     marks: map(MARKS, extra => chartHead({}, {extra})),
     height: map(HEIGHT, height),
     build: map(BUILD, o => body(o)),
-    shoulders: map({Narrow: 8.5, Medium: 10.5, Broad: 13.5}, sh => body({sh}, 'shoulders')),
-    waist: map({Defined: 6.5, Straight: 10, Soft: 11}, wa => body({wa}, 'waist')),
-    hips: map({Narrow: 9.5, Medium: 11.5, Wide: 15.5}, hi => body({hi}, 'hips')),
-    bust: map({Small: 8.5, Medium: 10, Large: 11.5, 'Very large': 13}, bu => body({bu}, 'bust')),
-    thighs: map({Slim: 9.5, Toned: 11, Full: 13.5}, th => body({th}, 'thighs')),
+    shoulders: map(PART.shoulders[1], sh => body({sh}, 'shoulders')),
+    waist: map(PART.waist[1], wa => body({wa}, 'waist')),
+    hips: map(PART.hips[1], hi => body({hi}, 'hips')),
+    bust: map(PART.bust[1], bu => body({bu}, 'bust')),
+    thighs: map(PART.thighs[1], th => body({th}, 'thighs')),
     tattoos: MARKERS.tattoos, piercings: MARKERS.piercings, birthmarks: MARKERS.birthmarks,
     nails: map(NAILS, ([len, kind]) => nails(len, kind)),
     cup: map(CUP, r => breasts({r})),
@@ -518,7 +573,7 @@
     return fn ? fn() : '';
   }
 
-  const api = {render, TEXT_ONLY: ['labia', 'labia_fullness', 'ethnicity', 'apparent_age']};
+  const api = {render, preset, TEXT_ONLY: ['ethnicity', 'apparent_age']};
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.CharacterVisuals = api;
 })(this);

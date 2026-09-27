@@ -30275,7 +30275,7 @@ def _char_views_state(s, row):
         refs.setdefault(r.view_id, []).append({'image_id': r.ref_image_id, 'weight': r.weight})
     for k, cv in rows.items():
         v = CH.view(k, row.body_type) or {}
-        mode = cv.mode or v.get('mode') or 'reference'
+        mode = 'reference' if v.get('nocrop') else cv.mode or v.get('mode') or 'reference'
         d = dicts[k]
         d.update(display=shown.get(k, d['status']), mode=mode,
                  strength=CH.STRENGTH[mode],
@@ -31276,7 +31276,7 @@ def api_character_view_settings(char_id, view_key):
         cv = _char_views(s, row)[view_key]
         if 'mode' in body:
             mode = body['mode'] or None
-            if mode not in (None, 'crop', 'reference') or (mode == 'crop' and not v['parents']):
+            if mode not in (None, 'crop', 'reference') or (mode == 'crop' and (not v['parents'] or v.get('nocrop'))):
                 return jsonify({'ok': False, 'error': 'That view cannot be cropped.'}), 400
             cv.mode = mode
         if 'crop_box' in body:

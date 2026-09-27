@@ -227,7 +227,8 @@
     .ch-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 
     /* Body step and the view tree. */
-    .ch-body { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 20px; align-items: start; }
+    .ch-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: start; }
+    .ch-body #body-profile { max-width: 960px; }
     .ch-body > .drawer { display: none; }
     .ch-body > .ch-main { grid-column: 1; }
     .ch-body > .ch-side { grid-column: 2; }
@@ -276,7 +277,7 @@
       }
       .views-mode .ch-body { grid-template-rows: auto 1fr; }
       .views-mode .ch-body > .ch-side { grid-column: 2; grid-row: 1; }
-      .views-mode .ch-body > .ch-main { grid-column: 2; grid-row: 2; }
+      .views-mode .ch-body > .ch-main { grid-column: 2; grid-row: 1 / span 2; }
       .views-mode .views { grid-template-columns: 1fr; }
       .views-mode .views-toolbar { flex-direction: column; align-items: stretch; }
       .views-mode .drawer .vp-close { display: none; }
@@ -355,7 +356,32 @@
     .crop-handle[data-c="sw"] { left: -9px; bottom: -9px; cursor: nesw-resize; } .crop-handle[data-c="se"] { right: -9px; bottom: -9px; cursor: nwse-resize; }
     .crop-acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 4px; }
 
+    /* A pulse that says "this is the next thing to press". */
+    @keyframes nudge { 0% { box-shadow: 0 0 0 0 var(--accent-line); } 70% { box-shadow: 0 0 0 12px transparent; } 100% { box-shadow: 0 0 0 0 transparent; } }
+    .nudge { animation: nudge 1.1s ease-out 3; outline: 2px solid var(--accent); outline-offset: 2px; }
+    /* Presets drawn as figures, with the advanced picks folded away. */
+    .preset-opt { width: 92px; min-height: 118px; }
+    .preset-opt small { font-weight: 400; color: var(--text-muted); font-size: 0.64rem; }
+    .adv { border: 1px solid var(--border-soft); border-radius: var(--r); padding: 0 14px; }
+    .adv[open] { padding-bottom: 16px; }
+    .adv summary { cursor: pointer; padding: 12px 0; font-size: 0.84rem; font-weight: 600; color: var(--text-2); }
+    .adv > .hint { margin: 0 0 14px; }
+    /* The photo panel's three steps: generate, pick and approve, move on. */
+    .vp-steps { display: flex; gap: 6px; margin-top: 14px; flex-wrap: wrap; }
+    .vp-steps span { flex: 1; min-width: 90px; padding: 7px 10px; border-radius: var(--r-sm); background: var(--surface-2);
+      font-size: 0.74rem; font-weight: 600; color: var(--text-muted); text-align: center; }
+    .vp-steps .on { background: var(--accent); color: #fff; }
+    .vp-steps .done { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+    .opt-pick { display: block; width: 100%; padding: 0; border: 0; background: none; cursor: pointer; font: inherit; color: inherit; text-align: left; }
+    .opt.sel { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+    .opt-tools { position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; }
+    .opt-tools button { width: 28px; height: 28px; border-radius: 50%; border: 0; padding: 0; background: rgba(0,0,0,.6); color: #fff; cursor: pointer; font-size: 0.8rem; }
+    .opt-tools button:hover { background: rgba(0,0,0,.85); }
+    .opt-badge { position: absolute; top: 8px; left: 8px; }
+    .vp-anat .fp-list { gap: 16px; }
     /* Finish. */
+    .fin-persona .mode-pick { margin-top: 4px; }
+    .fin-linked { display: flex; align-items: center; gap: 8px; font-size: 0.86rem; font-weight: 600; }
     .fin-shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; }
     .fin-shots figure { margin: 0; }
     .fin-shots img { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border-radius: var(--r-md); display: block; cursor: zoom-in; background: var(--surface-2); }
@@ -528,6 +554,7 @@
           <div class="chips" id="vp-source"></div>
           <button type="button" class="btn btn-ghost vp-close" onclick="closeDrawer()" aria-label="Close">&times;</button>
         </div>
+        <div class="vp-steps" id="vp-steps"></div>
         <div class="banner" id="vp-banner" hidden></div>
         <div id="vp-body">
           <div id="vp-crop" class="vp-sec" hidden>
@@ -556,13 +583,15 @@
             <div class="chips" id="vp-traits"></div>
             <p class="hint" id="vp-traits-off"></p>
           </div>
+          <div class="vp-sec vp-anat" id="vp-anat" hidden></div>
           <div class="actionbar">
             <span class="dl">Variations</span><div class="chips" id="vp-batch"></div>
             <span class="grow"></span>
             <span class="hint" id="vp-quote"></span>
             <button type="button" class="btn btn-primary btn-sm" id="vp-var" onclick="generate(selView)"></button>
+            <button type="button" class="btn btn-primary" id="vp-approve" hidden onclick="approveSelected()"></button>
           </div>
-          <p class="opts-head" id="vp-opts-head" hidden>Pick one to approve — unapproved options delete themselves after 3 days.</p>
+          <p class="opts-head" id="vp-opts-head" hidden>Tap the best option, then press Approve. Options you do not approve delete themselves after 3 days.</p>
           <div class="vp-next" id="vp-next" hidden></div>
           <div class="opts" id="vp-opts"></div>
         </div>
@@ -582,12 +611,17 @@
             <label class="attest"><input type="checkbox" id="attest-body">I have the rights to these images, and everyone shown is 18+ and agreed to their likeness being used.</label>
             <button type="button" class="btn btn-ghost btn-sm" style="align-self:flex-start;" onclick="pickUpload('body_front', 'attest-body')">+ Add body photos</button>
           </div>
-          <div class="field"><label>Start from a preset</label><div class="chips" id="presets"></div>
-            <span class="hint">Sets every body feature; you can adjust after.</span></div>
-          <div class="fp-list" id="body-features"></div>
-          <div id="intimate-wrap" hidden>
-            <div class="fp-list" id="intimate-features"></div>
-          </div>
+          <div class="field" id="preset-field"><label>Start from a preset</label><div class="fp-opts" id="presets"></div>
+            <span class="hint">Sets her whole body, topless and intimate shapes included. Fine-tune under Advanced.</span></div>
+          <div id="outfit-pick"></div>
+          <details class="adv" id="body-adv">
+            <summary>Advanced: adjust individual features</summary>
+            <p class="hint">Every pick here overrides the preset, so she may no longer look like it.</p>
+            <div class="fp-list" id="body-features"></div>
+            <div id="intimate-wrap" hidden>
+              <div class="fp-list" id="intimate-features"></div>
+            </div>
+          </details>
         </section>
         <div class="views-toolbar" id="views-head">
           <div class="chips" id="view-filter"></div>
@@ -597,16 +631,6 @@
           <button type="button" class="btn btn-primary btn-sm" id="gen-remaining" onclick="generateRemaining()">Generate remaining</button>
         </div>
         <div id="tiers"></div>
-      </div>
-      <div class="ch-side">
-        <section class="form-section">
-          <div class="section-title">General references</div>
-          <span class="hint">Optional. Uploads here guide the face. Each photo's own references are set in its detail panel.</span>
-          <div class="refs" id="general-refs"></div>
-          <label class="attest"><input type="checkbox" id="attest">I have the rights to these images, and anyone shown is 18+ and agreed to their likeness being used for AI generation.</label>
-          <button type="button" class="btn btn-ghost btn-sm" style="align-self:flex-start;" onclick="pickUpload('')">+ Add general reference</button>
-          <input type="file" id="upload" accept="image/jpeg,image/png,image/webp" multiple hidden onchange="uploadFiles(this)">
-        </section>
       </div>
     </div>
     <div class="drawer-scrim" id="drawer-scrim" hidden onclick="closeDrawer()"></div>
@@ -620,10 +644,12 @@
         <div id="fin-accept-row"></div>
       </section>
       <div class="ch-side" id="fin-next">
-        <section class="form-section">
-          <div class="section-title">Link to a persona</div>
-          <span class="hint">Every photo her persona sends is then conditioned on this character.</span>
-          <select id="fin-persona" aria-label="Persona" onchange="linkPersona(this.value).then(renderFinish)"></select>
+        <section class="form-section fin-persona">
+          <div class="section-title">Her persona</div>
+          <span class="hint">A persona is her chatting side: her voice, backstory and how she moves fans from hello to a sale.
+            It sends her photos in chats, and every photo it sends or you make for it in the studio is generated from
+            this character, so she always looks like herself.</span>
+          <div id="fin-persona-box"></div>
         </section>
         <section class="form-section">
           <div class="section-title">Create content</div>
@@ -636,6 +662,8 @@
     <div class="ob-foot" id="ch-foot"></div>
   </div>
 </section>
+
+<input type="file" id="upload" accept="image/jpeg,image/png,image/webp" multiple hidden onchange="uploadFiles(this)">
 
 <div class="lightbox" id="lightbox" hidden onclick="if(event.target===this)closeLightbox()">
   <button type="button" class="lb-close" onclick="closeLightbox()" aria-label="Close">&times;</button>
@@ -665,10 +693,13 @@ function renderPresets() {
   const box = el('presets');
   if (!box) return;
   const sheet = cur.sheet || {};
+  el('preset-field').hidden = bodyMode() === 'match';
   box.innerHTML = (cat.presets || []).map(p => {
     const vals = Object.entries(p.values || {});
     const on = vals.length && vals.every(([k, v]) => sheet[k] === v);
-    return `<button type="button" class="chip" aria-pressed="${on ? 'true' : 'false'}" title="${p.hint}" onclick="saveSheet({preset:'${p.key}'})">${p.label}</button>`;
+    const art = window.CharacterVisuals && CharacterVisuals.preset ? CharacterVisuals.preset(p.values) : '';
+    return `<button type="button" class="fp-opt preset-opt" aria-pressed="${on ? 'true' : 'false'}" title="${esc(p.hint)}"
+      onclick="saveSheet({preset:'${p.key}'})">${art}<span>${esc(p.label)}</span><small>${esc(p.hint)}</small></button>`;
   }).join('');
 }
 // The full-body views generate one set of options per picked outfit (the
@@ -829,7 +860,7 @@ async function newCharacter(persona) {
 
 // ── Editor ──────────────────────────────────────────────────────────────────
 async function openCharacter(id) {
-  const [c, m] = await Promise.all([api('/api/characters/' + id), PageWizard.me()]);
+  const [c, m] = await Promise.all([api('/api/characters/' + id), PageWizard.me(), loadPersonas()]);
   cur = c.character;
   cat = await api('/api/characters/catalogue?level=' + cur.nsfw_level);
   el('list-view').hidden = true; el('edit-view').hidden = false;
@@ -962,10 +993,36 @@ function stepWhy(i) {
   if (k === 'finish' && !accepted()) return 'Accept her to finish.';
   return '';
 }
+// A few reasons Continue waits have one obvious button to press instead; those
+// keep Continue live and point at that button rather than greying it out.
+function nudgeTarget(i) {
+  const k = STEPS[i].key;
+  if (k === 'describe' && !stepDone(i)) return el('gen-face');
+  if (k === 'views' && stepWhy(i)) return el('vp-approve') && !el('vp-approve').hidden ? el('vp-approve') : el('vp-var');
+  return null;
+}
+function nudge(node) {
+  if (!node) return;
+  node.classList.remove('nudge');
+  void node.offsetWidth;
+  node.classList.add('nudge');
+  node.scrollIntoView({block: 'center', behavior: 'smooth'});
+  setTimeout(() => node.classList.remove('nudge'), 3400);
+}
 function goStep(i) { go(STEPS[i].key); }
 function stepBack() { const i = stepIdx(); if (i > 0) go(STEPS[i - 1].key); }
 async function stepNext() {
   const i = stepIdx();
+  if (stepWhy(i) && nudgeTarget(i)) {
+    if (STEPS[i].key === 'describe') {
+      if (dirty && !(await saveSheet())) return;
+      nudge(document.querySelector('.ch-gen'));
+      nudge(el('gen-face'));
+      return say('Saved. Now generate her face options \u2192', 'ok');
+    }
+    nudge(nudgeTarget(i));
+    return say(stepWhy(i), 'err');
+  }
   if (stepWhy(i)) return;
   if (SAVED_STEPS.includes(STEPS[i].key) && !(await saveSheet())) return;
   if (STEPS[i].key === 'body') PageWizard.markSeen(setupKey(), 'body');
@@ -999,8 +1056,8 @@ function renderFrame() {
                        : 'Her look is locked in. Link her to a persona and every photo made for it starts from this character.',
       cards: [
         {icon: '\u2726', title: 'Create content', desc: 'Open the studio and make photos of her.', call: 'openStudio()'},
-        {icon: '\ud83d\udd17', title: cur.persona ? 'Change her persona' : 'Link her to a persona',
-         desc: 'Choose which persona sends photos of her.', call: "closeDone('finish')"},
+        {icon: '\ud83d\udd17', title: 'Set up her persona',
+         desc: 'Her voice and chats; it sends photos of her.', call: cur.persona ? 'openPersona()' : "closeDone('finish')"},
         {icon: '\u2699\ufe0f', title: 'Fine-tune her photos', desc: 'Add optional views, or redo any photo.', call: "closeDone('views')"},
       ]});
     return;
@@ -1009,7 +1066,8 @@ function renderFrame() {
   el('ch-head').innerHTML = PageWizard.headHtml({crumb: PageWizard.crumb(STAGES, STEPS, i), title: s.title, sub: s.sub});
   const saves = SAVED_STEPS.includes(s.key);
   const next = last && !guided ? null
-    : {label: last ? 'Finish \u2713' : saves ? 'Save & continue \u2192' : continueLabel(), call: 'stepNext()', disabled: !!why, why};
+    : {label: last ? 'Finish \u2713' : saves ? 'Save & continue \u2192' : continueLabel(), call: 'stepNext()',
+       disabled: !!why && !nudgeTarget(i), why};
   el('ch-foot').innerHTML = PageWizard.footHtml({back: i > 0 ? 'stepBack()' : null, next, statusId: 'ch-msg',
     save: saves ? 'saveSheet()' : null,
     alt: guided ? [{icon: '\u25ce', label: 'Show me around', call: 'tourStart(true)'},
@@ -1080,8 +1138,8 @@ function featurePicker(f) {
   return `<fieldset class="fp"><legend>${esc(f.label)}</legend><div class="fp-opts" role="group">${opts}</div>${hex}</fieldset>`;
 }
 // Required at Explicit: her photos are generated to match the picked examples.
-function lookPicker() {
-  return (cat.looks || []).map(l => {
+function lookPicker(list) {
+  return (list || cat.looks || []).map(l => {
     const v = (cur.sheet || {})[l.key] || '';
     return `<fieldset class="fp"><legend>${esc(l.label)} · required</legend>
       ${v ? '' : '<p class="hint">Pick one before generating those photos.</p>'}
@@ -1135,7 +1193,7 @@ function outfitLabel(key) {
 function toggleOutfit(btn) {
   btn.setAttribute('aria-pressed', btn.getAttribute('aria-pressed') !== 'true');
   cur.sheet = collectSheet();
-  el('body-features').querySelector('fieldset').outerHTML = outfitPicker();
+  el('outfit-pick').innerHTML = outfitPicker();
   // The quotes follow the picks now, not after a save comes back.
   paintRailCost();
   if (selView && DRESSED.includes(selView)) renderViewPanel();
@@ -1304,11 +1362,14 @@ function setGenerating(on) {
 async function generate(view, n) {
   if (generating) return;
   const look = (cat.looks || []).find(l => l.views.includes(view) && !(cur.sheet || {})[l.key]);
-  if (look) { say(`Pick her ${look.label.toLowerCase()} example in Body profile first.`, 'err'); return go('body'); }
+  if (look) {
+    say(`Pick her ${look.label.toLowerCase()} example first.`, 'err');
+    return step === 'views' && !el('vp-anat').hidden ? nudge(el('vp-anat')) : go('body');
+  }
   setGenerating(true);
   say('');
   try {
-    if (step === 'describe' && !(await saveSheet())) return;
+    if ((step === 'describe' || dirty) && !(await saveSheet())) return;
     const sets = outfitSets(view);
     if (sets > 1) el('gen-title').textContent = `Generating ${n || batch} options × ${sets} outfits…`;
     const d = await submitView(view, n);
@@ -1316,7 +1377,8 @@ async function generate(view, n) {
     setGenerating(false);
     await reload();
     if (view === 'face_front') go('pick');
-    say(d.warning || 'New options are ready.', d.warning ? 'err' : 'ok');
+    else if (step === 'views') nudge(el('vp-opts'));
+    say(d.warning || (view === 'face_front' ? 'New options are ready.' : 'Tap the best one, then press Approve.'), d.warning ? 'err' : 'ok');
   } catch (e) {
     setGenerating(false);
     showGenError(friendly(e), () => generate(view, n));
@@ -1369,15 +1431,21 @@ function renderCheck() {
         ${r.observed ? `<span class="hint">${esc(r.observed)}</span>` : ''}</td>
       <td><input type="checkbox" aria-label="Confirm ${esc(f.label)}" ${confirmed.has(f.key) ? 'checked' : ''}
         onchange="this.checked?confirmed.add('${f.key}'):confirmed.delete('${f.key}');updateApprove()"></td></tr>`;
-  }).join('') || `<tr><td colspan="4" class="hint">Describe her face first.</td></tr>`;
+  }).join('') || `<tr><td colspan="4" class="hint">${faceMode() === 'blend'
+    ? 'Her face comes from your blended photos, so there is nothing to confirm. Approve it when it looks right.'
+    : 'Describe her face first.'}</td></tr>`;
   updateApprove();
 }
 function updateApprove() {
   const img = (cur.images || []).find(i => i.id === pickedFace) || {};
   const face = cat.features.filter(f => f.group === 'face' && cur.sheet[f.key]);
   const n = face.filter(f => confirmed.has(f.key)).length;
-  el('check-count').innerHTML = `<span class="st ${n && n === face.length ? 'approved' : ''}">${n} of ${face.length} confirmed</span>`;
-  el('approve-face').disabled = img.role === 'canonical' || !face.length || n < face.length;
+  // A blended face with no steers has nothing to tick; the adult check that
+  // approving runs still applies.
+  const none = !face.length && faceMode() === 'blend';
+  el('check-count').innerHTML = none ? '<span class="st approved">Nothing to confirm</span>'
+    : `<span class="st ${n && n === face.length ? 'approved' : ''}">${n} of ${face.length} confirmed</span>`;
+  el('approve-face').disabled = img.role === 'canonical' || (!face.length && !none) || n < face.length;
   el('approve-face').textContent = img.role === 'canonical' ? 'Face approved' : 'Approve face';
 }
 function tickMatches() {
@@ -1402,7 +1470,7 @@ async function approveFace() {
 // ── Body ────────────────────────────────────────────────────────────────────
 const INTIMATE = ['breasts', 'nipples', 'pubic', 'vulva', 'anus'];
 const TIERS = [[0, 'Anchor · approve first'], [1, 'Derived from anchor'], [2, 'Second level']];
-const STATUS_LABEL = {not_started: 'Not started', generating: 'Generating', review: 'Needs approval', approved: 'Approved', locked: 'Locked', outdated: 'Outdated'};
+const STATUS_LABEL = {not_started: 'Not started', generating: 'Generating', review: 'Pick one to approve', approved: 'Approved', locked: 'Locked', outdated: 'Outdated'};
 const MODE_LABEL = {reference: 'Reference', crop: 'Crop'};
 const PHOTO_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 17-5-5-9 8"/></svg>';
 let viewFilter = 'SFW';
@@ -1445,12 +1513,15 @@ function renderBody() {
   el('body-match-panel').hidden = !match;
   el('body-match-refs').innerHTML = bodyRefs.map(refTile).join('');
   el('body-match-count').textContent = `${bodyRefs.length} added${bodyRefs.length ? '.' : ' — add at least 1.'}`;
-  el('body-features').innerHTML = outfitPicker() + cat.features
-    .filter(f => f.group === 'body' && (!match || BODY_MATCH_KEEP.includes(f.key))).map(featurePicker).join('');
+  // The profile's pickers exist only on its own step; on Her photos the panel
+  // shows the ones a photo needs, and two copies of a picker would disagree.
+  const profile = step === 'body';
+  el('outfit-pick').innerHTML = profile ? outfitPicker() : '';
+  el('body-features').innerHTML = profile ? cat.features
+    .filter(f => f.group === 'body' && (!match || BODY_MATCH_KEEP.includes(f.key))).map(featurePicker).join('') : '';
   const intimate = cat.features.filter(f => INTIMATE.includes(f.group));
   el('intimate-wrap').hidden = !intimate.length;
-  el('intimate-features').innerHTML = lookPicker() + intimate.map(featurePicker).join('');
-  el('general-refs').innerHTML = images('', 'reference').map(refTile).join('');
+  el('intimate-features').innerHTML = profile ? lookPicker() + intimate.map(featurePicker).join('') : '';
   renderViewPanel();
   pollGenerating();
 }
@@ -1501,7 +1572,7 @@ function renderViewPanel() {
   const locked = st.display === 'locked';
   el('vp-body').style.opacity = locked ? .55 : 1;
   el('vp-source').innerHTML = [['crop', 'Crop & refine'], ['reference', 'Reference']].map(([m, l]) =>
-    `<button type="button" class="chip" aria-pressed="${st.mode === m}" ${m === 'crop' && !v.parents.length ? 'disabled title="Only a photo built from another photo can be cropped"' : ''} onclick="saveView({mode:'${m}'})">${l}</button>`).join('');
+    `<button type="button" class="chip" aria-pressed="${st.mode === m}" ${m === 'crop' && (!v.parents.length || v.nocrop) ? 'disabled title="Only a photo built from an undressed photo can be cropped"' : ''} onclick="saveView({mode:'${m}'})">${l}</button>`).join('');
   const parent = canonOf(v.parents[0]);
   el('vp-src').innerHTML = parent ? `<button type="button" class="vp-thumb" title="Built from ${esc(viewDef(v.parents[0]).label)}"
     aria-label="Open source photo" onclick="openLightbox(['${esc(parent.url)}'], 0)"><img src="${esc(parent.url)}" alt=""></button>` : '';
@@ -1530,31 +1601,65 @@ function renderViewPanel() {
     `<a href="#" onclick="go('body');return false;">Edit body profile</a>`;
   const dressed = DRESSED.includes(v.key);
   const opts = images(v.key, 'canonical').concat(images(v.key, 'wardrobe'), images(v.key, 'candidate'));
+  const cands = images(v.key, 'candidate');
+  if (vpPick.view !== v.key || !cands.find(o => o.id === vpPick.id)) vpPick = {view: v.key, id: cands.length === 1 ? cands[0].id : ''};
   vpOptUrls = opts.map(o => o.url);
-  el('vp-opts-head').hidden = !pending;
+  el('vp-opts-head').hidden = !pending || locked;
   el('vp-opts').className = 'opts';
   el('vp-opts').innerHTML = opts.map((o, i) => {
-    const age = (o.checks || {}).age, kept = o.role === 'canonical', worn = o.role === 'wardrobe';
+    const age = (o.checks || {}).age, kept = o.role === 'canonical', worn = o.role === 'wardrobe', sel = o.id === vpPick.id;
     const label = dressed ? `<span class="opt-outfit">${esc(outfitLabel(o.outfit))}</span>` : '';
-    const toWardrobe = dressed && main && main.id !== o.id && (main.outfit || '') !== (o.outfit || '');
-    return `<div class="opt ${kept || worn ? 'kept' : ''}">
-      <img class="opt-zoom" src="${esc(o.url)}" alt="${esc(v.label)} option" onclick="vpImgClick(event, ${i})">${label}
-      ${kept || worn ? '' : '<div class="opt-pending"><b class="st review">Not approved</b></div>'}
-      ${kept ? `<div class="opt-act"><b class="st approved">${dressed ? 'Main' : 'Approved'}</b><span class="grow"></span>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="removeApproved()">Unapprove</button></div>` : worn ? `<div class="opt-act">
-        <b class="st approved">Wardrobe</b><span class="grow"></span>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="approveView('${o.id}', true)">Make main</button>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="unapproveView('${o.id}')">Unapprove</button></div>` : `<div class="opt-act">
-        <button type="button" class="btn btn-primary btn-sm" ${locked ? 'disabled' : ''} title="${toWardrobe ? 'Approve for ' + esc(outfitLabel(o.outfit)) : ''}" onclick="approveView('${o.id}')">${toWardrobe ? 'Add to wardrobe' : 'Approve this photo'}</button>
-        ${v.key === 'body_front' ? `<button type="button" class="btn btn-ghost btn-sm" onclick="runViewCheck('${o.id}')" title="Adult check">${age ? `<b class="tag ${age}">${age}</b>` : 'Check'}</button>` : ''}
-        <button type="button" class="btn btn-ghost btn-sm" aria-label="Delete option" onclick="removeImage('${o.id}')">Delete</button></div>`}</div>`;
+    const tools = `<div class="opt-tools"><button type="button" aria-label="Enlarge" onclick="vpImgClick(event, ${i})">&#x2922;</button>` +
+      (kept || worn ? '' : `<button type="button" aria-label="Delete option" onclick="event.stopPropagation();removeImage('${o.id}')">&times;</button>`) + '</div>';
+    if (kept || worn) return `<div class="opt kept"><img class="opt-zoom" src="${esc(o.url)}" alt="${esc(v.label)}" onclick="vpImgClick(event, ${i})">${label}${tools}
+      <div class="opt-act"><b class="st approved">${kept ? (dressed ? 'Main' : 'Approved') : 'Wardrobe'}</b><span class="grow"></span>
+      ${worn ? `<button type="button" class="btn btn-ghost btn-sm" onclick="approveView('${o.id}', true)">Make main</button>` : ''}
+      <button type="button" class="btn btn-ghost btn-sm" onclick="${kept ? 'removeApproved()' : `unapproveView('${o.id}')`}">Unapprove</button></div></div>`;
+    return `<div class="opt${sel ? ' sel' : ''}"><button type="button" class="opt-pick" aria-pressed="${sel}" ${locked ? 'disabled' : ''}
+        onclick="vpPick={view:'${v.key}',id:'${o.id}'};renderViewPanel()"><img src="${esc(o.url)}" alt="${esc(v.label)} option ${i + 1}">${label}
+      <span class="opt-label">${sel ? '\u2713 Selected' : 'Option ' + (i + 1)}${age ? ` <b class="tag ${age}">${age}</b>` : ''}</span></button>${tools}</div>`;
   }).join('') || `<p class="hint">No options yet. Pick how many variations, then generate.</p>`;
+  // One clear action at a time: generate while there is nothing to pick, then
+  // approve the picked option, which also opens the next photo.
+  const picked = cands.find(o => o.id === vpPick.id), next = nextAfter(v.key);
+  const toWardrobe = picked && dressed && main && (main.outfit || '') !== (picked.outfit || '');
+  const ap = el('vp-approve');
+  ap.hidden = !pending || locked;
+  ap.disabled = !picked;
+  ap.textContent = !picked ? 'Tap an option to approve it' : toWardrobe ? 'Add to wardrobe'
+    : next ? `Approve & continue to ${next.label} \u2192` : cur.status !== 'complete' && v.required ? 'Approve & finish \u2192' : 'Approve this photo';
+  const step_ = st.status === 'approved' && !pending ? 3 : pending ? 2 : 1;
+  el('vp-steps').innerHTML = ['Generate', 'Pick & approve', 'Next photo'].map((t, n) =>
+    `<span class="${n + 1 === step_ ? 'on' : n + 1 < step_ ? 'done' : ''}">${n + 1 < step_ ? '\u2713' : n + 1} ${t}</span>`).join('');
+  renderAnatomy(v, locked);
   const gen = el('vp-var');
-  gen.textContent = (st.display === 'outdated' ? 'Regenerate ' : 'Generate ') + batch;
+  gen.textContent = (st.display === 'outdated' ? 'Regenerate ' : pending ? 'Generate more: ' : 'Generate ') + batch;
   el('vp-quote').textContent = cost(v.key, batch);
-  gen.className = 'btn btn-sm ' + (st.display === 'review' ? 'btn-secondary' : 'btn-primary');
+  gen.className = 'btn btn-sm ' + (pending ? 'btn-ghost' : 'btn-primary');
   gen.disabled = locked || st.display === 'generating';
   el('vp-batch').innerHTML = batchChips();
+}
+let vpPick = {view: '', id: ''};
+// The required photo the walk opens after this one, once it is approved.
+function nextAfter(key) {
+  const left = cat.views.filter(v => v.required && v.key !== 'face_front' && v.key !== key && vs(v.key).status !== 'approved');
+  return left.find(v => v.parents.every(p => p === key || vs(p).status === 'approved')) || left[0];
+}
+function approveSelected() { if (vpPick.id) approveView(vpPick.id, false, true); }
+// What a photo needs picked before it is generated: its intimate features and,
+// at Explicit, the example her anatomy is copied from.
+const ANATOMY = {breasts: ['breasts', 'nipples'], nipples: ['nipples'], nude_front: ['pubic'], pubic: ['pubic'],
+  vulva_closed: ['vulva'], vulva_open: ['vulva'], anus_closed: ['anus'], anus_open: ['anus']};
+function renderAnatomy(v, locked) {
+  const box = el('vp-anat'), groups = ANATOMY[v.key] || [];
+  const looks = (cat.looks || []).filter(l => l.views.includes(v.key));
+  const feats = cat.features.filter(f => groups.includes(f.group));
+  box.hidden = locked || (!looks.length && !feats.length);
+  if (box.hidden) return (box.innerHTML = '');
+  const missing = looks.some(l => !(cur.sheet || {})[l.key]);
+  box.innerHTML = `<span class="dl">Before you generate: pick her ${esc(v.label.toLowerCase().split(' (')[0])}</span>
+    <p class="hint" style="margin:0;">${missing ? 'Pick the example first; this photo is made to match it.' : 'Sent with this photo and every photo built on it. Saved when you generate.'}</p>
+    <div class="fp-list">${lookPicker(looks)}${feats.map(featurePicker).join('')}</div>`;
 }
 let refPop = false;
 function toggleRefPop(e) { e.stopPropagation(); refPop = !refPop; renderViewPanel(); }
@@ -1686,7 +1791,8 @@ function acceptCharacter() {
   render();
 }
 function renderFinish() {
-  const ok = accepted(), shots = cat.views.filter(v => v.required && canonOf(v.key));
+  // Every approved photo, optional ones included, so her back views show too.
+  const ok = accepted(), shots = cat.views.filter(v => canonOf(v.key));
   el('fin-sub').textContent = `${cur.name} · ${cur.age} · ${LEVEL_LABEL[cur.nsfw_level]} · version ${cur.version} · ${shots.length} approved photos`;
   const urls = shots.map(v => canonOf(v.key).url);
   el('fin-shots').innerHTML = shots.map((v, i) => `<figure><img src="${esc(urls[i])}" alt="" onclick="openLightbox(finUrls, ${i})"><figcaption>${esc(v.label)}</figcaption></figure>`).join('');
@@ -1696,11 +1802,42 @@ function renderFinish() {
     ? `<span class="fin-accepted">✓ Accepted · version ${cur.version}</span>`
     : `<button type="button" class="btn btn-primary" onclick="acceptCharacter()">Accept character</button>`;
   el('fin-next').classList.toggle('off', !ok);
-  el('fin-persona').innerHTML = `<option value="">Not linked</option>` + personas.map(p =>
-    `<option value="${esc(p.slug)}" ${cur.persona === p.slug ? 'selected' : ''}>${esc(p.name || p.slug)}</option>`).join('');
+  const name = slug => (personas.find(p => p.slug === slug) || {}).name || slug;
+  const others = personas.filter(p => p.slug !== cur.persona);
+  const select = `<select id="fin-persona" aria-label="Persona" onchange="this.value && linkPersona(this.value).then(renderFinish)">
+    <option value="">Choose a persona…</option>${others.map(p => `<option value="${esc(p.slug)}">${esc(p.name || p.slug)}</option>`).join('')}</select>`;
+  el('fin-persona-box').innerHTML = cur.persona
+    ? `<div class="fin-linked">✓ Linked to ${esc(name(cur.persona))}</div>
+       <button type="button" class="btn btn-primary" onclick="openPersona()">Open her persona \u2192</button>
+       ${others.length ? `<details class="adv"><summary>Link a different persona</summary>${select}</details>` : ''}`
+    : `<div class="mode-pick">
+        <button type="button" class="mode-opt" onclick="createPersona()"><strong>Create her persona</strong>
+          <span>A new persona named after her, ready to set up her voice and chats.</span></button>
+        ${others.length ? `<div class="mode-opt"><strong>Link an existing persona</strong><span>It takes her look from now on.</span>${select}</div>` : ''}
+      </div>`;
   el('fin-studio-note').textContent = cur.persona
-    ? `Generate photos as ${(personas.find(p => p.slug === cur.persona) || {}).name || cur.persona}, locked to this character.` : 'Link a persona first so the studio uses this character.';
+    ? `Generate photos as ${name(cur.persona)}, locked to this character.` : 'Give her a persona first so the studio uses this character.';
   el('fin-studio').disabled = !cur.persona;
+}
+async function createPersona() {
+  try {
+    const d = await api(`/api/characters/${cur.id}/studio`, {body: {}});
+    cur.persona = d.slug;
+    await loadPersonas();
+    openPersona();
+  } catch (e) { say(e.message, 'err'); }
+}
+// Inside the dashboard the persona opens in its own editor; on its own the
+// page goes to the dashboard.
+function openPersona() {
+  try { if (window.parent !== window && window.parent.loadPersona) return window.parent.loadPersona(cur.persona); } catch (e) {}
+  location.href = '/dashboard';
+}
+async function loadPersonas() {
+  try {
+    const list = await (await fetch('/api/personas')).json();
+    personas = Array.isArray(list) ? list : (list.personas || []);
+  } catch (e) {}
 }
 let finUrls = [];
 
@@ -1717,10 +1854,16 @@ async function runViewCheck(id) {
   try { await api(`/api/characters/${cur.id}/images/${target}/check`, {body: {}}); await reload(); say('Check done.', 'ok'); }
   catch (e) { say(e.message, 'err'); }
 }
-async function approveView(id, main) {
+async function approveView(id, main, advance) {
   try {
+    const was = selView, required = (viewDef(was) || {}).required;
     await api(`/api/characters/${cur.id}/images/${id}/approve`, {body: main ? {main: true} : {}}); await reload();
     const next = cur.status !== 'complete' && nextPhoto();
+    if (advance && next) {
+      showFilterFor(next.key); render();
+      return say(`Approved \u2713 Next: ${next.label}. Generate its options.`, 'ok');
+    }
+    if (advance && required && cur.status === 'complete') { go('finish'); return say('Every required photo is approved \u2713', 'ok'); }
     say(next ? `Approved. Press Continue for ${next.label}.` : 'Every required photo is approved. Press Continue to accept her.', 'ok');
     if (!el('vp-next').hidden) el('vp-next').scrollIntoView({block: 'nearest', behavior: 'smooth'});
   }
@@ -1766,10 +1909,7 @@ document.addEventListener('keydown', e => {
       && !matchMedia('(min-width: 1320px)').matches && el('lightbox').hidden && el('ch-confirm').hidden) closeDrawer();
 });
 (async function init() {
-  try {
-    const list = await (await fetch('/api/personas')).json();
-    personas = Array.isArray(list) ? list : (list.personas || []);
-  } catch (e) {}
+  await loadPersonas();
   const q = new URLSearchParams(location.search);
   try {
     if (q.get('new')) return await newCharacter(q.get('persona'));
