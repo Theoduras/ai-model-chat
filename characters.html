@@ -844,6 +844,7 @@ function showList() {
   if (dirty) return confirmLeave(showList);
   el('edit-view').hidden = true; el('list-view').hidden = false;
   history.replaceState(null, '', '/characters');
+  try { window.parent !== window && window.parent.markActiveChar && window.parent.markActiveChar(null); } catch (e) {}
   loadList();
 }
 async function deleteCharacter(id) {
@@ -871,6 +872,7 @@ async function openCharacter(id) {
   cat = await api('/api/characters/catalogue?level=' + cur.nsfw_level);
   el('list-view').hidden = true; el('edit-view').hidden = false;
   history.replaceState(null, '', '/characters?id=' + id);
+  try { window.parent !== window && window.parent.markActiveChar && window.parent.markActiveChar(id); } catch (e) {}
   // A creator is walked through each new character until they finish or skip;
   // an admin gets the same frame without the guide, and Guide brings it back.
   guided = !m.isAdmin && !PageWizard.entry(setupKey()).done;

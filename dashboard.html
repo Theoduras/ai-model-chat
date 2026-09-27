@@ -1053,6 +1053,7 @@ function buildPersonaItem(p) {
   const el = document.createElement('div');
   el.className = 'persona-item';
   el.id = 'item-' + p.slug;
+  if (p.slug === currentSlug) el.classList.add('active');
   el.onclick = () => loadPersona(p.slug);
   const initials = (p.name || p.slug).slice(0,2).toUpperCase();
   const avatarHtml = p.avatar
@@ -1289,8 +1290,21 @@ function sortPgSlugs(slugs) {
   });
 }
 
+// Held here, not read off the row, because both sidebar lists are rebuilt
+// whenever favourites or the character list change.
+let activeCharId = null;
+
 function clearSbActive() {
   document.querySelectorAll('.sb-item.active').forEach(el => el.classList.remove('active'));
+  activeCharId = null;
+}
+
+// Called by the embedded character page too, which switches characters
+// without going back through openEmbedded.
+function markActiveChar(id) {
+  activeCharId = id == null ? null : String(id);
+  document.querySelectorAll('#sb-chars .persona-item').forEach(el =>
+    el.classList.toggle('active', el.dataset.charId === activeCharId));
 }
 
 function showPersonaBrowser() {
@@ -1389,6 +1403,9 @@ function openEmbedded(url, navEl) {
   document.querySelectorAll('.persona-item').forEach(el => el.classList.remove('active'));
   clearSbActive();
   if (navEl) navEl.classList.add('active');
+  const charId = url.startsWith('/characters?')
+    ? new URLSearchParams(url.split('?')[1]).get('id') : null;
+  markActiveChar(charId);
   document.getElementById('action-bar').style.display = 'none';
   document.body.classList.remove('browsing');
   document.body.classList.add('embedding');
@@ -1734,7 +1751,8 @@ function renderCharList() {
   const list = sbCharacters.filter(fav).concat(sbCharacters.filter(c => !fav(c))).slice(0, 3);
   list.forEach(c => {
     const el = document.createElement('div');
-    el.className = 'persona-item';
+    el.className = 'persona-item' + (String(c.id) === activeCharId ? ' active' : '');
+    el.dataset.charId = String(c.id);
     el.onclick = () => openEmbedded('/characters?id=' + encodeURIComponent(c.id),
                                     document.querySelector('[data-view="/characters"]'));
     const initials = (c.name || '?').slice(0, 2).toUpperCase();
