@@ -902,6 +902,7 @@ function go(s) {
   else if (!selView) showFilterFor((nextPhoto() || {}).key);
   step = s; showDone = false; render();
   el('ch-stepwrap').scrollTop = 0;
+  if (s === 'finish' && accepted() && !cur.persona) setTimeout(pointToNext, 300);
 }
 function render() {
   const shown = step === 'views' ? 'body' : step;
@@ -1005,12 +1006,12 @@ function nudgeTarget(i) {
   if (k === 'views' && stepWhy(i)) return el('vp-approve') && !el('vp-approve').hidden ? el('vp-approve') : el('vp-var');
   return null;
 }
-function nudge(node) {
+function nudge(node, stay) {
   if (!node) return;
   node.classList.remove('nudge');
   void node.offsetWidth;
   node.classList.add('nudge');
-  node.scrollIntoView({block: 'center', behavior: 'smooth'});
+  if (!stay) node.scrollIntoView({block: 'center', behavior: 'smooth'});
   setTimeout(() => node.classList.remove('nudge'), 3400);
 }
 function goStep(i) { go(STEPS[i].key); }
@@ -1126,8 +1127,20 @@ function finishGuide() {
   render();
 }
 function closeDone(s) { showDone = false; go(s); }
-function openStudio() {
+// The studio is keyed by persona, so an unlinked character is given her own
+// one first; setting up its voice and chats can wait.
+async function openStudio() {
+  if (cur && !cur.persona) {
+    try { cur.persona = (await api(`/api/characters/${cur.id}/studio`, {body: {}})).slug; await loadPersonas(); }
+    catch (e) { return say(e.message, 'err'); }
+  }
   PageWizard.openPage(cur && cur.persona ? '/studio?persona=' + encodeURIComponent(cur.persona) : '/studio');
+}
+// Once she is accepted, the persona card and the studio are what comes next.
+function pointToNext() {
+  nudge(document.querySelector('.fin-persona'));
+  nudge(el('fin-studio'), true);
+  say('Accepted \u2713 Next: set up her persona, or start creating content.', 'ok');
 }
 
 function featurePicker(f) {
@@ -1791,6 +1804,7 @@ function acceptCharacter() {
   try { localStorage.setItem('ch-accepted:' + cur.id, String(cur.version)); } catch (e) {}
   if (guided) return finishGuide();
   render();
+  pointToNext();
 }
 function renderFinish() {
   // Every approved photo, optional ones included, so her back views show too.
@@ -1818,8 +1832,8 @@ function renderFinish() {
         ${others.length ? `<div class="mode-opt"><strong>Link an existing persona</strong><span>It takes her look from now on.</span>${select}</div>` : ''}
       </div>`;
   el('fin-studio-note').textContent = cur.persona
-    ? `Generate photos as ${name(cur.persona)}, locked to this character.` : 'Give her a persona first so the studio uses this character.';
-  el('fin-studio').disabled = !cur.persona;
+    ? `Generate photos as ${name(cur.persona)}, locked to this character.` : 'Make photos of her now; setting up her persona can wait.';
+  el('fin-studio').disabled = !ok;
 }
 async function createPersona() {
   try {
