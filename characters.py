@@ -164,7 +164,9 @@ YOUTH_WEIGHT = {('apparent_age', '18–21'): 2}
 # validates and is stored as the new one.
 RENAMED = {('face_shape', 'Long'): 'Rectangle', ('makeup', 'Soft natural'): 'Natural glam',
            ('makeup', 'Polished'): 'Natural glam', ('makeup', 'Soft glam'): 'Bronze glam',
-           ('makeup', 'Classic red lip'): 'Smoky red'}
+           ('makeup', 'Classic red lip'): 'Smoky red', ('makeup', 'Old Hollywood'): 'Smoky red',
+           ('makeup', 'Wine lip'): 'Smoky red', ('makeup', 'Fresh glow'): 'Natural glam',
+           ('makeup', 'Cat-eye gloss'): 'Gold winged', ('makeup', 'Bronze smoky'): 'Bronze glam'}
 
 YOUTH_BLOCK_AT = 3
 YOUTH_WARN_AT = 2

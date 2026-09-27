@@ -291,6 +291,14 @@ def test_content_prompts():
                 if model == 'seedream-4-5':
                     check(f'{model} {rung} {a} over the floor', w * h >= IG.SEEDREAM_MIN_PX)
     check('nano uses its own list', IG.dimensions('nano-banana-2', '2k', '16:9') == (2752, 1536))
+    for rung in ('2k', '4k'):
+        for a in IG.IMAGE_ASPECTS:
+            w, h = IG.dimensions('krea-2-large', rung, a)
+            rw, rh = (int(x) for x in a.split(':'))
+            check(f'krea {rung} {a} keeps its shape', abs(w / h - rw / rh) / (rw / rh) < 0.02)
+            check(f'krea {rung} {a} on the grid', w % 16 == 0 and h % 16 == 0)
+            check(f'krea {rung} {a} under its ceiling', max(w, h) == IG.KREA_MAX_SIDE)
+    check('krea 16:9', IG.dimensions('krea-2-medium', '2k', '16:9') == (2048, 1152))
     check('no shape named keeps the old frame', IG.dimensions('seedream-4-5', '2k') == (1664, 2432))
 
     def clauses(p):
