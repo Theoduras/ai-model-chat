@@ -121,7 +121,7 @@ p.sub{font-size:17px;color:var(--text-soft);line-height:1.65;margin-bottom:36px;
 .who{list-style:none;display:grid;gap:8px;margin:-16px 0 32px;max-width:480px;font-size:15px;color:var(--text-soft)}
 .who b{color:var(--text);margin-right:6px}
 .right{height:100vh;height:100dvh;min-height:620px;max-height:1100px;padding:clamp(92px,13vh,124px) 56px clamp(24px,5vh,48px);gap:clamp(16px,3vh,28px)}
-.rhead,.clips,.flow{position:relative;z-index:2;max-width:880px;width:100%;margin:0 auto}
+.rhead,.clips{position:relative;z-index:2;max-width:880px;width:100%;margin:0 auto}
 .rhead{display:grid;gap:clamp(8px,1.4vh,14px)}
 .rlabel{font-size:11px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:#ff9fbf}
 .rtitle{font-family:'Sora';font-weight:800;font-size:clamp(26px,3.9vh,36px);line-height:1.17;letter-spacing:-.015em;color:#fff;max-width:640px}
@@ -131,20 +131,28 @@ p.sub{font-size:17px;color:var(--text-soft);line-height:1.65;margin-bottom:36px;
 .rcta span{font-size:13px;color:#cdbfd1}
 .flow-cta{display:inline-flex;align-items:center;min-height:46px;background:linear-gradient(120deg,#ff5c38,#ff2d78,#7c3aed);background-size:300% 100%;background-position:0% 50%;color:#fff;font-weight:600;text-decoration:none;padding:0 22px;border-radius:12px;box-shadow:0 10px 30px #ff2d7840;transition:background-position .25s ease-out}
 .flow-cta:hover{background-position:100% 50%}
-.flow-cta:focus-visible,.clip-tabs button:focus-visible{outline:2px solid #ff5c38;outline-offset:2px;box-shadow:0 0 0 3px #ff5c3826}
-.clips{flex:1 1 auto;min-height:160px;display:flex;flex-direction:column;background:#140a17;border:1px solid #ffffff1f;border-radius:24px;overflow:hidden;box-shadow:0 20px 60px #0009}
-.clip-tabs{display:flex;gap:6px;padding:8px;border-bottom:1px solid #ffffff14}
-.clip-tabs button{background:transparent;color:#e9dcec;border:1px solid transparent;border-radius:999px;padding:7px 14px;font:600 13px Inter,system-ui,sans-serif;cursor:pointer}
-.clip-tabs button[aria-selected="true"]{background:#ff5c3826;border-color:#ff5c3866;color:#fff}
-.clips video{display:block;flex:1 1 auto;min-height:0;width:100%;object-fit:cover;object-position:top left;background:#140a17}
-.clips video[hidden]{display:none}
-.flow{list-style:none;padding:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;counter-reset:f}
-.flow li{counter-increment:f;display:grid;gap:4px;align-content:start;padding-top:12px;border-top:2px solid #ffffff26;color:#fff}
-.flow li.on{border-top-color:#ff5c38}
-.flow li::before{content:"Step " counter(f);font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#ada7a3}
-.flow li.on::before{color:#ff5c38}
-.flow b{font-size:14px;font-weight:600}
-.flow span{font-size:12.5px;color:#cdbfd1;line-height:1.35}
+.flow-cta:focus-visible,.step:focus-visible{outline:2px solid #ff5c38;outline-offset:2px}
+/* Four steps, one big: data-slot 0 is the big box, 1-3 the cards beside it. */
+.clips{flex:1 1 auto;min-height:300px;display:grid;grid-template-columns:minmax(0,1fr) clamp(150px,27%,220px);grid-template-rows:repeat(3,minmax(0,1fr));gap:12px}
+.step{position:relative;overflow:hidden;min-width:0;min-height:0;padding:0;border:1px solid #ffffff1f;border-radius:16px;background:#140a17;color:#fff;font:inherit;text-align:left;cursor:pointer;transform-origin:0 0;transition:border-color .2s}
+.step:hover{border-color:#ffffff40}
+.step[data-slot="0"]{grid-column:1;grid-row:1/-1;border-radius:24px;cursor:default;box-shadow:0 20px 60px #0009}
+.step[data-slot="1"]{grid-column:2;grid-row:1}
+.step[data-slot="2"]{grid-column:2;grid-row:2}
+.step[data-slot="3"]{grid-column:2;grid-row:3}
+.step.moving{z-index:3}
+.step video{display:block;width:100%;height:100%;object-fit:contain;background:#140a17}
+.step .ph{position:absolute;inset:0;display:grid;place-content:center;justify-items:center;gap:10px;background:radial-gradient(80% 70% at 30% 20%,#ff2d7833,transparent 60%),radial-gradient(70% 60% at 80% 90%,#7c3aed33,transparent 60%),#1a0e1e;font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:#cdbfd1}
+.step .ph i{font-style:normal;font-size:56px;letter-spacing:0}
+.step .card{position:absolute;inset:0;display:grid;align-content:start;gap:4px;padding:14px;background:#2d1a33;transition:opacity .3s}
+.step .card i{font-style:normal;font-size:22px;margin-bottom:6px}
+.step .card b{font-size:14.5px}
+.step .card span{font-size:12.5px;color:#e0d2e4;line-height:1.4}
+.step .card em{position:absolute;top:10px;right:12px;font:700 12px 'Sora';font-style:normal;color:#ff6b9a}
+.step .tag{position:absolute;left:14px;bottom:14px;display:flex;align-items:center;gap:8px;padding:7px 12px;border-radius:999px;background:#140a17cc;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);font-size:13px;font-weight:600;opacity:0;transition:opacity .3s}
+.step .tag em{font:700 12px 'Sora';font-style:normal;color:#ff6b9a}
+.step[data-slot="0"] .card{opacity:0;pointer-events:none}
+.step[data-slot="0"] .tag{opacity:1}
 @media(max-height:700px){.rsub{display:none}}
 @media(max-width:900px){
   .split{grid-template-columns:1fr}
@@ -154,8 +162,12 @@ p.sub{font-size:17px;color:var(--text-soft);line-height:1.65;margin-bottom:36px;
   .auth a{padding:8px 15px;font-size:13px}
   h1{font-size:46px}
   .right{height:auto;min-height:auto;max-height:none;padding:40px 20px}
-  .clips{flex:none}
-  .clips video{aspect-ratio:900/669}
+  .clips{flex:none;grid-template-columns:repeat(3,minmax(0,1fr));grid-template-rows:auto 150px}
+  .step[data-slot="0"]{grid-column:1/-1;grid-row:1;aspect-ratio:900/669}
+  .step[data-slot="1"],.step[data-slot="2"],.step[data-slot="3"]{grid-row:2}
+  .step[data-slot="1"]{grid-column:1}
+  .step[data-slot="2"]{grid-column:2}
+  .step[data-slot="3"]{grid-column:3}
   .rsub{display:block}
   .ring.a{width:240px;height:240px}
 }
@@ -170,7 +182,11 @@ p.sub{font-size:17px;color:var(--text-soft);line-height:1.65;margin-bottom:36px;
   .meta{flex-wrap:wrap;gap:14px;font-size:12px}
   .right{padding:32px 16px}
   .rtitle{font-size:24px}
-  .flow{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .clips{grid-template-rows:auto 132px;gap:8px}
+  .step .card{padding:10px}
+  .step .card i{font-size:18px;margin-bottom:2px}
+  .step .card b{font-size:13px}
+  .step .card span{font-size:11.5px}
   .ring.a,.ring.b{display:none}
   .auth a{padding:7px 12px;font-size:12.5px}
 }
@@ -347,19 +363,27 @@ p.sub{font-size:17px;color:var(--text-soft);line-height:1.65;margin-bottom:36px;
       <div class="rcta"><a class="flow-cta" href="/register">Start building her →</a><span>About 30 minutes · No photos needed</span></div>
     </div>
     <div class="clips">
-      <div class="clip-tabs" role="tablist">
-        <button type="button" role="tab" aria-selected="true" data-clip="0">Create her character</button>
-        <button type="button" role="tab" aria-selected="false" data-clip="1">Set up her persona</button>
-      </div>
-      <video src="/img/character-creator.mp4" muted loop playsinline preload="none" aria-label="Creating a character in the builder"></video>
-      <video src="/img/persona-setup.mp4" muted loop playsinline preload="none" hidden aria-label="Setting up a persona"></video>
+      <button type="button" class="step" data-slot="0" aria-pressed="true">
+        <video src="/img/character-creator.mp4" muted loop playsinline preload="none" aria-label="Choosing her face and body in the builder"></video>
+        <span class="card"><em>1</em><i aria-hidden="true">🎛️</i><b>Choose or upload</b><span>Face, body, every detail</span></span>
+        <span class="tag"><em>1</em>Choose or upload</span>
+      </button>
+      <button type="button" class="step" data-slot="1" aria-pressed="false">
+        <video src="/img/persona-setup.mp4" muted loop playsinline preload="none" aria-label="Locking her face and body"></video>
+        <span class="card"><em>2</em><i aria-hidden="true">🔒</i><b>Face &amp; body locked</b><span>The same her in every shot</span></span>
+        <span class="tag"><em>2</em>Face &amp; body locked</span>
+      </button>
+      <button type="button" class="step" data-slot="2" aria-pressed="false">
+        <span class="ph"><i aria-hidden="true">✨</i>Clip coming soon</span>
+        <span class="card"><em>3</em><i aria-hidden="true">✨</i><b>Create content</b><span>SFW and NSFW, prompt or no prompt</span></span>
+        <span class="tag"><em>3</em>Create content</span>
+      </button>
+      <button type="button" class="step" data-slot="3" aria-pressed="false">
+        <span class="ph"><i aria-hidden="true">💸</i>Clip coming soon</span>
+        <span class="card"><em>4</em><i aria-hidden="true">💸</i><b>Post &amp; funnel</b><span>Followers into Fanvue subscribers</span></span>
+        <span class="tag"><em>4</em>Post &amp; funnel</span>
+      </button>
     </div>
-    <ol class="flow">
-      <li class="on"><b>Choose or upload</b><span>Easy picker or your own photos</span></li>
-      <li class="on"><b>Lock her look</b><span>Same face and body in every shot</span></li>
-      <li><b>Create content</b><span>SFW and NSFW, prompt or not</span></li>
-      <li><b>Post &amp; funnel</b><span>Followers into Fanvue subscribers</span></li>
-    </ol>
   </div>
 
 </div>
@@ -611,17 +635,37 @@ fetch('/api/features')
 <script>
 (function(){
   var box=document.querySelector('.clips'); if(!box) return;
-  var vids=box.querySelectorAll('video'), tabs=box.querySelectorAll('[data-clip]'), cur=0, seen=false;
-  function show(i){
-    cur=i;
-    vids.forEach(function(v,j){v.hidden=j!==i; if(j!==i) v.pause();});
-    tabs.forEach(function(t,j){t.setAttribute('aria-selected',j===i);});
-    if(seen){vids[i].preload='auto';vids[i].play().catch(function(){});}
+  var steps=[].slice.call(box.querySelectorAll('.step')), seen=false, busy=false;
+  var still=matchMedia('(prefers-reduced-motion: reduce)');
+  function big(){return box.querySelector('[data-slot="0"]');}
+  function play(){
+    steps.forEach(function(s){
+      var v=s.querySelector('video'); if(!v) return;
+      if(s===big()&&seen){v.preload='auto';v.play().catch(function(){});} else v.pause();
+    });
   }
-  tabs.forEach(function(t,j){t.addEventListener('click',function(){show(j);});});
+  // FLIP: swap the two slots, then animate each box from where it was to where it is.
+  function swap(el){
+    var cur=big(); if(el===cur||busy) return;
+    var from=[el.getBoundingClientRect(),cur.getBoundingClientRect()];
+    cur.setAttribute('data-slot',el.getAttribute('data-slot'));
+    el.setAttribute('data-slot','0');
+    cur.setAttribute('aria-pressed','false'); el.setAttribute('aria-pressed','true');
+    play();
+    if(still.matches||!el.animate) return;
+    busy=true;
+    [el,cur].forEach(function(s,i){
+      var a=from[i], b=s.getBoundingClientRect();
+      s.classList.toggle('moving',s===el);
+      s.animate([{transform:'translate('+(a.left-b.left)+'px,'+(a.top-b.top)+'px) scale('+(a.width/b.width)+','+(a.height/b.height)+')'},
+                 {transform:'none'}],{duration:450,easing:'cubic-bezier(.22,1,.36,1)'})
+       .onfinish=function(){s.classList.remove('moving');busy=false;};
+    });
+  }
+  steps.forEach(function(s){s.addEventListener('click',function(){swap(s);});});
   // Loaded only once the panel is on screen: on a phone it sits below the fold.
   new IntersectionObserver(function(es,o){
-    if(es[0].isIntersecting){seen=true;o.disconnect();show(cur);}
+    if(es[0].isIntersecting){seen=true;o.disconnect();play();}
   }).observe(box);
 })();
 </script>
