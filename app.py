@@ -1235,6 +1235,7 @@ def healthz():
         'relay': _ofc.RELAY_VERSION,
         'secret_key_set': bool((os.getenv('SECRET_KEY') or '').strip()),
         'google_login': bool(_google_oauth_config()[0]),
+        'apple_login': bool(_apple_oauth_config()[0]),
         'payments_oxapay': bool(_oxapay_key()),
         'payments_stripe': bool(_stripe_key()),
         'accounts_persist': not warns,
@@ -2289,7 +2290,7 @@ _OPEN_PATHS = (
                tuple('/' + s for s in platform_pages.PAGES) +
                ('/login', '/register', '/logout', '/pricing', '/billing',
                '/demo-ends',
-               '/auth/google', '/join/', '/api/workspaces',
+               '/auth/google', '/auth/apple', '/join/', '/api/workspaces',
                '/account', '/api/billing', '/healthz', '/go/', '/webhooks/',
                '/dashboard/logout', '/admin/logout',
                # OAuth landing pages: the platform's auth server redirects the
@@ -2669,6 +2670,10 @@ button:disabled{opacity:.6;cursor:not-allowed;transform:none;animation:none}
 .gbtn{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;background:#fff;color:#1f1f1f;border:1px solid #dadce0;border-radius:12px;padding:13px;font-size:.95rem;font-weight:600;font-family:var(--font);cursor:pointer;text-decoration:none;transition:box-shadow .2s}
 .gbtn:hover{box-shadow:0 2px 10px #0003}
 .gbtn svg{width:18px;height:18px}
+.abtn{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;background:#000;color:#fff;border:1px solid var(--border);border-radius:12px;padding:13px;font-size:.95rem;font-weight:600;font-family:var(--font);cursor:pointer;text-decoration:none;transition:box-shadow .2s}
+.abtn:hover{box-shadow:0 2px 10px #0003}
+.abtn svg{width:16px;height:18px}
+.gbtn+.abtn{margin-top:10px}
 .orsep{display:flex;align-items:center;gap:12px;color:var(--text-muted);font-size:.78rem;margin:18px 0}
 .orsep:before,.orsep:after{content:'';flex:1;height:1px;background:var(--border)}
 .tiers{display:grid;gap:16px;margin-top:8px;align-items:stretch}
@@ -2790,8 +2795,9 @@ REGISTER_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <style>""" + ACCOUNT_CSS + """</style></head><body data-page="register"><div class="wrap"><div class="card">
 <h1 data-edit-id="h1">Create your account</h1><p class="sub" data-edit-id="sub">Start building your AI persona.</p>
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
-{% if google_enabled %}<a class="gbtn" href="/auth/google{{ google_next }}"><svg viewBox="0 0 48 48"><path fill="#4285F4" d="M45.1 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h11.8c-.5 2.8-2 5.1-4.4 6.7v5.5h7.1c4.2-3.8 6.6-9.5 6.6-16.2z"/><path fill="#34A853" d="M24 46c6 0 11-2 14.5-5.3l-7.1-5.5c-2 1.3-4.5 2.1-7.4 2.1-5.7 0-10.6-3.9-12.3-9.1H4.3v5.7C7.8 41 15.3 46 24 46z"/><path fill="#FBBC05" d="M11.7 28.2c-.4-1.3-.7-2.7-.7-4.2s.2-2.9.7-4.2v-5.7H4.3C2.8 17.1 2 20.4 2 24s.8 6.9 2.3 9.9l7.4-5.7z"/><path fill="#EA4335" d="M24 10.7c3.2 0 6.1 1.1 8.4 3.3l6.3-6.3C35 4.1 30 2 24 2 15.3 2 7.8 7 4.3 14.1l7.4 5.7c1.7-5.2 6.6-9.1 12.3-9.1z"/></svg>Continue with Google</a>
-<div class="orsep">or</div>{% endif %}
+{% if google_enabled %}<a class="gbtn" href="/auth/google{{ google_next }}"><svg viewBox="0 0 48 48"><path fill="#4285F4" d="M45.1 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h11.8c-.5 2.8-2 5.1-4.4 6.7v5.5h7.1c4.2-3.8 6.6-9.5 6.6-16.2z"/><path fill="#34A853" d="M24 46c6 0 11-2 14.5-5.3l-7.1-5.5c-2 1.3-4.5 2.1-7.4 2.1-5.7 0-10.6-3.9-12.3-9.1H4.3v5.7C7.8 41 15.3 46 24 46z"/><path fill="#FBBC05" d="M11.7 28.2c-.4-1.3-.7-2.7-.7-4.2s.2-2.9.7-4.2v-5.7H4.3C2.8 17.1 2 20.4 2 24s.8 6.9 2.3 9.9l7.4-5.7z"/><path fill="#EA4335" d="M24 10.7c3.2 0 6.1 1.1 8.4 3.3l6.3-6.3C35 4.1 30 2 24 2 15.3 2 7.8 7 4.3 14.1l7.4 5.7c1.7-5.2 6.6-9.1 12.3-9.1z"/></svg>Continue with Google</a>{% endif %}
+{% if apple_enabled %}<a class="abtn" href="/auth/apple{{ google_next }}"><svg viewBox="0 0 814 1000"><path fill="currentColor" d="M788 341c-6 4-108 62-108 190 0 149 131 201 135 203-1 3-21 72-69 142-43 62-88 124-156 124s-86-40-164-40c-76 0-104 41-166 41s-106-57-156-127C46 792 0 666 0 546c0-194 126-296 250-296 66 0 121 43 162 43 39 0 101-46 176-46 29 0 131 3 200 94zM554 160c31-37 53-88 53-139 0-7-1-14-2-20-51 2-111 34-147 76-28 32-55 83-55 135 0 8 1 15 2 18 3 1 8 1 13 1 46 0 103-31 136-71z"/></svg>Continue with Apple</a>{% endif %}
+{% if google_enabled or apple_enabled %}<div class="orsep">or</div>{% endif %}
 <form method="post">
 <label>Name</label><input type="text" name="name" autocomplete="name" value="{{ name or '' }}">
 <label>Email</label><input type="email" name="email" required autocomplete="email" value="{{ email or '' }}">
@@ -2809,8 +2815,9 @@ SIGNIN_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <style>""" + ACCOUNT_CSS + """</style></head><body data-page="login"><div class="wrap"><div class="card">
 <h1 data-edit-id="h1">Sign in</h1><p class="sub" data-edit-id="sub">Welcome back.</p>
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
-{% if google_enabled %}<a class="gbtn" href="/auth/google{{ google_next }}"><svg viewBox="0 0 48 48"><path fill="#4285F4" d="M45.1 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h11.8c-.5 2.8-2 5.1-4.4 6.7v5.5h7.1c4.2-3.8 6.6-9.5 6.6-16.2z"/><path fill="#34A853" d="M24 46c6 0 11-2 14.5-5.3l-7.1-5.5c-2 1.3-4.5 2.1-7.4 2.1-5.7 0-10.6-3.9-12.3-9.1H4.3v5.7C7.8 41 15.3 46 24 46z"/><path fill="#FBBC05" d="M11.7 28.2c-.4-1.3-.7-2.7-.7-4.2s.2-2.9.7-4.2v-5.7H4.3C2.8 17.1 2 20.4 2 24s.8 6.9 2.3 9.9l7.4-5.7z"/><path fill="#EA4335" d="M24 10.7c3.2 0 6.1 1.1 8.4 3.3l6.3-6.3C35 4.1 30 2 24 2 15.3 2 7.8 7 4.3 14.1l7.4 5.7c1.7-5.2 6.6-9.1 12.3-9.1z"/></svg>Continue with Google</a>
-<div class="orsep">or</div>{% endif %}
+{% if google_enabled %}<a class="gbtn" href="/auth/google{{ google_next }}"><svg viewBox="0 0 48 48"><path fill="#4285F4" d="M45.1 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h11.8c-.5 2.8-2 5.1-4.4 6.7v5.5h7.1c4.2-3.8 6.6-9.5 6.6-16.2z"/><path fill="#34A853" d="M24 46c6 0 11-2 14.5-5.3l-7.1-5.5c-2 1.3-4.5 2.1-7.4 2.1-5.7 0-10.6-3.9-12.3-9.1H4.3v5.7C7.8 41 15.3 46 24 46z"/><path fill="#FBBC05" d="M11.7 28.2c-.4-1.3-.7-2.7-.7-4.2s.2-2.9.7-4.2v-5.7H4.3C2.8 17.1 2 20.4 2 24s.8 6.9 2.3 9.9l7.4-5.7z"/><path fill="#EA4335" d="M24 10.7c3.2 0 6.1 1.1 8.4 3.3l6.3-6.3C35 4.1 30 2 24 2 15.3 2 7.8 7 4.3 14.1l7.4 5.7c1.7-5.2 6.6-9.1 12.3-9.1z"/></svg>Continue with Google</a>{% endif %}
+{% if apple_enabled %}<a class="abtn" href="/auth/apple{{ google_next }}"><svg viewBox="0 0 814 1000"><path fill="currentColor" d="M788 341c-6 4-108 62-108 190 0 149 131 201 135 203-1 3-21 72-69 142-43 62-88 124-156 124s-86-40-164-40c-76 0-104 41-166 41s-106-57-156-127C46 792 0 666 0 546c0-194 126-296 250-296 66 0 121 43 162 43 39 0 101-46 176-46 29 0 131 3 200 94zM554 160c31-37 53-88 53-139 0-7-1-14-2-20-51 2-111 34-147 76-28 32-55 83-55 135 0 8 1 15 2 18 3 1 8 1 13 1 46 0 103-31 136-71z"/></svg>Continue with Apple</a>{% endif %}
+{% if google_enabled or apple_enabled %}<div class="orsep">or</div>{% endif %}
 <form method="post">
 <label>Email</label><input type="email" name="email" required autocomplete="email" value="{{ email or '' }}">
 <label>Password</label><input type="password" name="password" required autocomplete="current-password">
@@ -3883,19 +3890,25 @@ def _vapid_public():
         serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint))
 
 
-def _vapid_auth(endpoint, contact):
+def _es256_jwt(key, header, claims):
+    """A JWT signed with a P-256 key. JOSE wants the raw r||s signature, not
+    the DER that cryptography returns."""
     from cryptography.hazmat.primitives import hashes
     from cryptography.hazmat.primitives.asymmetric import ec
     from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
+    head = _b64url(json.dumps(dict(header, alg='ES256')).encode())
+    body = _b64url(json.dumps(claims).encode())
+    r, s_ = decode_dss_signature(key.sign(f'{head}.{body}'.encode(),
+                                          ec.ECDSA(hashes.SHA256())))
+    return f'{head}.{body}.' + _b64url(r.to_bytes(32, 'big') + s_.to_bytes(32, 'big'))
+
+
+def _vapid_auth(endpoint, contact):
     u = urllib.parse.urlsplit(endpoint)
-    head = _b64url(json.dumps({'typ': 'JWT', 'alg': 'ES256'}).encode())
-    claims = _b64url(json.dumps({'aud': f'{u.scheme}://{u.netloc}',
-                                 'exp': int(time.time()) + 12 * 3600,
-                                 'sub': contact}).encode())
-    r, s_ = decode_dss_signature(_vapid_key().sign(
-        f'{head}.{claims}'.encode(), ec.ECDSA(hashes.SHA256())))
-    sig = _b64url(r.to_bytes(32, 'big') + s_.to_bytes(32, 'big'))
-    return f'vapid t={head}.{claims}.{sig}, k={_vapid_public()}'
+    tok = _es256_jwt(_vapid_key(), {'typ': 'JWT'},
+                     {'aud': f'{u.scheme}://{u.netloc}',
+                      'exp': int(time.time()) + 12 * 3600, 'sub': contact})
+    return f'vapid t={tok}, k={_vapid_public()}'
 
 
 def _send_push(endpoint, contact):
@@ -5453,6 +5466,7 @@ def _inject_google_oauth():
     cid, _ = _google_oauth_config()
     nxt = request.args.get('next') or ''
     return {'google_enabled': bool(cid),
+            'apple_enabled': bool(_apple_oauth_config()[0]),
             'google_next': ('?next=' + urllib.parse.quote(nxt)) if nxt.startswith('/') else ''}
 
 
@@ -5484,7 +5498,7 @@ def auth_google():
     return redirect(GOOGLE_AUTH_URL + '?' + urllib.parse.urlencode(params))
 
 
-def _google_post(url, data):
+def _oauth_post(url, data):
     req = urllib.request.Request(
         url, data=urllib.parse.urlencode(data).encode(),
         headers={'Content-Type': 'application/x-www-form-urlencoded'})
@@ -5499,9 +5513,38 @@ def _google_userinfo(access_token):
         return json.loads(r.read().decode())
 
 
+def _oauth_signin(provider, sub, email, name, nxt):
+    """Sign in (or register) the account a provider vouched for. `provider` is
+    'google' or 'apple' and names the users column holding its id."""
+    from db import User, create_user, get_user_by_email
+    col = getattr(User, provider + '_sub')
+    s = _db_session()
+    try:
+        u = s.query(User).filter(col == sub).first()
+        if u is None and email:
+            u = get_user_by_email(s, email)
+        if u is None:
+            u = create_user(s, email, '', name or '', **{provider + '_sub': sub})
+            _credit_signup_link(s)
+        # Links an existing account to the provider's on first use.
+        if not getattr(u, provider + '_sub'):
+            setattr(u, provider + '_sub', sub)
+        u.last_login = datetime.now(timezone.utc).replace(tzinfo=None)
+        _note_demo_signin(s, u, provider)
+        s.commit()
+        session['user_id'] = u.id
+        session['login_at'] = time.time()
+        session.permanent = True
+        active = u.status == 'active' or (u.role or 'user') == 'admin'
+    finally:
+        s.close()
+    if nxt and active:
+        return redirect(nxt)
+    return _post_signin_redirect(active)
+
+
 @app.route('/auth/google/callback')
 def auth_google_callback():
-    from db import create_user, get_user_by_email, get_user_by_google_sub
     cid, secret = _google_oauth_config()
     if not cid:
         return redirect('/login')
@@ -5513,7 +5556,7 @@ def auth_google_callback():
     if request.args.get('error') or not request.args.get('code'):
         return render_template_string(SIGNIN_HTML, error='Google sign-in was cancelled.')
     try:
-        tok = _google_post(GOOGLE_TOKEN_URL, {
+        tok = _oauth_post(GOOGLE_TOKEN_URL, {
             'code': request.args['code'], 'client_id': cid,
             'client_secret': secret, 'redirect_uri': _google_redirect_uri(),
             'grant_type': 'authorization_code'})
@@ -5527,27 +5570,139 @@ def auth_google_callback():
     if not sub or not email or not info.get('email_verified'):
         return render_template_string(
             SIGNIN_HTML, error='Google did not return a verified email address.'), 400
+    return _oauth_signin('google', sub, email, info.get('name') or '', nxt)
+
+
+# ── Sign in with Apple (Services ID + a .p8 key from developer.apple.com) ────
+# Set APPLE_CLIENT_ID (the Services ID), APPLE_TEAM_ID, APPLE_KEY_ID and
+# APPLE_PRIVATE_KEY (the .p8 contents) to switch it on; hidden until then.
+APPLE_ISSUER = 'https://appleid.apple.com'
+APPLE_AUTH_URL = APPLE_ISSUER + '/auth/authorize'
+APPLE_TOKEN_URL = APPLE_ISSUER + '/auth/token'
+
+
+def _apple_oauth_config():
+    cid = (os.getenv('APPLE_CLIENT_ID') or '').strip()
+    team = (os.getenv('APPLE_TEAM_ID') or '').strip()
+    kid = (os.getenv('APPLE_KEY_ID') or '').strip()
+    # One env var holds the whole PEM, so accept its newlines escaped.
+    key = (os.getenv('APPLE_PRIVATE_KEY') or '').strip().replace('\\n', '\n')
+    if cid and team and kid and key:
+        return cid, team, kid, key
+    return None, None, None, None
+
+
+def _apple_redirect_uri():
+    explicit = (os.getenv('APPLE_REDIRECT_URI') or '').strip()
+    if explicit:
+        return explicit
+    return _callback_origin() + '/auth/apple/callback'
+
+
+def _apple_client_secret():
+    """Apple takes no static client secret: it is an ES256 JWT signed with the
+    team's key, valid for up to six months. Minted per sign-in instead."""
+    from cryptography.hazmat.primitives import serialization
+    cid, team, kid, key = _apple_oauth_config()
+    now = int(time.time())
+    return _es256_jwt(serialization.load_pem_private_key(key.encode(), None),
+                      {'kid': kid},
+                      {'iss': team, 'iat': now, 'exp': now + 300,
+                       'aud': APPLE_ISSUER, 'sub': cid})
+
+
+def _jwt_claims(token):
+    import base64
+    part = token.split('.')[1]
+    return json.loads(base64.urlsafe_b64decode(part + '=' * (-len(part) % 4)))
+
+
+@app.route('/auth/apple')
+def auth_apple():
+    cid = _apple_oauth_config()[0]
+    if not cid:
+        return render_template_string(
+            SIGNIN_HTML, error='Apple sign-in is not configured yet.'), 503
+    state = secrets.token_urlsafe(24)
+    nonce = secrets.token_urlsafe(24)
+    session['apple_oauth_state'] = state
+    session['apple_oauth_nonce'] = nonce
+    nxt = request.args.get('next') or ''
+    session['apple_oauth_next'] = nxt if nxt.startswith('/') else ''
+    params = {'client_id': cid, 'redirect_uri': _apple_redirect_uri(),
+              'response_type': 'code', 'response_mode': 'form_post',
+              'scope': 'name email', 'state': state, 'nonce': nonce}
+    return redirect(APPLE_AUTH_URL + '?' + urllib.parse.urlencode(params))
+
+
+@app.route('/auth/apple/callback', methods=['POST'])
+def auth_apple_callback_post():
+    """Apple posts the result cross-site, and the session cookie (SameSite Lax)
+    does not ride on a cross-site POST, so the state check and any pending
+    invite would be lost. A GET navigation carries it: bounce to one."""
+    f = request.form
+    name = ''
+    try:
+        n = (json.loads(f.get('user') or '{}').get('name') or {})
+        name = ' '.join(x for x in (n.get('firstName'), n.get('lastName')) if x)
+    except (ValueError, AttributeError):
+        pass
+    q = {k: f.get(k) for k in ('code', 'state', 'error') if f.get(k)}
+    if name:
+        q['name'] = name
+    return redirect('/auth/apple/callback?' + urllib.parse.urlencode(q), code=303)
+
+
+@app.route('/auth/apple/callback')
+def auth_apple_callback():
+    cid = _apple_oauth_config()[0]
+    if not cid:
+        return redirect('/login')
+    state = session.pop('apple_oauth_state', None)
+    nonce = session.pop('apple_oauth_nonce', None)
+    nxt = session.pop('apple_oauth_next', '') or ''
+    if not state or request.args.get('state') != state:
+        return render_template_string(SIGNIN_HTML,
+                                      error='Sign-in expired. Please try again.'), 400
+    if request.args.get('error') or not request.args.get('code'):
+        return render_template_string(SIGNIN_HTML, error='Apple sign-in was cancelled.')
+    try:
+        tok = _oauth_post(APPLE_TOKEN_URL, {
+            'code': request.args['code'], 'client_id': cid,
+            'client_secret': _apple_client_secret(),
+            'redirect_uri': _apple_redirect_uri(),
+            'grant_type': 'authorization_code'})
+        # Straight from Apple's token endpoint over TLS, so TLS vouches for the
+        # issuer and the signature need not be checked (OIDC Core 3.1.3.7).
+        claims = _jwt_claims(tok['id_token'])
+    except Exception as e:
+        logger.warning('APPLE OAUTH failed: %s', e)
+        return render_template_string(
+            SIGNIN_HTML, error='Could not complete Apple sign-in. Try again.'), 502
+    if (claims.get('iss') != APPLE_ISSUER or claims.get('aud') != cid
+            or claims.get('nonce') != nonce
+            or float(claims.get('exp') or 0) < time.time()):
+        logger.warning('APPLE OAUTH id_token rejected: iss=%s aud=%s',
+                       claims.get('iss'), claims.get('aud'))
+        return render_template_string(
+            SIGNIN_HTML, error='Could not complete Apple sign-in. Try again.'), 400
+    sub = claims.get('sub')
+    email = ''
+    if str(claims.get('email_verified')).lower() == 'true':
+        email = (claims.get('email') or '').strip().lower()
+    if not sub:
+        return render_template_string(
+            SIGNIN_HTML, error='Apple did not return an account id.'), 400
+    from db import get_user_by_apple_sub
     s = _db_session()
     try:
-        u = get_user_by_google_sub(s, sub) or get_user_by_email(s, email)
-        if u is None:
-            u = create_user(s, email, '', info.get('name') or '', google_sub=sub)
-            _credit_signup_link(s)
-        # Links an existing password account to the Google account on first use.
-        if not u.google_sub:
-            u.google_sub = sub
-        u.last_login = datetime.now(timezone.utc).replace(tzinfo=None)
-        _note_demo_signin(s, u, 'google')
-        s.commit()
-        session['user_id'] = u.id
-        session['login_at'] = time.time()
-        session.permanent = True
-        active = u.status == 'active' or (u.role or 'user') == 'admin'
+        known = get_user_by_apple_sub(s, sub) is not None
     finally:
         s.close()
-    if nxt and active:
-        return redirect(nxt)
-    return _post_signin_redirect(active)
+    if not known and not email:
+        return render_template_string(
+            SIGNIN_HTML, error='Apple did not return a verified email address.'), 400
+    return _oauth_signin('apple', sub, email, request.args.get('name') or '', nxt)
 
 
 @app.route('/register', methods=['GET', 'POST'])
@@ -5616,12 +5771,13 @@ def login():
     s = _db_session()
     try:
         u = get_user_by_email(s, email)
-        # A Google-only account has no password, so the generic error would send
-        # the creator round in circles resetting one that never existed.
-        if u and u.google_sub and not u.password_hash:
+        # A Google- or Apple-only account has no password, so the generic error
+        # would send the creator round in circles resetting one that never existed.
+        if u and (u.google_sub or u.apple_sub) and not u.password_hash:
+            via = 'Google' if u.google_sub else 'Apple'
             return render_template_string(
                 SIGNIN_HTML, email=email,
-                error='That account uses Google. Use "Continue with Google".')
+                error=f'That account uses {via}. Use "Continue with {via}".')
         if not u or not u.password_hash or not check_password_hash(u.password_hash, password):
             return render_template_string(SIGNIN_HTML, error='Wrong email or password.',
                                           email=email)
