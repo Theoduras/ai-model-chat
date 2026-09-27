@@ -149,10 +149,9 @@ p.sub{font-size:17px;color:var(--text-soft);line-height:1.65;margin-bottom:36px;
 .step .card b{font-size:14.5px}
 .step .card span{font-size:12.5px;color:#e0d2e4;line-height:1.4}
 .step .card em{position:absolute;top:16px;right:16px;font:700 12px 'Sora';font-style:normal;color:#ff6b9a}
-.step .tag{position:absolute;left:20px;bottom:20px;display:flex;align-items:center;gap:8px;padding:7px 12px;border-radius:999px;background:#140a17cc;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);font-size:13px;font-weight:600;opacity:0;transition:opacity .3s}
-.step .tag em{font:700 12px 'Sora';font-style:normal;color:#ff6b9a}
 .step[data-slot="0"] .card{opacity:0;pointer-events:none}
-.step[data-slot="0"] .tag{opacity:1}
+.now{position:relative;z-index:2;max-width:880px;width:100%;margin:0 auto calc(14px - clamp(48px,8vh,80px));display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:#fff}
+.now em{font:700 12px 'Sora';font-style:normal;color:#ff6b9a}
 @media(max-height:700px){.rsub{display:none}}
 /* Below this the side column squeezes the video to a stamp, so the cards go under it. */
 @media(max-width:1599px){
@@ -363,28 +362,25 @@ p.sub{font-size:17px;color:var(--text-soft);line-height:1.65;margin-bottom:36px;
       <div class="rlabel">Character builder</div>
       <div class="rtitle">Build your dream model in 30 minutes. <em>No prompts.</em></div>
       <div class="rsub">Pick every detail by choosing options. When she's done, create SFW and explicit content with the exact same face and body.</div>
-      <div class="rcta"><a class="flow-cta" href="/register">Start building her →</a><span>About 30 minutes · No photos needed</span></div>
+      <div class="rcta"><a class="flow-cta" href="/register">Start building →</a><span>About 30 minutes · No photos needed</span></div>
     </div>
+    <div class="now" aria-live="polite"><em>1</em><span>Choose or upload</span></div>
     <div class="clips">
       <button type="button" class="step" data-slot="0" aria-pressed="true">
         <video src="/img/character-creator.mp4" muted loop playsinline preload="none" aria-label="Choosing her face and body in the builder"></video>
         <span class="card"><em>1</em><i aria-hidden="true">🎛️</i><b>Choose or upload</b><span>Face, body, every detail</span></span>
-        <span class="tag"><em>1</em>Choose or upload</span>
       </button>
       <button type="button" class="step" data-slot="1" aria-pressed="false">
         <video src="/img/persona-setup.mp4" muted loop playsinline preload="none" aria-label="Locking her face and body"></video>
         <span class="card"><em>2</em><i aria-hidden="true">🔒</i><b>Face &amp; body locked</b><span>The same her in every shot</span></span>
-        <span class="tag"><em>2</em>Face &amp; body locked</span>
       </button>
       <button type="button" class="step" data-slot="2" aria-pressed="false">
         <span class="ph"><i aria-hidden="true">✨</i>Clip coming soon</span>
         <span class="card"><em>3</em><i aria-hidden="true">✨</i><b>Create content</b><span>SFW and NSFW, prompt or no prompt</span></span>
-        <span class="tag"><em>3</em>Create content</span>
       </button>
       <button type="button" class="step" data-slot="3" aria-pressed="false">
         <span class="ph"><i aria-hidden="true">💸</i>Clip coming soon</span>
         <span class="card"><em>4</em><i aria-hidden="true">💸</i><b>Post &amp; funnel</b><span>Followers into Fanvue subscribers</span></span>
-        <span class="tag"><em>4</em>Post &amp; funnel</span>
       </button>
     </div>
   </div>
@@ -647,18 +643,24 @@ fetch('/api/features')
       if(s===big()&&seen){v.preload='auto';v.play().catch(function(){});} else v.pause();
     });
   }
-  // FLIP: swap the two slots, then animate each box from where it was to where it is.
+  var now=document.querySelector('.now');
+  // FLIP: the clicked step goes big, the rest refill the cards in step order,
+  // then every box animates from where it was to where it is.
   function swap(el){
     var cur=big(); if(el===cur||busy) return;
-    var from=[el.getBoundingClientRect(),cur.getBoundingClientRect()];
-    cur.setAttribute('data-slot',el.getAttribute('data-slot'));
-    el.setAttribute('data-slot','0');
-    cur.setAttribute('aria-pressed','false'); el.setAttribute('aria-pressed','true');
+    var from=steps.map(function(s){return s.getBoundingClientRect();}), n=1;
+    steps.forEach(function(s){
+      s.setAttribute('data-slot',s===el?'0':String(n++));
+      s.setAttribute('aria-pressed',s===el?'true':'false');
+    });
+    now.querySelector('em').textContent=el.querySelector('.card em').textContent;
+    now.querySelector('span').textContent=el.querySelector('.card b').textContent;
     play();
     if(still.matches||!el.animate) return;
     busy=true;
-    [el,cur].forEach(function(s,i){
+    steps.forEach(function(s,i){
       var a=from[i], b=s.getBoundingClientRect();
+      if(a.left===b.left&&a.top===b.top&&a.width===b.width) return;
       s.classList.toggle('moving',s===el);
       s.animate([{transform:'translate('+(a.left-b.left)+'px,'+(a.top-b.top)+'px) scale('+(a.width/b.width)+','+(a.height/b.height)+')'},
                  {transform:'none'}],{duration:450,easing:'cubic-bezier(.22,1,.36,1)'})
