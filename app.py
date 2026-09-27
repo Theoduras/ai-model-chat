@@ -1092,6 +1092,10 @@ def robots_txt():
         return Response('User-agent: *\nDisallow: /\n', mimetype='text/plain')
     lines = ['User-agent: *']
     lines += ['Disallow: ' + p for p in _CRAWL_DISALLOW]
+    # Disallow matches by prefix, so '/fanvue' also shut out /fanvue-ai-chatter.
+    # Crawlers take the longest matching rule, and these outrank the prefixes.
+    lines += ['Allow: ' + p for p in sorted(_PUBLIC_PATHS)
+              if p.startswith(tuple(_CRAWL_DISALLOW))]
     lines += ['', 'Sitemap: ' + _site_origin() + '/sitemap.xml', '']
     return Response('\n'.join(lines), mimetype='text/plain')
 
