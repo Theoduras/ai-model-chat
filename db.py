@@ -1064,6 +1064,97 @@ def demo_event_summary(session):
     return out
 
 
+class SupportThread(Base):
+    """One support conversation per account. An admin can open it before the
+    user has ever written, which is why it is keyed on the user rather than
+    created by the user's first message."""
+    __tablename__ = 'support_threads'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    # One of the two is set. A visitor's thread is claimed (user_id filled
+    # in) when that browser signs in, so the conversation survives sign-up.
+    user_id = Column(String(32), index=True)
+    visitor_id = Column(String(32), index=True)
+    # ai | human. While an admin is talking the assistant stays out of the way;
+    # it only answers again once an admin hands the thread back.
+    mode = Column(String(8), default='ai')
+    # Where the widget was last opened, so an admin knows what they were looking at.
+    last_page = Column(String(255), default='')
+    user_unread = Column(Integer, default=0)
+    admin_unread = Column(Integer, default=0)
+    last_at = Column(DateTime, default=_now, index=True)
+    created_at = Column(DateTime, default=_now)
+
+
+class SupportMessage(Base):
+    __tablename__ = 'support_messages'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    thread_id = Column(String(32), ForeignKey('support_threads.id'), nullable=False)
+    role = Column(String(8), nullable=False)      # user | ai | admin
+    content = Column(Text, nullable=False)
+    author = Column(String(255), default='')      # the admin's email, for role=admin
+    created_at = Column(DateTime, default=_now)
+
+
+Index('ix_support_messages_thread_created', SupportMessage.thread_id,
+      SupportMessage.created_at)
+
+
+def get_support_thread(session, user_id=None, visitor_id=None, create=False):
+    """The caller's thread: by account when signed in, else by browser."""
+    q = session.query(SupportThread)
+    if user_id:
+        t = q.filter_by(user_id=user_id).first()
+        if t is None and visitor_id:
+            t = q.filter(SupportThread.visitor_id == visitor_id,
+                         SupportThread.user_id.is_(None)).first()
+            if t is not None:
+                t.user_id = user_id
+    elif visitor_id:
+        t = q.filter(SupportThread.visitor_id == visitor_id,
+                     SupportThread.user_id.is_(None)).first()
+    else:
+        return None
+    if t is None and create:
+        t = SupportThread(user_id=user_id or None,
+                          visitor_id=None if user_id else visitor_id)
+        session.add(t)
+        session.flush()
+    return t
+
+
+def count_support_ai_since(session, thread_id, since):
+    return (session.query(SupportMessage)
+            .filter(SupportMessage.thread_id == thread_id,
+                    SupportMessage.role == 'ai',
+                    SupportMessage.created_at >= since).count())
+
+
+def add_support_message(session, thread, role, content, author=''):
+    m = SupportMessage(thread_id=thread.id, role=role, content=content,
+                       author=(author or '')[:255])
+    session.add(m)
+    thread.last_at = _now()
+    if role == 'user':
+        thread.admin_unread = (thread.admin_unread or 0) + 1
+    else:
+        thread.user_unread = (thread.user_unread or 0) + 1
+    return m
+
+
+def list_support_messages(session, thread_id, limit=200):
+    rows = (session.query(SupportMessage)
+            .filter(SupportMessage.thread_id == thread_id)
+            .order_by(SupportMessage.created_at.desc()).limit(limit).all())
+    return rows[::-1]
+
+
+def list_support_threads(session, limit=300):
+    return (session.query(SupportThread)
+            .order_by(SupportThread.last_at.desc()).limit(limit).all())
+
+
 def get_user_by_email(session, email):
     return session.query(User).filter(
         User.email == (email or '').strip().lower()).first()
@@ -2242,7 +2333,8 @@ def init_db():
                          ('character_images', CharacterImage),
                          ('character_versions', CharacterVersion),
                          ('character_views', CharacterView),
-                         ('view_references', ViewReference)):
+                         ('view_references', ViewReference),
+                         ('support_threads', SupportThread)):
         try:
             _sync_columns(table, model)
         except Exception:

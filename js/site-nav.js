@@ -599,3 +599,13 @@
     if (e.origin === location.origin && e.data && e.data.snUpgrade) upgrade();
   });
 })();
+
+// Support bubble on every page that carries the site menu. The widget itself
+// skips the fan chat, where a fan is talking to a persona and not to us.
+(function () {
+  if (window.self !== window.top) return;
+  var s = document.createElement('script');
+  s.src = '/js/support-widget.js';
+  s.defer = true;
+  document.head.appendChild(s);
+})();

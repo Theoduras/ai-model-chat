@@ -2778,7 +2778,7 @@ WORKSPACE_JS = """<script>
 
 REGISTER_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><script src="/js/support-widget.js" defer></script>
 <link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Create account</title>
 <script src="/js/analytics.js" defer></script>
 <script src="/js/page-editor.js" defer></script>
@@ -2797,7 +2797,7 @@ REGISTER_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 
 SIGNIN_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><script src="/js/support-widget.js" defer></script>
 <link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Sign in</title>
 <script src="/js/analytics.js" defer></script>
 <script src="/js/page-editor.js" defer></script>
@@ -2852,7 +2852,7 @@ RESET_PASSWORD_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF
 
 BILLING_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>""" + WORKSPACE_JS + """
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><script src="/js/support-widget.js" defer></script>""" + WORKSPACE_JS + """
 <link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Choose a plan</title>
 <script src="/js/analytics.js" defer></script>
 <script src="/js/page-editor.js" defer></script>
@@ -3059,7 +3059,7 @@ document.querySelectorAll('button[data-tier]').forEach(function(b){
 
 TOKENS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>""" + WORKSPACE_JS + """
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><script src="/js/support-widget.js" defer></script>""" + WORKSPACE_JS + """
 <link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Buy tokens</title>
 <script src="/js/analytics.js" defer></script>
 <style>""" + ACCOUNT_CSS + """
@@ -3203,7 +3203,7 @@ var TOK_PROVIDERS = [{% if stripe_enabled %}['stripe','card']{% endif %}{% if st
 
 DEMO_ENDS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><script src="/js/support-widget.js" defer></script>
 <link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png">
 <title>This is where the demo ends</title>
 <script src="/js/analytics.js" defer></script>
@@ -3241,7 +3241,7 @@ stops at the moment she would start talking to your real fans and taking their m
 
 ACCOUNT_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>""" + WORKSPACE_JS + """
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><script src="/js/support-widget.js" defer></script>""" + WORKSPACE_JS + """
 <link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>My account</title>
 <style>""" + ACCOUNT_CSS + """
 table{width:100%;border-collapse:collapse;margin-top:8px;font-size:.85rem}
@@ -3315,7 +3315,7 @@ _AVATAR_PLACEHOLDER = (
 
 PROFILE_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>""" + WORKSPACE_JS + """
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><script src="/js/support-widget.js" defer></script>""" + WORKSPACE_JS + """
 <link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Your profile</title>
 <style>""" + ACCOUNT_CSS + """
 textarea{width:100%;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:11px 14px;color:var(--text);font-size:.95rem;outline:none;margin-bottom:16px;font-family:inherit;resize:vertical;min-height:88px}
@@ -3415,9 +3415,10 @@ a.email{color:#a78bfa;text-decoration:none;font-weight:500}
 </style></head><body><div class="wrap wide" style="max-width:1100px">
 <div class="bar"><span>Admin · {{ users|length }} user{{ '' if users|length == 1 else 's' }}</span>
 <a href="/admin/trials">Trial links</a>
+<a href="/admin/support">Support inbox</a>
 <span>{% if super_admin %}<a href="/admin/permissions">Permissions</a> &nbsp; <a href="/admin/register-links">Register links</a> &nbsp; {% endif %}<a href="/admin/demos">Demo accounts</a> &nbsp; <a href="/dashboard">Dashboard</a> &nbsp; <a href="/logout">Sign out</a></span></div>
 <div class="card"><div class="scroll"><table>
-<tr><th>Email</th><th>Name</th><th>Role</th><th>Team</th><th>Plan</th><th>Status</th><th>Renews</th><th>Joined</th></tr>
+<tr><th>Email</th><th>Name</th><th>Role</th><th>Team</th><th>Plan</th><th>Status</th><th>Renews</th><th>Joined</th><th></th></tr>
 {% for u in users %}<tr>
 <td><a class="email" href="/admin/users/{{ u.id }}">{{ u.email }}</a></td>
 <td>{{ u.name or '—' }}</td>
@@ -3427,6 +3428,7 @@ a.email{color:#a78bfa;text-decoration:none;font-weight:500}
 {% if u.trial %} <span class="pill trial" title="Trial granted {{ u.trial }}">trial</span>{% endif %}</td>
 <td><span class="pill {{ u.status }}">{{ u.status }}</span></td>
 <td>{{ u.expires or '—' }}</td><td>{{ u.created or '—' }}</td>
+<td><a class="email" href="/admin/support?user={{ u.id }}">Message</a></td>
 </tr>{% endfor %}
 </table></div></div></div></body></html>"""
 
@@ -3694,6 +3696,465 @@ def admin_users():
     return render_template_string(
         ADMIN_USERS_HTML, users=rows,
         super_admin=bool((_current_user() or {}).get('is_super_admin')))
+
+
+# ── Support chat ─────────────────────────────────────────────────────────────
+# The bubble in the corner of every creator and marketing page. An assistant
+# answers until a person steps in; an admin can also open a thread with any
+# account that never wrote, which is the point — it is a way to reach users.
+
+SUPPORT_AI_DAILY_CAP = 20
+SUPPORT_MAX_CHARS = 2000
+
+_SUPPORT_BRIEF = """You are the support assistant for this platform: software for
+content creators (models) who run an AI persona that chats with their fans and
+turns those chats into paid content sales.
+
+What the product does:
+- Persona builder: the creator fills in a form (name, age, backstory,
+  personality, speech style, warmth, flirt pace, NSFW level, interests,
+  conversion triggers) and the system prompt is written for them.
+- Funnel: every persona moves a fan through warm, engage, intrigue, tease,
+  offer and close, with PPV offers and follow-ups the creator configures.
+- Platforms: Fanvue, Telegram, X, Threads, Discord and Instagram are live.
+  OnlyFans, Reddit and TikTok are marked Coming soon.
+- Generation studio and character builder: images of the persona generated
+  from an approved character. Photos are open to every active plan and paid
+  in tokens; video is not open to customers yet. Tokens can be topped up on
+  the Tokens page.
+- Content vault, content planner, team seats on higher plans, and a chat
+  widget creators can embed on their own site.
+- Pages: Dashboard (/dashboard), Pricing (/pricing), Billing and account
+  (/account), Tokens (/tokens), Sign up (/register), Sign in (/login).
+
+Plans:
+{plans}
+
+Rules:
+- Answer in 1 to 4 short sentences, plain text, no markdown headings.
+- Only state what is written above. If you do not know, say so and suggest
+  the Talk to a human button in this chat window. Never invent features,
+  prices, dates or policies, and never promise refunds or credits.
+- Never ask for passwords, card numbers or API keys.
+- Be warm and useful. Now and then, when it fits, ask one light question about
+  what they are building (their niche, which platforms they use, what they
+  hope the persona does), so the team can help them better. Never interrogate.
+"""
+
+
+def _support_plans_text():
+    lines = []
+    for key, t in _BASE_TIERS.items():
+        price = 'free' if not t.get('price') else f"{t['price']} EUR/month"
+        feats = '; '.join(f for f in t.get('features') or [] if isinstance(f, str))
+        lines.append(f"- {t['name']} ({price}): {feats}")
+    return '\n'.join(lines)
+
+
+def _support_context(user):
+    if not user:
+        return ('The person writing is a visitor who is not signed in. They '
+                'may be deciding whether to sign up: help them understand the '
+                'product and point them to /pricing or /register.')
+    bits = [f"The person writing is signed in as {user.get('name') or user['email']}",
+            f"plan: {user.get('tier') or 'none chosen yet'}",
+            f"status: {user.get('status')}"]
+    if user.get('seat_role') and user['seat_role'] != 'owner':
+        bits.append(f"a {user['seat_role']} seat in {user.get('workspace_name')}'s workspace")
+    try:
+        bal = _token_balance(user)
+        bits.append('tokens: unlimited' if bal is None else f'tokens: {bal}')
+    except Exception:
+        pass
+    return ', '.join(bits) + '.'
+
+
+def _support_ai_reply(user, history):
+    if client is None:
+        return ("I can't answer right now. Tap Talk to a human and someone "
+                "from the team will reply here.")
+    system = (_SUPPORT_BRIEF.format(plans=_support_plans_text()) + '\n'
+              + _support_context(user))
+    contents = []
+    for m in history[-20:]:
+        if m.role == 'user':
+            contents.append({'role': 'user', 'parts': [{'text': m.content}]})
+        else:
+            contents.append({'role': 'model', 'parts': [{'text': m.content}]})
+    try:
+        resp = client.models.generate_content(
+            model=MODEL_NAME, contents=contents,
+            config=_no_thinking(types.GenerateContentConfig(
+                system_instruction=system, temperature=0.4,
+                max_output_tokens=600)))
+        reply = _gemini_text(resp).strip()
+    except Exception as e:
+        logger.warning('SUPPORT AI failed: %s', e)
+        reply = ''
+    return reply or ("Sorry, I couldn't answer that just now. Tap Talk to a "
+                     "human and someone from the team will reply here.")
+
+
+def _support_caller():
+    """(user, visitor_id). A visitor is the browser cookie the demo already
+    sets, so an anonymous thread is tied to one browser."""
+    user = _current_user()
+    return user, _demo_visitor()
+
+
+def _support_payload(s, t, user):
+    from db import list_support_messages, _epoch
+    msgs = list_support_messages(s, t.id) if t is not None else []
+    return {'ok': True, 'signed_in': bool(user),
+            'is_admin': bool(user and user.get('is_admin')),
+            'mode': t.mode if t is not None else 'ai',
+            'unread': (t.user_unread or 0) if t is not None else 0,
+            'messages': [{'id': m.id, 'role': m.role, 'content': m.content,
+                          'at': _epoch(m.created_at)} for m in msgs]}
+
+
+@app.route('/api/support', methods=['GET'])
+def api_support_get():
+    from db import get_support_thread
+    user, vid = _support_caller()
+    s = _db_session()
+    try:
+        t = get_support_thread(s, user_id=user['id'] if user else None,
+                               visitor_id=vid)
+        page = (request.args.get('page') or '')[:255]
+        if t is not None and page and page != t.last_page:
+            t.last_page = page
+        s.commit()
+        return jsonify(_support_payload(s, t, user))
+    finally:
+        s.close()
+
+
+@app.route('/api/support', methods=['POST'])
+def api_support_post():
+    from db import (get_support_thread, add_support_message,
+                    list_support_messages, count_support_ai_since)
+    user, vid = _support_caller()
+    data = request.get_json(silent=True) or {}
+    text = (data.get('message') or '').strip()[:SUPPORT_MAX_CHARS]
+    if not text:
+        return jsonify({'ok': False, 'error': 'Empty message'}), 400
+    who = user['email'] if user else f'visitor_{vid}'
+    chat_logger, _ = get_chat_logger(f'support_{who}')
+    s = _db_session()
+    try:
+        t = get_support_thread(s, user_id=user['id'] if user else None,
+                               visitor_id=vid, create=True)
+        page = (data.get('page') or '')[:255]
+        if page:
+            t.last_page = page
+        add_support_message(s, t, 'user', text)
+        chat_logger.info('SUPPORT IN %s: %s', who, text)
+        if t.mode == 'ai':
+            since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=1)
+            if not user and count_support_ai_since(s, t.id, since) >= SUPPORT_AI_DAILY_CAP:
+                t.mode = 'human'
+                reply = ("I've passed this to the team. Someone will reply "
+                         "here as soon as they can.")
+            else:
+                s.flush()
+                reply = _support_ai_reply(user, list_support_messages(s, t.id))
+            add_support_message(s, t, 'ai', reply)
+            chat_logger.info('SUPPORT AI %s: %s', who, reply)
+        t.user_unread = 0
+        s.commit()
+        return jsonify(_support_payload(s, t, user))
+    finally:
+        s.close()
+
+
+@app.route('/api/support/human', methods=['POST'])
+def api_support_human():
+    from db import get_support_thread, add_support_message
+    user, vid = _support_caller()
+    s = _db_session()
+    try:
+        t = get_support_thread(s, user_id=user['id'] if user else None,
+                               visitor_id=vid, create=True)
+        if t.mode != 'human':
+            t.mode = 'human'
+            add_support_message(s, t, 'ai', "I've asked a team member to join. "
+                                "They'll reply here, and you'll see a badge on "
+                                "the chat button when they do.")
+            t.admin_unread = (t.admin_unread or 0) + 1
+        t.user_unread = 0
+        s.commit()
+        return jsonify(_support_payload(s, t, user))
+    finally:
+        s.close()
+
+
+@app.route('/api/support/read', methods=['POST'])
+def api_support_read():
+    from db import get_support_thread
+    user, vid = _support_caller()
+    s = _db_session()
+    try:
+        t = get_support_thread(s, user_id=user['id'] if user else None,
+                               visitor_id=vid)
+        if t is not None and t.user_unread:
+            t.user_unread = 0
+            s.commit()
+        return jsonify({'ok': True})
+    finally:
+        s.close()
+
+
+def _admin_support_thread(s, key, create=False):
+    """An admin addresses a thread by account id, or by 'v:<visitor>' for an
+    anonymous one. Only an account can have a thread opened for it: a visitor
+    has to have written first, or there is nobody to reach."""
+    from db import User, get_support_thread
+    if key.startswith('v:'):
+        return get_support_thread(s, visitor_id=key[2:])
+    if s.get(User, key) is None:
+        return None
+    return get_support_thread(s, user_id=key, create=create)
+
+
+@app.route('/api/admin/support', methods=['GET'])
+def api_admin_support_threads():
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    from db import User, SupportMessage, list_support_threads, list_users, _epoch
+    s = _db_session()
+    try:
+        threads = list_support_threads(s)
+        users = {u.id: u for u in list_users(s, limit=5000)}
+        out = []
+        for t in threads:
+            last = (s.query(SupportMessage).filter_by(thread_id=t.id)
+                    .order_by(SupportMessage.created_at.desc()).first())
+            u = users.get(t.user_id) if t.user_id else None
+            out.append({'key': t.user_id or ('v:' + (t.visitor_id or '')),
+                        'email': u.email if u else '',
+                        'name': (u.name if u else '') or '',
+                        'tier': (u.tier if u else '') or '',
+                        'visitor': not t.user_id,
+                        'mode': t.mode, 'unread': t.admin_unread or 0,
+                        'page': t.last_page or '',
+                        'last': (last.content[:120] if last else ''),
+                        'last_role': last.role if last else '',
+                        'at': _epoch(t.last_at)})
+        people = [{'key': u.id, 'email': u.email, 'name': u.name or '',
+                   'tier': u.tier or '', 'status': u.status or ''}
+                  for u in users.values()]
+        return jsonify({'ok': True, 'threads': out, 'users': people})
+    finally:
+        s.close()
+
+
+@app.route('/api/admin/support/<key>', methods=['GET'])
+def api_admin_support_get(key):
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    from db import User, list_support_messages, _epoch
+    s = _db_session()
+    try:
+        t = _admin_support_thread(s, key)
+        u = None if key.startswith('v:') else s.get(User, key)
+        if t is None and u is None:
+            return jsonify({'error': 'Not found'}), 404
+        if t is not None and t.admin_unread:
+            t.admin_unread = 0
+            s.commit()
+        msgs = list_support_messages(s, t.id) if t is not None else []
+        return jsonify({
+            'ok': True, 'key': key, 'mode': t.mode if t is not None else 'ai',
+            'page': (t.last_page if t is not None else '') or '',
+            'user': ({'email': u.email, 'name': u.name or '', 'tier': u.tier or '',
+                      'status': u.status or '', 'country': u.country or '',
+                      'brand': u.brand or '', 'joined': _fmt_date(u.created_at),
+                      'last_login': _fmt_datetime(u.last_login)} if u else None),
+            'messages': [{'id': m.id, 'role': m.role, 'content': m.content,
+                          'author': m.author or '', 'at': _epoch(m.created_at)}
+                         for m in msgs]})
+    finally:
+        s.close()
+
+
+@app.route('/api/admin/support/<key>', methods=['POST'])
+def api_admin_support_post(key):
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    from db import add_support_message
+    admin = _current_user()
+    data = request.get_json(silent=True) or {}
+    text = (data.get('message') or '').strip()[:SUPPORT_MAX_CHARS]
+    if not text:
+        return jsonify({'ok': False, 'error': 'Empty message'}), 400
+    s = _db_session()
+    try:
+        t = _admin_support_thread(s, key, create=True)
+        if t is None:
+            return jsonify({'error': 'Not found'}), 404
+        # An admin talking means the assistant stops, or both would answer.
+        t.mode = 'human'
+        add_support_message(s, t, 'admin', text, author=admin['email'])
+        t.admin_unread = 0
+        s.commit()
+        chat_logger, _ = get_chat_logger(f'support_{key}')
+        chat_logger.info('SUPPORT ADMIN %s -> %s: %s', admin['email'], key, text)
+        return jsonify({'ok': True})
+    finally:
+        s.close()
+
+
+@app.route('/api/admin/support/<key>/mode', methods=['POST'])
+def api_admin_support_mode(key):
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    mode = (request.get_json(silent=True) or {}).get('mode')
+    if mode not in ('ai', 'human'):
+        return jsonify({'ok': False, 'error': 'mode is ai or human'}), 400
+    s = _db_session()
+    try:
+        t = _admin_support_thread(s, key, create=True)
+        if t is None:
+            return jsonify({'error': 'Not found'}), 404
+        t.mode = mode
+        s.commit()
+        return jsonify({'ok': True, 'mode': mode})
+    finally:
+        s.close()
+
+
+@app.route('/admin/support')
+def admin_support():
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    return render_template_string(ADMIN_SUPPORT_HTML)
+
+
+ADMIN_SUPPORT_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Support inbox</title>
+<style>""" + ACCOUNT_CSS + """
+body{display:block;padding:24px 16px}
+.wrap{max-width:1180px;margin:0 auto}
+.inbox{display:grid;grid-template-columns:320px 1fr;gap:14px;height:calc(100vh - 110px);min-height:480px}
+.col{background:var(--panel);border:1px solid var(--border);border-radius:14px;display:flex;flex-direction:column;min-height:0}
+.col-head{padding:12px;border-bottom:1px solid var(--border)}
+.col-head input{margin:0;padding:9px 12px;font-size:.85rem}
+.list{overflow-y:auto;flex:1}
+.item{padding:11px 14px;border-bottom:1px solid var(--border);cursor:pointer;display:block}
+.item:hover{background:var(--surface)}
+.item.sel{background:var(--surface);box-shadow:inset 3px 0 0 var(--accent)}
+.item .top{display:flex;justify-content:space-between;gap:8px;align-items:center}
+.item .who{font-weight:600;font-size:.86rem;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.item .prev{font-size:.78rem;color:var(--text-muted);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.badge{background:var(--accent);color:#fff;border-radius:999px;font-size:.68rem;font-weight:700;padding:1px 7px}
+.pill{display:inline-block;padding:1px 8px;border-radius:999px;font-size:.68rem;font-weight:600;background:var(--surface);color:var(--text-3);border:1px solid var(--border)}
+.pill.human{background:#2e1065;color:#c4b5fd;border-color:#4c1d95}
+.sect{font-size:.7rem;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);padding:12px 14px 6px}
+.convo-head{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap}
+.convo-head .meta{font-size:.78rem;color:var(--text-muted);margin-top:3px}
+.msgs{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:8px}
+.m{max-width:72%;padding:9px 13px;border-radius:14px;font-size:.88rem;line-height:1.45;white-space:pre-wrap;word-wrap:break-word}
+.m.user{align-self:flex-start;background:var(--surface);color:var(--text)}
+.m.ai{align-self:flex-end;background:transparent;border:1px dashed var(--border);color:var(--text-2)}
+.m.admin{align-self:flex-end;background:var(--accent);color:#fff}
+.m .by{display:block;font-size:.66rem;opacity:.7;margin-bottom:2px}
+.compose{display:flex;gap:8px;padding:12px;border-top:1px solid var(--border)}
+.compose textarea{flex:1;resize:none;height:62px;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:10px 12px;color:var(--text);font-family:var(--font);font-size:.9rem;outline:none}
+.compose button,.convo-head button{width:auto;padding:10px 18px;font-size:.85rem}
+button.ghost{background:var(--surface);border:1px solid var(--border);color:var(--text)}
+button.ghost:hover{animation:none;box-shadow:none}
+.empty{margin:auto;color:var(--text-muted);font-size:.9rem;text-align:center;padding:30px}
+@media(max-width:760px){.inbox{grid-template-columns:1fr;height:auto}.col{min-height:360px}.m{max-width:88%}}
+</style></head><body><div class="wrap">
+<div class="bar"><span>Admin &middot; support inbox</span>
+<span><a href="/admin/users">All users</a> &nbsp; <a href="/dashboard">Dashboard</a> &nbsp; <a href="/logout">Sign out</a></span></div>
+<div class="inbox">
+  <div class="col">
+    <div class="col-head"><input id="q" type="search" placeholder="Search, or pick anyone to message"></div>
+    <div class="list" id="list"></div>
+  </div>
+  <div class="col" id="convo"><div class="empty">Pick a conversation, or search for any user to start one.<br>They'll see it in the chat bubble on their next page view.</div></div>
+</div></div>
+<script>
+var threads = [], users = [], current = null, lastSig = '';
+function esc(s){var d=document.createElement('div');d.textContent=s==null?'':String(s);return d.innerHTML;}
+function when(t){if(!t)return '';var d=new Date(t*1000),n=new Date();
+  return d.toDateString()===n.toDateString()?d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}):d.toLocaleDateString();}
+function label(t){return t.visitor?'Visitor':(t.name?t.name+' · '+t.email:t.email);}
+function loadList(){
+  fetch('/api/admin/support').then(function(r){return r.json();}).then(function(d){
+    if(!d.ok)return; threads=d.threads; users=d.users; renderList();
+  });
+}
+function renderList(){
+  var q=(document.getElementById('q').value||'').toLowerCase().trim(), h='';
+  var have={};
+  threads.forEach(function(t){have[t.key]=1;
+    if(q && (label(t)+' '+t.last+' '+t.page).toLowerCase().indexOf(q)<0)return;
+    h+='<a class="item'+(current===t.key?' sel':'')+'" data-k="'+esc(t.key)+'"><div class="top"><span class="who">'+esc(label(t))+'</span>'
+      +(t.unread?'<span class="badge">'+t.unread+'</span>':'<span class="pill'+(t.mode==='human'?' human':'')+'">'+(t.mode==='human'?'you':'AI')+'</span>')
+      +'</div><div class="prev">'+esc((t.last_role==='user'?'':t.last_role==='admin'?'You: ':'AI: ')+t.last)+' · '+when(t.at)+'</div></a>';
+  });
+  if(!h)h='<div class="empty">No conversations yet.</div>';
+  if(q){
+    var more=users.filter(function(u){return !have[u.key]&&(u.email+' '+u.name).toLowerCase().indexOf(q)>=0;}).slice(0,40);
+    if(more.length){h+='<div class="sect">Start a chat</div>';
+      more.forEach(function(u){h+='<a class="item" data-k="'+esc(u.key)+'"><div class="who">'+esc(u.name?u.name+' · '+u.email:u.email)+'</div><div class="prev">'+esc((u.tier||'no plan')+' · '+u.status)+'</div></a>';});}
+  }
+  var el=document.getElementById('list'); el.innerHTML=h;
+  el.querySelectorAll('.item').forEach(function(a){a.onclick=function(){open(a.getAttribute('data-k'));};});
+}
+function open(k){current=k;lastSig='';history.replaceState(null,'','?'+(k.indexOf('v:')===0?'visitor='+encodeURIComponent(k.slice(2)):'user='+encodeURIComponent(k)));loadConvo(true);renderList();}
+function loadConvo(scroll){
+  if(!current)return;
+  var k=current;
+  fetch('/api/admin/support/'+encodeURIComponent(k)).then(function(r){return r.json();}).then(function(d){
+    if(!d.ok||k!==current)return;
+    var sig=d.mode+'|'+d.messages.length+'|'+(d.messages.length?d.messages[d.messages.length-1].id:'');
+    if(sig===lastSig)return; lastSig=sig;
+    var u=d.user, c=document.getElementById('convo');
+    var draft=(document.getElementById('reply')||{}).value||'';
+    var hadFocus=document.activeElement&&document.activeElement.id==='reply';
+    var meta=u?[u.tier||'no plan',u.status,u.brand,u.country,'joined '+u.joined,u.last_login?'last seen '+u.last_login:''].filter(Boolean).join(' · '):'Anonymous visitor';
+    if(d.page)meta+=' · on '+d.page;
+    var h='<div class="convo-head"><div><div style="font-weight:700">'+esc(u?(u.name?u.name+' · '+u.email:u.email):'Visitor')+'</div><div class="meta">'+esc(meta)+'</div></div>'
+      +'<div>'+(d.mode==='human'?'<button class="ghost" id="mode" data-m="ai">Hand back to AI</button>':'<button class="ghost" id="mode" data-m="human">Take over</button>')+'</div></div><div class="msgs" id="msgs">';
+    if(!d.messages.length)h+='<div class="empty">No messages yet. Write first &mdash; it appears in their chat bubble with a badge.</div>';
+    d.messages.forEach(function(m){h+='<div class="m '+m.role+'"><span class="by">'+esc(m.role==='user'?'them':m.role==='ai'?'AI assistant':(m.author||'admin'))+' · '+when(m.at)+'</span>'+esc(m.content)+'</div>';});
+    h+='</div><form class="compose" id="f"><textarea id="reply" placeholder="Write as the team (Enter to send, Shift+Enter for a new line)"></textarea><button type="submit">Send</button></form>';
+    c.innerHTML=h;
+    var r=document.getElementById('reply'); r.value=draft; if(hadFocus)r.focus();
+    var box=document.getElementById('msgs'); box.scrollTop=box.scrollHeight;
+    r.onkeydown=function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}};
+    document.getElementById('f').onsubmit=function(e){e.preventDefault();send();};
+    document.getElementById('mode').onclick=function(){
+      fetch('/api/admin/support/'+encodeURIComponent(k)+'/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:this.getAttribute('data-m')})})
+        .then(function(){lastSig='';loadConvo();loadList();});
+    };
+    if(scroll)r.focus();
+    loadList();
+  });
+}
+function send(){
+  var r=document.getElementById('reply'), text=(r.value||'').trim(); if(!text||!current)return;
+  r.value=''; var k=current;
+  fetch('/api/admin/support/'+encodeURIComponent(k),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text})})
+    .then(function(x){return x.json();}).then(function(d){if(!d.ok){r.value=text;alert(d.error||'Could not send');return;}lastSig='';loadConvo();loadList();});
+}
+document.getElementById('q').oninput=renderList;
+var p=new URLSearchParams(location.search);
+if(p.get('user'))current=p.get('user'); else if(p.get('visitor'))current='v:'+p.get('visitor');
+loadList(); if(current)loadConvo(true);
+setInterval(function(){if(document.hidden)return;loadList();loadConvo();},5000);
+</script></body></html>"""
 
 
 ADMIN_PERMISSIONS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
@@ -4047,7 +4508,7 @@ INVITE_DAYS = 14
 
 TEAM_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>""" + WORKSPACE_JS + """
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><script src="/js/support-widget.js" defer></script>""" + WORKSPACE_JS + """
 <link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Team</title>
 <style>""" + ACCOUNT_CSS + """
 table{width:100%;border-collapse:collapse;font-size:.88rem}
@@ -5768,7 +6229,7 @@ def api_billing_portal():
 
 REFERRALS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>""" + WORKSPACE_JS + """
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><script src="/js/support-widget.js" defer></script>""" + WORKSPACE_JS + """
 <link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Refer a creator</title>
 <style>""" + ACCOUNT_CSS + """
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:16px 0}
@@ -5812,7 +6273,7 @@ pay for it, credited automatically against your own next invoice.</p>
 
 REFERRALS_LOCKED_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>""" + WORKSPACE_JS + """
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><script src="/js/support-widget.js" defer></script>""" + WORKSPACE_JS + """
 <link rel="icon" href="/favicon.ico" sizes="any"><title>Refer a creator</title>
 <style>""" + ACCOUNT_CSS + """</style></head><body data-page="referrals"><div class="wrap"><div class="card">
 <h1>Refer a creator</h1>
