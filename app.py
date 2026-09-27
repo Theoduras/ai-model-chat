@@ -3328,7 +3328,7 @@ a.email{color:#a78bfa;text-decoration:none;font-weight:500}
 </style></head><body><div class="wrap wide" style="max-width:1100px">
 <div class="bar"><span>Admin · {{ users|length }} user{{ '' if users|length == 1 else 's' }}</span>
 <a href="/admin/trials">Trial links</a>
-<span>{% if super_admin %}<a href="/admin/permissions">Permissions</a> &nbsp; {% endif %}<a href="/admin/demos">Demo accounts</a> &nbsp; <a href="/dashboard">Dashboard</a> &nbsp; <a href="/logout">Sign out</a></span></div>
+<span>{% if super_admin %}<a href="/admin/permissions">Permissions</a> &nbsp; <a href="/admin/register-links">Register links</a> &nbsp; {% endif %}<a href="/admin/demos">Demo accounts</a> &nbsp; <a href="/dashboard">Dashboard</a> &nbsp; <a href="/logout">Sign out</a></span></div>
 <div class="card"><div class="scroll"><table>
 <tr><th>Email</th><th>Name</th><th>Role</th><th>Team</th><th>Plan</th><th>Status</th><th>Renews</th><th>Joined</th></tr>
 {% for u in users %}<tr>
@@ -6265,7 +6265,7 @@ def _count_trial_click(code):
 
 @app.route('/admin/register-links', methods=['GET', 'POST'])
 def admin_register_links():
-    blocked = _require_admin()
+    blocked = _require_super_admin()
     if blocked:
         return blocked
     from db import RegisterLink, list_register_links
