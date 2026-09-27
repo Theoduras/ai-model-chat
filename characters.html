@@ -463,7 +463,6 @@
           <span class="hint">Must be 18 or over. Every prompt states she is a fictional adult of this age.</span></div>
         <div class="field"><label>Explicitness level</label><div class="chips" id="level-chips"></div>
           <span class="hint">Sets which body photos are required.</span></div>
-        <div class="field"><label for="f-persona">Persona</label><select id="f-persona" onchange="linkPersona(this.value)"></select></div>
         <div class="field"><label for="f-notes">Notes (optional)</label><input id="f-notes" type="text" maxlength="400" oninput="markDirty()"></div>
       </section>
     </div>
@@ -923,7 +922,7 @@ function render() {
 const STAGES = [{key: 'face', label: 'Her face'}, {key: 'body', label: 'Her body'}, {key: 'ready', label: 'Ready'}];
 const STEPS = [
   {key: 'basics', stage: 'face', nav: 'About her', title: 'Who is she?',
-   sub: 'Give her a name, her age and how explicit her photos may be, and choose the persona she belongs to. Name, age and level go into every prompt.'},
+   sub: 'Give her a name, her age and how explicit her photos may be. You link her to a persona at the end. Name, age and level go into every prompt.'},
   {key: 'describe', stage: 'face', nav: 'Design her face', title: 'How should her face be made?',
    sub: 'Build it from the drawings, or blend 2 to 6 faces into a new one. Nothing else can be generated until her face is approved.'},
   {key: 'pick', stage: 'face', nav: 'Pick one', title: 'Pick her face',
@@ -955,7 +954,6 @@ function basicsWhy() {
   if (!name || name === 'Untitled draft') return 'Give her a name to continue.';
   if (!(+cur.age >= 18)) return 'Her age must be 18 or over.';
   if (!cur.nsfw_level) return 'Choose an explicitness level to continue.';
-  if (personas.length && !cur.persona) return 'Choose her persona to continue.';
   return '';
 }
 function stepDone(i) {
@@ -1308,16 +1306,13 @@ function renderBasics() {
   el('f-age').value = cur.age; el('f-notes').value = cur.notes || '';
   el('level-chips').innerHTML = cat.levels.map(l => `<button type="button" class="chip" aria-pressed="${cur.nsfw_level === l.key}"
     onclick="saveSheet({nsfw_level:'${l.key}'})">${l.label}</button>`).join('');
-  const sel = el('f-persona');
-  sel.innerHTML = `<option value="">Not linked — link later</option>` + personas.map(p =>
-    `<option value="${esc(p.slug)}" ${cur.persona === p.slug ? 'selected' : ''}>${esc(p.name || p.slug)}</option>`).join('');
 }
 async function linkPersona(slug) {
   try {
     if (cur.persona && slug) await api('/api/characters/' + cur.id + '/link', {body: {persona: ''}});
     await api('/api/characters/' + cur.id + '/link', {body: {persona: slug}});
     cur.persona = slug; renderFrame(); say(slug ? 'Linked to ' + slug + '.' : 'Unlinked.', 'ok');
-  } catch (e) { say(e.message, 'err'); renderBasics(); }
+  } catch (e) { say(e.message, 'err'); render(); }
 }
 
 // One generation at a time: a second press would start a second paid job.
