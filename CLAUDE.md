@@ -30,6 +30,7 @@ studio.html                     — Generation studio (admin-only while in testi
 characters.py                   — Character catalogue: views, features, level rules, prompts
 characters.html                 — Character builder (face, checks, body views; admin-only)
 js/character-visuals.js         — Option drawings for the character builder (SVG, parametric)
+js/support-widget.js            — Support bubble (AI assistant, team takeover), loaded by site-nav.js
 test_characters.py              — SFW/NSFW separation and validation tests
 imagegen.py                     — NSFW image/video generation (Runware, ModelsLab)
 credits.py                      — Token pricing, top-up packs, margin floor
@@ -103,6 +104,10 @@ requirements.txt                — Python deps: flask, google-genai, python-dot
 | `POST /api/characters/{id}/generate` | JSON | Generate options for one view |
 | `POST /api/characters/{id}/images/{img}/approve` | JSON | Make an image a view's approved photo; bumps the version |
 | `GET /api/personas/{slug}/character` | — | Linked character, and which views a `shot`/`scene` sends |
+| `GET/POST /api/support` | JSON | Support bubble: the caller's thread / send (AI answers while `mode` is `ai`) |
+| `POST /api/support/human` | — | Ask for a person; the assistant stops answering |
+| `GET /admin/support` | — | Admin support inbox; start a chat with any account |
+| `GET/POST /api/admin/support/{user_id}` | JSON | Read / write a thread as the team (`v:{visitor}` for a signed-out one) |
 
 ---
 
