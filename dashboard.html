@@ -1676,6 +1676,7 @@ function renderPersonaBrowser() {
         '<div class="pg-row-bar">' + progressBarHtml(pct, pcfg) + '</div>' +
         star +
         '<button type="button" class="btn btn-ghost pg-open" onclick="event.stopPropagation();loadPersona(\'' + slug + '\')">Open</button>' +
+        '<button type="button" class="btn btn-ghost btn-sm admin-only" onclick="event.stopPropagation();transferPersona(\'' + slug + '\')">Transfer</button>' +
         delBtn + '</div>';
     }
     return '<div class="pg-card" onclick="loadPersona(\'' + slug + '\')">' +
@@ -1686,6 +1687,7 @@ function renderPersonaBrowser() {
       '<div class="pg-card-foot">' +
         progressBarHtml(pct, pcfg) +
         '<button type="button" class="btn btn-primary pg-open" onclick="event.stopPropagation();loadPersona(\'' + slug + '\')">Open</button>' +
+        '<button type="button" class="btn btn-ghost btn-sm admin-only" onclick="event.stopPropagation();transferPersona(\'' + slug + '\')">Transfer</button>' +
       '</div></div>';
   }).join('');
 
@@ -1779,6 +1781,10 @@ function renderCharList() {
 function newModel() {
   openEmbedded('/characters?new=1', document.querySelector('[data-view="/characters"]'));
   saveView({ kind: 'embed', url: '/characters' });
+}
+
+function transferPersona(slug) {
+  adminTransfer('persona', slug, (personas[slug] || {}).name || slug, () => location.reload());
 }
 
 async function loadPersona(slug) {
@@ -2014,6 +2020,7 @@ function renderForm(slug, cfg) {
       <h2 style="font-size:1.1rem; font-weight:600;">${cfg.name || slug}</h2>
       <span style="font-size:0.75rem; color:var(--text-muted);">/${slug}</span>
       ${(personas[slug] || {}).owner ? `<span style="font-size:0.75rem; color:var(--text-muted);">· Owner: ${esc(personas[slug].owner)}</span>` : ''}
+      <button type="button" class="btn btn-ghost btn-sm admin-only" style="margin-left:auto;" onclick="transferPersona('${slug}')">Transfer</button>
     </div>
 
     <div class="form-section">
@@ -3809,5 +3816,6 @@ function placeTour() {
 init();
 </script>
 
+<script src="/js/admin-transfer.js"></script>
 </body>
 </html>

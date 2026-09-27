@@ -774,9 +774,13 @@ function say(text, kind) {
 }
 
 // ── List ────────────────────────────────────────────────────────────────────
+let isAdmin = false;
 async function loadList() {
   el('cards').innerHTML = skelGrid(4);
-  try { chars = (await api('/api/characters')).characters || []; }
+  try {
+    chars = (await api('/api/characters')).characters || [];
+    isAdmin = !!(await PageWizard.me()).isAdmin;
+  }
   catch (e) {
     el('cards').innerHTML = `<div class="pg-none"><div class="pg-none-t">Could not load your characters.</div>
       <button type="button" class="btn btn-secondary" onclick="loadList()">Try again</button></div>`;
@@ -835,6 +839,7 @@ function renderList() {
         <div class="pg-bar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100" aria-label="Approved photos"><i style="width:${pct}%;background:${progressColour(pct)};"></i></div>
         <span class="pg-pct" style="color:${progressColour(pct)};">${pct}%</span>
         <button type="button" class="btn btn-primary pg-open" onclick="event.stopPropagation();openCharacter('${c.id}')">Open</button>
+        ${isAdmin ? `<button type="button" class="btn btn-ghost btn-sm" onclick="event.stopPropagation();adminTransfer('character', '${c.id}', chars.find(x => x.id === '${c.id}').name, loadList)">Transfer</button>` : ''}
         ${c.owner && !c.can_delete ? '' : `<button type="button" class="btn btn-ghost btn-sm" onclick="event.stopPropagation();deleteCharacter('${c.id}')">Delete</button>`}
         <span class="ch-card-note">${status} · version ${c.version}</span>
       </div></div>`;
@@ -1990,5 +1995,6 @@ window.addEventListener('pagehide', saveChState);
     </div>
   </div>
 </div>
+<script src="/js/admin-transfer.js"></script>
 </body>
 </html>

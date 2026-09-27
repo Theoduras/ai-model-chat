@@ -31790,6 +31790,125 @@ def api_characters():
         s.close()
 
 
+@app.route('/api/admin/workspaces')
+def api_admin_workspaces():
+    me = _current_user()
+    if not (me or {}).get('is_admin'):
+        return jsonify({'ok': False, 'error': 'Not found'}), 404
+    from db import Workspace, User
+    s = _db_session()
+    try:
+        rows = (s.query(Workspace.id, Workspace.name, User.email)
+                .join(User, User.id == Workspace.owner_id).order_by(User.email).all())
+        return jsonify({'ok': True, 'workspaces': [
+            {'id': w, 'label': e + (' · ' + n if n and n != e else '')} for w, n, e in rows]})
+    finally:
+        s.close()
+
+
+@app.route('/api/admin/transfer', methods=['POST'])
+def api_admin_transfer():
+    """Move or copy a persona or character onto another account. A persona and
+    its character travel separately; a moved one keeps its link."""
+    me = _current_user()
+    if not (me or {}).get('is_admin'):
+        return jsonify({'ok': False, 'error': 'Not found'}), 404
+    body = request.get_json(silent=True) or {}
+    kind, item, mode = body.get('kind'), str(body.get('id') or ''), body.get('mode')
+    if kind not in ('persona', 'character') or mode not in ('move', 'copy'):
+        return jsonify({'ok': False, 'error': 'Bad request'}), 400
+    from db import Workspace
+    s = _db_session()
+    try:
+        ws = s.get(Workspace, str(body.get('workspace') or ''))
+        if not ws:
+            return jsonify({'ok': False, 'error': 'Unknown account'}), 404
+        if kind == 'persona':
+            return _transfer_persona(item, ws, mode)
+        return _transfer_character(s, item, ws, mode)
+    finally:
+        s.close()
+
+
+def _transfer_persona(slug, ws, mode):
+    if not re.match(r'^[a-z0-9_-]+$', slug):
+        return jsonify({'ok': False, 'error': 'Invalid slug'}), 400
+    saved = db_get_persona(slug)
+    if mode == 'move':
+        if not saved or _is_premade(slug):
+            return jsonify({'ok': False, 'error': 'An original cannot be moved; copy it instead.'}), 400
+        if _is_house_persona(slug):
+            return jsonify({'ok': False, 'error': 'This persona runs the public demo chat.'}), 400
+        db_save_persona(slug, saved.get('name'), saved['config'], saved.get('prompt') or '',
+                        owner_id=ws.id)
+        _prompt_cache.pop(slug, None)
+        return jsonify({'ok': True, 'slug': slug})
+    if saved:
+        config = dict(saved['config'])
+    else:
+        path = _persona_path(slug, '.config.json')
+        if not os.path.exists(path):
+            return jsonify({'ok': False, 'error': 'Unknown persona'}), 404
+        with open(path, 'r', encoding='utf-8') as f:
+            config = json.load(f)
+    config.pop('char_linked', None)
+    name = config.get('name') or slug
+    new = unique_copy_slug(name)
+    db_save_persona(new, name, config, build_system_prompt(config), owner_id=ws.id)
+    return jsonify({'ok': True, 'slug': new})
+
+
+def _transfer_character(s, char_id, ws, mode):
+    import uuid
+    from db import Character, CharacterImage, CharacterView, CharacterVersion
+    row = s.get(Character, char_id)
+    if not row:
+        return jsonify({'ok': False, 'error': 'Unknown character'}), 404
+    if mode == 'move':
+        row.workspace_id, row.owner_id = ws.id, ws.owner_id
+        s.commit()
+        return jsonify({'ok': True, 'id': row.id})
+    new = Character(workspace_id=ws.id, owner_id=ws.owner_id,
+                    key='char-' + uuid.uuid4().hex[:12], slug=unique_copy_slug(row.name),
+                    name=row.name, age=row.age, body_type=row.body_type,
+                    nsfw_level=row.nsfw_level, sheet_json=row.sheet_json, notes=row.notes,
+                    status=row.status, version=row.version, attested_at=row.attested_at)
+    s.add(new)
+    s.flush()
+    # The copy gets its own files: deleting either character deletes its images.
+    ids = {}
+    for img in _char_images(s, row.id):
+        path = ''
+        if img.gcs_path:
+            try:
+                path = storage.put(new.key, storage.get(img.gcs_path), img.mime,
+                                   prefix=img.gcs_path.split('/', 1)[0])
+            except Exception:
+                logging.exception('character copy: image %s', img.id)
+                continue
+        c = CharacterImage(character_id=new.id, view=img.view, role=img.role, source=img.source,
+                           rating=img.rating, gcs_path=path, mime=img.mime,
+                           checks_json=img.checks_json, outfit=img.outfit,
+                           expires_at=img.expires_at)
+        s.add(c)
+        s.flush()
+        ids[img.id] = c.id
+    for v in s.query(CharacterView).filter_by(character_id=row.id).all():
+        s.add(CharacterView(character_id=new.id, view_key=v.view_key,
+                            status='review' if v.status == 'generating' else v.status,
+                            mode=v.mode, crop_box_json=v.crop_box_json, strength=v.strength,
+                            result_image_id=ids.get(v.result_image_id), version=v.version,
+                            parent_versions_json=v.parent_versions_json))
+    for v in s.query(CharacterVersion).filter_by(character_id=row.id).all():
+        snap = v.snapshot_json or '{}'
+        for old, fresh in ids.items():
+            snap = snap.replace(old, fresh)
+        s.add(CharacterVersion(character_id=new.id, number=v.number, snapshot_json=snap))
+    _char_to_persona(new, ws.id, {'from_character': True})
+    s.commit()
+    return jsonify({'ok': True, 'id': new.id})
+
+
 @app.route('/api/characters/<char_id>/studio', methods=['POST'])
 def api_character_studio(char_id):
     """Give an unlinked character its own persona, so the studio, the vault and
