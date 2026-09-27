@@ -31855,7 +31855,41 @@ def _transfer_persona(slug, ws, mode):
     name = config.get('name') or slug
     new = unique_copy_slug(name)
     db_save_persona(new, name, config, build_system_prompt(config), owner_id=ws.id)
+    _copy_persona_media(slug, new)
     return jsonify({'ok': True, 'slug': new})
+
+
+def _copy_persona_media(src, dst):
+    """Copy the vault with its own files, so deleting either side's media
+    never deletes the other's."""
+    from db import PersonaMedia
+    s = _db_session()
+    try:
+        cols = [c.name for c in PersonaMedia.__table__.columns if c.name != 'id']
+        ids, copies = {}, []
+        for m in s.query(PersonaMedia).filter(PersonaMedia.slug == src).all():
+            vals = {c: getattr(m, c) for c in cols}
+            vals['slug'] = dst
+            try:
+                for k in ('gcs_path', 'poster_gcs_path'):
+                    if vals.get(k):
+                        vals[k] = storage.put(dst, storage.get(vals[k]), storage.mime_of(vals[k]),
+                                              prefix=vals[k].split('/', 1)[0])
+            except Exception:
+                logging.exception('persona copy: media %s', m.id)
+                continue
+            c = PersonaMedia(**vals)
+            s.add(c)
+            s.flush()
+            ids[m.id] = c.id
+            copies.append(c)
+        if 'parent_media' in cols:
+            for c in copies:
+                if c.parent_media:
+                    c.parent_media = ids.get(c.parent_media, '')
+        s.commit()
+    finally:
+        s.close()
 
 
 def _transfer_character(s, char_id, ws, mode):

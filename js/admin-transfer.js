@@ -12,7 +12,7 @@
     wrap.innerHTML = `<div style="background:var(--surface,#16161a);color:var(--text,#eee);border:1px solid var(--border,#333);border-radius:12px;padding:20px;width:100%;max-width:420px;">
       <h3 style="margin:0 0 12px;font-size:1rem;">Put ${esc(name)} on another account</h3>
       <select id="at-ws" style="width:100%;padding:8px;margin-bottom:12px;">${accounts.map(a => `<option value="${esc(a.id)}">${esc(a.label)}</option>`).join('')}</select>
-      <label style="display:block;margin-bottom:6px;"><input type="radio" name="at-mode" value="copy" checked> Copy &mdash; both accounts keep one</label>
+      <label style="display:block;margin-bottom:6px;"><input type="radio" name="at-mode" value="copy" checked> Copy &mdash; both accounts keep one${kind === 'persona' ? ', vault included' : ''}</label>
       <label style="display:block;margin-bottom:14px;"><input type="radio" name="at-mode" value="move"> Move &mdash; the current owner loses it</label>
       <div id="at-msg" style="font-size:.8rem;color:var(--err,#f66);min-height:1em;margin-bottom:8px;"></div>
       <div style="display:flex;gap:8px;justify-content:flex-end;">
