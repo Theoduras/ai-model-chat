@@ -81,11 +81,16 @@ RUNWARE_MODELS = {
     'krea-2-medium': os.getenv('RW_MODEL_KREA_2_MEDIUM', 'krea:krea@2-medium'),
 }
 
-# Krea takes its references nested under `inputs`, at most ten, and no side
-# over 2048 on a 16 px grid, so neither Seedream's floor nor its field applies.
+# Krea takes its references nested under `inputs`, at most ten, and only the
+# sizes below -- Runware's own `unsupportedDimensions` answer, one per shape at
+# about a megapixel. A shape missing here is one the picker must not offer.
 KREA_MODELS = ('krea-2-large', 'krea-2-medium')
-KREA_MAX_SIDE = 2048
 KREA_MAX_REFERENCES = 10
+KREA_PX = {
+    '1:1': (1024, 1024), '4:3': (1184, 896), '3:2': (1248, 832),
+    '16:9': (1376, 768), '21:9': (1568, 672), '4:5': (928, 1152),
+    '2:3': (832, 1248), '9:16': (768, 1376),
+}
 
 # Google's image models, whatever Runware calls them, refuse explicit content
 # at any safety level. They are safe-work rungs only, and an explicit shot is
@@ -348,8 +353,7 @@ MODEL_PX = {
     'seedream-5-pro':  {'2k': (1664, 2432), '4k': (3072, 4096)},
     'nano-banana-pro': {'2k': (1696, 2528), '4k': (3392, 5096)},
     'nano-banana-2':   {'2k': (1696, 2528), '4k': (3392, 5096)},
-    # 2048 is the ceiling, so the 4k rung is the same frame.
-    **{m: {'2k': (1360, 2048), '4k': (1360, 2048)} for m in KREA_MODELS},
+    **{m: {'2k': KREA_PX['2:3']} for m in KREA_MODELS},
 }
 RESOLUTION_PX = {
     '2k': (1664, 2432),
@@ -373,6 +377,13 @@ SEEDREAM_MIN_PX = 3686400
 MAX_IMAGE_SIDE = 4096
 
 
+def image_aspects_for(model_key):
+    """The frame shapes a model serves, in the picker's own order."""
+    if model_key in KREA_MODELS:
+        return [a for a in IMAGE_ASPECTS if a in KREA_PX]
+    return list(IMAGE_ASPECTS)
+
+
 def dimensions(model_key, resolution, aspect=None):
     """(width, height) for a still. The rung is a pixel budget and the aspect
     only reshapes it, so a 16:9 still costs what a 2:3 one does."""
@@ -382,11 +393,8 @@ def dimensions(model_key, resolution, aspect=None):
         return base
     if model_key in ('nano-banana-pro', 'nano-banana-2'):
         return GOOGLE_PX_2K[aspect]
-    rw, rh = (int(x) for x in aspect.split(':'))
     if model_key in KREA_MODELS:
-        if rw >= rh:
-            return KREA_MAX_SIDE, round(KREA_MAX_SIDE * rh / rw / 16) * 16
-        return round(KREA_MAX_SIDE * rw / rh / 16) * 16, KREA_MAX_SIDE
+        return KREA_PX.get(aspect) or base
     rw, rh = (int(x) for x in aspect.split(':'))
     budget = max(base[0] * base[1], SEEDREAM_MIN_PX)
     # The pair on the 64 grid closest to the shape that neither drops under

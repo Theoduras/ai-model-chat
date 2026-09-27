@@ -29563,6 +29563,12 @@ def _gen_spec(slug, body, user):
             model = imagegen.EXPLICIT_MODEL
         batch = max(1, min(8, int(body.get('batch') or 1)))
         aspect = (body.get('aspect') or '').strip()
+        # Checked on the model that will run, after any move above: a size it
+        # does not serve is refused by the provider after the tokens are held.
+        if resolution not in CR.image_resolutions_for(model) or (
+                aspect and aspect not in imagegen.image_aspects_for(model)):
+            raise imagegen.GenerationError(
+                f'{CR.MODEL_LABELS.get(model, model)} does not make that size.')
         spec.update({'shot': shot, 'model': model, 'resolution': resolution,
                      'aspect': aspect if aspect in imagegen.IMAGE_ASPECTS else '',
                      'batch': batch, 'outfit': body.get('outfit') or {}})

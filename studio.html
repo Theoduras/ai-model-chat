@@ -1105,6 +1105,8 @@ function renderModelChips() {
   if (!keys.includes(hidden.value)) {
     hidden.value = keys.includes(genPrices.defaults.model)
       ? genPrices.defaults.model : (keys[0] || '');
+    renderImageRes();
+    renderImageAspects();
   }
   const res = (el('gen-res') || {}).value || genPrices.defaults.resolution;
   box.innerHTML = keys.map(m => {
@@ -1123,6 +1125,8 @@ function renderModelChips() {
 
 function pickModel(key) {
   el('gen-model').value = key;
+  renderImageRes();
+  renderImageAspects();
   renderModelChips();
   loadReferences();
   genQuote();
@@ -1428,12 +1432,20 @@ function renderGenForm() {
   fillVocab('gen-expression', genExpressions);
   fillVocab('gen-quality', genQualities);
 
-  const res = el('gen-res');
-  if (res && !res.options.length) {
-    res.innerHTML = genPrices.resolutions.map(r =>
-      opt(r, `${GEN_RES_LABELS[r] || r} (${r})`, genPrices.defaults.resolution)).join('');
-  }
+  renderImageRes();
   genQuote();
+}
+
+// Only the rungs the picked model serves; the pick is kept where it still fits.
+function renderImageRes() {
+  const res = el('gen-res');
+  if (!res || !genPrices) return;
+  const m = (el('gen-model') || {}).value;
+  const list = ((genPrices.image_model_resolutions || {})[m]) || genPrices.resolutions;
+  const keep = list.includes(res.value) ? res.value
+    : (list.includes(genPrices.defaults.resolution) ? genPrices.defaults.resolution : list[0]);
+  res.innerHTML = list.map(r => opt(r, `${GEN_RES_LABELS[r] || r} (${r})`, keep)).join('');
+  res.value = keep;
 }
 
 // Frame shape. Hidden for a model that inherits the source's frame: a picker
@@ -1480,8 +1492,14 @@ function pickAspect(a) {
 
 // A still's frame has its own list and its own pick: stills and clips are
 // different shapes of work, and choosing one should not move the other.
+function imageAspectList() {
+  const m = (el('gen-model') || {}).value;
+  return ((genPrices && genPrices.image_model_aspects) || {})[m]
+    || (genPrices && genPrices.image_aspects) || [];
+}
+
 function currentImageAspect() {
-  const list = (genPrices && genPrices.image_aspects) || [];
+  const list = imageAspectList();
   if (!list.includes(genImageAspect)) {
     genImageAspect = (genPrices && genPrices.default_image_aspect) || list[0] || '';
   }
@@ -1493,7 +1511,7 @@ function renderImageAspects() {
   if (!box || !genPrices) return;
   el('gen-image-shape').style.display = genMake === 'image' ? '' : 'none';
   const chosen = currentImageAspect();
-  box.innerHTML = (genPrices.image_aspects || []).map(a =>
+  box.innerHTML = imageAspectList().map(a =>
     `<button type="button" class="gen-chip" aria-pressed="${a === chosen}"
        onclick="pickImageAspect('${a}')">${esc(a)}</button>`).join('');
 }
@@ -1612,7 +1630,9 @@ function showEngines() {
     return;
   }
   const e = (genExplicit() ? genEngines.nsfw : genEngines.sfw) || {};
-  const rows = [['Image', e.model, e.passes === 1 ? 'one pass' : '']];
+  const picked = el('gen-model').value;
+  const rows = [['Image', (genPrices && genPrices.labels[picked]) || e.model,
+                 e.passes === 1 ? 'one pass' : '']];
   if (genIdentity !== 'vault' && genCharacter && genCharacter.has_approved) {
     rows.push(['Her character', e.identity || 'reference images', 'approved views, same call']);
   }

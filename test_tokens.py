@@ -71,7 +71,7 @@ def test_quote_covers_everything():
     print('quote coverage')
     missing = []
     for model in CR.IMAGE_MODELS:
-        for res in CR.RESOLUTIONS:
+        for res in CR.image_resolutions_for(model):
             for addons in ((), ('audio',)):
                 try:
                     CR.quote({'kind': 'image', 'model': model, 'resolution': res,
@@ -124,8 +124,8 @@ def test_prices_track_cost():
     check('a premium still costs more, in single digits',
           CR.IMAGE_PRICES['nano-banana-pro'] == {'2k': 4, '4k': 7})
     check('Krea 2 is priced off its own bill',
-          CR.IMAGE_PRICES['krea-2-large'] == {'2k': 2, '4k': 2}
-          and CR.IMAGE_PRICES['krea-2-medium'] == {'2k': 1, '4k': 1})
+          CR.IMAGE_PRICES['krea-2-large'] == {'2k': 2}
+          and CR.IMAGE_PRICES['krea-2-medium'] == {'2k': 1})
     import imagegen as IG
     check('imagegen runs explicit on exactly the models credits offers for it',
           set(CR.models_for_rating('nsfw')) == set(IG.EXPLICIT_MODELS))

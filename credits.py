@@ -83,9 +83,10 @@ PROVIDER_COST_USD = {
     'seedream-5-pro':  {'2k': 0.04, '4k': 0.04},
     'nano-banana-2':   {'2k': 0.10255, '4k': 0.2051},
     'nano-banana-pro': {'2k': 0.138, '4k': 0.276},
-    # Runware's list price, flat per image; 4k runs at the 2048 ceiling.
-    'krea-2-large':    {'2k': 0.06, '4k': 0.06},
-    'krea-2-medium':   {'2k': 0.04, '4k': 0.04},
+    # Runware's list price, flat per image. One rung only: Krea takes a fixed
+    # ~1 MP size per shape, so a 4k still is not something it can make.
+    'krea-2-large':    {'2k': 0.06},
+    'krea-2-medium':   {'2k': 0.04},
 }
 
 VIDEO_COST_USD_PER_SECOND = {
@@ -287,6 +288,11 @@ VIDEO_MODEL_RATINGS = {
     # one place a swap job leaves the default provider.
     'ml-face-swap': ('sfw', 'nsfw'),
 }
+
+
+def image_resolutions_for(model):
+    """The rungs a still model is priced at, which are the rungs it serves."""
+    return [r for r in RESOLUTIONS if r in PROVIDER_COST_USD.get(model, {})]
 
 
 def models_for_rating(rating):
@@ -649,6 +655,11 @@ def price_table():
         # A still's frame is free for the same reason: the rung is the pixel
         # budget and the shape only reshapes it.
         'image_aspects': list(_IG.IMAGE_ASPECTS),
+        # What each model can actually be asked for, so the picker never offers
+        # a size the provider refuses after the tokens are reserved.
+        'image_model_aspects': {m: _IG.image_aspects_for(m) for m in IMAGE_MODELS},
+        'image_model_resolutions': {m: image_resolutions_for(m)
+                                    for m in IMAGE_MODELS},
         'default_image_aspect': _IG.DEFAULT_IMAGE_ASPECT,
         'audio_modes': list(AUDIO_MODES),
         'extend_modes': list(EXTEND_MODES),
