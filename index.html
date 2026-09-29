@@ -316,14 +316,12 @@ p.sub{font-size:17px;color:var(--text-soft);line-height:1.65;margin-bottom:36px;
 @media(max-width:900px){
   .pricing{padding:70px 24px 80px}
 }
-/* The nav overlays a panel that is 52% of the viewport, so below roughly
-   1320px the links reach the artwork. Give the bar its own backdrop there
-   instead of letting the buttons sit on the gradient. */
-@media(max-width:1320px){
-  .site-nav{background:var(--nav-bg);backdrop-filter:blur(18px) saturate(180%);
-    -webkit-backdrop-filter:blur(18px) saturate(180%);
-    box-shadow:0 14px 38px rgba(0,0,0,.18),0 1px 0 var(--hair)}
-}
+/* The nav's links reach the dark artwork panel at any width once site-nav.js
+   has added its own, and in light mode their dark text vanishes on it. The
+   bar always carries its own backdrop instead. */
+.site-nav{background:var(--nav-bg);backdrop-filter:blur(18px) saturate(180%);
+  -webkit-backdrop-filter:blur(18px) saturate(180%);
+  box-shadow:0 14px 38px rgba(0,0,0,.18),0 1px 0 var(--hair)}
 </style>
 </head>
 <body data-page="home">
