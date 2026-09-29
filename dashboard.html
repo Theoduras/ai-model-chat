@@ -2065,6 +2065,8 @@ function renderForm(slug, cfg) {
           </div>
           </div>
           <input type="hidden" id="f-avatar" value="${esc(cfg.avatar || '')}">
+          <input type="hidden" id="f-avatar-source" value="${esc(cfg.avatar_source || '')}">
+          <div id="avatar-source" class="avatar-actions" style="display:none;margin-top:8px;"></div>
           <span class="hint" style="margin-top:6px;">Uses the first photo below unless you upload one here.</span>
         </div>
         <div class="field">
@@ -2630,6 +2632,8 @@ function handleAvatarUpload(input) {
   const reader = new FileReader();
   reader.onload = e => {
     avatarFromPhoto = false;
+    const src = document.getElementById('f-avatar-source');
+    if (src) src.value = 'upload';
     setAvatar(e.target.result);
   };
   reader.readAsDataURL(file);
@@ -2668,6 +2672,7 @@ function collectConfig() {
     nsfw_enabled: document.getElementById('f-nsfw')?.checked || false,
     nsfw_level: v('f-nsfw-level'), conversion_triggers: v('f-triggers'),
     avatar: v('f-avatar'), avatar_from_photo: avatarFromPhoto, platforms: collectPlatforms(),
+    avatar_source: v('f-avatar-source'),
   };
 }
 
@@ -2767,13 +2772,40 @@ function setAvatar(dataUrl) {
   const prev  = document.getElementById('avatar-preview');
   if (!field || !prev) return;
   field.value = dataUrl;
-  prev.innerHTML = dataUrl
-    ? '<img loading="lazy" decoding="async" src="' + dataUrl + '" style="width:100%;height:100%;object-fit:cover;">'
+  renderAvatarSource();
+}
+
+// A linked character's approved face is the profile picture. With an upload
+// as well, the creator picks which one the persona shows.
+let charFaceUrl = '';
+
+function renderAvatarSource() {
+  const field = document.getElementById('f-avatar');
+  const prev = document.getElementById('avatar-preview');
+  const box = document.getElementById('avatar-source');
+  const src = document.getElementById('f-avatar-source');
+  if (!field || !prev || !box || !src) return;
+  const upload = field.value;
+  const useFace = charFaceUrl && !(upload && src.value === 'upload');
+  const shown = useFace ? charFaceUrl : upload;
+  prev.innerHTML = shown
+    ? '<img loading="lazy" decoding="async" src="' + shown + '" style="width:100%;height:100%;object-fit:cover;">'
     : '<span style="font-size:28px;color:var(--text-muted);">+</span>';
+  box.style.display = charFaceUrl && upload ? '' : 'none';
+  box.innerHTML = charFaceUrl && upload
+    ? '<button type="button" class="btn ' + (useFace ? 'btn-primary' : 'btn-ghost') + '" onclick="pickAvatarSource(\'character\')">Character face</button>' +
+      '<button type="button" class="btn ' + (useFace ? 'btn-ghost' : 'btn-primary') + '" onclick="pickAvatarSource(\'upload\')">Uploaded photo</button>'
+    : '';
+}
+
+function pickAvatarSource(which) {
+  document.getElementById('f-avatar-source').value = which;
+  renderAvatarSource();
 }
 
 
 async function loadCharacterSection(slug) {
+  charFaceUrl = '';
   const box = document.getElementById('character-box');
   if (!box) return;
   let c = null;
@@ -2782,6 +2814,8 @@ async function loadCharacterSection(slug) {
     if (!r.ok) { box.closest('.form-section').style.display = 'none'; return; }
     c = (await r.json()).character;
   } catch (e) { box.innerHTML = '<span class="hint">Could not load the character.</span>'; return; }
+  charFaceUrl = (c && c.face_url) || '';
+  renderAvatarSource();
   const esc = s => String(s ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
   if (!c) {
     box.innerHTML = `<div style="display:flex; flex-direction:column; gap:8px;">

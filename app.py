@@ -8881,7 +8881,29 @@ def _vault_photos(slug, nsfw):
 
 def _persona_has_photo(slug, config):
     return (bool(config.get('avatar')) or bool(db_get_images(slug))
-            or bool(_vault_photos(slug, nsfw=False)))
+            or bool(_vault_photos(slug, nsfw=False)) or bool(_character_face(slug)))
+
+
+def _character_face(slug):
+    """The linked character's approved front face, as (path, mime), or None."""
+    from db import Character, CharacterImage
+    try:
+        s = _db_session()
+    except Exception:
+        return None
+    try:
+        row = s.query(Character).filter(Character.slug == slug).first()
+        if not row:
+            return None
+        img = (s.query(CharacterImage)
+               .filter(CharacterImage.character_id == row.id, CharacterImage.view == 'face_front',
+                       CharacterImage.role == 'canonical')
+               .order_by(CharacterImage.created_at.desc()).first())
+        return (img.gcs_path, img.mime or 'image/jpeg') if img and img.gcs_path else None
+    except Exception:
+        return None
+    finally:
+        s.close()
 
 
 def _chat_nsfw_photo(slug):
@@ -10237,6 +10259,18 @@ def api_persona_avatar(slug):
             with open(config_path, 'r', encoding='utf-8') as f:
                 cfg = json.load(f)
     avatar = cfg.get('avatar', '')
+    # A linked character's face is her picture unless the creator, having both,
+    # picked her own upload.
+    uploaded = avatar.startswith('data:')
+    if not (uploaded and cfg.get('avatar_source') == 'upload'):
+        face = _character_face(slug)
+        if face:
+            try:
+                data = storage.get(face[0])
+            except Exception:
+                data = None
+            if data:
+                return Response(data, mimetype=face[1])
     # Fall back to the first gallery image so personas with photos get a profile pic.
     if not avatar or not avatar.startswith('data:'):
         imgs = db_get_images(slug)
