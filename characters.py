@@ -114,9 +114,6 @@ FEATURES = {
                                                            ('Wide', 'a wide, full bum set low on the hips'),
                                                            ('V-shaped', 'a V-shaped bum')]),
         'thighs': ('Thighs', 'body', _opts('thighs', 'Slim', 'Toned', 'Full')),
-        'tattoos': ('Tattoos', 'body', [('None', 'no tattoos'), ('Small, wrist', 'a small wrist tattoo'), ('Small, ankle', 'a small ankle tattoo'),
-                                        ('Hip', 'a hip tattoo'), ('Sleeve', 'a full arm sleeve tattoo'), ('Back piece', 'a large back tattoo')]),
-        'piercings': ('Piercings', 'body', [('None', 'no piercings'), ('Ears', 'pierced ears'), ('Nose', 'a nose piercing'), ('Navel', 'a navel piercing')]),
         'birthmarks': ('Birthmarks', 'body', [('None', ''), ('Shoulder', 'a small birthmark on the shoulder'), ('Hip', 'a small birthmark on the hip')]),
         'nails': ('Nails', 'body', _opts('nails', 'Short, nude', 'Medium, painted', 'Long, painted', 'French tips')),
         # Topless
@@ -188,11 +185,11 @@ VARIATIONS = BATCH_CHOICES
 # picks, so clicking one visibly changes the sheet. Face picks and colours are
 # left alone. No preset uses a youth-leaning option, so none can push a face
 # pick over the limit.
-def _preset(height, build, shape, shoulders, waist, hips, bust, glutes, thighs, tattoos, piercings, birthmarks, nails,
+def _preset(height, build, shape, shoulders, waist, hips, bust, glutes, thighs, birthmarks, nails,
             cup, breast_shape, spacing, augmented, perkiness, areola, nipple, nipple_shape, pubic, density):
     return {'height': height, 'build': build, 'body_shape': shape, 'shoulders': shoulders, 'waist': waist,
-            'hips': hips, 'bust': bust, 'glute_shape': glutes, 'thighs': thighs, 'tattoos': tattoos,
-            'piercings': piercings, 'birthmarks': birthmarks, 'nails': nails,
+            'hips': hips, 'bust': bust, 'glute_shape': glutes, 'thighs': thighs,
+            'birthmarks': birthmarks, 'nails': nails,
             'cup': cup, 'breast_shape': breast_shape, 'spacing': spacing, 'augmented': augmented,
             'perkiness': perkiness, 'areola_size': areola, 'nipple_size': nipple, 'nipple_shape': nipple_shape,
             'nipple_piercing': 'None', 'pubic_style': pubic, 'pubic_density': density}
@@ -203,39 +200,39 @@ PRESET_GROUPS = ('body', 'breasts', 'nipples', 'pubic')
 BODY_PRESETS = {
     'natural': ('Natural', 'Average height and build',
                 _preset('165–175 cm', 'Average', 'Rectangle', 'Medium', 'Straight', 'Medium', 'Medium',
-                        'Round', 'Toned', 'None', 'Ears', 'None', 'Short, nude',
+                        'Round', 'Toned', 'None', 'Short, nude',
                         'B', 'Round', 'Average', 'Natural', 'Natural', 'Medium', 'Medium', 'Protruding', 'Trimmed', 'Medium')),
     'petite_athletic': ('Petite athletic', 'Compact, toned',
                         _preset('155–165 cm', 'Athletic', 'Rectangle', 'Medium', 'Defined', 'Medium', 'Medium',
-                                'Bubble', 'Toned', 'Small, ankle', 'Ears', 'None', 'Short, nude',
+                                'Bubble', 'Toned', 'None', 'Short, nude',
                                 'B', 'Athletic', 'Average', 'Natural', 'Natural', 'Small', 'Medium', 'Protruding', 'Landing strip', 'Medium')),
     'curvy': ('Curvy', 'Full hips and thighs',
               _preset('155–165 cm', 'Curvy', 'Pear', 'Medium', 'Defined', 'Wide', 'Large',
-                      'Wide', 'Full', 'Hip', 'Navel', 'None', 'Long, painted',
+                      'Wide', 'Full', 'None', 'Long, painted',
                       'D', 'Round', 'Average', 'Natural', 'Natural', 'Medium', 'Medium', 'Protruding', 'Trimmed', 'Medium')),
     'hourglass': ('Hourglass', 'Defined waist, balanced curves',
                   _preset('165–175 cm', 'Curvy', 'Hourglass', 'Medium', 'Defined', 'Wide', 'Large',
-                          'Heart-shaped', 'Full', 'None', 'Ears', 'None', 'French tips',
+                          'Heart-shaped', 'Full', 'None', 'French tips',
                           'D', 'Teardrop', 'Average', 'Natural', 'Natural', 'Medium', 'Medium', 'Protruding', 'Triangle', 'Medium')),
     'athletic_tall': ('Athletic tall', 'Strong frame, sporty',
                       _preset('Over 175 cm', 'Athletic', 'Inverted triangle', 'Broad', 'Defined', 'Medium', 'Medium',
-                              'Bubble', 'Toned', 'Small, wrist', 'Ears', 'None', 'Short, nude',
+                              'Bubble', 'Toned', 'None', 'Short, nude',
                               'B', 'Athletic', 'Wide', 'Natural', 'Natural', 'Small', 'Medium', 'Flat', 'Landing strip', 'Medium')),
     'voluptuous': ('Voluptuous', 'Very full bust, hips and bum',
                    _preset('165–175 cm', 'Voluptuous', 'Hourglass', 'Medium', 'Defined', 'Wide', 'Very large',
-                           'Bubble', 'Full', 'Hip', 'Navel', 'None', 'Long, painted',
+                           'Bubble', 'Full', 'None', 'Long, painted',
                            'E+', 'Round', 'Close', 'Natural', 'Soft', 'Large', 'Large', 'Puffy', 'Trimmed', 'Medium')),
     'fitness': ('Fitness', 'Muscular, strong, sculpted',
                 _preset('165–175 cm', 'Muscular', 'Inverted triangle', 'Broad', 'Defined', 'Medium', 'Medium',
-                        'Bubble', 'Toned', 'Sleeve', 'Navel', 'None', 'Short, nude',
+                        'Bubble', 'Toned', 'None', 'Short, nude',
                         'C', 'Athletic', 'Average', 'Natural', 'Natural', 'Small', 'Medium', 'Protruding', 'Landing strip', 'Medium')),
     'pear': ('Pear / thick bottom', 'Slimmer top, big hips and bum',
              _preset('155–165 cm', 'Curvy', 'Pear', 'Medium', 'Defined', 'Wide', 'Medium',
-                     'Wide', 'Full', 'Small, ankle', 'Ears', 'None', 'French tips',
+                     'Wide', 'Full', 'None', 'French tips',
                      'C', 'Teardrop', 'Average', 'Natural', 'Natural', 'Medium', 'Medium', 'Protruding', 'Natural', 'Medium')),
     'glamour': ('Glamour', 'Tall, enhanced bust, defined waist',
                 _preset('165–175 cm', 'Curvy', 'Hourglass', 'Medium', 'Defined', 'Medium', 'Very large',
-                        'Round', 'Toned', 'None', 'Navel', 'None', 'Long, painted',
+                        'Round', 'Toned', 'None', 'Long, painted',
                         'DD', 'Round', 'Close', 'Augmented', 'Natural', 'Medium', 'Medium', 'Protruding', 'Landing strip', 'Medium')),
     'scratch': ('Start from scratch', 'Clear every body pick', {}),
 }
@@ -282,11 +279,11 @@ VIEWS = {
              framing=('a full-body side view, standing perfectly straight and upright, head level, feet together, '
                       'wearing {outfit}'), uses=('body',)),
         dict(key='hands', label='Hands', group='body', rating='sfw', required_from=None, parents=('body_front',), tier=1, mode='reference',
-             zoom=True, body=('nails', 'tattoos'),
+             zoom=True, body=('nails',),
              framing=('a tight close-up of only her two hands, resting open palms down side by side on a plain surface, '
                       'fingers and nails in sharp focus, wrists at the frame edge'), uses=('body',)),
         dict(key='feet', label='Feet', group='body', rating='sfw', required_from=None, parents=('body_front',), tier=1, mode='reference',
-             zoom=True, body=('tattoos',),
+             zoom=True, body=(),
              framing=('a tight close-up of only her two bare feet standing side by side on a plain floor, '
                       'toes and nails in sharp focus, ankles at the top edge of the frame'), uses=('body',)),
         dict(key='breasts', label='Breasts (topless, front)', group='nsfw', rating='moderate', required_from='moderate',
@@ -310,7 +307,7 @@ VIEWS = {
              topless=('Topless from behind (standing)', 'a full-body topless photo from behind wearing only plain panties, standing straight')),
         dict(key='pubic', label='Pubic area (front, standing)', group='nsfw', rating='explicit', required_from='explicit',
              parents=('nude_front',), tier=2, mode='crop', region='pelvis', zoom=True,
-             body=('hips', 'thighs', 'tattoos', 'birthmarks'),
+             body=('hips', 'thighs', 'birthmarks'),
              framing=('a close-up of her nude pubic area from the front while standing, framed from just below the '
                       'navel to the top of the thighs, pubic mound centred and in sharp focus'),
              uses=('pubic',)),
@@ -668,7 +665,7 @@ def hair_words(hexcode):
 BLEND_KEEP = ('ethnicity', 'apparent_age', 'hair_colour', 'hair_texture', 'makeup')
 DEFAULT_MAKEUP = 'Natural glam'
 FACE_MODES = ('build', 'blend')
-BODY_MATCH_KEEP = ('height', 'tattoos', 'piercings', 'birthmarks', 'nails')
+BODY_MATCH_KEEP = ('height', 'birthmarks', 'nails')
 BODY_MODES = ('build', 'match')
 
 
