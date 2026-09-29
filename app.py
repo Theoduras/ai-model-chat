@@ -31647,7 +31647,10 @@ def _character_view_refs(char_id, view_key, outfit_image=None, look=None):
         picked += _char_images(s, char_id, view=view_key, role='reference')
         if v.get('group') == 'face' and view_key != 'face_front':
             picked += _char_images(s, char_id, view='face_front', role='reference')
-        picked += _char_images(s, char_id, view='', role='reference')
+        if not (v.get('zoom') and 'face' not in v.get('uses', ())):
+            # General uploads are mostly her face; a body close-up that gets
+            # one draws that face into the frame.
+            picked += _char_images(s, char_id, view='', role='reference')
         urls = [u for u in (_char_ref_url(i) for i in picked) if u]
         crop = _CHAR_CROPS.pop(char_id + ':' + view_key, None)
         if crop:

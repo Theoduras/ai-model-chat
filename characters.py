@@ -761,8 +761,14 @@ def build_view_prompt(key, sheet, age, has_reference, body_type='female',
                 else 'the same skin and build, loosely' if v.get('zoom')
                 else 'identical face and body' if strength >= 0.5
                 else 'the same face and build, loosely')
-        lead = ('photorealistic photo of the exact same woman as the reference images, '
-                + hold + ', now as ' + v['framing'] + '.')
+        if v.get('zoom') and 'face' not in v['uses']:
+            # "The same woman" makes the model copy the face it sees in the
+            # full-body reference into the close-up; only her skin carries over.
+            lead = ('photorealistic close-up taking only the skin tone and body of the woman in the '
+                    'reference images, ' + hold + ', now as ' + v['framing'] + '.')
+        else:
+            lead = ('photorealistic photo of the exact same woman as the reference images, '
+                    + hold + ', now as ' + v['framing'] + '.')
     else:
         lead = f"photorealistic photo of a woman, {v['framing']}."
     body = f' Her features: {detail}.' if detail else ''
@@ -770,7 +776,8 @@ def build_view_prompt(key, sheet, age, has_reference, body_type='female',
     if text:
         body += ' ' + text
     zoom = (' Zoomed in: the subject fills the whole frame; no face, no full body, nothing '
-            'beyond the subject in shot.') if v.get('zoom') else ''
+            'beyond the subject in shot.' + ('' if 'face' in v['uses'] else
+            ' Her face, head and hair are not in the picture at all.')) if v.get('zoom') else ''
     return (lead + zoom + body + ' ' + STUDIO + ' ' + adult_clause(age)).strip()
 
 
