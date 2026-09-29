@@ -413,6 +413,9 @@
     .ch-confirm { display: flex; }
     .ch-confirm .modal-body { font-size: 0.88rem; color: var(--text-2); line-height: 1.55; }
     .ch-confirm .modal-footer { margin: 0; padding: 0 22px 20px; }
+    #ch-import .modal-body { max-height: 70vh; overflow-y: auto; }
+    #ch-import label.field { display: flex; flex-direction: column; gap: 4px; font-size: 0.82rem; color: var(--text-2); }
+    #ch-import label.field input, #ch-import label.field select { width: 100%; }
 
     @media (max-width: 900px) {
       .ch-list-wrap { padding: 16px 16px 56px; }
@@ -461,6 +464,7 @@
       <div class="pg-head-l">
         <h2>Your characters</h2>
         <button type="button" class="btn btn-primary" onclick="newCharacter()">+ New character</button>
+        <button type="button" class="btn btn-ghost" onclick="openImport()">I already have her</button>
       </div>
       <div class="pg-toggle" id="filters" role="group" aria-label="Filter characters"></div>
     </div>
@@ -705,6 +709,30 @@
   </div>
 </div>
 
+<div class="modal-overlay ch-confirm" id="ch-import" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="ch-import-t" style="max-width:480px;">
+    <div class="modal-header"><h2 id="ch-import-t">Add your own character</h2></div>
+    <div class="modal-body" style="display:flex;flex-direction:column;gap:12px;">
+      <span>Already have her photos? They become her approved look, so nothing needs generating.</span>
+      <label class="field">Name<input type="text" id="imp-name" maxlength="120" placeholder="Her name"></label>
+      <div style="display:flex;gap:10px;">
+        <label class="field" style="flex:1;">Age<input type="number" id="imp-age" min="18" max="80" value="24"></label>
+        <label class="field" style="flex:1;">Level<select id="imp-level" onchange="impViews()">
+          <option value="sfw">SFW</option><option value="moderate">Topless</option><option value="explicit">Explicit</option></select></label>
+      </div>
+      <label class="field">Her face, front <b>(required)</b><input type="file" id="imp-face_front" accept="image/jpeg,image/png,image/webp"></label>
+      <label class="field">Full body, front (optional)<input type="file" id="imp-body_front" accept="image/jpeg,image/png,image/webp"></label>
+      <details><summary>More views (optional)</summary><div id="imp-more" style="display:flex;flex-direction:column;gap:8px;margin-top:8px;"></div></details>
+      <label class="attest"><input type="checkbox" id="imp-attest">I have the rights to these images, and everyone shown is 18+ and agreed to their likeness being used.</label>
+      <span class="hint" id="imp-msg"></span>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-ghost" onclick="el('ch-import').hidden = true">Cancel</button>
+      <button type="button" class="btn btn-primary" id="imp-go" onclick="runImport()">Add her</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const el = id => document.getElementById(id);
 let lbUrls = []; let lbIdx = 0; let vpOptUrls = [];
@@ -816,6 +844,7 @@ const EMPTY_LIST = `<div class="empty-state"><div class="es-card">
     <li><span class="es-num">3</span><div><strong>Ready</strong><span>Accept her and link her to a persona.</span></div></li>
   </ol>
   <button type="button" class="btn btn-primary es-cta" onclick="newCharacter()">+ New character</button>
+  <button type="button" class="btn btn-ghost es-cta" onclick="openImport()">I already have her</button>
   <p class="es-foot">We walk you through it one step at a time. Each photo shows its token price first.</p>
 </div></div>`;
 const LIST_INTRO = 'The fixed look of each model. A linked character drives every photo made for her persona.';
@@ -876,6 +905,60 @@ async function deleteCharacter(id) {
   dirty = false;
   showList();
 }
+// Her own photos go up as each view's candidate and are approved at once, in
+// view-tree order, so the face and full body pass the same adult check a
+// generated one does.
+let impCat = null;
+async function impViews() {
+  impCat = await api('/api/characters/catalogue?level=' + el('imp-level').value).catch(() => null);
+  const views = ((impCat || {}).views || []).filter(v => !['face_front', 'body_front'].includes(v.key));
+  el('imp-more').innerHTML = views.map(v => `<label class="field">${esc(v.label)}
+    <input type="file" data-view="${esc(v.key)}" accept="image/jpeg,image/png,image/webp"></label>`).join('');
+}
+function openImport() {
+  el('imp-msg').textContent = '';
+  el('ch-import').hidden = false;
+  impViews();
+}
+async function runImport() {
+  const msg = t => { el('imp-msg').textContent = t; };
+  const face = el('imp-face_front').files[0];
+  if (!face) return msg('Add her face photo — it is required.');
+  if (!el('imp-attest').checked) return msg('Tick the rights and consent box first.');
+  const picks = [['face_front', face]];
+  if (el('imp-body_front').files[0]) picks.push(['body_front', el('imp-body_front').files[0]]);
+  const order = ((impCat || {}).views || []).map(v => v.key);
+  [...el('imp-more').querySelectorAll('input[type=file]')]
+    .filter(i => i.files[0]).sort((a, b) => order.indexOf(a.dataset.view) - order.indexOf(b.dataset.view))
+    .forEach(i => picks.push([i.dataset.view, i.files[0]]));
+  el('imp-go').disabled = true;
+  let id = '';
+  const skipped = [];
+  try {
+    msg('Creating her…');
+    const d = await api('/api/characters', {body: {name: el('imp-name').value.trim() || 'My character',
+      age: parseInt(el('imp-age').value) || 24, nsfw_level: el('imp-level').value}});
+    id = d.character.id;
+    for (const [view, file] of picks) {
+      msg('Checking ' + view.replace(/_/g, ' ') + '…');
+      const data = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); });
+      try {
+        const up = await api(`/api/characters/${id}/images`, {body: {view, image: data, attest: true, import: true}});
+        await api(`/api/characters/${id}/images/${up.image.id}/approve`, {body: {}});
+      } catch (e) {
+        if (view === 'face_front') throw e;
+        skipped.push(view.replace(/_/g, ' ') + ': ' + e.message);
+      }
+    }
+    el('ch-import').hidden = true;
+    await openCharacter(id);
+    say(skipped.length ? 'Added. Not approved — ' + skipped.join('; ') : 'Added with her own photos approved.',
+        skipped.length ? 'err' : 'ok');
+  } catch (e) {
+    msg(e.message + (id ? ' The draft was kept — open it to try again.' : ''));
+  } finally { el('imp-go').disabled = false; }
+}
+
 async function newCharacter(persona) {
   try {
     const d = await api('/api/characters', {body: persona ? {persona} : {}});

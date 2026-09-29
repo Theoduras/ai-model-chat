@@ -32287,6 +32287,9 @@ def api_character_upload(char_id):
     # A crop is cut from the character's own approved parent, so there is no
     # third party's likeness to attest for.
     as_crop = body.get('crop_as') in ('candidate', 'reference')
+    # An imported photo is her existing look: it goes up as the view's
+    # candidate, and approving it runs the same adult check as any other.
+    imported = body.get('import') is True and not as_crop
     if not as_crop and body.get('attest') is not True:
         return jsonify({'ok': False, 'error': 'Confirm you have the rights to these '
                         'images and that anyone shown is 18+ and agreed.'}), 400
@@ -32314,16 +32317,17 @@ def api_character_upload(char_id):
         v = CH.view(view_key, row.body_type) if view_key else None
         if view_key and (not v or v not in CH.views_for_level(row.nsfw_level, row.body_type)):
             return jsonify({'ok': False, 'error': 'That view is not available at this level.'}), 400
-        if as_crop and not v:
+        if (as_crop or imported) and not v:
             return jsonify({'ok': False, 'error': 'A crop belongs to a view.'}), 400
-        role = body['crop_as'] if as_crop else 'reference'
+        role = body['crop_as'] if as_crop else 'candidate' if imported else 'reference'
         if body.get('role') == 'outfit' and not as_crop:
             # An outfit photo only ever dresses a full-body view; it is never
             # a reference for her face or body, nor for content.
             role, view_key, v = 'outfit', '', None
         path = storage.put(row.key, data, mime, prefix=storage.KEPT_PREFIX)
         img = CharacterImage(character_id=row.id, view=view_key, role=role,
-                             source='crop' if as_crop else 'upload', rating=(v or {}).get('rating', 'sfw'),
+                             source='crop' if as_crop else 'import' if imported else 'upload',
+                             rating=(v or {}).get('rating', 'sfw'),
                              gcs_path=path, mime=mime)
         s.add(img)
         if role == 'candidate':
@@ -32612,7 +32616,7 @@ def api_character_approve(char_id, img_id):
         v = CH.view(img.view, row.body_type)
         if not v or v not in CH.views_for_level(row.nsfw_level, row.body_type):
             return jsonify({'ok': False, 'error': 'That view is not available at this level.'}), 400
-        if v['group'] == 'face' and img.source == 'upload':
+        if v['group'] == 'face' and img.source == 'upload':  # an 'import' is her real face
             return jsonify({'ok': False, 'error': 'Face uploads are references. Generate the face from them.'}), 400
         canon = _char_canonicals(s, row.id)
         rows, state = _char_views_state(s, row)
@@ -32635,7 +32639,7 @@ def api_character_approve(char_id, img_id):
             if checks.get('age') != 'adult':
                 return jsonify({'ok': False, 'error': 'The adult-appearance check did '
                                 'not pass for this photo. Regenerate it.'}), 409
-        if img.view == 'face_front':
+        if img.view == 'face_front' and img.source != 'import':
             ticked = set(body.get('confirmed') or ())
             sheet = _char_json_sheet(row)
             unticked = [CH.features(row.body_type)[k][0] for k in CH.FACE_CHECKS
