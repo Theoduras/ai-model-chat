@@ -87,6 +87,10 @@
     .ch-sub-h { font-size: 0.84rem; font-weight: 600; color: var(--text-2); margin: 4px 0 -8px; }
     .ch-quote { text-align: center; margin-top: -6px; }
     .ch-gen .btn, .ch-block-btn { width: 100%; }
+    .ch-gen { position: sticky; top: 16px; }
+    @media (max-width: 1100px) { .ch-gen { position: static; } }
+    @keyframes gen-blink { 0%, 100% { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-line); } 50% { border-color: transparent; box-shadow: none; } }
+    .ch-gen.gen-blink { border: 2px solid var(--accent); animation: gen-blink .6s ease-in-out 5; }
     .ch-inline { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
     .ch-inline > span { font-size: 0.84rem; font-weight: 600; color: var(--text-2); }
 
@@ -233,11 +237,11 @@
     .ch-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 
     /* Body step and the view tree. */
-    .ch-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: start; }
+    .ch-body { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 20px; align-items: start; }
     .ch-body #body-profile { max-width: 960px; }
     .ch-body > .drawer { display: none; }
     .ch-body > .ch-main { grid-column: 1; }
-    .ch-body > .ch-side { grid-column: 2; }
+    .ch-body > .ch-side { grid-column: 2; grid-row: 1; align-self: stretch; }
     .ch-main { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
     @media (max-width: 1100px) {
       .ch-body { grid-template-columns: minmax(0, 1fr); }
@@ -652,12 +656,17 @@
         <div class="views-toolbar" id="views-head">
           <div class="chips" id="view-filter"></div>
           <span class="hint" id="body-summary"></span>
-          <span class="grow"></span>
-          <button type="button" class="btn btn-ghost btn-sm" id="regen-branch" onclick="regenerateBranch()">Regenerate outdated</button>
-          <button type="button" class="btn btn-primary btn-sm" id="gen-remaining" onclick="generateRemaining()">Generate remaining</button>
         </div>
         <div id="tiers"></div>
       </div>
+      <aside class="ch-side">
+        <section class="form-section ch-gen">
+          <div class="section-title">Generate</div>
+          <span class="hint" id="gen-left"></span>
+          <button type="button" class="btn btn-primary" id="gen-remaining" onclick="generateRemaining()">Generate remaining</button>
+          <button type="button" class="btn btn-ghost" id="regen-branch" onclick="regenerateBranch()">Regenerate outdated</button>
+        </section>
+      </aside>
     </div>
     <div class="drawer-scrim" id="drawer-scrim" hidden onclick="closeDrawer()"></div>
 
@@ -1126,6 +1135,17 @@ function nudge(node, stay) {
   if (!stay) node.scrollIntoView({block: 'center', behavior: 'smooth'});
   setTimeout(() => node.classList.remove('nudge'), 3400);
 }
+// The visible step's Generate card blinks, then keeps its border a moment.
+function blinkGen() {
+  const card = [...document.querySelectorAll('.ch-gen')].find(n => n.offsetParent);
+  if (!card) return;
+  card.classList.remove('gen-blink');
+  void card.offsetWidth;
+  card.classList.add('gen-blink');
+  card.scrollIntoView({block: 'nearest', behavior: 'smooth'});
+  clearTimeout(blinkGen.t);
+  blinkGen.t = setTimeout(() => card.classList.remove('gen-blink'), 7000);
+}
 function goStep(i) { go(STEPS[i].key); }
 function stepBack() { const i = stepIdx(); if (i > 0) go(STEPS[i - 1].key); }
 async function stepNext() {
@@ -1133,11 +1153,12 @@ async function stepNext() {
   if (stepWhy(i) && nudgeTarget(i)) {
     if (STEPS[i].key === 'describe') {
       if (dirty && !(await saveSheet())) return;
-      nudge(document.querySelector('.ch-gen'));
-      nudge(el('gen-face'));
+      blinkGen();
       return say('Saved. Now generate her face options \u2192', 'ok');
     }
-    nudge(nudgeTarget(i));
+    // Nothing waiting for approval means her photos still need generating.
+    if (STEPS[i].key === 'views' && !(el('vp-approve') && !el('vp-approve').hidden)) blinkGen();
+    else nudge(nudgeTarget(i));
     return say(stepWhy(i), 'err');
   }
   if (stepWhy(i)) return;
@@ -1638,6 +1659,7 @@ function renderBody() {
   }).join('') || '<p class="hint">No views in this filter.</p>';
   const todo = shown.filter(v => ['not_started', 'outdated'].includes(vs(v.key).display));
   el('gen-remaining').disabled = !todo.length;
+  el('gen-left').textContent = todo.length ? `${todo.length} view${todo.length === 1 ? '' : 's'} left` : 'Every view is generated.';
   el('regen-branch').hidden = !shown.some(v => vs(v.key).display === 'outdated');
   const match = bodyMode() === 'match', bodyRefs = images('body_front', 'reference');
   document.querySelectorAll('[data-body-mode]').forEach(b => b.setAttribute('aria-pressed', b.dataset.bodyMode === bodyMode()));
