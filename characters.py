@@ -137,8 +137,12 @@ FEATURES = {
         'nipple_size': ('Nipple size', 'nipples', _opts('nipples', 'Small', 'Medium', 'Large')),
         'nipple_shape': ('Nipple shape', 'nipples', _opts('nipples', 'Flat', 'Puffy', 'Protruding', 'Inverted')),
         # Explicit
-        'pubic_style': ('Pubic hair style', 'pubic', [('Trimmed', 'trimmed pubic hair'), ('Landing strip', 'a landing strip'),
-                                                     ('Triangle', 'a neat triangle of pubic hair'), ('Natural', 'natural full pubic hair'),
+        'pubic_style': ('Pubic hair style', 'pubic', [
+            ('Trimmed', 'short, neatly trimmed pubic hair covering the mound'),
+            ('Landing strip', 'a landing strip — one narrow vertical strip of pubic hair about two fingers wide, running '
+                              'straight up from the top of the vulva; everything else cleanly shaved and bare'),
+            ('Triangle', 'a neat trimmed triangle of pubic hair on the mound; the rest shaved'),
+            ('Natural', 'natural full pubic hair'),
                                                      ('Shaved', 'shaved pubic area')]),
         'pubic_colour': ('Pubic hair colour', 'pubic', _opts('pubic hair', 'Matches hair', 'Dark', 'Light')),
         'pubic_density': ('Density', 'pubic', _opts('', 'Sparse', 'Medium', 'Dense')),
@@ -621,10 +625,20 @@ def _fragments(sheet, groups, body_type='female'):
         if k == 'pubic_colour' and val == 'Matches hair':
             frag = 'pubic hair matching her hair colour'
         if k == 'pubic_density' and frag:
-            frag = f'{frag} pubic hair'
+            # Density describes the style's hair; alone, "sparse pubic hair"
+            # outweighs a landing strip and reads as shaved.
+            style = (sheet or {}).get('pubic_style')
+            if style == 'Shaved':
+                continue
+            frag = (PUBIC_DENSITY_WORDS.get(val, frag) + (' in the strip' if style == 'Landing strip' else '')
+                    if style else f'{frag} pubic hair')
         if frag:
             out.append(frag)
     return out
+
+
+PUBIC_DENSITY_WORDS = {'Sparse': 'the pubic hair is fine and thin', 'Medium': 'the pubic hair is of medium thickness',
+                       'Dense': 'the pubic hair is thick and full'}
 
 
 def allowed_groups(level):
@@ -735,7 +749,10 @@ def build_view_prompt(key, sheet, age, has_reference, body_type='female',
         kept['hair_colour_hex'] = sheet['hair_colour_hex']
     frags = _fragments(kept, groups, body_type)
     if 'face' not in v['uses'] and (sheet or {}).get('skin_tone'):
-        frags = _fragments({'skin_tone': sheet['skin_tone']}, ('face',), body_type) + frags
+        # Skin tone alone: the face group would also add default makeup,
+        # which pulls a face into a body close-up.
+        tone = dict(features(body_type)['skin_tone'][2]).get(sheet['skin_tone'])
+        frags = ([tone] if tone else []) + frags
     detail = ', '.join(frags)
     strength = STRENGTH[mode] if strength is None else strength
     if mode == 'crop':
@@ -744,6 +761,11 @@ def build_view_prompt(key, sheet, age, has_reference, body_type='female',
         touch = ('only sharpen detail and skin texture, change nothing else' if strength < 0.4
                  else 'refine detail, keeping pose, skin tone and lighting' if strength < 0.7
                  else 'redraw the detail freely, keeping the same body and lighting')
+        if 'pubic' in groups and (sheet or {}).get('pubic_style'):
+            # The crop's parent was often made before the style was picked, so
+            # copying it would copy the wrong hair.
+            touch = ('keep the pose, skin, lighting and proportions of that crop, but redraw her pubic '
+                     'hair exactly as described below')
         lead = ('photorealistic high-resolution close-up recreated from the first reference '
                 f'image, which is a crop of the same woman: {v["framing"]}. Same skin, lighting '
                 f'and proportions as that crop; {touch}.')
