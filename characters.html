@@ -87,8 +87,11 @@
     .ch-sub-h { font-size: 0.84rem; font-weight: 600; color: var(--text-2); margin: 4px 0 -8px; }
     .ch-quote { text-align: center; margin-top: -6px; }
     .ch-gen .btn, .ch-block-btn { width: 100%; }
-    .ch-gen { position: sticky; top: 16px; }
-    @media (max-width: 1100px) { .ch-gen { position: static; } }
+    .ch-describe > .ch-gen, .ch-body > .ch-side { position: sticky; top: 16px; z-index: 5; align-self: start; }
+    .ch-body > .ch-side .ch-gen { background: var(--panel); box-shadow: 0 10px 28px rgba(0,0,0,.28); }
+    .gen-list { margin: -4px 0 0; padding-left: 18px; font-size: 0.82rem; color: var(--text-2); display: flex; flex-direction: column; gap: 2px; }
+    .gen-list:empty { display: none; }
+    @media (max-width: 1100px) { .ch-describe > .ch-gen, .ch-body > .ch-side { position: static; } }
     @keyframes gen-blink { 0%, 100% { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-line); } 50% { border-color: transparent; box-shadow: none; } }
     .ch-gen.gen-blink { border: 2px solid var(--accent); animation: gen-blink .6s ease-in-out 5; }
     .ch-inline { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
@@ -248,7 +251,7 @@
     .ch-body #body-profile { max-width: 960px; }
     .ch-body > .drawer { display: none; }
     .ch-body > .ch-main { grid-column: 1; }
-    .ch-body > .ch-side { grid-column: 2; grid-row: 1; align-self: stretch; }
+    .ch-body > .ch-side { grid-column: 2; grid-row: 1; }
     .ch-main { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
     @media (max-width: 1100px) {
       .ch-body { grid-template-columns: minmax(0, 1fr); }
@@ -294,7 +297,7 @@
       }
       .views-mode .ch-body { grid-template-rows: auto 1fr; }
       .views-mode .ch-body > .ch-side { grid-column: 2; grid-row: 1; }
-      .views-mode .ch-body > .ch-main { grid-column: 2; grid-row: 1 / span 2; }
+      .views-mode .ch-body > .ch-main { grid-column: 2; grid-row: 2; }
       .views-mode .views { grid-template-columns: minmax(0, 1fr); }
       .views-mode .views-toolbar { flex-direction: column; align-items: stretch; }
       .views-mode .drawer .vp-close { display: none; }
@@ -669,8 +672,11 @@
       <aside class="ch-side">
         <section class="form-section ch-gen">
           <div class="section-title">Generate</div>
-          <span class="hint" id="gen-left"></span>
+          <div class="ch-inline"><span>Options per view</span><div class="chips" id="body-batch-chips"></div></div>
+          <p class="hint" id="gen-left"></p>
+          <ul class="gen-list" id="gen-list"></ul>
           <button type="button" class="btn btn-primary" id="gen-remaining" onclick="generateRemaining()">Generate remaining</button>
+          <span class="hint ch-quote" id="gen-total"></span>
           <button type="button" class="btn btn-ghost" id="regen-branch" onclick="regenerateBranch()">Regenerate outdated</button>
         </section>
       </aside>
@@ -842,7 +848,7 @@ async function api(url, opts) {
     headers: {'Content-Type': 'application/json'}}, opts, {body: JSON.stringify(opts.body)}) : opts);
   let data = {};
   try { data = await r.json(); } catch (e) {}
-  if (!r.ok || data.ok === false) throw Object.assign(new Error(data.error || ('Request failed (' + r.status + ')')), {status: r.status, plain: !data.error});
+  if (!r.ok || data.ok === false) throw Object.assign(new Error(data.error || ('Request failed (' + r.status + ')')), {status: r.status, plain: !data.error, data});
   return data;
 }
 // The status line lives in the step footer, which render() redraws, so the
@@ -981,7 +987,7 @@ async function runImport() {
       const data = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(file); });
       try {
         const up = await api(`/api/characters/${id}/images`, {body: {view, image: data, attest: true, import: true}});
-        await api(`/api/characters/${id}/images/${up.image.id}/approve`, {body: {}});
+        await approveImage(id, up.image.id, {});
       } catch (e) {
         if (view === 'face_front') throw e;
         skipped.push(view.replace(/_/g, ' ') + ': ' + e.message);
@@ -994,6 +1000,18 @@ async function runImport() {
   } catch (e) {
     msg(e.message + (id ? ' The draft was kept — open it to try again.' : ''));
   } finally { el('imp-go').disabled = false; }
+}
+
+// An undecided adult check can be settled by an admin who has looked at the
+// photo; a 'minor' result, and anyone else, stays blocked.
+async function approveImage(charId, id, body) {
+  const url = `/api/characters/${charId}/images/${id}/approve`;
+  try { return await api(url, {body}); }
+  catch (e) {
+    if (!(isAdmin && e.data && e.data.age === 'uncertain')) throw e;
+    if (!confirm('The adult check was uncertain. You have looked at this photo and she is clearly an adult — approve it?')) throw e;
+    return api(url, {body: Object.assign({}, body, {reviewed_adult: true})});
+  }
 }
 
 async function newCharacter(persona) {
@@ -1601,7 +1619,7 @@ function renderCheck() {
   const age = checks.age || '';
   el('age-tag').className = 'tag ' + (age || 'uncertain');
   el('age-tag').textContent = age ? age[0].toUpperCase() + age.slice(1) : 'Not checked';
-  el('age-note').textContent = checks.age_note || '';
+  el('age-note').textContent = (checks.age_note || '') + (checks.reviewed_by ? ' Reviewed by an admin.' : '');
   const face = cat.features.filter(f => f.group === 'face' && cur.sheet[f.key]);
   el('check-rows').innerHTML = face.map(f => {
     const r = ((checks.features || {})[f.key] || {});
@@ -1611,7 +1629,9 @@ function renderCheck() {
         ${r.observed ? `<span class="hint">${esc(r.observed)}</span>` : ''}</td>
       <td><input type="checkbox" aria-label="Confirm ${esc(f.label)}" ${confirmed.has(f.key) ? 'checked' : ''}
         onchange="this.checked?confirmed.add('${f.key}'):confirmed.delete('${f.key}');updateApprove()"></td></tr>`;
-  }).join('') || `<tr><td colspan="4" class="hint">${faceMode() === 'blend'
+  }).join('') || `<tr><td colspan="4" class="hint">${img.source === 'import'
+    ? 'This is her own photo, so there is nothing to confirm. Approve it when it looks right.'
+    : faceMode() === 'blend'
     ? 'Her face comes from your blended photos, so there is nothing to confirm. Approve it when it looks right.'
     : 'Describe her face first.'}</td></tr>`;
   updateApprove();
@@ -1622,7 +1642,7 @@ function updateApprove() {
   const n = face.filter(f => confirmed.has(f.key)).length;
   // A blended face with no steers has nothing to tick; the adult check that
   // approving runs still applies.
-  const none = !face.length && faceMode() === 'blend';
+  const none = !face.length && (faceMode() === 'blend' || img.source === 'import');
   el('check-count').innerHTML = none ? '<span class="st approved">Nothing to confirm</span>'
     : `<span class="st ${n && n === face.length ? 'approved' : ''}">${n} of ${face.length} confirmed</span>`;
   el('approve-face').disabled = img.role === 'canonical' || (!face.length && !none) || n < face.length;
@@ -1642,7 +1662,7 @@ async function runCheck() {
 async function approveFace() {
   try {
     say('Checking and approving…');
-    await api(`/api/characters/${cur.id}/images/${pickedFace}/approve`, {body: {confirmed: [...confirmed]}});
+    await approveImage(cur.id, pickedFace, {confirmed: [...confirmed]});
     await reload(); say('Face approved. Press Continue.', 'ok');
   } catch (e) { await reload(); say(e.message, 'err'); }
 }
@@ -1685,9 +1705,7 @@ function renderBody() {
     return vs_.length ? `<div class="tier"><h3 class="tier-h">${label}</h3>
       <div class="views">${vs_.map(viewTile).join('')}</div></div>` : '';
   }).join('') || '<p class="hint">No views in this filter.</p>';
-  const todo = shown.filter(v => ['not_started', 'outdated'].includes(vs(v.key).display));
-  el('gen-remaining').disabled = !todo.length;
-  el('gen-left').textContent = todo.length ? `${todo.length} view${todo.length === 1 ? '' : 's'} left` : 'Every view is generated.';
+  paintGenCard();
   el('regen-branch').hidden = !shown.some(v => vs(v.key).display === 'outdated');
   const match = bodyMode() === 'match', bodyRefs = images('body_front', 'reference');
   document.querySelectorAll('[data-body-mode]').forEach(b => b.setAttribute('aria-pressed', b.dataset.bodyMode === bodyMode()));
@@ -1964,8 +1982,28 @@ async function queueViews(keys) {
   say(`${ok} of ${keys.length} generated — open each one and approve a photo to use it.`, errs.length ? 'err' : 'ok');
   if (errs.length) showGenError(errs.join(' '), () => queueViews([...failed].length ? [...failed] : keys));
 }
+// On the body profile every view counts; on Her photos the SFW/NSFW filter
+// decides, the same as the list beside the card.
+function remainingViews() {
+  return cat.views.filter(v => (step === 'body' || inFilter(v)) && ['not_started', 'outdated'].includes(vs(v.key).display));
+}
+function paintGenCard() {
+  const todo = remainingViews();
+  const all = cat.views.filter(v => ['not_started', 'outdated'].includes(vs(v.key).display)).length;
+  const total = todo.reduce((sum, v) => sum + tokensFor(imagesFor(v.key, batch), v.key), 0);
+  el('body-batch-chips').innerHTML = batchChips();
+  el('gen-left').textContent = todo.length
+    ? `Makes ${batch} option${batch === 1 ? '' : 's'} for each of these ${todo.length} view${todo.length === 1 ? '' : 's'}; you then pick and approve one per view.`
+      + (all > todo.length ? ` ${all - todo.length} more are hidden by the ${viewFilter} filter.` : '')
+    : all ? `Nothing left in the ${viewFilter} filter — switch it to see the other ${all}.` : 'Every view is generated.';
+  const names = todo.map(v => v.label);
+  el('gen-list').innerHTML = names.slice(0, 6).map(n => `<li>${esc(n)}</li>`).join('')
+    + (names.length > 6 ? `<li class="hint">+${names.length - 6} more</li>` : '');
+  el('gen-total').textContent = todo.length && cat.price_per_image ? `≈ ${total.toLocaleString()} tokens in total` : '';
+  el('gen-remaining').disabled = !todo.length;
+}
 function generateRemaining() {
-  queueViews(cat.views.filter(inFilter).filter(v => ['not_started', 'outdated'].includes(vs(v.key).display)).map(v => v.key));
+  queueViews(remainingViews().map(v => v.key));
 }
 function regenerateBranch() {
   queueViews(cat.views.filter(inFilter).filter(v => vs(v.key).display === 'outdated').map(v => v.key));
@@ -2048,7 +2086,7 @@ async function runViewCheck(id) {
 async function approveView(id, main, advance) {
   try {
     const was = selView, required = (viewDef(was) || {}).required;
-    await api(`/api/characters/${cur.id}/images/${id}/approve`, {body: main ? {main: true} : {}}); await reload();
+    await approveImage(cur.id, id, main ? {main: true} : {}); await reload();
     const next = cur.status !== 'complete' && nextPhoto();
     if (advance && next) {
       showFilterFor(next.key); render();

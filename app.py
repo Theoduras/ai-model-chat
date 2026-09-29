@@ -32636,9 +32636,18 @@ def api_character_approve(char_id, img_id):
                 checks = _char_vision_check(img, row, img.view)
                 img.checks_json = json.dumps(checks)
                 s.commit()
+            if checks.get('age') == 'uncertain' and body.get('reviewed_adult') is True \
+                    and user.get('is_admin'):
+                # An admin who looked at the photo may settle an undecided
+                # check; a 'minor' result is never overridable.
+                checks.update({'age': 'adult', 'reviewed_by': user.get('email') or user.get('id'),
+                               'reviewed_at': datetime.now(timezone.utc).isoformat()})
+                img.checks_json = json.dumps(checks)
+                logger.info('adult check reviewed: image %s by %s', img.id, checks['reviewed_by'])
             if checks.get('age') != 'adult':
                 return jsonify({'ok': False, 'error': 'The adult-appearance check did '
-                                'not pass for this photo. Regenerate it.'}), 409
+                                'not pass for this photo. Regenerate it.',
+                                'age': checks.get('age') or 'uncertain'}), 409
         if img.view == 'face_front' and img.source != 'import':
             ticked = set(body.get('confirmed') or ())
             sheet = _char_json_sheet(row)
