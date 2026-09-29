@@ -1134,7 +1134,7 @@ def google_site_verification(token):
 # stay in env vars and the tag stays absent until they are set.
 @app.route('/js/analytics.js')
 def analytics_js():
-    ga = (os.getenv('GA_MEASUREMENT_ID') or '').strip()
+    ga = (os.getenv('GA_MEASUREMENT_ID', 'G-3Q0XHZP4XV') or '').strip()
     ads = (os.getenv('GOOGLE_ADS_ID') or '').strip()
     label = (os.getenv('GOOGLE_ADS_SIGNUP_LABEL') or '').strip()
     resp = Response(mimetype='application/javascript')
