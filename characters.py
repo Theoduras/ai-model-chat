@@ -139,8 +139,10 @@ FEATURES = {
         # Explicit
         'pubic_style': ('Pubic hair style', 'pubic', [
             ('Trimmed', 'short, neatly trimmed pubic hair covering the mound'),
-            ('Landing strip', 'a landing strip — one narrow vertical strip of pubic hair about two fingers wide, running '
-                              'straight up from the top of the vulva; everything else cleanly shaved and bare'),
+            ('Landing strip', 'a landing strip of pubic hair: a small, visible patch of short hair on the pubic mound only, '
+                              'just above the vulva, about two fingers wide and a few centimetres tall, ending well below '
+                              'the navel; the vulva and everything around it cleanly shaved; the stomach is smooth, with no '
+                              'line or hair on it'),
             ('Triangle', 'a neat trimmed triangle of pubic hair on the mound; the rest shaved'),
             ('Natural', 'natural full pubic hair'),
                                                      ('Shaved', 'shaved pubic area')]),
