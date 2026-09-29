@@ -2785,13 +2785,26 @@ WORKSPACE_JS = """<script>
 })();
 </script>"""
 
+# The signed-out header from the pricing page, for the sign-in pages.
+AUTH_NAV_HTML = """<header class="site-nav">
+<a class="brand" href="/">Velvetfunneler</a>
+<div class="links">
+<button type="button" class="theme-toggle" onclick="toggleTheme()" title="Light mode" aria-label="Switch to light mode">
+<svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke-linecap="round"/></svg>
+<svg class="ico-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" stroke-linejoin="round"/></svg>
+</button>
+<a class="nav-ghost nav-pricing" href="/pricing">Pricing</a>
+<a class="nav-ghost" href="/login">Log in</a><a class="nav-btn" href="/register">Register</a>
+</div>
+</header>"""
+
 REGISTER_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><script src="/js/support-widget.js" defer></script>
 <link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Create account</title>
 <script src="/js/analytics.js" defer></script>
 <script src="/js/page-editor.js" defer></script>
-<style>""" + ACCOUNT_CSS + """</style><script src="/js/analytics.js" defer></script></head><body data-page="register"><div class="wrap"><div class="card">
+<style>""" + ACCOUNT_CSS + """body{padding-top:80px}</style><script src="/js/analytics.js" defer></script></head><body data-page="register">""" + AUTH_NAV_HTML + """<div class="wrap"><div class="card">
 <h1 data-edit-id="h1">Create your account</h1><p class="sub" data-edit-id="sub">Start building your AI persona.</p>
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
 {% if google_enabled %}<a class="gbtn" href="/auth/google{{ google_next }}"><svg viewBox="0 0 48 48"><path fill="#4285F4" d="M45.1 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h11.8c-.5 2.8-2 5.1-4.4 6.7v5.5h7.1c4.2-3.8 6.6-9.5 6.6-16.2z"/><path fill="#34A853" d="M24 46c6 0 11-2 14.5-5.3l-7.1-5.5c-2 1.3-4.5 2.1-7.4 2.1-5.7 0-10.6-3.9-12.3-9.1H4.3v5.7C7.8 41 15.3 46 24 46z"/><path fill="#FBBC05" d="M11.7 28.2c-.4-1.3-.7-2.7-.7-4.2s.2-2.9.7-4.2v-5.7H4.3C2.8 17.1 2 20.4 2 24s.8 6.9 2.3 9.9l7.4-5.7z"/><path fill="#EA4335" d="M24 10.7c3.2 0 6.1 1.1 8.4 3.3l6.3-6.3C35 4.1 30 2 24 2 15.3 2 7.8 7 4.3 14.1l7.4 5.7c1.7-5.2 6.6-9.1 12.3-9.1z"/></svg>Continue with Google</a>
@@ -2810,7 +2823,7 @@ SIGNIN_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Sign in</title>
 <script src="/js/analytics.js" defer></script>
 <script src="/js/page-editor.js" defer></script>
-<style>""" + ACCOUNT_CSS + """</style><script src="/js/analytics.js" defer></script></head><body data-page="login"><div class="wrap"><div class="card">
+<style>""" + ACCOUNT_CSS + """body{padding-top:80px}</style><script src="/js/analytics.js" defer></script></head><body data-page="login">""" + AUTH_NAV_HTML + """<div class="wrap"><div class="card">
 <h1 data-edit-id="h1">Sign in</h1><p class="sub" data-edit-id="sub">Welcome back.</p>
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
 {% if google_enabled %}<a class="gbtn" href="/auth/google{{ google_next }}"><svg viewBox="0 0 48 48"><path fill="#4285F4" d="M45.1 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h11.8c-.5 2.8-2 5.1-4.4 6.7v5.5h7.1c4.2-3.8 6.6-9.5 6.6-16.2z"/><path fill="#34A853" d="M24 46c6 0 11-2 14.5-5.3l-7.1-5.5c-2 1.3-4.5 2.1-7.4 2.1-5.7 0-10.6-3.9-12.3-9.1H4.3v5.7C7.8 41 15.3 46 24 46z"/><path fill="#FBBC05" d="M11.7 28.2c-.4-1.3-.7-2.7-.7-4.2s.2-2.9.7-4.2v-5.7H4.3C2.8 17.1 2 20.4 2 24s.8 6.9 2.3 9.9l7.4-5.7z"/><path fill="#EA4335" d="M24 10.7c3.2 0 6.1 1.1 8.4 3.3l6.3-6.3C35 4.1 30 2 24 2 15.3 2 7.8 7 4.3 14.1l7.4 5.7c1.7-5.2 6.6-9.1 12.3-9.1z"/></svg>Continue with Google</a>
