@@ -135,8 +135,8 @@ FEATURES = {
         'pubic_density': ('Density', 'pubic', _opts('', 'Sparse', 'Medium', 'Dense')),
         # Her shape comes from the example she picks (LOOKS), so only the colour
         # is described in words.
-        'vulva_colour': ('Colour', 'vulva', _opts('vulva', 'Pink', 'Rosy', 'Tan', 'Brown', 'Dark')),
-        'anus_colour': ('Colour', 'anus', _opts('anus', 'Pink', 'Rosy', 'Tan', 'Brown', 'Dark')),
+        'vulva_colour': ('Vulva colour', 'vulva', _opts('vulva', 'Pink', 'Rosy', 'Tan', 'Brown', 'Dark')),
+        'anus_colour': ('Anus colour', 'anus', _opts('anus', 'Pink', 'Rosy', 'Tan', 'Brown', 'Dark')),
     },
 }
 

@@ -154,6 +154,13 @@
     /* Outfits: chips, uploaded outfits as tiles, and a colour row per outfit. */
     .of-up { position: relative; display: inline-flex; }
     .look-opt img { width: 72px; height: 72px; object-fit: cover; border-radius: var(--r-sm); }
+    .look-opt { position: relative; }
+    .look-zoom { position: absolute; top: 8px; right: 8px; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+      background: rgba(0,0,0,.55); color: #fff; font-size: 0.8rem; opacity: 0; transition: opacity .15s; }
+    .look-opt:hover .look-zoom, .look-zoom:focus { opacity: 1; }
+    @media (hover: none) { .look-zoom { opacity: 1; } }
+    .lightbox .lb-bar { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 14px; color: #fff; font-size: 0.9rem; }
+    .lightbox .lb-bar button { position: static; width: auto; height: auto; padding: 10px 20px; border-radius: 999px; font-size: 0.9rem; font-weight: 600; background: var(--accent); }
     .of-up .fp-opt img { width: 56px; height: 56px; object-fit: cover; border-radius: var(--r-sm); }
     .of-del {
       position: absolute; top: -7px; right: -7px; width: 22px; height: 22px; border-radius: 50%; border: 0; padding: 0;
@@ -705,6 +712,7 @@
   <button type="button" class="lb-prev" onclick="lbNav(-1)" aria-label="Previous">&lsaquo;</button>
   <img id="lb-img" src="" alt="">
   <button type="button" class="lb-next" onclick="lbNav(1)" aria-label="Next">&rsaquo;</button>
+  <div class="lb-bar" id="lb-bar" hidden><span id="lb-count"></span><button type="button" id="lb-choose" onclick="lbChoose()">Choose this</button></div>
 </div>
 
 <div class="modal-overlay ch-confirm" id="ch-confirm" hidden>
@@ -794,9 +802,29 @@ function vpImgClick(e, i) {
   e.stopPropagation();
   openLightbox(vpOptUrls, i);
 }
-function openLightbox(urls, idx) { lbUrls = urls; lbIdx = idx; el('lb-img').src = lbUrls[lbIdx]; el('lightbox').hidden = false; }
+// lbPick holds the picker's option buttons when the lightbox was opened from
+// one, so the large view can choose; any other lightbox leaves it empty.
+let lbPick = [];
+function openLightbox(urls, idx, pick) { lbUrls = urls; lbIdx = idx; lbPick = pick || []; lbShow(); el('lightbox').hidden = false; }
 function closeLightbox() { el('lightbox').hidden = true; }
-function lbNav(d) { lbIdx = (lbIdx + d + lbUrls.length) % lbUrls.length; el('lb-img').src = lbUrls[lbIdx]; }
+function lbNav(d) { lbIdx = (lbIdx + d + lbUrls.length) % lbUrls.length; lbShow(); }
+function lbShow() {
+  el('lb-img').src = lbUrls[lbIdx];
+  el('lb-bar').hidden = !lbPick.length;
+  if (!lbPick.length) return;
+  el('lb-count').textContent = `${lbIdx + 1} of ${lbPick.length}`;
+  const on = lbPick[lbIdx].getAttribute('aria-pressed') === 'true';
+  el('lb-choose').textContent = on ? 'Chosen \u2713' : 'Choose this';
+}
+function lbChoose() {
+  const btn = lbPick[lbIdx];
+  if (btn && btn.getAttribute('aria-pressed') !== 'true') pickOption(btn);
+  closeLightbox();
+}
+function zoomLook(span) {
+  const btns = [...span.closest('.fp-opts').querySelectorAll('.look-opt')];
+  openLightbox(btns.map(b => b.querySelector('img').src), btns.indexOf(span.closest('.look-opt')), btns);
+}
 document.addEventListener('keydown', e => {
   if (el('lightbox').hidden) return;
   if (e.key === 'Escape') closeLightbox();
@@ -1286,7 +1314,7 @@ function featurePicker(f) {
     const art = photo ? `<img src="/img/makeup/${photo}.jpg" alt="" loading="lazy">`
       : window.CharacterVisuals ? CharacterVisuals.render(f.key, o, cur.sheet) : '';
     return `<button type="button" class="fp-opt${photo ? ' look-opt' : art ? '' : ' text'}" data-feature="${f.key}" data-value="${esc(o)}"
-      aria-pressed="${o === v}" onclick="pickOption(this)">${art}<span>${esc(o)}</span></button>`;
+      aria-pressed="${o === v}" onclick="pickOption(this)">${art}${photo ? '<span class="look-zoom" role="button" tabindex="0" aria-label="View larger" onclick="event.stopPropagation(); zoomLook(this)">&#10530;</span>' : ''}<span>${esc(o)}</span></button>`;
   }).join('');
   const hex = f.key === 'hair_colour' ? `<label class="hex-pick"><input type="color" id="hair-hex"
       value="${esc((cur.sheet || {}).hair_colour_hex || '#7a5436')}" onchange="pickHairHex(this.value)">Or pick any colour</label>` : '';
@@ -1299,7 +1327,7 @@ function lookPicker(list) {
     return `<fieldset class="fp"><legend>${esc(l.label)} · required</legend>
       ${v ? '' : '<p class="hint">Pick one before generating those photos.</p>'}
       <div class="fp-opts" role="group">${l.options.map(n => `<button type="button" class="fp-opt look-opt" data-look-key="${l.key}" data-look="${n}"
-        aria-pressed="${n === v}" onclick="pickOption(this)"><img src="/api/characters/looks/${l.folder}/${n}.jpg" alt="Example ${n}" loading="lazy"><span>${n}</span></button>`).join('')}</div></fieldset>`;
+        aria-pressed="${n === v}" onclick="pickOption(this)"><img src="/api/characters/looks/${l.folder}/${n}.jpg" alt="Example ${n}" loading="lazy"><span class="look-zoom" role="button" tabindex="0" aria-label="View larger" onclick="event.stopPropagation(); zoomLook(this)">&#10530;</span><span>${n}</span></button>`).join('')}</div></fieldset>`;
   }).join('');
 }
 function pickHairHex(hex) {
