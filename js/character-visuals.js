@@ -450,14 +450,6 @@
     Protruding: 'M10,8 Q46,12 50,28 L56,28 Q58,32 56,36 L50,36 Q46,52 10,56',
     Inverted: 'M10,8 Q46,12 50,28 Q46,32 50,36 Q46,52 10,56',
   };
-  function pair(n) {
-    let s = '';
-    [18, 46].forEach((cx, i) => {
-      s += ring(cx, 32, 8) + ring(cx, 32, 2.4);
-      if (n === 2 || (n === 1 && i === 1)) s += line(`M${cx - 7},32 L${cx + 7},32`, ' stroke-width="1.6"') + ring(cx - 7.5, 32, 1.6) + ring(cx + 7.5, 32, 1.6);
-    });
-    return bsvg(s);
-  }
 
   // ── Pelvis with hair drawn as short strokes ────────────────────────────────
   const PELVIS = line('M10,4 Q13,30 24,48 Q32,58 40,48 Q51,30 54,4') +
@@ -540,7 +532,6 @@
     areola_size: map({Small: 8, Medium: 12, Large: 17}, r => areola(r, 3)),
     nipple_size: map({Small: 2.5, Medium: 4, Large: 5.5}, r => areola(12, r)),
     nipple_shape: map(NIP_SHAPE, d => bsvg(line('M10,8 L10,56', ' stroke-width="1.4" stroke-dasharray="2 2.6"') + line(d))),
-    nipple_piercing: map({None: 0, One: 1, Both: 2}, pair),
     pubic_style: map(PUBIC, (v, k) => pubic(k, 3.6)),
     pubic_density: map({Sparse: 5.2, Medium: 3.6, Dense: 2.6}, g => pubic('Natural', g)),
   };

@@ -127,7 +127,6 @@ FEATURES = {
         'areola_colour': ('Areola colour', 'nipples', _opts('areolae', 'Light pink', 'Pink', 'Rosy brown', 'Brown', 'Dark brown')),
         'nipple_size': ('Nipple size', 'nipples', _opts('nipples', 'Small', 'Medium', 'Large')),
         'nipple_shape': ('Nipple shape', 'nipples', _opts('nipples', 'Flat', 'Puffy', 'Protruding', 'Inverted')),
-        'nipple_piercing': ('Nipple piercing', 'nipples', [('None', ''), ('One', 'one pierced nipple'), ('Both', 'both nipples pierced')]),
         # Explicit
         'pubic_style': ('Pubic hair style', 'pubic', [('Trimmed', 'trimmed pubic hair'), ('Landing strip', 'a landing strip'),
                                                      ('Triangle', 'a neat triangle of pubic hair'), ('Natural', 'natural full pubic hair'),
@@ -192,7 +191,7 @@ def _preset(height, build, shape, shoulders, waist, hips, bust, glutes, thighs, 
             'birthmarks': birthmarks, 'nails': nails,
             'cup': cup, 'breast_shape': breast_shape, 'spacing': spacing, 'augmented': augmented,
             'perkiness': perkiness, 'areola_size': areola, 'nipple_size': nipple, 'nipple_shape': nipple_shape,
-            'nipple_piercing': 'None', 'pubic_style': pubic, 'pubic_density': density}
+            'pubic_style': pubic, 'pubic_density': density}
 
 
 PRESET_GROUPS = ('body', 'breasts', 'nipples', 'pubic')
