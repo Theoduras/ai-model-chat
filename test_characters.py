@@ -186,7 +186,7 @@ def test_validation():
     clean, warn = CH.validate({'age': 25, 'notes': 'likes red', 'banned': ['red']})
     check('banned terms struck', 'red' not in clean['notes'])
     clean, _ = CH.validate({'age': 25, 'sheet': {'labia': 'Tucked', 'labia_fullness': 'Full', 'vulva_colour': 'Pink'}})
-    check('retired labia picks drop', clean['sheet'] == {'vulva_colour': 'Pink'})
+    check('retired labia picks drop', clean['sheet'] == {'vulva_colour': 'Rosy'})
 
 
 def test_every_option_has_a_drawing():

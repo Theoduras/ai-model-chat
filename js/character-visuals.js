@@ -301,8 +301,6 @@
     hair_colour: {'Black': '#1c1a1a', 'Dark brown': '#3b2618', 'Light brown': '#7a5436', 'Auburn': '#7e3a1e',
       'Red': '#a8391c', 'Strawberry blonde': '#d19a6b', 'Blonde': '#e3c27a', 'Platinum': '#efe6d0'},
     areola_colour: {'Light pink': '#e8b3a8', 'Pink': '#d98f86', 'Rosy brown': '#b87562', 'Brown': '#8e5a45', 'Dark brown': '#5e3a2c'},
-    vulva_colour: {'Pink': '#e3a197', 'Rosy': '#c9867a', 'Tan': '#b08466', 'Brown': '#8a5d47', 'Dark': '#5a3a2c'},
-    anus_colour: {'Pink': '#e3a197', 'Rosy': '#c9867a', 'Tan': '#b08466', 'Brown': '#8a5d47', 'Dark': '#5a3a2c'},
   };
   const EYE_COLOURS = {'Brown': '#6b4226', 'Dark brown': '#3a2414', 'Hazel': '#8e7440', 'Green': '#4f7a3e',
     'Blue': '#4a7fb5', 'Grey': '#8a949c'};
@@ -537,6 +535,14 @@
   };
   Object.entries(COLOURS).forEach(([key, set]) => { TABLE[key] = map(set, swatch); });
 
+  // Intimate colours follow her skin tone: each is her skin mixed toward a tint.
+  const SKIN_RELATIVE = {'Same as skin': ['#000000', 0], 'Slightly darker': ['#3a2218', 0.18],
+    'Darker': ['#3a2218', 0.36], 'Rosy': ['#c2606a', 0.3]};
+  function mix(a, b, t) {
+    const c = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+    const [x, y] = [c(a), c(b)];
+    return '#' + x.map((v, i) => Math.round(v + (y[i] - v) * t).toString(16).padStart(2, '0')).join('');
+  }
   const unset = () => svg(`<circle cx="32" cy="32" r="20" stroke-width="1.4" stroke-dasharray="3 3"/>`);
   const hairHex = sheet => (sheet || {}).hair_colour === 'Custom' ? (sheet || {}).hair_colour_hex
     : COLOURS.hair_colour[(sheet || {}).hair_colour];
@@ -552,6 +558,11 @@
         const hair = hairHex(sheet);
         return hair ? swatch(hair) : svg(`<circle cx="32" cy="32" r="20" stroke-width="1.4" stroke-dasharray="3 3"/>`);
       }
+    }
+    if (feature === 'vulva_colour' || feature === 'anus_colour') {
+      const skin = COLOURS.skin_tone[(sheet || {}).skin_tone] || COLOURS.skin_tone['Light olive'];
+      const tint = SKIN_RELATIVE[option];
+      return tint ? swatch(mix(skin, tint[0], tint[1])) : '';
     }
     const fn = (TABLE[feature] || {})[option];
     return fn ? fn() : '';

@@ -40,6 +40,15 @@ def _opts(noun, *values):
     return [(v, f'{v.lower()} {noun}'.strip()) for v in values]
 
 
+# Intimate colour is said relative to her skin, so it follows whatever skin
+# tone she has rather than naming a colour that may not fit it.
+def _skin_relative(noun):
+    return [('Same as skin', f'{noun} the same tone as her skin'),
+            ('Slightly darker', f'{noun} a shade slightly darker than her skin tone'),
+            ('Darker', f'{noun} noticeably darker than her skin tone, natural pigmentation'),
+            ('Rosy', f'{noun} in her own skin tone with a natural rosy flush')]
+
+
 FEATURES = {
     'female': {
         # Face
@@ -135,8 +144,8 @@ FEATURES = {
         'pubic_density': ('Density', 'pubic', _opts('', 'Sparse', 'Medium', 'Dense')),
         # Her shape comes from the example she picks (LOOKS), so only the colour
         # is described in words.
-        'vulva_colour': ('Vulva colour', 'vulva', _opts('vulva', 'Pink', 'Rosy', 'Tan', 'Brown', 'Dark')),
-        'anus_colour': ('Anus colour', 'anus', _opts('anus', 'Pink', 'Rosy', 'Tan', 'Brown', 'Dark')),
+        'vulva_colour': ('Vulva colour', 'vulva', _skin_relative('vulva')),
+        'anus_colour': ('Anus colour', 'anus', _skin_relative('anus')),
     },
 }
 
@@ -158,7 +167,9 @@ YOUTH_LEANING = {
 YOUTH_WEIGHT = {('apparent_age', '18–21'): 2}
 # Options renamed after sheets were saved with them: the old label still
 # validates and is stored as the new one.
-RENAMED = {('face_shape', 'Long'): 'Rectangle', ('makeup', 'Soft natural'): 'Natural glam',
+RENAMED = {**{(k, old): new for k in ('vulva_colour', 'anus_colour') for old, new in (
+               ('Pink', 'Rosy'), ('Tan', 'Slightly darker'), ('Brown', 'Darker'), ('Dark', 'Darker'))},
+           ('face_shape', 'Long'): 'Rectangle', ('makeup', 'Soft natural'): 'Natural glam',
            ('makeup', 'Polished'): 'Natural glam', ('makeup', 'Soft glam'): 'Bronze glam',
            ('makeup', 'Classic red lip'): 'Smoky red', ('makeup', 'Old Hollywood'): 'Smoky red',
            ('makeup', 'Wine lip'): 'Smoky red', ('makeup', 'Fresh glow'): 'Natural glam',
