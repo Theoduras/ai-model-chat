@@ -1327,7 +1327,7 @@ function confirmLeave(then) {
 addEventListener('beforeunload', e => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
 
 const BLEND_KEEP = ['ethnicity', 'apparent_age', 'hair_colour', 'hair_texture', 'makeup'];
-const BODY_MATCH_KEEP = ['height', 'tattoos', 'piercings', 'birthmarks', 'nails'];
+const BODY_MATCH_KEEP = ['height', 'birthmarks', 'nails'];
 function bodyMode() { return (cur.sheet || {}).body_mode === 'match' ? 'match' : 'build'; }
 async function setBodyMode(mode) {
   if (mode === bodyMode()) return;

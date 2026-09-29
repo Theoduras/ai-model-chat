@@ -2787,7 +2787,7 @@ WORKSPACE_JS = """<script>
 
 # The signed-out header from the pricing page, for the sign-in pages.
 AUTH_NAV_HTML = """<header class="site-nav">
-<a class="brand" href="/">Velvetfunneler</a>
+<a class="brand" href="/">Velvetfunneler<i>.com</i></a>
 <div class="links">
 <button type="button" class="theme-toggle" onclick="toggleTheme()" title="Light mode" aria-label="Switch to light mode">
 <svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke-linecap="round"/></svg>
@@ -2844,7 +2844,7 @@ FORGOT_PASSWORD_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UT
 <meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
 <link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Reset your password</title>
 <script src="/js/page-editor.js" defer></script>
-<style>""" + ACCOUNT_CSS + """</style></head><body data-page="forgot"><div class="wrap"><div class="card">
+<style>""" + ACCOUNT_CSS + """body{padding-top:80px}</style></head><body data-page="forgot">""" + AUTH_NAV_HTML + """<div class="wrap"><div class="card">
 <h1 data-edit-id="h1">Reset your password</h1><p class="sub" data-edit-id="sub">Enter your account email and we'll send a reset link.</p>
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
 {% if sent %}<div class="sub" style="margin-bottom:18px">If an account exists for {{ email }}, a reset link has been sent.
@@ -2881,7 +2881,7 @@ BILLING_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <style>""" + ACCOUNT_CSS + """
 </style><script src="/js/analytics.js" defer></script></head><body data-page="pricing">
 <header class="site-nav">
-<a class="brand" href="/">Velvetfunneler</a>
+<a class="brand" href="/">Velvetfunneler<i>.com</i></a>
 <div class="links">
 <button type="button" class="theme-toggle" onclick="toggleTheme()" title="Light mode" aria-label="Switch to light mode">
 <svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke-linecap="round"/></svg>
@@ -3103,7 +3103,7 @@ background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 16%,var(--surf
 @media(max-width:700px){.tokcard{grid-template-columns:1fr}.tk-side{border-left:0;border-top:1px solid var(--border)}}
 </style></head><body data-page="pricing">
 <header class="site-nav">
-<a class="brand" href="/">Velvetfunneler</a>
+<a class="brand" href="/">Velvetfunneler<i>.com</i></a>
 <div class="links">
 <button type="button" class="theme-toggle" onclick="toggleTheme()" title="Light mode" aria-label="Switch to light mode">
 <svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke-linecap="round"/></svg>
@@ -3247,7 +3247,7 @@ DEMO_ENDS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <div class="lockart"><svg viewBox="0 0 24 24" aria-hidden="true">
 <rect x="4" y="10.5" width="16" height="10" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></svg></div>
 <h1 style="margin-bottom:6px" data-edit-id="h1">This is where the demo ends</h1>
-<p class="sub" data-edit-id="sub">Connecting {{ platform_name }} is the paid half of Velvetfunneler. The demo
+<p class="sub" data-edit-id="sub">Connecting {{ platform_name }} is the paid half of Velvetfunneler.com. The demo
 gives you the persona, the funnel and the whole builder, with nothing capped &mdash; it
 stops at the moment she would start talking to your real fans and taking their money.</p>
 <ul class="steps">

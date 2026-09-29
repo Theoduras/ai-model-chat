@@ -134,7 +134,7 @@
   };
 
   var BRAND_HTML = '<a href="/" class="brand">' +
-    '<span data-sn-brand>Velvetfunneler</span><i data-sn-suffix></i></a>';
+    '<span data-sn-brand>Velvetfunneler</span><i data-sn-suffix>.com</i></a>';
 
   // The homepage's brand wording is operator-editable and stored under the
   // "home" page content; every page reads it so the name never diverges.

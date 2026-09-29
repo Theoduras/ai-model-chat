@@ -43,7 +43,7 @@ $('form').addEventListener('submit', async e => {
     out.innerHTML = d.openers.map(c =>
       '<div class="header-line"><span>' + esc(c) + '</span>' +
       '<button class="btn ghost" type="button">Copy</button></div>').join('') +
-      '<p class="nudge"><a href="' + esc(SIGNUP) + '">Velvetfunneler sends an opener like these to ' +
+      '<p class="nudge"><a href="' + esc(SIGNUP) + '">Velvetfunneler.com sends an opener like these to ' +
       'every new fan the moment they subscribe, then keeps the chat going →</a></p>';
     out.querySelectorAll('.header-line button').forEach((b, i) =>
       b.addEventListener('click', () => copyText(d.openers[i], b)));
