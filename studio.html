@@ -2066,7 +2066,7 @@ let genWritten = null;
 function promptChoices() {
   return {
     persona: slug(), rating: genRating, model: el('gen-model').value,
-    shot: el('gen-shot').value, scene: genScene(),
+    shot: el('gen-shot').value, scene: genScene(), location: (el('gen-scene') || {}).value || '',
     style: el('gen-style').value, camera: el('gen-camera').value,
     lighting: el('gen-lighting').value,
     expression: el('gen-expression').value,
@@ -2134,7 +2134,7 @@ async function suggestDirection() {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         persona: slug(), rating: genRating, shot: el('gen-shot').value,
-        scene: genScene(), style: el('gen-style').value,
+        scene: genScene(), location: (el('gen-scene') || {}).value || '', style: el('gen-style').value,
         clothing: el('gen-clothing').value.trim(),
       }),
     });
@@ -2300,7 +2300,7 @@ async function runGeneration() {
         prompt: el('gen-prompt').value.trim(),
         prompt_mode: el('gen-prompt').value.trim() ? 'full' : '',
         negative: el('gen-negative').value.trim(),
-        scene: genScene(),
+        scene: genScene(), location: (el('gen-scene') || {}).value || '',
         style: el('gen-style').value,
         camera: el('gen-camera').value,
         lighting: el('gen-lighting').value,

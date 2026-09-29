@@ -713,6 +713,15 @@ SCENES = {
     'aftermath': ('explicit', 'afterwards, flushed and tousled'),
 }
 
+# Scenes that name a place of their own, without it, for when the creator
+# picked where she is: the location always wins.
+SCENES_ACTION = {
+    'shower': 'wet, steamy skin',
+    'bath': 'wet skin, bubbles',
+    'vanity': 'doing her makeup',
+    'walk-in-closet': 'choosing an outfit',
+}
+
 # Scenes that name clothing, without it, for when the creator typed her own.
 SCENES_BARE = {
     'lingerie-tease': 'teasing the camera',
@@ -964,7 +973,7 @@ def _sentence(text):
 def build_prompt(appearance, shot, outfit=None, has_reference=False, extra='',
                  style='', scene='', camera='', lighting='', direction='',
                  banned=(), age=None, quality='', clothing='', features='',
-                 expression='', smudges=False):
+                 expression='', smudges=False, location=''):
     """The positive prompt for one generation, written the way a creator
     would brief her own post: what it is for, who, the shot, what she wears,
     what she is doing, the phone and the light, how real it looks.
@@ -983,6 +992,10 @@ def build_prompt(appearance, shot, outfit=None, has_reference=False, extra='',
     framing = ((clothing and SHOT_FRAMING_BARE.get(shot))
                or SHOT_FRAMING.get(shot, SHOT_FRAMING['portrait']))
     where = (clothing and SCENES_BARE.get(scene)) or scene_row[1]
+    place = SCENES.get(location, ('', ''))[1] if SCENES.get(location, ('',))[0] == 'sfw' else ''
+    if place:
+        act = '' if scene in ('', location) else (SCENES_ACTION.get(scene) or where)
+        where = ', '.join(b for b in (place, act) if b)
     if not where and outfit.get('location'):
         where = f"in {outfit['location']}"
     styled = '' if style in STYLE_IN_SHOT.get(shot, ()) else STYLES.get(style, '')
@@ -999,6 +1012,7 @@ def build_prompt(appearance, shot, outfit=None, has_reference=False, extra='',
                   + ', '.join(b for b in (who, framing, where, styled) if b)),
         ('The reference images set who she is — not what she wears or where she is.'
          if has_reference else ''),
+        _sentence(f'The photo is taken {place}; the setting must clearly be that place' if place else ''),
         (MAKEUP_FROM_REFERENCE if has_reference and shot == 'closeup' else ''),
         _sentence(f'She is wearing {clothing}' if clothing else ''),
         _sentence(direction),

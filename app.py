@@ -30606,8 +30606,10 @@ def _gen_spec(slug, body, user):
     if not imagegen.scene_allowed(scene, level):
         raise imagegen.GenerationError(
             'That scene is explicit — switch the studio to Explicit first.')
+    location = (body.get('location') or '').strip().lower()
     spec.update({
         'scene': scene if scene in imagegen.SCENES else '',
+        'location': location if imagegen.SCENES.get(location, ('',))[0] == 'sfw' else '',
         'style': (body.get('style') or '').strip().lower(),
         'camera': (body.get('camera') or '').strip().lower(),
         'lighting': (body.get('lighting') or '').strip().lower(),
@@ -31716,7 +31718,7 @@ def _gen_image_prompt(slug, spec, has_reference):
         spec.get('outfit'), has_reference,
         extra=spec.get('prompt_extra', ''),
         style=spec.get('style', ''), scene=spec.get('scene', ''),
-        camera=spec.get('camera', ''),
+        location=spec.get('location', ''), camera=spec.get('camera', ''),
         lighting=spec.get('lighting', ''),
         direction=' '.join(filter(None, (
             spec.get('direction', ''),
@@ -32820,7 +32822,9 @@ def api_generate_direction():
     spicy = CH.job_level(shot, scene) != 'sfw'
     cfg = _persona_config(slug) or {}
     clothing = str(body.get('clothing') or '').strip()[:200]
+    place = imagegen.SCENES.get(str(body.get('location') or '').strip().lower(), ('', ''))
     what = ', '.join(filter(None, (
+        place[1] if place[0] == 'sfw' else '',
         '' if spicy else imagegen.SHOT_FRAMING.get(shot, ''),
         '' if spicy else imagegen.SCENES.get(scene, ('', ''))[1],
         imagegen.STYLES.get(str(body.get('style') or ''), ''),
