@@ -31852,6 +31852,14 @@ def api_characters():
             return jsonify({'ok': True, 'characters': out})
         body = request.get_json(silent=True) or {}
         persona = (body.get('persona') or '').strip().lower()
+        if not persona:
+            # A plan at its persona limit would otherwise be refused outright,
+            # though it may own a persona that still has no character.
+            owned = [p['slug'] for p in db_list_personas(owner_id=_workspace_id(user))]
+            if owned:
+                taken = {r[0] for r in s.query(Character.slug)
+                         .filter(Character.slug.in_(owned)).all()}
+                persona = next((p for p in owned if p not in taken), '')
         if persona:
             if not _char_persona_ok(persona):
                 return jsonify({'ok': False, 'error': 'Not your persona'}), 403
