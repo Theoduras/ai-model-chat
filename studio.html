@@ -351,9 +351,11 @@
         <section class="gen-group">
           <h3>The shot</h3>
           <div class="gen-form">
-            <label class="gen-f"><span>Scene</span>
+            <label class="gen-f"><span>Where is she</span>
               <select id="gen-scene"></select></label>
-            <label class="gen-f"><span>Shot</span>
+            <label class="gen-f" id="gen-scene-nsfw-wrap" hidden><span>Where is she (NSFW)</span>
+              <select id="gen-scene-nsfw"></select></label>
+            <label class="gen-f"><span>What kind of content</span>
               <select id="gen-shot" onchange="genQuote()"></select></label>
             <label class="gen-f"><span>Style</span>
               <select id="gen-style"></select></label>
@@ -366,7 +368,7 @@
                      placeholder="looking back over her shoulder, phone in one hand">
               <button type="button" class="btn btn-ghost btn-sm" id="gen-direction-btn" onclick="suggestDirection()">&#10022; Suggest</button>
             </div>
-            <span class="hint" id="gen-direction-note">Filled in from the scene and shot — or type your own.</span>
+            <span class="hint" id="gen-direction-note">Click Suggest for a fresh idea — or type your own.</span>
           </div>
         </section>
 
@@ -650,10 +652,23 @@
 <script>
 function el(id){ return document.getElementById(id); }
 function esc(s){ return (s||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
-function slug(){ const v = (el('persona')||{}).value || ''; return v.startsWith('char:') ? '' : v; }
+// Where she is: an NSFW place, when one is picked, wins over the safe one.
+function genScene() {
+  const n = el('gen-scene-nsfw');
+  return (n && !el('gen-scene-nsfw-wrap').hidden && n.value) || (el('gen-scene') || {}).value || '';
+}
+
+function slug(){ const v = (el('persona')||{}).value || ''; return /^(char|own):/.test(v) ? '' : v; }
 // A bare character gets its studio-only persona the moment it is picked.
 async function studioSlugFor() {
   const sel = el('persona'), v = sel.value;
+  if (v === 'own:') {
+    try {
+      const d = await (await fetch('/api/studio/own-vault', {method: 'POST'})).json();
+      if (d.slug) { sel.selectedOptions[0].value = d.slug; sel.value = d.slug; }
+    } catch (e) {}
+    return;
+  }
   if (!v.startsWith('char:')) return;
   try {
     const d = await (await fetch('/api/characters/' + encodeURIComponent(v.slice(5)) + '/studio',
@@ -709,22 +724,22 @@ const GEN_RES_LABELS = { '2k': '2K', '4k': '4K' };
 async function init() {
   try {
     const list = await (await fetch('/api/personas?studio=1')).json();
-    const rows = Array.isArray(list) ? list : (list.personas || []);
+    const rows = (Array.isArray(list) ? list : (list.personas || []))
+      .filter(p => !(p.config || {}).content_vault);
     let chars = [];
     try {
       chars = ((await (await fetch('/api/characters')).json()).characters || [])
         .filter(c => !c.persona);
     } catch (e) {}
-    el('persona').innerHTML = rows.map(p =>
+    el('persona').innerHTML = '<option value="own:">No character — Your Content</option>' + rows.map(p =>
       `<option value="${esc(p.slug)}">${esc(p.name || p.slug)}</option>`).join('')
       + chars.map(c => `<option value="char:${esc(c.id)}">${esc(c.name || 'Character')} (character)</option>`).join('');
-    if (!el('persona').options.length) {
-      el('persona-hint').textContent = 'Create a persona or a character first — generation needs one to look like.';
-      return;
-    }
+    // Nothing is picked for her unless she picked it before: the default is
+    // her own content, with no character's look forced on it.
     const want = new URLSearchParams(location.search).get('persona')
       || (studioSaved() || {}).persona;
     if (want && [...el('persona').options].some(o => o.value === want)) el('persona').value = want;
+    else el('persona').value = 'own:';
     await studioSlugFor();
   } catch (e) {
     el('persona-hint').textContent = 'Could not load personas.';
@@ -763,7 +778,7 @@ async function loadCharacterBadge() {
   const box = el('gen-character');
   if (!box || !slug()) return;
   const shot = (el('gen-shot') || {}).value || '';
-  const scene = (el('gen-scene') || {}).value || '';
+  const scene = genScene();
   let c = null;
   try {
     const d = await (await fetch('/api/personas/' + encodeURIComponent(slug()) + '/character?shot='
@@ -787,7 +802,7 @@ async function loadCharacterBadge() {
     + '<br><small>Safe-work shots never receive an explicit photo.</small>';
 }
 document.addEventListener('change', e => {
-  if (e.target && (e.target.id === 'gen-shot' || e.target.id === 'gen-scene')) loadCharacterBadge();
+  if (e.target && ['gen-shot', 'gen-scene', 'gen-scene-nsfw'].includes(e.target.id)) loadCharacterBadge();
 });
 
 // Her look comes from the linked character, the face/body slots, or both —
@@ -1436,9 +1451,13 @@ function renderGenForm() {
     const keep = scene.value;
     // The scene list arrives gated to this persona already; the rating toggle
     // only hides the explicit half, and picking a scene never touches the shot.
-    const offered = genRating === 'nsfw' ? genScenes : genScenes.filter(sc => sc.level === 'sfw');
     scene.innerHTML = `<option value="">Anywhere</option>` +
-      offered.map(sc => opt(sc.key, prettyKey(sc.key), keep)).join('');
+      genScenes.filter(sc => sc.level === 'sfw').map(sc => opt(sc.key, prettyKey(sc.key), keep)).join('');
+    const nsfw = el('gen-scene-nsfw'), keepN = nsfw.value;
+    const explicit = genRating === 'nsfw' ? genScenes.filter(sc => sc.level !== 'sfw') : [];
+    nsfw.innerHTML = `<option value="">—</option>` +
+      explicit.map(sc => opt(sc.key, prettyKey(sc.key), keepN)).join('');
+    el('gen-scene-nsfw-wrap').hidden = !explicit.length;
   }
   fillVocab('gen-style', genStyles);
   fillVocab('gen-camera', genCameras);
@@ -2047,7 +2066,7 @@ let genWritten = null;
 function promptChoices() {
   return {
     persona: slug(), rating: genRating, model: el('gen-model').value,
-    shot: el('gen-shot').value, scene: el('gen-scene').value,
+    shot: el('gen-shot').value, scene: genScene(),
     style: el('gen-style').value, camera: el('gen-camera').value,
     lighting: el('gen-lighting').value,
     expression: el('gen-expression').value,
@@ -2092,7 +2111,7 @@ function checkPromptStale() {
 }
 ['change', 'input'].forEach(t => document.addEventListener(t, e => {
   const id = e.target && e.target.id;
-  if (['gen-shot', 'gen-scene', 'gen-style', 'gen-camera', 'gen-lighting',
+  if (['gen-shot', 'gen-scene', 'gen-scene-nsfw', 'gen-style', 'gen-camera', 'gen-lighting',
        'gen-expression', 'gen-smudges', 'gen-quality', 'gen-clothing', 'gen-direction', 'gen-ref',
        'gen-model'].includes(id)) checkPromptStale();
 }));
@@ -2115,7 +2134,7 @@ async function suggestDirection() {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         persona: slug(), rating: genRating, shot: el('gen-shot').value,
-        scene: el('gen-scene').value, style: el('gen-style').value,
+        scene: genScene(), style: el('gen-style').value,
         clothing: el('gen-clothing').value.trim(),
       }),
     });
@@ -2134,7 +2153,7 @@ document.addEventListener('input', e => {
   if (e.target && e.target.id === 'gen-direction') delete e.target.dataset.auto;
 });
 document.addEventListener('change', e => {
-  if (!e.target || !['gen-shot', 'gen-scene'].includes(e.target.id)) return;
+  if (!e.target || !['gen-shot', 'gen-scene', 'gen-scene-nsfw'].includes(e.target.id)) return;
   const input = el('gen-direction');
   if (!input.value.trim() || input.dataset.auto) suggestDirection();
 });
@@ -2281,7 +2300,7 @@ async function runGeneration() {
         prompt: el('gen-prompt').value.trim(),
         prompt_mode: el('gen-prompt').value.trim() ? 'full' : '',
         negative: el('gen-negative').value.trim(),
-        scene: el('gen-scene').value,
+        scene: genScene(),
         style: el('gen-style').value,
         camera: el('gen-camera').value,
         lighting: el('gen-lighting').value,

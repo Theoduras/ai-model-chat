@@ -2180,7 +2180,8 @@ def _cap_denied(name, user, extra=None):
 
 
 def _persona_count(user):
-    return len(db_list_personas(owner_id=_workspace_id(user)))
+    return len([p for p in db_list_personas(owner_id=_workspace_id(user))
+                if not p.get('config', {}).get('content_vault')])
 
 
 def _persona_cap_blocked(user):
@@ -9234,12 +9235,15 @@ def api_personas():
     because that is the public fan chat picker.
     """
     viewer = _current_user()
+    studio = request.args.get('studio') == '1'
     if viewer and not viewer.get('is_admin'):
         own = []
         # Personas are saved and counted against the active workspace, so
         # listing them by user id hides everything the moment the two differ.
         for sp in db_list_personas(owner_id=_workspace_id(viewer)):
             config = sp.get('config', {})
+            if config.get('content_vault') and not studio:
+                continue
             has_img = _persona_has_photo(sp['slug'], config)
             own.append({
                 'slug': sp['slug'],
@@ -9300,6 +9304,8 @@ def api_personas():
         if _is_premade(sp['slug']):
             continue  # a committed original shadows any stale DB copy of the same slug
         config = sp.get('config', {})
+        if config.get('content_vault') and not studio:
+            continue
         has_img = _persona_has_photo(sp['slug'], config)
         personas.append({
             'slug': sp['slug'],
@@ -32091,6 +32097,21 @@ def _transfer_character(s, char_id, ws, mode):
     return jsonify({'ok': True, 'id': new.id})
 
 
+@app.route('/api/studio/own-vault', methods=['POST'])
+def api_studio_own_vault():
+    """The workspace's "Your Content" vault: where a generation made without a
+    character lands. Hidden from persona lists and not counted against the plan."""
+    blocked = _require_active()
+    if blocked:
+        return blocked
+    ws = _workspace_id(_current_user())
+    slug = 'yours-' + re.sub(r'[^a-z0-9]', '', str(ws).lower())[:40]
+    if not db_get_persona(slug):
+        config = {'name': 'Your Content', 'content_vault': True, 'studio_only': True}
+        db_save_persona(slug, 'Your Content', config, build_system_prompt(config), owner_id=ws)
+    return jsonify({'ok': True, 'slug': slug})
+
+
 @app.route('/api/characters/<char_id>/studio', methods=['POST'])
 def api_character_studio(char_id):
     """Give an unlinked character its own persona, so the studio, the vault and
@@ -32761,9 +32782,10 @@ def api_generate_direction():
     """One line of direction for the next still — pose, expression, what she
     is doing — written the way a creator plans her own post.
 
-    Only a safe-work job goes to Gemini: nothing explicit is sent to Google,
-    and it would refuse anyway. Everything above safe work, and any Gemini
-    failure, gets one of the studio's own lines instead.
+    Every rating goes to Gemini. Above safe work it is asked for a sensual but
+    non-graphic line, which it will write; the explicit detail comes from the
+    shot itself at generation. A random mood keeps two clicks from agreeing.
+    Only a Gemini failure falls back to one of the studio's own lines.
     """
     blocked = _require_active()
     if blocked:
@@ -32779,14 +32801,12 @@ def api_generate_direction():
     scene = str(body.get('scene') or '').strip().lower()
     if scene not in imagegen.SCENES:
         scene = ''
-    if CH.job_level(shot, scene) != 'sfw':
-        return jsonify({'ok': True, 'direction': imagegen.pick_direction(shot, scene),
-                        'source': 'built-in'})
-
+    spicy = CH.job_level(shot, scene) != 'sfw'
     cfg = _persona_config(slug) or {}
     clothing = str(body.get('clothing') or '').strip()[:200]
     what = ', '.join(filter(None, (
-        imagegen.SHOT_FRAMING.get(shot, ''), imagegen.SCENES.get(scene, ('', ''))[1],
+        '' if spicy else imagegen.SHOT_FRAMING.get(shot, ''),
+        '' if spicy else imagegen.SCENES.get(scene, ('', ''))[1],
         imagegen.STYLES.get(str(body.get('style') or ''), ''),
         f'wearing {clothing}' if clothing else '')))
     system = (
@@ -32794,9 +32814,14 @@ def api_generate_direction():
         "Write ONE direction for it: your pose, expression, what you are doing "
         "and any prop, in 25 words or fewer, as a plain comma-separated phrase. "
         "Make it feel natural and personal, like something you would actually post. "
+        + ("It is for your paid page, so make it flirty and sensual — a teasing, "
+           "intimate pose — but never graphic or explicit. " if spicy else "") +
+        "Be surprising: never the obvious pose for this kind of photo. "
         "Do not mention clothing" + (" beyond what is given" if clothing else "") + ", "
         "camera, lighting, photo quality, age or body. No quotes, no hashtags, no emoji.")
-    ask = f"The photo: {what or 'a casual photo'}."
+    mood = random.choice(('playful', 'lazy', 'confident', 'shy', 'mischievous', 'dreamy',
+                          'bold', 'cosy', 'candid', 'sultry', 'goofy', 'focused'))
+    ask = f"The photo: {what or ('a private, intimate photo' if spicy else 'a casual photo')}. Mood: {mood}."
     interests = str(cfg.get('interests') or '').strip()
     if interests:
         ask += f" Things you are into: {interests[:200]}."
@@ -32805,7 +32830,7 @@ def api_generate_direction():
             model=MODEL_NAME,
             contents=[{'role': 'user', 'parts': [{'text': ask}]}],
             config=types.GenerateContentConfig(system_instruction=system,
-                                               temperature=1.0),
+                                               temperature=1.3),
         )
         line = re.sub(r'\s+', ' ', _gemini_text(resp)).strip().strip('"\'').rstrip('.')
         if line:
