@@ -22374,12 +22374,43 @@ def _plat_auto_run_api(plat):
         return jsonify({'ok': False, 'error': str(e)[:200]}), 400
 
 
+def _fv_find_chat(persona, handle):
+    """Why one fan is or is not answered: what Fanvue's search returns for the
+    handle, whether the round's full chat list holds them, and whether they are
+    stood down as unsendable."""
+    scope = _fanvue_scope(persona)
+    out = {'handle': handle}
+    try:
+        res = _fanvue_call(persona, 'GET', f'{scope}/chats?search='
+                           + urllib.parse.quote(handle) + '&size=10')
+        rows = _fv_list(res) or []
+        out['search_rows'] = rows[:3]
+        out['search_parsed'] = [dict(zip(('uuid', 'handle', 'is_creator', 'chat_uuid'),
+                                         _fv_user_of_chat(r))) for r in rows]
+    except Exception as e:
+        out['search_error'] = _fv_error_text(e)
+    try:
+        allrows = _fanvue_paged(persona, f'{scope}/chats')
+        out['round_chat_count'] = len(allrows)
+        out['in_round_list'] = any((_fv_user_of_chat(r)[1] or '').lower() == handle.lower()
+                                   for r in allrows)
+    except Exception as e:
+        out['round_error'] = _fv_error_text(e)
+    for p in out.get('search_parsed') or []:
+        out.setdefault('unsendable', {})[p['handle'] or p['uuid']] = \
+            _fv_is_unsendable(persona, p['uuid'] or '')
+    return out
+
+
 @app.route('/api/fanvue/debug')
 @operator_only
 def api_fanvue_debug():
     """Dump raw Fanvue JSON (me / chats / first chat's messages) so the exact
     field names can be confirmed. Admin-gated; used to fix parsing quickly."""
     persona = (request.args.get('persona') or '').strip()
+    find = (request.args.get('find') or '').strip().lstrip('@')
+    if find:
+        return jsonify(_fv_find_chat(persona, find))
     out = {}
     try:
         out['me'] = _fanvue_call(persona, 'GET', '/users/me')
