@@ -97,6 +97,10 @@
     .gen-chips.gen-stack { flex-direction: column; }
     .gen-stack .gen-chip { display: flex; justify-content: space-between; gap: 8px; border-radius: var(--r-sm); padding: 8px 11px; text-align: left; }
     .gen-chip small { color: var(--text-muted); }
+    .gen-stack .gen-eng { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .gen-eng b { font-weight: 600; white-space: nowrap; }
+    .gen-eng .gen-tag { font-size: 12px; font-weight: 400; font-style: italic; line-height: 1.3; }
+    .gen-stack .gen-price { flex-shrink: 0; white-space: nowrap; font-weight: 400; }
     .gen-chip[aria-pressed="true"] small { color: var(--text-2); }
 
     /* Thumbnails: one 3:4 tile for every photo picker on the page. */
@@ -1446,8 +1450,11 @@ function renderModelChips() {
   // picker having lied.
   const want = genRating === 'nsfw' ? 'nsfw' : 'sfw';
   const ratings = genPrices.ratings || {};
+  const order = ['seedream-4-5', 'nano-banana-2', 'nano-banana-pro'];
+  const rank = m => (order.indexOf(m) + 1) || order.length + 1;
   const keys = Object.keys(genPrices.images)
-    .filter(m => m !== 'seedream-5-pro' && (ratings[m] || ['sfw']).includes(want));
+    .filter(m => m !== 'seedream-5-pro' && (ratings[m] || ['sfw']).includes(want))
+    .sort((a, b) => rank(a) - rank(b));
   if (!keys.includes(hidden.value)) {
     hidden.value = keys.includes(genPrices.defaults.model)
       ? genPrices.defaults.model : (keys[0] || '');
@@ -1461,9 +1468,9 @@ function renderModelChips() {
   box.innerHTML = keys.map(m => {
     const price = (genPrices.images[m] || {})[res];
     return `<button type="button" class="gen-chip" aria-pressed="${m === hidden.value}"
-             onclick="pickModel('${m}')">${esc(label(m))}
-             ${tag(m) ? `<small><i>${esc(tag(m))}</i></small>` : ''}
-             <small>${price === undefined ? '' : price + ' tokens'}</small></button>`;
+             onclick="pickModel('${m}')"><span class="gen-eng"><b>${esc(label(m))}</b>
+             ${tag(m) ? `<small class="gen-tag">${esc(tag(m))}</small>` : ''}</span>
+             <small class="gen-price">${price === undefined ? '' : price + (price === 1 ? ' token' : ' tokens')}</small></button>`;
   }).join('') || '<span class="hint">No model serves that rating.</span>';
   if (note) {
     const only = label(keys[0]);
