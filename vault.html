@@ -657,6 +657,19 @@ async function vwDelete(ids) {
   vwDraw();
 }
 
+async function vwUndress(id) {
+  try {
+    const res = await fetch('/api/generate/undress', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ persona: vwSlug, media: id }),
+    });
+    const d = await res.json();
+    note(d.ok ? 'Undressing — ' + d.tokens + ' token' + (d.tokens === 1 ? '' : 's')
+                + '. The result lands in Studio → generations for you to keep.'
+              : (d.error || 'Undress failed.'));
+  } catch (e) { note('Undress failed.'); }
+}
+
 async function vwDownload(ids) {
   const want = ids || [...vwPicked];
   if (!want.length) return;
@@ -778,6 +791,7 @@ function vwViewDraw() {
     + '</div></div>'
     + '<div class="vw-sec" style="flex-direction:row;gap:8px;margin-top:auto;">'
       + '<button type="button" class="btn btn-secondary" style="flex:1" onclick="vwDownload([\'' + m.id + '\'])">⭳ Download</button>'
+      + (m.kind === 'video' ? '' : '<button type="button" class="btn btn-secondary" title="Fully nude version of this photo — 1 token" onclick="vwUndress(\'' + m.id + '\')">Undress</button>')
       + '<button type="button" class="btn btn-ghost" style="color:var(--err)" onclick="vwDelete([\'' + m.id + '\'])">Delete</button>'
     + '</div>';
 }
