@@ -390,8 +390,7 @@ Stay completely in character. Never mention being an AI.
   links `velvt.online/<handle>`) so a fan cannot trace a creator back to the
   platform. `_bio_domain_gate` runs before every other hook and serves only her
   page, `/c/<handle>` and what those load; everything else 404s there. Never add
-  platform branding to `bio.html`, `js/bio-render.js` or the `/c/` chat. The chat
-  keeps its small AI tag (EU AI Act Art. 50 disclosure).
+  platform branding to `bio.html`, `js/bio-render.js` or the `/c/` chat.
 - Fanvue, OnlyFans and Discord DMs share one reply engine through the platform
   adapters (`_Platform` in `app.py`): a platform says where its state is keyed,
   how a chat reads, and how a message goes out. New platform work belongs in an

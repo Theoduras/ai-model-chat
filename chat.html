@@ -59,7 +59,7 @@
     </div>
     <div class="header-info">
       <div class="header-name" id="header-name">…</div>
-      <div class="header-meta"><span id="header-status"></span><span class="ai-tag" id="ai-tag" hidden>AI</span></div>
+      <div class="header-meta" id="header-status"></div>
     </div>
     <div class="header-right">
       <nav data-site-nav="inline" class="sn-links sn-inline"></nav>
@@ -165,7 +165,7 @@ let PFX = 'persona_' + persona + '_';
 if ((EMBED || window.self !== window.top) && !PICKER) { document.body.classList.add('embed'); }
 if (ONLY) document.body.classList.add('only');
 if (DEMO) document.body.classList.add('demo');
-if (FAN) { document.body.classList.add('fan'); document.getElementById('ai-tag').hidden = false; }
+if (FAN) document.body.classList.add('fan');
 
 function applyPersonaConfig(cfg) {
   avatarUrl = null;
