@@ -18187,7 +18187,8 @@ def api_fanvue_wish():
         try:
             cfg = {'enabled': bool(d.get('enabled')),
                    'price_sfw': max(FV_PRICE_FLOOR, int(d.get('price_sfw') or 0)),
-                   'price_nsfw': max(FV_PRICE_FLOOR, int(d.get('price_nsfw') or 0))}
+                   'price_nsfw': max(FV_PRICE_FLOOR, int(d.get('price_nsfw') or 0)),
+                   'test_phrase': str(d.get('test_phrase') or '').strip()[:80]}
         except (TypeError, ValueError):
             return jsonify({'ok': False, 'error': 'Prices must be numbers'}), 400
         _set_setting(f'fanvue_wish_{persona}', json.dumps(cfg))
@@ -21028,6 +21029,24 @@ def _wish_owner(persona):
         s.close()
 
 
+def _fv_wish_mark_paid(persona, fan_uuid):
+    """Test phrase: count this fan's last wish as bought. True if one was open."""
+    from db import PpvDrop, mark_ppv_paid
+    s = _db_session()
+    try:
+        d = (s.query(PpvDrop)
+             .filter(PpvDrop.persona == persona, PpvDrop.fan_uuid == str(fan_uuid),
+                     PpvDrop.set_id == 'wish', PpvDrop.paid_at.is_(None))
+             .order_by(PpvDrop.created_at.desc()).first())
+        if not d:
+            return False
+        mark_ppv_paid(s, d.id, source='test')
+        s.commit()
+        return True
+    finally:
+        s.close()
+
+
 def _fv_wish_unpaid(persona, fan_uuid):
     """True while this fan's last wish is unbought, or when that cannot be read:
     each wish spends the creator's tokens, so an unpaid one blocks the next."""
@@ -21050,7 +21069,15 @@ def _fv_wish_check(persona, fan_uuid, fan_key, who, text):
     """A wish to make from this message, or None. The free gates run before
     the one classifier call, so an ordinary message costs nothing."""
     cfg = _fv_wish_cfg(persona)
-    if not cfg.get('enabled') or not wishes.looks_like_wish(text):
+    if not cfg.get('enabled'):
+        return None
+    phrase = (cfg.get('test_phrase') or '').strip().lower()
+    if phrase and phrase in (text or '').lower() and _wish_owner(persona):
+        if _fv_wish_mark_paid(persona, fan_uuid):
+            _fv_trace(persona, 'ppv', f'{who} said the wish test phrase — last wish '
+                                      'counted as bought', fan=fan_key)
+        return None
+    if not wishes.looks_like_wish(text):
         return None
     owner = _wish_owner(persona)
     if not owner:

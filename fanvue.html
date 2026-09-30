@@ -190,6 +190,7 @@
         <label style="display:flex;gap:6px;align-items:center;margin:0;"><input type="checkbox" id="wish-on"> On</label>
         <label style="margin:0;">Safe price ($) <input type="number" id="wish-sfw" min="3" step="1" style="max-width:90px;"></label>
         <label style="margin:0;">Explicit price ($) <input type="number" id="wish-nsfw" min="3" step="1" style="max-width:90px;"></label>
+        <label style="margin:0;" title="Testing only: when a fan sends a message containing this, their last wish counts as bought, so they can ask for another without paying.">Test phrase <input type="text" id="wish-test" placeholder="blank = off" style="max-width:160px;"></label>
         <button class="btn-ai" onclick="saveWish()">Save</button>
         <span class="hint" id="wish-hint"></span>
       </div>
@@ -755,12 +756,14 @@ async function loadWish(){
   document.getElementById('wish-on').checked=!!d.enabled;
   document.getElementById('wish-sfw').value=d.price_sfw?d.price_sfw/100:'';
   document.getElementById('wish-nsfw').value=d.price_nsfw?d.price_nsfw/100:'';
+  document.getElementById('wish-test').value=d.test_phrase||'';
   row.style.display='';
 }
 async function saveWish(){
   const cents=id=>Math.round((parseFloat(document.getElementById(id).value)||0)*100);
   const d=await post('/api/fanvue/wish',{persona:persona(),enabled:document.getElementById('wish-on').checked,
-    price_sfw:cents('wish-sfw'),price_nsfw:cents('wish-nsfw')});
+    price_sfw:cents('wish-sfw'),price_nsfw:cents('wish-nsfw'),
+    test_phrase:document.getElementById('wish-test').value});
   document.getElementById('wish-hint').textContent=d.ok?'Saved':(d.error||'Save failed');
   if(d.ok)loadWish();
 }
