@@ -19342,7 +19342,8 @@ def _fv_user_of_chat(chat):
     uuid = _fv_first(chat, 'userUuid', 'otherUserUuid') or _fv_first(u, 'uuid', 'id')
     handle = _fv_first(u, 'handle', 'username', 'displayName', default='')
     role = str(_fv_first(u, 'role', 'type', default='')).lower()
-    is_creator = bool(u.get('isCreator') or u.get('creator') or role == 'creator')
+    is_creator = bool(u.get('isCreator') or u.get('creator') or role == 'creator'
+                      or (u is not chat and chat.get('isCreator') is True))
     chat_uuid = _fv_first(chat, 'uuid', 'id', 'chatUuid', default='')
     return uuid, handle, is_creator, chat_uuid
 
@@ -19365,6 +19366,11 @@ def _fv_chat_online(chat, grace_minutes=5):
             return True
     seen = _fv_first(chat, 'lastSeenAt', 'lastSeen', default='') or \
         _fv_first(u, 'lastSeenAt', 'lastSeen', default='')
+    # Someone who hides their presence (creators often do) reads offline for
+    # good, yet a fan who has just written to her is plainly there.
+    last = chat.get('lastMessage') if isinstance(chat.get('lastMessage'), dict) else {}
+    if last and u.get('uuid') and _fv_sender(last) == u.get('uuid'):
+        seen = seen or _fv_first(last, 'sentAt', 'createdAt', default='')
     if seen:
         try:
             s = str(seen).replace('Z', '+00:00')
