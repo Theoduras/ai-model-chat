@@ -1447,7 +1447,7 @@ function renderModelChips() {
   const want = genRating === 'nsfw' ? 'nsfw' : 'sfw';
   const ratings = genPrices.ratings || {};
   const keys = Object.keys(genPrices.images)
-    .filter(m => (ratings[m] || ['sfw']).includes(want));
+    .filter(m => m !== 'seedream-5-pro' && (ratings[m] || ['sfw']).includes(want));
   if (!keys.includes(hidden.value)) {
     hidden.value = keys.includes(genPrices.defaults.model)
       ? genPrices.defaults.model : (keys[0] || '');
