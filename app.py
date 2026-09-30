@@ -18358,19 +18358,11 @@ def _fv_persona_for_creator(creator_uuid):
 # subscription is created on connect rather than left to whoever set the account
 # up. Each subscription returns its own signing secret, once, at creation.
 FV_WEBHOOK_PATH = '/webhooks/fanvue'
-# Every event this app acts on, and the scope Fanvue requires for it.
-# read:creator is optional and may be refused, so the request is built from what
-# the connection actually holds — asking for an event we lack the scope for
-# fails the whole call, taking the events we could have had with it.
-FV_WEBHOOK_EVENTS = {
-    'creator.payment.succeeded': 'read:creator',
-    'creator.subscription.activated': 'read:creator',
-    'creator.subscription.deactivated': 'read:creator',
-    'creator.refund.created': 'read:creator',
-    'creator.dispute.created': 'read:creator',
-    'creator.dispute.flagged': 'read:creator',
-    'creator.message.read': 'read:chat',
-}
+# Fanvue's own webhook types, ticked by hand in its Developer Area (app ->
+# Webhooks). There is no API to subscribe: POST /webhooks/subscriptions only
+# ever answered a bare 400.
+FV_WEBHOOK_EVENTS = ('Purchase Received', 'Tip Received', 'New Subscriber')
+FV_WEBHOOK_LAST_KEY = 'fanvue_webhook_last'
 
 
 def _fv_webhook_url():
@@ -18384,14 +18376,23 @@ def _fv_webhook_url():
     host = origin.split('://', 1)[1].split('/')[0].split(':')[0].lower()
     if host in ('localhost', '127.0.0.1', '::1') or host.endswith('.local'):
         return ''
-    return origin + FV_WEBHOOK_PATH
+    return origin + FV_WEBHOOK_PATH + '?k=' + _fv_webhook_token()
+
+
+def _fv_webhook_token():
+    """The secret in the webhook URL. Fanvue's deliveries are not known to be
+    signed, and an unauthenticated "purchase" would unlock paid content, so the
+    URL itself carries a key only Fanvue's settings hold."""
+    tok = (_get_setting('fanvue_webhook_token') or '').strip()
+    if not tok:
+        import secrets
+        tok = secrets.token_urlsafe(18)
+        _set_setting('fanvue_webhook_token', tok)
+    return tok
 
 
 def _fv_wanted_events(persona):
-    granted = set((_fanvue_tokens(persona).get('scope') or '').split())
-    refused = set(_fv_stored_hook(persona).get('refused') or [])
-    return sorted(e for e, need in FV_WEBHOOK_EVENTS.items()
-                  if need in granted and e not in refused)
+    return list(FV_WEBHOOK_EVENTS)
 
 
 def _fv_hook_key(persona):
@@ -18425,94 +18426,18 @@ def _fv_webhook_secrets():
 
 
 def _fv_ensure_webhook(persona, force=False):
-    """Make sure this creator's events are subscribed to our endpoint.
-
-    Idempotent: an existing subscription on the same URL covering the same
-    events is left alone. Fanvue has no way to amend one, so a subscription
-    missing events is replaced — which mints a new secret, hence storing it."""
+    """What to paste into Fanvue's Developer Area, and whether anything has
+    arrived on it yet. Makes no Fanvue call: webhooks are set per app there."""
     url = _fv_webhook_url()
     if not url:
         return {'ok': False, 'reason': 'no public https URL for this deployment'}
-    wanted = _fv_wanted_events(persona)
-    if not wanted:
-        return {'ok': False, 'reason': 'connection holds none of the needed scopes'}
-
-    try:
-        res = _fanvue_call(persona, 'GET', '/webhooks/subscriptions')
-    except Exception as e:
-        return {'ok': False, 'reason': f'could not list subscriptions: {str(e)[:120]}'}
-    mine = None
-    for row in (_fv_list(res) or []):
-        if str(row.get('url') or '').rstrip('/') == url:
-            mine = row
-            break
-
-    stored = _fv_stored_hook(persona)
-    if mine and not force:
-        have = set(mine.get('events') or [])
-        if set(wanted).issubset(have):
-            # Keep whatever secret we already hold for it — Fanvue never
-            # returns one again after creation.
-            _set_setting(_fv_hook_key(persona), json.dumps(
-                {'id': mine.get('id') or '', 'url': url, 'events': sorted(have),
-                 'secret': stored.get('secret') or '',
-                 'refused': stored.get('refused') or []}))
-            return {'ok': True, 'reason': 'already subscribed', 'url': url,
-                    'events': sorted(have), 'created': False}
-
-    if mine:
-        try:
-            _fanvue_call(persona, 'DELETE', f"/webhooks/subscriptions/{mine.get('id')}")
-        except Exception as e:
-            logger.warning('Fanvue [%s] could not replace the webhook subscription: %s',
-                           persona, str(e)[:120])
-
-    refused, why = [], ''
-    try:
-        made = _fanvue_call(persona, 'POST', '/webhooks/subscriptions',
-                            body={'url': url, 'events': wanted})
-    except Exception as e:
-        # detail keeps only Fanvue's "message" ("Bad Request"); the field
-        # errors that say what was wrong are in the rest of the body.
-        try:
-            body_text = (e.read() or b'').decode(errors='ignore')[:400]
-        except Exception:
-            body_text = ''
-        made, why = None, body_text or _fv_error_text(e)
-        # One unknown event fails the whole call, taking the rest with it, so
-        # find the one Fanvue will not take by leaving each out in turn.
-        if getattr(e, 'code', None) == 400 and len(wanted) > 1:
-            for drop in wanted:
-                rest = [x for x in wanted if x != drop]
-                try:
-                    made = _fanvue_call(persona, 'POST', '/webhooks/subscriptions',
-                                        body={'url': url, 'events': rest})
-                except Exception:
-                    continue
-                refused, wanted = [drop], rest
-                break
-        if made is None:
-            # Fanvue's reason first: a long prefix pushed it out of view.
-            _fv_trace(persona, 'error',
-                      f'webhook subscription refused — Fanvue said: '
-                      f'{why.replace(chr(10), " ")} — url {url}, {len(wanted)} events')
-            _set_setting(_fv_hook_key(persona), json.dumps(
-                dict(stored, url=url, last_error=why[:300], tried=wanted)))
-            return {'ok': False, 'reason': why, 'url': url, 'tried': wanted}
-    body = made.get('data') if isinstance(made.get('data'), dict) else made
-    secret = str((body or {}).get('signingSecret') or '')
-    _set_setting(_fv_hook_key(persona), json.dumps(
-        {'id': str((body or {}).get('id') or ''), 'url': url, 'events': wanted,
-         'secret': secret or stored.get('secret') or '',
-         'refused': sorted(set(stored.get('refused') or []) | set(refused))}))
-    missing = sorted(set(FV_WEBHOOK_EVENTS) - set(wanted) - set(refused))
-    _fv_trace(persona, 'connected',
-              'subscribed to ' + ', '.join(e.split('.', 1)[1] for e in wanted)
-              + (f" — {len(missing)} more need read:creator" if missing else '')
-              + (f" — Fanvue refused {refused[0]} ({why})" if refused else ''))
-    logger.info('Fanvue [%s] webhook subscribed: %s → %s', persona, url, wanted)
-    return {'ok': True, 'reason': 'subscribed', 'url': url, 'events': wanted,
-            'missing': missing, 'created': True}
+    last = _get_setting(FV_WEBHOOK_LAST_KEY) or ''
+    info = {'url': url, 'events': list(FV_WEBHOOK_EVENTS), 'missing': []}
+    if last:
+        return dict(info, ok=True, reason=f'last delivery {last}')
+    return dict(info, ok=False,
+                reason='nothing received yet — in Fanvue Developer Area → your app → '
+                       'Webhooks, add ' + url + ' and tick ' + ', '.join(FV_WEBHOOK_EVENTS))
 
 
 def _fv_ensure_webhook_safe(persona):
@@ -18612,13 +18537,16 @@ def fanvue_webhook():
         ok, why = _fv_verify_signature(raw, header, secret)
         if ok:
             break
+    if not ok and hmac.compare_digest(request.args.get('k') or '', _fv_webhook_token()):
+        ok = True
     if not ok:
         logger.warning('Fanvue webhook rejected: %s (%d secret(s) tried)', why, len(secrets))
         return jsonify({'error': 'invalid signature'}), 401
     try:
-        ev = json.loads(raw.decode('utf-8'))
+        ev = _fv_typed_event(json.loads(raw.decode('utf-8')))
     except Exception:
         return jsonify({'error': 'invalid payload'}), 400
+    _set_setting(FV_WEBHOOK_LAST_KEY, datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC'))
 
     kind = str(ev.get('type') or '')
     data = ev.get('data') if isinstance(ev.get('data'), dict) else {}
@@ -18634,7 +18562,9 @@ def fanvue_webhook():
         logger.info('Fanvue webhook %s for an unknown creator %s', kind, creator)
         return jsonify({'ok': True, 'ignored': 'unknown creator'})
 
-    if kind == 'creator.payment.succeeded':
+    _fv_trace(persona, 'connected', f'webhook {kind}: '
+                                    f'{json.dumps(ev.get("raw") or ev)[:300]}')
+    if kind == 'creator.payment.succeeded' and data.get('source') != 'tip':
         amount = _fv_first(data, 'amount', 'gross', 'total', default=None)
         _fv_settle_drop(persona, fan,
                         amount_cents=int(amount) if amount else None,
@@ -18650,6 +18580,42 @@ def fanvue_webhook():
     except Exception as e:
         logger.warning('Fanvue outcome %s not recorded: %s', kind, str(e)[:120])
     return jsonify({'ok': True})
+
+
+def _fv_typed_event(ev):
+    """Fanvue's deliveries carry no type: its own example app tells them apart
+    by shape. Map them onto the names the handler below already speaks, and
+    lift the fan and creator out to where it looks for them."""
+    if not isinstance(ev, dict) or ev.get('type'):
+        return ev
+    for key, kind in (('purchase', 'creator.payment.succeeded'),
+                      ('tip', 'creator.payment.succeeded'),
+                      ('subscriber', 'creator.subscription.activated'),
+                      ('follower', 'creator.follower.new')):
+        if key in ev or f'{key}Uuid' in ev:
+            break
+    else:
+        kind = 'creator.message.received' if 'message' in ev else 'unknown'
+        key = ''
+    inner = ev.get(key) if isinstance(ev.get(key), dict) else {}
+    fan = ''
+    for k in ('sender', 'user', 'fan', 'buyer', 'subscriber', 'follower'):
+        if isinstance(ev.get(k), dict) and ev[k].get('uuid'):
+            fan = ev[k]['uuid']
+            break
+    fan = fan or _fv_first(inner, 'userUuid', 'fanUuid', 'buyerUuid', 'senderUuid',
+                           default='') or _fv_first(ev, 'userUuid', 'fanUuid',
+                                                    'senderUuid', f'{key}Uuid', default='')
+    data = dict(inner)
+    data.setdefault('amount', _fv_first(inner, 'amount', 'price', default=None)
+                    or _fv_first(ev, 'amount', 'price', default=None))
+    if key == 'tip':
+        data['source'] = 'tip'
+    data['creator'] = {'uuid': ev.get('creatorUuid') or ev.get('recipientUuid')}
+    data['fan'] = {'uuid': fan}
+    return {'type': kind, 'data': data,
+            'id': ev.get('id') or inner.get('uuid') or ev.get(f'{key}Uuid') or '',
+            'raw': ev}
 
 
 # Fanvue's own names for the events that decide whether a funnel actually
@@ -18926,12 +18892,11 @@ def api_fanvue_funnels():
         cfg = _fv_funnel_cfg(persona)
         # Reported from what was stored at subscribe time — this is a page load,
         # not a reason to call Fanvue.
-        hook = _fv_stored_hook(persona)
+        hook = _fv_ensure_webhook(persona)
         return jsonify({'ok': True, 'config': cfg, 'webhook': {
-            'subscribed': bool(hook.get('id')),
-            'events': hook.get('events') or [],
-            'missing': sorted(set(FV_WEBHOOK_EVENTS) - set(hook.get('events') or [])),
-            'url': hook.get('url') or _fv_webhook_url()}, 'funnels': [
+            'subscribed': bool(hook.get('ok')), 'events': hook.get('events') or [],
+            'missing': [], 'reason': hook.get('reason') or '',
+            'url': hook.get('url') or ''}, 'funnels': [
             {'id': fid, 'name': f['name'], 'trigger': f['trigger'],
              'ladder': f['ladder'], 'best': f['best'], 'worst': f['worst'],
              'exit': f['exit'], 'unlocked': fid in cfg['unlocked'],
@@ -21599,13 +21564,12 @@ class _FanvuePlatform(_Platform):
         return _fanvue_creator(persona).get('handle')
 
     def webhook_state(self, persona):
-        hook = _fv_stored_hook(persona)
-        ready = bool(_fv_webhook_secret() or hook.get('secret'))
-        return {'ready': ready, 'url': hook.get('url') or '',
-                'last_error': hook.get('last_error') or '',
-                'problem': '' if ready else
-                'No webhook signing secret, so payment webhooks are rejected. '
-                'Purchases are still picked up by Reconcile, just later.'}
+        hook = _fv_ensure_webhook(persona)
+        return {'ready': bool(hook.get('ok')), 'url': hook.get('url') or '',
+                'last_error': '',
+                'problem': '' if hook.get('ok') else
+                'Fanvue webhook ' + (hook.get('reason') or 'not set up')
+                + '. Purchases are still picked up by Reconcile, just later.'}
 
     def send_text(self, persona, scope, fan_id, text):
         _fv_send_text(persona, scope, fan_id, text)
