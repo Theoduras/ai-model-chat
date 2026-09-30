@@ -19,6 +19,14 @@
     else document.documentElement.classList.add('in-workspace');
   </script>
   <style>
+    .rail-sub { display: flex; flex-direction: column; gap: 1px; margin: 2px 0 8px 26px; }
+    .ob-rsub { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--text-2); font: inherit; font-size: 0.78rem; text-align: left; cursor: pointer; }
+    .ob-rsub:hover { background: var(--surface); }
+    .ob-rsub.on { background: var(--accent-soft); color: var(--text); font-weight: 600; }
+    .ob-rsub.locked { opacity: .55; }
+    .ob-rsub-i { width: 14px; text-align: center; font-size: 0.7rem; flex-shrink: 0; color: var(--text-muted); }
+    .ob-rsub.approved .ob-rsub-i { color: var(--ok); }
+    .ob-rsub.review .ob-rsub-i, .ob-rsub.generating .ob-rsub-i, .ob-rsub.outdated .ob-rsub-i { color: var(--warn); }
     .v2-badge { position: fixed; left: 12px; top: 6px; z-index: 60; padding: 4px 10px; border-radius: 999px; font-size: .7rem; font-weight: 700; letter-spacing: .04em; background: var(--accent); color: #fff; opacity: .9; pointer-events: none; }
     .info { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; margin-left: 6px; border: 1px solid var(--text-muted); border-radius: 50%; font: italic 700 .68rem/1 Georgia, serif; color: var(--text-muted); cursor: pointer; vertical-align: middle; background: transparent; flex-shrink: 0; }
     .info:hover, .info:focus-visible { color: var(--accent); border-color: var(--accent); outline: none; }
@@ -679,10 +687,6 @@
             <div class="fp-list" id="intimate-features"></div>
           </div>
         </section>
-        <div class="views-toolbar" id="views-head">
-          <span class="hint" id="body-summary"></span>
-        </div>
-        <div id="tiers"></div>
       </div>
       <aside class="ch-side" id="ch-side-card">
         <section class="form-section ch-gen step-card" id="step-card">
@@ -1096,7 +1100,6 @@ function render() {
   const shown = prof || isPhotos() ? 'body' : step;
   document.querySelectorAll('[data-step]').forEach(n => n.hidden = showDone || n.dataset.step !== shown);
   el('body-profile').hidden = !prof;
-  el('views-head').hidden = el('tiers').hidden = prof;
   el('ch-side-card').hidden = prof;
   el('edit-view').classList.toggle('views-mode', isPhotos());
   // Beside the list there is room to open the next photo straight away; as a
@@ -1407,12 +1410,25 @@ function continueLabel() {
   const v = isPhotos() && nextPhoto();
   return v && v.key !== selView ? `Continue to ${v.label} \u2192` : 'Continue \u2192';
 }
+// Each photo of a photo step is listed under that step in the menu, so the menu
+// is the one place to see what exists and what is still to do.
+const RAIL_ICON = {approved: '\u2713', review: '\u25cf', generating: '\u25cf', outdated: '!', locked: '\ud83d\udd12'};
+function railPhotos(i) {
+  const t = STEPS[i];
+  if (!t || !t.views) return '';
+  const rows = stepViews(t).map(v => {
+    const d = vs(v.key).display;
+    return `<button type="button" class="ob-rsub ${d}${selView === v.key && step === t.key ? ' on' : ''}" onclick="openView('${v.key}')">
+      <span class="ob-rsub-i">${RAIL_ICON[d] || '\u25cb'}</span><span class="ob-rsub-t">${esc(v.label)}</span></button>`;
+  }).join('');
+  return `<div class="rail-sub" role="group" aria-label="${esc(t.nav)} photos">${rows}</div>`;
+}
 function renderFrame() {
   const i = stepIdx(), [ok, n] = approvedCount();
   const pct = Math.round(STEPS.filter((s, k) => stepDone(k)).length / STEPS.length * 100);
   el('ch-rail').innerHTML = `<button type="button" class="btn-back-gallery" onclick="showList()">← All characters</button>` +
     PageWizard.railHtml({title: 'Your character', name: cur.name, pct, stages: STAGES, steps: STEPS, idx: i,
-      done: stepDone, reachable: stepOpen, call: 'goStep'}) +
+      done: stepDone, reachable: stepOpen, call: 'goStep', sub: railPhotos}) +
     `<div class="ch-rail-meta"><span><b>${ok} of ${n}</b> required photos approved</span><span id="rail-cost"></span>
       <button type="button" class="btn btn-ghost btn-sm" onclick="deleteCharacter('${cur.id}')">Delete character</button></div>`;
   paintRailCost();
@@ -1496,20 +1512,29 @@ const STEP_TIPS = {
 const PHOTO_TIPS = () => [
   {anchor: '#step-card', placement: 'left', title: 'Generate one photo at a time',
    body: 'This list shows only the photos of this step. Each button generates that one photo and shows its price. Generate, then open it and approve the best option.'},
-  {anchor: '#tiers', placement: 'left', title: 'Every photo, in one place',
-   body: 'All her photos live here, with safe-for-work and NSFW in separate sections. A photo unlocks once the ones it is built from are approved.'},
+  {anchor: '#ch-rail .rail-sub', placement: 'right', title: 'Her photos are in the menu',
+   body: 'Every photo of this step is listed under it in the menu, with its status. Tap one to open it. A photo unlocks once the ones it is built from are approved.'},
   foot(['Approve all to move on', 'Continue opens the next step once every photo in this one is approved. The line above says which one is missing.'])];
 ['photos_body', 'photos_face', 'photos_intimate'].forEach(k => { STEP_TIPS[k] = PHOTO_TIPS; });
+const TODO_ANCHOR = {basics: '#f-name', describe: '#face-features', pick: '#face-opts', check: '.ch-check-card',
+  body: '#presets', intimate: '#prof-intimate', photos_body: '#step-card', photos_face: '#step-card',
+  photos_intimate: '#step-card', finish: '#fin-accept-row'};
 let TOUR = null;
 // Tips whose anchor is not on screen are dropped, so a stop never lands on nothing.
 function buildTour(key, force) {
   const make = STEP_TIPS[key];
   if (!make) return null;
   const items = make().filter(t => { const n = typeof t.anchor === 'function' ? t.anchor() : document.querySelector(t.anchor); return n && n.getBoundingClientRect().width; });
-  return items.length ? PageWizard.tour(items, {onEnd: () => {
+  return items.length ? PageWizard.tour(items, {smooth: true, block: 'center', onEnd: () => {
     PageWizard.markSeen(setupKey(), 'tour:' + key);
     // Each step builds its own tour, so the finished one's markup goes with it.
     document.querySelectorAll('.obt-root:not(.on)').forEach(n => n.remove());
+    // Back to the first thing this step needs from the creator.
+    const todo = document.querySelector(TODO_ANCHOR[key] || '');
+    if (todo) {
+      todo.scrollIntoView({block: 'start', behavior: 'smooth'});
+      if (/^(INPUT|TEXTAREA)$/.test(todo.tagName)) setTimeout(() => todo.focus({preventScroll: true}), 450);
+    }
   }}) : null;
 }
 function tourStart(force) {
@@ -1913,32 +1938,6 @@ const PHOTO_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" s
 function vs(key) { return (cur.views || {})[key] || {display: 'locked'}; }
 function isNsfw(v) { return v.group === 'nsfw'; }
 function imgById(id) { return (cur.images || []).find(i => i.id === id); }
-function viewTile(v) {
-  const st = vs(v.key), c = canonOf(v.key), t = curStep();
-  const from = v.parents.length ? 'from ' + v.parents.map(p => viewDef(p) ? viewDef(p).label : p).join(' + ') : 'base';
-  const mode = MODE_LABEL[st.mode];
-  const off = t && t.views && !t.views.includes(v.key) ? ' off-step' : '';
-  return `<button type="button" class="view${off}" aria-pressed="${selView === v.key}" onclick="openView('${v.key}')">
-    <div class="vt">${c ? `<img src="${esc(c.url)}" alt="">` : PHOTO_ICON}</div>
-    <div class="view-t"><div class="view-n">${esc(v.label)}${info('view:' + v.key)}</div>
-      <div class="view-f">${esc(from)}</div>
-      <div class="view-s"><span class="st ${st.display}">${STATUS_LABEL[st.display] || 'Locked'}</span>${mode ? `<span class="st">${mode}</span>` : ''}</div></div></button>`;
-}
-// The list of every photo: safe-for-work and NSFW in their own collapsible sections.
-let partsOpen = {sfw: true, nsfw: null};
-function partsList() {
-  const t = curStep(), onNsfw = !!(t && t.nsfw);
-  const sfw = cat.views.filter(v => !isNsfw(v)), nsfw = cat.views.filter(isNsfw);
-  const grid = list => `<div class="views">${list.map(v => viewTile(v)).join('')}</div>`;
-  const count = list => `${list.filter(v => vs(v.key).status === 'approved').length}/${list.length}`;
-  const sfwBlock = [['face', 'Face'], ['body', 'Body']].map(([g, label]) => {
-    const l = sfw.filter(v => v.group === g);
-    return l.length ? `<h3 class="tier-h">${label}</h3>${grid(l)}` : '';
-  }).join('');
-  const nsfwOpen = partsOpen.nsfw === null ? onNsfw : partsOpen.nsfw;
-  return `<details class="parts" ${partsOpen.sfw ? 'open' : ''} ontoggle="partsOpen.sfw=this.open"><summary>Safe for work \u00b7 ${count(sfw)}</summary>${sfwBlock}</details>`
-    + (nsfw.length ? `<details class="parts" ${nsfwOpen ? 'open' : ''} ontoggle="partsOpen.nsfw=this.open"><summary>NSFW \u00b7 ${count(nsfw)}</summary>${grid(nsfw)}</details>` : '');
-}
 // One row per photo in the current step, each with its own Generate.
 function shotRow(v) {
   const st = vs(v.key), c = canonOf(v.key), d = st.display;
@@ -1968,13 +1967,7 @@ function generateOne(key) {
 }
 function renderBody() {
   renderPresets();
-  const req = cat.views.filter(v => v.required);
-  const ok = req.filter(v => vs(v.key).status === 'approved').length;
-  const waiting = cat.views.filter(v => vs(v.key).display === 'review').length;
-  el('body-summary').textContent = `${LEVEL_LABEL[cur.nsfw_level]} · ${ok} of ${req.length} required approved · v${cur.version}` +
-    (waiting ? ` · ${waiting} waiting for your approval` : '');
   if (isPhotos()) {
-    el('tiers').innerHTML = partsList();
     paintStepCard();
   }
   const match = bodyMode() === 'match', bodyRefs = images('body_front', 'reference');
@@ -2013,7 +2006,8 @@ function openView(key) {
     return say(`Finish ${need ? need.nav : 'the earlier steps'} first.`, 'err');
   }
   selView = key;
-  if (t.key !== step) { step = t.key; render(); } else renderBody();
+  step = t.key;
+  render();
 }
 function closeDrawer() { selView = null; renderBody(); }
 function refTile(i) {

@@ -73,7 +73,7 @@
         return '<button type="button" class="ob-rstep ' + cls + (go ? '' : ' pw-off') + '"' +
           (i === o.idx ? ' aria-current="step"' : '') + (go ? ' onclick="' + o.call + '(' + i + ')"' : ' tabindex="-1"') + '>' +
           (o.done(i) && i !== o.idx ? '<span class="ob-rcheck">✓</span>' : '<span class="ob-rdot"></span>') +
-          esc(s.nav) + '</button>';
+          esc(s.nav) + '</button>' + (o.sub ? o.sub(i) || '' : '');
       }).join('') + '</div>' : '';
       // Another stage's title jumps to where that stage left off, or to its
       // result once it is finished — never past what `reachable` allows.
@@ -258,7 +258,7 @@
       // A mark about something further down the step scrolls it into view first,
       // or the hole in the dim lands on nothing.
       var el = anchorOf(step);
-      if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+      if (el && el.scrollIntoView) el.scrollIntoView({ block: opts.block || 'nearest', behavior: opts.smooth ? 'smooth' : 'auto' });
       n.title.textContent = step.title;
       n.body.textContent = step.body;
       n.count.textContent = (i + 1) + ' of ' + items.length;
