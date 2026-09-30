@@ -33904,10 +33904,9 @@ UNDRESS_PROMPT = (
 
 @app.route('/api/generate/undress', methods=['POST'])
 def api_generate_undress():
-    """One still taken to fully nude, as a Seedream 4.5 edit of itself.
+       """One still taken to fully nude, as a Seedream 4.5 edit of itself.
 
-    Only a photo this platform generated for the persona is accepted, never an
-    upload: an upload could be anybody, and a generation is her character."""
+    Accepts a generated or uploaded photo that belongs to this persona."""
     blocked = _require_active()
     if blocked:
         return blocked
@@ -33925,7 +33924,7 @@ def api_generate_undress():
     try:
         row = get_persona_media(s, media_id) if media_id else None
         ok = (row is not None and row.slug == slug and (row.kind or 'image') == 'image'
-              and row.source == 'generated' and bool(row.gcs_path))
+                            and row.source in ('generated', 'uploaded') and bool(row.gcs_path))
         size = _undress_aspect(row) if ok else ''
     finally:
         s.close()
