@@ -78,7 +78,7 @@ def test_tools():
     slugs = [t['slug'] for t in FT.TOOLS]
     check('slugs unique', len(slugs) == len(set(slugs)))
     tracks = [t['track'] for t in FT.TOOLS if t['track']]
-    check('four tracked tools', len(tracks) == 4 and len(set(tracks)) == 4)
+    check('five tracked tools', len(tracks) == 5 and len(set(tracks)) == 5)
     check('track codes fit a register link', all(len(c) <= 32 and c.replace('-', '').isalnum()
                                                   for c in tracks))
     here = os.path.dirname(os.path.abspath(__file__))
