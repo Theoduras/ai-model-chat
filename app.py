@@ -21201,35 +21201,59 @@ def _fv_run_wish(persona, scope, fan_uuid, fan_key, who, wish, plat):
                     'rating': 'explicit' if wish['explicit'] else 'sfw',
                     'shot': 'nude' if wish['explicit'] else 'full',
                     'prompt': wish['scene'], 'clothing': wish['outfit']}
-            spec = _gen_spec(persona, body, owner)
             char = _character_snapshot(persona)
-            if char:
-                spec.update(character=char, character_id=char['id'],
-                            character_version=char['version'])
-            job_id, _short = _gen_queue(owner, persona, spec, CR.quote(spec),
-                                        _token_balance(owner))
-            if not job_id:
-                _fv_trace(persona, 'error', f'{who}: wish skipped — not enough tokens',
-                          fan=fan_key)
+
+            def make(body):
+                spec = _gen_spec(persona, body, owner)
+                if char:
+                    spec.update(character=char, character_id=char['id'],
+                                character_version=char['version'])
+                job_id, _short = _gen_queue(owner, persona, spec, CR.quote(spec),
+                                            _token_balance(owner))
+                if not job_id:
+                    _fv_trace(persona, 'error', f'{who}: wish photo skipped — not '
+                                                'enough tokens', fan=fan_key)
+                    return None
+                _gen_start(job_id, persona, spec, _workspace_id(owner))
+                media = _gen_wait(job_id)
+                data = media and storage.get(media.gcs_path)
+                if not data:
+                    _fv_trace(persona, 'error', f'{who}: wish generation failed',
+                              fan=fan_key)
+                    return None
+                media_id, mime = media.id, media.mime or 'image/jpeg'
+                s = _db_session()
+                try:
+                    from db import get_persona_media
+                    _gen_keep_row(s, get_persona_media(s, media_id))
+                finally:
+                    s.close()
+                return media_id, data, mime
+
+            # A set, not a single: every later photo leads with the first as its
+            # reference so outfit, room and light match and only the pose moves.
+            first = make(body)
+            if not first:
                 return
-            _gen_start(job_id, persona, spec, _workspace_id(owner))
-            media = _gen_wait(job_id)
-            data = media and storage.get(media.gcs_path)
-            if not data:
-                _fv_trace(persona, 'error', f'{who}: wish generation failed', fan=fan_key)
-                return
-            media_id, mime = media.id, media.mime or 'image/jpeg'
-            s = _db_session()
-            try:
-                from db import get_persona_media
-                _gen_keep_row(s, get_persona_media(s, media_id))
-            finally:
-                s.close()
-            uuid = _fv_upload_media(persona, data, 'image',
-                                    f'wish-{media_id}.{mime.split("/")[-1]}',
-                                    content_type=mime, scope=scope)
+            photos = [first]
+            for _ in range(random.randint(2, 3) - 1):
+                more = make({**body, 'reference_media': first[0],
+                             'prompt': f"{wish['scene']}. Same woman, same outfit, same "
+                                       'room, background and lighting as the first '
+                                       'reference photo; only the pose and camera '
+                                       'angle change.'})
+                if not more:
+                    break
+                photos.append(more)
+
             uploads = _fv_uploads(persona)
-            uploads[media_id] = uuid
+            uuids = []
+            for media_id, data, mime in photos:
+                uuid = _fv_upload_media(persona, data, 'image',
+                                        f'wish-{media_id}.{mime.split("/")[-1]}',
+                                        content_type=mime, scope=scope)
+                uploads[media_id] = uuid
+                uuids.append(uuid)
             _set_setting(_fv_uploads_key(persona), json.dumps(uploads))
             try:
                 try:
@@ -21237,17 +21261,19 @@ def _fv_run_wish(persona, scope, fan_uuid, fan_key, who, wish, plat):
                 except url_error.HTTPError as e:
                     if e.code not in (400, 409):
                         raise
-                _fv_attach_to_folder(persona, 'Wishes', uuid)
+                for uuid in uuids:
+                    _fv_attach_to_folder(persona, 'Wishes', uuid)
             except Exception as e:
                 _fv_trace(persona, 'error', f'{who}: wish not filed in Wishes: '
                                             f'{_fv_error_text(e)}', fan=fan_key)
-            caption = wish['caption'] or 'made this one just for you'
-            msg_uuid = plat.send_ppv(persona, scope, fan_uuid, caption, [uuid],
+            caption = wish['caption'] or 'made these just for you'
+            msg_uuid = plat.send_ppv(persona, scope, fan_uuid, caption, uuids,
                                      wish['price'])
             _fv_record_drop(persona, fan_uuid, {'id': 'wish', 'name': 'Wish'}, 0,
-                            wish['price'], [uuid], msg_uuid, plat=plat)
-            _fv_trace(persona, 'ppv', f'✨ wish → {who} at ${wish["price"] / 100:g}: '
-                                      f'{wish["scene"]}', fan=fan_key)
+                            wish['price'], uuids, msg_uuid, plat=plat)
+            _fv_trace(persona, 'ppv', f'✨ wish ({len(uuids)} photos) → {who} at '
+                                      f'${wish["price"] / 100:g}: {wish["scene"]}',
+                      fan=fan_key)
     except Exception as e:
         logger.exception('wish for %s/%s failed', persona, fan_uuid)
         _fv_trace(persona, 'error', f'{who}: wish failed: {str(e)[:160]}', fan=fan_key)
