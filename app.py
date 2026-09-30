@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify, send_from_directory, session, redirect, url_for, render_template, render_template_string, Response, after_this_request, g
-from flask import has_request_context
+from flask import has_request_context, send_file
 import os
 import sys
 import functools
@@ -916,6 +916,37 @@ def _session_secret():
         return secrets.token_hex(32)
 
 
+_GZIP_TYPES = ('text/', 'application/json', 'application/javascript', 'image/svg+xml')
+_GZIP_MAX = 4 * 1024 * 1024
+
+
+@app.after_request
+def _gzip_response(resp):
+    # Cloud Run does not compress, and the app shell is 100-200 KB per page.
+    # after_request hooks run last-registered first, so this one sits right
+    # after the app is created: every hook that reads or rewrites the body has
+    # run by the time it is compressed.
+    try:
+        if (resp.status_code != 200 or resp.headers.get('Content-Encoding')
+                or 'gzip' not in request.headers.get('Accept-Encoding', '')
+                or not (resp.mimetype or '').startswith(_GZIP_TYPES)
+                or resp.is_streamed and not resp.direct_passthrough):
+            return resp
+        resp.direct_passthrough = False
+        data = resp.get_data()
+        if len(data) < 1024 or len(data) > _GZIP_MAX:
+            return resp
+        import gzip
+        resp.set_data(gzip.compress(data, compresslevel=6, mtime=0))
+        resp.headers['Content-Encoding'] = 'gzip'
+        resp.headers.add('Vary', 'Accept-Encoding')
+        if resp.headers.get('ETag') and not resp.headers['ETag'].startswith('W/'):
+            resp.headers['ETag'] = 'W/' + resp.headers['ETag']
+    except Exception:
+        pass
+    return resp
+
+
 try:
     from db import init_db
     init_db()
@@ -1216,7 +1247,12 @@ def _revalidate_app_shell(resp):
     if ((resp.mimetype or '').startswith('text/html')
             or (request.path or '/').startswith(_REVALIDATE_PREFIXES)):
         resp.headers['Cache-Control'] = 'no-cache, must-revalidate'
+    elif (request.path or '/').startswith(_LONG_CACHE_PREFIXES) and resp.status_code == 200:
+        resp.headers['Cache-Control'] = 'public, max-age=86400'
     return resp
+
+
+_LONG_CACHE_PREFIXES = ('/img/', '/fonts/')
 
 
 @app.route('/healthz')
@@ -2900,7 +2936,9 @@ BILLING_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 plan is active{% if user.expires_at %} until {{ user.expires_at[:10] }}{% endif %}.
 <a href="/dashboard">Go to dashboard</a></div>
 {% elif user.status == 'expired' %}
-<div class="err">Your plan has expired. Renew below to regain access.</div>
+<div class="err">Your plan has expired. Renew below to regain access.
+Your content, history and saved files are deleted 14 days after it ends; renewing before then keeps everything.
+<a href="/api/account/export">Download all my content</a></div>
 {% else %}
 <h1 style="margin-bottom:6px" data-edit-id="h1">Choose a plan</h1>
 <p class="sub" data-edit-id="sub">Pay by card or crypto. Access unlocks as soon as it confirms.</p>
@@ -7763,7 +7801,6 @@ def dashboard_logout():
 # View it at /admin/visitors ; download the raw log at /admin/visitors.log .
 
 _GEO_CACHE = {}
-_VISIT_LOG_FILE = os.path.join(LOG_DIR, 'visitors.log') if LOG_DIR else None
 _VISIT_SKIP_PREFIXES = ('/api/', '/static/', '/css/', '/js/', '/assets/')
 _VISIT_SKIP_EXACT = {'/healthz', '/favicon.ico', '/admin/visitors', '/admin/visitors.log'}
 
@@ -7829,20 +7866,8 @@ def _geo_lookup(ip):
     return geo
 
 
-def _append_visit_logfile(ts, ip, geo, path, ua):
-    if not _VISIT_LOG_FILE:
-        return
-    try:
-        os.makedirs(os.path.dirname(_VISIT_LOG_FILE), exist_ok=True)
-        loc = ' / '.join(p for p in (geo.get('city'), geo.get('region'), geo.get('country')) if p) or '?'
-        with open(_VISIT_LOG_FILE, 'a', encoding='utf-8') as f:
-            f.write(f"{ts}\t{ip}\t{loc}\t{path}\t{(ua or '')[:160]}\n")
-    except Exception:
-        pass
-
-
 def _finalize_visit(vid, ip, path, ua):
-    """Background: geo-locate the IP, persist it to the row, append to the log file."""
+    """Background: geo-locate the IP and persist it to the row."""
     geo = _geo_lookup(ip)
     try:
         from db import SessionLocal, set_visit_geo
@@ -7854,7 +7879,6 @@ def _finalize_visit(vid, ip, path, ua):
             s.close()
     except Exception:
         pass
-    _append_visit_logfile(_now_str(), ip, geo, path, ua)
 
 
 @app.after_request
@@ -11985,8 +12009,37 @@ def _growth_queue_round():
         sdb.close()
 
 
+def _lapse_notice(user, left):
+    base = (os.getenv('PUBLIC_BASE_URL') or '').rstrip('/')
+    return _send_email([user.email], 'Your plan has ended - download your content',
+        f"Your plan has ended. Your content, chat history and saved files will be "
+        f"deleted in {left} days.\n\nSubscribe again before then and nothing is "
+        f"deleted. To keep a copy, download everything here (sign in first):\n"
+        f"{base}/api/account/export\n")
+
+
+@app.route('/api/account/export')
+def account_export():
+    """A zip of everything the caller's workspace owns. Open to a lapsed
+    account on purpose: that is when someone needs it."""
+    user = _current_user()
+    if not user:
+        return redirect('/login?next=/api/account/export')
+    if user['workspace_owner_id'] != user['id'] and not user.get('is_admin'):
+        return ('Only the account owner can download this.', 403)
+    import account_lifecycle
+    s = _db_session()
+    try:
+        data = account_lifecycle.build_export(s, user['workspace_owner_id'])
+    finally:
+        s.close()
+    return send_file(data, mimetype='application/zip', as_attachment=True,
+                     download_name='my-content.zip')
+
+
 def _growth_queue_worker():
     import time as _t
+    last_prune = 0.0
     while True:
         _t.sleep(60)
         try:
@@ -11994,6 +12047,20 @@ def _growth_queue_worker():
                 _growth_queue_round()
         except Exception:
             logger.exception('growth queue tick failed')
+        if _t.time() - last_prune > 6 * 3600:
+            last_prune = _t.time()
+            try:
+                import account_lifecycle
+                from db import SessionLocal, prune_logs
+                s = SessionLocal()
+                try:
+                    prune_logs(s)
+                    s.commit()
+                    account_lifecycle.sweep(s, notify=_lapse_notice)
+                finally:
+                    s.close()
+            except Exception:
+                logger.exception('log prune / lapse sweep failed')
 
 
 def _dc_cta_fans(persona):
