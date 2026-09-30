@@ -255,15 +255,15 @@ def test_resolver():
     check('approval unlocks child', st['body_front'] == 'not_started')
     check('grandchild still locked', st['nude_front'] == 'locked')
     rows['body_front'] = _row('body_front', 'approved', 1, {'face_front': 1})
-    rows['face_profile'] = _row('face_profile', 'approved', 1, {'body_front': 1})
-    check('approved stays approved', CH.resolve_all(rows)['face_profile'] == 'approved')
+    rows['hands'] = _row('hands', 'approved', 1, {'body_front': 1})
+    check('approved stays approved', CH.resolve_all(rows)['hands'] == 'approved')
     check('rear_nude needs both parents', CH.resolve_all(rows)['rear_nude'] == 'locked')
     rows['body_front']['version'] = 2
     st = CH.resolve_all(rows)
-    check('re-approved parent outdates child', st['face_profile'] == 'outdated')
-    check('not-yet-generated child is not outdated', st['hands'] == 'not_started')
+    check('re-approved parent outdates child', st['hands'] == 'outdated')
+    check('not-yet-generated child is not outdated', st['feet'] == 'not_started')
     branch = CH.outdated_branch(rows)
-    check('branch holds outdated', 'face_profile' in branch and 'face_front' not in branch)
+    check('branch holds outdated', 'hands' in branch and 'face_front' not in branch)
 def test_snapshot_views():
     every = {v['key']: {'path': v['key'], 'mime': 'image/jpeg'} for v in CH.views()}
     snap = {'body_type': 'female', 'views': every}
@@ -368,6 +368,11 @@ def test_vulva_looks():
         CH.LOOK_FILES = saved
 
 
+def test_face_angles_hang_off_the_face():
+    check('every face angle is built from the face', all(
+        CH.parents(k) == ('face_front',) for k in ('face_three_quarter', 'face_profile', 'face_smile')))
+
+
 def test_cup_in_body_photos():
     sheet = {'cup': 'DD', 'bust': 'Large', 'height': '165–175 cm'}
     def prompt(key, level):
@@ -412,5 +417,6 @@ if __name__ == '__main__':
     test_vulva_looks()
     test_presets()
     test_cup_in_body_photos()
+    test_face_angles_hang_off_the_face()
     print('FAILED' if FAILURES else 'OK', len(FAILURES))
     raise SystemExit(1 if FAILURES else 0)

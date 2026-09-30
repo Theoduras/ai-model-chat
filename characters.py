@@ -281,9 +281,9 @@ VIEWS = {
         dict(key='face_three_quarter', label='Face, three-quarter', group='face', rating='sfw', required_from=None,
              parents=('face_front',), tier=1, mode='reference', framing='a three-quarter view head-and-shoulders portrait, neutral expression', uses=('face',)),
         dict(key='face_profile', label='Face, profile', group='face', rating='sfw', required_from=None,
-             parents=('body_front',), tier=1, mode='reference', framing='a side-profile head-and-shoulders portrait, neutral expression', uses=('face',)),
+             parents=('face_front',), tier=1, mode='reference', framing='a side-profile head-and-shoulders portrait, neutral expression', uses=('face',)),
         dict(key='face_smile', label='Face, smiling', group='face', rating='sfw', required_from=None,
-             parents=('body_front',), tier=1, mode='reference', framing='a front-facing head-and-shoulders portrait with a natural warm smile', uses=('face',)),
+             parents=('face_front',), tier=1, mode='reference', framing='a front-facing head-and-shoulders portrait with a natural warm smile', uses=('face',)),
         dict(key='body_front', label='Full body, front', group='body', rating='sfw', required_from='sfw', parents=('face_front',), tier=0, mode='reference',
              framing=('a full-body photo from head to feet, standing perfectly straight and upright, facing the '
                       'camera squarely, head level, shoulders level, feet together, arms relaxed slightly away '

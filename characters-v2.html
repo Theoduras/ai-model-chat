@@ -578,7 +578,7 @@
     <div class="ch-cols ch-check" data-step="check" hidden>
       <div class="ch-side">
         <div class="ch-shot"><img id="check-img" alt="Selected face option"></div>
-        <p class="hint" data-info="step:photos_face">Other angles of her face (three-quarter, profile, smiling) get their own step later, after her full-body photo.</p>
+        <p class="hint" data-info="step:photos_face">After she is approved, the next step generates three more angles of her face.</p>
       </div>
       <section class="form-section ch-check-card">
         <div class="ch-check-head ch-inline">
@@ -639,7 +639,7 @@
             </div>
           </div>
           <div class="vp-sec">
-            <div class="vp-row"><span class="dl" data-info="drawer:traits">Body profile used</span><span class="hint" id="vp-traits-n"></span></div>
+            <div class="vp-row"><span class="dl" data-info="drawer:traits"><span id="vp-traits-l">Body profile used</span></span><span class="hint" id="vp-traits-n"></span></div>
             <div class="chips" id="vp-traits"></div>
             <p class="hint" id="vp-traits-off"></p>
           </div>
@@ -1123,7 +1123,7 @@ const HELP = {
   'step:check': ['Check & approve', 'Tick every feature that matches what you chose. Approving runs an adult-appearance check and locks her face; every later photo copies it.'],
   'step:body': ['Body profile', 'Her overall shape: a preset, her breast size, and the individual features. Every body photo is made from this, so finish it before generating anything.'],
   'step:photos_body': ['Body photos', 'Her clothed full-body photos, starting with the front. The back, side, hands and feet are built from the front, so they unlock once it is approved. All of them must be approved to move on.'],
-  'step:photos_face': ['Face angles', 'Three-quarter, profile and smiling. Profile and smiling are built from her approved full-body photo, so they come after the body photos.'],
+  'step:photos_face': ['Face angles', 'Three-quarter, profile and smiling, each built from her approved face. Approve all three to open the body steps.'],
   'step:intimate': ['Intimate details', 'Nipples, pubic hair, vulva and anus. Choose all of it now: the intimate photos are generated from these choices, so nothing is generated first and then corrected. Breast size is set in Body profile.'],
   'step:photos_intimate': ['Intimate photos', 'Each photo is built from the ones it depends on (the lock message says which) and from your intimate details. Approve them top to bottom.'],
   'step:finish': ['Accept & link', 'Review her full set, accept this version, then link her to a persona so every photo that persona sends looks like her.'],
@@ -1153,8 +1153,8 @@ const HELP = {
 const VIEW_HELP = {
   face_front: 'Her main face photo. Every other photo copies this face, so it is approved first.',
   face_three_quarter: 'Her face turned slightly. Built from the front face photo.',
-  face_profile: 'Her face from the side. Built from her full-body photo.',
-  face_smile: 'Her face with a natural smile. Built from her full-body photo.',
+  face_profile: 'Her face from the side. Built from the front face photo.',
+  face_smile: 'Her face with a natural smile. Built from the front face photo.',
   body_front: 'Her clothed full body from the front. It carries her breast size and every body feature, and all other body photos are built from it.',
   body_back: 'Her clothed full body from behind, built from the front photo.',
   body_side: 'Her clothed full body from the side, built from the front photo.',
@@ -1253,14 +1253,14 @@ const ALL_STEPS = [
    sub: 'Choose the option that looks most like her. Not right? Regenerate, or change her features. Options you do not pick delete themselves after 3 days.'},
   {key: 'check', stage: 'face', nav: 'Check & approve', title: 'Check every feature',
    sub: 'Tick each feature that matches what you chose. Approving runs the adult-appearance check and locks her face in.'},
+  {key: 'photos_face', stage: 'face', nav: 'Face angles', title: 'Approve her face angles',
+   views: ['face_three_quarter', 'face_profile', 'face_smile'],
+   sub: 'Other angles of her face: three-quarter, profile and smiling, each built from her approved face. Generate and approve all three; the body steps open after that.'},
   {key: 'body', stage: 'body', nav: 'Body profile', title: 'What is her body like?',
    sub: 'Start from a preset, set her breast size right under it, then fine-tune. Every body photo is made from this, so finish it before generating.'},
   {key: 'photos_body', stage: 'body', nav: 'Body photos', title: 'Approve her body photos',
    views: ['body_front', 'body_back', 'body_side', 'hands', 'hands_palms', 'feet', 'feet_soles'],
    sub: 'Her clothed full-body photos, front first. Generate each photo, approve the best option, and every photo in this step must be approved before the next step opens.'},
-  {key: 'photos_face', stage: 'body', nav: 'Face angles', title: 'Approve her face angles',
-   views: ['face_three_quarter', 'face_profile', 'face_smile'],
-   sub: 'Other angles of her face: three-quarter, profile and smiling. Profile and smiling are built from her approved full-body photo, which is why they come after it.'},
   {key: 'intimate', stage: 'intimate', nsfw: true, nav: 'Intimate details', title: 'How is she intimately?',
    sub: 'Breasts, nipples, pubic hair, vulva and anus. Choose everything here first: her intimate photos are generated from these choices, so nothing has to be redrawn later.'},
   {key: 'photos_intimate', stage: 'intimate', nsfw: true, nav: 'Intimate photos', title: 'Approve her intimate photos',
@@ -2078,10 +2078,12 @@ function renderViewPanel() {
   // Only traits this level offers; the rest were never pickable here.
   const traits = (v.traits || []).filter(k => (cat.features || []).some(f => f.key === k));
   const on = traits.filter(k => (cur.sheet || {})[k]), off = traits.filter(k => !(cur.sheet || {})[k]);
+  const face = v.group === 'face';
   el('vp-traits-n').textContent = `${on.length} of ${traits.length} in the prompt`;
   el('vp-traits').innerHTML = on.map(k => `<span class="trait">${esc(fl(k))}: <b>${esc(cur.sheet[k])}</b></span>`).join('');
   el('vp-traits-off').innerHTML = (off.length ? `Not set, so not sent: ${off.map(k => esc(fl(k))).join(', ')}. ` : '') +
-    `<a href="#" onclick="go('body');return false;">Edit body profile</a>`;
+    `<a href="#" onclick="go('${face ? 'describe' : 'body'}');return false;">${face ? 'Edit her face' : 'Edit body profile'}</a>`;
+  el('vp-traits-l').textContent = face ? 'Face features used' : 'Body profile used';
   const dressed = DRESSED.includes(v.key);
   const opts = images(v.key, 'canonical').concat(images(v.key, 'wardrobe'), images(v.key, 'candidate'));
   const cands = images(v.key, 'candidate');
