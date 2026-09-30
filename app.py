@@ -31002,11 +31002,96 @@ def _clip_views(char, picked, model):
     return keys, [role(k) for k in keys]
 
 
+def _clip_refs(slug, spec, job_id=''):
+    """The photos a clip on an uploaded video is sent with, and what each one
+    is, in payload order. The job and the Advanced preview both read this, so
+    the prompt names exactly the images that go out."""
+    job = spec.get('job') or ('swap' if spec['kind'] == 'swap' else 'animate')
+    roles = None
+    # Face only for a model that replaces the person in a
+    # clip: it takes her build and wardrobe from the source, so
+    # a body reference is a second identity rather than more
+    # information about this one.
+    role = ('face' if imagegen.wants_face_only(spec.get('model'))
+            else 'body' if imagegen.wants_body_only(spec.get('model'))
+            else None)
+    # The swap models carry no reference set of their own, so
+    # they borrow the photo model's -- deliberately, and said
+    # out loud in the log rather than left as a fallback.
+    ref_model = spec.get('model')
+    refs = _gen_reference_urls(slug, ref_model, role=role)
+    if not refs:
+        ref_model = imagegen.EXPLICIT_MODEL
+        refs = _gen_reference_urls(slug, ref_model, role=role)
+    if not refs and role == 'body':
+        refs = _gen_reference_urls(slug, ref_model)
+    if job == 'reel' and (spec.get('character')
+                          or spec.get('identity_media')):
+        char = spec.get('character')
+        keys, roles = (_clip_views(char, spec.get('character_views'),
+                                   spec.get('model')) if char else ([], []))
+        refs = [u for u in (_char_path_url(char['views'][k]['path'],
+                                           char['views'][k]['mime'])
+                            for k in keys) if u] + _gen_media_urls(
+            slug, spec.get('identity_media'))
+    elif (spec.get('identity_media')
+          and spec.get('identity') != 'character'):
+        refs = _gen_media_urls(slug, spec['identity_media'])
+        ref_model = 'picked'
+    elif (spec.get('identity') == 'character' and role != 'face'):
+        char = spec['character']
+        keys, roles = _clip_views(
+            char, spec.get('character_views'), spec.get('model'))
+        refs = [u for u in (_char_path_url(char['views'][k]['path'],
+                                           char['views'][k]['mime'])
+                            for k in keys) if u]
+        refs += _gen_media_urls(slug, spec.get('identity_media'))
+        ref_model = 'character'
+    elif spec.get('identity') == 'character':
+        refs = _character_urls(spec['character'], None, None,
+                               face_only=True)
+        ref_model = 'character'
+    elif spec.get('character'):
+        refs = (_character_urls(spec['character'], None, None,
+                                face_only=bool(role))
+                + refs)[:imagegen.MAX_REFERENCES]
+    logger.info('swap job=%s refs=%d role=%s from=%s',
+                job_id, len(refs), role or 'face+body', ref_model)
+    if refs and imagegen.wants_body_only(spec.get('model')):
+        refs = [imagegen.fit_reference(refs[0])]
+    cap = imagegen.ref_cap(spec.get('model'))
+    roles = (roles or [])[:len(refs)]
+    roles = roles + ['other'] * (len(refs) - len(roles))
+    extras = []
+    if cap > 1 and not imagegen.wants_body_only(spec.get('model')):
+        for kind_, row_ in (
+                ('outfit', _studio_outfit(slug, spec.get('outfit_ref'))),
+                ('location', _studio_location(slug, spec.get('location_ref')))):
+            url_ = row_ and _char_path_url(row_.gcs_path, 'image/jpeg')
+            if url_:
+                extras.append((kind_, url_))
+    # One list of (url, role) pairs, so the prompt can never
+    # name an image that is not in the payload.
+    pairs, seen = [], set()
+    for url_, role_ in list(zip(refs, roles)) + [
+            (u, k) for k, u in extras]:
+        if url_ and url_ not in seen:
+            seen.add(url_)
+            pairs.append((url_, role_))
+    own = [p for p in pairs if p[1] not in ('outfit', 'location')]
+    tail = [p for p in pairs if p[1] in ('outfit', 'location')]
+    pairs = (own[:max(1, cap - len(tail))] + tail)[:cap]
+    refs = [p[0] for p in pairs]
+    roles = [p[1] for p in pairs]
+    logger.info('clip job=%s sends %d refs: %s',
+                job_id, len(refs), ','.join(roles))
+    return refs, roles
+
+
 def _gen_video_prompt(slug, spec):
     """The words a clip job would be sent with, built the way the submit path
-    builds them but without signing a URL, for the studio's Advanced panel.
-    The reference roles are the ones the job would name, not a promise of
-    which photos survive the provider's cap."""
+    builds them, for the studio's Advanced panel. The images it names come
+    from `_clip_refs`, the same list the job sends."""
     job = spec.get('job') or ('swap' if spec['kind'] == 'swap' else 'animate')
     model = spec.get('model')
     motion = spec.get('motion', '') or spec.get('prompt_extra', '')
@@ -31018,22 +31103,7 @@ def _gen_video_prompt(slug, spec):
             return imagegen.build_swap_prompt(
                 text, preserve=imagegen.preserves_source('swap', model),
                 place=spec.get('place') or '')
-        if char and spec.get('identity') == 'character':
-            roles = _clip_views(char, spec.get('character_views'), model)[1]
-        else:
-            roles = (['face'] if imagegen.wants_face_only(model)
-                     else ['body'] if imagegen.wants_body_only(model)
-                     else ['face', 'body'])
-        roles = list(roles) + ['other'] * len(picked)
-        if imagegen.wants_body_only(model):
-            roles = roles[:1]
-        cap = imagegen.ref_cap(model)
-        extras = []
-        if cap > 1 and not imagegen.wants_body_only(model):
-            extras = [k for k, ref in (('outfit', spec.get('outfit_ref')),
-                                       ('location', spec.get('location_ref'))) if ref]
-        roles = roles[:max(1, cap - len(extras))]
-        roles = (roles + extras)[:cap]
+        roles = _clip_refs(slug, spec)[1]
         return imagegen.build_swap_prompt(
             text, preserve=imagegen.preserves_source('swap', model), roles=roles,
             place=spec.get('place') or '', at_images=imagegen.uses_at_images(model))
@@ -33782,77 +33852,7 @@ def _gen_start(job_id, slug, spec, workspace):
                         raise imagegen.GenerationError(
                             'That uploaded clip is no longer there. Upload it again.')
                     call['source_url'] = url
-                    # Face only for a model that replaces the person in a
-                    # clip: it takes her build and wardrobe from the source, so
-                    # a body reference is a second identity rather than more
-                    # information about this one.
-                    role = ('face' if imagegen.wants_face_only(spec.get('model'))
-                            else 'body' if imagegen.wants_body_only(spec.get('model'))
-                            else None)
-                    # The swap models carry no reference set of their own, so
-                    # they borrow the photo model's -- deliberately, and said
-                    # out loud in the log rather than left as a fallback.
-                    ref_model = spec.get('model')
-                    refs = _gen_reference_urls(slug, ref_model, role=role)
-                    if not refs:
-                        ref_model = imagegen.EXPLICIT_MODEL
-                        refs = _gen_reference_urls(slug, ref_model, role=role)
-                    if not refs and role == 'body':
-                        refs = _gen_reference_urls(slug, ref_model)
-                    if job == 'reel' and (spec.get('character')
-                                          or spec.get('identity_media')):
-                        refs = call['reference_urls']
-                    elif (spec.get('identity_media')
-                          and spec.get('identity') != 'character'):
-                        refs = _gen_media_urls(slug, spec['identity_media'])
-                        ref_model = 'picked'
-                    elif (spec.get('identity') == 'character' and role != 'face'):
-                        char = spec['character']
-                        keys, roles = _clip_views(
-                            char, spec.get('character_views'), spec.get('model'))
-                        refs = [u for u in (_char_path_url(char['views'][k]['path'],
-                                                           char['views'][k]['mime'])
-                                            for k in keys) if u]
-                        refs += _gen_media_urls(slug, spec.get('identity_media'))
-                        ref_model = 'character'
-                    elif spec.get('identity') == 'character':
-                        refs = _character_urls(spec['character'], None, None,
-                                               face_only=True)
-                        ref_model = 'character'
-                    elif spec.get('character'):
-                        refs = (_character_urls(spec['character'], None, None,
-                                                face_only=bool(role))
-                                + refs)[:imagegen.MAX_REFERENCES]
-                    logger.info('swap job=%s refs=%d role=%s from=%s',
-                                job_id, len(refs), role or 'face+body', ref_model)
-                    if refs and imagegen.wants_body_only(spec.get('model')):
-                        refs = [imagegen.fit_reference(refs[0])]
-                    cap = imagegen.ref_cap(spec.get('model'))
-                    roles = (roles or [])[:len(refs)]
-                    roles = roles + ['other'] * (len(refs) - len(roles))
-                    extras = []
-                    if cap > 1 and not imagegen.wants_body_only(spec.get('model')):
-                        for kind_, row_ in (
-                                ('outfit', _studio_outfit(slug, spec.get('outfit_ref'))),
-                                ('location', _studio_location(slug, spec.get('location_ref')))):
-                            url_ = row_ and _char_path_url(row_.gcs_path, 'image/jpeg')
-                            if url_:
-                                extras.append((kind_, url_))
-                    # One list of (url, role) pairs, so the prompt can never
-                    # name an image that is not in the payload.
-                    pairs, seen = [], set()
-                    for url_, role_ in list(zip(refs, roles)) + [
-                            (u, k) for k, u in extras]:
-                        if url_ and url_ not in seen:
-                            seen.add(url_)
-                            pairs.append((url_, role_))
-                    own = [p for p in pairs if p[1] not in ('outfit', 'location')]
-                    tail = [p for p in pairs if p[1] in ('outfit', 'location')]
-                    pairs = (own[:max(1, cap - len(tail))] + tail)[:cap]
-                    refs = [p[0] for p in pairs]
-                    roles = [p[1] for p in pairs]
-                    logger.info('clip job=%s sends %d refs: %s',
-                                job_id, len(refs), ','.join(roles))
+                    refs, roles = _clip_refs(slug, spec, job_id)
                     call['prompt'] = imagegen.build_swap_prompt(
                         motion if job == 'swap'
                         else (spec.get('prompt_extra') or motion),
