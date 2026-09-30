@@ -66,7 +66,7 @@
   </div>
 
   <div class="pl-planbar" id="pl-planbar" hidden>
-    <span class="pl-planbar-l">Plan for</span>
+    <span class="pl-planbar-l">Posts this week</span>
     <span class="pl-chips" id="pl-plan-chans"></span>
     <label class="pl-planbar-x"><input type="checkbox" id="pl-plan-cross"> Same post everywhere</label>
     <button type="button" class="btn btn-primary" onclick="plPlan(this)">Plan it</button>
@@ -100,6 +100,9 @@
       <div class="field" style="margin-top:14px;" id="pl-m-when-field">
         <label for="pl-m-when">When</label>
         <input type="datetime-local" id="pl-m-when">
+        <div id="pl-m-more-when"></div>
+        <button type="button" class="btn-section-save" id="pl-m-add-when"
+                style="margin:6px 0 0; align-self:flex-start;" onclick="plAddWhen()">+ Add date</button>
       </div>
 
       <div class="field" style="margin-top:14px;">
@@ -282,6 +285,11 @@ let plPickedMedia = [];   // what the open editor has attached, in order
 let plChans = [];         // channels ticked on a brand-new post
 let plCaps = null;        // this account's plan capabilities, from /api/me
 let plPlanChans = [];     // channels the next plan covers
+let plPlanCounts = {};    // posts per channel for the next plan
+let plPlanMedia = {};     // media picked per channel for the next plan, in order
+let plPlanPickFor = '';   // the channel the media picker is filling for the plan
+// A starting count per channel, from growth.WEEKLY_CADENCE.
+const PL_SUGGEST = { x: 14, threads: 7, fanvue: 7, instagram: 7, tiktok: 7, reddit: 3 };
 let plRating = '';        // '', 'sfw' or 'nsfw' for the next draft
 let plRemote = [];        // posts Fanvue already has booked — read-only
 let plFvVault = null;     // her Fanvue vault, fetched the first time it is needed
@@ -734,7 +742,9 @@ function plCard(c) {
     + (flag ? '<span class="pl-flag">' + esc(flag) + '</span>' : '') + '</span>'
     + (c.media && c.kind !== 'proposed' ? plMediaThumb(c.media, ' is-card') : '')
     + (c.kind === 'proposed' && c.publishable ? plSlotMediaRow(c) : '')
-    + '<span class="pl-text">' + esc(c.text || 'no angle yet') + '</span>'
+    + (c.kind === 'proposed' && c.platform === 'instagram' ? plSlotIgRow(c) : '')
+    + '<span class="pl-text">' + esc(c.text || (c.kind === 'proposed'
+        ? 'written from the media when you queue the week' : 'no angle yet')) + '</span>'
     + (c.error ? '<span class="pl-flag" style="margin-left:0;">' + esc(c.error.slice(0, 60)) + '</span>' : '')
     + '</button>';
 }
@@ -754,6 +764,34 @@ function plSlotMediaRow(c) {
            + (warn ? ' · explicit' : (slot.media_override ? ' · forced' : ''))
          : '+ add media')
     + '</span></span>';
+}
+
+// Where a planned Instagram post lands. A clip defaults to a reel and a photo
+// to the feed until she picks.
+function plIgDefault(slot) {
+  const m = slot.media_id ? plMediaById(slot.media_id) : null;
+  return slot.ig_kind || ((m && m.kind === 'video') ? 'reel' : 'post');
+}
+
+const PL_IG_KINDS = [['post', 'Feed post'], ['story', 'Story'], ['reel', 'Reel']];
+
+// A chip rather than a select: the card is a button, and a form control inside
+// one does not take clicks in every browser. Each tap moves to the next type.
+function plSlotIgRow(c) {
+  const kind = plIgDefault(plProposed[c.idx] || {});
+  const label = (PL_IG_KINDS.find(o => o[0] === kind) || PL_IG_KINDS[0])[1];
+  return '<span class="pl-slot-media" role="button" tabindex="0"'
+    + ' title="Where this lands on Instagram — tap to change"'
+    + ' onclick="event.stopPropagation(); plSlotIgNext(' + c.idx + ')">'
+    + 'Instagram: ' + esc(label) + ' ▾</span>';
+}
+
+function plSlotIgNext(idx) {
+  const slot = plProposed[idx];
+  if (!slot) return;
+  const i = PL_IG_KINDS.findIndex(o => o[0] === plIgDefault(slot));
+  slot.ig_kind = PL_IG_KINDS[(i + 1) % PL_IG_KINDS.length][0];
+  plRender(plPlanMeta || {});
 }
 
 // ── Slot media picker ───────────────────────────────────────────────────────
@@ -778,6 +816,16 @@ function plSlotMediaOpen(idx) {
 function plSlotMediaClose() {
   document.getElementById('pl-slot-media').classList.remove('open');
   plSlotIdx = -1;
+  if (plPlanPickFor) { plPlanPickFor = ''; plRenderPlanChans(); }
+}
+
+// The slot the picker is filling: a proposed card, or a channel of the plan.
+function plSlotTarget() {
+  if (plPlanPickFor) {
+    return { platform: plPlanPickFor, multi: true,
+             ids: plPlanMedia[plPlanPickFor] || (plPlanMedia[plPlanPickFor] = []) };
+  }
+  return plProposed[plSlotIdx];
 }
 
 function plSlotBanned(platform, m) {
@@ -785,7 +833,7 @@ function plSlotBanned(platform, m) {
 }
 
 function plSlotMediaDraw() {
-  const slot = plProposed[plSlotIdx];
+  const slot = plSlotTarget();
   if (!slot) return;
   const q = document.getElementById('pl-sm-q').value.trim().toLowerCase();
   const rating = document.getElementById('pl-sm-rating').value;
@@ -800,7 +848,7 @@ function plSlotMediaDraw() {
   });
   document.getElementById('pl-sm-grid').innerHTML = shown.length
     ? shown.map(m => '<button type="button" class="pl-vault-item'
-        + (slot.media_id === m.id ? ' on' : '')
+        + ((slot.multi ? slot.ids.indexOf(m.id) !== -1 : slot.media_id === m.id) ? ' on' : '')
         + (plSlotBanned(slot.platform, m) ? ' is-banned' : '')
         + '" onclick="plSlotMediaPick(\'' + esc(m.id) + '\')">'
         + plMediaThumb(m)
@@ -811,11 +859,12 @@ function plSlotMediaDraw() {
     : '<span class="hint">Nothing in the vault matches that. Add media in the '
       + 'Content Vault.</span>';
   document.getElementById('pl-sm-foot').innerHTML =
-    '<span class="hint">' + shown.length + ' of ' + plVault.length + ' shown'
+    '<span class="hint">' + (slot.multi ? slot.ids.length + ' picked · ' : '')
+    + shown.length + ' of ' + plVault.length + ' shown'
     + (PL_NSFW_BANNED.indexOf(slot.platform) !== -1
         ? ' · this channel bans explicit media' : '') + '</span>'
     + '<span style="display:flex; gap:8px;">'
-    + (slot.media_id
+    + (slot.media_id && !slot.multi
         ? '<button type="button" class="btn btn-ghost" onclick="plSlotMediaPick(\'\')">Post without media</button>'
         : '')
     + '<button type="button" class="btn btn-primary" onclick="plSlotMediaClose()">Done</button>'
@@ -823,9 +872,22 @@ function plSlotMediaDraw() {
 }
 
 function plSlotMediaPick(id) {
-  const slot = plProposed[plSlotIdx];
+  const slot = plSlotTarget();
   if (!slot) return;
   const m = id ? plMediaById(id) : null;
+  if (slot.multi) {
+    const i = slot.ids.indexOf(id);
+    if (i !== -1) slot.ids.splice(i, 1);
+    else if (plSlotBanned(slot.platform, m)) {
+      alert((PL_LABELS[slot.platform] || slot.platform) + ' does not allow explicit media.');
+      return;
+    } else if (slot.ids.length >= (plPlanCounts[slot.platform] || PL_SUGGEST[slot.platform] || 7)) {
+      alert('That is already one for every post. Raise the count to add more.');
+      return;
+    } else slot.ids.push(id);
+    plSlotMediaDraw();
+    return;
+  }
   if (id && plSlotBanned(slot.platform, m)) {
     const label = PL_LABELS[slot.platform] || slot.platform;
     if (!confirm(label + ' does not allow explicit media. Posting this will very '
@@ -855,13 +917,49 @@ function plRenderPlanChans() {
   document.getElementById('pl-plan-chans').innerHTML = PL_PLATFORMS.map(p => {
     if (!plAllowed(p)) return plLockedChan(p);
     const on = plPlanChans.indexOf(p) !== -1;
-    return '<label class="pl-chan-pick' + (on ? ' on' : '') + '">'
+    const n = plPlanCounts[p] || PL_SUGGEST[p] || 7;
+    return '<span class="pl-plan-row">'
+      + '<label class="pl-chan-pick' + (on ? ' on' : '') + '">'
       + '<input type="checkbox"' + (on ? ' checked' : '')
       + ' onchange="plTogglePlanChan(\'' + p + '\')">'
       + esc(PL_LABELS[p])
       + (PL_PUBLISHABLE.indexOf(p) === -1 ? '<span class="by-hand">by hand</span>' : '')
-      + '</label>';
+      + '</label>'
+      + (on ? '<input type="number" class="pl-plan-n" min="1" max="28" value="' + n + '"'
+          + ' aria-label="Posts on ' + esc(PL_LABELS[p]) + '"'
+          + ' oninput="plPlanCount(\'' + p + '\', this.value)">'
+          + (PL_PUBLISHABLE.indexOf(p) !== -1
+              ? '<button type="button" class="btn-section-save" id="pl-plan-m-' + p + '"'
+                + ' onclick="plPlanMediaOpen(\'' + p + '\')">' + plPlanMediaLabel(p) + '</button>'
+              : '')
+        : '')
+      + '</span>';
   }).join('');
+}
+
+function plPlanMediaLabel(p) {
+  return 'Media ' + (plPlanMedia[p] || []).length + '/' + (plPlanCounts[p] || PL_SUGGEST[p] || 7);
+}
+
+function plPlanCount(p, v) {
+  const n = Math.max(1, Math.min(28, parseInt(v, 10) || 1));
+  plPlanCounts[p] = n;
+  if (plPlanMedia[p]) plPlanMedia[p] = plPlanMedia[p].slice(0, n);
+  const b = document.getElementById('pl-plan-m-' + p);
+  if (b) b.textContent = plPlanMediaLabel(p);
+}
+
+// The plan's media is picked before anything is written: the posts are
+// written from it when the week is queued.
+function plPlanMediaOpen(p) {
+  plPlanPickFor = p;
+  plSlotIdx = -1;
+  document.getElementById('pl-sm-q').value = '';
+  document.getElementById('pl-sm-rating').value = '';
+  document.getElementById('pl-sm-title').textContent =
+    'Media for ' + (PL_LABELS[p] || p) + ' — pick up to ' + (plPlanCounts[p] || PL_SUGGEST[p] || 7);
+  document.getElementById('pl-slot-media').classList.add('open');
+  plSlotMediaDraw();
 }
 
 // A channel above this plan: shown so the creator can see what upgrading buys,
@@ -875,7 +973,10 @@ function plLockedChan(p) {
 function plTogglePlanChan(p) {
   if (!plAllowed(p)) return;
   const i = plPlanChans.indexOf(p);
-  if (i === -1) plPlanChans.push(p); else plPlanChans.splice(i, 1);
+  if (i === -1) {
+    plPlanChans.push(p);
+    if (!plPlanCounts[p]) plPlanCounts[p] = PL_SUGGEST[p] || 7;
+  } else plPlanChans.splice(i, 1);
   plRenderPlanChans();
 }
 
@@ -890,6 +991,11 @@ async function plPlan(btn) {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ persona: plSlug, start: plWeekStart, days: 7,
                              platforms: plPlanChans,
+                             counts: Object.fromEntries(plPlanChans.map(
+                               p => [p, plPlanCounts[p] || PL_SUGGEST[p] || 7])),
+                             media: Object.fromEntries(plPlanChans
+                               .filter(p => (plPlanMedia[p] || []).length)
+                               .map(p => [p, plPlanMedia[p].slice()])),
                              cross: document.getElementById('pl-plan-cross').checked })
     });
     const d = await res.json();
@@ -897,17 +1003,14 @@ async function plPlan(btn) {
     plProposed = d.slots || [];
     plPlanMeta = d;
     plPlanClose();
-    if (!d.ideas) {
-      alert('The angles came back empty, so every proposed card needs one typed in '
-        + 'before it can be queued.');
-    }
     plLoadQueue();
   } catch (e) { alert('Could not plan the week.'); }
   finally { btn.disabled = false; btn.textContent = was; }
 }
 
 async function plQueueWeek(btn) {
-  const slots = plProposed.filter(s => s.publishable);
+  const slots = plProposed.filter(s => s.publishable).map(s =>
+    s.platform === 'instagram' ? { ...s, ig_kind: plIgDefault(s) } : s);
   if (!slots.length) return;
   btn.disabled = true;
   const was = btn.textContent;
@@ -957,6 +1060,8 @@ function plNew() {
   const when = document.getElementById('pl-m-when');
   when.value = toLocalInput(at);
   when.disabled = false;
+  document.getElementById('pl-m-more-when').innerHTML = '';
+  document.getElementById('pl-m-add-when').style.display = '';
   document.getElementById('pl-m-when-field').style.display = '';
 
   const ta = document.getElementById('pl-m-text');
@@ -1194,6 +1299,8 @@ function plEdit(kind, idx) {
       + (row.error ? ' ' + row.error : '');
 
   const when = document.getElementById('pl-m-when');
+  document.getElementById('pl-m-more-when').innerHTML = '';
+  document.getElementById('pl-m-add-when').style.display = 'none';
   when.value = toLocalInput(at);
   // Every post has a slot now, whether it goes out on its own or is a reminder
   // to post it by hand, so the time is worth setting either way.
@@ -1514,6 +1621,25 @@ function plCopy(btn) {
   else { ta.select(); document.execCommand('copy'); done(); }
 }
 
+// The same post again on another date: one more row, same words and media.
+function plAddWhen() {
+  const box = document.getElementById('pl-m-more-when');
+  const last = box.querySelectorAll('input');
+  const prev = fromLocalInput((last.length ? last[last.length - 1]
+    : document.getElementById('pl-m-when')).value) || Math.floor(Date.now() / 1000);
+  const row = document.createElement('div');
+  row.className = 'pl-when-row';
+  row.innerHTML = '<input type="datetime-local" value="' + toLocalInput(prev + 86400) + '">'
+    + '<button type="button" class="btn-section-save" aria-label="Remove date"'
+    + ' onclick="this.parentNode.remove()">&times;</button>';
+  box.appendChild(row);
+}
+
+function plMoreWhen() {
+  return Array.from(document.querySelectorAll('#pl-m-more-when input'))
+    .map(i => fromLocalInput(i.value)).filter(Boolean);
+}
+
 async function plSave(btn, now) {
   if (!plOpen) return;
   const text = document.getElementById('pl-m-text').value.trim();
@@ -1550,7 +1676,8 @@ async function plSave(btn, now) {
       res = await fetch('/api/growth/queue', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ persona: plSlug, platforms: plChans, text: text,
-                               run_at: at, now: !!now, media_ids: plPickedMedia,
+                               run_at: at, run_ats: plMoreWhen(),
+                               now: !!now, media_ids: plPickedMedia,
                                ...(fv || {}), ...(ig || {}), ...(rd || {}) })
       });
     } else if (plOpen.kind === 'proposed') {

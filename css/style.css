@@ -1305,6 +1305,7 @@ body:not(.is-admin) .admin-only { display: none !important; }
 }
 .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 20px; align-items: start; }
 .field { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.field[hidden] { display: none; }
 .field.full { grid-column: 1 / -1; }
 
 /* The avatar keeps the same column edges as every other row, so the form reads
@@ -3711,6 +3712,9 @@ body.page-dashboard .pg-search input[type="text"] {
 }
 .pl-planbar-l { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.4px; color: var(--text-muted); }
 .pl-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.pl-plan-row { display: inline-flex; align-items: center; gap: 6px; }
+.pl-plan-n { width: 58px; padding: 4px 6px; }
+.pl-when-row { display: flex; gap: 6px; margin-top: 6px; }
 .pl-planbar-x { display: flex; align-items: center; gap: 6px; font-size: 0.78rem; color: var(--text-2); }
 
 .pl-card-top { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }

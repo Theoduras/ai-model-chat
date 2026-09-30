@@ -847,12 +847,28 @@ def queue_stats(rows, now=0):
 # funnels.winback_due has been in the tree unused since the funnel engine
 # landed. This is the thin wrapper the follow-up rounds call.
 WEEKLY_CADENCE = {
-    'x':         {'per_day': 2,  'hours': (9, 20)},
-    'threads':   {'per_day': 1,  'hours': (12,)},
-    'fanvue':    {'per_day': 1,  'hours': (11,)},
-    'instagram': {'per_day': 1,  'hours': (18,)},
-    'tiktok':    {'per_day': 1,  'hours': (19,)},
-    'reddit':    {'per_week': 3, 'hours': (21,)},
+    'x':         {'per_day': 2},
+    'threads':   {'per_day': 1},
+    'fanvue':    {'per_day': 1},
+    'instagram': {'per_day': 1},
+    'tiktok':    {'per_day': 1},
+    'reddit':    {'per_week': 3},
+}
+
+# When US fans are on each channel, as (from, to) hours in Eastern time, from
+# the Sprout Social, Hootsuite and Later engagement studies, narrowed to the
+# hours that are also awake on the West Coast (nothing before 9 ET but Reddit's
+# commute). Each post draws a window and a minute inside it, so the week never
+# lands on the same clock time twice: a feed that posts at 18:00 sharp every
+# day reads as a scheduler, and the same audience sees every post.
+US_TZ = 'America/New_York'
+US_WINDOWS = {
+    'x':         {'week': ((9, 11), (12, 14), (19, 22)), 'end': ((10, 12), (19, 22))},
+    'threads':   {'week': ((11, 14), (19, 21)), 'end': ((10, 13), (19, 21))},
+    'fanvue':    {'week': ((12, 14), (20, 23)), 'end': ((11, 14), (20, 23))},
+    'instagram': {'week': ((11, 13), (18, 21)), 'end': ((10, 12), (18, 21))},
+    'tiktok':    {'week': ((18, 22),), 'end': ((11, 13), (18, 22))},
+    'reddit':    {'week': ((7, 9), (20, 23)), 'end': ((9, 11), (20, 23))},
 }
 
 # 70/20/10. Most of what she posts has to be worth following on its own, or a
@@ -938,12 +954,26 @@ def series_part(series):
     return part if part in SERIES_BRIEF else 0
 
 
-def plan_week(start_at, days=7, cadence=None, platforms=None):
+def _us_at(day_ts, minute):
+    """The epoch for `minute` past midnight Eastern on the Eastern date that
+    `day_ts` falls on, daylight saving included."""
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo(US_TZ)
+    d = datetime.fromtimestamp(day_ts, tz).date()
+    local = datetime(d.year, d.month, d.day, tzinfo=tz) + timedelta(minutes=minute)
+    # Re-attach after the arithmetic so a DST day gets its own offset.
+    return int(local.replace(tzinfo=None).replace(tzinfo=tz).timestamp()), d.weekday()
+
+
+def plan_week(start_at, days=7, cadence=None, platforms=None, counts=None, seed=None):
     """The week's slots: what goes where, when, and which of the three jobs each
     post is doing. Reddit never draws the ask — its own brief rules out sales
     language, and a subreddit is the fastest place to lose an account over it.
     `platforms` narrows the cadence to the channels she picked; an empty or
-    unknown pick means the whole cadence rather than an empty week."""
+    unknown pick means the whole cadence rather than an empty week. `counts`
+    ({platform: posts}) is how many she wants on each channel over the run."""
+    import random
     cadence = cadence or WEEKLY_CADENCE
     if platforms:
         picked = {p for p in platforms if p in cadence}
@@ -953,28 +983,62 @@ def plan_week(start_at, days=7, cadence=None, platforms=None):
     # not a silent week.
     days = max(1, min(int(days or 0), 28))
     start_at = int(start_at or 0)
+    end_at = start_at + days * 86400
+    rng = random.Random(seed if seed is not None else start_at)
     slots = []
     for plat, spec in cadence.items():
-        hours = spec.get('hours') or (12,)
-        per_day = int(spec.get('per_day', 0) or 0)
-        per_week = int(spec.get('per_week', 0) or 0)
-        if per_day:
-            picks = [(d, hours[i % len(hours)])
-                     for d in range(days) for i in range(per_day)]
-        elif per_week:
-            total = max(1, int(round(per_week * days / 7.0)))
-            step = days / float(total)
-            picks = [(min(days - 1, int(i * step)), hours[i % len(hours)])
-                     for i in range(total)]
+        if counts is not None:
+            try:
+                total = max(0, min(int(counts.get(plat) or 0), days * 4))
+            except (TypeError, ValueError):
+                total = 0
+        elif spec.get('per_day'):
+            total = int(spec['per_day']) * days
         else:
-            picks = []
+            total = max(1, int(round(int(spec.get('per_week') or 0) * days / 7.0))) \
+                if spec.get('per_week') else 0
+        wins = US_WINDOWS.get(plat) or {'week': ((12, 14),), 'end': ((12, 14),)}
+        taken, per_day = set(), {}
+        picks = []
+        for i in range(total):
+            d = min(days - 1, int(i * days / float(total)))
+            k = per_day.get(d, 0)
+            per_day[d] = k + 1
+            at = 0
+            # A window that falls past the end of her week (an evening slot on
+            # the last day, seen from Europe) moves to a neighbouring day
+            # rather than dropping the post.
+            for dd in (d, d - 1, d + 1, d - 2):
+                if not 0 <= dd < days:
+                    continue
+                day_ts = start_at + dd * 86400 + 43200
+                _, wd = _us_at(day_ts, 0)
+                pool = wins['end' if wd >= 5 else 'week']
+                # Rotate which window leads each day, and spread a day's posts
+                # across its windows, so no two days open at the same hour.
+                order = [pool[(dd + k + j) % len(pool)] for j in range(len(pool))]
+                for attempt in range(12):
+                    lo, hi = order[(attempt // 4) % len(order)]
+                    minute = rng.randrange(lo * 60, hi * 60)
+                    cand, _ = _us_at(day_ts, minute)
+                    # Inside her week, and never the same clock time twice.
+                    if start_at <= cand < end_at and minute % 1440 not in taken \
+                            and all(abs(cand - p) >= 3600 for p, _ in picks):
+                        at, d = cand, dd
+                        break
+                if at:
+                    break
+            if not at:
+                continue
+            taken.add(minute % 1440)
+            picks.append((at, d))
+        picks.sort()
         kinds = mix_for(len(picks))
-        for n, (d, h) in enumerate(picks):
+        for n, (at, d) in enumerate(picks):
             kind = 'value' if plat == 'reddit' else kinds[n]
             slots.append({'platform': plat, 'label': POST_PLATFORMS.get(plat, {}).get('label', plat),
-                          'day': d, 'hour': h, 'kind': kind,
-                          'at': start_at + d * 86400 + h * 3600,
-                          'publishable': plat in PUBLISHABLE})
+                          'day': d, 'hour': (at - start_at) % 86400 // 3600, 'kind': kind,
+                          'at': at, 'publishable': plat in PUBLISHABLE})
     slots.sort(key=lambda s: (s['at'], s['platform']))
     return slots
 

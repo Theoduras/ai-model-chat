@@ -11665,6 +11665,9 @@ def _growth_naive_utc(epoch):
     return datetime.fromtimestamp(int(epoch), timezone.utc).replace(tzinfo=None)
 
 
+_X_REPEAT_MARKS = ('✨', '🖤', '🌙', '💫', '🤍', '🔥', '💋')
+
+
 @app.route('/api/growth/queue', methods=['GET', 'POST', 'PATCH', 'DELETE'])
 @platform_scoped
 def api_growth_queue():
@@ -11702,6 +11705,17 @@ def api_growth_queue():
 
         when = int(data.get('run_at') or 0) or int(time.time())
         run_at = datetime.fromtimestamp(when, timezone.utc).replace(tzinfo=None)
+        # The same post on more dates: one row per date, no model call.
+        extra_at = []
+        for t in (data.get('run_ats') or [])[:14]:
+            try:
+                t = int(t)
+            except (TypeError, ValueError):
+                continue
+            if t > time.time() and t != when and t not in extra_at:
+                extra_at.append(t)
+        dates = [run_at] + [datetime.fromtimestamp(t, timezone.utc).replace(tzinfo=None)
+                            for t in sorted(extra_at)]
         raw_media = [str(m).strip() for m in (data.get('media_ids') or []) if str(m).strip()] \
             or ([str(data.get('media_id') or '').strip()]
                 if str(data.get('media_id') or '').strip() else [])
@@ -11734,13 +11748,21 @@ def api_growth_queue():
                 if why:
                     failed.append({'platform': plat, 'error': why})
                     continue
-                slots = [(text, run_at, '', '', '')]
-                if rd_targets:
-                    stagger = _growth_rd_stagger(data)
-                    slots = [(t['title'], run_at + timedelta(minutes=stagger * n),
-                              t['sub'], t['flair'], t['kind'])
-                             for n, t in enumerate(rd_targets)]
-                for slot_text, slot_at, rd_sub, rd_flair, rd_kind in slots:
+                slots = []
+                for rep, day_at in enumerate(dates):
+                    body = text
+                    # X refuses a post that repeats one of hers word for word.
+                    if plat == 'x' and rep:
+                        body = growth.trim_post(plat, text + ' ' + _X_REPEAT_MARKS[
+                            (rep - 1) % len(_X_REPEAT_MARKS)])
+                    if rd_targets:
+                        stagger = _growth_rd_stagger(data)
+                        slots += [(t['title'], day_at + timedelta(minutes=stagger * n),
+                                   t['sub'], t['flair'], t['kind'], rep)
+                                  for n, t in enumerate(rd_targets)]
+                    else:
+                        slots.append((body, day_at, '', '', '', rep))
+                for slot_text, slot_at, rd_sub, rd_flair, rd_kind, rep in slots:
                     row = queue_post(sdb, persona, plat, slot_text, slot_at,
                                      media_ids[0] if media_ids else '',
                                      growth.queue_status_for(plat),
@@ -11749,7 +11771,7 @@ def api_growth_queue():
                                      rd_sub=rd_sub, rd_flair=rd_flair,
                                      rd_kind=rd_kind)
                     queued.append({'platform': plat, 'id': row.id,
-                                   'sub': rd_sub,
+                                   'sub': rd_sub, 'first': not rep,
                                    'status': growth.queue_status_for(plat)})
             sdb.commit()
         finally:
@@ -11763,7 +11785,8 @@ def api_growth_queue():
                     (data.get('text') or '')[:60])
         sent = []
         if data.get('now'):
-            sent, now_failed = _growth_send_now(persona, queued)
+            # Post now is the first date; the other dates stay queued.
+            sent, now_failed = _growth_send_now(persona, [q for q in queued if q['first']])
             failed = failed + now_failed
         return jsonify({'ok': True, 'id': queued[0]['id'], 'queued': queued,
                         'sent': sent, 'failed': failed,
@@ -12039,28 +12062,86 @@ def _series_note(series):
     return f'\n\n{brief}' if brief else ''
 
 
-def _growth_plan_draft(persona, platform, kind, idea):
+def _shrink_image(blob, mime, edge=384):
+    """A still cut down to `edge` px on its long side. Gemini bills a picture
+    this small as one tile, where a phone photo is several; a caption needs
+    what is in the frame, not the pores."""
+    if not blob:
+        return blob, mime
+    try:
+        import io
+        from PIL import Image
+        im = Image.open(io.BytesIO(blob))
+        if max(im.size) <= edge:
+            return blob, mime
+        im.thumbnail((edge, edge))
+        out = io.BytesIO()
+        im.convert('RGB').save(out, 'JPEG', quality=80)
+        return out.getvalue(), 'image/jpeg'
+    except Exception:
+        return blob, mime
+
+
+def _plan_media_facts(persona, media_id):
+    """(rating, words) for a vault item: its rating, and what the vault says it
+    is, for writing about a file the model is not shown."""
+    from db import SessionLocal, get_persona_media
+    sdb = SessionLocal()
+    try:
+        row = get_persona_media(sdb, media_id)
+        if not row or row.slug != persona:
+            return '', ''
+        words = ', '.join(w for w in (row.purpose, row.outfit, row.location,
+                                      row.lighting, row.tags) if w)
+        return (row.rating or ''), words
+    finally:
+        sdb.close()
+
+
+def _growth_plan_draft(persona, platform, kind, idea, media_id='', like=''):
     """One post for one slot: the platform's own brief, plus what this slot is
-    for. Re-rolled once if it reads as a rewrite of something already posted."""
+    for, written about the media it carries. Only a still rated safe-for-work
+    or unrated in her own vault is shown to the model — nothing explicit goes
+    to Google, and a Fanvue vault item is mostly explicit and unrated — so the
+    rest is written from what the vault says the file is. `like` is a caption
+    already written for the same file on another channel: rewriting it is a
+    text call, where looking at the picture again is not."""
     spec = growth.POST_PLATFORMS[platform]
+    picture, mime, words = None, '', ''
+    if media_id and not like:
+        rating, words = _plan_media_facts(persona, media_id)
+        if rating != 'nsfw' and not _fv_media_id(media_id):
+            picture, mime = _shrink_image(*_draft_media_bytes(persona, media_id))
+    if like:
+        subject = f'the same thing as this post from another channel: "{like[:600]}"'
+    elif idea:
+        subject = idea
+    elif picture:
+        subject = 'the picture attached'
+    elif words:
+        subject = f'the {("clip" if "video" in words else "photo")} going out with it ({words})'
+    else:
+        subject = 'a moment from your day'
     instruction = (
-        f'Write ONE {spec["label"]} post as yourself, in character, about: '
-        f'{idea}. The job of this post is {growth.MIX_BRIEF[kind]} It must be '
+        f'Write ONE {spec["label"]} post as yourself, in character, about '
+        f'{subject}. The job of this post is {growth.MIX_BRIEF[kind]} It must be '
         f'{spec["brief"]}. Stay under {spec["cap"]} characters. Return only the '
         'post itself, no preamble and no quotes.'
         + _content_level_note(persona, platform)
         + _no_repeat_block(persona, platform))
     cap = spec['cap']
     text = growth.trim_to(_persona_text(
-        persona, instruction, max_tokens=500, temperature=1.0), max(cap, 0))
+        persona, instruction + _draft_media_note(bool(picture)), max_tokens=300, temperature=1.0,
+        image=(picture, mime) if picture else None), max(cap, 0))
     if text and _reads_as_repeat(persona, platform, text):
         _content_repeat_blocked(persona, platform)
+        # The retry is text-only: the first pass already saw the picture.
         try:
             text = growth.trim_to(_persona_text(
                 persona,
                 instruction + '\n\nYour last attempt was a rewrite of one of '
                 'those. Pick a different angle entirely.',
-                max_tokens=500, temperature=1.0), max(cap, 0)) or text
+                max_tokens=300, temperature=1.0), max(cap, 0)) or text
         except Exception:
             pass
     return text
@@ -12070,9 +12151,9 @@ def _growth_plan_draft(persona, platform, kind, idea):
 @platform_scoped
 def api_growth_plan():
     """A week laid out: which channel, when, and whether the post is there to be
-    worth reading, to hint, or to ask. Previewing costs one model call for the
-    week's angles; queueing costs one per post and only touches the two channels
-    that can actually publish."""
+    worth reading, to hint, or to ask. Previewing costs no model call; queueing
+    costs one per post, written from the media it carries, and only touches
+    the channels that can actually publish."""
     data = request.json or {}
     persona = (data.get('persona') or '').strip()
     if not re.match(r'^[a-z0-9_-]+$', persona or ''):
@@ -12092,11 +12173,13 @@ def api_growth_plan():
                 continue
             kind = s.get('kind') if s.get('kind') in growth.MIX_BRIEF else 'value'
             idea = (s.get('idea') or '').strip()[:200]
-            if idea:
-                wanted.append({'platform': plat, 'at': at, 'kind': kind,
-                               'idea': idea,
-                               'media_id': str(s.get('media_id') or '')[:64],
-                               'media_override': bool(s.get('media_override'))})
+            media_id = str(s.get('media_id') or '')[:64]
+            # The picture is the subject now; a slot with neither still gets
+            # written, about something from her day.
+            wanted.append({'platform': plat, 'at': at, 'kind': kind,
+                           'idea': idea, 'media_id': media_id,
+                           'ig_kind': str(s.get('ig_kind') or '')[:8],
+                           'media_override': bool(s.get('media_override'))})
         if not wanted:
             return jsonify({'ok': False,
                             'error': 'Nothing here can be queued — the slots are '
@@ -12113,15 +12196,11 @@ def api_growth_plan():
         used = {r['media_id'] for r in _growth_queue_rows(persona) if r['media_id']}
         sdb = SessionLocal()
         try:
+            # One look at a picture per file: the same file on a second channel
+            # is a text rewrite of the first caption.
+            written = {}
             for s in wanted:
-                try:
-                    text = _growth_plan_draft(persona, s['platform'], s['kind'], s['idea'])
-                except Exception as e:
-                    failed.append({**s, 'error': str(e)[:200]})
-                    continue
-                if not text:
-                    failed.append({**s, 'error': 'came back empty'})
-                    continue
+                media_id = ''
                 if s.get('media_id'):
                     media_id, why = _plan_media_check(
                         persona, s['platform'], s['media_id'],
@@ -12129,12 +12208,26 @@ def api_growth_plan():
                     if why:
                         failed.append({**s, 'error': why})
                         continue
-                else:
-                    media_id = _plan_media_pick(persona, s['platform'], used)
+                ig_kind, why = _growth_ig_kind(persona, s['platform'], s,
+                                               [media_id] if media_id else [])
+                if why:
+                    failed.append({**s, 'error': why})
+                    continue
+                try:
+                    text = _growth_plan_draft(persona, s['platform'], s['kind'], s['idea'],
+                                              media_id, written.get(media_id, ''))
+                except Exception as e:
+                    failed.append({**s, 'error': str(e)[:200]})
+                    continue
+                if not text:
+                    failed.append({**s, 'error': 'came back empty'})
+                    continue
                 if media_id:
                     used.add(media_id)
+                    written.setdefault(media_id, text)
                 run_at = datetime.fromtimestamp(s['at'], timezone.utc).replace(tzinfo=None)
-                row = queue_post(sdb, persona, s['platform'], text, run_at, media_id)
+                row = queue_post(sdb, persona, s['platform'], text, run_at, media_id,
+                                 ig_kind=ig_kind)
                 queued.append({**s, 'id': row.id, 'text': text, 'media_id': media_id})
             sdb.commit()
         finally:
@@ -12147,10 +12240,8 @@ def api_growth_plan():
                         'queue': _growth_queue_rows(persona)})
 
     days = int(data.get('days') or 7)
-    # The hours in the cadence are hours of the creator's day, so the day has to
-    # start at their midnight — which only the browser knows. Falling back to
-    # UTC midnight keeps the shape right when nothing is sent; it just puts the
-    # slots in the wrong part of someone else's day.
+    # The post times are US Eastern (growth.US_WINDOWS); the week they fall in
+    # starts at the creator's midnight, which only the browser knows.
     start = int(data.get('start') or 0) or (now - now % 86400)
     # Today is planned from now on, not from this morning.
     picked = [growth.normalise_source(p) for p in (data.get('platforms') or [])]
@@ -12159,61 +12250,29 @@ def api_growth_plan():
     if not picked:
         return jsonify({'ok': False,
                         'error': 'None of those channels are on your plan.'}), 402
-    slots = growth.series_plan([s for s in growth.plan_week(start, days, platforms=picked)
-                                if s['at'] > now])
+    counts = data.get('counts') if isinstance(data.get('counts'), dict) else None
+    slots = growth.series_plan([s for s in growth.plan_week(
+        start, days, platforms=picked, counts=counts, seed=f'{persona}:{start}')
+        if s['at'] > now])
     if data.get('cross') and len(picked) > 1:
         slots = growth.cross_post(slots, picked)
-    # A part two continues its part one, and a cross-post is the same idea in
-    # several places, so each group draws one angle between them and the week
-    # asks the model for that many rather than one per slot.
-    leads, seen = [], set()
-    for s in slots:
-        group = (('cross', (s.get('cross') or {}).get('group'))
-                 if s.get('cross') else ('series', (s.get('series') or {}).get('group')))
-        if group[1] and group in seen:
-            continue
-        if group[1]:
-            seen.add(group)
-        leads.append(s)
-    ideas = []
-    if leads:
-        try:
-            raw = _persona_text(
-                persona,
-                f'List {len(leads)} different things you could post about over '
-                f'the next {days} days — one per line, no numbering, no '
-                'explanation. Each is a short angle in your own words: a moment '
-                'from your day, a thought, something you noticed, something you '
-                'are willing to admit. They must all be different from each '
-                'other. Return only the lines.'
-                + _no_repeat_block(persona, ''),
-                max_tokens=1400, temperature=1.05)
-            ideas = growth.plan_ideas(raw, len(leads))
-        except Exception as e:
-            logger.warning('PLAN ideas failed [%s]: %s', persona, str(e)[:200])
-    by_group = {}
-    for i, s in enumerate(leads):
-        # Fewer angles than slots means the tail repeats one rather than sitting
-        # empty; an empty slot is one the operator has to fill by hand anyway.
-        s['idea'] = ideas[i % len(ideas)] if ideas else ''
-        group = ((('cross', (s.get('cross') or {}).get('group')) if s.get('cross')
-                  else ('series', (s.get('series') or {}).get('group'))))
-        if group[1]:
-            by_group[group] = s['idea']
-    for s in slots:
-        if 'idea' not in s:
-            group = ((('cross', (s.get('cross') or {}).get('group')) if s.get('cross')
-                      else ('series', (s.get('series') or {}).get('group'))))
-            s['idea'] = by_group.get(group, '')
-    # The photo each slot would carry, shown with the plan so the creator can
-    # swap it before queueing rather than finding out from the feed.
+    # The media she picked for each channel goes on that channel's posts in
+    # order. Nothing is written here: the caption is written from the picture
+    # when the week is queued, so a preview she throws away costs nothing.
+    chosen = data.get('media') if isinstance(data.get('media'), dict) else {}
     used = {r['media_id'] for r in _growth_queue_rows(persona) if r['media_id']}
     for s in slots:
+        s['idea'] = ''
         if not s.get('publishable'):
             continue
-        s['media_id'] = _plan_media_pick(persona, s['platform'], used)
+        mine = chosen.get(s['platform'])
+        if isinstance(mine, list):
+            s['media_id'] = str(mine.pop(0))[:64] if mine else ''
+        else:
+            s['media_id'] = _plan_media_pick(persona, s['platform'], used)
         if s['media_id']:
             used.add(s['media_id'])
+    ideas = []
     return jsonify({'ok': True, 'persona': persona, 'start': start, 'days': days,
                     'slots': slots, 'ideas': len(ideas),
                     'cap': growth.PLAN_QUEUE_CAP,
