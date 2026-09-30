@@ -116,11 +116,16 @@ def put(slug, data, mime, prefix=STAGING_PREFIX):
     URL: a URL either expires or, on a private Blob store, needs a credential
     the caller has no business holding."""
     ext = _EXT.get((mime or '').lower(), '.bin')
-    path = f'{prefix}/{slug}/{uuid.uuid4().hex}{ext}'
+    return replace(f'{prefix}/{slug}/{uuid.uuid4().hex}{ext}', data, mime)
+
+
+def replace(path, data, mime):
+    """Write bytes at a path this server already chose, overwriting it."""
     mime = mime or 'application/octet-stream'
     if backend() == 'blob':
         _blob('PUT', '?pathname=' + urllib.parse.quote(path), body=data,
               headers={'x-content-type': mime, 'x-add-random-suffix': '0',
+                       'x-allow-overwrite': '1',
                        'x-vercel-blob-access': 'private'})
         return path
     _bucket().blob(path).upload_from_string(data, content_type=mime)

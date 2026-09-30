@@ -31719,6 +31719,26 @@ VIDEO_SOURCE_MAX_SECONDS = CR.VIDEO_MAX_SECONDS
 VIDEO_SOURCE_MIMES = {'video/mp4': '.mp4', 'video/quicktime': '.mov'}
 
 
+def _fix_m4v_brand(data):
+    """An Apple/HandBrake export is an MP4 labelled `M4V ` in its ftyp box,
+    and Runware sniffs that label as video/x-m4v and refuses the clip. The
+    label is all that differs, so it is swapped in place for `mp42`."""
+    if len(data) >= 12 and data[4:8] == b'ftyp' and data[8:11] == b'M4V':
+        return data[:8] + b'mp42' + data[12:]
+    return data
+
+
+def _fix_stored_m4v(path):
+    try:
+        head = storage.read_range(path, 0, 12) or b''
+        if _fix_m4v_brand(head) == head:
+            return
+        storage.replace(path, _fix_m4v_brand(storage.get(path)),
+                        'video/quicktime' if path.endswith('.mov') else 'video/mp4')
+    except Exception:
+        logger.exception('could not relabel an m4v clip path=%s', path)
+
+
 def _mp4_dimensions(data):
     """Duration in seconds and pixel size, read out of an MP4/MOV's own header.
 
@@ -31924,6 +31944,10 @@ def api_persona_video_source(slug):
                                  'upload again.'}), 413
 
     try:
+        if stored:
+            _fix_stored_m4v(stored)
+        else:
+            data = _fix_m4v_brand(data)
         path = stored or storage.put(slug, data, mime,
                                      prefix=VIDEO_SOURCE_PREFIX)
         poster_path = ''
@@ -34278,6 +34302,7 @@ def _gen_start(job_id, slug, spec, workspace):
                 # A swap always carries a clip; an Animate carries one only
                 # when it is motion transfer. Both resolve it the same way.
                 if spec.get('source_path'):
+                    _fix_stored_m4v(spec['source_path'])
                     url = storage.signed_url(spec['source_path'])
                     if not url:
                         url = _gen_source_data_uri(spec['source_path'])
