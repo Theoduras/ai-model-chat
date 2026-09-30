@@ -451,6 +451,20 @@ def parents(key, body_type='female'):
     return tuple(v['parents']) if v else ()
 
 
+def resolve_reference_images(refs, canon_by_view, image_view):
+    """A reference means "that view's approved photo", whatever photo that is
+    now. Each stored reference is moved to the current approved photo of its
+    view; repeats collapse and a view with no approved photo drops out.
+    `canon_by_view` is {view: image id}; `image_view` is {image id: view}."""
+    out, seen = [], set()
+    for r in refs or []:
+        cid = canon_by_view.get(image_view.get(r.get('image_id')))
+        if cid and cid not in seen:
+            seen.add(cid)
+            out.append({'image_id': cid, 'weight': r.get('weight') or 1.0})
+    return out
+
+
 def level_parents(v, level=None):
     """The parents of a view that exist at `level`. The nude is built from the
     pubic and vagina photos only where those are shown; at Topless it is not."""

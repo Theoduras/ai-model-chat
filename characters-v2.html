@@ -380,6 +380,7 @@
     .ref-pop button:hover, .ref-pop button[aria-pressed="true"] { background: var(--accent-soft); }
     .ref-pop img { width: 32px; height: 40px; border-radius: var(--r-xs); object-fit: cover; flex-shrink: 0; }
     .ref-pop span { flex: 1; }
+    .ref-err { padding: 6px 10px; font-size: 0.76rem; color: var(--err); }
     .ref-pop i { font-style: normal; color: var(--accent); font-weight: 700; }
     .up-card { display: flex; flex-direction: column; gap: 8px; padding: 14px; border: 1px dashed var(--accent-line); border-radius: var(--r); background: var(--accent-soft); }
     .up-card strong { font-size: 0.84rem; }
@@ -2166,7 +2167,7 @@ function renderViewPanel() {
       : `<span class="hint">${approved.length ? 'No approved photo selected' : 'No approved photos yet'}</span>`) +
     (approved.length ? `<button type="button" class="ref-add" aria-label="Choose reference photos" aria-expanded="${refPop}" onclick="toggleRefPop(event)">+</button>` : '') +
     own.map(refTile).join('') +
-    (refPop ? `<div class="ref-pop" onclick="event.stopPropagation()">${approved.map(o => { const c = canonOf(o.key);
+    (refPop ? `<div class="ref-pop" onclick="event.stopPropagation()">${refErr ? `<div class="ref-err">${esc(refErr)}</div>` : ''}${approved.map(o => { const c = canonOf(o.key);
       return `<button type="button" aria-pressed="${chosen.includes(c.id)}" onclick="toggleRef('${c.id}')"><img src="${esc(c.url)}" alt=""><span>${esc(o.label)}</span><i>${chosen.includes(c.id) ? '✓' : ''}</i></button>`; }).join('')}</div>` : '');
   const fl = k => ((cat.features || []).find(f => f.key === k) || {}).label || k;
   // Only traits this level offers; the rest were never pickable here.
@@ -2242,7 +2243,7 @@ function renderAnatomy(v, locked) {
     <p class="hint" style="margin:0;">This photo is made from that choice. <a href="#" onclick="go('intimate');return false;">Choose it in Intimate details</a>, then come back to generate.</p>`;
 }
 let refPop = false;
-function toggleRefPop(e) { e.stopPropagation(); refPop = !refPop; renderViewPanel(); }
+function toggleRefPop(e) { e.stopPropagation(); refPop = !refPop; refErr = ''; renderViewPanel(); }
 document.addEventListener('click', () => { if (refPop) { refPop = false; renderViewPanel(); } });
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && refPop) { refPop = false; renderViewPanel(); } });
 async function removeApproved() {
@@ -2298,11 +2299,23 @@ async function saveView(patch) {
   try { cur = (await api(`/api/characters/${cur.id}/views/${selView}`, {method: 'PUT', body: patch})).character; renderBody(); }
   catch (e) { say(e.message, 'err'); }
 }
-function toggleRef(id) {
+let refErr = '';
+async function toggleRef(id) {
   const v = viewDef(selView), st = vs(selView);
-  let ids = st.references ? st.references.map(r => r.image_id) : v.parents.map(p => (canonOf(p) || {}).id).filter(Boolean);
-  ids = ids.includes(id) ? ids.filter(i => i !== id) : ids.concat(id);
-  saveView({references: ids.map((i, n) => ({image_id: i, weight: 1 - n * 0.1}))});
+  const now = st.references ? st.references.map(r => r.image_id) : v.parents.map(p => (canonOf(p) || {}).id).filter(Boolean);
+  const ids = now.includes(id) ? now.filter(i => i !== id) : now.concat(id);
+  // With none chosen the photo would fall back to its defaults, so one stays.
+  if (!ids.length) { refErr = 'A photo needs at least one reference.'; return renderViewPanel(); }
+  const refs = ids.map((i, n) => ({image_id: i, weight: 1 - n * 0.1})), prev = st.references;
+  refErr = '';
+  if (cur.views && cur.views[selView]) cur.views[selView].references = refs;
+  renderViewPanel();
+  try { cur = (await api(`/api/characters/${cur.id}/views/${selView}`, {method: 'PUT', body: {references: refs}})).character; }
+  catch (e) {
+    if (cur.views && cur.views[selView]) cur.views[selView].references = prev;
+    refErr = e.message;
+  }
+  renderViewPanel();
 }
 // Seedream takes no denoise, so a crop view sends the parent's region itself,
 // padded and upscaled 2x, as its first reference.

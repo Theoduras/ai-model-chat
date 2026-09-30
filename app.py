@@ -31406,6 +31406,19 @@ def _char_view_dict(cv):
             'strength': cv.strength, 'result_image_id': cv.result_image_id}
 
 
+def _char_current_refs(s, char_id, refs):
+    """`refs` ({'image_id', 'weight'} dicts) moved to each view's current
+    approved photo; see characters.resolve_reference_images."""
+    from db import CharacterImage
+    ids = [r.get('image_id') for r in refs or [] if r.get('image_id')]
+    if not ids:
+        return []
+    image_view = {i.id: i.view for i in s.query(CharacterImage).filter(
+        CharacterImage.character_id == char_id, CharacterImage.id.in_(ids))}
+    canon = {view: img.id for view, img in _char_canonicals(s, char_id).items()}
+    return CH.resolve_reference_images(refs, canon, image_view)
+
+
 def _char_views_state(s, row):
     """Every view's row with its display status. A generation that died without
     reaching _character_finish drops the view back to where it was."""
@@ -31430,6 +31443,7 @@ def _char_views_state(s, row):
     ids = [cv.id for cv in rows.values()]
     for r in s.query(ViewReference).filter(ViewReference.view_id.in_(ids)).all() if ids else []:
         refs.setdefault(r.view_id, []).append({'image_id': r.ref_image_id, 'weight': r.weight})
+    refs = {vid: _char_current_refs(s, row.id, lst) or None for vid, lst in refs.items()}
     for k, cv in rows.items():
         v = CH.view(k, row.body_type) or {}
         mode = 'reference' if v.get('nocrop') else cv.mode or v.get('mode') or 'reference'
@@ -31711,10 +31725,11 @@ def _character_view_refs(char_id, view_key, outfit_image=None, look=None):
             # Seedream takes no per-reference weight, so weight is order: the
             # heaviest reference leads.
             chosen.sort(key=lambda r: -(r.weight or 0))
+            now = _char_current_refs(s, char_id, [{'image_id': r.ref_image_id, 'weight': r.weight} for r in chosen])
             by_id = {i.id: i for i in s.query(CharacterImage).filter(
-                CharacterImage.id.in_([r.ref_image_id for r in chosen]))}
-            picked = [by_id[r.ref_image_id] for r in chosen if r.ref_image_id in by_id]
-        else:
+                CharacterImage.id.in_([r['image_id'] for r in now]))}
+            picked = [by_id[r['image_id']] for r in now if r['image_id'] in by_id]
+        if not chosen or not picked:
             picked = [canon[d] for d in v.get('parents', ()) if d in canon]
         if view_key in canon:
             picked.append(canon[view_key])
@@ -32655,10 +32670,17 @@ def api_character_view_settings(char_id, view_key):
             refs = body['references']
             s.query(ViewReference).filter_by(view_id=cv.id).delete()
             if refs is not None:
-                canon = {i.id for i in _char_canonicals(s, row.id).values()}
-                for r in refs[:imagegen.MAX_REFERENCES]:
-                    if r.get('image_id') not in canon:
-                        return jsonify({'ok': False, 'error': 'Only approved views can be references.'}), 400
+                known = {i.id for i in s.query(CharacterImage).filter(
+                    CharacterImage.character_id == row.id,
+                    CharacterImage.id.in_([r.get('image_id') for r in refs if r.get('image_id')]))}
+                if any(r.get('image_id') not in known for r in refs):
+                    return jsonify({'ok': False, 'error': 'Only her own photos can be references.'}), 400
+                # A reference is a view's approved photo, so a photo that has
+                # since been replaced is stored as its replacement.
+                now = _char_current_refs(s, row.id, refs)
+                if refs and not now:
+                    return jsonify({'ok': False, 'error': 'Only approved views can be references.'}), 400
+                for r in now[:imagegen.MAX_REFERENCES]:
                     s.add(ViewReference(view_id=cv.id, ref_image_id=r['image_id'],
                                         weight=float(r.get('weight') or 1.0)))
         s.commit()

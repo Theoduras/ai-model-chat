@@ -392,6 +392,18 @@ def test_pubic_and_vulva_lead_to_the_nude():
           == ['body_front', 'breasts', 'nipples'])
 
 
+def test_reference_images_follow_the_approved_photo():
+    canon = {'body_front': 'new', 'face_front': 'f'}
+    image_view = {'old': 'body_front', 'new': 'body_front', 'f': 'face_front', 'x': 'hands'}
+    refs = [{'image_id': 'old', 'weight': 1}, {'image_id': 'new', 'weight': .9}, {'image_id': 'f', 'weight': .8},
+            {'image_id': 'x', 'weight': .7}, {'image_id': 'ghost'}]
+    out = CH.resolve_reference_images(refs, canon, image_view)
+    check('a replaced photo becomes its replacement', out[0] == {'image_id': 'new', 'weight': 1})
+    check('the same view is not listed twice', [r['image_id'] for r in out] == ['new', 'f'])
+    check('a view with no approved photo or an unknown image drops out',
+          not any(r['image_id'] in ('x', 'ghost') for r in out))
+
+
 def test_face_angles_hang_off_the_face():
     check('every face angle is built from the face', all(
         CH.parents(k) == ('face_front',) for k in ('face_three_quarter', 'face_profile', 'face_smile')))
@@ -441,6 +453,7 @@ if __name__ == '__main__':
     test_vulva_looks()
     test_presets()
     test_cup_in_body_photos()
+    test_reference_images_follow_the_approved_photo()
     test_face_angles_hang_off_the_face()
     test_pubic_and_vulva_lead_to_the_nude()
     print('FAILED' if FAILURES else 'OK', len(FAILURES))
