@@ -27,6 +27,7 @@ kept as a secondary target and still works, but is not where the app is deployed
 ```
 app.py                          — Flask server, Gemini API, multi-persona, builder API
 studio.html                     — Generation studio (admin-only while in testing)
+undress.html                    — Undress page: gallery of a persona's generated photos, one button each (no uploads)
 characters.py                   — Character catalogue: views, features, level rules, prompts
 characters.html                 — Character builder: steps (face, face angles, body, intimate), per-photo generate, required vs optional photos, menu sublists
 js/character-visuals.js         — Option drawings for the character builder (SVG, parametric)

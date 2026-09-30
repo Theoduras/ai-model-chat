@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Undress</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <script src="/js/theme.js"></script>
+  <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="/css/site-nav.css">
+  <script src="/js/site-nav.js" defer></script>
+  <style>
+    .ud-scroll { flex:1; min-height:0; overflow-y:auto; }
+    .ud-wrap { max-width:1280px; margin:0 auto; padding:22px 24px 80px; }
+    .ud-bar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
+    .ud-bar select { padding:8px 10px; border-radius:8px; border:1px solid var(--border, #333);
+      background:var(--surface, transparent); color:inherit; }
+    .ud-note { margin:0 0 14px; padding:10px 14px; border-radius:8px;
+      border:1px solid var(--border, #333); font-size:.85rem; }
+    .ud-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(190px, 1fr)); gap:14px; }
+    .ud-card { position:relative; border-radius:10px; overflow:hidden;
+      border:1px solid var(--border, #333); background:var(--surface, transparent); }
+    .ud-card img { display:block; width:100%; aspect-ratio:3/4; object-fit:cover; }
+    .ud-card .btn { position:absolute; left:8px; right:8px; bottom:8px; }
+    .ud-empty { color:var(--text-muted); font-size:.9rem; padding:40px 0; text-align:center; }
+  </style>
+</head>
+<body class="page-dashboard">
+<header>
+  <h1>Undress</h1>
+  <div style="display:flex; align-items:center; gap:16px;">
+    <nav data-site-nav="inline" class="sn-links sn-inline"></nav>
+    <a href="/dashboard" style="color:var(--text-muted); font-size:0.8rem; text-decoration:none;">← Dashboard</a>
+  </div>
+</header>
+
+<div class="ud-scroll"><div class="ud-wrap">
+  <div class="ud-bar">
+    <label for="ud-persona">Persona</label>
+    <select id="ud-persona" onchange="udPick(this.value)"></select>
+    <span style="color:var(--text-muted); font-size:.85rem">1 token per photo. Only photos generated here are listed.</span>
+  </div>
+  <div class="ud-note" id="ud-note" hidden></div>
+  <div class="ud-grid" id="ud-grid"></div>
+</div></div>
+
+<script>
+let udSlug = '';
+function el(id) { return document.getElementById(id); }
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g,
+    c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+function note(msg) { const n = el('ud-note'); n.textContent = msg || ''; n.hidden = !msg; }
+
+async function udInit() {
+  let list = [];
+  try { list = await (await fetch('/api/personas')).json(); } catch (e) {}
+  if (!Array.isArray(list) || !list.length) { note('No personas yet — create one in the dashboard first.'); return; }
+  el('ud-persona').innerHTML = list.map(p => `<option value="${esc(p.slug)}">${esc(p.name || p.slug)}</option>`).join('');
+  const wanted = new URLSearchParams(location.search).get('persona') || '';
+  udPick(list.some(p => p.slug === wanted) ? wanted : list[0].slug);
+}
+
+async function udPick(slug) {
+  udSlug = slug;
+  el('ud-persona').value = slug;
+  el('ud-grid').innerHTML = '';
+  try {
+    const d = await (await fetch('/api/personas/' + encodeURIComponent(slug) + '/media')).json();
+    const rows = ((d && d.vault) || []).filter(m => (m.kind || 'image') === 'image' && m.source === 'generated');
+    el('ud-grid').innerHTML = rows.length ? rows.map(m => `
+      <div class="ud-card">
+        <img src="${esc(m.thumb)}" loading="lazy" alt="">
+        <button type="button" class="btn btn-secondary" onclick="udGo('${esc(m.id)}')">Undress</button>
+      </div>`).join('') : '<div class="ud-empty">No generated photos kept for this persona yet.</div>';
+    note('');
+  } catch (e) { note('Could not load the gallery.'); }
+}
+
+async function udGo(id) {
+  try {
+    const res = await fetch('/api/generate/undress', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ persona: udSlug, media: id }),
+    });
+    const d = await res.json();
+    note(d.ok ? 'Undressing — ' + d.tokens + ' token' + (d.tokens === 1 ? '' : 's')
+                + '. The result lands in Studio → generations for you to keep.'
+              : (d.error || 'Undress failed.'));
+  } catch (e) { note('Undress failed.'); }
+}
+udInit();
+</script>
+</body>
+</html>

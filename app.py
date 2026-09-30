@@ -32748,6 +32748,14 @@ def _char_vision_check(img, row, view_key):
     return result
 
 
+@app.route('/undress')
+def undress_page():
+    blocked = _require_active()
+    if blocked:
+        return blocked
+    return send_from_directory(BASE_DIR, 'undress.html')
+
+
 @app.route('/characters')
 def characters_page():
     blocked = _require_active()
