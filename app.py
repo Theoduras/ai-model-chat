@@ -33547,12 +33547,21 @@ def _gen_start(job_id, slug, spec, workspace):
                             url_ = row_ and _char_path_url(row_.gcs_path, 'image/jpeg')
                             if url_:
                                 extras.append((kind_, url_))
-                    keep = max(1, cap - len(extras))
-                    refs, roles = refs[:keep], roles[:keep]
-                    for kind_, url_ in extras[:cap - len(refs)]:
-                        refs.append(url_)
-                        roles.append(kind_)
-                    refs = refs[:cap]
+                    # One list of (url, role) pairs, so the prompt can never
+                    # name an image that is not in the payload.
+                    pairs, seen = [], set()
+                    for url_, role_ in list(zip(refs, roles)) + [
+                            (u, k) for k, u in extras]:
+                        if url_ and url_ not in seen:
+                            seen.add(url_)
+                            pairs.append((url_, role_))
+                    own = [p for p in pairs if p[1] not in ('outfit', 'location')]
+                    tail = [p for p in pairs if p[1] in ('outfit', 'location')]
+                    pairs = (own[:max(1, cap - len(tail))] + tail)[:cap]
+                    refs = [p[0] for p in pairs]
+                    roles = [p[1] for p in pairs]
+                    logger.info('clip job=%s sends %d refs: %s',
+                                job_id, len(refs), ','.join(roles))
                     call['prompt'] = imagegen.build_swap_prompt(
                         motion if job == 'swap'
                         else (spec.get('prompt_extra') or motion),
@@ -33734,6 +33743,14 @@ def _gen_finish(job_id, slug, spec, workspace, urls):
             continue
         _gen_refund_short_clip(job_id, workspace, spec, data, mime)
         if (mime or '').startswith('video/'):
+            if (spec.get('source_path') and spec.get('sound') in (None, 'original')
+                    and not spec.get('audio')
+                    and spec.get('model') not in imagegen.KLING_MOTION_MODELS):
+                # A model that regenerates the clip loses its sound; the
+                # uploaded clip still has it.
+                source = storage.get(spec['source_path'])
+                if source:
+                    data = imagegen.copy_audio(data, source)
             if spec.get('audio_path'):
                 track = storage.get(spec['audio_path'])
                 if track:
