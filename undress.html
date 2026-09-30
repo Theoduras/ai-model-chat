@@ -24,6 +24,11 @@
     .ud-card img { display:block; width:100%; aspect-ratio:3/4; object-fit:cover; }
     .ud-card .btn { position:absolute; left:8px; right:8px; bottom:8px; }
     .ud-pending { display:flex; align-items:center; justify-content:center; aspect-ratio:3/4; font-size:.85rem; color:var(--text-muted); padding:8px; text-align:center; }
+    .ud-lb { position:fixed; inset:0; z-index:9999; background:rgba(0,0,0,.92); display:none; align-items:center; justify-content:center; flex-direction:column; gap:14px; }
+    .ud-lb.on { display:flex; }
+    .ud-lb img { max-width:92vw; max-height:78vh; object-fit:contain; }
+    .ud-lb .nav { position:absolute; top:50%; transform:translateY(-50%); background:rgba(255,255,255,.12); color:#fff; border:0; font-size:2rem; width:48px; height:64px; cursor:pointer; border-radius:8px; }
+    .ud-lb .x { position:absolute; top:14px; right:18px; background:none; border:0; color:#fff; font-size:2rem; cursor:pointer; }
     .ud-empty { color:var(--text-muted); font-size:.9rem; padding:40px 0; text-align:center; }
   </style>
 </head>
@@ -45,6 +50,14 @@
   <div class="ud-note" id="ud-note" hidden></div>
   <div class="ud-grid" id="ud-grid"></div>
 </div></div>
+
+<div class="ud-lb" id="ud-lb" onclick="if(event.target===this)udClose()">
+  <button class="x" onclick="udClose()" aria-label="Close">×</button>
+  <button class="nav" style="left:14px" onclick="udStep(-1)" aria-label="Previous">‹</button>
+  <img id="ud-lb-img" alt="">
+  <button class="btn btn-secondary" style="padding:10px 28px" onclick="udGo(udLbId())">Undress</button>
+  <button class="nav" style="right:14px" onclick="udStep(1)" aria-label="Next">›</button>
+</div>
 
 <script>
 let udSlug = '';
@@ -78,7 +91,7 @@ ${udCard(m)}`).join('') : '<div class="ud-empty">No generated photos kept for th
 }
 
 function udCard(m) {
-  return `<div class="ud-card"><img src="${esc(m.thumb || m.url)}" loading="lazy" alt="">
+  return `<div class="ud-card"><img src="${esc(m.thumb || m.url)}" loading="lazy" alt="" data-id="${esc(m.id)}" onclick="udOpen(this)" style="cursor:zoom-in">
     <button type="button" class="btn btn-secondary" onclick="udGo('${esc(m.id)}')">Undress</button></div>`;
 }
 
@@ -116,6 +129,24 @@ async function udGo(id) {
     note('Done — added to this page.');
   } catch (e) { fail('Undress failed.'); }
 }
+let udIdx = -1;
+function udImgs() { return [...document.querySelectorAll('#ud-grid img[data-id]')]; }
+function udLbId() { const i = udImgs()[udIdx]; return i ? i.dataset.id : ''; }
+function udOpen(img) { udIdx = udImgs().indexOf(img); udShow(); }
+function udShow() {
+  const i = udImgs()[udIdx];
+  if (!i) return udClose();
+  el('ud-lb-img').src = i.src;
+  el('ud-lb').classList.add('on');
+}
+function udStep(d) { const n = udImgs().length; if (n) { udIdx = (udIdx + d + n) % n; udShow(); } }
+function udClose() { el('ud-lb').classList.remove('on'); udIdx = -1; }
+document.addEventListener('keydown', e => {
+  if (udIdx < 0) return;
+  if (e.key === 'Escape') udClose();
+  else if (e.key === 'ArrowLeft') udStep(-1);
+  else if (e.key === 'ArrowRight') udStep(1);
+});
 udInit();
 </script>
 </body>
