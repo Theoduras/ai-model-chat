@@ -1046,7 +1046,7 @@ async function openCharacter(id) {
   try { window.parent !== window && window.parent.markActiveChar && window.parent.markActiveChar(id); } catch (e) {}
   // A creator is walked through each new character until they finish or skip;
   // an admin gets the same frame without the guide, and Guide brings it back.
-  guided = !PageWizard.entry(setupKey()).done;
+  guided = !PageWizard.entry(setupKey()).done && !canonOf('face_front');
   showDone = false; selView = ''; pickedFace = ''; lastMsg = ['', '']; dirty = false;
   const canon = canonOf('face_front');
   // A refresh comes back to the step (and photo panel) it left, this tab only.
@@ -1056,7 +1056,6 @@ async function openCharacter(id) {
   syncSteps();
   go((saved && STEPS.some(x => x.key === saved.step) && saved.step) || (canon ? resumeStep() : (images('face_front', 'candidate').length ? 'pick' : basicsWhy() ? 'basics' : 'describe')));
   if (saved && saved.selView && isPhotos() && curStep().views.includes(saved.selView)) { selView = saved.selView; render(); }
-  if (guided && !saved) requestAnimationFrame(() => tourStart(false));
 }
 function images(view, role) { return (cur.images || []).filter(i => i.view === view && (!role || i.role === role)); }
 function canonOf(view) { return images(view, 'canonical')[0]; }
@@ -1082,7 +1081,7 @@ function go(s) {
     idx = open.find(j => !stepDone(j)) ?? open[open.length - 1] ?? 3;
   }
   s = STEPS[idx].key;
-  if (s !== step) lastMsg = ['', ''];
+  if (s !== step) { lastMsg = ['', '']; if (TOUR && TOUR.on()) TOUR.end(true); }
   const t = STEPS[idx];
   step = s;
   if (!t.views) selView = '';
@@ -1111,6 +1110,7 @@ function render() {
   ({basics: renderBasics, describe: renderDescribe, pick: renderPick, check: renderCheck, body: renderBody, intimate: renderBody, finish: renderFinish})[isPhotos() ? 'body' : step]();
   renderFrame();
   decorateInfo();
+  maybeTour();
 }
 // ── Help (the i icons) ──────────────────────────────────────────────────────
 const HELP = {
@@ -1455,33 +1455,77 @@ function priceAnchor() {
     .find(b => b && b.getBoundingClientRect().width);
 }
 const vis = q => { const n = document.querySelector(q); return n && n.getBoundingClientRect().width ? n : null; };
-const TOUR = PageWizard.tour([
-  {anchor: '#ch-head', placement: 'bottom', title: 'One step at a time',
-   body: 'Her look is built in the order of the steps on the left. Each step asks one thing, and the line under the question says what to do. Every photo of a step has to be approved before the next step opens.'},
-  {anchor: '#ch-rail', placement: 'right', title: 'Where you are',
-   body: 'Four stages: her face, her body (profile, body photos, face angles), the intimate details and photos (only when her level allows), then accept and link. You can jump back to any step you have already reached.'},
-  {anchor: activeCard, placement: 'right', title: 'This is her real character',
-   body: 'Your picks are kept on her character when you press Save or Save & continue. Nothing reaches a fan until you approve it.'},
-  {anchor: () => vis('#preset-cup') || vis('#presets'), placement: 'right', title: 'Preset, then breast size',
-   body: 'A preset fills her whole body in one click. The breast size row under it changes only her bust, and her full-body photos are drawn with it from the very first one.'},
-  {anchor: () => vis('#step-card'), placement: 'left', title: 'Generate one photo at a time',
-   body: 'This list shows only the photos of the current step. Each button generates that one photo and shows its price; there is no bulk button, so every photo is made from choices you have already locked in.'},
-  {anchor: () => vis('#tiers'), placement: 'left', title: 'Every photo, in one place',
-   body: 'This list holds all her photos, with safe-for-work and NSFW kept in separate sections. Open any photo whose step is unlocked.'},
-  {anchor: priceAnchor, placement: 'left', title: 'Every button shows its price',
-   body: 'Generating spends tokens from your allowance. The price is shown next to the button before you click, and anything that fails comes back to you.'},
-  {anchor: () => vis('.info'), placement: 'bottom', title: 'The i icons explain everything',
-   body: 'Tap the small i next to any step, photo, option or button to see what it does, why it is there and what to do.'},
-  {anchor: '#ch-foot', placement: 'top', title: 'Continue, or skip ahead',
-   body: 'Continue unlocks once a step is done, and the line above it says what is missing. Skip setup leaves the guide and keeps everything you have made, and Guide brings it back any time.'},
-], {onEnd: skipped => PageWizard.save('page:characters-v2', {tour: skipped ? 'skipped' : 'done'})});
-// The tour runs once per creator, not once per character.
+// The guide is one short set of tips per step, shown when that step opens and
+// only about what is on it. Pressing Continue opens the next step, which shows
+// its own tips, so the guide follows the creator instead of running ahead.
+const foot = t => ({anchor: '#ch-foot', placement: 'top', title: t[0], body: t[1]});
+const STEP_TIPS = {
+  basics: () => [
+    {anchor: '#ch-rail', placement: 'right', title: 'Welcome: one step at a time',
+     body: 'The steps on the left are the order to work in. Each step explains itself when you open it, and the next one opens when you press Continue.'},
+    {anchor: '#f-name', placement: 'bottom', title: 'Start with who she is',
+     body: 'Give her a name and an age (18 or over), then choose how explicit her photos may be. The level decides whether the Intimate steps exist.'},
+    foot(['Then continue', 'Press Save & continue when name, age and level are set. The line above the button tells you if something is missing.'])],
+  describe: () => [
+    {anchor: '#face-features', placement: 'right', title: 'Design her face',
+     body: 'Tap the drawing that fits each feature, or blend 2 to 6 face photos instead. Take your time: the next step generates her face from exactly this.'},
+    {anchor: '#gen-face', placement: 'left', title: 'Then generate',
+     body: 'Choose how many options to make and press Generate. The price shows before you click. You pick one of the results on the next step.'}],
+  pick: () => [
+    {anchor: '#face-opts', placement: 'top', title: 'Pick her face',
+     body: 'Tap the option that looks most like her. Not right? Regenerate for new options. Options you do not pick delete themselves after 3 days.'}],
+  check: () => [
+    {anchor: '.ch-check-card', placement: 'left', title: 'Check and approve',
+     body: 'Tick every feature that matches what you chose, then press Approve face. That runs the adult-appearance check and locks her face for every later photo.'}],
+  body: () => [
+    {anchor: '#presets', placement: 'bottom', title: 'Start from a preset',
+     body: 'A preset fills her whole body in one click. You can change everything afterwards.'},
+    {anchor: '#preset-cup', placement: 'top', title: 'Then set her breast size',
+     body: 'This changes only her bust. Her full-body photos are drawn with it from the very first one, so set it before you generate.'},
+    foot(['Save when you are happy', 'Save & continue opens Body photos, where you generate her clothed full-body photos one at a time.'])],
+  intimate: () => [
+    {anchor: '#prof-intimate', placement: 'right', title: 'Choose everything first',
+     body: 'Pubic hair, vulva, anus and the shape examples. Her intimate photos are generated from these choices, so pick them all now and nothing has to be redrawn later.'},
+    foot(['Then continue', 'Save & continue opens the intimate photos, each built from the choices you just made.'])],
+  finish: () => [
+    {anchor: '#fin-accept-row', placement: 'top', title: 'Accept her',
+     body: 'Look through her approved set, then accept this version.'},
+    {anchor: '.fin-persona', placement: 'left', title: 'Link her to a persona',
+     body: 'Create a persona for her or link an existing one, so every photo it sends looks like her.'}],
+};
+const PHOTO_TIPS = () => [
+  {anchor: '#step-card', placement: 'left', title: 'Generate one photo at a time',
+   body: 'This list shows only the photos of this step. Each button generates that one photo and shows its price. Generate, then open it and approve the best option.'},
+  {anchor: '#tiers', placement: 'left', title: 'Every photo, in one place',
+   body: 'All her photos live here, with safe-for-work and NSFW in separate sections. A photo unlocks once the ones it is built from are approved.'},
+  foot(['Approve all to move on', 'Continue opens the next step once every photo in this one is approved. The line above says which one is missing.'])];
+['photos_body', 'photos_face', 'photos_intimate'].forEach(k => { STEP_TIPS[k] = PHOTO_TIPS; });
+let TOUR = null;
+// Tips whose anchor is not on screen are dropped, so a stop never lands on nothing.
+function buildTour(key, force) {
+  const make = STEP_TIPS[key];
+  if (!make) return null;
+  const items = make().filter(t => { const n = typeof t.anchor === 'function' ? t.anchor() : document.querySelector(t.anchor); return n && n.getBoundingClientRect().width; });
+  return items.length ? PageWizard.tour(items, {onEnd: () => {
+    PageWizard.markSeen(setupKey(), 'tour:' + key);
+    // Each step builds its own tour, so the finished one's markup goes with it.
+    document.querySelectorAll('.obt-root:not(.on)').forEach(n => n.remove());
+  }}) : null;
+}
 function tourStart(force) {
-  if (showDone || (!force && PageWizard.entry('page:characters-v2').tour)) return;
-  TOUR.start();
+  if (showDone || !curStep() || (TOUR && TOUR.on())) return;
+  if (!force && PageWizard.seen(setupKey()).includes('tour:' + step)) return;
+  TOUR = buildTour(step, force);
+  if (TOUR) TOUR.start();
+}
+// After every draw: a guided creator gets the tips of the step they just opened.
+function maybeTour() {
+  if (!guided || showDone || (TOUR && TOUR.on())) return;
+  clearTimeout(maybeTour.t);
+  maybeTour.t = setTimeout(() => tourStart(false), 350);
 }
 function skipGuide() {
-  TOUR.end(true);
+  if (TOUR) TOUR.end(true);
   guided = false;
   PageWizard.save(setupKey(), {done: true});
   render();
@@ -1489,12 +1533,12 @@ function skipGuide() {
 }
 function startGuide() {
   guided = true;
-  PageWizard.save(setupKey(), {done: false});
+  PageWizard.save(setupKey(), {done: false, seen: PageWizard.seen(setupKey()).filter(k => !k.startsWith('tour:'))});
   render();
   tourStart(true);
 }
 function finishGuide() {
-  TOUR.end(false);
+  if (TOUR) TOUR.end(false);
   guided = false;
   PageWizard.save(setupKey(), {done: true});
   showDone = true;
