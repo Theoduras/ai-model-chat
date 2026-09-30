@@ -120,7 +120,9 @@ REFERENCE_VIDEO_MODELS = ('wan-2-7', 'seedance-2-0', 'seedance-2-0-fast',
 # round trip carrying every reference photo before `_send` strips it.
 NO_NEGATIVE_MODELS = ('wan-3-0', 'seedance-2-0', 'seedance-2-0-fast')
 # Models that only work on a clip the creator uploaded.
-CLIP_ONLY_MODELS = ('p-video-replace',)
+# p-video-replace stays priced for past jobs but is no longer offered.
+CLIP_ONLY_MODELS = ('p-video-replace', 'kling-3-0-omni')
+DEFAULT_REPLACE_MODEL = 'kling-3-0-omni'
 DEFAULT_VIDEO_MODEL = 'wan-2-5'
 
 # Swapping someone into an uploaded clip is video-to-video, which only Wan 2.7
@@ -152,12 +154,11 @@ VIDEO_EDIT_MODEL = 'wan-2-7'
 # face-swap endpoint is uncensored and swaps rather than regenerates.
 VIDEO_JOBS = {
     'reel': {'models': ('wan-2-5', 'seedance-2-5', 'wan-2-7', 'seedance-2-0', 'seedance-2-0-fast', 'minimax-h3', 'minimax-h3-fast', 'wan-3-0',
-                        'p-video-replace',
                         'kling-3-0-mc', 'kling-2-6-mc', 'kling-3-0-omni'), 'needs': (),
              'kind': 'video', 'ratings': ('sfw',),
              'label': 'Reel',
              'note': 'A prompt, a photo, or both, as a short clip.'},
-    'swap': {'models': ('kling-2-6-mc', 'kling-3-0-mc', 'p-video-replace',
+    'swap': {'models': ('kling-2-6-mc', 'kling-3-0-mc',
                         'ml-face-swap', 'wan-2-7', 'kling-3-0-omni'),
              'needs': ('source', 'refs'), 'kind': 'swap',
              'clause': 'preserve',

@@ -30965,7 +30965,7 @@ def _gen_spec(slug, body, user):
             if model not in (imagegen.CLIP_ONLY_MODELS
                              + imagegen.KLING_MOTION_MODELS
                              + (CR.VIDEO_EDIT_MODEL,)):
-                model = 'p-video-replace'
+                model = imagegen.DEFAULT_REPLACE_MODEL
             spec['source_path'] = src['path']
             spec['source_id'] = drive_id
             spec['source_width'] = src['width']

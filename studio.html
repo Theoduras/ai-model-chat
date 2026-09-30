@@ -2434,7 +2434,7 @@ function pickIdPhoto(id) {
 function videoModelNow() {
   if (genJob === 'reel') {
     const m = videoModel();
-    if (genDrive) return CLIP_MODELS.includes(m) || m === 'wan-2-7' ? m : 'p-video-replace';
+    if (genDrive) return CLIP_MODELS.includes(m) || m === 'wan-2-7' ? m : 'kling-3-0-omni';
     if (reelChar() && !REF_VIDEO_MODELS.includes(m)) return 'wan-2-7';
     return m;
   }
