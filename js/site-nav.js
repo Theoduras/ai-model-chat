@@ -113,7 +113,6 @@
     { href: '/register', label: 'Register', icon: 'register', cta: true },
   ];
   var ACCOUNT_IN = [
-    { href: '/undress', label: 'Undress', keep: true },
     { href: '/tokens', label: 'Tokens', icon: 'tokens', cta: true, keep: true, tokens: true },
     { href: '/billing', label: 'Upgrade', icon: 'upgrade', cta: true, keep: true },
     { href: '/dashboard?view=personas', label: 'Dashboard', icon: 'dashboard', cta: true },
