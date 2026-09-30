@@ -33,7 +33,7 @@ _ALL = [
     {'slug': 'onlyfans-ai-chatbot', 'name': 'OnlyFans', 'tag': 'Inbox auto-reply and PPV', 'status': 'Soon'},
     {'slug': 'fansly-ai-chatbot', 'name': 'Fansly', 'tag': 'Another paid page to funnel into', 'status': 'Soon'},
     {'slug': 'reddit-posting-bot', 'name': 'Reddit', 'tag': 'Per-subreddit posting and comments', 'status': 'Soon'},
-    {'slug': 'tiktok-posting-automation', 'name': 'TikTok', 'tag': 'Safe-for-work clips on schedule', 'status': 'Soon'},
+    {'slug': 'tiktok-posting-automation', 'name': 'TikTok', 'tag': 'Safe-for-work videos on schedule', 'status': 'Soon'},
 ]
 
 
@@ -712,7 +712,7 @@ PAGES = {
         'slug': 'ai-image-generator',
         'live': True,
         'title': 'AI Image and Video Generator for Creators | Velvetfunneler.com',
-        'description': ('Generate photos and short clips of your own persona from her reference shots. '
+        'description': ('Generate photos and short videos of your own persona from her reference shots. '
                         'Consistent face and body, safe or explicit, priced per generation in tokens.'),
         'eyebrow': 'Live now · Character builder',
         'h1_pre': 'AI image and video generator for',
@@ -725,7 +725,7 @@ PAGES = {
             'The Generation Studio makes new photos of a persona who already exists. You give her a '
             'set of face shots and a set of body shots, and every generation is conditioned on them, '
             'so it is the same woman in every frame rather than a new one each time.',
-            'Short clips work the same way with one rule: a clip is only ever animated from a photo '
+            'Short videos work the same way with one rule: a video is only ever animated from a photo '
             'you already kept, so its first frame carries her face and there is nothing to correct.',
         ],
         'cta_primary': 'Start now',
@@ -746,7 +746,7 @@ PAGES = {
         'features': [
             {'icon': '🧍', 'title': 'Face and body, separately',
              'body': 'Two reference sets per persona. A full-body shot is exactly where a face reference alone starts to drift, so the body gets its own.'},
-            {'icon': '🎬', 'title': 'Clips from a kept photo',
+            {'icon': '🎬', 'title': 'Videos from a kept photo',
              'body': 'Video always starts from a still you already approved. There is no text-to-video path, on purpose.'},
             {'icon': '🎚️', 'title': 'Safe or explicit',
              'body': 'The rating filters the model list. Explicit work is pinned to the one model that serves it, rather than left to fail at the provider.'},
@@ -762,7 +762,7 @@ PAGES = {
         'how_sub': 'No prompt engineering, no LoRA training, no model to fine-tune.',
         'steps': [
             {'title': 'Give her references', 'body': 'Upload or pick her face shots and her body shots once. Every later generation uses them.'},
-            {'title': 'Set the shot', 'body': 'Photo or clip, safe or explicit, size, how many, the scene and your own description.'},
+            {'title': 'Set the shot', 'body': 'Photo or video, safe or explicit, size, how many, the scene and your own description.'},
             {'title': 'Keep the good ones', 'body': 'Review the batch, keep what works, and it becomes available to the rest of the platform.'},
         ],
         'rows_eyebrow': 'The models',
@@ -773,7 +773,7 @@ PAGES = {
             {'k': 'Seedream 4.5', 'v': 'Every explicit still. The one model that serves explicit work and takes reference images, which is why it is pinned there.'},
             {'k': 'Seedream 5.0 Pro', 'v': 'Safe for work only. Its provider refuses explicit prompts outright, so it is never offered for them.'},
             {'k': 'Nano Banana Pro and Nano Banana 2', 'v': 'Safe for work only, for the shots where their look is the better one.'},
-            {'k': 'Video', 'v': 'Clips animated from an approved still, priced by length and size.'},
+            {'k': 'Video', 'v': 'Videos animated from an approved still, priced by length and size.'},
             {'k': 'Sizes', 'v': 'Two bands, roughly 2k and 4k, resolved per model because each one accepts its own dimensions.'},
         ],
         'faq': [
@@ -782,13 +782,13 @@ PAGES = {
             {'q': 'How does it keep the same face?',
              'a': 'Every generation is conditioned on her real reference photos, and the face set and the body set are kept apart. Identity is never left to the wording of a prompt.'},
             {'q': 'Can I generate a video from text?',
-             'a': 'No, deliberately. A clip is animated from a still you already approved, so the first frame is already her.'},
+             'a': 'No, deliberately. A video is animated from a still you already approved, so the first frame is already her.'},
             {'q': 'Can it generate explicit content?',
              'a': 'Yes, on the one model that serves it. The safe-for-work models refuse it at the provider, so they are filtered out before you can pick them.'},
             {'q': 'Can a generation reach a fan by accident?',
              'a': 'No. A new generation is unapproved and invisible to every send path until you keep it, and anything you do not keep expires on its own.'},
             {'q': 'What does it cost?',
-             'a': 'Credits, priced from what the generation actually costs to run, so a still and a five second clip are very different numbers. The studio shows the price before you submit.'},
+             'a': 'Credits, priced from what the generation actually costs to run, so a still and a five second video are very different numbers. The studio shows the price before you submit.'},
         ],
         'related': _related('ai-image-generator', ['ai-content-planner', 'fanvue-ai-chatter', 'telegram-ai-chatbot', 'velvetchat-share-link']),
         'close_h2': 'New photos of a persona who already exists',
@@ -1119,13 +1119,13 @@ PAGES = {
         'slug': 'tiktok-posting-automation',
         'live': False,
         'title': 'TikTok Posting Automation for Creators | Velvetfunneler.com',
-        'description': ('Schedule safe-for-work clips to TikTok from the same calendar as every other '
+        'description': ('Schedule safe-for-work videos to TikTok from the same calendar as every other '
                         'channel. Built as a registered app, in production and waiting on release.'),
         'eyebrow': 'In production · Reach',
         'h1_pre': 'TikTok posting automation for',
-        'h1_accent': 'safe-for-work clips.',
+        'h1_accent': 'safe-for-work videos.',
         'lede': [
-            'TikTok is a top-of-funnel channel and Velvetfunneler.com treats it as exactly that. Clips go '
+            'TikTok is a top-of-funnel channel and Velvetfunneler.com treats it as exactly that. Videos go '
             'out on a schedule from the same calendar as every other channel, and nothing explicit '
             'and no paid link ever rides on it.',
             'It is built as a registered TikTok app with the Content Posting API, tested, and sitting '
@@ -1136,7 +1136,7 @@ PAGES = {
         'hero_note': 'Not connectable yet. A planned TikTok post stays on your calendar as a manual row in the meantime.',
         'route_title': 'How a TikTok post works',
         'route': [
-            {'label': 'You plan a clip', 'detail': 'On the same content calendar as X, Threads, Instagram and Fanvue.'},
+            {'label': 'You plan a video', 'detail': 'On the same content calendar as X, Threads, Instagram and Fanvue.'},
             {'label': 'It uploads to her account', 'detail': 'Through TikTok\'s own Content Posting API, with a bearer token rather than a driven browser.'},
             {'label': 'It lands or it publishes', 'detail': 'In her drafts for her to publish, or straight to her profile once the app is audited.'},
             {'label': 'The bio link does the rest', 'detail': 'A tracked link hands the viewer to a channel with a DM funnel.'},
@@ -1148,14 +1148,14 @@ PAGES = {
         'features_sub': ('TikTok bars pointing anyone at adult content. Rather than leaving that to a setting, '
                          'the channel is held safe for work in the platform itself.'),
         'features': [
-            {'icon': '🎬', 'title': 'Clips on a schedule',
+            {'icon': '🎬', 'title': 'Videos on a schedule',
              'body': 'TikTok sits on the same calendar as every other channel, so a week of content is still one sitting.'},
             {'icon': '🔒', 'title': 'Held safe for work',
              'body': 'An explicit post cannot be queued to TikTok whatever the persona is set to, and no paid link goes out on it.'},
             {'icon': '🔑', 'title': 'A registered app',
              'body': 'Login Kit and the Content Posting API with a bearer token. No driven browser, no captured cookie, no signature to forge.'},
             {'icon': '📥', 'title': 'Drafts or direct',
-             'body': 'By default the clip lands in her TikTok drafts and she publishes it herself. Direct posting turns on once TikTok audits the app.'},
+             'body': 'By default the video lands in her TikTok drafts and she publishes it herself. Direct posting turns on once TikTok audits the app.'},
             {'icon': '🗣️', 'title': 'Says which one it did',
              'body': 'Posted and in her drafts are not the same claim, so the console and the calendar both say which happened.'},
             {'icon': '🔗', 'title': 'Tracked bio link',
@@ -1165,8 +1165,8 @@ PAGES = {
         'how_h2_accent': 'in the meantime',
         'how_sub': 'Planned TikTok posts are kept rather than dropped.',
         'steps': [
-            {'title': 'Plan it anyway', 'body': 'TikTok posts still go on the calendar and come back as a manual row with the clip ready.'},
-            {'title': 'Post it by hand', 'body': 'Nothing is lost while the release is pending. The planner holds the clip and the caption.'},
+            {'title': 'Plan it anyway', 'body': 'TikTok posts still go on the calendar and come back as a manual row with the video ready.'},
+            {'title': 'Post it by hand', 'body': 'Nothing is lost while the release is pending. The planner holds the video and the caption.'},
             {'title': 'It switches on later', 'body': 'When it is released, the same planned posts start uploading on their own.'},
         ],
         'rows_eyebrow': 'Where it fits',
@@ -1174,7 +1174,7 @@ PAGES = {
         'rows_h2_accent': 'the other channels',
         'rows_sub': 'The widest reach and the tightest rules. It is a way in, never a way to sell.',
         'rows': [
-            {'k': 'TikTok', 'v': 'Posting only, safe for work, one clip per post. No DMs, no comment replies, no paid links.'},
+            {'k': 'TikTok', 'v': 'Posting only, safe for work, one video per post. No DMs, no comment replies, no paid links.'},
             {'k': 'Instagram', 'v': 'Posting only too, but feed posts, Stories and Reels, and no safe-for-work lock.'},
             {'k': 'Threads', 'v': 'Public only, with comment and mention auto-reply on top of posting.'},
             {'k': 'X (Twitter)', 'v': 'Posts, replies, DM funnel and lead gathering, all on one account.'},
@@ -1192,11 +1192,11 @@ PAGES = {
             {'q': 'Can it reply to comments or DMs?',
              'a': 'No. TikTok has no comment API, and there is no DM path here. It is a posting channel.'},
             {'q': 'What happens to a TikTok post I plan now?',
-             'a': 'It stays on the calendar as a manual row with the clip and caption ready, so you post it by hand rather than losing it.'},
+             'a': 'It stays on the calendar as a manual row with the video and caption ready, so you post it by hand rather than losing it.'},
         ],
         'related': _related('tiktok-posting-automation', ['instagram-posting-automation', 'ai-content-planner', 'reddit-posting-bot', 'threads-auto-reply']),
         'close_h2': 'Plan TikTok now, upload it automatically later',
-        'close_sub': 'The calendar keeps every clip ready to go, and starts uploading them the day the channel opens.',
+        'close_sub': 'The calendar keeps every video ready to go, and starts uploading them the day the channel opens.',
     },
 }
 
