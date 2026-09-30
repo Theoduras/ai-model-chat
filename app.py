@@ -21876,6 +21876,9 @@ def _plat_round_body(plat, persona):
         if cursor.get(fan_uuid) == msg_id:
             log.append(f'{who}: already replied to their latest')
             continue  # already handled this latest inbound message
+        if not _claim_msg(plat, persona, fan_uuid, msg_id):
+            log.append(f'{who}: handled by another instance')
+            continue
 
         # Persist the new inbound (import already stored it on first contact).
         if not did_import:
@@ -22426,6 +22429,43 @@ def _fanvue_auto_round(persona):
 
 def _fanvue_round_now(persona, block=False):
     return _plat_round_now(PLAT_FANVUE, persona, block)
+
+
+_INSTANCE_ID = os.urandom(16).hex()
+
+
+def _claim_msg(plat, persona, fan_uuid, msg_id, ttl=600):
+    """Claim one fan message for this instance. The round lock is per process,
+    and a second Cloud Run instance (or a deploy overlap) otherwise answers the
+    same message again -- a second reply and a second paid wish. One row per
+    fan, swapped with compare-and-set; a claim older than ttl is up for grabs so
+    a holder that died never strands the message."""
+    from db import AppSetting
+    from sqlalchemy.exc import IntegrityError
+    key = 'fvclaim:' + hashlib.sha1(f'{plat.slug}:{persona}:{fan_uuid}'.encode()).hexdigest()
+    now = int(time.time())
+    mine = f'{msg_id}|{now}|{_INSTANCE_ID}'
+    s = _db_session()
+    try:
+        s.add(AppSetting(key=key, value=mine))
+        try:
+            s.commit()
+            return True
+        except IntegrityError:
+            s.rollback()
+        row = s.get(AppSetting, key)
+        old = (row.value or '') if row else ''
+        parts = old.split('|')
+        if (len(parts) == 3 and parts[0] == str(msg_id) and parts[2] != _INSTANCE_ID
+                and parts[1].isdigit() and now - int(parts[1]) < ttl):
+            return False
+        n = (s.query(AppSetting)
+             .filter(AppSetting.key == key, AppSetting.value == old)
+             .update({'value': mine}, synchronize_session=False))
+        s.commit()
+        return n == 1
+    finally:
+        s.close()
 
 
 def _plat_round_now(plat, persona, block=False):
