@@ -18,7 +18,7 @@
       background:var(--surface, transparent); color:inherit; }
     .ud-upload-btn { padding:8px 12px; border-radius:8px; border:1px solid var(--border, #333);
       background:var(--surface, transparent); color:inherit; cursor:pointer; font-size:.9rem; }
-    .ud-upload-btn:hover { background:var(--hover, #222); }
+    .ud-upload-btn:hover { background:var(--surface); opacity: 0.8; }
     .ud-note { margin:0 0 14px; padding:10px 14px; border-radius:8px;
       border:1px solid var(--border, #333); font-size:.85rem; }
     .ud-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(190px, 1fr)); gap:14px; }
@@ -92,7 +92,7 @@ async function udPick(slug) {
   el('ud-grid').innerHTML = '';
   try {
     const d = await (await fetch('/api/personas/' + encodeURIComponent(slug) + '/media')).json();
-    // Allow both generated and uploaded sources
+    // Allow both generated and uploaded sources for undressing
     const rows = ((d && d.vault) || []).filter(m => (m.kind || 'image') === 'image' && (m.source === 'generated' || m.source === 'uploaded'));
     el('ud-grid').innerHTML = rows.length ? rows.map(m => `
 ${udCard(m)}`).join('') : '<div class="ud-empty">No photos kept for this persona yet.</div>';
@@ -107,7 +107,7 @@ function udCard(m) {
 
 async function udUpload(input) {
   const file = input.files && input.files[0];
-  input.value = ''; // Reset input so the same file can be uploaded again if needed
+  input.value = ''; 
   if (!file) return;
   if (!udSlug) return note('Please select a persona first.');
 
@@ -124,9 +124,7 @@ async function udUpload(input) {
     const fd = new FormData();
     fd.append('file', file);
     fd.append('persona', udSlug);
-    fd.append('source', 'uploaded'); // Tag it as uploaded if backend requires it
 
-    // Note: Verify this upload endpoint matches your server's routing
     const res = await fetch('/api/media/upload', {
       method: 'POST',
       body: fd
@@ -138,7 +136,6 @@ async function udUpload(input) {
       return;
     }
 
-    // Replace pending placeholder with the new image card
     pending.outerHTML = udCard(d.media);
     note('Upload complete.');
   } catch (e) {
