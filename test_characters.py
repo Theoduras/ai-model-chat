@@ -190,7 +190,7 @@ def test_validation():
     strip = CH.build_view_prompt('pubic', {'pubic_style': 'Landing strip', 'pubic_density': 'Sparse', 'skin_tone': 'Fair'},
                                  25, True, mode='crop')
     check('landing strip is described and redrawn on a crop',
-          'on the pubic mound only' in strip and 'sparse pubic hair' not in strip
+          'thin vertical landing strip' in strip and 'sparse pubic hair' not in strip
           and 'shaved pubic area' not in strip and 'redraw her pubic hair' in strip)
     check('body close-up carries no makeup', 'makeup' not in strip)
 
